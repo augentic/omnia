@@ -33,12 +33,12 @@ pub use self::request::*;
 pub trait Provider: Send + Sync {}
 impl<T> Provider for T where T: Send + Sync {}
 
-/// Typestate marker indicating a [`Client`] has not yet been configured with a provider.
-///
-/// Calling `.provider(...)` transitions `Client<NoProvider>` into `Client<Arc<P>>`, and
-/// request methods are only available on the configured state.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct NoProvider;
+// /// Typestate marker indicating a [`Client`] has not yet been configured with a provider.
+// ///
+// /// Calling `.provider(...)` transitions `Client<NoProvider>` into `Client<Arc<P>>`, and
+// /// request methods are only available on the configured state.
+// #[derive(Clone, Copy, Debug, Default)]
+// pub struct NoProvider;
 
 /// Build an API client to execute the request.
 ///

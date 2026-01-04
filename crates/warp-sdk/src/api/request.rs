@@ -22,7 +22,7 @@ use crate::api::{Body, Client, Provider};
 ///
 /// The primary role of this trait is to provide a common interface for
 /// requests so they can be handled by [`handle`] method.
-pub trait Handler<P: Provider> {
+pub trait Handler<P: Provider>: Sized {
     /// The output type of the handler.
     type Output: Body;
 
@@ -39,25 +39,15 @@ pub trait Handler<P: Provider> {
 pub trait Decodable: Sized {
     type DecodeError;
 
-    // /// Decode the message into a request handler.
-    // ///
-    // /// # Errors
-    // ///
-    // /// Returns an error if the message cannot be decoded.
-    // fn decode<P>(bytes: &[u8]) -> Result<RequestHandler<Self, P>, Self::DecodeError>
-    // where
-    //     P: Provider,
-    //     Self: Handler<P>;
-
     /// Decode the message into a request handler.
     ///
     /// # Errors
     ///
     /// Returns an error if the message cannot be decoded.
-    fn decode<T, P>(bytes: &[u8]) -> Result<T, Self::DecodeError>
-    where
-        T: Handler<P>,
-        P: Provider;
+    fn decode(bytes: &[u8]) -> Result<Self, Self::DecodeError>;
+    // where
+    //     Self: Handler<NoProvider>;
+    // P: Provider;
 }
 
 /// Request-scoped context passed to [`Handler::handle`].
@@ -82,11 +72,7 @@ pub struct Context<'a, P: Provider> {
 /// owner and headers set.
 /// ```
 #[derive(Debug)]
-pub struct RequestHandler<R, P>
-where
-    R: Handler<P>,
-    P: Provider,
-{
+pub struct RequestHandler<R, P> {
     request: R,
     headers: HeaderMap<String>,
 
@@ -97,7 +83,44 @@ where
     provider: Arc<P>,
 }
 
-// pub struct NoProvider;
+pub struct NoProvider;
+pub struct NoRequest;
+
+impl RequestHandler<NoRequest, NoProvider> {
+    /// Set the provider (transitions typestate)
+    pub fn new<P: Provider>(provider: P) -> RequestHandler<NoRequest, P> {
+        RequestHandler {
+            request: NoRequest,
+            headers: HeaderMap::default(),
+            provider: Arc::new(provider),
+            owner: Arc::<str>::from(""),
+        }
+    }
+}
+
+impl<R: Handler<NoProvider>> RequestHandler<R, NoProvider> {
+    /// Set the provider (transitions typestate)
+    pub fn with_provider<P: Provider>(self, provider: P) -> RequestHandler<R, P> {
+        RequestHandler {
+            request: self.request,
+            headers: self.headers,
+            provider: Arc::new(provider),
+            owner: self.owner,
+        }
+    }
+}
+
+impl<P: Provider> RequestHandler<NoRequest, P> {
+    /// Set the provider (transitions typestate)
+    pub fn request<R: Handler<P>>(self, request: R) -> RequestHandler<R, P> {
+        RequestHandler {
+            request,
+            headers: HeaderMap::default(),
+            provider: self.provider,
+            owner: self.owner,
+        }
+    }
+}
 
 impl<R, P> RequestHandler<R, P>
 where
@@ -112,6 +135,18 @@ where
             owner: Arc::clone(&client.owner),
             provider: Arc::clone(&client.provider),
         }
+    }
+
+    // pub fn with_provider(mut self, provider: P) -> Self {
+    //     self.provider = Arc::new(provider);
+    //     self
+    // }
+
+    /// Set the owner
+    #[must_use]
+    pub fn with_owner(mut self, owner: impl Into<String>) -> Self {
+        self.owner = Arc::<str>::from(owner.into());
+        self
     }
 
     /// Set request headers.
