@@ -32,11 +32,11 @@ pub trait Handler<P: Provider>: Decode {
     /// # Errors
     ///
     /// Returns an error if the message cannot be decoded.
-    fn handler(bytes: &[u8]) -> Result<PreHandler<Self, P>, Self::Error>
+    fn handler(encoded: Self::Encoded) -> Result<PreHandler<Self, P>, Self::Error>
     where
         Self::Error: From<Self::DecodeError>,
     {
-        let request = Self::decode(bytes)?;
+        let request = Self::decode(encoded)?;
         Ok(PreHandler::new(request))
     }
 
@@ -48,6 +48,7 @@ pub trait Handler<P: Provider>: Decode {
 
 /// Trait for messages that can be decoded and built into handlers
 pub trait Decode: Sized {
+    type Encoded;
     type DecodeError: Error;
 
     /// Decode the message into a request handler.
@@ -55,7 +56,7 @@ pub trait Decode: Sized {
     /// # Errors
     ///
     /// Returns an error if the message cannot be decoded.
-    fn decode(bytes: &[u8]) -> Result<Self, Self::DecodeError>;
+    fn decode(encoded: Self::Encoded) -> Result<Self, Self::DecodeError>;
 }
 
 pub struct PreHandler<R: Handler<P>, P: Provider> {
