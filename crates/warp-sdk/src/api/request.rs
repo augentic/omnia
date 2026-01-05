@@ -19,8 +19,12 @@ use http::HeaderMap;
 use crate::api::reply::Reply;
 use crate::api::{Body, Client, Provider};
 
+pub type Request<R, P> = RequestHandler<RequestSet<R, P>, NoOwner, NoProvider>;
+pub type HanderError<R, P> = <R as Handler<P>>::Error;
+// pub type HanderResult<T, R, P> = Result<T, <R as Handler<P>>::Error>;
+
 /// Trait to provide a common interface for request handling.
-pub trait Handler<P: Provider>: TryFrom<Self::Input, Error = <Self as Handler<P>>::Error> {
+pub trait Handler<P: Provider>: TryFrom<Self::Input, Error = HanderError<Self, P>> {
     /// The raw input type of the handler.
     type Input;
 
@@ -35,34 +39,16 @@ pub trait Handler<P: Provider>: TryFrom<Self::Input, Error = <Self as Handler<P>
     /// # Errors
     ///
     /// Returns an error if the message cannot be decoded.
-    fn handler(input: Self::Input) -> Result<PreHandler<Self, P>, <Self as Handler<P>>::Error> {
+    fn handler(input: Self::Input) -> Result<Request<Self, P>, HanderError<Self, P>> {
         let request = Self::try_from(input)?;
-        Ok(PreHandler::new(request))
+        let handler = RequestHandler::new().request(request);
+        Ok(handler)
     }
 
     /// Implemented by the request handler to process the request.
     fn handle(
         self, ctx: Context<P>,
-    ) -> impl Future<Output = Result<Reply<Self::Output>, <Self as Handler<P>>::Error>> + Send;
-}
-
-pub struct PreHandler<R: Handler<P>, P: Provider>(RequestSet<R, P>);
-
-impl<R: Handler<P>, P: Provider> PreHandler<R, P> {
-    pub const fn new(request: R) -> Self {
-        Self(RequestSet(request, PhantomData))
-    }
-
-    pub fn provider(
-        self, provider: P,
-    ) -> RequestHandler<RequestSet<R, P>, NoOwner, ProviderSet<P>> {
-        RequestHandler {
-            request: self.0,
-            headers: HeaderMap::default(),
-            provider: ProviderSet(Arc::new(provider)),
-            owner: NoOwner,
-        }
-    }
+    ) -> impl Future<Output = Result<Reply<Self::Output>, HanderError<Self, P>>> + Send;
 }
 
 /// Request router.
