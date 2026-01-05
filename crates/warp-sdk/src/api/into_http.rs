@@ -48,6 +48,12 @@ pub struct HttpError {
     error: String,
 }
 
+impl From<crate::Error> for HttpError {
+    fn from(e: crate::Error) -> Self {
+        Self { status:e.status(), error:e.to_string() }
+    }
+}
+
 impl From<anyhow::Error> for HttpError {
     fn from(e: anyhow::Error) -> Self {
         let error = format!("{e}, caused by: {}", e.root_cause());

@@ -20,7 +20,7 @@ use crate::api::reply::Reply;
 use crate::api::{Body, Client, Provider};
 
 /// Trait to provide a common interface for request handling.
-pub trait Handler<P: Provider>: TryFrom<Self::Input> {
+pub trait Handler<P: Provider>: TryFrom<Self::Input, Error = <Self as Handler<P>>::Error> {
     /// The raw input type of the handler.
     type Input;
 
@@ -35,10 +35,7 @@ pub trait Handler<P: Provider>: TryFrom<Self::Input> {
     /// # Errors
     ///
     /// Returns an error if the message cannot be decoded.
-    fn handler(input: Self::Input) -> Result<PreHandler<Self, P>, <Self as Handler<P>>::Error>
-    where
-        <Self as Handler<P>>::Error: From<<Self as TryFrom<Self::Input>>::Error>,
-    {
+    fn handler(input: Self::Input) -> Result<PreHandler<Self, P>, <Self as Handler<P>>::Error> {
         let request = Self::try_from(input)?;
         Ok(PreHandler::new(request))
     }
@@ -62,12 +59,12 @@ impl<R: Handler<P>, P: Provider> PreHandler<R, P> {
         }
     }
 
-    pub fn provider(self, provider: P) -> RequestHandler<R, P> {
+    pub fn provider(self, provider: P) -> RequestHandler<R, NoOwner, P> {
         RequestHandler {
             request: self.request,
             headers: HeaderMap::default(),
             provider: Arc::new(provider),
-            owner: Arc::<str>::from(""),
+            owner: NoOwner,
         }
     }
 }
@@ -78,31 +75,34 @@ impl<R: Handler<P>, P: Provider> PreHandler<R, P> {
 /// owner and headers set.
 /// ```
 #[derive(Debug)]
-pub struct RequestHandler<R, P> {
+pub struct RequestHandler<R, O, P> {
     request: R,
     headers: HeaderMap<String>,
 
     /// The owning tenant/namespace.
-    owner: Arc<str>,
+    owner: O,
 
     /// The provider to use while handling of the request.
     provider: Arc<P>,
 }
 
+pub struct NoOwner;
+pub struct OwnerSet(Arc<str>);
+
 pub struct NoProvider;
 pub struct NoRequest;
 
-impl Default for RequestHandler<NoRequest, NoProvider> {
+impl Default for RequestHandler<NoRequest, NoOwner, NoProvider> {
     fn default() -> Self {
         Self {
             request: NoRequest,
             headers: HeaderMap::default(),
+            owner: NoOwner,
             provider: Arc::new(NoProvider),
-            owner: Arc::<str>::from(""),
         }
     }
 }
-impl RequestHandler<NoRequest, NoProvider> {
+impl RequestHandler<NoRequest, NoOwner, NoProvider> {
     /// Create a new `RequestHandler` with no provider.
     #[must_use]
     pub fn new() -> Self {
@@ -110,64 +110,75 @@ impl RequestHandler<NoRequest, NoProvider> {
     }
 }
 
-impl<R> RequestHandler<R, NoProvider> {
+impl<R, O> RequestHandler<R, O, NoProvider> {
     /// Set the provider (transitions typestate)
-    pub fn provider<P: Provider>(self, provider: P) -> RequestHandler<R, P> {
+    pub fn provider<P: Provider>(self, provider: P) -> RequestHandler<R, O, P> {
         RequestHandler {
             request: self.request,
             headers: self.headers,
-            provider: Arc::new(provider),
             owner: self.owner,
+            provider: Arc::new(provider),
         }
     }
 }
 
-impl<P: Provider> RequestHandler<NoRequest, P> {
+impl<O, P: Provider> RequestHandler<NoRequest, O, P> {
     /// Set the provider (transitions typestate)
-    pub fn request<R: Handler<P>>(self, request: R) -> RequestHandler<R, P> {
+    pub fn request<R: Handler<P>>(self, request: R) -> RequestHandler<R, O, P> {
         RequestHandler {
             request,
             headers: HeaderMap::default(),
-            provider: self.provider,
             owner: self.owner,
+            provider: self.provider,
         }
     }
 }
 
-impl<R, P> RequestHandler<R, P>
+impl<R, P> RequestHandler<R, NoOwner, P>
 where
     R: Handler<P>,
     P: Provider,
 {
     // Internal constructor for creating a `RequestHandler` from a `Client`.
-    pub(crate) fn from_client(client: &Client<P>, request: R) -> Self {
-        Self {
+    pub(crate) fn from_client(client: &Client<P>, request: R) -> RequestHandler<R, OwnerSet, P> {
+        RequestHandler {
             request,
             headers: HeaderMap::default(),
-            owner: Arc::clone(&client.owner),
+            owner: OwnerSet(Arc::clone(&client.owner)),
             provider: Arc::clone(&client.provider),
         }
     }
 
-    // pub fn with_provider(mut self, provider: P) -> Self {
-    //     self.provider = Arc::new(provider);
-    //     self
-    // }
-
     /// Set the owner
     #[must_use]
-    pub fn owner(mut self, owner: impl Into<String>) -> Self {
-        self.owner = Arc::<str>::from(owner.into());
-        self
+    pub fn owner(self, owner: impl Into<String>) -> RequestHandler<R, OwnerSet, P> {
+        RequestHandler {
+            request: self.request,
+            headers: self.headers,
+            owner: OwnerSet(Arc::from(owner.into())),
+            provider: self.provider,
+        }
     }
+}
 
+impl<R, O, P> RequestHandler<R, O, P>
+where
+    R: Handler<P>,
+    P: Provider,
+{
     /// Set request headers.
     #[must_use]
     pub fn headers(mut self, headers: HeaderMap<String>) -> Self {
         self.headers = headers;
         self
     }
+}
 
+impl<R, P> RequestHandler<R, OwnerSet, P>
+where
+    R: Handler<P>,
+    P: Provider,
+{
     /// Handle the request by routing it to the appropriate handler.
     ///
     /// # Constraints
@@ -182,7 +193,7 @@ where
     #[inline]
     pub async fn handle(self) -> Result<Reply<R::Output>, <R as Handler<P>>::Error> {
         let ctx = Context {
-            owner: &self.owner,
+            owner: &self.owner.0,
             provider: &*self.provider,
             headers: &self.headers,
         };
@@ -192,7 +203,7 @@ where
 
 // Implement [`IntoFuture`] so that the request can be awaited directly (without
 // needing to call the `handle` method).
-impl<R, P> IntoFuture for RequestHandler<R, P>
+impl<R, P> IntoFuture for RequestHandler<R, OwnerSet, P>
 where
     P: Provider + 'static,
     R: Handler<P> + Send + 'static,

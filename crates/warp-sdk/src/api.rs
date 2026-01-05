@@ -33,20 +33,13 @@ pub use self::request::*;
 pub trait Provider: Send + Sync {}
 impl<T> Provider for T where T: Send + Sync {}
 
-// /// Typestate marker indicating a [`Client`] has not yet been configured with a provider.
-// ///
-// /// Calling `.provider(...)` transitions `Client<NoProvider>` into `Client<Arc<P>>`, and
-// /// request methods are only available on the configured state.
-// #[derive(Clone, Copy, Debug, Default)]
-// pub struct NoProvider;
-
 /// Build an API client to execute the request.
 ///
 /// The client is the main entry point for making API requests. It holds
 /// the provider configuration and provides methods to create the request
 /// router.
 #[derive(Clone, Debug)]
-pub struct Client<P = NoProvider> {
+pub struct Client<P> {
     /// The owning tenant/namespace.
     owner: Arc<str>,
 
@@ -76,7 +69,7 @@ impl Client<NoProvider> {
 
 impl<P: Provider> Client<P> {
     /// Create a new [`RequestHandler`] with no headers.
-    pub fn request<R: Handler<P>>(&self, request: R) -> RequestHandler<R, P> {
+    pub fn request<R: Handler<P>>(&self, request: R) -> RequestHandler<R, OwnerSet, P> {
         RequestHandler::from_client(self, request)
     }
 }
