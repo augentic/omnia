@@ -86,21 +86,27 @@ pub struct RequestHandler<R, P> {
 pub struct NoProvider;
 pub struct NoRequest;
 
-impl RequestHandler<NoRequest, NoProvider> {
-    /// Set the provider (transitions typestate)
-    pub fn new<P: Provider>(provider: P) -> RequestHandler<NoRequest, P> {
-        RequestHandler {
+impl Default for RequestHandler<NoRequest, NoProvider> {
+    fn default() -> Self {
+        Self {
             request: NoRequest,
             headers: HeaderMap::default(),
-            provider: Arc::new(provider),
+            provider: Arc::new(NoProvider),
             owner: Arc::<str>::from(""),
         }
     }
 }
+impl RequestHandler<NoRequest, NoProvider> {
+    /// Create a new `RequestHandler` with no provider.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
 
-impl<R: Handler<NoProvider>> RequestHandler<R, NoProvider> {
+impl<R> RequestHandler<R, NoProvider> {
     /// Set the provider (transitions typestate)
-    pub fn with_provider<P: Provider>(self, provider: P) -> RequestHandler<R, P> {
+    pub fn provider<P: Provider>(self, provider: P) -> RequestHandler<R, P> {
         RequestHandler {
             request: self.request,
             headers: self.headers,
@@ -144,7 +150,7 @@ where
 
     /// Set the owner
     #[must_use]
-    pub fn with_owner(mut self, owner: impl Into<String>) -> Self {
+    pub fn owner(mut self, owner: impl Into<String>) -> Self {
         self.owner = Arc::<str>::from(owner.into());
         self
     }
