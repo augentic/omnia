@@ -1,21 +1,17 @@
-## 0.21.0
+## 0.22.0
 
 Unreleased
 
 ### Added
 
+**Guest Macro**: Added a macro to generate wasm guests from configuration.
+  
 ### Changed
 
+**Backends**: Moved all backend crates (`crates/be-*`) to a new [backends](https://github.com/augentic/backends)
+repository.
+
 <!-- Release notes generated using configuration in .github/release.yaml at main -->
-
-## What's Changed
-* Bump to 0.20.0 by @github-actions[bot] in https://github.com/augentic/warp/pull/144
-* Post-split by @andrewweston in https://github.com/augentic/warp/pull/145
-* fix missing deps by @andrewweston in https://github.com/augentic/warp/pull/146
-* Http Interface by @andrewweston in https://github.com/augentic/warp/pull/147
-* Bump to 0.21.0 by @github-actions[bot] in https://github.com/augentic/warp/pull/148
-* Guest Macro by @andrewweston in https://github.com/augentic/warp/pull/149
-
 
 **Full Changelog**: https://github.com/augentic/warp/compare/v0.20.1...v0.22.0
 
