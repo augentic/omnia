@@ -1,7 +1,6 @@
 [package]
 name = "runtime-macro"
 description = "Procedural macros for runtime build code generation"
-publish = true
 authors.workspace = true
 categories.workspace = true
 edition.workspace = true

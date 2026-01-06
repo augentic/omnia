@@ -95,8 +95,8 @@ wasmtime-wasi-io = "40.0.0"
 wit-bindgen = { version = "0.50.0", features = ["async-spawn"] }
 
 # interally referenced crates
-guest-macro = { path = "crates/guest-macro", version = "0.23.0" }
-runtime-macro = { path = "crates/runtime-macro", version = "0.23.0" }
+guest-macro = { path = "crates/guest-macro", version = "0.23.0", registry = "credibil" }
+runtime-macro = { path = "crates/runtime-macro", version = "0.23.0", registry = "credibil" }
 warp = { path = "crates/warp", version = "0.23.0", registry = "credibil" }
 warp-otel = { path = "crates/otel", version = "0.23.0" }
 warp-sdk = { path = "crates/warp-sdk", version = "0.23.0", registry = "credibil" }
