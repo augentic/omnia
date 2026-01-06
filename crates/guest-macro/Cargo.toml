@@ -1,7 +1,6 @@
 [package]
 name = "guest-macro"
 description = "Procedural macros for guest code generation"
-publish = true
 authors.workspace = true
 categories.workspace = true
 edition.workspace = true
