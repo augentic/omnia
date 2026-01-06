@@ -94,3 +94,7 @@ cargo vet regenerate unpublished
 cargo vet --locked
 '''
 install_crate = "cargo-vet"
+
+[tasks.publish]
+command = "cargo"
+args = ["publish", "--registry=credibil", "--allow-dirty", "--dry-run"]
