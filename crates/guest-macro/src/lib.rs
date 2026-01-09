@@ -1,3 +1,5 @@
+mod capabilities;
+mod environment;
 mod guest;
 mod http;
 mod messaging;

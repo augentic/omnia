@@ -2,113 +2,221 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-// use syn::spanned::Spanned;
-use syn::{Ident, LitStr, Path, Result, Token};
+use syn::{Ident, Result, Token};
 
-use crate::guest::{Config, handler_name};
-
-pub struct Messaging {
-    pub topics: Vec<Topic>,
+pub struct Capabilities {
+    pub capabilities: Vec<Capability>,
 }
 
-impl Parse for Messaging {
+impl Parse for Capabilities {
     fn parse(input: ParseStream) -> Result<Self> {
-        let topics = Punctuated::<Topic, Token![,]>::parse_terminated(input)?;
+        let capabilities = Punctuated::<Capability, Token![,]>::parse_terminated(input)?;
         Ok(Self {
-            topics: topics.into_iter().collect(),
+            capabilities: capabilities.into_iter().collect(),
         })
     }
 }
 
-pub struct Topic {
-    pub pattern: LitStr,
-    pub message: Path,
-    pub handler: Ident,
+pub struct Capability {
+    pub name: Ident,
 }
 
-impl Parse for Topic {
+impl Parse for Capability {
     fn parse(input: ParseStream) -> Result<Self> {
-        let pattern: LitStr = input.parse()?;
-        input.parse::<Token![:]>()?;
-
-        let message: Path = input.parse()?;
-        let handler = handler_name(&pattern);
-
-        Ok(Self {
-            pattern,
-            message,
-            handler,
-        })
+        let name: Ident = input.parse()?;
+        Ok(Self { name })
     }
 }
 
-pub fn expand(messaging: &Messaging, config: &Config) -> TokenStream {
-    let topic_arms = messaging.topics.iter().map(expand_topic);
-    let processors = messaging.topics.iter().map(|t| expand_handler(t, config));
+pub fn expand(capabilities: &Capabilities) -> TokenStream {
+    let impls = capabilities.capabilities.iter().map(expand_capability);
 
     quote! {
-        mod messaging {
-            use warp_sdk::wasi_messaging::types::{Error, Message};
-            use warp_sdk::{wasi_messaging, wasi_otel};
-            use warp_sdk::Handler;
+        mod capabilities {
+            use std::any::Any;
+            use std::error::Error;
 
+            use warp_sdk::anyhow::{Context, Result};
+            use warp_sdk::bytes::Bytes;
+            use warp_sdk::http::{Request, Response};
+            use warp_sdk::{wasi_http, wasi_identity, wasi_keyvalue, wasi_messaging};
+            use warp_sdk::{Config, HttpRequest, Identity, Message, Publisher, StateStore};
+
+            use super::environment::ConfigSettings;
             use super::*;
 
-            pub struct Messaging;
-            wasi_messaging::export!(Messaging with_types_in wasi_messaging);
+            #[derive(Clone, Default)]
+            pub struct Provider {
+                pub config: ConfigSettings,
+            }
 
-            impl wasi_messaging::incoming_handler::Guest for Messaging {
-                #[wasi_otel::instrument]
-                async fn handle(message: Message) -> Result<(), Error> {
-                    let topic = message.topic().unwrap_or_default();
-
-                    // check we're processing topics for the correct environment
-                    // FIXME: this should be done in macro body instead of here
-                    let env = std::env::var("ENV").unwrap_or_default();
-                    let Some(topic) = topic.strip_prefix(&format!("{env}-")) else {
-                        return Err(wasi_messaging::types::Error::Other("Incorrect environment".to_string()));
-                    };
-
-                    if let Err(e) = match &topic {
-                        #(#topic_arms)*
-                        _ => return Err(Error::Other("Unhandled topic".to_string())),
-                    } {
-                        return Err(Error::Other(e.to_string()));
-                    }
-
-                    Ok(())
+            impl Provider {
+                pub fn new() -> Self {
+                    Self::default()
                 }
             }
 
-            #(#processors)*
+            impl Config for Provider {
+                async fn get(&self, key: &str) -> Result<String> {
+                    <ConfigSettings as Config>::get(&self.config, key).await
+                }
+            }
+
+            #(#impls)*
         }
     }
 }
 
-fn expand_topic(topic: &Topic) -> TokenStream {
-    let pattern = &topic.pattern;
-    let handler = &topic.handler;
+fn expand_capability(capability: &Capability) -> TokenStream {
+    let name = capability.name.to_string();
 
-    quote! {
-        t if t.contains(#pattern) => #handler(message.data()).await,
+    match name.as_str() {
+        "HttpRequest" => expand_http_request(),
+        "Identity" => expand_identity(),
+        "Publisher" => expand_publisher(),
+        "StateStore" => expand_state_store(),
+        _ => {
+            let name_ident = &capability.name;
+            quote! {
+                compile_error!(concat!("unknown capability: ", stringify!(#name_ident)));
+            }
+        }
     }
 }
 
-fn expand_handler(topic: &Topic, config: &Config) -> TokenStream {
-    let handler_fn = &topic.handler;
-    let message = &topic.message;
-    let owner = &config.owner;
-    let provider = &config.provider;
-
+fn expand_http_request() -> TokenStream {
     quote! {
-        #[wasi_otel::instrument]
-        async fn #handler_fn(payload: Vec<u8>) -> Result<()> {
-             #message::handler(payload)?
-                 .provider(&#provider::new())
-                 .owner(#owner)
-                 .await
-                 .map(|_| ())
-                 .map_err(Into::into)
+        impl HttpRequest for Provider {
+            async fn fetch<T>(&self, request: Request<T>) -> Result<Response<Bytes>>
+            where
+                T: warp_sdk::http_body::Body + Any + Send,
+                T::Data: Into<Vec<u8>>,
+                T::Error: Into<Box<dyn Error + Send + Sync + 'static>>,
+            {
+                tracing::debug!("request: {:?}", request.uri());
+                wasi_http::handle(request).await
+            }
         }
+    }
+}
+
+fn expand_identity() -> TokenStream {
+    quote! {
+        impl Identity for Provider {
+            async fn access_token(&self) -> Result<String> {
+                use warp_sdk::wit_bindgen::block_on;
+
+                let identity = <Self as Config>::get(&self, "AZURE_IDENTITY").await?;
+                let identity = block_on(wasi_identity::credentials::get_identity(identity))?;
+                let access_token = block_on(async move { identity.get_token(vec![]).await })?;
+                Ok(access_token.token)
+            }
+        }
+    }
+}
+
+fn expand_publisher() -> TokenStream {
+    quote! {
+        impl Publisher for Provider {
+            async fn send(&self, topic: &str, message: &Message) -> Result<()> {
+                use wasi_messaging::producer;
+                use wasi_messaging::types::Client;
+
+                tracing::debug!("sending to topic: {topic}");
+
+                let client = Client::connect("kafka".to_string())
+                    .await
+                    .context("connecting to broker")?;
+                let msg = wasi_messaging::types::Message::new(&message.payload);
+                let env = <Self as Config>::get(&self, "ENV").await.unwrap_or_default();
+                let topic = format!("{env}-{topic}");
+
+                if let Err(e) = producer::send(&client, topic.clone(), msg).await {
+                    tracing::error!(
+                        monotonic_counter.publishing_errors = 1,
+                        error = %e,
+                        topic = %topic,
+                    );
+                } else {
+                    tracing::info!(
+                        monotonic_counter.messages_sent = 1,
+                        topic = %topic,
+                    );
+                }
+
+                Ok(())
+            }
+        }
+    }
+}
+
+fn expand_state_store() -> TokenStream {
+    quote! {
+        impl StateStore for Provider {
+            async fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+                let bucket = wasi_keyvalue::cache::open("cache")
+                    .await
+                    .context("opening cache")?;
+                bucket.get(key).await.context("reading state from cache")
+            }
+
+            async fn set(
+                &self,
+                key: &str,
+                value: &[u8],
+                ttl_secs: Option<u64>,
+            ) -> Result<Option<Vec<u8>>> {
+                let bucket = wasi_keyvalue::cache::open("cache")
+                    .await
+                    .context("opening cache")?;
+                bucket
+                    .set(key, value, ttl_secs)
+                    .await
+                    .context("writing state to cache")
+            }
+
+            async fn delete(&self, key: &str) -> Result<()> {
+                let bucket = wasi_keyvalue::cache::open("cache")
+                    .await
+                    .context("opening cache")?;
+                bucket.delete(key).await.context("deleting state from cache")
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use quote::quote;
+
+    use super::*;
+
+    #[test]
+    fn parse_capabilities() {
+        let input = quote! {
+            HttpRequest,
+            Identity,
+            Publisher,
+            StateStore
+        };
+
+        let parsed: Capabilities = syn::parse2(input).expect("should parse");
+        assert_eq!(parsed.capabilities.len(), 4);
+
+        assert_eq!(parsed.capabilities[0].name.to_string(), "HttpRequest");
+        assert_eq!(parsed.capabilities[1].name.to_string(), "Identity");
+        assert_eq!(parsed.capabilities[2].name.to_string(), "Publisher");
+        assert_eq!(parsed.capabilities[3].name.to_string(), "StateStore");
+    }
+
+    #[test]
+    fn parse_single_capability() {
+        let input = quote! {
+            HttpRequest
+        };
+
+        let parsed: Capabilities = syn::parse2(input).expect("should parse");
+        assert_eq!(parsed.capabilities.len(), 1);
+        assert_eq!(parsed.capabilities[0].name.to_string(), "HttpRequest");
     }
 }

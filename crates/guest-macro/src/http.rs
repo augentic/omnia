@@ -1,16 +1,10 @@
-use std::sync::LazyLock;
-
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use regex::Regex;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{Error, Ident, LitStr, Path, Result, Token};
 
 use crate::guest::{Config, handler_name};
-
-static PARAMS_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\{([A-Za-z_][A-Za-z0-9_]*)\}").expect("should compile"));
 
 pub struct Http {
     pub routes: Vec<Route>,
@@ -40,7 +34,6 @@ impl Parse for Route {
         let mut handler: Option<Handler> = None;
 
         let fields = Punctuated::<Opt, Token![|]>::parse_separated_nonempty(input)?;
-
         for field in fields.into_pairs() {
             match field.into_value() {
                 Opt::Handler(h) => {
@@ -82,17 +75,20 @@ struct Handler {
 // Parse the handler method in the form of `method(request, reply)`.
 impl Parse for Handler {
     fn parse(input: ParseStream) -> Result<Self> {
+        // parse method
         let method: Ident = input.parse()?;
-        let mut with_body = false;
-        let mut with_query = false;
 
+        // parse request and reply
         let list;
         syn::parenthesized!(list in input);
 
-        // parse request
+        // ..request
         let request: Path = list.parse()?;
 
-        // parse `with_body` or `with_query`
+        // ..optional `with_body` or `with_query`
+        let mut with_body = false;
+        let mut with_query = false;
+
         let l = list.lookahead1();
         if l.peek(kw::with_body) {
             list.parse::<kw::with_body>()?;
@@ -102,9 +98,22 @@ impl Parse for Handler {
             with_query = true;
         }
 
-        // parse reply
+        // ..reply
         list.parse::<Token![,]>()?;
         let reply: Path = list.parse()?;
+
+        // verify
+        if method == "get" && with_body {
+            return Err(Error::new(
+                method.span(),
+                "GET requests should not have a body; consider using query parameters",
+            ));
+        } else if method == "post" && with_query {
+            return Err(Error::new(
+                method.span(),
+                "POST requests should not have query parameters; consider using body",
+            ));
+        }
 
         Ok(Self {
             method,
@@ -139,9 +148,10 @@ impl Parse for Opt {
 }
 
 fn extract_params(path: &LitStr) -> Vec<Ident> {
-    PARAMS_REGEX
-        .captures_iter(&path.value())
-        .filter_map(|caps| caps.get(1).map(|m| m.as_str().to_owned()))
+    path.value()
+        .split('/')
+        .filter(|s| s.starts_with('{') && s.ends_with('}'))
+        .map(|s| &s[1..s.len() - 1])
         .map(|p| format_ident!("{p}"))
         .collect()
 }
