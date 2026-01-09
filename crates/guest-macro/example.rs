@@ -1,21 +1,25 @@
-buildgen::guest!({
+use std::env;
+
+guest_macro::guest!({
     owner: "at",
-    provider: MyProvider,
     http: [
-        "/jobs/detector": {
-            method: get,
-            request: DetectionRequest
-            reply: DetectionReply
-        },
-        "/god-mode/set-trip/{vehicle_id}/{trip_id}": {
-            method: get,
-            request: SetTripRequest
-            reply: SetTripReply
-        }
+        "/jobs/detector": get(DetectionRequest, DetectionReply) | query,
+        "/god-mode/set-trip/{vehicle_id}/{trip_id}": post(SetTripRequest,SetTripReply) | body,
     ],
     messaging: [
-        "realtime-r9k.v1": {
-            message: R9kMessage
-        }
+        format!("{env}-realtime-r9k.v1", env = env::var("ENV").unwrap_or("dev".to_string())): (R9kMessage),
+    ],
+    capabilities: [
+        HttpRequest,
+        Identity,
+        Publisher,
+        StateStore
+    ],
+    environment: [
+        ENV: String = "dev",
+        BLOCK_MGT_URL: String,
+        CC_STATIC_URL: String,
+        FLEET_URL: String,
+        GTFS_STATIC_URL: String ,
     ]
 });

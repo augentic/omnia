@@ -5,7 +5,7 @@ use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::{Ident, LitStr, Path, Result, Token};
 
-use crate::guest::{Config, method_name};
+use crate::guest::{Config, handler_name};
 
 pub struct Messaging {
     pub topics: Vec<Topic>,
@@ -53,7 +53,7 @@ impl Parse for Topic {
         };
 
         //
-        let handler = method_name(&message);
+        let handler = handler_name(&pattern);
 
         Ok(Self {
             pattern,
@@ -105,7 +105,7 @@ pub fn expand(messaging: &Messaging, config: &Config) -> TokenStream {
                     let topic = message.topic().unwrap_or_default();
 
                     // check we're processing topics for the correct environment
-                    // let env = &Provider::new().config.environment;
+                    // FIXME: this should be done in macro body instead of here
                     let env = std::env::var("ENV").unwrap_or_default();
                     let Some(topic) = topic.strip_prefix(&format!("{env}-")) else {
                         return Err(wasi_messaging::types::Error::Other("Incorrect environment".to_string()));
@@ -146,7 +146,7 @@ fn expand_handler(topic: &Topic, config: &Config) -> TokenStream {
         #[wasi_otel::instrument]
         async fn #handler_fn(payload: Vec<u8>) -> Result<()> {
              #message::handler(payload)?
-                 .provider(#provider::new())
+                 .provider(&#provider::new())
                  .owner(#owner)
                  .await
                  .map(|_| ())
