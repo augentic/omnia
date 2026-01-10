@@ -37,9 +37,9 @@ mod generated {
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use warp::{Host, Server, State};
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::{ResourceTable, ResourceTableError};
+use yetti::{Host, Server, State};
 
 pub use self::default_impl::MessagingDefault;
 pub use self::generated::Messaging;
@@ -176,9 +176,9 @@ impl From<anyhow::Error> for Error {
 #[macro_export]
 macro_rules! wasi_view {
     ($store_ctx:ty, $field_name:ident) => {
-        impl wasi_messaging::WasiMessagingView for $store_ctx {
-            fn messaging(&mut self) -> wasi_messaging::WasiMessagingCtxView<'_> {
-                wasi_messaging::WasiMessagingCtxView {
+        impl yetti_wasi_messaging::WasiMessagingView for $store_ctx {
+            fn messaging(&mut self) -> yetti_wasi_messaging::WasiMessagingCtxView<'_> {
+                yetti_wasi_messaging::WasiMessagingCtxView {
                     ctx: &mut self.$field_name,
                     table: &mut self.table,
                 }

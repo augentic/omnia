@@ -8,10 +8,10 @@ use std::fmt::Debug;
 
 use anyhow::Result;
 pub use default_impl::ConfigDefault;
-use warp::{Host, Server, State};
 use wasmtime::component::Linker;
 pub use wasmtime_wasi_config;
 use wasmtime_wasi_config::WasiConfigVariables;
+use yetti::{Host, Server, State};
 
 #[derive(Debug)]
 pub struct WasiConfig;
@@ -48,9 +48,9 @@ pub trait WasiConfigView: Send {
 #[macro_export]
 macro_rules! wasi_view {
     ($store_ctx:ty, $field_name:ident) => {
-        impl wasi_config::WasiConfigView for $store_ctx {
-            fn config(&mut self) -> wasi_config::wasmtime_wasi_config::WasiConfig<'_> {
-                let vars = wasi_config::WasiConfigCtx::get_config(&self.$field_name);
+        impl yetti_wasi_config::WasiConfigView for $store_ctx {
+            fn config(&mut self) -> yetti_wasi_config::wasmtime_wasi_config::WasiConfig<'_> {
+                let vars = yetti_wasi_config::WasiConfigCtx::get_config(&self.$field_name);
                 wasi_config::wasmtime_wasi_config::WasiConfig::from(vars)
             }
         }

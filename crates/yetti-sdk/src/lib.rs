@@ -21,7 +21,7 @@ pub use crate::error::*;
 ///
 /// # Example
 /// ```rust,ignore
-/// warp_sdk::ensure_env!("API_KEY", "SOME_URL");
+/// yetti_sdk::ensure_env!("API_KEY", "SOME_URL");
 /// ```
 #[macro_export]
 macro_rules! ensure_env {

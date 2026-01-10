@@ -1,4 +1,4 @@
 [messaging]
-url = "https://github.com/credibil/wasi-messaging/archive/main.tar.gz"
+url = "https://github.com/augentic/wasi-messaging/archive/main.tar.gz"
 sha256 = "b2c1010452567f54c855ca1e27a70099e2284f6c1be057d19916730e532f6984"
 sha512 = "9032cc25fa3f9af72b2230faf317c96ad84a668315d5487dd836473edc575a52088ae71fb227248f4fd1086779bc213eb0292e25278b5c70cea83f70219931de"

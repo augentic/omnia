@@ -140,7 +140,7 @@ You can create different runtime configurations for different use cases:
 mod http_runtime {
     use wasi_http::WasiHttpCtx;
 
-    warp::runtime!({
+    yetti::runtime!({
         "http": WasiHttpCtx
     });
 }
@@ -151,7 +151,7 @@ mod full_runtime {
     use wasi_otel::DefaultOtel;
     use be_nats::Client as Nats;
 
-    warp::runtime!({
+    yetti::runtime!({
         "http": WasiHttpCtx,
         "otel": DefaultOtel,
         "keyvalue": Nats,
@@ -161,21 +161,11 @@ mod full_runtime {
 }
 ```
 
-## Migration from Feature Flags
-
-Before this macro, runtime configurations were managed through feature flags:
-
-```toml
-[features]
-credibil = ["http-default", "otel-default", "blobstore-mongodb", "keyvalue-nats", "messaging-nats", "vault-azure"]
-```
-
 Now you can declaratively specify your configuration:
 
 ```rust
-#[cfg(feature = "credibil")]
 mod credibil_runtime {
-    warp::runtime!({
+    yetti::runtime!({
         "http": WasiHttpCtx,
         "otel": DefaultOtel,
         "blobstore": MongoDb,

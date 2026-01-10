@@ -29,7 +29,7 @@ use opentelemetry::{KeyValue, global};
 use serde_json::{Value, json};
 use tower_http::cors::{Any, CorsLayer};
 use tracing::Level;
-use warp_sdk::HttpResult;
+use yetti_sdk::HttpResult;
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
 

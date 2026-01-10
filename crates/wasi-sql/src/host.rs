@@ -34,9 +34,9 @@ mod generated {
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use warp::{Host, Server, State};
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::ResourceTable;
+use yetti::{Host, Server, State};
 
 use self::generated::wasi::sql::{readwrite, types};
 pub use crate::host::default_impl::SqlDefault;
@@ -91,9 +91,9 @@ pub trait WasiSqlView: Send {
 #[macro_export]
 macro_rules! wasi_view {
     ($store_ctx:ty, $field_name:ident) => {
-        impl wasi_sql::WasiSqlView for $store_ctx {
-            fn sql(&mut self) -> wasi_sql::WasiSqlCtxView<'_> {
-                wasi_sql::WasiSqlCtxView {
+        impl yetti_wasi_sql::WasiSqlView for $store_ctx {
+            fn sql(&mut self) -> yetti_wasi_sql::WasiSqlCtxView<'_> {
+                yetti_wasi_sql::WasiSqlCtxView {
                     ctx: &mut self.$field_name,
                     table: &mut self.table,
                 }

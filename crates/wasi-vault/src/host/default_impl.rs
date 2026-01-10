@@ -8,7 +8,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use futures::FutureExt;
 use tracing::instrument;
-use warp::Backend;
+use yetti::Backend;
 
 use crate::host::WasiVaultCtx;
 use crate::host::resource::{FutureResult, Locker};
@@ -18,7 +18,7 @@ type Store = Arc<parking_lot::RwLock<HashMap<String, HashMap<String, Vec<u8>>>>>
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions;
 
-impl warp::FromEnv for ConnectOptions {
+impl yetti::FromEnv for ConnectOptions {
     fn from_env() -> Result<Self> {
         Ok(Self)
     }

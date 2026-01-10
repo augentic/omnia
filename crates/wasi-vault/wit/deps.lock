@@ -1,4 +1,4 @@
 [vault]
-url = "https://github.com/credibil/wasi-vault/archive/main.tar.gz"
+url = "https://github.com/augentic/wasi-vault/archive/main.tar.gz"
 sha256 = "c8fa6372812acff70c359e00ceafbf8d3f3ed600060a4cd26db54b65518f7820"
 sha512 = "cfed7fdad55ac8e36b5d6d44a1f25fcb0129a32948851a3f1235e3659f269e3ec1462c70d1a1b83b24a52c4bab62a6c3f8ba97edbd2c104e856b527c1293299a"

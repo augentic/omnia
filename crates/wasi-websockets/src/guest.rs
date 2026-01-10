@@ -3,7 +3,7 @@
 #![allow(clippy::same_length_and_capacity)]
 
 // Bindings for the `wasi:websockets` world.
-// See (<https://github.com/credibil/wasi-websockets/>)
+// See (<https://github.com/augentic/wasi-websockets/>)
 wit_bindgen::generate!({
     world: "websockets",
     path: "wit",

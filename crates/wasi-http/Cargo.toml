@@ -1,5 +1,5 @@
 [package]
-name = "wasi-http"
+name = "yetti-wasi-http"
 description = "WASI HTTP WIT implementation"
 readme = "README.md"
 authors.workspace = true
@@ -31,7 +31,7 @@ fromenv.workspace = true
 futures.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
-warp.workspace = true
+yetti.workspace = true
 tokio.workspace = true
 wasmtime = { workspace = true, features = ["component-model-async"] }
 wasmtime-wasi.workspace = true
@@ -47,5 +47,5 @@ rkyv = "0.8.13"
 serde.workspace = true
 serde_json.workspace = true
 tower.workspace = true
-wasi-keyvalue.workspace = true
 wasip3.workspace = true
+yetti-wasi-keyvalue.workspace = true

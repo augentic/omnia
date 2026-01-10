@@ -1,5 +1,5 @@
 [package]
-name = "guest-macro"
+name = "yetti-guest-macro"
 description = "Procedural macros for guest code generation"
 authors.workspace = true
 categories.workspace = true

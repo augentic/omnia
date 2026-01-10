@@ -31,9 +31,9 @@ mod generated {
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use warp::{Host, Server, State};
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::ResourceTable;
+use yetti::{Host, Server, State};
 
 pub use self::default_impl::IdentityDefault;
 use self::generated::wasi::identity::credentials;
@@ -89,9 +89,9 @@ pub trait WasiIdentityCtx: Debug + Send + Sync + 'static {
 #[macro_export]
 macro_rules! wasi_view {
     ($store_ctx:ty, $field_name:ident) => {
-        impl wasi_identity::WasiIdentityView for $store_ctx {
-            fn identity(&mut self) -> wasi_identity::WasiIdentityCtxView<'_> {
-                wasi_identity::WasiIdentityCtxView {
+        impl yetti_wasi_identity::WasiIdentityView for $store_ctx {
+            fn identity(&mut self) -> yetti_wasi_identity::WasiIdentityCtxView<'_> {
+                yetti_wasi_identity::WasiIdentityCtxView {
                     ctx: &mut self.$field_name,
                     table: &mut self.table,
                 }

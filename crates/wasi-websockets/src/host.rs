@@ -34,9 +34,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use server::run_server;
 use store_impl::FutureResult;
-use warp::{Host, Server, State};
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::ResourceTable;
+use yetti::{Host, Server, State};
 
 pub use self::default_impl::WebSocketsDefault;
 use self::generated::wasi::websockets::{store, types as generated_types};
@@ -95,9 +95,9 @@ impl generated_types::Host for WasiWebSocketsCtxView<'_> {
 #[macro_export]
 macro_rules! wasi_view {
     ($store_ctx:ty, $field_name:ident) => {
-        impl wasi_websockets::WebSocketsView for $store_ctx {
-            fn websockets(&mut self) -> wasi_websockets::WasiWebSocketsCtxView<'_> {
-                wasi_websockets::WasiWebSocketsCtxView {
+        impl yetti_wasi_websockets::WebSocketsView for $store_ctx {
+            fn websockets(&mut self) -> yetti_wasi_websockets::WasiWebSocketsCtxView<'_> {
+                yetti_wasi_websockets::WasiWebSocketsCtxView {
                     ctx: &self.$field_name,
                     table: &mut self.table,
                 }

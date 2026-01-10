@@ -7,7 +7,7 @@ use http::{Request, Response};
 use http_body_util::BodyExt;
 use http_body_util::combinators::UnsyncBoxBody;
 use tracing::instrument;
-use warp::Backend;
+use yetti::Backend;
 use wasmtime_wasi::TrappableError;
 use wasmtime_wasi_http::p3::bindings::http::types::ErrorCode;
 use wasmtime_wasi_http::p3::{self, RequestOptions};
@@ -22,7 +22,7 @@ pub struct ConnectOptions {
     pub addr: String,
 }
 
-impl warp::FromEnv for ConnectOptions {
+impl yetti::FromEnv for ConnectOptions {
     fn from_env() -> Result<Self> {
         Self::from_env().finalize().context("issue loading connection options")
     }

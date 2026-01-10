@@ -9,6 +9,6 @@ sha256 = "9f1ad5da70f621bbd4c69e3bd90250a0c12ecfde266aa8f99684fc44bc1e7c15"
 sha512 = "6d0a9db6848f24762933d1c168a5b5b1065ba838c253ee20454afeb8dd1a049b918d25deff556083d68095dd3126ae131ac3e738774320eee5d918f5a4b5354e"
 
 [otel]
-url = "https://github.com/credibil/wasi-otel/archive/main.tar.gz"
+url = "https://github.com/augentic/wasi-otel/archive/main.tar.gz"
 sha256 = "3e454a6c0bc05bd83da36ab683da28ad34efd2385ce79759c9d1e9b4a9f53235"
 sha512 = "48eaf4a93098eb8d2ac4b429ec5b7fa7a18a5f5e66b506d729283095e01b78c4d327429ddc0b116835110b6191a976577643a8084bbe8540d06d188dcdcb234b"

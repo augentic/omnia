@@ -18,7 +18,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::{Value, json};
 use tracing::Level;
-use warp_sdk::HttpResult;
+use yetti_sdk::HttpResult;
 use wasi_identity::credentials::get_identity;
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};

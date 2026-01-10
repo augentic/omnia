@@ -30,9 +30,9 @@ mod generated {
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use warp::{Host, Server, State};
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::ResourceTable;
+use yetti::{Host, Server, State};
 
 use self::generated::wasi::vault::vault;
 pub use crate::host::default_impl::VaultDefault;
@@ -85,9 +85,9 @@ pub trait WasiVaultView: Send {
 #[macro_export]
 macro_rules! wasi_view {
     ($store_ctx:ty, $field_name:ident) => {
-        impl wasi_vault::WasiVaultView for $store_ctx {
-            fn vault(&mut self) -> wasi_vault::WasiVaultCtxView<'_> {
-                wasi_vault::WasiVaultCtxView {
+        impl yetti_wasi_vault::WasiVaultView for $store_ctx {
+            fn vault(&mut self) -> yetti_wasi_vault::WasiVaultCtxView<'_> {
+                yetti_wasi_vault::WasiVaultCtxView {
                     ctx: &mut self.$field_name,
                     table: &mut self.table,
                 }

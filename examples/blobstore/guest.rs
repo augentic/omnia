@@ -21,9 +21,9 @@ use axum::{Json, Router};
 use bytes::Bytes;
 use serde_json::Value;
 use tracing::Level;
-use warp_sdk::HttpResult;
-use wasi_blobstore::blobstore;
-use wasi_blobstore::types::{IncomingValue, OutgoingValue};
+use yetti_sdk::HttpResult;
+use yetti_wasi_blobstore::blobstore;
+use yetti_wasi_blobstore::types::{IncomingValue, OutgoingValue};
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
 

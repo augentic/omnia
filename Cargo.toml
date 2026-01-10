@@ -3,13 +3,13 @@ members = ["crates/*", "examples"]
 resolver = "3"
 
 [workspace.package]
-authors = ["Credibil"]
+authors = ["Augentic"]
 categories = ["runtime", "wasi", "wasm"]
 edition = "2024"
-homepage = "https://credibil.io"
-keywords = ["decentralized", "identity"]
+homepage = "https://augentic.io"
+keywords = ["runtime", "wasi", "wasm"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/credibil/wrt"
+repository = "https://github.com/augentic/yetti"
 rust-version = "1.92"
 version = "0.24.0"
 
@@ -95,22 +95,22 @@ wasmtime-wasi-io = "40.0.1"
 wit-bindgen = { version = "0.50.0", features = ["async-spawn"] }
 
 # interally referenced crates
-guest-macro = { path = "crates/guest-macro", version = "0.24.0", registry = "credibil" }
-runtime-macro = { path = "crates/runtime-macro", version = "0.24.0", registry = "credibil" }
-warp = { path = "crates/warp", version = "0.24.0", registry = "credibil" }
-warp-otel = { path = "crates/otel", version = "0.24.0", registry = "credibil" }
-warp-sdk = { path = "crates/warp-sdk", version = "0.24.0", registry = "credibil" }
-wasi-blobstore = { path = "crates/wasi-blobstore", version = "0.24.0", registry = "credibil" }
-wasi-config = { path = "crates/wasi-config", version = "0.24.0", registry = "credibil" }
-wasi-http = { path = "crates/wasi-http", version = "0.24.0", registry = "credibil" }
-wasi-identity = { path = "crates/wasi-identity", version = "0.24.0", registry = "credibil" }
-wasi-keyvalue = { path = "crates/wasi-keyvalue", version = "0.24.0", registry = "credibil" }
-wasi-messaging = { path = "crates/wasi-messaging", version = "0.24.0", registry = "credibil" }
-wasi-otel = { path = "crates/wasi-otel", version = "0.24.0", registry = "credibil" }
-wasi-otel-attr = { path = "crates/wasi-otel-attr", version = "0.24.0", registry = "credibil" }
-wasi-sql = { path = "crates/wasi-sql", version = "0.24.0", registry = "credibil" }
-wasi-vault = { path = "crates/wasi-vault", version = "0.24.0", registry = "credibil" }
-wasi-websockets = { path = "crates/wasi-websockets", version = "0.24.0", registry = "credibil" }
+yetti = { path = "crates/yetti", version = "0.24.0", registry = "credibil" }
+yetti-guest-macro = { path = "crates/guest-macro", version = "0.24.0", registry = "credibil" }
+yetti-otel = { path = "crates/otel", version = "0.24.0", registry = "credibil" }
+yetti-runtime-macro = { path = "crates/runtime-macro", version = "0.24.0", registry = "credibil" }
+yetti-sdk = { path = "crates/yetti-sdk", version = "0.24.0", registry = "credibil" }
+yetti-wasi-blobstore = { path = "crates/wasi-blobstore", version = "0.24.0", registry = "credibil" }
+yetti-wasi-config = { path = "crates/wasi-config", version = "0.24.0", registry = "credibil" }
+yetti-wasi-http = { path = "crates/wasi-http", version = "0.24.0", registry = "credibil" }
+yetti-wasi-identity = { path = "crates/wasi-identity", version = "0.24.0", registry = "credibil" }
+yetti-wasi-keyvalue = { path = "crates/wasi-keyvalue", version = "0.24.0", registry = "credibil" }
+yetti-wasi-messaging = { path = "crates/wasi-messaging", version = "0.24.0", registry = "credibil" }
+yetti-wasi-otel = { path = "crates/wasi-otel", version = "0.24.0", registry = "credibil" }
+yetti-wasi-otel-attr = { path = "crates/wasi-otel-attr", version = "0.24.0", registry = "credibil" }
+yetti-wasi-sql = { path = "crates/wasi-sql", version = "0.24.0", registry = "credibil" }
+yetti-wasi-vault = { path = "crates/wasi-vault", version = "0.24.0", registry = "credibil" }
+yetti-wasi-websockets = { path = "crates/wasi-websockets", version = "0.24.0", registry = "credibil" }
 
 [patch.crates-io]
 # wasmtime = { git = "https://github.com/bytecodealliance/wasmtime", branch = "release-40.0.1" }

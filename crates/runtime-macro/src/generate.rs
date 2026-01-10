@@ -67,13 +67,13 @@ impl TryFrom<Config> for Generated {
         // main function
         let main_fn = if input.gen_main {
             quote! {
-                use warp::tokio;
+                use yetti::tokio;
 
                 #[tokio::main]
                 async fn main() -> anyhow::Result<()> {
-                    use warp::Parser;
-                    match warp::Cli::parse().command {
-                        warp::Command::Run { wasm } => runtime::run(wasm).await,
+                    use yetti::Parser;
+                    match yetti::Cli::parse().command {
+                        yetti::Command::Run { wasm } => runtime::run(wasm).await,
                         _ => unreachable!(),
                     }
                 }
@@ -123,6 +123,6 @@ fn wasi_ident(path: &Path) -> Ident {
     };
 
     let name = quote! {#ident}.to_string();
-    let name = name.replace("Wasi", "wasi_").to_lowercase();
+    let name = name.replace("Wasi", "yetti_wasi_").to_lowercase();
     format_ident!("{name}")
 }

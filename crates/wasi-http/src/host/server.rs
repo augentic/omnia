@@ -18,7 +18,7 @@ use hyper::service::service_fn;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tracing::{Instrument, debug_span};
-use warp::State;
+use yetti::State;
 use wasmtime::Store;
 use wasmtime_wasi_http::io::TokioIo;
 use wasmtime_wasi_http::p3::WasiHttpView;

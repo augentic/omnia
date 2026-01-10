@@ -7,9 +7,9 @@ mod server;
 
 use anyhow::Result;
 pub use default_impl::HttpDefault;
-use warp::{Host, Server, State};
 use wasmtime::component::Linker;
 pub use wasmtime_wasi_http::p3::{WasiHttpCtxView, WasiHttpView};
+use yetti::{Host, Server, State};
 
 #[derive(Debug)]
 pub struct WasiHttp;

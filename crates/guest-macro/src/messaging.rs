@@ -4,7 +4,7 @@ use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{Ident, LitStr, Path, Result, Token};
 
-use crate::guest::{Config, handler_name};
+use crate::guest::{handler_name, Config};
 
 pub struct Messaging {
     pub topics: Vec<Topic>,
@@ -47,9 +47,9 @@ pub fn expand(messaging: &Messaging, config: &Config) -> TokenStream {
 
     quote! {
         mod messaging {
-            use warp_sdk::wasi_messaging::types::{Error, Message};
-            use warp_sdk::{wasi_messaging, wasi_otel};
-            use warp_sdk::Handler;
+            use yetti_sdk::wasi_messaging::types::{Error, Message};
+            use yetti_sdk::{wasi_messaging, wasi_otel};
+            use yetti_sdk::Handler;
 
             use super::*;
 

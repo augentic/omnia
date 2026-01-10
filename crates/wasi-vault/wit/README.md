@@ -9,7 +9,7 @@ Install `wit-deps` from source (<https://github.com/bytecodealliance/wit-deps>)
 Add dependencies to `deps.toml`:
 
 ```toml
-keyvalue = "https://github.com/credibil/wasi-keyvalue/archive/main.tar.gz"
+keyvalue = "https://github.com/augentic/wasi-keyvalue/archive/main.tar.gz"
 ```
 
 Import/update dependencies using `wit-deps update` from the crate root.

@@ -1,5 +1,5 @@
 [package]
-name = "runtime-macro"
+name = "yetti-runtime-macro"
 description = "Procedural macros for runtime build code generation"
 authors.workspace = true
 categories.workspace = true

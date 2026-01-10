@@ -3,7 +3,7 @@
 #![allow(clippy::same_length_and_capacity)]
 
 // Bindings for the `wasi:vault` world.
-// See (<https://github.com/credibil/wasi-vault/>)
+// See (<https://github.com/augentic/wasi-vault/>)
 wit_bindgen::generate!({
     world: "vault",
     path: "wit",

@@ -1,10 +1,10 @@
 cfg_if::cfg_if! {
     if #[cfg(not(target_arch = "wasm32"))] {
-        use wasi_http::{WasiHttp, HttpDefault};
-        use wasi_otel::{WasiOtel, OtelDefault};
-        use wasi_vault::{WasiVault, VaultDefault};
+        use yetti_wasi_http::{WasiHttp, HttpDefault};
+        use yetti_wasi_otel::{WasiOtel, OtelDefault};
+        use yetti_wasi_vault::{WasiVault, VaultDefault};
 
-        warp::runtime!({
+        yetti::runtime!({
             main: true,
             hosts: {
                 WasiHttp: HttpDefault,

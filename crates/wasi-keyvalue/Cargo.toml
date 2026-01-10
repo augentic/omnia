@@ -1,5 +1,5 @@
 [package]
-name = "wasi-keyvalue"
+name = "yetti-wasi-keyvalue"
 description = "WASI Keyvalue implementation"
 readme = "README.md"
 authors.workspace = true
@@ -24,7 +24,7 @@ tracing.workspace = true
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 futures.workspace = true
-warp.workspace = true
+yetti.workspace = true
 parking_lot.workspace = true
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true

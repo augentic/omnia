@@ -15,7 +15,7 @@ use futures::FutureExt;
 use futures_util::SinkExt;
 use tokio_tungstenite::tungstenite::{Bytes, Message};
 use tracing::instrument;
-use warp::{Backend, FutureResult};
+use yetti::{Backend, FutureResult};
 
 use crate::host::WebSocketsCtx;
 use crate::host::generated::wasi::websockets::types::Peer;
@@ -26,7 +26,7 @@ use crate::host::types::PublishMessage;
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions;
 
-impl warp::FromEnv for ConnectOptions {
+impl yetti::FromEnv for ConnectOptions {
     fn from_env() -> Result<Self> {
         Ok(Self)
     }

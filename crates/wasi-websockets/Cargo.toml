@@ -1,5 +1,5 @@
 [package]
-name = "wasi-websockets"
+name = "yetti-wasi-websockets"
 description = "WASI WebSockets WIT implementation"
 readme = "README.md"
 authors.workspace = true
@@ -26,7 +26,7 @@ futures-util.workspace = true
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["server"] }
 hyper-util.workspace = true
-warp.workspace = true
+yetti.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["sync"] }

@@ -36,8 +36,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use bytes::Bytes;
 pub use resource::*;
-pub use warp::FutureResult;
-use warp::{Host, Server, State};
+pub use yetti::FutureResult;
+use yetti::{Host, Server, State};
 use wasmtime::component::{HasData, Linker, ResourceTable};
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 
@@ -108,9 +108,9 @@ pub trait WasiBlobstoreView: Send {
 #[macro_export]
 macro_rules! wasi_view {
     ($store_ctx:ty, $field_name:ident) => {
-        impl wasi_blobstore::WasiBlobstoreView for $store_ctx {
-            fn blobstore(&mut self) -> wasi_blobstore::WasiBlobstoreCtxView<'_> {
-                wasi_blobstore::WasiBlobstoreCtxView {
+        impl yetti_wasi_blobstore::WasiBlobstoreView for $store_ctx {
+            fn blobstore(&mut self) -> yetti_wasi_blobstore::WasiBlobstoreCtxView<'_> {
+                yetti_wasi_blobstore::WasiBlobstoreCtxView {
                     ctx: &mut self.$field_name,
                     table: &mut self.table,
                 }

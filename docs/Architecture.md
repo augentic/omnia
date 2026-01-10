@@ -23,7 +23,7 @@ WRT provides a thin wrapper around wasmtime for ergonomic integration of host-ba
 │        └───────────────┴───────┬───────┴───────────────┘            │
 │                                │                                    │
 │                         ┌──────┴──────┐                             │
-│                         │   warp    │                             │
+│                         │   yetti    │                             │
 │                         │ (wasmtime)  │                             │
 │                         └──────┬──────┘                             │
 │                                │                                    │
@@ -67,7 +67,7 @@ WRT is organized into three distinct layers:
 
 ## Crate Organization
 
-### Kernel (`crates/warp`)
+### Kernel (`crates/yetti`)
 
 The foundation of the runtime. Provides:
 
@@ -225,7 +225,7 @@ Dependencies on standard WASI definitions are managed in `wit/deps/` and version
 
 ## Runtime Execution Flow
 
-1. **CLI Parsing**: The warp parses command-line arguments (`run` or `compile`)
+1. **CLI Parsing**: The yetti parses command-line arguments (`run` or `compile`)
 
 2. **Backend Connection**: The `runtime!` macro-generated code connects to all configured backends using environment variables
 
@@ -267,7 +267,7 @@ See individual backend READMEs for specific environment variables.
 wrt/
 ├── src/                    # CLI entry points (realtime binaries)
 ├── crates/
-│   ├── warp/             # Core runtime infrastructure
+│   ├── yetti/             # Core runtime infrastructure
 │   ├── buildgen/           # Runtime code generation macro
 │   ├── wasi-*/             # WASI interface implementations
 │   │   ├── src/

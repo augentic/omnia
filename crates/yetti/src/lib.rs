@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 pub use clap::Parser;
 use clap::Subcommand;
-pub use runtime_macro::runtime;
+pub use yetti_runtime_macro::runtime;
 pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
 // re-export internal modules

@@ -1,5 +1,5 @@
 [package]
-name = "wasi-otel"
+name = "yetti-wasi-otel"
 description = "WASI Opentelemetry implementation"
 readme = "README.md"
 authors.workspace = true
@@ -35,8 +35,8 @@ futures.workspace = true
 hex = "0.4.3"
 opentelemetry-proto = "0.31.0"
 prost = "0.14.1"
-warp.workspace = true
-warp-otel.workspace = true
+yetti.workspace = true
+yetti-otel.workspace = true
 wasmtime.workspace = true
 
 # guest dependencies
@@ -44,5 +44,5 @@ wasmtime.workspace = true
 cfg-if.workspace = true
 num-traits = "0.2.19"
 tracing-subscriber = { workspace = true, features = ["env-filter"], optional = true }
-wasi-otel-attr.workspace = true
+yetti-wasi-otel-attr.workspace = true
 wit-bindgen.workspace = true

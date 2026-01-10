@@ -1,5 +1,5 @@
 [package]
-name = "wasi-config"
+name = "yetti-wasi-config"
 description = "WASI Config WIT implementation"
 readme = "README.md"
 authors.workspace = true
@@ -24,7 +24,7 @@ wasmtime-wasi-config.workspace = true
 
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-warp.workspace = true
+yetti.workspace = true
 wasmtime = { workspace = true, features = ["component-model-async"] }
 
 # guest dependencies

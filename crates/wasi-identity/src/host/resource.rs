@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::ops::Deref;
 use std::sync::Arc;
 
-pub use warp::FutureResult;
+pub use yetti::FutureResult;
 
 pub use crate::host::generated::wasi::identity::credentials::AccessToken;
 

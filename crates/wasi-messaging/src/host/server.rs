@@ -3,7 +3,7 @@ use std::env;
 use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
 use tracing::{Instrument, debug_span, instrument};
-use warp::State;
+use yetti::State;
 use wasmtime::Store;
 
 use crate::host::WasiMessagingView;

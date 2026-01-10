@@ -1,5 +1,5 @@
 [package]
-name = "warp-otel"
+name = "yetti-otel"
 description = "Opentelemetry integration for Warp"
 readme = "README.md"
 authors.workspace = true

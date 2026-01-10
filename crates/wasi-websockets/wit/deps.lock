@@ -1,4 +1,4 @@
 [websockets]
-url = "https://github.com/credibil/wasi-websockets/archive/main.tar.gz"
+url = "https://github.com/augentic/wasi-websockets/archive/main.tar.gz"
 sha256 = "d43287d354d4493e3489765cf4d253a4c529f96fa429cef4b265eeb47d6cb738"
 sha512 = "830e426414407ff8579a4c872334dffa77b09f397872b209ea4500aa77f8a88fe16043e7611d24251ac7f2a53cb71d8f4b4eb51723f5fb15078a28ddae9a1751"

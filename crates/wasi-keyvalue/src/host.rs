@@ -31,9 +31,9 @@ mod generated {
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use warp::{Host, Server, State};
 use wasmtime::component::{HasData, Linker, ResourceTableError};
 use wasmtime_wasi::ResourceTable;
+use yetti::{Host, Server, State};
 
 pub use self::default_impl::KeyValueDefault;
 use self::generated::wasi::keyvalue::store::Error;
@@ -97,9 +97,9 @@ impl From<ResourceTableError> for Error {
 #[macro_export]
 macro_rules! wasi_view {
     ($store_ctx:ty, $field_name:ident) => {
-        impl wasi_keyvalue::WasiKeyValueView for $store_ctx {
-            fn keyvalue(&mut self) -> wasi_keyvalue::WasiKeyValueCtxView<'_> {
-                wasi_keyvalue::WasiKeyValueCtxView {
+        impl yetti_wasi_keyvalue::WasiKeyValueView for $store_ctx {
+            fn keyvalue(&mut self) -> yetti_wasi_keyvalue::WasiKeyValueCtxView<'_> {
+                yetti_wasi_keyvalue::WasiKeyValueCtxView {
                     ctx: &mut self.$field_name,
                     table: &mut self.table,
                 }

@@ -15,7 +15,7 @@ use futures::FutureExt;
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection as SqliteConnection, params_from_iter};
 use tracing::instrument;
-use warp::Backend;
+use yetti::Backend;
 
 use crate::host::resource::{Connection, FutureResult};
 use crate::host::{DataType, Field, Row, WasiSqlCtx};
@@ -26,7 +26,7 @@ pub struct ConnectOptions {
     pub database: String,
 }
 
-impl warp::FromEnv for ConnectOptions {
+impl yetti::FromEnv for ConnectOptions {
     fn from_env() -> Result<Self> {
         Self::from_env().finalize().context("issue loading connection options")
     }

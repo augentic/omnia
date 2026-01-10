@@ -10,7 +10,7 @@ use syn::parse_macro_input;
 /// # Example
 ///
 /// ```ignore
-/// warp::runtime!({
+/// yetti::runtime!({
 ///     wasi_http: WasiHttp,
 ///     wasi_otel: DefaultOtel,
 ///     wasi_blobstore: MongoDb,

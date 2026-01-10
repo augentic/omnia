@@ -1,5 +1,5 @@
 [package]
-name = "wasi-otel-attr"
+name = "yetti-wasi-otel-attr"
 description = "Opentelemetry attribute macros for WASI components"
 readme = "README.md"
 authors.workspace = true

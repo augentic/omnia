@@ -23,18 +23,18 @@ pub fn expand(generated: Generated) -> TokenStream {
             use std::path::PathBuf;
 
             use anyhow::Result;
-            use warp::anyhow::Context as _;
-            use warp::futures::future::{BoxFuture, try_join_all};
-            use warp::tokio;
-            use warp::wasmtime::component::InstancePre;
-            use warp::wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
-            use warp::{Backend, Compiled, Server, State};
+            use yetti::anyhow::Context as _;
+            use yetti::futures::future::{BoxFuture, try_join_all};
+            use yetti::tokio;
+            use yetti::wasmtime::component::InstancePre;
+            use yetti::wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+            use yetti::{Backend, Compiled, Server, State};
 
             use super::*;
 
             /// Run the specified wasm guest using the configured runtime.
             pub async fn run(wasm: PathBuf) -> Result<()> {
-                let mut compiled = warp::create(&wasm)
+                let mut compiled = yetti::create(&wasm)
                     .with_context(|| format!("compiling {}", wasm.display()))?;
                 let run_state = Context::new(&mut compiled)
                     .await

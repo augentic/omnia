@@ -4,7 +4,7 @@ use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{Error, Ident, LitStr, Path, Result, Token};
 
-use crate::guest::{Config, handler_name};
+use crate::guest::{handler_name, Config};
 
 pub struct Http {
     pub routes: Vec<Route>,
@@ -165,9 +165,9 @@ pub fn expand(http: &Http, config: &Config) -> TokenStream {
 
     quote! {
         mod http {
-            use warp_sdk::api::{HttpResult, Reply};
-            use warp_sdk::{axum, wasi_http, wasi_otel, wasip3};
-            use warp_sdk::Handler;
+            use yetti_sdk::api::{HttpResult, Reply};
+            use yetti_sdk::{axum, wasi_http, wasi_otel, wasip3};
+            use yetti_sdk::Handler;
 
             use super::*;
 

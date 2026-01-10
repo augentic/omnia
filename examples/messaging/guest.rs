@@ -29,7 +29,7 @@ use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
 use serde_json::{Value, json};
-use warp_sdk::HttpResult;
+use yetti_sdk::HttpResult;
 use wasi_messaging::types::{Client, Error, Message};
 use wasi_messaging::{producer, request_reply};
 use wasip3::exports::http::handler::Guest;

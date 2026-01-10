@@ -20,7 +20,7 @@ impl HostWithStore for WasiOtel {
         accessor: &Accessor<T, Self>, span_data: Vec<wasi::SpanData>,
     ) -> Result<(), wasi::Error> {
         // return if opentelemetry is not initialized
-        let Some(resource) = warp_otel::init::resource() else {
+        let Some(resource) = yetti_otel::init::resource() else {
             tracing::warn!("otel resource not initialized, skipping trace export");
             return Ok(());
         };

@@ -3,7 +3,7 @@
 #![allow(clippy::same_length_and_capacity)]
 
 // Bindings for the `wasi:sql` world.
-// See (<https://github.com/credibil/wasi-sql/>)
+// See (<https://github.com/augentic/wasi-sql/>)
 wit_bindgen::generate!({
     world: "sql",
     path: "wit",

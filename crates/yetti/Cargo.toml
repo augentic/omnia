@@ -1,6 +1,6 @@
 [package]
-name = "warp"
-description = "Warp runtime"
+name = "yetti"
+description = "Yetti runtime"
 readme = "README.md"
 authors.workspace = true
 categories.workspace = true
@@ -25,10 +25,10 @@ jit = ["wasmtime/cranelift"]
 anyhow.workspace = true
 clap = { version = "4.5.54", features = ["derive"] }
 futures.workspace = true
-runtime-macro.workspace = true
 serde.workspace = true
 tracing.workspace = true
 tokio = { workspace = true, features = ["macros"] }
-warp-otel.workspace = true
+yetti-otel.workspace = true
+yetti-runtime-macro.workspace = true
 wasmtime = { workspace = true, features = ["runtime"] }
 wasmtime-wasi.workspace = true

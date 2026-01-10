@@ -29,7 +29,7 @@ use axum::{Json, Router};
 use bytes::Bytes;
 use serde_json::Value;
 use tracing::Level;
-use warp_sdk::HttpResult;
+use yetti_sdk::HttpResult;
 use wasi_vault::vault;
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};

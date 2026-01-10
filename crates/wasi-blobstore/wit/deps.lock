@@ -1,5 +1,5 @@
 [blobstore]
-url = "https://github.com/credibil/wasi-blobstore/archive/main.tar.gz"
+url = "https://github.com/augentic/wasi-blobstore/archive/main.tar.gz"
 sha256 = "4e226ffdc8f17afa5af22b039b7737332502e07b921230c83e39f7f5339eb0cd"
 sha512 = "166027cb95f0718bfee9d98cd628f49e3b95a890a4e8fe7fd0f9868ae2f7f49302162ff52a13dda05539820f460e7928a2f7e452995c4365c0629742f7cf9270"
 deps = ["io"]

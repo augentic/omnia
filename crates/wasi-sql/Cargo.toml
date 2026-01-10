@@ -1,5 +1,5 @@
 [package]
-name = "wasi-sql"
+name = "yetti-wasi-sql"
 description = "WASI SQL implementation"
 readme = "README.md"
 authors.workspace = true
@@ -21,7 +21,7 @@ workspace = true
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 fromenv.workspace = true
 futures.workspace = true
-warp.workspace = true
+yetti.workspace = true
 parking_lot.workspace = true
 rusqlite = { version = "0.38.0", features = ["bundled"] }
 tracing.workspace = true

@@ -1,4 +1,4 @@
 [identity]
-url = "https://github.com/credibil/wasi-identity/archive/main.tar.gz"
+url = "https://github.com/augentic/wasi-identity/archive/main.tar.gz"
 sha256 = "e7cd1df906153cde02f752b0f49d4aabf201a397b33b90e34ddc7a1cb25f33f6"
 sha512 = "22ff62b63ddad892068da8f98bdd32a03ea646dea1ca30ce72c445a2774bb7b9c36170845e698fe0cd4f612240e38e1399b5c3b0c48871009be6bebfe50605df"

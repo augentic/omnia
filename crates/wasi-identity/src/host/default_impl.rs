@@ -12,7 +12,7 @@ use oauth2::{
     TokenResponse as _, TokenUrl,
 };
 use tracing::instrument;
-use warp::Backend;
+use yetti::Backend;
 
 use crate::host::WasiIdentityCtx;
 pub use crate::host::generated::wasi::identity::credentials::AccessToken;
@@ -30,7 +30,7 @@ pub struct ConnectOptions {
     pub token_url: String,
 }
 
-impl warp::FromEnv for ConnectOptions {
+impl yetti::FromEnv for ConnectOptions {
     fn from_env() -> Result<Self> {
         Self::from_env().finalize().context("issue loading connection options")
     }

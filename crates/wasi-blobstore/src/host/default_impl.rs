@@ -10,7 +10,7 @@ use anyhow::{Result, anyhow};
 use futures::FutureExt;
 use parking_lot::RwLock;
 use tracing::instrument;
-use warp::Backend;
+use yetti::Backend;
 
 use crate::host::WasiBlobstoreCtx;
 use crate::host::generated::wasi::blobstore::container::{ContainerMetadata, ObjectMetadata};
@@ -19,7 +19,7 @@ use crate::host::resource::{Container, FutureResult};
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions;
 
-impl warp::FromEnv for ConnectOptions {
+impl yetti::FromEnv for ConnectOptions {
     fn from_env() -> Result<Self> {
         Ok(Self)
     }
