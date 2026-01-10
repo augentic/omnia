@@ -6,6 +6,15 @@ Unreleased
 
 ### Changed
 
+<!-- Release notes generated using configuration in .github/release.yaml at main -->
+
+## What's Changed
+* Bump to 0.22.0 by @github-actions[bot] in https://github.com/augentic/warp/pull/150
+* Default Guest Capabilities by @andrewweston in https://github.com/augentic/warp/pull/151
+
+
+**Full Changelog**: https://github.com/augentic/warp/compare/v0.22.0...v0.23.0
+
 ---
 
 Release notes for previous releases can be found on the respective release
