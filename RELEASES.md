@@ -1,19 +1,20 @@
-## 0.22.0
+## 0.23.0
 
 Unreleased
 
 ### Added
 
+- Default implementations for all [capability traits](https://github.com/augentic/warp/blob/main/crates/warp-sdk/src/capabilities.rs)
+
+- `ensure_env` macro for checking required environment variables are set.
+
 ### Changed
 
-<!-- Release notes generated using configuration in .github/release.yaml at main -->
+- Modified the "shape" of the guest macro input.
 
-## What's Changed
-* Bump to 0.22.0 by @github-actions[bot] in https://github.com/augentic/warp/pull/150
-* Default Guest Capabilities by @andrewweston in https://github.com/augentic/warp/pull/151
+- Updated dependencies.
 
-
-**Full Changelog**: https://github.com/augentic/warp/compare/v0.22.0...v0.23.0
+**Full Changelog**: <https://github.com/augentic/warp/compare/v0.22.0...v0.23.0>
 
 ---
 

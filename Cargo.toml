@@ -98,7 +98,7 @@ wit-bindgen = { version = "0.50.0", features = ["async-spawn"] }
 guest-macro = { path = "crates/guest-macro", version = "0.23.0", registry = "credibil" }
 runtime-macro = { path = "crates/runtime-macro", version = "0.23.0", registry = "credibil" }
 warp = { path = "crates/warp", version = "0.23.0", registry = "credibil" }
-warp-otel = { path = "crates/otel", version = "0.23.0" }
+warp-otel = { path = "crates/otel", version = "0.23.0", registry = "credibil" }
 warp-sdk = { path = "crates/warp-sdk", version = "0.23.0", registry = "credibil" }
 wasi-blobstore = { path = "crates/wasi-blobstore", version = "0.23.0", registry = "credibil" }
 wasi-config = { path = "crates/wasi-config", version = "0.23.0", registry = "credibil" }
