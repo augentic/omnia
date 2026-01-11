@@ -69,11 +69,15 @@ where
     }
 }
 
+/// A trait which provides internal WASI WebSockets state.
+///
+/// This is implemented by the `T` in `Linker<T>` — a single type shared across
+/// all WASI components for the runtime build.
 pub trait WebSocketsView: Send {
     fn websockets(&mut self) -> WasiWebSocketsCtxView<'_>;
 }
 
-/// View into [`WebSocketsCtxView`] and [`ResourceTable`].
+/// View into [`WebSocketsCtx`] implementation and [`ResourceTable`].
 pub struct WasiWebSocketsCtxView<'a> {
     /// Mutable reference to the WASI WebSockets context.
     pub ctx: &'a dyn WebSocketsCtx,
@@ -82,6 +86,10 @@ pub struct WasiWebSocketsCtxView<'a> {
     pub table: &'a mut ResourceTable,
 }
 
+/// A trait which provides internal WASI WebSockets context.
+///
+/// This is implemented by the resource-specific provider of WebSockets
+/// functionality.
 pub trait WebSocketsCtx: Debug + Send + Sync + 'static {
     fn serve(&self) -> FutureResult<Arc<dyn resource::Server>>;
 }

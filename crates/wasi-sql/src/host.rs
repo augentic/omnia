@@ -36,6 +36,7 @@ use std::sync::Arc;
 
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::ResourceTable;
+pub use yetti::FutureResult;
 use yetti::{Host, Server, State};
 
 use self::generated::wasi::sql::{readwrite, types};
@@ -62,12 +63,13 @@ where
 
 impl<S> Server<S> for WasiSql where S: State {}
 
-/// A trait which provides internal WASI SQL context.
+/// A trait which provides internal WASI SQL state.
 ///
-/// This is implemented by the resource-specific provider of SQL
-/// functionality. For example, `PostgreSQL`, `MySQL`, `SQLite`, etc.
-pub trait WasiSqlCtx: Debug + Send + Sync + 'static {
-    fn open(&self, name: String) -> FutureResult<Arc<dyn Connection>>;
+/// This is implemented by the `T` in `Linker<T>` — a single type shared across
+/// all WASI components for the runtime build.
+pub trait WasiSqlView: Send {
+    /// Return a [`WasiSqlCtxView`] from mutable reference to self.
+    fn sql(&mut self) -> WasiSqlCtxView<'_>;
 }
 
 /// View into [`WasiSqlCtx`] implementation and [`ResourceTable`].
@@ -79,13 +81,12 @@ pub struct WasiSqlCtxView<'a> {
     pub table: &'a mut ResourceTable,
 }
 
-/// A trait which provides internal WASI Key-Value state.
+/// A trait which provides internal WASI SQL context.
 ///
-/// This is implemented by the `T` in `Linker<T>` — a single type shared across
-/// all WASI components for the runtime build.
-pub trait WasiSqlView: Send {
-    /// Return a [`WasiSqlCtxView`] from mutable reference to self.
-    fn sql(&mut self) -> WasiSqlCtxView<'_>;
+/// This is implemented by the resource-specific provider of SQL
+/// functionality. For example, `PostgreSQL`, `MySQL`, `SQLite`, etc.
+pub trait WasiSqlCtx: Debug + Send + Sync + 'static {
+    fn open(&self, name: String) -> FutureResult<Arc<dyn Connection>>;
 }
 
 #[macro_export]

@@ -39,6 +39,7 @@ use std::sync::Arc;
 
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::{ResourceTable, ResourceTableError};
+pub use yetti::FutureResult;
 use yetti::{Host, Server, State};
 
 pub use self::default_impl::MessagingDefault;
@@ -75,6 +76,24 @@ where
     async fn run(&self, state: &S) -> anyhow::Result<()> {
         server::run(state).await
     }
+}
+
+/// A trait which provides internal WASI Messaging state.
+///
+/// This is implemented by the `T` in `Linker<T>` — a single type shared across
+/// all WASI components for the runtime build.
+pub trait WasiMessagingView: Send {
+    /// Return a [`WasiMessagingCtxView`] from mutable reference to self.
+    fn messaging(&mut self) -> WasiMessagingCtxView<'_>;
+}
+
+/// View into [`WasiMessagingCtx`] implementation and [`ResourceTable`].
+pub struct WasiMessagingCtxView<'a> {
+    /// Mutable reference to the WASI Messaging context.
+    pub ctx: &'a mut dyn WasiMessagingCtx,
+
+    /// Mutable reference to table used to manage resources.
+    pub table: &'a mut ResourceTable,
 }
 
 /// A trait which provides internal WASI Messaging context.
@@ -141,24 +160,6 @@ pub trait WasiMessagingCtx: Debug + Send + Sync + 'static {
     fn remove_metadata(
         &self, message: Arc<dyn Message>, key: String,
     ) -> anyhow::Result<Arc<dyn Message>>;
-}
-
-/// View into [`WasiMessagingCtx`] implementation and [`ResourceTable`].
-pub struct WasiMessagingCtxView<'a> {
-    /// Mutable reference to the WASI Key-Value context.
-    pub ctx: &'a mut dyn WasiMessagingCtx,
-
-    /// Mutable reference to table used to manage resources.
-    pub table: &'a mut ResourceTable,
-}
-
-/// A trait which provides internal WASI Key-Value state.
-///
-/// This is implemented by the `T` in `Linker<T>` — a single type shared across
-/// all WASI components for the runtime build.
-pub trait WasiMessagingView: Send {
-    /// Return a [`WasiMessagingCtxView`] from mutable reference to self.
-    fn messaging(&mut self) -> WasiMessagingCtxView<'_>;
 }
 
 impl From<ResourceTableError> for Error {

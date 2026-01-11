@@ -33,6 +33,7 @@ use std::sync::Arc;
 
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::ResourceTable;
+pub use yetti::FutureResult;
 use yetti::{Host, Server, State};
 
 pub use self::default_impl::IdentityDefault;
@@ -57,10 +58,7 @@ where
 
 impl<S> Server<S> for WasiIdentity where S: State {}
 
-//===============================================
-// TODO: this could be a generic trait for all WASI hosts
-//===============================================
-/// A trait which provides internal WASI Key-Value state.
+/// A trait which provides internal WASI Identity state.
 ///
 /// This is implemented by the `T` in `Linker<T>` — a single type shared across
 /// all WASI components for the runtime build.
@@ -71,17 +69,17 @@ pub trait WasiIdentityView: Send {
 
 /// View into [`WasiIdentityCtx`] implementation and [`ResourceTable`].
 pub struct WasiIdentityCtxView<'a> {
-    /// Mutable reference to the WASI Key-Value context.
+    /// Mutable reference to the WASI Identity context.
     pub ctx: &'a mut dyn WasiIdentityCtx,
 
     /// Mutable reference to table used to manage resources.
     pub table: &'a mut ResourceTable,
 }
 
-/// A trait which provides internal WASI Key-Value context.
+/// A trait which provides internal WASI Identity context.
 ///
-/// This is implemented by the resource-specific provider of Key-Value
-/// functionality. For example, an in-memory store, or a Redis-backed store.
+/// This is implemented by the resource-specific provider of Identity
+/// functionality.
 pub trait WasiIdentityCtx: Debug + Send + Sync + 'static {
     fn get_identity(&self, name: String) -> FutureResult<Arc<dyn Identity>>;
 }

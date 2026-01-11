@@ -10,7 +10,6 @@ use std::fmt::Debug;
 use anyhow::Result;
 use futures::future::BoxFuture;
 use wasmtime::component::{InstancePre, Linker};
-use wasmtime_wasi::WasiView;
 
 pub type FutureResult<T> = BoxFuture<'static, Result<T>>;
 
@@ -34,13 +33,12 @@ pub trait Host<T>: Debug + Sync + Send {
     fn add_to_linker(linker: &mut Linker<T>) -> Result<()>;
 }
 
-use wasmtime::component::HasData;
-
-pub trait View<'a, T: WasiView>: HasData + 'a + Send {
-    // type Data<'a>: HasData + 'a;
-
-    fn view(ctx: &mut T) -> <Self as HasData>::Data<'_>;
-}
+// use wasmtime::component::HasData;
+// pub trait View<'a, T>: HasData + 'a + Send {
+//     fn ctx_view(ctx: &'a mut T, table: &'a mut ResourceTable) -> <Self as HasData>::Data<'a> {
+//         todo!()
+//     }
+// }
 
 /// Implemented by WASI hosts that are servers in order to allow the runtime to
 /// start them.
