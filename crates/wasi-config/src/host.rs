@@ -41,14 +41,14 @@ where
 
 impl<S> Server<S> for WasiConfig where S: State {}
 
-/// A trait which provides internal WASI Config state.
-///
-/// This is implemented by the `T` in `Linker<T>` — a single type shared across
-/// all WASI components for the runtime build.
-pub trait WasiConfigView: Send {
-    /// Return a [`WasiConfig`] from mutable reference to self.
-    fn config(&mut self) -> wasmtime_wasi_config::WasiConfig<'_>;
-}
+// /// A trait which provides internal WASI Config state.
+// ///
+// /// This is implemented by the `T` in `Linker<T>` — a single type shared across
+// /// all WASI components for the runtime build.
+// pub trait WasiConfigView: Send {
+//     /// Return a [`WasiConfig`] from mutable reference to self.
+//     fn config(&mut self) -> wasmtime_wasi_config::WasiConfig<'_>;
+// }
 
 /// A trait which provides internal WASI Config context.
 ///
