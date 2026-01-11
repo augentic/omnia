@@ -36,9 +36,9 @@ where
 #[macro_export]
 macro_rules! wasi_view {
     ($store_ctx:ty, $field_name:ident) => {
-        impl wasi_http::WasiHttpView for $store_ctx {
-            fn http(&mut self) -> wasi_http::WasiHttpCtxView<'_> {
-                wasi_http::WasiHttpCtxView {
+        impl yetti_wasi_http::WasiHttpView for $store_ctx {
+            fn http(&mut self) -> yetti_wasi_http::WasiHttpCtxView<'_> {
+                yetti_wasi_http::WasiHttpCtxView {
                     ctx: &mut self.$field_name,
                     table: &mut self.table,
                 }

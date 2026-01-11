@@ -27,15 +27,6 @@ where
 
 impl<S> Server<S> for WasiConfig where S: State {}
 
-/// A trait which provides internal WASI Config context.
-///
-/// This is implemented by the resource-specific provider of Config
-/// functionality.
-pub trait WasiConfigCtx: Debug + Send + Sync + 'static {
-    /// Get the configuration variables.
-    fn get_config(&self) -> &WasiConfigVariables;
-}
-
 /// A trait which provides internal WASI Config state.
 ///
 /// This is implemented by the `T` in `Linker<T>` — a single type shared across
@@ -45,13 +36,22 @@ pub trait WasiConfigView: Send {
     fn config(&mut self) -> wasmtime_wasi_config::WasiConfig<'_>;
 }
 
+/// A trait which provides internal WASI Config context.
+///
+/// This is implemented by the resource-specific provider of Config
+/// functionality.
+pub trait WasiConfigCtx: Debug + Send + Sync + 'static {
+    /// Get the configuration variables.
+    fn get_config(&self) -> &WasiConfigVariables;
+}
+
 #[macro_export]
 macro_rules! wasi_view {
     ($store_ctx:ty, $field_name:ident) => {
         impl yetti_wasi_config::WasiConfigView for $store_ctx {
             fn config(&mut self) -> yetti_wasi_config::wasmtime_wasi_config::WasiConfig<'_> {
                 let vars = yetti_wasi_config::WasiConfigCtx::get_config(&self.$field_name);
-                wasi_config::wasmtime_wasi_config::WasiConfig::from(vars)
+                yetti_wasi_config::wasmtime_wasi_config::WasiConfig::from(vars)
             }
         }
     };
