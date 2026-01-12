@@ -32,7 +32,7 @@ use base64ct::{Base64, Encoding};
 use bytes::Bytes;
 use http::Method;
 use http::header::{CACHE_CONTROL, IF_NONE_MATCH};
-use http_body_util::{Empty, Full};
+use http_body_util::Empty;
 use serde_json::{Value, json};
 use tracing::Level;
 use wasip3::exports::http::handler::Guest;
