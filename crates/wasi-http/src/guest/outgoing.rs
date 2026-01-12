@@ -4,7 +4,7 @@ use std::error::Error;
 use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
 use http::HeaderValue;
-use http::header::ETAG;
+use http::header::{CONTENT_LENGTH, ETAG};
 use http_body::Body;
 use wasip3::http::handler;
 use wasip3::http_compat::{IncomingMessage, http_from_wasi_response, http_into_wasi_request};
@@ -47,6 +47,13 @@ where
 
     // read body
     let mut body_buf = BytesMut::new();
+    if let Some(len) = parts.headers.get(CONTENT_LENGTH)
+        && let Ok(cl) = len.to_str()
+    {
+        let len = cl.parse::<usize>().unwrap_or(0);
+        body_buf.reserve(len);
+    }
+
     if let Some(response) = body.take_unstarted() {
         let (_, body_rx) = wit_future::new(|| Ok(()));
         let (mut stream, _trailers) = response.consume_body(body_rx);
@@ -56,13 +63,12 @@ where
             let (result, read) = stream.read(read_buf).await;
             body_buf.extend_from_slice(&read);
 
-            match result {
-                StreamResult::Complete(size) => {
-                    if size < CHUNK_SIZE {
-                        break;
-                    }
-                }
-                _ => break,
+            let StreamResult::Complete(size) = result else {
+                tracing::debug!("body read cancelled or dropped");
+                break;
+            };
+            if size < CHUNK_SIZE {
+                break;
             }
         }
     }
