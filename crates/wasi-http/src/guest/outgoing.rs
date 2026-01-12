@@ -2,13 +2,13 @@ use std::any::Any;
 use std::error::Error;
 
 use anyhow::{Context, Result};
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use http::HeaderValue;
 use http::header::ETAG;
 use http_body::Body;
-// use http_body_util::BodyExt;
 use wasip3::http::handler;
 use wasip3::http_compat::{IncomingMessage, http_from_wasi_response, http_into_wasi_request};
+use wasip3::wit_bindgen::StreamResult;
 use wasip3::wit_future;
 
 pub use crate::guest::cache::{Cache, CacheOptions};
@@ -42,16 +42,28 @@ where
 
     // convert wasi response to http response
     let (parts, mut body) = http_resp.into_parts();
-    let (_body_tx, body_rx) = wit_future::new(|| Ok(()));
 
-    let bytes = if let Some(response) = body.take_unstarted() {
-        let (stream, _trailers) = response.consume_body(body_rx);
-        stream.collect().await.into()
-    } else {
-        Bytes::new()
-    };
+    // read body
+    let mut body_buf = BytesMut::new();
+    if let Some(response) = body.take_unstarted() {
+        let (_, body_rx) = wit_future::new(|| Ok(()));
+        let (mut stream, _trailers) = response.consume_body(body_rx);
 
-    let mut response = http::Response::from_parts(parts, bytes);
+        loop {
+            let read_buf = Vec::with_capacity(1024);
+            let (result, read) = stream.read(read_buf).await;
+            body_buf.extend_from_slice(&read);
+
+            if let StreamResult::Complete(size) = result
+                && size >= 1024
+            {
+                continue;
+            }
+            break;
+        }
+    }
+
+    let mut response = http::Response::from_parts(parts, body_buf.into());
 
     // cache response when indicated by `Cache-Control` header
     if let Some(cache) = maybe_cache {

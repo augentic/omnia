@@ -91,7 +91,7 @@ async fn cache() -> Result<impl IntoResponse, Infallible> {
 #[yetti_wasi_otel::instrument]
 async fn origin(body: Bytes) -> HttpResult<Json<Value>> {
     let request = http::Request::builder()
-        .method(Method::POST)
+        .method(Method::GET)
         .uri("https://jsonplaceholder.cypress.io/posts")
         .header(CACHE_CONTROL, "no-cache, max-age=300")
         .body(Full::new(body))

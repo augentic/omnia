@@ -73,7 +73,7 @@ impl p3::WasiHttpCtx for HttpDefault {
             let collected = body.collect().await.map_err(internal_error)?;
 
             // build reqwest::Request
-            let mut builder = reqwest::Client::builder();
+            let mut client_builder = reqwest::Client::builder();
 
             // check for client certificate in headers
             if let Some(encoded_cert) = parts.headers.remove("Client-Cert") {
@@ -81,10 +81,10 @@ impl p3::WasiHttpCtx for HttpDefault {
                 let encoded = encoded_cert.to_str().map_err(internal_error)?;
                 let bytes = Base64::decode_vec(encoded).map_err(internal_error)?;
                 let identity = reqwest::Identity::from_pem(&bytes).map_err(internal_error)?;
-                builder = builder.identity(identity);
+                client_builder = client_builder.identity(identity);
             }
 
-            let client = builder.build().map_err(reqwest_error)?;
+            let client = client_builder.build().map_err(reqwest_error)?;
             let resp = client
                 .request(parts.method, parts.uri.to_string())
                 .headers(parts.headers)
