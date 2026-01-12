@@ -7,10 +7,13 @@ mod capabilities;
 mod error;
 
 #[cfg(target_arch = "wasm32")]
-pub use guest_macro::*;
+pub use yetti_guest_macro::*;
 pub use {anyhow, axum, bytes, http, http_body, tracing};
 #[cfg(target_arch = "wasm32")]
-pub use {wasi_http, wasi_identity, wasi_keyvalue, wasi_messaging, wasi_otel, wasip3, wit_bindgen};
+pub use {
+    wasip3, wit_bindgen, yetti_wasi_http, yetti_wasi_identity, yetti_wasi_keyvalue,
+    yetti_wasi_messaging, yetti_wasi_otel,
+};
 
 pub use crate::api::*;
 pub use crate::capabilities::*;

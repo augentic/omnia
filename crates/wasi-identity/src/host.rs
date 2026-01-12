@@ -85,7 +85,7 @@ pub trait WasiIdentityCtx: Debug + Send + Sync + 'static {
 }
 
 #[macro_export]
-macro_rules! wasi_view {
+macro_rules! yetti_wasi_view {
     ($store_ctx:ty, $field_name:ident) => {
         impl yetti_wasi_identity::WasiIdentityView for $store_ctx {
             fn identity(&mut self) -> yetti_wasi_identity::WasiIdentityCtxView<'_> {

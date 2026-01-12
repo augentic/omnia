@@ -131,7 +131,7 @@ where
                     // forward request to guest
                     let (wasi_resp, task) = proxy.handle(store, request).await??;
                     let http_resp =
-                        store.with(|mut store| wasi_resp.into_http(&mut store, io_result))?;
+                        store.with(|mut store| yetti_wasi_resp.into_http(&mut store, io_result))?;
                     _ = sender.send(http_resp);
                     task.block(store).await;
 

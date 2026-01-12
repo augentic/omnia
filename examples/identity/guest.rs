@@ -18,11 +18,11 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::{Value, json};
 use tracing::Level;
-use wasi_identity::credentials::get_identity;
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
 use wit_bindgen::block_on;
 use yetti_sdk::HttpResult;
+use yetti_wasi_identity::credentials::get_identity;
 
 const SCOPE: &str = "https://management.azure.com/.default";
 
@@ -31,15 +31,15 @@ wasip3::http::proxy::export!(Http);
 
 impl Guest for Http {
     /// Routes incoming requests to the identity handler.
-    #[wasi_otel::instrument(name = "http_guest_handle", level = Level::INFO)]
+    #[yetti_wasi_otel::instrument(name = "http_guest_handle", level = Level::INFO)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new().route("/", get(handler));
-        wasi_http::serve(router, request).await
+        yetti_wasi_http::serve(router, request).await
     }
 }
 
 /// Obtains an access token from the identity provider.
-#[wasi_otel::instrument]
+#[yetti_wasi_otel::instrument]
 async fn handler() -> HttpResult<Json<Value>> {
     let identity = block_on(get_identity("identity".to_string())).context("getting identity")?;
 

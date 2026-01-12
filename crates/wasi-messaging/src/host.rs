@@ -175,7 +175,7 @@ impl From<anyhow::Error> for Error {
 }
 
 #[macro_export]
-macro_rules! wasi_view {
+macro_rules! yetti_wasi_view {
     ($store_ctx:ty, $field_name:ident) => {
         impl yetti_wasi_messaging::WasiMessagingView for $store_ctx {
             fn messaging(&mut self) -> yetti_wasi_messaging::WasiMessagingCtxView<'_> {

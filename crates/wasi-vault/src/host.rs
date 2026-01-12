@@ -84,7 +84,7 @@ pub trait WasiVaultCtx: Debug + Send + Sync + 'static {
 }
 
 #[macro_export]
-macro_rules! wasi_view {
+macro_rules! yetti_wasi_view {
     ($store_ctx:ty, $field_name:ident) => {
         impl yetti_wasi_vault::WasiVaultView for $store_ctx {
             fn vault(&mut self) -> yetti_wasi_vault::WasiVaultCtxView<'_> {

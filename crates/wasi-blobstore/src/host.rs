@@ -106,7 +106,7 @@ pub trait WasiBlobstoreCtx: Debug + Send + Sync + 'static {
 }
 
 #[macro_export]
-macro_rules! wasi_view {
+macro_rules! yetti_wasi_view {
     ($store_ctx:ty, $field_name:ident) => {
         impl yetti_wasi_blobstore::WasiBlobstoreView for $store_ctx {
             fn blobstore(&mut self) -> yetti_wasi_blobstore::WasiBlobstoreCtxView<'_> {
@@ -129,7 +129,7 @@ macro_rules! wasi_view {
 // }
 
 // #[macro_export]
-// macro_rules! wasi_view {
+// macro_rules! yetti_wasi_view {
 //     ($store_ctx:ty, $field_name:ident) => {
 //         impl View<WasiBlobstore, $store_ctx> for $store_ctx {
 //             fn data(&mut self) -> <WasiBlobstore as HasData>::Data<'_> {

@@ -24,7 +24,7 @@ pub trait Config: Send + Sync {
     #[cfg(target_arch = "wasm32")]
     fn get(&self, key: &str) -> impl Future<Output = Result<String>> + Send {
         async move {
-            let config = wasi_config::store::get(key).context("getting configuration")?;
+            let config = yetti_wasi_config::store::get(key).context("getting configuration")?;
             config.ok_or_else(|| anyhow!("configuration not found"))
         }
     }
@@ -48,7 +48,7 @@ pub trait HttpRequest: Send + Sync {
         T::Data: Into<Vec<u8>>,
         T::Error: Into<Box<dyn Error + Send + Sync + 'static>>,
     {
-        async move { wasi_http::handle(request).await }
+        async move { yetti_wasi_http::handle(request).await }
     }
 }
 
@@ -78,8 +78,8 @@ pub trait Publisher: Send + Sync {
     /// Publish (send) a message to a topic.
     #[cfg(target_arch = "wasm32")]
     fn send(&self, topic: &str, message: &Message) -> impl Future<Output = Result<()>> + Send {
-        use wasi_messaging::producer;
-        use wasi_messaging::types::{self as wasi, Client};
+        use yetti_wasi_messaging::producer;
+        use yetti_wasi_messaging::types::{self as wasi, Client};
 
         async move {
             let client =
@@ -111,7 +111,7 @@ pub trait StateStore: Send + Sync {
     #[cfg(target_arch = "wasm32")]
     fn get(&self, key: &str) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
         async move {
-            let bucket = wasi_keyvalue::cache::open("cache").await.context("opening cache")?;
+            let bucket = yetti_wasi_keyvalue::cache::open("cache").await.context("opening cache")?;
             bucket.get(key).await.context("reading state from cache")
         }
     }
@@ -122,7 +122,7 @@ pub trait StateStore: Send + Sync {
         &self, key: &str, value: &[u8], ttl_secs: Option<u64>,
     ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
         async move {
-            let bucket = wasi_keyvalue::cache::open("cache").await.context("opening cache")?;
+            let bucket = yetti_wasi_keyvalue::cache::open("cache").await.context("opening cache")?;
             bucket.set(key, value, ttl_secs).await.context("reading state from cache")
         }
     }
@@ -131,7 +131,7 @@ pub trait StateStore: Send + Sync {
     #[cfg(target_arch = "wasm32")]
     fn delete(&self, key: &str) -> impl Future<Output = Result<()>> + Send {
         async move {
-            let bucket = wasi_keyvalue::cache::open("cache").await.context("opening cache")?;
+            let bucket = yetti_wasi_keyvalue::cache::open("cache").await.context("opening cache")?;
             bucket.delete(key).await.context("deleting entry from cache")
         }
     }
@@ -146,7 +146,7 @@ pub trait Identity: Send + Sync {
     /// Get an access token for the specified identity.
     #[cfg(target_arch = "wasm32")]
     fn access_token(&self, identity: String) -> impl Future<Output = Result<String>> + Send {
-        use wasi_identity::credentials::get_identity;
+        use yetti_wasi_identity::credentials::get_identity;
 
         async move {
             let identity = wit_bindgen::block_on(get_identity(identity))?;

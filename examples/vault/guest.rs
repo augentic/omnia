@@ -29,25 +29,25 @@ use axum::{Json, Router};
 use bytes::Bytes;
 use serde_json::Value;
 use tracing::Level;
-use wasi_vault::vault;
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
 use yetti_sdk::HttpResult;
+use yetti_wasi_vault::vault;
 
 struct Http;
 wasip3::http::proxy::export!(Http);
 
 impl Guest for Http {
     /// Routes incoming requests to the vault handler.
-    #[wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
+    #[yetti_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new().route("/", post(handler));
-        wasi_http::serve(router, request).await
+        yetti_wasi_http::serve(router, request).await
     }
 }
 
 /// Stores and retrieves a secret from the vault.
-#[wasi_otel::instrument]
+#[yetti_wasi_otel::instrument]
 async fn handler(body: Bytes) -> HttpResult<Json<Value>> {
     let locker =
         vault::open("credibil-locker".to_string()).await.context("failed to open vault locker")?;

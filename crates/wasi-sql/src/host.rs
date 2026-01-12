@@ -90,7 +90,7 @@ pub trait WasiSqlCtx: Debug + Send + Sync + 'static {
 }
 
 #[macro_export]
-macro_rules! wasi_view {
+macro_rules! yetti_wasi_view {
     ($store_ctx:ty, $field_name:ident) => {
         impl yetti_wasi_sql::WasiSqlView for $store_ctx {
             fn sql(&mut self) -> yetti_wasi_sql::WasiSqlCtxView<'_> {

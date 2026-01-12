@@ -38,7 +38,7 @@ wasip3::http::proxy::export!(Http);
 
 impl Guest for Http {
     /// Routes requests and demonstrates telemetry patterns.
-    #[wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
+    #[yetti_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         // tracing-based metrics
         tracing::info!(monotonic_counter.tracing_counter = 1, key1 = "value 1");
@@ -79,7 +79,7 @@ impl Guest for Http {
                     .route("/", post(handler))
                     .route("/", options(handle_options));
 
-                wasi_http::serve(router, request)
+                yetti_wasi_http::serve(router, request)
             })
             .await
     }
@@ -87,7 +87,7 @@ impl Guest for Http {
 
 /// Simple JSON echo handler.
 #[axum::debug_handler]
-#[wasi_otel::instrument]
+#[yetti_wasi_otel::instrument]
 async fn handler(Json(body): Json<Value>) -> HttpResult<Json<Value>> {
     tracing::info!("handling request: {:?}", body);
     Ok(Json(json!({

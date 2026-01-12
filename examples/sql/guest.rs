@@ -32,28 +32,28 @@ use axum::{Json, Router};
 use bytes::Bytes;
 use serde_json::{Value, json};
 use tracing::Level;
-use wasi_sql::types::{Connection, DataType, FormattedValue, Statement};
-use wasi_sql::{into_json, readwrite};
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
 use yetti_sdk::HttpResult;
+use yetti_wasi_sql::types::{Connection, DataType, FormattedValue, Statement};
+use yetti_wasi_sql::{into_json, readwrite};
 
 struct Http;
 wasip3::http::proxy::export!(Http);
 
 impl Guest for Http {
     /// Routes HTTP requests to database operations.
-    #[wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
+    #[yetti_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         tracing::debug!("received request: {:?}", request);
         let router = Router::new().route("/", get(query)).route("/", post(insert));
-        wasi_http::serve(router, request).await
+        yetti_wasi_http::serve(router, request).await
     }
 }
 
 /// Queries all rows from the sample table.
 #[axum::debug_handler]
-#[wasi_otel::instrument]
+#[yetti_wasi_otel::instrument]
 async fn query() -> HttpResult<Json<Value>> {
     tracing::info!("query database");
 
@@ -72,7 +72,7 @@ async fn query() -> HttpResult<Json<Value>> {
 
 /// Inserts a new row into the sample table.
 #[axum::debug_handler]
-#[wasi_otel::instrument]
+#[yetti_wasi_otel::instrument]
 async fn insert(_body: Bytes) -> HttpResult<Json<Value>> {
     tracing::info!("insert data");
 

@@ -28,7 +28,7 @@ mod generated {
 }
 
 /// Re-exported `instrument` macro for use in guest code.
-pub use wasi_otel_attr::instrument;
+pub use yetti_wasi_otel_attr::instrument;
 
 use self::init::ExitGuard;
 use crate::guest::init::INIT;

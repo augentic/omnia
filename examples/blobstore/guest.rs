@@ -32,15 +32,15 @@ wasip3::http::proxy::export!(Http);
 
 impl Guest for Http {
     /// Routes incoming HTTP requests to the blob storage handler.
-    #[wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
+    #[yetti_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new().route("/", post(handler));
-        wasi_http::serve(router, request).await
+        yetti_wasi_http::serve(router, request).await
     }
 }
 
 /// Stores and retrieves data from the blobstore.
-#[wasi_otel::instrument]
+#[yetti_wasi_otel::instrument]
 async fn handler(body: Bytes) -> HttpResult<Json<Value>> {
     // create an outgoing value to hold the data we want to store
     let outgoing = OutgoingValue::new_outgoing_value();

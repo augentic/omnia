@@ -20,7 +20,7 @@ use axum::{Json, Router};
 use bytes::Bytes;
 use serde_json::{Value, json};
 use tracing::Level;
-use wasi_keyvalue::store;
+use yetti_wasi_keyvalue::store;
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
 use yetti_sdk::HttpResult;
@@ -30,15 +30,15 @@ wasip3::http::proxy::export!(Http);
 
 impl Guest for Http {
     /// Routes incoming HTTP requests to the key-value handler.
-    #[wasi_otel::instrument(name = "http_guest_handle", level = Level::INFO)]
+    #[yetti_wasi_otel::instrument(name = "http_guest_handle", level = Level::INFO)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new().route("/", post(handler));
-        wasi_http::serve(router, request).await
+        yetti_wasi_http::serve(router, request).await
     }
 }
 
 /// Stores and retrieves data from the key-value store.
-#[wasi_otel::instrument]
+#[yetti_wasi_otel::instrument]
 async fn handler(body: Bytes) -> HttpResult<Json<Value>> {
     let bucket = store::open("credibil_bucket".to_string()).await.context("opening bucket")?;
 

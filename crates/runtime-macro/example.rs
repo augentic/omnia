@@ -1,5 +1,5 @@
-use wasi_blobstore::{BlobstoreDefault, WasiBlobstore};
-use wasi_http::{HttpDefault, WasiHttp};
+use yetti_wasi_blobstore::{BlobstoreDefault, WasiBlobstore};
+use yetti_wasi_http::{HttpDefault, WasiHttp};
 
 warp::runtime!({
     main: true,

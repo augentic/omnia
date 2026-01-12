@@ -93,7 +93,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
 
                     StoreCtx {
                         table: ResourceTable::new(),
-                        wasi: wasi_ctx,
+                        wasi: yetti_wasi_ctx,
                         #(#store_ctx_values,)*
                     }
                 }
@@ -163,7 +163,7 @@ impl TryFrom<&Config> for Generated {
 
         for host in &input.hosts {
             let host_type = &host.type_;
-            let host_ident = wasi_ident(host_type);
+            let host_ident = yetti_wasi_ident(host_type);
             let backend_type = &host.backend;
             let backend_ident = field_ident(backend_type);
 
@@ -176,9 +176,9 @@ impl TryFrom<&Config> for Generated {
 
             // WASI view impls
             // HACK: derive module name from WASI type
-            let module = wasi_ident(host_type);
+            let module = yetti_wasi_ident(host_type);
             wasi_view_impls.push(quote! {
-                #module::wasi_view!(StoreCtx, #host_ident);
+                #module::yetti_wasi_view!(StoreCtx, #host_ident);
             });
         }
 
@@ -235,7 +235,7 @@ fn field_ident(path: &Path) -> Ident {
     format_ident!("{field_str}")
 }
 
-fn wasi_ident(path: &Path) -> Ident {
+fn yetti_wasi_ident(path: &Path) -> Ident {
     let Some(ident) = path.segments.last() else {
         return format_ident!("wasi");
     };

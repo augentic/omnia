@@ -10,9 +10,9 @@ use syn::parse_macro_input;
 ///
 /// ```ignore
 /// yetti::runtime!({
-///     wasi_http: WasiHttp,
-///     wasi_otel: DefaultOtel,
-///     wasi_blobstore: MongoDb,
+///     yetti_wasi_http: WasiHttp,
+///     yetti_wasi_otel: DefaultOtel,
+///     yetti_wasi_blobstore: MongoDb,
 /// });
 /// ```
 #[proc_macro]
