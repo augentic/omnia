@@ -1,23 +1,26 @@
-## 0.23.0
+## 0.24.0
 
 Unreleased
 
 ### Added
 
+Added default implementations to guest capability traits. This means, in the most cases, guests
+can be used without needing to implement the capability traits.
+
 ### Changed
+
+Renamed this repo `qwasr` in anticipation of publishing to crates.io. All crates have been prefixed
+with `qwasr-` to match the new name.
+
+A number of bugs were fixed in the guest code, including:
+
+- outgoing HTTP requests where the response body was not being read correctly
+- resolved an issue with the `#[wasi_otel::instrument]` macro where guest traces and metrics were 
+  not being exported.
 
 <!-- Release notes generated using configuration in .github/release.yaml at main -->
 
-## What's Changed
-* Bump to 0.22.0 by @github-actions[bot] in https://github.com/augentic/qwasr/pull/150
-* Default Guest Capabilities by @andrewweston in https://github.com/augentic/qwasr/pull/151
-* Bump to 0.23.0 by @github-actions[bot] in https://github.com/augentic/qwasr/pull/152
-* fix publish of warp-otel by @andrewweston in https://github.com/augentic/qwasr/pull/153
-* Yetti crate rename by @andrewweston in https://github.com/augentic/qwasr/pull/154
-* Guest bug fixes by @andrewweston in https://github.com/augentic/qwasr/pull/155
-
-
-**Full Changelog**: https://github.com/augentic/qwasr/compare/v0.22.1...v0.24.0
+**Full Changelog**: <https://github.com/augentic/qwasr/compare/v0.22.1...v0.24.0>
 
 ---
 
