@@ -13,7 +13,7 @@ use wasip3::wit_future;
 
 pub use crate::guest::cache::{Cache, CacheOptions};
 
-const CHUNK_SIZE: usize = 1024;
+const CHUNK_SIZE: usize = 2048;
 
 /// Send an HTTP request using the WASI HTTP proxy handler.
 ///
@@ -59,17 +59,14 @@ where
         let (mut stream, _trailers) = response.consume_body(body_rx);
 
         loop {
-            let read_buf = Vec::with_capacity(1024);
+            let read_buf = Vec::with_capacity(CHUNK_SIZE);
             let (result, read) = stream.read(read_buf).await;
             body_buf.extend_from_slice(&read);
 
-            let StreamResult::Complete(size) = result else {
+            let StreamResult::Complete(_) = result else {
                 tracing::debug!("body read cancelled or dropped");
                 break;
             };
-            if size < CHUNK_SIZE {
-                break;
-            }
         }
     }
 

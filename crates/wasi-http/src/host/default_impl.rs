@@ -84,6 +84,10 @@ impl p3::WasiHttpCtx for HttpDefault {
                 client_builder = client_builder.identity(identity);
             }
 
+            // remove Host header (it is added by reqwest automatically)
+            parts.headers.remove("Host");
+
+            // make request
             let client = client_builder.build().map_err(reqwest_error)?;
             let resp = client
                 .request(parts.method, parts.uri.to_string())
@@ -93,12 +97,13 @@ impl p3::WasiHttpCtx for HttpDefault {
                 .await
                 .map_err(reqwest_error)?;
 
+            // process response
             let converted: Response<reqwest::Body> = resp.into();
             let (parts, body) = converted.into_parts();
             let body = body.map_err(reqwest_error).boxed_unsync();
             let mut response = Response::from_parts(parts, body);
 
-            // filter headers disallowed by `wasmtime-wasi-http`
+            // remove forbidden headers (disallowed by `wasmtime-wasi-http`)
             let headers = response.headers_mut();
             for header in &FORBIDDEN_HEADERS {
                 headers.remove(header);

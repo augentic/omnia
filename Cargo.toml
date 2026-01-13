@@ -92,7 +92,7 @@ wasmtime-wasi = { version = "40.0.1", features = ["p3"] }
 wasmtime-wasi-config = "40.0.1"
 wasmtime-wasi-http = { version = "40.0.1", features = ["p3"] }
 wasmtime-wasi-io = "40.0.1"
-wit-bindgen = { version = "0.50.0", features = ["async-spawn"] }
+wit-bindgen = { version = "0.51.0", features = ["async-spawn"] }
 
 # interally referenced crates
 qwasr = { path = "crates/qwasr", version = "0.25.0", registry = "credibil" }
