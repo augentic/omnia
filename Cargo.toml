@@ -11,7 +11,7 @@ keywords = ["runtime", "wasi", "wasm"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/augentic/qwasr"
 rust-version = "1.92"
-version = "0.25.0"
+version = "0.26.0"
 
 [workspace.lints.rust]
 # https://dirname.github.io/rust-std-doc/rustc/lints/listing/allowed-by-default.html
@@ -95,22 +95,22 @@ wasmtime-wasi-io = "40.0.1"
 wit-bindgen = { version = "0.51.0", features = ["async-spawn"] }
 
 # interally referenced crates
-qwasr = { path = "crates/qwasr", version = "0.25.0", registry = "credibil" }
-qwasr-guest-macro = { path = "crates/guest-macro", version = "0.25.0", registry = "credibil" }
-qwasr-otel = { path = "crates/otel", version = "0.25.0", registry = "credibil" }
-qwasr-runtime-macro = { path = "crates/runtime-macro", version = "0.25.0", registry = "credibil" }
-qwasr-sdk = { path = "crates/qwasr-sdk", version = "0.25.0", registry = "credibil" }
-qwasr-wasi-blobstore = { path = "crates/wasi-blobstore", version = "0.25.0", registry = "credibil" }
-qwasr-wasi-config = { path = "crates/wasi-config", version = "0.25.0", registry = "credibil" }
-qwasr-wasi-http = { path = "crates/wasi-http", version = "0.25.0", registry = "credibil" }
-qwasr-wasi-identity = { path = "crates/wasi-identity", version = "0.25.0", registry = "credibil" }
-qwasr-wasi-keyvalue = { path = "crates/wasi-keyvalue", version = "0.25.0", registry = "credibil" }
-qwasr-wasi-messaging = { path = "crates/wasi-messaging", version = "0.25.0", registry = "credibil" }
-qwasr-wasi-otel = { path = "crates/wasi-otel", version = "0.25.0", registry = "credibil" }
-qwasr-wasi-otel-attr = { path = "crates/wasi-otel-attr", version = "0.25.0", registry = "credibil" }
-qwasr-wasi-sql = { path = "crates/wasi-sql", version = "0.25.0", registry = "credibil" }
-qwasr-wasi-vault = { path = "crates/wasi-vault", version = "0.25.0", registry = "credibil" }
-qwasr-wasi-websockets = { path = "crates/wasi-websockets", version = "0.25.0", registry = "credibil" }
+qwasr = { path = "crates/qwasr", version = "0.26.0", registry = "credibil" }
+qwasr-guest-macro = { path = "crates/guest-macro", version = "0.26.0", registry = "credibil" }
+qwasr-otel = { path = "crates/otel", version = "0.26.0", registry = "credibil" }
+qwasr-runtime-macro = { path = "crates/runtime-macro", version = "0.26.0", registry = "credibil" }
+qwasr-sdk = { path = "crates/qwasr-sdk", version = "0.26.0", registry = "credibil" }
+qwasr-wasi-blobstore = { path = "crates/wasi-blobstore", version = "0.26.0", registry = "credibil" }
+qwasr-wasi-config = { path = "crates/wasi-config", version = "0.26.0", registry = "credibil" }
+qwasr-wasi-http = { path = "crates/wasi-http", version = "0.26.0", registry = "credibil" }
+qwasr-wasi-identity = { path = "crates/wasi-identity", version = "0.26.0", registry = "credibil" }
+qwasr-wasi-keyvalue = { path = "crates/wasi-keyvalue", version = "0.26.0", registry = "credibil" }
+qwasr-wasi-messaging = { path = "crates/wasi-messaging", version = "0.26.0", registry = "credibil" }
+qwasr-wasi-otel = { path = "crates/wasi-otel", version = "0.26.0", registry = "credibil" }
+qwasr-wasi-otel-attr = { path = "crates/wasi-otel-attr", version = "0.26.0", registry = "credibil" }
+qwasr-wasi-sql = { path = "crates/wasi-sql", version = "0.26.0", registry = "credibil" }
+qwasr-wasi-vault = { path = "crates/wasi-vault", version = "0.26.0", registry = "credibil" }
+qwasr-wasi-websockets = { path = "crates/wasi-websockets", version = "0.26.0", registry = "credibil" }
 
 [patch.crates-io]
 # wasmtime = { git = "https://github.com/bytecodealliance/wasmtime", branch = "release-40.0.1" }

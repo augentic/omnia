@@ -819,7 +819,7 @@ dependencies = [
 
 [[package]]
 name = "examples"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2094,7 +2094,7 @@ dependencies = [
 
 [[package]]
 name = "qwasr"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2110,7 +2110,7 @@ dependencies = [
 
 [[package]]
 name = "qwasr-guest-macro"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2119,7 +2119,7 @@ dependencies = [
 
 [[package]]
 name = "qwasr-otel"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "http",
@@ -2135,7 +2135,7 @@ dependencies = [
 
 [[package]]
 name = "qwasr-runtime-macro"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2144,7 +2144,7 @@ dependencies = [
 
 [[package]]
 name = "qwasr-sdk"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2169,7 +2169,7 @@ dependencies = [
 
 [[package]]
 name = "qwasr-wasi-blobstore"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2185,7 +2185,7 @@ dependencies = [
 
 [[package]]
 name = "qwasr-wasi-config"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "qwasr",
@@ -2197,7 +2197,7 @@ dependencies = [
 
 [[package]]
 name = "qwasr-wasi-http"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2227,7 +2227,7 @@ dependencies = [
 
 [[package]]
 name = "qwasr-wasi-identity"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "fromenv",
@@ -2244,7 +2244,7 @@ dependencies = [
 
 [[package]]
 name = "qwasr-wasi-keyvalue"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2262,7 +2262,7 @@ dependencies = [
 
 [[package]]
 name = "qwasr-wasi-messaging"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -2280,7 +2280,7 @@ dependencies = [
 
 [[package]]
 name = "qwasr-wasi-otel"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "cfg-if",
@@ -2303,7 +2303,7 @@ dependencies = [
 
 [[package]]
 name = "qwasr-wasi-otel-attr"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2312,7 +2312,7 @@ dependencies = [
 
 [[package]]
 name = "qwasr-wasi-sql"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "base64ct",
@@ -2331,7 +2331,7 @@ dependencies = [
 
 [[package]]
 name = "qwasr-wasi-vault"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -2346,7 +2346,7 @@ dependencies = [
 
 [[package]]
 name = "qwasr-wasi-websockets"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -2400,7 +2400,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6db2770f06117d490610c7488547d543617b21bfa07796d7a12f6f1bd53850d1"
 dependencies = [
  "rand_chacha 0.9.0",
- "rand_core 0.9.4",
+ "rand_core 0.9.5",
 ]
 
 [[package]]
@@ -2420,7 +2420,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
 dependencies = [
  "ppv-lite86",
- "rand_core 0.9.4",
+ "rand_core 0.9.5",
 ]
 
 [[package]]
@@ -2434,9 +2434,9 @@ dependencies = [
 
 [[package]]
 name = "rand_core"
-version = "0.9.4"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f1b3bc831f92381018fd9c6350b917c7b21f1eed35a65a51900e0e55a3d7afa"
+checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
 dependencies = [
  "getrandom 0.3.4",
 ]
@@ -2447,7 +2447,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "513962919efc330f829edb2535844d1b912b0fbe2ca165d613e4e8788bb05a5a"
 dependencies = [
- "rand_core 0.9.4",
+ "rand_core 0.9.5",
 ]
 
 [[package]]
@@ -2613,9 +2613,9 @@ dependencies = [
 
 [[package]]
 name = "rkyv"
-version = "0.8.13"
+version = "0.8.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b2e88acca7157d83d789836a3987dafc12bc3d88a050e54b8fe9ea4aaa29d20"
+checksum = "360b333c61ae24e5af3ae7c8660bd6b21ccd8200dbbc5d33c2454421e85b9c69"
 dependencies = [
  "bytecheck",
  "bytes",
@@ -2632,9 +2632,9 @@ dependencies = [
 
 [[package]]
 name = "rkyv_derive"
-version = "0.8.13"
+version = "0.8.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f6dffea3c91fa91a3c0fc8a061b0e27fef25c6304728038a6d6bcb1c58ba9bd"
+checksum = "7c02f8cdd12b307ab69fe0acf4cd2249c7460eb89dce64a0febadf934ebb6a9e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3167,22 +3167,22 @@ dependencies = [
 
 [[package]]
 name = "time"
-version = "0.3.44"
+version = "0.3.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91e7d9e3bb61134e77bde20dd4825b97c010155709965fedf0f49bb138e52a9d"
+checksum = "f9e442fc33d7fdb45aa9bfeb312c095964abdf596f7567261062b2a7107aaabd"
 dependencies = [
  "deranged",
  "num-conv",
  "powerfmt",
- "serde",
+ "serde_core",
  "time-core",
 ]
 
 [[package]]
 name = "time-core"
-version = "0.1.6"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40868e7c1d2f0b8d73e4a8c7f0ff63af4f6d19be117e90bd73eb1d62cf831c6b"
+checksum = "8b36ee98fd31ec7426d599183e8fe26932a8dc1fb76ddb6214d05493377d34ca"
 
 [[package]]
 name = "tinystr"
@@ -4847,6 +4847,6 @@ dependencies = [
 
 [[package]]
 name = "zmij"
-version = "1.0.13"
+version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac93432f5b761b22864c774aac244fa5c0fd877678a4c37ebf6cf42208f9c9ec"
+checksum = "bd8f3f50b848df28f887acb68e41201b5aea6bc8a8dacc00fb40635ff9a72fea"
