@@ -12,6 +12,7 @@ Release notes for previous releases can be found on the respective release
 branches of the repository.
 
 <!-- ARCHIVE_START -->
+* [0.25.x](https://github.com/augentic/qwasr/blob/release-0.25.0/RELEASES.md)
 * [0.23.x](https://github.com/augentic/qwasr/blob/release-0.23.0/RELEASES.md)
 * [0.22.x](https://github.com/augentic/qwasr/blob/release-0.22.0/RELEASES.md)
 * [0.21.x](https://github.com/augentic/qwasr/blob/release-0.21.0/RELEASES.md)
