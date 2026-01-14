@@ -4,7 +4,7 @@
 
 // Bindings for the `wasi:vault` world.
 // See (<https://github.com/augentic/wasi-vault/>)
-mod generated{
+mod generated {
     #![allow(missing_docs)]
     wit_bindgen::generate!({
         world: "vault",
