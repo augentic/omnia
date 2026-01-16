@@ -11,6 +11,7 @@ use qwasr::{Host, Server, State};
 use wasmtime::component::Linker;
 pub use wasmtime_wasi_http::p3::{WasiHttpCtxView, WasiHttpView};
 
+/// Host-side service for `wasi:http`.
 #[derive(Debug)]
 pub struct WasiHttp;
 
@@ -33,6 +34,7 @@ where
     }
 }
 
+/// Implementation of the `WasiHttpView` trait for the store context.
 #[macro_export]
 macro_rules! qwasr_wasi_view {
     ($store_ctx:ty, $field_name:ident) => {

@@ -16,6 +16,7 @@ use crate::host::WasiBlobstoreCtx;
 use crate::host::generated::wasi::blobstore::container::{ContainerMetadata, ObjectMetadata};
 use crate::host::resource::{Container, FutureResult};
 
+/// Options used to connect to the blobstore.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions;
 
@@ -25,6 +26,7 @@ impl qwasr::FromEnv for ConnectOptions {
     }
 }
 
+/// Default implementation for `wasi:blobstore`.
 #[derive(Debug, Clone)]
 pub struct BlobstoreDefault {
     store: Arc<RwLock<HashMap<String, InMemContainer>>>,

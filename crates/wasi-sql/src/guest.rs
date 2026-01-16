@@ -4,17 +4,21 @@
 
 // Bindings for the `wasi:sql` world.
 // See (<https://github.com/augentic/wasi-sql/>)
-wit_bindgen::generate!({
-    world: "sql",
-    path: "wit",
-    generate_all,
-});
+mod generated {
+    #![allow(missing_docs)]
+
+    wit_bindgen::generate!({
+        world: "sql",
+        path: "wit",
+        generate_all,
+    });
+}
 
 use anyhow::Result;
 use base64ct::{Base64, Encoding};
 use serde_json::Value;
 
-pub use self::wasi::sql::*;
+pub use self::generated::wasi::sql::*;
 use crate::types::{DataType, Row};
 
 /// Helper function to create JSON output from rows returned by a query.

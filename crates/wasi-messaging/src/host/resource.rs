@@ -10,19 +10,25 @@ pub use qwasr::FutureResult;
 use serde::{Deserialize, Serialize};
 
 use crate::host::generated::wasi::messaging::types;
+/// Stream of message proxies.
 pub type Subscriptions = Pin<Box<dyn Stream<Item = MessageProxy> + Send>>;
 
+/// Messaging client trait.
 #[allow(unused_variables)]
 pub trait Client: Debug + Send + Sync + 'static {
+    /// Subscribe to messages.
     fn subscribe(&self) -> FutureResult<Subscriptions>;
 
+    /// Send a message to a topic.
     fn send(&self, topic: String, message: MessageProxy) -> FutureResult<()>;
 
+    /// Request a response from a topic.
     fn request(
         &self, topic: String, message: MessageProxy, options: Option<RequestOptions>,
     ) -> FutureResult<MessageProxy>;
 }
 
+/// Proxy for a messaging client.
 #[derive(Clone, Debug)]
 pub struct ClientProxy(pub Arc<dyn Client>);
 
@@ -59,6 +65,7 @@ pub trait Message: Debug + Send + Sync + 'static {
     fn as_any(&self) -> &dyn Any;
 }
 
+/// Proxy for a message.
 #[derive(Clone, Debug)]
 pub struct MessageProxy(pub Arc<dyn Message>);
 
@@ -76,12 +83,15 @@ impl DerefMut for MessageProxy {
     }
 }
 
+/// Metadata associated with a message.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Metadata {
+    /// The metadata fields.
     pub inner: HashMap<String, String>,
 }
 
 impl Metadata {
+    /// Create a new empty metadata object.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -124,14 +134,20 @@ impl From<types::Metadata> for Metadata {
     }
 }
 
+/// Reply information for a message.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Reply {
+    /// The client name.
     pub client_name: String,
+    /// The reply topic.
     pub topic: String,
 }
 
+/// Options for messaging requests.
 #[derive(Default, Clone)]
 pub struct RequestOptions {
+    /// Request timeout.
     pub timeout: Option<std::time::Duration>,
+    /// Number of expected replies.
     pub expected_replies: Option<u32>,
 }

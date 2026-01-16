@@ -55,11 +55,14 @@ pub trait HttpRequest: Send + Sync {
 /// Message represents a message to be published.
 #[derive(Clone, Debug)]
 pub struct Message {
+    /// The message payload.
     pub payload: Vec<u8>,
+    /// The message headers.
     pub headers: HashMap<String, String>,
 }
 
 impl Message {
+    /// Create a new message with the specified payload.
     #[must_use]
     pub fn new(payload: &[u8]) -> Self {
         Self {

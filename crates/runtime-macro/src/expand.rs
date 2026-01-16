@@ -2,16 +2,15 @@
 //!
 //! Expands the parsed runtime configuration into a complete runtime implementation.
 
-use std::collections::HashSet;
-
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Ident, Path};
 
 use crate::runtime::Config;
 
+// Generate the runtime from the configuration.
 pub fn expand(config: &Config) -> syn::Result<TokenStream> {
-    let Generated {
+    let Expanded {
         context_fields,
         store_ctx_fields,
         store_ctx_values,
@@ -19,7 +18,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
         server_trait_impls,
         wasi_view_impls,
         main_fn,
-    } = Generated::try_from(config)?;
+    } = Expanded::try_from(config)?;
 
     Ok(quote! {
         mod runtime {
@@ -125,7 +124,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
     })
 }
 
-struct Generated {
+struct Expanded {
     context_fields: Vec<TokenStream>,
     store_ctx_fields: Vec<TokenStream>,
     store_ctx_values: Vec<TokenStream>,
@@ -135,21 +134,21 @@ struct Generated {
     main_fn: TokenStream,
 }
 
-impl TryFrom<&Config> for Generated {
+impl TryFrom<&Config> for Expanded {
     type Error = syn::Error;
 
     fn try_from(input: &Config) -> Result<Self, Self::Error> {
         // `Context` struct
         let mut context_fields = Vec::new();
-        let mut seen_backends = HashSet::new();
+        let mut seen_backends = Vec::new();
 
         for backend in &input.backends {
-            // Deduplicate backends based on their string representation
+            // deduplicate backends based on their string representation
             let backend_str = quote! {#backend}.to_string();
             if seen_backends.contains(&backend_str) {
                 continue;
             }
-            seen_backends.insert(backend_str);
+            seen_backends.push(backend_str);
 
             let field = field_ident(backend);
             context_fields.push(quote! {#field: #backend});
@@ -163,7 +162,7 @@ impl TryFrom<&Config> for Generated {
 
         for host in &input.hosts {
             let host_type = &host.type_;
-            let host_ident = qwasr_wasi_ident(host_type);
+            let host_ident = wasi_ident(host_type);
             let backend_type = &host.backend;
             let backend_ident = field_ident(backend_type);
 
@@ -176,7 +175,7 @@ impl TryFrom<&Config> for Generated {
 
             // WASI view impls
             // HACK: derive module name from WASI type
-            let module = qwasr_wasi_ident(host_type);
+            let module = wasi_ident(host_type);
             wasi_view_impls.push(quote! {
                 #module::qwasr_wasi_view!(StoreCtx, #host_ident);
             });
@@ -235,7 +234,7 @@ fn field_ident(path: &Path) -> Ident {
     format_ident!("{field_str}")
 }
 
-fn qwasr_wasi_ident(path: &Path) -> Ident {
+fn wasi_ident(path: &Path) -> Ident {
     let Some(ident) = path.segments.last() else {
         return format_ident!("wasi");
     };

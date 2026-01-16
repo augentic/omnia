@@ -1,3 +1,5 @@
+//! Config example runtime.
+
 cfg_if::cfg_if! {
     if #[cfg(not(target_arch = "wasm32"))] {
         use qwasr_wasi_config::{WasiConfig, ConfigDefault};

@@ -8,7 +8,7 @@ mod resource;
 mod types_impl;
 
 mod generated {
-    #![allow(clippy::trait_duplication_in_bounds)]
+    #![allow(missing_docs)]
 
     pub use anyhow::Error;
 
@@ -44,6 +44,7 @@ pub use crate::host::default_impl::SqlDefault;
 pub use crate::host::generated::wasi::sql::types::{DataType, Field, FormattedValue, Row};
 pub use crate::host::resource::*;
 
+/// Host-side service for `wasi:sql`.
 #[derive(Debug)]
 pub struct WasiSql;
 
@@ -86,9 +87,11 @@ pub struct WasiSqlCtxView<'a> {
 /// This is implemented by the resource-specific provider of SQL
 /// functionality. For example, `PostgreSQL`, `MySQL`, `SQLite`, etc.
 pub trait WasiSqlCtx: Debug + Send + Sync + 'static {
+    /// Open a connection to the database.
     fn open(&self, name: String) -> FutureResult<Arc<dyn Connection>>;
 }
 
+/// Implementation of the `WasiSqlView` trait for the store context.
 #[macro_export]
 macro_rules! qwasr_wasi_view {
     ($store_ctx:ty, $field_name:ident) => {

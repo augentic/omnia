@@ -9,6 +9,7 @@ use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 pub const CACHE_BUCKET: &str = "default-cache";
 
+/// A cache instance for storing and retrieving responses.
 #[derive(Debug, Default)]
 pub struct Cache {
     control: Control,

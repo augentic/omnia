@@ -6,6 +6,7 @@
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_possible_wrap)]
 #![allow(clippy::cast_lossless)]
+#![allow(missing_docs)]
 
 use std::sync::Arc;
 
@@ -20,18 +21,24 @@ use tracing::instrument;
 use crate::host::resource::{Connection, FutureResult};
 use crate::host::{DataType, Field, Row, WasiSqlCtx};
 
+/// Options used to connect to the SQL database.
+///
+/// This struct is used to load connection options from environment variables.
 #[derive(Debug, Clone, FromEnv)]
 pub struct ConnectOptions {
+    /// The database path or connection string.
     #[env(from = "SQL_DATABASE", default = ":memory:")]
     pub database: String,
 }
 
+#[allow(missing_docs)]
 impl qwasr::FromEnv for ConnectOptions {
     fn from_env() -> Result<Self> {
         Self::from_env().finalize().context("issue loading connection options")
     }
 }
 
+/// Default implementation for `wasi:sql`.
 #[derive(Debug, Clone)]
 pub struct SqlDefault {
     // Store the database path to create new connections on demand

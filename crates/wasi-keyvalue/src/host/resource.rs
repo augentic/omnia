@@ -26,6 +26,7 @@ pub trait Bucket: Debug + Send + Sync + 'static {
     fn keys(&self) -> FutureResult<Vec<String>>;
 }
 
+/// Proxy for a Key-Value bucket.
 #[derive(Clone, Debug)]
 pub struct BucketProxy(pub Arc<dyn Bucket>);
 

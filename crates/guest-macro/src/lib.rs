@@ -1,3 +1,5 @@
+//! Procedural macros for the qwasr guest.
+
 mod guest;
 mod http;
 mod messaging;

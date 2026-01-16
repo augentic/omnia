@@ -5,6 +5,7 @@ use http::{HeaderValue, StatusCode};
 use crate::api::Body;
 use crate::api::reply::Reply;
 
+/// Result type for HTTP requests.
 #[allow(type_alias_bounds)]
 pub type HttpResult<T: IntoResponse, E: IntoResponse = HttpError> = Result<T, E>;
 
@@ -43,6 +44,7 @@ where
     }
 }
 
+/// Error type for HTTP requests.
 pub struct HttpError {
     status: StatusCode,
     error: String,

@@ -5,5 +5,5 @@ on:
 
 jobs:
   release:
-    uses: augentic/pipeline/.github/workflows/release.yaml@main
+    uses: augentic/.github/.github/workflows/release.yaml@main
     secrets: inherit

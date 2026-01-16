@@ -7,8 +7,6 @@ mod resource;
 mod store_impl;
 
 mod generated {
-    #![allow(clippy::trait_duplication_in_bounds)]
-
     pub use self::wasi::keyvalue::store::Error;
     pub use super::{BucketProxy, Cas};
 
@@ -41,8 +39,10 @@ use self::generated::wasi::keyvalue::store::Error;
 use self::generated::wasi::keyvalue::{atomics, batch, store};
 pub use self::resource::*;
 
+/// Result type for Key-Value operations.
 pub type Result<T, E = Error> = anyhow::Result<T, E>;
 
+/// Host-side service for `wasi:keyvalue`.
 #[derive(Debug)]
 pub struct WasiKeyValue;
 
@@ -86,6 +86,7 @@ pub struct WasiKeyValueCtxView<'a> {
 /// This is implemented by the resource-specific provider of Key-Value
 /// functionality. For example, an in-memory store, or a Redis-backed store.
 pub trait WasiKeyValueCtx: Debug + Send + Sync + 'static {
+    /// Open a bucket.
     fn open_bucket(&self, identifier: String) -> FutureResult<Arc<dyn Bucket>>;
 }
 
@@ -95,6 +96,7 @@ impl From<ResourceTableError> for Error {
     }
 }
 
+/// Implementation of the `WasiKeyValueView` trait for the store context.
 #[macro_export]
 macro_rules! qwasr_wasi_view {
     ($store_ctx:ty, $field_name:ident) => {

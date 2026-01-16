@@ -4,10 +4,13 @@
 
 // Bindings for the `wasi:vault` world.
 // See (<https://github.com/augentic/wasi-vault/>)
-wit_bindgen::generate!({
+mod generated {
+    #![allow(missing_docs)]
+    wit_bindgen::generate!({
     world: "identity",
     path: "wit",
     generate_all,
-});
+    });
+}
 
-pub use self::wasi::identity::*;
+pub use self::generated::wasi::identity::*;

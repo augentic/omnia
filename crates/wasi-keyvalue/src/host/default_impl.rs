@@ -25,6 +25,7 @@ impl qwasr::FromEnv for ConnectOptions {
     }
 }
 
+/// Default implementation for `wasi:keyvalue`.
 #[derive(Debug, Clone)]
 pub struct KeyValueDefault {
     store: Store,

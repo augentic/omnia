@@ -30,6 +30,7 @@ pub use self::into_http::*;
 pub use self::reply::*;
 pub use self::request::*;
 
+/// Provider trait for request handlers.
 pub trait Provider: Send + Sync {}
 impl<T> Provider for T where T: Send + Sync {}
 

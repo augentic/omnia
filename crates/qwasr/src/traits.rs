@@ -11,14 +11,19 @@ use anyhow::Result;
 use futures::future::BoxFuture;
 use wasmtime::component::{InstancePre, Linker};
 
+/// Result type for asynchronous operations.
 pub type FutureResult<T> = BoxFuture<'static, Result<T>>;
 
+/// State trait for WASI components.
 pub trait State: Clone + Send + Sync + 'static {
+    /// The store context type.
     type StoreCtx: Send;
 
+    /// Returns the store context.
     #[must_use]
     fn store(&self) -> Self::StoreCtx;
 
+    /// Returns the pre-instantiated component.
     fn instance_pre(&self) -> &InstancePre<Self::StoreCtx>;
 }
 
@@ -49,6 +54,7 @@ pub trait Server<S: State>: Debug + Sync + Send {
 /// Implemented by backend resources to allow the backend to be connected to a
 /// WASI component.
 pub trait Backend: Sized + Sync + Send {
+    /// The options used to connect to the backend.
     type ConnectOptions: FromEnv;
 
     /// Connect to the resource.
@@ -57,9 +63,11 @@ pub trait Backend: Sized + Sync + Send {
         async { Self::connect_with(Self::ConnectOptions::from_env()?).await }
     }
 
+    /// Connect to the resource with the specified options.
     fn connect_with(options: Self::ConnectOptions) -> impl Future<Output = Result<Self>>;
 }
 
+/// Trait for creating connection options from environment variables.
 pub trait FromEnv: Sized {
     /// Create connection options from environment variables.
     ///

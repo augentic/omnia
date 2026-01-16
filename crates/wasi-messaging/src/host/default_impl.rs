@@ -18,6 +18,7 @@ use crate::host::resource::{
     Client, FutureResult, Message, MessageProxy, Metadata, Reply, RequestOptions, Subscriptions,
 };
 
+/// Options used to connect to the messaging system.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions;
 
@@ -27,6 +28,7 @@ impl qwasr::FromEnv for ConnectOptions {
     }
 }
 
+/// Default implementation for `wasi:messaging`.
 #[derive(Debug)]
 pub struct MessagingDefault {
     sender: Sender<MessageProxy>,

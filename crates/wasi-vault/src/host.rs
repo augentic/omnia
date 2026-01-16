@@ -7,7 +7,6 @@ mod resource;
 mod vault_impl;
 
 mod generated {
-    #![allow(clippy::trait_duplication_in_bounds)]
 
     pub use self::wasi::vault::vault::Error;
     pub use super::LockerProxy;
@@ -39,6 +38,7 @@ use self::generated::wasi::vault::vault;
 pub use crate::host::default_impl::VaultDefault;
 pub use crate::host::resource::*;
 
+/// Host-side service for `wasi:vault`.
 #[derive(Debug)]
 pub struct WasiVault;
 
@@ -80,9 +80,11 @@ pub struct WasiVaultCtxView<'a> {
 /// This is implemented by the resource-specific provider of Vault
 /// functionality.
 pub trait WasiVaultCtx: Debug + Send + Sync + 'static {
+    /// Open a locker.
     fn open_locker(&self, identifier: String) -> FutureResult<Arc<dyn Locker>>;
 }
 
+/// Implementation of the `WasiVaultView` trait for the store context.
 #[macro_export]
 macro_rules! qwasr_wasi_view {
     ($store_ctx:ty, $field_name:ident) => {

@@ -5,5 +5,5 @@ on:
 
 jobs:
   patch:
-    uses: augentic/pipeline/.github/workflows/patch.yaml@main
+    uses: augentic/.github/.github/workflows/patch.yaml@main
     secrets: inherit

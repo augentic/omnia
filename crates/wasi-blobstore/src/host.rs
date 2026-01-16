@@ -7,7 +7,7 @@ mod resource;
 mod types_impl;
 
 mod generated {
-    #![allow(clippy::trait_duplication_in_bounds)]
+    #![allow(missing_docs)]
 
     pub use super::{ContainerProxy, IncomingValue, OutgoingValue, StreamObjectNames};
 
@@ -45,10 +45,14 @@ pub use self::default_impl::BlobstoreDefault;
 pub use self::generated::wasi::blobstore::container::{ContainerMetadata, ObjectMetadata};
 use self::generated::wasi::blobstore::{blobstore, container, types};
 
+/// Incoming value for a blobstore operation.
 pub type IncomingValue = Bytes;
+/// Outgoing value for a blobstore operation.
 pub type OutgoingValue = MemoryOutputPipe;
+/// Stream of object names.
 pub type StreamObjectNames = Vec<String>;
 
+/// Host-side service for `wasi:blobstore`.
 #[derive(Debug)]
 pub struct WasiBlobstore;
 
@@ -105,6 +109,7 @@ pub trait WasiBlobstoreCtx: Debug + Send + Sync + 'static {
     fn container_exists(&self, name: String) -> FutureResult<bool>;
 }
 
+/// Implementation of the `WasiBlobstoreView` trait for the store context.
 #[macro_export]
 macro_rules! qwasr_wasi_view {
     ($store_ctx:ty, $field_name:ident) => {

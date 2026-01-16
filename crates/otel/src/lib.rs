@@ -1,9 +1,9 @@
-#![cfg(not(target_arch = "wasm32"))]
-
-//! # Telemtry
+//! # Telemetry
 //!
 //! Telemetry is a module that provides functionality for collecting and
 //! reporting OpenTelemetry-based metrics.
+
+#![cfg(not(target_arch = "wasm32"))]
 
 pub mod init;
 pub mod tracing;

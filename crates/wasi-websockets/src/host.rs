@@ -9,7 +9,6 @@ mod store_impl;
 mod types;
 
 mod generated {
-    #![allow(clippy::trait_duplication_in_bounds)]
 
     pub use super::resource::ServerProxy;
 
@@ -41,6 +40,7 @@ use wasmtime_wasi::ResourceTable;
 pub use self::default_impl::WebSocketsDefault;
 use self::generated::wasi::websockets::{store, types as generated_types};
 
+/// Host-side service for `wasi:websockets`.
 #[derive(Clone, Debug)]
 pub struct WasiWebSockets;
 
@@ -74,6 +74,7 @@ where
 /// This is implemented by the `T` in `Linker<T>` — a single type shared across
 /// all WASI components for the runtime build.
 pub trait WebSocketsView: Send {
+    /// Return a [`WasiWebSocketsCtxView`] from mutable reference to self.
     fn websockets(&mut self) -> WasiWebSocketsCtxView<'_>;
 }
 
@@ -91,6 +92,7 @@ pub struct WasiWebSocketsCtxView<'a> {
 /// This is implemented by the resource-specific provider of WebSockets
 /// functionality.
 pub trait WebSocketsCtx: Debug + Send + Sync + 'static {
+    /// Start a WebSockets server.
     fn serve(&self) -> FutureResult<Arc<dyn resource::Server>>;
 }
 
@@ -100,6 +102,7 @@ impl generated_types::Host for WasiWebSocketsCtxView<'_> {
     }
 }
 
+/// Implementation of the `WebSocketsView` trait for the store context.
 #[macro_export]
 macro_rules! qwasr_wasi_view {
     ($store_ctx:ty, $field_name:ident) => {

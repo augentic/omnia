@@ -50,3 +50,7 @@ serde_json.workspace = true
 tower.workspace = true
 wasip3.workspace = true
 qwasr-wasi-keyvalue.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+wiremock = "0.6.5"

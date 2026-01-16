@@ -1,3 +1,5 @@
+//! Procedural macros for the qwasr runtime.
+
 mod expand;
 mod runtime;
 
