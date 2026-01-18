@@ -36,6 +36,7 @@ impl qwasr::FromEnv for ConnectOptions {
     }
 }
 
+/// Default implementation for `wasi:identity`.
 #[derive(Debug, Clone)]
 pub struct IdentityDefault {
     token_manager: TokenManager,

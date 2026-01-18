@@ -38,9 +38,11 @@ pub trait Container: Debug + Send + Sync + 'static {
     /// Check if the object exists.
     fn has_object(&self, name: String) -> FutureResult<bool>;
 
+    /// Get metadata for the specified object.
     fn object_info(&self, name: String) -> FutureResult<ObjectMetadata>;
 }
 
+/// Proxy for a blobstore container.
 #[derive(Clone, Debug)]
 pub struct ContainerProxy(pub Arc<dyn Container>);
 

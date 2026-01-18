@@ -5,7 +5,7 @@ mod tracing_impl;
 mod types_impl;
 
 mod generated {
-    #![allow(clippy::trait_duplication_in_bounds)]
+
     pub use self::wasi::otel::types::Error;
 
     wasmtime::component::bindgen!({
@@ -31,6 +31,7 @@ use wasmtime::component::{HasData, Linker, ResourceTable};
 pub use self::default_impl::OtelDefault;
 use self::generated::wasi::otel::{metrics, resource, tracing, types};
 
+/// Host-side service for `wasi:otel`.
 #[derive(Debug)]
 pub struct WasiOtel;
 
@@ -88,6 +89,7 @@ pub trait WasiOtelCtx: Debug + Send + Sync + 'static {
     fn export_metrics(&self, request: ExportMetricsServiceRequest) -> FutureResult<()>;
 }
 
+/// Implementation of the `WasiOtelView` trait for the store context.
 #[macro_export]
 macro_rules! qwasr_wasi_view {
     ($store_ctx:ty, $field_name:ident) => {

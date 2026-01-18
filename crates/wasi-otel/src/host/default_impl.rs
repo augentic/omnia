@@ -24,6 +24,7 @@ impl qwasr::FromEnv for ConnectOptions {
     }
 }
 
+/// Default implementation for `wasi:otel`.
 #[derive(Debug, Clone)]
 pub struct OtelDefault;
 

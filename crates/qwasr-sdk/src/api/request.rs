@@ -119,6 +119,7 @@ use http::HeaderMap;
 use crate::api::reply::Reply;
 use crate::api::{Body, Client, Provider};
 
+/// Type alias for a [`RequestHandler`].
 pub type Request<R, P> = RequestHandler<RequestSet<R, P>, NoOwner, NoProvider>;
 
 /// Trait to provide a common interface for request handling.

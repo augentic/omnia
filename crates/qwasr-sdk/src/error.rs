@@ -14,20 +14,40 @@ pub enum Error {
     // --- Client errors ---
     /// Request payload is invalid or missing required fields.
     #[error("code: {code}, description: {description}")]
-    BadRequest { code: String, description: String },
+    BadRequest {
+        /// The error code.
+        code: String,
+        /// The error description.
+        description: String,
+    },
 
     /// Resource or data not found.
     #[error("code: {code}, description: {description}")]
-    NotFound { code: String, description: String },
+    NotFound {
+        /// The error code.
+        code: String,
+        /// The error description.
+        description: String,
+    },
 
     // --- Server errors ---
     /// A non recoverable internal error occurred.
     #[error("code: {code}, description: {description}")]
-    ServerError { code: String, description: String },
+    ServerError {
+        /// The error code.
+        code: String,
+        /// The error description.
+        description: String,
+    },
 
     /// An upstream dependency failed while fulfilling the request.
     #[error("code: {code}, description: {description}")]
-    BadGateway { code: String, description: String },
+    BadGateway {
+        /// The error code.
+        code: String,
+        /// The error description.
+        description: String,
+    },
 }
 
 impl Error {
@@ -110,6 +130,7 @@ impl From<serde_json::Error> for Error {
     }
 }
 
+/// Create a new `BadRequest` error.
 #[macro_export]
 macro_rules! bad_request {
     ($fmt:expr, $($arg:tt)*) => {
@@ -120,6 +141,7 @@ macro_rules! bad_request {
     };
 }
 
+/// Create a new `ServerError` error.
 #[macro_export]
 macro_rules! server_error {
     ($fmt:expr, $($arg:tt)*) => {
@@ -130,6 +152,7 @@ macro_rules! server_error {
     };
 }
 
+/// Create a new `BadGateway` error.
 #[macro_export]
 macro_rules! bad_gateway {
     ($fmt:expr, $($arg:tt)*) => {

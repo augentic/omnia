@@ -1,3 +1,5 @@
+//! Cache implementation for WASI Key-Value
+
 use anyhow::{Context, Result};
 use chrono::serde::ts_seconds;
 use chrono::{DateTime, Duration, Utc};
@@ -110,7 +112,7 @@ impl Cacheable {
     }
 
     #[must_use]
-    pub fn is_expired(&self) -> bool {
+    pub(crate) fn is_expired(&self) -> bool {
         Utc::now() >= self.expires_at
     }
 }

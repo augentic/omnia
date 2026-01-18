@@ -15,6 +15,7 @@ use crate::host::resource::{FutureResult, Locker};
 
 type Store = Arc<parking_lot::RwLock<HashMap<String, HashMap<String, Vec<u8>>>>>;
 
+/// Options used to connect to the vault.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions;
 
@@ -24,6 +25,7 @@ impl qwasr::FromEnv for ConnectOptions {
     }
 }
 
+/// Default implementation for `wasi:vault`.
 #[derive(Debug, Clone)]
 pub struct VaultDefault {
     // Using Arc for shared state across instances

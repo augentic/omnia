@@ -1,6 +1,6 @@
-#![cfg(not(target_arch = "wasm32"))]
-
 //! # WebAssembly Initiator
+
+#![cfg(not(target_arch = "wasm32"))]
 
 #[cfg(feature = "jit")]
 mod compile;
@@ -20,14 +20,15 @@ pub use self::compile::*;
 pub use self::create::*;
 pub use self::traits::*;
 
+/// Command line interface for qwasr.
 #[derive(Parser, PartialEq, Eq)]
-#[command(version, about, long_about = None)]
 pub struct Cli {
     /// The command to execute.
     #[command(subcommand)]
     pub command: Command,
 }
 
+/// Subcommands for the qwasr CLI.
 #[derive(Subcommand, PartialEq, Eq)]
 pub enum Command {
     /// Run the specified wasm guest.

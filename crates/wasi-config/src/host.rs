@@ -13,6 +13,7 @@ use wasmtime::component::{HasData, Linker};
 pub use wasmtime_wasi_config;
 use wasmtime_wasi_config::WasiConfigVariables;
 
+/// Host-side service for `wasi:config`.
 #[derive(Debug)]
 pub struct WasiConfig;
 
@@ -49,6 +50,7 @@ pub trait WasiConfigCtx: Debug + Send + Sync + 'static {
     fn get_config(&self) -> &WasiConfigVariables;
 }
 
+/// Implementation of the `WasiConfigView` trait for the store context.
 #[macro_export]
 macro_rules! qwasr_wasi_view {
     ($store_ctx:ty, $field_name:ident) => {

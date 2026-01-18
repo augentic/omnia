@@ -6,7 +6,7 @@ mod server;
 mod types_impl;
 
 mod generated {
-    #![allow(clippy::trait_duplication_in_bounds)]
+    #![allow(missing_docs)]
 
     pub use wasi::messaging::types::Error;
 
@@ -48,8 +48,10 @@ pub use self::generated::wasi::messaging::types::Error;
 use self::generated::wasi::messaging::{producer, request_reply, types};
 pub use self::resource::*;
 
+/// Result type for messaging operations.
 pub type Result<T, E = Error> = anyhow::Result<T, E>;
 
+/// Host-side service for `wasi:messaging`.
 #[derive(Debug)]
 pub struct WasiMessaging;
 
@@ -174,6 +176,7 @@ impl From<anyhow::Error> for Error {
     }
 }
 
+/// Implementation of the `WasiMessagingView` trait for the store context.
 #[macro_export]
 macro_rules! qwasr_wasi_view {
     ($store_ctx:ty, $field_name:ident) => {

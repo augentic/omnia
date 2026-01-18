@@ -26,8 +26,10 @@ impl qwasr::FromEnv for ConnectOptions {
     }
 }
 
+/// Default implementation for `wasi:config`.
 #[derive(Clone)]
 pub struct ConfigDefault {
+    /// The configuration variables.
     pub config_vars: Arc<WasiConfigVariables>,
 }
 

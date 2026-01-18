@@ -32,6 +32,7 @@ impl qwasr::FromEnv for ConnectOptions {
     }
 }
 
+/// Default implementation for `wasi:websockets`.
 #[derive(Debug, Clone)]
 pub struct WebSocketsDefault;
 

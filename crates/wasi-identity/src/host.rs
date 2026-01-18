@@ -8,8 +8,6 @@ mod resource;
 mod types_impl;
 
 mod generated {
-    #![allow(clippy::trait_duplication_in_bounds)]
-
     pub use self::wasi::identity::types::Error;
     pub use crate::host::resource::IdentityProxy;
 
@@ -40,6 +38,7 @@ pub use self::default_impl::IdentityDefault;
 use self::generated::wasi::identity::credentials;
 pub use self::resource::*;
 
+/// Host-side service for `wasi:identity`.
 #[derive(Debug)]
 pub struct WasiIdentity;
 
@@ -81,9 +80,11 @@ pub struct WasiIdentityCtxView<'a> {
 /// This is implemented by the resource-specific provider of Identity
 /// functionality.
 pub trait WasiIdentityCtx: Debug + Send + Sync + 'static {
+    /// Get the identity for the specified name.
     fn get_identity(&self, name: String) -> FutureResult<Arc<dyn Identity>>;
 }
 
+/// Implementation of the `WasiIdentityView` trait for the store context.
 #[macro_export]
 macro_rules! qwasr_wasi_view {
     ($store_ctx:ty, $field_name:ident) => {

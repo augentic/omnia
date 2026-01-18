@@ -12,20 +12,20 @@ jobs:
       - run: |
           echo "This workflow only runs on the 'release-*' branches"
           exit 1
-          
+
   ci:
     name: CI
     if: ${{ startsWith(github.ref_name, 'release-') }}
-    uses: augentic/pipeline/.github/workflows/ci.yaml@main
+    uses: augentic/.github/.github/workflows/ci.yaml@main
     secrets: inherit
 
   publish:
     name: Publish
     needs: ci
-    uses: augentic/pipeline/.github/workflows/publish.yaml@main
+    uses: augentic/.github/.github/workflows/publish.yaml@main
 
   crates:
     name: Publish crates
     needs: publish
-    uses: augentic/pipeline/.github/workflows/crates.yaml@main
+    uses: augentic/.github/.github/workflows/crates.yaml@main
     secrets: inherit
