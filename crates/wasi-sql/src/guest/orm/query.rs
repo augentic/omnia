@@ -5,7 +5,7 @@ use sea_query::backend::{
 use sea_query::prepare::SqlWriter;
 use sea_query::{BinOper, Oper, Quote, SimpleExpr, SubQueryStatement, Value};
 
-use crate::wasi::sql::types::DataType;
+use crate::types::DataType;
 
 pub struct BuiltQuery {
     pub sql: String,
@@ -19,6 +19,7 @@ pub struct OrmQueryBuilder {
 }
 
 impl Default for OrmQueryBuilder {
+    // should work for `Postgres` and `Sqlite`
     fn default() -> Self {
         Self {
             quote: Quote::new(b'"'),

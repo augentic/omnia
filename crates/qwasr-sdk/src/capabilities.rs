@@ -163,9 +163,9 @@ pub trait Identity: Send + Sync {
     }
 }
 
-/// Marker trait for types that provide ORM database access.
+/// Marker trait for types that provide relational database access.
 ///
-/// Any type implementing this trait automatically gets `SqlDb` functionality
+/// Any type implementing this trait automatically gets `TableStore` functionality
 /// via a blanket implementation in the `qwasr-wasi-sql` crate.
 #[cfg(target_arch = "wasm32")]
-pub use qwasr_wasi_sql::orm::OrmDataStore;
+pub use qwasr_wasi_sql::orm::TableStore;

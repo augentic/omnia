@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::marker::PhantomData;
 
 use anyhow::Result;
@@ -9,6 +7,7 @@ use crate::orm::entity::{Entity, values_to_wasi_datatypes};
 use crate::orm::filter::Filter;
 use crate::orm::query::{BuiltQuery, OrmQueryBuilder};
 
+/// Builder for constructing DELETE queries.
 pub struct DeleteBuilder<M: Entity> {
     filters: Vec<SimpleExpr>,
     returning: Vec<&'static str>,
@@ -26,17 +25,20 @@ impl<M: Entity> Default for DeleteBuilder<M> {
 }
 
 impl<M: Entity> DeleteBuilder<M> {
+    /// Creates a new DELETE query builder.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Adds a WHERE clause filter.
     #[must_use]
     pub fn r#where(mut self, filter: Filter) -> Self {
         self.filters.push(filter.into_expr(M::TABLE));
         self
     }
 
+    /// Specifies columns to return from deleted rows.
     #[must_use]
     pub fn returning(mut self, column: &'static str) -> Self {
         self.returning.push(column);
@@ -62,6 +64,14 @@ impl<M: Entity> DeleteBuilder<M> {
 
         let (sql, values) = statement.build(OrmQueryBuilder::default());
         let params = values_to_wasi_datatypes(values)?;
+
+        tracing::debug!(
+            table = M::TABLE,
+            sql = %sql,
+            param_count = params.len(),
+            "DeleteBuilder generated SQL"
+        );
+
         Ok(BuiltQuery { sql, params })
     }
 }

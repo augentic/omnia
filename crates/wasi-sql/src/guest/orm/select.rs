@@ -1,15 +1,15 @@
-#![allow(dead_code)]
 use std::marker::PhantomData;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use sea_query::{Alias, ColumnRef, IntoIden, Order, Query, SimpleExpr};
 
-use crate::orm::OrmDataStore;
+use crate::orm::TableStore;
 use crate::orm::entity::{Entity, values_to_wasi_datatypes};
 use crate::orm::filter::Filter;
 use crate::orm::join::{Join, JoinSpec};
 use crate::orm::query::{BuiltQuery, OrmQueryBuilder};
 
+/// Builder for constructing SELECT queries.
 pub struct SelectBuilder<M: Entity> {
     filters: Vec<SimpleExpr>,
     limit: Option<u64>,
@@ -40,29 +40,34 @@ impl<M: Entity> Default for SelectBuilder<M> {
 }
 
 impl<M: Entity> SelectBuilder<M> {
+    /// Creates a new SELECT query builder.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Adds a WHERE clause filter.
     #[must_use]
     pub fn r#where(mut self, filter: Filter) -> Self {
         self.filters.push(filter.into_expr(M::TABLE));
         self
     }
 
+    /// Sets the maximum number of rows to return.
     #[must_use]
     pub const fn limit(mut self, limit: u64) -> Self {
         self.limit = Some(limit);
         self
     }
 
+    /// Sets the number of rows to skip.
     #[must_use]
     pub const fn offset(mut self, offset: u64) -> Self {
         self.offset = Some(offset);
         self
     }
 
+    /// Adds ascending ORDER BY clause.
     #[must_use]
     pub fn order_by(mut self, table: Option<&'static str>, column: &'static str) -> Self {
         let table = table.unwrap_or(M::TABLE);
@@ -70,6 +75,7 @@ impl<M: Entity> SelectBuilder<M> {
         self
     }
 
+    /// Adds descending ORDER BY clause.
     #[must_use]
     pub fn order_by_desc(mut self, table: Option<&'static str>, column: &'static str) -> Self {
         let table = table.unwrap_or(M::TABLE);
@@ -77,31 +83,29 @@ impl<M: Entity> SelectBuilder<M> {
         self
     }
 
+    /// Adds a JOIN clause to the query.
     #[must_use]
     pub fn join(mut self, join: Join) -> Self {
         self.joins.push(join.into_join_spec(M::TABLE));
         self
     }
 
-    /// Consumes the builder, executes the query against the provider, and maps rows to the Model.
+    /// Consumes the builder, executes the query against the provider, and maps rows to the model.
     ///
     /// # Errors
     ///
     /// Returns an error if the query fails to build, execute, or if row conversion to the model fails.
-    pub async fn fetch(self, provider: &impl OrmDataStore, pool_name: &str) -> Result<Vec<M>> {
-        let BuiltQuery { sql, params } =
-            self.build().map_err(|e| anyhow::anyhow!("failed building query: {e:?}"))?;
+    pub async fn fetch(self, provider: &impl TableStore, pool_name: &str) -> Result<Vec<M>> {
+        let BuiltQuery { sql, params } = self.build().context("failed building query")?;
 
-        let rows = provider
-            .query(pool_name.to_string(), sql, params)
-            .await
-            .map_err(|e| anyhow::anyhow!("query failed: {e:?}"))?;
+        let rows =
+            provider.query(pool_name.to_string(), sql, params).await.context("query failed")?;
 
         let models = rows
             .iter()
             .map(M::from_row)
             .collect::<Result<Vec<_>>>()
-            .map_err(|e| anyhow::anyhow!("row conversion failed: {e:?}"))?;
+            .context("row conversion failed")?;
 
         Ok(models)
     }
@@ -113,10 +117,27 @@ impl<M: Entity> SelectBuilder<M> {
     /// Returns an error if query values cannot be converted to WASI data types.
     pub fn build(self) -> Result<BuiltQuery> {
         let mut statement = Query::select();
-        let projection: Vec<ColumnRef> =
-            M::projection().iter().map(|column| table_column(M::TABLE, column)).collect();
 
-        statement.columns(projection).from(Alias::new(M::TABLE));
+        // Build column specs lookup map
+        let column_specs = M::column_specs();
+        let spec_map: std::collections::HashMap<&str, (&str, &str)> = column_specs
+            .into_iter()
+            .map(|(field, table, column)| (field, (table, column)))
+            .collect();
+
+        // Build columns with proper table qualification
+        for field in M::projection() {
+            if let Some(&(table, column)) = spec_map.get(field) {
+                // Use specified table.column AS field
+                statement
+                    .expr_as(SimpleExpr::Column(table_column(table, column)), Alias::new(*field));
+            } else {
+                // Auto-qualify with main table
+                statement.column(table_column(M::TABLE, field));
+            }
+        }
+
+        statement.from(Alias::new(M::TABLE));
 
         for JoinSpec {
             table,
@@ -151,6 +172,14 @@ impl<M: Entity> SelectBuilder<M> {
 
         let (sql, values) = statement.build(OrmQueryBuilder::default());
         let params = values_to_wasi_datatypes(values)?;
+
+        tracing::debug!(
+            table = M::TABLE,
+            sql = %sql,
+            param_count = params.len(),
+            "SelectBuilder generated SQL"
+        );
+
         Ok(BuiltQuery { sql, params })
     }
 }

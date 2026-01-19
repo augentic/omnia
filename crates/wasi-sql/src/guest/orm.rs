@@ -70,17 +70,22 @@
 //! ```ignore
 //! use crate::orm::Join;
 //!
-//! // Entity with default joins
+//! // Entity with default joins and column aliasing
 //! entity! {
 //!     table = "posts",
+//!     columns = [
+//!         ("users", "name", "author_name"),       // users.name AS author_name
+//!         ("users", "email", "author_email"),    // users.email AS author_email
+//!     ],
 //!     joins = [
 //!         Join::left("users", Filter::col_eq("posts", "author_id", "users", "id")),
 //!     ],
 //!     #[derive(Debug, Clone)]
 //!     pub struct PostWithAuthor {
-//!         pub id: i32,
-//!         pub title: String,
-//!         pub author_name: String,  // From joined users table
+//!         pub id: i32,              // Auto: posts.id
+//!         pub title: String,        // Auto: posts.title
+//!         pub author_name: String,  // Manual: users.name AS author_name
+//!         pub author_email: String, // Manual: users.email AS author_email
 //!     }
 //! }
 //!
@@ -121,14 +126,20 @@
 //!
 //! ## Upserts
 //!
+//! Handle INSERT ... ON CONFLICT scenarios using native database syntax (PostgreSQL/SQLite).
+//! These are **atomic operations** - the database handles them in a single statement,
+//! not as separate SELECT/INSERT/UPDATE queries.
+//!
 //! ```ignore
-//! // Insert or update on conflict
+//! // Insert or update on conflict - atomic operation
 //! InsertBuilder::<User>::new()
 //!     .set("email", "test@example.com")
 //!     .set("name", "John Doe")
 //!     .on_conflict("email")
 //!     .do_update(&["name"])
 //!     .build()?;
+//! // Generates: INSERT INTO users (email, name) VALUES ($1, $2)
+//! //            ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
 //! ```
 //!
 //! ## Custom Types
@@ -142,7 +153,7 @@
 //! }
 //! ```
 //!
-//! For comprehensive examples and advanced usage, see [`orm_usage.md`](orm/orm_usage.md).
+//! For more information, please refer to [`usage.md`](orm/usage.md).
 
 mod delete;
 mod entity;
@@ -161,53 +172,64 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 pub use insert::InsertBuilder;
 pub use join::Join;
-#[doc(hidden)]
-pub use sea_query::Value as SeaQueryValue;
 pub use select::SelectBuilder;
 pub use update::UpdateBuilder;
 
 use crate::readwrite;
 use crate::types::{Connection, DataType, Row, Statement};
 
+/// Type alias for boxed futures returning ORM results.
 pub type FutureResult<T> = BoxFuture<'static, Result<T>>;
 
 /// Trait for types that provide ORM database access.
 ///
 /// Implement this trait to enable ORM operations. Default implementations
 /// use the WASI SQL bindings to execute queries.
-pub trait OrmDataStore: Send + Sync {
+pub trait TableStore: Send + Sync {
+    /// Executes a query and returns the result rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails, statement preparation fails, or query execution fails.
     fn query(
         &self, pool_name: String, query: String, params: Vec<DataType>,
     ) -> FutureResult<Vec<Row>> {
         async {
             let cnn = Connection::open(pool_name)
                 .await
-                .map_err(|e| anyhow!("failed to open connection: {e:?}"))?;
+                .map_err(|e| anyhow!("failed to open connection: {}", e.trace()))?;
 
             let stmt = Statement::prepare(query, params)
                 .await
-                .map_err(|e| anyhow!("failed to prepare statement: {e:?}"))?;
+                .map_err(|e| anyhow!("failed to prepare statement: {}", e.trace()))?;
 
-            let res =
-                readwrite::query(&cnn, &stmt).await.map_err(|e| anyhow!("query failed: {e:?}"))?;
+            let res = readwrite::query(&cnn, &stmt)
+                .await
+                .map_err(|e| anyhow!("query failed: {}", e.trace()))?;
 
             Ok(res)
         }
         .boxed()
     }
 
+    /// Executes a statement and returns the number of affected rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails, statement preparation fails, or execution fails.
     fn exec(&self, pool_name: String, query: String, params: Vec<DataType>) -> FutureResult<u32> {
         async {
             let cnn = Connection::open(pool_name)
                 .await
-                .map_err(|e| anyhow!("failed to open connection: {e:?}"))?;
+                .map_err(|e| anyhow!("failed to open connection: {}", e.trace()))?;
 
             let stmt = Statement::prepare(query, params)
                 .await
-                .map_err(|e| anyhow!("failed to prepare statement: {e:?}"))?;
+                .map_err(|e| anyhow!("failed to prepare statement: {}", e.trace()))?;
 
-            let res =
-                readwrite::exec(&cnn, &stmt).await.map_err(|e| anyhow!("exec failed: {e:?}"))?;
+            let res = readwrite::exec(&cnn, &stmt)
+                .await
+                .map_err(|e| anyhow!("exec failed: {}", e.trace()))?;
 
             Ok(res)
         }

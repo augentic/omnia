@@ -16,6 +16,13 @@ mod generated {
 
 pub mod orm;
 
+// Re-exports for ``entity`` macro use only. This is needed to avoid leaking ``SeqQuery`` value
+// types into guest code
+#[doc(hidden)]
+pub mod __private {
+    pub use sea_query::Value;
+}
+
 use anyhow::Result;
 use base64ct::{Base64, Encoding};
 use serde_json::Value;

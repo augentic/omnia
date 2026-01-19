@@ -57,6 +57,59 @@ entity! {
 }
 ```
 
+### Entity with Column Aliasing
+
+When joining tables, use the `columns` parameter to explicitly specify which fields come from joined tables:
+
+```rust
+entity! {
+    table = "posts",
+    columns = [
+        ("users", "name", "author_name"),       // users.name AS author_name
+        ("users", "email", "author_email"),    // users.email AS author_email
+    ],
+    joins = [
+        Join::left("users", Filter::col_eq("posts", "author_id", "users", "id")),
+    ],
+    #[derive(Debug, Clone)]
+    pub struct PostWithAuthor {
+        pub id: i32,              // Auto-qualified: posts.id
+        pub title: String,        // Auto-qualified: posts.title
+        pub author_id: i32,       // Auto-qualified: posts.author_id
+        pub author_name: String,  // Manual: users.name AS author_name
+        pub author_email: String, // Manual: users.email AS author_email
+    }
+}
+```
+
+**Key Points:**
+
+- Fields **not** in `columns` are auto-qualified with the main table (`posts.id`, `posts.title`, etc.)
+- Fields **in** `columns` use explicit table qualification: `(source_table, source_column, struct_field)`
+- This is required when selecting columns from joined tables
+- Useful for resolving name conflicts (e.g., both tables have `created_at`)
+
+**Handling Column Name Conflicts:**
+
+```rust
+entity! {
+    table = "posts",
+    columns = [
+        ("users", "created_at", "author_created_at"),  // Alias to avoid conflict
+    ],
+    joins = [
+        Join::left("users", Filter::col_eq("posts", "author_id", "users", "id")),
+    ],
+    #[derive(Debug, Clone)]
+    pub struct PostFull {
+        pub id: i32,
+        pub title: String,
+        pub created_at: DateTime<Utc>,        // posts.created_at
+        pub author_created_at: DateTime<Utc>, // users.created_at AS author_created_at
+    }
+}
+```
+
 ---
 
 ## Basic CRUD Operations
@@ -303,7 +356,17 @@ Join::left("users", Filter::and(vec![
 
 ## Upserts
 
-Handle INSERT ... ON CONFLICT scenarios:
+Handle INSERT ... ON CONFLICT scenarios using native database syntax.
+
+**Important:** Upserts are **atomic database operations**. The ORM generates a single `INSERT ... ON CONFLICT` SQL statement that the database executes atomically. This is **not** a "select first, then insert or update" pattern - it's faster, safer, and avoids race conditions.
+
+**Generated SQL Example:**
+
+```sql
+-- What .on_conflict("email").do_update(&["name"]) generates:
+INSERT INTO users (email, name) VALUES ($1, $2)
+ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
+```
 
 ### Do Nothing on Conflict
 
@@ -353,17 +416,6 @@ InsertBuilder::<User>::new()
     .set("bio", "Developer")
     .on_conflict_columns(&["email", "username"])
     .do_update_all()  // Updates name, age, bio (not email, username)
-    .build()?;
-```
-
-### Constraint-Based Conflict
-
-```rust
-// PostgreSQL named constraint
-InsertBuilder::<User>::new()
-    .set("email", "test@example.com")
-    .on_conflict_constraint("users_email_key")
-    .do_nothing()
     .build()?;
 ```
 
@@ -519,17 +571,20 @@ SelectBuilder::<Post>::new()
 ```rust
 entity! {
     table = "posts",
+    columns = [
+        ("users", "name", "author_name"),  // users.name AS author_name
+    ],
     joins = [
         Join::left("users", Filter::col_eq("posts", "author_id", "users", "id")),
     ],
     #[derive(Debug, Clone)]
     pub struct PostListItem {
-        pub id: i32,
-        pub title: String,
-        pub excerpt: String,
-        pub author_name: String,
-        pub created_at: DateTime<Utc>,
-        pub view_count: i32,
+        pub id: i32,              // posts.id
+        pub title: String,        // posts.title
+        pub excerpt: String,      // posts.excerpt
+        pub author_name: String,  // users.name AS author_name
+        pub created_at: DateTime<Utc>,  // posts.created_at
+        pub view_count: i32,      // posts.view_count
     }
 }
 
@@ -580,9 +635,11 @@ SelectBuilder::<PostWithAuthor>::new()
 ## Best Practices
 
 1. **Use entity-level joins** for common relationships, ad-hoc joins for specific queries
-2. **Leverage Filter combinators** (and/or/not) for complex conditions
-3. **Use type-safe filters** - natural Rust types are automatically converted
-4. **Implement FetchValue** for custom domain types (new types, enums)
-5. **Use upserts** instead of "select then insert/update" patterns
-6. **Always paginate** large result sets with limit/offset
-7. **Prefer table-qualified filters** when working with joins to avoid ambiguity
+2. **Use column aliasing** (`columns` parameter) when selecting from joined tables to avoid SQL errors
+3. **Leverage Filter combinators** (and/or/not) for complex conditions
+4. **Use type-safe filters** - natural Rust types are automatically converted
+5. **Implement FetchValue** for custom domain types (new types, enums)
+6. **Use upserts** instead of "select then insert/update" patterns
+7. **Always paginate** large result sets with limit/offset
+8. **Prefer table-qualified filters** when working with joins to avoid ambiguity
+9. **Handle column name conflicts** by aliasing one or both columns in the `columns` parameter

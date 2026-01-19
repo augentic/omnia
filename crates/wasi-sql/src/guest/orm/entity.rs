@@ -3,9 +3,12 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use sea_query::{Order, Value, Values};
 
 use crate::orm::join::Join;
-use crate::wasi::sql::types::{DataType, Row};
+use crate::types::{DataType, Row};
 
-// A helper trait to map types to your specific converter functions
+/// Trait for types that can be extracted from database rows.
+///
+/// This trait is implemented for all standard Rust types that can be
+/// fetched from a database row (`i32`, `String`, `DateTime`, etc.).
 pub trait FetchValue: Sized {
     /// Fetch a value from a row by column name.
     ///
@@ -15,9 +18,72 @@ pub trait FetchValue: Sized {
     fn fetch(row: &Row, col: &str) -> anyhow::Result<Self>;
 }
 
+/// Declares an ORM entity with automatic `Entity` trait implementation.
+///
+/// # Examples
+///
+/// ```ignore
+/// entity! {
+///     table = "posts",
+///     pub struct Post {
+///         pub id: i32,
+///         pub title: String,
+///     }
+/// }
+/// ```
 #[macro_export]
 macro_rules! entity {
-    // With joins
+    // With joins and columns
+    (
+        table = $table:literal,
+        columns = [$( ($col_table:literal, $col_name:literal, $col_field:literal) ),* $(,)?],
+        joins = [$($join:expr),* $(,)?],
+        $(#[$meta:meta])*
+        pub struct $struct_name:ident {
+            $(pub $field_name:ident : $field_type:ty),* $(,)?
+        }
+    ) => {
+        $(#[$meta])*
+        pub struct $struct_name {
+            $(pub $field_name : $field_type),*
+        }
+
+        impl $crate::orm::Entity for $struct_name {
+            const TABLE: &'static str = $table;
+
+            fn projection() -> &'static [&'static str] {
+                &[ $( stringify!($field_name) ),* ]
+            }
+
+            fn joins() -> Vec<Join> {
+                vec![$($join),*]
+            }
+
+            fn column_specs() -> Vec<(&'static str, &'static str, &'static str)> {
+                vec![$( ($col_field, $col_table, $col_name) ),*]
+            }
+
+            fn from_row(row: &$crate::types::Row) -> anyhow::Result<Self> {
+                Ok(Self {
+                    $(
+                        $field_name: <$field_type as $crate::orm::FetchValue>::fetch(row, stringify!($field_name))?,
+                    )*
+                })
+            }
+        }
+
+        impl $crate::orm::EntityValues for $struct_name {
+            fn __to_values(&self) -> Vec<(&'static str, $crate::__private::Value)> {
+                vec![
+                    $(
+                        (stringify!($field_name), self.$field_name.clone().into()),
+                    )*
+                ]
+            }
+        }
+    };
+
+    // With joins only
     (
         table = $table:literal,
         joins = [$($join:expr),* $(,)?],
@@ -42,7 +108,7 @@ macro_rules! entity {
                 vec![$($join),*]
             }
 
-            fn from_row(row: &$crate::wasi::sql::types::Row) -> anyhow::Result<Self> {
+            fn from_row(row: &$crate::types::Row) -> anyhow::Result<Self> {
                 Ok(Self {
                     $(
                         $field_name: <$field_type as $crate::orm::FetchValue>::fetch(row, stringify!($field_name))?,
@@ -52,7 +118,7 @@ macro_rules! entity {
         }
 
         impl $crate::orm::EntityValues for $struct_name {
-            fn __to_values(&self) -> Vec<(&'static str, $crate::orm::SeaQueryValue)> {
+            fn __to_values(&self) -> Vec<(&'static str, $crate::__private::Value)> {
                 vec![
                     $(
                         (stringify!($field_name), self.$field_name.clone().into()),
@@ -62,7 +128,7 @@ macro_rules! entity {
         }
     };
 
-    // Without joins
+    // Without joins - this is for a basic entity
     (
         table = $table:literal,
         $(#[$meta:meta])*
@@ -82,7 +148,7 @@ macro_rules! entity {
                 &[ $( stringify!($field_name) ),* ]
             }
 
-            fn from_row(row: &$crate::wasi::sql::types::Row) -> anyhow::Result<Self> {
+            fn from_row(row: &$crate::types::Row) -> anyhow::Result<Self> {
                 Ok(Self {
                     $(
                         $field_name: <$field_type as $crate::orm::FetchValue>::fetch(row, stringify!($field_name))?,
@@ -92,7 +158,7 @@ macro_rules! entity {
         }
 
         impl $crate::orm::EntityValues for $struct_name {
-            fn __to_values(&self) -> Vec<(&'static str, $crate::orm::SeaQueryValue)> {
+            fn __to_values(&self) -> Vec<(&'static str, $crate::__private::Value)> {
                 vec![
                     $(
                         (stringify!($field_name), self.$field_name.clone().into()),
@@ -103,18 +169,33 @@ macro_rules! entity {
     };
 }
 
+/// Trait for database entities with metadata for query building.
+///
+/// Typically implemented via the `entity!` macro rather than manually.
 pub trait Entity: Sized {
+    /// The database table name for this entity.
     const TABLE: &'static str;
 
+    /// Column names to select when fetching this entity.
     fn projection() -> &'static [&'static str];
 
+    /// Default ordering specification for queries.
     #[must_use]
     fn ordering() -> Vec<OrderSpec> {
         Vec::new()
     }
 
+    /// Default joins to include when querying this entity.
     #[must_use]
     fn joins() -> Vec<Join> {
+        Vec::new()
+    }
+
+    /// Column specifications for fields from joined tables.
+    /// Returns tuples of (``struct_field``, ``source_table``, ``source_column``).
+    /// Fields not listed here will be auto-qualified with the main table.
+    #[must_use]
+    fn column_specs() -> Vec<(&'static str, &'static str, &'static str)> {
         Vec::new()
     }
 
@@ -126,8 +207,7 @@ pub trait Entity: Sized {
     fn from_row(row: &Row) -> Result<Self>;
 }
 
-/// Internal trait for extracting entity values. Not part of the public API.
-/// Automatically implemented by the `entity!` macro.
+/// Internal trait for extracting entity values. Automatically implemented by the `entity!` macro.
 #[doc(hidden)]
 pub trait EntityValues {
     fn __to_values(&self) -> Vec<(&'static str, Value)>;

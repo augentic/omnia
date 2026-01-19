@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use sea_query::{JoinType, SimpleExpr};
 
 use crate::orm::filter::Filter;

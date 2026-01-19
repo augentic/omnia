@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::marker::PhantomData;
 
 use anyhow::Result;
@@ -8,6 +6,7 @@ use sea_query::{Alias, OnConflict, Query, SimpleExpr, Value};
 use crate::orm::entity::{Entity, EntityValues, values_to_wasi_datatypes};
 use crate::orm::query::{BuiltQuery, OrmQueryBuilder};
 
+/// Builder for constructing INSERT queries.
 pub struct InsertBuilder<M: Entity> {
     values: Vec<(&'static str, Value)>,
     conflict: Option<ConflictStrategy>,
@@ -21,7 +20,6 @@ enum ConflictStrategy {
 
 enum ConflictTarget {
     Columns(Vec<&'static str>),
-    Constraint(&'static str),
 }
 
 impl<M: Entity> Default for InsertBuilder<M> {
@@ -35,6 +33,7 @@ impl<M: Entity> Default for InsertBuilder<M> {
 }
 
 impl<M: Entity> InsertBuilder<M> {
+    /// Creates a new INSERT query builder.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -53,6 +52,7 @@ impl<M: Entity> InsertBuilder<M> {
         }
     }
 
+    /// Sets a column value for the insert.
     #[must_use]
     pub fn set<V>(mut self, column: &'static str, value: V) -> Self
     where
@@ -67,15 +67,6 @@ impl<M: Entity> InsertBuilder<M> {
     pub fn on_conflict_columns(mut self, columns: &[&'static str]) -> Self {
         self.conflict = Some(ConflictStrategy::DoNothing {
             target: ConflictTarget::Columns(columns.to_vec()),
-        });
-        self
-    }
-
-    /// Handle conflicts on a named constraint. Call ``do_update()`` or ``do_nothing()`` after.
-    #[must_use]
-    pub fn on_conflict_constraint(mut self, constraint: &'static str) -> Self {
-        self.conflict = Some(ConflictStrategy::DoNothing {
-            target: ConflictTarget::Constraint(constraint),
         });
         self
     }
@@ -121,7 +112,6 @@ impl<M: Entity> InsertBuilder<M> {
             };
             let conflict_cols: Vec<&str> = match &target {
                 ConflictTarget::Columns(cols) => cols.clone(),
-                ConflictTarget::Constraint(_) => Vec::new(),
             };
             let update_cols: Vec<&'static str> = self
                 .values
@@ -158,29 +148,15 @@ impl<M: Entity> InsertBuilder<M> {
         if let Some(conflict) = self.conflict {
             let on_conflict = match conflict {
                 ConflictStrategy::DoNothing { target } => {
-                    match target {
-                        ConflictTarget::Columns(cols) => {
-                            OnConflict::columns(cols.into_iter().map(Alias::new))
-                                .do_nothing()
-                                .to_owned()
-                        }
-                        ConflictTarget::Constraint(_) => {
-                            // Constraint-based conflicts not fully supported by SeaQuery API
-                            // Fall back to column-based approach
-                            OnConflict::new().do_nothing().to_owned()
-                        }
-                    }
+                    let ConflictTarget::Columns(cols) = target;
+                    OnConflict::columns(cols.into_iter().map(Alias::new)).do_nothing().to_owned()
                 }
-                ConflictStrategy::DoUpdate { target, columns } => match target {
-                    ConflictTarget::Columns(cols) => {
-                        OnConflict::columns(cols.into_iter().map(Alias::new))
-                            .update_columns(columns.into_iter().map(Alias::new))
-                            .to_owned()
-                    }
-                    ConflictTarget::Constraint(_) => OnConflict::new()
+                ConflictStrategy::DoUpdate { target, columns } => {
+                    let ConflictTarget::Columns(cols) = target;
+                    OnConflict::columns(cols.into_iter().map(Alias::new))
                         .update_columns(columns.into_iter().map(Alias::new))
-                        .to_owned(),
-                },
+                        .to_owned()
+                }
             };
 
             statement.on_conflict(on_conflict);
@@ -188,6 +164,14 @@ impl<M: Entity> InsertBuilder<M> {
 
         let (sql, values) = statement.build(OrmQueryBuilder::default());
         let params = values_to_wasi_datatypes(values)?;
+
+        tracing::debug!(
+            table = M::TABLE,
+            sql = %sql,
+            param_count = params.len(),
+            "InsertBuilder generated SQL"
+        );
+
         Ok(BuiltQuery { sql, params })
     }
 }
