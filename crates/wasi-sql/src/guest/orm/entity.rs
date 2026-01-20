@@ -440,7 +440,9 @@ fn as_timestamp(value: &DataType) -> Result<DateTime<Utc>> {
                 return Ok(DateTime::<Utc>::from_naive_utc_and_offset(parsed, Utc));
             }
 
-            bail!("unsupported timestamp: {raw}")
+            bail!(
+                "unsupported timestamp: {raw}; expected RFC3339 or \"%Y-%m-%d %H:%M:%S%.f\" format"
+            )
         }
         _ => bail!("expected timestamp data type"),
     }
@@ -451,5 +453,211 @@ fn as_json(value: &DataType) -> Result<serde_json::Value> {
         DataType::Str(Some(raw)) => Ok(serde_json::from_str(raw)?),
         DataType::Binary(Some(bytes)) => Ok(serde_json::from_slice(bytes)?),
         _ => bail!("expected json compatible data type"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{Field, Row};
+
+    #[test]
+    fn fetch_value_i64() {
+        let row = Row {
+            fields: vec![Field {
+                name: "id".to_string(),
+                value: DataType::Int64(Some(42)),
+            }],
+            index: "0".to_string(),
+        };
+
+        let result: i64 = FetchValue::fetch(&row, "id").unwrap();
+        assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn fetch_value_string() {
+        let row = Row {
+            fields: vec![Field {
+                name: "name".to_string(),
+                value: DataType::Str(Some("test".to_string())),
+            }],
+            index: "0".to_string(),
+        };
+
+        let result: String = FetchValue::fetch(&row, "name").unwrap();
+        assert_eq!(result, "test");
+    }
+
+    #[test]
+    fn fetch_value_bool() {
+        let row = Row {
+            fields: vec![Field {
+                name: "active".to_string(),
+                value: DataType::Boolean(Some(true)),
+            }],
+            index: "0".to_string(),
+        };
+
+        let result: bool = FetchValue::fetch(&row, "active").unwrap();
+        assert!(result);
+    }
+
+    #[test]
+    fn fetch_optional_some() {
+        let row = Row {
+            fields: vec![Field {
+                name: "email".to_string(),
+                value: DataType::Str(Some("test@example.com".to_string())),
+            }],
+            index: "0".to_string(),
+        };
+
+        let result: Option<String> = FetchValue::fetch(&row, "email").unwrap();
+        assert_eq!(result, Some("test@example.com".to_string()));
+    }
+
+    #[test]
+    fn fetch_optional_none() {
+        let row = Row {
+            fields: vec![Field {
+                name: "phone".to_string(),
+                value: DataType::Str(None),
+            }],
+            index: "0".to_string(),
+        };
+
+        let result: Option<String> = FetchValue::fetch(&row, "phone").unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn fetch_missing_column() {
+        let row = Row {
+            fields: vec![Field {
+                name: "id".to_string(),
+                value: DataType::Int64(Some(1)),
+            }],
+            index: "0".to_string(),
+        };
+
+        let result: Result<String> = FetchValue::fetch(&row, "missing");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("missing column"));
+    }
+
+    #[test]
+    fn fetch_wrong_type() {
+        let row = Row {
+            fields: vec![Field {
+                name: "id".to_string(),
+                value: DataType::Str(Some("not_a_number".to_string())),
+            }],
+            index: "0".to_string(),
+        };
+
+        let result: Result<i64> = FetchValue::fetch(&row, "id");
+        result.unwrap_err();
+    }
+
+    #[test]
+    fn fetch_datetime_rfc3339() {
+        let row = Row {
+            fields: vec![Field {
+                name: "created_at".to_string(),
+                value: DataType::Timestamp(Some("2024-01-15T10:30:45.123Z".to_string())),
+            }],
+            index: "0".to_string(),
+        };
+
+        let result: DateTime<Utc> = FetchValue::fetch(&row, "created_at").unwrap();
+        assert_eq!(result.to_rfc3339(), "2024-01-15T10:30:45.123+00:00");
+    }
+
+    #[test]
+    fn fetch_datetime_fallback_format() {
+        let row = Row {
+            fields: vec![Field {
+                name: "updated_at".to_string(),
+                value: DataType::Timestamp(Some("2024-01-15 10:30:45.123".to_string())),
+            }],
+            index: "0".to_string(),
+        };
+
+        let result: DateTime<Utc> = FetchValue::fetch(&row, "updated_at").unwrap();
+        assert_eq!(result.format("%Y-%m-%d %H:%M:%S").to_string(), "2024-01-15 10:30:45");
+    }
+
+    #[test]
+    fn fetch_datetime_invalid_format() {
+        let row = Row {
+            fields: vec![Field {
+                name: "bad_date".to_string(),
+                value: DataType::Timestamp(Some("not a valid date".to_string())),
+            }],
+            index: "0".to_string(),
+        };
+
+        let result: Result<DateTime<Utc>> = FetchValue::fetch(&row, "bad_date");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("unsupported timestamp"));
+    }
+
+    #[test]
+    fn fetch_optional_datetime() {
+        let row = Row {
+            fields: vec![Field {
+                name: "deleted_at".to_string(),
+                value: DataType::Timestamp(None),
+            }],
+            index: "0".to_string(),
+        };
+
+        let result: Option<DateTime<Utc>> = FetchValue::fetch(&row, "deleted_at").unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn value_to_wasi_bool() {
+        use sea_query::Value;
+
+        let val = value_to_wasi_datatype(Value::Bool(Some(true))).unwrap();
+        assert!(matches!(val, DataType::Boolean(Some(true))));
+    }
+
+    #[test]
+    fn value_to_wasi_integers() {
+        use sea_query::Value;
+
+        let val_int = value_to_wasi_datatype(Value::Int(Some(42))).unwrap();
+        let val_bigint = value_to_wasi_datatype(Value::BigInt(Some(999))).unwrap();
+
+        assert!(matches!(val_int, DataType::Int32(Some(42))));
+        assert!(matches!(val_bigint, DataType::Int64(Some(999))));
+    }
+
+    #[test]
+    fn value_to_wasi_string() {
+        use sea_query::Value;
+
+        let val =
+            value_to_wasi_datatype(Value::String(Some(Box::new("test".to_string())))).unwrap();
+
+        if let DataType::Str(Some(s)) = &val {
+            assert_eq!(s, "test");
+        } else {
+            panic!("Expected string");
+        }
+    }
+
+    #[test]
+    fn check_is_null() {
+        assert!(is_null(&DataType::Str(None)));
+        assert!(is_null(&DataType::Int64(None)));
+        assert!(is_null(&DataType::Boolean(None)));
+        assert!(is_null(&DataType::Date(None)));
+        assert!(is_null(&DataType::Time(None)));
+        assert!(is_null(&DataType::Timestamp(None)));
+        assert!(!is_null(&DataType::Str(Some("test".to_string()))));
     }
 }

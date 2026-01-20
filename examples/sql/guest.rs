@@ -10,7 +10,6 @@
 //! - Preparing parameterized SQL statements
 //! - Executing SELECT queries with JOINs
 //! - Executing INSERT/UPDATE/DELETE commands
-//! - Foreign key relationships
 //! - Converting results to JSON
 //!
 //! ## Security
@@ -84,6 +83,8 @@ async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> HttpResult<Json<
         .await
         .context("failed to fetch max agency_id")?;
 
+    // Not worried about concurrency issue here as one request will fail. Moreover, this
+    // is an example. Ideally, this will be handled in a more idiomatic way.
     let next_id = agencies.first().map(|a| a.agency_id + 1).unwrap_or(1);
 
     let agency = Agency {
@@ -221,6 +222,8 @@ async fn create_feed(
         .await
         .context("failed to fetch max feed_id")?;
 
+    // Not worried about concurrency issue here as one request will fail. Moreover, this
+    // is an example. Ideally, this will be handled in a more idiomatic way.
     let next_id = feeds.first().map(|f| f.feed_id + 1).unwrap_or(1);
 
     let feed = Feed {
@@ -283,6 +286,8 @@ async fn delete_feed(Path(id): Path<i64>) -> HttpResult<Json<Value>> {
     Ok(Json(json!({ "message": "feed deleted", "feed_id": id })))
 }
 
+/// Create the schema. This has to be called from each request handler since each request
+/// is handled by a new guest instance. This is a minor overhead from an example perspective.
 async fn ensure_schema() -> Result<()> {
     let pool = Connection::open("db".to_string())
         .await

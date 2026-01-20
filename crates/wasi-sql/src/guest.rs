@@ -16,7 +16,7 @@ mod generated {
 
 pub mod orm;
 
-// Re-exports for ``entity`` macro use only. This is needed to avoid leaking ``SeqQuery`` value
+// Re-exports for ``entity`` macro use only. This is needed to avoid leaking ``SeaQuery`` value
 // types into guest code
 #[doc(hidden)]
 pub mod __private {

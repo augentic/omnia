@@ -26,7 +26,7 @@
 //! ## CRUD Operations
 //!
 //! ```ignore
-//! use crate::orm::{SelectBuilder, InsertBuilder, UpdateBuilder, DeleteBuilder, Filter};
+//! use qwasr_wasi_sql::orm::{SelectBuilder, InsertBuilder, UpdateBuilder, DeleteBuilder, Filter};
 //!
 //! // Select with filter
 //! let posts = SelectBuilder::<Post>::new()
@@ -68,7 +68,7 @@
 //! ## Joins
 //!
 //! ```ignore
-//! use crate::orm::Join;
+//! use qwasr_wasi_sql::orm::Join;
 //!
 //! // Entity with default joins and column aliasing
 //! entity! {
@@ -192,10 +192,10 @@ pub trait TableStore: Send + Sync {
     ///
     /// Returns an error if the connection fails, statement preparation fails, or query execution fails.
     fn query(
-        &self, pool_name: String, query: String, params: Vec<DataType>,
+        &self, cnn_name: String, query: String, params: Vec<DataType>,
     ) -> FutureResult<Vec<Row>> {
         async {
-            let cnn = Connection::open(pool_name)
+            let cnn = Connection::open(cnn_name)
                 .await
                 .map_err(|e| anyhow!("failed to open connection: {}", e.trace()))?;
 
@@ -217,9 +217,9 @@ pub trait TableStore: Send + Sync {
     /// # Errors
     ///
     /// Returns an error if the connection fails, statement preparation fails, or execution fails.
-    fn exec(&self, pool_name: String, query: String, params: Vec<DataType>) -> FutureResult<u32> {
+    fn exec(&self, cnn_name: String, query: String, params: Vec<DataType>) -> FutureResult<u32> {
         async {
-            let cnn = Connection::open(pool_name)
+            let cnn = Connection::open(cnn_name)
                 .await
                 .map_err(|e| anyhow!("failed to open connection: {}", e.trace()))?;
 

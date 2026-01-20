@@ -19,7 +19,7 @@ Comprehensive guide to using the ORM layer with examples covering implemented fe
 ### Basic Entity
 
 ```rust
-use crate::orm::{Entity, FetchValue};
+use qwasr_wasi_sql::orm::{Entity, FetchValue};
 use chrono::{DateTime, Utc};
 
 entity! {
@@ -39,7 +39,7 @@ entity! {
 ### Entity with Default Joins
 
 ```rust
-use crate::orm::Join;
+use qwasr_wasi_sql::orm::Join;
 
 entity! {
     table = "posts",
@@ -117,7 +117,7 @@ entity! {
 ### Select All
 
 ```rust
-use crate::orm::SelectBuilder;
+use qwasr_wasi_sql::orm::SelectBuilder;
 
 let posts = SelectBuilder::<Post>::new()
     .fetch(provider, "db").await?;
@@ -138,7 +138,7 @@ let published_posts = SelectBuilder::<Post>::new()
 ### Insert
 
 ```rust
-use crate::orm::InsertBuilder;
+use qwasr_wasi_sql::orm::InsertBuilder;
 
 // Basic insert
 InsertBuilder::<Post>::new()
@@ -163,7 +163,7 @@ InsertBuilder::<Post>::from_entity(&post).build()?;
 ### Update
 
 ```rust
-use crate::orm::UpdateBuilder;
+use qwasr_wasi_sql::orm::UpdateBuilder;
 
 UpdateBuilder::<Post>::new()
     .set("title", "Updated Title")
@@ -175,7 +175,7 @@ UpdateBuilder::<Post>::new()
 ### Delete
 
 ```rust
-use crate::orm::DeleteBuilder;
+use qwasr_wasi_sql::orm::DeleteBuilder;
 
 DeleteBuilder::<Post>::new()
     .where(Filter::eq("id", 123))
@@ -482,7 +482,7 @@ SelectBuilder::<Post>::new()
 ### Implementing FetchValue for Custom Types
 
 ```rust
-use crate::orm::FetchValue;
+use qwasr_wasi_sql::orm::FetchValue;
 use wasi_sql::types::{DataType, Row};
 
 // Custom newtype

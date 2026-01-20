@@ -41,7 +41,7 @@ impl TableRefBuilder for OrmQueryBuilder {}
 
 impl OperLeftAssocDecider for OrmQueryBuilder {
     fn well_known_left_associative(&self, op: &BinOper) -> bool {
-        // Copied from seq-query 0.32.7 backend/query_builder.rs `common_well_known_left_associative`
+        // Copied from sea-query 0.32.7 backend/query_builder.rs `common_well_known_left_associative`
         matches!(
             op,
             BinOper::And | BinOper::Or | BinOper::Add | BinOper::Sub | BinOper::Mul | BinOper::Mod
@@ -53,7 +53,7 @@ impl PrecedenceDecider for OrmQueryBuilder {
     fn inner_expr_well_known_greater_precedence(
         &self, _inner: &SimpleExpr, _outer_oper: &Oper,
     ) -> bool {
-        // Conservative approach that forces paranthesis
+        // Conservative approach that forces parentheses
         false
     }
 }
