@@ -10,7 +10,7 @@ homepage = "https://augentic.io"
 keywords = ["runtime", "wasi", "wasm"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/augentic/qwasr"
-rust-version = "1.92"
+rust-version = "1.93"
 version = "0.27.0"
 
 [workspace.lints.rust]
