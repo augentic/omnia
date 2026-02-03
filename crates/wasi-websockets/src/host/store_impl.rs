@@ -47,7 +47,7 @@ impl HostServerWithStore for WasiWebSockets {
         ws_server.health_check().await
     }
 
-    fn drop<T>(_: Access<'_, T, Self>, _r: Resource<ServerProxy>) -> Result<()> {
+    fn drop<T>(_: Access<'_, T, Self>, _r: Resource<ServerProxy>) -> wasmtime::Result<()> {
         Ok(())
     }
 }

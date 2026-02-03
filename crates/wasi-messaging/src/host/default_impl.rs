@@ -62,7 +62,7 @@ impl WasiMessagingCtx for MessagingDefault {
         async move { Ok(Arc::new(client) as Arc<dyn Client>) }.boxed()
     }
 
-    fn new_message(&self, data: Vec<u8>) -> anyhow::Result<Arc<dyn Message>> {
+    fn new_message(&self, data: Vec<u8>) -> Result<Arc<dyn Message>> {
         tracing::debug!("creating new message");
         let message = InMemMessage::from(data);
         Ok(Arc::new(message) as Arc<dyn Message>)
@@ -70,11 +70,11 @@ impl WasiMessagingCtx for MessagingDefault {
 
     fn set_content_type(
         &self, message: Arc<dyn Message>, content_type: String,
-    ) -> anyhow::Result<Arc<dyn Message>> {
+    ) -> Result<Arc<dyn Message>> {
         tracing::debug!("setting content-type: {}", content_type);
 
         let Some(inmem) = message.as_any().downcast_ref::<InMemMessage>() else {
-            anyhow::bail!("invalid message type");
+            return Err(wasmtime::Error::msg("invalid message type").into());
         };
 
         let mut updated = inmem.clone();
@@ -85,13 +85,11 @@ impl WasiMessagingCtx for MessagingDefault {
         Ok(Arc::new(updated) as Arc<dyn Message>)
     }
 
-    fn set_payload(
-        &self, message: Arc<dyn Message>, data: Vec<u8>,
-    ) -> anyhow::Result<Arc<dyn Message>> {
+    fn set_payload(&self, message: Arc<dyn Message>, data: Vec<u8>) -> Result<Arc<dyn Message>> {
         tracing::debug!("setting payload");
 
         let Some(inmem) = message.as_any().downcast_ref::<InMemMessage>() else {
-            anyhow::bail!("invalid message type");
+            return Err(wasmtime::Error::msg("invalid message type").into());
         };
 
         let mut updated = inmem.clone();
@@ -102,11 +100,11 @@ impl WasiMessagingCtx for MessagingDefault {
 
     fn add_metadata(
         &self, message: Arc<dyn Message>, key: String, value: String,
-    ) -> anyhow::Result<Arc<dyn Message>> {
+    ) -> Result<Arc<dyn Message>> {
         tracing::debug!("adding metadata: {key} = {value}");
 
         let Some(inmem) = message.as_any().downcast_ref::<InMemMessage>() else {
-            anyhow::bail!("invalid message type");
+            return Err(wasmtime::Error::msg("invalid message type").into());
         };
 
         let mut updated = inmem.clone();
@@ -119,11 +117,11 @@ impl WasiMessagingCtx for MessagingDefault {
 
     fn set_metadata(
         &self, message: Arc<dyn Message>, metadata: Metadata,
-    ) -> anyhow::Result<Arc<dyn Message>> {
+    ) -> Result<Arc<dyn Message>> {
         tracing::debug!("setting all metadata");
 
         let Some(inmem) = message.as_any().downcast_ref::<InMemMessage>() else {
-            anyhow::bail!("invalid message type");
+            return Err(wasmtime::Error::msg("invalid message type").into());
         };
 
         let mut updated = inmem.clone();
@@ -132,13 +130,11 @@ impl WasiMessagingCtx for MessagingDefault {
         Ok(Arc::new(updated) as Arc<dyn Message>)
     }
 
-    fn remove_metadata(
-        &self, message: Arc<dyn Message>, key: String,
-    ) -> anyhow::Result<Arc<dyn Message>> {
+    fn remove_metadata(&self, message: Arc<dyn Message>, key: String) -> Result<Arc<dyn Message>> {
         tracing::debug!("removing metadata: {}", key);
 
         let Some(inmem) = message.as_any().downcast_ref::<InMemMessage>() else {
-            anyhow::bail!("invalid message type");
+            return Err(wasmtime::Error::msg("invalid message type").into());
         };
 
         let mut updated = inmem.clone();

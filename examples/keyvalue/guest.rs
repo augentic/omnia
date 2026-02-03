@@ -26,7 +26,7 @@ use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
 
 struct Http;
-wasip3::http::proxy::export!(Http);
+wasip3::http::service::export!(Http);
 
 impl Guest for Http {
     /// Routes incoming HTTP requests to the key-value handler.

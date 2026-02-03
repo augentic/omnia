@@ -27,7 +27,7 @@ use wit_bindgen::block_on;
 const SCOPE: &str = "https://management.azure.com/.default";
 
 struct Http;
-wasip3::http::proxy::export!(Http);
+wasip3::http::service::export!(Http);
 
 impl Guest for Http {
     /// Routes incoming requests to the identity handler.

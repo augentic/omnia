@@ -6,9 +6,7 @@ use crate::host::generated::wasi::identity::credentials::{
 };
 use crate::host::generated::wasi::identity::types::Error;
 use crate::host::resource::IdentityProxy;
-use crate::host::{WasiIdentity, WasiIdentityCtxView};
-
-pub type Result<T, E = Error> = anyhow::Result<T, E>;
+use crate::host::{Result, WasiIdentity, WasiIdentityCtxView};
 
 impl HostWithStore for WasiIdentity {
     async fn get_identity<T>(
@@ -31,7 +29,7 @@ impl HostIdentityWithStore for WasiIdentity {
 
     fn drop<T>(
         mut accessor: Access<'_, T, Self>, rep: Resource<IdentityProxy>,
-    ) -> anyhow::Result<()> {
+    ) -> wasmtime::Result<()> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
@@ -42,10 +40,8 @@ impl HostIdentity for WasiIdentityCtxView<'_> {}
 pub fn get_identity<T>(
     accessor: &Accessor<T, WasiIdentity>, self_: &Resource<IdentityProxy>,
 ) -> Result<IdentityProxy> {
-    accessor.with(|mut store| {
-        let identity = store.get().table.get(self_).map_err(|_e| Error::NoSuchIdentity)?;
-        Ok::<_, Error>(identity.clone())
-    })
+    accessor
+        .with(|mut store| store.get().table.get(self_).cloned().map_err(|_e| Error::NoSuchIdentity))
 }
 
 impl From<anyhow::Error> for Error {

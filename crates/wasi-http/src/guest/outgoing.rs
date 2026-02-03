@@ -2,18 +2,15 @@ use std::any::Any;
 use std::error::Error;
 
 use anyhow::{Context, Result};
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use http::HeaderValue;
-use http::header::{CONTENT_LENGTH, ETAG};
+use http::header::ETAG;
 use http_body::Body;
-use wasip3::http::handler;
+use wasip3::http::client;
 use wasip3::http_compat::{IncomingMessage, http_from_wasi_response, http_into_wasi_request};
-use wasip3::wit_bindgen::StreamResult;
 use wasip3::wit_future;
 
 pub use crate::guest::cache::{Cache, CacheOptions};
-
-const CHUNK_SIZE: usize = 2048;
 
 /// Send an HTTP request using the WASI HTTP proxy handler.
 ///
@@ -39,38 +36,23 @@ where
     // forward to `wasmtime-wasi-http` outbound proxy
     tracing::debug!("forwarding request to proxy: {:?}", request.headers());
     let wasi_req = http_into_wasi_request(request).context("Issue converting request")?;
-    let wasi_resp = handler::handle(wasi_req).await.context("Issue calling proxy")?;
+    let wasi_resp = client::send(wasi_req).await.context("Issue calling proxy")?;
     let http_resp = http_from_wasi_response(wasi_resp).context("Issue converting response")?;
 
     // convert wasi response to http response
     let (parts, mut body) = http_resp.into_parts();
 
     // read body
-    let mut body_buf = BytesMut::new();
-    if let Some(len) = parts.headers.get(CONTENT_LENGTH)
-        && let Ok(cl) = len.to_str()
-    {
-        let len = cl.parse::<usize>().unwrap_or(0);
-        body_buf.reserve(len);
-    }
-
-    if let Some(response) = body.take_unstarted() {
+    let bytes: Vec<u8> = if let Some(response) = body.take_unstarted() {
         let (_, body_rx) = wit_future::new(|| Ok(()));
-        let (mut stream, _trailers) = response.consume_body(body_rx);
+        let (stream, _trailers) = response.consume_body(body_rx);
 
-        loop {
-            let read_buf = Vec::with_capacity(CHUNK_SIZE);
-            let (result, read) = stream.read(read_buf).await;
-            body_buf.extend_from_slice(&read);
+        stream.collect().await
+    } else {
+        vec![]
+    };
 
-            let StreamResult::Complete(_) = result else {
-                tracing::debug!("body read cancelled or dropped");
-                break;
-            };
-        }
-    }
-
-    let mut response = http::Response::from_parts(parts, body_buf.into());
+    let mut response = http::Response::from_parts(parts, bytes.into());
 
     // cache response when indicated by `Cache-Control` header
     if let Some(cache) = maybe_cache {

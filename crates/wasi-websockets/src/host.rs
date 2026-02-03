@@ -53,7 +53,7 @@ where
     T: WebSocketsView + 'static,
 {
     fn add_to_linker(linker: &mut Linker<T>) -> Result<()> {
-        store::add_to_linker::<_, Self>(linker, T::websockets)
+        Ok(store::add_to_linker::<_, Self>(linker, T::websockets)?)
     }
 }
 
@@ -97,7 +97,7 @@ pub trait WebSocketsCtx: Debug + Send + Sync + 'static {
 }
 
 impl generated_types::Host for WasiWebSocketsCtxView<'_> {
-    fn convert_error(&mut self, err: anyhow::Error) -> Result<String> {
+    fn convert_error(&mut self, err: anyhow::Error) -> wasmtime::Result<String> {
         Ok(err.to_string())
     }
 }

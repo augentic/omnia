@@ -46,8 +46,8 @@ impl HostWithStore for WasiKeyValue {
     /// returns an error if the CAS operation failed.
     async fn swap<T>(
         _store: &Accessor<T, Self>, _self_: Resource<Cas>, _value: Vec<u8>,
-    ) -> anyhow::Result<Result<(), CasError>> {
-        Err(anyhow!("not implemented"))
+    ) -> anyhow::Result<Result<(), CasError>, wasmtime::Error> {
+        Err(wasmtime::Error::msg("not implemented"))
     }
 }
 
@@ -75,7 +75,7 @@ impl HostCasWithStore for WasiKeyValue {
     }
 
     /// Drop the CAS handle.
-    fn drop<T>(mut accessor: Access<'_, T, Self>, rep: Resource<Cas>) -> anyhow::Result<()> {
+    fn drop<T>(mut accessor: Access<'_, T, Self>, rep: Resource<Cas>) -> wasmtime::Result<()> {
         tracing::trace!("atomics::HostCas::drop");
         Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }

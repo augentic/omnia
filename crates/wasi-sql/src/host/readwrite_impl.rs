@@ -10,9 +10,9 @@ use crate::host::{WasiSql, WasiSqlCtxView};
 impl HostWithStore for WasiSql {
     async fn query<T>(
         accessor: &Accessor<T, Self>, c: Resource<Connection>, q: Resource<Statement>,
-    ) -> Result<Result<Vec<Row>, Resource<Error>>> {
-        let connection = get_connection(accessor, &c)?;
-        let statement = get_statement(accessor, &q)?;
+    ) -> wasmtime::Result<Result<Vec<Row>, Resource<Error>>> {
+        let connection = get_connection(accessor, &c).map_err(wasmtime::Error::from_anyhow)?;
+        let statement = get_statement(accessor, &q).map_err(wasmtime::Error::from_anyhow)?;
 
         // get statement from resource table
         let (query, params) = (statement.query.clone(), statement.params.clone());
@@ -28,9 +28,9 @@ impl HostWithStore for WasiSql {
 
     async fn exec<T>(
         accessor: &Accessor<T, Self>, c: Resource<Connection>, q: Resource<Statement>,
-    ) -> Result<Result<u32, Resource<Error>>> {
-        let connection = get_connection(accessor, &c)?;
-        let statement = get_statement(accessor, &q)?;
+    ) -> wasmtime::Result<Result<u32, Resource<Error>>> {
+        let connection = get_connection(accessor, &c).map_err(wasmtime::Error::from_anyhow)?;
+        let statement = get_statement(accessor, &q).map_err(wasmtime::Error::from_anyhow)?;
 
         // get statement from resource table
         let (query, params) = (statement.query.clone(), statement.params.clone());

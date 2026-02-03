@@ -23,6 +23,7 @@ mod generated {
         trappable_error_type: {
             "wasi:keyvalue/store.error" => Error,
         },
+
     });
 }
 
@@ -39,7 +40,7 @@ use self::generated::wasi::keyvalue::store::Error;
 use self::generated::wasi::keyvalue::{atomics, batch, store};
 pub use self::resource::*;
 
-/// Result type for Key-Value operations.
+/// Result type for key-value operations.
 pub type Result<T, E = Error> = anyhow::Result<T, E>;
 
 /// Host-side service for `wasi:keyvalue`.
@@ -57,7 +58,7 @@ where
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
         store::add_to_linker::<_, Self>(linker, T::keyvalue)?;
         atomics::add_to_linker::<_, Self>(linker, T::keyvalue)?;
-        batch::add_to_linker::<_, Self>(linker, T::keyvalue)
+        Ok(batch::add_to_linker::<_, Self>(linker, T::keyvalue)?)
     }
 }
 

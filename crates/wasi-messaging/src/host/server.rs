@@ -77,7 +77,12 @@ where
         store
             .run_concurrent(async |store| {
                 let guest = messaging.wasi_messaging_incoming_handler();
-                guest.call_handle(store, msg_res).await.map(|_| ()).context("issue sending message")
+                guest
+                    .call_handle(store, msg_res)
+                    .await
+                    .map(|_| ())
+                    .map_err(anyhow::Error::from)
+                    .context("issue sending message")
             })
             .instrument(debug_span!("messaging-handle"))
             .await?

@@ -40,7 +40,7 @@ use wasip3::http::types::{ErrorCode, Request, Response};
 // ----------------------------------------------------------------------------
 
 pub struct Http;
-wasip3::http::proxy::export!(Http);
+wasip3::http::service::export!(Http);
 
 impl Guest for Http {
     /// Routes HTTP requests to messaging operations.

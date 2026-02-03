@@ -3,7 +3,7 @@
 use std::env;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 use qwasr_otel::Telemetry;
 use tracing::instrument;
 use wasmtime::component::{Component, InstancePre, Linker};
@@ -25,7 +25,6 @@ pub fn create<T: WasiView + 'static>(wasm: &PathBuf) -> Result<Compiled<T>> {
     tracing::info!("initializing runtime");
 
     let mut config = Config::new();
-    config.async_support(true);
     config.wasm_component_model_async(true);
     let engine = Engine::new(&config)?;
 
@@ -39,7 +38,9 @@ pub fn create<T: WasiView + 'static>(wasm: &PathBuf) -> Result<Compiled<T>> {
         if cfg!(feature = "jit") {
             Component::from_file(&engine, wasm)
         } else {
-            Err(anyhow!("Issue loading component: {e}. Enable `jit` feature to load wasm32 files."))
+            Err(wasmtime::Error::msg(format!(
+                "Issue loading component: {e}. Enable `jit` feature to load wasm32 files."
+            )))
         }
     })?;
 
@@ -75,7 +76,7 @@ impl<T: WasiView> Compiled<T> {
     ///
     /// Will fail if the component cannot be pre-instantiated.
     pub fn pre_instantiate(&mut self) -> Result<InstancePre<T>> {
-        self.linker.instantiate_pre(&self.component)
+        self.linker.instantiate_pre(&self.component).map_err(anyhow::Error::from)
     }
 }
 

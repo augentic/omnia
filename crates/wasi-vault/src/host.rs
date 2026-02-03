@@ -36,7 +36,11 @@ use wasmtime_wasi::ResourceTable;
 
 use self::generated::wasi::vault::vault;
 pub use crate::host::default_impl::VaultDefault;
+use crate::host::generated::Error;
 pub use crate::host::resource::*;
+
+/// Result type for  vault operations.
+pub type Result<T, E = Error> = anyhow::Result<T, E>;
 
 /// Host-side service for `wasi:vault`.
 #[derive(Debug)]
@@ -51,7 +55,7 @@ where
     T: WasiVaultView + 'static,
 {
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        vault::add_to_linker::<_, Self>(linker, T::vault)
+        Ok(vault::add_to_linker::<_, Self>(linker, T::vault)?)
     }
 }
 

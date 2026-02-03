@@ -20,7 +20,7 @@ where
     T: WasiHttpView + 'static,
 {
     fn add_to_linker(linker: &mut Linker<T>) -> Result<()> {
-        wasmtime_wasi_http::p3::add_to_linker(linker)
+        Ok(wasmtime_wasi_http::p3::add_to_linker(linker)?)
     }
 }
 

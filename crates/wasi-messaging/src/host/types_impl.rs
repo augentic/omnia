@@ -24,7 +24,7 @@ impl HostClientWithStore for WasiMessaging {
 
     fn drop<T>(
         mut accessor: Access<'_, T, Self>, rep: Resource<ClientProxy>,
-    ) -> anyhow::Result<()> {
+    ) -> wasmtime::Result<()> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
@@ -33,8 +33,8 @@ impl HostMessageWithStore for WasiMessaging {
     /// Create a new message with the given payload.
     fn new<T>(
         mut host: Access<'_, T, Self>, data: Vec<u8>,
-    ) -> anyhow::Result<Resource<MessageProxy>> {
-        let message = host.get().ctx.new_message(data)?;
+    ) -> wasmtime::Result<Resource<MessageProxy>> {
+        let message = host.get().ctx.new_message(data).map_err(wasmtime::Error::from_anyhow)?;
         let proxy = MessageProxy(message);
         Ok(host.get().table.push(proxy)?)
     }
@@ -42,7 +42,7 @@ impl HostMessageWithStore for WasiMessaging {
     /// The topic/subject/channel this message was received on, if any.
     fn topic<T>(
         mut host: Access<'_, T, Self>, self_: Resource<MessageProxy>,
-    ) -> anyhow::Result<Option<Topic>> {
+    ) -> wasmtime::Result<Option<Topic>> {
         let message = host.get().table.get(&self_)?;
         let topic = message.topic();
         if topic.is_empty() { Ok(None) } else { Ok(Some(topic)) }
@@ -52,7 +52,7 @@ impl HostMessageWithStore for WasiMessaging {
     /// message. This is sometimes described as the "format" type".
     fn content_type<T>(
         mut host: Access<'_, T, Self>, self_: Resource<MessageProxy>,
-    ) -> anyhow::Result<Option<String>> {
+    ) -> wasmtime::Result<Option<String>> {
         let message = host.get().table.get(&self_)?;
         if let Some(md) = message.metadata() {
             if let Some(content_type) = md.get("content-type") {
@@ -67,10 +67,13 @@ impl HostMessageWithStore for WasiMessaging {
     /// This is sometimes described as the "format" type.
     fn set_content_type<T>(
         mut host: Access<'_, T, Self>, self_: Resource<MessageProxy>, content_type: String,
-    ) -> anyhow::Result<()> {
+    ) -> wasmtime::Result<()> {
         let store = host.get();
         let message = store.table.get(&self_)?;
-        let updated_message = store.ctx.set_content_type(Arc::clone(&message.0), content_type)?;
+        let updated_message = store
+            .ctx
+            .set_content_type(Arc::clone(&message.0), content_type)
+            .map_err(wasmtime::Error::from_anyhow)?;
         store.table.push(updated_message)?;
         Ok(())
     }
@@ -78,7 +81,7 @@ impl HostMessageWithStore for WasiMessaging {
     /// An opaque blob of data.
     fn data<T>(
         mut host: Access<'_, T, Self>, self_: Resource<MessageProxy>,
-    ) -> anyhow::Result<Vec<u8>> {
+    ) -> wasmtime::Result<Vec<u8>> {
         let message = host.get().table.get(&self_)?;
         Ok(message.payload())
     }
@@ -86,10 +89,13 @@ impl HostMessageWithStore for WasiMessaging {
     /// Set the opaque blob of data for this message, discarding the old value.
     fn set_data<T>(
         mut host: Access<'_, T, Self>, self_: Resource<MessageProxy>, data: Vec<u8>,
-    ) -> anyhow::Result<()> {
+    ) -> wasmtime::Result<()> {
         let store = host.get();
         let message = store.table.get(&self_)?;
-        let updated_message = store.ctx.set_payload(Arc::clone(&message.0), data)?;
+        let updated_message = store
+            .ctx
+            .set_payload(Arc::clone(&message.0), data)
+            .map_err(wasmtime::Error::from_anyhow)?;
         store.table.push(updated_message)?;
         Ok(())
     }
@@ -97,7 +103,7 @@ impl HostMessageWithStore for WasiMessaging {
     /// Get the metadata associated with this message.    
     fn metadata<T>(
         mut host: Access<'_, T, Self>, self_: Resource<MessageProxy>,
-    ) -> anyhow::Result<Option<types::Metadata>> {
+    ) -> wasmtime::Result<Option<types::Metadata>> {
         let message = host.get().table.get(&self_)?;
         if let Some(md) = message.metadata() {
             return Ok(Some(md.into()));
@@ -108,10 +114,13 @@ impl HostMessageWithStore for WasiMessaging {
     /// Append a key-value pair to the metadata of this message.
     fn add_metadata<T>(
         mut host: Access<'_, T, Self>, self_: Resource<MessageProxy>, key: String, value: String,
-    ) -> anyhow::Result<()> {
+    ) -> wasmtime::Result<()> {
         let store = host.get();
         let message = store.table.get(&self_)?;
-        let updated_message = store.ctx.add_metadata(Arc::clone(&message.0), key, value)?;
+        let updated_message = store
+            .ctx
+            .add_metadata(Arc::clone(&message.0), key, value)
+            .map_err(wasmtime::Error::from_anyhow)?;
         store.table.push(updated_message)?;
         Ok(())
     }
@@ -119,10 +128,13 @@ impl HostMessageWithStore for WasiMessaging {
     /// Set all the metadata on this message, replacing any existing metadata.
     fn set_metadata<T>(
         mut host: Access<'_, T, Self>, self_: Resource<MessageProxy>, meta: types::Metadata,
-    ) -> anyhow::Result<()> {
+    ) -> wasmtime::Result<()> {
         let store = host.get();
         let message = store.table.get(&self_)?;
-        let updated_message = store.ctx.set_metadata(Arc::clone(&message.0), meta.into())?;
+        let updated_message = store
+            .ctx
+            .set_metadata(Arc::clone(&message.0), meta.into())
+            .map_err(wasmtime::Error::from_anyhow)?;
         store.table.push(updated_message)?;
         Ok(())
     }
@@ -130,23 +142,26 @@ impl HostMessageWithStore for WasiMessaging {
     /// Remove a key-value pair from the metadata of a message.
     fn remove_metadata<T>(
         mut host: Access<'_, T, Self>, self_: Resource<MessageProxy>, key: String,
-    ) -> anyhow::Result<()> {
+    ) -> wasmtime::Result<()> {
         let store = host.get();
         let message = store.table.get(&self_)?;
-        let updated_message = store.ctx.remove_metadata(Arc::clone(&message.0), key)?;
+        let updated_message = store
+            .ctx
+            .remove_metadata(Arc::clone(&message.0), key)
+            .map_err(wasmtime::Error::from_anyhow)?;
         store.table.push(updated_message)?;
         Ok(())
     }
 
     fn drop<T>(
         mut accessor: Access<'_, T, Self>, rep: Resource<MessageProxy>,
-    ) -> anyhow::Result<()> {
+    ) -> wasmtime::Result<()> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
 
 impl Host for WasiMessagingCtxView<'_> {
-    fn convert_error(&mut self, err: Error) -> anyhow::Result<Error> {
+    fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }
 }
@@ -169,4 +184,10 @@ pub fn get_message<T>(
         let message = store.get().table.get(self_)?;
         Ok::<_, Error>(message.clone())
     })
+}
+
+impl From<wasmtime::Error> for Error {
+    fn from(err: wasmtime::Error) -> Self {
+        Self::Other(err.to_string())
+    }
 }

@@ -9,6 +9,8 @@ mod types_impl;
 mod generated {
     #![allow(missing_docs)]
 
+    pub type Error = String;
+
     pub use super::{ContainerProxy, IncomingValue, OutgoingValue, StreamObjectNames};
 
     wasmtime::component::bindgen!({
@@ -25,7 +27,7 @@ mod generated {
             "wasi:blobstore/container.stream-object-names": StreamObjectNames,
         },
         trappable_error_type: {
-            "wasi:blobstore/types.error" => anyhow::Error,
+            "wasi:blobstore/types.error" => Error,
         },
     });
 }
@@ -33,7 +35,6 @@ mod generated {
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use anyhow::Result;
 use bytes::Bytes;
 pub use qwasr::FutureResult;
 use qwasr::{Host, Server, State};
@@ -43,6 +44,7 @@ use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 
 pub use self::default_impl::BlobstoreDefault;
 pub use self::generated::wasi::blobstore::container::{ContainerMetadata, ObjectMetadata};
+pub use self::generated::wasi::blobstore::types::Error;
 use self::generated::wasi::blobstore::{blobstore, container, types};
 
 /// Incoming value for a blobstore operation.
@@ -51,6 +53,9 @@ pub type IncomingValue = Bytes;
 pub type OutgoingValue = MemoryOutputPipe;
 /// Stream of object names.
 pub type StreamObjectNames = Vec<String>;
+
+/// Result type for blobstore operations.
+pub type Result<T> = anyhow::Result<T, Error>;
 
 /// Host-side service for `wasi:blobstore`.
 #[derive(Debug)]
@@ -64,10 +69,10 @@ impl<T> Host<T> for WasiBlobstore
 where
     T: WasiBlobstoreView + 'static,
 {
-    fn add_to_linker(linker: &mut Linker<T>) -> Result<()> {
+    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
         blobstore::add_to_linker::<_, Self>(linker, T::blobstore)?;
         container::add_to_linker::<_, Self>(linker, T::blobstore)?;
-        types::add_to_linker::<_, Self>(linker, T::blobstore)
+        Ok(types::add_to_linker::<_, Self>(linker, T::blobstore)?)
     }
 }
 

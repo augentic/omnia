@@ -28,7 +28,6 @@ pub fn compile(wasm: &PathBuf, output: Option<PathBuf>) -> Result<()> {
 
     // compile component
     let mut config = Config::new();
-    config.async_support(true);
     config.wasm_component_model_async(true);
     let engine = Engine::new(&config)?;
     let component = Component::from_file(&engine, wasm)?;

@@ -47,7 +47,7 @@ where
         tracing::add_to_linker::<_, Self>(linker, T::otel)?;
         metrics::add_to_linker::<_, Self>(linker, T::otel)?;
         types::add_to_linker::<_, Self>(linker, T::otel)?;
-        resource::add_to_linker::<_, Self>(linker, T::otel)
+        Ok(resource::add_to_linker::<_, Self>(linker, T::otel)?)
     }
 }
 

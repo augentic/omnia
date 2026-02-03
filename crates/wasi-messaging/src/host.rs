@@ -66,7 +66,7 @@ where
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
         producer::add_to_linker::<_, Self>(linker, T::messaging)?;
         request_reply::add_to_linker::<_, Self>(linker, T::messaging)?;
-        types::add_to_linker::<_, Self>(linker, T::messaging)
+        Ok(types::add_to_linker::<_, Self>(linker, T::messaging)?)
     }
 }
 

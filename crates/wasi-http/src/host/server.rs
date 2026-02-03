@@ -22,7 +22,7 @@ use tracing::{Instrument, debug_span};
 use wasmtime::Store;
 use wasmtime_wasi_http::io::TokioIo;
 use wasmtime_wasi_http::p3::WasiHttpView;
-use wasmtime_wasi_http::p3::bindings::ProxyIndices;
+use wasmtime_wasi_http::p3::bindings::ServiceIndices;
 use wasmtime_wasi_http::p3::bindings::http::types::{self as wasi, ErrorCode};
 
 type OutgoingBody = UnsyncBoxBody<Bytes, anyhow::Error>;
@@ -62,8 +62,10 @@ where
                     service_fn(move |request| {
                         let handler = handler.clone();
                         async move {
-                            let response =
-                                handler.handle(request).await.unwrap_or_else(|_e| internal_error());
+                            let response = handler.handle(request).await.unwrap_or_else(|e| {
+                                tracing::error!("Error proxying request: {e}");
+                                internal_error()
+                            });
 
                             // track server error responses
                             if response.status() >= StatusCode::INTERNAL_SERVER_ERROR {
@@ -113,9 +115,9 @@ where
         let instance_pre = self.state.instance_pre();
         let store_data = self.state.store();
         let mut store = Store::new(instance_pre.engine(), store_data);
-        let indices = ProxyIndices::new(instance_pre)?;
+        let indices = ServiceIndices::new(instance_pre)?;
         let instance = instance_pre.instantiate_async(&mut store).await?;
-        let proxy = indices.load(&mut store, &instance)?;
+        let service = indices.load(&mut store, &instance)?;
 
         let (sender, receiver) = oneshot::channel();
 
@@ -129,7 +131,7 @@ where
                     let (request, io_result) = wasi::Request::from_http(http_req);
 
                     // forward request to guest
-                    let (wasi_resp, task) = proxy.handle(store, request).await??;
+                    let (wasi_resp, task) = service.handle(store, request).await??;
                     let http_resp =
                         store.with(|mut store| wasi_resp.into_http(&mut store, io_result))?;
                     _ = sender.send(http_resp);

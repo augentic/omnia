@@ -37,6 +37,10 @@ use wasmtime_wasi::ResourceTable;
 pub use self::default_impl::IdentityDefault;
 use self::generated::wasi::identity::credentials;
 pub use self::resource::*;
+use crate::host::generated::Error;
+
+/// Result type for identity operations.
+pub type Result<T> = anyhow::Result<T, Error>;
 
 /// Host-side service for `wasi:identity`.
 #[derive(Debug)]
@@ -51,7 +55,7 @@ where
     T: WasiIdentityView + 'static,
 {
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        credentials::add_to_linker::<_, Self>(linker, T::identity)
+        Ok(credentials::add_to_linker::<_, Self>(linker, T::identity)?)
     }
 }
 

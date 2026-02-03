@@ -58,7 +58,7 @@ where
 {
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
         readwrite::add_to_linker::<_, Self>(linker, T::sql)?;
-        types::add_to_linker::<_, Self>(linker, T::sql)
+        Ok(types::add_to_linker::<_, Self>(linker, T::sql)?)
     }
 }
 

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use futures::FutureExt;
 use parking_lot::RwLock;
 use qwasr::Backend;
@@ -67,7 +67,10 @@ impl WasiBlobstoreCtx for BlobstoreDefault {
         async move {
             let container = {
                 let store = store.read();
-                store.get(&name).cloned().ok_or_else(|| anyhow!("container not found: {name}"))?
+                store
+                    .get(&name)
+                    .cloned()
+                    .ok_or_else(|| wasmtime::Error::msg(format!("container not found: {name}")))?
             };
             Ok(Arc::new(container) as Arc<dyn Container>)
         }
@@ -118,11 +121,11 @@ impl InMemContainer {
 }
 
 impl Container for InMemContainer {
-    fn name(&self) -> anyhow::Result<String> {
+    fn name(&self) -> Result<String> {
         Ok(self.name.clone())
     }
 
-    fn info(&self) -> anyhow::Result<ContainerMetadata> {
+    fn info(&self) -> Result<ContainerMetadata> {
         let name = self.name.clone();
         let created_at = self.created_at;
 
@@ -209,7 +212,10 @@ impl Container for InMemContainer {
         async move {
             let size = {
                 let objects = objects.read();
-                objects.get(&name).ok_or_else(|| anyhow!("object not found: {name}"))?.len()
+                objects
+                    .get(&name)
+                    .ok_or_else(|| wasmtime::Error::msg(format!("object not found: {name}")))?
+                    .len()
             };
 
             Ok(ObjectMetadata {

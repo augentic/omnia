@@ -83,16 +83,17 @@ tower = "0.5.2"
 tracing = "0.1.44"
 tracing-opentelemetry = "0.32.0"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt"] }
-wasip3 = { version = "0.3.1", features = ["http-compat"] }
-wasmtime = { version = "40.0.1", default-features = false, features = [
+wasip3 = { version = "0.4.0", features = ["http-compat"] }
+wasmtime = { version = "42.0.0", default-features = false, features = [
+    "anyhow",
     "component-model-async",
     "parallel-compilation",
 ] }
-wasmtime-wasi = { version = "40.0.1", features = ["p3"] }
-wasmtime-wasi-config = "40.0.1"
-wasmtime-wasi-http = { version = "40.0.1", features = ["p3"] }
-wasmtime-wasi-io = "40.0.1"
-wit-bindgen = { version = "0.51.0", features = ["async-spawn"] }
+wasmtime-wasi = { version = "42.0.0", features = ["p3"] }
+wasmtime-wasi-config = "42.0.0"
+wasmtime-wasi-http = { version = "42.0.0", features = ["p3"] }
+wasmtime-wasi-io = "42.0.0"
+wit-bindgen = { version = "0.52.0", features = ["async-spawn"] }
 
 # interally referenced crates
 qwasr = { path = "crates/qwasr", version = "0.27.0", registry = "credibil" }
@@ -112,9 +113,6 @@ qwasr-wasi-sql = { path = "crates/wasi-sql", version = "0.27.0", registry = "cre
 qwasr-wasi-vault = { path = "crates/wasi-vault", version = "0.27.0", registry = "credibil" }
 qwasr-wasi-websockets = { path = "crates/wasi-websockets", version = "0.27.0", registry = "credibil" }
 
-[patch.crates-io]
-# wasmtime = { git = "https://github.com/bytecodealliance/wasmtime", branch = "release-40.0.1" }
-
 [profile.release]
 lto = true
 opt-level = "s"
@@ -125,3 +123,10 @@ strip = true
 
 # [package.metadata.cargo-machete]
 # ignored = ["openssl"]
+
+[patch.crates-io]
+wasmtime = { git = "https://github.com/bytecodealliance/wasmtime", branch = "main" }
+wasmtime-wasi = { git = "https://github.com/bytecodealliance/wasmtime", branch = "main" }
+wasmtime-wasi-config = { git = "https://github.com/bytecodealliance/wasmtime", branch = "main" }
+wasmtime-wasi-http = { git = "https://github.com/bytecodealliance/wasmtime", branch = "main" }
+wasmtime-wasi-io = { git = "https://github.com/bytecodealliance/wasmtime", branch = "main" }

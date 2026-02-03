@@ -6,7 +6,6 @@ mod default_impl;
 
 use std::fmt::Debug;
 
-use anyhow::Result;
 pub use default_impl::ConfigDefault;
 use qwasr::{Host, Server, State};
 use wasmtime::component::{HasData, Linker};
@@ -25,8 +24,8 @@ impl<T> Host<T> for WasiConfig
 where
     T: WasiConfigView + 'static,
 {
-    fn add_to_linker(linker: &mut Linker<T>) -> Result<()> {
-        wasmtime_wasi_config::add_to_linker(linker, T::config)
+    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
+        Ok(wasmtime_wasi_config::add_to_linker(linker, T::config)?)
     }
 }
 

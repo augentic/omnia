@@ -14,7 +14,7 @@ use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
 
 struct HttpGuest;
-wasip3::http::proxy::export!(HttpGuest);
+wasip3::http::service::export!(HttpGuest);
 
 impl Guest for HttpGuest {
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
