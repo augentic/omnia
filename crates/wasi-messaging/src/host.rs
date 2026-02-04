@@ -164,14 +164,23 @@ pub trait WasiMessagingCtx: Debug + Send + Sync + 'static {
     ) -> anyhow::Result<Arc<dyn Message>>;
 }
 
+/// `anyhow::Error` to `Error` mapping
+impl From<anyhow::Error> for Error {
+    fn from(err: anyhow::Error) -> Self {
+        Self::Other(err.to_string())
+    }
+}
+
+/// `ResourceTableError` to `Error` mapping
 impl From<ResourceTableError> for Error {
     fn from(err: ResourceTableError) -> Self {
         Self::Other(err.to_string())
     }
 }
 
-impl From<anyhow::Error> for Error {
-    fn from(err: anyhow::Error) -> Self {
+/// `wasmtime::Error` to `Error` mapping
+impl From<wasmtime::Error> for Error {
+    fn from(err: wasmtime::Error) -> Self {
         Self::Other(err.to_string())
     }
 }

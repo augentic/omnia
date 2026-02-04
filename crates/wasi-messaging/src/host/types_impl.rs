@@ -185,9 +185,3 @@ pub fn get_message<T>(
         Ok::<_, Error>(message.clone())
     })
 }
-
-impl From<wasmtime::Error> for Error {
-    fn from(err: wasmtime::Error) -> Self {
-        Self::Other(err.to_string())
-    }
-}

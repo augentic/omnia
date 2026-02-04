@@ -1,5 +1,5 @@
 use anyhow::Context;
-use wasmtime::component::{Access, Accessor, Resource, ResourceTableError};
+use wasmtime::component::{Access, Accessor, Resource};
 
 use crate::host::generated::wasi::vault::vault::Error;
 use crate::host::resource::LockerProxy;
@@ -80,16 +80,4 @@ pub fn get_locker<T>(
         let locker = store.get().table.get(self_)?;
         Ok::<_, Error>(locker.clone())
     })
-}
-
-impl From<anyhow::Error> for Error {
-    fn from(err: anyhow::Error) -> Self {
-        Self::Other(err.to_string())
-    }
-}
-
-impl From<ResourceTableError> for Error {
-    fn from(err: ResourceTableError) -> Self {
-        Self::Other(err.to_string())
-    }
 }

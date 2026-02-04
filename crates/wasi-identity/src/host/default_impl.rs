@@ -73,7 +73,7 @@ impl Default for AccessToken {
 impl From<TokenResponse> for AccessToken {
     fn from(token_resp: TokenResponse) -> Self {
         let token = token_resp.access_token().secret().clone();
-        let expires_in = token_resp.expires_in().unwrap_or(Duration::from_secs(3600));
+        let expires_in = token_resp.expires_in().unwrap_or(Duration::from_hours(1));
 
         Self {
             token,
@@ -181,7 +181,7 @@ mod tests {
                 token: "cached-token".to_string(),
                 expires_in: 60,
             };
-            cache.expires_at = Instant::now() + Duration::from_secs(60);
+            cache.expires_at = Instant::now() + Duration::from_mins(1);
         };
 
         let token = manager.token(&[]).await.expect("token from cache");

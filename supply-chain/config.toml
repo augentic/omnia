@@ -182,6 +182,10 @@ criteria = "safe-to-deploy"
 version = "0.3.4"
 criteria = "safe-to-deploy"
 
+[[exemptions.gimli]]
+version = "0.33.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.hashlink]]
 version = "0.7.0"
 criteria = "safe-to-deploy"
