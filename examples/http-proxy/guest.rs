@@ -1,23 +1,4 @@
 //! # HTTP Proxy Wasm Guest
-//!
-//! This module demonstrates an HTTP proxy pattern with caching using WASI HTTP.
-//! It shows how to:
-//! - Make outbound HTTP requests from a WebAssembly guest
-//! - Implement HTTP caching with ETags and Cache-Control headers
-//! - Use client certificates for mTLS authentication
-//!
-//! ## Caching Strategy
-//!
-//! The proxy uses standard HTTP caching headers:
-//! - `Cache-Control`: Controls caching duration (`max-age`) and behavior (`no-cache`)
-//! - `If-None-Match`: Provides an ETag for cache lookup
-//!
-//! ## Endpoints
-//!
-//! - `GET /echo`: Simple echo handler
-//! - `GET /cache`: Fetch with caching (returns cached response if available)
-//! - `POST /origin`: Fetch from origin, cache response
-//! - `POST /client-cert`: Fetch with client certificate authentication
 
 #![cfg(target_arch = "wasm32")]
 
@@ -35,7 +16,7 @@ use http::header::{CACHE_CONTROL, IF_NONE_MATCH};
 use http_body_util::Empty;
 use qwasr_sdk::HttpResult;
 use qwasr_wasi_http::CacheOptions;
-use serde_json::{Value, json};
+use serde_json::Value;
 use tracing::Level;
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
@@ -48,21 +29,12 @@ impl Guest for HttpGuest {
     #[qwasr_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new()
-            .route("/echo", get(echo))
             .route("/cache", get(cache))
-            .route("/origin", post(origin))
+            .route("/origin-sm", get(origin_sm))
+            .route("/origin-xl", post(origin_xl))
             .route("/client-cert", post(client_cert));
         qwasr_wasi_http::serve(router, request).await
     }
-}
-
-/// Simple echo handler that returns the request body with a greeting.
-#[qwasr_wasi_otel::instrument]
-async fn echo(Json(body): Json<Value>) -> HttpResult<Json<Value>> {
-    Ok(Json(json!({
-        "message": "Hello, World!",
-        "request": body
-    })))
 }
 
 /// Fetches data with HTTP caching enabled.
@@ -86,9 +58,29 @@ async fn cache() -> Result<impl IntoResponse, Infallible> {
     Ok(http_response)
 }
 
+#[qwasr_wasi_otel::instrument]
+async fn origin_sm() -> Result<impl IntoResponse, Infallible> {
+    tracing::info!("fetching from origin-sm");
+
+    let request = http::Request::builder()
+        .method(Method::GET)
+        .uri("https://jsonplaceholder.cypress.io/posts/1")
+        .body(Empty::<Bytes>::new())
+        .expect("failed to build request");
+
+    let response = qwasr_wasi_http::handle(request).await.unwrap();
+    let (parts, body) = response.into_parts();
+    let http_response = http::Response::from_parts(parts, Body::from(body));
+
+    tracing::info!("fetched from origin-sm");
+    Ok(http_response)
+}
+
 /// Fetches from origin and caches the response.
 #[qwasr_wasi_otel::instrument]
-async fn origin() -> HttpResult<Json<Value>> {
+async fn origin_xl() -> HttpResult<Json<Value>> {
+    tracing::info!("fetching from origin-xl");
+
     let request = http::Request::builder()
         .method(Method::GET)
         .uri("https://jsonplaceholder.cypress.io/posts")
@@ -100,6 +92,7 @@ async fn origin() -> HttpResult<Json<Value>> {
     let body = response.into_body();
     let body = serde_json::from_slice::<Value>(&body).context("issue parsing response body")?;
 
+    tracing::info!("fetched from origin-xl");
     Ok(Json(body))
 }
 
