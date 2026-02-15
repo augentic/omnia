@@ -2,8 +2,8 @@ use anyhow::{Result, anyhow, bail};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use sea_query::{Order, Value, Values};
 
-use crate::orm::join::Join;
-use crate::types::{DataType, Row};
+use crate::orm::Join;
+use crate::{DataType, Row};
 
 /// Trait for types that can be extracted from database rows.
 ///
@@ -40,12 +40,18 @@ macro_rules! entity {
         joins = [$($join:expr),* $(,)?],
         $(#[$meta:meta])*
         pub struct $struct_name:ident {
-            $(pub $field_name:ident : $field_type:ty),* $(,)?
+            $(
+                $(#[$field_meta:meta])*
+                pub $field_name:ident : $field_type:ty
+            ),* $(,)?
         }
     ) => {
         $(#[$meta])*
         pub struct $struct_name {
-            $(pub $field_name : $field_type),*
+            $(
+                $(#[$field_meta])*
+                pub $field_name : $field_type
+            ),*
         }
 
         impl $crate::orm::Entity for $struct_name {
@@ -63,7 +69,7 @@ macro_rules! entity {
                 vec![$( ($col_field, $col_table, $col_name) ),*]
             }
 
-            fn from_row(row: &$crate::types::Row) -> anyhow::Result<Self> {
+            fn from_row(row: &$crate::Row) -> anyhow::Result<Self> {
                 Ok(Self {
                     $(
                         $field_name: <$field_type as $crate::orm::FetchValue>::fetch(row, stringify!($field_name))?,
@@ -73,7 +79,7 @@ macro_rules! entity {
         }
 
         impl $crate::orm::EntityValues for $struct_name {
-            fn __to_values(&self) -> Vec<(&'static str, $crate::__private::Value)> {
+            fn __to_values(&self) -> Vec<(&'static str, $crate::orm::__private::Value)> {
                 vec![
                     $(
                         (stringify!($field_name), self.$field_name.clone().into()),
@@ -89,12 +95,18 @@ macro_rules! entity {
         joins = [$($join:expr),* $(,)?],
         $(#[$meta:meta])*
         pub struct $struct_name:ident {
-            $(pub $field_name:ident : $field_type:ty),* $(,)?
+            $(
+                $(#[$field_meta:meta])*
+                pub $field_name:ident : $field_type:ty
+            ),* $(,)?
         }
     ) => {
         $(#[$meta])*
         pub struct $struct_name {
-            $(pub $field_name : $field_type),*
+            $(
+                $(#[$field_meta])*
+                pub $field_name : $field_type
+            ),*
         }
 
         impl $crate::orm::Entity for $struct_name {
@@ -108,7 +120,7 @@ macro_rules! entity {
                 vec![$($join),*]
             }
 
-            fn from_row(row: &$crate::types::Row) -> anyhow::Result<Self> {
+            fn from_row(row: &$crate::Row) -> anyhow::Result<Self> {
                 Ok(Self {
                     $(
                         $field_name: <$field_type as $crate::orm::FetchValue>::fetch(row, stringify!($field_name))?,
@@ -118,7 +130,7 @@ macro_rules! entity {
         }
 
         impl $crate::orm::EntityValues for $struct_name {
-            fn __to_values(&self) -> Vec<(&'static str, $crate::__private::Value)> {
+            fn __to_values(&self) -> Vec<(&'static str, $crate::orm::__private::Value)> {
                 vec![
                     $(
                         (stringify!($field_name), self.$field_name.clone().into()),
@@ -133,12 +145,18 @@ macro_rules! entity {
         table = $table:literal,
         $(#[$meta:meta])*
         pub struct $struct_name:ident {
-            $(pub $field_name:ident : $field_type:ty),* $(,)?
+            $(
+                $(#[$field_meta:meta])*
+                pub $field_name:ident : $field_type:ty
+            ),* $(,)?
         }
     ) => {
         $(#[$meta])*
         pub struct $struct_name {
-            $(pub $field_name : $field_type),*
+            $(
+                $(#[$field_meta])*
+                pub $field_name : $field_type
+            ),*
         }
 
         impl $crate::orm::Entity for $struct_name {
@@ -148,7 +166,7 @@ macro_rules! entity {
                 &[ $( stringify!($field_name) ),* ]
             }
 
-            fn from_row(row: &$crate::types::Row) -> anyhow::Result<Self> {
+            fn from_row(row: &$crate::Row) -> anyhow::Result<Self> {
                 Ok(Self {
                     $(
                         $field_name: <$field_type as $crate::orm::FetchValue>::fetch(row, stringify!($field_name))?,
@@ -158,7 +176,7 @@ macro_rules! entity {
         }
 
         impl $crate::orm::EntityValues for $struct_name {
-            fn __to_values(&self) -> Vec<(&'static str, $crate::__private::Value)> {
+            fn __to_values(&self) -> Vec<(&'static str, $crate::orm::__private::Value)> {
                 vec![
                     $(
                         (stringify!($field_name), self.$field_name.clone().into()),

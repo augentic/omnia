@@ -2,7 +2,6 @@
 //!
 //! Tests the public API as users would interact with it.
 
-#![cfg(target_arch = "wasm32")]
 #![allow(
     missing_docs,
     clippy::struct_field_names,
@@ -15,9 +14,8 @@ mod common;
 
 use chrono::{DateTime, Utc};
 use common::{Event, User};
-use qwasr_wasi_sql::entity;
 use qwasr_wasi_sql::orm::{Entity, Filter, Join};
-use qwasr_wasi_sql::types::{DataType, Field, Row};
+use qwasr_wasi_sql::{DataType, Field, Row, entity};
 
 use crate::common::Item;
 

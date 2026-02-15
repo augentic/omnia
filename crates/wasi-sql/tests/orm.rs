@@ -2,16 +2,15 @@
 //!
 //! Tests the public API as users would interact with it.
 
-#![cfg(target_arch = "wasm32")]
 #![allow(missing_docs)]
 
 mod common;
 
 use common::{CommentWithAlias, Item, PostWithJoin, User, assert_sql_contains};
+use qwasr_wasi_sql::DataType;
 use qwasr_wasi_sql::orm::{
     DeleteBuilder, Entity, Filter, InsertBuilder, Join, SelectBuilder, UpdateBuilder,
 };
-use qwasr_wasi_sql::types::DataType;
 
 // SELECT tests
 

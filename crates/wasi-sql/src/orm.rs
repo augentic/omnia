@@ -90,13 +90,13 @@
 //! }
 //!
 //! // Joins happen automatically
-//! let posts = SelectBuilder::<PostWithAuthor>::new()
-//!     .fetch(provider, "db").await?;
+//! let posts = SelectBuilder::<PostWithAuthor>::new().fetch(provider, "db").await?;
 //!
 //! // Or add ad-hoc joins
 //! let posts = SelectBuilder::<Post>::new()
 //!     .join(Join::left("users", Filter::col_eq("posts", "author_id", "users", "id")))
-//!     .fetch(provider, "db").await?;
+//!     .fetch(provider, "db")
+//!     .await?;
 //! ```
 //!
 //! ## Filtering
@@ -164,19 +164,21 @@ mod query;
 mod select;
 mod update;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
+use base64ct::{Base64, Encoding};
 pub use delete::DeleteBuilder;
 pub use entity::{Entity, EntityValues, FetchValue};
 pub use filter::Filter;
+#[cfg(target_arch = "wasm32")]
 use futures::FutureExt;
 use futures::future::BoxFuture;
 pub use insert::InsertBuilder;
 pub use join::Join;
 pub use select::SelectBuilder;
+use serde_json::Value;
 pub use update::UpdateBuilder;
 
-use crate::readwrite;
-use crate::types::{Connection, DataType, Row, Statement};
+use crate::{DataType, Row};
 
 /// Type alias for boxed futures returning ORM results.
 pub type FutureResult<T> = BoxFuture<'static, Result<T>>;
@@ -191,21 +193,32 @@ pub trait TableStore: Send + Sync {
     /// # Errors
     ///
     /// Returns an error if the connection fails, statement preparation fails, or query execution fails.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn query(
+        &self, cnn_name: String, query: String, params: Vec<DataType>,
+    ) -> FutureResult<Vec<Row>>;
+
+    /// Executes a query and returns the result rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails, statement preparation fails, or query execution fails.
+    #[cfg(target_arch = "wasm32")]
     fn query(
         &self, cnn_name: String, query: String, params: Vec<DataType>,
     ) -> FutureResult<Vec<Row>> {
         async {
-            let cnn = Connection::open(cnn_name)
+            let cnn = crate::types::Connection::open(cnn_name)
                 .await
-                .map_err(|e| anyhow!("failed to open connection: {}", e.trace()))?;
+                .map_err(|e| anyhow::anyhow!("failed to open connection: {}", e.trace()))?;
 
-            let stmt = Statement::prepare(query, params)
+            let stmt = crate::types::Statement::prepare(query, params)
                 .await
-                .map_err(|e| anyhow!("failed to prepare statement: {}", e.trace()))?;
+                .map_err(|e| anyhow::anyhow!("failed to prepare statement: {}", e.trace()))?;
 
-            let res = readwrite::query(&cnn, &stmt)
+            let res = crate::readwrite::query(&cnn, &stmt)
                 .await
-                .map_err(|e| anyhow!("query failed: {}", e.trace()))?;
+                .map_err(|e| anyhow::anyhow!("query failed: {}", e.trace()))?;
 
             Ok(res)
         }
@@ -217,22 +230,89 @@ pub trait TableStore: Send + Sync {
     /// # Errors
     ///
     /// Returns an error if the connection fails, statement preparation fails, or execution fails.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn exec(&self, cnn_name: String, query: String, params: Vec<DataType>) -> FutureResult<u32>;
+
+    /// Executes a query and returns the result rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails, statement preparation fails, or query execution fails.
+    #[cfg(target_arch = "wasm32")]
     fn exec(&self, cnn_name: String, query: String, params: Vec<DataType>) -> FutureResult<u32> {
         async {
-            let cnn = Connection::open(cnn_name)
+            let cnn = crate::types::Connection::open(cnn_name)
                 .await
-                .map_err(|e| anyhow!("failed to open connection: {}", e.trace()))?;
+                .map_err(|e| anyhow::anyhow!("failed to open connection: {}", e.trace()))?;
 
-            let stmt = Statement::prepare(query, params)
+            let stmt = crate::types::Statement::prepare(query, params)
                 .await
-                .map_err(|e| anyhow!("failed to prepare statement: {}", e.trace()))?;
+                .map_err(|e| anyhow::anyhow!("failed to prepare statement: {}", e.trace()))?;
 
-            let res = readwrite::exec(&cnn, &stmt)
+            let res = crate::readwrite::exec(&cnn, &stmt)
                 .await
-                .map_err(|e| anyhow!("exec failed: {}", e.trace()))?;
+                .map_err(|e| anyhow::anyhow!("exec failed: {}", e.trace()))?;
 
             Ok(res)
         }
         .boxed()
     }
+}
+
+// Re-exports for ``entity`` macro use only. This is needed to avoid leaking ``SeaQuery`` value
+// types into guest code
+#[doc(hidden)]
+pub mod __private {
+    pub use sea_query::Value;
+}
+
+/// Helper function to create JSON output from rows returned by a query.
+///
+/// # Errors
+/// Transforms into JSON value types fail.
+pub fn into_json(rows: Vec<Row>) -> Result<Value> {
+    let json_rows: Vec<Value> = rows
+        .into_iter()
+        .map(|row| {
+            let mut map = serde_json::Map::new();
+            for field in row.fields {
+                let json_value = match field.value {
+                    DataType::Int32(Some(v)) => Value::Number(v.into()),
+                    DataType::Int64(Some(v)) => Value::Number(v.into()),
+                    DataType::Uint32(Some(v)) => Value::Number(v.into()),
+                    DataType::Uint64(Some(v)) => Value::Number(v.into()),
+                    DataType::Float(Some(v)) => serde_json::Number::from_f64(f64::from(v))
+                        .map_or(Value::Null, Value::Number),
+                    DataType::Double(Some(v)) => {
+                        serde_json::Number::from_f64(v).map_or(Value::Null, Value::Number)
+                    }
+                    DataType::Str(Some(v))
+                    | DataType::Date(Some(v))
+                    | DataType::Time(Some(v))
+                    | DataType::Timestamp(Some(v)) => Value::String(v),
+                    DataType::Boolean(Some(v)) => Value::Bool(v),
+                    DataType::Binary(Some(v)) => {
+                        let encoded = Base64::encode_string(&v);
+                        Value::String(encoded)
+                    }
+                    DataType::Int32(None)
+                    | DataType::Int64(None)
+                    | DataType::Uint32(None)
+                    | DataType::Uint64(None)
+                    | DataType::Float(None)
+                    | DataType::Double(None)
+                    | DataType::Str(None)
+                    | DataType::Boolean(None)
+                    | DataType::Date(None)
+                    | DataType::Time(None)
+                    | DataType::Timestamp(None)
+                    | DataType::Binary(None) => Value::Null,
+                };
+                map.insert(field.name, json_value);
+            }
+            Value::Object(map)
+        })
+        .collect();
+
+    Ok(Value::Array(json_rows))
 }

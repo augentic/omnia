@@ -19,6 +19,7 @@ axum = { workspace = true, features = ["json", "macros", "query"] }
 bytes.workspace = true
 http.workspace = true
 http-body.workspace = true
+qwasr-wasi-sql.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror = "2.0.18"
@@ -32,7 +33,6 @@ qwasr-wasi-identity.workspace = true
 qwasr-wasi-keyvalue.workspace = true
 qwasr-wasi-messaging.workspace = true
 qwasr-wasi-otel.workspace = true
-qwasr-wasi-sql.workspace = true
 wasip3.workspace = true
 wit-bindgen.workspace = true
 

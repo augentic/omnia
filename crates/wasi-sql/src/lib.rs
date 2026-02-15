@@ -3,6 +3,9 @@
 //! This module implements a runtime service for `wasi:vault`
 //! (<https://github.com/augentic/wasi-vault>).
 
+pub mod orm;
+pub use orm::*;
+
 #[cfg(target_arch = "wasm32")]
 mod guest;
 #[cfg(target_arch = "wasm32")]

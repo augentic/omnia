@@ -1,6 +1,5 @@
 //! Common test helpers shared across integration tests.
 
-#![cfg(target_arch = "wasm32")]
 #![allow(dead_code)]
 
 use chrono::{DateTime, Utc};
