@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow, bail};
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use sea_query::{Order, Value, Values};
 
 use crate::orm::Join;
@@ -343,6 +343,12 @@ impl FetchValue for DateTime<Utc> {
     }
 }
 
+impl FetchValue for NaiveDate {
+    fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
+        as_date(row_field(row, col)?)
+    }
+}
+
 impl FetchValue for serde_json::Value {
     fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
         as_json(row_field(row, col)?)
@@ -463,6 +469,14 @@ fn as_timestamp(value: &DataType) -> Result<DateTime<Utc>> {
             )
         }
         _ => bail!("expected timestamp data type"),
+    }
+}
+
+fn as_date(value: &DataType) -> Result<NaiveDate> {
+    match value {
+        DataType::Date(Some(raw)) => NaiveDate::parse_from_str(raw, "%Y-%m-%d")
+            .map_err(|_e| anyhow!("unsupported date: {raw}; expected \"%Y-%m-%d\" format")),
+        _ => bail!("expected date data type"),
     }
 }
 
