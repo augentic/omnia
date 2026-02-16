@@ -10,12 +10,12 @@
 
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
-use std::env;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result, anyhow};
+use fromenv::FromEnv;
 use futures::FutureExt;
 use futures_channel::mpsc;
 use futures_util::stream::TryStreamExt;
@@ -24,22 +24,26 @@ use qwasr::{Backend, FutureResult};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use tokio_stream::wrappers::BroadcastStream;
-use tokio_tungstenite::tungstenite::{Message, Utf8Bytes};
+use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::{WebSocketStream, accept_async};
 use tracing::instrument;
 
 use crate::host::WebSocketCtx;
 use crate::host::resource::{Event, EventProxy, Socket, Subscriptions};
 
-const DEF_WEBSOCKET_ADDR: &str = "0.0.0.0:80";
+const MAX_CONNECTIONS: usize = 1024;
 
 /// Options used to connect to the WebSocket service.
-#[derive(Debug, Clone, Default)]
-pub struct ConnectOptions;
+#[derive(Debug, Clone, FromEnv)]
+pub struct ConnectOptions {
+    /// The address to bind the WebSocket server to.
+    #[env(from = "WEBSOCKET_ADDR", default = "0.0.0.0:80")]
+    pub addr: String,
+}
 
 impl qwasr::FromEnv for ConnectOptions {
     fn from_env() -> Result<Self> {
-        Ok(Self)
+        Self::from_env().finalize().context("issue loading connection options")
     }
 }
 
@@ -65,10 +69,8 @@ impl Backend for WebSocketDefault {
     type ConnectOptions = ConnectOptions;
 
     #[instrument]
-    #[allow(clippy::used_underscore_binding)]
-    async fn connect_with(_options: Self::ConnectOptions) -> Result<Self> {
+    async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
         tracing::debug!("initializing default WebSocket implementation");
-        tracing::warn!("Using default WebSocket implementation - suitable for development only");
 
         let (event_tx, event_rx) = broadcast::channel::<EventProxy>(256);
         let connections = ConnectionMap::new(Mutex::new(HashMap::new()));
@@ -81,7 +83,7 @@ impl Backend for WebSocketDefault {
 
         let server = websocket.clone();
         tokio::spawn(async move {
-            if let Err(e) = server.listen().await {
+            if let Err(e) = server.listen(options.addr).await {
                 tracing::error!("WebSocket server error: {e}");
             }
         });
@@ -130,29 +132,35 @@ impl Socket for WebSocketDefault {
 
         async move {
             let data = event.data();
-            let text = String::from_utf8(data)
-                .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
-            let msg = Message::Text(Utf8Bytes::from(text));
+            let msg = Message::Binary(data.into());
+            let requested_groups: Option<HashSet<&str>> =
+                groups.as_ref().map(|group_names| group_names.iter().map(String::as_str).collect());
 
             let senders: Vec<_> = {
-                let connections =
-                    connections.lock().unwrap_or_else(PoisonError::into_inner);
-                groups.as_ref().map_or_else(
+                let connections = connections.lock().unwrap_or_else(PoisonError::into_inner);
+                requested_groups.as_ref().map_or_else(
                     || connections.values().map(|c| c.sender.clone()).collect(),
                     |groups| {
                         connections
                             .values()
-                            .filter(|c| groups.iter().any(|g| c.groups.contains(g)))
+                            .filter(|c| c.groups.iter().any(|g| groups.contains(g.as_str())))
                             .map(|c| c.sender.clone())
                             .collect()
                     },
                 )
             };
 
+            let mut failures = 0usize;
             for mut sender in senders {
-                if sender.try_send(msg.clone()).is_err() {
-                    tracing::warn!("failed to send to peer, channel full or disconnected");
+                if let Err(e) = sender.try_send(msg.clone()) {
+                    failures += 1;
+                    tracing::warn!("failed to send to peer, channel full or disconnected: {e}");
                 }
+            }
+            if failures > 0 {
+                return Err(anyhow!(
+                    "failed to enqueue websocket payload for {failures} connection(s)"
+                ));
             }
 
             Ok(())
@@ -162,9 +170,8 @@ impl Socket for WebSocketDefault {
 }
 
 impl WebSocketDefault {
-    async fn listen(self) -> Result<()> {
-        let addr = env::var("WEBSOCKET_ADDR").unwrap_or_else(|_| DEF_WEBSOCKET_ADDR.into());
-        let listener = TcpListener::bind(&addr).await?;
+    async fn listen(self, addr: String) -> Result<()> {
+        let listener = TcpListener::bind(addr).await?;
         tracing::info!("websocket server listening on: {}", listener.local_addr()?);
 
         loop {
@@ -192,16 +199,27 @@ impl WebSocketDefault {
     async fn handle_connect(&self, ws_stream: WebSocketStream<TcpStream>, peer: SocketAddr) {
         let (tx, rx) = mpsc::channel(256);
 
-        self.connections
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(
-                peer,
-                Connection {
-                    groups: HashSet::new(),
-                    sender: tx,
-                },
-            );
+        let accepted = {
+            let mut connections = self.connections.lock().unwrap_or_else(PoisonError::into_inner);
+            if connections.len() >= MAX_CONNECTIONS {
+                tracing::warn!(
+                    "rejecting websocket connection from {peer}: max connections ({MAX_CONNECTIONS}) reached"
+                );
+                false
+            } else {
+                connections.insert(
+                    peer,
+                    Connection {
+                        groups: HashSet::new(),
+                        sender: tx,
+                    },
+                );
+                true
+            }
+        };
+        if !accepted {
+            return;
+        }
 
         let (outgoing, incoming) = ws_stream.split();
 
@@ -245,6 +263,7 @@ impl WebSocketDefault {
                 }
                 Message::Close(frame) => {
                     tracing::info!("peer {peer} sent close frame: {frame:?}");
+                    return future::err(WsError::ConnectionClosed);
                 }
                 _ => {}
             }
@@ -257,10 +276,7 @@ impl WebSocketDefault {
         future::select(broadcast_incoming, receive_from_host).await;
 
         tracing::info!("{peer} disconnected");
-        self.connections
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(&peer);
+        self.connections.lock().unwrap_or_else(PoisonError::into_inner).remove(&peer);
     }
 }
 
@@ -294,11 +310,17 @@ impl Event for InMemEvent {
 
 #[cfg(test)]
 mod tests {
+    use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+
     use super::*;
 
     #[tokio::test]
     async fn websocket() {
-        let ctx = WebSocketDefault::connect_with(ConnectOptions).await.expect("connect");
+        let ctx = WebSocketDefault::connect_with(ConnectOptions {
+            addr: "0.0.0.0:80".into(),
+        })
+        .await
+        .expect("connect");
 
         // Test connect
         let _socket = ctx.connect().await.expect("connect socket");
@@ -307,5 +329,39 @@ mod tests {
         let event = ctx.new_event(b"test payload".to_vec()).expect("new event");
         assert_eq!(event.data(), b"test payload".to_vec());
         assert!(event.group().is_none());
+    }
+
+    #[test]
+    fn outbound_payload_is_binary() {
+        let payload = vec![0, 159, 146, 150];
+        let message = Message::Binary(payload.clone().into());
+        let Message::Binary(bytes) = message else {
+            panic!("expected binary websocket message");
+        };
+        assert_eq!(bytes.to_vec(), payload);
+    }
+
+    #[test]
+    fn close_message_is_terminal_frame() {
+        let close = Message::Close(Some(CloseFrame {
+            code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Normal,
+            reason: "normal".into(),
+        }));
+        assert!(matches!(close, Message::Close(_)));
+    }
+
+    #[test]
+    fn bounded_channel_surfaces_backpressure() {
+        let (mut sender, _receiver) = mpsc::channel::<Message>(1);
+        for idx in u8::MIN..=u8::MAX {
+            match sender.try_send(Message::Binary(vec![idx].into())) {
+                Ok(()) => {}
+                Err(err) => {
+                    assert!(err.is_full());
+                    return;
+                }
+            }
+        }
+        panic!("expected backpressure after filling channel");
     }
 }

@@ -2432,6 +2432,7 @@ name = "qwasr-wasi-websocket"
 version = "0.27.0"
 dependencies = [
  "anyhow",
+ "fromenv",
  "futures",
  "futures-channel",
  "futures-util",
