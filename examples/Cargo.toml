@@ -36,6 +36,7 @@ tower-http = { version = "0.6.8", features = ["cors", "trace"] }
 tracing.workspace = true
 wasip3.workspace = true
 wit-bindgen.workspace = true
+qwasr-orm.workspace = true
 qwasr-sdk.workspace = true
 qwasr-wasi-otel-attr.workspace = true
 

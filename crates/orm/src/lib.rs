@@ -171,11 +171,10 @@ pub use entity::{Entity, EntityValues, FetchValue};
 pub use filter::Filter;
 pub use insert::InsertBuilder;
 pub use join::Join;
-pub use select::SelectBuilder;
-pub use update::UpdateBuilder;
-
 // Re-export basic WASI SQL types for use in query parameters and custom value conversions.
 pub use qwasr_wasi_sql::{DataType, Field, Row};
+pub use select::SelectBuilder;
+pub use update::UpdateBuilder;
 
 // Re-exports for ``entity`` macro use only. This is needed to avoid leaking ``SeaQuery`` value
 // types into guest code

@@ -849,6 +849,7 @@ dependencies = [
  "http-body-util",
  "opentelemetry",
  "qwasr",
+ "qwasr-orm",
  "qwasr-sdk",
  "qwasr-wasi-blobstore",
  "qwasr-wasi-config",
