@@ -33,10 +33,8 @@ impl Backend for OtelDefault {
 
     #[instrument]
     async fn connect_with(_options: Self::ConnectOptions) -> Result<Self> {
-        tracing::debug!("initializing no-op OpenTelemetry implementation");
-        tracing::warn!(
-            "Using default no-op OpenTelemetry implementation - telemetry will be logged but not exported"
-        );
+        tracing::debug!("Initializing no-op OTel exporter");
+        tracing::warn!("Using no-op OTel exporter - will log but not export");
         Ok(Self)
     }
 }
@@ -52,7 +50,7 @@ impl WasiOtelCtx for OtelDefault {
                 .iter()
                 .map(|rs| rs.scope_spans.iter().map(|ss| ss.spans.len()).sum::<usize>())
                 .sum::<usize>();
-            tracing::debug!("would export {span_count} spans (default implementation)");
+            tracing::debug!("No-op OTel exporter: would export {span_count} spans");
             Ok(())
         }
         .boxed()
@@ -68,7 +66,7 @@ impl WasiOtelCtx for OtelDefault {
                 .iter()
                 .map(|rm| rm.scope_metrics.iter().map(|sm| sm.metrics.len()).sum::<usize>())
                 .sum::<usize>();
-            tracing::debug!("would export {metric_count} metrics (default implementation)");
+            tracing::debug!("No-op OTel exporter: would export {metric_count} metrics");
             Ok(())
         }
         .boxed()
