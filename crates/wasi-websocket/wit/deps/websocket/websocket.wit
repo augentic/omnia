@@ -3,6 +3,14 @@ package wasi:websocket@0.1.0;
 world imports {
     import types;
     import client;
+}
+
+world sender {
+    include imports;
+}
+
+world duplex {
+    include imports;
     export handler;
 }
 

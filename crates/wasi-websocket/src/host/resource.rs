@@ -1,34 +1,75 @@
+use std::any::Any;
 use std::fmt::Debug;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
+use std::pin::Pin;
 use std::sync::Arc;
 
-pub use qwasr::FutureResult;
+use futures::Stream;
+use qwasr::FutureResult;
 
-use crate::host::generated::wasi::websocket::types::Peer;
+/// Stream of event proxies.
+pub type Subscriptions = Pin<Box<dyn Stream<Item = EventProxy> + Send>>;
+// /// Shared map of connected WebSocket clients.
+// pub type ConnectionMap = Arc<Mutex<HashMap<SocketAddr, Connection>>>;
 
-/// Providers implement the [`WebSocketerver`] trait to allow the host to
-/// interact with backend resources.
-pub trait Server: Debug + Send + Sync + 'static {
-    /// Get the peers connected to the server.
-    fn get_peers(&self) -> Vec<Peer>;
+// /// Information about a connected WebSocket client.
+// #[derive(Debug, Clone)]
+// pub struct Connection {
+//     /// The groups this connection has joined.
+//     pub groups: HashSet<String>,
+//     /// Channel sender for outbound messages to this client.
+//     pub sender: UnboundedSender<Message>,
+// }
 
-    /// Send a message to the specified peers.
-    fn send_peers(&self, message: String, peers: Vec<String>) -> FutureResult<()>;
+/// Providers implement the [`Socket`] trait to allow the host to interact with
+/// backend WebSocket resources.
+#[allow(unused_variables)]
+pub trait Socket: Debug + Send + Sync + 'static {
+    /// Subscribe to incoming events from WebSocket clients.
+    fn subscribe(&self) -> FutureResult<Subscriptions>;
 
-    /// Send a message to all connected peers.
-    fn send_all(&self, message: String) -> FutureResult<()>;
-
-    /// Perform a health check on the server.
-    fn health_check(&self) -> FutureResult<String>;
+    /// Send an event to connected WebSocket clients, optionally filtered by groups.
+    fn send(&self, event: EventProxy, groups: Option<Vec<String>>) -> FutureResult<()>;
 }
 
+/// Proxy for a WebSocket socket.
 #[derive(Clone, Debug)]
-pub struct ServerProxy(pub Arc<dyn Server>);
+pub struct SocketProxy(pub Arc<dyn Socket>);
 
-impl Deref for ServerProxy {
-    type Target = Arc<dyn Server>;
+impl Deref for SocketProxy {
+    type Target = Arc<dyn Socket>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+/// Providers implement the [`Event`] trait to represent WebSocket events.
+pub trait Event: Debug + Send + Sync + 'static {
+    /// The group this event was received on, if any.
+    fn group(&self) -> Option<String>;
+
+    /// The event data.
+    fn data(&self) -> Vec<u8>;
+
+    /// For downcasting support.
+    fn as_any(&self) -> &dyn Any;
+}
+
+/// Proxy for a WebSocket event.
+#[derive(Clone, Debug)]
+pub struct EventProxy(pub Arc<dyn Event>);
+
+impl Deref for EventProxy {
+    type Target = Arc<dyn Event>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for EventProxy {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }

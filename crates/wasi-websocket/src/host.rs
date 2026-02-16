@@ -2,15 +2,18 @@
 //!
 //! This module implements a runtime server for websocket
 
-mod default_impl;
+pub mod default_impl;
+mod client_impl;
 mod resource;
 mod server;
-mod store_impl;
-mod types;
+mod types_impl;
 
 mod generated {
+    #![allow(missing_docs)]
 
-    pub use super::resource::ServerProxy;
+    pub use wasi::websocket::types::Error;
+
+    pub use crate::host::resource::{EventProxy, SocketProxy};
 
     wasmtime::component::bindgen!({
         world: "websocket",
@@ -18,11 +21,15 @@ mod generated {
         imports: {
             default: store | tracing | trappable,
         },
-        trappable_error_type: {
-            "wasi:websocket/types.error" => anyhow::Error,
+        exports: {
+            default: store | tracing | trappable,
         },
         with: {
-            "wasi:websocket/server.server": ServerProxy,
+            "wasi:websocket/types.socket": SocketProxy,
+            "wasi:websocket/types.event": EventProxy,
+        },
+        trappable_error_type: {
+            "wasi:websocket/types.error" => Error,
         },
     });
 }
@@ -30,15 +37,19 @@ mod generated {
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use anyhow::Result;
+pub use qwasr::FutureResult;
 use qwasr::{Host, Server, State};
-use server::run_server;
-use store_impl::FutureResult;
 use wasmtime::component::{HasData, Linker};
-use wasmtime_wasi::ResourceTable;
+use wasmtime_wasi::{ResourceTable, ResourceTableError};
 
 pub use self::default_impl::WebSocketDefault;
-use self::generated::wasi::websocket::{self, types as generated_types};
+pub use self::generated::Websocket;
+pub use self::generated::wasi::websocket::types::Error;
+use self::generated::wasi::websocket::{client, types as generated_types};
+pub use self::resource::*;
+
+/// Result type for WebSocket operations.
+pub type Result<T, E = Error> = anyhow::Result<T, E>;
 
 /// Host-side service for `wasi:websocket`.
 #[derive(Clone, Debug)]
@@ -52,8 +63,9 @@ impl<T> Host<T> for WasiWebSocket
 where
     T: WebSocketView + 'static,
 {
-    fn add_to_linker(linker: &mut Linker<T>) -> Result<()> {
-        Ok(store::add_to_linker::<_, Self>(linker, T::websocket)?)
+    fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
+        client::add_to_linker::<_, Self>(linker, T::websocket)?;
+        Ok(generated_types::add_to_linker::<_, Self>(linker, T::websocket)?)
     }
 }
 
@@ -62,10 +74,8 @@ where
     S: State,
     S::StoreCtx: WebSocketView,
 {
-    /// Provide http proxy service the specified wasm component.
-    /// ``state`` will be used at a later time to provide resource access to guest handlers
-    async fn run(&self, state: &S) -> Result<()> {
-        run_server(state).await
+    async fn run(&self, state: &S) -> anyhow::Result<()> {
+        server::run(state).await
     }
 }
 
@@ -81,7 +91,7 @@ pub trait WebSocketView: Send {
 /// View into [`WebSocketCtx`] implementation and [`ResourceTable`].
 pub struct WasiWebSocketCtxView<'a> {
     /// Mutable reference to the WASI WebSocket context.
-    pub ctx: &'a dyn WebSocketCtx,
+    pub ctx: &'a mut dyn WebSocketCtx,
 
     /// Mutable reference to table used to manage resources.
     pub table: &'a mut ResourceTable,
@@ -92,13 +102,39 @@ pub struct WasiWebSocketCtxView<'a> {
 /// This is implemented by the resource-specific provider of WebSocket
 /// functionality.
 pub trait WebSocketCtx: Debug + Send + Sync + 'static {
-    /// Start a WebSocket server.
-    fn serve(&self) -> FutureResult<Arc<dyn resource::Server>>;
+    /// Connect to the WebSocket service and return a socket.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails.
+    fn connect(&self) -> FutureResult<Arc<dyn Socket>>;
+
+    /// Create a new event with the given payload.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if event creation fails.
+    fn new_event(&self, data: Vec<u8>) -> anyhow::Result<Arc<dyn Event>>;
 }
 
-impl generated_types::Host for WasiWebSocketCtxView<'_> {
-    fn convert_error(&mut self, err: anyhow::Error) -> wasmtime::Result<String> {
-        Ok(err.to_string())
+/// `anyhow::Error` to `Error` mapping
+impl From<anyhow::Error> for Error {
+    fn from(err: anyhow::Error) -> Self {
+        Self::Other(err.to_string())
+    }
+}
+
+/// `ResourceTableError` to `Error` mapping
+impl From<ResourceTableError> for Error {
+    fn from(err: ResourceTableError) -> Self {
+        Self::Other(err.to_string())
+    }
+}
+
+/// `wasmtime::Error` to `Error` mapping
+impl From<wasmtime::Error> for Error {
+    fn from(err: wasmtime::Error) -> Self {
+        Self::Other(err.to_string())
     }
 }
 
@@ -109,7 +145,7 @@ macro_rules! qwasr_wasi_view {
         impl qwasr_wasi_websocket::WebSocketView for $store_ctx {
             fn websocket(&mut self) -> qwasr_wasi_websocket::WasiWebSocketCtxView<'_> {
                 qwasr_wasi_websocket::WasiWebSocketCtxView {
-                    ctx: &self.$field_name,
+                    ctx: &mut self.$field_name,
                     table: &mut self.table,
                 }
             }

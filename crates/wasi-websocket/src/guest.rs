@@ -10,9 +10,12 @@ mod generated {
     wit_bindgen::generate!({
         world: "websocket",
         path: "wit",
+        additional_derives: [Clone],
         generate_all,
-        pub_export_macro: true
+        pub_export_macro: true,
     });
 }
 
+pub use self::generated::exports::wasi::websocket::*;
 pub use self::generated::wasi::websocket::*;
+pub use self::generated::*;

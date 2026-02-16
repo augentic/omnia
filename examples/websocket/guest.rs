@@ -2,25 +2,26 @@
 //!
 //! This module demonstrates the WASI WebSocket interface for real-time
 //! bidirectional communication. It shows how to:
-//! - Access a WebSocket server managed by the host
-//! - Query connected peers
-//! - Send messages to specific peers
+//! - Connect to a WebSocket socket managed by the host
+//! - Create events and send them to connected clients
+//! - Optionally target specific groups
 
 #![cfg(target_arch = "wasm32")]
 
 use anyhow::anyhow;
-use axum::routing::{get, post};
+use axum::routing::post;
 use axum::{Json, Router};
 use qwasr_sdk::HttpResult;
-use qwasr_wasi_websocket::store;
+use qwasr_wasi_websocket::client;
+use qwasr_wasi_websocket::types::{Error, Event, Socket};
 use serde_json::{Value, json};
-use wasip3::exports::http::handler::Guest;
+use wasip3::exports::http;
 use wasip3::http::types::{ErrorCode, Request, Response};
 
 struct HttpGuest;
 wasip3::http::service::export!(HttpGuest);
 
-impl Guest for HttpGuest {
+impl http::handler::Guest for HttpGuest {
     /// Routes HTTP requests to WebSocket management endpoints.
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new().route("/socket", post(send_message));
@@ -28,21 +29,34 @@ impl Guest for HttpGuest {
     }
 }
 
-/// Sends a message to all connected WebSocket peers.
+/// Sends a message to all connected WebSocket clients.
 #[axum::debug_handler]
 async fn send_message(message: String) -> HttpResult<Json<Value>> {
-    let server = store::get_server().await.map_err(|e| anyhow!("getting websocket server: {e}"))?;
-
-    let client_peers =
-        server.get_peers().await.map_err(|e| anyhow!("getting websocket peers: {e}"))?;
-    let recipients: Vec<String> = client_peers.iter().map(|p| p.address.clone()).collect();
-
-    server
-        .send_peers(message, recipients)
+    let socket = Socket::connect("default".to_string())
         .await
-        .map_err(|e| anyhow!("sending websocket message: {e}"))?;
+        .map_err(|e| anyhow!("connecting websocket socket: {e}"))?;
+
+    let event = Event::new(&message.into_bytes());
+    client::send(&socket, event, None)
+        .await
+        .map_err(|e| anyhow!("sending websocket event: {e}"))?;
 
     Ok(Json(json!({
-        "message": "message received"
+        "message": "event sent"
     })))
+}
+
+struct WebSocketGuest;
+qwasr_wasi_websocket::export!(WebSocketGuest);
+
+impl qwasr_wasi_websocket::handler::Guest for WebSocketGuest {
+    /// Routes HTTP requests to WebSocket management endpoints.
+    async fn handle(event: Event) -> Result<(), Error> {
+        let socket = Socket::connect("default".to_string()).await.map_err(|e| Error::from(e))?;
+
+        let event = Event::new(&event.data().to_vec());
+        client::send(&socket, event, None).await.map_err(|e| Error::from(e))?;
+
+        Ok(())
+    }
 }
