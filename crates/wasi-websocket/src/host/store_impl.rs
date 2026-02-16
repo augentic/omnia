@@ -2,14 +2,14 @@ use anyhow::{Context, Result};
 pub use qwasr::FutureResult;
 use wasmtime::component::{Access, Accessor, Resource};
 
-use crate::host::generated::wasi::websockets::store::{
+use crate::host::generated::wasi::websocket::store::{
     Host, HostServer, HostServerWithStore, HostWithStore,
 };
-use crate::host::generated::wasi::websockets::types::Peer;
+use crate::host::generated::wasi::websocket::types::Peer;
 use crate::host::resource::ServerProxy;
-use crate::host::{WasiWebSockets, WasiWebSocketsCtxView};
+use crate::host::{WasiWebSocket, WasiWebSocketCtxView};
 
-impl HostWithStore for WasiWebSockets {
+impl HostWithStore for WasiWebSocket {
     async fn get_server<T>(accessor: &Accessor<T, Self>) -> Result<Resource<ServerProxy>> {
         let server = accessor.with(|mut store| store.get().ctx.serve()).await?;
         let proxy = ServerProxy(server);
@@ -17,7 +17,7 @@ impl HostWithStore for WasiWebSockets {
     }
 }
 
-impl HostServerWithStore for WasiWebSockets {
+impl HostServerWithStore for WasiWebSocket {
     async fn get_peers<T>(
         accessor: &Accessor<T, Self>, self_: Resource<ServerProxy>,
     ) -> Result<Vec<Peer>> {
@@ -52,11 +52,11 @@ impl HostServerWithStore for WasiWebSockets {
     }
 }
 
-impl Host for WasiWebSocketsCtxView<'_> {}
-impl HostServer for WasiWebSocketsCtxView<'_> {}
+impl Host for WasiWebSocketCtxView<'_> {}
+impl HostServer for WasiWebSocketCtxView<'_> {}
 
 pub fn use_server<T>(
-    accessor: &Accessor<T, WasiWebSockets>, self_: &Resource<ServerProxy>,
+    accessor: &Accessor<T, WasiWebSocket>, self_: &Resource<ServerProxy>,
 ) -> Result<ServerProxy> {
     accessor.with(|mut store| {
         let server = store.get().table.get(self_).context("Failed to get WebSocket server")?;

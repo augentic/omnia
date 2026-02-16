@@ -17,7 +17,7 @@ qwasr-wasi-messaging.workspace = true
 qwasr-wasi-otel.workspace = true
 qwasr-wasi-sql.workspace = true
 qwasr-wasi-vault.workspace = true
-qwasr-wasi-websockets.workspace = true
+qwasr-wasi-websocket.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 qwasr.workspace = true
@@ -130,10 +130,10 @@ name = "vault"
 path = "vault/runtime.rs"
 
 [[example]]
-name = "websockets-wasm"
-path = "websockets/guest.rs"
+name = "websocket-wasm"
+path = "websocket/guest.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "websockets"
-path = "websockets/runtime.rs"
+name = "websocket"
+path = "websocket/runtime.rs"

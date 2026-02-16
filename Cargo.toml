@@ -111,7 +111,7 @@ qwasr-wasi-otel = { path = "crates/wasi-otel", version = "0.27.0", registry = "c
 qwasr-wasi-otel-attr = { path = "crates/wasi-otel-attr", version = "0.27.0", registry = "credibil" }
 qwasr-wasi-sql = { path = "crates/wasi-sql", version = "0.27.0", registry = "credibil" }
 qwasr-wasi-vault = { path = "crates/wasi-vault", version = "0.27.0", registry = "credibil" }
-qwasr-wasi-websockets = { path = "crates/wasi-websockets", version = "0.27.0", registry = "credibil" }
+qwasr-wasi-websocket = { path = "crates/wasi-websocket", version = "0.27.0", registry = "credibil" }
 
 [profile.release]
 lto = true

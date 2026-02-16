@@ -1,0 +1,59 @@
+package wasi:websocket@0.1.0;
+
+world imports {
+    import types;
+    import client;
+    export handler;
+}
+
+interface types {
+    /// A connection to a websocket service.
+    resource socket {
+        connect: static async func(name: string) -> result<socket, error>;
+        disconnect: func() -> result<_, error>;
+    }
+
+    /// A type alias for string to represent a websocket group
+    type group = string;
+
+    /// A websocket event.
+    resource event {
+        constructor(data: list<u8>);
+        /// The group this event was received on, if any
+        group: func() -> option<group>;
+        /// The event message.
+        data: func() -> list<u8>;
+    }
+
+    /// Errors that can occur when using the websocket interface.
+    variant error {
+        /// The request or operation timed out.
+        timeout,
+        /// An error occurred with the connection.
+        connection(string),
+        /// A permission error occurred.
+        permission-denied(string),
+        /// A catch all for other types of errors
+        other(string),
+    }
+}
+
+interface client {
+    use types.{error, event, socket, group};
+
+    /// Sends the event using the given socket.
+    send: async func(s: borrow<socket>, event: event, group: option<list<group>>) -> result<_, error>;
+}
+
+interface handler {
+    use types.{event, error};
+
+    /// Whenever this guest receives a message in one of the subscribed topics, the message is
+    /// sent to this handler. The guest is responsible for matching on the group and handling the
+    /// message accordingly. Implementors (such as hosts) calling this interface should make their
+    /// own decisions on how to handle errors returned from this function.
+    handle: async func(event: event) -> result<_, error>;
+}
+
+
+

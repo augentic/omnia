@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 pub use qwasr::FutureResult;
 
-use crate::host::generated::wasi::websockets::types::Peer;
+use crate::host::generated::wasi::websocket::types::Peer;
 
-/// Providers implement the [`WebSocketServer`] trait to allow the host to
+/// Providers implement the [`WebSocketerver`] trait to allow the host to
 /// interact with backend resources.
 pub trait Server: Debug + Send + Sync + 'static {
     /// Get the peers connected to the server.

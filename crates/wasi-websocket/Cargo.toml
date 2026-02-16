@@ -1,6 +1,6 @@
 [package]
-name = "qwasr-wasi-websockets"
-description = "WASI WebSockets WIT implementation"
+name = "qwasr-wasi-websocket"
+description = "WASI WebSocket WIT implementation"
 readme = "README.md"
 authors.workspace = true
 categories.workspace = true

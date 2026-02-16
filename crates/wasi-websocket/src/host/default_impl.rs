@@ -1,9 +1,9 @@
-//! Default implementation for wasi-websockets
+//! Default implementation for wasi-websocket
 //!
-//! This is a lightweight implementation providing a basic WebSockets server
+//! This is a lightweight implementation providing a basic WebSocket server
 //! without persistent connections.
 //!
-//! For production use, use a backend with proper WebSockets connection
+//! For production use, use a backend with proper WebSocket connection
 //! management.
 
 #![allow(clippy::used_underscore_binding)]
@@ -17,8 +17,8 @@ use qwasr::{Backend, FutureResult};
 use tokio_tungstenite::tungstenite::{Bytes, Message};
 use tracing::instrument;
 
-use crate::host::WebSocketsCtx;
-use crate::host::generated::wasi::websockets::types::Peer;
+use crate::host::WebSocketCtx;
+use crate::host::generated::wasi::websocket::types::Peer;
 use crate::host::resource::Server;
 use crate::host::server::{get_peer_map, send_message, service_client};
 use crate::host::types::PublishMessage;
@@ -32,11 +32,11 @@ impl qwasr::FromEnv for ConnectOptions {
     }
 }
 
-/// Default implementation for `wasi:websockets`.
+/// Default implementation for `wasi:websocket`.
 #[derive(Debug, Clone)]
-pub struct WebSocketsDefault;
+pub struct WebSocketDefault;
 
-impl Backend for WebSocketsDefault {
+impl Backend for WebSocketDefault {
     type ConnectOptions = ConnectOptions;
 
     #[instrument]
@@ -47,20 +47,20 @@ impl Backend for WebSocketsDefault {
     }
 }
 
-impl WebSocketsCtx for WebSocketsDefault {
-    /// Provide a default WebSockets server.
+impl WebSocketCtx for WebSocketDefault {
+    /// Provide a default WebSocket server.
     ///
     /// This is a basic implementation for development use only.
     fn serve(&self) -> FutureResult<Arc<dyn Server>> {
         async move {
-            tracing::debug!("creating default WebSockets server");
+            tracing::debug!("creating default WebSocket server");
             Ok(Arc::new(Self) as Arc<dyn Server>)
         }
         .boxed()
     }
 }
 
-impl Server for WebSocketsDefault {
+impl Server for WebSocketDefault {
     /// Get the peers connected to the server.
     fn get_peers(&self) -> Vec<Peer> {
         let Ok(peer_map) = get_peer_map() else {
@@ -115,7 +115,7 @@ impl Server for WebSocketsDefault {
         async move {
             let ws_client = service_client().await;
             ws_client.lock().await.send(Message::Ping(Bytes::new())).await?;
-            Ok("websockets service is healthy".into())
+            Ok("websocket service is healthy".into())
         }
         .boxed()
     }

@@ -99,17 +99,17 @@ pub trait Backend: Sized + Sync + Send {
 
 Each WASI interface crate provides both guest and host implementations:
 
-| Crate             | WASI Interface   | Purpose                     |
-| ----------------- | ---------------- | --------------------------- |
-| `wasi-http`       | `wasi:http`      | HTTP client/server          |
-| `wasi-keyvalue`   | `wasi:keyvalue`  | Key-value storage           |
-| `wasi-messaging`  | `wasi:messaging` | Pub/sub messaging           |
-| `wasi-blobstore`  | `wasi:blobstore` | Object/blob storage         |
-| `wasi-sql`        | `wasi:sql`       | SQL database access         |
-| `wasi-vault`      | Custom           | Secrets management          |
-| `wasi-identity`   | Custom           | Identity/authentication     |
-| `wasi-otel`       | Custom           | OpenTelemetry observability |
-| `wasi-websockets` | Custom           | WebSocket connections       |
+| Crate            | WASI Interface   | Purpose                     |
+| ---------------- | ---------------- | --------------------------- |
+| `wasi-http`      | `wasi:http`      | HTTP client/server          |
+| `wasi-keyvalue`  | `wasi:keyvalue`  | Key-value storage           |
+| `wasi-messaging` | `wasi:messaging` | Pub/sub messaging           |
+| `wasi-blobstore` | `wasi:blobstore` | Object/blob storage         |
+| `wasi-sql`       | `wasi:sql`       | SQL database access         |
+| `wasi-vault`     | Custom           | Secrets management          |
+| `wasi-identity`  | Custom           | Identity/authentication     |
+| `wasi-otel`      | Custom           | OpenTelemetry observability |
+| `wasi-websocket` | Custom           | WebSocket connections       |
 
 Each crate contains:
 
@@ -235,7 +235,7 @@ Dependencies on standard WASI definitions are managed in `wit/deps/` and version
 
 5. **Instance Pre-instantiation**: The component is pre-instantiated for efficient spawning
 
-6. **Server Start**: Server interfaces (HTTP, messaging, WebSockets) start listening for requests
+6. **Server Start**: Server interfaces (HTTP, messaging, WebSocket) start listening for requests
 
 7. **Request Handling**: Incoming requests spawn new instances, execute guest code, and return responses
 

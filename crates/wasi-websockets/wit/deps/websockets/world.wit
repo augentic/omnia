@@ -1,6 +1,0 @@
-package wasi:websockets@0.1.0;
-
-world imports {
-    /// This is the default websockets to use when user code simply wants to send a message.
-    import store;
-}

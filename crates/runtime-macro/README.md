@@ -82,8 +82,8 @@ runtime!({
 - **`identity`**: Identity and authentication
   - Backend: `Azure` (Azure Identity)
 
-- **`websockets`**: WebSocket connections
-  - Backend: `WebSocketsCtxImpl` (default implementation for development use)
+- **`websocket`**: WebSocket connections
+  - Backend: `WebSocketCtxImpl` (default implementation for development use)
 
 ## Generated Code
 
@@ -129,7 +129,7 @@ A public async function that:
 2. Compiles the WebAssembly component
 3. Links WASI interfaces
 4. Connects to backends
-5. Starts server interfaces (HTTP, messaging, WebSockets)
+5. Starts server interfaces (HTTP, messaging, WebSocket)
 
 ## Example: Custom Initiator Configuration
 

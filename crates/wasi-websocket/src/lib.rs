@@ -1,7 +1,7 @@
-//! # WASI Websockets Service
+//! # WASI WebSocket Service
 //!
-//! This module implements a runtime service for `wasi:websockets`
-//! (<https://github.com/augentic/wasi-websockets>).
+//! This module implements a runtime service for `wasi:websocket`
+//! (<https://github.com/augentic/wasi-websocket>).
 
 #[cfg(target_arch = "wasm32")]
 mod guest;

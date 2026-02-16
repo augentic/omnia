@@ -6,7 +6,7 @@ doc-valid-idents = [
   "NATS",
   "OpenTelemetry",
   "WebAssembly",
-  "WebSockets",
+  "WebSocket",
 ]
 
 allowed-duplicate-crates = [

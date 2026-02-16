@@ -880,7 +880,7 @@ dependencies = [
  "qwasr-wasi-otel-attr",
  "qwasr-wasi-sql",
  "qwasr-wasi-vault",
- "qwasr-wasi-websockets",
+ "qwasr-wasi-websocket",
  "serde",
  "serde_json",
  "tower-http",
@@ -2428,7 +2428,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "qwasr-wasi-websockets"
+name = "qwasr-wasi-websocket"
 version = "0.27.0"
 dependencies = [
  "anyhow",
