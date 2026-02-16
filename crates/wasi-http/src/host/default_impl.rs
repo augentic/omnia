@@ -71,42 +71,48 @@ impl p3::WasiHttpCtx for HttpDefault {
     > {
         Box::new(async move {
             let (mut parts, body) = request.into_parts();
-            let collected = body.collect().await.map_err(internal_error)?;
 
-            // build reqwest::Request
-            let mut client_builder = reqwest::Client::builder();
+            // dedupe "Host" headers (keep the one added by wasmtime/wasip3?)
+            let values = parts.headers.get_all(HOST).iter().cloned().collect::<Vec<_>>();
+            if values.len() > 1 {
+                parts.headers.remove(HOST);
+                for v in values.into_iter().skip(1) {
+                    parts.headers.append(HOST, v);
+                }
+            }
+
+            // build client
+            let mut builder = reqwest::Client::builder();
 
             // check for "Client-Cert" header
             if let Some(encoded_cert) = parts.headers.remove("Client-Cert") {
                 tracing::debug!("using client certificate");
-                let encoded = encoded_cert.to_str().map_err(internal_error)?;
-                let bytes = Base64::decode_vec(encoded).map_err(internal_error)?;
-                let identity = reqwest::Identity::from_pem(&bytes).map_err(internal_error)?;
-                client_builder = client_builder.identity(identity);
+                let encoded = encoded_cert.to_str().map_err(internal_err)?;
+                let bytes = Base64::decode_vec(encoded).map_err(internal_err)?;
+                let identity = reqwest::Identity::from_pem(&bytes).map_err(internal_err)?;
+                builder = builder.identity(identity);
             }
 
-            // HACK: remove host header to appease Azure Frontdoor
-            parts.headers.remove("Host");
-            client_builder = client_builder.default_headers(parts.headers);
-
-            // Disable system proxy in tests to avoid macOS system-configuration issues
+            // disable system proxy in tests to avoid macOS issues
             #[cfg(test)]
-            let client_builder = client_builder.no_proxy();
+            let builder = builder.no_proxy();
+            let client = builder.build().map_err(reqwest_err)?;
 
-            let client = client_builder.build().map_err(reqwest_error)?;
+            let collected = body.collect().await.map_err(internal_err)?;
 
             // make request
             let resp = client
                 .request(parts.method, parts.uri.to_string())
+                .headers(parts.headers)
                 .body(collected.to_bytes())
                 .send()
                 .await
-                .map_err(reqwest_error)?;
+                .map_err(reqwest_err)?;
 
             // process response
             let converted: Response<reqwest::Body> = resp.into();
             let (parts, body) = converted.into_parts();
-            let body = body.map_err(reqwest_error).boxed_unsync();
+            let body = body.map_err(reqwest_err).boxed_unsync();
             let mut response = Response::from_parts(parts, body);
 
             // remove forbidden headers (disallowed by `wasmtime-wasi-http`)
@@ -120,12 +126,12 @@ impl p3::WasiHttpCtx for HttpDefault {
     }
 }
 
-fn internal_error(e: impl Display) -> ErrorCode {
+fn internal_err(e: impl Display) -> ErrorCode {
     ErrorCode::InternalError(Some(e.to_string()))
 }
 
 #[allow(clippy::needless_pass_by_value)]
-fn reqwest_error(e: reqwest::Error) -> ErrorCode {
+fn reqwest_err(e: reqwest::Error) -> ErrorCode {
     if e.is_timeout() {
         ErrorCode::ConnectionTimeout
     } else if e.is_connect() {
@@ -133,7 +139,7 @@ fn reqwest_error(e: reqwest::Error) -> ErrorCode {
     } else if e.is_request() {
         ErrorCode::HttpRequestUriInvalid
     } else {
-        internal_error(e)
+        internal_err(e)
     }
 }
 
@@ -141,58 +147,64 @@ fn reqwest_error(e: reqwest::Error) -> ErrorCode {
 mod tests {
     use std::pin::Pin;
 
+    use http::header::{AUTHORIZATION, CONTENT_TYPE};
     use http::{Method, StatusCode};
-    use http_body_util::Full;
+    use http_body_util::{Empty, Full};
     use p3::WasiHttpCtx;
-    use wiremock::matchers::{body_string, header, method, path};
+    use wiremock::matchers::{body_string, header, method};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
 
     #[tokio::test]
-    async fn get_method() {
+    async fn multiple_host_headers() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .and(path("/test"))
             .respond_with(ResponseTemplate::new(200).set_body_string("Hello, World!"))
             .mount(&server)
             .await;
 
-        let uri = format!("{}/test", server.uri());
-        let body = Full::new(Bytes::from("")).map_err(internal_error).boxed_unsync();
-        let request = Request::builder().method(Method::GET).uri(&uri).body(body).unwrap();
+        let request = Request::get(server.uri())
+            .header(HOST, "localhost-1")
+            .header(HOST, "localhost-2")
+            .body(Empty::new().map_err(internal_err).boxed_unsync())
+            .unwrap();
 
         let result = HttpDefault.handle(request).await;
-
         assert!(result.is_ok());
+
+        // check response
         let (response, _) = result.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
 
+        // check body
         let body = response.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(body, Bytes::from("Hello, World!"));
 
+        // check received request
         let requests = server.received_requests().await.expect("should have requests");
         assert_eq!(requests.len(), 1);
-        println!("requests: {:?}", requests[0].headers);
+
+        assert_eq!(requests[0].headers.get_all(HOST).iter().count(), 1);
+        assert_eq!(requests[0].headers.get(HOST).unwrap().to_str().unwrap(), "localhost-2");
     }
 
     #[tokio::test]
     async fn post_with_body() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
-            .and(path("/echo"))
             .and(body_string("test body"))
             .respond_with(ResponseTemplate::new(201).set_body_string("Created"))
             .mount(&server)
             .await;
 
-        let uri = format!("{}/echo", server.uri());
-        let body = Full::new(Bytes::from("test body")).map_err(internal_error).boxed_unsync();
-        let request = Request::builder().method(Method::POST).uri(&uri).body(body).unwrap();
+        let request = Request::post(server.uri())
+            .body(Full::new(Bytes::from("test body")).map_err(internal_err).boxed_unsync())
+            .unwrap();
 
         let result = HttpDefault.handle(request).await;
-
         assert!(result.is_ok());
+
         let (response, _) = result.unwrap();
         assert_eq!(response.status(), StatusCode::CREATED);
     }
@@ -201,69 +213,64 @@ mod tests {
     async fn custom_headers() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .and(path("/headers"))
             .and(header("X-Custom-Header", "custom-value"))
-            .and(header("Authorization", "Bearer token123"))
+            .and(header(AUTHORIZATION, "Bearer token123"))
             .respond_with(ResponseTemplate::new(200))
             .mount(&server)
             .await;
 
-        let uri = format!("{}/headers", server.uri());
-        let body = Full::new(Bytes::from("")).map_err(internal_error).boxed_unsync();
-        let mut request = Request::builder().method(Method::GET).uri(&uri).body(body).unwrap();
-        request
-            .headers_mut()
-            .insert(HeaderName::from_static("x-custom-header"), "custom-value".parse().unwrap());
-        request
-            .headers_mut()
-            .insert(http::header::AUTHORIZATION, "Bearer token123".parse().unwrap());
+        let request = Request::get(server.uri())
+            .header("X-Custom-Header", "custom-value")
+            .header(AUTHORIZATION, "Bearer token123")
+            .body(Empty::new().map_err(internal_err).boxed_unsync())
+            .unwrap();
 
         let result = HttpDefault.handle(request).await;
-
         assert!(result.is_ok());
+
         let (response, _) = result.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[tokio::test]
-    async fn forbidden_headers() {
+    async fn permitted_headers() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .and(path("/forbidden"))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .insert_header("Connection", "keep-alive")
-                    .insert_header("Transfer-Encoding", "chunked")
-                    .insert_header("Upgrade", "websocket")
+                    .insert_header(CONNECTION, "keep-alive")
+                    .insert_header(TRANSFER_ENCODING, "chunked")
+                    .insert_header(UPGRADE, "websocket")
+                    .insert_header(CONTENT_TYPE, "application/json")
                     .insert_header("X-Safe-Header", "safe-value"),
             )
             .mount(&server)
             .await;
 
-        let uri = format!("{}/forbidden", server.uri());
-        let body = Full::new(Bytes::from("")).map_err(internal_error).boxed_unsync();
-        let request = Request::builder().method(Method::GET).uri(&uri).body(body).unwrap();
+        let request = Request::get(server.uri())
+            .body(Empty::new().map_err(internal_err).boxed_unsync())
+            .unwrap();
 
         let result = HttpDefault.handle(request).await;
-
         assert!(result.is_ok());
+
+        // check response
         let (response, _) = result.unwrap();
+        let headers = response.headers();
 
-        // Verify forbidden headers are removed
-        assert!(!response.headers().contains_key(CONNECTION));
-        assert!(!response.headers().contains_key(TRANSFER_ENCODING));
-        assert!(!response.headers().contains_key(UPGRADE));
+        // permitted headers are preserved
+        assert_eq!(headers.get(CONTENT_TYPE).unwrap().to_str().unwrap(), "application/json");
+        assert_eq!(headers.get("X-Safe-Header").unwrap().to_str().unwrap(), "safe-value");
 
-        // Verify safe headers are preserved
-        assert_eq!(
-            response.headers().get("X-Safe-Header").unwrap().to_str().unwrap(),
-            "safe-value"
-        );
+        // verify forbidden headers are removed
+        assert!(!headers.contains_key(CONNECTION));
+        assert!(!headers.contains_key(TRANSFER_ENCODING));
+        assert!(!headers.contains_key(UPGRADE));
     }
 
     #[tokio::test]
     async fn invalid_uri() {
-        let body = Full::new(Bytes::from("")).map_err(internal_error).boxed_unsync();
+        let body = Full::new(Bytes::from("")).map_err(internal_err).boxed_unsync();
         let request =
             Request::builder().method(Method::GET).uri("not-a-valid-uri").body(body).unwrap();
 
@@ -273,51 +280,39 @@ mod tests {
 
     #[tokio::test]
     async fn connection_refused() {
-        let uri = "http://localhost:59999/test";
-        let body = Full::new(Bytes::from("")).map_err(internal_error).boxed_unsync();
-        let request = Request::builder().method(Method::GET).uri(uri).body(body).unwrap();
+        let request = Request::get("http://localhost:59999/test")
+            .body(Empty::new().map_err(internal_err).boxed_unsync())
+            .unwrap();
 
         let result = HttpDefault.handle(request).await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
-    async fn invalid_client_cert_base64() {
+    async fn client_cert_base64() {
         let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/secure"))
-            .respond_with(ResponseTemplate::new(200))
-            .mount(&server)
-            .await;
+        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
 
-        let uri = format!("{}/secure", server.uri());
-        let body = Full::new(Bytes::from("")).map_err(internal_error).boxed_unsync();
-        let mut request = Request::builder().method(Method::GET).uri(&uri).body(body).unwrap();
-        request
-            .headers_mut()
-            .insert(HeaderName::from_static("client-cert"), "not-valid-base64!!!".parse().unwrap());
+        let request = Request::get(server.uri())
+            .header("Client-Cert", "not-valid-base64!!!")
+            .body(Empty::new().map_err(internal_err).boxed_unsync())
+            .unwrap();
 
         let result = HttpDefault.handle(request).await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
-    async fn invalid_client_cert_pem() {
+    async fn client_cert_pem() {
         let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/secure"))
-            .respond_with(ResponseTemplate::new(200))
-            .mount(&server)
-            .await;
+        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
 
         let invalid_pem = "invalid pem content";
         let encoded = Base64::encode_string(invalid_pem.as_bytes());
-        let uri = format!("{}/secure", server.uri());
-        let body = Full::new(Bytes::from("")).map_err(internal_error).boxed_unsync();
-        let mut request = Request::builder().method(Method::GET).uri(&uri).body(body).unwrap();
-        request
-            .headers_mut()
-            .insert(HeaderName::from_static("client-cert"), encoded.parse().unwrap());
+        let request = Request::get(server.uri())
+            .header("Client-Cert", encoded)
+            .body(Empty::new().map_err(internal_err).boxed_unsync())
+            .unwrap();
 
         let result = HttpDefault.handle(request).await;
         assert!(result.is_err());
