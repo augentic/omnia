@@ -22,6 +22,3 @@ qwasr-wasi-sql.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 sea-query = { version = "0.32", default-features = false, features = ["thread-safe", "with-chrono"] }
-
-[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
-qwasr-orm.workspace = true

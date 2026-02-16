@@ -2203,7 +2203,6 @@ version = "0.27.0"
 dependencies = [
  "anyhow",
  "chrono",
- "qwasr-orm",
  "qwasr-wasi-sql",
  "sea-query",
  "serde_json",
