@@ -33,7 +33,7 @@ pub trait FetchValue: Sized {
 /// ```
 #[macro_export]
 macro_rules! entity {
-    // With joins and columns
+    // Full form: columns + joins + struct (single code-generation arm)
     (
         table = $table:literal,
         columns = [$( ($col_table:literal, $col_name:literal, $col_field:literal) ),* $(,)?],
@@ -90,102 +90,30 @@ macro_rules! entity {
         }
     };
 
-    // With joins only
+    // Joins only → forward with empty columns
     (
         table = $table:literal,
         joins = [$($join:expr),* $(,)?],
-        $(#[$meta:meta])*
-        pub struct $struct_name:ident {
-            $(
-                $(#[$field_meta:meta])*
-                pub $field_name:ident : $field_type:ty
-            ),* $(,)?
-        }
+        $($rest:tt)*
     ) => {
-        #[allow(missing_docs)]
-        $(#[$meta])*
-        pub struct $struct_name {
-            $(
-                $(#[$field_meta])*
-                pub $field_name : $field_type
-            ),*
-        }
-
-        impl $crate::Entity for $struct_name {
-            const TABLE: &'static str = $table;
-
-            fn projection() -> &'static [&'static str] {
-                &[ $( stringify!($field_name) ),* ]
-            }
-
-            fn joins() -> Vec<Join> {
-                vec![$($join),*]
-            }
-
-            fn from_row(row: &$crate::Row) -> anyhow::Result<Self> {
-                Ok(Self {
-                    $(
-                        $field_name: <$field_type as $crate::FetchValue>::fetch(row, stringify!($field_name))?,
-                    )*
-                })
-            }
-        }
-
-        impl $crate::EntityValues for $struct_name {
-            fn __to_values(&self) -> Vec<(&'static str, $crate::__private::Value)> {
-                vec![
-                    $(
-                        (stringify!($field_name), self.$field_name.clone().into()),
-                    )*
-                ]
-            }
+        $crate::entity! {
+            table = $table,
+            columns = [],
+            joins = [$($join),*],
+            $($rest)*
         }
     };
 
-    // Without joins - this is for a basic entity
+    // Bare table → forward with empty columns and joins
     (
         table = $table:literal,
-        $(#[$meta:meta])*
-        pub struct $struct_name:ident {
-            $(
-                $(#[$field_meta:meta])*
-                pub $field_name:ident : $field_type:ty
-            ),* $(,)?
-        }
+        $($rest:tt)*
     ) => {
-        #[allow(missing_docs)]
-        $(#[$meta])*
-        pub struct $struct_name {
-            $(
-                $(#[$field_meta])*
-                pub $field_name : $field_type
-            ),*
-        }
-
-        impl $crate::Entity for $struct_name {
-            const TABLE: &'static str = $table;
-
-            fn projection() -> &'static [&'static str] {
-                &[ $( stringify!($field_name) ),* ]
-            }
-
-            fn from_row(row: &$crate::Row) -> anyhow::Result<Self> {
-                Ok(Self {
-                    $(
-                        $field_name: <$field_type as $crate::FetchValue>::fetch(row, stringify!($field_name))?,
-                    )*
-                })
-            }
-        }
-
-        impl $crate::EntityValues for $struct_name {
-            fn __to_values(&self) -> Vec<(&'static str, $crate::__private::Value)> {
-                vec![
-                    $(
-                        (stringify!($field_name), self.$field_name.clone().into()),
-                    )*
-                ]
-            }
+        $crate::entity! {
+            table = $table,
+            columns = [],
+            joins = [],
+            $($rest)*
         }
     };
 }
