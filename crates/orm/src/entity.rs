@@ -40,13 +40,19 @@ macro_rules! entity {
         joins = [$($join:expr),* $(,)?],
         $(#[$meta:meta])*
         pub struct $struct_name:ident {
-            $(pub $field_name:ident : $field_type:ty),* $(,)?
+            $(
+                $(#[$field_meta:meta])*
+                pub $field_name:ident : $field_type:ty
+            ),* $(,)?
         }
     ) => {
         #[allow(missing_docs)]
         $(#[$meta])*
         pub struct $struct_name {
-            $(pub $field_name : $field_type),*
+            $(
+                $(#[$field_meta])*
+                pub $field_name : $field_type
+            ),*
         }
 
         impl $crate::Entity for $struct_name {
@@ -90,13 +96,19 @@ macro_rules! entity {
         joins = [$($join:expr),* $(,)?],
         $(#[$meta:meta])*
         pub struct $struct_name:ident {
-            $(pub $field_name:ident : $field_type:ty),* $(,)?
+            $(
+                $(#[$field_meta:meta])*
+                pub $field_name:ident : $field_type:ty
+            ),* $(,)?
         }
     ) => {
         #[allow(missing_docs)]
         $(#[$meta])*
         pub struct $struct_name {
-            $(pub $field_name : $field_type),*
+            $(
+                $(#[$field_meta])*
+                pub $field_name : $field_type
+            ),*
         }
 
         impl $crate::Entity for $struct_name {
@@ -135,13 +147,19 @@ macro_rules! entity {
         table = $table:literal,
         $(#[$meta:meta])*
         pub struct $struct_name:ident {
-            $(pub $field_name:ident : $field_type:ty),* $(,)?
+            $(
+                $(#[$field_meta:meta])*
+                pub $field_name:ident : $field_type:ty
+            ),* $(,)?
         }
     ) => {
         #[allow(missing_docs)]
         $(#[$meta])*
         pub struct $struct_name {
-            $(pub $field_name : $field_type),*
+            $(
+                $(#[$field_meta])*
+                pub $field_name : $field_type
+            ),*
         }
 
         impl $crate::Entity for $struct_name {
