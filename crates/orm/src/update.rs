@@ -1,22 +1,24 @@
 use std::marker::PhantomData;
 
 use anyhow::Result;
-use sea_query::{Alias, Query, SimpleExpr};
+use sea_query::{Alias, Query, SimpleExpr, Value};
 
-use crate::orm::entity::{Entity, values_to_wasi_datatypes};
-use crate::orm::filter::Filter;
-use crate::orm::query::{BuiltQuery, OrmQueryBuilder};
+use crate::entity::{Entity, values_to_wasi_datatypes};
+use crate::filter::Filter;
+use crate::query::{BuiltQuery, OrmQueryBuilder};
 
-/// Builder for constructing DELETE queries.
-pub struct DeleteBuilder<M: Entity> {
+/// Builder for constructing UPDATE queries.
+pub struct UpdateBuilder<M: Entity> {
+    set_clauses: Vec<(&'static str, Value)>,
     filters: Vec<SimpleExpr>,
     returning: Vec<&'static str>,
     _marker: PhantomData<M>,
 }
 
-impl<M: Entity> Default for DeleteBuilder<M> {
+impl<M: Entity> Default for UpdateBuilder<M> {
     fn default() -> Self {
         Self {
+            set_clauses: Vec::new(),
             filters: Vec::new(),
             returning: Vec::new(),
             _marker: PhantomData,
@@ -24,11 +26,21 @@ impl<M: Entity> Default for DeleteBuilder<M> {
     }
 }
 
-impl<M: Entity> DeleteBuilder<M> {
-    /// Creates a new DELETE query builder.
+impl<M: Entity> UpdateBuilder<M> {
+    /// Creates a new UPDATE query builder.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Sets a column to a new value.
+    #[must_use]
+    pub fn set<V>(mut self, column: &'static str, value: V) -> Self
+    where
+        V: Into<Value>,
+    {
+        self.set_clauses.push((column, value.into()));
+        self
     }
 
     /// Adds a WHERE clause filter.
@@ -38,24 +50,28 @@ impl<M: Entity> DeleteBuilder<M> {
         self
     }
 
-    /// Specifies columns to return from deleted rows.
+    /// Specifies columns to return from updated rows.
     #[must_use]
     pub fn returning(mut self, column: &'static str) -> Self {
         self.returning.push(column);
         self
     }
 
-    /// Build the DELETE query.
+    /// Build the UPDATE query.
     ///
     /// # Errors
     ///
-    /// Returns an error if any query values cannot be converted to WASI data types.
+    /// Returns an error if query values cannot be converted to WASI data types.
     pub fn build(self) -> Result<BuiltQuery> {
-        let mut statement = Query::delete();
-        statement.from_table(Alias::new(M::TABLE));
+        let mut statement = Query::update();
+        statement.table(Alias::new(M::TABLE));
 
-        for filter in self.filters {
-            statement.and_where(filter);
+        for (column, value) in self.set_clauses {
+            statement.value(Alias::new(column), value);
+        }
+
+        for expr in self.filters {
+            statement.and_where(expr);
         }
 
         for column in self.returning {
@@ -69,7 +85,7 @@ impl<M: Entity> DeleteBuilder<M> {
             table = M::TABLE,
             sql = %sql,
             param_count = params.len(),
-            "DeleteBuilder generated SQL"
+            "UpdateBuilder generated SQL"
         );
 
         Ok(BuiltQuery { sql, params })

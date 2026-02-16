@@ -3,8 +3,8 @@ use std::marker::PhantomData;
 use anyhow::Result;
 use sea_query::{Alias, OnConflict, Query, SimpleExpr, Value};
 
-use crate::orm::entity::{Entity, EntityValues, values_to_wasi_datatypes};
-use crate::orm::query::{BuiltQuery, OrmQueryBuilder};
+use crate::entity::{Entity, EntityValues, values_to_wasi_datatypes};
+use crate::query::{BuiltQuery, OrmQueryBuilder};
 
 /// Builder for constructing INSERT queries.
 pub struct InsertBuilder<M: Entity> {

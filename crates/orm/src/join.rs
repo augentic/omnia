@@ -1,6 +1,6 @@
 use sea_query::{JoinType, SimpleExpr};
 
-use crate::orm::filter::Filter;
+use crate::filter::Filter;
 
 /// Represents a SQL join operation without exposing ``SeaQuery`` types to guest code.
 #[derive(Clone)]

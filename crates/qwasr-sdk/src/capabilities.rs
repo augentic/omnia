@@ -12,8 +12,7 @@ use anyhow::{Context, anyhow};
 use bytes::Bytes;
 use http::{Request, Response};
 use http_body::Body;
-#[cfg(target_arch = "wasm32")]
-use qwasr_wasi_sql::types::{DataType, Row};
+use qwasr_wasi_sql::{DataType, Row};
 
 /// The `Config` trait is used by implementers to provide configuration from
 /// WASI-guest to dependent crates.
@@ -176,6 +175,7 @@ pub trait TableStore: Send + Sync {
         &self, cnn_name: String, query: String, params: Vec<DataType>,
     ) -> impl Future<Output = Result<Vec<Row>>> + Send;
 
+    /// Executes a statement and returns the number of affected rows.
     #[cfg(not(target_arch = "wasm32"))]
     fn exec(
         &self, cnn_name: String, query: String, params: Vec<DataType>,

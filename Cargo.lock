@@ -2164,6 +2164,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "qwasr-orm"
+version = "0.27.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "qwasr-orm",
+ "qwasr-wasi-sql",
+ "sea-query",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "qwasr-otel"
 version = "0.27.0"
 dependencies = [
