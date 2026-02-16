@@ -1,11 +1,11 @@
 use std::marker::PhantomData;
 
-use sea_query::{Alias, ColumnRef, IntoIden, Order, Query, SimpleExpr};
+use sea_query::{Alias, ColumnRef, IntoIden, Order, SimpleExpr};
 
 use crate::entity::{Entity, values_to_wasi_datatypes};
 use crate::filter::Filter;
 use crate::join::{Join, JoinSpec};
-use crate::query::{BuiltQuery, OrmQueryBuilder};
+use crate::query::{Query, QueryBuilder};
 
 /// Builder for constructing SELECT queries.
 pub struct SelectBuilder<M: Entity> {
@@ -93,8 +93,8 @@ impl<M: Entity> SelectBuilder<M> {
     /// # Errors
     ///
     /// Returns an error if query values cannot be converted to WASI data types.
-    pub fn build(self) -> anyhow::Result<BuiltQuery> {
-        let mut statement = Query::select();
+    pub fn build(self) -> anyhow::Result<Query> {
+        let mut statement = sea_query::Query::select();
 
         // Build column specs lookup map
         let column_specs = M::column_specs();
@@ -148,7 +148,7 @@ impl<M: Entity> SelectBuilder<M> {
             statement.order_by(column, order);
         }
 
-        let (sql, values) = statement.build(OrmQueryBuilder::default());
+        let (sql, values) = statement.build(QueryBuilder::default());
         let params = values_to_wasi_datatypes(values)?;
 
         tracing::debug!(
@@ -158,7 +158,7 @@ impl<M: Entity> SelectBuilder<M> {
             "SelectBuilder generated SQL"
         );
 
-        Ok(BuiltQuery { sql, params })
+        Ok(Query { sql, params })
     }
 }
 
