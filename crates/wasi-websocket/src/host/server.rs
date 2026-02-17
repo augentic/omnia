@@ -24,6 +24,7 @@ where
         component,
     };
 
+
     let mut stream = handler.subscriptions().await?;
     while let Some(event) = stream.next().await {
         let handler = handler.clone();
@@ -32,7 +33,6 @@ where
             tracing::info!(monotonic_counter.event_counter = 1, service = %handler.component);
 
             if let Err(e) = handler.handle(event.clone()).await {
-                tracing::error!("issue processing event: {e}");
                 tracing::error!(
                     monotonic_counter.processing_errors = 1,
                     service = %handler.component,

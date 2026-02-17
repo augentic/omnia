@@ -2436,6 +2436,7 @@ dependencies = [
  "futures",
  "futures-channel",
  "futures-util",
+ "parking_lot",
  "qwasr",
  "serde",
  "serde_json",

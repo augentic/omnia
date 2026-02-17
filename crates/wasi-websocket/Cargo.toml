@@ -24,6 +24,7 @@ fromenv.workspace = true
 futures.workspace = true
 futures-channel.workspace = true
 futures-util.workspace = true
+parking_lot.workspace = true
 qwasr.workspace = true
 serde.workspace = true
 serde_json.workspace = true
