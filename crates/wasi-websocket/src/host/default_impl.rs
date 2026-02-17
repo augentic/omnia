@@ -21,6 +21,7 @@ use futures_channel::mpsc;
 use futures_util::stream::TryStreamExt;
 use futures_util::{StreamExt, future, pin_mut};
 use qwasr::{Backend, FutureResult};
+use serde_json::Value;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use tokio_stream::wrappers::BroadcastStream;
@@ -130,8 +131,6 @@ impl Socket for WebSocketDefault {
         tracing::debug!("sending event to WebSocket clients, groups: {:?}", groups);
         let connections = Arc::clone(&self.connections);
 
-        println!("default_impl::send");
-
         async move {
             let data = event.data();
             let msg = Message::Binary(data.into());
@@ -159,7 +158,7 @@ impl Socket for WebSocketDefault {
                     tracing::warn!("failed to send to peer, channel full or disconnected: {e}");
                 }
             }
-            
+
             if failures > 0 {
                 return Err(anyhow!(
                     "failed to enqueue websocket payload for {failures} connection(s)"
@@ -172,78 +171,72 @@ impl Socket for WebSocketDefault {
     }
 }
 
+/// WebSocket server implementation.
+///
+/// This implementation listens for new connections and handles them in a
+/// separate task. It broadcasts incoming messages to all connected peers and
+/// forwards outgoing messages to connected clients.
 impl WebSocketDefault {
     async fn listen(self, addr: String) -> Result<()> {
         let listener = TcpListener::bind(addr).await?;
         tracing::info!("websocket server listening on: {}", listener.local_addr()?);
 
+        // listen for new connections
         loop {
             let (stream, peer_addr) = match listener.accept().await {
                 Ok(conn) => conn,
                 Err(e) => {
                     tracing::error!("accept error: {e}");
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    // tokio::time::sleep(Duration::from_millis(100)).await;
                     continue;
                 }
             };
-            tracing::info!("New WebSocket connection from: {peer_addr}");
+            tracing::info!("New connection from: {peer_addr}");
 
             let server = self.clone();
             tokio::spawn(async move {
                 if let Ok(ws_stream) = accept_async(stream).await {
-                    server.handle_connect(ws_stream, peer_addr).await;
+                    server.handle_socket(ws_stream, peer_addr).await;
                 } else {
-                    tracing::error!("WebSocket handshake failed for {peer_addr}");
+                    tracing::error!("Handshake failed for {peer_addr}");
                 }
             });
         }
     }
 
-    async fn handle_connect(&self, ws_stream: WebSocketStream<TcpStream>, peer: SocketAddr) {
+    async fn handle_socket(&self, ws_stream: WebSocketStream<TcpStream>, peer_addr: SocketAddr) {
         let (tx, rx) = mpsc::channel(256);
 
-        let accepted = {
-            let mut connections = self.connections.lock().unwrap_or_else(PoisonError::into_inner);
-            if connections.len() >= MAX_CONNECTIONS {
-                tracing::warn!(
-                    "rejecting websocket connection from {peer}: max connections ({MAX_CONNECTIONS}) reached"
-                );
-                false
-            } else {
-                connections.insert(
-                    peer,
-                    Connection {
-                        groups: HashSet::new(),
-                        sender: tx,
-                    },
-                );
-                true
-            }
-        };
-        if !accepted {
+        // save peer connection
+        if let Err(e) = self.save_socket(peer_addr, tx) {
+            tracing::error!("issue saving peer connection: {e}");
             return;
         }
 
+        // split the stream into outgoing and incoming
         let (outgoing, incoming) = ws_stream.split();
 
-        let broadcast_incoming = incoming.try_for_each(|msg| {
+        // broadcast incoming messages to all peers
+        let incoming_broadcaster = incoming.try_for_each(|msg| {
             match msg {
                 Message::Text(text) => {
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
-                        && json.get("type").and_then(|t| t.as_str()) == Some("subscribe")
-                        && let Some(groups) = json.get("groups").and_then(|g| g.as_array())
+                    if let Ok(json) = serde_json::from_str::<Value>(&text)
+                        && json.get("type").and_then(Value::as_str) == Some("subscribe")
+                        && let Some(groups) = json.get("groups").and_then(Value::as_array)
                     {
                         let group_set: HashSet<String> =
                             groups.iter().filter_map(|g| g.as_str().map(String::from)).collect();
-                        tracing::info!("peer {peer} subscribing to groups: {group_set:?}");
+                        tracing::info!("peer {peer_addr} subscribing to groups: {group_set:?}");
+
                         if let Some(conn) = self
                             .connections
                             .lock()
                             .unwrap_or_else(PoisonError::into_inner)
-                            .get_mut(&peer)
+                            .get_mut(&peer_addr)
                         {
                             conn.groups = group_set;
                         }
+
                         return future::ok(());
                     }
 
@@ -265,7 +258,7 @@ impl WebSocketDefault {
                     }
                 }
                 Message::Close(frame) => {
-                    tracing::info!("peer {peer} sent close frame: {frame:?}");
+                    tracing::info!("peer {peer_addr} sent close frame: {frame:?}");
                     return future::err(WsError::ConnectionClosed);
                 }
                 _ => {}
@@ -273,13 +266,33 @@ impl WebSocketDefault {
             future::ok(())
         });
 
-        let receive_from_host = rx.map(Ok).forward(outgoing);
+        // forward outgoing messages to the connected client
+        let outgoing_forwarder = rx.map(Ok).forward(outgoing);
 
-        pin_mut!(broadcast_incoming, receive_from_host);
-        future::select(broadcast_incoming, receive_from_host).await;
+        // wait for the peer to disconnect
+        pin_mut!(incoming_broadcaster, outgoing_forwarder);
+        future::select(incoming_broadcaster, outgoing_forwarder).await;
+        tracing::info!("{peer_addr} disconnected");
 
-        tracing::info!("{peer} disconnected");
-        self.connections.lock().unwrap_or_else(PoisonError::into_inner).remove(&peer);
+        self.connections.lock().unwrap_or_else(PoisonError::into_inner).remove(&peer_addr);
+    }
+
+    fn save_socket(&self, peer_addr: SocketAddr, tx: mpsc::Sender<Message>) -> Result<()> {
+        let mut conns = self.connections.lock().unwrap_or_else(PoisonError::into_inner);
+        if conns.len() >= MAX_CONNECTIONS {
+            return Err(anyhow!("max connections reached"));
+        }
+
+        conns.insert(
+            peer_addr,
+            Connection {
+                groups: HashSet::new(),
+                sender: tx,
+            },
+        );
+        drop(conns);
+
+        Ok(())
     }
 }
 
