@@ -25,7 +25,11 @@ where
     };
     let mut stream = handler.subscriptions().await?;
 
+    println!("server::run");
+
     while let Some(event) = stream.next().await {
+        println!("event received: {event:?}");
+
         let handler = handler.clone();
         tokio::spawn(async move {
             tracing::info!(monotonic_counter.event_counter = 1, service = %handler.component);
@@ -73,6 +77,8 @@ where
         let instance = instance_pre.instantiate_async(&mut store).await?;
         let websocket = Websocket::new(&mut store, &instance)?;
 
+        println!("server::handle");
+
         store
             .run_concurrent(async |store| {
                 let guest = websocket.wasi_websocket_handler();
@@ -95,8 +101,7 @@ where
 
         store
             .run_concurrent(async |store| {
-                let socket =
-                    store.with(|mut store| store.get().websocket().ctx.connect()).await?;
+                let socket = store.with(|mut store| store.get().websocket().ctx.connect()).await?;
                 socket.subscribe().await
             })
             .await?

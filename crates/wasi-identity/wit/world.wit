@@ -1,4 +1,4 @@
-package credibil:wasi-identity;
+package qwasr:wasi-identity;
 
 world identity {
 	include wasi:identity/imports@0.1.0-draft;

@@ -24,7 +24,7 @@ wasip3::http::service::export!(HttpGuest);
 impl http::handler::Guest for HttpGuest {
     /// Routes HTTP requests to WebSocket management endpoints.
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
-        let router = Router::new().route("/socket", post(send_message));
+        let router = Router::new().route("/", post(send_message));
         qwasr_wasi_http::serve(router, request).await
     }
 }
@@ -32,14 +32,10 @@ impl http::handler::Guest for HttpGuest {
 /// Sends a message to all connected WebSocket clients.
 #[axum::debug_handler]
 async fn send_message(message: String) -> HttpResult<Json<Value>> {
-    let socket = Socket::connect("default".to_string())
-        .await
-        .map_err(|e| anyhow!("connecting websocket socket: {e}"))?;
-
+    let socket =
+        Socket::connect("default".to_string()).await.map_err(|e| anyhow!("connecting: {e}"))?;
     let event = Event::new(&message.into_bytes());
-    client::send(&socket, event, None)
-        .await
-        .map_err(|e| anyhow!("sending websocket event: {e}"))?;
+    client::send(&socket, event, None).await.map_err(|e| anyhow!("sending event: {e}"))?;
 
     Ok(Json(json!({
         "message": "event sent"
@@ -50,13 +46,8 @@ struct WebSocketGuest;
 qwasr_wasi_websocket::export!(WebSocketGuest);
 
 impl qwasr_wasi_websocket::handler::Guest for WebSocketGuest {
-    /// Routes HTTP requests to WebSocket management endpoints.
     async fn handle(event: Event) -> Result<(), Error> {
-        let socket = Socket::connect("default".to_string()).await.map_err(|e| Error::from(e))?;
-
-        let event = Event::new(&event.data().to_vec());
-        client::send(&socket, event, None).await.map_err(|e| Error::from(e))?;
-
+        println!("received event: {event:?}");
         Ok(())
     }
 }

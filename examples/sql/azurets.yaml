@@ -1,5 +1,5 @@
 name: sql
 
 include:
-  - oci://ghcr.io/credibil/compose-azurets:latest
-  - oci://ghcr.io/credibil/compose-otelcol:latest
+  - oci://ghcr.io/qwasr/compose-azurets:latest
+  - oci://ghcr.io/qwasr/compose-otelcol:latest

@@ -9,17 +9,6 @@ use qwasr::FutureResult;
 
 /// Stream of event proxies.
 pub type Subscriptions = Pin<Box<dyn Stream<Item = EventProxy> + Send>>;
-// /// Shared map of connected WebSocket clients.
-// pub type ConnectionMap = Arc<Mutex<HashMap<SocketAddr, Connection>>>;
-
-// /// Information about a connected WebSocket client.
-// #[derive(Debug, Clone)]
-// pub struct Connection {
-//     /// The groups this connection has joined.
-//     pub groups: HashSet<String>,
-//     /// Channel sender for outbound messages to this client.
-//     pub sender: UnboundedSender<Message>,
-// }
 
 /// Providers implement the [`Socket`] trait to allow the host to interact with
 /// backend WebSocket resources.

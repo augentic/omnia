@@ -1,4 +1,4 @@
-package credibil:wasi-messaging;
+package qwasr:wasi-messaging;
 
 world messaging {
 	include wasi:messaging/messaging-request-reply@0.2.0-draft;

@@ -1,11 +1,10 @@
 //! # WASI Messaging WIT implementation
 
-#![allow(clippy::same_length_and_capacity)]
-
 // Bindings for the `wasi:messaging` world.
 // See (<https://github.com/WebAssembly/wasi-messaging/>)
 mod generated {
     #![allow(missing_docs)]
+    #![allow(clippy::same_length_and_capacity)]
 
     wit_bindgen::generate!({
         world: "messaging",

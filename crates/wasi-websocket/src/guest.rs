@@ -1,11 +1,10 @@
 //! # WASI WebSocket WIT implementation
 
-#![allow(clippy::same_length_and_capacity)]
-
 // Bindings for the `wasi:websocket` world.
 // See (<https://github.com/augentic/wasi-websocket/>)
 mod generated {
     #![allow(missing_docs)]
+    #![allow(clippy::same_length_and_capacity)]
 
     wit_bindgen::generate!({
         world: "websocket",
@@ -13,6 +12,7 @@ mod generated {
         additional_derives: [Clone],
         generate_all,
         pub_export_macro: true,
+        default_bindings_module: "qwasr_wasi_websocket",
     });
 }
 

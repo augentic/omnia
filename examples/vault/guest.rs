@@ -50,7 +50,7 @@ impl Guest for Http {
 #[qwasr_wasi_otel::instrument]
 async fn handler(body: Bytes) -> HttpResult<Json<Value>> {
     let locker =
-        vault::open("credibil-locker".to_string()).await.context("failed to open vault locker")?;
+        vault::open("qwasr-locker".to_string()).await.context("failed to open vault locker")?;
 
     locker.set("secret-id".to_string(), body.to_vec()).await.context("issue setting secret")?;
 

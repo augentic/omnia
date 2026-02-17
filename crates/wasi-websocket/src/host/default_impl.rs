@@ -130,18 +130,20 @@ impl Socket for WebSocketDefault {
         tracing::debug!("sending event to WebSocket clients, groups: {:?}", groups);
         let connections = Arc::clone(&self.connections);
 
+        println!("default_impl::send");
+
         async move {
             let data = event.data();
             let msg = Message::Binary(data.into());
-            let requested_groups: Option<HashSet<&str>> =
-                groups.as_ref().map(|group_names| group_names.iter().map(String::as_str).collect());
+            let to_groups: Option<HashSet<&str>> =
+                groups.as_ref().map(|g| g.iter().map(String::as_str).collect());
 
-            let senders: Vec<_> = {
-                let connections = connections.lock().unwrap_or_else(PoisonError::into_inner);
-                requested_groups.as_ref().map_or_else(
-                    || connections.values().map(|c| c.sender.clone()).collect(),
+            let clients: Vec<_> = {
+                let conns = connections.lock().unwrap_or_else(PoisonError::into_inner);
+                to_groups.as_ref().map_or_else(
+                    || conns.values().map(|c| c.sender.clone()).collect(),
                     |groups| {
-                        connections
+                        conns
                             .values()
                             .filter(|c| c.groups.iter().any(|g| groups.contains(g.as_str())))
                             .map(|c| c.sender.clone())
@@ -151,12 +153,13 @@ impl Socket for WebSocketDefault {
             };
 
             let mut failures = 0usize;
-            for mut sender in senders {
-                if let Err(e) = sender.try_send(msg.clone()) {
+            for mut client in clients {
+                if let Err(e) = client.try_send(msg.clone()) {
                     failures += 1;
                     tracing::warn!("failed to send to peer, channel full or disconnected: {e}");
                 }
             }
+            
             if failures > 0 {
                 return Err(anyhow!(
                     "failed to enqueue websocket payload for {failures} connection(s)"

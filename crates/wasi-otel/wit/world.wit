@@ -1,4 +1,4 @@
-package credibil:wasi-otel;
+package qwasr:wasi-otel;
 
 world otel {
 	include wasi:otel/imports@0.2.0-draft;

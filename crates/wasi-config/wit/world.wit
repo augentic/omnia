@@ -1,4 +1,4 @@
-package credibil:wasi-config;
+package qwasr:wasi-config;
 
 world config {
 	include wasi:config/imports@0.2.0-rc.1;

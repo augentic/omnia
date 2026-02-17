@@ -2,8 +2,8 @@
 //!
 //! This module implements a runtime server for websocket
 
-pub mod default_impl;
 mod client_impl;
+mod default_impl;
 mod resource;
 mod server;
 mod types_impl;
