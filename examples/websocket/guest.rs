@@ -38,7 +38,7 @@ async fn send_message(message: String) -> HttpResult<Json<Value>> {
     client::send(&client, event, None).await.map_err(|e| anyhow!("sending event: {e}"))?;
 
     Ok(Json(json!({
-        "message": "event sent"
+"message": "event sent"
     })))
 }
 

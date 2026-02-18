@@ -235,3 +235,28 @@ pub trait TableStore: Send + Sync {
         }
     }
 }
+
+/// The `WebSocket` trait defines behavior for sending events to WebSocket clients.
+pub trait WebSocket: Send + Sync {
+    /// Send an event to connected WebSocket clients.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn send(
+        &self, name: &str, data: &[u8], sockets: Option<Vec<String>>,
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// Send an event to connected WebSocket clients.
+    #[cfg(target_arch = "wasm32")]
+    fn send(
+        &self, name: &str, data: &[u8], sockets: Option<Vec<String>>,
+    ) -> impl Future<Output = Result<()>> + Send {
+        async move {
+            let client = qwasr_wasi_websocket::types::Client::connect(name.to_string())
+                .await
+                .map_err(|e| anyhow!("connecting to websocket: {e}"))?;
+            let event = qwasr_wasi_websocket::types::Event::new(data);
+            qwasr_wasi_websocket::client::send(&client, event, sockets)
+                .await
+                .map_err(|e| anyhow!("sending websocket event: {e}"))
+        }
+    }
+}
