@@ -99,6 +99,7 @@ wit-bindgen = { version = "0.53.1", features = ["async-spawn"] }
 # interally referenced crates
 qwasr = { path = "crates/qwasr", version = "0.27.0", registry = "credibil" }
 qwasr-guest-macro = { path = "crates/guest-macro", version = "0.27.0", registry = "credibil" }
+qwasr-orm = { path = "crates/orm", version = "0.27.0", registry = "credibil" }
 qwasr-otel = { path = "crates/otel", version = "0.27.0", registry = "credibil" }
 qwasr-runtime-macro = { path = "crates/runtime-macro", version = "0.27.0", registry = "credibil" }
 qwasr-sdk = { path = "crates/qwasr-sdk", version = "0.27.0", registry = "credibil" }

@@ -155,6 +155,8 @@
 //!
 //! For more information, please refer to [`usage.md`](orm/usage.md).
 
+#![cfg(target_arch = "wasm32")]
+
 mod delete;
 mod entity;
 mod filter;
@@ -164,75 +166,19 @@ mod query;
 mod select;
 mod update;
 
-use anyhow::{Result, anyhow};
 pub use delete::DeleteBuilder;
 pub use entity::{Entity, EntityValues, FetchValue};
 pub use filter::Filter;
-use futures::FutureExt;
-use futures::future::BoxFuture;
 pub use insert::InsertBuilder;
 pub use join::Join;
+// Re-export basic WASI SQL types for use in query parameters and custom value conversions.
+pub use qwasr_wasi_sql::{DataType, Field, Row};
 pub use select::SelectBuilder;
 pub use update::UpdateBuilder;
 
-use crate::readwrite;
-use crate::types::{Connection, DataType, Row, Statement};
-
-/// Type alias for boxed futures returning ORM results.
-pub type FutureResult<T> = BoxFuture<'static, Result<T>>;
-
-/// Trait for types that provide ORM database access.
-///
-/// Implement this trait to enable ORM operations. Default implementations
-/// use the WASI SQL bindings to execute queries.
-pub trait TableStore: Send + Sync {
-    /// Executes a query and returns the result rows.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails, statement preparation fails, or query execution fails.
-    fn query(
-        &self, cnn_name: String, query: String, params: Vec<DataType>,
-    ) -> FutureResult<Vec<Row>> {
-        async {
-            let cnn = Connection::open(cnn_name)
-                .await
-                .map_err(|e| anyhow!("failed to open connection: {}", e.trace()))?;
-
-            let stmt = Statement::prepare(query, params)
-                .await
-                .map_err(|e| anyhow!("failed to prepare statement: {}", e.trace()))?;
-
-            let res = readwrite::query(&cnn, &stmt)
-                .await
-                .map_err(|e| anyhow!("query failed: {}", e.trace()))?;
-
-            Ok(res)
-        }
-        .boxed()
-    }
-
-    /// Executes a statement and returns the number of affected rows.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails, statement preparation fails, or execution fails.
-    fn exec(&self, cnn_name: String, query: String, params: Vec<DataType>) -> FutureResult<u32> {
-        async {
-            let cnn = Connection::open(cnn_name)
-                .await
-                .map_err(|e| anyhow!("failed to open connection: {}", e.trace()))?;
-
-            let stmt = Statement::prepare(query, params)
-                .await
-                .map_err(|e| anyhow!("failed to prepare statement: {}", e.trace()))?;
-
-            let res = readwrite::exec(&cnn, &stmt)
-                .await
-                .map_err(|e| anyhow!("exec failed: {}", e.trace()))?;
-
-            Ok(res)
-        }
-        .boxed()
-    }
+// Re-exports for ``entity`` macro use only. This is needed to avoid leaking ``SeaQuery`` value
+// types into guest code
+#[doc(hidden)]
+pub mod __private {
+    pub use sea_query::Value;
 }

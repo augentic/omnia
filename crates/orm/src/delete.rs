@@ -1,11 +1,11 @@
 use std::marker::PhantomData;
 
 use anyhow::Result;
-use sea_query::{Alias, Query, SimpleExpr};
+use sea_query::{Alias, SimpleExpr};
 
-use crate::orm::entity::{Entity, values_to_wasi_datatypes};
-use crate::orm::filter::Filter;
-use crate::orm::query::{BuiltQuery, OrmQueryBuilder};
+use crate::entity::{Entity, values_to_wasi_datatypes};
+use crate::filter::Filter;
+use crate::query::{Query, QueryBuilder};
 
 /// Builder for constructing DELETE queries.
 pub struct DeleteBuilder<M: Entity> {
@@ -50,8 +50,8 @@ impl<M: Entity> DeleteBuilder<M> {
     /// # Errors
     ///
     /// Returns an error if any query values cannot be converted to WASI data types.
-    pub fn build(self) -> Result<BuiltQuery> {
-        let mut statement = Query::delete();
+    pub fn build(self) -> Result<Query> {
+        let mut statement = sea_query::Query::delete();
         statement.from_table(Alias::new(M::TABLE));
 
         for filter in self.filters {
@@ -62,7 +62,7 @@ impl<M: Entity> DeleteBuilder<M> {
             statement.returning_col(Alias::new(column));
         }
 
-        let (sql, values) = statement.build(OrmQueryBuilder::default());
+        let (sql, values) = statement.build(QueryBuilder::default());
         let params = values_to_wasi_datatypes(values)?;
 
         tracing::debug!(
@@ -72,6 +72,6 @@ impl<M: Entity> DeleteBuilder<M> {
             "DeleteBuilder generated SQL"
         );
 
-        Ok(BuiltQuery { sql, params })
+        Ok(Query { sql, params })
     }
 }

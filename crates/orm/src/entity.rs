@@ -1,9 +1,9 @@
 use anyhow::{Result, anyhow, bail};
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use sea_query::{Order, Value, Values};
 
-use crate::orm::join::Join;
-use crate::types::{DataType, Row};
+use crate::join::Join;
+use crate::{DataType, Row};
 
 /// Trait for types that can be extracted from database rows.
 ///
@@ -33,22 +33,29 @@ pub trait FetchValue: Sized {
 /// ```
 #[macro_export]
 macro_rules! entity {
-    // With joins and columns
+    // Full form: columns + joins + struct (single code-generation arm)
     (
         table = $table:literal,
         columns = [$( ($col_table:literal, $col_name:literal, $col_field:literal) ),* $(,)?],
         joins = [$($join:expr),* $(,)?],
         $(#[$meta:meta])*
         pub struct $struct_name:ident {
-            $(pub $field_name:ident : $field_type:ty),* $(,)?
+            $(
+                $(#[$field_meta:meta])*
+                pub $field_name:ident : $field_type:ty
+            ),* $(,)?
         }
     ) => {
+        #[allow(missing_docs)]
         $(#[$meta])*
         pub struct $struct_name {
-            $(pub $field_name : $field_type),*
+            $(
+                $(#[$field_meta])*
+                pub $field_name : $field_type
+            ),*
         }
 
-        impl $crate::orm::Entity for $struct_name {
+        impl $crate::Entity for $struct_name {
             const TABLE: &'static str = $table;
 
             fn projection() -> &'static [&'static str] {
@@ -63,16 +70,16 @@ macro_rules! entity {
                 vec![$( ($col_field, $col_table, $col_name) ),*]
             }
 
-            fn from_row(row: &$crate::types::Row) -> anyhow::Result<Self> {
+            fn from_row(row: &$crate::Row) -> anyhow::Result<Self> {
                 Ok(Self {
                     $(
-                        $field_name: <$field_type as $crate::orm::FetchValue>::fetch(row, stringify!($field_name))?,
+                        $field_name: <$field_type as $crate::FetchValue>::fetch(row, stringify!($field_name))?,
                     )*
                 })
             }
         }
 
-        impl $crate::orm::EntityValues for $struct_name {
+        impl $crate::EntityValues for $struct_name {
             fn __to_values(&self) -> Vec<(&'static str, $crate::__private::Value)> {
                 vec![
                     $(
@@ -83,88 +90,30 @@ macro_rules! entity {
         }
     };
 
-    // With joins only
+    // Joins only → forward with empty columns
     (
         table = $table:literal,
         joins = [$($join:expr),* $(,)?],
-        $(#[$meta:meta])*
-        pub struct $struct_name:ident {
-            $(pub $field_name:ident : $field_type:ty),* $(,)?
-        }
+        $($rest:tt)*
     ) => {
-        $(#[$meta])*
-        pub struct $struct_name {
-            $(pub $field_name : $field_type),*
-        }
-
-        impl $crate::orm::Entity for $struct_name {
-            const TABLE: &'static str = $table;
-
-            fn projection() -> &'static [&'static str] {
-                &[ $( stringify!($field_name) ),* ]
-            }
-
-            fn joins() -> Vec<Join> {
-                vec![$($join),*]
-            }
-
-            fn from_row(row: &$crate::types::Row) -> anyhow::Result<Self> {
-                Ok(Self {
-                    $(
-                        $field_name: <$field_type as $crate::orm::FetchValue>::fetch(row, stringify!($field_name))?,
-                    )*
-                })
-            }
-        }
-
-        impl $crate::orm::EntityValues for $struct_name {
-            fn __to_values(&self) -> Vec<(&'static str, $crate::__private::Value)> {
-                vec![
-                    $(
-                        (stringify!($field_name), self.$field_name.clone().into()),
-                    )*
-                ]
-            }
+        $crate::entity! {
+            table = $table,
+            columns = [],
+            joins = [$($join),*],
+            $($rest)*
         }
     };
 
-    // Without joins - this is for a basic entity
+    // Bare table → forward with empty columns and joins
     (
         table = $table:literal,
-        $(#[$meta:meta])*
-        pub struct $struct_name:ident {
-            $(pub $field_name:ident : $field_type:ty),* $(,)?
-        }
+        $($rest:tt)*
     ) => {
-        $(#[$meta])*
-        pub struct $struct_name {
-            $(pub $field_name : $field_type),*
-        }
-
-        impl $crate::orm::Entity for $struct_name {
-            const TABLE: &'static str = $table;
-
-            fn projection() -> &'static [&'static str] {
-                &[ $( stringify!($field_name) ),* ]
-            }
-
-            fn from_row(row: &$crate::types::Row) -> anyhow::Result<Self> {
-                Ok(Self {
-                    $(
-                        $field_name: <$field_type as $crate::orm::FetchValue>::fetch(row, stringify!($field_name))?,
-                    )*
-                })
-            }
-        }
-
-        impl $crate::orm::EntityValues for $struct_name {
-            fn __to_values(&self) -> Vec<(&'static str, $crate::__private::Value)> {
-                vec![
-                    $(
-                        (stringify!($field_name), self.$field_name.clone().into()),
-                    )*
-                ]
-            }
+        $crate::entity! {
+            table = $table,
+            columns = [],
+            joins = [],
+            $($rest)*
         }
     };
 }
@@ -325,6 +274,12 @@ impl FetchValue for DateTime<Utc> {
     }
 }
 
+impl FetchValue for NaiveDate {
+    fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
+        as_date(row_field(row, col)?)
+    }
+}
+
 impl FetchValue for serde_json::Value {
     fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
         as_json(row_field(row, col)?)
@@ -445,6 +400,14 @@ fn as_timestamp(value: &DataType) -> Result<DateTime<Utc>> {
             )
         }
         _ => bail!("expected timestamp data type"),
+    }
+}
+
+fn as_date(value: &DataType) -> Result<NaiveDate> {
+    match value {
+        DataType::Date(Some(raw)) => NaiveDate::parse_from_str(raw, "%Y-%m-%d")
+            .map_err(|_e| anyhow!("unsupported date: {raw}; expected \"%Y-%m-%d\" format")),
+        _ => bail!("expected date data type"),
     }
 }
 

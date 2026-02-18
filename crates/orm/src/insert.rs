@@ -1,10 +1,10 @@
 use std::marker::PhantomData;
 
 use anyhow::Result;
-use sea_query::{Alias, OnConflict, Query, SimpleExpr, Value};
+use sea_query::{Alias, OnConflict, SimpleExpr, Value};
 
-use crate::orm::entity::{Entity, EntityValues, values_to_wasi_datatypes};
-use crate::orm::query::{BuiltQuery, OrmQueryBuilder};
+use crate::entity::{Entity, EntityValues, values_to_wasi_datatypes};
+use crate::query::{Query, QueryBuilder};
 
 /// Builder for constructing INSERT queries.
 pub struct InsertBuilder<M: Entity> {
@@ -133,8 +133,8 @@ impl<M: Entity> InsertBuilder<M> {
     /// # Errors
     ///
     /// Returns an error if any query values cannot be converted to WASI data types.
-    pub fn build(self) -> Result<BuiltQuery> {
-        let mut statement = Query::insert();
+    pub fn build(self) -> Result<Query> {
+        let mut statement = sea_query::Query::insert();
         statement.into_table(Alias::new(M::TABLE));
 
         let columns: Vec<_> = self.values.iter().map(|(column, _)| Alias::new(*column)).collect();
@@ -162,7 +162,7 @@ impl<M: Entity> InsertBuilder<M> {
             statement.on_conflict(on_conflict);
         }
 
-        let (sql, values) = statement.build(OrmQueryBuilder::default());
+        let (sql, values) = statement.build(QueryBuilder::default());
         let params = values_to_wasi_datatypes(values)?;
 
         tracing::debug!(
@@ -172,6 +172,6 @@ impl<M: Entity> InsertBuilder<M> {
             "InsertBuilder generated SQL"
         );
 
-        Ok(BuiltQuery { sql, params })
+        Ok(Query { sql, params })
     }
 }

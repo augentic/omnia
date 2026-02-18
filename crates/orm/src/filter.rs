@@ -1,6 +1,6 @@
 use sea_query::{Expr, ExprTrait, SimpleExpr, Value};
 
-use crate::orm::select::table_column;
+use crate::select::table_column;
 
 /// Filter represents database predicates without exposing ``SeaQuery`` types to guest code.
 ///

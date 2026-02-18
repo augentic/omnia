@@ -15,9 +15,7 @@ mod common;
 
 use chrono::{DateTime, Utc};
 use common::{Event, User};
-use qwasr_wasi_sql::entity;
-use qwasr_wasi_sql::orm::{Entity, Filter, Join};
-use qwasr_wasi_sql::types::{DataType, Field, Row};
+use qwasr_orm::{DataType, Entity, Field, Filter, Join, Row, entity};
 
 use crate::common::Item;
 

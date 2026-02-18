@@ -23,12 +23,12 @@ use axum::extract::Path;
 use axum::routing::{delete, get};
 use axum::{Json, Router};
 use chrono::Utc;
-use qwasr_sdk::{HttpResult, TableStore};
-use qwasr_wasi_sql::orm::{
-    DeleteBuilder, Filter, InsertBuilder, Join, SelectBuilder, UpdateBuilder,
+use qwasr_orm::{
+    DeleteBuilder, Entity, Filter, InsertBuilder, Join, SelectBuilder, UpdateBuilder, entity,
 };
+use qwasr_sdk::{HttpResult, TableStore};
+use qwasr_wasi_sql::readwrite;
 use qwasr_wasi_sql::types::{Connection, Statement};
-use qwasr_wasi_sql::{entity, readwrite};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tracing::Level;
@@ -60,11 +60,21 @@ async fn list_agencies() -> HttpResult<Json<Value>> {
     tracing::info!("list all agencies");
     ensure_schema().await?;
 
-    let agencies = SelectBuilder::<Agency>::new()
+    let select = SelectBuilder::<Agency>::new()
         .order_by_desc(None, "created_at")
-        .fetch(&Provider, "db")
+        .build()
+        .context("failed to build query")?;
+
+    let rows = Provider
+        .query("db".to_string(), select.sql, select.params)
         .await
-        .context("failed to fetch agencies")?;
+        .context("failed to execute query")?;
+
+    let agencies = rows
+        .iter()
+        .map(Agency::from_row)
+        .collect::<Result<Vec<_>>>()
+        .context("failed row mapping")?;
 
     Ok(Json(json!(agencies)))
 }
@@ -76,12 +86,22 @@ async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> HttpResult<Json<
     tracing::info!("create agency");
     ensure_schema().await?;
 
-    let agencies = SelectBuilder::<Agency>::new()
+    let select = SelectBuilder::<Agency>::new()
         .order_by_desc(None, "agency_id")
         .limit(1)
-        .fetch(&Provider, "db")
+        .build()
+        .context("failed to build max agency_id query")?;
+
+    let rows = Provider
+        .query("db".to_string(), select.sql, select.params)
         .await
-        .context("failed to fetch max agency_id")?;
+        .context("failed to execute query")?;
+
+    let agencies = rows
+        .iter()
+        .map(Agency::from_row)
+        .collect::<Result<Vec<_>>>()
+        .context("failed row mapping")?;
 
     // Not worried about concurrency issue here as one request will fail. Moreover, this
     // is an example. Ideally, this will be handled in a more idiomatic way.
@@ -114,11 +134,21 @@ async fn get_agency(Path(id): Path<i64>) -> HttpResult<Json<Value>> {
     tracing::info!("get agency {}", id);
     ensure_schema().await?;
 
-    let agencies = SelectBuilder::<Agency>::new()
+    let select = SelectBuilder::<Agency>::new()
         .r#where(Filter::eq("agency_id", id))
-        .fetch(&Provider, "db")
+        .build()
+        .context("failed to build fetch agency by ID query")?;
+
+    let rows = Provider
+        .query("db".to_string(), select.sql, select.params)
         .await
-        .context("failed to fetch agency")?;
+        .context("failed to execute query")?;
+
+    let agencies = rows
+        .iter()
+        .map(Agency::from_row)
+        .collect::<Result<Vec<_>>>()
+        .context("failed row mapping")?;
 
     let agency = agencies.first().ok_or_else(|| anyhow!("agency not found"))?;
 
@@ -135,11 +165,21 @@ async fn update_agency(
     ensure_schema().await?;
 
     // Verify agency exists
-    let agencies = SelectBuilder::<Agency>::new()
+    let select = SelectBuilder::<Agency>::new()
         .r#where(Filter::eq("agency_id", id))
-        .fetch(&Provider, "db")
+        .build()
+        .context("failed to build fetch agency by ID query")?;
+
+    let rows = Provider
+        .query("db".to_string(), select.sql, select.params)
         .await
-        .context("failed to verify agency")?;
+        .context("failed to execute query")?;
+
+    let agencies = rows
+        .iter()
+        .map(Agency::from_row)
+        .collect::<Result<Vec<_>>>()
+        .context("failed row mapping")?;
 
     let _ = agencies.first().ok_or_else(|| anyhow!("agency not found"))?;
 
@@ -167,11 +207,21 @@ async fn update_agency(
         .context("failed to update agency")?;
 
     // Fetch updated agency
-    let agencies = SelectBuilder::<Agency>::new()
+    let select = SelectBuilder::<Agency>::new()
         .r#where(Filter::eq("agency_id", id))
-        .fetch(&Provider, "db")
+        .build()
+        .context("failed to build fetch agency by ID query")?;
+
+    let rows = Provider
+        .query("db".to_string(), select.sql, select.params)
         .await
-        .context("failed to fetch updated agency")?;
+        .context("failed to execute query")?;
+
+    let agencies = rows
+        .iter()
+        .map(Agency::from_row)
+        .collect::<Result<Vec<_>>>()
+        .context("failed row mapping")?;
 
     let agency = agencies.first().ok_or_else(|| anyhow!("agency not found after update"))?;
 
@@ -185,12 +235,22 @@ async fn list_agency_feeds(Path(agency_id): Path<i64>) -> HttpResult<Json<Value>
     tracing::info!("list feeds for agency {}", agency_id);
     ensure_schema().await?;
 
-    let feeds = SelectBuilder::<Feed>::new()
+    let select = SelectBuilder::<Feed>::new()
         .r#where(Filter::eq("agency_id", agency_id))
         .order_by_desc(None, "created_at")
-        .fetch(&Provider, "db")
+        .build()
+        .context("failed to build query to select feeds by agency_id")?;
+
+    let rows = Provider
+        .query("db".to_string(), select.sql, select.params)
         .await
-        .context("failed to fetch feeds")?;
+        .context("failed to execute query")?;
+
+    let feeds = rows
+        .iter()
+        .map(Feed::from_row)
+        .collect::<Result<Vec<_>>>()
+        .context("failed row mapping")?;
 
     Ok(Json(json!({ "feeds": feeds })))
 }
@@ -205,22 +265,42 @@ async fn create_feed(
     ensure_schema().await?;
 
     // Verify agency exists
-    let agencies = SelectBuilder::<Agency>::new()
+    let select = SelectBuilder::<Agency>::new()
         .r#where(Filter::eq("agency_id", agency_id))
-        .fetch(&Provider, "db")
+        .build()
+        .context("failed to build fetch agency by ID query")?;
+
+    let rows = Provider
+        .query("db".to_string(), select.sql, select.params)
         .await
-        .context("failed to verify agency")?;
+        .context("failed to execute query")?;
+
+    let agencies = rows
+        .iter()
+        .map(Agency::from_row)
+        .collect::<Result<Vec<_>>>()
+        .context("failed row mapping")?;
 
     if agencies.is_empty() {
         return Err(anyhow!("agency not found").into());
     }
 
-    let feeds = SelectBuilder::<Feed>::new()
+    let select = SelectBuilder::<Feed>::new()
         .order_by_desc(None, "feed_id")
         .limit(1)
-        .fetch(&Provider, "db")
+        .build()
+        .context("failed to build max feed_id query")?;
+
+    let rows = Provider
+        .query("db".to_string(), select.sql, select.params)
         .await
-        .context("failed to fetch max feed_id")?;
+        .context("failed to execute query")?;
+
+    let feeds = rows
+        .iter()
+        .map(Feed::from_row)
+        .collect::<Result<Vec<_>>>()
+        .context("failed row mapping")?;
 
     // Not worried about concurrency issue here as one request will fail. Moreover, this
     // is an example. Ideally, this will be handled in a more idiomatic way.
@@ -252,12 +332,22 @@ async fn list_all_feeds() -> HttpResult<Json<Value>> {
     tracing::info!("list all feeds with agency info");
     ensure_schema().await?;
 
-    let feeds_with_agency = SelectBuilder::<FeedWithAgency>::new()
+    let select = SelectBuilder::<FeedWithAgency>::new()
         .order_by_desc(Some("feed"), "created_at")
         .limit(100)
-        .fetch(&Provider, "db")
+        .build()
+        .context("failed to build fetch feeds with agencies query")?;
+
+    let rows = Provider
+        .query("db".to_string(), select.sql, select.params)
         .await
-        .context("failed to fetch feeds with agencies")?;
+        .context("failed to execute query")?;
+
+    let feeds_with_agency = rows
+        .iter()
+        .map(FeedWithAgency::from_row)
+        .collect::<Result<Vec<_>>>()
+        .context("failed row mapping")?;
 
     Ok(Json(json!({ "feeds": feeds_with_agency })))
 }

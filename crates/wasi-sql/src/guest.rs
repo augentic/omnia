@@ -14,21 +14,12 @@ mod generated {
     });
 }
 
-pub mod orm;
-
-// Re-exports for ``entity`` macro use only. This is needed to avoid leaking ``SeaQuery`` value
-// types into guest code
-#[doc(hidden)]
-pub mod __private {
-    pub use sea_query::Value;
-}
-
 use anyhow::Result;
 use base64ct::{Base64, Encoding};
 use serde_json::Value;
 
 pub use self::generated::wasi::sql::*;
-use crate::types::{DataType, Row};
+pub use crate::types::{DataType, Field, Row};
 
 /// Helper function to create JSON output from rows returned by a query.
 ///

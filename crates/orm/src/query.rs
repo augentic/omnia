@@ -1,24 +1,23 @@
 use sea_query::backend::{
-    EscapeBuilder, OperLeftAssocDecider, PrecedenceDecider, QueryBuilder, QuotedBuilder,
-    TableRefBuilder,
+    EscapeBuilder, OperLeftAssocDecider, PrecedenceDecider, QuotedBuilder, TableRefBuilder,
 };
 use sea_query::prepare::SqlWriter;
 use sea_query::{BinOper, Oper, Quote, SimpleExpr, SubQueryStatement, Value};
 
-use crate::types::DataType;
+use crate::DataType;
 
-pub struct BuiltQuery {
+pub struct Query {
     pub sql: String,
     pub params: Vec<DataType>,
 }
 
-pub struct OrmQueryBuilder {
+pub struct QueryBuilder {
     pub quote: Quote,
     pub placeholder: &'static str, // "?" or "$"
     pub numbered: bool,            // false for "?", true for "$1, $2, ..."
 }
 
-impl Default for OrmQueryBuilder {
+impl Default for QueryBuilder {
     // should work for `Postgres` and `Sqlite`
     fn default() -> Self {
         Self {
@@ -29,17 +28,17 @@ impl Default for OrmQueryBuilder {
     }
 }
 
-impl QuotedBuilder for OrmQueryBuilder {
+impl QuotedBuilder for QueryBuilder {
     fn quote(&self) -> Quote {
         self.quote
     }
 }
 
-impl EscapeBuilder for OrmQueryBuilder {}
+impl EscapeBuilder for QueryBuilder {}
 
-impl TableRefBuilder for OrmQueryBuilder {}
+impl TableRefBuilder for QueryBuilder {}
 
-impl OperLeftAssocDecider for OrmQueryBuilder {
+impl OperLeftAssocDecider for QueryBuilder {
     fn well_known_left_associative(&self, op: &BinOper) -> bool {
         // Copied from sea-query 0.32.7 backend/query_builder.rs `common_well_known_left_associative`
         matches!(
@@ -49,7 +48,7 @@ impl OperLeftAssocDecider for OrmQueryBuilder {
     }
 }
 
-impl PrecedenceDecider for OrmQueryBuilder {
+impl PrecedenceDecider for QueryBuilder {
     fn inner_expr_well_known_greater_precedence(
         &self, _inner: &SimpleExpr, _outer_oper: &Oper,
     ) -> bool {
@@ -58,7 +57,7 @@ impl PrecedenceDecider for OrmQueryBuilder {
     }
 }
 
-impl QueryBuilder for OrmQueryBuilder {
+impl sea_query::backend::QueryBuilder for QueryBuilder {
     fn prepare_query_statement(&self, query: &SubQueryStatement, sql: &mut dyn SqlWriter) {
         match query {
             SubQueryStatement::SelectStatement(s) => self.prepare_select_statement(s, sql),

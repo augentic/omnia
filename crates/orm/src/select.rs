@@ -1,13 +1,11 @@
 use std::marker::PhantomData;
 
-use anyhow::{Context, Result};
-use sea_query::{Alias, ColumnRef, IntoIden, Order, Query, SimpleExpr};
+use sea_query::{Alias, ColumnRef, IntoIden, Order, SimpleExpr};
 
-use crate::orm::TableStore;
-use crate::orm::entity::{Entity, values_to_wasi_datatypes};
-use crate::orm::filter::Filter;
-use crate::orm::join::{Join, JoinSpec};
-use crate::orm::query::{BuiltQuery, OrmQueryBuilder};
+use crate::entity::{Entity, values_to_wasi_datatypes};
+use crate::filter::Filter;
+use crate::join::{Join, JoinSpec};
+use crate::query::{Query, QueryBuilder};
 
 /// Builder for constructing SELECT queries.
 pub struct SelectBuilder<M: Entity> {
@@ -90,33 +88,13 @@ impl<M: Entity> SelectBuilder<M> {
         self
     }
 
-    /// Consumes the builder, executes the query against the provider, and maps rows to the model.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the query fails to build, execute, or if row conversion to the model fails.
-    pub async fn fetch(self, provider: &impl TableStore, pool_name: &str) -> Result<Vec<M>> {
-        let BuiltQuery { sql, params } = self.build().context("failed building query")?;
-
-        let rows =
-            provider.query(pool_name.to_string(), sql, params).await.context("query failed")?;
-
-        let models = rows
-            .iter()
-            .map(M::from_row)
-            .collect::<Result<Vec<_>>>()
-            .context("row conversion failed")?;
-
-        Ok(models)
-    }
-
     /// Build the SELECT query.
     ///
     /// # Errors
     ///
     /// Returns an error if query values cannot be converted to WASI data types.
-    pub fn build(self) -> Result<BuiltQuery> {
-        let mut statement = Query::select();
+    pub fn build(self) -> anyhow::Result<Query> {
+        let mut statement = sea_query::Query::select();
 
         // Build column specs lookup map
         let column_specs = M::column_specs();
@@ -170,7 +148,7 @@ impl<M: Entity> SelectBuilder<M> {
             statement.order_by(column, order);
         }
 
-        let (sql, values) = statement.build(OrmQueryBuilder::default());
+        let (sql, values) = statement.build(QueryBuilder::default());
         let params = values_to_wasi_datatypes(values)?;
 
         tracing::debug!(
@@ -180,7 +158,7 @@ impl<M: Entity> SelectBuilder<M> {
             "SelectBuilder generated SQL"
         );
 
-        Ok(BuiltQuery { sql, params })
+        Ok(Query { sql, params })
     }
 }
 

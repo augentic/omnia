@@ -1,11 +1,9 @@
 //! Common test helpers shared across integration tests.
-
 #![cfg(target_arch = "wasm32")]
 #![allow(dead_code)]
 
 use chrono::{DateTime, Utc};
-use qwasr_wasi_sql::entity;
-use qwasr_wasi_sql::orm::{Filter, Join};
+use qwasr_orm::{Filter, Join, entity};
 
 // Common test entities used across multiple test files
 
@@ -92,6 +90,7 @@ fn canonicalize_sql(sql: &str) -> String {
 /// This helper normalizes SQL to avoid brittle exact-string matching with ``SeaQuery`` output.
 /// It strips identifier quotes, normalizes whitespace, and checks that fragments appear
 /// sequentially in the generated SQL.
+#[allow(clippy::missing_panics_doc)]
 pub fn assert_sql_contains(actual: &str, fragments: &[&str]) {
     let actual_canonical = canonicalize_sql(actual);
     let mut search_start = 0usize;

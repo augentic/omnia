@@ -8,9 +8,7 @@
 mod common;
 
 use common::{CommentWithAlias, Item, PostWithJoin, User, assert_sql_contains};
-use qwasr_wasi_sql::orm::{
-    DeleteBuilder, Entity, Filter, InsertBuilder, Join, SelectBuilder, UpdateBuilder,
-};
+use qwasr_orm::{DeleteBuilder, Entity, Filter, InsertBuilder, Join, SelectBuilder, UpdateBuilder};
 use qwasr_wasi_sql::types::DataType;
 
 // SELECT tests

@@ -869,6 +869,7 @@ dependencies = [
  "http-body-util",
  "opentelemetry",
  "qwasr",
+ "qwasr-orm",
  "qwasr-sdk",
  "qwasr-wasi-blobstore",
  "qwasr-wasi-config",
@@ -2193,6 +2194,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "qwasr-orm"
+version = "0.27.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "qwasr-wasi-sql",
+ "sea-query",
+ "serde_json",
+ "tracing",
 ]
 
 [[package]]

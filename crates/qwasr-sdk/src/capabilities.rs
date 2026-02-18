@@ -12,6 +12,7 @@ use anyhow::{Context, anyhow};
 use bytes::Bytes;
 use http::{Request, Response};
 use http_body::Body;
+use qwasr_wasi_sql::{DataType, Row};
 
 /// The `Config` trait is used by implementers to provide configuration from
 /// WASI-guest to dependent crates.
@@ -163,9 +164,74 @@ pub trait Identity: Send + Sync {
     }
 }
 
-/// Marker trait for types that provide relational database access.
+/// Trait for types that provide ORM database access.
 ///
-/// Any type implementing this trait automatically gets `TableStore` functionality
-/// via a blanket implementation in the `qwasr-wasi-sql` crate.
-#[cfg(target_arch = "wasm32")]
-pub use qwasr_wasi_sql::orm::TableStore;
+/// Implement this trait to enable ORM operations. Default implementations
+/// use the WASI SQL bindings to execute queries.
+pub trait TableStore: Send + Sync {
+    /// Executes a query and returns the result rows.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn query(
+        &self, cnn_name: String, query: String, params: Vec<DataType>,
+    ) -> impl Future<Output = Result<Vec<Row>>> + Send;
+
+    /// Executes a statement and returns the number of affected rows.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn exec(
+        &self, cnn_name: String, query: String, params: Vec<DataType>,
+    ) -> impl Future<Output = Result<u32>> + Send;
+
+    /// Executes a query and returns the result rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails, statement preparation fails, or query execution fails.
+    #[cfg(target_arch = "wasm32")]
+    fn query(
+        &self, cnn_name: String, query: String, params: Vec<DataType>,
+    ) -> impl Future<Output = Result<Vec<Row>>> + Send {
+        use qwasr_wasi_sql::types::{Connection, Statement};
+        async move {
+            let cnn = Connection::open(cnn_name)
+                .await
+                .map_err(|e| anyhow!("failed to open connection: {}", e.trace()))?;
+
+            let stmt = Statement::prepare(query, params)
+                .await
+                .map_err(|e| anyhow!("failed to prepare statement: {}", e.trace()))?;
+
+            let res = qwasr_wasi_sql::readwrite::query(&cnn, &stmt)
+                .await
+                .map_err(|e| anyhow!("query failed: {}", e.trace()))?;
+
+            Ok(res)
+        }
+    }
+
+    /// Executes a statement and returns the number of affected rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails, statement preparation fails, or execution fails.
+    #[cfg(target_arch = "wasm32")]
+    fn exec(
+        &self, cnn_name: String, query: String, params: Vec<DataType>,
+    ) -> impl Future<Output = Result<u32>> + Send {
+        use qwasr_wasi_sql::types::{Connection, Statement};
+        async move {
+            let cnn = Connection::open(cnn_name)
+                .await
+                .map_err(|e| anyhow!("failed to open connection: {}", e.trace()))?;
+
+            let stmt = Statement::prepare(query, params)
+                .await
+                .map_err(|e| anyhow!("failed to prepare statement: {}", e.trace()))?;
+
+            let res = qwasr_wasi_sql::readwrite::exec(&cnn, &stmt)
+                .await
+                .map_err(|e| anyhow!("exec failed: {}", e.trace()))?;
+
+            Ok(res)
+        }
+    }
+}

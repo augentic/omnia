@@ -1,6 +1,6 @@
 [package]
 name = "qwasr-otel"
-description = "Opentelemetry integration for Warp"
+description = "Opentelemetry integration for Qwasr"
 readme = "README.md"
 authors.workspace = true
 categories.workspace = true

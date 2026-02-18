@@ -1,11 +1,11 @@
 use std::marker::PhantomData;
 
 use anyhow::Result;
-use sea_query::{Alias, Query, SimpleExpr, Value};
+use sea_query::{Alias, SimpleExpr, Value};
 
-use crate::orm::entity::{Entity, values_to_wasi_datatypes};
-use crate::orm::filter::Filter;
-use crate::orm::query::{BuiltQuery, OrmQueryBuilder};
+use crate::entity::{Entity, values_to_wasi_datatypes};
+use crate::filter::Filter;
+use crate::query::{Query, QueryBuilder};
 
 /// Builder for constructing UPDATE queries.
 pub struct UpdateBuilder<M: Entity> {
@@ -62,8 +62,8 @@ impl<M: Entity> UpdateBuilder<M> {
     /// # Errors
     ///
     /// Returns an error if query values cannot be converted to WASI data types.
-    pub fn build(self) -> Result<BuiltQuery> {
-        let mut statement = Query::update();
+    pub fn build(self) -> Result<Query> {
+        let mut statement = sea_query::Query::update();
         statement.table(Alias::new(M::TABLE));
 
         for (column, value) in self.set_clauses {
@@ -78,7 +78,7 @@ impl<M: Entity> UpdateBuilder<M> {
             statement.returning_col(Alias::new(column));
         }
 
-        let (sql, values) = statement.build(OrmQueryBuilder::default());
+        let (sql, values) = statement.build(QueryBuilder::default());
         let params = values_to_wasi_datatypes(values)?;
 
         tracing::debug!(
@@ -88,6 +88,6 @@ impl<M: Entity> UpdateBuilder<M> {
             "UpdateBuilder generated SQL"
         );
 
-        Ok(BuiltQuery { sql, params })
+        Ok(Query { sql, params })
     }
 }
