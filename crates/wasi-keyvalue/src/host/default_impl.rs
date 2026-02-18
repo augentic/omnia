@@ -2,19 +2,18 @@
 //!
 //! This is a lightweight implementation for development use only.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use dashmap::DashMap;
 use futures::FutureExt;
+use moka::sync::Cache;
 use qwasr::Backend;
 use tracing::instrument;
 
 use crate::host::WasiKeyValueCtx;
 use crate::host::resource::{Bucket, FutureResult};
 
-type Store = Arc<DashMap<String, HashMap<String, Vec<u8>>>>;
+type BucketCache = Cache<String, Vec<u8>>;
 
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions;
@@ -26,9 +25,15 @@ impl qwasr::FromEnv for ConnectOptions {
 }
 
 /// Default implementation for `wasi:keyvalue`.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct KeyValueDefault {
-    store: Store,
+    store: Cache<String, BucketCache>,
+}
+
+impl std::fmt::Debug for KeyValueDefault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KeyValueDefault").finish_non_exhaustive()
+    }
 }
 
 impl Backend for KeyValueDefault {
@@ -38,7 +43,7 @@ impl Backend for KeyValueDefault {
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
         tracing::debug!("initializing in-memory key-value store");
         Ok(Self {
-            store: Arc::new(DashMap::new()),
+            store: Cache::builder().build(),
         })
     }
 }
@@ -47,21 +52,27 @@ impl WasiKeyValueCtx for KeyValueDefault {
     fn open_bucket(&self, identifier: String) -> FutureResult<Arc<dyn Bucket>> {
         tracing::debug!("opening bucket: {identifier}");
 
-        self.store.entry(identifier.clone()).or_default();
+        let cache = self.store.get_with(identifier.clone(), || Cache::builder().build());
 
         let bucket = InMemBucket {
             name: identifier,
-            store: Arc::clone(&self.store),
+            cache,
         };
 
         async move { Ok(Arc::new(bucket) as Arc<dyn Bucket>) }.boxed()
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct InMemBucket {
     name: String,
-    store: Store,
+    cache: BucketCache,
+}
+
+impl std::fmt::Debug for InMemBucket {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InMemBucket").field("name", &self.name).finish_non_exhaustive()
+    }
 }
 
 impl Bucket for InMemBucket {
@@ -73,37 +84,31 @@ impl Bucket for InMemBucket {
 
     fn get(&self, key: String) -> FutureResult<Option<Vec<u8>>> {
         tracing::debug!("getting key: {key} from bucket: {}", self.name);
-        let result = self.store.get(&self.name).and_then(|bucket| bucket.get(&key).cloned());
+        let result = self.cache.get(&key);
         async move { Ok(result) }.boxed()
     }
 
     fn set(&self, key: String, value: Vec<u8>) -> FutureResult<()> {
         tracing::debug!("setting key: {key} in bucket: {}", self.name);
-        self.store.entry(self.name.clone()).or_default().insert(key, value);
+        self.cache.insert(key, value);
         async move { Ok(()) }.boxed()
     }
 
     fn delete(&self, key: String) -> FutureResult<()> {
         tracing::debug!("deleting key: {key} from bucket: {}", self.name);
-        if let Some(mut bucket) = self.store.get_mut(&self.name) {
-            bucket.remove(&key);
-        }
+        self.cache.invalidate(&key);
         async move { Ok(()) }.boxed()
     }
 
     fn exists(&self, key: String) -> FutureResult<bool> {
         tracing::debug!("checking existence of key: {key} in bucket: {}", self.name);
-        let exists = self.store.get(&self.name).is_some_and(|bucket| bucket.contains_key(&key));
+        let exists = self.cache.contains_key(&key);
         async move { Ok(exists) }.boxed()
     }
 
     fn keys(&self) -> FutureResult<Vec<String>> {
         tracing::debug!("listing keys in bucket: {}", self.name);
-        let keys = self
-            .store
-            .get(&self.name)
-            .map(|bucket| bucket.keys().cloned().collect())
-            .unwrap_or_default();
+        let keys = self.cache.iter().map(|(k, _)| (*k).clone()).collect();
         async move { Ok(keys) }.boxed()
     }
 }

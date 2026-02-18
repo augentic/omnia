@@ -27,7 +27,7 @@ version = "0.25.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.aws-lc-rs]]
-version = "1.15.4"
+version = "1.16.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.aws-lc-sys]]
@@ -100,6 +100,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.crc32fast]]
 version = "1.5.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.crossbeam-channel]]
+version = "0.5.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.crossbeam-deque]]
@@ -314,6 +318,10 @@ criteria = "safe-to-deploy"
 version = "0.3.4"
 criteria = "safe-to-deploy"
 
+[[exemptions.moka]]
+version = "0.12.13"
+criteria = "safe-to-deploy"
+
 [[exemptions.munge]]
 version = "0.4.7"
 criteria = "safe-to-deploy"
@@ -368,6 +376,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.pin-project-internal]]
 version = "1.1.10"
+criteria = "safe-to-deploy"
+
+[[exemptions.portable-atomic]]
+version = "1.13.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.ppv-lite86]]
@@ -528,6 +540,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.system-configuration-sys]]
 version = "0.6.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.tagptr]]
+version = "0.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.time]]

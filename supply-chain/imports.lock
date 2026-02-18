@@ -65,8 +65,8 @@ user-login = "dtolnay"
 user-name = "David Tolnay"
 
 [[publisher.bumpalo]]
-version = "3.19.1"
-when = "2025-12-16"
+version = "3.20.1"
+when = "2026-02-18"
 user-id = 696
 user-login = "fitzgen"
 user-name = "Nick Fitzgerald"
@@ -121,15 +121,15 @@ user-login = "sunfishcode"
 user-name = "Dan Gohman"
 
 [[publisher.clap]]
-version = "4.5.58"
-when = "2026-02-11"
+version = "4.5.59"
+when = "2026-02-16"
 user-id = 6743
 user-login = "epage"
 user-name = "Ed Page"
 
 [[publisher.clap_builder]]
-version = "4.5.58"
-when = "2026-02-11"
+version = "4.5.59"
+when = "2026-02-16"
 user-id = 6743
 user-login = "epage"
 user-name = "Ed Page"
@@ -543,8 +543,8 @@ user-login = "sunfishcode"
 user-name = "Dan Gohman"
 
 [[publisher.target-lexicon]]
-version = "0.13.4"
-when = "2025-12-18"
+version = "0.13.5"
+when = "2026-02-15"
 user-id = 6825
 user-login = "sunfishcode"
 user-name = "Dan Gohman"
@@ -620,8 +620,8 @@ user-login = "seanmonstar"
 user-name = "Sean McArthur"
 
 [[publisher.unicode-ident]]
-version = "1.0.23"
-when = "2026-02-08"
+version = "1.0.24"
+when = "2026-02-16"
 user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
@@ -1287,6 +1287,17 @@ who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
 delta = "0.2.3 -> 0.3.0"
 notes = "Nothing out of the ordinary, virtually no unsafe code."
+
+[[audits.bytecode-alliance.audits.crossbeam-channel]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "0.5.4 -> 0.5.8"
+notes = """
+This diff does what it says on the tin for this version range, notably fixing a
+race condition, improving handling of durations, and additionally swapping out a
+spin lock with a lock from the standard library. Minor bits of `unsafe` code
+are modified but that's expected given the nature of this crate.
+"""
 
 [[audits.bytecode-alliance.audits.crossbeam-epoch]]
 who = "Alex Crichton <alex@alexcrichton.com>"
@@ -2691,6 +2702,38 @@ criteria = "safe-to-deploy"
 delta = "0.9.3 -> 0.9.4"
 notes = "I've reviewed every source contribution that was neither authored nor reviewed by Mozilla."
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.crossbeam-channel]]
+who = "Jan-Erik Rediger <jrediger@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.5.8 -> 0.5.11"
+aggregated-from = "https://raw.githubusercontent.com/mozilla/glean/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.crossbeam-channel]]
+who = "Jan-Erik Rediger <jrediger@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.5.11 -> 0.5.12"
+notes = "Minimal change fixing a memory leak."
+aggregated-from = "https://raw.githubusercontent.com/mozilla/glean/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.crossbeam-channel]]
+who = "Glenn Watson <git@intuitionlibrary.com>"
+criteria = "safe-to-deploy"
+delta = "0.5.12 -> 0.5.13"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.crossbeam-channel]]
+who = "Jan-Erik Rediger <jrediger@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.5.13 -> 0.5.14"
+aggregated-from = "https://raw.githubusercontent.com/mozilla/glean/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.crossbeam-channel]]
+who = "Jan-Erik Rediger <jrediger@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.5.14 -> 0.5.15"
+notes = "Fixes a regression from an earlier version which could lead to a double free"
+aggregated-from = "https://raw.githubusercontent.com/mozilla/glean/main/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.crossbeam-epoch]]
 who = "Mike Hommey <mh+mozilla@glandium.org>"

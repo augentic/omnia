@@ -236,7 +236,7 @@ pub trait TableStore: Send + Sync {
     }
 }
 
-/// The `Broadcast` trait defines behavior for sending events to WebSocket 
+/// The `Broadcast` trait defines behavior for sending events to WebSocket
 /// or other broadcast channels.
 pub trait Broadcast: Send + Sync {
     /// Send an event to connected WebSocket clients.

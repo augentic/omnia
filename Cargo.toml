@@ -60,6 +60,7 @@ bytes = "1.11.1"
 cfg-if = "1.0.4"
 chrono = "0.4.43"
 dashmap = "6.1.0"
+moka = { version = "0.12.13", features = ["sync"] }
 fromenv = "0.1.0"
 futures = "0.3.32"
 futures-channel = "0.3.32"
