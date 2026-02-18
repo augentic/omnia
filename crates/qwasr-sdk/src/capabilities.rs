@@ -74,7 +74,7 @@ impl Message {
 }
 
 /// The `Publisher` trait defines the message publishing behavior.
-pub trait Publisher: Send + Sync {
+pub trait Publish: Send + Sync {
     /// Publish (send) a message to a topic.
     #[cfg(not(target_arch = "wasm32"))]
     fn send(&self, topic: &str, message: &Message) -> impl Future<Output = Result<()>> + Send;
@@ -236,8 +236,9 @@ pub trait TableStore: Send + Sync {
     }
 }
 
-/// The `WebSocket` trait defines behavior for sending events to WebSocket clients.
-pub trait WebSocket: Send + Sync {
+/// The `Broadcast` trait defines behavior for sending events to WebSocket 
+/// or other broadcast channels.
+pub trait Broadcast: Send + Sync {
     /// Send an event to connected WebSocket clients.
     #[cfg(not(target_arch = "wasm32"))]
     fn send(
