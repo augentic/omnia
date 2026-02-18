@@ -29,7 +29,7 @@ tokio = { workspace = true, features = ["sync"] }
 tracing.workspace = true
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true
-tokio-stream = { version = "0.1.17", features = ["sync"] }
+tokio-stream.workspace = true
 
 # guest dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]

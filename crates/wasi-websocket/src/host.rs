@@ -13,7 +13,7 @@ mod generated {
 
     pub use wasi::websocket::types::Error;
 
-    pub use crate::host::resource::{EventProxy, ClientProxy};
+    pub use crate::host::resource::{ClientProxy, EventProxy};
 
     wasmtime::component::bindgen!({
         world: "websocket",

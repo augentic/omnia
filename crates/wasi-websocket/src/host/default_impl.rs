@@ -192,7 +192,7 @@ impl WebSocketDefault {
         let incoming_broadcaster = incoming.try_for_each(|msg| {
             match msg {
                 Message::Text(text) => {
-                    self.send_to_guest(socket_addr.clone(), text.as_bytes().to_vec())
+                    self.send_to_guest(socket_addr.clone(), text.as_bytes().to_vec());
                 }
                 Message::Binary(data) => self.send_to_guest(socket_addr.clone(), data.to_vec()),
                 Message::Close(_) => {
@@ -227,8 +227,8 @@ impl WebSocketDefault {
     /// Send event to the wasm guest's websocket event handler.
     fn send_to_guest(&self, socket_addr: String, data: Vec<u8>) {
         let event = InMemEvent { socket_addr, data };
-        if self.event_tx.send(EventProxy(Arc::new(event))).is_err() {
-            tracing::warn!("no subscribers for incoming WebSocket event");
+        if let Err(e) = self.event_tx.send(EventProxy(Arc::new(event))) {
+            tracing::warn!("issue sending WebSocket event: {e}");
         }
     }
 }
@@ -252,6 +252,7 @@ impl Event for InMemEvent {
 #[cfg(test)]
 mod tests {
     use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+    use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 
     use super::*;
 
@@ -285,7 +286,7 @@ mod tests {
     #[test]
     fn close_message() {
         let close = Message::Close(Some(CloseFrame {
-            code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Normal,
+            code: CloseCode::Normal,
             reason: "normal".into(),
         }));
         assert!(matches!(close, Message::Close(_)));

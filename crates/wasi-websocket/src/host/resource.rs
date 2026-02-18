@@ -51,4 +51,3 @@ impl Deref for EventProxy {
         &self.0
     }
 }
-

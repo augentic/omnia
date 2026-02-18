@@ -27,7 +27,7 @@ futures-util.workspace = true
 parking_lot.workspace = true
 qwasr.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
-tokio-stream = { version = "0.1.17", features = ["sync"] }
+tokio-stream.workspace = true
 tokio-tungstenite = "0.28.0"
 tracing.workspace = true
 tungstenite = "0.28.0"
