@@ -8,7 +8,7 @@ use wasmtime::Store;
 
 use crate::host::WebSocketView;
 use crate::host::generated::Websocket;
-use crate::host::resource::{EventProxy, Subscriptions};
+use crate::host::resource::{EventProxy, Events};
 
 #[instrument("websocket-server", skip(state))]
 pub async fn run<S>(state: &S) -> Result<()>
@@ -24,9 +24,8 @@ where
         component,
     };
 
-
-    let mut stream = handler.subscriptions().await?;
-    while let Some(event) = stream.next().await {
+    // handle events from the websocket clients
+    while let Some(event) = handler.events().await?.next().await {
         let handler = handler.clone();
 
         tokio::spawn(async move {
@@ -88,16 +87,16 @@ where
             .await?
     }
 
-    /// Get subscriptions for incoming WebSocket events.
-    async fn subscriptions(&self) -> Result<Subscriptions> {
+    /// Get events for incoming WebSocket events.
+    async fn events(&self) -> Result<Events> {
         let instance_pre = self.state.instance_pre();
         let store_data = self.state.store();
         let mut store = Store::new(instance_pre.engine(), store_data);
 
         store
             .run_concurrent(async |store| {
-                let socket = store.with(|mut store| store.get().websocket().ctx.connect()).await?;
-                socket.subscribe().await
+                let client = store.with(|mut store| store.get().websocket().ctx.connect()).await?;
+                client.events().await
             })
             .await?
     }

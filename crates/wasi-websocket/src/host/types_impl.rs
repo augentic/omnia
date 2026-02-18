@@ -1,26 +1,26 @@
 use wasmtime::component::{Access, Accessor, Resource};
 
 pub use crate::host::generated::wasi::websocket::types::{
-    Error, Group, Host, HostEvent, HostEventWithStore, HostSocket, HostSocketWithStore,
+    Error, Group, Host, HostEvent, HostEventWithStore, HostClient, HostClientWithStore,
 };
-use crate::host::resource::{EventProxy, SocketProxy};
+use crate::host::resource::{EventProxy, ClientProxy};
 use crate::host::{Result, WasiWebSocket, WasiWebSocketCtxView};
 
-impl HostSocketWithStore for WasiWebSocket {
+impl HostClientWithStore for WasiWebSocket {
     async fn connect<T>(
         accessor: &Accessor<T, Self>, _name: String,
-    ) -> Result<Resource<SocketProxy>> {
+    ) -> Result<Resource<ClientProxy>> {
         let socket = accessor.with(|mut store| store.get().ctx.connect()).await?;
-        let proxy = SocketProxy(socket);
+        let proxy = ClientProxy(socket);
         Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
     }
 
-    fn disconnect<T>(_: Access<'_, T, Self>, _: Resource<SocketProxy>) -> Result<()> {
+    fn disconnect<T>(_: Access<'_, T, Self>, _: Resource<ClientProxy>) -> Result<()> {
         Ok(())
     }
 
     fn drop<T>(
-        mut accessor: Access<'_, T, Self>, rep: Resource<SocketProxy>,
+        mut accessor: Access<'_, T, Self>, rep: Resource<ClientProxy>,
     ) -> wasmtime::Result<()> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
@@ -64,12 +64,12 @@ impl Host for WasiWebSocketCtxView<'_> {
         Ok(err)
     }
 }
-impl HostSocket for WasiWebSocketCtxView<'_> {}
+impl HostClient for WasiWebSocketCtxView<'_> {}
 impl HostEvent for WasiWebSocketCtxView<'_> {}
 
-pub fn get_socket<T>(
-    accessor: &Accessor<T, WasiWebSocket>, self_: &Resource<SocketProxy>,
-) -> Result<SocketProxy> {
+pub fn get_client<T>(
+    accessor: &Accessor<T, WasiWebSocket>, self_: &Resource<ClientProxy>,
+) -> Result<ClientProxy> {
     accessor.with(|mut store| {
         let socket = store.get().table.get(self_)?;
         Ok::<_, Error>(socket.clone())

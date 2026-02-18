@@ -30,7 +30,7 @@ use tokio_tungstenite::{WebSocketStream, accept_async};
 use tracing::instrument;
 
 use crate::host::WebSocketCtx;
-use crate::host::resource::{Event, EventProxy, Socket, Subscriptions};
+use crate::host::resource::{Client, Event, EventProxy, Events};
 
 const MAX_CONNECTIONS: usize = 1024;
 const BROADCAST_CHANNEL_CAPACITY: usize = 256;
@@ -98,10 +98,10 @@ impl Backend for WebSocketDefault {
 }
 
 impl WebSocketCtx for WebSocketDefault {
-    fn connect(&self) -> FutureResult<Arc<dyn Socket>> {
+    fn connect(&self) -> FutureResult<Arc<dyn Client>> {
         tracing::debug!("connecting WebSocket socket");
         let socket = self.clone();
-        async move { Ok(Arc::new(socket) as Arc<dyn Socket>) }.boxed()
+        async move { Ok(Arc::new(socket) as Arc<dyn Client>) }.boxed()
     }
 
     fn new_event(&self, data: Vec<u8>) -> Result<Arc<dyn Event>> {
@@ -111,8 +111,8 @@ impl WebSocketCtx for WebSocketDefault {
     }
 }
 
-impl Socket for WebSocketDefault {
-    fn subscribe(&self) -> FutureResult<Subscriptions> {
+impl Client for WebSocketDefault {
+    fn events(&self) -> FutureResult<Events> {
         tracing::debug!("subscribing to WebSocket events");
         let stream = BroadcastStream::new(self.event_rx.resubscribe());
 
@@ -126,58 +126,23 @@ impl Socket for WebSocketDefault {
                     }
                 }
             });
-            Ok(Box::pin(stream) as Subscriptions)
+            Ok(Box::pin(stream) as Events)
         }
         .boxed()
     }
 
-    // TODO: this method needs to be merged with the broadcast_event method
     fn send(&self, event: EventProxy, groups: Option<Vec<String>>) -> FutureResult<()> {
         tracing::debug!("sending event to WebSocket clients, groups: {:?}", groups);
-        let connections = Arc::clone(&self.connections);
+        self.broadcast_event(event.data());
 
-        async move {
-            let data = event.data();
-            let msg = Message::Binary(data.into());
-            let to_groups: Option<HashSet<&str>> =
-                groups.as_ref().map(|g| g.iter().map(String::as_str).collect());
+        // let msg = Message::Binary(event.data().into());
+        // self.broadcast(&msg, groups.as_deref());
 
-            let mut conns = connections.lock();
-
-            // prune dead connections while collecting recipients
-            let dead_peers: Vec<SocketAddr> =
-                conns.iter().filter(|(_, c)| c.sender.is_closed()).map(|(a, _)| *a).collect();
-            for addr in &dead_peers {
-                tracing::debug!("pruning dead connection: {addr}");
-                conns.remove(addr);
-            }
-
-            let clients: Vec<_> = to_groups.as_ref().map_or_else(
-                || conns.values().map(|c| c.sender.clone()).collect(),
-                |groups| {
-                    conns
-                        .values()
-                        .filter(|c| c.groups.iter().any(|g| groups.contains(g.as_str())))
-                        .map(|c| c.sender.clone())
-                        .collect()
-                },
-            );
-
-            drop(conns);
-
-            for mut client in clients {
-                if let Err(e) = client.try_send(msg.clone()) {
-                    tracing::warn!("failed to send to peer, channel full or disconnected: {e}");
-                }
-            }
-
-            Ok(())
-        }
-        .boxed()
+        async move { Ok(()) }.boxed()
     }
 }
 
-/// WebSocket server implementation.
+/// Default implementation for the WebSocket server.
 ///
 /// This implementation listens for new connections and handles them in a
 /// separate task. It broadcasts incoming messages to all connected peers and
@@ -210,8 +175,8 @@ impl WebSocketDefault {
     async fn handle_socket(&self, ws_stream: WebSocketStream<TcpStream>, peer_addr: SocketAddr) {
         let (tx, rx) = mpsc::channel(PER_CLIENT_CHANNEL_CAPACITY);
 
-        if let Err(e) = self.save_socket(peer_addr, tx) {
-            tracing::error!("issue saving peer connection: {e}");
+        if let Err(e) = self.add_socket(peer_addr, tx) {
+            tracing::error!("issue adding peer connection: {e}");
             return;
         }
 
@@ -222,7 +187,9 @@ impl WebSocketDefault {
                 Message::Text(text) => {
                     if let Some(groups) = parse_message(&text) {
                         tracing::info!("peer {peer_addr} subscribing to groups: {groups:?}");
-                        self.set_peer_groups(peer_addr, groups);
+                        if let Some(conn) = self.connections.lock().get_mut(&peer_addr) {
+                            conn.groups = groups;
+                        }
                         return future::ok(());
                     }
                     self.broadcast_event(text.as_bytes().to_vec());
@@ -249,22 +216,8 @@ impl WebSocketDefault {
         self.connections.lock().remove(&peer_addr);
     }
 
-    /// Broadcast raw data as an event to all subscribers.
-    fn broadcast_event(&self, data: Vec<u8>) {
-        let event = InMemEvent { data };
-        if self.event_tx.send(EventProxy(Arc::new(event))).is_err() {
-            tracing::warn!("no subscribers for incoming WebSocket event");
-        }
-    }
-
-    /// Update the group subscriptions for a connected peer.
-    fn set_peer_groups(&self, peer_addr: SocketAddr, groups: HashSet<String>) {
-        if let Some(conn) = self.connections.lock().get_mut(&peer_addr) {
-            conn.groups = groups;
-        }
-    }
-
-    fn save_socket(&self, peer_addr: SocketAddr, tx: mpsc::Sender<Message>) -> Result<()> {
+    /// Add a new socket to the connection map.
+    fn add_socket(&self, peer_addr: SocketAddr, tx: mpsc::Sender<Message>) -> Result<()> {
         let mut conns = self.connections.lock();
         if conns.len() >= MAX_CONNECTIONS {
             return Err(anyhow!("max connections reached"));
@@ -280,6 +233,45 @@ impl WebSocketDefault {
         drop(conns);
 
         Ok(())
+    }
+
+    /// Broadcast raw data as an event to all subscribers.
+    fn broadcast_event(&self, data: Vec<u8>) {
+        let event = InMemEvent { data };
+        if self.event_tx.send(EventProxy(Arc::new(event))).is_err() {
+            tracing::warn!("no subscribers for incoming WebSocket event");
+        }
+    }
+
+    /// Send a WebSocket message to connected clients, optionally filtered by group.
+    fn broadcast(&self, msg: &Message, groups: Option<&[String]>) {
+        let mut conns = self.connections.lock();
+
+        // prune dead connections while collecting recipients
+        let dead_peers: Vec<SocketAddr> =
+            conns.iter().filter(|(_, c)| c.sender.is_closed()).map(|(a, _)| *a).collect();
+        for addr in &dead_peers {
+            tracing::debug!("pruning dead connection: {addr}");
+            conns.remove(addr);
+        }
+
+        let clients: Vec<_> = groups.map_or_else(
+            || conns.values().map(|c| c.sender.clone()).collect(),
+            |groups| {
+                conns
+                    .values()
+                    .filter(|c| c.groups.iter().any(|g| groups.contains(g)))
+                    .map(|c| c.sender.clone())
+                    .collect()
+            },
+        );
+        drop(conns);
+
+        for mut client in clients {
+            if let Err(e) = client.try_send(msg.clone()) {
+                tracing::warn!("failed to send to peer, channel full or disconnected: {e}");
+            }
+        }
     }
 }
 

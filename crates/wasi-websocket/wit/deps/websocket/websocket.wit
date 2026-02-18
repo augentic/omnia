@@ -16,8 +16,8 @@ world duplex {
 
 interface types {
     /// A connection to a websocket service.
-    resource socket {
-        connect: static async func(name: string) -> result<socket, error>;
+    resource client {
+        connect: static async func(name: string) -> result<client, error>;
         disconnect: func() -> result<_, error>;
     }
 
@@ -47,10 +47,10 @@ interface types {
 }
 
 interface client {
-    use types.{error, event, socket, group};
+    use types.{error, event, client, group};
 
-    /// Sends the event using the given socket.
-    send: async func(s: borrow<socket>, event: event, group: option<list<group>>) -> result<_, error>;
+    /// Sends the event using the given client.
+    send: async func(s: borrow<client>, event: event, group: option<list<group>>) -> result<_, error>;
 }
 
 interface handler {

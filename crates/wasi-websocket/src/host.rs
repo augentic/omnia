@@ -13,7 +13,7 @@ mod generated {
 
     pub use wasi::websocket::types::Error;
 
-    pub use crate::host::resource::{EventProxy, SocketProxy};
+    pub use crate::host::resource::{EventProxy, ClientProxy};
 
     wasmtime::component::bindgen!({
         world: "websocket",
@@ -25,7 +25,7 @@ mod generated {
             default: store | tracing | trappable,
         },
         with: {
-            "wasi:websocket/types.socket": SocketProxy,
+            "wasi:websocket/types.client": ClientProxy,
             "wasi:websocket/types.event": EventProxy,
         },
         trappable_error_type: {
@@ -107,7 +107,7 @@ pub trait WebSocketCtx: Debug + Send + Sync + 'static {
     /// # Errors
     ///
     /// Returns an error if the connection fails.
-    fn connect(&self) -> FutureResult<Arc<dyn Socket>>;
+    fn connect(&self) -> FutureResult<Arc<dyn Client>>;
 
     /// Create a new event with the given payload.
     ///

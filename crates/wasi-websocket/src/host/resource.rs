@@ -8,25 +8,25 @@ use futures::Stream;
 use qwasr::FutureResult;
 
 /// Stream of event proxies.
-pub type Subscriptions = Pin<Box<dyn Stream<Item = EventProxy> + Send>>;
+pub type Events = Pin<Box<dyn Stream<Item = EventProxy> + Send>>;
 
-/// Providers implement the [`Socket`] trait to allow the host to interact with
+/// Providers implement the [`Client`] trait to allow the host to interact with
 /// backend WebSocket resources.
 #[allow(unused_variables)]
-pub trait Socket: Debug + Send + Sync + 'static {
+pub trait Client: Debug + Send + Sync + 'static {
     /// Subscribe to incoming events from WebSocket clients.
-    fn subscribe(&self) -> FutureResult<Subscriptions>;
+    fn events(&self) -> FutureResult<Events>;
 
     /// Send an event to connected WebSocket clients, optionally filtered by groups.
     fn send(&self, event: EventProxy, groups: Option<Vec<String>>) -> FutureResult<()>;
 }
 
-/// Proxy for a WebSocket socket.
+/// Proxy for a WebSocket server client.
 #[derive(Clone, Debug)]
-pub struct SocketProxy(pub Arc<dyn Socket>);
+pub struct ClientProxy(pub Arc<dyn Client>);
 
-impl Deref for SocketProxy {
-    type Target = Arc<dyn Socket>;
+impl Deref for ClientProxy {
+    type Target = Arc<dyn Client>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
