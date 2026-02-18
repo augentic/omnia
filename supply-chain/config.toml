@@ -130,6 +130,10 @@ criteria = "safe-to-deploy"
 version = "0.21.3"
 criteria = "safe-to-deploy"
 
+[[exemptions.dashmap]]
+version = "6.1.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.data-encoding]]
 version = "2.10.0"
 criteria = "safe-to-deploy"
@@ -228,6 +232,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.gimli]]
 version = "0.33.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.hashbrown]]
+version = "0.14.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.hashlink]]

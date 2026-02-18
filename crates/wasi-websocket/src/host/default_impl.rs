@@ -8,16 +8,15 @@
 //! For production use, use a backend with proper WebSocket connection
 //! management and authentication.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
+use dashmap::DashMap;
 use fromenv::FromEnv;
 use futures::FutureExt;
 use futures_channel::mpsc;
 use futures_util::stream::TryStreamExt;
 use futures_util::{StreamExt, future, pin_mut};
-use parking_lot::Mutex;
 use qwasr::{Backend, FutureResult};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast::{self, Receiver, Sender};
@@ -33,7 +32,7 @@ const MAX_CONNECTIONS: usize = 1024;
 const BROADCAST_CHANNEL_CAPACITY: usize = 256;
 const PER_CLIENT_CHANNEL_CAPACITY: usize = 256;
 
-type ConnectionMap = Arc<Mutex<HashMap<String, mpsc::Sender<Message>>>>;
+type ConnectionMap = Arc<DashMap<String, mpsc::Sender<Message>>>;
 
 /// Options used to connect to the WebSocket service.
 #[derive(Debug, Clone, FromEnv)]
@@ -75,7 +74,7 @@ impl Backend for WebSocketDefault {
         tracing::debug!("using default WebSocket backend");
 
         let (event_tx, event_rx) = broadcast::channel::<EventProxy>(BROADCAST_CHANNEL_CAPACITY);
-        let connections: ConnectionMap = Arc::new(Mutex::new(HashMap::new()));
+        let connections: ConnectionMap = Arc::new(DashMap::new());
 
         let websocket = Self {
             event_tx,
@@ -131,19 +130,17 @@ impl Client for WebSocketDefault {
     fn send(&self, event: EventProxy, sockets: Option<Vec<String>>) -> FutureResult<()> {
         tracing::debug!("sending event to WebSocket clients, sockets: {:?}", sockets);
 
-        let mut conns = self.connections.lock();
-        conns.retain(|_, sender| !sender.is_closed());
+        self.connections.retain(|_, sender| !sender.is_closed());
 
         let msg = Message::Binary(event.data().to_vec().into());
-        for (socket_addr, sender) in conns.iter_mut() {
-            if sockets.as_ref().is_some_and(|s| !s.contains(socket_addr)) {
+        for mut entry in self.connections.iter_mut() {
+            if sockets.as_ref().is_some_and(|s| !s.contains(entry.key())) {
                 continue;
             }
-            if let Err(e) = sender.try_send(msg.clone()) {
+            if let Err(e) = entry.value_mut().try_send(msg.clone()) {
                 tracing::warn!("failed to send to peer, channel full or disconnected: {e}");
             }
         }
-        drop(conns);
 
         async move { Ok(()) }.boxed()
     }
@@ -210,17 +207,15 @@ impl WebSocketDefault {
         future::select(incoming_broadcaster, outgoing_forwarder).await;
         tracing::info!("{socket_addr} disconnected");
 
-        self.connections.lock().remove(&socket_addr);
+        self.connections.remove(&socket_addr);
     }
 
     /// Add a new socket to the connection map.
     fn add_socket(&self, socket_addr: String, tx: mpsc::Sender<Message>) -> Result<()> {
-        let mut conns = self.connections.lock();
-        if conns.len() >= MAX_CONNECTIONS {
+        if self.connections.len() >= MAX_CONNECTIONS {
             return Err(anyhow!("max connections reached"));
         }
-        conns.insert(socket_addr, tx);
-        drop(conns);
+        self.connections.insert(socket_addr, tx);
         Ok(())
     }
 

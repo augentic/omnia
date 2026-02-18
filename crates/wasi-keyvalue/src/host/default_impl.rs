@@ -6,15 +6,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
+use dashmap::DashMap;
 use futures::FutureExt;
-use parking_lot::RwLock;
 use qwasr::Backend;
 use tracing::instrument;
 
 use crate::host::WasiKeyValueCtx;
 use crate::host::resource::{Bucket, FutureResult};
 
-type Store = Arc<RwLock<HashMap<String, HashMap<String, Vec<u8>>>>>;
+type Store = Arc<DashMap<String, HashMap<String, Vec<u8>>>>;
 
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions;
@@ -38,7 +38,7 @@ impl Backend for KeyValueDefault {
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
         tracing::debug!("initializing in-memory key-value store");
         Ok(Self {
-            store: Arc::new(RwLock::new(HashMap::new())),
+            store: Arc::new(DashMap::new()),
         })
     }
 }
@@ -47,14 +47,11 @@ impl WasiKeyValueCtx for KeyValueDefault {
     fn open_bucket(&self, identifier: String) -> FutureResult<Arc<dyn Bucket>> {
         tracing::debug!("opening bucket: {identifier}");
 
-        let bucket = InMemBucket {
-            name: identifier.clone(),
-            store: Arc::clone(&self.store),
-        };
+        self.store.entry(identifier.clone()).or_default();
 
-        {
-            let mut store = self.store.write();
-            store.entry(identifier).or_default()
+        let bucket = InMemBucket {
+            name: identifier,
+            store: Arc::clone(&self.store),
         };
 
         async move { Ok(Arc::new(bucket) as Arc<dyn Bucket>) }.boxed()
@@ -76,79 +73,38 @@ impl Bucket for InMemBucket {
 
     fn get(&self, key: String) -> FutureResult<Option<Vec<u8>>> {
         tracing::debug!("getting key: {key} from bucket: {}", self.name);
-        let store = Arc::clone(&self.store);
-        let name = self.name.clone();
-
-        async move {
-            let result = {
-                let store = store.read();
-                store.get(&name).and_then(|bucket| bucket.get(&key).cloned())
-            };
-            Ok(result)
-        }
-        .boxed()
+        let result = self.store.get(&self.name).and_then(|bucket| bucket.get(&key).cloned());
+        async move { Ok(result) }.boxed()
     }
 
     fn set(&self, key: String, value: Vec<u8>) -> FutureResult<()> {
         tracing::debug!("setting key: {key} in bucket: {}", self.name);
-        let store = Arc::clone(&self.store);
-        let name = self.name.clone();
-
-        async move {
-            {
-                let mut store = store.write();
-                store.entry(name).or_default().insert(key, value)
-            };
-            Ok(())
-        }
-        .boxed()
+        self.store.entry(self.name.clone()).or_default().insert(key, value);
+        async move { Ok(()) }.boxed()
     }
 
     fn delete(&self, key: String) -> FutureResult<()> {
         tracing::debug!("deleting key: {key} from bucket: {}", self.name);
-        let store = Arc::clone(&self.store);
-        let name = self.name.clone();
-
-        async move {
-            {
-                let mut store = store.write();
-                if let Some(bucket) = store.get_mut(&name) {
-                    bucket.remove(&key);
-                }
-            }
-            Ok(())
+        if let Some(mut bucket) = self.store.get_mut(&self.name) {
+            bucket.remove(&key);
         }
-        .boxed()
+        async move { Ok(()) }.boxed()
     }
 
     fn exists(&self, key: String) -> FutureResult<bool> {
         tracing::debug!("checking existence of key: {key} in bucket: {}", self.name);
-        let store = Arc::clone(&self.store);
-        let name = self.name.clone();
-
-        async move {
-            let exists = {
-                let store = store.read();
-                store.get(&name).is_some_and(|bucket| bucket.contains_key(&key))
-            };
-            Ok(exists)
-        }
-        .boxed()
+        let exists = self.store.get(&self.name).is_some_and(|bucket| bucket.contains_key(&key));
+        async move { Ok(exists) }.boxed()
     }
 
     fn keys(&self) -> FutureResult<Vec<String>> {
         tracing::debug!("listing keys in bucket: {}", self.name);
-        let store = Arc::clone(&self.store);
-        let name = self.name.clone();
-
-        async move {
-            let keys = {
-                let store = store.read();
-                store.get(&name).map(|bucket| bucket.keys().cloned().collect()).unwrap_or_default()
-            };
-            Ok(keys)
-        }
-        .boxed()
+        let keys = self
+            .store
+            .get(&self.name)
+            .map(|bucket| bucket.keys().cloned().collect())
+            .unwrap_or_default();
+        async move { Ok(keys) }.boxed()
     }
 }
 
