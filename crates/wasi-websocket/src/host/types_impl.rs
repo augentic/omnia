@@ -1,7 +1,7 @@
 use wasmtime::component::{Access, Accessor, Resource};
 
 pub use crate::host::generated::wasi::websocket::types::{
-    Error, Host, HostClient, HostClientWithStore, HostEvent, HostEventWithStore, Socket,
+    Error, Host, HostClient, HostClientWithStore, HostEvent, HostEventWithStore, SocketAddr,
 };
 use crate::host::resource::{ClientProxy, EventProxy};
 use crate::host::{Result, WasiWebSocket, WasiWebSocketCtxView};
@@ -37,11 +37,11 @@ impl HostEventWithStore for WasiWebSocket {
     }
 
     /// The socket address this event was received from.
-    fn socket<T>(
+    fn socket_addr<T>(
         mut host: Access<'_, T, Self>, self_: Resource<EventProxy>,
-    ) -> wasmtime::Result<Option<Socket>> {
+    ) -> wasmtime::Result<Option<SocketAddr>> {
         let event = host.get().table.get(&self_)?;
-        Ok(event.socket_addr())
+        Ok(event.socket_addr().map(String::from))
     }
 
     /// The event data.
@@ -49,7 +49,7 @@ impl HostEventWithStore for WasiWebSocket {
         mut host: Access<'_, T, Self>, self_: Resource<EventProxy>,
     ) -> wasmtime::Result<Vec<u8>> {
         let event = host.get().table.get(&self_)?;
-        Ok(event.data())
+        Ok(event.data().to_vec())
     }
 
     fn drop<T>(

@@ -22,13 +22,13 @@ interface types {
     }
 
     /// A type alias for string to represent a websocket socket address
-    type socket = string;
+    type socket-addr = string;
 
     /// A websocket event.
     resource event {
         constructor(data: list<u8>);
-        /// The group this event was received on, if any
-        socket: func() -> option<socket>;
+        /// The socket address this event was received from, if any
+        socket-addr: func() -> option<socket-addr>;
         /// The event message.
         data: func() -> list<u8>;
     }
@@ -47,10 +47,10 @@ interface types {
 }
 
 interface client {
-    use types.{error, event, client, socket};
+    use types.{error, event, client, socket-addr};
 
     /// Sends the event using the given client.
-    send: async func(s: borrow<client>, event: event, sockets: option<list<socket>>) -> result<_, error>;
+    send: async func(s: borrow<client>, event: event, sockets: option<list<socket-addr>>) -> result<_, error>;
 }
 
 interface handler {

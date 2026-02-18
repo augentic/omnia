@@ -1,6 +1,5 @@
-use std::any::Any;
 use std::fmt::Debug;
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -12,7 +11,6 @@ pub type Events = Pin<Box<dyn Stream<Item = EventProxy> + Send>>;
 
 /// Providers implement the [`Client`] trait to allow the host to interact with
 /// backend WebSocket resources.
-#[allow(unused_variables)]
 pub trait Client: Debug + Send + Sync + 'static {
     /// Subscribe to incoming events from WebSocket clients.
     fn events(&self) -> FutureResult<Events>;
@@ -36,13 +34,10 @@ impl Deref for ClientProxy {
 /// Providers implement the [`Event`] trait to represent WebSocket events.
 pub trait Event: Debug + Send + Sync + 'static {
     /// The socket address this event was received from.
-    fn socket_addr(&self) -> Option<String>;
+    fn socket_addr(&self) -> Option<&str>;
 
     /// The event data.
-    fn data(&self) -> Vec<u8>;
-
-    /// For downcasting support.
-    fn as_any(&self) -> &dyn Any;
+    fn data(&self) -> &[u8];
 }
 
 /// Proxy for a WebSocket event.
@@ -57,8 +52,3 @@ impl Deref for EventProxy {
     }
 }
 
-impl DerefMut for EventProxy {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}

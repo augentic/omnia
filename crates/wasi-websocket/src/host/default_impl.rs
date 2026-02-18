@@ -8,9 +8,7 @@
 //! For production use, use a backend with proper WebSocket connection
 //! management and authentication.
 
-use std::any::Any;
 use std::collections::HashMap;
-// use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
@@ -35,14 +33,14 @@ const MAX_CONNECTIONS: usize = 1024;
 const BROADCAST_CHANNEL_CAPACITY: usize = 256;
 const PER_CLIENT_CHANNEL_CAPACITY: usize = 256;
 
-type ConnectionMap = Arc<Mutex<HashMap<String, Connection>>>;
+type ConnectionMap = Arc<Mutex<HashMap<String, mpsc::Sender<Message>>>>;
 
 /// Options used to connect to the WebSocket service.
 #[derive(Debug, Clone, FromEnv)]
 pub struct ConnectOptions {
     /// The address to bind the WebSocket server to.
     #[env(from = "WEBSOCKET_ADDR", default = "0.0.0.0:80")]
-    pub addr: String,
+    pub socket_addr: String,
 }
 
 impl qwasr::FromEnv for ConnectOptions {
@@ -87,7 +85,7 @@ impl Backend for WebSocketDefault {
         let server = websocket.clone();
 
         tokio::spawn(async move {
-            if let Err(e) = server.listen(options.addr).await {
+            if let Err(e) = server.listen(options.socket_addr).await {
                 tracing::error!("issue starting websocket server: {e}");
             }
         });
@@ -104,7 +102,7 @@ impl WebSocketCtx for WebSocketDefault {
 
     fn new_event(&self, data: Vec<u8>) -> Result<Arc<dyn Event>> {
         Ok(Arc::new(InMemEvent {
-            addr: String::new(),
+            socket_addr: String::new(),
             data,
         }) as Arc<dyn Event>)
     }
@@ -133,18 +131,15 @@ impl Client for WebSocketDefault {
     fn send(&self, event: EventProxy, sockets: Option<Vec<String>>) -> FutureResult<()> {
         tracing::debug!("sending event to WebSocket clients, sockets: {:?}", sockets);
 
-        // prune dead connections while collecting recipients
         let mut conns = self.connections.lock();
-        conns.retain(|_, c| !c.sender.is_closed());
+        conns.retain(|_, sender| !sender.is_closed());
 
-        // send event to connected clients
-        let msg = Message::Binary(event.data().into());
-        for conn in conns.values_mut() {
-            // skip if client is not in the list of sockets
-            if sockets.as_ref().is_some_and(|s| !s.contains(&conn.addr)) {
+        let msg = Message::Binary(event.data().to_vec().into());
+        for (socket_addr, sender) in conns.iter_mut() {
+            if sockets.as_ref().is_some_and(|s| !s.contains(socket_addr)) {
                 continue;
             }
-            if let Err(e) = conn.sender.try_send(msg.clone()) {
+            if let Err(e) = sender.try_send(msg.clone()) {
                 tracing::warn!("failed to send to peer, channel full or disconnected: {e}");
             }
         }
@@ -160,8 +155,8 @@ impl Client for WebSocketDefault {
 /// separate task. It broadcasts incoming messages to all connected peers and
 /// forwards outgoing messages to connected clients.
 impl WebSocketDefault {
-    async fn listen(self, addr: String) -> Result<()> {
-        let listener = TcpListener::bind(addr).await?;
+    async fn listen(self, socket_addr: String) -> Result<()> {
+        let listener = TcpListener::bind(socket_addr).await?;
         tracing::info!("websocket server listening on: {}", listener.local_addr()?);
 
         loop {
@@ -184,10 +179,10 @@ impl WebSocketDefault {
         }
     }
 
-    async fn handle_socket(&self, ws_stream: WebSocketStream<TcpStream>, addr: String) {
+    async fn handle_socket(&self, ws_stream: WebSocketStream<TcpStream>, socket_addr: String) {
         let (tx, rx) = mpsc::channel(PER_CLIENT_CHANNEL_CAPACITY);
 
-        if let Err(e) = self.add_socket(addr.clone(), tx) {
+        if let Err(e) = self.add_socket(socket_addr.clone(), tx) {
             tracing::error!("issue adding peer connection: {e}");
             return;
         }
@@ -196,10 +191,12 @@ impl WebSocketDefault {
 
         let incoming_broadcaster = incoming.try_for_each(|msg| {
             match msg {
-                Message::Text(text) => self.send_to_guest(addr.clone(), text.as_bytes().to_vec()),
-                Message::Binary(data) => self.send_to_guest(addr.clone(), data.to_vec()),
-                Message::Close(frame) => {
-                    tracing::info!("peer {addr} sent close frame: {frame:?}");
+                Message::Text(text) => {
+                    self.send_to_guest(socket_addr.clone(), text.as_bytes().to_vec())
+                }
+                Message::Binary(data) => self.send_to_guest(socket_addr.clone(), data.to_vec()),
+                Message::Close(_) => {
+                    tracing::info!("peer {socket_addr} sent close frame");
                     return future::err(WsError::ConnectionClosed);
                 }
                 _ => {}
@@ -211,56 +208,44 @@ impl WebSocketDefault {
 
         pin_mut!(incoming_broadcaster, outgoing_forwarder);
         future::select(incoming_broadcaster, outgoing_forwarder).await;
-        tracing::info!("{addr} disconnected");
+        tracing::info!("{socket_addr} disconnected");
 
-        self.connections.lock().remove(&addr);
+        self.connections.lock().remove(&socket_addr);
     }
 
     /// Add a new socket to the connection map.
-    fn add_socket(&self, addr: String, tx: mpsc::Sender<Message>) -> Result<()> {
+    fn add_socket(&self, socket_addr: String, tx: mpsc::Sender<Message>) -> Result<()> {
         let mut conns = self.connections.lock();
         if conns.len() >= MAX_CONNECTIONS {
             return Err(anyhow!("max connections reached"));
         }
-
-        conns.insert(addr.clone(), Connection { addr, sender: tx });
+        conns.insert(socket_addr, tx);
         drop(conns);
-
         Ok(())
     }
 
     /// Send event to the wasm guest's websocket event handler.
-    fn send_to_guest(&self, addr: String, data: Vec<u8>) {
-        let event = InMemEvent { addr, data };
+    fn send_to_guest(&self, socket_addr: String, data: Vec<u8>) {
+        let event = InMemEvent { socket_addr, data };
         if self.event_tx.send(EventProxy(Arc::new(event))).is_err() {
             tracing::warn!("no subscribers for incoming WebSocket event");
         }
     }
 }
 
-#[derive(Debug, Clone)]
-struct Connection {
-    addr: String,
-    sender: mpsc::Sender<Message>,
-}
-
 #[derive(Debug, Clone, Default)]
 struct InMemEvent {
-    addr: String,
+    socket_addr: String,
     data: Vec<u8>,
 }
 
 impl Event for InMemEvent {
-    fn socket_addr(&self) -> Option<String> {
-        Some(self.addr.clone())
+    fn socket_addr(&self) -> Option<&str> {
+        if self.socket_addr.is_empty() { None } else { Some(&self.socket_addr) }
     }
 
-    fn data(&self) -> Vec<u8> {
-        self.data.clone()
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
+    fn data(&self) -> &[u8] {
+        &self.data
     }
 }
 
@@ -273,18 +258,18 @@ mod tests {
     #[tokio::test]
     async fn websocket() {
         let ctx = WebSocketDefault::connect_with(ConnectOptions {
-            addr: "0.0.0.0:80".into(),
+            socket_addr: "0.0.0.0:80".into(),
         })
         .await
         .expect("connect");
 
         // Test connect
-        let _socket = ctx.connect().await.expect("connect socket");
+        let _client = ctx.connect().await.expect("connect client");
 
         // Test new_event
         let event = ctx.new_event(b"test payload".to_vec()).expect("new event");
-        assert_eq!(event.data(), b"test payload".to_vec());
-        assert!(event.socket_addr().is_some());
+        assert_eq!(event.data(), b"test payload");
+        assert!(event.socket_addr().is_none());
     }
 
     #[test]
