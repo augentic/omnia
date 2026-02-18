@@ -21,14 +21,14 @@ interface types {
         disconnect: func() -> result<_, error>;
     }
 
-    /// A type alias for string to represent a websocket group
-    type group = string;
+    /// A type alias for string to represent a websocket socket address
+    type socket = string;
 
     /// A websocket event.
     resource event {
         constructor(data: list<u8>);
         /// The group this event was received on, if any
-        group: func() -> option<group>;
+        socket: func() -> option<socket>;
         /// The event message.
         data: func() -> list<u8>;
     }
@@ -47,10 +47,10 @@ interface types {
 }
 
 interface client {
-    use types.{error, event, client, group};
+    use types.{error, event, client, socket};
 
     /// Sends the event using the given client.
-    send: async func(s: borrow<client>, event: event, group: option<list<group>>) -> result<_, error>;
+    send: async func(s: borrow<client>, event: event, sockets: option<list<socket>>) -> result<_, error>;
 }
 
 interface handler {

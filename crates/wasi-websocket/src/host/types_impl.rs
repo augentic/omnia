@@ -1,9 +1,9 @@
 use wasmtime::component::{Access, Accessor, Resource};
 
 pub use crate::host::generated::wasi::websocket::types::{
-    Error, Group, Host, HostEvent, HostEventWithStore, HostClient, HostClientWithStore,
+    Error, Host, HostClient, HostClientWithStore, HostEvent, HostEventWithStore, Socket,
 };
-use crate::host::resource::{EventProxy, ClientProxy};
+use crate::host::resource::{ClientProxy, EventProxy};
 use crate::host::{Result, WasiWebSocket, WasiWebSocketCtxView};
 
 impl HostClientWithStore for WasiWebSocket {
@@ -36,12 +36,12 @@ impl HostEventWithStore for WasiWebSocket {
         Ok(host.get().table.push(proxy)?)
     }
 
-    /// The group this event was received on, if any.
-    fn group<T>(
+    /// The socket address this event was received from.
+    fn socket<T>(
         mut host: Access<'_, T, Self>, self_: Resource<EventProxy>,
-    ) -> wasmtime::Result<Option<Group>> {
+    ) -> wasmtime::Result<Option<Socket>> {
         let event = host.get().table.get(&self_)?;
-        Ok(event.group())
+        Ok(event.socket_addr())
     }
 
     /// The event data.

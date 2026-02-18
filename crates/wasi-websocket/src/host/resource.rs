@@ -17,8 +17,8 @@ pub trait Client: Debug + Send + Sync + 'static {
     /// Subscribe to incoming events from WebSocket clients.
     fn events(&self) -> FutureResult<Events>;
 
-    /// Send an event to connected WebSocket clients, optionally filtered by groups.
-    fn send(&self, event: EventProxy, groups: Option<Vec<String>>) -> FutureResult<()>;
+    /// Send an event to connected WebSocket clients, optionally filtered by sockets.
+    fn send(&self, event: EventProxy, sockets: Option<Vec<String>>) -> FutureResult<()>;
 }
 
 /// Proxy for a WebSocket server client.
@@ -35,8 +35,8 @@ impl Deref for ClientProxy {
 
 /// Providers implement the [`Event`] trait to represent WebSocket events.
 pub trait Event: Debug + Send + Sync + 'static {
-    /// The group this event was received on, if any.
-    fn group(&self) -> Option<String>;
+    /// The socket address this event was received from.
+    fn socket_addr(&self) -> Option<String>;
 
     /// The event data.
     fn data(&self) -> Vec<u8>;
