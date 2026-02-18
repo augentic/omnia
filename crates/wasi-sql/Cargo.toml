@@ -38,7 +38,7 @@ anyhow.workspace = true
 base64ct.workspace = true
 chrono.workspace = true
 futures.workspace = true
-sea-query = { version = "0.32", default-features = false, features = ["thread-safe", "with-chrono"] }
+sea-query.workspace = true
 serde_json.workspace = true
 wit-bindgen.workspace = true
 
