@@ -30,7 +30,7 @@ fromenv.workspace = true
 futures.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
-reqwest = "0.13.1"
+reqwest = "0.13.2"
 tokio.workspace = true
 wasmtime = { workspace = true, features = ["component-model-async"] }
 wasmtime-wasi.workspace = true
@@ -44,7 +44,7 @@ futures.workspace = true
 http-body.workspace = true
 http-body-util.workspace = true
 percent-encoding = "2.3.2"
-rkyv = "0.8.13"
+rkyv = "0.8.15"
 serde.workspace = true
 serde_json.workspace = true
 tower.workspace = true

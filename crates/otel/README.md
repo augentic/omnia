@@ -1,13 +1,8 @@
 # Omnia OpenTelemetry
 
-OpenTelemetry tracing and metrics integration for the Omnia runtime.
-This crate initializes `tracing-subscriber`, OTLP span exporters, and
-metric readers with retry logic so that host runtimes report telemetry
-out-of-the-box.
+OpenTelemetry tracing and metrics integration for the Omnia runtime. This crate initializes `tracing-subscriber`, OTLP span exporters, and metric readers with retry logic so that host runtimes report telemetry out-of-the-box.
 
-> **Note:** This is a host-side library (not compiled for `wasm32`). It is
-> called internally by `omnia::create()` during runtime startup. Most users
-> do not need to depend on this crate directly.
+> **Note:** This is a host-side library (not compiled for `wasm32`). It is called internally by `omnia::create()` during runtime startup. Most users do not need to depend on this crate directly.
 
 ## Usage
 
@@ -23,8 +18,7 @@ Telemetry::new("my-service")
     .build()?;
 ```
 
-The `OTEL_GRPC_URL` environment variable is also respected if no explicit
-endpoint is set.
+The `OTEL_GRPC_URL` environment variable is also respected if no explicit endpoint is set.
 
 ## License
 

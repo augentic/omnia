@@ -9,9 +9,9 @@
 use axum::routing::{options, post};
 use axum::{Json, Router};
 use http::Method;
+use omnia_sdk::HttpResult;
 use opentelemetry::trace::{TraceContextExt, Tracer};
 use opentelemetry::{KeyValue, global};
-use omnia_sdk::HttpResult;
 use serde_json::{Value, json};
 use tower_http::cors::{Any, CorsLayer};
 use tracing::Level;

@@ -23,9 +23,9 @@ mod generated {
 
 use std::fmt::Debug;
 
+use omnia::{FutureResult, Host, Server, State};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
-use omnia::{FutureResult, Host, Server, State};
 use wasmtime::component::{HasData, Linker, ResourceTable};
 
 pub use self::default_impl::OtelDefault;

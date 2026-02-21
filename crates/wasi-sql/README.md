@@ -1,9 +1,9 @@
-# wasi::sql Implementation
+# WASI SQL Implementation
 
 This crate provides both guest and host implementations for the `wasi::sql` specification:
 
 - **Guest**: WIT bindings and a type-safe ORM layer for WASM components
-- **Host**: Runtime service with SQLite backend for wasmtime-based hosts
+- **Host**: Runtime service with `SQLite` backend for wasmtime-based hosts
 
 ## Features
 
@@ -21,7 +21,7 @@ The guest module provides query builders for type-safe database operations:
 
 ### Host Implementation
 
-The host provides a wasmtime component implementation using SQLite:
+The host provides a wasmtime component implementation using `SQLite`:
 
 - **Multiple connections**: Named connection pools
 - **Transactions**: Read-write transaction support

@@ -158,7 +158,6 @@
 //! For more information, please refer to [`usage.md`](orm/usage.md).
 
 #![forbid(unsafe_code)]
-
 #![cfg(target_arch = "wasm32")]
 
 mod delete;

@@ -3,5 +3,8 @@
         "Cargo.toml"
     ],
     "rust-analyzer.check.command": "clippy",
-    // "rust-analyzer.cargo.target": "wasm32-wasip2",
+    "[markdown]": {
+        "editor.wordWrap": "wordWrapColumn",
+        "editor.wordWrapColumn": 100
+    }
 }

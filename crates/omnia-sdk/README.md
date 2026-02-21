@@ -1,13 +1,10 @@
 # Omnia SDK
 
-Shared traits, error types, and abstractions consumed by WASM guests and domain
-crates. These definitions provide the capability contracts used for dependency
-injection across adapters.
+Shared traits, error types, and abstractions consumed by WASM guests and domain crates. These definitions provide the capability contracts used for dependency injection across adapters.
 
 ## Quick Start
 
-Use the `guest!` macro to wire up HTTP routes and messaging handlers for a WASI
-component guest:
+Use the `guest!` macro to wire up HTTP routes and messaging handlers for a WASI component guest:
 
 ```rust,ignore
 omnia_sdk::guest!({
@@ -23,14 +20,11 @@ omnia_sdk::guest!({
 });
 ```
 
-The macro generates the WASI HTTP handler, axum router, and messaging
-subscriber glue so your business logic only needs to implement the `Handler`
-trait for each request type.
+The macro generates the WASI HTTP handler, axum router, and messaging subscriber glue so your business logic only needs to implement the `Handler` trait for each request type.
 
 ## Capabilities
 
-The SDK exposes trait-based abstractions that are automatically backed by WASI
-host calls when compiled to `wasm32`:
+The SDK exposes trait-based abstractions that are automatically backed by WASI host calls when compiled to `wasm32`:
 
 | Trait | Purpose |
 |-------|---------|
@@ -42,14 +36,11 @@ host calls when compiled to `wasm32`:
 | `TableStore` | Execute SQL queries and statements via the ORM layer |
 | `Broadcast` | Send events over WebSocket channels |
 
-When targeting `wasm32`, each trait has a default implementation that delegates
-to the corresponding `omnia-wasi-*` bindings. Host-side test code can provide
-mock implementations by implementing the same traits.
+When targeting `wasm32`, each trait has a default implementation that delegates to the corresponding `omnia-wasi-*` bindings. Host-side test code can provide mock implementations by implementing the same traits.
 
 ## Error Handling
 
-The crate provides an `Error` enum with HTTP-aware variants (`BadRequest`,
-`NotFound`, `ServerError`, `BadGateway`) plus helper macros:
+The crate provides an `Error` enum with HTTP-aware variants (`BadRequest`, `NotFound`, `ServerError`, `BadGateway`) plus helper macros:
 
 ```rust,ignore
 use omnia_sdk::{bad_request, server_error};
@@ -59,8 +50,7 @@ let err = bad_request!("missing field: {}", "name");
 
 ## Architecture
 
-See the [workspace documentation](https://github.com/augentic/omnia) for the
-full architecture guide.
+See the [workspace documentation](https://github.com/augentic/omnia) for the full architecture guide.
 
 ## License
 

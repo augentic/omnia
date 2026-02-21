@@ -34,7 +34,7 @@ tracing-opentelemetry = { workspace = true, optional = true }
 futures.workspace = true
 hex = "0.4.3"
 opentelemetry-proto = "0.31.0"
-prost = "0.14.1"
+prost = "0.14.3"
 omnia.workspace = true
 omnia-otel.workspace = true
 wasmtime.workspace = true

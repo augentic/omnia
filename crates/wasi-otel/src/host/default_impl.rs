@@ -8,9 +8,9 @@
 
 use anyhow::Result;
 use futures::FutureExt;
+use omnia::{Backend, FutureResult};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
-use omnia::{Backend, FutureResult};
 use tracing::instrument;
 
 use crate::host::WasiOtelCtx;

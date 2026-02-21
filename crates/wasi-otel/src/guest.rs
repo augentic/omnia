@@ -6,8 +6,6 @@
 //!
 //! [wasi]: https://github.com/bytecodealliance/wasi
 
-#![allow(clippy::same_length_and_capacity)]
-
 mod convert;
 mod init;
 #[cfg(feature = "metrics")]

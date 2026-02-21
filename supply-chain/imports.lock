@@ -44,8 +44,8 @@ user-login = "epage"
 user-name = "Ed Page"
 
 [[publisher.anyhow]]
-version = "1.0.101"
-when = "2026-02-05"
+version = "1.0.102"
+when = "2026-02-20"
 user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
@@ -65,8 +65,8 @@ user-login = "dtolnay"
 user-name = "David Tolnay"
 
 [[publisher.bumpalo]]
-version = "3.20.1"
-when = "2026-02-18"
+version = "3.20.2"
+when = "2026-02-19"
 user-id = 696
 user-login = "fitzgen"
 user-name = "Nick Fitzgerald"
@@ -121,15 +121,15 @@ user-login = "sunfishcode"
 user-name = "Dan Gohman"
 
 [[publisher.clap]]
-version = "4.5.59"
-when = "2026-02-16"
+version = "4.5.60"
+when = "2026-02-19"
 user-id = 6743
 user-login = "epage"
 user-name = "Ed Page"
 
 [[publisher.clap_builder]]
-version = "4.5.59"
-when = "2026-02-16"
+version = "4.5.60"
+when = "2026-02-19"
 user-id = 6743
 user-login = "epage"
 user-name = "Ed Page"
@@ -529,8 +529,8 @@ user-login = "Thomasdezeeuw"
 user-name = "Thomas de Zeeuw"
 
 [[publisher.syn]]
-version = "2.0.116"
-when = "2026-02-15"
+version = "2.0.117"
+when = "2026-02-20"
 user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"

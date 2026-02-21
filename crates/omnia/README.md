@@ -1,10 +1,8 @@
 # Omnia Wasm Runtime
 
-The Omnia Wasm runtime provides a thin wrapper around [`wasmtime`](https://github.com/bytecodealliance/wasmtime)
-for ergonomic integration of host-based services for WASI components.
+The Omnia Wasm runtime provides a thin wrapper around [`wasmtime`](https://github.com/bytecodealliance/wasmtime) for ergonomic integration of host-based services for WASI components.
 
-We consider this a stop-gap solution until production-grade runtimes support dynamic inclusion of host-based
-services.
+We consider this a stop-gap solution until production-grade runtimes support dynamic inclusion of host-based services.
 
 ## Quick Start
 
@@ -21,8 +19,7 @@ omnia::runtime!({
 });
 ```
 
-The macro generates a `runtime_run()` async function that compiles the WebAssembly
-component, connects backends, links WASI interfaces, and starts server loops.
+The macro generates a `runtime_run()` async function that compiles the WebAssembly component, connects backends, links WASI interfaces, and starts server loops.
 
 ## Core Traits
 
@@ -40,8 +37,7 @@ component, connects backends, links WASI interfaces, and starts server loops.
 
 ## Architecture
 
-See the [workspace documentation](https://github.com/augentic/omnia) for the full
-architecture guide and list of available WASI interface crates.
+See the [workspace documentation](https://github.com/augentic/omnia) for the full architecture guide and list of available WASI interface crates.
 
 ## License
 

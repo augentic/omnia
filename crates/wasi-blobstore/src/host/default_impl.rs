@@ -8,8 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use futures::FutureExt;
-use parking_lot::RwLock;
 use omnia::Backend;
+use parking_lot::RwLock;
 use tracing::instrument;
 
 use crate::host::WasiBlobstoreCtx;

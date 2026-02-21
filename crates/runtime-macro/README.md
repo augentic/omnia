@@ -121,7 +121,7 @@ Implements the `State` trait from the `runtime` crate, providing methods to crea
 
 Implements view traits for each configured WASI interface, allowing the WebAssembly guest to call host functions.
 
-### runtime_run() Function
+### `runtime_run()` Function
 
 A public async function that:
 

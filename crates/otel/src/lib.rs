@@ -6,7 +6,6 @@
 //! reporting OpenTelemetry-based metrics.
 
 #![forbid(unsafe_code)]
-
 #![cfg(not(target_arch = "wasm32"))]
 
 pub mod init;

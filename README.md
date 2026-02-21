@@ -1,15 +1,14 @@
 # OMNIA — Quick WebAssembly Secure Runtime
 
-OMNIA provides a thin wrapper around [`wasmtime`](https://github.com/bytecodealliance/wasmtime)
-for ergonomic integration of host-based services for WASI components.
+OMNIA provides a thin wrapper around [`wasmtime`](https://github.com/bytecodealliance/wasmtime) for ergonomic integration of host-based services for WASI components.
 
-We consider this an interim solution until production-grade wasm runtimes provide support for the
-dynamic inclusion of host-based services.
+While it can be used standalone, Omnia is primarily intended for use with Augentic's Agent Skills. It provides a safe, hand-crafted runtime for safely running agent-generated WASI components.
+
+The  opinionated nature of WASI guest components and more particularly, the Omnia framework, provides a level of control and consistency hard to achieve in agent-generated code.
 
 ## Examples
 
-There are a number of examples provided in the `examples` directory that can be used to experiment
-with the runtime and see it in action.
+There are a number of examples provided in the `examples` directory that can be used to experiment with the runtime and see it in action.
 
 Each example contains a Wasm guest and the runtime required to run it.
 

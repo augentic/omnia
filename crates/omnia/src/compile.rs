@@ -42,10 +42,10 @@ pub fn compile(wasm: &PathBuf, output: Option<PathBuf>) -> Result<()> {
             out_path.push(file_name);
         }
 
-        if let Some(dir) = out_path.parent() {
-            if !dir.exists() {
-                fs::create_dir_all(dir)?;
-            }
+        if let Some(dir) = out_path.parent()
+            && !dir.exists()
+        {
+            fs::create_dir_all(dir)?;
         }
 
         File::create(&out_path)?.write_all(&serialized)?;
