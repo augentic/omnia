@@ -81,7 +81,7 @@ dependencies = ["clean"]
 env = { RUSTFLAGS = "-Dwarnings" }
 
 # Test Doc
-[tasks.test-doc]
+[tasks.test-docs]
 command = "cargo"
 args = ["test", "--doc", "--all-features", "--workspace"]
 

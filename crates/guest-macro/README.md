@@ -17,7 +17,7 @@ guest-macro = { workspace = true }
 
 Then use the `guest!` macro to generate your guest infrastructure:
 
-```rust
+```rust,ignore
 use guest_macro::guest;
 
 guest!({
@@ -54,7 +54,7 @@ The macro accepts a struct-like syntax with the following fields:
 
 HTTP routes are defined with the syntax:
 
-```rust
+```rust,ignore
 "/path": method(RequestType, ResponseType)
 ```
 
@@ -72,7 +72,7 @@ HTTP routes are defined with the syntax:
 
 Path parameters use curly brace syntax and are automatically extracted:
 
-```rust
+```rust,ignore
 "/users/{user_id}/posts/{post_id}": get(GetPostRequest, GetPostResponse)
 ```
 
@@ -80,7 +80,7 @@ Path parameters use curly brace syntax and are automatically extracted:
 
 Messaging topics are defined with the syntax:
 
-```rust
+```rust,ignore
 "topic-name.version": MessageType
 ```
 
@@ -104,7 +104,7 @@ The macro generates the following modules under `#[cfg(target_arch = "wasm32")]`
 
 ## Example
 
-```rust
+```rust,ignore
 use guest_macro::guest;
 
 // Define your provider

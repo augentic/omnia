@@ -14,7 +14,7 @@ use syn::parse_macro_input;
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```rust,ignore
 /// omnia::runtime!({
 ///     omnia_wasi_http: WasiHttp,
 ///     omnia_wasi_otel: DefaultOtel,

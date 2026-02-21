@@ -15,7 +15,7 @@ use syn::parse_macro_input;
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```rust,ignore
 /// guest_macro::guest!({
 ///     owner: "at",
 ///     provider: MyProvider,

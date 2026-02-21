@@ -17,7 +17,7 @@ omnia = { workspace = true }
 
 Then use the `runtime!` macro to generate your runtime infrastructure:
 
-```rust
+```rust,ignore
 use omnia::runtime;
 
 // Import the backend types you want to use
@@ -49,7 +49,7 @@ runtime!({
 
 The macro accepts a map-like syntax:
 
-```rust
+```rust,ignore
 runtime!({
     "interface_name": BackendType,
     // ...
@@ -93,7 +93,7 @@ The macro generates the following:
 
 A struct holding pre-instantiated components and backend connections:
 
-```rust
+```rust,ignore
 #[derive(Clone)]
 struct RuntimeContext {
     instance_pre: InstancePre<RuntimeStoreCtx>,
@@ -105,7 +105,7 @@ struct RuntimeContext {
 
 Per-instance data shared between the WebAssembly runtime and host functions:
 
-```rust
+```rust,ignore
 pub struct RuntimeStoreCtx {
     pub table: ResourceTable,
     pub wasi: WasiCtx,
@@ -135,7 +135,7 @@ A public async function that:
 
 You can create different runtime configurations for different use cases:
 
-```rust
+```rust,ignore
 // Minimal HTTP server
 mod http_runtime {
     use omnia_wasi_http::WasiHttpCtx;
@@ -163,7 +163,7 @@ mod full_runtime {
 
 Now you can declaratively specify your configuration:
 
-```rust
+```rust,ignore
 mod omnia_runtime {
     omnia::runtime!({
         "http": WasiHttpCtx,
