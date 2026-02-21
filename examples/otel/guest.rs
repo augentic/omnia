@@ -11,7 +11,7 @@ use axum::{Json, Router};
 use http::Method;
 use opentelemetry::trace::{TraceContextExt, Tracer};
 use opentelemetry::{KeyValue, global};
-use qwasr_sdk::HttpResult;
+use omnia_sdk::HttpResult;
 use serde_json::{Value, json};
 use tower_http::cors::{Any, CorsLayer};
 use tracing::Level;
@@ -23,7 +23,7 @@ wasip3::http::service::export!(Http);
 
 impl Guest for Http {
     /// Routes requests and demonstrates telemetry patterns.
-    #[qwasr_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
+    #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         // tracing-based metrics
         tracing::info!(monotonic_counter.tracing_counter = 1, key1 = "value 1");
@@ -64,7 +64,7 @@ impl Guest for Http {
                     .route("/", post(handler))
                     .route("/", options(handle_options));
 
-                qwasr_wasi_http::serve(router, request)
+                omnia_wasi_http::serve(router, request)
             })
             .await
     }
@@ -72,7 +72,7 @@ impl Guest for Http {
 
 /// Simple JSON echo handler.
 #[axum::debug_handler]
-#[qwasr_wasi_otel::instrument]
+#[omnia_wasi_otel::instrument]
 async fn handler(Json(body): Json<Value>) -> HttpResult<Json<Value>> {
     tracing::info!("handling request: {:?}", body);
     Ok(Json(json!({

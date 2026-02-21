@@ -28,9 +28,9 @@ use std::time::Instant;
 use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
-use qwasr_sdk::HttpResult;
-use qwasr_wasi_messaging::types::{Client, Error, Message};
-use qwasr_wasi_messaging::{producer, request_reply};
+use omnia_sdk::HttpResult;
+use omnia_wasi_messaging::types::{Client, Error, Message};
+use omnia_wasi_messaging::{producer, request_reply};
 use serde_json::{Value, json};
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
@@ -48,7 +48,7 @@ impl Guest for Http {
         let router = Router::new()
             .route("/pub-sub", post(pub_sub))
             .route("/request-reply", post(request_reply_handler));
-        qwasr_wasi_http::serve(router, request).await
+        omnia_wasi_http::serve(router, request).await
     }
 }
 
@@ -91,9 +91,9 @@ async fn request_reply_handler(body: Bytes) -> Json<Value> {
 // ----------------------------------------------------------------------------
 
 pub struct Messaging;
-qwasr_wasi_messaging::export!(Messaging with_types_in qwasr_wasi_messaging);
+omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
 
-impl qwasr_wasi_messaging::incoming_handler::Guest for Messaging {
+impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
     /// Handles incoming messages from subscribed topics.
     async fn handle(message: Message) -> anyhow::Result<(), Error> {
         tracing::debug!("start processing msg");

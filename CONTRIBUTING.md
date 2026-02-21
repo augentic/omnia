@@ -1,12 +1,12 @@
 # Contribution Guide
 
-Credibil welcomes community contributions to the `perdx-did` library.
+Augentic welcomes community contributions to the `omnia` library.
 
-Since the project is still unstable, there are specific priorities for development. Pull requests that do not address these priorities will not be accepted until Credentials is production ready.
+Since the project is still unstable, there are specific priorities for development. Pull requests that do not address these priorities will not be accepted until Omnia is production ready.
 
 Please familiarize yourself with the Contribution Guidelines and Project Roadmap before contributing.
 
-There are many ways to help Credentials besides contributing code:
+There are many ways to help Omnia besides contributing code:
 
 - Fix bugs or file issues
 - Improve the documentation
@@ -15,13 +15,13 @@ There are many ways to help Credentials besides contributing code:
 
 - [Contributing Code](#contributing-code)
 - [Code Style](#code-style)
-- [Developer’s Certificate of Origin](#developers-certificate-of-origin)
+- [Developer's Certificate of Origin](#developers-certificate-of-origin)
 - [Pull request procedure](#pull-request-procedure)
 - [Conduct](#conduct)
 
 ## Contributing Code
 
-Unless you are fixing a known bug, we **strongly** recommend discussing it with the core team via a GitHub issue before getting started to ensure your work is consistent with Credentials's roadmap and architecture.
+Unless you are fixing a known bug, we **strongly** recommend discussing it with the core team via a GitHub issue before getting started to ensure your work is consistent with Omnia's roadmap and architecture.
 
 All contributions are made via pull request. Note that **all patches from all contributors get reviewed**. After a pull request is made other contributors will offer feedback, and if the patch passes review a maintainer will accept it with a comment. When pull requests fail testing, authors are expected to update their pull requests to address the failures until the tests pass and the pull request merges successfully.
 
@@ -33,9 +33,9 @@ Reviewers should leave a "LGTM" comment once they are satisfied with the patch. 
 
 Please follow these guidelines when formatting source code:
 
-- Go code should match the output of `gofmt -s`
+- Rust code should match the output of `cargo +nightly fmt`
 
-## Developer’s Certificate of Origin
+## Developer's Certificate of Origin
 
 All contributions must include acceptance of the DCO:
 
@@ -92,8 +92,7 @@ To make a pull request, you will need a GitHub account; if you are unclear on th
 
 1. Create a feature branch off of `master` so that changes do not get mixed up.
 1. [Rebase](https://git-scm.com/book/en/Git-Branching-Rebasing) your local changes against the `master` branch.
-1. Run the full project test suite with the `go test ./...` (or equivalent) command and confirm that it passes.
-1. Run `gofmt -s` (if the project is written in Go).
+1. Run the full project test suite and confirm that it passes.
 1. Accept the Developer's Certificate of Origin on all commits (see above).
 1. Ensure that each commit has a subsystem prefix (ex: `controller:`).
 
@@ -109,7 +108,7 @@ Whether you are a regular contributor or a newcomer, we care about making this c
 - Please avoid using nicknames that might detract from a friendly, safe and welcoming environment for all.
 - Be kind and courteous. There is no need to be mean or rude.
 - We will exclude you from interaction if you insult, demean or harass anyone. In particular, we do not tolerate behavior that excludes people in socially marginalized groups.
-- Private harassment is also unacceptable. No matter who you are, if you feel you have been or are being harassed or made uncomfortable by a community member, please contact one of the channel ops or a member of the Credentials core team immediately.
+- Private harassment is also unacceptable. No matter who you are, if you feel you have been or are being harassed or made uncomfortable by a community member, please contact one of the channel ops or a member of the Omnia core team immediately.
 - Likewise any spamming, trolling, flaming, baiting or other attention-stealing behaviour is not welcome.
 
 We welcome discussion about creating a welcoming, safe, and productive environment for the community. If you have any questions, feedback, or concerns please let us know with a GitHub issue.

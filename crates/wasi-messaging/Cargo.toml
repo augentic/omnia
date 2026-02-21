@@ -1,6 +1,6 @@
 [package]
-name = "qwasr-wasi-messaging"
-description = "WASI messaging WIT implementation"
+name = "omnia-wasi-messaging"
+description = "WASI messaging pub/sub interface for the Omnia runtime"
 readme = "README.md"
 authors.workspace = true
 categories.workspace = true
@@ -22,7 +22,7 @@ workspace = true
 anyhow.workspace = true
 futures.workspace = true
 http.workspace = true
-qwasr.workspace = true
+omnia.workspace = true
 serde.workspace = true
 time.workspace = true
 tokio = { workspace = true, features = ["sync"] }

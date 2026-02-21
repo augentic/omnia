@@ -4,7 +4,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use qwasr_otel::Telemetry;
+use omnia_otel::Telemetry;
 use tracing::instrument;
 use wasmtime::component::{Component, InstancePre, Linker};
 use wasmtime::{Config, Engine};
@@ -49,7 +49,7 @@ pub fn create<T: WasiView + 'static>(wasm: &PathBuf) -> Result<Compiled<T>> {
     wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
     wasmtime_wasi::p3::add_to_linker(&mut linker)?;
 
-    tracing::info!("runtime intialized");
+    tracing::info!("runtime initialized");
 
     Ok(Compiled { component, linker })
 }

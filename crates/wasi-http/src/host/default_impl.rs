@@ -12,7 +12,7 @@ use http::header::{
 use http::{Request, Response};
 use http_body_util::BodyExt;
 use http_body_util::combinators::UnsyncBoxBody;
-use qwasr::Backend;
+use omnia::Backend;
 use tracing::instrument;
 use wasmtime_wasi::TrappableError;
 use wasmtime_wasi_http::p3::bindings::http::types::ErrorCode;
@@ -41,7 +41,7 @@ pub struct ConnectOptions {
     pub addr: String,
 }
 
-impl qwasr::FromEnv for ConnectOptions {
+impl omnia::FromEnv for ConnectOptions {
     fn from_env() -> Result<Self> {
         Self::from_env().finalize().context("issue loading connection options")
     }

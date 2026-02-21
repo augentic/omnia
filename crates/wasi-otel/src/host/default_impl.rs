@@ -10,7 +10,7 @@ use anyhow::Result;
 use futures::FutureExt;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
-use qwasr::{Backend, FutureResult};
+use omnia::{Backend, FutureResult};
 use tracing::instrument;
 
 use crate::host::WasiOtelCtx;
@@ -18,7 +18,7 @@ use crate::host::WasiOtelCtx;
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions;
 
-impl qwasr::FromEnv for ConnectOptions {
+impl omnia::FromEnv for ConnectOptions {
     fn from_env() -> Result<Self> {
         Ok(Self)
     }

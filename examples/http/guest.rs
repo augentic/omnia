@@ -10,7 +10,7 @@
 
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use qwasr_sdk::HttpResult;
+use omnia_sdk::HttpResult;
 use serde_json::{Value, json};
 use tracing::Level;
 use wasip3::exports::http::handler::Guest;
@@ -21,15 +21,15 @@ wasip3::http::service::export!(HttpGuest);
 
 impl Guest for HttpGuest {
     /// Routes incoming HTTP requests to handlers.
-    #[qwasr_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
+    #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new().route("/", get(echo_get)).route("/", post(echo_post));
-        qwasr_wasi_http::serve(router, request).await
+        omnia_wasi_http::serve(router, request).await
     }
 }
 
 /// GET request handler.
-#[qwasr_wasi_otel::instrument]
+#[omnia_wasi_otel::instrument]
 async fn echo_get(Json(body): Json<Value>) -> HttpResult<Json<Value>> {
     Ok(Json(json!({
         "message": "Hello from echo_get!",
@@ -38,7 +38,7 @@ async fn echo_get(Json(body): Json<Value>) -> HttpResult<Json<Value>> {
 }
 
 /// POST request handler.
-#[qwasr_wasi_otel::instrument]
+#[omnia_wasi_otel::instrument]
 async fn echo_post(Json(body): Json<Value>) -> HttpResult<Json<Value>> {
     Ok(Json(json!({
         "message": "Hello from echo_post!",

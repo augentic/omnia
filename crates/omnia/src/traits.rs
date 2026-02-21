@@ -6,6 +6,7 @@
 //! of a specific set of WASI interfaces.
 
 use std::fmt::Debug;
+use std::future::Future;
 
 use anyhow::Result;
 use futures::future::BoxFuture;
@@ -76,35 +77,3 @@ pub trait FromEnv: Sized {
     /// Returns an error if required environment variables are missing or invalid.
     fn from_env() -> Result<Self>;
 }
-
-// /// Implemented by `StoreCtx` to provide access to a specific host's context.
-// ///
-// /// This trait enables the runtime macro to generate view provider implementations
-// /// without needing to know the module path of each WASI host.
-// ///
-// /// Each WASI host crate provides a blanket impl that automatically implements
-// /// their `WasiXxxView` trait for any type that implements `ViewProvider<WasiXxx>`.
-// pub trait View<H: HasData, T>: Send {
-//     /// Return a [`WasiBlobstoreCtxView`] from mutable reference to self.
-//     fn data(&mut self) -> <H as HasData>::Data<'_>;
-// }
-
-// pub trait CtxView<'a, T>: HasData + 'a + Send {
-//     fn ctx_view(ctx: &'a mut T, table: &'a mut ResourceTable) -> <Self as HasData>::Data<'a>;
-// }
-
-// /// ```rust,ignore
-// /// impl WasiHost for WasiHttp {
-// ///     type Ctx = dyn WasiHttpView;
-// /// }
-// /// ...
-// /// fn ctx(&mut self) -> <WasiHttp as WasiHost>::Ctx {}
-// /// ```
-// pub trait WasiHost {
-//     type Ctx: ?Sized;
-// }
-
-// /// Implemented by StoreCtx to provide access to a host's context
-// pub trait ViewProvider<H: WasiHost> {
-//     fn ctx_and_table(&mut self) -> (&mut H::Ctx, &mut ResourceTable);
-// }

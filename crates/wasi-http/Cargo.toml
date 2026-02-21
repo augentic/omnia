@@ -1,6 +1,6 @@
 [package]
-name = "qwasr-wasi-http"
-description = "WASI HTTP WIT implementation"
+name = "omnia-wasi-http"
+description = "WASI HTTP interface implementation for the Omnia runtime"
 readme = "README.md"
 authors.workspace = true
 categories.workspace = true
@@ -35,7 +35,7 @@ tokio.workspace = true
 wasmtime = { workspace = true, features = ["component-model-async"] }
 wasmtime-wasi.workspace = true
 wasmtime-wasi-http.workspace = true
-qwasr.workspace = true
+omnia.workspace = true
 
 # guest dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -49,7 +49,7 @@ serde.workspace = true
 serde_json.workspace = true
 tower.workspace = true
 wasip3.workspace = true
-qwasr-wasi-keyvalue.workspace = true
+omnia-wasi-keyvalue.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

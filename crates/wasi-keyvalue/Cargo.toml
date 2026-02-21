@@ -1,6 +1,6 @@
 [package]
-name = "qwasr-wasi-keyvalue"
-description = "WASI Keyvalue implementation"
+name = "omnia-wasi-keyvalue"
+description = "WASI key-value store interface for the Omnia runtime"
 readme = "README.md"
 authors.workspace = true
 categories.workspace = true
@@ -24,7 +24,7 @@ tracing.workspace = true
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 futures.workspace = true
-qwasr.workspace = true
+omnia.workspace = true
 moka.workspace = true
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true

@@ -29,11 +29,6 @@ impl RetrySpanExporter {
     pub fn new(exporter: SpanExporter) -> Self {
         Self { inner: Arc::new(Mutex::new(exporter)), backoff: Backoff::new() }
     }
-
-    // #[must_use]
-    // pub fn backoff(self, backoff: Backoff) -> Self {
-    //     Self { backoff, ..self }
-    // }
 }
 
 impl SpanExporterTrait for RetrySpanExporter {
@@ -79,11 +74,6 @@ impl RetryMetricExporter {
     pub const fn new(exporter: MetricExporter) -> Self {
         Self { inner: exporter, backoff: Backoff::new() }
     }
-
-    // #[must_use]
-    // pub fn backoff(self, backoff: Backoff) -> Self {
-    //     Self { backoff, ..self }
-    // }
 }
 
 impl PushMetricExporter for RetryMetricExporter {
@@ -114,7 +104,7 @@ impl PushMetricExporter for RetryMetricExporter {
     }
 
     fn shutdown_with_timeout(&self, _: Duration) -> Result<(), OTelSdkError> {
-        todo!()
+        self.inner.shutdown()
     }
 }
 

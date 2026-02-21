@@ -23,9 +23,9 @@ impl From<Value> for wasi::Value {
                 Array::String(items) => {
                     Self::StringArray(items.into_iter().map(Into::into).collect())
                 }
-                _ => unimplemented!(),
+                _ => Self::String(format!("{v:?}")),
             },
-            _ => unimplemented!(),
+            _ => Self::String(format!("{value:?}")),
         }
     }
 }

@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 //! wasi-sql ORM layer for SQL databases.
 //!
 //! Provides a fluent API for building SQL queries with compile-time type safety,
@@ -26,7 +28,7 @@
 //! ## CRUD Operations
 //!
 //! ```ignore
-//! use qwasr_wasi_sql::orm::{SelectBuilder, InsertBuilder, UpdateBuilder, DeleteBuilder, Filter};
+//! use omnia_wasi_sql::orm::{SelectBuilder, InsertBuilder, UpdateBuilder, DeleteBuilder, Filter};
 //!
 //! // Select with filter
 //! let posts = SelectBuilder::<Post>::new()
@@ -68,7 +70,7 @@
 //! ## Joins
 //!
 //! ```ignore
-//! use qwasr_wasi_sql::orm::Join;
+//! use omnia_wasi_sql::orm::Join;
 //!
 //! // Entity with default joins and column aliasing
 //! entity! {
@@ -155,6 +157,8 @@
 //!
 //! For more information, please refer to [`usage.md`](orm/usage.md).
 
+#![forbid(unsafe_code)]
+
 #![cfg(target_arch = "wasm32")]
 
 mod delete;
@@ -172,7 +176,7 @@ pub use filter::Filter;
 pub use insert::InsertBuilder;
 pub use join::Join;
 // Re-export basic WASI SQL types for use in query parameters and custom value conversions.
-pub use qwasr_wasi_sql::{DataType, Field, Row};
+pub use omnia_wasi_sql::{DataType, Field, Row};
 pub use select::SelectBuilder;
 pub use update::UpdateBuilder;
 

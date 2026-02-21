@@ -97,4 +97,45 @@ install_crate = "cargo-vet"
 
 [tasks.publish]
 command = "cargo"
-args = ["publish", "--registry=credibil", "--allow-dirty", "--dry-run"]
+args = ["publish", "--registry=augentic", "--allow-dirty", "--dry-run"]
+
+# Publish all crates to crates.io in dependency order (dry-run by default).
+# Remove --dry-run to actually publish.
+[tasks.publish-crates-io]
+script = '''
+set -e
+
+DRY_RUN="--dry-run"
+if [ "${PUBLISH_FOR_REAL}" = "true" ]; then
+  DRY_RUN=""
+fi
+
+echo "=== Tier 1: No internal dependencies ==="
+cargo publish -p omnia-guest-macro $DRY_RUN
+cargo publish -p omnia-runtime-macro $DRY_RUN
+cargo publish -p omnia-wasi-otel-attr $DRY_RUN
+cargo publish -p omnia-otel $DRY_RUN
+
+echo "=== Tier 2: Core runtime ==="
+cargo publish -p omnia $DRY_RUN
+
+echo "=== Tier 3: WASI interface crates ==="
+cargo publish -p omnia-wasi-blobstore $DRY_RUN
+cargo publish -p omnia-wasi-config $DRY_RUN
+cargo publish -p omnia-wasi-http $DRY_RUN
+cargo publish -p omnia-wasi-identity $DRY_RUN
+cargo publish -p omnia-wasi-keyvalue $DRY_RUN
+cargo publish -p omnia-wasi-messaging $DRY_RUN
+cargo publish -p omnia-wasi-sql $DRY_RUN
+cargo publish -p omnia-wasi-vault $DRY_RUN
+cargo publish -p omnia-wasi-websocket $DRY_RUN
+cargo publish -p omnia-wasi-otel $DRY_RUN
+
+echo "=== Tier 4: ORM ==="
+cargo publish -p omnia-orm $DRY_RUN
+
+echo "=== Tier 5: SDK ==="
+cargo publish -p omnia-sdk $DRY_RUN
+
+echo "=== Done ==="
+'''

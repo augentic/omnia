@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::ops::Deref;
 use std::sync::Arc;
 
-pub use qwasr::FutureResult;
+pub use omnia::FutureResult;
 
 use crate::host::generated::wasi::blobstore::container::{ContainerMetadata, ObjectMetadata};
 

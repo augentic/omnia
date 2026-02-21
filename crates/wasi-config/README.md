@@ -1,3 +1,3 @@
-# WASI HTTP Host
+# WASI Config Host
 
-This crate provides a WASI-enabled HTTP host for use in Credibil WebAssembly components.
+This crate provides a WASI-enabled Config host for use in Omnia WebAssembly components.

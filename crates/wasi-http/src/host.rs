@@ -7,7 +7,7 @@ mod server;
 
 use anyhow::Result;
 pub use default_impl::HttpDefault;
-use qwasr::{Host, Server, State};
+use omnia::{Host, Server, State};
 use wasmtime::component::Linker;
 pub use wasmtime_wasi_http::p3::{WasiHttpCtxView, WasiHttpView};
 
@@ -36,11 +36,11 @@ where
 
 /// Implementation of the `WasiHttpView` trait for the store context.
 #[macro_export]
-macro_rules! qwasr_wasi_view {
+macro_rules! omnia_wasi_view {
     ($store_ctx:ty, $field_name:ident) => {
-        impl qwasr_wasi_http::WasiHttpView for $store_ctx {
-            fn http(&mut self) -> qwasr_wasi_http::WasiHttpCtxView<'_> {
-                qwasr_wasi_http::WasiHttpCtxView {
+        impl omnia_wasi_http::WasiHttpView for $store_ctx {
+            fn http(&mut self) -> omnia_wasi_http::WasiHttpCtxView<'_> {
+                omnia_wasi_http::WasiHttpCtxView {
                     ctx: &mut self.$field_name,
                     table: &mut self.table,
                 }

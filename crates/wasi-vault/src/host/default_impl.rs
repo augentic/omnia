@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use futures::FutureExt;
-use qwasr::Backend;
+use omnia::Backend;
 use tracing::instrument;
 
 use crate::host::WasiVaultCtx;
@@ -19,7 +19,7 @@ type Store = Arc<parking_lot::RwLock<HashMap<String, HashMap<String, Vec<u8>>>>>
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions;
 
-impl qwasr::FromEnv for ConnectOptions {
+impl omnia::FromEnv for ConnectOptions {
     fn from_env() -> Result<Self> {
         Ok(Self)
     }

@@ -36,8 +36,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use bytes::Bytes;
-pub use qwasr::FutureResult;
-use qwasr::{Host, Server, State};
+pub use omnia::FutureResult;
+use omnia::{Host, Server, State};
 pub use resource::*;
 use wasmtime::component::{HasData, Linker, ResourceTable};
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
@@ -116,11 +116,11 @@ pub trait WasiBlobstoreCtx: Debug + Send + Sync + 'static {
 
 /// Implementation of the `WasiBlobstoreView` trait for the store context.
 #[macro_export]
-macro_rules! qwasr_wasi_view {
+macro_rules! omnia_wasi_view {
     ($store_ctx:ty, $field_name:ident) => {
-        impl qwasr_wasi_blobstore::WasiBlobstoreView for $store_ctx {
-            fn blobstore(&mut self) -> qwasr_wasi_blobstore::WasiBlobstoreCtxView<'_> {
-                qwasr_wasi_blobstore::WasiBlobstoreCtxView {
+        impl omnia_wasi_blobstore::WasiBlobstoreView for $store_ctx {
+            fn blobstore(&mut self) -> omnia_wasi_blobstore::WasiBlobstoreCtxView<'_> {
+                omnia_wasi_blobstore::WasiBlobstoreCtxView {
                     ctx: &mut self.$field_name,
                     table: &mut self.table,
                 }
@@ -139,7 +139,7 @@ macro_rules! qwasr_wasi_view {
 // }
 
 // #[macro_export]
-// macro_rules! qwasr_wasi_view {
+// macro_rules! omnia_wasi_view {
 //     ($store_ctx:ty, $field_name:ident) => {
 //         impl View<WasiBlobstore, $store_ctx> for $store_ctx {
 //             fn data(&mut self) -> <WasiBlobstore as HasData>::Data<'_> {

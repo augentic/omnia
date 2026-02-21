@@ -28,6 +28,6 @@ mod generated {
 }
 
 /// Re-exported `instrument` macro for use in guest code.
-pub use qwasr_wasi_otel_attr::instrument;
+pub use omnia_wasi_otel_attr::instrument;
 
 pub use crate::guest::init::*;

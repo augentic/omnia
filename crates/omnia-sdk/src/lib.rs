@@ -1,18 +1,24 @@
-//! # Realtime Core
+#![doc = include_str!("../README.md")]
+
+//! # Omnia SDK
 //!
-//! Core modules for the Realtime platform.
+//! Core modules for the Omnia platform.
+
+#![forbid(unsafe_code)]
 
 pub mod api;
 mod capabilities;
 mod error;
 
 #[cfg(target_arch = "wasm32")]
-pub use qwasr_guest_macro::*;
+pub use omnia_guest_macro::*;
+#[doc(hidden)]
 pub use {anyhow, axum, bytes, http, http_body, tracing};
 #[cfg(target_arch = "wasm32")]
+#[doc(hidden)]
 pub use {
-    qwasr_wasi_http, qwasr_wasi_identity, qwasr_wasi_keyvalue, qwasr_wasi_messaging,
-    qwasr_wasi_otel, wasip3, wit_bindgen,
+    omnia_wasi_http, omnia_wasi_identity, omnia_wasi_keyvalue, omnia_wasi_messaging,
+    omnia_wasi_otel, wasip3, wit_bindgen,
 };
 
 pub use crate::api::*;
@@ -24,7 +30,7 @@ pub use crate::error::*;
 ///
 /// # Example
 /// ```rust,ignore
-/// qwasr_sdk::ensure_env!("API_KEY", "SOME_URL");
+/// omnia_sdk::ensure_env!("API_KEY", "SOME_URL");
 /// ```
 #[macro_export]
 macro_rules! ensure_env {

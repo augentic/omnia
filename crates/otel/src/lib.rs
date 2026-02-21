@@ -1,7 +1,11 @@
+#![doc = include_str!("../README.md")]
+
 //! # Telemetry
 //!
 //! Telemetry is a module that provides functionality for collecting and
 //! reporting OpenTelemetry-based metrics.
+
+#![forbid(unsafe_code)]
 
 #![cfg(not(target_arch = "wasm32"))]
 

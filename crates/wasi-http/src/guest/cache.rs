@@ -71,7 +71,7 @@ impl Cache {
 
         tracing::debug!("retrieving cached response with etag `{}`", &ctrl.etag);
 
-        let cache = qwasr_wasi_keyvalue::cache::open(&self.bucket).await?;
+        let cache = omnia_wasi_keyvalue::cache::open(&self.bucket).await?;
         cache
             .get(&ctrl.etag)
             .await
@@ -93,7 +93,7 @@ impl Cache {
 
         tracing::debug!("caching response with etag `{}`", &ctrl.etag);
 
-        let cache = qwasr_wasi_keyvalue::cache::open(&self.bucket).await?;
+        let cache = omnia_wasi_keyvalue::cache::open(&self.bucket).await?;
         cache
             .set(&ctrl.etag, &serialize(response)?, Some(ctrl.max_age))
             .await

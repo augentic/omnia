@@ -1,6 +1,6 @@
-# buildgen
+# omnia-runtime-macro
 
-Procedural macros for generating WebAssembly Component Initiator infrastructure.
+Procedural macros for generating WebAssembly Component Runtime infrastructure.
 
 ## Overview
 
@@ -8,21 +8,21 @@ This crate provides the `runtime!` macro that generates the necessary runtime in
 
 ## Usage
 
-Add `buildgen` to your dependencies:
+Add `omnia` to your dependencies (the `runtime!` macro is re-exported from the `omnia` crate):
 
 ```toml
 [dependencies]
-buildgen = { workspace = true }
+omnia = { workspace = true }
 ```
 
 Then use the `runtime!` macro to generate your runtime infrastructure:
 
 ```rust
-use buildgen::runtime;
+use omnia::runtime;
 
 // Import the backend types you want to use
-use qwasr_wasi_http::WasiHttpCtx;
-use qwasr_wasi_otel::DefaultOtel;
+use omnia_wasi_http::WasiHttpCtx;
+use omnia_wasi_otel::DefaultOtel;
 use be_mongodb::Client as MongoDb;
 use be_nats::Client as Nats;
 use be_azure::Client as Azure;
@@ -138,20 +138,20 @@ You can create different runtime configurations for different use cases:
 ```rust
 // Minimal HTTP server
 mod http_runtime {
-    use qwasr_wasi_http::WasiHttpCtx;
+    use omnia_wasi_http::WasiHttpCtx;
 
-    qwasr::runtime!({
+    omnia::runtime!({
         "http": WasiHttpCtx
     });
 }
 
 // Full-featured runtime
 mod full_runtime {
-    use qwasr_wasi_http::WasiHttpCtx;
-    use qwasr_wasi_otel::DefaultOtel;
+    use omnia_wasi_http::WasiHttpCtx;
+    use omnia_wasi_otel::DefaultOtel;
     use be_nats::Client as Nats;
 
-    qwasr::runtime!({
+    omnia::runtime!({
         "http": WasiHttpCtx,
         "otel": DefaultOtel,
         "keyvalue": Nats,
@@ -164,8 +164,8 @@ mod full_runtime {
 Now you can declaratively specify your configuration:
 
 ```rust
-mod credibil_runtime {
-    qwasr::runtime!({
+mod omnia_runtime {
+    omnia::runtime!({
         "http": WasiHttpCtx,
         "otel": DefaultOtel,
         "blobstore": MongoDb,

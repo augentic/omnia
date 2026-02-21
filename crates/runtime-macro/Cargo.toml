@@ -1,6 +1,6 @@
 [package]
-name = "qwasr-runtime-macro"
-description = "Procedural macros for runtime build code generation"
+name = "omnia-runtime-macro"
+description = "Procedural macros for Omnia runtime build code generation"
 authors.workspace = true
 categories.workspace = true
 edition.workspace = true

@@ -8,8 +8,8 @@
 mod common;
 
 use common::{CommentWithAlias, Item, PostWithJoin, User, assert_sql_contains};
-use qwasr_orm::{DeleteBuilder, Entity, Filter, InsertBuilder, Join, SelectBuilder, UpdateBuilder};
-use qwasr_wasi_sql::types::DataType;
+use omnia_orm::{DeleteBuilder, Entity, Filter, InsertBuilder, Join, SelectBuilder, UpdateBuilder};
+use omnia_wasi_sql::types::DataType;
 
 // SELECT tests
 

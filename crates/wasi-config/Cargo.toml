@@ -1,6 +1,6 @@
 [package]
-name = "qwasr-wasi-config"
-description = "WASI Config WIT implementation"
+name = "omnia-wasi-config"
+description = "WASI config interface implementation for the Omnia runtime"
 readme = "README.md"
 authors.workspace = true
 categories.workspace = true
@@ -24,7 +24,7 @@ wasmtime-wasi-config.workspace = true
 
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-qwasr.workspace = true
+omnia.workspace = true
 wasmtime = { workspace = true, features = ["component-model-async"] }
 
 # guest dependencies

@@ -1,6 +1,6 @@
 [package]
-name = "qwasr-sdk"
-description = "qwasr guest SDK"
+name = "omnia-sdk"
+description = "SDK for building WASI component guests with Omnia runtime support"
 readme = "README.md"
 version.workspace = true
 edition.workspace = true
@@ -19,20 +19,20 @@ axum = { workspace = true, features = ["json", "macros", "query"] }
 bytes.workspace = true
 http.workspace = true
 http-body.workspace = true
-qwasr-wasi-sql.workspace = true
+omnia-wasi-sql.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror = "2.0.18"
 tracing.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-qwasr-guest-macro.workspace = true
-qwasr-wasi-config.workspace = true
-qwasr-wasi-http.workspace = true
-qwasr-wasi-identity.workspace = true
-qwasr-wasi-keyvalue.workspace = true
-qwasr-wasi-messaging.workspace = true
-qwasr-wasi-otel.workspace = true
+omnia-guest-macro.workspace = true
+omnia-wasi-config.workspace = true
+omnia-wasi-http.workspace = true
+omnia-wasi-identity.workspace = true
+omnia-wasi-keyvalue.workspace = true
+omnia-wasi-messaging.workspace = true
+omnia-wasi-otel.workspace = true
 wasip3.workspace = true
 wit-bindgen.workspace = true
 

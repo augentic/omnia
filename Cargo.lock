@@ -890,21 +890,21 @@ dependencies = [
  "chrono",
  "http",
  "http-body-util",
+ "omnia",
+ "omnia-orm",
+ "omnia-sdk",
+ "omnia-wasi-blobstore",
+ "omnia-wasi-config",
+ "omnia-wasi-http",
+ "omnia-wasi-identity",
+ "omnia-wasi-keyvalue",
+ "omnia-wasi-messaging",
+ "omnia-wasi-otel",
+ "omnia-wasi-otel-attr",
+ "omnia-wasi-sql",
+ "omnia-wasi-vault",
+ "omnia-wasi-websocket",
  "opentelemetry",
- "qwasr",
- "qwasr-orm",
- "qwasr-sdk",
- "qwasr-wasi-blobstore",
- "qwasr-wasi-config",
- "qwasr-wasi-http",
- "qwasr-wasi-identity",
- "qwasr-wasi-keyvalue",
- "qwasr-wasi-messaging",
- "qwasr-wasi-otel",
- "qwasr-wasi-otel-attr",
- "qwasr-wasi-sql",
- "qwasr-wasi-vault",
- "qwasr-wasi-websocket",
  "serde",
  "serde_json",
  "tower-http",
@@ -1854,6 +1854,295 @@ dependencies = [
 ]
 
 [[package]]
+name = "omnia"
+version = "0.27.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "futures",
+ "omnia-otel",
+ "omnia-runtime-macro",
+ "serde",
+ "tokio",
+ "tracing",
+ "wasmtime",
+ "wasmtime-wasi",
+]
+
+[[package]]
+name = "omnia-guest-macro"
+version = "0.27.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "omnia-orm"
+version = "0.27.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "omnia-wasi-sql",
+ "sea-query",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "omnia-otel"
+version = "0.27.0"
+dependencies = [
+ "anyhow",
+ "http",
+ "opentelemetry",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
+ "rand 0.10.0",
+ "tower",
+ "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "omnia-runtime-macro"
+version = "0.27.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "omnia-sdk"
+version = "0.27.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "bytes",
+ "http",
+ "http-body",
+ "omnia-guest-macro",
+ "omnia-wasi-config",
+ "omnia-wasi-http",
+ "omnia-wasi-identity",
+ "omnia-wasi-keyvalue",
+ "omnia-wasi-messaging",
+ "omnia-wasi-otel",
+ "omnia-wasi-sql",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+ "tracing-subscriber",
+ "wasip3",
+ "wit-bindgen 0.53.1",
+]
+
+[[package]]
+name = "omnia-wasi-blobstore"
+version = "0.27.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "futures",
+ "omnia",
+ "parking_lot",
+ "tokio",
+ "tracing",
+ "wasmtime",
+ "wasmtime-wasi",
+ "wit-bindgen 0.53.1",
+]
+
+[[package]]
+name = "omnia-wasi-config"
+version = "0.27.0"
+dependencies = [
+ "anyhow",
+ "omnia",
+ "tracing",
+ "wasmtime",
+ "wasmtime-wasi-config",
+ "wit-bindgen 0.53.1",
+]
+
+[[package]]
+name = "omnia-wasi-http"
+version = "0.27.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base64ct",
+ "bytes",
+ "fromenv",
+ "futures",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "omnia",
+ "omnia-wasi-keyvalue",
+ "percent-encoding",
+ "reqwest 0.13.2",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tracing",
+ "wasip3",
+ "wasmtime",
+ "wasmtime-wasi",
+ "wasmtime-wasi-http",
+ "wiremock",
+]
+
+[[package]]
+name = "omnia-wasi-identity"
+version = "0.27.0"
+dependencies = [
+ "anyhow",
+ "fromenv",
+ "futures",
+ "oauth2",
+ "omnia",
+ "serde",
+ "tokio",
+ "tracing",
+ "wasmtime",
+ "wasmtime-wasi",
+ "wit-bindgen 0.53.1",
+]
+
+[[package]]
+name = "omnia-wasi-keyvalue"
+version = "0.27.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "futures",
+ "moka",
+ "omnia",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "wasmtime",
+ "wasmtime-wasi",
+ "wit-bindgen 0.53.1",
+]
+
+[[package]]
+name = "omnia-wasi-messaging"
+version = "0.27.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "http",
+ "omnia",
+ "serde",
+ "time",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "wasmtime",
+ "wasmtime-wasi",
+ "wit-bindgen 0.53.1",
+]
+
+[[package]]
+name = "omnia-wasi-otel"
+version = "0.27.0"
+dependencies = [
+ "anyhow",
+ "cfg-if",
+ "futures",
+ "hex",
+ "num-traits",
+ "omnia",
+ "omnia-otel",
+ "omnia-wasi-otel-attr",
+ "opentelemetry",
+ "opentelemetry-proto",
+ "opentelemetry_sdk",
+ "prost",
+ "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
+ "wasmtime",
+ "wit-bindgen 0.53.1",
+]
+
+[[package]]
+name = "omnia-wasi-otel-attr"
+version = "0.27.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "omnia-wasi-sql"
+version = "0.27.0"
+dependencies = [
+ "anyhow",
+ "base64ct",
+ "chrono",
+ "fromenv",
+ "futures",
+ "omnia",
+ "parking_lot",
+ "rusqlite",
+ "sea-query",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "wasmtime",
+ "wasmtime-wasi",
+ "wit-bindgen 0.53.1",
+]
+
+[[package]]
+name = "omnia-wasi-vault"
+version = "0.27.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "omnia",
+ "parking_lot",
+ "tokio",
+ "tracing",
+ "wasmtime",
+ "wasmtime-wasi",
+ "wit-bindgen 0.53.1",
+]
+
+[[package]]
+name = "omnia-wasi-websocket"
+version = "0.27.0"
+dependencies = [
+ "anyhow",
+ "dashmap",
+ "fromenv",
+ "futures",
+ "futures-channel",
+ "futures-util",
+ "omnia",
+ "tokio",
+ "tokio-stream",
+ "tokio-tungstenite",
+ "tracing",
+ "tungstenite",
+ "wasmtime",
+ "wasmtime-wasi",
+ "wit-bindgen 0.53.1",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2221,295 +2510,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "21b2ebcf727b7760c461f091f9f0f539b77b8e87f2fd88131e7f1b433b3cece4"
 dependencies = [
  "proc-macro2",
-]
-
-[[package]]
-name = "qwasr"
-version = "0.27.0"
-dependencies = [
- "anyhow",
- "clap",
- "futures",
- "qwasr-otel",
- "qwasr-runtime-macro",
- "serde",
- "tokio",
- "tracing",
- "wasmtime",
- "wasmtime-wasi",
-]
-
-[[package]]
-name = "qwasr-guest-macro"
-version = "0.27.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "qwasr-orm"
-version = "0.27.0"
-dependencies = [
- "anyhow",
- "chrono",
- "qwasr-wasi-sql",
- "sea-query",
- "serde_json",
- "tracing",
-]
-
-[[package]]
-name = "qwasr-otel"
-version = "0.27.0"
-dependencies = [
- "anyhow",
- "http",
- "opentelemetry",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
- "rand 0.10.0",
- "tower",
- "tracing",
- "tracing-opentelemetry",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "qwasr-runtime-macro"
-version = "0.27.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "qwasr-sdk"
-version = "0.27.0"
-dependencies = [
- "anyhow",
- "axum",
- "bytes",
- "http",
- "http-body",
- "qwasr-guest-macro",
- "qwasr-wasi-config",
- "qwasr-wasi-http",
- "qwasr-wasi-identity",
- "qwasr-wasi-keyvalue",
- "qwasr-wasi-messaging",
- "qwasr-wasi-otel",
- "qwasr-wasi-sql",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tracing",
- "tracing-subscriber",
- "wasip3",
- "wit-bindgen 0.53.1",
-]
-
-[[package]]
-name = "qwasr-wasi-blobstore"
-version = "0.27.0"
-dependencies = [
- "anyhow",
- "bytes",
- "futures",
- "parking_lot",
- "qwasr",
- "tokio",
- "tracing",
- "wasmtime",
- "wasmtime-wasi",
- "wit-bindgen 0.53.1",
-]
-
-[[package]]
-name = "qwasr-wasi-config"
-version = "0.27.0"
-dependencies = [
- "anyhow",
- "qwasr",
- "tracing",
- "wasmtime",
- "wasmtime-wasi-config",
- "wit-bindgen 0.53.1",
-]
-
-[[package]]
-name = "qwasr-wasi-http"
-version = "0.27.0"
-dependencies = [
- "anyhow",
- "axum",
- "base64ct",
- "bytes",
- "fromenv",
- "futures",
- "http",
- "http-body",
- "http-body-util",
- "hyper",
- "percent-encoding",
- "qwasr",
- "qwasr-wasi-keyvalue",
- "reqwest 0.13.2",
- "rkyv",
- "serde",
- "serde_json",
- "tokio",
- "tower",
- "tracing",
- "wasip3",
- "wasmtime",
- "wasmtime-wasi",
- "wasmtime-wasi-http",
- "wiremock",
-]
-
-[[package]]
-name = "qwasr-wasi-identity"
-version = "0.27.0"
-dependencies = [
- "anyhow",
- "fromenv",
- "futures",
- "oauth2",
- "qwasr",
- "serde",
- "tokio",
- "tracing",
- "wasmtime",
- "wasmtime-wasi",
- "wit-bindgen 0.53.1",
-]
-
-[[package]]
-name = "qwasr-wasi-keyvalue"
-version = "0.27.0"
-dependencies = [
- "anyhow",
- "chrono",
- "futures",
- "moka",
- "qwasr",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "wasmtime",
- "wasmtime-wasi",
- "wit-bindgen 0.53.1",
-]
-
-[[package]]
-name = "qwasr-wasi-messaging"
-version = "0.27.0"
-dependencies = [
- "anyhow",
- "futures",
- "http",
- "qwasr",
- "serde",
- "time",
- "tokio",
- "tokio-stream",
- "tracing",
- "wasmtime",
- "wasmtime-wasi",
- "wit-bindgen 0.53.1",
-]
-
-[[package]]
-name = "qwasr-wasi-otel"
-version = "0.27.0"
-dependencies = [
- "anyhow",
- "cfg-if",
- "futures",
- "hex",
- "num-traits",
- "opentelemetry",
- "opentelemetry-proto",
- "opentelemetry_sdk",
- "prost",
- "qwasr",
- "qwasr-otel",
- "qwasr-wasi-otel-attr",
- "tracing",
- "tracing-opentelemetry",
- "tracing-subscriber",
- "wasmtime",
- "wit-bindgen 0.53.1",
-]
-
-[[package]]
-name = "qwasr-wasi-otel-attr"
-version = "0.27.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "qwasr-wasi-sql"
-version = "0.27.0"
-dependencies = [
- "anyhow",
- "base64ct",
- "chrono",
- "fromenv",
- "futures",
- "parking_lot",
- "qwasr",
- "rusqlite",
- "sea-query",
- "serde_json",
- "tokio",
- "tracing",
- "wasmtime",
- "wasmtime-wasi",
- "wit-bindgen 0.53.1",
-]
-
-[[package]]
-name = "qwasr-wasi-vault"
-version = "0.27.0"
-dependencies = [
- "anyhow",
- "futures",
- "parking_lot",
- "qwasr",
- "tokio",
- "tracing",
- "wasmtime",
- "wasmtime-wasi",
- "wit-bindgen 0.53.1",
-]
-
-[[package]]
-name = "qwasr-wasi-websocket"
-version = "0.27.0"
-dependencies = [
- "anyhow",
- "dashmap",
- "fromenv",
- "futures",
- "futures-channel",
- "futures-util",
- "qwasr",
- "tokio",
- "tokio-stream",
- "tokio-tungstenite",
- "tracing",
- "tungstenite",
- "wasmtime",
- "wasmtime-wasi",
- "wit-bindgen 0.53.1",
 ]
 
 [[package]]

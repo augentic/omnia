@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::Result;
 use futures::FutureExt;
 use parking_lot::RwLock;
-use qwasr::Backend;
+use omnia::Backend;
 use tracing::instrument;
 
 use crate::host::WasiBlobstoreCtx;
@@ -20,7 +20,7 @@ use crate::host::resource::{Container, FutureResult};
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions;
 
-impl qwasr::FromEnv for ConnectOptions {
+impl omnia::FromEnv for ConnectOptions {
     fn from_env() -> Result<Self> {
         Ok(Self)
     }

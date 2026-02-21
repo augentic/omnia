@@ -47,18 +47,18 @@ pub fn expand(messaging: &Messaging, config: &Config) -> TokenStream {
 
     quote! {
         mod messaging {
-            use qwasr_sdk::qwasr_wasi_messaging::types::{Error, Message};
-            use qwasr_sdk::{wasi_messaging, qwasr_wasi_otel};
-            use qwasr_sdk::Handler;
+            use omnia_sdk::omnia_wasi_messaging::types::{Error, Message};
+            use omnia_sdk::{wasi_messaging, omnia_wasi_otel};
+            use omnia_sdk::Handler;
 
             use super::*;
 
             pub struct Messaging;
-            qwasr_wasi_messaging::export!(Messaging with_types_in qwasr_wasi_messaging);
+            omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
 
             // Message handler
-            impl qwasr_wasi_messaging::incoming_handler::Guest for Messaging {
-                #[qwasr_wasi_otel::instrument]
+            impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
+                #[omnia_wasi_otel::instrument]
                 async fn handle(message: Message) -> Result<(), Error> {
                     let topic = message
                         .topic()
@@ -95,7 +95,7 @@ fn expand_handler(topic: &Topic, config: &Config) -> TokenStream {
     let provider = &config.provider;
 
     quote! {
-        #[qwasr_wasi_otel::instrument]
+        #[omnia_wasi_otel::instrument]
         async fn #handler_fn(payload: Vec<u8>) -> Result<()> {
              #message::handler(payload)?
                  .provider(&#provider::new())

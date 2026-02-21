@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use chrono::{DateTime, Utc};
-use qwasr_orm::{Filter, Join, entity};
+use omnia_orm::{Filter, Join, entity};
 
 // Common test entities used across multiple test files
 

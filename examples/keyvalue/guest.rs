@@ -18,8 +18,8 @@ use anyhow::Context;
 use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
-use qwasr_sdk::HttpResult;
-use qwasr_wasi_keyvalue::store;
+use omnia_sdk::HttpResult;
+use omnia_wasi_keyvalue::store;
 use serde_json::{Value, json};
 use tracing::Level;
 use wasip3::exports::http::handler::Guest;
@@ -30,17 +30,17 @@ wasip3::http::service::export!(Http);
 
 impl Guest for Http {
     /// Routes incoming HTTP requests to the key-value handler.
-    #[qwasr_wasi_otel::instrument(name = "http_guest_handle", level = Level::INFO)]
+    #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::INFO)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new().route("/", post(handler));
-        qwasr_wasi_http::serve(router, request).await
+        omnia_wasi_http::serve(router, request).await
     }
 }
 
 /// Stores and retrieves data from the key-value store.
-#[qwasr_wasi_otel::instrument]
+#[omnia_wasi_otel::instrument]
 async fn handler(body: Bytes) -> HttpResult<Json<Value>> {
-    let bucket = store::open("credibil_bucket".to_string()).await.context("opening bucket")?;
+    let bucket = store::open("omnia_bucket".to_string()).await.context("opening bucket")?;
 
     bucket.set("my_key".to_string(), body.to_vec()).await.context("storing data")?;
 

@@ -12,7 +12,7 @@ implementation for development use only as it logs telemetry data but doesn't ex
 cargo build --example otel-wasm --target wasm32-wasip2
 
 # run the host
-export RUST_LOG="info,wasi_otel=debug,qwasr_wasi_http=debug,otel=debug"
+export RUST_LOG="info,wasi_otel=debug,omnia_wasi_http=debug,otel=debug"
 cargo run --example otel -- run ./target/wasm32-wasip2/debug/examples/otel_wasm.wasm
 ```
 
@@ -45,9 +45,9 @@ Modify the runtime.rs file to use the OpenTelemetry Collector backend:
 
 ```rust
 ...
-use qwasr::opentelemetry::WasiOtelCtx;
+use omnia::opentelemetry::WasiOtelCtx;
 
-qwasr::runtime!({
+omnia::runtime!({
     main: true,
     hosts: {
         WasiHttp: HttpDefault,
@@ -59,6 +59,6 @@ qwasr::runtime!({
 
 ```bash
 export OTEL_GRPC_URL="http://localhost:4317"
-export RUST_LOG="info,wasi_otel=debug,qwasr_wasi_http=debug,otel=debug"
+export RUST_LOG="info,wasi_otel=debug,omnia_wasi_http=debug,otel=debug"
 cargo run --example otel -- run ./target/wasm32-wasip2/debug/examples/otel_wasm.wasm
 ```

@@ -9,7 +9,7 @@ Demonstrates `wasi-vault` using the default (in-memory) implementation for secur
 cargo build --example vault-wasm --target wasm32-wasip2
 
 # run the host
-export RUST_LOG="info,wasi_vault=debug,qwasr_wasi_http=debug,vault=debug"
+export RUST_LOG="info,wasi_vault=debug,omnia_wasi_http=debug,vault=debug"
 cargo run --example vault -- run ./target/wasm32-wasip2/debug/examples/vault_wasm.wasm
 ```
 

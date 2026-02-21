@@ -1,4 +1,8 @@
-//! Procedural macros for the qwasr guest.
+#![doc = include_str!("../README.md")]
+
+//! Procedural macros for the omnia guest.
+
+#![forbid(unsafe_code)]
 
 mod guest;
 mod http;

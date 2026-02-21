@@ -1,4 +1,4 @@
-package qwasr:wasi-blobstore;
+package omnia:wasi-blobstore;
 
 world blobstore {
 	include wasi:blobstore/imports@0.2.0-draft;

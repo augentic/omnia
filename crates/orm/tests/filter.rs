@@ -8,7 +8,7 @@
 mod common;
 
 use common::{User, assert_sql_contains};
-use qwasr_orm::{DataType, Filter, Join, SelectBuilder};
+use omnia_orm::{DataType, Filter, Join, SelectBuilder};
 
 #[test]
 fn filter_like_pattern() {

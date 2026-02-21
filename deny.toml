@@ -52,7 +52,3 @@ duplicates = "deny"
 include-path-dependencies = true
 unused = "warn"
 
-[sources]
-private = [
-  "sparse+https://pkgs.dev.azure.com/credibil/_packaging/credibil/Cargo/index/",
-]

@@ -1,6 +1,6 @@
 [package]
-name = "qwasr-wasi-identity"
-description = "WASI Identity implementation"
+name = "omnia-wasi-identity"
+description = "WASI identity and authentication interface for the Omnia runtime"
 readme = "README.md"
 authors.workspace = true
 categories.workspace = true
@@ -21,7 +21,7 @@ anyhow.workspace = true
 fromenv.workspace = true
 futures.workspace = true
 oauth2 = "5.0.0"
-qwasr.workspace = true
+omnia.workspace = true
 serde.workspace = true
 tracing.workspace = true
 wasmtime.workspace = true

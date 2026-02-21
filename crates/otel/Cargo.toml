@@ -1,6 +1,6 @@
 [package]
-name = "qwasr-otel"
-description = "Opentelemetry integration for Qwasr"
+name = "omnia-otel"
+description = "OpenTelemetry tracing and metrics integration for the Omnia runtime"
 readme = "README.md"
 authors.workspace = true
 categories.workspace = true

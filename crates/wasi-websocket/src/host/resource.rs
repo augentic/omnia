@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use futures::Stream;
-use qwasr::FutureResult;
+use omnia::FutureResult;
 
 /// Stream of event proxies.
 pub type Events = Pin<Box<dyn Stream<Item = EventProxy> + Send>>;

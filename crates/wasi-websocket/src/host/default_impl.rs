@@ -17,7 +17,7 @@ use futures::FutureExt;
 use futures_channel::mpsc;
 use futures_util::stream::TryStreamExt;
 use futures_util::{StreamExt, future, pin_mut};
-use qwasr::{Backend, FutureResult};
+use omnia::{Backend, FutureResult};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use tokio_stream::wrappers::BroadcastStream;
@@ -42,7 +42,7 @@ pub struct ConnectOptions {
     pub socket_addr: String,
 }
 
-impl qwasr::FromEnv for ConnectOptions {
+impl omnia::FromEnv for ConnectOptions {
     fn from_env() -> Result<Self> {
         Self::from_env().finalize().context("issue loading connection options")
     }

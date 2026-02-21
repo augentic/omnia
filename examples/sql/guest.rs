@@ -23,12 +23,12 @@ use axum::extract::Path;
 use axum::routing::{delete, get};
 use axum::{Json, Router};
 use chrono::Utc;
-use qwasr_orm::{
+use omnia_orm::{
     DeleteBuilder, Entity, Filter, InsertBuilder, Join, SelectBuilder, UpdateBuilder, entity,
 };
-use qwasr_sdk::{HttpResult, TableStore};
-use qwasr_wasi_sql::readwrite;
-use qwasr_wasi_sql::types::{Connection, Statement};
+use omnia_sdk::{HttpResult, TableStore};
+use omnia_wasi_sql::readwrite;
+use omnia_wasi_sql::types::{Connection, Statement};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tracing::Level;
@@ -40,7 +40,7 @@ wasip3::http::service::export!(Http);
 
 impl Guest for Http {
     /// Routes HTTP requests to database operations.
-    #[qwasr_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
+    #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         tracing::debug!("received request: {:?}", request);
         let router = Router::new()
@@ -49,13 +49,13 @@ impl Guest for Http {
             .route("/agencies/{id}/feeds", get(list_agency_feeds).post(create_feed))
             .route("/feeds", get(list_all_feeds))
             .route("/feeds/{id}", delete(delete_feed));
-        qwasr_wasi_http::serve(router, request).await
+        omnia_wasi_http::serve(router, request).await
     }
 }
 
 /// List all agencies.
 #[axum::debug_handler]
-#[qwasr_wasi_otel::instrument]
+#[omnia_wasi_otel::instrument]
 async fn list_agencies() -> HttpResult<Json<Value>> {
     tracing::info!("list all agencies");
     ensure_schema().await?;
@@ -81,7 +81,7 @@ async fn list_agencies() -> HttpResult<Json<Value>> {
 
 /// Create a new agency.
 #[axum::debug_handler]
-#[qwasr_wasi_otel::instrument]
+#[omnia_wasi_otel::instrument]
 async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> HttpResult<Json<Value>> {
     tracing::info!("create agency");
     ensure_schema().await?;
@@ -129,7 +129,7 @@ async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> HttpResult<Json<
 
 /// Get a specific agency.
 #[axum::debug_handler]
-#[qwasr_wasi_otel::instrument]
+#[omnia_wasi_otel::instrument]
 async fn get_agency(Path(id): Path<i64>) -> HttpResult<Json<Value>> {
     tracing::info!("get agency {}", id);
     ensure_schema().await?;
@@ -157,7 +157,7 @@ async fn get_agency(Path(id): Path<i64>) -> HttpResult<Json<Value>> {
 
 /// Update an agency.
 #[axum::debug_handler]
-#[qwasr_wasi_otel::instrument]
+#[omnia_wasi_otel::instrument]
 async fn update_agency(
     Path(id): Path<i64>, Json(req): Json<UpdateAgencyRequest>,
 ) -> HttpResult<Json<Value>> {
@@ -230,7 +230,7 @@ async fn update_agency(
 
 /// List all feeds for a specific agency.
 #[axum::debug_handler]
-#[qwasr_wasi_otel::instrument]
+#[omnia_wasi_otel::instrument]
 async fn list_agency_feeds(Path(agency_id): Path<i64>) -> HttpResult<Json<Value>> {
     tracing::info!("list feeds for agency {}", agency_id);
     ensure_schema().await?;
@@ -257,7 +257,7 @@ async fn list_agency_feeds(Path(agency_id): Path<i64>) -> HttpResult<Json<Value>
 
 /// Create a new feed for an agency.
 #[axum::debug_handler]
-#[qwasr_wasi_otel::instrument]
+#[omnia_wasi_otel::instrument]
 async fn create_feed(
     Path(agency_id): Path<i64>, Json(req): Json<CreateFeedRequest>,
 ) -> HttpResult<Json<Value>> {
@@ -327,7 +327,7 @@ async fn create_feed(
 
 /// List all feeds with their agency information (demonstrates JOIN).
 #[axum::debug_handler]
-#[qwasr_wasi_otel::instrument]
+#[omnia_wasi_otel::instrument]
 async fn list_all_feeds() -> HttpResult<Json<Value>> {
     tracing::info!("list all feeds with agency info");
     ensure_schema().await?;
@@ -354,7 +354,7 @@ async fn list_all_feeds() -> HttpResult<Json<Value>> {
 
 /// Delete a specific feed.
 #[axum::debug_handler]
-#[qwasr_wasi_otel::instrument]
+#[omnia_wasi_otel::instrument]
 async fn delete_feed(Path(id): Path<i64>) -> HttpResult<Json<Value>> {
     tracing::info!("delete feed {}", id);
     ensure_schema().await?;

@@ -34,11 +34,11 @@ The host provides a wasmtime component implementation using SQLite:
 
 ```bash
 # Run unit tests (entity module) and integration tests (orm, filter, entity) all together
-cargo test -p qwasr-wasi-sql --lib --target wasm32-wasip2 --no-run && \
-  cargo test -p qwasr-wasi-sql --test orm --target wasm32-wasip2 --no-run && \
-  cargo test -p qwasr-wasi-sql --test entity --target wasm32-wasip2 --no-run && \
-  cargo test -p qwasr-wasi-sql --test filter --target wasm32-wasip2 --no-run && \
-  WASMTIME_BACKTRACE_DETAILS=1 wasmtime target/wasm32-wasip2/debug/deps/qwasr_wasi_sql-*.wasm && \
+cargo test -p omnia-wasi-sql --lib --target wasm32-wasip2 --no-run && \
+  cargo test -p omnia-wasi-sql --test orm --target wasm32-wasip2 --no-run && \
+  cargo test -p omnia-wasi-sql --test entity --target wasm32-wasip2 --no-run && \
+  cargo test -p omnia-wasi-sql --test filter --target wasm32-wasip2 --no-run && \
+  WASMTIME_BACKTRACE_DETAILS=1 wasmtime target/wasm32-wasip2/debug/deps/omnia_wasi_sql-*.wasm && \
   WASMTIME_BACKTRACE_DETAILS=1 wasmtime target/wasm32-wasip2/debug/deps/orm-*.wasm && \
   WASMTIME_BACKTRACE_DETAILS=1 wasmtime target/wasm32-wasip2/debug/deps/entity-*.wasm && \
   WASMTIME_BACKTRACE_DETAILS=1 wasmtime target/wasm32-wasip2/debug/deps/filter-*.wasm
@@ -49,21 +49,21 @@ cargo test -p qwasr-wasi-sql --lib --target wasm32-wasip2 --no-run && \
 
 ```bash
 # Run unit tests (entity module) and integration tests (orm, filter, entity) individually
-cargo test -p qwasr-wasi-sql --lib --target wasm32-wasip2 --no-run &&
-  WASMTIME_BACKTRACE_DETAILS=1 wasmtime target/wasm32-wasip2/debug/deps/qwasr_wasi_sql-*.wasm
+cargo test -p omnia-wasi-sql --lib --target wasm32-wasip2 --no-run &&
+  WASMTIME_BACKTRACE_DETAILS=1 wasmtime target/wasm32-wasip2/debug/deps/omnia_wasi_sql-*.wasm
 ```
 
 ```bash
-cargo test -p qwasr-wasi-sql --test orm --target wasm32-wasip2 --no-run &&
+cargo test -p omnia-wasi-sql --test orm --target wasm32-wasip2 --no-run &&
   WASMTIME_BACKTRACE_DETAILS=1 wasmtime target/wasm32-wasip2/debug/deps/orm-*.wasm
 ```
 
 ```bash
-cargo test -p qwasr-wasi-sql --test entity --target wasm32-wasip2 --no-run &&
+cargo test -p omnia-wasi-sql --test entity --target wasm32-wasip2 --no-run &&
   WASMTIME_BACKTRACE_DETAILS=1 wasmtime target/wasm32-wasip2/debug/deps/entity-*.wasm
 ```
 
 ```bash
-cargo test -p qwasr-wasi-sql --test filter --target wasm32-wasip2 --no-run &&
+cargo test -p omnia-wasi-sql --test filter --target wasm32-wasip2 --no-run &&
   WASMTIME_BACKTRACE_DETAILS=1 wasmtime target/wasm32-wasip2/debug/deps/filter-*.wasm
 ```

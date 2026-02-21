@@ -1,7 +1,11 @@
+#![doc = include_str!("../README.md")]
+
 //! # WASI Http Service
 //!
 //! This module implements a runtime service for `wasi:http`
 //! (<https://github.com/WebAssembly/wasi-http>).
+
+#![forbid(unsafe_code)]
 
 #[cfg(target_arch = "wasm32")]
 mod guest;

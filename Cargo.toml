@@ -1,21 +1,21 @@
 [workspace]
 members = ["crates/*", "examples"]
-resolver = "3"
+resolver = "2"
 
 [workspace.package]
 authors = ["Augentic"]
-categories = ["runtime", "wasi", "wasm"]
-edition = "2024"
+categories = ["wasm", "web-programming", "asynchronous"]
+edition = "2021"
 homepage = "https://augentic.io"
-keywords = ["runtime", "wasi", "wasm"]
+keywords = ["runtime", "wasi", "wasm", "wasmtime", "component-model"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/augentic/qwasr"
-rust-version = "1.93"
+repository = "https://github.com/augentic/omnia"
+rust-version = "1.86"
 version = "0.27.0"
 
 [workspace.lints.rust]
 # https://dirname.github.io/rust-std-doc/rustc/lints/listing/allowed-by-default.html
-missing_docs = "warn"
+missing_docs = "deny"
 trivial_numeric_casts = "warn"
 unsafe_op_in_unsafe_fn = "warn"
 unused_extern_crates = "warn"
@@ -99,24 +99,24 @@ wasmtime-wasi-http = { version = "42.0.0", features = ["p3"] }
 wasmtime-wasi-io = "42.0.0"
 wit-bindgen = { version = "0.53.1", features = ["async-spawn"] }
 
-# interally referenced crates
-qwasr = { path = "crates/qwasr", version = "0.27.0", registry = "credibil" }
-qwasr-guest-macro = { path = "crates/guest-macro", version = "0.27.0", registry = "credibil" }
-qwasr-orm = { path = "crates/orm", version = "0.27.0", registry = "credibil" }
-qwasr-otel = { path = "crates/otel", version = "0.27.0", registry = "credibil" }
-qwasr-runtime-macro = { path = "crates/runtime-macro", version = "0.27.0", registry = "credibil" }
-qwasr-sdk = { path = "crates/qwasr-sdk", version = "0.27.0", registry = "credibil" }
-qwasr-wasi-blobstore = { path = "crates/wasi-blobstore", version = "0.27.0", registry = "credibil" }
-qwasr-wasi-config = { path = "crates/wasi-config", version = "0.27.0", registry = "credibil" }
-qwasr-wasi-http = { path = "crates/wasi-http", version = "0.27.0", registry = "credibil" }
-qwasr-wasi-identity = { path = "crates/wasi-identity", version = "0.27.0", registry = "credibil" }
-qwasr-wasi-keyvalue = { path = "crates/wasi-keyvalue", version = "0.27.0", registry = "credibil" }
-qwasr-wasi-messaging = { path = "crates/wasi-messaging", version = "0.27.0", registry = "credibil" }
-qwasr-wasi-otel = { path = "crates/wasi-otel", version = "0.27.0", registry = "credibil" }
-qwasr-wasi-otel-attr = { path = "crates/wasi-otel-attr", version = "0.27.0", registry = "credibil" }
-qwasr-wasi-sql = { path = "crates/wasi-sql", version = "0.27.0", registry = "credibil" }
-qwasr-wasi-vault = { path = "crates/wasi-vault", version = "0.27.0", registry = "credibil" }
-qwasr-wasi-websocket = { path = "crates/wasi-websocket", version = "0.27.0", registry = "credibil" }
+# internally referenced crates
+omnia = { path = "crates/omnia", version = "0.27.0" }
+omnia-guest-macro = { path = "crates/guest-macro", version = "0.27.0" }
+omnia-orm = { path = "crates/orm", version = "0.27.0" }
+omnia-otel = { path = "crates/otel", version = "0.27.0" }
+omnia-runtime-macro = { path = "crates/runtime-macro", version = "0.27.0" }
+omnia-sdk = { path = "crates/omnia-sdk", version = "0.27.0" }
+omnia-wasi-blobstore = { path = "crates/wasi-blobstore", version = "0.27.0" }
+omnia-wasi-config = { path = "crates/wasi-config", version = "0.27.0" }
+omnia-wasi-http = { path = "crates/wasi-http", version = "0.27.0" }
+omnia-wasi-identity = { path = "crates/wasi-identity", version = "0.27.0" }
+omnia-wasi-keyvalue = { path = "crates/wasi-keyvalue", version = "0.27.0" }
+omnia-wasi-messaging = { path = "crates/wasi-messaging", version = "0.27.0" }
+omnia-wasi-otel = { path = "crates/wasi-otel", version = "0.27.0" }
+omnia-wasi-otel-attr = { path = "crates/wasi-otel-attr", version = "0.27.0" }
+omnia-wasi-sql = { path = "crates/wasi-sql", version = "0.27.0" }
+omnia-wasi-vault = { path = "crates/wasi-vault", version = "0.27.0" }
+omnia-wasi-websocket = { path = "crates/wasi-websocket", version = "0.27.0" }
 
 [profile.release]
 lto = true

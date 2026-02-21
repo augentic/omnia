@@ -14,8 +14,8 @@ use bytes::Bytes;
 use http::Method;
 use http::header::{CACHE_CONTROL, IF_NONE_MATCH};
 use http_body_util::Empty;
-use qwasr_sdk::HttpResult;
-use qwasr_wasi_http::CacheOptions;
+use omnia_sdk::HttpResult;
+use omnia_wasi_http::CacheOptions;
 use serde_json::Value;
 use tracing::Level;
 use wasip3::exports::http::handler::Guest;
@@ -26,19 +26,19 @@ wasip3::http::service::export!(HttpGuest);
 
 impl Guest for HttpGuest {
     /// Routes incoming requests to appropriate handlers.
-    #[qwasr_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
+    #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new()
             .route("/cache", get(cache))
             .route("/origin-sm", get(origin_sm))
             .route("/origin-xl", post(origin_xl))
             .route("/client-cert", post(client_cert));
-        qwasr_wasi_http::serve(router, request).await
+        omnia_wasi_http::serve(router, request).await
     }
 }
 
 /// Fetches data with HTTP caching enabled.
-#[qwasr_wasi_otel::instrument]
+#[omnia_wasi_otel::instrument]
 async fn cache() -> Result<impl IntoResponse, Infallible> {
     let request = http::Request::builder()
         .method(Method::GET)
@@ -51,14 +51,14 @@ async fn cache() -> Result<impl IntoResponse, Infallible> {
         .body(Empty::<Bytes>::new())
         .expect("failed to build request");
 
-    let response = qwasr_wasi_http::handle(request).await.unwrap();
+    let response = omnia_wasi_http::handle(request).await.unwrap();
     let (parts, body) = response.into_parts();
     let http_response = http::Response::from_parts(parts, Body::from(body));
 
     Ok(http_response)
 }
 
-#[qwasr_wasi_otel::instrument]
+#[omnia_wasi_otel::instrument]
 async fn origin_sm() -> Result<impl IntoResponse, Infallible> {
     tracing::info!("fetching from origin-sm");
 
@@ -68,7 +68,7 @@ async fn origin_sm() -> Result<impl IntoResponse, Infallible> {
         .body(Empty::<Bytes>::new())
         .expect("failed to build request");
 
-    let response = qwasr_wasi_http::handle(request).await.unwrap();
+    let response = omnia_wasi_http::handle(request).await.unwrap();
     let (parts, body) = response.into_parts();
     let http_response = http::Response::from_parts(parts, Body::from(body));
 
@@ -77,7 +77,7 @@ async fn origin_sm() -> Result<impl IntoResponse, Infallible> {
 }
 
 /// Fetches from origin and caches the response.
-#[qwasr_wasi_otel::instrument]
+#[omnia_wasi_otel::instrument]
 async fn origin_xl() -> HttpResult<Json<Value>> {
     tracing::info!("fetching from origin-xl");
 
@@ -88,7 +88,7 @@ async fn origin_xl() -> HttpResult<Json<Value>> {
         .body(Empty::<Bytes>::new())
         .expect("failed to build request");
 
-    let response = qwasr_wasi_http::handle(request).await?;
+    let response = omnia_wasi_http::handle(request).await?;
     let body = response.into_body();
     let body = serde_json::from_slice::<Value>(&body).context("issue parsing response body")?;
 
@@ -97,7 +97,7 @@ async fn origin_xl() -> HttpResult<Json<Value>> {
 }
 
 /// Demonstrates mTLS client certificate authentication.
-#[qwasr_wasi_otel::instrument]
+#[omnia_wasi_otel::instrument]
 async fn client_cert() -> HttpResult<Json<Value>> {
     let auth_cert = "
         -----BEGIN CERTIFICATE-----
@@ -118,7 +118,7 @@ async fn client_cert() -> HttpResult<Json<Value>> {
         .body(Empty::<Bytes>::new())
         .expect("Failed to build request");
 
-    let response = qwasr_wasi_http::handle(request).await?;
+    let response = omnia_wasi_http::handle(request).await?;
     let body = response.into_body();
     let body_str = Base64::encode_string(&body);
 

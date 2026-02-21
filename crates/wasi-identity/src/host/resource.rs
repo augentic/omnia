@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::ops::Deref;
 use std::sync::Arc;
 
-pub use qwasr::FutureResult;
+pub use omnia::FutureResult;
 
 pub use crate::host::generated::wasi::identity::credentials::AccessToken;
 

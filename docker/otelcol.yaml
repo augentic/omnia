@@ -1,5 +1,5 @@
 # Publish to GitHub Container Registry:
-# docker compose -f examples/docker/opentelemetry.yaml publish ghcr.io/qwasr/otel-compose:latest
+# docker compose -f examples/docker/opentelemetry.yaml publish ghcr.io/omnia/otel-compose:latest
 
 services:
   otelcol:

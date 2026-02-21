@@ -1,6 +1,6 @@
 # Examples
 
-This directory contains examples demonstrating WASI capabilities with WRT (WASI Runtime).
+This directory contains examples demonstrating WASI capabilities with Omnia.
 
 ## Structure
 

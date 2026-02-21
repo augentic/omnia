@@ -1,4 +1,8 @@
+#![doc = include_str!("../README.md")]
+
 //! # OpenTelemetry Attribute Macros
+
+#![forbid(unsafe_code)]
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -24,7 +28,7 @@ pub fn instrument(args: TokenStream, item: TokenStream) -> TokenStream {
     // recreate function with the instrument macro wrapping the body
     let new_fn = quote! {
         #signature {
-            let _guard = ::qwasr_wasi_otel::init();
+            let _guard = ::omnia_wasi_otel::init();
             #body
         }
     };

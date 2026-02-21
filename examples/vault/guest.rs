@@ -27,8 +27,8 @@ use anyhow::Context;
 use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
-use qwasr_sdk::HttpResult;
-use qwasr_wasi_vault::vault;
+use omnia_sdk::HttpResult;
+use omnia_wasi_vault::vault;
 use serde_json::Value;
 use tracing::Level;
 use wasip3::exports::http::handler::Guest;
@@ -39,18 +39,18 @@ wasip3::http::service::export!(Http);
 
 impl Guest for Http {
     /// Routes incoming requests to the vault handler.
-    #[qwasr_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
+    #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new().route("/", post(handler));
-        qwasr_wasi_http::serve(router, request).await
+        omnia_wasi_http::serve(router, request).await
     }
 }
 
 /// Stores and retrieves a secret from the vault.
-#[qwasr_wasi_otel::instrument]
+#[omnia_wasi_otel::instrument]
 async fn handler(body: Bytes) -> HttpResult<Json<Value>> {
     let locker =
-        vault::open("qwasr-locker".to_string()).await.context("failed to open vault locker")?;
+        vault::open("omnia-locker".to_string()).await.context("failed to open vault locker")?;
 
     locker.set("secret-id".to_string(), body.to_vec()).await.context("issue setting secret")?;
 

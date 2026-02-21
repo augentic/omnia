@@ -7,7 +7,7 @@ mod default_impl;
 use std::fmt::Debug;
 
 pub use default_impl::ConfigDefault;
-use qwasr::{Host, Server, State};
+use omnia::{Host, Server, State};
 use wasmtime::component::{HasData, Linker};
 pub use wasmtime_wasi_config;
 use wasmtime_wasi_config::WasiConfigVariables;
@@ -51,12 +51,12 @@ pub trait WasiConfigCtx: Debug + Send + Sync + 'static {
 
 /// Implementation of the `WasiConfigView` trait for the store context.
 #[macro_export]
-macro_rules! qwasr_wasi_view {
+macro_rules! omnia_wasi_view {
     ($store_ctx:ty, $field_name:ident) => {
-        impl qwasr_wasi_config::WasiConfigView for $store_ctx {
-            fn config(&mut self) -> qwasr_wasi_config::wasmtime_wasi_config::WasiConfig<'_> {
-                let vars = qwasr_wasi_config::WasiConfigCtx::get_config(&self.$field_name);
-                qwasr_wasi_config::wasmtime_wasi_config::WasiConfig::from(vars)
+        impl omnia_wasi_config::WasiConfigView for $store_ctx {
+            fn config(&mut self) -> omnia_wasi_config::wasmtime_wasi_config::WasiConfig<'_> {
+                let vars = omnia_wasi_config::WasiConfigCtx::get_config(&self.$field_name);
+                omnia_wasi_config::wasmtime_wasi_config::WasiConfig::from(vars)
             }
         }
     };

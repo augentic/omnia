@@ -2,7 +2,7 @@ use std::env;
 
 use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
-use qwasr::State;
+use omnia::State;
 use tracing::{Instrument, debug_span, instrument};
 use wasmtime::Store;
 

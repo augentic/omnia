@@ -1,5 +1,5 @@
-use qwasr_wasi_blobstore::{BlobstoreDefault, WasiBlobstore};
-use qwasr_wasi_http::{HttpDefault, WasiHttp};
+use omnia_wasi_blobstore::{BlobstoreDefault, WasiBlobstore};
+use omnia_wasi_http::{HttpDefault, WasiHttp};
 
 warp::runtime!({
     main: true,

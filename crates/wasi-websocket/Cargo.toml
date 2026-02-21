@@ -1,6 +1,6 @@
 [package]
-name = "qwasr-wasi-websocket"
-description = "WASI WebSocket WIT implementation"
+name = "omnia-wasi-websocket"
+description = "WASI WebSocket interface for the Omnia runtime"
 readme = "README.md"
 authors.workspace = true
 categories.workspace = true
@@ -25,7 +25,7 @@ fromenv.workspace = true
 futures.workspace = true
 futures-channel.workspace = true
 futures-util.workspace = true
-qwasr.workspace = true
+omnia.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
 tokio-stream.workspace = true
 tokio-tungstenite = "0.28.0"

@@ -1,4 +1,4 @@
-package qwasr:wasi-messaging;
+package omnia:wasi-messaging;
 
 world messaging {
 	include wasi:messaging/messaging-request-reply@0.2.0-draft;

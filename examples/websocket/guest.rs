@@ -11,9 +11,9 @@
 use anyhow::anyhow;
 use axum::routing::post;
 use axum::{Json, Router};
-use qwasr_sdk::HttpResult;
-use qwasr_wasi_websocket::client;
-use qwasr_wasi_websocket::types::{Client, Error, Event};
+use omnia_sdk::HttpResult;
+use omnia_wasi_websocket::client;
+use omnia_wasi_websocket::types::{Client, Error, Event};
 use serde_json::{Value, json};
 use wasip3::exports::http;
 use wasip3::http::types::{ErrorCode, Request, Response};
@@ -25,7 +25,7 @@ impl http::handler::Guest for HttpGuest {
     /// Routes HTTP requests to WebSocket management endpoints.
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new().route("/", post(send_message));
-        qwasr_wasi_http::serve(router, request).await
+        omnia_wasi_http::serve(router, request).await
     }
 }
 
@@ -43,9 +43,9 @@ async fn send_message(message: String) -> HttpResult<Json<Value>> {
 }
 
 struct WebSocketGuest;
-qwasr_wasi_websocket::export!(WebSocketGuest);
+omnia_wasi_websocket::export!(WebSocketGuest);
 
-impl qwasr_wasi_websocket::handler::Guest for WebSocketGuest {
+impl omnia_wasi_websocket::handler::Guest for WebSocketGuest {
     async fn handle(event: Event) -> Result<(), Error> {
         println!("received event: {event:?}");
 

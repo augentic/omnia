@@ -25,18 +25,18 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
             use std::path::PathBuf;
 
             use anyhow::Result;
-            use qwasr::anyhow::Context as _;
-            use qwasr::futures::future::{try_join_all, BoxFuture};
-            use qwasr::tokio;
-            use qwasr::wasmtime::component::{HasData,InstancePre};
-            use qwasr::wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
-            use qwasr::{Backend, Compiled, Server, State};
+            use omnia::anyhow::Context as _;
+            use omnia::futures::future::{try_join_all, BoxFuture};
+            use omnia::tokio;
+            use omnia::wasmtime::component::{HasData,InstancePre};
+            use omnia::wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+            use omnia::{Backend, Compiled, Server, State};
 
             use super::*;
 
             /// Run the specified wasm guest using the configured runtime.
             pub async fn run(wasm: PathBuf) -> Result<()> {
-                let mut compiled = qwasr::create(&wasm)
+                let mut compiled = omnia::create(&wasm)
                     .with_context(|| format!("compiling {}", wasm.display()))?;
                 let run_state = Context::new(&mut compiled)
                     .await
@@ -177,20 +177,20 @@ impl TryFrom<&Config> for Expanded {
             // HACK: derive module name from WASI type
             let module = wasi_ident(host_type);
             wasi_view_impls.push(quote! {
-                #module::qwasr_wasi_view!(StoreCtx, #host_ident);
+                #module::omnia_wasi_view!(StoreCtx, #host_ident);
             });
         }
 
         // main function (optional)
         let main_fn = if input.gen_main {
             quote! {
-                use qwasr::tokio;
+                use omnia::tokio;
 
                 #[tokio::main]
                 async fn main() -> anyhow::Result<()> {
-                    use qwasr::Parser;
-                    match qwasr::Cli::parse().command {
-                        qwasr::Command::Run { wasm } => runtime::run(wasm).await,
+                    use omnia::Parser;
+                    match omnia::Cli::parse().command {
+                        omnia::Command::Run { wasm } => runtime::run(wasm).await,
                         _ => unreachable!(),
                     }
                 }
@@ -240,6 +240,6 @@ fn wasi_ident(path: &Path) -> Ident {
     };
 
     let name = quote! {#ident}.to_string();
-    let name = name.replace("Wasi", "qwasr_wasi_").to_lowercase();
+    let name = name.replace("Wasi", "omnia_wasi_").to_lowercase();
     format_ident!("{name}")
 }

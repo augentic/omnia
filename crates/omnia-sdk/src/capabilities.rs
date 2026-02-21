@@ -5,6 +5,7 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::error::Error;
+use std::future::Future;
 
 use anyhow::Result;
 #[cfg(target_arch = "wasm32")]
@@ -12,7 +13,7 @@ use anyhow::{Context, anyhow};
 use bytes::Bytes;
 use http::{Request, Response};
 use http_body::Body;
-use qwasr_wasi_sql::{DataType, Row};
+use omnia_wasi_sql::{DataType, Row};
 
 /// The `Config` trait is used by implementers to provide configuration from
 /// WASI-guest to dependent crates.
@@ -25,7 +26,7 @@ pub trait Config: Send + Sync {
     #[cfg(target_arch = "wasm32")]
     fn get(&self, key: &str) -> impl Future<Output = Result<String>> + Send {
         async move {
-            let config = qwasr_wasi_config::store::get(key).context("getting configuration")?;
+            let config = omnia_wasi_config::store::get(key).context("getting configuration")?;
             config.ok_or_else(|| anyhow!("configuration not found"))
         }
     }
@@ -49,7 +50,7 @@ pub trait HttpRequest: Send + Sync {
         T::Data: Into<Vec<u8>>,
         T::Error: Into<Box<dyn Error + Send + Sync + 'static>>,
     {
-        async move { qwasr_wasi_http::handle(request).await }
+        async move { omnia_wasi_http::handle(request).await }
     }
 }
 
@@ -82,8 +83,8 @@ pub trait Publish: Send + Sync {
     /// Publish (send) a message to a topic.
     #[cfg(target_arch = "wasm32")]
     fn send(&self, topic: &str, message: &Message) -> impl Future<Output = Result<()>> + Send {
-        use qwasr_wasi_messaging::producer;
-        use qwasr_wasi_messaging::types::{self as wasi, Client};
+        use omnia_wasi_messaging::producer;
+        use omnia_wasi_messaging::types::{self as wasi, Client};
 
         async move {
             let client =
@@ -116,7 +117,7 @@ pub trait StateStore: Send + Sync {
     fn get(&self, key: &str) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
         async move {
             let bucket =
-                qwasr_wasi_keyvalue::cache::open("cache").await.context("opening cache")?;
+                omnia_wasi_keyvalue::cache::open("cache").await.context("opening cache")?;
             bucket.get(key).await.context("reading state from cache")
         }
     }
@@ -128,7 +129,7 @@ pub trait StateStore: Send + Sync {
     ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
         async move {
             let bucket =
-                qwasr_wasi_keyvalue::cache::open("cache").await.context("opening cache")?;
+                omnia_wasi_keyvalue::cache::open("cache").await.context("opening cache")?;
             bucket.set(key, value, ttl_secs).await.context("reading state from cache")
         }
     }
@@ -138,7 +139,7 @@ pub trait StateStore: Send + Sync {
     fn delete(&self, key: &str) -> impl Future<Output = Result<()>> + Send {
         async move {
             let bucket =
-                qwasr_wasi_keyvalue::cache::open("cache").await.context("opening cache")?;
+                omnia_wasi_keyvalue::cache::open("cache").await.context("opening cache")?;
             bucket.delete(key).await.context("deleting entry from cache")
         }
     }
@@ -153,7 +154,7 @@ pub trait Identity: Send + Sync {
     /// Get an access token for the specified identity.
     #[cfg(target_arch = "wasm32")]
     fn access_token(&self, identity: String) -> impl Future<Output = Result<String>> + Send {
-        use qwasr_wasi_identity::credentials::get_identity;
+        use omnia_wasi_identity::credentials::get_identity;
 
         async move {
             let identity = wit_bindgen::block_on(get_identity(identity))?;
@@ -190,7 +191,7 @@ pub trait TableStore: Send + Sync {
     fn query(
         &self, cnn_name: String, query: String, params: Vec<DataType>,
     ) -> impl Future<Output = Result<Vec<Row>>> + Send {
-        use qwasr_wasi_sql::types::{Connection, Statement};
+        use omnia_wasi_sql::types::{Connection, Statement};
         async move {
             let cnn = Connection::open(cnn_name)
                 .await
@@ -200,7 +201,7 @@ pub trait TableStore: Send + Sync {
                 .await
                 .map_err(|e| anyhow!("failed to prepare statement: {}", e.trace()))?;
 
-            let res = qwasr_wasi_sql::readwrite::query(&cnn, &stmt)
+            let res = omnia_wasi_sql::readwrite::query(&cnn, &stmt)
                 .await
                 .map_err(|e| anyhow!("query failed: {}", e.trace()))?;
 
@@ -217,7 +218,7 @@ pub trait TableStore: Send + Sync {
     fn exec(
         &self, cnn_name: String, query: String, params: Vec<DataType>,
     ) -> impl Future<Output = Result<u32>> + Send {
-        use qwasr_wasi_sql::types::{Connection, Statement};
+        use omnia_wasi_sql::types::{Connection, Statement};
         async move {
             let cnn = Connection::open(cnn_name)
                 .await
@@ -227,7 +228,7 @@ pub trait TableStore: Send + Sync {
                 .await
                 .map_err(|e| anyhow!("failed to prepare statement: {}", e.trace()))?;
 
-            let res = qwasr_wasi_sql::readwrite::exec(&cnn, &stmt)
+            let res = omnia_wasi_sql::readwrite::exec(&cnn, &stmt)
                 .await
                 .map_err(|e| anyhow!("exec failed: {}", e.trace()))?;
 
@@ -251,11 +252,11 @@ pub trait Broadcast: Send + Sync {
         &self, name: &str, data: &[u8], sockets: Option<Vec<String>>,
     ) -> impl Future<Output = Result<()>> + Send {
         async move {
-            let client = qwasr_wasi_websocket::types::Client::connect(name.to_string())
+            let client = omnia_wasi_websocket::types::Client::connect(name.to_string())
                 .await
                 .map_err(|e| anyhow!("connecting to websocket: {e}"))?;
-            let event = qwasr_wasi_websocket::types::Event::new(data);
-            qwasr_wasi_websocket::client::send(&client, event, sockets)
+            let event = omnia_wasi_websocket::types::Event::new(data);
+            omnia_wasi_websocket::client::send(&client, event, sockets)
                 .await
                 .map_err(|e| anyhow!("sending websocket event: {e}"))
         }

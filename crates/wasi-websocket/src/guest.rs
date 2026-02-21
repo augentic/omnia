@@ -12,7 +12,7 @@ mod generated {
         additional_derives: [Clone],
         generate_all,
         pub_export_macro: true,
-        default_bindings_module: "qwasr_wasi_websocket",
+        default_bindings_module: "omnia_wasi_websocket",
     });
 }
 

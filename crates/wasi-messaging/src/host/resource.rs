@@ -6,7 +6,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use futures::Stream;
-pub use qwasr::FutureResult;
+pub use omnia::FutureResult;
 use serde::{Deserialize, Serialize};
 
 use crate::host::generated::wasi::messaging::types;

@@ -9,7 +9,7 @@ Demonstrates `wasi-sql` using the default (in-memory) implementation with a two-
 cargo build --example sql-wasm --target wasm32-wasip2
 
 # run the host
-export RUST_LOG="info,qwasr_wasi_sql=debug,qwasr_wasi_http=debug,sql=debug"
+export RUST_LOG="info,omnia_wasi_sql=debug,omnia_wasi_http=debug,sql=debug"
 cargo run --example sql -- run ./target/wasm32-wasip2/debug/examples/sql_wasm.wasm
 ```
 

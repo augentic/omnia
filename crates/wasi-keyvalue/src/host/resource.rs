@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::ops::Deref;
 use std::sync::Arc;
 
-pub use qwasr::FutureResult;
+pub use omnia::FutureResult;
 
 /// Providers implement the [`Bucket`] trait to allow the host to
 /// interact with different backend buckets (stores).

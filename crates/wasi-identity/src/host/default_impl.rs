@@ -11,7 +11,7 @@ use oauth2::{
     ClientId, ClientSecret, EmptyExtraTokenFields, Scope, StandardTokenResponse,
     TokenResponse as _, TokenUrl,
 };
-use qwasr::Backend;
+use omnia::Backend;
 use tracing::instrument;
 
 use crate::host::WasiIdentityCtx;
@@ -30,7 +30,7 @@ pub struct ConnectOptions {
     pub token_url: String,
 }
 
-impl qwasr::FromEnv for ConnectOptions {
+impl omnia::FromEnv for ConnectOptions {
     fn from_env() -> Result<Self> {
         Self::from_env().finalize().context("issue loading connection options")
     }
@@ -73,7 +73,7 @@ impl Default for AccessToken {
 impl From<TokenResponse> for AccessToken {
     fn from(token_resp: TokenResponse) -> Self {
         let token = token_resp.access_token().secret().clone();
-        let expires_in = token_resp.expires_in().unwrap_or(Duration::from_hours(1));
+        let expires_in = token_resp.expires_in().unwrap_or(Duration::from_secs(3600));
 
         Self {
             token,

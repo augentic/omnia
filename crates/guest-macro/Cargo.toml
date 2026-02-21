@@ -1,6 +1,6 @@
 [package]
-name = "qwasr-guest-macro"
-description = "Procedural macros for guest code generation"
+name = "omnia-guest-macro"
+description = "Procedural macros for Omnia WASI guest code generation"
 authors.workspace = true
 categories.workspace = true
 edition.workspace = true

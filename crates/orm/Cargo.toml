@@ -1,6 +1,6 @@
 [package]
-name = "qwasr-orm"
-description = "Object-relational mapping helper, suitable for use with qwasr-wasi-sql"
+name = "omnia-orm"
+description = "Object-relational mapping helper, suitable for use with omnia-wasi-sql"
 readme = "README.md"
 authors.workspace = true
 categories.workspace = true
@@ -18,7 +18,7 @@ workspace = true
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 anyhow.workspace = true
 chrono.workspace = true
-qwasr-wasi-sql.workspace = true
+omnia-wasi-sql.workspace = true
 sea-query.workspace = true
 serde_json.workspace = true
 tracing.workspace = true

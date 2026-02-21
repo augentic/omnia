@@ -34,8 +34,8 @@ mod generated {
 use std::fmt::Debug;
 use std::sync::Arc;
 
-pub use qwasr::FutureResult;
-use qwasr::{Host, Server, State};
+pub use omnia::FutureResult;
+use omnia::{Host, Server, State};
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::ResourceTable;
 
@@ -93,11 +93,11 @@ pub trait WasiSqlCtx: Debug + Send + Sync + 'static {
 
 /// Implementation of the `WasiSqlView` trait for the store context.
 #[macro_export]
-macro_rules! qwasr_wasi_view {
+macro_rules! omnia_wasi_view {
     ($store_ctx:ty, $field_name:ident) => {
-        impl qwasr_wasi_sql::WasiSqlView for $store_ctx {
-            fn sql(&mut self) -> qwasr_wasi_sql::WasiSqlCtxView<'_> {
-                qwasr_wasi_sql::WasiSqlCtxView {
+        impl omnia_wasi_sql::WasiSqlView for $store_ctx {
+            fn sql(&mut self) -> omnia_wasi_sql::WasiSqlCtxView<'_> {
+                omnia_wasi_sql::WasiSqlCtxView {
                     ctx: &mut self.$field_name,
                     table: &mut self.table,
                 }

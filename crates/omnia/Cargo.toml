@@ -1,6 +1,6 @@
 [package]
-name = "qwasr"
-description = "qwasr runtime"
+name = "omnia"
+description = "Ergonomic WebAssembly component runtime built on wasmtime with pluggable WASI host services"
 readme = "README.md"
 authors.workspace = true
 categories.workspace = true
@@ -28,7 +28,7 @@ futures.workspace = true
 serde.workspace = true
 tracing.workspace = true
 tokio = { workspace = true, features = ["macros"] }
-qwasr-otel.workspace = true
-qwasr-runtime-macro.workspace = true
+omnia-otel.workspace = true
+omnia-runtime-macro.workspace = true
 wasmtime = { workspace = true, features = ["runtime"] }
 wasmtime-wasi.workspace = true

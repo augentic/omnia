@@ -1,4 +1,4 @@
-package qwasr:wasi-keyvalue;
+package omnia:wasi-keyvalue;
 
 world keyvalue {
 	// include wasi:keyvalue/watch-service@0.2.0-draft2;

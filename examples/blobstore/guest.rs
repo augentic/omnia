@@ -19,9 +19,9 @@ use anyhow::anyhow;
 use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
-use qwasr_sdk::HttpResult;
-use qwasr_wasi_blobstore::blobstore;
-use qwasr_wasi_blobstore::types::{IncomingValue, OutgoingValue};
+use omnia_sdk::HttpResult;
+use omnia_wasi_blobstore::blobstore;
+use omnia_wasi_blobstore::types::{IncomingValue, OutgoingValue};
 use serde_json::Value;
 use tracing::Level;
 use wasip3::exports::http::handler::Guest;
@@ -32,15 +32,15 @@ wasip3::http::service::export!(Http);
 
 impl Guest for Http {
     /// Routes incoming HTTP requests to the blob storage handler.
-    #[qwasr_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
+    #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new().route("/", post(handler));
-        qwasr_wasi_http::serve(router, request).await
+        omnia_wasi_http::serve(router, request).await
     }
 }
 
 /// Stores and retrieves data from the blobstore.
-#[qwasr_wasi_otel::instrument]
+#[omnia_wasi_otel::instrument]
 async fn handler(body: Bytes) -> HttpResult<Json<Value>> {
     // create an outgoing value to hold the data we want to store
     let outgoing = OutgoingValue::new_outgoing_value();

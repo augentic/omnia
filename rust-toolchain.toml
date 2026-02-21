@@ -1,9 +1,7 @@
 [toolchain]
-channel = "nightly"
-# channel = "stable"
+channel = "stable"
 components = ["clippy", "rust-src", "rustfmt"]
 targets = [
   "aarch64-apple-darwin",
   "wasm32-wasip2",
 ]
-# profile = "minimal" # "default"

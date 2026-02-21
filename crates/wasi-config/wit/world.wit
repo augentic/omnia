@@ -1,4 +1,4 @@
-package qwasr:wasi-config;
+package omnia:wasi-config;
 
 world config {
 	include wasi:config/imports@0.2.0-rc.1;

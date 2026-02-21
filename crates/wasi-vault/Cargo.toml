@@ -1,6 +1,6 @@
 [package]
-name = "qwasr-wasi-vault"
-description = "WASI Vault implementation"
+name = "omnia-wasi-vault"
+description = "WASI secrets vault interface for the Omnia runtime"
 readme = "README.md"
 authors.workspace = true
 categories.workspace = true
@@ -21,7 +21,7 @@ workspace = true
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
 futures.workspace = true
-qwasr.workspace = true
+omnia.workspace = true
 parking_lot.workspace = true
 tracing.workspace = true
 wasmtime.workspace = true

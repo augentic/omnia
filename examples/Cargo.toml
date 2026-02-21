@@ -8,19 +8,19 @@ version.workspace = true
 [dependencies]
 anyhow.workspace = true
 cfg-if.workspace = true
-qwasr-wasi-blobstore.workspace = true
-qwasr-wasi-config.workspace = true
-qwasr-wasi-http.workspace = true
-qwasr-wasi-identity.workspace = true
-qwasr-wasi-keyvalue.workspace = true
-qwasr-wasi-messaging.workspace = true
-qwasr-wasi-otel.workspace = true
-qwasr-wasi-sql.workspace = true
-qwasr-wasi-vault.workspace = true
-qwasr-wasi-websocket.workspace = true
+omnia-wasi-blobstore.workspace = true
+omnia-wasi-config.workspace = true
+omnia-wasi-http.workspace = true
+omnia-wasi-identity.workspace = true
+omnia-wasi-keyvalue.workspace = true
+omnia-wasi-messaging.workspace = true
+omnia-wasi-otel.workspace = true
+omnia-wasi-sql.workspace = true
+omnia-wasi-vault.workspace = true
+omnia-wasi-websocket.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-qwasr.workspace = true
+omnia.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 axum = { workspace = true, features = ["macros"] }
@@ -36,9 +36,9 @@ tower-http = { version = "0.6.8", features = ["cors", "trace"] }
 tracing.workspace = true
 wasip3.workspace = true
 wit-bindgen.workspace = true
-qwasr-orm.workspace = true
-qwasr-sdk.workspace = true
-qwasr-wasi-otel-attr.workspace = true
+omnia-orm.workspace = true
+omnia-sdk.workspace = true
+omnia-wasi-otel-attr.workspace = true
 
 [[example]]
 name = "blobstore-wasm"

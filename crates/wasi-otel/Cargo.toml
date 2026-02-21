@@ -1,6 +1,6 @@
 [package]
-name = "qwasr-wasi-otel"
-description = "WASI Opentelemetry implementation"
+name = "omnia-wasi-otel"
+description = "WASI OpenTelemetry interface for the Omnia runtime"
 readme = "README.md"
 authors.workspace = true
 categories.workspace = true
@@ -35,8 +35,8 @@ futures.workspace = true
 hex = "0.4.3"
 opentelemetry-proto = "0.31.0"
 prost = "0.14.1"
-qwasr.workspace = true
-qwasr-otel.workspace = true
+omnia.workspace = true
+omnia-otel.workspace = true
 wasmtime.workspace = true
 
 # guest dependencies
@@ -44,5 +44,5 @@ wasmtime.workspace = true
 cfg-if.workspace = true
 num-traits = "0.2.19"
 tracing-subscriber = { workspace = true, features = ["env-filter"], optional = true }
-qwasr-wasi-otel-attr.workspace = true
+omnia-wasi-otel-attr.workspace = true
 wit-bindgen.workspace = true

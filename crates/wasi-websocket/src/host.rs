@@ -37,8 +37,8 @@ mod generated {
 use std::fmt::Debug;
 use std::sync::Arc;
 
-pub use qwasr::FutureResult;
-use qwasr::{Host, Server, State};
+pub use omnia::FutureResult;
+use omnia::{Host, Server, State};
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::{ResourceTable, ResourceTableError};
 
@@ -140,11 +140,11 @@ impl From<wasmtime::Error> for Error {
 
 /// Implementation of the `WebSocketView` trait for the store context.
 #[macro_export]
-macro_rules! qwasr_wasi_view {
+macro_rules! omnia_wasi_view {
     ($store_ctx:ty, $field_name:ident) => {
-        impl qwasr_wasi_websocket::WebSocketView for $store_ctx {
-            fn websocket(&mut self) -> qwasr_wasi_websocket::WasiWebSocketCtxView<'_> {
-                qwasr_wasi_websocket::WasiWebSocketCtxView {
+        impl omnia_wasi_websocket::WebSocketView for $store_ctx {
+            fn websocket(&mut self) -> omnia_wasi_websocket::WasiWebSocketCtxView<'_> {
+                omnia_wasi_websocket::WasiWebSocketCtxView {
                     ctx: &mut self.$field_name,
                     table: &mut self.table,
                 }

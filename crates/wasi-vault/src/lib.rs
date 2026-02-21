@@ -1,7 +1,11 @@
+#![doc = include_str!("../README.md")]
+
 //! # WASI Vault Service
 //!
 //! This module implements a runtime service for `wasi:vault`
 //! (<https://github.com/augentic/wasi-vault>).
+
+#![forbid(unsafe_code)]
 
 #[cfg(target_arch = "wasm32")]
 mod guest;

@@ -1,4 +1,8 @@
-//! Procedural macros for the qwasr runtime.
+#![doc = include_str!("../README.md")]
+
+//! Procedural macros for the omnia runtime.
+
+#![forbid(unsafe_code)]
 
 mod expand;
 mod runtime;
@@ -11,10 +15,10 @@ use syn::parse_macro_input;
 /// # Example
 ///
 /// ```ignore
-/// qwasr::runtime!({
-///     qwasr_wasi_http: WasiHttp,
-///     qwasr_wasi_otel: DefaultOtel,
-///     qwasr_wasi_blobstore: MongoDb,
+/// omnia::runtime!({
+///     omnia_wasi_http: WasiHttp,
+///     omnia_wasi_otel: DefaultOtel,
+///     omnia_wasi_blobstore: MongoDb,
 /// });
 /// ```
 #[proc_macro]

@@ -157,13 +157,13 @@ impl HostStreamObjectNamesWithStore for WasiBlobstore {
     async fn read_stream_object_names<T>(
         _: &Accessor<T, Self>, _self_: Resource<StreamObjectNames>, _len: u64,
     ) -> Result<(Vec<String>, bool)> {
-        unimplemented!()
+        Err("stream object names not yet supported".to_string())
     }
 
     async fn skip_stream_object_names<T>(
         _: &Accessor<T, Self>, _names_ref: Resource<StreamObjectNames>, _num: u64,
     ) -> Result<(u64, bool)> {
-        unimplemented!()
+        Err("stream object names not yet supported".to_string())
     }
 
     fn drop<T>(

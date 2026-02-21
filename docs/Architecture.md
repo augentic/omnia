@@ -1,10 +1,10 @@
 # Architecture
 
-This document describes the architecture of WRT (WebAssembly Runtime), a modular WASI component runtime built on [wasmtime](https://github.com/bytecodealliance/wasmtime).
+This document describes the architecture of Omnia (WebAssembly Runtime), a modular WASI component runtime built on [wasmtime](https://github.com/bytecodealliance/wasmtime).
 
 ## Overview
 
-WRT provides a thin wrapper around wasmtime for ergonomic integration of host-based services for WASI components. It enables WebAssembly guests to interact with external services (databases, message queues, etc.) through standardized WASI interfaces, while allowing hosts to swap backend implementations without changing guest code.
+Omnia provides a thin wrapper around wasmtime for ergonomic integration of host-based services for WASI components. It enables WebAssembly guests to interact with external services (databases, message queues, etc.) through standardized WASI interfaces, while allowing hosts to swap backend implementations without changing guest code.
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -23,7 +23,7 @@ WRT provides a thin wrapper around wasmtime for ergonomic integration of host-ba
 │        └───────────────┴───────┬───────┴───────────────┘            │
 │                                │                                    │
 │                         ┌──────┴──────┐                             │
-│                         │   qwasr    │                             │
+│                         │   omnia    │                             │
 │                         │ (wasmtime)  │                             │
 │                         └──────┬──────┘                             │
 │                                │                                    │
@@ -38,7 +38,7 @@ WRT provides a thin wrapper around wasmtime for ergonomic integration of host-ba
 
 ### Guest/Host Architecture
 
-WRT follows the WebAssembly Component Model's guest/host pattern:
+Omnia follows the WebAssembly Component Model's guest/host pattern:
 
 - **Guest**: Application code compiled to WebAssembly (`.wasm`). Uses WASI interfaces to interact with the outside world. The guest is portable and backend-agnostic.
 
@@ -48,7 +48,7 @@ This separation allows the same guest code to run with different backends—swap
 
 ### Three-Layer Architecture
 
-WRT is organized into three distinct layers:
+Omnia is organized into three distinct layers:
 
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
@@ -67,7 +67,7 @@ WRT is organized into three distinct layers:
 
 ## Crate Organization
 
-### Kernel (`crates/qwasr`)
+### Kernel (`crates/omnia`)
 
 The foundation of the runtime. Provides:
 
@@ -214,7 +214,7 @@ WASI interfaces are defined using [WIT (WebAssembly Interface Types)](https://co
 
 ```wit
 // wasi-keyvalue/wit/world.wit
-package qwasr:wasi-keyvalue;
+package omnia:wasi-keyvalue;
 
 world keyvalue {
     include wasi:keyvalue/imports@0.2.0-draft2;
@@ -225,7 +225,7 @@ Dependencies on standard WASI definitions are managed in `wit/deps/` and version
 
 ## Runtime Execution Flow
 
-1. **CLI Parsing**: The qwasr parses command-line arguments (`run` or `compile`)
+1. **CLI Parsing**: The omnia parses command-line arguments (`run` or `compile`)
 
 2. **Backend Connection**: The `runtime!` macro-generated code connects to all configured backends using environment variables
 
@@ -264,10 +264,10 @@ See individual backend READMEs for specific environment variables.
 ## Directory Structure
 
 ```text
-wrt/
-├── src/                    # CLI entry points (realtime binaries)
+omnia/
+├── src/                    # CLI entry points (omnia binaries)
 ├── crates/
-│   ├── qwasr/             # Core runtime infrastructure
+│   ├── omnia/             # Core runtime infrastructure
 │   ├── buildgen/           # Runtime code generation macro
 │   ├── wasi-*/             # WASI interface implementations
 │   │   ├── src/

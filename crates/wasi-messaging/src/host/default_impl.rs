@@ -8,7 +8,7 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use futures::FutureExt;
 use futures::stream::StreamExt;
-use qwasr::Backend;
+use omnia::Backend;
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::instrument;
@@ -22,7 +22,7 @@ use crate::host::resource::{
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions;
 
-impl qwasr::FromEnv for ConnectOptions {
+impl omnia::FromEnv for ConnectOptions {
     fn from_env() -> Result<Self> {
         Ok(Self)
     }

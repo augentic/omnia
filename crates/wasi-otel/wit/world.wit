@@ -1,4 +1,4 @@
-package qwasr:wasi-otel;
+package omnia:wasi-otel;
 
 world otel {
 	include wasi:otel/imports@0.2.0-draft;

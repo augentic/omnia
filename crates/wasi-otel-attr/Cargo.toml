@@ -1,6 +1,6 @@
 [package]
-name = "qwasr-wasi-otel-attr"
-description = "Opentelemetry attribute macros for WASI components"
+name = "omnia-wasi-otel-attr"
+description = "OpenTelemetry attribute macros for Omnia WASI components"
 readme = "README.md"
 authors.workspace = true
 categories.workspace = true

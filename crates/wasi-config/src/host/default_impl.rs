@@ -11,7 +11,7 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use anyhow::Result;
-use qwasr::Backend;
+use omnia::Backend;
 use tracing::instrument;
 use wasmtime_wasi_config::WasiConfigVariables;
 
@@ -20,7 +20,7 @@ use crate::WasiConfigCtx;
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions;
 
-impl qwasr::FromEnv for ConnectOptions {
+impl omnia::FromEnv for ConnectOptions {
     fn from_env() -> Result<Self> {
         Ok(Self)
     }
