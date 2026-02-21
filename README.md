@@ -1,23 +1,38 @@
-# OMNIA — Quick WebAssembly Secure Runtime
+# Omnia: Secure WebAssembly Runtime
 
-OMNIA provides a thin wrapper around [`wasmtime`](https://github.com/bytecodealliance/wasmtime) for ergonomic integration of host-based services for WASI components.
+Omnia is a lightweight, secure runtime for WebAssembly (WASI) components. It provides a thin, ergonomic wrapper around [`wasmtime`](https://github.com/bytecodealliance/wasmtime) to easily integrate host-based services like HTTP, messaging, and key-value stores into your WASI applications.
 
-While it can be used standalone, Omnia is primarily intended for use with Augentic's Agent Skills. It provides a safe, hand-crafted runtime for safely running agent-generated WASI components.
+While it can be used standalone, Omnia is primarily designed to be the runtime for **Augentic's Agent Skills**. It ensures that agent-generated code runs in a safe, sandboxed environment while still having controlled access to necessary infrastructure.
 
-The  opinionated nature of WASI guest components and more particularly, the Omnia framework, provides a level of control and consistency hard to achieve in agent-generated code.
+## Why Omnia?
+
+- **Secure by Default**: All guest code runs in a strict WebAssembly sandbox. Capabilities (network, filesystem) are explicitly granted.
+- **Batteries Included**: Comes with built-in support for common WASI interfaces: HTTP, Key-Value, Messaging, SQL, and more.
+- **Developer Friendly**: Provides a rich SDK (`omnia-sdk`) and macros (`guest!`, `runtime!`) to eliminate boilerplate.
+- **Pluggable Architecture**: Easily swap out backend implementations (e.g., switch from in-memory to Redis for Key-Value) without changing guest code.
+
+## Features
+
+- **WASI 0.2 Support**: Full support for the Component Model and WASI Preview 2.
+- **Host Services**:
+  - **HTTP**: Outbound requests and incoming server handling.
+  - **Key-Value**: Simple get/set/delete operations (default: in-memory).
+  - **Messaging**: Pub/Sub patterns (default: in-memory broadcast).
+  - **SQL**: Database access via ORM (default: SQLite).
+  - **Observability**: OpenTelemetry tracing and metrics built-in.
+- **Macros**:
+  - `runtime!`: Declaratively configure your host runtime.
+  - `guest!`: Wire up guest handlers with minimal code.
 
 ## Examples
 
-There are a number of examples provided in the `examples` directory that can be used to experiment with the runtime and see it in action.
+The `examples` directory contains complete working examples of guests and runtimes.
 
-Each example contains a Wasm guest and the runtime required to run it.
-
-See [examples/README.md](./examples/README.md) for more details.
+[**Explore the Examples**](./examples/README.md)
 
 ## Building
 
-There are multiple ways to build a runtime by combining `--bin` and `--features` flags.
-For example, to build the `omnia` runtime with all features enabled:
+You can build the runtime with specific features enabled. To build the full `omnia` CLI:
 
 ```bash
 cargo build --bin=omnia --features=omnia --release
@@ -25,7 +40,7 @@ cargo build --bin=omnia --features=omnia --release
 
 ### Docker
 
-Building with Docker:
+To build a production-ready Docker image:
 
 ```bash
 export CARGO_REGISTRIES_AUGENTIC_TOKEN="<registry token>"
@@ -40,7 +55,7 @@ docker build \
 ## Crates
 
 | Crate | Description |
-|-------|-------------|
+| ----- | ----------- |
 | [`omnia`](crates/omnia) | Core runtime -- wasmtime wrapper with CLI and pluggable WASI host services |
 | [`omnia-sdk`](crates/omnia-sdk) | Guest SDK -- traits, error types, and macros for WASI component authors |
 | [`omnia-orm`](crates/orm) | ORM layer for wasi-sql with fluent query builder |
@@ -58,3 +73,7 @@ docker build \
 | [`omnia-wasi-sql`](crates/wasi-sql) | wasi:sql host and guest bindings |
 | [`omnia-wasi-vault`](crates/wasi-vault) | wasi:vault host and guest bindings |
 | [`omnia-wasi-websocket`](crates/wasi-websocket) | wasi:websocket host and guest bindings |
+
+## License
+
+MIT OR Apache-2.0

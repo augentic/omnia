@@ -1,9 +1,5 @@
 #![doc = include_str!("../README.md")]
 
-//! # Omnia SDK
-//!
-//! Core modules for the Omnia platform.
-
 #![forbid(unsafe_code)]
 
 pub mod api;

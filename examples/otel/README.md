@@ -43,7 +43,7 @@ docker compose -f docker/otelcol.yaml up -d
 
 Modify the runtime.rs file to use the OpenTelemetry Collector backend:
 
-```rust
+```rust,ignore
 ...
 use omnia::opentelemetry::WasiOtelCtx;
 

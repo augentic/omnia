@@ -1,9 +1,14 @@
-# WASI SQL Implementation
+# Omnia WASI SQL
 
-This crate provides both guest and host implementations for the `wasi::sql` specification:
+This crate provides the SQL database interface for the Omnia runtime.
 
-- **Guest**: WIT bindings and a type-safe ORM layer for WASM components
-- **Host**: Runtime service with `SQLite` backend for wasmtime-based hosts
+## Interface
+
+Implements the `wasi:sql` WIT interface.
+
+## Backend
+
+- **Host**: Uses `rusqlite` to provide a SQLite backend. Supports both in-memory (`:memory:`) and file-based databases.
 
 ## Features
 
@@ -11,59 +16,23 @@ This crate provides both guest and host implementations for the `wasi::sql` spec
 
 The guest module provides query builders for type-safe database operations:
 
-- **Entity macro**: Declare database models with automatic trait implementations
-- **Query builders**: SELECT, INSERT, UPDATE, DELETE with fluent APIs
-- **Joins**: Support for INNER, LEFT, RIGHT, and FULL joins
-- **Filters**: Type-safe WHERE clauses with comparisons and logical operators
-- **Column aliasing**: Manual column specifications for joined tables
-- **Type conversion**: Automatic conversion between Rust types and SQL data types
-- **Upserts**: Native INSERT ... ON CONFLICT support
+- **Entity macro**: Declare database models with automatic trait implementations.
+- **Query builders**: Fluent APIs for SELECT, INSERT, UPDATE, DELETE.
+- **Joins & Filters**: Type-safe query construction.
 
-### Host Implementation
+## Usage
 
-The host provides a wasmtime component implementation using `SQLite`:
+Add this crate to your `Cargo.toml` and use it in your runtime configuration:
 
-- **Multiple connections**: Named connection pools
-- **Transactions**: Read-write transaction support
-- **Prepared statements**: Efficient query execution
-- **In-memory & file-based**: Supports both `:memory:` and file-backed databases
+```rust,ignore
+use omnia::runtime;
+use omnia_wasi_sql::SqlDefault;
 
-## Testing
-
-### All together
-
-```bash
-# Run unit tests (entity module) and integration tests (orm, filter, entity) all together
-cargo test -p omnia-wasi-sql --lib --target wasm32-wasip2 --no-run && \
-  cargo test -p omnia-wasi-sql --test orm --target wasm32-wasip2 --no-run && \
-  cargo test -p omnia-wasi-sql --test entity --target wasm32-wasip2 --no-run && \
-  cargo test -p omnia-wasi-sql --test filter --target wasm32-wasip2 --no-run && \
-  WASMTIME_BACKTRACE_DETAILS=1 wasmtime target/wasm32-wasip2/debug/deps/omnia_wasi_sql-*.wasm && \
-  WASMTIME_BACKTRACE_DETAILS=1 wasmtime target/wasm32-wasip2/debug/deps/orm-*.wasm && \
-  WASMTIME_BACKTRACE_DETAILS=1 wasmtime target/wasm32-wasip2/debug/deps/entity-*.wasm && \
-  WASMTIME_BACKTRACE_DETAILS=1 wasmtime target/wasm32-wasip2/debug/deps/filter-*.wasm
-
+omnia::runtime!({
+    "sql": SqlDefault,
+});
 ```
 
-### Individually
+## License
 
-```bash
-# Run unit tests (entity module) and integration tests (orm, filter, entity) individually
-cargo test -p omnia-wasi-sql --lib --target wasm32-wasip2 --no-run &&
-  WASMTIME_BACKTRACE_DETAILS=1 wasmtime target/wasm32-wasip2/debug/deps/omnia_wasi_sql-*.wasm
-```
-
-```bash
-cargo test -p omnia-wasi-sql --test orm --target wasm32-wasip2 --no-run &&
-  WASMTIME_BACKTRACE_DETAILS=1 wasmtime target/wasm32-wasip2/debug/deps/orm-*.wasm
-```
-
-```bash
-cargo test -p omnia-wasi-sql --test entity --target wasm32-wasip2 --no-run &&
-  WASMTIME_BACKTRACE_DETAILS=1 wasmtime target/wasm32-wasip2/debug/deps/entity-*.wasm
-```
-
-```bash
-cargo test -p omnia-wasi-sql --test filter --target wasm32-wasip2 --no-run &&
-  WASMTIME_BACKTRACE_DETAILS=1 wasmtime target/wasm32-wasip2/debug/deps/filter-*.wasm
-```
+MIT OR Apache-2.0

@@ -1,7 +1,5 @@
 #![doc = include_str!("../README.md")]
 
-//! # WebAssembly Initiator
-
 #![cfg(not(target_arch = "wasm32"))]
 
 #[cfg(feature = "jit")]
