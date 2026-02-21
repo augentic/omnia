@@ -8,7 +8,7 @@ Implements the `wasi:sql` WIT interface.
 
 ## Backend
 
-- **Host**: Uses `rusqlite` to provide a SQLite backend. Supports both in-memory (`:memory:`) and file-based databases.
+- **Host**: Uses `rusqlite` to provide a `SQLite` backend. Supports both in-memory (`:memory:`) and file-based databases.
 
 ## Features
 
