@@ -6,6 +6,23 @@ Unreleased
 
 ### Changed
 
+<!-- Release notes generated using configuration in .github/release.yaml at main -->
+
+## What's Changed
+* Bump to 0.26.0 by @github-actions[bot] in https://github.com/augentic/omnia/pull/162
+* Update Rust version and fix lints by @andrew-goldie in https://github.com/augentic/omnia/pull/163
+* Upgrade to wasmtime 42 by @karthik-phl in https://github.com/augentic/omnia/pull/164
+* Http proxy by @andrewweston in https://github.com/augentic/omnia/pull/165
+* improve tests and host header dedupe by @andrewweston in https://github.com/augentic/omnia/pull/166
+* ORM as separate crate by @andrew-goldie in https://github.com/augentic/omnia/pull/167
+* WebSocket refactor by @andrewweston in https://github.com/augentic/omnia/pull/168
+* Production quality in-mem Key Value by @andrewweston in https://github.com/augentic/omnia/pull/169
+* Rename to Omnia by @andrewweston in https://github.com/augentic/omnia/pull/170
+* Bump to 0.27.0 by @github-actions[bot] in https://github.com/augentic/omnia/pull/171
+
+
+**Full Changelog**: https://github.com/augentic/omnia/compare/v0.26.0...v0.28.0
+
 ---
 
 Release notes for previous releases can be found on the respective release
