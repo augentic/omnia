@@ -42,10 +42,10 @@ async fn send_message(message: String) -> HttpResult<Json<Value>> {
     })))
 }
 
-struct WebSocketGuest;
-omnia_wasi_websocket::export!(WebSocketGuest);
+struct WebSocket;
+omnia_wasi_websocket::export!(WebSocket);
 
-impl omnia_wasi_websocket::handler::Guest for WebSocketGuest {
+impl omnia_wasi_websocket::handler::Guest for WebSocket {
     async fn handle(event: Event) -> Result<(), Error> {
         println!("received event: {event:?}");
 

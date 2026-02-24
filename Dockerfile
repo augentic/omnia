@@ -10,7 +10,6 @@ RUN adduser --disabled-password --gecos "" --home "/nonexistent" \
 
 WORKDIR /app
 RUN \
-    --mount=type=secret,id=augentic,env=CARGO_REGISTRIES_AUGENTIC_TOKEN \
     --mount=type=bind,source=.cargo,target=.cargo \
     --mount=type=bind,source=Cargo.toml,target=Cargo.toml \
     --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
