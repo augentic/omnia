@@ -893,7 +893,7 @@ dependencies = [
 
 [[package]]
 name = "examples"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1868,7 +1868,7 @@ dependencies = [
 
 [[package]]
 name = "omnia"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1884,7 +1884,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-guest-macro"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1893,7 +1893,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-orm"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1905,7 +1905,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-otel"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "http",
@@ -1921,7 +1921,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-runtime-macro"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1930,7 +1930,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-sdk"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1957,7 +1957,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-blobstore"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1973,7 +1973,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-config"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "omnia",
@@ -1985,7 +1985,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-http"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2016,7 +2016,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-identity"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "fromenv",
@@ -2033,7 +2033,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-keyvalue"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2051,7 +2051,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-messaging"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -2069,7 +2069,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-otel"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "cfg-if",
@@ -2092,7 +2092,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-otel-attr"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2101,7 +2101,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-sql"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "base64ct",
@@ -2122,7 +2122,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-vault"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -2137,7 +2137,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-websocket"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "dashmap",
