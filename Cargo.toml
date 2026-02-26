@@ -58,7 +58,7 @@ axum = { version = "0.8.8", default-features = false, features = ["json"] }
 base64ct = { version = "1.8.3", features = ["std"] }
 bytes = "1.11.1"
 cfg-if = "1.0.4"
-chrono = "0.4.43"
+chrono = "0.4.44"
 dashmap = "6.1.0"
 fromenv = "0.1.0"
 futures = "0.3.32"
@@ -80,7 +80,7 @@ sea-query = { version = "0.32.7", default-features = false, features = ["thread-
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 syn = { version = "2.0.117", features = ["full"] }
-time = "0.3.45"
+time = "0.3.47"
 tokio = { version = "1.49.0", default-features = false }
 tokio-stream = { version = "0.1.18", features = ["sync"] }
 tower = "0.5.3"
@@ -88,11 +88,11 @@ tracing = "0.1.44"
 tracing-opentelemetry = "0.32.1"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt"] }
 wasip3 = { version = "0.4.0", features = ["http-compat"] }
-wasmtime = { version = "42.0.0", default-features = false, features = ["anyhow", "parallel-compilation"] }
-wasmtime-wasi = { version = "42.0.0", features = ["p3"] }
-wasmtime-wasi-config = "42.0.0"
-wasmtime-wasi-http = { version = "42.0.0", features = ["p3"] }
-wasmtime-wasi-io = "42.0.0"
+wasmtime = { version = "42.0.1", default-features = false, features = ["anyhow", "parallel-compilation"] }
+wasmtime-wasi = { version = "42.0.1", features = ["p3"] }
+wasmtime-wasi-config = "42.0.1"
+wasmtime-wasi-http = { version = "42.0.1", features = ["p3"] }
+wasmtime-wasi-io = "42.0.1"
 wit-bindgen = { version = "0.53.1", features = ["async-spawn"] }
 
 # internally referenced crates
