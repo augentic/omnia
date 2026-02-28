@@ -1,5 +1,0 @@
-package omnia:wasi-vault;
-
-world vault {
-	include wasi:vault/imports@0.1.0-draft;
-}

@@ -13,7 +13,7 @@ mod generated {
     pub use crate::host::resource::{ClientProxy, MessageProxy, RequestOptions};
 
     wasmtime::component::bindgen!({
-        world: "messaging",
+        world: "messaging-request-reply",
         path: "wit",
         imports: {
             // "wasi:messaging/types.[static]client.connect": store | tracing | trappable,
@@ -43,7 +43,7 @@ use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::{ResourceTable, ResourceTableError};
 
 pub use self::default_impl::MessagingDefault;
-pub use self::generated::Messaging;
+pub use self::generated::MessagingRequestReply;
 pub use self::generated::wasi::messaging::types::Error;
 use self::generated::wasi::messaging::{producer, request_reply, types};
 pub use self::resource::*;

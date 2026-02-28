@@ -8,20 +8,20 @@ mod resource;
 mod types_impl;
 
 mod generated {
-    pub use self::wasi::identity::types::Error;
+    pub use self::omnia::identity::types::Error;
     pub use crate::host::resource::IdentityProxy;
 
     wasmtime::component::bindgen!({
-        world: "identity",
+        world: "imports",
         path: "wit",
         imports: {
             default: store | tracing | trappable,
         },
         with: {
-            "wasi:identity/credentials.identity": IdentityProxy,
+            "omnia:identity/credentials.identity": IdentityProxy,
         },
         trappable_error_type: {
-            "wasi:identity/types.error" => Error,
+            "omnia:identity/types.error" => Error,
         },
     });
 }
@@ -35,7 +35,7 @@ use wasmtime::component::{HasData, Linker, ResourceTableError};
 use wasmtime_wasi::ResourceTable;
 
 pub use self::default_impl::IdentityDefault;
-use self::generated::wasi::identity::credentials;
+use self::generated::omnia::identity::credentials;
 pub use self::resource::*;
 use crate::host::generated::Error;
 

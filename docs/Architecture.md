@@ -214,7 +214,7 @@ WASI interfaces are defined using [WIT (WebAssembly Interface Types)](https://co
 
 ```wit
 // wasi-keyvalue/wit/world.wit
-package omnia:wasi-keyvalue;
+package wasi:keyvalue;
 
 world keyvalue {
     include wasi:keyvalue/imports@0.2.0-draft2;

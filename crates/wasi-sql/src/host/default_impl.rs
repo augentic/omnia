@@ -160,7 +160,7 @@ fn datatype_to_rusqlite_value(dt: &DataType) -> rusqlite::types::Value {
         DataType::Double(Some(f)) => rusqlite::types::Value::Real(*f),
         DataType::Str(Some(s)) => rusqlite::types::Value::Text(s.clone()),
         DataType::Binary(Some(b)) => rusqlite::types::Value::Blob(b.clone()),
-        DataType::Timestamp(Some(ts)) => rusqlite::types::Value::Text(ts.clone()),
+        DataType::Timestamp(Some(ts)) => rusqlite::types::Value::Text(ts.value.clone()),
         // All None variants map to NULL
         _ => rusqlite::types::Value::Null,
     }

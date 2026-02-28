@@ -1,6 +1,6 @@
 use wasmtime::component::{Access, Accessor, Resource};
 
-pub use crate::host::generated::wasi::websocket::types::{
+pub use crate::host::generated::omnia::websocket::types::{
     Error, Host, HostClient, HostClientWithStore, HostEvent, HostEventWithStore, SocketAddr,
 };
 use crate::host::resource::{ClientProxy, EventProxy};

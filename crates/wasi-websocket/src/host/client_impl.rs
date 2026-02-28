@@ -1,7 +1,7 @@
 use wasmtime::component::{Accessor, Resource};
 
-use crate::host::generated::wasi::websocket::client::{Host, HostWithStore};
-use crate::host::generated::wasi::websocket::types::SocketAddr;
+use crate::host::generated::omnia::websocket::client::{Host, HostWithStore};
+use crate::host::generated::omnia::websocket::types::SocketAddr;
 use crate::host::resource::{ClientProxy, EventProxy};
 use crate::host::types_impl::{get_client, get_event};
 use crate::host::{Result, WasiWebSocket, WasiWebSocketCtxView};

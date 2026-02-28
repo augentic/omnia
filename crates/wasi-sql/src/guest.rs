@@ -6,7 +6,7 @@ mod generated {
     #![allow(missing_docs)]
 
     wit_bindgen::generate!({
-        world: "sql",
+        world: "imports",
         path: "wit",
         generate_all,
     });
@@ -39,10 +39,10 @@ pub fn into_json(rows: Vec<Row>) -> Result<Value> {
                     DataType::Double(Some(v)) => {
                         serde_json::Number::from_f64(v).map_or(Value::Null, Value::Number)
                     }
-                    DataType::Str(Some(v))
-                    | DataType::Date(Some(v))
+                    DataType::Str(Some(v)) => Value::String(v),
+                    DataType::Date(Some(v))
                     | DataType::Time(Some(v))
-                    | DataType::Timestamp(Some(v)) => Value::String(v),
+                    | DataType::Timestamp(Some(v)) => Value::String(v.value),
                     DataType::Boolean(Some(v)) => Value::Bool(v),
                     DataType::Binary(Some(v)) => {
                         let encoded = Base64::encode_string(&v);

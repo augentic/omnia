@@ -7,7 +7,7 @@ use tracing::{Instrument, debug_span, instrument};
 use wasmtime::Store;
 
 use crate::host::WebSocketView;
-use crate::host::generated::Websocket;
+use crate::host::generated::Duplex;
 use crate::host::resource::{EventProxy, Events};
 
 #[instrument("websocket-server", skip(state))]
@@ -71,11 +71,11 @@ where
         let instance_pre = self.state.instance_pre();
         let mut store = Store::new(instance_pre.engine(), store_data);
         let instance = instance_pre.instantiate_async(&mut store).await?;
-        let websocket = Websocket::new(&mut store, &instance)?;
+        let websocket = Duplex::new(&mut store, &instance)?;
 
         store
             .run_concurrent(async |store| {
-                let guest = websocket.wasi_websocket_handler();
+                let guest = websocket.omnia_websocket_handler();
                 guest
                     .call_handle(store, event_res)
                     .await

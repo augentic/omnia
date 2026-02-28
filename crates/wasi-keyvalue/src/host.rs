@@ -11,7 +11,7 @@ mod generated {
     pub use super::{BucketProxy, Cas};
 
     wasmtime::component::bindgen!({
-        world: "keyvalue",
+        world: "imports",
         path: "wit",
         imports: {
             default: store | tracing | trappable,

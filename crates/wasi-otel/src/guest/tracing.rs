@@ -8,7 +8,7 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::trace::{SdkTracerProvider, Span, SpanData, SpanProcessor};
 
-use crate::guest::generated::wasi::otel::tracing as wasi;
+use crate::guest::generated::omnia::otel::tracing as wasi;
 
 pub fn init(resource: Resource) -> SdkTracerProvider {
     let processor = Processor::new();

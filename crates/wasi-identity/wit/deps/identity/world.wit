@@ -1,5 +1,0 @@
-package wasi:identity@0.1.0-draft;
-
-world imports {
-    import credentials;
-}

@@ -5,10 +5,10 @@
 mod generated {
     #![allow(missing_docs)]
     wit_bindgen::generate!({
-        world: "vault",
+        world: "imports",
         path: "wit",
         generate_all,
     });
 }
 
-pub use self::generated::wasi::vault::*;
+pub use self::generated::omnia::vault::*;

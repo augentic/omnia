@@ -1,7 +1,7 @@
 use opentelemetry_sdk::Resource;
 
 use crate::host::WasiOtelCtxView;
-use crate::host::generated::wasi::otel::{resource, types};
+use crate::host::generated::omnia::otel::{resource, types};
 
 impl resource::Host for WasiOtelCtxView<'_> {
     fn resource(&mut self) -> wasmtime::Result<types::Resource> {

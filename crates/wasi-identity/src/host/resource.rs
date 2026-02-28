@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 pub use omnia::FutureResult;
 
-pub use crate::host::generated::wasi::identity::credentials::AccessToken;
+pub use crate::host::generated::omnia::identity::credentials::AccessToken;
 
 /// Providers implement the [`Identity`] trait to allow the host to
 /// interact with different backend identity providers.
