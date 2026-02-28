@@ -6,7 +6,7 @@ mod generated {
     #![allow(missing_docs)]
 
     wit_bindgen::generate!({
-        world: "config",
+        world: "imports",
         path: "wit",
         generate_all,
     });
