@@ -6,8 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use opentelemetry::{Array, InstrumentationScope, Key, KeyValue, Value};
 
-use crate::guest::generated::wasi::clocks::wall_clock::Datetime;
 use crate::guest::generated::omnia::otel::types as wasi;
+use crate::guest::generated::wasi::clocks::wall_clock::Datetime;
 
 impl From<Value> for wasi::Value {
     fn from(value: Value) -> Self {

@@ -12,7 +12,6 @@ mod generated {
     #![allow(missing_docs)]
 
     pub use self::omnia::websocket::types::Error;
-
     pub use crate::host::resource::{ClientProxy, EventProxy};
 
     wasmtime::component::bindgen!({

@@ -5,10 +5,10 @@
 mod generated {
     #![allow(missing_docs)]
     wit_bindgen::generate!({
-    world: "identity",
-    path: "wit",
-    generate_all,
+        world: "imports",
+        path: "wit",
+        generate_all,
     });
 }
 
-pub use self::generated::wasi::identity::*;
+pub use self::generated::omnia::identity::*;

@@ -188,21 +188,12 @@ fn value_to_wasi_datatype(value: Value) -> Result<DataType> {
         Value::Float(v) => DataType::Float(v),
         Value::Double(v) => DataType::Double(v),
         Value::String(v) => DataType::Str(v.map(|value| *value)),
-        Value::ChronoDate(v) => DataType::Date(v.map(|value| {
-            let date = *value;
-            date.to_string() // "%Y-%m-%d"
-        })),
-        Value::ChronoTime(v) => DataType::Time(v.map(|value| {
-            let time = *value;
-            time.to_string() // "%H:%M:%S%.f"
-        })),
-        Value::ChronoDateTime(v) => DataType::Timestamp(v.map(|value| {
-            let dt = *value;
-            dt.to_string() // "%Y-%m-%d %H:%M:%S%.f"
-        })),
+        Value::ChronoDate(v) => DataType::Date(v.map(|value| value.to_string())),
+        Value::ChronoTime(v) => DataType::Time(v.map(|value| value.to_string())),
+        Value::ChronoDateTime(v) => DataType::Timestamp(v.map(|value| value.to_string())),
         Value::ChronoDateTimeUtc(v) => DataType::Timestamp(v.map(|value| {
             let dt: DateTime<Utc> = *value;
-            dt.to_rfc3339() // "%Y-%m-%dT%H:%M:%S%.f%:z"
+            dt.to_rfc3339()
         })),
         Value::Char(v) => DataType::Str(v.map(|ch| ch.to_string())),
         Value::Bytes(v) => DataType::Binary(v.map(|bytes| *bytes)),

@@ -2,14 +2,11 @@
 
 ## Prerequisites
 
-Install `wit-deps` from source (<https://github.com/bytecodealliance/wit-deps>)
+Install [wkg](https://github.com/bytecodealliance/wasm-pkg-tools).
 
 ## Usage
 
-Add dependencies to `deps.toml`:
-
-```toml
-keyvalue = "https://github.com/augentic/wasi-keyvalue/archive/main.tar.gz"
+```bash
+wkg get omnia:otel@0.1.0 --config .wkg-config.toml --output ./crates/wasi-otel/wit/otel.wit
+wkg wit fetch --config .wkg-config.toml --wit-dir ./crates/wasi-otel/wit
 ```
-
-Import/update dependencies using `wit-deps update` from the crate root.
