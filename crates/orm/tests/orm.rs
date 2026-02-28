@@ -201,14 +201,14 @@ fn insert_from_entity() {
 }
 
 #[test]
-fn insert_from_entity_with_table() {
+fn insert_via_entity_convenience() {
     let item = Item {
         id: 1,
         name: "test".to_string(),
         count: 10,
     };
 
-    let query = InsertBuilder::from_entity("items", &item).build().unwrap();
+    let query = item.insert().build().unwrap();
 
     assert_sql_contains(
         &query.sql,

@@ -3,7 +3,9 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use sea_query::{Value, Values};
 
 use crate::delete::DeleteBuilder;
+use crate::insert::InsertBuilder;
 use crate::select::SelectBuilder;
+use crate::update::UpdateBuilder;
 use crate::{DataType, Row};
 
 /// Trait for types that can be extracted from database rows.
@@ -81,7 +83,7 @@ macro_rules! entity {
 /// Trait for database entities.
 ///
 /// Typically implemented via the `entity!` macro rather than manually.
-pub trait Entity: Sized {
+pub trait Entity: Sized + Send + Sync {
     /// The database table name for this entity.
     const TABLE: &'static str;
 
@@ -99,6 +101,21 @@ pub trait Entity: Sized {
     #[must_use]
     fn select() -> SelectBuilder {
         SelectBuilder::new(Self::TABLE).columns(Self::COLUMNS.iter().copied())
+    }
+
+    /// Returns an [`InsertBuilder`] pre-populated with all fields from this entity instance.
+    #[must_use]
+    fn insert(&self) -> InsertBuilder
+    where
+        Self: EntityValues,
+    {
+        InsertBuilder::from(self)
+    }
+
+    /// Returns an [`UpdateBuilder`] pre-configured with this entity's table.
+    #[must_use]
+    fn update() -> UpdateBuilder {
+        UpdateBuilder::new(Self::TABLE)
     }
 
     /// Returns a [`DeleteBuilder`] pre-configured with this entity's table.
@@ -149,71 +166,27 @@ fn value_to_wasi_datatype(value: Value) -> Result<DataType> {
     Ok(data_type)
 }
 
-impl FetchValue for bool {
-    fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_bool(row_field(row, col)?)
-    }
+macro_rules! impl_fetch_value {
+    ($ty:ty, $convert:ident) => {
+        impl FetchValue for $ty {
+            fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
+                $convert(row_field(row, col)?)
+            }
+        }
+    };
 }
 
-impl FetchValue for i32 {
-    fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_i32(row_field(row, col)?)
-    }
-}
-
-impl FetchValue for i64 {
-    fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_i64(row_field(row, col)?)
-    }
-}
-
-impl FetchValue for u32 {
-    fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_u32(row_field(row, col)?)
-    }
-}
-
-impl FetchValue for u64 {
-    fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_u64(row_field(row, col)?)
-    }
-}
-
-impl FetchValue for f32 {
-    fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_f32(row_field(row, col)?)
-    }
-}
-
-impl FetchValue for f64 {
-    fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_f64(row_field(row, col)?)
-    }
-}
-
-impl FetchValue for String {
-    fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_string(row_field(row, col)?)
-    }
-}
-
-impl FetchValue for Vec<u8> {
-    fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_binary(row_field(row, col)?)
-    }
-}
-
-impl FetchValue for DateTime<Utc> {
-    fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_timestamp(row_field(row, col)?)
-    }
-}
-
-impl FetchValue for serde_json::Value {
-    fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_json(row_field(row, col)?)
-    }
-}
+impl_fetch_value!(bool, as_bool);
+impl_fetch_value!(i32, as_i32);
+impl_fetch_value!(i64, as_i64);
+impl_fetch_value!(u32, as_u32);
+impl_fetch_value!(u64, as_u64);
+impl_fetch_value!(f32, as_f32);
+impl_fetch_value!(f64, as_f64);
+impl_fetch_value!(String, as_string);
+impl_fetch_value!(Vec<u8>, as_binary);
+impl_fetch_value!(DateTime<Utc>, as_timestamp);
+impl_fetch_value!(serde_json::Value, as_json);
 
 impl<T: FetchValue> FetchValue for Option<T> {
     fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {

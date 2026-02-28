@@ -20,16 +20,8 @@ impl InsertBuilder {
         }
     }
 
-    /// Creates an INSERT builder pre-populated with all fields from an entity instance.
-    #[must_use]
-    pub fn from_entity<E: EntityValues>(table: &str, entity: &E) -> Self {
-        Self {
-            table: table.to_string(),
-            values: entity.__to_values(),
-        }
-    }
-
-    /// Creates an INSERT builder from an entity, inferring the table name from [`Entity::TABLE`].
+    /// Creates an INSERT builder pre-populated with all fields from an entity instance,
+    /// inferring the table name from [`Entity::TABLE`].
     #[must_use]
     pub fn from<E: Entity + EntityValues>(entity: &E) -> Self {
         Self {

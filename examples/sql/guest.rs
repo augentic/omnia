@@ -23,7 +23,7 @@ use axum::extract::Path;
 use axum::routing::{delete, get};
 use axum::{Json, Router};
 use chrono::Utc;
-use omnia_orm::{Entity, Filter, InsertBuilder, Join, Order, UpdateBuilder, entity};
+use omnia_orm::{Entity, Filter, Join, Order, SelectBuilder, entity};
 use omnia_sdk::{HttpResult, TableStore};
 use omnia_wasi_sql::readwrite;
 use omnia_wasi_sql::types::{Connection, Statement};
@@ -113,7 +113,7 @@ async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> HttpResult<Json<
         created_at: Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
     };
 
-    let query = InsertBuilder::from(&agency).build().context("failed to build insert query")?;
+    let query = agency.insert().build().context("failed to build insert query")?;
 
     Provider
         .exec("db".to_string(), query.sql, query.params)
@@ -178,7 +178,7 @@ async fn update_agency(
 
     let _ = agencies.first().ok_or_else(|| anyhow!("agency not found"))?;
 
-    let query = UpdateBuilder::new("agency")
+    let query = Agency::update()
         .set_if("name", req.name)
         .set_if("url", req.url)
         .set_if("timezone", req.timezone)
@@ -296,7 +296,7 @@ async fn create_feed(
         created_at: Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
     };
 
-    let query = InsertBuilder::from(&feed).build().context("failed to build insert query")?;
+    let query = feed.insert().build().context("failed to build insert query")?;
 
     Provider
         .exec("db".to_string(), query.sql, query.params)
@@ -313,7 +313,8 @@ async fn list_all_feeds() -> HttpResult<Json<Value>> {
     tracing::info!("list all feeds with agency info");
     ensure_schema().await?;
 
-    let select = FeedWithAgency::select()
+    let select = SelectBuilder::new("feed")
+        .columns(Feed::COLUMNS.iter().copied())
         .column_as("agency.name", "agency_name")
         .column_as("agency.url", "agency_url")
         .column_as("agency.timezone", "agency_timezone")
@@ -430,8 +431,8 @@ entity!(
     }
 );
 
-// FeedWithAgency uses the basic entity definition. The join and aliased columns
-// are specified at query-build time via `.join()` and `.column_as()`.
+// FeedWithAgency is used only for `from_row()` mapping. The SELECT query is
+// built explicitly with `Feed::COLUMNS` plus `.column_as()` for joined fields.
 entity!(
     table = "feed",
     #[derive(Debug, Clone, Serialize)]
