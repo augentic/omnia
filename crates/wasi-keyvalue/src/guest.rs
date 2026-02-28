@@ -5,7 +5,7 @@
 mod generated {
     #![allow(missing_docs)]
     wit_bindgen::generate!({
-    world: "keyvalue",
+    world: "imports",
     path: "wit",
     generate_all,
     });

@@ -19,7 +19,7 @@ mod generated {
     #![allow(clippy::collection_is_never_read)]
 
     wit_bindgen::generate!({
-        world: "otel",
+        world: "imports",
         path: "wit",
         generate_all,
     });

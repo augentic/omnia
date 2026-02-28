@@ -1,0 +1,42 @@
+package omnia:vault@0.1.0;
+
+interface vault {
+  /// An error type that encapsulates the different errors that can occur fetching secrets
+  variant error {
+    /// The host does not recognize the store identifier requested.
+    no-such-store,
+    /// The requesting component does not have access to the specified store
+    /// (which may or may not exist).
+    access-denied,
+    /// Some implementation-specific error has occurred (e.g. I/O)
+    other(string),
+  }
+
+  /// A locker contains collection of related secrets.
+  resource locker {
+    /// Get the specified secret.
+    ///
+    /// Returns `none` if the specified secret does not exist.
+    get: async func(secret-id: string) -> result<option<list<u8>>, error>;
+    /// Store a secret in the vault. If the `id` already exists, the
+    /// secret will be overwritten.
+    set: async func(secret-id: string, value: list<u8>) -> result<_, error>;
+    /// Delete the specified secret.
+    ///
+    /// Will do nothing if the secret does not exist.
+    delete: async func(secret-id: string) -> result<_, error>;
+    /// Check if the specified secret exists.
+    exists: async func(secret-id: string) -> result<bool, error>;
+    /// List all `secret-id`s in the locker.
+    list-ids: async func() -> result<list<string>, error>;
+  }
+
+  /// Open the specified locker.
+  ///
+  /// `error::no-such-store` will be raised if the `identifier` is not recognized.
+  open: async func(locker-id: string) -> result<locker, error>;
+}
+
+world imports {
+  import vault;
+}

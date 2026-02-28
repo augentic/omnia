@@ -1,4 +1,0 @@
-[config]
-url = "https://github.com/WebAssembly/wasi-config/archive/main.tar.gz"
-sha256 = "1b2b0aa370dacb8e4997c05effb55a5b5b7f2df0399ebe65ca6483d32f91a719"
-sha512 = "8360214390c8eb08fb0028e5bbb83b87e5c5982d0cfcc3c3f3be053f750eaacb0d806f9fbc91ce8d864df78b84babab8adb269a3f70fbc1fdf7f1f33e9843e43"

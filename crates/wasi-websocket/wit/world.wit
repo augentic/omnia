@@ -1,5 +1,0 @@
-package omnia:wasi-websocket;
-
-world websocket {
-    include wasi:websocket/duplex@0.1.0;
-}

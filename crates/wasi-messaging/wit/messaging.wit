@@ -1,0 +1,150 @@
+package wasi:messaging@0.2.0-draft;
+
+interface types {
+  /// A type alias for list<tuple<string, string>> to represent metadata attached to a message
+  type metadata = list<tuple<string, string>>;
+
+  /// A type alias for string to represent a message topic
+  type topic = string;
+
+  /// A connection to a message-exchange service (e.g., buffer, broker, etc.).
+  resource client {
+    connect: static async func(name: string) -> result<client, error>;
+    disconnect: func() -> result<_, error>;
+  }
+
+  /// Errors that can occur when using the messaging interface.
+  variant error {
+    /// The request or operation timed out.
+    timeout,
+    /// An error occurred with the connection. Includes a message for additional context
+    connection(string),
+    /// A permission error occurred. Includes a message for additional context
+    permission-denied(string),
+    /// A catch all for other types of errors
+    other(string),
+  }
+
+  /// A message with a binary payload and additional information
+  resource message {
+    constructor(data: list<u8>);
+    /// The topic/subject/channel this message was received on, if any
+    topic: func() -> option<topic>;
+    /// An optional content-type describing the format of the data in the message. This is
+    /// sometimes described as the "format" type
+    content-type: func() -> option<string>;
+    /// Set the content-type describing the format of the data in the message. This is
+    /// sometimes described as the "format" type
+    set-content-type: func(content-type: string);
+    /// An opaque blob of data
+    data: func() -> list<u8>;
+    /// Set the opaque blob of data for this message, discarding the old value
+    set-data: func(data: list<u8>);
+    /// Optional metadata (also called headers or attributes in some systems) attached to the
+    /// message. This metadata is simply decoration and should not be interpreted by a host
+    /// to ensure portability across different implementors (e.g., Kafka -> NATS, etc.).
+    metadata: func() -> option<metadata>;
+    /// Add a new key-value pair to the metadata, overwriting any existing value for the same key
+    add-metadata: func(key: string, value: string);
+    /// Set the metadata
+    set-metadata: func(meta: metadata);
+    /// Remove a key-value pair from the metadata
+    remove-metadata: func(key: string);
+  }
+}
+
+interface incoming-handler {
+  use types.{message, error, topic};
+
+  /// Whenever this guest receives a message in one of the subscribed topics, the message is
+  /// sent to this handler. The guest is responsible for matching on the topic and handling the
+  /// message accordingly. Implementors (such as hosts) calling this interface should make their
+  /// own decisions on how to handle errors returned from this function.
+  handle: async func(message: message) -> result<_, error>;
+}
+
+/// The producer interface is used to send messages to a channel/topic.
+interface producer {
+  use types.{client, message, error, topic};
+
+  /// Sends the message using the given client.
+  send: async func(c: borrow<client>, topic: topic, message: message) -> result<_, error>;
+}
+
+/// The request-reply interface allows a guest to send a message and await a response. This
+/// interface is considered optional as not all message services support the concept of
+/// request/reply. However, request/reply is a very common pattern in messaging and as such, we have
+/// included it as a core interface.
+interface request-reply {
+  use types.{client, message, error, topic};
+
+  /// Options for a request/reply operation. This is a resource to allow for future expansion of
+  /// options.
+  resource request-options {
+    /// Creates a new request options resource with no options set.
+    constructor();
+    /// The maximum amount of time to wait for a response. If the timeout value is not set, then
+    /// the request/reply operation will block until a message is received in response.
+    set-timeout-ms: func(timeout-ms: u32);
+    /// The maximum number of replies to expect before returning.
+    set-expected-replies: func(expected-replies: u32);
+  }
+
+  /// Performs a blocking request/reply operation with an optional set of request options.
+  ///
+  /// The behavior of this function is largely dependent on the options given to the function.
+  /// If no options are provided, then the request/reply operation will block until a single
+  /// message is received in response. If a timeout is provided, then the request/reply operation
+  /// will block for the specified amount of time before returning an error if no messages were
+  /// received (or the list of messages that were received). If both a timeout and an expected
+  /// number of replies are provided, the function should return when either condition is met
+  /// (whichever comes first)—e.g., (1) if no replies were received within the timeout return an
+  /// error, (2) if the maximum expected number of replies were received before timeout, return
+  /// the list of messages, or (3) if the timeout is reached before the expected number of replies,
+  /// return the list of messages received up to that point.
+  request: async func(c: borrow<client>, topic: topic, message: borrow<message>, options: option<request-options>) -> result<list<message>, error>;
+
+  /// Replies to the given message with the given response message. The details of which topic
+  /// the message is sent to is up to the implementation. This allows for reply-to details to be
+  /// handled in the best way possible for the underlying messaging system.
+  ///
+  /// Please note that this reply functionality is different than something like HTTP because there
+  /// are several use cases in which a reply might not be required for every message (so this would
+  /// be a noop). There are also cases when you might want to reply and then continue processing.
+  /// Additionally, you might want to reply to a message several times (such as providing an
+  /// update). So this function is allowed to be called multiple times, unlike something like HTTP
+  /// where the reply is sent and the connection is closed.
+  reply: async func(reply-to: borrow<message>, message: message) -> result<_, error>;
+}
+
+/// The `imports` world defines the interfaces that the component will import from the host.
+/// It includes the `producer` interface for sending messages.
+world imports {
+  import types;
+  import producer;
+}
+/// The `imports-request-reply` world extends `imports` by including the `request-reply` interface.
+/// This allows the component to perform request/reply messaging patterns.
+world imports-request-reply {
+  import types;
+  import request-reply;
+  import producer;
+}
+/// The `messaging-request-reply` world combines `imports-request-reply` with the `incoming-handler`
+/// export. This setup allows the host to interact with the component for both sending messages and
+/// handling incoming messages with request/reply capabilities.
+world messaging-request-reply {
+  import types;
+  import request-reply;
+  import producer;
+
+  export incoming-handler;
+}
+/// The `messaging-core` world includes the basic `imports` and exports the `incoming-handler`,
+/// enabling the component to handle incoming messages without request/reply capabilities.
+world messaging-core {
+  import types;
+  import producer;
+
+  export incoming-handler;
+}

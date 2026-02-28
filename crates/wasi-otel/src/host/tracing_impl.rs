@@ -12,7 +12,8 @@ use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span, Sta
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use wasmtime::component::Accessor;
 
-use crate::host::generated::wasi::otel::tracing::{self as wasi, HostWithStore};
+use crate::host::generated::omnia::otel::tracing::{self as wasi, HostWithStore};
+use crate::host::types_impl::datetime_nanos;
 use crate::{WasiOtel, WasiOtelCtxView};
 
 impl HostWithStore for WasiOtel {
@@ -97,8 +98,8 @@ impl From<wasi::SpanData> for Span {
             flags: span.span_context.trace_flags.into(),
             name: span.name,
             kind: span.span_kind as i32,
-            start_time_unix_nano: span.start_time.into(),
-            end_time_unix_nano: span.end_time.into(),
+            start_time_unix_nano: datetime_nanos(span.start_time),
+            end_time_unix_nano: datetime_nanos(span.end_time),
             attributes: span.attributes.into_iter().map(Into::into).collect(),
             dropped_attributes_count: span.dropped_attributes,
             events: span.events.into_iter().map(Into::into).collect(),
@@ -152,7 +153,7 @@ impl From<wasi::TraceFlags> for u32 {
 impl From<wasi::Event> for Event {
     fn from(event: wasi::Event) -> Self {
         Self {
-            time_unix_nano: event.time.into(),
+            time_unix_nano: datetime_nanos(event.time),
             name: event.name,
             attributes: event.attributes.into_iter().map(Into::into).collect(),
             dropped_attributes_count: 0,

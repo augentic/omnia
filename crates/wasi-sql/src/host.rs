@@ -15,7 +15,7 @@ mod generated {
     pub use super::{ConnectionProxy, Statement};
 
     wasmtime::component::bindgen!({
-        world: "sql",
+        world: "imports",
         path: "wit",
         imports: {
             default: store | tracing | trappable,

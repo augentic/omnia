@@ -11,12 +11,11 @@ mod types_impl;
 mod generated {
     #![allow(missing_docs)]
 
-    pub use wasi::websocket::types::Error;
-
+    pub use self::omnia::websocket::types::Error;
     pub use crate::host::resource::{ClientProxy, EventProxy};
 
     wasmtime::component::bindgen!({
-        world: "websocket",
+        world: "duplex",
         path: "wit",
         imports: {
             default: store | tracing | trappable,
@@ -25,11 +24,11 @@ mod generated {
             default: store | tracing | trappable,
         },
         with: {
-            "wasi:websocket/types.client": ClientProxy,
-            "wasi:websocket/types.event": EventProxy,
+            "omnia:websocket/types.client": ClientProxy,
+            "omnia:websocket/types.event": EventProxy,
         },
         trappable_error_type: {
-            "wasi:websocket/types.error" => Error,
+            "omnia:websocket/types.error" => Error,
         },
     });
 }
@@ -43,9 +42,9 @@ use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::{ResourceTable, ResourceTableError};
 
 pub use self::default_impl::WebSocketDefault;
-pub use self::generated::Websocket;
-pub use self::generated::wasi::websocket::types::Error;
-use self::generated::wasi::websocket::{client, types as generated_types};
+pub use self::generated::Duplex;
+pub use self::generated::omnia::websocket::types::Error;
+use self::generated::omnia::websocket::{client, types as generated_types};
 pub use self::resource::*;
 
 /// Result type for WebSocket operations.

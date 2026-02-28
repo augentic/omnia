@@ -6,7 +6,7 @@ mod generated {
     #![allow(missing_docs)]
 
     wit_bindgen::generate!({
-        world: "websocket",
+        world: "duplex",
         path: "wit",
         additional_derives: [Clone],
         generate_all,
@@ -15,6 +15,6 @@ mod generated {
     });
 }
 
-pub use self::generated::exports::wasi::websocket::*;
-pub use self::generated::wasi::websocket::*;
+pub use self::generated::exports::omnia::websocket::*;
+pub use self::generated::omnia::websocket::*;
 pub use self::generated::*;

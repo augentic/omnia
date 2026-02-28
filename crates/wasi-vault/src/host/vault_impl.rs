@@ -1,7 +1,7 @@
 use anyhow::Context;
 use wasmtime::component::{Access, Accessor, Resource};
 
-use crate::host::generated::wasi::vault::vault::Error;
+use crate::host::generated::omnia::vault::vault::Error;
 use crate::host::resource::LockerProxy;
 use crate::host::vault::{Host, HostLocker, HostLockerWithStore, HostWithStore};
 use crate::host::{Result, WasiVault, WasiVaultCtxView};

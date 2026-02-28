@@ -1,10 +1,10 @@
 use anyhow::Context;
 use wasmtime::component::{Access, Accessor, Resource};
 
-use crate::host::generated::wasi::identity::credentials::{
+use crate::host::generated::omnia::identity::credentials::{
     AccessToken, Host, HostIdentity, HostIdentityWithStore, HostWithStore,
 };
-use crate::host::generated::wasi::identity::types::Error;
+use crate::host::generated::omnia::identity::types::Error;
 use crate::host::resource::IdentityProxy;
 use crate::host::{Result, WasiIdentity, WasiIdentityCtxView};
 

@@ -6,7 +6,7 @@ mod generated {
     #![allow(missing_docs)]
 
     wit_bindgen::generate!({
-        world: "messaging",
+        world: "messaging-request-reply",
         path: "wit",
         additional_derives: [Clone],
         generate_all,

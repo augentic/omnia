@@ -4,7 +4,7 @@ use opentelemetry::{Array, Key, Value};
 use opentelemetry_sdk::Resource;
 
 use crate::host::WasiOtelCtxView;
-use crate::host::generated::wasi::otel::types;
+use crate::host::generated::omnia::otel::types;
 
 impl types::Host for WasiOtelCtxView<'_> {
     fn convert_error(&mut self, err: types::Error) -> wasmtime::Result<types::Error> {
@@ -162,8 +162,6 @@ impl Hash for types::InstrumentationScope {
     }
 }
 
-impl From<types::Datetime> for u64 {
-    fn from(dt: types::Datetime) -> Self {
-        (dt.seconds * 1_000_000_000) + Self::from(dt.nanoseconds)
-    }
+pub fn datetime_nanos(dt: types::Datetime) -> u64 {
+    (dt.seconds * 1_000_000_000) + u64::from(dt.nanoseconds)
 }

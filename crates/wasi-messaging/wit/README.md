@@ -7,5 +7,5 @@ Install [wkg](https://github.com/bytecodealliance/wasm-pkg-tools).
 ## Usage
 
 ```bash
-wkg get omnia:identity@0.2.0-draft --config .wkg-config.toml --output ./crates/wasi-identity/wit/identity.wit
+wkg get wasi:messaging@0.2.0-draft --config .wkg-config.toml --output ./crates/wasi-messaging/wit/messaging.wit
 ```

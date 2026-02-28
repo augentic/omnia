@@ -15,7 +15,7 @@ use omnia::Backend;
 use tracing::instrument;
 
 use crate::host::WasiIdentityCtx;
-pub use crate::host::generated::wasi::identity::credentials::AccessToken;
+pub use crate::host::generated::omnia::identity::credentials::AccessToken;
 use crate::host::resource::{FutureResult, Identity};
 
 type TokenResponse = StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>;

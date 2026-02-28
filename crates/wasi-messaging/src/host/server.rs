@@ -7,7 +7,7 @@ use tracing::{Instrument, debug_span, instrument};
 use wasmtime::Store;
 
 use crate::host::WasiMessagingView;
-use crate::host::generated::Messaging;
+use crate::host::generated::MessagingRequestReply;
 use crate::host::resource::{MessageProxy, Subscriptions};
 
 #[instrument("messaging-server", skip(state))]
@@ -72,7 +72,7 @@ where
         let instance_pre = self.state.instance_pre();
         let mut store = Store::new(instance_pre.engine(), store_data);
         let instance = instance_pre.instantiate_async(&mut store).await?;
-        let messaging = Messaging::new(&mut store, &instance)?;
+        let messaging = MessagingRequestReply::new(&mut store, &instance)?;
 
         store
             .run_concurrent(async |store| {

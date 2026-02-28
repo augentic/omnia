@@ -8,20 +8,20 @@ mod vault_impl;
 
 mod generated {
 
-    pub use self::wasi::vault::vault::Error;
+    pub use self::omnia::vault::vault::Error;
     pub use super::LockerProxy;
 
     wasmtime::component::bindgen!({
-        world: "vault",
+        world: "imports",
         path: "wit",
         imports: {
             default: store | tracing | trappable,
         },
         with: {
-            "wasi:vault/vault.locker": LockerProxy,
+            "omnia:vault/vault.locker": LockerProxy,
         },
         trappable_error_type: {
-            "wasi:vault/vault.error" => Error,
+            "omnia:vault/vault.error" => Error,
         },
     });
 }
@@ -34,7 +34,7 @@ use omnia::{Host, Server, State};
 use wasmtime::component::{HasData, Linker, ResourceTableError};
 use wasmtime_wasi::ResourceTable;
 
-use self::generated::wasi::vault::vault;
+use self::generated::omnia::vault::vault;
 pub use crate::host::default_impl::VaultDefault;
 use crate::host::generated::Error;
 pub use crate::host::resource::*;

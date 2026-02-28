@@ -17,7 +17,7 @@ use opentelemetry_sdk::metrics::{
     InstrumentKind, ManualReader, Pipeline, SdkMeterProvider, Temporality,
 };
 
-use crate::guest::generated::wasi::otel::metrics as wasi;
+use crate::guest::generated::omnia::otel::metrics as wasi;
 
 pub fn init(resource: Resource) -> SdkMeterProvider {
     let reader = Reader::new();

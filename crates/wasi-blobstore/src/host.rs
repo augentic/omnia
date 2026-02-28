@@ -14,7 +14,7 @@ mod generated {
     pub use super::{ContainerProxy, IncomingValue, OutgoingValue, StreamObjectNames};
 
     wasmtime::component::bindgen!({
-        world: "blobstore",
+        world: "imports",
         path: "wit",
         imports: {
             default: store | tracing | trappable,

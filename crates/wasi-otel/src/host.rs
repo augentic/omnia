@@ -6,17 +6,20 @@ mod types_impl;
 
 mod generated {
 
-    pub use self::wasi::otel::types::Error;
+    pub use self::omnia::otel::types::Error;
 
     wasmtime::component::bindgen!({
-        world: "otel",
+        world: "imports",
         path: "wit",
         imports: {
-            "wasi:otel/resource.resource": tracing | trappable,
+            "omnia:otel/resource.resource": tracing | trappable,
             default: store | tracing | trappable,
         },
+        with: {
+            "wasi:clocks": wasmtime_wasi::p2::bindings::clocks,
+        },
         trappable_error_type: {
-            "wasi:otel/types.error" => Error,
+            "omnia:otel/types.error" => Error,
         }
     });
 }
@@ -29,7 +32,7 @@ use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use wasmtime::component::{HasData, Linker, ResourceTable};
 
 pub use self::default_impl::OtelDefault;
-use self::generated::wasi::otel::{metrics, resource, tracing, types};
+use self::generated::omnia::otel::{metrics, resource, tracing, types};
 
 /// Host-side service for `wasi:otel`.
 #[derive(Debug)]
