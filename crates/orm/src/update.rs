@@ -1,36 +1,26 @@
-use std::marker::PhantomData;
-
 use anyhow::Result;
 use sea_query::{Alias, SimpleExpr, Value};
 
-use crate::entity::{Entity, values_to_wasi_datatypes};
+use crate::entity::values_to_wasi_datatypes;
 use crate::filter::Filter;
 use crate::query::{Query, QueryBuilder};
 
 /// Builder for constructing UPDATE queries.
-pub struct UpdateBuilder<M: Entity> {
+pub struct UpdateBuilder {
+    table: String,
     set_clauses: Vec<(&'static str, Value)>,
     filters: Vec<SimpleExpr>,
-    returning: Vec<&'static str>,
-    _marker: PhantomData<M>,
 }
 
-impl<M: Entity> Default for UpdateBuilder<M> {
-    fn default() -> Self {
+impl UpdateBuilder {
+    /// Creates a new UPDATE query builder for the given table.
+    #[must_use]
+    pub fn new(table: &str) -> Self {
         Self {
+            table: table.to_string(),
             set_clauses: Vec::new(),
             filters: Vec::new(),
-            returning: Vec::new(),
-            _marker: PhantomData,
         }
-    }
-}
-
-impl<M: Entity> UpdateBuilder<M> {
-    /// Creates a new UPDATE query builder.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
     }
 
     /// Sets a column to a new value.
@@ -43,17 +33,24 @@ impl<M: Entity> UpdateBuilder<M> {
         self
     }
 
-    /// Adds a WHERE clause filter.
+    /// Conditionally sets a column when the value is `Some`.
+    ///
+    /// This is useful for partial updates where only provided fields should be modified.
     #[must_use]
-    pub fn r#where(mut self, filter: Filter) -> Self {
-        self.filters.push(filter.into_expr(M::TABLE));
-        self
+    pub fn set_if<V>(self, column: &'static str, value: Option<V>) -> Self
+    where
+        V: Into<Value>,
+    {
+        match value {
+            Some(v) => self.set(column, v),
+            None => self,
+        }
     }
 
-    /// Specifies columns to return from updated rows.
+    /// Adds a WHERE clause filter.
     #[must_use]
-    pub fn returning(mut self, column: &'static str) -> Self {
-        self.returning.push(column);
+    pub fn filter(mut self, filter: Filter) -> Self {
+        self.filters.push(filter.into_expr(&self.table));
         self
     }
 
@@ -64,7 +61,7 @@ impl<M: Entity> UpdateBuilder<M> {
     /// Returns an error if query values cannot be converted to WASI data types.
     pub fn build(self) -> Result<Query> {
         let mut statement = sea_query::Query::update();
-        statement.table(Alias::new(M::TABLE));
+        statement.table(Alias::new(&self.table));
 
         for (column, value) in self.set_clauses {
             statement.value(Alias::new(column), value);
@@ -74,15 +71,11 @@ impl<M: Entity> UpdateBuilder<M> {
             statement.and_where(expr);
         }
 
-        for column in self.returning {
-            statement.returning_col(Alias::new(column));
-        }
-
-        let (sql, values) = statement.build(QueryBuilder::default());
+        let (sql, values) = statement.build(QueryBuilder);
         let params = values_to_wasi_datatypes(values)?;
 
         tracing::debug!(
-            table = M::TABLE,
+            table = %self.table,
             sql = %sql,
             param_count = params.len(),
             "UpdateBuilder generated SQL"

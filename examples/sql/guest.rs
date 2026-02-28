@@ -23,9 +23,7 @@ use axum::extract::Path;
 use axum::routing::{delete, get};
 use axum::{Json, Router};
 use chrono::Utc;
-use omnia_orm::{
-    DeleteBuilder, Entity, Filter, InsertBuilder, Join, SelectBuilder, UpdateBuilder, entity,
-};
+use omnia_orm::{Entity, Filter, InsertBuilder, Join, Order, UpdateBuilder, entity};
 use omnia_sdk::{HttpResult, TableStore};
 use omnia_wasi_sql::readwrite;
 use omnia_wasi_sql::types::{Connection, Statement};
@@ -60,8 +58,8 @@ async fn list_agencies() -> HttpResult<Json<Value>> {
     tracing::info!("list all agencies");
     ensure_schema().await?;
 
-    let select = SelectBuilder::<Agency>::new()
-        .order_by_desc(None, "created_at")
+    let select = Agency::select()
+        .order_by("created_at", Order::Desc)
         .build()
         .context("failed to build query")?;
 
@@ -86,8 +84,8 @@ async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> HttpResult<Json<
     tracing::info!("create agency");
     ensure_schema().await?;
 
-    let select = SelectBuilder::<Agency>::new()
-        .order_by_desc(None, "agency_id")
+    let select = Agency::select()
+        .order_by("agency_id", Order::Desc)
         .limit(1)
         .build()
         .context("failed to build max agency_id query")?;
@@ -115,9 +113,7 @@ async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> HttpResult<Json<
         created_at: Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
     };
 
-    let query = InsertBuilder::<Agency>::from_entity(&agency)
-        .build()
-        .context("failed to build insert query")?;
+    let query = InsertBuilder::from(&agency).build().context("failed to build insert query")?;
 
     Provider
         .exec("db".to_string(), query.sql, query.params)
@@ -134,8 +130,8 @@ async fn get_agency(Path(id): Path<i64>) -> HttpResult<Json<Value>> {
     tracing::info!("get agency {}", id);
     ensure_schema().await?;
 
-    let select = SelectBuilder::<Agency>::new()
-        .r#where(Filter::eq("agency_id", id))
+    let select = Agency::select()
+        .filter(Filter::eq("agency_id", id))
         .build()
         .context("failed to build fetch agency by ID query")?;
 
@@ -164,9 +160,8 @@ async fn update_agency(
     tracing::info!("update agency {}", id);
     ensure_schema().await?;
 
-    // Verify agency exists
-    let select = SelectBuilder::<Agency>::new()
-        .r#where(Filter::eq("agency_id", id))
+    let select = Agency::select()
+        .filter(Filter::eq("agency_id", id))
         .build()
         .context("failed to build fetch agency by ID query")?;
 
@@ -183,21 +178,11 @@ async fn update_agency(
 
     let _ = agencies.first().ok_or_else(|| anyhow!("agency not found"))?;
 
-    // Build update query - conditionally set only provided fields
-    let mut update = UpdateBuilder::<Agency>::new();
-
-    if let Some(name) = req.name {
-        update = update.set("name", name);
-    }
-    if let Some(url) = req.url {
-        update = update.set("url", url);
-    }
-    if let Some(timezone) = req.timezone {
-        update = update.set("timezone", timezone);
-    }
-
-    let query = update
-        .r#where(Filter::eq("agency_id", id))
+    let query = UpdateBuilder::new("agency")
+        .set_if("name", req.name)
+        .set_if("url", req.url)
+        .set_if("timezone", req.timezone)
+        .filter(Filter::eq("agency_id", id))
         .build()
         .context("failed to build update query")?;
 
@@ -206,9 +191,8 @@ async fn update_agency(
         .await
         .context("failed to update agency")?;
 
-    // Fetch updated agency
-    let select = SelectBuilder::<Agency>::new()
-        .r#where(Filter::eq("agency_id", id))
+    let select = Agency::select()
+        .filter(Filter::eq("agency_id", id))
         .build()
         .context("failed to build fetch agency by ID query")?;
 
@@ -235,9 +219,9 @@ async fn list_agency_feeds(Path(agency_id): Path<i64>) -> HttpResult<Json<Value>
     tracing::info!("list feeds for agency {}", agency_id);
     ensure_schema().await?;
 
-    let select = SelectBuilder::<Feed>::new()
-        .r#where(Filter::eq("agency_id", agency_id))
-        .order_by_desc(None, "created_at")
+    let select = Feed::select()
+        .filter(Filter::eq("agency_id", agency_id))
+        .order_by("created_at", Order::Desc)
         .build()
         .context("failed to build query to select feeds by agency_id")?;
 
@@ -264,9 +248,8 @@ async fn create_feed(
     tracing::info!("create feed for agency {}", agency_id);
     ensure_schema().await?;
 
-    // Verify agency exists
-    let select = SelectBuilder::<Agency>::new()
-        .r#where(Filter::eq("agency_id", agency_id))
+    let select = Agency::select()
+        .filter(Filter::eq("agency_id", agency_id))
         .build()
         .context("failed to build fetch agency by ID query")?;
 
@@ -285,8 +268,8 @@ async fn create_feed(
         return Err(anyhow!("agency not found").into());
     }
 
-    let select = SelectBuilder::<Feed>::new()
-        .order_by_desc(None, "feed_id")
+    let select = Feed::select()
+        .order_by("feed_id", Order::Desc)
         .limit(1)
         .build()
         .context("failed to build max feed_id query")?;
@@ -313,9 +296,7 @@ async fn create_feed(
         created_at: Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
     };
 
-    let query = InsertBuilder::<Feed>::from_entity(&feed)
-        .build()
-        .context("failed to build insert query")?;
+    let query = InsertBuilder::from(&feed).build().context("failed to build insert query")?;
 
     Provider
         .exec("db".to_string(), query.sql, query.params)
@@ -332,8 +313,12 @@ async fn list_all_feeds() -> HttpResult<Json<Value>> {
     tracing::info!("list all feeds with agency info");
     ensure_schema().await?;
 
-    let select = SelectBuilder::<FeedWithAgency>::new()
-        .order_by_desc(Some("feed"), "created_at")
+    let select = FeedWithAgency::select()
+        .column_as("agency.name", "agency_name")
+        .column_as("agency.url", "agency_url")
+        .column_as("agency.timezone", "agency_timezone")
+        .join(Join::left("agency", Filter::col_eq("feed", "agency_id", "agency", "agency_id")))
+        .order_by("created_at", Order::Desc)
         .limit(100)
         .build()
         .context("failed to build fetch feeds with agencies query")?;
@@ -359,8 +344,8 @@ async fn delete_feed(Path(id): Path<i64>) -> HttpResult<Json<Value>> {
     tracing::info!("delete feed {}", id);
     ensure_schema().await?;
 
-    let query = DeleteBuilder::<Feed>::new()
-        .r#where(Filter::eq("feed_id", id))
+    let query = Feed::delete()
+        .filter(Filter::eq("feed_id", id))
         .build()
         .context("failed to build delete query")?;
 
@@ -445,26 +430,19 @@ entity!(
     }
 );
 
-// Entity with JOIN - demonstrates the power of joins
-// Uses the `columns` parameter to manually specify columns from the joined agency table.
-// Fields not in `columns` are auto-qualified with the main table (feed).
+// FeedWithAgency uses the basic entity definition. The join and aliased columns
+// are specified at query-build time via `.join()` and `.column_as()`.
 entity!(
     table = "feed",
-    columns = [
-        ("agency", "name", "agency_name"),
-        ("agency", "url", "agency_url"),
-        ("agency", "timezone", "agency_timezone"),
-    ],
-    joins = [Join::left("agency", Filter::col_eq("feed", "agency_id", "agency", "agency_id")),],
     #[derive(Debug, Clone, Serialize)]
     pub struct FeedWithAgency {
-        pub feed_id: i64,                    // Auto: feed.feed_id
-        pub agency_id: i64,                  // Auto: feed.agency_id
-        pub description: String,             // Auto: feed.description
-        pub created_at: String,              // Auto: feed.created_at
-        pub agency_name: String,             // Manual: agency.name AS agency_name
-        pub agency_url: Option<String>,      // Manual: agency.url AS agency_url
-        pub agency_timezone: Option<String>, // Manual: agency.timezone AS agency_timezone
+        pub feed_id: i64,
+        pub agency_id: i64,
+        pub description: String,
+        pub created_at: String,
+        pub agency_name: String,
+        pub agency_url: Option<String>,
+        pub agency_timezone: Option<String>,
     }
 );
 

@@ -3,9 +3,7 @@
 #![allow(dead_code)]
 
 use chrono::{DateTime, Utc};
-use omnia_orm::{Filter, Join, entity};
-
-// Common test entities used across multiple test files
+use omnia_orm::entity;
 
 entity! {
     table = "users",
@@ -14,28 +12,6 @@ entity! {
         pub id: i64,
         pub name: String,
         pub active: bool,
-    }
-}
-
-entity! {
-    table = "posts",
-    joins = [Join::left("users", Filter::col_eq("posts", "author_id", "users", "id"))],
-    #[derive(Debug, Clone)]
-    pub struct PostWithJoin {
-        pub id: i64,
-        pub title: String,
-    }
-}
-
-entity! {
-    table = "comments",
-    columns = [("users", "name", "author_name")],
-    joins = [Join::left("users", Filter::col_eq("comments", "user_id", "users", "id"))],
-    #[derive(Debug, Clone)]
-    pub struct CommentWithAlias {
-        pub id: i64,
-        pub content: String,
-        pub author_name: String,
     }
 }
 
@@ -75,9 +51,7 @@ fn canonicalize_sql(sql: &str) -> String {
                 in_single_quote = !in_single_quote;
                 cleaned.push(ch);
             }
-            '"' if !in_single_quote => {
-                // Strip identifier quoting to avoid brittle comparisons.
-            }
+            '"' if !in_single_quote => {}
             _ => cleaned.push(ch),
         }
     }
@@ -87,7 +61,7 @@ fn canonicalize_sql(sql: &str) -> String {
 
 /// Assert that SQL contains all expected fragments in order.
 ///
-/// This helper normalizes SQL to avoid brittle exact-string matching with ``SeaQuery`` output.
+/// This helper normalizes SQL to avoid brittle exact-string matching with `SeaQuery` output.
 /// It strips identifier quotes, normalizes whitespace, and checks that fragments appear
 /// sequentially in the generated SQL.
 #[allow(clippy::missing_panics_doc)]

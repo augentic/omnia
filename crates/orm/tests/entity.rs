@@ -1,4 +1,4 @@
-//! Integration tests for the ORM ``entity!`` macro.
+//! Integration tests for the ORM `entity!` macro.
 //!
 //! Tests the public API as users would interact with it.
 
@@ -15,70 +15,14 @@ mod common;
 
 use chrono::{DateTime, Utc};
 use common::{Event, User};
-use omnia_orm::{DataType, Entity, Field, Filter, Join, Row, entity};
+use omnia_orm::{DataType, Entity, Field, Row, entity};
 
 use crate::common::Item;
-
-entity! {
-    table = "test_comments",
-    joins = [
-        Join::inner("users", Filter::col_eq("test_comments", "user_id", "users", "id"))
-    ],
-    pub struct TestCommentsWithUser {
-        pub id: i64,
-        pub content: String,
-        pub user_name: String,
-    }
-}
-
-entity! {
-    table = "test_orders",
-    columns = [
-        ("test_orders", "id", "id"),
-        ("test_orders", "total", "total"),
-        ("customers", "name", "customer_name"),
-    ],
-    joins = [
-        Join::left("customers", Filter::col_eq("test_orders", "customer_id", "customers", "id"))
-    ],
-    pub struct TestOrdersWithCustomer {
-        pub id: i64,
-        pub total: f64,
-        pub customer_name: String,
-    }
-}
 
 #[test]
 fn entity_basic() {
     assert_eq!(User::TABLE, "users");
-    assert_eq!(User::projection(), &["id", "name", "active"]);
-    assert!(User::joins().is_empty());
-    assert!(User::column_specs().is_empty());
-    assert!(User::ordering().is_empty());
-}
-
-#[test]
-fn entity_with_joins() {
-    assert_eq!(TestCommentsWithUser::TABLE, "test_comments");
-    assert_eq!(TestCommentsWithUser::projection(), &["id", "content", "user_name"]);
-
-    let joins = TestCommentsWithUser::joins();
-    assert_eq!(joins.len(), 1);
-}
-
-#[test]
-fn entity_with_joins_and_columns() {
-    assert_eq!(TestOrdersWithCustomer::TABLE, "test_orders");
-    assert_eq!(TestOrdersWithCustomer::projection(), &["id", "total", "customer_name"]);
-
-    let column_specs = TestOrdersWithCustomer::column_specs();
-    assert_eq!(column_specs.len(), 3);
-    assert_eq!(column_specs[0], ("id", "test_orders", "id"));
-    assert_eq!(column_specs[1], ("total", "test_orders", "total"));
-    assert_eq!(column_specs[2], ("customer_name", "customers", "name"));
-
-    let joins = TestOrdersWithCustomer::joins();
-    assert_eq!(joins.len(), 1);
+    assert_eq!(User::COLUMNS, &["id", "name", "active"]);
 }
 
 #[test]
@@ -241,7 +185,6 @@ fn entity_with_multiple_fields() {
     assert_eq!(result.json_field, br#"{"key":"value","count":42}"#.to_vec());
     assert_eq!(result.dt_field.format("%Y-%m-%d").to_string(), "2024-01-15");
 
-    // Ensure JSON data can be deserialized from the binary field
     let json: serde_json::Value = serde_json::from_slice(&result.json_field).unwrap();
     assert_eq!(json["key"], "value");
     assert_eq!(json["count"], 42);

@@ -1,36 +1,27 @@
+use anyhow::Result;
 use sea_query::backend::{
     EscapeBuilder, OperLeftAssocDecider, PrecedenceDecider, QuotedBuilder, TableRefBuilder,
 };
 use sea_query::prepare::SqlWriter;
-use sea_query::{BinOper, Oper, Quote, SimpleExpr, SubQueryStatement, Value};
+use sea_query::{BinOper, Oper, QueryStatementWriter, Quote, SimpleExpr, SubQueryStatement, Value};
 
 use crate::DataType;
+use crate::entity::values_to_wasi_datatypes;
 
+/// A compiled SQL query ready for execution.
 pub struct Query {
+    /// The SQL query string.
     pub sql: String,
+    /// The bound parameter values.
     pub params: Vec<DataType>,
 }
 
-pub struct QueryBuilder {
-    pub quote: Quote,
-    pub placeholder: &'static str, // "?" or "$"
-    pub numbered: bool,            // false for "?", true for "$1, $2, ..."
-}
-
-impl Default for QueryBuilder {
-    // should work for `Postgres` and `Sqlite`
-    fn default() -> Self {
-        Self {
-            quote: Quote::new(b'"'),
-            placeholder: "$",
-            numbered: true,
-        }
-    }
-}
+/// Parameterised query builder targeting Postgres/SQLite (`$1, $2, ...` placeholders).
+pub struct QueryBuilder;
 
 impl QuotedBuilder for QueryBuilder {
     fn quote(&self) -> Quote {
-        self.quote
+        Quote::new(b'"')
     }
 }
 
@@ -40,7 +31,6 @@ impl TableRefBuilder for QueryBuilder {}
 
 impl OperLeftAssocDecider for QueryBuilder {
     fn well_known_left_associative(&self, op: &BinOper) -> bool {
-        // Copied from sea-query 0.32.7 backend/query_builder.rs `common_well_known_left_associative`
         matches!(
             op,
             BinOper::And | BinOper::Or | BinOper::Add | BinOper::Sub | BinOper::Mul | BinOper::Mod
@@ -52,7 +42,6 @@ impl PrecedenceDecider for QueryBuilder {
     fn inner_expr_well_known_greater_precedence(
         &self, _inner: &SimpleExpr, _outer_oper: &Oper,
     ) -> bool {
-        // Conservative approach that forces parentheses
         false
     }
 }
@@ -73,6 +62,25 @@ impl sea_query::backend::QueryBuilder for QueryBuilder {
     }
 
     fn placeholder(&self) -> (&str, bool) {
-        (self.placeholder, self.numbered)
+        ("$", true)
     }
+}
+
+/// Builds a [`Query`] from any `SeaQuery` statement, providing an escape hatch for guests
+/// who need to construct queries directly with `SeaQuery` rather than through the ORM builders.
+///
+/// # Errors
+///
+/// Returns an error if any query parameter values cannot be converted to WASI data types.
+pub fn build_query(statement: &impl QueryStatementWriter) -> Result<Query> {
+    let (sql, values) = statement.build(QueryBuilder);
+    let params = values_to_wasi_datatypes(values)?;
+
+    tracing::debug!(
+        sql = %sql,
+        param_count = params.len(),
+        "build_query generated SQL"
+    );
+
+    Ok(Query { sql, params })
 }

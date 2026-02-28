@@ -1,8 +1,9 @@
 use anyhow::{Result, anyhow, bail};
-use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
-use sea_query::{Order, Value, Values};
+use chrono::{DateTime, NaiveDateTime, Utc};
+use sea_query::{Value, Values};
 
-use crate::join::Join;
+use crate::delete::DeleteBuilder;
+use crate::select::SelectBuilder;
 use crate::{DataType, Row};
 
 /// Trait for types that can be extracted from database rows.
@@ -33,11 +34,8 @@ pub trait FetchValue: Sized {
 /// ```
 #[macro_export]
 macro_rules! entity {
-    // Full form: columns + joins + struct (single code-generation arm)
     (
         table = $table:literal,
-        columns = [$( ($col_table:literal, $col_name:literal, $col_field:literal) ),* $(,)?],
-        joins = [$($join:expr),* $(,)?],
         $(#[$meta:meta])*
         pub struct $struct_name:ident {
             $(
@@ -57,18 +55,7 @@ macro_rules! entity {
 
         impl $crate::Entity for $struct_name {
             const TABLE: &'static str = $table;
-
-            fn projection() -> &'static [&'static str] {
-                &[ $( stringify!($field_name) ),* ]
-            }
-
-            fn joins() -> Vec<Join> {
-                vec![$($join),*]
-            }
-
-            fn column_specs() -> Vec<(&'static str, &'static str, &'static str)> {
-                vec![$( ($col_field, $col_table, $col_name) ),*]
-            }
+            const COLUMNS: &'static [&'static str] = &[$(stringify!($field_name)),*];
 
             fn from_row(row: &$crate::Row) -> anyhow::Result<Self> {
                 Ok(Self {
@@ -89,64 +76,17 @@ macro_rules! entity {
             }
         }
     };
-
-    // Joins only → forward with empty columns
-    (
-        table = $table:literal,
-        joins = [$($join:expr),* $(,)?],
-        $($rest:tt)*
-    ) => {
-        $crate::entity! {
-            table = $table,
-            columns = [],
-            joins = [$($join),*],
-            $($rest)*
-        }
-    };
-
-    // Bare table → forward with empty columns and joins
-    (
-        table = $table:literal,
-        $($rest:tt)*
-    ) => {
-        $crate::entity! {
-            table = $table,
-            columns = [],
-            joins = [],
-            $($rest)*
-        }
-    };
 }
 
-/// Trait for database entities with metadata for query building.
+/// Trait for database entities.
 ///
 /// Typically implemented via the `entity!` macro rather than manually.
 pub trait Entity: Sized {
     /// The database table name for this entity.
     const TABLE: &'static str;
 
-    /// Column names to select when fetching this entity.
-    fn projection() -> &'static [&'static str];
-
-    /// Default ordering specification for queries.
-    #[must_use]
-    fn ordering() -> Vec<OrderSpec> {
-        Vec::new()
-    }
-
-    /// Default joins to include when querying this entity.
-    #[must_use]
-    fn joins() -> Vec<Join> {
-        Vec::new()
-    }
-
-    /// Column specifications for fields from joined tables.
-    /// Returns tuples of (``struct_field``, ``source_table``, ``source_column``).
-    /// Fields not listed here will be auto-qualified with the main table.
-    #[must_use]
-    fn column_specs() -> Vec<(&'static str, &'static str, &'static str)> {
-        Vec::new()
-    }
+    /// The column names for this entity, in field declaration order.
+    const COLUMNS: &'static [&'static str];
 
     /// Construct an entity instance from a database row.
     ///
@@ -154,6 +94,18 @@ pub trait Entity: Sized {
     ///
     /// Returns an error if any required column is missing or cannot be converted to the expected type.
     fn from_row(row: &Row) -> Result<Self>;
+
+    /// Returns a [`SelectBuilder`] pre-configured with this entity's table and columns.
+    #[must_use]
+    fn select() -> SelectBuilder {
+        SelectBuilder::new(Self::TABLE).columns(Self::COLUMNS.iter().copied())
+    }
+
+    /// Returns a [`DeleteBuilder`] pre-configured with this entity's table.
+    #[must_use]
+    fn delete() -> DeleteBuilder {
+        DeleteBuilder::new(Self::TABLE)
+    }
 }
 
 /// Internal trait for extracting entity values. Automatically implemented by the `entity!` macro.
@@ -162,14 +114,7 @@ pub trait EntityValues {
     fn __to_values(&self) -> Vec<(&'static str, Value)>;
 }
 
-#[derive(Clone)]
-pub struct OrderSpec {
-    pub table: Option<&'static str>,
-    pub column: &'static str,
-    pub order: Order,
-}
-
-// Outbound conversion (internal use only)
+/// Converts `sea_query::Values` to WASI `DataType` values.
 pub fn values_to_wasi_datatypes(values: Values) -> Result<Vec<DataType>> {
     values.into_iter().map(value_to_wasi_datatype).collect()
 }
@@ -204,7 +149,6 @@ fn value_to_wasi_datatype(value: Value) -> Result<DataType> {
     Ok(data_type)
 }
 
-// Inbound conversion
 impl FetchValue for bool {
     fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
         as_bool(row_field(row, col)?)
@@ -262,12 +206,6 @@ impl FetchValue for Vec<u8> {
 impl FetchValue for DateTime<Utc> {
     fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
         as_timestamp(row_field(row, col)?)
-    }
-}
-
-impl FetchValue for NaiveDate {
-    fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_date(row_field(row, col)?)
     }
 }
 
@@ -394,14 +332,6 @@ fn as_timestamp(value: &DataType) -> Result<DateTime<Utc>> {
     }
 }
 
-fn as_date(value: &DataType) -> Result<NaiveDate> {
-    match value {
-        DataType::Date(Some(raw)) => NaiveDate::parse_from_str(raw, "%Y-%m-%d")
-            .map_err(|_e| anyhow!("unsupported date: {raw}; expected \"%Y-%m-%d\" format")),
-        _ => bail!("expected date data type"),
-    }
-}
-
 fn as_json(value: &DataType) -> Result<serde_json::Value> {
     match value {
         DataType::Str(Some(raw)) => Ok(serde_json::from_str(raw)?),
@@ -418,11 +348,9 @@ mod tests {
     fn value_to_wasi_numeric_types() {
         use sea_query::Value;
 
-        // Boolean
         let val_bool = value_to_wasi_datatype(Value::Bool(Some(true))).unwrap();
         assert!(matches!(val_bool, DataType::Boolean(Some(true))));
 
-        // Integers
         let val_int = value_to_wasi_datatype(Value::Int(Some(42))).unwrap();
         assert!(matches!(val_int, DataType::Int32(Some(42))));
 
@@ -435,7 +363,6 @@ mod tests {
         let val_small = value_to_wasi_datatype(Value::SmallInt(Some(1000))).unwrap();
         assert!(matches!(val_small, DataType::Int32(Some(1000))));
 
-        // Unsigned integers
         let val_tiny_u = value_to_wasi_datatype(Value::TinyUnsigned(Some(10))).unwrap();
         assert!(matches!(val_tiny_u, DataType::Uint32(Some(10))));
 
@@ -448,7 +375,6 @@ mod tests {
         let val_big_u = value_to_wasi_datatype(Value::BigUnsigned(Some(10000))).unwrap();
         assert!(matches!(val_big_u, DataType::Uint64(Some(10000))));
 
-        // Floats
         let val_f32 = value_to_wasi_datatype(Value::Float(Some(std::f32::consts::PI))).unwrap();
         assert!(
             matches!(val_f32, DataType::Float(Some(v)) if (v - std::f32::consts::PI).abs() < 0.01)
@@ -464,7 +390,6 @@ mod tests {
     fn value_to_wasi_string_types() {
         use sea_query::Value;
 
-        // String
         let val_string =
             value_to_wasi_datatype(Value::String(Some(Box::new("test".to_string())))).unwrap();
         if let DataType::Str(Some(s)) = &val_string {
@@ -473,7 +398,6 @@ mod tests {
             panic!("Expected string");
         }
 
-        // Char
         let val_char = value_to_wasi_datatype(Value::Char(Some('A'))).unwrap();
         if let DataType::Str(Some(s)) = &val_char {
             assert_eq!(s, "A");
@@ -499,7 +423,6 @@ mod tests {
         use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
         use sea_query::Value;
 
-        // Date
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
         let val_date = value_to_wasi_datatype(Value::ChronoDate(Some(Box::new(date)))).unwrap();
         if let DataType::Date(Some(s)) = &val_date {
@@ -508,7 +431,6 @@ mod tests {
             panic!("Expected date string");
         }
 
-        // Time
         let time = NaiveTime::from_hms_opt(10, 30, 45).unwrap();
         let val_time = value_to_wasi_datatype(Value::ChronoTime(Some(Box::new(time)))).unwrap();
         if let DataType::Time(Some(s)) = &val_time {
@@ -517,7 +439,6 @@ mod tests {
             panic!("Expected time string");
         }
 
-        // DateTime
         let dt = NaiveDateTime::parse_from_str("2024-01-15 10:30:45", "%Y-%m-%d %H:%M:%S").unwrap();
         let val_dt = value_to_wasi_datatype(Value::ChronoDateTime(Some(Box::new(dt)))).unwrap();
         if let DataType::Timestamp(Some(s)) = &val_dt {
@@ -526,7 +447,6 @@ mod tests {
             panic!("Expected timestamp string");
         }
 
-        // DateTime<Utc>
         let dt_utc: DateTime<Utc> = "2024-01-15T10:30:45Z".parse().unwrap();
         let val_dt_utc =
             value_to_wasi_datatype(Value::ChronoDateTimeUtc(Some(Box::new(dt_utc)))).unwrap();
@@ -557,34 +477,25 @@ mod tests {
 
     #[test]
     fn as_type_conversion_errors() {
-        // Test that as_* functions properly reject wrong types
-
-        // as_bool should reject non-boolean
         let result = as_bool(&DataType::Int32(Some(1)));
         result.unwrap_err();
 
-        // as_i32 should reject non-int32
         let result = as_i32(&DataType::Str(Some("not a number".to_string())));
         result.unwrap_err();
 
-        // as_i64 should reject non-int64
         let result = as_i64(&DataType::Boolean(Some(true)));
         result.unwrap_err();
 
-        // as_string should reject non-string
         let result = as_string(&DataType::Int32(Some(42)));
         result.unwrap_err();
 
-        // as_binary should reject non-binary
         let result = as_binary(&DataType::Str(Some("not binary".to_string())));
         result.unwrap_err();
 
-        // as_timestamp should reject invalid date format
         let result = as_timestamp(&DataType::Timestamp(Some("invalid date".to_string())));
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("unsupported timestamp"));
 
-        // as_json should reject invalid JSON
         let result = as_json(&DataType::Str(Some("not json".to_string())));
         result.unwrap_err();
     }

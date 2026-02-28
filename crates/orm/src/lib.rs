@@ -16,13 +16,12 @@ pub use entity::{Entity, EntityValues, FetchValue};
 pub use filter::Filter;
 pub use insert::InsertBuilder;
 pub use join::Join;
-// Re-export basic WASI SQL types for use in query parameters and custom value conversions.
 pub use omnia_wasi_sql::{DataType, Field, Row};
+pub use query::{Query, QueryBuilder, build_query};
+pub use sea_query::{JoinType, Order};
 pub use select::SelectBuilder;
 pub use update::UpdateBuilder;
 
-// Re-exports for ``entity`` macro use only. This is needed to avoid leaking ``SeaQuery`` value
-// types into guest code
 #[doc(hidden)]
 pub mod __private {
     pub use sea_query::Value;
