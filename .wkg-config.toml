@@ -1,4 +1,4 @@
-default_registry = "augentic"
+default_registry = "omnia.host"
 
 [namespace_registries]
 omnia = "omnia.host"
