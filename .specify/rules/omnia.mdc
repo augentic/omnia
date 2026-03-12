@@ -1,0 +1,65 @@
+---
+description: Omnia plugin context -- Rust WASM code generation, testing, and review patterns
+alwaysApply: true
+---
+
+# Omnia Plugin - Rust WASM Code Generation
+
+## Overview
+
+This plugin generates production-grade Rust WASM components from Specify artifacts (specs + design.md), targeting the Omnia SDK and wasmtime runtime. Requirements analysis and design enrichment are provided by the Plan plugin; this plugin handles code generation, testing, and review.
+
+**Purpose**: Generate, test, and review Rust WASM crates from structured Specify artifacts.
+
+## Plugin Architecture
+
+```
+/plugins/omnia/
+├── .cursor-plugin/
+│   └── plugin.json      # Plugin manifest
+├── rules/
+│   └── omnia.mdc         # This file
+└── skills/
+    ├── crate-writer/      # Specify artifacts → Rust crate
+    ├── guest-writer/      # WASM guest project wrapper
+    ├── test-writer/       # Test suites from Specify artifacts
+    └── code-reviewer/     # AI-powered code review
+```
+
+Each skill has its own SKILL.md with full details. The Specify artifact format (specs + design.md) is described in [specify.md](../../references/specify.md).
+
+## Common Patterns
+
+### REST API
+
+Specify artifacts with API endpoint specs generate: POST/GET/DELETE handlers, domain types (Order, OrderItem, OrderStatus), validation, and tests for happy path + errors.
+
+### Message Consumer
+
+Artifacts describing message handling generate: message handler for topic, domain types from message schema, HTTP-based email sending, tests with MockProvider.
+
+### Background Job
+
+Artifacts for scheduled work generate: scheduled handler, report logic, TableStore data aggregation, tests with fixture data.
+
+## Troubleshooting
+
+### Generated Code Incomplete
+
+- Are specs complete with scenarios and requirements?
+- Are API endpoints fully specified in design.md?
+- Are request/response schemas documented?
+
+### Tests Don't Match Expected Behavior
+
+- Are spec scenarios accurate?
+- Were requirements changed after generation?
+
+## Related Documentation
+
+- See project rule (`.cursor/rules/project.mdc`) for overall project context
+- [Crate Writer SKILL.md](skills/crate-writer/SKILL.md) - Generation patterns
+- [Test Writer SKILL.md](skills/test-writer/SKILL.md) - Test suite generation
+- [Code Reviewer SKILL.md](skills/code-reviewer/SKILL.md) - AI-powered code review
+- [Guest Writer SKILL.md](skills/guest-writer/SKILL.md) - WASM guest wrapper
+- [Specify Artifact Specification](../../references/specify.md) - Artifact format details
