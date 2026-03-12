@@ -1,0 +1,1 @@
+../../test-writer/examples/testing-publisher.md

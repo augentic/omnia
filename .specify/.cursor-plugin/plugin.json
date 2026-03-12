@@ -1,0 +1,18 @@
+{
+  "name": "omnia",
+  "displayName": "Omnia Code Generation",
+  "description": "Generate Rust WASM code from JIRA epics, requirements, or design documents.",
+  "version": "0.12.0",
+  "author": {
+    "name": "Augentic",
+    "email": "andrew@augentic.io"
+  },
+  "homepage": "https://github.com/augentic/omnia",
+  "repository": "https://github.com/augentic/omnia",
+  "license": "MIT or Apache-2.0",
+  "keywords": [
+    "rust",
+    "omnia"
+  ],
+  "settings": {}
+}

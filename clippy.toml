@@ -20,6 +20,7 @@ allowed-duplicate-crates = [
   "rand",
   "rand_chacha",
   "rand_core",
+  "r-efi",
   "reqwest",
   "rustix",
   "rustls",

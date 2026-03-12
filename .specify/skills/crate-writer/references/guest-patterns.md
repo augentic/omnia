@@ -1,0 +1,1 @@
+../../../references/guest-patterns.md
