@@ -1,1 +1,0 @@
-../../../references/agent-teams.md

@@ -1,1 +1,0 @@
-../../../references/capabilities.md

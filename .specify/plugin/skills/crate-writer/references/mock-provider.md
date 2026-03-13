@@ -1,1 +1,0 @@
-../../test-writer/references/mock-provider.md
