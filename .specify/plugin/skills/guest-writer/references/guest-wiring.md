@@ -1,1 +1,0 @@
-../../../references/guest-wiring.md
