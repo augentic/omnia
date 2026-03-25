@@ -7,10 +7,12 @@
 //! ## Filter coverage
 //!
 //! - `eq`, `gte`, `lte`, `contains` -- stops query params
+//! - `ne` -- stops `exclude_zone` param (direct `ComparisonOp::Ne` codepath)
 //! - `in_list` -- routes `types` param
 //! - `is_not_null`, `is_null` -- stops `accessible` and `top_level` params
 //! - `or`, `starts_with` -- nested inside routes `q` param
 //! - `not` -- nested inside routes `exclude_type` param
+//! - `not(and(...))` -- routes `not_agency` + `not_type` combo (De Morgan negation)
 //! - `on_date` -- stops `updated_on` param
 
 #![cfg(target_arch = "wasm32")]
@@ -71,6 +73,7 @@ struct CreateStopRequest {
 struct StopQuery {
     q: Option<String>,
     zone: Option<String>,
+    exclude_zone: Option<String>,
     accessible: Option<bool>,
     top_level: Option<bool>,
     min_lat: Option<f64>,
@@ -136,6 +139,9 @@ async fn list_stops(Query(p): Query<StopQuery>) -> HttpResult<Json<Value>> {
     }
     if let Some(zone) = &p.zone {
         filters.push(Filter::eq("zone_id", zone.as_str()));
+    }
+    if let Some(zone) = &p.exclude_zone {
+        filters.push(Filter::ne("zone_id", zone.as_str()));
     }
     if p.accessible.unwrap_or(false) {
         filters.push(Filter::eq("wheelchair_boarding", 1));
@@ -209,6 +215,8 @@ struct RouteQuery {
     types: Option<String>,
     agency: Option<String>,
     exclude_type: Option<i32>,
+    not_agency: Option<String>,
+    not_type: Option<i32>,
     limit: Option<u32>,
     continuation: Option<String>,
 }
@@ -262,6 +270,12 @@ async fn list_routes(Query(p): Query<RouteQuery>) -> HttpResult<Json<Value>> {
     }
     if let Some(exclude) = p.exclude_type {
         filters.push(Filter::not(Filter::eq("route_type", exclude)));
+    }
+    if let (Some(agency), Some(rtype)) = (&p.not_agency, p.not_type) {
+        filters.push(Filter::not(Filter::and([
+            Filter::eq("agency_id", agency.as_str()),
+            Filter::eq("route_type", rtype),
+        ])));
     }
 
     let filter = if filters.is_empty() { None } else { Some(Filter::and(filters)) };

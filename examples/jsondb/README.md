@@ -78,6 +78,9 @@ curl -s "http://localhost:8080/stops?q=Station"
 # By zone -- eq on zone_id
 curl -s "http://localhost:8080/stops?zone=zone-1"
 
+# Exclude a zone -- ne on zone_id (direct ComparisonOp::Ne codepath)
+curl -s "http://localhost:8080/stops?exclude_zone=zone-1"
+
 # Accessible stops -- eq(wheelchair_boarding, 1) + is_not_null(zone_id)
 curl -s "http://localhost:8080/stops?accessible=true"
 
@@ -149,6 +152,9 @@ curl -s "http://localhost:8080/routes?agency=AT"
 # Exclude ferries -- not(eq(route_type, 4))
 curl -s "http://localhost:8080/routes?exclude_type=4"
 
+# Exclude AT buses -- not(and(eq(agency, AT), eq(type, 3))) (De Morgan negation)
+curl -s "http://localhost:8080/routes?not_agency=AT&not_type=3"
+
 # Combined: AT bus and rail, no ferries
 curl -s "http://localhost:8080/routes?agency=AT&types=2,3&exclude_type=4"
 ```
@@ -211,6 +217,7 @@ curl -s "http://localhost:8080/stop-times?stop=stop-001&after=08:00:00&before=10
 - **CRUD** -- insert, get, put (upsert), delete on stops; insert + get on routes and stop_times
 - **Combined query endpoints** -- each collection has one query endpoint that builds `Filter::and(...)` from whichever query params are present
 - **Filter::eq** -- zone, agency, trip_id, stop_id
+- **Filter::ne** -- exclude a specific zone (direct `ComparisonOp::Ne` codepath)
 - **Filter::gte / lte** -- bounding box (lat/lon), time range, sequence range
 - **Filter::contains** -- text search on stop_name
 - **Filter::in_list** -- route types (bus, rail, ferry)
@@ -219,8 +226,9 @@ curl -s "http://localhost:8080/stop-times?stop=stop-001&after=08:00:00&before=10
 - **Filter::or** -- route name search across short and long names
 - **Filter::starts_with** -- route long name prefix search
 - **Filter::not** -- exclude a route type
+- **Filter::not(Filter::and(...))** -- exclude a specific agency+type combo (De Morgan negation)
 - **Filter::on_date** -- stops updated on a specific date
-- **Pagination** -- limit + continuation token
+- **Pagination** -- limit + continuation token (page 2 verified)
 - **Sort** -- results sorted by name or sequence
 
 ## Test Script
@@ -317,8 +325,21 @@ check_gte "bounding box (and + gte + lte)" 2 "$(echo "$R" | jq '.stops | length'
 R=$(curl -s "$BASE/stops?updated_on=2026-03-19")
 check_gte "updated on date (on_date)" 3 "$(echo "$R" | jq '.stops | length')"
 
+R=$(curl -s "$BASE/stops?exclude_zone=zone-1")
+check "exclude zone (ne)" "3" "$(echo "$R" | jq '.stops | length')"
+
 R=$(curl -s "$BASE/stops?limit=2")
 check "pagination limit" "2" "$(echo "$R" | jq '.stops | length')"
+
+TOKEN=$(echo "$R" | jq -r '.continuation // empty')
+if [ -n "$TOKEN" ]; then
+  R2=$(curl -s "$BASE/stops?limit=2&continuation=$TOKEN")
+  PAGE2=$(echo "$R2" | jq '.stops | length')
+  check_gte "pagination page 2 (continuation)" 1 "$PAGE2"
+else
+  echo "FAIL: no continuation token returned for limit=2"
+  FAIL=$((FAIL + 1))
+fi
 
 echo ""
 echo "=== Testing routes ==="
@@ -337,6 +358,9 @@ check "agency filter (eq)" "3" "$(echo "$R" | jq '.routes | length')"
 
 R=$(curl -s "$BASE/routes?exclude_type=4")
 check "exclude ferries (not)" "3" "$(echo "$R" | jq '.routes | length')"
+
+R=$(curl -s "$BASE/routes?not_agency=AT&not_type=3")
+check "exclude AT buses (not+and de morgan)" "2" "$(echo "$R" | jq '.routes | length')"
 
 echo ""
 echo "=== Testing stop times ==="

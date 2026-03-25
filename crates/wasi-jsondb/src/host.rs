@@ -1,6 +1,5 @@
 //! Host-side `wasi:jsondb` implementation.
 
-mod bson_filter;
 pub mod default_impl;
 mod resource;
 mod store_impl;
@@ -58,7 +57,9 @@ use wasmtime_wasi::ResourceTable;
 
 use self::generated::wasi::jsondb::{store, types};
 pub use crate::host::default_impl::JsonDbDefault;
-pub use crate::host::generated::wasi::jsondb::types::{Document, QueryResult};
+pub use crate::host::generated::wasi::jsondb::types::{
+    ComparisonOp, Document, QueryResult, ScalarValue, SortField,
+};
 pub use crate::host::resource::{FilterProxy, FilterTree};
 
 /// Host service for `wasi:jsondb`.

@@ -4,6 +4,8 @@
 #![allow(clippy::cast_sign_loss)]
 #![allow(missing_docs)]
 
+mod bson_filter;
+
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -13,10 +15,10 @@ use polodb_core::bson::{self, doc};
 use polodb_core::{CollectionT, Database};
 use tracing::instrument;
 
-use crate::host::bson_filter::to_bson;
 use crate::host::generated::wasi::jsondb::types::{Document, QueryResult, SortField};
 use crate::host::resource::FilterTree;
 use crate::host::{FutureResult, QueryOpts, WasiJsonDbCtx};
+use bson_filter::to_bson;
 
 /// Connection options for the embedded `PoloDB` file.
 #[derive(Debug, Clone)]
@@ -219,8 +221,8 @@ fn is_duplicate_key_error(err: &polodb_core::Error) -> bool {
 mod tests {
     use serde_json::json;
 
+    use super::bson_filter::to_bson;
     use super::*;
-    use crate::host::bson_filter::to_bson;
     use crate::host::generated::wasi::jsondb::types::{ComparisonOp, ScalarValue};
     use crate::host::resource::FilterTree;
 
@@ -239,7 +241,7 @@ mod tests {
         JsonDbDefault { db: Arc::new(db) }
     }
 
-    fn insert_doc(ctx: &JsonDbDefault, collection: &str, id: &str, val: serde_json::Value) {
+    fn insert_doc(ctx: &JsonDbDefault, collection: &str, id: &str, val: &serde_json::Value) {
         let col = ctx.db.collection::<bson::Document>(collection);
         let mut bson_doc = bson::to_document(&val).expect("to bson");
         bson_doc.insert("_id", id);
@@ -247,10 +249,10 @@ mod tests {
     }
 
     fn query_with_filter(
-        ctx: &JsonDbDefault, collection: &str, filter: FilterTree,
+        ctx: &JsonDbDefault, collection: &str, filter: &FilterTree,
     ) -> Vec<bson::Document> {
         let col = ctx.db.collection::<bson::Document>(collection);
-        let bson_filter = to_bson(&filter);
+        let bson_filter = to_bson(filter);
         let cursor = col.find(bson_filter).run().expect("find");
         cursor.collect::<Result<Vec<_>, _>>().expect("collect")
     }
@@ -281,53 +283,53 @@ mod tests {
     #[test]
     fn not_equal_via_filter_tree() {
         let ctx = temp_db();
-        insert_doc(&ctx, "r", "r1", json!({"route_type": 3}));
-        insert_doc(&ctx, "r", "r2", json!({"route_type": 4}));
-        insert_doc(&ctx, "r", "r3", json!({"route_type": 2}));
+        insert_doc(&ctx, "r", "r1", &json!({"route_type": 3}));
+        insert_doc(&ctx, "r", "r2", &json!({"route_type": 4}));
+        insert_doc(&ctx, "r", "r3", &json!({"route_type": 2}));
 
         let filter = FilterTree::Not(Box::new(FilterTree::Compare {
             field: "route_type".to_string(),
             op: ComparisonOp::Eq,
             value: ScalarValue::Int32(4),
         }));
-        let results = query_with_filter(&ctx, "r", filter);
+        let results = query_with_filter(&ctx, "r", &filter);
         assert_eq!(results.len(), 2, "Not(Eq(4)) should exclude route_type=4");
     }
 
     #[test]
     fn is_not_null_via_filter_tree() {
         let ctx = temp_db();
-        insert_doc(&ctx, "s", "s1", json!({"zone_id": "z1"}));
-        insert_doc(&ctx, "s", "s2", json!({"zone_id": null}));
-        insert_doc(&ctx, "s", "s3", json!({"zone_id": "z2"}));
+        insert_doc(&ctx, "s", "s1", &json!({"zone_id": "z1"}));
+        insert_doc(&ctx, "s", "s2", &json!({"zone_id": null}));
+        insert_doc(&ctx, "s", "s3", &json!({"zone_id": "z2"}));
 
         let filter = FilterTree::IsNotNull("zone_id".to_string());
-        let results = query_with_filter(&ctx, "s", filter);
+        let results = query_with_filter(&ctx, "s", &filter);
         assert_eq!(results.len(), 2, "IsNotNull should exclude null zone_id");
     }
 
     #[test]
     fn contains_via_filter_tree() {
         let ctx = temp_db();
-        insert_doc(&ctx, "s", "s1", json!({"name": "Albany Station"}));
-        insert_doc(&ctx, "s", "s2", json!({"name": "Newmarket Station"}));
-        insert_doc(&ctx, "s", "s3", json!({"name": "Ponsonby Rd"}));
+        insert_doc(&ctx, "s", "s1", &json!({"name": "Albany Station"}));
+        insert_doc(&ctx, "s", "s2", &json!({"name": "Newmarket Station"}));
+        insert_doc(&ctx, "s", "s3", &json!({"name": "Ponsonby Rd"}));
 
         let filter = FilterTree::Contains {
             field: "name".to_string(),
             pattern: "Station".to_string(),
         };
-        let results = query_with_filter(&ctx, "s", filter);
+        let results = query_with_filter(&ctx, "s", &filter);
         assert_eq!(results.len(), 2, "Contains('Station') should match 2 stops");
     }
 
     #[test]
     fn and_eq_int_with_is_not_null() {
         let ctx = temp_db();
-        insert_doc(&ctx, "s", "s1", json!({"wb": 1, "zone_id": "z1"}));
-        insert_doc(&ctx, "s", "s2", json!({"wb": 1, "zone_id": "z2"}));
-        insert_doc(&ctx, "s", "s3", json!({"wb": 0, "zone_id": "z3"}));
-        insert_doc(&ctx, "s", "s4", json!({"wb": 1, "zone_id": null}));
+        insert_doc(&ctx, "s", "s1", &json!({"wb": 1, "zone_id": "z1"}));
+        insert_doc(&ctx, "s", "s2", &json!({"wb": 1, "zone_id": "z2"}));
+        insert_doc(&ctx, "s", "s3", &json!({"wb": 0, "zone_id": "z3"}));
+        insert_doc(&ctx, "s", "s4", &json!({"wb": 1, "zone_id": null}));
 
         let filter = FilterTree::And(vec![
             FilterTree::Compare {
@@ -337,37 +339,37 @@ mod tests {
             },
             FilterTree::IsNotNull("zone_id".to_string()),
         ]);
-        let results = query_with_filter(&ctx, "s", filter);
+        let results = query_with_filter(&ctx, "s", &filter);
         assert_eq!(results.len(), 2, "wb=1 AND zone_id IS NOT NULL");
     }
 
     #[test]
     fn not_in_list_via_filter_tree() {
         let ctx = temp_db();
-        insert_doc(&ctx, "r", "r1", json!({"v": 1}));
-        insert_doc(&ctx, "r", "r2", json!({"v": 2}));
-        insert_doc(&ctx, "r", "r3", json!({"v": 3}));
+        insert_doc(&ctx, "r", "r1", &json!({"v": 1}));
+        insert_doc(&ctx, "r", "r2", &json!({"v": 2}));
+        insert_doc(&ctx, "r", "r3", &json!({"v": 3}));
 
         let filter = FilterTree::NotInList {
             field: "v".to_string(),
             values: vec![ScalarValue::Int32(1), ScalarValue::Int32(2)],
         };
-        let results = query_with_filter(&ctx, "r", filter);
+        let results = query_with_filter(&ctx, "r", &filter);
         assert_eq!(results.len(), 1, "NotInList([1,2]) should return only v=3");
     }
 
     #[test]
     fn starts_with_via_filter_tree() {
         let ctx = temp_db();
-        insert_doc(&ctx, "sw", "s1", json!({"name": "Northern Express"}));
-        insert_doc(&ctx, "sw", "s2", json!({"name": "Eastern Line"}));
-        insert_doc(&ctx, "sw", "s3", json!({"name": "Inner Link"}));
+        insert_doc(&ctx, "sw", "s1", &json!({"name": "Northern Express"}));
+        insert_doc(&ctx, "sw", "s2", &json!({"name": "Eastern Line"}));
+        insert_doc(&ctx, "sw", "s3", &json!({"name": "Inner Link"}));
 
         let filter = FilterTree::StartsWith {
             field: "name".to_string(),
             pattern: "Northern".to_string(),
         };
-        let results = query_with_filter(&ctx, "sw", filter);
+        let results = query_with_filter(&ctx, "sw", &filter);
         assert_eq!(results.len(), 1, "StartsWith('Northern') should match 1");
     }
 }
