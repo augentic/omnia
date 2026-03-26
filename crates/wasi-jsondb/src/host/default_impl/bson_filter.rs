@@ -39,11 +39,13 @@ pub fn to_bson(tree: &FilterTree) -> Document {
         FilterTree::IsNotNull(field) => {
             doc! { field: { "$not": { "$eq": Bson::Null } } }
         }
-        FilterTree::Contains { field, pattern }
-        | FilterTree::StartsWith { field, pattern }
-        | FilterTree::EndsWith { field, pattern } => {
+        FilterTree::Contains { field, pattern } => {
             doc! { field: { "$regex": to_regex(&regex_escape(pattern)) } }
         }
+        // PoloDB ignores regex anchors ^ and $, so StartsWith/EndsWith
+        // cannot be evaluated server-side. Return empty filter (matches all);
+        // the caller post-filters with `post_filter_matches`.
+        FilterTree::StartsWith { .. } | FilterTree::EndsWith { .. } => doc! {},
         FilterTree::And(children) => {
             let docs: Vec<Bson> = children.iter().map(|c| Bson::Document(to_bson(c))).collect();
             doc! { "$and": docs }
@@ -100,11 +102,11 @@ fn negate_to_bson(inner: &FilterTree) -> Document {
             doc! { field: { "$not": { "$eq": Bson::Null } } }
         }
         FilterTree::IsNotNull(field) => doc! { field: Bson::Null },
-        FilterTree::Contains { field, pattern }
-        | FilterTree::StartsWith { field, pattern }
-        | FilterTree::EndsWith { field, pattern } => {
+        FilterTree::Contains { field, pattern } => {
             doc! { field: { "$not": { "$regex": to_regex(&regex_escape(pattern)) } } }
         }
+        // Negated StartsWith/EndsWith: also deferred to post-filter.
+        FilterTree::StartsWith { .. } | FilterTree::EndsWith { .. } => doc! {},
         FilterTree::And(children) => {
             let docs: Vec<Bson> =
                 children.iter().map(|c| Bson::Document(negate_to_bson(c))).collect();
@@ -145,4 +147,35 @@ fn to_regex(pattern: &str) -> bson::Regex {
 
 fn regex_escape(s: &str) -> String {
     regex::escape(s)
+}
+
+/// Returns `true` if the filter contains `StartsWith` or `EndsWith` nodes
+/// that require client-side post-filtering (`PoloDB` ignores regex anchors).
+pub fn needs_post_filter(tree: &FilterTree) -> bool {
+    match tree {
+        FilterTree::StartsWith { .. } | FilterTree::EndsWith { .. } => true,
+        FilterTree::And(children) | FilterTree::Or(children) => {
+            children.iter().any(needs_post_filter)
+        }
+        FilterTree::Not(inner) => needs_post_filter(inner),
+        _ => false,
+    }
+}
+
+/// Evaluate `StartsWith`/`EndsWith` conditions against a BSON document.
+///
+/// Other filter types return `true` (already evaluated by `PoloDB`).
+pub fn post_filter_matches(tree: &FilterTree, doc: &bson::Document) -> bool {
+    match tree {
+        FilterTree::StartsWith { field, pattern } => {
+            doc.get_str(field).is_ok_and(|s| s.starts_with(pattern.as_str()))
+        }
+        FilterTree::EndsWith { field, pattern } => {
+            doc.get_str(field).is_ok_and(|s| s.ends_with(pattern.as_str()))
+        }
+        FilterTree::And(children) => children.iter().all(|c| post_filter_matches(c, doc)),
+        FilterTree::Or(children) => children.iter().any(|c| post_filter_matches(c, doc)),
+        FilterTree::Not(inner) => !post_filter_matches(inner, doc),
+        _ => true,
+    }
 }

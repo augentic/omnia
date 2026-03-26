@@ -26,12 +26,20 @@ url = "https://raw.githubusercontent.com/zcash/rust-ecosystem/main/supply-chain/
 version = "0.25.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.ahash]]
+version = "0.8.12"
+criteria = "safe-to-deploy"
+
+[[exemptions.atomic]]
+version = "0.6.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.aws-lc-rs]]
-version = "1.16.1"
+version = "1.16.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.aws-lc-sys]]
-version = "0.38.0"
+version = "0.39.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.axum]]
@@ -54,12 +62,28 @@ criteria = "safe-to-deploy"
 version = "2.11.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.bitvec]]
+version = "1.0.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.bson]]
+version = "2.15.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.bytecheck]]
 version = "0.8.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.bytecheck_derive]]
 version = "0.8.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.bytemuck]]
+version = "1.25.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.bzip2-sys]]
+version = "0.1.13+1.0.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.cc]]
@@ -72,6 +96,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.chrono]]
 version = "0.4.44"
+criteria = "safe-to-deploy"
+
+[[exemptions.clang-sys]]
+version = "1.8.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.combine]]
@@ -168,6 +196,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.fs_extra]]
 version = "1.3.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.funty]]
+version = "2.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.futures]]
@@ -267,7 +299,7 @@ version = "0.7.10"
 criteria = "safe-to-deploy"
 
 [[exemptions.itertools]]
-version = "0.14.0"
+version = "0.10.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.itoa]]
@@ -286,12 +318,20 @@ criteria = "safe-to-deploy"
 version = "0.3.91"
 criteria = "safe-to-deploy"
 
-[[exemptions.libsqlite3-sys]]
-version = "0.36.0"
+[[exemptions.lazycell]]
+version = "1.3.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.log]]
-version = "0.4.29"
+[[exemptions.libloading]]
+version = "0.8.9"
+criteria = "safe-to-deploy"
+
+[[exemptions.libsqlite3-sys]]
+version = "0.37.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.libz-sys]]
+version = "1.1.25"
 criteria = "safe-to-deploy"
 
 [[exemptions.lru-slab]]
@@ -304,6 +344,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.maybe-owned]]
 version = "0.3.4"
+criteria = "safe-to-deploy"
+
+[[exemptions.minimal-lexical]]
+version = "0.2.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.moka]]
@@ -343,7 +387,7 @@ version = "0.31.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.opentelemetry-otlp]]
-version = "0.31.0"
+version = "0.31.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.opentelemetry-proto]]
@@ -364,6 +408,14 @@ criteria = "safe-to-deploy"
 
 [[exemptions.pin-project-lite]]
 version = "0.2.17"
+criteria = "safe-to-deploy"
+
+[[exemptions.polodb-librocksdb-sys]]
+version = "9.0.0-alpha.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.polodb_core]]
+version = "5.1.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.portable-atomic]]
@@ -410,6 +462,10 @@ criteria = "safe-to-deploy"
 version = "6.0.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.radium]]
+version = "0.7.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.rancor]]
 version = "0.1.1"
 criteria = "safe-to-deploy"
@@ -443,7 +499,7 @@ version = "0.1.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rusqlite]]
-version = "0.38.0"
+version = "0.39.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls]]
@@ -475,7 +531,7 @@ version = "0.102.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls-webpki]]
-version = "0.103.9"
+version = "0.103.10"
 criteria = "safe-to-deploy"
 
 [[exemptions.same-file]]
@@ -555,7 +611,7 @@ version = "0.1.18"
 criteria = "safe-to-deploy"
 
 [[exemptions.tokio-tungstenite]]
-version = "0.28.0"
+version = "0.29.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.tonic]]
@@ -595,7 +651,7 @@ version = "0.3.22"
 criteria = "safe-to-deploy"
 
 [[exemptions.tungstenite]]
-version = "0.28.0"
+version = "0.29.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.typenum]]
@@ -662,9 +718,25 @@ criteria = "safe-to-deploy"
 version = "1.0.6"
 criteria = "safe-to-deploy"
 
+[[exemptions.winapi]]
+version = "0.3.9"
+criteria = "safe-to-deploy"
+
+[[exemptions.winapi-i686-pc-windows-gnu]]
+version = "0.4.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.winapi-x86_64-pc-windows-gnu]]
+version = "0.4.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.wiremock]]
 version = "0.6.5"
 criteria = "safe-to-run"
+
+[[exemptions.wyz]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
 
 [[exemptions.yoke]]
 version = "0.8.1"

@@ -9,6 +9,7 @@ mod bson_filter;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use bson_filter::to_bson;
 use futures::FutureExt;
 use omnia::{Backend, FromEnv};
 use polodb_core::bson::{self, doc};
@@ -18,7 +19,6 @@ use tracing::instrument;
 use crate::host::generated::wasi::jsondb::types::{Document, QueryResult, SortField};
 use crate::host::resource::FilterTree;
 use crate::host::{FutureResult, QueryOpts, WasiJsonDbCtx};
-use bson_filter::to_bson;
 
 /// Connection options for the embedded `PoloDB` file.
 #[derive(Debug, Clone)]
@@ -121,7 +121,8 @@ impl WasiJsonDbCtx for JsonDbDefault {
         let db = Arc::clone(&self.db);
         async move {
             let col = db.collection::<bson::Document>(&collection);
-            let bson_filter = filter.map_or_else(|| doc! {}, |f| to_bson(&f));
+            let needs_post = filter.as_ref().is_some_and(bson_filter::needs_post_filter);
+            let bson_filter = filter.as_ref().map_or_else(|| doc! {}, to_bson);
 
             let skip_u64 = parse_continuation(options.continuation.as_deref()).unwrap_or(0)
                 + u64::from(options.offset.unwrap_or(0));
@@ -144,6 +145,12 @@ impl WasiJsonDbCtx for JsonDbDefault {
             for item in cursor {
                 raw.push(item.context("cursor item")?);
             }
+
+            // Post-filter StartsWith/EndsWith in Rust (PoloDB ignores regex anchors).
+            if needs_post && let Some(ref f) = filter {
+                raw.retain(|d| bson_filter::post_filter_matches(f, d));
+            }
+
             let mut has_more = false;
             if let Some(lim) = limit
                 && raw.len() > lim as usize
@@ -254,7 +261,11 @@ mod tests {
         let col = ctx.db.collection::<bson::Document>(collection);
         let bson_filter = to_bson(filter);
         let cursor = col.find(bson_filter).run().expect("find");
-        cursor.collect::<Result<Vec<_>, _>>().expect("collect")
+        let mut results: Vec<_> = cursor.collect::<Result<Vec<_>, _>>().expect("collect");
+        if bson_filter::needs_post_filter(filter) {
+            results.retain(|d| bson_filter::post_filter_matches(filter, d));
+        }
+        results
     }
 
     #[tokio::test]
