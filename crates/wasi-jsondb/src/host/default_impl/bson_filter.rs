@@ -130,15 +130,14 @@ fn negate_to_bson(inner: &FilterTree) -> Document {
     match inner {
         FilterTree::Compare { field, op, value } => {
             let v = to_bson_value(value);
-            let bson_op = match op {
-                ComparisonOp::Eq => "$eq",
-                ComparisonOp::Ne => "$ne",
-                ComparisonOp::Gt => "$gt",
-                ComparisonOp::Gte => "$gte",
-                ComparisonOp::Lt => "$lt",
-                ComparisonOp::Lte => "$lte",
-            };
-            doc! { field: { "$not": { bson_op: v } } }
+            match op {
+                ComparisonOp::Ne => doc! { field: { "$eq": v } },
+                ComparisonOp::Eq => doc! { field: { "$not": { "$eq": v } } },
+                ComparisonOp::Gt => doc! { field: { "$not": { "$gt": v } } },
+                ComparisonOp::Gte => doc! { field: { "$not": { "$gte": v } } },
+                ComparisonOp::Lt => doc! { field: { "$not": { "$lt": v } } },
+                ComparisonOp::Lte => doc! { field: { "$not": { "$lte": v } } },
+            }
         }
         FilterTree::InList { field, values } => {
             let bson_vals: Vec<Bson> = values.iter().map(to_bson_value).collect();

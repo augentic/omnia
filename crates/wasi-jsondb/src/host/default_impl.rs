@@ -81,12 +81,11 @@ impl WasiJsonDbCtx for JsonDbDefault {
             let col = db.collection::<bson::Document>(&collection);
             let bson_doc = wit_to_bson_document(&doc).context("encoding insert document")?;
             col.insert_one(bson_doc)
-                .map_err(|e| {
-                    if is_duplicate_key_error(&e) {
+                .map_err(|e| match e {
+                    polodb_core::Error::DuplicateKey(_) => {
                         anyhow::anyhow!("document id already exists")
-                    } else {
-                        anyhow::anyhow!("{e}")
                     }
+                    other => anyhow::anyhow!("{other}"),
                 })
                 .context("insert_one")?;
             Ok(())
@@ -126,6 +125,9 @@ impl WasiJsonDbCtx for JsonDbDefault {
                 bson_filter::validate(f).context("invalid filter")?;
             }
 
+            let limit = options.limit.map_or(MAX_PAGE_SIZE, u64::from);
+            anyhow::ensure!(limit > 0, "query limit must be at least 1");
+
             let col = db.collection::<bson::Document>(&collection);
             let bson_filter = filter.as_ref().map_or_else(|| doc! {}, to_bson);
 
@@ -133,7 +135,6 @@ impl WasiJsonDbCtx for JsonDbDefault {
                 + u64::from(options.offset.unwrap_or(0));
 
             let sort_doc = build_sort_document(&options.order_by);
-            let limit = options.limit.map_or(MAX_PAGE_SIZE, u64::from);
 
             let mut find = col.find(bson_filter);
             if let Some(s) = sort_doc {
@@ -215,10 +216,6 @@ fn bson_to_wit_document(d: &bson::Document) -> Result<Document> {
     }
     let data = serde_json::to_vec(&json_val).context("serialize JSON body")?;
     Ok(Document { id, data })
-}
-
-fn is_duplicate_key_error(err: &polodb_core::Error) -> bool {
-    format!("{err}").to_lowercase().contains("duplicate")
 }
 
 #[cfg(test)]

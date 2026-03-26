@@ -140,7 +140,7 @@ curl -s http://localhost:8080/routes/route-nex
 # All routes
 curl -s "http://localhost:8080/routes"
 
-# Name search -- or(contains(short_name), starts_with(long_name))
+# Name search -- or(contains(short_name), contains(long_name))
 curl -s "http://localhost:8080/routes?q=Northern"
 
 # By route types -- in_list(route_type, [2, 3])
