@@ -8,7 +8,7 @@ use crate::host::generated::wasi::jsondb::store::{
 use crate::host::{JsonDbError, QueryOpts, WasiJsonDb, WasiJsonDbCtxView};
 
 fn map_err(e: &anyhow::Error) -> JsonDbError {
-    JsonDbError::Other(e.to_string())
+    JsonDbError::Other(format!("{e:#}"))
 }
 
 impl HostWithStore for WasiJsonDb {

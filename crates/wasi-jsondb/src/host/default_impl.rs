@@ -20,6 +20,8 @@ use crate::host::generated::wasi::jsondb::types::{Document, QueryResult, SortFie
 use crate::host::resource::FilterTree;
 use crate::host::{FutureResult, QueryOpts, WasiJsonDbCtx};
 
+const MAX_PAGE_SIZE: u64 = 1000;
+
 /// Connection options for the embedded `PoloDB` file.
 #[derive(Debug, Clone)]
 pub struct ConnectOptions {
@@ -120,25 +122,25 @@ impl WasiJsonDbCtx for JsonDbDefault {
     ) -> FutureResult<QueryResult> {
         let db = Arc::clone(&self.db);
         async move {
+            if let Some(ref f) = filter {
+                bson_filter::validate(f).context("invalid filter")?;
+            }
+
             let col = db.collection::<bson::Document>(&collection);
-            let needs_post = filter.as_ref().is_some_and(bson_filter::needs_post_filter);
             let bson_filter = filter.as_ref().map_or_else(|| doc! {}, to_bson);
 
-            let skip_u64 = parse_continuation(options.continuation.as_deref()).unwrap_or(0)
+            let skip_u64 = parse_continuation(options.continuation.as_deref())?
                 + u64::from(options.offset.unwrap_or(0));
 
             let sort_doc = build_sort_document(&options.order_by);
-            let limit = options.limit.map(u64::from);
+            let limit = options.limit.map_or(MAX_PAGE_SIZE, u64::from);
 
             let mut find = col.find(bson_filter);
             if let Some(s) = sort_doc {
                 find = find.sort(s);
             }
             find = find.skip(skip_u64);
-            let fetch_limit = limit.map(|l| l.saturating_add(1));
-            if let Some(l) = fetch_limit {
-                find = find.limit(l);
-            }
+            find = find.limit(limit.saturating_add(1));
 
             let cursor = find.run().context("find query")?;
             let mut raw = Vec::new();
@@ -146,17 +148,9 @@ impl WasiJsonDbCtx for JsonDbDefault {
                 raw.push(item.context("cursor item")?);
             }
 
-            // Post-filter StartsWith/EndsWith in Rust (PoloDB ignores regex anchors).
-            if needs_post && let Some(ref f) = filter {
-                raw.retain(|d| bson_filter::post_filter_matches(f, d));
-            }
-
-            let mut has_more = false;
-            if let Some(lim) = limit
-                && raw.len() > lim as usize
-            {
-                has_more = true;
-                raw.truncate(lim as usize);
+            let has_more = raw.len() > limit as usize;
+            if has_more {
+                raw.truncate(limit as usize);
             }
 
             let mut documents = Vec::with_capacity(raw.len());
@@ -178,8 +172,11 @@ impl WasiJsonDbCtx for JsonDbDefault {
     }
 }
 
-fn parse_continuation(continuation: Option<&str>) -> Option<u64> {
-    continuation?.parse().ok()
+fn parse_continuation(continuation: Option<&str>) -> Result<u64> {
+    continuation.map_or_else(
+        || Ok(0),
+        |s| s.parse().with_context(|| format!("invalid continuation token: {s:?}")),
+    )
 }
 
 fn build_sort_document(order_by: &[SortField]) -> Option<bson::Document> {
@@ -258,14 +255,11 @@ mod tests {
     fn query_with_filter(
         ctx: &JsonDbDefault, collection: &str, filter: &FilterTree,
     ) -> Vec<bson::Document> {
+        bson_filter::validate(filter).expect("filter validation");
         let col = ctx.db.collection::<bson::Document>(collection);
         let bson_filter = to_bson(filter);
         let cursor = col.find(bson_filter).run().expect("find");
-        let mut results: Vec<_> = cursor.collect::<Result<Vec<_>, _>>().expect("collect");
-        if bson_filter::needs_post_filter(filter) {
-            results.retain(|d| bson_filter::post_filter_matches(filter, d));
-        }
-        results
+        cursor.collect::<Result<Vec<_>, _>>().expect("collect")
     }
 
     #[tokio::test]
@@ -370,17 +364,29 @@ mod tests {
     }
 
     #[test]
-    fn starts_with_via_filter_tree() {
-        let ctx = temp_db();
-        insert_doc(&ctx, "sw", "s1", &json!({"name": "Northern Express"}));
-        insert_doc(&ctx, "sw", "s2", &json!({"name": "Eastern Line"}));
-        insert_doc(&ctx, "sw", "s3", &json!({"name": "Inner Link"}));
-
+    fn starts_with_rejected() {
         let filter = FilterTree::StartsWith {
             field: "name".to_string(),
             pattern: "Northern".to_string(),
         };
-        let results = query_with_filter(&ctx, "sw", &filter);
-        assert_eq!(results.len(), 1, "StartsWith('Northern') should match 1");
+        let err = bson_filter::validate(&filter).unwrap_err();
+        assert!(
+            err.to_string().contains("not supported"),
+            "expected unsupported error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn dollar_prefixed_field_rejected() {
+        let filter = FilterTree::Compare {
+            field: "$where".to_string(),
+            op: ComparisonOp::Eq,
+            value: ScalarValue::Str("1".to_string()),
+        };
+        let err = bson_filter::validate(&filter).unwrap_err();
+        assert!(
+            err.to_string().contains("must not start with '$'"),
+            "expected $ rejection, got: {err}"
+        );
     }
 }

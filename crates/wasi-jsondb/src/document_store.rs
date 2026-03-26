@@ -325,20 +325,25 @@ impl Filter {
     }
 
     /// Restrict `field` to a calendar date (UTC day) using range on timestamp strings.
-    #[must_use]
-    pub fn on_date(field: &str, iso_date: &str) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `iso_date` is not a valid `YYYY-MM-DD` date or is the
+    /// maximum representable date (no next day).
+    pub fn on_date(field: &str, iso_date: &str) -> anyhow::Result<Self> {
+        let next = next_iso_date(iso_date)?;
         let start = format!("{iso_date}T00:00:00Z");
-        let end_date = next_iso_date(iso_date);
-        let end = format!("{end_date}T00:00:00Z");
-        Self::And(vec![Self::gte(field, Timestamp(start)), Self::lt(field, Timestamp(end))])
+        let end = format!("{next}T00:00:00Z");
+        Ok(Self::And(vec![Self::gte(field, Timestamp(start)), Self::lt(field, Timestamp(end))]))
     }
 }
 
-/// Advance `YYYY-MM-DD` by one day (UTC). Falls back to `iso_date` on parse failure.
-fn next_iso_date(iso_date: &str) -> String {
+fn next_iso_date(iso_date: &str) -> anyhow::Result<String> {
     use chrono::NaiveDate;
-    NaiveDate::parse_from_str(iso_date, "%Y-%m-%d").map_or_else(
-        |_| iso_date.to_string(),
-        |d| d.succ_opt().map_or_else(|| iso_date.to_string(), |n| n.format("%Y-%m-%d").to_string()),
-    )
+    let date = NaiveDate::parse_from_str(iso_date, "%Y-%m-%d")
+        .map_err(|_e| anyhow::anyhow!("invalid ISO date: {iso_date:?}"))?;
+    let next = date
+        .succ_opt()
+        .ok_or_else(|| anyhow::anyhow!("cannot compute next day for date: {iso_date}"))?;
+    Ok(next.format("%Y-%m-%d").to_string())
 }

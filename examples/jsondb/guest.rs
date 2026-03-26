@@ -10,7 +10,7 @@
 //! - `ne` -- stops `exclude_zone` param (direct `ComparisonOp::Ne` codepath)
 //! - `in_list` -- routes `types` param
 //! - `is_not_null`, `is_null` -- stops `accessible` and `top_level` params
-//! - `or`, `starts_with` -- nested inside routes `q` param
+//! - `or`, `contains` -- nested inside routes `q` param
 //! - `not` -- nested inside routes `exclude_type` param
 //! - `not(and(...))` -- routes `not_agency` + `not_type` combo (De Morgan negation)
 //! - `on_date` -- stops `updated_on` param
@@ -163,7 +163,7 @@ async fn list_stops(Query(p): Query<StopQuery>) -> HttpResult<Json<Value>> {
         filters.push(Filter::lte("stop_lon", v));
     }
     if let Some(date) = &p.updated_on {
-        filters.push(Filter::on_date("last_updated", date));
+        filters.push(Filter::on_date("last_updated", date)?);
     }
 
     let filter = if filters.is_empty() { None } else { Some(Filter::and(filters)) };
@@ -252,7 +252,7 @@ async fn list_routes(Query(p): Query<RouteQuery>) -> HttpResult<Json<Value>> {
     if let Some(q) = &p.q {
         filters.push(Filter::or([
             Filter::contains("route_short_name", q),
-            Filter::starts_with("route_long_name", q),
+            Filter::contains("route_long_name", q),
         ]));
     }
     if let Some(types_str) = &p.types {

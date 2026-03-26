@@ -15,14 +15,65 @@
 //! | `$ne` returns the **equal** document (behaves as `$eq`) | `{ "$not": { "$eq": … } }` |
 //! | `$nin` returns the **matching** documents (behaves as `$in`) | `{ "$not": { "$in": … } }` |
 //! | `Bson::RegularExpression` value is silently ignored in queries | `{ "$regex": bson::Regex { … } }` operator syntax |
-//! | Regex anchors `^` / `$` are silently ignored | `StartsWith`/`EndsWith` degrade to `Contains` |
+//! | Regex anchors `^` / `$` are silently ignored | `starts-with` / `ends-with` rejected at runtime |
+//!
+//! # Unsupported filter operations
+//!
+//! `StartsWith` and `EndsWith` cannot be evaluated server-side because `PoloDB` ignores
+//! regex anchors. Rather than silently degrading to `Contains` or post-filtering (which
+//! breaks pagination), `validate` rejects these upfront. Backends that support regex
+//! anchors (e.g. MongoDB) can implement them natively.
 
+use anyhow::{Result, bail};
 use polodb_core::bson::{self, Bson, Document, doc};
 
 use crate::host::generated::wasi::jsondb::types::{ComparisonOp, ScalarValue};
 use crate::host::resource::FilterTree;
 
+/// Validate a filter tree for `PoloDB` compatibility.
+///
+/// Rejects field names that would be interpreted as BSON operators (`$`-prefixed)
+/// and filter operations that `PoloDB` cannot evaluate server-side.
+pub fn validate(tree: &FilterTree) -> Result<()> {
+    match tree {
+        FilterTree::Compare { field, .. }
+        | FilterTree::InList { field, .. }
+        | FilterTree::NotInList { field, .. }
+        | FilterTree::Contains { field, .. }
+        | FilterTree::IsNull(field)
+        | FilterTree::IsNotNull(field) => validate_bson_field(field),
+        FilterTree::StartsWith { .. } => {
+            bail!("starts-with filter is not supported by the PoloDB backend")
+        }
+        FilterTree::EndsWith { .. } => {
+            bail!("ends-with filter is not supported by the PoloDB backend")
+        }
+        FilterTree::And(children) | FilterTree::Or(children) => {
+            for child in children {
+                validate(child)?;
+            }
+            Ok(())
+        }
+        FilterTree::Not(inner) => validate(inner),
+    }
+}
+
+fn validate_bson_field(field: &str) -> Result<()> {
+    if field.is_empty() {
+        bail!("filter field name must not be empty");
+    }
+    if field.starts_with('$') {
+        bail!("filter field name must not start with '$': {field:?}");
+    }
+    if field.contains('\0') {
+        bail!("filter field name must not contain null bytes: {field:?}");
+    }
+    Ok(())
+}
+
 /// Convert a host filter tree to a BSON query document.
+///
+/// Call [`validate`] first to reject unsupported operations and unsafe field names.
 #[must_use]
 pub fn to_bson(tree: &FilterTree) -> Document {
     match tree {
@@ -42,10 +93,9 @@ pub fn to_bson(tree: &FilterTree) -> Document {
         FilterTree::Contains { field, pattern } => {
             doc! { field: { "$regex": to_regex(&regex_escape(pattern)) } }
         }
-        // PoloDB ignores regex anchors ^ and $, so StartsWith/EndsWith
-        // cannot be evaluated server-side. Return empty filter (matches all);
-        // the caller post-filters with `post_filter_matches`.
-        FilterTree::StartsWith { .. } | FilterTree::EndsWith { .. } => doc! {},
+        FilterTree::StartsWith { .. } | FilterTree::EndsWith { .. } => {
+            unreachable!("validate() rejects these before to_bson is called")
+        }
         FilterTree::And(children) => {
             let docs: Vec<Bson> = children.iter().map(|c| Bson::Document(to_bson(c))).collect();
             doc! { "$and": docs }
@@ -105,8 +155,9 @@ fn negate_to_bson(inner: &FilterTree) -> Document {
         FilterTree::Contains { field, pattern } => {
             doc! { field: { "$not": { "$regex": to_regex(&regex_escape(pattern)) } } }
         }
-        // Negated StartsWith/EndsWith: also deferred to post-filter.
-        FilterTree::StartsWith { .. } | FilterTree::EndsWith { .. } => doc! {},
+        FilterTree::StartsWith { .. } | FilterTree::EndsWith { .. } => {
+            unreachable!("validate() rejects these before negate_to_bson is called")
+        }
         FilterTree::And(children) => {
             let docs: Vec<Bson> =
                 children.iter().map(|c| Bson::Document(negate_to_bson(c))).collect();
@@ -147,35 +198,4 @@ fn to_regex(pattern: &str) -> bson::Regex {
 
 fn regex_escape(s: &str) -> String {
     regex::escape(s)
-}
-
-/// Returns `true` if the filter contains `StartsWith` or `EndsWith` nodes
-/// that require client-side post-filtering (`PoloDB` ignores regex anchors).
-pub fn needs_post_filter(tree: &FilterTree) -> bool {
-    match tree {
-        FilterTree::StartsWith { .. } | FilterTree::EndsWith { .. } => true,
-        FilterTree::And(children) | FilterTree::Or(children) => {
-            children.iter().any(needs_post_filter)
-        }
-        FilterTree::Not(inner) => needs_post_filter(inner),
-        _ => false,
-    }
-}
-
-/// Evaluate `StartsWith`/`EndsWith` conditions against a BSON document.
-///
-/// Other filter types return `true` (already evaluated by `PoloDB`).
-pub fn post_filter_matches(tree: &FilterTree, doc: &bson::Document) -> bool {
-    match tree {
-        FilterTree::StartsWith { field, pattern } => {
-            doc.get_str(field).is_ok_and(|s| s.starts_with(pattern.as_str()))
-        }
-        FilterTree::EndsWith { field, pattern } => {
-            doc.get_str(field).is_ok_and(|s| s.ends_with(pattern.as_str()))
-        }
-        FilterTree::And(children) => children.iter().all(|c| post_filter_matches(c, doc)),
-        FilterTree::Or(children) => children.iter().any(|c| post_filter_matches(c, doc)),
-        FilterTree::Not(inner) => !post_filter_matches(inner, doc),
-        _ => true,
-    }
 }

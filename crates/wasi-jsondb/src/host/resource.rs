@@ -61,6 +61,19 @@ pub enum FilterTree {
     Not(Box<Self>),
 }
 
+impl FilterTree {
+    /// Maximum nesting depth of the tree.
+    pub fn depth(&self) -> usize {
+        match self {
+            Self::And(children) | Self::Or(children) => {
+                1 + children.iter().map(Self::depth).max().unwrap_or(0)
+            }
+            Self::Not(inner) => 1 + inner.depth(),
+            _ => 1,
+        }
+    }
+}
+
 /// Wrapper stored in the wasmtime resource table for `filter` handles.
 #[derive(Debug, Clone)]
 pub struct FilterProxy(pub FilterTree);
