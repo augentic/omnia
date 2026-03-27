@@ -19,7 +19,7 @@ workspace = true
 anyhow.workspace = true
 http.workspace = true
 opentelemetry.workspace = true
-opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic"] }
+opentelemetry-otlp = { version = "0.31.1", features = ["grpc-tonic"] }
 opentelemetry_sdk = { workspace = true, features = ["rt-tokio"] }
 rand.workspace = true
 tower.workspace = true

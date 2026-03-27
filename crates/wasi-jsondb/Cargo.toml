@@ -1,6 +1,6 @@
 [package]
-name = "omnia-wasi-sql"
-description = "WASI SQL database interface for the Omnia runtime"
+name = "omnia-wasi-jsondb"
+description = "WASI JSON document store interface for the Omnia runtime"
 readme = "README.md"
 authors.workspace = true
 categories.workspace = true
@@ -19,27 +19,29 @@ workspace = true
 
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+anyhow.workspace = true
 fromenv.workspace = true
 futures.workspace = true
 omnia.workspace = true
 parking_lot.workspace = true
-rusqlite = { version = "0.39.0", features = ["bundled"] }
+polodb_core = { version = "5.1.4", default-features = false }
+regex = "1.11.1"
+serde_json.workspace = true
+serde.workspace = true
+tracing.workspace = true
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true
 
 # shared dependencies
 [dependencies]
 anyhow.workspace = true
-tracing.workspace = true
+chrono.workspace = true
 
 # guest dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 anyhow.workspace = true
-base64ct.workspace = true
-chrono.workspace = true
 futures.workspace = true
-sea-query.workspace = true
-serde_json.workspace = true
+serde.workspace = true
 wit-bindgen.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]

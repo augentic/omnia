@@ -5,6 +5,11 @@ pub mod api;
 mod capabilities;
 mod error;
 
+/// JSON document store types and helpers (from `omnia-wasi-jsondb`).
+pub mod document_store {
+    pub use omnia_wasi_jsondb::document_store::*;
+}
+
 #[cfg(target_arch = "wasm32")]
 pub use omnia_guest_macro::*;
 #[doc(hidden)]

@@ -18,7 +18,7 @@ skip_rust_env_info = true
 dependencies = ["audit", "fmt", "lint", "outdated", "deps"]
 
 [tasks.ci]
-dependencies = ["lint", "test", "test-doc", "vet", "outdated", "deny", "fmt"]
+dependencies = ["lint", "test", "test-docs", "vet", "outdated", "deny", "fmt"]
 
 # -------------------------------------
 # Individual Actions

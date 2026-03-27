@@ -1,0 +1,88 @@
+package wasi:jsondb@0.1.0;
+
+interface types {
+    variant error {
+        no-such-store,
+        access-denied,
+        other(string),
+    }
+
+    variant scalar-value {
+        null,
+        boolean(bool),
+        int32(s32),
+        int64(s64),
+        float64(f64),
+        str(string),
+        binary(list<u8>),
+        timestamp(string),
+    }
+
+    enum comparison-op {
+        eq,
+        ne,
+        gt,
+        gte,
+        lt,
+        lte,
+    }
+
+    /// Host-managed filter tree. The guest builds filters by calling
+    /// static constructors; the host assembles a native recursive
+    /// tree internally.
+    resource filter {
+        compare: static func(field: string, op: comparison-op, value: scalar-value) -> filter;
+        in-list: static func(field: string, values: list<scalar-value>) -> filter;
+        not-in-list: static func(field: string, values: list<scalar-value>) -> filter;
+        is-null: static func(field: string) -> filter;
+        is-not-null: static func(field: string) -> filter;
+        contains: static func(field: string, pattern: string) -> filter;
+        starts-with: static func(field: string, pattern: string) -> filter;
+        ends-with: static func(field: string, pattern: string) -> filter;
+        and: static func(filters: list<filter>) -> filter;
+        or: static func(filters: list<filter>) -> filter;
+        not: static func(inner: filter) -> filter;
+    }
+
+    record sort-field {
+        field: string,
+        descending: bool,
+    }
+
+    record query-options {
+        filter: option<filter>,
+        order-by: list<sort-field>,
+        limit: option<u32>,
+        offset: option<u32>,
+        /// Opaque pagination token. None = start from beginning.
+        /// Returned by a previous query-result; pass it back to
+        /// fetch the next page. Semantics are backend-dependent.
+        continuation: option<string>,
+    }
+
+    record document {
+        id: string,
+        /// JSON-serialized document body.
+        data: list<u8>,
+    }
+
+    record query-result {
+        documents: list<document>,
+        continuation: option<string>,
+    }
+}
+
+interface store {
+    use types.{document, query-options, query-result, error};
+
+    get: async func(collection: string, id: string) -> result<option<document>, error>;
+    insert: async func(collection: string, doc: document) -> result<_, error>;
+    put: async func(collection: string, doc: document) -> result<_, error>;
+    delete: async func(collection: string, id: string) -> result<bool, error>;
+    query: async func(collection: string, options: query-options) -> result<query-result, error>;
+}
+
+world imports {
+    import types;
+    import store;
+}

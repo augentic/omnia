@@ -9,9 +9,12 @@ feature-depth = 1
 
 [advisories]
 unmaintained = 'workspace'
-# ignore = [
-#   "RUSTSEC-2024-0445",
-# ]
+ignore = [
+  # rustls-webpki 0.102.8 CRL distribution-point matching bug.
+  # Transitive via wasmtime-wasi-http -> rustls 0.22; fix requires
+  # wasmtime to bump to rustls 0.23+ (rustls-webpki 0.103.10+).
+  "RUSTSEC-2026-0049",
+]
 
 [licenses]
 allow = [

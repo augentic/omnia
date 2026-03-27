@@ -15,6 +15,7 @@ omnia-wasi-identity.workspace = true
 omnia-wasi-keyvalue.workspace = true
 omnia-wasi-messaging.workspace = true
 omnia-wasi-otel.workspace = true
+omnia-wasi-jsondb.workspace = true
 omnia-wasi-sql.workspace = true
 omnia-wasi-vault.workspace = true
 omnia-wasi-websocket.workspace = true
@@ -111,6 +112,15 @@ crate-type = ["cdylib"]
 [[example]]
 name = "otel"
 path = "otel/runtime.rs"
+
+[[example]]
+name = "jsondb-wasm"
+path = "jsondb/guest.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "jsondb"
+path = "jsondb/runtime.rs"
 
 [[example]]
 name = "sql-wasm"
