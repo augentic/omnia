@@ -6,6 +6,25 @@ Unreleased
 
 ### Changed
 
+<!-- Release notes generated using configuration in .github/release.yaml at main -->
+
+## What's Changed
+* Bump to 0.27.0 by @github-actions[bot] in https://github.com/augentic/omnia/pull/171
+* Bump to 0.28.0 by @github-actions[bot] in https://github.com/augentic/omnia/pull/172
+* Development environment setup by @andrewweston in https://github.com/augentic/omnia/pull/173
+* Tidy lints by @andrewweston in https://github.com/augentic/omnia/pull/175
+* Wasmtime patch by @andrewweston in https://github.com/augentic/omnia/pull/174
+* Migrate to wasm-pkg-tools for WIT by @andrewweston in https://github.com/augentic/omnia/pull/176
+* Implement wasm pkg (wkg) registry by @andrewweston in https://github.com/augentic/omnia/pull/177
+* Add plugin by @andrewweston in https://github.com/augentic/omnia/pull/178
+* Add specify readme by @andrewweston in https://github.com/augentic/omnia/pull/179
+* Create plugin directory by @andrewweston in https://github.com/augentic/omnia/pull/180
+* move plugins to specify repo by @andrewweston in https://github.com/augentic/omnia/pull/181
+* Introducing wasi-jsondb by @karthik-phl in https://github.com/augentic/omnia/pull/182
+
+
+**Full Changelog**: https://github.com/augentic/omnia/compare/v0.27.0...v0.29.0
+
 ---
 
 Release notes for previous releases can be found on the respective release
