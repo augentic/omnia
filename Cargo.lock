@@ -71,9 +71,9 @@ dependencies = [
 
 [[package]]
 name = "anstyle"
-version = "1.0.13"
+version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5192cca8006f1fd4f7237516f40fa183bb07f8fbdfedaa0036de5ea9b0b45e78"
+checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
 
 [[package]]
 name = "anstyle-parse"
@@ -461,9 +461,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.56"
+version = "1.2.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aebf35691d1bfb0ac386a69bac2fde4dd276fb618cf8bf4f5318fe285e821bb2"
+checksum = "7a0dd1ca384932ff3641c8718a02769f1698e7563dc6974ffd03346116310423"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -576,9 +576,9 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "cmake"
-version = "0.1.57"
+version = "0.1.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75443c44cd6b379beb8c5b45d85d0773baf31cce901fe7bb252f4eff3008ef7d"
+checksum = "c0f78a02292a74a88ac736019ab962ece0bc380e3f977bf72e376c5d78ff0678"
 dependencies = [
  "cc",
 ]
@@ -594,9 +594,9 @@ dependencies = [
 
 [[package]]
 name = "colorchoice"
-version = "1.0.4"
+version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
+checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 
 [[package]]
 name = "combine"
@@ -1012,7 +1012,7 @@ dependencies = [
 
 [[package]]
 name = "examples"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1682,9 +1682,9 @@ checksum = "d98f6fed1fde3f8c21bc40a1abb88dd75e67924f9cffc3ef95607bad8017f8e2"
 
 [[package]]
 name = "iri-string"
-version = "0.7.10"
+version = "0.7.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c91338f0783edbd6195decb37bae672fd3b165faffb89bf7b9e6942f8b1a731a"
+checksum = "d8e7418f59cc01c88316161279a7f665217ae316b388e58a0d10e29f54f1e5eb"
 dependencies = [
  "memchr",
  "serde",
@@ -1716,9 +1716,9 @@ dependencies = [
 
 [[package]]
 name = "itoa"
-version = "1.0.17"
+version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
+checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jni"
@@ -1729,7 +1729,7 @@ dependencies = [
  "cesu8",
  "cfg-if",
  "combine",
- "jni-sys",
+ "jni-sys 0.3.1",
  "log",
  "thiserror 1.0.69",
  "walkdir",
@@ -1738,9 +1738,31 @@ dependencies = [
 
 [[package]]
 name = "jni-sys"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8eaf4bc02d17cbdd7ff4c7438cafcdf7fb9a4613313ad11b4f8fefe7d3fa0130"
+checksum = "41a652e1f9b6e0275df1f15b32661cf0d4b78d4d87ddec5e0c3c20f097433258"
+dependencies = [
+ "jni-sys 0.4.1",
+]
+
+[[package]]
+name = "jni-sys"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6377a88cb3910bee9b0fa88d4f42e1d2da8e79915598f65fb0c7ee14c878af2"
+dependencies = [
+ "jni-sys-macros",
+]
+
+[[package]]
+name = "jni-sys-macros"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38c0b942f458fe50cdac086d2f946512305e5631e720728f2a61aabcd47a6264"
+dependencies = [
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "jobserver"
@@ -1939,9 +1961,9 @@ dependencies = [
 
 [[package]]
 name = "moka"
-version = "0.12.14"
+version = "0.12.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85f8024e1c8e71c778968af91d43700ce1d11b219d127d79fb2934153b82b42b"
+checksum = "957228ad12042ee839f93c8f257b62b4c0ab5eaae1d4fa60de53b27c9d7c5046"
 dependencies = [
  "crossbeam-channel",
  "crossbeam-epoch",
@@ -1995,9 +2017,9 @@ dependencies = [
 
 [[package]]
 name = "num-conv"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf97ec579c3c42f953ef76dbf8d55ac91fb219dde70e49aa4a6b7d74e9919050"
+checksum = "c6673768db2d862beb9b39a78fdcb1a69439615d5794a1be50caa9bc92c81967"
 
 [[package]]
 name = "num-traits"
@@ -2052,7 +2074,7 @@ dependencies = [
 
 [[package]]
 name = "omnia"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2068,7 +2090,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-guest-macro"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2077,7 +2099,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-orm"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2089,7 +2111,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-otel"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "anyhow",
  "http",
@@ -2105,7 +2127,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-runtime-macro"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2114,7 +2136,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-sdk"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2142,7 +2164,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-blobstore"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2158,7 +2180,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-config"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "anyhow",
  "omnia",
@@ -2170,7 +2192,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-http"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2201,7 +2223,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-identity"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "anyhow",
  "fromenv",
@@ -2218,7 +2240,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-jsondb"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2239,7 +2261,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-keyvalue"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2257,7 +2279,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-messaging"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -2275,7 +2297,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-otel"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "anyhow",
  "cfg-if",
@@ -2299,7 +2321,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-otel-attr"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2308,7 +2330,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-sql"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "anyhow",
  "base64ct",
@@ -2329,7 +2351,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-vault"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -2344,7 +2366,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-websocket"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "anyhow",
  "dashmap",
@@ -2624,9 +2646,9 @@ dependencies = [
 
 [[package]]
 name = "proptest"
-version = "1.10.0"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37566cb3fdacef14c0737f9546df7cfeadbfbc9fef10991038bf5015d0c80532"
+checksum = "4b45fcc2344c680f5025fe57779faef368840d0bd1f42f216291f0dc4ace4744"
 dependencies = [
  "bitflags",
  "num-traits",
@@ -3698,9 +3720,9 @@ dependencies = [
 
 [[package]]
 name = "tinyvec"
-version = "1.10.0"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfa5fdc3bce6191a1dbc8c02d5c8bffcf557bafa17c124c5264a458f1b0613fa"
+checksum = "3e61e67053d25a4e82c844e8424039d9745781b3fc4f32b8d55ed50f5f667ef3"
 dependencies = [
  "tinyvec_macros",
 ]
@@ -3943,9 +3965,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.3.22"
+version = "0.3.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f30143827ddab0d256fd843b7a66d164e9f271cfa0dde49142c5ca0ca291f1e"
+checksum = "cb7f578e5945fb242538965c2d0b04418d38ec25c79d160cd279bf0731c8d319"
 dependencies = [
  "matchers",
  "nu-ansi-term",
@@ -5262,18 +5284,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.42"
+version = "0.8.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2578b716f8a7a858b7f02d5bd870c14bf4ddbbcf3a4c05414ba6503640505e3"
+checksum = "efbb2a062be311f2ba113ce66f697a4dc589f85e78a4aea276200804cea0ed87"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.42"
+version = "0.8.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e6cc098ea4d3bd6246687de65af3f920c430e236bee1e3bf2e441463f08a02f"
+checksum = "0e8bc7269b54418e7aeeef514aa68f8690b8c0489a06b0136e5f57c4c5ccab89"
 dependencies = [
  "proc-macro2",
  "quote",
