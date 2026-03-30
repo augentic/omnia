@@ -2144,6 +2144,7 @@ dependencies = [
  "http",
  "http-body",
  "omnia-guest-macro",
+ "omnia-wasi-blobstore",
  "omnia-wasi-config",
  "omnia-wasi-http",
  "omnia-wasi-identity",

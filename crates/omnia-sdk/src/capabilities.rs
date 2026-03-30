@@ -333,3 +333,143 @@ pub trait Broadcast: Send + Sync {
         }
     }
 }
+
+/// Binary large object storage (WASI Blobstore).
+///
+/// Default WASM implementations delegate to `wasi:blobstore` via
+/// `omnia-wasi-blobstore`.
+pub trait BlobStore: Send + Sync {
+    /// Retrieve an object's data from a container.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn get(
+        &self, container: &str, name: &str,
+    ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send;
+
+    /// Store an object in a container.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn put(
+        &self, container: &str, name: &str, data: &[u8],
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// Delete an object from a container.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn delete(&self, container: &str, name: &str) -> impl Future<Output = Result<()>> + Send;
+
+    /// Check whether an object exists in a container.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn has(&self, container: &str, name: &str) -> impl Future<Output = Result<bool>> + Send;
+
+    /// List all object names in a container.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn list(&self, container: &str) -> impl Future<Output = Result<Vec<String>>> + Send;
+
+    /// Retrieve an object's data from a container.
+    #[cfg(target_arch = "wasm32")]
+    fn get(
+        &self, container: &str, name: &str,
+    ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
+        use omnia_wasi_blobstore::blobstore;
+        use omnia_wasi_blobstore::types::IncomingValue;
+
+        async move {
+            let ctr = blobstore::get_container(container.to_string())
+                .await
+                .map_err(|e| anyhow!("opening container: {e}"))?;
+            if !ctr
+                .has_object(name.to_string())
+                .await
+                .map_err(|e| anyhow!("checking object existence: {e}"))?
+            {
+                return Ok(None);
+            }
+            let incoming = ctr
+                .get_data(name.to_string(), 0, u64::MAX)
+                .await
+                .map_err(|e| anyhow!("reading object: {e}"))?;
+            let data = IncomingValue::incoming_value_consume_sync(incoming)
+                .map_err(|e| anyhow!("consuming incoming value: {e}"))?;
+            Ok(Some(data))
+        }
+    }
+
+    /// Store an object in a container.
+    #[cfg(target_arch = "wasm32")]
+    fn put(
+        &self, container: &str, name: &str, data: &[u8],
+    ) -> impl Future<Output = Result<()>> + Send {
+        use omnia_wasi_blobstore::blobstore;
+        use omnia_wasi_blobstore::types::OutgoingValue;
+
+        async move {
+            let ctr = blobstore::get_container(container.to_string())
+                .await
+                .map_err(|e| anyhow!("opening container: {e}"))?;
+            let outgoing = OutgoingValue::new_outgoing_value();
+            {
+                let body = outgoing
+                    .outgoing_value_write_body()
+                    .await
+                    .map_err(|e| anyhow!("getting write body: {e}"))?;
+                body.blocking_write_and_flush(data).map_err(|e| anyhow!("writing data: {e}"))?;
+            }
+            ctr.write_data(name.to_string(), &outgoing)
+                .await
+                .map_err(|e| anyhow!("writing object: {e}"))?;
+            OutgoingValue::finish(outgoing).map_err(|e| anyhow!("finishing write: {e}"))?;
+            Ok(())
+        }
+    }
+
+    /// Delete an object from a container.
+    #[cfg(target_arch = "wasm32")]
+    fn delete(&self, container: &str, name: &str) -> impl Future<Output = Result<()>> + Send {
+        use omnia_wasi_blobstore::blobstore;
+
+        async move {
+            let ctr = blobstore::get_container(container.to_string())
+                .await
+                .map_err(|e| anyhow!("opening container: {e}"))?;
+            ctr.delete_object(name.to_string()).await.map_err(|e| anyhow!("deleting object: {e}"))
+        }
+    }
+
+    /// Check whether an object exists in a container.
+    #[cfg(target_arch = "wasm32")]
+    fn has(&self, container: &str, name: &str) -> impl Future<Output = Result<bool>> + Send {
+        use omnia_wasi_blobstore::blobstore;
+
+        async move {
+            let ctr = blobstore::get_container(container.to_string())
+                .await
+                .map_err(|e| anyhow!("opening container: {e}"))?;
+            ctr.has_object(name.to_string())
+                .await
+                .map_err(|e| anyhow!("checking object existence: {e}"))
+        }
+    }
+
+    /// List all object names in a container.
+    #[cfg(target_arch = "wasm32")]
+    fn list(&self, container: &str) -> impl Future<Output = Result<Vec<String>>> + Send {
+        use omnia_wasi_blobstore::blobstore;
+
+        async move {
+            let ctr = blobstore::get_container(container.to_string())
+                .await
+                .map_err(|e| anyhow!("opening container: {e}"))?;
+            let stream = ctr.list_objects().await.map_err(|e| anyhow!("listing objects: {e}"))?;
+            let mut names = Vec::new();
+            loop {
+                let (batch, done) = stream
+                    .read_stream_object_names(100)
+                    .await
+                    .map_err(|e| anyhow!("reading object names: {e}"))?;
+                names.extend(batch);
+                if done {
+                    break;
+                }
+            }
+            Ok(names)
+        }
+    }
+}

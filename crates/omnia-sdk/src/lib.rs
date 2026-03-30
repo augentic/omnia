@@ -17,8 +17,8 @@ pub use {anyhow, axum, bytes, http, http_body, tracing};
 #[cfg(target_arch = "wasm32")]
 #[doc(hidden)]
 pub use {
-    omnia_wasi_http, omnia_wasi_identity, omnia_wasi_keyvalue, omnia_wasi_messaging,
-    omnia_wasi_otel, wasip3, wit_bindgen,
+    omnia_wasi_blobstore, omnia_wasi_http, omnia_wasi_identity, omnia_wasi_keyvalue,
+    omnia_wasi_messaging, omnia_wasi_otel, wasip3, wit_bindgen,
 };
 
 pub use crate::api::*;
