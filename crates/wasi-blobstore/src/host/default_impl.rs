@@ -236,36 +236,122 @@ impl Container for InMemContainer {
 mod tests {
     use super::*;
 
+    async fn new_ctx() -> BlobstoreDefault {
+        BlobstoreDefault::connect_with(ConnectOptions).await.expect("connect")
+    }
+
     #[tokio::test]
-    async fn container_operations() {
-        let ctx = BlobstoreDefault::connect_with(ConnectOptions).await.expect("connect");
+    async fn container_crud() {
+        let ctx = new_ctx().await;
 
-        // Test create and get container
-        let container =
-            ctx.create_container("test-container".to_string()).await.expect("create container");
+        ctx.create_container("bucket".to_string()).await.expect("create");
+        assert!(ctx.container_exists("bucket".to_string()).await.expect("exists"));
 
-        // Test write and read data
-        container.write_data("object1".to_string(), b"data1".to_vec()).await.expect("write data");
+        let retrieved = ctx.get_container("bucket".to_string()).await.expect("get");
+        assert_eq!(retrieved.name().expect("name"), "bucket");
 
-        let data = container.get_data("object1".to_string(), 0, 0).await.expect("get data");
-        assert_eq!(data, Some(b"data1".to_vec()));
+        ctx.delete_container("bucket".to_string()).await.expect("delete");
+        assert!(!ctx.container_exists("bucket".to_string()).await.expect("exists after delete"));
+    }
 
-        // Test object existence
-        assert!(container.has_object("object1".to_string()).await.expect("has object"));
-        assert!(!container.has_object("object2".to_string()).await.expect("has object"));
+    #[tokio::test]
+    async fn get_nonexistent_container() {
+        let ctx = new_ctx().await;
+        let result = ctx.get_container("no-such-container".to_string()).await;
+        assert!(result.is_err());
+    }
 
-        // Test list objects
-        container.write_data("object2".to_string(), b"data2".to_vec()).await.expect("write data");
-        let mut objects = container.list_objects().await.expect("list objects");
+    #[tokio::test]
+    async fn object_crud() {
+        let ctx = new_ctx().await;
+        let container = ctx.create_container("obj-crud".to_string()).await.expect("create");
+
+        container.write_data("k1".to_string(), b"v1".to_vec()).await.expect("write");
+        let data = container.get_data("k1".to_string(), 0, 0).await.expect("get");
+        assert_eq!(data, Some(b"v1".to_vec()));
+
+        assert!(container.has_object("k1".to_string()).await.expect("has k1"));
+        assert!(!container.has_object("k2".to_string()).await.expect("has k2"));
+
+        container.write_data("k2".to_string(), b"v2".to_vec()).await.expect("write k2");
+        let mut objects = container.list_objects().await.expect("list");
         objects.sort();
-        assert_eq!(objects, vec!["object1".to_string(), "object2".to_string()]);
+        assert_eq!(objects, vec!["k1", "k2"]);
 
-        // Test delete object
-        container.delete_object("object1".to_string()).await.expect("delete object");
-        assert!(!container.has_object("object1".to_string()).await.expect("has object"));
+        container.delete_object("k1".to_string()).await.expect("delete k1");
+        assert!(!container.has_object("k1".to_string()).await.expect("has k1 after delete"));
+    }
 
-        // Test container metadata
-        let info = container.info().expect("container info");
-        assert_eq!(info.name, "test-container");
+    #[tokio::test]
+    async fn object_info_valid() {
+        let ctx = new_ctx().await;
+        let container = ctx.create_container("info-test".to_string()).await.expect("create");
+
+        let payload = b"hello world";
+        container.write_data("doc.txt".to_string(), payload.to_vec()).await.expect("write");
+
+        let meta = container.object_info("doc.txt".to_string()).await.expect("object_info");
+        assert_eq!(meta.name, "doc.txt");
+        assert_eq!(meta.container, "info-test");
+        assert_eq!(meta.size, payload.len() as u64);
+    }
+
+    #[tokio::test]
+    async fn get_nonexistent_object() {
+        let ctx = new_ctx().await;
+        let container = ctx.create_container("miss".to_string()).await.expect("create");
+
+        let data = container.get_data("ghost".to_string(), 0, 0).await.expect("get");
+        assert_eq!(data, None);
+    }
+
+    #[tokio::test]
+    async fn object_info_nonexistent() {
+        let ctx = new_ctx().await;
+        let container = ctx.create_container("miss-info".to_string()).await.expect("create");
+
+        let result = container.object_info("ghost".to_string()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn overwrite_object() {
+        let ctx = new_ctx().await;
+        let container = ctx.create_container("overwrite".to_string()).await.expect("create");
+
+        container.write_data("key".to_string(), b"first".to_vec()).await.expect("write 1");
+        container.write_data("key".to_string(), b"second".to_vec()).await.expect("write 2");
+
+        let data = container.get_data("key".to_string(), 0, 0).await.expect("get");
+        assert_eq!(data, Some(b"second".to_vec()));
+    }
+
+    #[tokio::test]
+    async fn delete_nonexistent_object() {
+        let ctx = new_ctx().await;
+        let container = ctx.create_container("del-miss".to_string()).await.expect("create");
+
+        container.delete_object("nope".to_string()).await.expect("delete missing should succeed");
+    }
+
+    #[tokio::test]
+    async fn empty_container_list() {
+        let ctx = new_ctx().await;
+        let container = ctx.create_container("empty".to_string()).await.expect("create");
+
+        let objects = container.list_objects().await.expect("list");
+        assert!(objects.is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_container_overwrites_existing() {
+        let ctx = new_ctx().await;
+
+        let original = ctx.create_container("reused".to_string()).await.expect("create 1");
+        original.write_data("stale".to_string(), b"old".to_vec()).await.expect("write");
+
+        let fresh = ctx.create_container("reused".to_string()).await.expect("create 2");
+        let objects = fresh.list_objects().await.expect("list");
+        assert!(objects.is_empty(), "re-created container should be empty");
     }
 }

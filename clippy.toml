@@ -11,6 +11,7 @@ doc-valid-idents = [
 
 allowed-duplicate-crates = [
   "core-foundation",
+  "jni-sys",
   "cpufeatures",
   "embedded-io",
   "foldhash",

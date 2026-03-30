@@ -635,9 +635,7 @@ pub trait BlobStore: Send + Sync {
             let ctr = blobstore::get_container(container.to_string())
                 .await
                 .map_err(|e| anyhow!("opening container: {e}"))?;
-            ctr.delete_objects(&names)
-                .await
-                .map_err(|e| anyhow!("deleting objects: {e}"))
+            ctr.delete_objects(&names).await.map_err(|e| anyhow!("deleting objects: {e}"))
         }
     }
 
@@ -730,9 +728,7 @@ pub trait BlobStore: Send + Sync {
                 container: dest_container.to_string(),
                 object: dest_name.to_string(),
             };
-            blobstore::copy_object(&src, &dest)
-                .await
-                .map_err(|e| anyhow!("copying object: {e}"))
+            blobstore::copy_object(&src, &dest).await.map_err(|e| anyhow!("copying object: {e}"))
         }
     }
 
@@ -756,9 +752,7 @@ pub trait BlobStore: Send + Sync {
                 container: dest_container.to_string(),
                 object: dest_name.to_string(),
             };
-            blobstore::move_object(&src, &dest)
-                .await
-                .map_err(|e| anyhow!("moving object: {e}"))
+            blobstore::move_object(&src, &dest).await.map_err(|e| anyhow!("moving object: {e}"))
         }
     }
 }
