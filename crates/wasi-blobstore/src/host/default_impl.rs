@@ -259,7 +259,7 @@ mod tests {
     async fn get_nonexistent_container() {
         let ctx = new_ctx().await;
         let result = ctx.get_container("no-such-container".to_string()).await;
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 
     #[tokio::test]
@@ -281,6 +281,16 @@ mod tests {
 
         container.delete_object("k1".to_string()).await.expect("delete k1");
         assert!(!container.has_object("k1".to_string()).await.expect("has k1 after delete"));
+    }
+
+    #[tokio::test]
+    async fn container_info() {
+        let ctx = new_ctx().await;
+        let container = ctx.create_container("meta-test".to_string()).await.expect("create");
+
+        let meta = container.info().expect("info");
+        assert_eq!(meta.name, "meta-test");
+        assert!(meta.created_at > 0, "created_at should be a positive unix timestamp");
     }
 
     #[tokio::test]
@@ -312,7 +322,7 @@ mod tests {
         let container = ctx.create_container("miss-info".to_string()).await.expect("create");
 
         let result = container.object_info("ghost".to_string()).await;
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 
     #[tokio::test]
