@@ -322,7 +322,7 @@ mod tests {
         let container = ctx.create_container("miss-info".to_string()).await.expect("create");
 
         let result = container.object_info("ghost".to_string()).await;
-        result.unwrap_err();
+        result.expect_err("object_info should error for nonexistent object");
     }
 
     #[tokio::test]
