@@ -8,11 +8,10 @@ use crate::host::generated::wasi::blobstore::container::{
     HostStreamObjectNamesWithStore, ObjectMetadata,
 };
 use crate::host::resource::ContainerProxy;
-use crate::host::{Result, WasiBlobstore, WasiBlobstoreCtxView};
+use crate::host::{Result, StreamObjectNames, WasiBlobstore, WasiBlobstoreCtxView};
 
 pub type IncomingValue = Bytes;
 pub type OutgoingValue = MemoryOutputPipe;
-pub type StreamObjectNames = Vec<String>;
 
 impl HostContainerWithStore for WasiBlobstore {
     fn name<T>(mut host: Access<'_, T, Self>, self_: Resource<ContainerProxy>) -> Result<String> {
@@ -86,7 +85,8 @@ impl HostContainerWithStore for WasiBlobstore {
         let container = get_container(accessor, &self_)?;
         let names =
             container.list_objects().await.context("listing objects").map_err(|e| e.to_string())?;
-        accessor.with(|mut store| store.get().table.push(names)).map_err(|e| e.to_string())
+        let stream = StreamObjectNames::new(names);
+        accessor.with(|mut store| store.get().table.push(stream)).map_err(|e| e.to_string())
     }
 
     async fn delete_object<T>(
@@ -155,15 +155,42 @@ impl HostContainerWithStore for WasiBlobstore {
 
 impl HostStreamObjectNamesWithStore for WasiBlobstore {
     async fn read_stream_object_names<T>(
-        _: &Accessor<T, Self>, _self_: Resource<StreamObjectNames>, _len: u64,
+        accessor: &Accessor<T, Self>, self_: Resource<StreamObjectNames>, len: u64,
     ) -> Result<(Vec<String>, bool)> {
-        Err("stream object names not yet supported".to_string())
+        accessor.with(|mut store| {
+            let stream = store
+                .get()
+                .table
+                .get_mut(&self_)
+                .context("StreamObjectNames not found")
+                .map_err(|e| e.to_string())?;
+
+            let remaining = &stream.names[stream.offset..];
+            let take = usize::try_from(len).unwrap_or(usize::MAX).min(remaining.len());
+            let batch = remaining[..take].to_vec();
+            stream.offset += take;
+            let done = stream.offset >= stream.names.len();
+            Ok((batch, done))
+        })
     }
 
     async fn skip_stream_object_names<T>(
-        _: &Accessor<T, Self>, _names_ref: Resource<StreamObjectNames>, _num: u64,
+        accessor: &Accessor<T, Self>, self_: Resource<StreamObjectNames>, num: u64,
     ) -> Result<(u64, bool)> {
-        Err("stream object names not yet supported".to_string())
+        accessor.with(|mut store| {
+            let stream = store
+                .get()
+                .table
+                .get_mut(&self_)
+                .context("StreamObjectNames not found")
+                .map_err(|e| e.to_string())?;
+
+            let remaining = stream.names.len() - stream.offset;
+            let skip = usize::try_from(num).unwrap_or(usize::MAX).min(remaining);
+            stream.offset += skip;
+            let done = stream.offset >= stream.names.len();
+            Ok((skip as u64, done))
+        })
     }
 
     fn drop<T>(

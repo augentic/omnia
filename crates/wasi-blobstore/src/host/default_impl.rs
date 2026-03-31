@@ -235,6 +235,7 @@ impl Container for InMemContainer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::StreamObjectNames;
 
     async fn new_ctx() -> BlobstoreDefault {
         BlobstoreDefault::connect_with(ConnectOptions).await.expect("connect")
@@ -353,5 +354,147 @@ mod tests {
         let fresh = ctx.create_container("reused".to_string()).await.expect("create 2");
         let objects = fresh.list_objects().await.expect("list");
         assert!(objects.is_empty(), "re-created container should be empty");
+    }
+
+    #[tokio::test]
+    async fn copy_object_across_containers() {
+        let ctx = new_ctx().await;
+        let src = ctx.create_container("src-bucket".to_string()).await.expect("create src");
+        let dest = ctx.create_container("dest-bucket".to_string()).await.expect("create dest");
+
+        src.write_data("file.txt".to_string(), b"payload".to_vec()).await.expect("write");
+
+        let data = src.get_data("file.txt".to_string(), 0, u64::MAX).await.expect("read src");
+        assert!(data.is_some());
+        dest.write_data("file-copy.txt".to_string(), data.unwrap()).await.expect("write dest");
+
+        let copied =
+            dest.get_data("file-copy.txt".to_string(), 0, u64::MAX).await.expect("read dest");
+        assert_eq!(copied, Some(b"payload".to_vec()));
+
+        assert!(src.has_object("file.txt".to_string()).await.expect("src still has object"));
+    }
+
+    #[tokio::test]
+    async fn copy_object_within_same_container() {
+        let ctx = new_ctx().await;
+        let ctr = ctx.create_container("same-bucket".to_string()).await.expect("create");
+
+        ctr.write_data("original".to_string(), b"data".to_vec()).await.expect("write");
+
+        let data = ctr.get_data("original".to_string(), 0, u64::MAX).await.expect("read");
+        ctr.write_data("duplicate".to_string(), data.unwrap()).await.expect("write copy");
+
+        let copied = ctr.get_data("duplicate".to_string(), 0, u64::MAX).await.expect("read copy");
+        assert_eq!(copied, Some(b"data".to_vec()));
+        assert!(ctr.has_object("original".to_string()).await.expect("original still exists"));
+    }
+
+    #[tokio::test]
+    async fn move_object_across_containers() {
+        let ctx = new_ctx().await;
+        let src = ctx.create_container("move-src".to_string()).await.expect("create src");
+        let dest = ctx.create_container("move-dest".to_string()).await.expect("create dest");
+
+        src.write_data("doc.bin".to_string(), b"binary-data".to_vec()).await.expect("write");
+
+        let data = src.get_data("doc.bin".to_string(), 0, u64::MAX).await.expect("read");
+        dest.write_data("doc-moved.bin".to_string(), data.unwrap()).await.expect("write dest");
+        src.delete_object("doc.bin".to_string()).await.expect("delete src");
+
+        let moved =
+            dest.get_data("doc-moved.bin".to_string(), 0, u64::MAX).await.expect("read dest");
+        assert_eq!(moved, Some(b"binary-data".to_vec()));
+        assert!(!src.has_object("doc.bin".to_string()).await.expect("src deleted"));
+    }
+
+    #[tokio::test]
+    async fn move_object_within_same_container() {
+        let ctx = new_ctx().await;
+        let ctr = ctx.create_container("rename-bucket".to_string()).await.expect("create");
+
+        ctr.write_data("old-name".to_string(), b"content".to_vec()).await.expect("write");
+
+        let data = ctr.get_data("old-name".to_string(), 0, u64::MAX).await.expect("read");
+        ctr.write_data("new-name".to_string(), data.unwrap()).await.expect("write renamed");
+        ctr.delete_object("old-name".to_string()).await.expect("delete old");
+
+        assert_eq!(
+            ctr.get_data("new-name".to_string(), 0, u64::MAX).await.expect("read new"),
+            Some(b"content".to_vec())
+        );
+        assert!(!ctr.has_object("old-name".to_string()).await.expect("old gone"));
+    }
+
+    #[test]
+    fn stream_object_names_read_all_at_once() {
+        let mut stream = StreamObjectNames::new(vec!["a".into(), "b".into(), "c".into()]);
+
+        let remaining = &stream.names[stream.offset..];
+        let take = 100_usize.min(remaining.len());
+        let batch: Vec<String> = remaining[..take].to_vec();
+        stream.offset += take;
+        let done = stream.offset >= stream.names.len();
+
+        assert_eq!(batch, vec!["a", "b", "c"]);
+        assert!(done);
+    }
+
+    #[test]
+    fn stream_object_names_paginated() {
+        let mut stream = StreamObjectNames::new(vec![
+            "a".into(),
+            "b".into(),
+            "c".into(),
+            "d".into(),
+            "e".into(),
+        ]);
+
+        let mut all = Vec::new();
+        let page_size = 2_usize;
+        loop {
+            let remaining = &stream.names[stream.offset..];
+            let take = page_size.min(remaining.len());
+            let batch: Vec<String> = remaining[..take].to_vec();
+            stream.offset += take;
+            let done = stream.offset >= stream.names.len();
+            all.extend(batch);
+            if done {
+                break;
+            }
+        }
+
+        assert_eq!(all, vec!["a", "b", "c", "d", "e"]);
+    }
+
+    #[test]
+    fn stream_object_names_empty() {
+        let stream = StreamObjectNames::new(vec![]);
+
+        let remaining = &stream.names[stream.offset..];
+        let take = 100_usize.min(remaining.len());
+        let batch: Vec<String> = remaining[..take].to_vec();
+        let done = stream.offset + take >= stream.names.len();
+
+        assert!(batch.is_empty());
+        assert!(done);
+    }
+
+    #[test]
+    fn stream_object_names_skip() {
+        let mut stream =
+            StreamObjectNames::new(vec!["a".into(), "b".into(), "c".into(), "d".into()]);
+
+        let remaining = stream.names.len() - stream.offset;
+        let skip = 2_usize.min(remaining);
+        stream.offset += skip;
+
+        assert_eq!(skip, 2);
+        assert_eq!(&stream.names[stream.offset..], &["c", "d"]);
+
+        let remaining2 = &stream.names[stream.offset..];
+        let take = 100_usize.min(remaining2.len());
+        let batch: Vec<String> = remaining2[..take].to_vec();
+        assert_eq!(batch, vec!["c", "d"]);
     }
 }

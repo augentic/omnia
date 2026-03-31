@@ -45,12 +45,67 @@ impl HostWithStore for WasiBlobstore {
             .map_err(|e| e.to_string())
     }
 
-    async fn copy_object<T>(_: &Accessor<T, Self>, _src: ObjectId, _dest: ObjectId) -> Result<()> {
-        unimplemented!("copy_object not implemented yet")
+    async fn copy_object<T>(
+        accessor: &Accessor<T, Self>, src: ObjectId, dest: ObjectId,
+    ) -> Result<()> {
+        tracing::trace!(
+            "copy_object: {}/{} -> {}/{}",
+            src.container,
+            src.object,
+            dest.container,
+            dest.object
+        );
+
+        let src_container = accessor
+            .with(|mut store| store.get().ctx.get_container(src.container.clone()))
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let data = src_container
+            .get_data(src.object.clone(), 0, u64::MAX)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("source object not found: {}/{}", src.container, src.object))?;
+
+        let dest_container = accessor
+            .with(|mut store| store.get().ctx.get_container(dest.container.clone()))
+            .await
+            .map_err(|e| e.to_string())?;
+
+        dest_container.write_data(dest.object, data).await.map_err(|e| e.to_string())
     }
 
-    async fn move_object<T>(_: &Accessor<T, Self>, _src: ObjectId, _dest: ObjectId) -> Result<()> {
-        unimplemented!("move_object not implemented yet")
+    async fn move_object<T>(
+        accessor: &Accessor<T, Self>, src: ObjectId, dest: ObjectId,
+    ) -> Result<()> {
+        tracing::trace!(
+            "move_object: {}/{} -> {}/{}",
+            src.container,
+            src.object,
+            dest.container,
+            dest.object
+        );
+
+        let src_container = accessor
+            .with(|mut store| store.get().ctx.get_container(src.container.clone()))
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let src_object_name = src.object.clone();
+        let data = src_container
+            .get_data(src.object.clone(), 0, u64::MAX)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("source object not found: {}/{}", src.container, src.object))?;
+
+        let dest_container = accessor
+            .with(|mut store| store.get().ctx.get_container(dest.container.clone()))
+            .await
+            .map_err(|e| e.to_string())?;
+
+        dest_container.write_data(dest.object, data).await.map_err(|e| e.to_string())?;
+
+        src_container.delete_object(src_object_name).await.map_err(|e| e.to_string())
     }
 }
 

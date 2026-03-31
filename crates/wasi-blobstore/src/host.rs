@@ -51,8 +51,21 @@ use self::generated::wasi::blobstore::{blobstore, container, types};
 pub type IncomingValue = Bytes;
 /// Outgoing value for a blobstore operation.
 pub type OutgoingValue = MemoryOutputPipe;
-/// Stream of object names.
-pub type StreamObjectNames = Vec<String>;
+/// Stream of object names with position tracking for paginated reads.
+pub struct StreamObjectNames {
+    /// The full list of object names in this stream.
+    pub(crate) names: Vec<String>,
+    /// Current read offset into `names`.
+    pub(crate) offset: usize,
+}
+
+impl StreamObjectNames {
+    /// Create a new stream from a complete list of object names.
+    #[must_use]
+    pub const fn new(names: Vec<String>) -> Self {
+        Self { names, offset: 0 }
+    }
+}
 
 /// Result type for blobstore operations.
 pub type Result<T> = anyhow::Result<T, Error>;
