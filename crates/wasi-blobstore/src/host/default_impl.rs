@@ -259,7 +259,7 @@ mod tests {
     async fn get_nonexistent_container() {
         let ctx = new_ctx().await;
         let result = ctx.get_container("no-such-container".to_string()).await;
-        result.unwrap_err();
+        result.expect_err("expected error when getting nonexistent container");
     }
 
     #[tokio::test]
