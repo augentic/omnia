@@ -1,17 +1,15 @@
 use anyhow::Context;
 use bytes::{Bytes, BytesMut};
 use wasmtime::component::{Access, Accessor, Resource};
-use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 
 use crate::host::generated::wasi::blobstore::container::{
     ContainerMetadata, Host, HostContainer, HostContainerWithStore, HostStreamObjectNames,
     HostStreamObjectNamesWithStore, ObjectMetadata,
 };
 use crate::host::resource::ContainerProxy;
-use crate::host::{Result, StreamObjectNames, WasiBlobstore, WasiBlobstoreCtxView};
+use crate::host::{OutgoingValue, Result, StreamObjectNames, WasiBlobstore, WasiBlobstoreCtxView};
 
 pub type IncomingValue = Bytes;
-pub type OutgoingValue = MemoryOutputPipe;
 
 impl HostContainerWithStore for WasiBlobstore {
     fn name<T>(mut host: Access<'_, T, Self>, self_: Resource<ContainerProxy>) -> Result<String> {
@@ -65,7 +63,7 @@ impl HostContainerWithStore for WasiBlobstore {
         let bytes = accessor
             .with(|mut store| {
                 let value = store.get().table.get(&data)?;
-                Ok::<Vec<u8>, wasmtime::Error>(value.contents().to_vec())
+                Ok::<Vec<u8>, wasmtime::Error>(value.pipe.contents().to_vec())
             })
             .map_err(|e| e.to_string())?;
 

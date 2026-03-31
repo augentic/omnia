@@ -4,6 +4,10 @@ use crate::host::generated::wasi::blobstore::blobstore::{Host, HostWithStore, Ob
 use crate::host::resource::ContainerProxy;
 use crate::host::{Result, WasiBlobstore, WasiBlobstoreCtxView};
 
+fn same_object(src: &ObjectId, dest: &ObjectId) -> bool {
+    src.container == dest.container && src.object == dest.object
+}
+
 impl HostWithStore for WasiBlobstore {
     async fn create_container<T>(
         accessor: &Accessor<T, Self>, name: String,
@@ -86,6 +90,11 @@ impl HostWithStore for WasiBlobstore {
             dest.object
         );
 
+        if same_object(&src, &dest) {
+            // No-op for identical source and destination; deleting would corrupt data.
+            return Ok(());
+        }
+
         let src_container = accessor
             .with(|mut store| store.get().ctx.get_container(src.container.clone()))
             .await
@@ -110,3 +119,34 @@ impl HostWithStore for WasiBlobstore {
 }
 
 impl Host for WasiBlobstoreCtxView<'_> {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn same_object_detects_identical_ids() {
+        let a = ObjectId {
+            container: "bucket".to_string(),
+            object: "blob".to_string(),
+        };
+        let b = ObjectId {
+            container: "bucket".to_string(),
+            object: "blob".to_string(),
+        };
+        assert!(same_object(&a, &b));
+    }
+
+    #[test]
+    fn same_object_rejects_different_ids() {
+        let a = ObjectId {
+            container: "bucket".to_string(),
+            object: "blob".to_string(),
+        };
+        let b = ObjectId {
+            container: "bucket".to_string(),
+            object: "blob-2".to_string(),
+        };
+        assert!(!same_object(&a, &b));
+    }
+}

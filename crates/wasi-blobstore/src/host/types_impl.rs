@@ -2,17 +2,16 @@ use bytes::Bytes;
 use wasmtime::component::{Access, Accessor, Resource};
 use wasmtime::error::Context;
 use wasmtime_wasi::p2::bindings::io::streams::{InputStream, OutputStream};
-use wasmtime_wasi::p2::pipe::{MemoryInputPipe, MemoryOutputPipe};
+use wasmtime_wasi::p2::pipe::MemoryInputPipe;
 
 use crate::host::generated::Error;
 use crate::host::generated::wasi::blobstore::types::{
     Host, HostIncomingValue, HostIncomingValueWithStore, HostOutgoingValue,
     HostOutgoingValueWithStore, IncomingValueSyncBody,
 };
-use crate::host::{Result, WasiBlobstore, WasiBlobstoreCtxView};
+use crate::host::{OutgoingValue, Result, WasiBlobstore, WasiBlobstoreCtxView};
 
 pub type IncomingValue = Bytes;
-pub type OutgoingValue = MemoryOutputPipe;
 
 impl HostIncomingValueWithStore for WasiBlobstore {
     fn incoming_value_consume_sync<T>(
@@ -67,20 +66,30 @@ impl HostOutgoingValueWithStore for WasiBlobstore {
         accessor: &wasmtime::component::Accessor<T, Self>,
         self_: wasmtime::component::Resource<OutgoingValue>,
     ) -> wasmtime::Result<wasmtime::Result<wasmtime::component::Resource<OutputStream>, ()>> {
-        let value = accessor.with(|mut store| {
-            let outgoing = store.get().table.get(&self_).context("OutgoingValue not found")?;
-            Ok::<_, wasmtime::Error>(outgoing.clone())
-        })?;
-        let stream: OutputStream = Box::new(value);
-        Ok(accessor.with(|mut store| {
-            store.get().table.push(stream).map_err(|e| {
-                tracing::error!("Failed to fetch stream with error {e}");
-            })
-        }))
+        accessor.with(|mut store| {
+            let pipe = {
+                let outgoing = store.get().table.get_mut(&self_).context("OutgoingValue not found")?;
+                if outgoing.take_write_body().is_err() {
+                    return Ok(Err(()));
+                }
+                outgoing.pipe.clone()
+            };
+
+            let stream: OutputStream = Box::new(pipe);
+            let stream_resource = store.get().table.push(stream)?;
+            Ok(Ok(stream_resource))
+        })
     }
 
-    fn finish<T>(_: Access<'_, T, Self>, _self_: Resource<OutgoingValue>) -> Result<()> {
-        Ok(())
+    fn finish<T>(mut host: Access<'_, T, Self>, self_: Resource<OutgoingValue>) -> Result<()> {
+        let outgoing = host
+            .get()
+            .table
+            .get_mut(&self_)
+            .context("OutgoingValue not found")
+            .map_err(|e| e.to_string())?;
+
+        outgoing.finalize().map_err(ToString::to_string)
     }
 
     fn drop<T>(

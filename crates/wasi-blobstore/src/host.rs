@@ -50,7 +50,43 @@ use self::generated::wasi::blobstore::{blobstore, container, types};
 /// Incoming value for a blobstore operation.
 pub type IncomingValue = Bytes;
 /// Outgoing value for a blobstore operation.
-pub type OutgoingValue = MemoryOutputPipe;
+#[derive(Debug, Clone)]
+pub struct OutgoingValue {
+    pub(crate) pipe: MemoryOutputPipe,
+    pub(crate) write_body_taken: bool,
+    pub(crate) finished: bool,
+}
+
+impl OutgoingValue {
+    /// Create a new outgoing value with an in-memory buffer capacity.
+    #[must_use]
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            pipe: MemoryOutputPipe::new(capacity),
+            write_body_taken: false,
+            finished: false,
+        }
+    }
+
+    pub(crate) fn take_write_body(&mut self) -> std::result::Result<(), ()> {
+        if self.finished || self.write_body_taken {
+            return Err(());
+        }
+        self.write_body_taken = true;
+        Ok(())
+    }
+
+    pub(crate) fn finalize(&mut self) -> std::result::Result<(), &'static str> {
+        if self.finished {
+            return Err("outgoing value already finished");
+        }
+        if !self.write_body_taken {
+            return Err("outgoing value write body was never requested");
+        }
+        self.finished = true;
+        Ok(())
+    }
+}
 /// Stream of object names with position tracking for paginated reads.
 pub struct StreamObjectNames {
     /// The full list of object names in this stream.
@@ -161,3 +197,29 @@ macro_rules! omnia_wasi_view {
 //         }
 //     };
 // }
+
+#[cfg(test)]
+mod tests {
+    use super::OutgoingValue;
+
+    #[test]
+    fn outgoing_value_write_body_is_one_shot() {
+        let mut outgoing = OutgoingValue::new(16);
+        assert_eq!(outgoing.take_write_body(), Ok(()));
+        assert_eq!(outgoing.take_write_body(), Err(()));
+    }
+
+    #[test]
+    fn outgoing_value_finish_requires_write_body() {
+        let mut outgoing = OutgoingValue::new(16);
+        assert_eq!(outgoing.finalize(), Err("outgoing value write body was never requested"));
+    }
+
+    #[test]
+    fn outgoing_value_finish_is_single_use() {
+        let mut outgoing = OutgoingValue::new(16);
+        assert_eq!(outgoing.take_write_body(), Ok(()));
+        assert_eq!(outgoing.finalize(), Ok(()));
+        assert_eq!(outgoing.finalize(), Err("outgoing value already finished"));
+    }
+}

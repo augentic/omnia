@@ -44,11 +44,13 @@ impl Guest for Http {
 async fn handler(body: Bytes) -> HttpResult<Json<Value>> {
     // create an outgoing value to hold the data we want to store
     let outgoing = OutgoingValue::new_outgoing_value();
-    let stream = outgoing
-        .outgoing_value_write_body()
-        .await
-        .map_err(|()| anyhow!("failed to create stream"))?;
-    stream.blocking_write_and_flush(&body).map_err(|e| anyhow!("writing body: {e}"))?;
+    {
+        let stream = outgoing
+            .outgoing_value_write_body()
+            .await
+            .map_err(|()| anyhow!("failed to create stream"))?;
+        stream.blocking_write_and_flush(&body).map_err(|e| anyhow!("writing body: {e}"))?;
+    }
 
     // write the blob to the container
     let container = blobstore::create_container("container".to_string())
