@@ -68,7 +68,8 @@ impl HostOutgoingValueWithStore for WasiBlobstore {
     ) -> wasmtime::Result<wasmtime::Result<wasmtime::component::Resource<OutputStream>, ()>> {
         accessor.with(|mut store| {
             let pipe = {
-                let outgoing = store.get().table.get_mut(&self_).context("OutgoingValue not found")?;
+                let outgoing =
+                    store.get().table.get_mut(&self_).context("OutgoingValue not found")?;
                 if outgoing.take_write_body().is_err() {
                     return Ok(Err(()));
                 }
@@ -81,11 +82,11 @@ impl HostOutgoingValueWithStore for WasiBlobstore {
         })
     }
 
-    fn finish<T>(mut host: Access<'_, T, Self>, self_: Resource<OutgoingValue>) -> Result<()> {
+    fn finish<T>(mut host: Access<'_, T, Self>, this: Resource<OutgoingValue>) -> Result<()> {
         let outgoing = host
             .get()
             .table
-            .get_mut(&self_)
+            .get_mut(&this)
             .context("OutgoingValue not found")
             .map_err(|e| e.to_string())?;
 

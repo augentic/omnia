@@ -68,7 +68,7 @@ impl OutgoingValue {
         }
     }
 
-    pub(crate) fn take_write_body(&mut self) -> std::result::Result<(), ()> {
+    pub(crate) const fn take_write_body(&mut self) -> std::result::Result<(), ()> {
         if self.finished || self.write_body_taken {
             return Err(());
         }
@@ -76,7 +76,7 @@ impl OutgoingValue {
         Ok(())
     }
 
-    pub(crate) fn finalize(&mut self) -> std::result::Result<(), &'static str> {
+    pub(crate) const fn finalize(&mut self) -> std::result::Result<(), &'static str> {
         if self.finished {
             return Err("outgoing value already finished");
         }
