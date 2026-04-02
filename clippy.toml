@@ -43,6 +43,7 @@ allowed-duplicate-crates = [
   "windows_x86_64_gnu",
   "windows_x86_64_gnullvm",
   "windows_x86_64_msvc",
+  "wasip3",
   "wit-bindgen",
   "wit-bindgen-core",
   "wit-bindgen-rust",

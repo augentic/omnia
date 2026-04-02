@@ -1,4 +1,5 @@
 use std::fmt::Display;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use base64ct::{Base64, Encoding};
@@ -14,15 +15,17 @@ use http_body_util::BodyExt;
 use http_body_util::combinators::UnsyncBoxBody;
 use omnia::Backend;
 use tracing::instrument;
+use wasmtime::component::ResourceTable;
 use wasmtime_wasi::TrappableError;
+use wasmtime_wasi_http::WasiHttpCtx;
 use wasmtime_wasi_http::p3::bindings::http::types::ErrorCode;
-use wasmtime_wasi_http::p3::{self, RequestOptions};
+use wasmtime_wasi_http::p3::{self, RequestOptions, WasiHttpCtxView};
 
 pub type HttpResult<T> = Result<T, HttpError>;
 pub type HttpError = TrappableError<ErrorCode>;
 pub type FutureResult<T> = Box<dyn Future<Output = Result<T, ErrorCode>> + Send>;
 
-/// Set of headers that are forbidden by by `wasmtime-wasi-http`.
+/// Set of headers that are forbidden by `wasmtime-wasi-http`.
 pub const FORBIDDEN_HEADERS: [HeaderName; 9] = [
     CONNECTION,
     HOST,
@@ -39,6 +42,8 @@ pub const FORBIDDEN_HEADERS: [HeaderName; 9] = [
 pub struct ConnectOptions {
     #[env(from = "HTTP_ADDR", default = "http://localhost:8080")]
     pub addr: String,
+    #[env(from = "HTTP_CONNECT_TIMEOUT_SECS", default = "10")]
+    pub connect_timeout_secs: u64,
 }
 
 impl omnia::FromEnv for ConnectOptions {
@@ -47,20 +52,55 @@ impl omnia::FromEnv for ConnectOptions {
     }
 }
 
+/// Reqwest-based HTTP hooks for outbound `wasi:http` requests.
+#[derive(Debug, Clone)]
+struct HttpHooks {
+    client: reqwest::Client,
+    connect_timeout: Duration,
+}
+
 /// Default implementation for `wasi:http`.
 #[derive(Debug, Clone)]
-pub struct HttpDefault;
+pub struct HttpDefault {
+    hooks: HttpHooks,
+    ctx: WasiHttpCtx,
+}
+
+impl HttpDefault {
+    /// Produce a [`WasiHttpCtxView`] by splitting borrows on inner fields.
+    pub fn as_view<'a>(&'a mut self, table: &'a mut ResourceTable) -> WasiHttpCtxView<'a> {
+        WasiHttpCtxView {
+            hooks: &mut self.hooks,
+            ctx: &mut self.ctx,
+            table,
+        }
+    }
+}
 
 impl Backend for HttpDefault {
     type ConnectOptions = ConnectOptions;
 
     #[instrument]
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
-        Ok(Self)
+        let connect_timeout = Duration::from_secs(options.connect_timeout_secs);
+
+        let builder = reqwest::Client::builder().connect_timeout(connect_timeout);
+
+        #[cfg(test)]
+        let builder = builder.no_proxy();
+
+        let client = builder.build().context("building HTTP client")?;
+        Ok(Self {
+            hooks: HttpHooks {
+                client,
+                connect_timeout,
+            },
+            ctx: WasiHttpCtx::default(),
+        })
     }
 }
 
-impl p3::WasiHttpCtx for HttpDefault {
+impl p3::WasiHttpHooks for HttpHooks {
     fn send_request(
         &mut self, request: Request<UnsyncBoxBody<Bytes, ErrorCode>>,
         _options: Option<RequestOptions>, fut: FutureResult<()>,
@@ -69,6 +109,9 @@ impl p3::WasiHttpCtx for HttpDefault {
                 Output = HttpResult<(Response<UnsyncBoxBody<Bytes, ErrorCode>>, FutureResult<()>)>,
             > + Send,
     > {
+        let shared_client = self.client.clone();
+        let connect_timeout = self.connect_timeout;
+
         Box::new(async move {
             let (mut parts, body) = request.into_parts();
 
@@ -81,28 +124,30 @@ impl p3::WasiHttpCtx for HttpDefault {
                 }
             }
 
-            // build client
-            let mut builder = reqwest::Client::builder();
-
-            // check for "Client-Cert" header
-            if let Some(encoded_cert) = parts.headers.remove("Client-Cert") {
+            // use a one-off client when a client certificate is required, otherwise
+            // reuse the shared client for connection pooling
+            let client = if let Some(encoded_cert) = parts.headers.remove("Client-Cert") {
                 tracing::debug!("using client certificate");
                 let encoded = encoded_cert.to_str().map_err(internal_err)?;
                 let bytes = Base64::decode_vec(encoded).map_err(internal_err)?;
                 let identity = reqwest::Identity::from_pem(&bytes).map_err(internal_err)?;
-                builder = builder.identity(identity);
-            }
+                let builder =
+                    reqwest::Client::builder().connect_timeout(connect_timeout).identity(identity);
 
-            // disable system proxy in tests to avoid macOS issues
-            #[cfg(test)]
-            let builder = builder.no_proxy();
-            let client = builder.build().map_err(reqwest_err)?;
+                #[cfg(test)]
+                let builder = builder.no_proxy();
+
+                builder.build().map_err(reqwest_err)?
+            } else {
+                shared_client
+            };
 
             let collected = body.collect().await.map_err(internal_err)?;
 
             // make request
+            let url = parts.uri.to_string();
             let resp = client
-                .request(parts.method, parts.uri.to_string())
+                .request(parts.method, &url)
                 .headers(parts.headers)
                 .body(collected.to_bytes())
                 .send()
@@ -150,11 +195,19 @@ mod tests {
     use http::header::{AUTHORIZATION, CONTENT_TYPE};
     use http::{Method, StatusCode};
     use http_body_util::{Empty, Full};
-    use p3::WasiHttpCtx;
+    use p3::WasiHttpHooks;
     use wiremock::matchers::{body_string, header, method};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
+
+    async fn test_client() -> HttpDefault {
+        let options = ConnectOptions {
+            addr: String::new(),
+            connect_timeout_secs: 10,
+        };
+        HttpDefault::connect_with(options).await.unwrap()
+    }
 
     #[tokio::test]
     async fn multiple_host_headers() {
@@ -170,7 +223,7 @@ mod tests {
             .body(Empty::new().map_err(internal_err).boxed_unsync())
             .unwrap();
 
-        let result = HttpDefault.handle(request).await;
+        let result = test_client().await.handle(request).await;
         assert!(result.is_ok());
 
         // check response
@@ -202,7 +255,7 @@ mod tests {
             .body(Full::new(Bytes::from("test body")).map_err(internal_err).boxed_unsync())
             .unwrap();
 
-        let result = HttpDefault.handle(request).await;
+        let result = test_client().await.handle(request).await;
         assert!(result.is_ok());
 
         let (response, _) = result.unwrap();
@@ -225,7 +278,7 @@ mod tests {
             .body(Empty::new().map_err(internal_err).boxed_unsync())
             .unwrap();
 
-        let result = HttpDefault.handle(request).await;
+        let result = test_client().await.handle(request).await;
         assert!(result.is_ok());
 
         let (response, _) = result.unwrap();
@@ -251,7 +304,7 @@ mod tests {
             .body(Empty::new().map_err(internal_err).boxed_unsync())
             .unwrap();
 
-        let result = HttpDefault.handle(request).await;
+        let result = test_client().await.handle(request).await;
         assert!(result.is_ok());
 
         // check response
@@ -274,7 +327,7 @@ mod tests {
         let request =
             Request::builder().method(Method::GET).uri("not-a-valid-uri").body(body).unwrap();
 
-        let result = HttpDefault.handle(request).await;
+        let result = test_client().await.handle(request).await;
         assert!(result.is_err());
     }
 
@@ -284,7 +337,7 @@ mod tests {
             .body(Empty::new().map_err(internal_err).boxed_unsync())
             .unwrap();
 
-        let result = HttpDefault.handle(request).await;
+        let result = test_client().await.handle(request).await;
         assert!(result.is_err());
     }
 
@@ -298,7 +351,7 @@ mod tests {
             .body(Empty::new().map_err(internal_err).boxed_unsync())
             .unwrap();
 
-        let result = HttpDefault.handle(request).await;
+        let result = test_client().await.handle(request).await;
         assert!(result.is_err());
     }
 
@@ -314,16 +367,15 @@ mod tests {
             .body(Empty::new().map_err(internal_err).boxed_unsync())
             .unwrap();
 
-        let result = HttpDefault.handle(request).await;
+        let result = test_client().await.handle(request).await;
         assert!(result.is_err());
     }
 
-    // Mock `wasip3::proxy::wasi::http::handler::handle` method
     impl HttpDefault {
         async fn handle(
             &mut self, request: Request<UnsyncBoxBody<Bytes, ErrorCode>>,
         ) -> HttpResult<(Response<UnsyncBoxBody<Bytes, ErrorCode>>, FutureResult<()>)> {
-            let boxed = self.send_request(request, None, Box::new(async { Ok(()) }));
+            let boxed = self.hooks.send_request(request, None, Box::new(async { Ok(()) }));
             Pin::from(boxed).await
         }
     }
