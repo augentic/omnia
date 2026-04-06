@@ -35,6 +35,9 @@ allow = [
 [licenses.private]
 ignore = true
 
+[sources]
+allow-git = ["https://github.com/bytecodealliance/wasmtime"]
+
 [bans]
 deny = [
   { name = "tokio", deny-multiple-versions = true },

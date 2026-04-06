@@ -87,13 +87,13 @@ tower = "0.5.3"
 tracing = "0.1.44"
 tracing-opentelemetry = "0.32.1"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt"] }
-wasip3 = { version = "0.4.0", features = ["http-compat"] }
-wasmtime = { version = "42.0.1", default-features = false, features = ["anyhow", "parallel-compilation"] }
-wasmtime-wasi = { version = "42.0.1", features = ["p3"] }
-wasmtime-wasi-config = "42.0.1"
-wasmtime-wasi-http = { version = "42.0.1", features = ["p3"] }
-wasmtime-wasi-io = "42.0.1"
-wit-bindgen = { version = "0.53.1", features = ["async-spawn"] }
+wasip3 = { version = "0.5.0", features = ["http-compat"] }
+wasmtime = { version = "44.0.0", default-features = false, features = ["anyhow", "parallel-compilation"] }
+wasmtime-wasi = { version = "44.0.0", features = ["p3"] }
+wasmtime-wasi-config = "44.0.0"
+wasmtime-wasi-http = { version = "44.0.0", features = ["p3"] }
+wasmtime-wasi-io = "44.0.0"
+wit-bindgen = { version = "0.54.0", features = ["async-spawn"] }
 
 # internally referenced crates
 omnia = { path = "crates/omnia", version = "0.30.0" }
@@ -106,12 +106,12 @@ omnia-wasi-blobstore = { path = "crates/wasi-blobstore", version = "0.30.0" }
 omnia-wasi-config = { path = "crates/wasi-config", version = "0.30.0" }
 omnia-wasi-http = { path = "crates/wasi-http", version = "0.30.0" }
 omnia-wasi-identity = { path = "crates/wasi-identity", version = "0.30.0" }
+omnia-wasi-jsondb = { path = "crates/wasi-jsondb", version = "0.30.0" }
 omnia-wasi-keyvalue = { path = "crates/wasi-keyvalue", version = "0.30.0" }
 omnia-wasi-messaging = { path = "crates/wasi-messaging", version = "0.30.0" }
 omnia-wasi-otel = { path = "crates/wasi-otel", version = "0.30.0" }
 omnia-wasi-otel-attr = { path = "crates/wasi-otel-attr", version = "0.30.0" }
 omnia-wasi-sql = { path = "crates/wasi-sql", version = "0.30.0" }
-omnia-wasi-jsondb = { path = "crates/wasi-jsondb", version = "0.30.0" }
 omnia-wasi-vault = { path = "crates/wasi-vault", version = "0.30.0" }
 omnia-wasi-websocket = { path = "crates/wasi-websocket", version = "0.30.0" }
 
@@ -126,9 +126,10 @@ strip = true
 # [package.metadata.cargo-machete]
 # ignored = ["openssl"]
 
-# [patch.crates-io]
-# wasmtime = { git = "https://github.com/bytecodealliance/wasmtime", branch = "release-42.0.0" }
-# wasmtime-wasi = { git = "https://github.com/bytecodealliance/wasmtime", branch = "release-42.0.0" }
-# wasmtime-wasi-config = { git = "https://github.com/bytecodealliance/wasmtime", branch = "release-42.0.0" }
-# wasmtime-wasi-http = { git = "https://github.com/bytecodealliance/wasmtime", branch = "release-42.0.0" }
-# wasmtime-wasi-io = { git = "https://github.com/bytecodealliance/wasmtime", branch = "release-42.0.0" }
+# TODO: remove once wasmtime 44 is published on crates.io
+[patch.crates-io]
+wasmtime = { git = "https://github.com/bytecodealliance/wasmtime", branch = "main" }
+wasmtime-wasi = { git = "https://github.com/bytecodealliance/wasmtime", branch = "main" }
+wasmtime-wasi-config = { git = "https://github.com/bytecodealliance/wasmtime", branch = "main" }
+wasmtime-wasi-http = { git = "https://github.com/bytecodealliance/wasmtime", branch = "main" }
+wasmtime-wasi-io = { git = "https://github.com/bytecodealliance/wasmtime", branch = "main" }

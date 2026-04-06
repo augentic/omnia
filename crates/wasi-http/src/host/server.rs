@@ -3,7 +3,9 @@
 use std::clone::Clone;
 use std::convert::Infallible;
 use std::env;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context as TaskContext, Poll};
 
 use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
@@ -11,7 +13,7 @@ use http::StatusCode;
 use http::uri::{PathAndQuery, Uri};
 use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::{BodyExt, Full};
-use hyper::body::Incoming;
+use hyper::body::{Body, Frame, Incoming, SizeHint};
 use hyper::header::{FORWARDED, HOST};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
@@ -119,41 +121,66 @@ where
         let instance = instance_pre.instantiate_async(&mut store).await?;
         let service = indices.load(&mut store, &instance)?;
 
-        let (sender, receiver) = oneshot::channel();
+        let (sender, receiver) = oneshot::channel::<Result<hyper::Response<OutgoingBody>>>();
 
         tokio::spawn(async move {
-            let guest_result = store
+            let send_err = |sender: oneshot::Sender<_>, e: anyhow::Error| {
+                _ = sender.send(Err(e));
+            };
+
+            let result = store
                 .run_concurrent(async |store| {
                     // convert hyper::Request to wasi::Request
                     let (parts, body) = request.into_parts();
                     let body = body.map_err(ErrorCode::from_hyper_request_error);
                     let http_req = http::Request::from_parts(parts, body);
-                    let (request, io_result) = wasi::Request::from_http(http_req);
+                    let (request, io) = wasi::Request::from_http(http_req);
 
                     // forward request to guest
-                    let (wasi_resp, task) = service.handle(store, request).await??;
-                    let http_resp =
-                        store.with(|mut store| wasi_resp.into_http(&mut store, io_result))?;
-                    _ = sender.send(http_resp);
-                    task.block(store).await;
+                    let wasi_resp = match service.handle(store, request).await? {
+                        Ok(resp) => resp,
+                        Err(e) => {
+                            send_err(sender, anyhow!("guest error: {e}"));
+                            return anyhow::Ok(());
+                        }
+                    };
+                    let resp = match store.with(|mut store| wasi_resp.into_http(&mut store, io)) {
+                        Ok(resp) => resp,
+                        Err(e) => {
+                            send_err(sender, anyhow!("converting guest response: {e}"));
+                            return anyhow::Ok(());
+                        }
+                    };
+
+                    // wrap body so we can detect when hyper finishes consuming it
+                    let (body_done_tx, body_done_rx) = oneshot::channel::<()>();
+                    let resp = resp.map(|body| {
+                        BodyDoneWrapper {
+                            body: body.map_err(Into::into),
+                            _tx: body_done_tx,
+                        }
+                        .boxed_unsync()
+                    });
+
+                    // send the streaming response to hyper, then keep
+                    // run_concurrent alive until hyper finishes reading
+                    if sender.send(Ok(resp)).is_ok() {
+                        _ = body_done_rx.await;
+                    }
 
                     anyhow::Ok(())
                 })
                 .instrument(debug_span!("http-request"))
-                .await?;
+                .await;
 
-            if let Err(e) = guest_result {
-                tracing::error!("Guest error: {e:?}");
-                return Err(e);
+            match result {
+                Err(e) => tracing::error!("run_concurrent error: {e:?}"),
+                Ok(Err(e)) => tracing::error!("guest error: {e:#}"),
+                Ok(Ok(())) => {}
             }
-
-            // write_profile(&mut store);
-            // drop(epoch_thread);
-
-            Ok(())
         });
 
-        let response = receiver.await?.map(|body| body.map_err(Into::into).boxed_unsync());
+        let response = receiver.await.map_err(|_recv| anyhow!("guest task panicked"))??;
         tracing::debug!("received response: {response:?}");
 
         Ok(response)
@@ -194,6 +221,38 @@ fn fix_request(mut request: hyper::Request<Incoming>) -> Result<hyper::Request<I
     let request = hyper::Request::from_parts(parts, body);
 
     Ok(request)
+}
+
+/// Wraps a response body and holds a `oneshot::Sender` that is dropped when
+/// the body is fully consumed (or the wrapper itself is dropped). The
+/// corresponding receiver keeps `run_concurrent` alive so WASI pipe resources
+/// remain valid while hyper streams the response.
+struct BodyDoneWrapper<B> {
+    body: B,
+    _tx: oneshot::Sender<()>,
+}
+
+impl<B> Body for BodyDoneWrapper<B>
+where
+    B: Body + Unpin,
+{
+    type Data = B::Data;
+    type Error = B::Error;
+
+    fn poll_frame(
+        self: Pin<&mut Self>, cx: &mut TaskContext<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        let inner = Pin::new(&mut self.get_mut().body);
+        inner.poll_frame(cx)
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        self.body.size_hint()
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.body.is_end_stream()
+    }
 }
 
 const BODY: &str = r"<!doctype html>
