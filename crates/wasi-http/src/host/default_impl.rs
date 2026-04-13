@@ -115,14 +115,8 @@ impl p3::WasiHttpHooks for HttpHooks {
         Box::new(async move {
             let (mut parts, body) = request.into_parts();
 
-            // dedupe "Host" headers (keep the one added by wasmtime/wasip3?)
-            let values = parts.headers.get_all(HOST).iter().cloned().collect::<Vec<_>>();
-            if values.len() > 1 {
-                parts.headers.remove(HOST);
-                for v in values.into_iter().skip(1) {
-                    parts.headers.append(HOST, v);
-                }
-            }
+            // remove "Host" headers (`reqwest` adds its own)
+            parts.headers.remove(HOST);
 
             // use a one-off client when a client certificate is required, otherwise
             // reuse the shared client for connection pooling
@@ -239,7 +233,7 @@ mod tests {
         assert_eq!(requests.len(), 1);
 
         assert_eq!(requests[0].headers.get_all(HOST).iter().count(), 1);
-        assert_eq!(requests[0].headers.get(HOST).unwrap().to_str().unwrap(), "localhost-2");
+        assert!(requests[0].headers.get(HOST).unwrap().to_str().unwrap().starts_with("127.0.0.1:"));
     }
 
     #[tokio::test]

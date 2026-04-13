@@ -128,8 +128,8 @@ strip = true
 
 # TODO: remove once wasmtime 44 is published on crates.io
 [patch.crates-io]
-wasmtime = { git = "https://github.com/bytecodealliance/wasmtime", branch = "main" }
-wasmtime-wasi = { git = "https://github.com/bytecodealliance/wasmtime", branch = "main" }
-wasmtime-wasi-config = { git = "https://github.com/bytecodealliance/wasmtime", branch = "main" }
-wasmtime-wasi-http = { git = "https://github.com/bytecodealliance/wasmtime", branch = "main" }
-wasmtime-wasi-io = { git = "https://github.com/bytecodealliance/wasmtime", branch = "main" }
+wasmtime = { git = "https://github.com/bytecodealliance/wasmtime", branch = "release-44.0.0" }
+wasmtime-wasi = { git = "https://github.com/bytecodealliance/wasmtime", branch = "release-44.0.0" }
+wasmtime-wasi-config = { git = "https://github.com/bytecodealliance/wasmtime", branch = "release-44.0.0" }
+wasmtime-wasi-http = { git = "https://github.com/bytecodealliance/wasmtime", branch = "release-44.0.0" }
+wasmtime-wasi-io = { git = "https://github.com/bytecodealliance/wasmtime", branch = "release-44.0.0" }
