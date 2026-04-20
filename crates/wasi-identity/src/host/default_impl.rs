@@ -73,7 +73,7 @@ impl Default for AccessToken {
 impl From<TokenResponse> for AccessToken {
     fn from(token_resp: TokenResponse) -> Self {
         let token = token_resp.access_token().secret().clone();
-        let expires_in = token_resp.expires_in().unwrap_or(Duration::from_secs(3600));
+        let expires_in = token_resp.expires_in().unwrap_or(Duration::from_hours(1));
 
         Self {
             token,
