@@ -10,14 +10,6 @@ feature-depth = 1
 [advisories]
 unmaintained = 'workspace'
 ignore = [
-  # rustls-webpki 0.102.8 CRL distribution-point matching bug.
-  # Transitive via wasmtime-wasi-http -> rustls 0.22; fix requires
-  # wasmtime to bump to rustls 0.23+ (rustls-webpki 0.103.10+).
-  "RUSTSEC-2026-0049",
-  # rand 0.8.5 unsoundness with custom logger + thread_rng reseeding.
-  # Transitive via wasmtime-wasi (cap-rand) and oauth2; no 0.8.x patch
-  # available — fix requires upstream to bump to rand 0.9.3+.
-  "RUSTSEC-2026-0097",
 ]
 
 [licenses]

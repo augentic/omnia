@@ -93,7 +93,7 @@ wasmtime-wasi = { version = "44.0.0", features = ["p3"] }
 wasmtime-wasi-config = "44.0.0"
 wasmtime-wasi-http = { version = "44.0.0", features = ["p3"] }
 wasmtime-wasi-io = "44.0.0"
-wit-bindgen = { version = "0.54.0", features = ["async-spawn"] }
+wit-bindgen = { version = "0.57.1", features = ["async-spawn"] }
 
 # internally referenced crates
 omnia = { path = "crates/omnia", version = "0.30.0" }
@@ -125,11 +125,3 @@ strip = true
 
 # [package.metadata.cargo-machete]
 # ignored = ["openssl"]
-
-# TODO: remove once wasmtime 44 is published on crates.io
-[patch.crates-io]
-wasmtime = { git = "https://github.com/bytecodealliance/wasmtime", branch = "release-44.0.0" }
-wasmtime-wasi = { git = "https://github.com/bytecodealliance/wasmtime", branch = "release-44.0.0" }
-wasmtime-wasi-config = { git = "https://github.com/bytecodealliance/wasmtime", branch = "release-44.0.0" }
-wasmtime-wasi-http = { git = "https://github.com/bytecodealliance/wasmtime", branch = "release-44.0.0" }
-wasmtime-wasi-io = { git = "https://github.com/bytecodealliance/wasmtime", branch = "release-44.0.0" }
