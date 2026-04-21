@@ -6,6 +6,20 @@ Unreleased
 
 ### Changed
 
+<!-- Release notes generated using configuration in .github/release.yaml at main -->
+
+## What's Changed
+* Bump to 0.29.0 by @github-actions[bot] in https://github.com/augentic/omnia/pull/183
+* Blobstore by @andrew-goldie in https://github.com/augentic/omnia/pull/185
+* Small code quality improvements for blobstore by @andrew-goldie in https://github.com/augentic/omnia/pull/186
+* Upgrade to wasmtime 43/44 by @karthik-phl in https://github.com/augentic/omnia/pull/188
+* Removed HOST header altogether in favor of  setting it by @karthik-phl in https://github.com/augentic/omnia/pull/189
+* Upgrade to wasmtime 44 by @karthik-phl in https://github.com/augentic/omnia/pull/190
+* Omnia 0.31.0 by @karthik-phl in https://github.com/augentic/omnia/pull/191
+
+
+**Full Changelog**: https://github.com/augentic/omnia/compare/v0.29.0...v0.31.0
+
 ---
 
 Release notes for previous releases can be found on the respective release
