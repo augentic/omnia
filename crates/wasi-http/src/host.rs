@@ -2,7 +2,10 @@
 //!
 //! This module implements a host-side service for `wasi:http`
 
+mod circuit_breaker;
 mod default_impl;
+mod resilience;
+mod retry;
 mod server;
 
 use anyhow::Result;

@@ -2,7 +2,6 @@
 //!
 //! Tests the public API as users would interact with it.
 
-#![cfg(target_arch = "wasm32")]
 #![allow(missing_docs)]
 
 mod common;

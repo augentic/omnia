@@ -26,10 +26,13 @@ tracing.workspace = true
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 base64ct.workspace = true
+dashmap.workspace = true
 fromenv.workspace = true
 futures.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
+parking_lot.workspace = true
+rand.workspace = true
 reqwest = "0.13.2"
 tokio.workspace = true
 wasmtime = { workspace = true, features = ["component-model-async"] }

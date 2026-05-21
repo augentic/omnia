@@ -80,6 +80,7 @@ impl From<wasi::Resource> for Resource {
             value: resource.schema_url.as_ref().map(|s| AnyValue {
                 value: Some(Value::StringValue(s.clone())),
             }),
+            ..KeyValue::default()
         });
 
         Self {
@@ -95,6 +96,7 @@ impl From<wasi::KeyValue> for KeyValue {
         Self {
             key: value.key,
             value: Some(value.value.into()),
+            ..Self::default()
         }
     }
 }
