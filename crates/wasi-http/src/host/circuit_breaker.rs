@@ -29,8 +29,8 @@ impl Default for BreakerConfig {
         Self {
             switch_on_threshold: 10,
             switch_off_threshold: 5,
-            reset_period: Duration::from_millis(10_000),
-            fault_window: Duration::from_millis(30_000),
+            reset_period: Duration::from_secs(10),
+            fault_window: Duration::from_secs(30),
         }
     }
 }
@@ -51,13 +51,15 @@ struct Inner {
 /// This prevents slow trickles of errors from accumulating into a false trip.
 #[derive(Debug)]
 pub struct CircuitBreaker {
+    name: String,
     inner: Mutex<Inner>,
     config: BreakerConfig,
 }
 
 impl CircuitBreaker {
-    pub fn new(config: BreakerConfig) -> Self {
+    pub fn new(name: impl Into<String>, config: BreakerConfig) -> Self {
         Self {
+            name: name.into(),
             inner: Mutex::new(Inner {
                 state: State::Off,
                 fault_count: 0,
@@ -78,29 +80,57 @@ impl CircuitBreaker {
     }
 
     fn check_at(&self, now: Instant) -> Result<(), ()> {
-        let mut inner = self.inner.lock();
-        let result = match inner.state {
-            State::Off => Ok(()),
-            State::On => {
-                if now.duration_since(inner.opened_at) >= self.config.reset_period {
-                    inner.state = State::HalfOn;
-                    inner.success_count = 0;
-                    inner.probe_count = 1;
-                    Ok(())
-                } else {
-                    Err(())
+        let mut transition = None;
+        let result = {
+            let mut inner = self.inner.lock();
+            match inner.state {
+                State::Off => Ok(()),
+                State::On => {
+                    if now.duration_since(inner.opened_at) >= self.config.reset_period {
+                        inner.state = State::HalfOn;
+                        inner.success_count = 0;
+                        inner.probe_count = 1;
+                        transition = Some(State::HalfOn);
+                        drop(inner);
+                        Ok(())
+                    } else {
+                        transition = Some(State::On);
+                        drop(inner);
+                        Err(())
+                    }
                 }
-            }
-            State::HalfOn => {
-                if inner.probe_count < self.config.switch_off_threshold {
-                    inner.probe_count += 1;
-                    Ok(())
-                } else {
-                    Err(())
+                State::HalfOn => {
+                    if inner.probe_count < self.config.switch_off_threshold {
+                        inner.probe_count += 1;
+                        drop(inner);
+                        Ok(())
+                    } else {
+                        transition = Some(State::HalfOn);
+                        drop(inner);
+                        Err(())
+                    }
                 }
             }
         };
-        drop(inner);
+
+        match (transition, &result) {
+            (Some(State::HalfOn), Ok(())) => {
+                tracing::info!(
+                    gauge.circuit_breaker_state = 2,
+                    bucket = %self.name,
+                    "circuit breaker entering probe state"
+                );
+            }
+            (Some(_), Err(())) => {
+                tracing::debug!(
+                    monotonic_counter.circuit_breaker_rejections = 1,
+                    bucket = %self.name,
+                    "request rejected by circuit breaker"
+                );
+            }
+            _ => {}
+        }
+
         result
     }
 
@@ -110,14 +140,30 @@ impl CircuitBreaker {
     }
 
     fn record_success_at(&self, _now: Instant) {
-        let mut inner = self.inner.lock();
-        if inner.state == State::HalfOn {
-            inner.success_count += 1;
-            if inner.success_count >= self.config.switch_off_threshold {
-                inner.state = State::Off;
-                inner.fault_count = 0;
-                inner.fault_window_start = Instant::now();
+        let recovered = {
+            let mut inner = self.inner.lock();
+            if inner.state == State::HalfOn {
+                inner.success_count += 1;
+                if inner.success_count >= self.config.switch_off_threshold {
+                    inner.state = State::Off;
+                    inner.fault_count = 0;
+                    inner.fault_window_start = Instant::now();
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
             }
+        };
+
+        if recovered {
+            tracing::info!(
+                monotonic_counter.circuit_breaker_recoveries = 1,
+                gauge.circuit_breaker_state = 0,
+                bucket = %self.name,
+                "circuit breaker recovered"
+            );
         }
     }
 
@@ -126,25 +172,56 @@ impl CircuitBreaker {
         self.record_failure_at(Instant::now());
     }
 
+    #[allow(clippy::if_then_some_else_none)]
     fn record_failure_at(&self, now: Instant) {
-        let mut inner = self.inner.lock();
-        match inner.state {
-            State::Off => {
-                if now.duration_since(inner.fault_window_start) > self.config.fault_window {
-                    inner.fault_count = 0;
-                    inner.fault_window_start = now;
+        let tripped = {
+            let mut inner = self.inner.lock();
+            match inner.state {
+                State::Off => {
+                    if now.duration_since(inner.fault_window_start) > self.config.fault_window {
+                        inner.fault_count = 0;
+                        inner.fault_window_start = now;
+                    }
+                    inner.fault_count += 1;
+                    if inner.fault_count >= self.config.switch_on_threshold {
+                        inner.state = State::On;
+                        inner.opened_at = now;
+                        let fc = inner.fault_count;
+                        drop(inner);
+                        Some(fc)
+                    } else {
+                        None
+                    }
                 }
-                inner.fault_count += 1;
-                if inner.fault_count >= self.config.switch_on_threshold {
+                State::HalfOn => {
                     inner.state = State::On;
                     inner.opened_at = now;
+                    drop(inner);
+                    Some(0)
                 }
+                State::On => None,
             }
-            State::HalfOn => {
-                inner.state = State::On;
-                inner.opened_at = now;
+        };
+
+        match tripped {
+            Some(0) => {
+                tracing::warn!(
+                    monotonic_counter.circuit_breaker_trips = 1,
+                    gauge.circuit_breaker_state = 1,
+                    bucket = %self.name,
+                    "circuit breaker re-tripped during probe"
+                );
             }
-            State::On => {}
+            Some(fault_count) => {
+                tracing::warn!(
+                    monotonic_counter.circuit_breaker_trips = 1,
+                    gauge.circuit_breaker_state = 1,
+                    bucket = %self.name,
+                    fault_count,
+                    "circuit breaker tripped"
+                );
+            }
+            None => {}
         }
     }
 
@@ -180,25 +257,25 @@ impl BucketRegistry {
             }
 
             let config = bucket_config_from_env(&name, global);
-            buckets.insert(name, Arc::new(CircuitBreaker::new(config)));
+            buckets.insert(name.clone(), Arc::new(CircuitBreaker::new(name, config)));
+        }
+
+        if buckets.is_empty() {
+            tracing::warn!(
+                "no circuit breaker buckets configured -- all upstreams share a single default breaker"
+            );
         }
 
         Self {
             buckets,
-            default_breaker: Arc::new(CircuitBreaker::new(global.clone())),
+            default_breaker: Arc::new(CircuitBreaker::new("default", global.clone())),
         }
     }
 
-    /// Resolve a breaker by explicit upstream name or by extracting the first path segment.
-    pub fn resolve(&self, upstream: Option<&str>, url: &str) -> Arc<CircuitBreaker> {
+    /// Resolve a breaker by explicit upstream name, falling back to the default breaker.
+    pub fn resolve(&self, upstream: Option<&str>) -> Arc<CircuitBreaker> {
         if let Some(name) = upstream
             && let Some(b) = self.buckets.get(name)
-        {
-            return Arc::clone(b.value());
-        }
-
-        if let Some(seg) = first_path_segment(url)
-            && let Some(b) = self.buckets.get(seg)
         {
             return Arc::clone(b.value());
         }
@@ -211,16 +288,6 @@ impl BucketRegistry {
     pub const fn default_breaker(&self) -> &Arc<CircuitBreaker> {
         &self.default_breaker
     }
-}
-
-/// Extract the first non-empty path segment from a URL string.
-fn first_path_segment(url: &str) -> Option<&str> {
-    let path = url.strip_prefix("http://").or_else(|| url.strip_prefix("https://")).map_or_else(
-        || url.starts_with('/').then_some(url),
-        |rest| rest.find('/').map(|i| &rest[i..]),
-    );
-
-    path.and_then(|p| p.split('/').find(|seg| !seg.is_empty()))
 }
 
 /// Load per-bucket config overrides from environment, falling back to global defaults.
@@ -268,14 +335,14 @@ mod tests {
 
     #[test]
     fn off_allows_requests() {
-        let cb = CircuitBreaker::new(test_config());
+        let cb = CircuitBreaker::new("test", test_config());
         assert!(cb.check().is_ok());
         assert_eq!(cb.state(), State::Off);
     }
 
     #[test]
     fn transitions_to_on_after_threshold() {
-        let cb = CircuitBreaker::new(test_config());
+        let cb = CircuitBreaker::new("test", test_config());
         let now = Instant::now();
         for _ in 0..3 {
             cb.record_failure_at(now);
@@ -285,7 +352,7 @@ mod tests {
 
     #[test]
     fn does_not_trip_below_threshold() {
-        let cb = CircuitBreaker::new(test_config());
+        let cb = CircuitBreaker::new("test", test_config());
         let now = Instant::now();
         for _ in 0..2 {
             cb.record_failure_at(now);
@@ -295,7 +362,7 @@ mod tests {
 
     #[test]
     fn rejects_when_on() {
-        let cb = CircuitBreaker::new(test_config());
+        let cb = CircuitBreaker::new("test", test_config());
         let now = Instant::now();
         for _ in 0..3 {
             cb.record_failure_at(now);
@@ -306,7 +373,7 @@ mod tests {
 
     #[test]
     fn transitions_to_half_on_after_reset_period() {
-        let cb = CircuitBreaker::new(test_config());
+        let cb = CircuitBreaker::new("test", test_config());
         let now = Instant::now();
         for _ in 0..3 {
             cb.record_failure_at(now);
@@ -320,7 +387,7 @@ mod tests {
 
     #[test]
     fn half_on_allows_probe_requests() {
-        let cb = CircuitBreaker::new(test_config());
+        let cb = CircuitBreaker::new("test", test_config());
         let now = Instant::now();
         for _ in 0..3 {
             cb.record_failure_at(now);
@@ -332,7 +399,7 @@ mod tests {
 
     #[test]
     fn half_on_to_off_after_successes() {
-        let cb = CircuitBreaker::new(test_config());
+        let cb = CircuitBreaker::new("test", test_config());
         let now = Instant::now();
         for _ in 0..3 {
             cb.record_failure_at(now);
@@ -348,7 +415,7 @@ mod tests {
 
     #[test]
     fn half_on_to_on_on_any_fault() {
-        let cb = CircuitBreaker::new(test_config());
+        let cb = CircuitBreaker::new("test", test_config());
         let now = Instant::now();
         for _ in 0..3 {
             cb.record_failure_at(now);
@@ -363,7 +430,7 @@ mod tests {
 
     #[test]
     fn half_on_caps_probe_requests() {
-        let cb = CircuitBreaker::new(test_config());
+        let cb = CircuitBreaker::new("test", test_config());
         let now = Instant::now();
         for _ in 0..3 {
             cb.record_failure_at(now);
@@ -376,7 +443,7 @@ mod tests {
 
     #[test]
     fn fault_window_resets_count() {
-        let cb = CircuitBreaker::new(test_config());
+        let cb = CircuitBreaker::new("test", test_config());
         let now = Instant::now();
         cb.record_failure_at(now);
         cb.record_failure_at(now);
@@ -390,7 +457,7 @@ mod tests {
 
     #[test]
     fn fault_window_boundary() {
-        let cb = CircuitBreaker::new(test_config());
+        let cb = CircuitBreaker::new("test", test_config());
         let t0 = Instant::now();
         cb.record_failure_at(t0);
         cb.record_failure_at(t0);
@@ -408,7 +475,7 @@ mod tests {
 
     #[test]
     fn record_failure_when_on_is_noop() {
-        let cb = CircuitBreaker::new(test_config());
+        let cb = CircuitBreaker::new("test", test_config());
         let now = Instant::now();
         for _ in 0..3 {
             cb.record_failure_at(now);
@@ -421,7 +488,7 @@ mod tests {
 
     #[test]
     fn record_success_in_off_is_noop() {
-        let cb = CircuitBreaker::new(test_config());
+        let cb = CircuitBreaker::new("test", test_config());
         cb.record_success();
         assert_eq!(cb.state(), State::Off);
     }
@@ -432,14 +499,14 @@ mod tests {
             switch_on_threshold: 1,
             ..test_config()
         };
-        let cb = CircuitBreaker::new(config);
+        let cb = CircuitBreaker::new("test", config);
         cb.record_failure();
         assert_eq!(cb.state(), State::On);
     }
 
     #[test]
     fn full_lifecycle() {
-        let cb = CircuitBreaker::new(test_config());
+        let cb = CircuitBreaker::new("test", test_config());
         let t0 = Instant::now();
 
         // OFF → ON
@@ -469,8 +536,8 @@ mod tests {
     }
 
     #[test]
-    fn rapid_transitions() {
-        let cb = CircuitBreaker::new(test_config());
+    fn rapid_transitions_do_not_corrupt_state() {
+        let cb = CircuitBreaker::new("test", test_config());
         let t0 = Instant::now();
 
         for i in 0..10 {
@@ -479,17 +546,23 @@ mod tests {
             let _ = cb.check_at(t);
             cb.record_success_at(t);
         }
-        // Should not panic or corrupt state
-        let s = cb.state();
-        assert!(s == State::Off || s == State::On || s == State::HalfOn);
+
+        // After 10 rounds with threshold=3: early failures trip the breaker,
+        // but check_at without elapsed reset_period keeps it On; record_success
+        // while On is a no-op (only HalfOn→Off transitions on success).
+        // Final state must be On because successes can't reset without a probe.
+        assert_eq!(cb.state(), State::On);
     }
 
     #[tokio::test]
     async fn concurrent_access() {
-        let cb = Arc::new(CircuitBreaker::new(BreakerConfig {
-            switch_on_threshold: 100,
-            ..test_config()
-        }));
+        let cb = Arc::new(CircuitBreaker::new(
+            "test",
+            BreakerConfig {
+                switch_on_threshold: 100,
+                ..test_config()
+            },
+        ));
 
         let mut handles = vec![];
         for _ in 0..20 {
@@ -511,11 +584,14 @@ mod tests {
 
     #[tokio::test]
     async fn concurrent_mixed_outcomes() {
-        let cb = Arc::new(CircuitBreaker::new(BreakerConfig {
-            switch_on_threshold: 50,
-            switch_off_threshold: 10,
-            ..test_config()
-        }));
+        let cb = Arc::new(CircuitBreaker::new(
+            "test",
+            BreakerConfig {
+                switch_on_threshold: 50,
+                switch_off_threshold: 10,
+                ..test_config()
+            },
+        ));
 
         let mut handles = vec![];
         for i in 0..20 {
@@ -542,16 +618,16 @@ mod tests {
     #[test]
     fn empty_buckets_config_uses_default_only() {
         let reg = BucketRegistry::new("", &BreakerConfig::default());
-        let b = reg.resolve(None, "http://example.com/anything");
+        let b = reg.resolve(None);
         assert!(Arc::ptr_eq(&b, reg.default_breaker()));
     }
 
     #[test]
     fn declared_buckets_created_at_startup() {
         let reg = BucketRegistry::new("a,b,c", &BreakerConfig::default());
-        let a = reg.resolve(Some("a"), "");
-        let b = reg.resolve(Some("b"), "");
-        let c = reg.resolve(Some("c"), "");
+        let a = reg.resolve(Some("a"));
+        let b = reg.resolve(Some("b"));
+        let c = reg.resolve(Some("c"));
         assert!(!Arc::ptr_eq(&a, reg.default_breaker()));
         assert!(!Arc::ptr_eq(&b, reg.default_breaker()));
         assert!(!Arc::ptr_eq(&c, reg.default_breaker()));
@@ -560,28 +636,21 @@ mod tests {
     #[test]
     fn lookup_by_name_exact_match() {
         let reg = BucketRegistry::new("monitoring", &BreakerConfig::default());
-        let b = reg.resolve(Some("monitoring"), "");
+        let b = reg.resolve(Some("monitoring"));
         assert!(!Arc::ptr_eq(&b, reg.default_breaker()));
     }
 
     #[test]
-    fn lookup_by_path_segment() {
+    fn lookup_without_name_returns_default() {
         let reg = BucketRegistry::new("monitoring", &BreakerConfig::default());
-        let b = reg.resolve(None, "http://example.com/monitoring/v2/upcoming");
-        assert!(!Arc::ptr_eq(&b, reg.default_breaker()));
+        let b = reg.resolve(None);
+        assert!(Arc::ptr_eq(&b, reg.default_breaker()));
     }
 
     #[test]
     fn lookup_unknown_name_returns_default() {
         let reg = BucketRegistry::new("monitoring", &BreakerConfig::default());
-        let b = reg.resolve(Some("nonexistent"), "");
-        assert!(Arc::ptr_eq(&b, reg.default_breaker()));
-    }
-
-    #[test]
-    fn lookup_unknown_path_returns_default() {
-        let reg = BucketRegistry::new("monitoring", &BreakerConfig::default());
-        let b = reg.resolve(None, "http://example.com/unknown-api/foo");
+        let b = reg.resolve(Some("nonexistent"));
         assert!(Arc::ptr_eq(&b, reg.default_breaker()));
     }
 
@@ -595,7 +664,7 @@ mod tests {
             ..BreakerConfig::default()
         };
         let reg = BucketRegistry::new("monitoring", &global);
-        let b = reg.resolve(Some("monitoring"), "");
+        let b = reg.resolve(Some("monitoring"));
         let now = Instant::now();
         for _ in 0..3 {
             b.record_failure_at(now);
@@ -610,7 +679,7 @@ mod tests {
             ..BreakerConfig::default()
         };
         let reg = BucketRegistry::new("test", &global);
-        let b = reg.resolve(Some("test"), "");
+        let b = reg.resolve(Some("test"));
         let now = Instant::now();
         for _ in 0..6 {
             b.record_failure_at(now);
@@ -629,8 +698,8 @@ mod tests {
                 ..BreakerConfig::default()
             },
         );
-        let a = reg.resolve(Some("a"), "");
-        let b = reg.resolve(Some("b"), "");
+        let a = reg.resolve(Some("a"));
+        let b = reg.resolve(Some("b"));
         let now = Instant::now();
         a.record_failure_at(now);
         a.record_failure_at(now);
@@ -642,11 +711,11 @@ mod tests {
     fn bucket_names_trimmed() {
         let reg = BucketRegistry::new(" monitoring , messaging ", &BreakerConfig::default());
         assert!(!std::ptr::eq(
-            reg.resolve(Some("monitoring"), "").as_ref(),
+            reg.resolve(Some("monitoring")).as_ref(),
             reg.default_breaker().as_ref()
         ));
         assert!(!std::ptr::eq(
-            reg.resolve(Some("messaging"), "").as_ref(),
+            reg.resolve(Some("messaging")).as_ref(),
             reg.default_breaker().as_ref()
         ));
     }
@@ -654,9 +723,8 @@ mod tests {
     #[test]
     fn duplicate_bucket_names_deduplicated() {
         let reg = BucketRegistry::new("a,a,b", &BreakerConfig::default());
-        // a and b exist, no duplicates
-        let a = reg.resolve(Some("a"), "");
-        let b = reg.resolve(Some("b"), "");
+        let a = reg.resolve(Some("a"));
+        let b = reg.resolve(Some("b"));
         assert!(!Arc::ptr_eq(&a, &b));
     }
 
@@ -677,20 +745,5 @@ mod tests {
         assert_eq!(b.state(), State::Off);
         b.record_failure_at(now);
         assert_eq!(b.state(), State::On);
-    }
-
-    #[test]
-    fn path_segment_empty_path_uses_default() {
-        let reg = BucketRegistry::new("monitoring", &BreakerConfig::default());
-        let b = reg.resolve(None, "http://host/");
-        assert!(Arc::ptr_eq(&b, reg.default_breaker()));
-    }
-
-    #[test]
-    fn override_takes_precedence_over_path() {
-        let reg = BucketRegistry::new("custom,monitoring", &BreakerConfig::default());
-        let b = reg.resolve(Some("custom"), "http://example.com/monitoring/v2");
-        let monitoring = reg.resolve(Some("monitoring"), "");
-        assert!(!Arc::ptr_eq(&b, &monitoring));
     }
 }

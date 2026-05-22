@@ -33,7 +33,25 @@ All outbound HTTP requests pass through three resilience layers — **timeout**,
 
 2. **Retry** — GET, HEAD, and OPTIONS requests are retried on transient failures (timeout, connection error, 429, 502, 503, 504). POST/PUT/PATCH/DELETE are never retried. Delays use jittered exponential backoff, and 429 responses with a `Retry-After` header use that value instead.
 
-3. **Circuit Breaker** — A windowed three-state breaker (OFF → ON → `HALF_ON` → OFF) protects against sustained upstream failures. Faults only accumulate within a rolling time window, so sporadic errors hours apart never trip the breaker.
+3. **Circuit Breaker** — A windowed three-state breaker (OFF → ON → `HALF_ON` → OFF) protects against sustained upstream failures. Only 5xx responses, timeouts, and connection errors count as faults — 429 (rate limiting) is handled by the retry layer and does not trip the breaker. Faults only accumulate within a rolling time window, so sporadic errors hours apart never trip the breaker.
+
+### Retry vs Breaker Interaction
+
+The retry loop runs *inside* the circuit breaker. The breaker only sees the final outcome after retries are exhausted — intermediate failures during retries do not count as breaker faults.
+
+| Outcome          | Retried?          | Faults breaker? |
+| ---------------- | ----------------- | --------------- |
+| 429              | Yes               | No              |
+| 500              | No                | Yes             |
+| 502              | Yes               | Yes             |
+| 503              | Yes               | Yes             |
+| 504              | Yes               | Yes             |
+| Timeout          | Yes               | Yes             |
+| Connection error | Yes               | Yes             |
+
+- **429** is retried (with `Retry-After` support) but does not fault the breaker — it's a rate-limiting signal, not a failure.
+- **500** faults the breaker but is not retried — it typically indicates a bug in the upstream rather than a transient issue.
+- Retry only applies to GET, HEAD, and OPTIONS. Non-idempotent methods (POST, PUT, PATCH, DELETE) are never retried but still record breaker faults on 5xx/timeout/connection error.
 
 ### WASI Boundary
 
@@ -77,11 +95,7 @@ The fault counter resets to zero if no new fault arrives within `fault_window_ms
 
 ### Buckets
 
-Declare named breaker buckets via `HTTP_CB_BUCKETS=monitoring,messaging`. Each bucket gets its own independent circuit breaker. Requests are routed to a bucket by:
-
-1. Explicit `upstream` field in `OutboundPolicy` (highest priority)
-2. First path segment of the URL (e.g., `/monitoring/v2/foo` → `monitoring`)
-3. Default breaker (fallback)
+Declare named breaker buckets via `HTTP_CB_BUCKETS=monitoring,messaging`. Each bucket gets its own independent circuit breaker. Requests are routed to a bucket by the explicit `upstream` field in `OutboundPolicy`. If no upstream is specified (or the name doesn't match a declared bucket), the request uses the shared default breaker.
 
 Per-bucket overrides: set `HTTP_CB_MONITORING_SWITCH_ON_THRESHOLD=3` to give the `monitoring` bucket a custom threshold.
 
@@ -96,7 +110,7 @@ let response = provider.fetch(request).await?;
 // With timeout override
 request.extensions_mut().insert(OutboundPolicy {
     timeout_ms: Some(5000),
-    upstream: None, // auto-derived from URL path
+    upstream: None, // uses the default breaker
 });
 let response = provider.fetch(request).await?;
 

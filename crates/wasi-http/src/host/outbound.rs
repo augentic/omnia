@@ -12,12 +12,12 @@ use super::circuit_breaker::BucketRegistry;
 use super::retry::{RetryPolicy, retry_send};
 
 /// Header names used to carry per-request resilience policy across the WASI boundary.
-pub const HEADER_TIMEOUT_MS: &str = "x-omnia-timeout-ms";
-pub const HEADER_UPSTREAM: &str = "x-omnia-upstream";
+const HEADER_TIMEOUT_MS: &str = "x-omnia-timeout-ms";
+const HEADER_UPSTREAM: &str = "x-omnia-upstream";
 
 /// Resilience configuration: retry policy + circuit breaker registry.
 ///
-/// When this is `Some` on `HttpHooks`, retry and circuit breaker are active.
+/// When `Some` on `HttpHooks`, retry and circuit breaker are active.
 /// When `None`, requests are sent directly with only timeout applied.
 #[derive(Debug, Clone)]
 pub struct ResilienceConfig {
@@ -26,29 +26,19 @@ pub struct ResilienceConfig {
     pub registry: Arc<BucketRegistry>,
 }
 
-/// Determines whether an outcome should count as a circuit breaker fault.
-fn is_breaker_fault(result: &Result<&reqwest::Response, &reqwest::Error>) -> bool {
-    match result {
-        Err(e) => e.is_timeout() || e.is_connect(),
-        Ok(resp) => resp.status().is_server_error() || resp.status().as_u16() == 429,
-    }
-}
-
-/// Execute an outbound HTTP request with timeout, retry, and circuit breaker protection.
+/// Send an outbound HTTP request through the full pipeline.
 ///
-/// 1. Extract and strip `X-Omnia-*` headers
-/// 2. Resolve breaker bucket
-/// 3. Check circuit breaker — reject immediately if open
-/// 4. Execute retry loop within timeout budget
-/// 5. Record success/failure with the breaker
-/// 6. Return response
-pub async fn send_with_resilience(
+/// Strips `X-Omnia-*` headers, resolves timeout, collects the body, then
+/// branches based on whether resilience is enabled:
+/// - `Some(config)` — circuit breaker check, retry loop, breaker recording
+/// - `None` — direct send with optional timeout
+pub async fn send(
     client: &reqwest::Client, request: Request<UnsyncBoxBody<Bytes, ErrorCode>>,
-    config: &ResilienceConfig, default_timeout: Duration,
+    resilience: Option<&ResilienceConfig>, default_timeout: Duration,
 ) -> Result<reqwest::Response, ErrorCode> {
     let (mut parts, body) = request.into_parts();
 
-    // 1. Extract and strip resilience headers
+    // Extract and strip resilience headers (always, even when disabled)
     let timeout_ms = parts
         .headers
         .remove(HEADER_TIMEOUT_MS)
@@ -56,7 +46,6 @@ pub async fn send_with_resilience(
     let upstream =
         parts.headers.remove(HEADER_UPSTREAM).and_then(|v| v.to_str().ok().map(String::from));
 
-    // Remove Host header (reqwest adds its own)
     parts.headers.remove(HOST);
 
     let timeout = match timeout_ms {
@@ -65,35 +54,59 @@ pub async fn send_with_resilience(
         None => Some(default_timeout),
     };
 
-    let url = parts.uri.to_string();
-
-    // 2. Resolve breaker bucket
-    let breaker = config.registry.resolve(upstream.as_deref(), &url);
-
-    // 3. Check circuit breaker
-    if breaker.check().is_err() {
-        let bucket_name = upstream.as_deref().unwrap_or("default");
-        return Err(ErrorCode::InternalError(Some(format!("circuit breaker open: {bucket_name}"))));
-    }
-
-    // 4. Collect body and execute with retry
+    // Collect body (needed for both paths — retries clone from bytes)
     let collected =
         body.collect().await.map_err(|e| ErrorCode::InternalError(Some(e.to_string())))?;
     let body_bytes = collected.to_bytes();
 
+    let url = parts.uri.to_string();
+
+    match resilience {
+        Some(config) => {
+            send_with_resilience(client, config, &parts, &url, body_bytes, upstream, timeout).await
+        }
+        None => send_direct(client, &parts, &url, body_bytes, timeout).await,
+    }
+}
+
+/// Direct send — no retry, no circuit breaker.
+async fn send_direct(
+    client: &reqwest::Client, parts: &http::request::Parts, url: &str, body: Bytes,
+    timeout: Option<Duration>,
+) -> Result<reqwest::Response, ErrorCode> {
+    let mut builder =
+        client.request(parts.method.clone(), url).headers(parts.headers.clone()).body(body);
+    if let Some(t) = timeout {
+        builder = builder.timeout(t);
+    }
+    builder.send().await.map_err(reqwest_to_error_code)
+}
+
+/// Send with circuit breaker + retry.
+async fn send_with_resilience(
+    client: &reqwest::Client, config: &ResilienceConfig, parts: &http::request::Parts, url: &str,
+    body: Bytes, upstream: Option<String>, timeout: Option<Duration>,
+) -> Result<reqwest::Response, ErrorCode> {
+    let breaker = config.registry.resolve(upstream.as_deref());
+
+    if breaker.check().is_err() {
+        let bucket_name = upstream.as_deref().unwrap_or("default");
+        tracing::warn!(bucket = bucket_name, url = %url, "outbound request blocked by circuit breaker");
+        return Err(ErrorCode::InternalError(Some(format!("circuit breaker open: {bucket_name}"))));
+    }
+
     let result = retry_send(
         client,
         &parts.method,
-        &url,
-        parts.headers,
-        body_bytes,
+        url,
+        parts.headers.clone(),
+        body,
         config.retry_max,
         &config.retry_policy,
         timeout,
     )
     .await;
 
-    // 5. Record with breaker
     let fault = is_breaker_fault(&result.as_ref());
     if fault {
         breaker.record_failure();
@@ -101,12 +114,22 @@ pub async fn send_with_resilience(
         breaker.record_success();
     }
 
-    // 6. Return
     result.map_err(reqwest_to_error_code)
 }
 
+/// Determines whether an outcome should count as a circuit breaker fault.
+/// 429 (Too Many Requests) is intentionally excluded — it's a rate-limiting
+/// signal, not a failure. The retry layer already handles 429 with
+/// `Retry-After` support; the breaker is reserved for actual degradation.
+fn is_breaker_fault(result: &Result<&reqwest::Response, &reqwest::Error>) -> bool {
+    match result {
+        Err(e) => e.is_timeout() || e.is_connect(),
+        Ok(resp) => resp.status().is_server_error(),
+    }
+}
+
 #[allow(clippy::needless_pass_by_value)]
-fn reqwest_to_error_code(e: reqwest::Error) -> ErrorCode {
+pub(super) fn reqwest_to_error_code(e: reqwest::Error) -> ErrorCode {
     if e.is_timeout() {
         ErrorCode::ConnectionTimeout
     } else if e.is_connect() {
@@ -217,7 +240,7 @@ mod tests {
 
         let req = get_request_with_headers(&server.uri(), Some(500), None);
         let config = test_config();
-        let result = send_with_resilience(&test_client(), req, &config, DEFAULT_TIMEOUT).await;
+        let result = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
 
         result.unwrap_err();
     }
@@ -225,11 +248,15 @@ mod tests {
     #[tokio::test]
     async fn default_timeout_when_no_header() {
         let server = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
 
         let req = get_request(&server.uri());
         let config = test_config();
-        let result = send_with_resilience(&test_client(), req, &config, DEFAULT_TIMEOUT).await;
+        let result = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
 
         result.unwrap();
     }
@@ -237,24 +264,15 @@ mod tests {
     #[tokio::test]
     async fn upstream_header_selects_bucket() {
         let server = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
 
         let config = test_config_with_buckets("monitoring");
         let req = get_request_with_headers(&server.uri(), None, Some("monitoring"));
-        let result = send_with_resilience(&test_client(), req, &config, DEFAULT_TIMEOUT).await;
-
-        result.unwrap();
-    }
-
-    #[tokio::test]
-    async fn path_segment_selects_bucket() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
-
-        let config = test_config_with_buckets("monitoring");
-        let uri = format!("{}/monitoring/v2/upcoming", server.uri());
-        let req = get_request(&uri);
-        let result = send_with_resilience(&test_client(), req, &config, DEFAULT_TIMEOUT).await;
+        let result = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
 
         result.unwrap();
     }
@@ -262,11 +280,15 @@ mod tests {
     #[tokio::test]
     async fn unknown_bucket_uses_default() {
         let server = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
 
         let config = test_config_with_buckets("monitoring");
         let req = get_request_with_headers(&server.uri(), None, Some("nonexistent"));
-        let result = send_with_resilience(&test_client(), req, &config, DEFAULT_TIMEOUT).await;
+        let result = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
 
         result.unwrap();
     }
@@ -274,11 +296,15 @@ mod tests {
     #[tokio::test]
     async fn headers_stripped_before_forwarding() {
         let server = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
 
         let req = get_request_with_headers(&server.uri(), Some(5000), Some("monitoring"));
         let config = test_config_with_buckets("monitoring");
-        let result = send_with_resilience(&test_client(), req, &config, DEFAULT_TIMEOUT).await;
+        let result = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
 
         result.unwrap();
 
@@ -300,7 +326,7 @@ mod tests {
 
         let config = test_config();
         let req = get_request(&server.uri());
-        let result = send_with_resilience(&test_client(), req, &config, DEFAULT_TIMEOUT).await;
+        let result = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
 
         result.unwrap();
         assert_eq!(config.registry.default_breaker().state(), State::Off);
@@ -322,7 +348,7 @@ mod tests {
         assert_eq!(config.registry.default_breaker().state(), State::On);
 
         let req = get_request(&server.uri());
-        let result = send_with_resilience(&test_client(), req, &config, DEFAULT_TIMEOUT).await;
+        let result = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
 
         result.unwrap_err();
     }
@@ -336,8 +362,7 @@ mod tests {
         }
 
         let req = get_request(&server.uri());
-        let err =
-            send_with_resilience(&test_client(), req, &config, DEFAULT_TIMEOUT).await.unwrap_err();
+        let err = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await.unwrap_err();
 
         match err {
             ErrorCode::InternalError(Some(msg)) => {
@@ -359,13 +384,13 @@ mod tests {
 
         for _ in 0..3 {
             let req = get_request(&server.uri());
-            let _ = send_with_resilience(&test_client(), req, &config, DEFAULT_TIMEOUT).await;
+            let _ = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
         }
 
         assert_eq!(config.registry.default_breaker().state(), State::On);
 
         let req = get_request(&server.uri());
-        let result = send_with_resilience(&test_client(), req, &config, DEFAULT_TIMEOUT).await;
+        let result = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
         result.unwrap_err();
     }
 
@@ -398,18 +423,18 @@ mod tests {
 
         for _ in 0..3 {
             let req = get_request(&server.uri());
-            let _ = send_with_resilience(&test_client(), req, &config, DEFAULT_TIMEOUT).await;
+            let _ = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
         }
         assert_eq!(config.registry.default_breaker().state(), State::On);
 
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let req = get_request(&server.uri());
-        let result = send_with_resilience(&test_client(), req, &config, DEFAULT_TIMEOUT).await;
+        let result = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
         result.unwrap();
 
         let req = get_request(&server.uri());
-        let result = send_with_resilience(&test_client(), req, &config, DEFAULT_TIMEOUT).await;
+        let result = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
         result.unwrap();
         assert_eq!(config.registry.default_breaker().state(), State::Off);
     }
@@ -428,11 +453,11 @@ mod tests {
 
         for _ in 0..3 {
             let req = get_request_with_headers(&server_a.uri(), None, Some("a"));
-            let _ = send_with_resilience(&test_client(), req, &config, DEFAULT_TIMEOUT).await;
+            let _ = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
         }
 
         let req = get_request_with_headers(&server_b.uri(), None, Some("b"));
-        let result = send_with_resilience(&test_client(), req, &config, DEFAULT_TIMEOUT).await;
+        let result = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
         result.unwrap();
     }
 
@@ -445,7 +470,7 @@ mod tests {
 
         for _ in 0..3 {
             let req = post_request(&server.uri());
-            let _ = send_with_resilience(&test_client(), req, &config, DEFAULT_TIMEOUT).await;
+            let _ = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
         }
 
         assert_eq!(config.registry.default_breaker().state(), State::On);
@@ -463,7 +488,7 @@ mod tests {
 
         for _ in 0..5 {
             let req = get_request(&server.uri());
-            let _ = send_with_resilience(&test_client(), req, &config, DEFAULT_TIMEOUT).await;
+            let _ = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
         }
 
         assert_eq!(config.registry.default_breaker().state(), State::Off);
@@ -481,7 +506,7 @@ mod tests {
 
         let config = test_config();
         let req = get_request(&server.uri());
-        let result = send_with_resilience(&test_client(), req, &config, DEFAULT_TIMEOUT).await;
+        let result = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
 
         result.unwrap();
         assert_eq!(config.registry.default_breaker().state(), State::Off);
@@ -506,36 +531,28 @@ mod tests {
 
         let start = Instant::now();
         let req = get_request(&server.uri());
-        let _ = send_with_resilience(&test_client(), req, &config, Duration::from_secs(3)).await;
+        let _ = send(&test_client(), req, Some(&config), Duration::from_secs(3)).await;
 
         assert!(start.elapsed() < Duration::from_secs(6));
     }
 
     #[tokio::test]
-    async fn path_segment_with_version_prefix() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
-
-        let config = test_config_with_buckets("monitoring");
-        let uri = format!("{}/monitoring/v2/foo", server.uri());
-        let req = get_request(&uri);
-        let result = send_with_resilience(&test_client(), req, &config, DEFAULT_TIMEOUT).await;
-        result.unwrap();
-    }
-
-    #[tokio::test]
-    async fn four29_retried_then_faults_breaker() {
+    async fn four29_does_not_fault_breaker() {
         let server = MockServer::start().await;
         Mock::given(method("GET")).respond_with(ResponseTemplate::new(429)).mount(&server).await;
 
-        let config = test_config();
+        let config = ResilienceConfig {
+            retry_max: 0,
+            ..test_config()
+        };
 
-        for _ in 0..3 {
+        for _ in 0..5 {
             let req = get_request(&server.uri());
-            let _ = send_with_resilience(&test_client(), req, &config, DEFAULT_TIMEOUT).await;
+            let _ = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
         }
 
-        assert_eq!(config.registry.default_breaker().state(), State::On);
+        // 429 is rate limiting, not a failure — breaker should stay off
+        assert_eq!(config.registry.default_breaker().state(), State::Off);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -569,7 +586,7 @@ mod tests {
                             .boxed_unsync(),
                     )
                     .unwrap();
-                send_with_resilience(&client, req, &cfg, DEFAULT_TIMEOUT).await
+                send(&client, req, Some(&*cfg), DEFAULT_TIMEOUT).await
             }));
         }
 
@@ -608,12 +625,101 @@ mod tests {
                     .boxed_unsync(),
             )
             .unwrap();
-        let result = send_with_resilience(&test_client(), req, &config, DEFAULT_TIMEOUT).await;
+        let result = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
 
         let resp = result.unwrap();
         assert_eq!(resp.status(), 200);
 
         let received = server.received_requests().await.unwrap();
         assert_eq!(received.len(), 2, "OPTIONS should have been retried once");
+    }
+
+    #[tokio::test]
+    async fn direct_send_strips_headers() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let req = get_request_with_headers(&server.uri(), Some(5000), Some("monitoring"));
+        let result = send(&test_client(), req, None, DEFAULT_TIMEOUT).await;
+
+        result.unwrap();
+
+        let received = server.received_requests().await.unwrap();
+        assert_eq!(received.len(), 1);
+        assert!(received[0].headers.get("x-omnia-timeout-ms").is_none());
+        assert!(received[0].headers.get("x-omnia-upstream").is_none());
+    }
+
+    #[tokio::test]
+    async fn direct_send_applies_header_timeout() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(2)))
+            .mount(&server)
+            .await;
+
+        let req = get_request_with_headers(&server.uri(), Some(500), None);
+        let result = send(&test_client(), req, None, DEFAULT_TIMEOUT).await;
+
+        result.unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn direct_send_no_retry() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(503))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let req = get_request(&server.uri());
+        let result = send(&test_client(), req, None, DEFAULT_TIMEOUT).await;
+
+        let resp = result.unwrap();
+        assert_eq!(resp.status(), 503);
+
+        let received = server.received_requests().await.unwrap();
+        assert_eq!(received.len(), 1, "direct send should not retry");
+    }
+
+    #[tokio::test]
+    async fn direct_send_infinite_timeout_when_zero() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_millis(200)))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let req = get_request(&server.uri());
+        let result = send(&test_client(), req, None, Duration::ZERO).await;
+
+        result.unwrap();
+    }
+
+    #[tokio::test]
+    async fn timeout_faults_breaker() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(2)))
+            .mount(&server)
+            .await;
+
+        let config = ResilienceConfig {
+            retry_max: 0,
+            ..test_config()
+        };
+
+        for _ in 0..3 {
+            let req = get_request_with_headers(&server.uri(), Some(100), None);
+            let _ = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
+        }
+
+        assert_eq!(config.registry.default_breaker().state(), State::On);
     }
 }

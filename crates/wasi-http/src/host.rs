@@ -4,7 +4,7 @@
 
 mod circuit_breaker;
 mod default_impl;
-mod resilience;
+mod outbound;
 mod retry;
 mod server;
 

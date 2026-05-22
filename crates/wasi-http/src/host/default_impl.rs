@@ -23,7 +23,7 @@ use wasmtime_wasi_http::p3::bindings::http::types::ErrorCode;
 use wasmtime_wasi_http::p3::{self, RequestOptions, WasiHttpCtxView};
 
 use super::circuit_breaker::{BreakerConfig, BucketRegistry};
-use super::resilience::{self, HEADER_TIMEOUT_MS, HEADER_UPSTREAM, ResilienceConfig};
+use super::outbound::{self, ResilienceConfig};
 use super::retry::RetryPolicy;
 
 pub type HttpResult<T> = Result<T, HttpError>;
@@ -179,25 +179,20 @@ impl p3::WasiHttpHooks for HttpHooks {
                 #[cfg(test)]
                 let builder = builder.no_proxy();
 
-                builder.build().map_err(reqwest_err)?
+                builder.build().map_err(outbound::reqwest_to_error_code)?
             } else {
                 shared_client
             };
 
             let request = Request::from_parts(parts, body);
-
-            let resp = if let Some(ref config) = resilience {
-                resilience::send_with_resilience(&client, request, config, default_timeout)
-                    .await
-                    .map_err(HttpError::from)?
-            } else {
-                send_direct(&client, request, default_timeout).await.map_err(HttpError::from)?
-            };
+            let resp = outbound::send(&client, request, resilience.as_ref(), default_timeout)
+                .await
+                .map_err(HttpError::from)?;
 
             // Process response
             let converted: Response<reqwest::Body> = resp.into();
             let (parts, body) = converted.into_parts();
-            let body = body.map_err(reqwest_err).boxed_unsync();
+            let body = body.map_err(outbound::reqwest_to_error_code).boxed_unsync();
             let mut response = Response::from_parts(parts, body);
 
             // Remove forbidden headers (disallowed by `wasmtime-wasi-http`)
@@ -211,67 +206,8 @@ impl p3::WasiHttpHooks for HttpHooks {
     }
 }
 
-/// Direct send path when resilience is disabled.
-/// Still applies timeout (if non-zero) and strips resilience headers.
-async fn send_direct(
-    client: &reqwest::Client, request: Request<UnsyncBoxBody<Bytes, ErrorCode>>,
-    default_timeout: Duration,
-) -> Result<reqwest::Response, ErrorCode> {
-    use http::header::HOST;
-
-    let (mut parts, body) = request.into_parts();
-
-    // Strip resilience headers even when disabled so they never reach the upstream
-    let timeout_ms = parts
-        .headers
-        .remove(HEADER_TIMEOUT_MS)
-        .and_then(|v| v.to_str().ok().and_then(|s| s.parse::<u64>().ok()));
-    parts.headers.remove(HEADER_UPSTREAM);
-    parts.headers.remove(HOST);
-
-    let timeout = match timeout_ms {
-        Some(ms) => Some(Duration::from_millis(ms)),
-        None if default_timeout.is_zero() => None,
-        None => Some(default_timeout),
-    };
-
-    let collected =
-        body.collect().await.map_err(|e| ErrorCode::InternalError(Some(e.to_string())))?;
-    let body_bytes = collected.to_bytes();
-
-    let mut builder =
-        client.request(parts.method, parts.uri.to_string()).headers(parts.headers).body(body_bytes);
-    if let Some(t) = timeout {
-        builder = builder.timeout(t);
-    }
-    builder.send().await.map_err(|e| {
-        if e.is_timeout() {
-            ErrorCode::ConnectionTimeout
-        } else if e.is_connect() {
-            ErrorCode::ConnectionRefused
-        } else if e.is_request() {
-            ErrorCode::HttpRequestUriInvalid
-        } else {
-            ErrorCode::InternalError(Some(e.to_string()))
-        }
-    })
-}
-
 fn internal_err(e: impl Display) -> ErrorCode {
     ErrorCode::InternalError(Some(e.to_string()))
-}
-
-#[allow(clippy::needless_pass_by_value)]
-fn reqwest_err(e: reqwest::Error) -> ErrorCode {
-    if e.is_timeout() {
-        ErrorCode::ConnectionTimeout
-    } else if e.is_connect() {
-        ErrorCode::ConnectionRefused
-    } else if e.is_request() {
-        ErrorCode::HttpRequestUriInvalid
-    } else {
-        internal_err(e)
-    }
 }
 
 #[cfg(test)]
@@ -476,7 +412,13 @@ mod tests {
         }
     }
 
-    // --- Resilience integration tests ---
+    // --- Integration tests for resilience glue ---
+    //
+    // Resilience logic (retry, circuit breaker, timeout, header handling) is
+    // thoroughly tested in `outbound::tests`. Tests here verify only the
+    // integration surface that `default_impl` adds on top: the `WasiHttpHooks`
+    // trait wiring, client-cert branching, forbidden-header stripping on the
+    // response, and the resilience-disabled opt-out path.
 
     async fn resilience_client(timeout_ms: u64, retry_max: u8, cb_threshold: u32) -> HttpDefault {
         let options = ConnectOptions {
@@ -494,206 +436,6 @@ mod tests {
             cb_buckets: String::new(),
         };
         HttpDefault::connect_with(options).await.unwrap()
-    }
-
-    async fn resilience_client_with_buckets(buckets: &str) -> HttpDefault {
-        let options = ConnectOptions {
-            addr: String::new(),
-            connect_timeout_secs: 10,
-            outbound_resilience: true,
-            response_timeout_ms: 5000,
-            retry_max: 0,
-            retry_base_delay_ms: 10,
-            retry_cap_delay_ms: 50,
-            cb_switch_on_threshold: 3,
-            cb_switch_off_threshold: 2,
-            cb_reset_period_ms: 100,
-            cb_fault_window_ms: 30_000,
-            cb_buckets: buckets.to_string(),
-        };
-        HttpDefault::connect_with(options).await.unwrap()
-    }
-
-    #[tokio::test]
-    async fn send_request_with_timeout() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(3)))
-            .mount(&server)
-            .await;
-
-        let mut client = resilience_client(500, 0, 10).await;
-        let request = Request::get(server.uri())
-            .header("x-omnia-timeout-ms", "500")
-            .body(Empty::new().map_err(internal_err).boxed_unsync())
-            .unwrap();
-
-        let result = client.handle(request).await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn send_request_default_timeout() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
-
-        let mut client = resilience_client(5000, 0, 10).await;
-        let request = Request::get(server.uri())
-            .body(Empty::new().map_err(internal_err).boxed_unsync())
-            .unwrap();
-
-        let (_, _fut) = client.handle(request).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn send_request_retries_transient_get() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(503))
-            .up_to_n_times(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
-            .mount(&server)
-            .await;
-
-        let mut client = resilience_client(5000, 2, 10).await;
-        let request = Request::get(server.uri())
-            .body(Empty::new().map_err(internal_err).boxed_unsync())
-            .unwrap();
-
-        let result = client.handle(request).await;
-        assert!(result.is_ok());
-        let (resp, _) = result.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn send_request_retries_transient_head() {
-        let server = MockServer::start().await;
-        Mock::given(method("HEAD"))
-            .respond_with(ResponseTemplate::new(503))
-            .up_to_n_times(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("HEAD")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
-
-        let mut client = resilience_client(5000, 2, 10).await;
-        let request = Request::head(server.uri())
-            .body(Empty::new().map_err(internal_err).boxed_unsync())
-            .unwrap();
-
-        let (_, _fut) = client.handle(request).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn send_request_no_retry_post() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .respond_with(ResponseTemplate::new(503))
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        let mut client = resilience_client(5000, 2, 10).await;
-        let request = Request::post(server.uri())
-            .body(Empty::new().map_err(internal_err).boxed_unsync())
-            .unwrap();
-
-        let result = client.handle(request).await;
-        assert!(result.is_ok());
-        let (resp, _) = result.unwrap();
-        assert_eq!(resp.status().as_u16(), 503);
-    }
-
-    #[tokio::test]
-    async fn send_request_circuit_open() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(503)).mount(&server).await;
-
-        let mut client = resilience_client(5000, 0, 3).await;
-
-        // Trip the breaker
-        for _ in 0..3 {
-            let request = Request::get(server.uri())
-                .body(Empty::new().map_err(internal_err).boxed_unsync())
-                .unwrap();
-            let _ = client.handle(request).await;
-        }
-
-        // Next request should be rejected without network call
-        let request = Request::get(server.uri())
-            .body(Empty::new().map_err(internal_err).boxed_unsync())
-            .unwrap();
-        let result = client.handle(request).await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn send_request_circuit_recovers() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(503))
-            .up_to_n_times(3)
-            .mount(&server)
-            .await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
-
-        let mut client = resilience_client(5000, 0, 3).await;
-
-        // Trip the breaker
-        for _ in 0..3 {
-            let request = Request::get(server.uri())
-                .body(Empty::new().map_err(internal_err).boxed_unsync())
-                .unwrap();
-            let _ = client.handle(request).await;
-        }
-
-        // Wait for reset period
-        tokio::time::sleep(Duration::from_millis(200)).await;
-
-        // Probe + recovery
-        for _ in 0..2 {
-            let request = Request::get(server.uri())
-                .body(Empty::new().map_err(internal_err).boxed_unsync())
-                .unwrap();
-            let (_, _fut) = client.handle(request).await.unwrap();
-        }
-    }
-
-    #[tokio::test]
-    async fn send_request_upstream_override() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
-
-        let mut client = resilience_client_with_buckets("monitoring").await;
-        let request = Request::get(server.uri())
-            .header("x-omnia-upstream", "monitoring")
-            .body(Empty::new().map_err(internal_err).boxed_unsync())
-            .unwrap();
-
-        let (_, _fut) = client.handle(request).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn send_request_strips_omnia_headers() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
-
-        let mut client = resilience_client_with_buckets("monitoring").await;
-        let request = Request::get(server.uri())
-            .header("x-omnia-timeout-ms", "5000")
-            .header("x-omnia-upstream", "monitoring")
-            .body(Empty::new().map_err(internal_err).boxed_unsync())
-            .unwrap();
-
-        let (_, _fut) = client.handle(request).await.unwrap();
-
-        let received = server.received_requests().await.unwrap();
-        assert_eq!(received.len(), 1);
-        assert!(received[0].headers.get("x-omnia-timeout-ms").is_none());
-        assert!(received[0].headers.get("x-omnia-upstream").is_none());
     }
 
     #[tokio::test]
@@ -724,7 +466,6 @@ mod tests {
 
         let mut client = resilience_client(5000, 2, 10).await;
 
-        // Invalid base64 → should error even with resilience active
         let request = Request::get(server.uri())
             .header("Client-Cert", "not-valid-base64!!!")
             .body(Empty::new().map_err(internal_err).boxed_unsync())
@@ -741,7 +482,6 @@ mod tests {
 
         let mut client = test_client().await;
 
-        // First request: 503 GET is NOT retried (single attempt)
         let request = Request::get(server.uri())
             .body(Empty::new().map_err(internal_err).boxed_unsync())
             .unwrap();
@@ -749,11 +489,9 @@ mod tests {
         let (resp, _fut) = client.handle(request).await.unwrap();
         assert_eq!(resp.status().as_u16(), 503);
 
-        // Verify only one request was made (no retry)
         let received = server.received_requests().await.unwrap();
         assert_eq!(received.len(), 1, "resilience off: GET should not retry");
 
-        // Send more failures to verify no circuit breaker trips
         for _ in 0..5 {
             let request = Request::get(server.uri())
                 .body(Empty::new().map_err(internal_err).boxed_unsync())
@@ -761,7 +499,6 @@ mod tests {
             let _ = client.handle(request).await;
         }
 
-        // All requests reached the server (no circuit breaker blocking)
         let received = server.received_requests().await.unwrap();
         assert_eq!(received.len(), 6, "all 6 requests should reach server without breaker");
     }

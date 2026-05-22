@@ -31,6 +31,10 @@ const fn is_retryable_status(status: u16) -> bool {
 }
 
 /// Parse a `Retry-After` header value as seconds.
+///
+/// Only the integer-seconds format is supported. HTTP-date values (e.g.
+/// `Wed, 21 Oct 2015 07:28:00 GMT`) are silently ignored and fall back to
+/// jittered exponential backoff.
 fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
     let val = headers.get(reqwest::header::RETRY_AFTER)?.to_str().ok()?;
     let secs: u64 = val.trim().parse().ok()?;
@@ -189,81 +193,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn retries_on_502() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(502))
-            .up_to_n_times(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
+    async fn retries_on_transient_server_errors() {
+        for status in [502, 503, 504] {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .respond_with(ResponseTemplate::new(status))
+                .up_to_n_times(1)
+                .mount(&server)
+                .await;
+            Mock::given(method("GET"))
+                .respond_with(ResponseTemplate::new(200))
+                .mount(&server)
+                .await;
 
-        let resp = retry_send(
-            &test_client(),
-            &Method::GET,
-            &server.uri(),
-            HeaderMap::new(),
-            Bytes::new(),
-            2,
-            &test_policy(),
-            Some(Duration::from_secs(5)),
-        )
-        .await
-        .unwrap();
+            let resp = retry_send(
+                &test_client(),
+                &Method::GET,
+                &server.uri(),
+                HeaderMap::new(),
+                Bytes::new(),
+                2,
+                &test_policy(),
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .unwrap();
 
-        assert_eq!(resp.status(), 200);
-    }
-
-    #[tokio::test]
-    async fn retries_on_503() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(503))
-            .up_to_n_times(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
-
-        let resp = retry_send(
-            &test_client(),
-            &Method::GET,
-            &server.uri(),
-            HeaderMap::new(),
-            Bytes::new(),
-            2,
-            &test_policy(),
-            Some(Duration::from_secs(5)),
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(resp.status(), 200);
-    }
-
-    #[tokio::test]
-    async fn retries_on_504() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(504))
-            .up_to_n_times(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
-
-        let resp = retry_send(
-            &test_client(),
-            &Method::GET,
-            &server.uri(),
-            HeaderMap::new(),
-            Bytes::new(),
-            2,
-            &test_policy(),
-            Some(Duration::from_secs(5)),
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(resp.status(), 200);
+            assert_eq!(resp.status(), 200, "should recover after transient {status}");
+        }
     }
 
     #[tokio::test]
@@ -371,228 +328,57 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn no_retry_on_post() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .respond_with(ResponseTemplate::new(503))
-            .expect(1)
-            .mount(&server)
-            .await;
+    async fn no_retry_on_mutating_methods() {
+        for m in [Method::POST, Method::PUT, Method::PATCH, Method::DELETE] {
+            let server = MockServer::start().await;
+            Mock::given(method(m.as_str()))
+                .respond_with(ResponseTemplate::new(503))
+                .expect(1)
+                .mount(&server)
+                .await;
 
-        let resp = retry_send(
-            &test_client(),
-            &Method::POST,
-            &server.uri(),
-            HeaderMap::new(),
-            Bytes::new(),
-            2,
-            &test_policy(),
-            Some(Duration::from_secs(5)),
-        )
-        .await
-        .unwrap();
+            let resp = retry_send(
+                &test_client(),
+                &m,
+                &server.uri(),
+                HeaderMap::new(),
+                Bytes::new(),
+                2,
+                &test_policy(),
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .unwrap();
 
-        assert_eq!(resp.status(), 503);
+            assert_eq!(resp.status(), 503, "{m} should not be retried");
+        }
     }
 
     #[tokio::test]
-    async fn no_retry_on_put() {
-        let server = MockServer::start().await;
-        Mock::given(method("PUT"))
-            .respond_with(ResponseTemplate::new(503))
-            .expect(1)
-            .mount(&server)
-            .await;
+    async fn no_retry_on_non_transient_errors() {
+        for status in [400, 401, 403, 404, 500] {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .respond_with(ResponseTemplate::new(status))
+                .expect(1)
+                .mount(&server)
+                .await;
 
-        let resp = retry_send(
-            &test_client(),
-            &Method::PUT,
-            &server.uri(),
-            HeaderMap::new(),
-            Bytes::new(),
-            2,
-            &test_policy(),
-            Some(Duration::from_secs(5)),
-        )
-        .await
-        .unwrap();
+            let resp = retry_send(
+                &test_client(),
+                &Method::GET,
+                &server.uri(),
+                HeaderMap::new(),
+                Bytes::new(),
+                2,
+                &test_policy(),
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .unwrap();
 
-        assert_eq!(resp.status(), 503);
-    }
-
-    #[tokio::test]
-    async fn no_retry_on_patch() {
-        let server = MockServer::start().await;
-        Mock::given(method("PATCH"))
-            .respond_with(ResponseTemplate::new(503))
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        let resp = retry_send(
-            &test_client(),
-            &Method::PATCH,
-            &server.uri(),
-            HeaderMap::new(),
-            Bytes::new(),
-            2,
-            &test_policy(),
-            Some(Duration::from_secs(5)),
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(resp.status(), 503);
-    }
-
-    #[tokio::test]
-    async fn no_retry_on_delete() {
-        let server = MockServer::start().await;
-        Mock::given(method("DELETE"))
-            .respond_with(ResponseTemplate::new(503))
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        let resp = retry_send(
-            &test_client(),
-            &Method::DELETE,
-            &server.uri(),
-            HeaderMap::new(),
-            Bytes::new(),
-            2,
-            &test_policy(),
-            Some(Duration::from_secs(5)),
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(resp.status(), 503);
-    }
-
-    #[tokio::test]
-    async fn no_retry_on_400() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(400))
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        let resp = retry_send(
-            &test_client(),
-            &Method::GET,
-            &server.uri(),
-            HeaderMap::new(),
-            Bytes::new(),
-            2,
-            &test_policy(),
-            Some(Duration::from_secs(5)),
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(resp.status(), 400);
-    }
-
-    #[tokio::test]
-    async fn no_retry_on_401() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(401))
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        let resp = retry_send(
-            &test_client(),
-            &Method::GET,
-            &server.uri(),
-            HeaderMap::new(),
-            Bytes::new(),
-            2,
-            &test_policy(),
-            Some(Duration::from_secs(5)),
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(resp.status(), 401);
-    }
-
-    #[tokio::test]
-    async fn no_retry_on_403() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(403))
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        let resp = retry_send(
-            &test_client(),
-            &Method::GET,
-            &server.uri(),
-            HeaderMap::new(),
-            Bytes::new(),
-            2,
-            &test_policy(),
-            Some(Duration::from_secs(5)),
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(resp.status(), 403);
-    }
-
-    #[tokio::test]
-    async fn no_retry_on_404() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(404))
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        let resp = retry_send(
-            &test_client(),
-            &Method::GET,
-            &server.uri(),
-            HeaderMap::new(),
-            Bytes::new(),
-            2,
-            &test_policy(),
-            Some(Duration::from_secs(5)),
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(resp.status(), 404);
-    }
-
-    #[tokio::test]
-    async fn no_retry_on_500() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(500))
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        let resp = retry_send(
-            &test_client(),
-            &Method::GET,
-            &server.uri(),
-            HeaderMap::new(),
-            Bytes::new(),
-            2,
-            &test_policy(),
-            Some(Duration::from_secs(5)),
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(resp.status(), 500);
+            assert_eq!(resp.status().as_u16(), status, "{status} should not trigger retry");
+        }
     }
 
     #[tokio::test]
@@ -746,33 +532,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exponential_backoff_increases() {
+    async fn backoff_bounded_by_cap() {
         let policy = RetryPolicy {
             base_delay_ms: 100,
-            cap_delay_ms: 10000,
+            cap_delay_ms: 100_000,
         };
-        // Verify delay calculation grows (testing internal method)
-        let d0 = policy.delay_for_attempt(0);
-        // With jitter, d0 is in [0, 100ms]
-        assert!(d0 <= Duration::from_millis(100));
 
-        // attempt 2: cap is min(100*4, 10000) = 400, jitter in [0, 400]
-        // We can't assert deterministic values due to jitter, but the cap grows
+        // Deterministic: every sample must be within [0, min(base*2^attempt, cap)]
+        for attempt in 0..8u8 {
+            let expected_cap = (100u64.saturating_mul(1u64 << attempt)).min(100_000);
+            for _ in 0..50 {
+                let d = policy.delay_for_attempt(attempt);
+                assert!(
+                    d <= Duration::from_millis(expected_cap),
+                    "attempt {attempt}: {d:?} exceeded cap {expected_cap}ms"
+                );
+            }
+        }
     }
 
     #[tokio::test]
-    async fn jitter_randomizes_delay() {
+    async fn backoff_cap_saturates() {
         let policy = RetryPolicy {
-            base_delay_ms: 1000,
-            cap_delay_ms: 10000,
+            base_delay_ms: 100,
+            cap_delay_ms: 500,
         };
-        let mut delays = Vec::new();
-        for _ in 0..10 {
-            delays.push(policy.delay_for_attempt(0));
+        // At attempt 5: base*2^5 = 3200, capped to 500
+        for _ in 0..50 {
+            let d = policy.delay_for_attempt(5);
+            assert!(d <= Duration::from_millis(500));
         }
-        // With 10 samples from [0, 1000ms], extremely unlikely they're all identical
-        let all_same = delays.windows(2).all(|w| w[0] == w[1]);
-        assert!(!all_same, "jitter should produce varying delays");
+    }
+
+    #[tokio::test]
+    async fn jitter_produces_distinct_values() {
+        let policy = RetryPolicy {
+            base_delay_ms: 1_000_000,
+            cap_delay_ms: 1_000_000,
+        };
+        // Range [0, 1_000_000ms] — probability of 100 identical values ≈ 0
+        let delays: Vec<_> = (0..100).map(|_| policy.delay_for_attempt(0)).collect();
+        let distinct = delays.iter().collect::<std::collections::HashSet<_>>().len();
+        assert!(distinct > 1, "100 samples from [0, 1_000_000ms] should not all be identical");
     }
 
     #[tokio::test]
@@ -816,7 +617,6 @@ mod tests {
     #[tokio::test]
     async fn remaining_budget_given_to_retry() {
         let server = MockServer::start().await;
-        // First attempt: 503 instantly. Second attempt: delays 2s then 200.
         Mock::given(method("GET"))
             .respond_with(ResponseTemplate::new(503))
             .up_to_n_times(1)
@@ -841,5 +641,97 @@ mod tests {
         .unwrap();
 
         assert_eq!(resp.status(), 200, "retry should get the remaining ~5s budget");
+    }
+
+    #[tokio::test]
+    async fn retry_after_httpdate_falls_back_to_jitter() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(429)
+                    .insert_header("Retry-After", "Wed, 21 Oct 2025 07:28:00 GMT"),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
+
+        let start = Instant::now();
+        let resp = retry_send(
+            &test_client(),
+            &Method::GET,
+            &server.uri(),
+            HeaderMap::new(),
+            Bytes::new(),
+            2,
+            &test_policy(),
+            Some(Duration::from_secs(5)),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(resp.status(), 200);
+        // HTTP-date is unparseable as integer — should fall back to jitter (<1s)
+        assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[tokio::test]
+    async fn head_retried_on_503() {
+        let server = MockServer::start().await;
+        Mock::given(method("HEAD"))
+            .respond_with(ResponseTemplate::new(503))
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("HEAD"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let resp = retry_send(
+            &test_client(),
+            &Method::HEAD,
+            &server.uri(),
+            HeaderMap::new(),
+            Bytes::new(),
+            2,
+            &test_policy(),
+            Some(Duration::from_secs(5)),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn no_timeout_budget_retries_fully() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(503))
+            .up_to_n_times(2)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
+
+        let resp = retry_send(
+            &test_client(),
+            &Method::GET,
+            &server.uri(),
+            HeaderMap::new(),
+            Bytes::new(),
+            3,
+            &test_policy(),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(resp.status(), 200);
+
+        let received = server.received_requests().await.unwrap();
+        assert_eq!(received.len(), 3, "should have retried twice with no budget limit");
     }
 }
