@@ -165,7 +165,7 @@ mod tests {
             switch_on_threshold: 3,
             switch_off_threshold: 2,
             reset_period: Duration::from_millis(100),
-            fault_window: Duration::from_millis(5000),
+            fault_window: Duration::from_secs(5),
         }
     }
 
@@ -416,7 +416,7 @@ mod tests {
                     switch_on_threshold: 3,
                     switch_off_threshold: 2,
                     reset_period: Duration::from_millis(50),
-                    fault_window: Duration::from_millis(5000),
+                    fault_window: Duration::from_secs(5),
                 },
             )),
         };
