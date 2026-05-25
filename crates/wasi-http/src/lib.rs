@@ -9,24 +9,11 @@
 
 /// Per-request resilience policy for outbound HTTP.
 ///
-/// Attach to a request via extensions before calling
-/// [`omnia_sdk::HttpRequest::fetch`]. The guest runtime serializes this into
-/// internal headers that the host reads and strips — the upstream never sees
-/// them.
+/// Attach to a request via extensions before calling `fetch` method of `HttpRequest` trait.
+/// The guest runtime serializes this into internal headers that the host reads
+/// and strips — the upstream never sees them.
 ///
-/// ```rust,ignore
-/// use omnia_sdk::{HttpRequest, OutboundPolicy};
-///
-/// let request = http::Request::builder()
-///     .uri("https://api.example.com/data")
-///     .extension(OutboundPolicy {
-///         timeout_ms: Some(5000),
-///         upstream: Some("my-service".into()),
-///     })
-///     .body(Empty::<Bytes>::new())?;
-///
-/// let response = HttpRequest::fetch(&provider, request).await?;
-/// ```
+/// Re-exported as `omnia_sdk::OutboundPolicy` for convenience.
 #[derive(Clone, Debug, Default)]
 pub struct OutboundPolicy {
     /// Response timeout in milliseconds. Falls back to host default if `None`.
