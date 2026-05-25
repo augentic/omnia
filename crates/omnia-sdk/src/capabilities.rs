@@ -54,6 +54,8 @@ pub trait HttpRequest: Send + Sync {
     }
 }
 
+pub use omnia_wasi_http::OutboundPolicy;
+
 /// Message represents a message to be published.
 #[derive(Clone, Debug)]
 pub struct Message {

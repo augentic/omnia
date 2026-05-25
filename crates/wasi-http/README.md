@@ -102,7 +102,7 @@ Per-bucket overrides: set `HTTP_CB_MONITORING_SWITCH_ON_THRESHOLD=3` to give the
 ### Guest Usage
 
 ```rust,ignore
-use omnia_wasi_http::OutboundPolicy;
+use omnia_sdk::OutboundPolicy;
 
 // Simple — use defaults
 let response = provider.fetch(request).await?;

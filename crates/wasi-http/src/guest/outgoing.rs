@@ -10,27 +10,8 @@ use wasip3::http::client;
 use wasip3::http_compat::{IncomingMessage, http_from_wasi_response, http_into_wasi_request};
 use wasip3::wit_future;
 
+pub use crate::OutboundPolicy;
 pub use crate::guest::cache::{Cache, CacheOptions};
-
-/// Per-request resilience policy.
-///
-/// Attach to a request via extensions before calling [`handle`]. The guest runtime
-/// serializes this into internal headers that the host reads and strips — the upstream
-/// never sees them.
-///
-/// ```rust,ignore
-/// request.extensions_mut().insert(OutboundPolicy {
-///     timeout_ms: Some(5000),
-///     upstream: None,
-/// });
-/// ```
-#[derive(Clone, Debug, Default)]
-pub struct OutboundPolicy {
-    /// Response timeout in milliseconds. Falls back to host default if `None`.
-    pub timeout_ms: Option<u64>,
-    /// Override breaker bucket name. Falls back to the default breaker if `None`.
-    pub upstream: Option<String>,
-}
 
 /// Send an HTTP request using the WASI HTTP proxy handler.
 ///
