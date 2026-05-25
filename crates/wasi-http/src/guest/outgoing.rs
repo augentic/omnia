@@ -28,7 +28,7 @@ pub use crate::guest::cache::{Cache, CacheOptions};
 pub struct OutboundPolicy {
     /// Response timeout in milliseconds. Falls back to host default if `None`.
     pub timeout_ms: Option<u64>,
-    /// Override breaker bucket name. Falls back to first path segment if `None`.
+    /// Override breaker bucket name. Falls back to the default breaker if `None`.
     pub upstream: Option<String>,
 }
 
