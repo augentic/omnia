@@ -10,6 +10,7 @@ use wasip3::http::client;
 use wasip3::http_compat::{IncomingMessage, http_from_wasi_response, http_into_wasi_request};
 use wasip3::wit_future;
 
+pub use crate::OutboundPolicy;
 pub use crate::guest::cache::{Cache, CacheOptions};
 
 /// Send an HTTP request using the WASI HTTP proxy handler.
@@ -17,13 +18,25 @@ pub use crate::guest::cache::{Cache, CacheOptions};
 /// # Errors
 ///
 /// Returns an error if the request could not be sent.
-pub async fn handle<T>(request: http::Request<T>) -> Result<http::Response<Bytes>>
+pub async fn handle<T>(mut request: http::Request<T>) -> Result<http::Response<Bytes>>
 where
     T: Body + Any,
     T::Data: Into<Vec<u8>>,
     T::Error: Into<Box<dyn Error + Send + Sync + 'static>>,
 {
     let maybe_cache = Cache::maybe_from(&request)?;
+
+    // Serialize OutboundPolicy into headers before crossing the WASI boundary
+    if let Some(policy) = request.extensions_mut().remove::<OutboundPolicy>() {
+        if let Some(ms) = policy.timeout_ms {
+            request.headers_mut().insert("x-omnia-timeout-ms", HeaderValue::from(ms));
+        }
+        if let Some(ref name) = policy.upstream {
+            let val = HeaderValue::from_str(name)
+                .with_context(|| format!("invalid upstream bucket name: {name:?}"))?;
+            request.headers_mut().insert("x-omnia-upstream", val);
+        }
+    }
 
     // check cache when indicated by `Cache-Control` header
     if let Some(cache) = maybe_cache.as_ref()

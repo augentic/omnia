@@ -1,6 +1,5 @@
 #![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
-#![cfg(target_arch = "wasm32")]
 
 mod delete;
 mod entity;

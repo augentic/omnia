@@ -2,14 +2,13 @@
 //!
 //! Tests the public API as users would interact with it.
 
-#![cfg(target_arch = "wasm32")]
 #![allow(missing_docs)]
 
 mod common;
 
 use common::{CommentWithAlias, Item, PostWithJoin, User, assert_sql_contains};
 use omnia_orm::{DeleteBuilder, Entity, Filter, InsertBuilder, Join, SelectBuilder, UpdateBuilder};
-use omnia_wasi_sql::types::DataType;
+use omnia_wasi_sql::DataType;
 
 // SELECT tests
 
