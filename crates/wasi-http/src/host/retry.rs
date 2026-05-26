@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use anyhow::{Result, bail};
 use bytes::Bytes;
 use http::{HeaderMap, Method};
 use rand::RngExt;
@@ -12,8 +13,24 @@ pub struct RetryPolicy {
 }
 
 impl RetryPolicy {
+    /// Validate that delays are sensible and won't cause overflow.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `cap_delay_ms` is zero or less than `base_delay_ms`.
+    pub fn validate(&self) -> Result<()> {
+        if self.base_delay_ms == 0 {
+            bail!("retry base_delay_ms must be > 0");
+        }
+        if self.cap_delay_ms < self.base_delay_ms {
+            bail!("retry cap_delay_ms must be >= base_delay_ms");
+        }
+        Ok(())
+    }
+
     fn delay_for_attempt(&self, attempt: u8) -> Duration {
-        let exp = self.base_delay_ms.saturating_mul(1u64 << attempt);
+        let exp =
+            self.base_delay_ms.saturating_mul(1u64.checked_shl(attempt.into()).unwrap_or(u64::MAX));
         let capped = exp.min(self.cap_delay_ms);
         let jittered = rand::rng().random_range(0..=capped);
         Duration::from_millis(jittered)
@@ -540,7 +557,9 @@ mod tests {
 
         // Deterministic: every sample must be within [0, min(base*2^attempt, cap)]
         for attempt in 0..8u8 {
-            let expected_cap = (100u64.saturating_mul(1u64 << attempt)).min(100_000);
+            let expected_cap = (100u64
+                .saturating_mul(1u64.checked_shl(attempt.into()).unwrap_or(u64::MAX)))
+            .min(100_000);
             for _ in 0..50 {
                 let d = policy.delay_for_attempt(attempt);
                 assert!(

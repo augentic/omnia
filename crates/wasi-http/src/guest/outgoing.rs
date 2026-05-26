@@ -32,9 +32,9 @@ where
             request.headers_mut().insert("x-omnia-timeout-ms", HeaderValue::from(ms));
         }
         if let Some(ref name) = policy.upstream {
-            if let Ok(val) = HeaderValue::from_str(name) {
-                request.headers_mut().insert("x-omnia-upstream", val);
-            }
+            let val = HeaderValue::from_str(name)
+                .with_context(|| format!("invalid upstream bucket name: {name:?}"))?;
+            request.headers_mut().insert("x-omnia-upstream", val);
         }
     }
 

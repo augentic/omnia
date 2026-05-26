@@ -137,12 +137,15 @@ impl Backend for HttpDefault {
             let registry = BucketRegistry::new(bucket_names, &breaker_config)
                 .context("building circuit breaker registry")?;
 
+            let retry_policy = RetryPolicy {
+                base_delay_ms: options.retry_base_delay_ms,
+                cap_delay_ms: options.retry_cap_delay_ms,
+            };
+            retry_policy.validate().context("validating retry policy")?;
+
             Some(ResilienceConfig {
                 retry_max: options.retry_max,
-                retry_policy: RetryPolicy {
-                    base_delay_ms: options.retry_base_delay_ms,
-                    cap_delay_ms: options.retry_cap_delay_ms,
-                },
+                retry_policy,
                 registry: Arc::new(registry),
             })
         } else {
