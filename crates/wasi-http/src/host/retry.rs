@@ -91,11 +91,17 @@ pub async fn retry_send(
             break;
         }
 
-        // Compute delay: prefer Retry-After for 429, else jittered exponential
+        // Compute delay: prefer Retry-After for 429, else jittered exponential.
+        // If the server asks us to wait longer than cap_delay_ms, respect the
+        // intent by stopping retries rather than hammering it sooner than asked.
         let delay = if let Ok(ref r) = last_resp
             && r.status().as_u16() == 429
         {
-            parse_retry_after(r.headers()).unwrap_or_else(|| policy.delay_for_attempt(attempt))
+            match parse_retry_after(r.headers()) {
+                Some(d) if d > Duration::from_millis(policy.cap_delay_ms) => break,
+                Some(d) => d,
+                None => policy.delay_for_attempt(attempt),
+            }
         } else {
             policy.delay_for_attempt(attempt)
         };
@@ -250,6 +256,11 @@ mod tests {
             .await;
         Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
 
+        let policy = RetryPolicy {
+            base_delay_ms: 10,
+            cap_delay_ms: 5000,
+        };
+
         let resp = retry_send(
             &test_client(),
             &Method::GET,
@@ -257,7 +268,7 @@ mod tests {
             HeaderMap::new(),
             Bytes::new(),
             2,
-            &test_policy(),
+            &policy,
             Some(Duration::from_secs(10)),
         )
         .await
@@ -315,6 +326,72 @@ mod tests {
 
         // Should return the 429 since budget doesn't allow a retry after 60s
         assert_eq!(resp.status(), 429);
+    }
+
+    #[tokio::test]
+    async fn retry_after_exceeding_cap_stops_retrying() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(429).insert_header("Retry-After", "999999"))
+            .mount(&server)
+            .await;
+
+        let policy = RetryPolicy {
+            base_delay_ms: 10,
+            cap_delay_ms: 50,
+        };
+
+        let start = Instant::now();
+        let resp = retry_send(
+            &test_client(),
+            &Method::GET,
+            &server.uri(),
+            HeaderMap::new(),
+            Bytes::new(),
+            2,
+            &policy,
+            None, // no deadline — the bug's trigger
+        )
+        .await
+        .unwrap();
+
+        // Server asked for longer than cap: stop retrying, return the 429
+        assert_eq!(resp.status(), 429);
+        assert!(start.elapsed() < Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn retry_after_within_cap_is_honoured() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(429).insert_header("Retry-After", "1"))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
+
+        let policy = RetryPolicy {
+            base_delay_ms: 10,
+            cap_delay_ms: 5000,
+        };
+
+        let start = Instant::now();
+        let resp = retry_send(
+            &test_client(),
+            &Method::GET,
+            &server.uri(),
+            HeaderMap::new(),
+            Bytes::new(),
+            2,
+            &policy,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(resp.status(), 200);
+        // Should have slept ~1s (the Retry-After value), not the jittered backoff
+        assert!(start.elapsed() >= Duration::from_millis(900));
     }
 
     #[tokio::test]
