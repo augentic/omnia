@@ -59,10 +59,10 @@ pub struct ConnectOptions {
     pub retry_base_delay_ms: u64,
     #[env(from = "HTTP_RETRY_CAP_DELAY_MS", default = "1000")]
     pub retry_cap_delay_ms: u64,
-    #[env(from = "HTTP_CB_SWITCH_ON_THRESHOLD", default = "10")]
-    pub cb_switch_on_threshold: u32,
-    #[env(from = "HTTP_CB_SWITCH_OFF_THRESHOLD", default = "5")]
-    pub cb_switch_off_threshold: u32,
+    #[env(from = "HTTP_CB_TRIP_THRESHOLD", default = "10")]
+    pub cb_trip_threshold: u32,
+    #[env(from = "HTTP_CB_RECOVERY_THRESHOLD", default = "5")]
+    pub cb_recovery_threshold: u32,
     #[env(from = "HTTP_CB_RESET_PERIOD_MS", default = "10000")]
     pub cb_reset_period_ms: u64,
     #[env(from = "HTTP_CB_FAULT_WINDOW_MS", default = "30000")]
@@ -121,8 +121,8 @@ impl Backend for HttpDefault {
 
         let resilience = if options.outbound_resilience {
             let breaker_config = BreakerConfig {
-                switch_on_threshold: options.cb_switch_on_threshold,
-                switch_off_threshold: options.cb_switch_off_threshold,
+                trip_threshold: options.cb_trip_threshold,
+                recovery_threshold: options.cb_recovery_threshold,
                 reset_period: Duration::from_millis(options.cb_reset_period_ms),
                 fault_window: Duration::from_millis(options.cb_fault_window_ms),
             };
@@ -244,8 +244,8 @@ mod tests {
             retry_max: 2,
             retry_base_delay_ms: 100,
             retry_cap_delay_ms: 1000,
-            cb_switch_on_threshold: 10,
-            cb_switch_off_threshold: 5,
+            cb_trip_threshold: 10,
+            cb_recovery_threshold: 5,
             cb_reset_period_ms: 10_000,
             cb_fault_window_ms: 30_000,
             cb_buckets: String::new(),
@@ -441,8 +441,8 @@ mod tests {
             retry_max,
             retry_base_delay_ms: 10,
             retry_cap_delay_ms: 50,
-            cb_switch_on_threshold: cb_threshold,
-            cb_switch_off_threshold: 2,
+            cb_trip_threshold: cb_threshold,
+            cb_recovery_threshold: 2,
             cb_reset_period_ms: 100,
             cb_fault_window_ms: 30_000,
             cb_buckets: String::new(),

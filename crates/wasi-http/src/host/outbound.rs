@@ -182,8 +182,8 @@ mod tests {
 
     fn breaker_config() -> BreakerConfig {
         BreakerConfig {
-            switch_on_threshold: 3,
-            switch_off_threshold: 2,
+            trip_threshold: 3,
+            recovery_threshold: 2,
             reset_period: Duration::from_millis(100),
             fault_window: Duration::from_secs(5),
         }
@@ -498,8 +498,8 @@ mod tests {
                 BucketRegistry::new(
                     [TEST_BUCKET.to_owned()],
                     &BreakerConfig {
-                        switch_on_threshold: 3,
-                        switch_off_threshold: 2,
+                        trip_threshold: 3,
+                        recovery_threshold: 2,
                         reset_period: Duration::from_millis(50),
                         fault_window: Duration::from_secs(5),
                     },

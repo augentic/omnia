@@ -62,7 +62,7 @@ Rust `http::Request` extensions do not cross the WASI component model boundary. 
 ```text
 Closed ──(faults ≥ threshold within window)──► Open ──(reset period elapsed)──► HalfOpen
   ▲                                                                                │
-  └──────────(successes ≥ switch_off_threshold)────────────────────────────────────┘
+  └──────────(successes ≥ recovery_threshold)──────────────────────────────────────┘
                                                        │
                                              (any fault) ──► Open
 ```
@@ -84,8 +84,8 @@ Faults are counted within a fixed window anchored at the first fault. When the w
 | `HTTP_RETRY_MAX`               | `2`                 | Max retry attempts (GET/HEAD/OPTIONS only). Ignored unless resilience = on. |
 | `HTTP_RETRY_BASE_DELAY_MS`     | `100`               | Exponential backoff base delay (ms)                                         |
 | `HTTP_RETRY_CAP_DELAY_MS`      | `1000`              | Max backoff delay (ms)                                                      |
-| `HTTP_CB_SWITCH_ON_THRESHOLD`  | `10`                | Faults within window to trip breaker                                        |
-| `HTTP_CB_SWITCH_OFF_THRESHOLD` | `5`                 | Probe successes to close breaker (also caps total probes per `HalfOpen`)    |
+| `HTTP_CB_TRIP_THRESHOLD`       | `10`                | Faults within window to trip breaker                                        |
+| `HTTP_CB_RECOVERY_THRESHOLD`   | `5`                 | Probe successes to close breaker (also caps total probes per `HalfOpen`)    |
 | `HTTP_CB_RESET_PERIOD_MS`      | `10000`             | Time in `Open` before allowing probes (ms)                                  |
 | `HTTP_CB_FAULT_WINDOW_MS`      | `30000`             | Fixed fault window for fault accumulation (ms)                              |
 | `HTTP_CB_BUCKETS`              | `""`                | Comma-separated bucket names for isolation                                  |
@@ -131,6 +131,36 @@ let response = provider.fetch(request).await?;
 - When the guest specifies an unknown bucket name, it receives `"unknown circuit breaker bucket: {name}"`.
 
 Guest crates should handle these gracefully — e.g., return cached data or a degraded response.
+
+## Benchmarks
+
+Circuit breaker benchmarks use [Criterion](https://crates.io/crates/criterion) and live in `benches/circuit_breaker.rs`.
+
+```sh
+# Run all benchmarks
+cargo bench -p omnia-wasi-http --bench circuit_breaker
+
+# Run a single scenario
+cargo bench -p omnia-wasi-http --bench circuit_breaker -- 'steady_state'
+```
+
+Criterion compares against the previous run automatically and flags regressions. HTML reports are written to `target/criterion/`.
+
+To save a named baseline before a refactor and compare against it later:
+
+```sh
+cargo bench -p omnia-wasi-http --bench circuit_breaker -- --save-baseline before-refactor
+
+# after changes
+cargo bench -p omnia-wasi-http --bench circuit_breaker -- --baseline before-refactor
+```
+
+To profile with [samply](https://github.com/mstange/samply):
+
+```sh
+CARGO_PROFILE_BENCH_DEBUG=true cargo bench -p omnia-wasi-http --bench circuit_breaker --no-run
+samply record target/release/deps/circuit_breaker-<hash> -- 'steady_state'
+```
 
 ## License
 
