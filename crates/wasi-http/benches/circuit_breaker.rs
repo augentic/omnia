@@ -19,8 +19,8 @@ const fn steady_state_config() -> BreakerConfig {
     BreakerConfig {
         trip_threshold: u32::MAX,
         recovery_threshold: 10,
-        reset_period: Duration::from_secs(60),
-        fault_window: Duration::from_secs(120),
+        reset_period: Duration::from_mins(1),
+        fault_window: Duration::from_mins(2),
     }
 }
 
