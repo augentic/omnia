@@ -49,6 +49,7 @@ pub async fn send(
     parts.headers.remove(HOST);
 
     let timeout = match timeout_ms {
+        Some(0) => None,
         Some(ms) => Some(Duration::from_millis(ms)),
         None if default_timeout.is_zero() => None,
         None => Some(default_timeout),
