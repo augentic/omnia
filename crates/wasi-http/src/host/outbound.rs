@@ -8,7 +8,7 @@ use http_body_util::BodyExt;
 use http_body_util::combinators::UnsyncBoxBody;
 use wasmtime_wasi_http::p3::bindings::http::types::ErrorCode;
 
-use super::circuit_breaker::BucketRegistry;
+use super::circuit_breaker::{BreakerDecision, BucketRegistry};
 use super::retry::{RetryPolicy, retry_send};
 
 /// Header names used to carry per-request resilience policy across the WASI boundary.
@@ -82,17 +82,25 @@ async fn send_direct(
     builder.send().await.map_err(reqwest_to_error_code)
 }
 
-/// Send with circuit breaker + retry.
+/// Send with retry and optional circuit breaker.
+///
+/// The breaker only activates when the guest explicitly names a bucket via
+/// `x-omnia-upstream`. Unknown bucket names are a misconfiguration error.
+/// Requests without an upstream still get retry + timeout.
 async fn send_with_resilience(
     client: &reqwest::Client, config: &ResilienceConfig, parts: &http::request::Parts, url: &str,
     body: Bytes, upstream: Option<String>, timeout: Option<Duration>,
 ) -> Result<reqwest::Response, ErrorCode> {
-    let breaker = config.registry.resolve(upstream.as_deref());
+    let resolved = config
+        .registry
+        .resolve(upstream.as_deref())
+        .map_err(|msg| ErrorCode::InternalError(Some(msg)))?;
 
-    if breaker.check().is_err() {
-        let bucket_name = upstream.as_deref().unwrap_or("default");
-        tracing::warn!(bucket = bucket_name, url = %url, "outbound request blocked by circuit breaker");
-        return Err(ErrorCode::InternalError(Some(format!("circuit breaker open: {bucket_name}"))));
+    if let Some(ref r) = resolved
+        && r.breaker.check() == BreakerDecision::Reject
+    {
+        tracing::warn!(bucket = %r.bucket, url = %url, "outbound request blocked by circuit breaker");
+        return Err(ErrorCode::InternalError(Some(format!("circuit breaker open: {}", r.bucket))));
     }
 
     let result = retry_send(
@@ -107,20 +115,32 @@ async fn send_with_resilience(
     )
     .await;
 
-    let fault = is_breaker_fault(&result.as_ref());
-    if fault {
-        breaker.record_failure();
-    } else {
-        breaker.record_success();
+    if let Some(ref r) = resolved {
+        if is_breaker_fault(&result.as_ref()) {
+            r.breaker.record_failure();
+        } else {
+            r.breaker.record_success();
+        }
     }
 
     result.map_err(reqwest_to_error_code)
 }
 
 /// Determines whether an outcome should count as a circuit breaker fault.
-/// 429 (Too Many Requests) is intentionally excluded — it's a rate-limiting
-/// signal, not a failure. The retry layer already handles 429 with
-/// `Retry-After` support; the breaker is reserved for actual degradation.
+///
+/// **Fault** (counts toward tripping / re-trips in `HalfOpen`):
+///   - 5xx server errors
+///   - Connect errors (connection refused, DNS failure, etc.)
+///   - Timeout errors
+///
+/// **Success** (counts toward `HalfOpen` → `Closed` recovery):
+///   - Any completed response that is not a fault, including 4xx client errors
+///   - 429 (Too Many Requests) is intentionally treated as success — it's a
+///     rate-limiting signal, not upstream degradation. The retry layer already
+///     handles 429 with `Retry-After` support.
+///   - All other transport errors (decode, redirect, body stream) are also
+///     treated as non-faults — they indicate client-side issues, not upstream
+///     degradation.
 fn is_breaker_fault(result: &Result<&reqwest::Response, &reqwest::Error>) -> bool {
     match result {
         Err(e) => e.is_timeout() || e.is_connect(),
@@ -169,26 +189,28 @@ mod tests {
         }
     }
 
+    const TEST_BUCKET: &str = "test";
+
     fn test_config() -> ResilienceConfig {
-        ResilienceConfig {
-            retry_max: 2,
-            retry_policy: RetryPolicy {
-                base_delay_ms: 10,
-                cap_delay_ms: 50,
-            },
-            registry: Arc::new(BucketRegistry::new("", &breaker_config())),
-        }
+        test_config_with_buckets(TEST_BUCKET)
     }
 
     fn test_config_with_buckets(names: &str) -> ResilienceConfig {
+        let bucket_names = names.split(',').map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
         ResilienceConfig {
             retry_max: 2,
             retry_policy: RetryPolicy {
                 base_delay_ms: 10,
                 cap_delay_ms: 50,
             },
-            registry: Arc::new(BucketRegistry::new(names, &breaker_config())),
+            registry: Arc::new(BucketRegistry::new(bucket_names, &breaker_config()).unwrap()),
         }
+    }
+
+    fn resolve_breaker(
+        config: &ResilienceConfig, name: &str,
+    ) -> Arc<crate::host::circuit_breaker::CircuitBreaker> {
+        config.registry.resolve(Some(name)).unwrap().unwrap().breaker
     }
 
     fn get_request(uri: &str) -> Request<UnsyncBoxBody<Bytes, ErrorCode>> {
@@ -278,19 +300,79 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unknown_bucket_uses_default() {
+    async fn unknown_bucket_returns_error() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .respond_with(ResponseTemplate::new(200))
-            .expect(1)
+            .expect(0)
             .mount(&server)
             .await;
 
         let config = test_config_with_buckets("monitoring");
         let req = get_request_with_headers(&server.uri(), None, Some("nonexistent"));
+        let err = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await.unwrap_err();
+
+        match err {
+            ErrorCode::InternalError(Some(msg)) => {
+                assert!(msg.contains("unknown circuit breaker bucket"), "unexpected: {msg}");
+            }
+            other => panic!("expected InternalError, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn no_upstream_skips_breaker() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).respond_with(ResponseTemplate::new(503)).mount(&server).await;
+
+        let config = ResilienceConfig {
+            retry_max: 0,
+            ..test_config()
+        };
+
+        // Send many 503s without specifying an upstream — breaker should not activate
+        for _ in 0..5 {
+            let req = get_request(&server.uri());
+            let result = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
+            assert_eq!(result.unwrap().status(), 503);
+        }
+    }
+
+    #[tokio::test]
+    async fn no_upstream_still_retries() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(503))
+            .up_to_n_times(2)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
+
+        let config = test_config();
+        let req = get_request(&server.uri());
         let result = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
 
         result.unwrap();
+        let received = server.received_requests().await.unwrap();
+        assert_eq!(received.len(), 3, "should retry twice then succeed without breaker");
+    }
+
+    #[tokio::test]
+    async fn no_upstream_still_applies_timeout() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(2)))
+            .mount(&server)
+            .await;
+
+        let config = ResilienceConfig {
+            retry_max: 0,
+            ..test_config()
+        };
+        let req = get_request_with_headers(&server.uri(), Some(500), None);
+        let result = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
+
+        result.unwrap_err();
     }
 
     #[tokio::test]
@@ -325,11 +407,11 @@ mod tests {
         Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
 
         let config = test_config();
-        let req = get_request(&server.uri());
+        let req = get_request_with_headers(&server.uri(), None, Some(TEST_BUCKET));
         let result = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
 
         result.unwrap();
-        assert_eq!(config.registry.default_breaker().state(), State::Off);
+        assert_eq!(resolve_breaker(&config, TEST_BUCKET).state(), State::Closed);
     }
 
     #[tokio::test]
@@ -342,12 +424,13 @@ mod tests {
             .await;
 
         let config = test_config();
+        let breaker = resolve_breaker(&config, TEST_BUCKET);
         for _ in 0..3 {
-            config.registry.default_breaker().record_failure();
+            breaker.record_failure();
         }
-        assert_eq!(config.registry.default_breaker().state(), State::On);
+        assert_eq!(breaker.state(), State::Open);
 
-        let req = get_request(&server.uri());
+        let req = get_request_with_headers(&server.uri(), None, Some(TEST_BUCKET));
         let result = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
 
         result.unwrap_err();
@@ -357,11 +440,12 @@ mod tests {
     async fn open_breaker_error_code() {
         let server = MockServer::start().await;
         let config = test_config();
+        let breaker = resolve_breaker(&config, TEST_BUCKET);
         for _ in 0..3 {
-            config.registry.default_breaker().record_failure();
+            breaker.record_failure();
         }
 
-        let req = get_request(&server.uri());
+        let req = get_request_with_headers(&server.uri(), None, Some(TEST_BUCKET));
         let err = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await.unwrap_err();
 
         match err {
@@ -383,19 +467,19 @@ mod tests {
         };
 
         for _ in 0..3 {
-            let req = get_request(&server.uri());
+            let req = get_request_with_headers(&server.uri(), None, Some(TEST_BUCKET));
             let _ = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
         }
 
-        assert_eq!(config.registry.default_breaker().state(), State::On);
+        assert_eq!(resolve_breaker(&config, TEST_BUCKET).state(), State::Open);
 
-        let req = get_request(&server.uri());
+        let req = get_request_with_headers(&server.uri(), None, Some(TEST_BUCKET));
         let result = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
         result.unwrap_err();
     }
 
     #[tokio::test]
-    async fn breaker_recovers_via_half_on() {
+    async fn breaker_recovers_via_half_open() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .respond_with(ResponseTemplate::new(503))
@@ -410,33 +494,36 @@ mod tests {
                 base_delay_ms: 10,
                 cap_delay_ms: 50,
             },
-            registry: Arc::new(BucketRegistry::new(
-                "",
-                &BreakerConfig {
-                    switch_on_threshold: 3,
-                    switch_off_threshold: 2,
-                    reset_period: Duration::from_millis(50),
-                    fault_window: Duration::from_secs(5),
-                },
-            )),
+            registry: Arc::new(
+                BucketRegistry::new(
+                    [TEST_BUCKET.to_owned()],
+                    &BreakerConfig {
+                        switch_on_threshold: 3,
+                        switch_off_threshold: 2,
+                        reset_period: Duration::from_millis(50),
+                        fault_window: Duration::from_secs(5),
+                    },
+                )
+                .unwrap(),
+            ),
         };
 
         for _ in 0..3 {
-            let req = get_request(&server.uri());
+            let req = get_request_with_headers(&server.uri(), None, Some(TEST_BUCKET));
             let _ = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
         }
-        assert_eq!(config.registry.default_breaker().state(), State::On);
+        assert_eq!(resolve_breaker(&config, TEST_BUCKET).state(), State::Open);
 
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        let req = get_request(&server.uri());
+        let req = get_request_with_headers(&server.uri(), None, Some(TEST_BUCKET));
         let result = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
         result.unwrap();
 
-        let req = get_request(&server.uri());
+        let req = get_request_with_headers(&server.uri(), None, Some(TEST_BUCKET));
         let result = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
         result.unwrap();
-        assert_eq!(config.registry.default_breaker().state(), State::Off);
+        assert_eq!(resolve_breaker(&config, TEST_BUCKET).state(), State::Closed);
     }
 
     #[tokio::test]
@@ -469,11 +556,12 @@ mod tests {
         let config = test_config();
 
         for _ in 0..3 {
-            let req = post_request(&server.uri());
+            let mut req = post_request(&server.uri());
+            req.headers_mut().insert(HEADER_UPSTREAM, TEST_BUCKET.parse().unwrap());
             let _ = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
         }
 
-        assert_eq!(config.registry.default_breaker().state(), State::On);
+        assert_eq!(resolve_breaker(&config, TEST_BUCKET).state(), State::Open);
     }
 
     #[tokio::test]
@@ -487,11 +575,11 @@ mod tests {
         };
 
         for _ in 0..5 {
-            let req = get_request(&server.uri());
+            let req = get_request_with_headers(&server.uri(), None, Some(TEST_BUCKET));
             let _ = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
         }
 
-        assert_eq!(config.registry.default_breaker().state(), State::Off);
+        assert_eq!(resolve_breaker(&config, TEST_BUCKET).state(), State::Closed);
     }
 
     #[tokio::test]
@@ -505,11 +593,11 @@ mod tests {
         Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
 
         let config = test_config();
-        let req = get_request(&server.uri());
+        let req = get_request_with_headers(&server.uri(), None, Some(TEST_BUCKET));
         let result = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
 
         result.unwrap();
-        assert_eq!(config.registry.default_breaker().state(), State::Off);
+        assert_eq!(resolve_breaker(&config, TEST_BUCKET).state(), State::Closed);
     }
 
     #[tokio::test]
@@ -526,11 +614,13 @@ mod tests {
                 base_delay_ms: 10,
                 cap_delay_ms: 50,
             },
-            registry: Arc::new(BucketRegistry::new("", &breaker_config())),
+            registry: Arc::new(
+                BucketRegistry::new([TEST_BUCKET.to_owned()], &breaker_config()).unwrap(),
+            ),
         };
 
         let start = Instant::now();
-        let req = get_request(&server.uri());
+        let req = get_request_with_headers(&server.uri(), None, Some(TEST_BUCKET));
         let _ = send(&test_client(), req, Some(&config), Duration::from_secs(3)).await;
 
         assert!(start.elapsed() < Duration::from_secs(6));
@@ -547,12 +637,12 @@ mod tests {
         };
 
         for _ in 0..5 {
-            let req = get_request(&server.uri());
+            let req = get_request_with_headers(&server.uri(), None, Some(TEST_BUCKET));
             let _ = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
         }
 
-        // 429 is rate limiting, not a failure — breaker should stay off
-        assert_eq!(config.registry.default_breaker().state(), State::Off);
+        // 429 is rate limiting, not a failure — breaker should stay closed
+        assert_eq!(resolve_breaker(&config, TEST_BUCKET).state(), State::Closed);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -569,23 +659,14 @@ mod tests {
         };
         let config = Arc::new(config);
 
-        // Phase 1: send requests in waves — early ones trip the breaker,
-        // later ones arrive after the breaker is ON and get rejected.
         let mut handles = Vec::new();
         for i in 0..10 {
             let client = test_client();
             let uri = server.uri();
             let cfg = Arc::clone(&config);
             handles.push(tokio::spawn(async move {
-                // Stagger requests slightly so early failures record before later checks
                 tokio::time::sleep(Duration::from_millis(i * 30)).await;
-                let req = Request::get(&uri)
-                    .body(
-                        Empty::new()
-                            .map_err(|e| ErrorCode::InternalError(Some(e.to_string())))
-                            .boxed_unsync(),
-                    )
-                    .unwrap();
+                let req = get_request_with_headers(&uri, None, Some(TEST_BUCKET));
                 send(&client, req, Some(&*cfg), DEFAULT_TIMEOUT).await
             }));
         }
@@ -601,7 +682,7 @@ mod tests {
 
         assert!(ok_count > 0, "some requests should have reached the server");
         assert!(err_count > 0, "breaker should have rejected some requests");
-        assert_eq!(config.registry.default_breaker().state(), State::On);
+        assert_eq!(resolve_breaker(&config, TEST_BUCKET).state(), State::Open);
     }
 
     #[tokio::test]
@@ -716,10 +797,10 @@ mod tests {
         };
 
         for _ in 0..3 {
-            let req = get_request_with_headers(&server.uri(), Some(100), None);
+            let req = get_request_with_headers(&server.uri(), Some(100), Some(TEST_BUCKET));
             let _ = send(&test_client(), req, Some(&config), DEFAULT_TIMEOUT).await;
         }
 
-        assert_eq!(config.registry.default_breaker().state(), State::On);
+        assert_eq!(resolve_breaker(&config, TEST_BUCKET).state(), State::Open);
     }
 }

@@ -26,7 +26,6 @@ tracing.workspace = true
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 base64ct.workspace = true
-dashmap.workspace = true
 fromenv.workspace = true
 futures.workspace = true
 http-body-util.workspace = true

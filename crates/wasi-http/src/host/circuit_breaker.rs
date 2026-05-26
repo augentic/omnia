@@ -1,27 +1,86 @@
+//! Three-state circuit breaker with a fixed fault window.
+
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use dashmap::DashMap;
+use anyhow::{Result, bail};
 use parking_lot::Mutex;
 
 /// Circuit breaker state machine with three states.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
-    /// Requests flow normally. Faults are tracked within a rolling window.
-    Off,
-    /// Requests are rejected. Transitions to `HalfOn` after the reset period.
-    On,
+    /// Requests flow normally. Faults are tracked within a fixed fault window.
+    Closed,
+    /// Requests are rejected. Transitions to `HalfOpen` after the reset period.
+    Open,
     /// A limited number of probe requests are allowed through to test recovery.
-    HalfOn,
+    HalfOpen,
+}
+
+/// Result of a circuit breaker check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BreakerDecision {
+    /// The request may proceed.
+    Allow,
+    /// The circuit is open; the request is rejected.
+    Reject,
+}
+
+/// Internal outcome of `check_at`, encoding the decision and any state transition.
+#[derive(Debug)]
+enum CheckOutcome {
+    /// Request allowed; breaker is `Closed` (no transition).
+    Allowed,
+    /// Request allowed; breaker just entered `HalfOpen` (first probe).
+    EnteredProbe,
+    /// Request rejected; breaker is `Open` or `HalfOpen` at probe capacity.
+    Rejected,
+}
+
+/// How the breaker was tripped to `Open`.
+#[derive(Debug)]
+enum TripCause {
+    /// Fault threshold reached while `Closed`.
+    FaultsExceeded(u32),
+    /// A fault during `HalfOpen` immediately re-opened the breaker.
+    ProbeFailed,
 }
 
 /// Configuration for a single circuit breaker instance.
 #[derive(Debug, Clone)]
 pub struct BreakerConfig {
+    /// Number of faults within `fault_window` required to trip `Closed` → `Open`.
     pub switch_on_threshold: u32,
+    /// Number of successful probe requests required to transition `HalfOpen` → `Closed`.
+    /// Also caps the total probe requests admitted per `HalfOpen` period.
     pub switch_off_threshold: u32,
+    /// How long the breaker stays `Open` before transitioning to `HalfOpen`.
     pub reset_period: Duration,
+    /// Rolling window in which faults are counted while `Closed`.
     pub fault_window: Duration,
+}
+
+impl BreakerConfig {
+    /// Validate that all thresholds and durations are sensible.
+    ///
+    /// Called at startup via `BucketRegistry::new`; invalid configs surface as
+    /// an error through `Backend::connect_with` rather than silently misbehaving.
+    pub fn validate(&self) -> Result<()> {
+        if self.switch_on_threshold < 1 {
+            bail!("switch_on_threshold must be >= 1");
+        }
+        if self.switch_off_threshold < 1 {
+            bail!("switch_off_threshold must be >= 1");
+        }
+        if self.reset_period.is_zero() {
+            bail!("reset_period must be > 0");
+        }
+        if self.fault_window.is_zero() {
+            bail!("fault_window must be > 0");
+        }
+        Ok(())
+    }
 }
 
 impl Default for BreakerConfig {
@@ -39,16 +98,25 @@ impl Default for BreakerConfig {
 struct Inner {
     state: State,
     fault_count: u32,
-    fault_window_start: Instant,
+    fault_window_start: Option<Instant>,
     success_count: u32,
     probe_count: u32,
-    opened_at: Instant,
+    opened_at: Option<Instant>,
 }
 
-/// A windowed three-state circuit breaker.
+/// A three-state circuit breaker with a fixed fault window.
 ///
-/// The fault counter resets when no new fault arrives within `fault_window`.
-/// This prevents slow trickles of errors from accumulating into a false trip.
+/// Faults are counted within a fixed window anchored at the first fault
+/// after construction (or after each window reset). Both `fault_window_start`
+/// and `opened_at` are lazily initialized — they remain `None` until the
+/// first fault or trip, so the breaker carries no synthetic timestamps.
+///
+/// When the window expires (elapsed > `fault_window`), the counter resets
+/// and the window re-anchors at the next fault. This prevents slow trickles
+/// of errors from accumulating into a false trip.
+///
+/// Note: the boundary comparison uses strict `>`, so a fault arriving exactly
+/// at the window edge is still counted in the current window.
 #[derive(Debug)]
 pub struct CircuitBreaker {
     name: String,
@@ -61,93 +129,90 @@ impl CircuitBreaker {
         Self {
             name: name.into(),
             inner: Mutex::new(Inner {
-                state: State::Off,
+                state: State::Closed,
                 fault_count: 0,
-                fault_window_start: Instant::now(),
+                fault_window_start: None,
                 success_count: 0,
                 probe_count: 0,
-                opened_at: Instant::now(),
+                opened_at: None,
             }),
             config,
         }
     }
 
     /// Check whether a request is allowed through.
-    ///
-    /// Returns `Ok(())` if the request may proceed, or `Err(())` if the circuit is open.
-    pub fn check(&self) -> Result<(), ()> {
+    pub fn check(&self) -> BreakerDecision {
         self.check_at(Instant::now())
     }
 
-    fn check_at(&self, now: Instant) -> Result<(), ()> {
-        let mut transition = None;
-        let result = {
+    fn check_at(&self, now: Instant) -> BreakerDecision {
+        let outcome = {
             let mut inner = self.inner.lock();
             match inner.state {
-                State::Off => Ok(()),
-                State::On => {
-                    if now.duration_since(inner.opened_at) >= self.config.reset_period {
-                        inner.state = State::HalfOn;
+                State::Closed => CheckOutcome::Allowed,
+                State::Open => {
+                    // Invariant: opened_at is always Some when state == Open (set by record_failure_at).
+                    // Fallback to `now` keeps the breaker Open (elapsed 0 < reset_period) rather than panicking.
+                    let opened = inner.opened_at.unwrap_or(now);
+                    if now.duration_since(opened) >= self.config.reset_period {
+                        inner.state = State::HalfOpen;
                         inner.success_count = 0;
                         inner.probe_count = 1;
-                        transition = Some(State::HalfOn);
-                        drop(inner);
-                        Ok(())
+                        CheckOutcome::EnteredProbe
                     } else {
-                        transition = Some(State::On);
-                        drop(inner);
-                        Err(())
+                        CheckOutcome::Rejected
                     }
                 }
-                State::HalfOn => {
+                State::HalfOpen => {
                     if inner.probe_count < self.config.switch_off_threshold {
                         inner.probe_count += 1;
+                        // Release lock before exiting the outer block (clippy::significant_drop_tightening).
                         drop(inner);
-                        Ok(())
+                        CheckOutcome::Allowed
                     } else {
-                        transition = Some(State::HalfOn);
-                        drop(inner);
-                        Err(())
+                        CheckOutcome::Rejected
                     }
                 }
             }
         };
 
-        match (transition, &result) {
-            (Some(State::HalfOn), Ok(())) => {
+        match outcome {
+            CheckOutcome::EnteredProbe => {
                 tracing::info!(
                     gauge.circuit_breaker_state = 2,
+                    state = "half_open",
                     bucket = %self.name,
                     "circuit breaker entering probe state"
                 );
+                BreakerDecision::Allow
             }
-            (Some(_), Err(())) => {
+            CheckOutcome::Rejected => {
                 tracing::debug!(
                     monotonic_counter.circuit_breaker_rejections = 1,
                     bucket = %self.name,
                     "request rejected by circuit breaker"
                 );
+                BreakerDecision::Reject
             }
-            _ => {}
+            CheckOutcome::Allowed => BreakerDecision::Allow,
         }
-
-        result
     }
 
-    /// Record a successful response. In `HalfOn`, counts toward closing the breaker.
+    /// Record a successful response. In `HalfOpen`, counts toward closing the breaker.
     pub fn record_success(&self) {
         self.record_success_at(Instant::now());
     }
 
+    // Kept for parametric symmetry with check_at / record_failure_at; success doesn't anchor a window.
     fn record_success_at(&self, _now: Instant) {
         let recovered = {
             let mut inner = self.inner.lock();
-            if inner.state == State::HalfOn {
+            if inner.state == State::HalfOpen {
                 inner.success_count += 1;
                 if inner.success_count >= self.config.switch_off_threshold {
-                    inner.state = State::Off;
+                    inner.state = State::Closed;
                     inner.fault_count = 0;
-                    inner.fault_window_start = Instant::now();
+                    inner.fault_window_start = None;
                     true
                 } else {
                     false
@@ -161,61 +226,63 @@ impl CircuitBreaker {
             tracing::info!(
                 monotonic_counter.circuit_breaker_recoveries = 1,
                 gauge.circuit_breaker_state = 0,
+                state = "closed",
                 bucket = %self.name,
                 "circuit breaker recovered"
             );
         }
     }
 
-    /// Record a fault. In `Off`, counts toward tripping. In `HalfOn`, trips immediately.
+    /// Record a fault. In `Closed`, counts toward tripping. In `HalfOpen`, trips immediately.
     pub fn record_failure(&self) {
         self.record_failure_at(Instant::now());
     }
 
-    #[allow(clippy::if_then_some_else_none)]
     fn record_failure_at(&self, now: Instant) {
         let tripped = {
             let mut inner = self.inner.lock();
             match inner.state {
-                State::Off => {
-                    if now.duration_since(inner.fault_window_start) > self.config.fault_window {
+                State::Closed => {
+                    let window_expired = inner
+                        .fault_window_start
+                        .is_some_and(|start| now.duration_since(start) > self.config.fault_window);
+                    if inner.fault_window_start.is_none() || window_expired {
                         inner.fault_count = 0;
-                        inner.fault_window_start = now;
+                        inner.fault_window_start = Some(now);
                     }
                     inner.fault_count += 1;
-                    if inner.fault_count >= self.config.switch_on_threshold {
-                        inner.state = State::On;
-                        inner.opened_at = now;
-                        let fc = inner.fault_count;
-                        drop(inner);
-                        Some(fc)
-                    } else {
-                        None
-                    }
+                    (inner.fault_count >= self.config.switch_on_threshold).then(|| {
+                        inner.state = State::Open;
+                        inner.opened_at = Some(now);
+                        TripCause::FaultsExceeded(inner.fault_count)
+                    })
                 }
-                State::HalfOn => {
-                    inner.state = State::On;
-                    inner.opened_at = now;
+                State::HalfOpen => {
+                    inner.state = State::Open;
+                    inner.opened_at = Some(now);
+                    // Release lock before exiting the outer block (clippy::significant_drop_tightening).
                     drop(inner);
-                    Some(0)
+                    Some(TripCause::ProbeFailed)
                 }
-                State::On => None,
+                State::Open => None,
             }
         };
 
         match tripped {
-            Some(0) => {
+            Some(TripCause::ProbeFailed) => {
                 tracing::warn!(
                     monotonic_counter.circuit_breaker_trips = 1,
                     gauge.circuit_breaker_state = 1,
+                    state = "open",
                     bucket = %self.name,
                     "circuit breaker re-tripped during probe"
                 );
             }
-            Some(fault_count) => {
+            Some(TripCause::FaultsExceeded(fault_count)) => {
                 tracing::warn!(
                     monotonic_counter.circuit_breaker_trips = 1,
                     gauge.circuit_breaker_state = 1,
+                    state = "open",
                     bucket = %self.name,
                     fault_count,
                     "circuit breaker tripped"
@@ -230,93 +297,84 @@ impl CircuitBreaker {
     pub fn state(&self) -> State {
         self.inner.lock().state
     }
+
+    #[cfg(test)]
+    fn fault_count(&self) -> u32 {
+        self.inner.lock().fault_count
+    }
 }
 
-/// Registry holding per-bucket circuit breakers and a default fallback.
+/// The result of resolving a circuit breaker from the registry.
+#[derive(Debug)]
+pub struct ResolvedBreaker {
+    /// The circuit breaker instance.
+    pub breaker: Arc<CircuitBreaker>,
+    /// The bucket name used.
+    pub bucket: String,
+}
+
+/// Registry holding per-bucket circuit breakers.
+///
+/// The breaker only activates when the guest explicitly names a bucket via
+/// `OutboundPolicy.upstream`. Requests without an upstream skip the breaker
+/// entirely (retry + timeout still apply). Requesting an unknown bucket is
+/// a misconfiguration error.
 #[derive(Debug)]
 pub struct BucketRegistry {
-    buckets: DashMap<String, Arc<CircuitBreaker>>,
-    default_breaker: Arc<CircuitBreaker>,
+    buckets: HashMap<String, Arc<CircuitBreaker>>,
 }
 
 impl BucketRegistry {
-    /// Build a registry from a comma-separated bucket list and per-bucket env overrides.
+    /// Build a registry from parsed bucket names.
     ///
-    /// Each bucket name `FOO` can have env overrides like `HTTP_CB_FOO_SWITCH_ON_THRESHOLD`.
-    /// Buckets without overrides inherit the global config.
-    pub fn new(bucket_names: &str, global: &BreakerConfig) -> Self {
-        let buckets = DashMap::new();
+    /// Every bucket shares the same `config`. Bucket names create isolated
+    /// fault-tracking boundaries — requests to different upstreams get independent
+    /// breaker instances with independent fault counts.
+    ///
+    /// Duplicate names are silently deduplicated.
+    pub fn new(names: impl IntoIterator<Item = String>, config: &BreakerConfig) -> Result<Self> {
+        config.validate()?;
 
-        for raw in bucket_names.split(',') {
-            let name = raw.trim().to_string();
-            if name.is_empty() {
-                continue;
+        let mut buckets = HashMap::new();
+        for name in names {
+            if !buckets.contains_key(&name) {
+                buckets.insert(name.clone(), Arc::new(CircuitBreaker::new(name, config.clone())));
             }
-            if buckets.contains_key(&name) {
-                continue;
-            }
-
-            let config = bucket_config_from_env(&name, global);
-            buckets.insert(name.clone(), Arc::new(CircuitBreaker::new(name, config)));
         }
 
         if buckets.is_empty() {
-            tracing::warn!(
-                "no circuit breaker buckets configured -- all upstreams share a single default breaker"
-            );
+            tracing::debug!("no circuit breaker buckets configured");
         }
 
-        Self {
-            buckets,
-            default_breaker: Arc::new(CircuitBreaker::new("default", global.clone())),
-        }
+        Ok(Self { buckets })
     }
 
-    /// Resolve a breaker by explicit upstream name, falling back to the default breaker.
-    pub fn resolve(&self, upstream: Option<&str>) -> Arc<CircuitBreaker> {
-        if let Some(name) = upstream
-            && let Some(b) = self.buckets.get(name)
-        {
-            return Arc::clone(b.value());
-        }
+    /// Resolve a breaker by explicit upstream name.
+    ///
+    /// Returns `Ok(None)` when no upstream is specified (breaker is skipped).
+    /// Returns `Ok(Some(_))` for a known bucket, `Err(_)` for an unknown bucket.
+    pub fn resolve(
+        &self, upstream: Option<&str>,
+    ) -> std::result::Result<Option<ResolvedBreaker>, String> {
+        let Some(name) = upstream else {
+            return Ok(None);
+        };
 
-        Arc::clone(&self.default_breaker)
+        self.buckets.get(name).map_or_else(
+            || Err(format!("unknown circuit breaker bucket: {name}")),
+            |b| {
+                Ok(Some(ResolvedBreaker {
+                    breaker: Arc::clone(b),
+                    bucket: name.to_owned(),
+                }))
+            },
+        )
     }
 
-    /// Return a reference to the default breaker.
+    /// Returns `true` if the registry has no configured buckets.
     #[cfg(test)]
-    pub const fn default_breaker(&self) -> &Arc<CircuitBreaker> {
-        &self.default_breaker
-    }
-}
-
-/// Load per-bucket config overrides from environment, falling back to global defaults.
-fn bucket_config_from_env(name: &str, global: &BreakerConfig) -> BreakerConfig {
-    let upper = name.to_uppercase();
-    let switch_on = std::env::var(format!("HTTP_CB_{upper}_SWITCH_ON_THRESHOLD"))
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(global.switch_on_threshold);
-    let switch_off = std::env::var(format!("HTTP_CB_{upper}_SWITCH_OFF_THRESHOLD"))
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(global.switch_off_threshold);
-    #[allow(clippy::cast_possible_truncation)]
-    let reset_ms: u64 = std::env::var(format!("HTTP_CB_{upper}_RESET_PERIOD_MS"))
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(global.reset_period.as_millis() as u64);
-    #[allow(clippy::cast_possible_truncation)]
-    let fault_ms: u64 = std::env::var(format!("HTTP_CB_{upper}_FAULT_WINDOW_MS"))
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(global.fault_window.as_millis() as u64);
-
-    BreakerConfig {
-        switch_on_threshold: switch_on,
-        switch_off_threshold: switch_off,
-        reset_period: Duration::from_millis(reset_ms),
-        fault_window: Duration::from_millis(fault_ms),
+    pub fn is_empty(&self) -> bool {
+        self.buckets.is_empty()
     }
 }
 
@@ -333,21 +391,25 @@ mod tests {
         }
     }
 
-    #[test]
-    fn off_allows_requests() {
-        let cb = CircuitBreaker::new("test", test_config());
-        assert!(cb.check().is_ok());
-        assert_eq!(cb.state(), State::Off);
+    /// Record enough faults at `now` to trip the breaker from `Closed` → `Open`.
+    fn trip_breaker(cb: &CircuitBreaker, now: Instant) {
+        for _ in 0..cb.config.switch_on_threshold {
+            cb.record_failure_at(now);
+        }
+        assert_eq!(cb.state(), State::Open);
     }
 
     #[test]
-    fn transitions_to_on_after_threshold() {
+    fn closed_allows_requests() {
         let cb = CircuitBreaker::new("test", test_config());
-        let now = Instant::now();
-        for _ in 0..3 {
-            cb.record_failure_at(now);
-        }
-        assert_eq!(cb.state(), State::On);
+        assert_eq!(cb.check(), BreakerDecision::Allow);
+        assert_eq!(cb.state(), State::Closed);
+    }
+
+    #[test]
+    fn transitions_to_open_after_threshold() {
+        let cb = CircuitBreaker::new("test", test_config());
+        trip_breaker(&cb, Instant::now());
     }
 
     #[test]
@@ -357,88 +419,74 @@ mod tests {
         for _ in 0..2 {
             cb.record_failure_at(now);
         }
-        assert_eq!(cb.state(), State::Off);
+        assert_eq!(cb.state(), State::Closed);
     }
 
     #[test]
-    fn rejects_when_on() {
+    fn rejects_when_open() {
         let cb = CircuitBreaker::new("test", test_config());
         let now = Instant::now();
-        for _ in 0..3 {
-            cb.record_failure_at(now);
-        }
-        assert_eq!(cb.state(), State::On);
-        assert!(cb.check_at(now).is_err());
+        trip_breaker(&cb, now);
+        assert_eq!(cb.check_at(now), BreakerDecision::Reject);
     }
 
     #[test]
-    fn transitions_to_half_on_after_reset_period() {
+    fn transitions_to_half_open_after_reset_period() {
         let cb = CircuitBreaker::new("test", test_config());
         let now = Instant::now();
-        for _ in 0..3 {
-            cb.record_failure_at(now);
-        }
-        assert_eq!(cb.state(), State::On);
+        trip_breaker(&cb, now);
 
         let later = now + Duration::from_millis(200);
-        assert!(cb.check_at(later).is_ok());
-        assert_eq!(cb.state(), State::HalfOn);
+        assert_eq!(cb.check_at(later), BreakerDecision::Allow);
+        assert_eq!(cb.state(), State::HalfOpen);
     }
 
     #[test]
-    fn half_on_allows_probe_requests() {
+    fn half_open_allows_probe_requests() {
         let cb = CircuitBreaker::new("test", test_config());
         let now = Instant::now();
-        for _ in 0..3 {
-            cb.record_failure_at(now);
-        }
+        trip_breaker(&cb, now);
         let later = now + Duration::from_millis(200);
-        assert!(cb.check_at(later).is_ok()); // transitions to HalfOn, first probe
-        assert!(cb.check_at(later).is_ok()); // second probe (switch_off_threshold=2, probe_count was 1)
+        assert_eq!(cb.check_at(later), BreakerDecision::Allow); // transitions to HalfOpen, first probe
+        assert_eq!(cb.check_at(later), BreakerDecision::Allow); // second probe (switch_off_threshold=2, probe_count was 1)
     }
 
     #[test]
-    fn half_on_to_off_after_successes() {
+    fn half_open_to_closed_after_successes() {
         let cb = CircuitBreaker::new("test", test_config());
         let now = Instant::now();
-        for _ in 0..3 {
-            cb.record_failure_at(now);
-        }
+        trip_breaker(&cb, now);
         let later = now + Duration::from_millis(200);
-        cb.check_at(later).unwrap();
-        assert_eq!(cb.state(), State::HalfOn);
+        assert_eq!(cb.check_at(later), BreakerDecision::Allow);
+        assert_eq!(cb.state(), State::HalfOpen);
 
         cb.record_success_at(later);
         cb.record_success_at(later);
-        assert_eq!(cb.state(), State::Off);
+        assert_eq!(cb.state(), State::Closed);
     }
 
     #[test]
-    fn half_on_to_on_on_any_fault() {
+    fn half_open_to_open_on_any_fault() {
         let cb = CircuitBreaker::new("test", test_config());
         let now = Instant::now();
-        for _ in 0..3 {
-            cb.record_failure_at(now);
-        }
+        trip_breaker(&cb, now);
         let later = now + Duration::from_millis(200);
-        cb.check_at(later).unwrap();
-        assert_eq!(cb.state(), State::HalfOn);
+        assert_eq!(cb.check_at(later), BreakerDecision::Allow);
+        assert_eq!(cb.state(), State::HalfOpen);
 
         cb.record_failure_at(later);
-        assert_eq!(cb.state(), State::On);
+        assert_eq!(cb.state(), State::Open);
     }
 
     #[test]
-    fn half_on_caps_probe_requests() {
+    fn half_open_caps_probe_requests() {
         let cb = CircuitBreaker::new("test", test_config());
         let now = Instant::now();
-        for _ in 0..3 {
-            cb.record_failure_at(now);
-        }
+        trip_breaker(&cb, now);
         let later = now + Duration::from_millis(200);
-        assert!(cb.check_at(later).is_ok()); // probe 1 (transitions to HalfOn)
-        assert!(cb.check_at(later).is_ok()); // probe 2 (switch_off_threshold=2)
-        assert!(cb.check_at(later).is_err()); // probe cap reached
+        assert_eq!(cb.check_at(later), BreakerDecision::Allow); // probe 1 (transitions to HalfOpen)
+        assert_eq!(cb.check_at(later), BreakerDecision::Allow); // probe 2 (switch_off_threshold=2)
+        assert_eq!(cb.check_at(later), BreakerDecision::Reject); // probe cap reached
     }
 
     #[test]
@@ -452,7 +500,7 @@ mod tests {
         let later = now + Duration::from_millis(600);
         cb.record_failure_at(later);
         // Only 1 fault in new window, below threshold
-        assert_eq!(cb.state(), State::Off);
+        assert_eq!(cb.state(), State::Closed);
     }
 
     #[test]
@@ -465,32 +513,29 @@ mod tests {
         // Just past the window — old faults expire, counter resets
         let t1 = t0 + Duration::from_millis(501);
         cb.record_failure_at(t1);
-        assert_eq!(cb.state(), State::Off);
+        assert_eq!(cb.state(), State::Closed);
 
         // Two more in the new window → threshold met
         cb.record_failure_at(t1);
         cb.record_failure_at(t1);
-        assert_eq!(cb.state(), State::On);
+        assert_eq!(cb.state(), State::Open);
     }
 
     #[test]
-    fn record_failure_when_on_is_noop() {
+    fn record_failure_when_open_is_noop() {
         let cb = CircuitBreaker::new("test", test_config());
         let now = Instant::now();
-        for _ in 0..3 {
-            cb.record_failure_at(now);
-        }
-        assert_eq!(cb.state(), State::On);
+        trip_breaker(&cb, now);
 
         cb.record_failure_at(now);
-        assert_eq!(cb.state(), State::On);
+        assert_eq!(cb.state(), State::Open);
     }
 
     #[test]
-    fn record_success_in_off_is_noop() {
+    fn record_success_in_closed_is_noop() {
         let cb = CircuitBreaker::new("test", test_config());
         cb.record_success();
-        assert_eq!(cb.state(), State::Off);
+        assert_eq!(cb.state(), State::Closed);
     }
 
     #[test]
@@ -501,7 +546,7 @@ mod tests {
         };
         let cb = CircuitBreaker::new("test", config);
         cb.record_failure();
-        assert_eq!(cb.state(), State::On);
+        assert_eq!(cb.state(), State::Open);
     }
 
     #[test]
@@ -509,30 +554,27 @@ mod tests {
         let cb = CircuitBreaker::new("test", test_config());
         let t0 = Instant::now();
 
-        // OFF → ON
-        for _ in 0..3 {
-            cb.record_failure_at(t0);
-        }
-        assert_eq!(cb.state(), State::On);
+        // Closed → Open
+        trip_breaker(&cb, t0);
 
-        // ON → HALF_ON
+        // Open → HalfOpen
         let t1 = t0 + Duration::from_millis(200);
-        cb.check_at(t1).unwrap();
-        assert_eq!(cb.state(), State::HalfOn);
+        assert_eq!(cb.check_at(t1), BreakerDecision::Allow);
+        assert_eq!(cb.state(), State::HalfOpen);
 
-        // HALF_ON → ON (fault during probe)
+        // HalfOpen → Open (fault during probe)
         cb.record_failure_at(t1);
-        assert_eq!(cb.state(), State::On);
+        assert_eq!(cb.state(), State::Open);
 
-        // ON → HALF_ON again
+        // Open → HalfOpen again
         let t2 = t1 + Duration::from_millis(200);
-        cb.check_at(t2).unwrap();
-        assert_eq!(cb.state(), State::HalfOn);
+        assert_eq!(cb.check_at(t2), BreakerDecision::Allow);
+        assert_eq!(cb.state(), State::HalfOpen);
 
-        // HALF_ON → OFF (successful probes)
+        // HalfOpen → Closed (successful probes)
         cb.record_success_at(t2);
         cb.record_success_at(t2);
-        assert_eq!(cb.state(), State::Off);
+        assert_eq!(cb.state(), State::Closed);
     }
 
     #[test]
@@ -548,27 +590,31 @@ mod tests {
         }
 
         // After 10 rounds with threshold=3: early failures trip the breaker,
-        // but check_at without elapsed reset_period keeps it On; record_success
-        // while On is a no-op (only HalfOn→Off transitions on success).
-        // Final state must be On because successes can't reset without a probe.
-        assert_eq!(cb.state(), State::On);
+        // but check_at without elapsed reset_period keeps it Open; record_success
+        // while Open is a no-op (only HalfOpen→Closed transitions on success).
+        // Final state must be Open because successes can't reset without a probe.
+        assert_eq!(cb.state(), State::Open);
     }
 
     #[tokio::test]
     async fn concurrent_access() {
+        const N_THREADS: u32 = 20;
+        const OPS_PER_THREAD: u32 = 50;
+        let threshold = 100;
+
         let cb = Arc::new(CircuitBreaker::new(
             "test",
             BreakerConfig {
-                switch_on_threshold: 100,
+                switch_on_threshold: threshold,
                 ..test_config()
             },
         ));
 
         let mut handles = vec![];
-        for _ in 0..20 {
+        for _ in 0..N_THREADS {
             let cb = Arc::clone(&cb);
             handles.push(tokio::spawn(async move {
-                for _ in 0..50 {
+                for _ in 0..OPS_PER_THREAD {
                     let _ = cb.check();
                     cb.record_failure();
                     cb.record_success();
@@ -579,7 +625,18 @@ mod tests {
         for h in handles {
             h.await.unwrap();
         }
-        // Must not panic
+
+        let state = cb.state();
+        assert!(
+            matches!(state, State::Closed | State::Open | State::HalfOpen),
+            "invalid state after concurrent access: {state:?}"
+        );
+        assert!(
+            cb.fault_count() <= threshold + N_THREADS,
+            "fault_count {} exceeds theoretical max {}",
+            cb.fault_count(),
+            threshold + N_THREADS
+        );
     }
 
     #[tokio::test]
@@ -615,135 +672,152 @@ mod tests {
 
     // --- BucketRegistry tests ---
 
+    fn buckets(names: &[&str]) -> Vec<String> {
+        names.iter().map(|s| (*s).to_owned()).collect()
+    }
+
     #[test]
-    fn empty_buckets_config_uses_default_only() {
-        let reg = BucketRegistry::new("", &BreakerConfig::default());
-        let b = reg.resolve(None);
-        assert!(Arc::ptr_eq(&b, reg.default_breaker()));
+    fn empty_buckets_config() {
+        let reg = BucketRegistry::new(Vec::<String>::new(), &BreakerConfig::default()).unwrap();
+        assert!(reg.is_empty());
     }
 
     #[test]
     fn declared_buckets_created_at_startup() {
-        let reg = BucketRegistry::new("a,b,c", &BreakerConfig::default());
-        let a = reg.resolve(Some("a"));
-        let b = reg.resolve(Some("b"));
-        let c = reg.resolve(Some("c"));
-        assert!(!Arc::ptr_eq(&a, reg.default_breaker()));
-        assert!(!Arc::ptr_eq(&b, reg.default_breaker()));
-        assert!(!Arc::ptr_eq(&c, reg.default_breaker()));
+        let reg =
+            BucketRegistry::new(buckets(&["a", "b", "c"]), &BreakerConfig::default()).unwrap();
+        reg.resolve(Some("a")).unwrap().unwrap();
+        reg.resolve(Some("b")).unwrap().unwrap();
+        reg.resolve(Some("c")).unwrap().unwrap();
     }
 
     #[test]
     fn lookup_by_name_exact_match() {
-        let reg = BucketRegistry::new("monitoring", &BreakerConfig::default());
-        let b = reg.resolve(Some("monitoring"));
-        assert!(!Arc::ptr_eq(&b, reg.default_breaker()));
+        let reg = BucketRegistry::new(buckets(&["monitoring"]), &BreakerConfig::default()).unwrap();
+        let resolved = reg.resolve(Some("monitoring")).unwrap().unwrap();
+        assert_eq!(resolved.bucket, "monitoring");
     }
 
     #[test]
-    fn lookup_without_name_returns_default() {
-        let reg = BucketRegistry::new("monitoring", &BreakerConfig::default());
-        let b = reg.resolve(None);
-        assert!(Arc::ptr_eq(&b, reg.default_breaker()));
+    fn lookup_without_name_returns_none() {
+        let reg = BucketRegistry::new(buckets(&["monitoring"]), &BreakerConfig::default()).unwrap();
+        assert!(reg.resolve(None).unwrap().is_none());
     }
 
     #[test]
-    fn lookup_unknown_name_returns_default() {
-        let reg = BucketRegistry::new("monitoring", &BreakerConfig::default());
-        let b = reg.resolve(Some("nonexistent"));
-        assert!(Arc::ptr_eq(&b, reg.default_breaker()));
+    fn lookup_unknown_name_returns_error() {
+        let reg = BucketRegistry::new(buckets(&["monitoring"]), &BreakerConfig::default()).unwrap();
+        let result = reg.resolve(Some("nonexistent"));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unknown circuit breaker bucket"));
     }
 
     #[test]
-    fn per_bucket_override_applied() {
-        // When an env var override is present, the bucket uses it.
-        // We test the non-env path by verifying the bucket inherits the global config,
-        // then separately test that a custom global config with threshold=3 trips correctly.
+    fn bucket_uses_global_config() {
         let global = BreakerConfig {
             switch_on_threshold: 3,
             ..BreakerConfig::default()
         };
-        let reg = BucketRegistry::new("monitoring", &global);
-        let b = reg.resolve(Some("monitoring"));
-        let now = Instant::now();
-        for _ in 0..3 {
-            b.record_failure_at(now);
-        }
-        assert_eq!(b.state(), State::On);
+        let reg = BucketRegistry::new(buckets(&["monitoring"]), &global).unwrap();
+        let resolved = reg.resolve(Some("monitoring")).unwrap().unwrap();
+        trip_breaker(&resolved.breaker, Instant::now());
     }
 
     #[test]
-    fn per_bucket_inherits_global_for_unset() {
+    fn bucket_inherits_global_thresholds() {
         let global = BreakerConfig {
             switch_on_threshold: 7,
             ..BreakerConfig::default()
         };
-        let reg = BucketRegistry::new("test", &global);
-        let b = reg.resolve(Some("test"));
+        let reg = BucketRegistry::new(buckets(&["test"]), &global).unwrap();
+        let resolved = reg.resolve(Some("test")).unwrap().unwrap();
         let now = Instant::now();
         for _ in 0..6 {
-            b.record_failure_at(now);
+            resolved.breaker.record_failure_at(now);
         }
-        assert_eq!(b.state(), State::Off);
-        b.record_failure_at(now);
-        assert_eq!(b.state(), State::On);
+        assert_eq!(resolved.breaker.state(), State::Closed);
+        resolved.breaker.record_failure_at(now);
+        assert_eq!(resolved.breaker.state(), State::Open);
     }
 
     #[test]
     fn multiple_buckets_are_independent() {
         let reg = BucketRegistry::new(
-            "a,b",
+            buckets(&["a", "b"]),
             &BreakerConfig {
                 switch_on_threshold: 2,
                 ..BreakerConfig::default()
             },
-        );
-        let a = reg.resolve(Some("a"));
-        let b = reg.resolve(Some("b"));
+        )
+        .unwrap();
+        let a = reg.resolve(Some("a")).unwrap().unwrap();
+        let b = reg.resolve(Some("b")).unwrap().unwrap();
         let now = Instant::now();
-        a.record_failure_at(now);
-        a.record_failure_at(now);
-        assert_eq!(a.state(), State::On);
-        assert_eq!(b.state(), State::Off);
-    }
-
-    #[test]
-    fn bucket_names_trimmed() {
-        let reg = BucketRegistry::new(" monitoring , messaging ", &BreakerConfig::default());
-        assert!(!std::ptr::eq(
-            reg.resolve(Some("monitoring")).as_ref(),
-            reg.default_breaker().as_ref()
-        ));
-        assert!(!std::ptr::eq(
-            reg.resolve(Some("messaging")).as_ref(),
-            reg.default_breaker().as_ref()
-        ));
+        a.breaker.record_failure_at(now);
+        a.breaker.record_failure_at(now);
+        assert_eq!(a.breaker.state(), State::Open);
+        assert_eq!(b.breaker.state(), State::Closed);
     }
 
     #[test]
     fn duplicate_bucket_names_deduplicated() {
-        let reg = BucketRegistry::new("a,a,b", &BreakerConfig::default());
-        let a = reg.resolve(Some("a"));
-        let b = reg.resolve(Some("b"));
-        assert!(!Arc::ptr_eq(&a, &b));
+        let reg =
+            BucketRegistry::new(buckets(&["a", "a", "b"]), &BreakerConfig::default()).unwrap();
+        let a = reg.resolve(Some("a")).unwrap().unwrap();
+        let b = reg.resolve(Some("b")).unwrap().unwrap();
+        assert!(!Arc::ptr_eq(&a.breaker, &b.breaker));
+    }
+
+    // --- Config validation tests ---
+
+    #[test]
+    fn valid_config_passes_validation() {
+        BreakerConfig::default().validate().unwrap();
+        test_config().validate().unwrap();
     }
 
     #[test]
-    fn default_breaker_uses_global_thresholds() {
-        let global = BreakerConfig {
-            switch_on_threshold: 5,
+    fn zero_switch_on_threshold_rejected() {
+        let config = BreakerConfig {
+            switch_on_threshold: 0,
             ..BreakerConfig::default()
         };
-        let reg = BucketRegistry::new("", &global);
-        let b = std::sync::Arc::<crate::host::circuit_breaker::CircuitBreaker>::clone(
-            reg.default_breaker(),
-        );
-        let now = Instant::now();
-        for _ in 0..4 {
-            b.record_failure_at(now);
-        }
-        assert_eq!(b.state(), State::Off);
-        b.record_failure_at(now);
-        assert_eq!(b.state(), State::On);
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn zero_switch_off_threshold_rejected() {
+        let config = BreakerConfig {
+            switch_off_threshold: 0,
+            ..BreakerConfig::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn zero_reset_period_rejected() {
+        let config = BreakerConfig {
+            reset_period: Duration::ZERO,
+            ..BreakerConfig::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn zero_fault_window_rejected() {
+        let config = BreakerConfig {
+            fault_window: Duration::ZERO,
+            ..BreakerConfig::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn registry_rejects_invalid_config() {
+        let bad = BreakerConfig {
+            switch_on_threshold: 0,
+            ..BreakerConfig::default()
+        };
+        BucketRegistry::new(Vec::<String>::new(), &bad).unwrap_err();
     }
 }

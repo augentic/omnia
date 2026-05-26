@@ -33,7 +33,7 @@ All outbound HTTP requests pass through three resilience layers — **timeout**,
 
 2. **Retry** — GET, HEAD, and OPTIONS requests are retried on transient failures (timeout, connection error, 429, 502, 503, 504). POST/PUT/PATCH/DELETE are never retried. Delays use jittered exponential backoff, and 429 responses with a `Retry-After` header use that value instead.
 
-3. **Circuit Breaker** — A windowed three-state breaker (OFF → ON → `HALF_ON` → OFF) protects against sustained upstream failures. Only 5xx responses, timeouts, and connection errors count as faults — 429 (rate limiting) is handled by the retry layer and does not trip the breaker. Faults only accumulate within a rolling time window, so sporadic errors hours apart never trip the breaker.
+3. **Circuit Breaker** — A three-state breaker (`Closed` → `Open` → `HalfOpen` → `Closed`) protects against sustained upstream failures. Only 5xx responses, timeouts, and connection errors count as faults — 429 (rate limiting) is handled by the retry layer and does not trip the breaker. Faults only accumulate within a fixed fault window, so sporadic errors hours apart never trip the breaker.
 
 ### Retry vs Breaker Interaction
 
@@ -60,20 +60,20 @@ Rust `http::Request` extensions do not cross the WASI component model boundary. 
 ### Circuit Breaker States
 
 ```text
-OFF ──(faults ≥ threshold within window)──► ON ──(reset period elapsed)──► HALF_ON
- ▲                                                                            │
- └──────────(successes ≥ switch_off_threshold)────────────────────────────────┘
-                                                    │
-                                          (any fault) ──► ON
+Closed ──(faults ≥ threshold within window)──► Open ──(reset period elapsed)──► HalfOpen
+  ▲                                                                                │
+  └──────────(successes ≥ switch_off_threshold)────────────────────────────────────┘
+                                                       │
+                                             (any fault) ──► Open
 ```
 
-- **OFF**: Requests flow normally. Faults are tracked in a rolling window.
-- **ON**: All requests are rejected immediately. After `reset_period_ms`, transitions to `HALF_ON`.
-- **HALF_ON**: A limited number of probe requests are allowed. If enough succeed, the breaker closes (OFF). Any single fault sends it back to ON.
+- **Closed**: Requests flow normally. Faults are tracked within a fixed fault window.
+- **Open**: All requests are rejected immediately. After `reset_period_ms`, transitions to `HalfOpen`.
+- **HalfOpen**: A limited number of probe requests are allowed. If enough succeed, the breaker closes (`Closed`). Any single fault sends it back to `Open`.
 
 ### Fault Window
 
-The fault counter resets to zero if no new fault arrives within `fault_window_ms`. This prevents slow trickles of errors from accumulating. Example: one timeout per hour over 10 hours = 10 faults, but each is isolated in its own window and never trips the breaker.
+Faults are counted within a fixed window anchored at the first fault. When the window expires (elapsed > `fault_window_ms`), the counter resets. This prevents slow trickles of errors from accumulating. Example: one timeout per hour over 10 hours = 10 faults, but each is isolated in its own window and never trips the breaker.
 
 ### Configuration
 
@@ -85,36 +85,39 @@ The fault counter resets to zero if no new fault arrives within `fault_window_ms
 | `HTTP_RETRY_BASE_DELAY_MS`     | `100`               | Exponential backoff base delay (ms)                                         |
 | `HTTP_RETRY_CAP_DELAY_MS`      | `1000`              | Max backoff delay (ms)                                                      |
 | `HTTP_CB_SWITCH_ON_THRESHOLD`  | `10`                | Faults within window to trip breaker                                        |
-| `HTTP_CB_SWITCH_OFF_THRESHOLD` | `5`                 | Probe successes to close breaker                                            |
-| `HTTP_CB_RESET_PERIOD_MS`      | `10000`             | Time in ON before allowing probes (ms)                                      |
-| `HTTP_CB_FAULT_WINDOW_MS`      | `30000`             | Rolling window for fault accumulation (ms)                                  |
-| `HTTP_CB_BUCKETS`              | `""`                | Comma-separated bucket names                                                |
-| `HTTP_CB_{NAME}_*`             | _(inherits global)_ | Per-bucket threshold overrides                                              |
+| `HTTP_CB_SWITCH_OFF_THRESHOLD` | `5`                 | Probe successes to close breaker (also caps total probes per `HalfOpen`)    |
+| `HTTP_CB_RESET_PERIOD_MS`      | `10000`             | Time in `Open` before allowing probes (ms)                                  |
+| `HTTP_CB_FAULT_WINDOW_MS`      | `30000`             | Fixed fault window for fault accumulation (ms)                              |
+| `HTTP_CB_BUCKETS`              | `""`                | Comma-separated bucket names for isolation                                  |
 
 > **Note:** Retry and circuit breaker env vars (`HTTP_RETRY_*`, `HTTP_CB_*`) are ignored unless `HTTP_OUTBOUND_RESILIENCE=true`. Timeout (`HTTP_RESPONSE_TIMEOUT_MS`) always applies when non-zero, regardless of the resilience toggle.
 
 ### Buckets
 
-Declare named breaker buckets via `HTTP_CB_BUCKETS=monitoring,messaging`. Each bucket gets its own independent circuit breaker. Requests are routed to a bucket by the explicit `upstream` field in `OutboundPolicy`. If no upstream is specified (or the name doesn't match a declared bucket), the request uses the shared default breaker.
+Declare named breaker buckets via `HTTP_CB_BUCKETS=monitoring,messaging`. Each bucket gets its own independent circuit breaker with the same global thresholds — bucket names create isolation boundaries so that failures in one upstream don't affect another.
 
-Per-bucket overrides: set `HTTP_CB_MONITORING_SWITCH_ON_THRESHOLD=3` to give the `monitoring` bucket a custom threshold.
+The breaker only activates when the guest explicitly sets the `upstream` field in `OutboundPolicy` to a declared bucket name:
+
+- **No upstream specified** — the breaker is bypassed entirely; retry and timeout still apply.
+- **Known bucket** — full circuit breaker protection on that bucket.
+- **Unknown bucket** — the request is rejected immediately with an error (misconfiguration).
 
 ### Guest Usage
 
 ```rust,ignore
 use omnia_sdk::OutboundPolicy;
 
-// Simple — use defaults
+// Simple — retry + timeout only, no circuit breaker
 let response = provider.fetch(request).await?;
 
-// With timeout override
+// With timeout override, still no breaker
 request.extensions_mut().insert(OutboundPolicy {
     timeout_ms: Some(5000),
-    upstream: None, // uses the default breaker
+    upstream: None,
 });
 let response = provider.fetch(request).await?;
 
-// With explicit bucket
+// With explicit bucket — enables circuit breaker for this upstream
 request.extensions_mut().insert(OutboundPolicy {
     timeout_ms: Some(10_000),
     upstream: Some("monitoring".into()),
@@ -124,7 +127,10 @@ let response = provider.fetch(request).await?;
 
 ### Error Handling
 
-When the circuit breaker is open, the guest receives an `ErrorCode::InternalError` with the message `"circuit breaker open: {bucket_name}"`. Guest crates should handle this gracefully — e.g., return cached data or a degraded response.
+- When the circuit breaker is open, the guest receives an `ErrorCode::InternalError` with the message `"circuit breaker open: {bucket_name}"`.
+- When the guest specifies an unknown bucket name, it receives `"unknown circuit breaker bucket: {name}"`.
+
+Guest crates should handle these gracefully — e.g., return cached data or a degraded response.
 
 ## License
 

@@ -18,7 +18,7 @@
 pub struct OutboundPolicy {
     /// Response timeout in milliseconds. Falls back to host default if `None`.
     pub timeout_ms: Option<u64>,
-    /// Override breaker bucket name. Falls back to the default breaker if `None`.
+    /// Circuit breaker bucket name. When `None`, the breaker is bypassed entirely.
     pub upstream: Option<String>,
 }
 

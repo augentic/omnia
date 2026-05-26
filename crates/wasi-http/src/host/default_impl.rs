@@ -119,7 +119,7 @@ impl Backend for HttpDefault {
 
         let client = builder.build().context("building HTTP client")?;
 
-        let resilience = options.outbound_resilience.then(|| {
+        let resilience = if options.outbound_resilience {
             let breaker_config = BreakerConfig {
                 switch_on_threshold: options.cb_switch_on_threshold,
                 switch_off_threshold: options.cb_switch_off_threshold,
@@ -127,15 +127,27 @@ impl Backend for HttpDefault {
                 fault_window: Duration::from_millis(options.cb_fault_window_ms),
             };
 
-            ResilienceConfig {
+            let bucket_names = options
+                .cb_buckets
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from);
+
+            let registry = BucketRegistry::new(bucket_names, &breaker_config)
+                .context("building circuit breaker registry")?;
+
+            Some(ResilienceConfig {
                 retry_max: options.retry_max,
                 retry_policy: RetryPolicy {
                     base_delay_ms: options.retry_base_delay_ms,
                     cap_delay_ms: options.retry_cap_delay_ms,
                 },
-                registry: Arc::new(BucketRegistry::new(&options.cb_buckets, &breaker_config)),
-            }
-        });
+                registry: Arc::new(registry),
+            })
+        } else {
+            None
+        };
 
         Ok(Self {
             hooks: HttpHooks {
