@@ -375,7 +375,7 @@ version = "0.8.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.libsqlite3-sys]]
-version = "0.37.0"
+version = "0.38.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.libz-sys]]
@@ -583,7 +583,7 @@ version = "0.1.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.rusqlite]]
-version = "0.39.0"
+version = "0.40.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustc-hash]]
