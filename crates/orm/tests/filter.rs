@@ -73,7 +73,7 @@ fn filter_in_empty_array() {
 
     // NOTE: SeaQuery generates invalid SQL for empty IN clauses: WHERE ($1) = ($2)
     // This is a known limitation - callers should avoid empty IN arrays
-    // or use Filter::And(vec![]) to short-circuit to no filter
+    // or use Filter::and([]) to short-circuit to no filter
     assert_sql_contains(&query.sql, &["WHERE", "($1)", "($2)"]);
     assert_eq!(query.params.len(), 2);
 }
@@ -101,16 +101,6 @@ fn filter_is_not_null() {
 
     assert_sql_contains(&query.sql, &["WHERE", "users.name", "IS NOT (NULL)"]);
     assert_eq!(query.params.len(), 0);
-}
-
-#[test]
-fn filter_any_values() {
-    let query =
-        SelectBuilder::<User>::new().r#where(Filter::any("id", vec![1, 2, 3])).build().unwrap();
-
-    // ANY is implemented as IN for direct value arrays
-    assert_sql_contains(&query.sql, &["WHERE", "users.id", "IN"]);
-    assert_eq!(query.params.len(), 3);
 }
 
 #[test]
@@ -147,30 +137,28 @@ fn filter_table_qualified_in() {
 }
 
 #[test]
-fn filter_col_ne() {
-    // Test column-to-column comparison (representative of all col_* variants)
+fn filter_col_compare() {
     let query = SelectBuilder::<User>::new()
-        .join(Join::left("user_roles", Filter::col_ne("users", "id", "user_roles", "user_id")))
+        .join(Join::left("user_roles", Filter::col_eq("users", "id", "user_roles", "user_id")))
         .build()
         .unwrap();
 
     assert_sql_contains(
         &query.sql,
-        &["LEFT JOIN", "user_roles", "ON", "users.id", "<>", "user_roles.user_id"],
+        &["LEFT JOIN", "user_roles", "ON", "users.id", "=", "user_roles.user_id"],
     );
 }
 
 #[test]
 fn filter_nested_and_or() {
     let query = SelectBuilder::<User>::new()
-        .r#where(Filter::And(vec![
-            Filter::Or(vec![Filter::eq("active", true), Filter::eq("id", 1)]),
+        .r#where(Filter::and([
+            Filter::or([Filter::eq("active", true), Filter::eq("id", 1)]),
             Filter::gt("id", 0),
         ]))
         .build()
         .unwrap();
 
-    // Should have nested boolean logic
     assert_sql_contains(&query.sql, &["WHERE"]);
     assert!(query.params.len() >= 2);
 }
@@ -178,9 +166,9 @@ fn filter_nested_and_or() {
 #[test]
 fn filter_deeply_nested() {
     let query = SelectBuilder::<User>::new()
-        .r#where(Filter::Or(vec![
-            Filter::And(vec![Filter::eq("active", true), Filter::gt("id", 10)]),
-            Filter::And(vec![Filter::eq("active", false), Filter::lt("id", 5)]),
+        .r#where(Filter::or([
+            Filter::and([Filter::eq("active", true), Filter::gt("id", 10)]),
+            Filter::and([Filter::eq("active", false), Filter::lt("id", 5)]),
         ]))
         .build()
         .unwrap();
@@ -195,7 +183,7 @@ fn filter_deeply_nested() {
 
 #[test]
 fn filter_empty_and() {
-    let query = SelectBuilder::<User>::new().r#where(Filter::And(vec![])).build().unwrap();
+    let query = SelectBuilder::<User>::new().r#where(Filter::and([])).build().unwrap();
 
     // Empty AND should be treated as true (all conditions satisfied)
     assert_sql_contains(&query.sql, &["SELECT", "FROM users"]);
@@ -203,8 +191,19 @@ fn filter_empty_and() {
 
 #[test]
 fn filter_empty_or() {
-    let query = SelectBuilder::<User>::new().r#where(Filter::Or(vec![])).build().unwrap();
+    let query = SelectBuilder::<User>::new().r#where(Filter::or([])).build().unwrap();
 
     // Empty OR should be treated as false (no conditions satisfied)
     assert_sql_contains(&query.sql, &["SELECT", "FROM users"]);
+}
+
+#[test]
+fn filter_in_table_combinator() {
+    // `in_table` qualifies all unqualified column refs (recursively) with the given table.
+    let query = SelectBuilder::<User>::new()
+        .r#where(Filter::eq("active", true).in_table("users"))
+        .build()
+        .unwrap();
+
+    assert_sql_contains(&query.sql, &["WHERE", "users.active", "=", "$1"]);
 }

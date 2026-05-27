@@ -204,76 +204,48 @@ fn value_to_wasi_datatype(value: Value) -> Result<DataType> {
     Ok(data_type)
 }
 
-// Inbound conversion
-impl FetchValue for bool {
-    fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_bool(row_field(row, col)?)
-    }
+// Inbound conversion: generate FetchValue impls for primitive types whose DataType variant
+// is a direct `Option<T>` carrying the value (no parsing required).
+macro_rules! fetch {
+    ($($ty:ty => $variant:ident),* $(,)?) => {$(
+        impl FetchValue for $ty {
+            fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
+                match row_field(row, col)? {
+                    DataType::$variant(Some(v)) => Ok(v.clone()),
+                    _ => bail!(concat!("expected ", stringify!($variant), " data type")),
+                }
+            }
+        }
+    )*};
 }
 
-impl FetchValue for i32 {
-    fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_i32(row_field(row, col)?)
-    }
-}
-
-impl FetchValue for i64 {
-    fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_i64(row_field(row, col)?)
-    }
-}
-
-impl FetchValue for u32 {
-    fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_u32(row_field(row, col)?)
-    }
-}
-
-impl FetchValue for u64 {
-    fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_u64(row_field(row, col)?)
-    }
-}
-
-impl FetchValue for f32 {
-    fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_f32(row_field(row, col)?)
-    }
-}
-
-impl FetchValue for f64 {
-    fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_f64(row_field(row, col)?)
-    }
-}
-
-impl FetchValue for String {
-    fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_string(row_field(row, col)?)
-    }
-}
-
-impl FetchValue for Vec<u8> {
-    fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_binary(row_field(row, col)?)
-    }
+fetch! {
+    bool    => Boolean,
+    i32     => Int32,
+    i64     => Int64,
+    u32     => Uint32,
+    u64     => Uint64,
+    f32     => Float,
+    f64     => Double,
+    String  => Str,
+    Vec<u8> => Binary,
 }
 
 impl FetchValue for DateTime<Utc> {
     fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_timestamp(row_field(row, col)?)
+        parse_timestamp(row_field(row, col)?)
     }
 }
 
 impl FetchValue for NaiveDate {
     fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_date(row_field(row, col)?)
+        parse_date(row_field(row, col)?)
     }
 }
 
 impl FetchValue for serde_json::Value {
     fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        as_json(row_field(row, col)?)
+        parse_json(row_field(row, col)?)
     }
 }
 
@@ -312,70 +284,7 @@ const fn is_null(value: &DataType) -> bool {
     )
 }
 
-fn as_bool(value: &DataType) -> Result<bool> {
-    match value {
-        DataType::Boolean(Some(v)) => Ok(*v),
-        _ => bail!("expected boolean data type"),
-    }
-}
-
-fn as_i32(value: &DataType) -> Result<i32> {
-    match value {
-        DataType::Int32(Some(v)) => Ok(*v),
-        _ => bail!("expected int32 data type"),
-    }
-}
-
-fn as_i64(value: &DataType) -> Result<i64> {
-    match value {
-        DataType::Int64(Some(v)) => Ok(*v),
-        _ => bail!("expected int64 data type"),
-    }
-}
-
-fn as_u32(value: &DataType) -> Result<u32> {
-    match value {
-        DataType::Uint32(Some(v)) => Ok(*v),
-        _ => bail!("expected uint32 data type"),
-    }
-}
-
-fn as_u64(value: &DataType) -> Result<u64> {
-    match value {
-        DataType::Uint64(Some(v)) => Ok(*v),
-        _ => bail!("expected uint64 data type"),
-    }
-}
-
-fn as_f32(value: &DataType) -> Result<f32> {
-    match value {
-        DataType::Float(Some(v)) => Ok(*v),
-        _ => bail!("expected float data type"),
-    }
-}
-
-fn as_f64(value: &DataType) -> Result<f64> {
-    match value {
-        DataType::Double(Some(v)) => Ok(*v),
-        _ => bail!("expected double data type"),
-    }
-}
-
-fn as_string(value: &DataType) -> Result<String> {
-    match value {
-        DataType::Str(Some(raw)) => Ok(raw.clone()),
-        _ => bail!("expected string data type"),
-    }
-}
-
-fn as_binary(value: &DataType) -> Result<Vec<u8>> {
-    match value {
-        DataType::Binary(Some(bytes)) => Ok(bytes.clone()),
-        _ => bail!("expected binary data type"),
-    }
-}
-
-fn as_timestamp(value: &DataType) -> Result<DateTime<Utc>> {
+fn parse_timestamp(value: &DataType) -> Result<DateTime<Utc>> {
     match value {
         DataType::Timestamp(Some(raw)) => {
             if let Ok(parsed) = DateTime::parse_from_rfc3339(raw) {
@@ -394,7 +303,7 @@ fn as_timestamp(value: &DataType) -> Result<DateTime<Utc>> {
     }
 }
 
-fn as_date(value: &DataType) -> Result<NaiveDate> {
+fn parse_date(value: &DataType) -> Result<NaiveDate> {
     match value {
         DataType::Date(Some(raw)) => NaiveDate::parse_from_str(raw, "%Y-%m-%d")
             .map_err(|_e| anyhow!("unsupported date: {raw}; expected \"%Y-%m-%d\" format")),
@@ -402,7 +311,7 @@ fn as_date(value: &DataType) -> Result<NaiveDate> {
     }
 }
 
-fn as_json(value: &DataType) -> Result<serde_json::Value> {
+fn parse_json(value: &DataType) -> Result<serde_json::Value> {
     match value {
         DataType::Str(Some(raw)) => Ok(serde_json::from_str(raw)?),
         DataType::Binary(Some(bytes)) => Ok(serde_json::from_slice(bytes)?),
@@ -556,36 +465,46 @@ mod tests {
     }
 
     #[test]
-    fn as_type_conversion_errors() {
-        // Test that as_* functions properly reject wrong types
+    fn fetch_value_rejects_wrong_types() {
+        use crate::Field;
 
-        // as_bool should reject non-boolean
-        let result = as_bool(&DataType::Int32(Some(1)));
-        result.unwrap_err();
+        fn one_field_row(value: DataType) -> Row {
+            Row {
+                fields: vec![Field {
+                    name: "x".to_string(),
+                    value,
+                }],
+                index: "0".to_string(),
+            }
+        }
 
-        // as_i32 should reject non-int32
-        let result = as_i32(&DataType::Str(Some("not a number".to_string())));
-        result.unwrap_err();
+        // bool should reject non-boolean
+        bool::fetch(&one_field_row(DataType::Int32(Some(1))), "x").unwrap_err();
 
-        // as_i64 should reject non-int64
-        let result = as_i64(&DataType::Boolean(Some(true)));
-        result.unwrap_err();
+        // i32 should reject non-int32
+        i32::fetch(&one_field_row(DataType::Str(Some("not a number".to_string()))), "x")
+            .unwrap_err();
 
-        // as_string should reject non-string
-        let result = as_string(&DataType::Int32(Some(42)));
-        result.unwrap_err();
+        // i64 should reject non-int64
+        i64::fetch(&one_field_row(DataType::Boolean(Some(true))), "x").unwrap_err();
 
-        // as_binary should reject non-binary
-        let result = as_binary(&DataType::Str(Some("not binary".to_string())));
-        result.unwrap_err();
+        // String should reject non-string
+        String::fetch(&one_field_row(DataType::Int32(Some(42))), "x").unwrap_err();
 
-        // as_timestamp should reject invalid date format
-        let result = as_timestamp(&DataType::Timestamp(Some("invalid date".to_string())));
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("unsupported timestamp"));
+        // Vec<u8> should reject non-binary
+        <Vec<u8>>::fetch(&one_field_row(DataType::Str(Some("not binary".to_string()))), "x")
+            .unwrap_err();
 
-        // as_json should reject invalid JSON
-        let result = as_json(&DataType::Str(Some("not json".to_string())));
-        result.unwrap_err();
+        // DateTime<Utc> should reject invalid timestamp format
+        let err = DateTime::<Utc>::fetch(
+            &one_field_row(DataType::Timestamp(Some("invalid".into()))),
+            "x",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("unsupported timestamp"));
+
+        // serde_json::Value should reject invalid JSON
+        serde_json::Value::fetch(&one_field_row(DataType::Str(Some("not json".to_string()))), "x")
+            .unwrap_err();
     }
 }

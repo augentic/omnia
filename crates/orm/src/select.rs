@@ -2,10 +2,10 @@ use std::marker::PhantomData;
 
 use sea_query::{Alias, ColumnRef, IntoIden, Order, SimpleExpr};
 
-use crate::entity::{Entity, values_to_wasi_datatypes};
+use crate::entity::Entity;
 use crate::filter::Filter;
 use crate::join::{Join, JoinSpec};
-use crate::query::{Query, QueryBuilder};
+use crate::query::{Query, finish};
 
 /// Builder for constructing SELECT queries.
 pub struct SelectBuilder<M: Entity> {
@@ -148,17 +148,7 @@ impl<M: Entity> SelectBuilder<M> {
             statement.order_by(column, order);
         }
 
-        let (sql, values) = statement.build(QueryBuilder::default());
-        let params = values_to_wasi_datatypes(values)?;
-
-        tracing::debug!(
-            table = M::TABLE,
-            sql = %sql,
-            param_count = params.len(),
-            "SelectBuilder generated SQL"
-        );
-
-        Ok(Query { sql, params })
+        finish(&statement, M::TABLE, "select")
     }
 }
 

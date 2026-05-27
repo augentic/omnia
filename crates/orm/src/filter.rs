@@ -2,149 +2,125 @@ use sea_query::{Expr, ExprTrait, SimpleExpr, Value};
 
 use crate::select::table_column;
 
+/// A column reference, optionally qualified with a table name.
+///
+/// When `table` is `None`, the column resolves against the entity's default table
+/// at query-build time. Use [`ColRef::qualified`] to bind a specific table for
+/// joined queries.
+#[derive(Debug, Clone, Copy)]
+pub struct ColRef {
+    /// Optional table qualifier. When `None`, the entity's default table is used at build time.
+    pub table: Option<&'static str>,
+    /// Column name.
+    pub column: &'static str,
+}
+
+impl ColRef {
+    /// Constructs a column reference with no table qualifier (resolved against the entity's
+    /// default table at build time).
+    #[must_use]
+    pub const fn unqualified(column: &'static str) -> Self {
+        Self { table: None, column }
+    }
+
+    /// Constructs an explicitly table-qualified column reference.
+    #[must_use]
+    pub const fn qualified(table: &'static str, column: &'static str) -> Self {
+        Self {
+            table: Some(table),
+            column,
+        }
+    }
+
+    fn resolve(self, default_table: &'static str) -> SimpleExpr {
+        Expr::col(table_column(self.table.unwrap_or(default_table), self.column)).into()
+    }
+}
+
+/// Comparison operators for [`Filter::Compare`] and [`Filter::ColCompare`].
+#[derive(Debug, Clone, Copy)]
+pub enum CmpOp {
+    /// `=`
+    Eq,
+    /// `!=`
+    Ne,
+    /// `>`
+    Gt,
+    /// `>=`
+    Gte,
+    /// `<`
+    Lt,
+    /// `<=`
+    Lte,
+}
+
 /// Filter represents database predicates without exposing ``SeaQuery`` types to guest code.
 ///
 /// Values are stored internally as ``sea_query::Value`` but guest code never imports ``SeaQuery``.
 /// Instead, guests use natural Rust types (i32, String, ``DateTime<Utc>``) which convert via From.
-///
-/// For filters with optional table parameter: None uses the entity's default table,
-/// ``Some("table_name")`` uses the specified table (useful for joins).
 #[derive(Debug, Clone)]
 pub enum Filter {
-    // Using static lifetimes since table and column names are compile time constants
-    /// [table.]column = value
-    Eq(Option<&'static str>, &'static str, Value),
-    /// [table.]column != value
-    Ne(Option<&'static str>, &'static str, Value),
-    /// [table.]column > value
-    Gt(Option<&'static str>, &'static str, Value),
-    /// [table.]column >= value
-    Gte(Option<&'static str>, &'static str, Value),
-    /// [table.]column < value
-    Lt(Option<&'static str>, &'static str, Value),
-    /// [table.]column <= value
-    Lte(Option<&'static str>, &'static str, Value),
-    /// [table.]column IN (values)
-    In(Option<&'static str>, &'static str, Vec<Value>),
-    /// [table.]column NOT IN (values)
-    NotIn(Option<&'static str>, &'static str, Vec<Value>),
-    /// [table.]column IS NULL
-    IsNull(Option<&'static str>, &'static str),
-    /// [table.]column IS NOT NULL
-    IsNotNull(Option<&'static str>, &'static str),
-    /// [table.]column LIKE pattern
-    Like(Option<&'static str>, &'static str, String),
-    /// [table.]column NOT LIKE pattern
-    NotLike(Option<&'static str>, &'static str, String),
-    /// [table.]column BETWEEN low AND high
-    Between(Option<&'static str>, &'static str, Value, Value),
-    /// [table.]column NOT BETWEEN low AND high
-    NotBetween(Option<&'static str>, &'static str, Value, Value),
-    /// [table.]column = ANY(values)
-    Any(Option<&'static str>, &'static str, Vec<Value>),
-    /// Column-to-column comparison: table1.col1 = table2.col2
-    ColEq(&'static str, &'static str, &'static str, &'static str),
-    /// Column-to-column comparison: table1.col1 != table2.col2
-    ColNe(&'static str, &'static str, &'static str, &'static str),
-    /// Column-to-column comparison: table1.col1 > table2.col2
-    ColGt(&'static str, &'static str, &'static str, &'static str),
-    /// Column-to-column comparison: table1.col1 >= table2.col2
-    ColGte(&'static str, &'static str, &'static str, &'static str),
-    /// Column-to-column comparison: table1.col1 < table2.col2
-    ColLt(&'static str, &'static str, &'static str, &'static str),
-    /// Column-to-column comparison: table1.col1 <= table2.col2
-    ColLte(&'static str, &'static str, &'static str, &'static str),
-    /// Logical AND of multiple filters
+    /// `col <op> value`
+    Compare(ColRef, CmpOp, Value),
+    /// `col IN (values)` or `col NOT IN (values)` when negated.
+    In(ColRef, Vec<Value>, bool),
+    /// `col IS NULL` or `col IS NOT NULL` when negated.
+    Null(ColRef, bool),
+    /// `col LIKE pattern` or `col NOT LIKE pattern` when negated.
+    Like(ColRef, String, bool),
+    /// `col BETWEEN low AND high` or `col NOT BETWEEN low AND high` when negated.
+    Between(ColRef, Value, Value, bool),
+    /// Column-to-column comparison, e.g. `table1.col1 <op> table2.col2`.
+    ColCompare(ColRef, CmpOp, ColRef),
+    /// Logical AND of multiple filters.
     And(Vec<Self>),
-    /// Logical OR of multiple filters
+    /// Logical OR of multiple filters.
     Or(Vec<Self>),
-    /// Logical NOT of a filter
+    /// Logical NOT of a filter.
     Not(Box<Self>),
 }
 
-impl Filter {
-    /// Helper to resolve a column reference with optional table qualifier
-    fn resolve_column(
-        tbl: Option<&'static str>, col: &'static str, default_table: &'static str,
-    ) -> SimpleExpr {
-        Expr::col(table_column(tbl.unwrap_or(default_table), col)).into()
+fn apply_cmp(left: SimpleExpr, op: CmpOp, right: SimpleExpr) -> SimpleExpr {
+    match op {
+        CmpOp::Eq => left.eq(right),
+        CmpOp::Ne => left.ne(right),
+        CmpOp::Gt => left.gt(right),
+        CmpOp::Gte => left.gte(right),
+        CmpOp::Lt => left.lt(right),
+        CmpOp::Lte => left.lte(right),
     }
+}
 
-    /// Convert Filter to ``SeaQuery`` ``SimpleExpr`` using the specified table name.
+impl Filter {
+    /// Convert Filter to ``SeaQuery`` ``SimpleExpr`` using the specified default table.
     #[must_use]
     pub fn into_expr(self, default_table: &'static str) -> SimpleExpr {
         match self {
-            Self::Eq(tbl, col, val) => Self::resolve_column(tbl, col, default_table).eq(val),
-            Self::Ne(tbl, col, val) => Self::resolve_column(tbl, col, default_table).ne(val),
-            Self::Gt(tbl, col, val) => Self::resolve_column(tbl, col, default_table).gt(val),
-            Self::Gte(tbl, col, val) => Self::resolve_column(tbl, col, default_table).gte(val),
-            Self::Lt(tbl, col, val) => Self::resolve_column(tbl, col, default_table).lt(val),
-            Self::Lte(tbl, col, val) => Self::resolve_column(tbl, col, default_table).lte(val),
-            Self::In(tbl, col, vals) => Self::resolve_column(tbl, col, default_table).is_in(vals),
-            Self::NotIn(tbl, col, vals) => {
-                Self::resolve_column(tbl, col, default_table).is_not_in(vals)
+            Self::Compare(col, op, val) => apply_cmp(col.resolve(default_table), op, val.into()),
+            Self::In(col, vals, false) => col.resolve(default_table).is_in(vals),
+            Self::In(col, vals, true) => col.resolve(default_table).is_not_in(vals),
+            Self::Null(col, false) => col.resolve(default_table).is_null(),
+            Self::Null(col, true) => col.resolve(default_table).is_not_null(),
+            Self::Like(col, pattern, false) => col.resolve(default_table).like(pattern),
+            Self::Like(col, pattern, true) => col.resolve(default_table).not_like(pattern),
+            Self::Between(col, low, high, false) => col.resolve(default_table).between(low, high),
+            Self::Between(col, low, high, true) => {
+                col.resolve(default_table).not_between(low, high)
             }
-            Self::IsNull(tbl, col) => Self::resolve_column(tbl, col, default_table).is_null(),
-            Self::IsNotNull(tbl, col) => {
-                Self::resolve_column(tbl, col, default_table).is_not_null()
-            }
-            Self::Like(tbl, col, pattern) => {
-                Self::resolve_column(tbl, col, default_table).like(pattern)
-            }
-            Self::NotLike(tbl, col, pattern) => {
-                Self::resolve_column(tbl, col, default_table).not_like(pattern)
-            }
-            Self::Between(tbl, col, low, high) => {
-                Self::resolve_column(tbl, col, default_table).between(low, high)
-            }
-            Self::NotBetween(tbl, col, low, high) => {
-                Self::resolve_column(tbl, col, default_table).not_between(low, high)
-            }
-            Self::Any(tbl, col, vals) => {
-                // Note: SeaQuery's ANY requires subquery; this is simplified for direct value array
-                Self::resolve_column(tbl, col, default_table).is_in(vals)
-            }
-            Self::ColEq(tbl1, col1, tbl2, col2) => {
-                let left = table_column(tbl1, col1);
-                let right = table_column(tbl2, col2);
-                Expr::col(left).eq(Expr::col(right))
-            }
-            Self::ColNe(tbl1, col1, tbl2, col2) => {
-                let left = table_column(tbl1, col1);
-                let right = table_column(tbl2, col2);
-                Expr::col(left).ne(Expr::col(right))
-            }
-            Self::ColGt(tbl1, col1, tbl2, col2) => {
-                let left = table_column(tbl1, col1);
-                let right = table_column(tbl2, col2);
-                Expr::col(left).gt(Expr::col(right))
-            }
-            Self::ColGte(tbl1, col1, tbl2, col2) => {
-                let left = table_column(tbl1, col1);
-                let right = table_column(tbl2, col2);
-                Expr::col(left).gte(Expr::col(right))
-            }
-            Self::ColLt(tbl1, col1, tbl2, col2) => {
-                let left = table_column(tbl1, col1);
-                let right = table_column(tbl2, col2);
-                Expr::col(left).lt(Expr::col(right))
-            }
-            Self::ColLte(tbl1, col1, tbl2, col2) => {
-                let left = table_column(tbl1, col1);
-                let right = table_column(tbl2, col2);
-                Expr::col(left).lte(Expr::col(right))
+            Self::ColCompare(left, op, right) => {
+                apply_cmp(left.resolve(default_table), op, right.resolve(default_table))
             }
             Self::And(filters) => {
                 let mut exprs = filters.into_iter().map(|f| f.into_expr(default_table));
                 exprs.next().map_or_else(
-                    || Expr::value(true), // no filters, so all conditions satisfied, hence `true`
+                    || Expr::value(true),
                     |first| exprs.fold(first, sea_query::SimpleExpr::and),
                 )
             }
             Self::Or(filters) => {
                 let mut exprs = filters.into_iter().map(|f| f.into_expr(default_table));
                 exprs.next().map_or_else(
-                    || Expr::value(false), // no filters, so 0 conditions satisfied, hence `false`
+                    || Expr::value(false),
                     |first| exprs.fold(first, sea_query::SimpleExpr::or),
                 )
             }
@@ -152,174 +128,228 @@ impl Filter {
         }
     }
 
-    // Convenience constructors for common single-table queries
-
-    /// Creates an equality filter (column = value).
+    /// Qualifies an existing filter with a specific table name.
+    ///
+    /// Applies recursively to nested combinators (`And`/`Or`/`Not`). For column-to-column
+    /// comparisons (`ColCompare`) the table qualifiers are already explicit and this is a no-op.
     #[must_use]
-    pub fn eq(col: &'static str, val: impl Into<Value>) -> Self {
-        Self::Eq(None, col, val.into())
+    pub fn in_table(self, table: &'static str) -> Self {
+        let set = |col: ColRef| ColRef {
+            table: Some(table),
+            ..col
+        };
+        match self {
+            Self::Compare(col, op, v) => Self::Compare(set(col), op, v),
+            Self::In(col, vals, neg) => Self::In(set(col), vals, neg),
+            Self::Null(col, neg) => Self::Null(set(col), neg),
+            Self::Like(col, pat, neg) => Self::Like(set(col), pat, neg),
+            Self::Between(col, lo, hi, neg) => Self::Between(set(col), lo, hi, neg),
+            Self::And(filters) => {
+                Self::And(filters.into_iter().map(|f| f.in_table(table)).collect())
+            }
+            Self::Or(filters) => Self::Or(filters.into_iter().map(|f| f.in_table(table)).collect()),
+            Self::Not(inner) => Self::Not(Box::new(inner.in_table(table))),
+            other @ Self::ColCompare(..) => other,
+        }
     }
+}
 
-    /// Creates an inequality filter (column != value).
-    #[must_use]
-    pub fn ne(col: &'static str, val: impl Into<Value>) -> Self {
-        Self::Ne(None, col, val.into())
-    }
+macro_rules! cmp_ctor {
+    ($name:ident, $op:ident, $doc:literal) => {
+        #[doc = $doc]
+        #[must_use]
+        pub fn $name(col: &'static str, val: impl Into<Value>) -> Self {
+            Self::Compare(ColRef::unqualified(col), CmpOp::$op, val.into())
+        }
+    };
+}
 
-    /// Creates a greater-than filter (column > value).
-    #[must_use]
-    pub fn gt(col: &'static str, val: impl Into<Value>) -> Self {
-        Self::Gt(None, col, val.into())
-    }
+macro_rules! table_cmp_ctor {
+    ($name:ident, $op:ident, $doc:literal) => {
+        #[doc = $doc]
+        #[must_use]
+        pub fn $name(table: &'static str, col: &'static str, val: impl Into<Value>) -> Self {
+            Self::Compare(ColRef::qualified(table, col), CmpOp::$op, val.into())
+        }
+    };
+}
 
-    /// Creates a greater-than-or-equal filter (column >= value).
-    #[must_use]
-    pub fn gte(col: &'static str, val: impl Into<Value>) -> Self {
-        Self::Gte(None, col, val.into())
-    }
+macro_rules! list_ctor {
+    ($name:ident, $negated:literal, $doc:literal) => {
+        #[doc = $doc]
+        #[must_use]
+        pub fn $name(col: &'static str, vals: impl IntoIterator<Item = impl Into<Value>>) -> Self {
+            Self::In(ColRef::unqualified(col), vals.into_iter().map(Into::into).collect(), $negated)
+        }
+    };
+}
 
-    /// Creates a less-than filter (column < value).
-    #[must_use]
-    pub fn lt(col: &'static str, val: impl Into<Value>) -> Self {
-        Self::Lt(None, col, val.into())
-    }
+macro_rules! table_list_ctor {
+    ($name:ident, $negated:literal, $doc:literal) => {
+        #[doc = $doc]
+        #[must_use]
+        pub fn $name(
+            table: &'static str, col: &'static str,
+            vals: impl IntoIterator<Item = impl Into<Value>>,
+        ) -> Self {
+            Self::In(
+                ColRef::qualified(table, col),
+                vals.into_iter().map(Into::into).collect(),
+                $negated,
+            )
+        }
+    };
+}
 
-    /// Creates a less-than-or-equal filter (column <= value).
-    #[must_use]
-    pub fn lte(col: &'static str, val: impl Into<Value>) -> Self {
-        Self::Lte(None, col, val.into())
-    }
+impl Filter {
+    // Convenience constructors for common single-table queries.
 
-    /// Creates an IN filter (column IN (values)).
-    #[must_use]
-    pub fn r#in(col: &'static str, vals: impl IntoIterator<Item = impl Into<Value>>) -> Self {
-        Self::In(None, col, vals.into_iter().map(Into::into).collect())
-    }
+    cmp_ctor!(eq, Eq, "Creates an equality filter (column = value).");
 
-    /// Creates a NOT IN filter (column NOT IN (values)).
-    #[must_use]
-    pub fn not_in(col: &'static str, vals: impl IntoIterator<Item = impl Into<Value>>) -> Self {
-        Self::NotIn(None, col, vals.into_iter().map(Into::into).collect())
-    }
+    cmp_ctor!(ne, Ne, "Creates an inequality filter (column != value).");
+
+    cmp_ctor!(gt, Gt, "Creates a greater-than filter (column > value).");
+
+    cmp_ctor!(gte, Gte, "Creates a greater-than-or-equal filter (column >= value).");
+
+    cmp_ctor!(lt, Lt, "Creates a less-than filter (column < value).");
+
+    cmp_ctor!(lte, Lte, "Creates a less-than-or-equal filter (column <= value).");
+
+    list_ctor!(r#in, false, "Creates an IN filter (column IN (values)).");
+
+    list_ctor!(not_in, true, "Creates a NOT IN filter (column NOT IN (values)).");
+
+    // Table-qualified variants. Equivalent to constructing the unqualified filter and
+    // calling `.in_table(...)` on the result, but kept as named ctors for ergonomics.
+
+    table_cmp_ctor!(
+        table_eq,
+        Eq,
+        "Creates a table-qualified equality filter (table.column = value)."
+    );
+
+    table_cmp_ctor!(
+        table_ne,
+        Ne,
+        "Creates a table-qualified inequality filter (table.column != value)."
+    );
+
+    table_cmp_ctor!(
+        table_gt,
+        Gt,
+        "Creates a table-qualified greater-than filter (table.column > value)."
+    );
+
+    table_cmp_ctor!(
+        table_gte,
+        Gte,
+        "Creates a table-qualified greater-than-or-equal filter (table.column >= value)."
+    );
+
+    table_cmp_ctor!(
+        table_lt,
+        Lt,
+        "Creates a table-qualified less-than filter (table.column < value)."
+    );
+
+    table_cmp_ctor!(
+        table_lte,
+        Lte,
+        "Creates a table-qualified less-than-or-equal filter (table.column <= value)."
+    );
+
+    table_list_ctor!(
+        table_in,
+        false,
+        "Creates a table-qualified IN filter (table.column IN (values))."
+    );
+
+    table_list_ctor!(
+        table_not_in,
+        true,
+        "Creates a table-qualified NOT IN filter (table.column NOT IN (values))."
+    );
 
     /// Creates an IS NULL filter.
     #[must_use]
     pub const fn is_null(col: &'static str) -> Self {
-        Self::IsNull(None, col)
+        Self::Null(ColRef::unqualified(col), false)
     }
 
     /// Creates an IS NOT NULL filter.
     #[must_use]
     pub const fn is_not_null(col: &'static str) -> Self {
-        Self::IsNotNull(None, col)
+        Self::Null(ColRef::unqualified(col), true)
     }
 
     /// Creates a LIKE filter with pattern matching.
     #[must_use]
     pub const fn like(col: &'static str, pattern: String) -> Self {
-        Self::Like(None, col, pattern)
+        Self::Like(ColRef::unqualified(col), pattern, false)
     }
 
     /// Creates a NOT LIKE filter with pattern matching.
     #[must_use]
     pub const fn not_like(col: &'static str, pattern: String) -> Self {
-        Self::NotLike(None, col, pattern)
+        Self::Like(ColRef::unqualified(col), pattern, true)
     }
 
     /// Creates a BETWEEN filter (column BETWEEN low AND high).
     #[must_use]
     pub fn between(col: &'static str, low: impl Into<Value>, high: impl Into<Value>) -> Self {
-        Self::Between(None, col, low.into(), high.into())
+        Self::Between(ColRef::unqualified(col), low.into(), high.into(), false)
     }
 
     /// Creates a NOT BETWEEN filter.
     #[must_use]
     pub fn not_between(col: &'static str, low: impl Into<Value>, high: impl Into<Value>) -> Self {
-        Self::NotBetween(None, col, low.into(), high.into())
+        Self::Between(ColRef::unqualified(col), low.into(), high.into(), true)
     }
 
-    /// Creates an ANY filter (column = ANY(values)).
+    // Logical combinators (alternatives to the bare enum variants).
+
+    /// Combines filters with logical AND. Empty list evaluates to `true`.
     #[must_use]
-    pub fn any(col: &'static str, vals: impl IntoIterator<Item = impl Into<Value>>) -> Self {
-        Self::Any(None, col, vals.into_iter().map(Into::into).collect())
+    pub fn and(filters: impl IntoIterator<Item = Self>) -> Self {
+        Self::And(filters.into_iter().collect())
     }
 
-    // Table-qualified variants for joined queries
-
-    /// Creates a table-qualified equality filter (table.column = value).
+    /// Combines filters with logical OR. Empty list evaluates to `false`.
     #[must_use]
-    pub fn table_eq(table: &'static str, col: &'static str, val: impl Into<Value>) -> Self {
-        Self::Eq(Some(table), col, val.into())
+    pub fn or(filters: impl IntoIterator<Item = Self>) -> Self {
+        Self::Or(filters.into_iter().collect())
     }
 
-    /// Creates a table-qualified inequality filter (table.column != value).
+    /// Logically negates a filter.
     #[must_use]
-    pub fn table_ne(table: &'static str, col: &'static str, val: impl Into<Value>) -> Self {
-        Self::Ne(Some(table), col, val.into())
-    }
-
-    /// Creates a table-qualified greater-than filter (table.column > value).
-    #[must_use]
-    pub fn table_gt(table: &'static str, col: &'static str, val: impl Into<Value>) -> Self {
-        Self::Gt(Some(table), col, val.into())
-    }
-
-    /// Creates a table-qualified greater-than-or-equal filter (table.column >= value).
-    #[must_use]
-    pub fn table_gte(table: &'static str, col: &'static str, val: impl Into<Value>) -> Self {
-        Self::Gte(Some(table), col, val.into())
-    }
-
-    /// Creates a table-qualified less-than filter (table.column < value).
-    #[must_use]
-    pub fn table_lt(table: &'static str, col: &'static str, val: impl Into<Value>) -> Self {
-        Self::Lt(Some(table), col, val.into())
-    }
-
-    /// Creates a table-qualified less-than-or-equal filter (table.column <= value).
-    #[must_use]
-    pub fn table_lte(table: &'static str, col: &'static str, val: impl Into<Value>) -> Self {
-        Self::Lte(Some(table), col, val.into())
-    }
-
-    /// Creates a table-qualified IN filter (table.column IN (values)).
-    #[must_use]
-    pub fn table_in(
-        table: &'static str, col: &'static str, vals: impl IntoIterator<Item = impl Into<Value>>,
-    ) -> Self {
-        Self::In(Some(table), col, vals.into_iter().map(Into::into).collect())
-    }
-
-    /// Creates a table-qualified NOT IN filter (table.column NOT IN (values)).
-    #[must_use]
-    pub fn table_not_in(
-        table: &'static str, col: &'static str, vals: impl IntoIterator<Item = impl Into<Value>>,
-    ) -> Self {
-        Self::NotIn(Some(table), col, vals.into_iter().map(Into::into).collect())
+    #[allow(clippy::should_implement_trait)] // logical NOT ctor; std::ops::Not signature is unsuitable
+    pub fn not(filter: Self) -> Self {
+        Self::Not(Box::new(filter))
     }
 
     /// Creates a table-qualified IS NULL filter (table.column IS NULL).
     #[must_use]
     pub const fn table_is_null(table: &'static str, col: &'static str) -> Self {
-        Self::IsNull(Some(table), col)
+        Self::Null(ColRef::qualified(table, col), false)
     }
 
     /// Creates a table-qualified IS NOT NULL filter (table.column IS NOT NULL).
     #[must_use]
     pub const fn table_is_not_null(table: &'static str, col: &'static str) -> Self {
-        Self::IsNotNull(Some(table), col)
+        Self::Null(ColRef::qualified(table, col), true)
     }
 
     /// Creates a table-qualified LIKE filter (table.column LIKE pattern).
     #[must_use]
     pub const fn table_like(table: &'static str, col: &'static str, pattern: String) -> Self {
-        Self::Like(Some(table), col, pattern)
+        Self::Like(ColRef::qualified(table, col), pattern, false)
     }
 
     /// Creates a table-qualified NOT LIKE filter (table.column NOT LIKE pattern).
     #[must_use]
     pub const fn table_not_like(table: &'static str, col: &'static str, pattern: String) -> Self {
-        Self::NotLike(Some(table), col, pattern)
+        Self::Like(ColRef::qualified(table, col), pattern, true)
     }
 
     /// Creates a table-qualified BETWEEN filter (table.column BETWEEN low AND high).
@@ -327,7 +357,7 @@ impl Filter {
     pub fn table_between(
         table: &'static str, col: &'static str, low: impl Into<Value>, high: impl Into<Value>,
     ) -> Self {
-        Self::Between(Some(table), col, low.into(), high.into())
+        Self::Between(ColRef::qualified(table, col), low.into(), high.into(), false)
     }
 
     /// Creates a table-qualified NOT BETWEEN filter.
@@ -335,63 +365,19 @@ impl Filter {
     pub fn table_not_between(
         table: &'static str, col: &'static str, low: impl Into<Value>, high: impl Into<Value>,
     ) -> Self {
-        Self::NotBetween(Some(table), col, low.into(), high.into())
+        Self::Between(ColRef::qualified(table, col), low.into(), high.into(), true)
     }
 
-    /// Creates a table-qualified ANY filter (table.column = ANY(values)).
-    #[must_use]
-    pub fn table_any(
-        table: &'static str, col: &'static str, vals: impl IntoIterator<Item = impl Into<Value>>,
-    ) -> Self {
-        Self::Any(Some(table), col, vals.into_iter().map(Into::into).collect())
-    }
-
-    /// Compare two columns for equality.
-    /// Table names are required since we're comparing columns from different tables.
+    /// Compares two columns for equality (`table1.col1 = table2.col2`).
+    /// Used primarily in JOIN conditions.
     #[must_use]
     pub const fn col_eq(
         table1: &'static str, col1: &'static str, table2: &'static str, col2: &'static str,
     ) -> Self {
-        Self::ColEq(table1, col1, table2, col2)
-    }
-
-    /// Creates a column-to-column inequality filter (table1.col1 != table2.col2).
-    #[must_use]
-    pub const fn col_ne(
-        table1: &'static str, col1: &'static str, table2: &'static str, col2: &'static str,
-    ) -> Self {
-        Self::ColNe(table1, col1, table2, col2)
-    }
-
-    /// Creates a column-to-column greater-than filter (table1.col1 > table2.col2).
-    #[must_use]
-    pub const fn col_gt(
-        table1: &'static str, col1: &'static str, table2: &'static str, col2: &'static str,
-    ) -> Self {
-        Self::ColGt(table1, col1, table2, col2)
-    }
-
-    /// Creates a column-to-column greater-than-or-equal filter (table1.col1 >= table2.col2).
-    #[must_use]
-    pub const fn col_gte(
-        table1: &'static str, col1: &'static str, table2: &'static str, col2: &'static str,
-    ) -> Self {
-        Self::ColGte(table1, col1, table2, col2)
-    }
-
-    /// Creates a column-to-column less-than filter (table1.col1 < table2.col2).
-    #[must_use]
-    pub const fn col_lt(
-        table1: &'static str, col1: &'static str, table2: &'static str, col2: &'static str,
-    ) -> Self {
-        Self::ColLt(table1, col1, table2, col2)
-    }
-
-    /// Creates a column-to-column less-than-or-equal filter (table1.col1 <= table2.col2).
-    #[must_use]
-    pub const fn col_lte(
-        table1: &'static str, col1: &'static str, table2: &'static str, col2: &'static str,
-    ) -> Self {
-        Self::ColLte(table1, col1, table2, col2)
+        Self::ColCompare(
+            ColRef::qualified(table1, col1),
+            CmpOp::Eq,
+            ColRef::qualified(table2, col2),
+        )
     }
 }

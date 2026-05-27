@@ -3,9 +3,9 @@ use std::marker::PhantomData;
 use anyhow::Result;
 use sea_query::{Alias, SimpleExpr};
 
-use crate::entity::{Entity, values_to_wasi_datatypes};
+use crate::entity::Entity;
 use crate::filter::Filter;
-use crate::query::{Query, QueryBuilder};
+use crate::query::{Query, finish};
 
 /// Builder for constructing DELETE queries.
 pub struct DeleteBuilder<M: Entity> {
@@ -62,16 +62,6 @@ impl<M: Entity> DeleteBuilder<M> {
             statement.returning_col(Alias::new(column));
         }
 
-        let (sql, values) = statement.build(QueryBuilder::default());
-        let params = values_to_wasi_datatypes(values)?;
-
-        tracing::debug!(
-            table = M::TABLE,
-            sql = %sql,
-            param_count = params.len(),
-            "DeleteBuilder generated SQL"
-        );
-
-        Ok(Query { sql, params })
+        finish(&statement, M::TABLE, "delete")
     }
 }
