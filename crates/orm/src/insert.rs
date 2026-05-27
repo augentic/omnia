@@ -3,23 +3,24 @@ use std::marker::PhantomData;
 use anyhow::Result;
 use sea_query::{Alias, OnConflict, SimpleExpr, Value};
 
-use crate::entity::{Entity, EntityValues, values_to_wasi_datatypes};
-use crate::query::{Query, QueryBuilder};
+use crate::entity::{Entity, EntityValues};
+use crate::query::{Query, finish};
 
 /// Builder for constructing INSERT queries.
 pub struct InsertBuilder<M: Entity> {
     values: Vec<(&'static str, Value)>,
-    conflict: Option<ConflictStrategy>,
+    conflict: Option<Conflict>,
     _marker: PhantomData<M>,
 }
 
-enum ConflictStrategy {
-    DoNothing { target: ConflictTarget },
-    DoUpdate { target: ConflictTarget, columns: Vec<&'static str> },
+struct Conflict {
+    target: Vec<&'static str>,
+    action: ConflictAction,
 }
 
-enum ConflictTarget {
-    Columns(Vec<&'static str>),
+enum ConflictAction {
+    Nothing,
+    Update(Vec<&'static str>),
 }
 
 impl<M: Entity> Default for InsertBuilder<M> {
@@ -62,68 +63,53 @@ impl<M: Entity> InsertBuilder<M> {
         self
     }
 
-    /// Handle conflicts on specified columns. Call ``do_update()`` or ``do_nothing()`` after.
+    /// Handle conflicts on the specified target columns. The default action is `DO NOTHING`;
+    /// chain [`Self::do_update`] or [`Self::do_update_all`] to switch to `DO UPDATE`.
     #[must_use]
     pub fn on_conflict_columns(mut self, columns: &[&'static str]) -> Self {
-        self.conflict = Some(ConflictStrategy::DoNothing {
-            target: ConflictTarget::Columns(columns.to_vec()),
+        self.conflict = Some(Conflict {
+            target: columns.to_vec(),
+            action: ConflictAction::Nothing,
         });
         self
     }
 
-    /// Shorthand for single column conflict
+    /// Shorthand for a single-column conflict target.
     #[must_use]
     pub fn on_conflict(self, column: &'static str) -> Self {
         self.on_conflict_columns(&[column])
     }
 
-    /// On conflict, do nothing (ignore the insert)
+    /// On conflict, do nothing. (Default action for [`Self::on_conflict_columns`]; provided
+    /// for explicit-verb call sites.)
     #[must_use]
     pub fn do_nothing(mut self) -> Self {
-        if let Some(ConflictStrategy::DoNothing { target }) = self.conflict.take() {
-            self.conflict = Some(ConflictStrategy::DoNothing { target });
+        if let Some(conflict) = self.conflict.as_mut() {
+            conflict.action = ConflictAction::Nothing;
         }
         self
     }
 
-    /// On conflict, update the specified columns with excluded (new) values
+    /// On conflict, update the specified columns with excluded (new) values.
     #[must_use]
     pub fn do_update(mut self, columns: &[&'static str]) -> Self {
-        if let Some(conflict) = self.conflict.take() {
-            let target = match conflict {
-                ConflictStrategy::DoNothing { target }
-                | ConflictStrategy::DoUpdate { target, .. } => target,
-            };
-            self.conflict = Some(ConflictStrategy::DoUpdate {
-                target,
-                columns: columns.to_vec(),
-            });
+        if let Some(conflict) = self.conflict.as_mut() {
+            conflict.action = ConflictAction::Update(columns.to_vec());
         }
         self
     }
 
-    /// On conflict, update all columns except the conflict target
+    /// On conflict, update all columns except the conflict target.
     #[must_use]
     pub fn do_update_all(mut self) -> Self {
-        if let Some(conflict) = self.conflict.take() {
-            let target = match conflict {
-                ConflictStrategy::DoNothing { target }
-                | ConflictStrategy::DoUpdate { target, .. } => target,
-            };
-            let conflict_cols: Vec<&str> = match &target {
-                ConflictTarget::Columns(cols) => cols.clone(),
-            };
+        if let Some(conflict) = self.conflict.as_mut() {
             let update_cols: Vec<&'static str> = self
                 .values
                 .iter()
                 .map(|(col, _)| *col)
-                .filter(|col| !conflict_cols.contains(col))
+                .filter(|col| !conflict.target.contains(col))
                 .collect();
-
-            self.conflict = Some(ConflictStrategy::DoUpdate {
-                target,
-                columns: update_cols,
-            });
+            conflict.action = ConflictAction::Update(update_cols);
         }
         self
     }
@@ -144,34 +130,19 @@ impl<M: Entity> InsertBuilder<M> {
         statement.columns(columns);
         statement.values_panic(row);
 
-        // Handle ON CONFLICT clause
-        if let Some(conflict) = self.conflict {
-            let on_conflict = match conflict {
-                ConflictStrategy::DoNothing { target } => {
-                    let ConflictTarget::Columns(cols) = target;
-                    OnConflict::columns(cols.into_iter().map(Alias::new)).do_nothing().to_owned()
+        if let Some(Conflict { target, action }) = self.conflict {
+            let mut on_conflict = OnConflict::columns(target.into_iter().map(Alias::new));
+            match action {
+                ConflictAction::Nothing => {
+                    on_conflict.do_nothing();
                 }
-                ConflictStrategy::DoUpdate { target, columns } => {
-                    let ConflictTarget::Columns(cols) = target;
-                    OnConflict::columns(cols.into_iter().map(Alias::new))
-                        .update_columns(columns.into_iter().map(Alias::new))
-                        .to_owned()
+                ConflictAction::Update(cols) => {
+                    on_conflict.update_columns(cols.into_iter().map(Alias::new));
                 }
-            };
-
+            }
             statement.on_conflict(on_conflict);
         }
 
-        let (sql, values) = statement.build(QueryBuilder::default());
-        let params = values_to_wasi_datatypes(values)?;
-
-        tracing::debug!(
-            table = M::TABLE,
-            sql = %sql,
-            param_count = params.len(),
-            "InsertBuilder generated SQL"
-        );
-
-        Ok(Query { sql, params })
+        finish(&statement, M::TABLE, "insert")
     }
 }

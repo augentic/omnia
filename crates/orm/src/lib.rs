@@ -12,9 +12,9 @@ mod update;
 
 pub use delete::DeleteBuilder;
 pub use entity::{Entity, EntityValues, FetchValue};
-pub use filter::Filter;
+pub use filter::{CmpOp, ColRef, Filter};
 pub use insert::InsertBuilder;
-pub use join::Join;
+pub use join::{Join, JoinKind};
 // Re-export basic WASI SQL types for use in query parameters and custom value conversions.
 pub use omnia_wasi_sql::{DataType, Field, Row};
 pub use select::SelectBuilder;

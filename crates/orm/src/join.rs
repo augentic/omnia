@@ -14,61 +14,26 @@ pub struct Join {
 /// Join types supported by the ORM.
 #[derive(Clone, Copy)]
 pub enum JoinKind {
+    /// `INNER JOIN`
     Inner,
+    /// `LEFT JOIN`
     Left,
+    /// `RIGHT JOIN`
     Right,
+    /// `FULL OUTER JOIN`
     Full,
 }
 
 impl Join {
-    /// Creates a JOIN (defaults to INNER JOIN).
+    /// Creates a JOIN of the given kind.
     #[must_use]
-    pub const fn new(table: &'static str, on: Filter) -> Self {
+    pub const fn new(table: &'static str, kind: JoinKind, on: Filter) -> Self {
         Self {
             table,
             alias: None,
             on,
-            kind: JoinKind::Inner,
+            kind,
         }
-    }
-
-    /// Creates a LEFT JOIN.
-    #[must_use]
-    pub const fn left(table: &'static str, on: Filter) -> Self {
-        Self {
-            table,
-            alias: None,
-            on,
-            kind: JoinKind::Left,
-        }
-    }
-
-    /// Creates a RIGHT JOIN.
-    #[must_use]
-    pub const fn right(table: &'static str, on: Filter) -> Self {
-        Self {
-            table,
-            alias: None,
-            on,
-            kind: JoinKind::Right,
-        }
-    }
-
-    /// Creates a FULL OUTER JOIN.
-    #[must_use]
-    pub const fn full(table: &'static str, on: Filter) -> Self {
-        Self {
-            table,
-            alias: None,
-            on,
-            kind: JoinKind::Full,
-        }
-    }
-
-    /// Creates an INNER JOIN (alias for `new`).
-    #[must_use]
-    pub const fn inner(table: &'static str, on: Filter) -> Self {
-        Self::new(table, on)
     }
 
     /// Sets an alias for the joined table.
@@ -88,6 +53,26 @@ impl Join {
             kind: self.kind.into_join_type(),
         }
     }
+}
+
+macro_rules! join_ctor {
+    ($name:ident, $kind:ident, $doc:literal) => {
+        #[doc = $doc]
+        #[must_use]
+        pub const fn $name(table: &'static str, on: Filter) -> Self {
+            Self::new(table, JoinKind::$kind, on)
+        }
+    };
+}
+
+impl Join {
+    join_ctor!(inner, Inner, "Creates an INNER JOIN.");
+
+    join_ctor!(left, Left, "Creates a LEFT JOIN.");
+
+    join_ctor!(right, Right, "Creates a RIGHT JOIN.");
+
+    join_ctor!(full, Full, "Creates a FULL OUTER JOIN.");
 }
 
 impl JoinKind {

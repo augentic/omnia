@@ -1,36 +1,47 @@
+use anyhow::Result;
 use sea_query::backend::{
     EscapeBuilder, OperLeftAssocDecider, PrecedenceDecider, QuotedBuilder, TableRefBuilder,
 };
 use sea_query::prepare::SqlWriter;
-use sea_query::{BinOper, Oper, Quote, SimpleExpr, SubQueryStatement, Value};
+use sea_query::{
+    BinOper, Oper, QueryStatementBuilder, Quote, SimpleExpr, SubQueryStatement, Value,
+};
 
 use crate::DataType;
+use crate::entity::values_to_wasi_datatypes;
 
 pub struct Query {
     pub sql: String,
     pub params: Vec<DataType>,
 }
 
-pub struct QueryBuilder {
-    pub quote: Quote,
-    pub placeholder: &'static str, // "?" or "$"
-    pub numbered: bool,            // false for "?", true for "$1, $2, ..."
+/// Finalises a `SeaQuery` statement into a [`Query`]: renders the SQL, converts the bound
+/// values to WASI [`DataType`]s, and emits a uniform `tracing::debug!` event.
+pub fn finish<S: QueryStatementBuilder>(
+    stmt: &S, table: &'static str, kind: &'static str,
+) -> Result<Query> {
+    let (sql, values) = stmt.build_any(&QueryBuilder);
+    let params = values_to_wasi_datatypes(values)?;
+
+    tracing::debug!(
+        table,
+        kind,
+        sql = %sql,
+        param_count = params.len(),
+        "ORM query built",
+    );
+
+    Ok(Query { sql, params })
 }
 
-impl Default for QueryBuilder {
-    // should work for `Postgres` and `Sqlite`
-    fn default() -> Self {
-        Self {
-            quote: Quote::new(b'"'),
-            placeholder: "$",
-            numbered: true,
-        }
-    }
-}
+/// Backend-agnostic `SeaQuery` query builder configured for Postgres/SQLite dialects:
+/// double-quoted identifiers and numbered placeholders (`$1`, `$2`, ...).
+#[derive(Default)]
+pub struct QueryBuilder;
 
 impl QuotedBuilder for QueryBuilder {
     fn quote(&self) -> Quote {
-        self.quote
+        Quote::new(b'"')
     }
 }
 
@@ -73,6 +84,6 @@ impl sea_query::backend::QueryBuilder for QueryBuilder {
     }
 
     fn placeholder(&self) -> (&str, bool) {
-        (self.placeholder, self.numbered)
+        ("$", true)
     }
 }

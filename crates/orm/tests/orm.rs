@@ -96,7 +96,7 @@ fn select_with_ad_hoc_join() {
 #[test]
 fn select_with_or_filter() {
     let query = SelectBuilder::<User>::new()
-        .r#where(Filter::Or(vec![Filter::eq("active", true), Filter::gt("id", 100)]))
+        .r#where(Filter::or([Filter::eq("active", true), Filter::gt("id", 100)]))
         .build()
         .unwrap();
 
@@ -112,7 +112,7 @@ fn select_with_or_filter() {
 #[test]
 fn select_with_not_filter() {
     let query = SelectBuilder::<User>::new()
-        .r#where(Filter::Not(Box::new(Filter::eq("active", false))))
+        .r#where(Filter::not(Filter::eq("active", false)))
         .build()
         .unwrap();
 

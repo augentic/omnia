@@ -218,9 +218,6 @@ Filter::not_between("age", 13, 19)
 // IN clause
 Filter::in("status", vec!["active", "pending", "approved"])
 Filter::not_in("user_id", vec![1, 2, 3])
-
-// ANY clause (for array columns)
-Filter::any("tags", vec!["rust", "programming"])
 ```
 
 ### Table-Qualified Filters (for Joins)
@@ -230,14 +227,16 @@ Filter::any("tags", vec!["rust", "programming"])
 Filter::table_eq("posts", "published", true)
 Filter::table_gt("users", "age", 18)
 Filter::table_like("posts", "title", "%rust%")
+
+// Or qualify an existing filter (applies recursively to nested combinators):
+Filter::eq("published", true).in_table("posts")
 ```
 
 ### Column-to-Column Comparisons
 
 ```rust
-// Compare columns from different tables
+// Compare columns from different tables (used in JOIN ON clauses).
 Filter::col_eq("posts", "author_id", "users", "id")
-Filter::col_gt("orders", "total", "users", "credit_limit")
 ```
 
 ### Logical Combinators
