@@ -2,11 +2,7 @@
 //!
 //! This module implements a host-side service for `wasi:http`
 
-mod circuit_breaker;
-pub use circuit_breaker::{BreakerConfig, BucketRegistry, CircuitBreaker};
 mod default_impl;
-mod outbound;
-mod retry;
 mod server;
 
 use anyhow::Result;

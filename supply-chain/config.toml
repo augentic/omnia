@@ -118,10 +118,6 @@ criteria = "safe-to-deploy"
 version = "1.5.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.criterion]]
-version = "0.3.5"
-criteria = "safe-to-run"
-
 [[exemptions.crossbeam-channel]]
 version = "0.5.4"
 criteria = "safe-to-deploy"
@@ -172,10 +168,6 @@ criteria = "safe-to-run"
 
 [[exemptions.digest]]
 version = "0.10.7"
-criteria = "safe-to-deploy"
-
-[[exemptions.either]]
-version = "1.16.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.fallible-iterator]]
@@ -257,10 +249,6 @@ criteria = "safe-to-deploy"
 [[exemptions.gimli]]
 version = "0.33.0"
 criteria = "safe-to-deploy"
-
-[[exemptions.half]]
-version = "2.7.1"
-criteria = "safe-to-run"
 
 [[exemptions.hashbrown]]
 version = "0.14.2"
@@ -473,18 +461,6 @@ criteria = "safe-to-deploy"
 [[exemptions.pkg-config]]
 version = "0.3.33"
 criteria = "safe-to-deploy"
-
-[[exemptions.plotters]]
-version = "0.3.7"
-criteria = "safe-to-run"
-
-[[exemptions.plotters-backend]]
-version = "0.3.7"
-criteria = "safe-to-run"
-
-[[exemptions.plotters-svg]]
-version = "0.3.7"
-criteria = "safe-to-run"
 
 [[exemptions.polodb-librocksdb-sys]]
 version = "9.0.0-alpha.1"
