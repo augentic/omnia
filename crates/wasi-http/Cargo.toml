@@ -30,9 +30,7 @@ fromenv.workspace = true
 futures.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
-parking_lot.workspace = true
-rand.workspace = true
-reqwest = "0.13.4"
+reqwest = "0.13.2"
 tokio.workspace = true
 wasmtime = { workspace = true, features = ["component-model-async"] }
 wasmtime-wasi.workspace = true
@@ -46,7 +44,7 @@ futures.workspace = true
 http-body.workspace = true
 http-body-util.workspace = true
 percent-encoding = "2.3.2"
-rkyv = "0.8.16"
+rkyv = "0.8.15"
 serde.workspace = true
 serde_json.workspace = true
 tower.workspace = true
@@ -54,10 +52,5 @@ wasip3.workspace = true
 omnia-wasi-keyvalue.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-criterion = { version = "0.8.2", features = ["html_reports"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 wiremock = "0.6.5"
-
-[[bench]]
-name = "circuit_breaker"
-harness = false
