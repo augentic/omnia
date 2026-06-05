@@ -6,6 +6,22 @@ Unreleased
 
 ### Changed
 
+<!-- Release notes generated using configuration in .github/release.yaml at main -->
+
+## What's Changed
+* Upgrade to wasmtime 43/44 by @karthik-phl in https://github.com/augentic/omnia/pull/188
+* Removed HOST header altogether in favor of `reqwest` setting it by @karthik-phl in https://github.com/augentic/omnia/pull/189
+* Upgrade to wasmtime 44 by @karthik-phl in https://github.com/augentic/omnia/pull/190
+* Omnia 0.31.0 by @karthik-phl in https://github.com/augentic/omnia/pull/191
+* Bump to 0.31.0 by @github-actions[bot] in https://github.com/augentic/omnia/pull/192
+* Circuit breaker and retry support in wasi-http by @karthik-phl in https://github.com/augentic/omnia/pull/193
+* Upgraded to Rust 1.95 and updated rusqlite to fix audit issues by @karthik-phl in https://github.com/augentic/omnia/pull/194
+* Minor orm deduplications by @andrewweston in https://github.com/augentic/omnia/pull/195
+* Remove wasi-http resiliency constructs by @karthik-phl in https://github.com/augentic/omnia/pull/196
+
+
+**Full Changelog**: https://github.com/augentic/omnia/compare/v0.30.0...v0.32.0
+
 ---
 
 Release notes for previous releases can be found on the respective release
