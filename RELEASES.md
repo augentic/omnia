@@ -2,25 +2,25 @@
 
 Unreleased
 
-### Added
-
 ### Changed
+
+- Upgraded the wasmtime stack (`wasmtime`, `wasmtime-wasi`, `wasmtime-wasi-config`,
+  `wasmtime-wasi-http`, `wasmtime-wasi-io`) from v44 to v45.0.0
+- Upgraded MSRV from Rust 1.93 to 1.95
+- Upgraded OpenTelemetry to 0.32 (`opentelemetry`, `opentelemetry_sdk`) and
+  `tracing-opentelemetry` to 0.33
+- Upgraded `rusqlite` from 0.39 to 0.40 (and `libsqlite3-sys` from 0.37 to
+  0.38) to address `cargo audit` findings; bumped `rkyv` from 0.8.15 to 0.8.16
+- WASM32 gating has been relaxed for the ORM crate and some refactoring done to
+  reduce boilerplate
 
 <!-- Release notes generated using configuration in .github/release.yaml at main -->
 
 ## What's Changed
-* Upgrade to wasmtime 43/44 by @karthik-phl in https://github.com/augentic/omnia/pull/188
-* Removed HOST header altogether in favor of `reqwest` setting it by @karthik-phl in https://github.com/augentic/omnia/pull/189
-* Upgrade to wasmtime 44 by @karthik-phl in https://github.com/augentic/omnia/pull/190
-* Omnia 0.31.0 by @karthik-phl in https://github.com/augentic/omnia/pull/191
-* Bump to 0.31.0 by @github-actions[bot] in https://github.com/augentic/omnia/pull/192
-* Circuit breaker and retry support in wasi-http by @karthik-phl in https://github.com/augentic/omnia/pull/193
 * Upgraded to Rust 1.95 and updated rusqlite to fix audit issues by @karthik-phl in https://github.com/augentic/omnia/pull/194
 * Minor orm deduplications by @andrewweston in https://github.com/augentic/omnia/pull/195
-* Remove wasi-http resiliency constructs by @karthik-phl in https://github.com/augentic/omnia/pull/196
 
-
-**Full Changelog**: https://github.com/augentic/omnia/compare/v0.30.0...v0.32.0
+**Full Changelog**: https://github.com/augentic/omnia/compare/v0.31.0...v0.32.0
 
 ---
 
