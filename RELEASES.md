@@ -1,4 +1,4 @@
-## 0.32.0
+## 0.33.0
 
 Unreleased
 
@@ -12,6 +12,7 @@ Release notes for previous releases can be found on the respective release
 branches of the repository.
 
 <!-- ARCHIVE_START -->
+* [0.33.x](https://github.com/augentic/omnia/blob/release-0.33.0/RELEASES.md)
 * [0.32.x](https://github.com/augentic/omnia/blob/release-0.32.0/RELEASES.md)
 
 - [0.31.x](https://github.com/augentic/omnia/blob/release-0.31.0/RELEASES.md)
