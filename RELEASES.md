@@ -6,6 +6,23 @@ Unreleased
 
 ### Changed
 
+<!-- Release notes generated using configuration in .github/release.yaml at main -->
+
+## What's Changed
+* Bump to 0.31.0 by @github-actions[bot] in https://github.com/augentic/omnia/pull/192
+* Circuit breaker and retry support in wasi-http by @karthik-phl in https://github.com/augentic/omnia/pull/193
+* Upgraded to Rust 1.95 and updated rusqlite to fix audit issues by @karthik-phl in https://github.com/augentic/omnia/pull/194
+* Minor orm deduplications by @andrewweston in https://github.com/augentic/omnia/pull/195
+* Remove wasi-http resiliency constructs by @karthik-phl in https://github.com/augentic/omnia/pull/196
+* Bump to 0.33.0 by @augentic-releases[bot] in https://github.com/augentic/omnia/pull/197
+* Updated supply chain for 0.33 release by @karthik-phl in https://github.com/augentic/omnia/pull/198
+* Updated wasip3 to resolve guest deadlock by @karthik-phl in https://github.com/augentic/omnia/pull/199
+
+## New Contributors
+* @augentic-releases[bot] made their first contribution in https://github.com/augentic/omnia/pull/197
+
+**Full Changelog**: https://github.com/augentic/omnia/compare/v0.31.0...v0.33.0
+
 ---
 
 Release notes for previous releases can be found on the respective release
