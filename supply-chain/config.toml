@@ -267,7 +267,7 @@ version = "0.14.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.hashlink]]
-version = "0.7.0"
+version = "0.12.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.hermit-abi]]
@@ -375,7 +375,7 @@ version = "0.8.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.libsqlite3-sys]]
-version = "0.38.0"
+version = "0.38.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.libz-sys]]
@@ -499,11 +499,11 @@ version = "1.11.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.prost]]
-version = "0.14.3"
+version = "0.14.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.prost-derive]]
-version = "0.14.3"
+version = "0.14.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.prost-types]]
@@ -575,7 +575,7 @@ version = "0.1.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.rusqlite]]
-version = "0.40.0"
+version = "0.40.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustc-hash]]
