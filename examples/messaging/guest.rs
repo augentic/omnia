@@ -28,6 +28,7 @@ use std::time::Instant;
 use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
+use http_body_util::Full;
 use omnia_sdk::HttpResult;
 use omnia_wasi_messaging::types::{Client, Error, Message};
 use omnia_wasi_messaging::{producer, request_reply};
@@ -47,7 +48,8 @@ impl Guest for Http {
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new()
             .route("/pub-sub", post(pub_sub))
-            .route("/request-reply", post(request_reply_handler));
+            .route("/request-reply", post(request_reply_handler))
+            .route("/upstream", post(upstream_handler));
         omnia_wasi_http::serve(router, request).await
     }
 }
@@ -76,7 +78,7 @@ async fn request_reply_handler(body: Bytes) -> Json<Value> {
     let client = Client::connect("default".to_string()).await.expect("should connect");
     let message = Message::new(&body);
     let reply = wit_bindgen::block_on(async move {
-        request_reply::request(&client, "a".to_string(), &message, None).await
+        request_reply::request(&client, "c".to_string(), &message, None).await
     })
     .expect("should reply");
 
@@ -84,6 +86,11 @@ async fn request_reply_handler(body: Bytes) -> Json<Value> {
     let data_str = String::from_utf8_lossy(&data);
 
     Json(json!({"reply": data_str}))
+}
+
+/// Simple echo endpoint used as the target for outbound HTTP from the messaging handler.
+async fn upstream_handler(body: Bytes) -> Json<Value> {
+    Json(json!({"echo": String::from_utf8_lossy(&body)}))
 }
 
 // ----------------------------------------------------------------------------
@@ -153,10 +160,33 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
                     .map_err(|e| Error::Other(format!("not utf8: {e}")))?;
                 tracing::debug!("message received on topic 'c': {data_str}");
 
-                let mut resp = b"Hello from topic c: ".to_vec();
-                resp.extend(data);
+                // Outbound HTTP from the messaging handler — verifies that
+                // wasip3's wit-bindgen dependency matches the workspace's.
+                // A mismatch causes a deadlock: the body_writer spawned by
+                // wasip3 lands in a different SPAWNED queue than the active
+                // executor.
+                let upstream = http::Request::builder()
+                    .method(http::Method::POST)
+                    .uri("http://localhost:8080/upstream")
+                    .body(Full::new(Bytes::from(data_str.to_string())))
+                    .expect("failed to build request");
 
-                let reply = Message::new(&resp);
+                println!("calling upstream HTTP from messaging handler");
+                let upstream_body = match omnia_wasi_http::handle(upstream).await {
+                    Ok(resp) => {
+                        println!("upstream responded: {}", resp.status());
+                        String::from_utf8_lossy(resp.body()).to_string()
+                    }
+                    Err(e) => {
+                        println!("upstream call failed: {e}");
+                        format!("error: {e}")
+                    }
+                };
+
+                let combined =
+                    format!("Hello from topic c | input: {data_str} | upstream: {upstream_body}");
+
+                let reply = Message::new(combined.as_bytes());
                 request_reply::reply(&message, reply).await?;
             }
             _ => {
