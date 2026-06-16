@@ -114,7 +114,7 @@ use std::future::{Future, IntoFuture};
 use std::marker::PhantomData;
 use std::pin::Pin;
 
-use http::HeaderMap;
+use http::{HeaderMap, HeaderValue};
 
 use crate::api::reply::Reply;
 use crate::api::{Body, Client, Provider};
@@ -185,7 +185,7 @@ pub struct RequestSet<R: Handler<P>, P: Provider>(R, PhantomData<P>);
 #[derive(Debug)]
 pub struct RequestHandler<R, O, P> {
     request: R,
-    headers: HeaderMap<String>,
+    headers: HeaderMap<HeaderValue>,
     owner: O,
     provider: P,
 }
@@ -284,7 +284,7 @@ impl<O, P> RequestHandler<NoRequest, O, P> {
 impl<R, O, P> RequestHandler<R, O, P> {
     /// Set request headers.
     #[must_use]
-    pub fn headers(mut self, headers: HeaderMap<String>) -> Self {
+    pub fn headers(mut self, headers: HeaderMap<HeaderValue>) -> Self {
         self.headers = headers;
         self
     }
@@ -352,5 +352,5 @@ pub struct Context<'a, P: Provider> {
     pub provider: &'a P,
 
     /// Request headers (typed).
-    pub headers: &'a HeaderMap<String>,
+    pub headers: &'a HeaderMap<HeaderValue>,
 }

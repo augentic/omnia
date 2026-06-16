@@ -2,8 +2,8 @@ use anyhow::{Result, anyhow, bail};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use sea_query::{Order, Value, Values};
 
-use crate::join::Join;
-use crate::{DataType, Row};
+use super::join::Join;
+use super::{DataType, Row};
 
 /// Trait for types that can be extracted from database rows.
 ///
@@ -16,106 +16,6 @@ pub trait FetchValue: Sized {
     ///
     /// Returns an error if the column is missing or the value cannot be converted to the target type.
     fn fetch(row: &Row, col: &str) -> anyhow::Result<Self>;
-}
-
-/// Declares an ORM entity with automatic `Entity` trait implementation.
-///
-/// # Examples
-///
-/// ```ignore
-/// entity! {
-///     table = "posts",
-///     pub struct Post {
-///         pub id: i32,
-///         pub title: String,
-///     }
-/// }
-/// ```
-#[macro_export]
-macro_rules! entity {
-    // Full form: columns + joins + struct (single code-generation arm)
-    (
-        table = $table:literal,
-        columns = [$( ($col_table:literal, $col_name:literal, $col_field:literal) ),* $(,)?],
-        joins = [$($join:expr),* $(,)?],
-        $(#[$meta:meta])*
-        pub struct $struct_name:ident {
-            $(
-                $(#[$field_meta:meta])*
-                pub $field_name:ident : $field_type:ty
-            ),* $(,)?
-        }
-    ) => {
-        #[allow(missing_docs)]
-        $(#[$meta])*
-        pub struct $struct_name {
-            $(
-                $(#[$field_meta])*
-                pub $field_name : $field_type
-            ),*
-        }
-
-        impl $crate::Entity for $struct_name {
-            const TABLE: &'static str = $table;
-
-            fn projection() -> &'static [&'static str] {
-                &[ $( stringify!($field_name) ),* ]
-            }
-
-            fn joins() -> Vec<Join> {
-                vec![$($join),*]
-            }
-
-            fn column_specs() -> Vec<(&'static str, &'static str, &'static str)> {
-                vec![$( ($col_field, $col_table, $col_name) ),*]
-            }
-
-            fn from_row(row: &$crate::Row) -> anyhow::Result<Self> {
-                Ok(Self {
-                    $(
-                        $field_name: <$field_type as $crate::FetchValue>::fetch(row, stringify!($field_name))?,
-                    )*
-                })
-            }
-        }
-
-        impl $crate::EntityValues for $struct_name {
-            fn __to_values(&self) -> Vec<(&'static str, $crate::__private::Value)> {
-                vec![
-                    $(
-                        (stringify!($field_name), self.$field_name.clone().into()),
-                    )*
-                ]
-            }
-        }
-    };
-
-    // Joins only → forward with empty columns
-    (
-        table = $table:literal,
-        joins = [$($join:expr),* $(,)?],
-        $($rest:tt)*
-    ) => {
-        $crate::entity! {
-            table = $table,
-            columns = [],
-            joins = [$($join),*],
-            $($rest)*
-        }
-    };
-
-    // Bare table → forward with empty columns and joins
-    (
-        table = $table:literal,
-        $($rest:tt)*
-    ) => {
-        $crate::entity! {
-            table = $table,
-            columns = [],
-            joins = [],
-            $($rest)*
-        }
-    };
 }
 
 /// Trait for database entities with metadata for query building.
@@ -169,7 +69,6 @@ pub struct OrderSpec {
     pub order: Order,
 }
 
-// Outbound conversion (internal use only)
 pub fn values_to_wasi_datatypes(values: Values) -> Result<Vec<DataType>> {
     values.into_iter().map(value_to_wasi_datatype).collect()
 }
@@ -204,8 +103,6 @@ fn value_to_wasi_datatype(value: Value) -> Result<DataType> {
     Ok(data_type)
 }
 
-// Inbound conversion: generate FetchValue impls for primitive types whose DataType variant
-// is a direct `Option<T>` carrying the value (no parsing required).
 macro_rules! fetch {
     ($($ty:ty => $variant:ident),* $(,)?) => {$(
         impl FetchValue for $ty {
@@ -327,11 +224,9 @@ mod tests {
     fn value_to_wasi_numeric_types() {
         use sea_query::Value;
 
-        // Boolean
         let val_bool = value_to_wasi_datatype(Value::Bool(Some(true))).unwrap();
         assert!(matches!(val_bool, DataType::Boolean(Some(true))));
 
-        // Integers
         let val_int = value_to_wasi_datatype(Value::Int(Some(42))).unwrap();
         assert!(matches!(val_int, DataType::Int32(Some(42))));
 
@@ -344,7 +239,6 @@ mod tests {
         let val_small = value_to_wasi_datatype(Value::SmallInt(Some(1000))).unwrap();
         assert!(matches!(val_small, DataType::Int32(Some(1000))));
 
-        // Unsigned integers
         let val_tiny_u = value_to_wasi_datatype(Value::TinyUnsigned(Some(10))).unwrap();
         assert!(matches!(val_tiny_u, DataType::Uint32(Some(10))));
 
@@ -357,7 +251,6 @@ mod tests {
         let val_big_u = value_to_wasi_datatype(Value::BigUnsigned(Some(10000))).unwrap();
         assert!(matches!(val_big_u, DataType::Uint64(Some(10000))));
 
-        // Floats
         let val_f32 = value_to_wasi_datatype(Value::Float(Some(std::f32::consts::PI))).unwrap();
         assert!(
             matches!(val_f32, DataType::Float(Some(v)) if (v - std::f32::consts::PI).abs() < 0.01)
@@ -373,7 +266,6 @@ mod tests {
     fn value_to_wasi_string_types() {
         use sea_query::Value;
 
-        // String
         let val_string =
             value_to_wasi_datatype(Value::String(Some(Box::new("test".to_string())))).unwrap();
         if let DataType::Str(Some(s)) = &val_string {
@@ -382,7 +274,6 @@ mod tests {
             panic!("Expected string");
         }
 
-        // Char
         let val_char = value_to_wasi_datatype(Value::Char(Some('A'))).unwrap();
         if let DataType::Str(Some(s)) = &val_char {
             assert_eq!(s, "A");
@@ -408,7 +299,6 @@ mod tests {
         use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
         use sea_query::Value;
 
-        // Date
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
         let val_date = value_to_wasi_datatype(Value::ChronoDate(Some(Box::new(date)))).unwrap();
         if let DataType::Date(Some(s)) = &val_date {
@@ -417,7 +307,6 @@ mod tests {
             panic!("Expected date string");
         }
 
-        // Time
         let time = NaiveTime::from_hms_opt(10, 30, 45).unwrap();
         let val_time = value_to_wasi_datatype(Value::ChronoTime(Some(Box::new(time)))).unwrap();
         if let DataType::Time(Some(s)) = &val_time {
@@ -426,7 +315,6 @@ mod tests {
             panic!("Expected time string");
         }
 
-        // DateTime
         let dt = NaiveDateTime::parse_from_str("2024-01-15 10:30:45", "%Y-%m-%d %H:%M:%S").unwrap();
         let val_dt = value_to_wasi_datatype(Value::ChronoDateTime(Some(Box::new(dt)))).unwrap();
         if let DataType::Timestamp(Some(s)) = &val_dt {
@@ -435,7 +323,6 @@ mod tests {
             panic!("Expected timestamp string");
         }
 
-        // DateTime<Utc>
         let dt_utc: DateTime<Utc> = "2024-01-15T10:30:45Z".parse().unwrap();
         let val_dt_utc =
             value_to_wasi_datatype(Value::ChronoDateTimeUtc(Some(Box::new(dt_utc)))).unwrap();
@@ -466,7 +353,7 @@ mod tests {
 
     #[test]
     fn fetch_value_rejects_wrong_types() {
-        use crate::Field;
+        use omnia_wasi_sql::Field;
 
         fn one_field_row(value: DataType) -> Row {
             Row {
@@ -478,24 +365,18 @@ mod tests {
             }
         }
 
-        // bool should reject non-boolean
         bool::fetch(&one_field_row(DataType::Int32(Some(1))), "x").unwrap_err();
 
-        // i32 should reject non-int32
         i32::fetch(&one_field_row(DataType::Str(Some("not a number".to_string()))), "x")
             .unwrap_err();
 
-        // i64 should reject non-int64
         i64::fetch(&one_field_row(DataType::Boolean(Some(true))), "x").unwrap_err();
 
-        // String should reject non-string
         String::fetch(&one_field_row(DataType::Int32(Some(42))), "x").unwrap_err();
 
-        // Vec<u8> should reject non-binary
         <Vec<u8>>::fetch(&one_field_row(DataType::Str(Some("not binary".to_string()))), "x")
             .unwrap_err();
 
-        // DateTime<Utc> should reject invalid timestamp format
         let err = DateTime::<Utc>::fetch(
             &one_field_row(DataType::Timestamp(Some("invalid".into()))),
             "x",
@@ -503,7 +384,6 @@ mod tests {
         .unwrap_err();
         assert!(err.to_string().contains("unsupported timestamp"));
 
-        // serde_json::Value should reject invalid JSON
         serde_json::Value::fetch(&one_field_row(DataType::Str(Some("not json".to_string()))), "x")
             .unwrap_err();
     }

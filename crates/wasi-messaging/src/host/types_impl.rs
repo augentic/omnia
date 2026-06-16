@@ -74,7 +74,7 @@ impl HostMessageWithStore for WasiMessaging {
             .ctx
             .set_content_type(Arc::clone(&message.0), content_type)
             .map_err(wasmtime::Error::from_anyhow)?;
-        store.table.push(updated_message)?;
+        *store.table.get_mut(&self_)? = MessageProxy(updated_message);
         Ok(())
     }
 
@@ -96,7 +96,7 @@ impl HostMessageWithStore for WasiMessaging {
             .ctx
             .set_payload(Arc::clone(&message.0), data)
             .map_err(wasmtime::Error::from_anyhow)?;
-        store.table.push(updated_message)?;
+        *store.table.get_mut(&self_)? = MessageProxy(updated_message);
         Ok(())
     }
 
@@ -121,7 +121,7 @@ impl HostMessageWithStore for WasiMessaging {
             .ctx
             .add_metadata(Arc::clone(&message.0), key, value)
             .map_err(wasmtime::Error::from_anyhow)?;
-        store.table.push(updated_message)?;
+        *store.table.get_mut(&self_)? = MessageProxy(updated_message);
         Ok(())
     }
 
@@ -135,7 +135,7 @@ impl HostMessageWithStore for WasiMessaging {
             .ctx
             .set_metadata(Arc::clone(&message.0), meta.into())
             .map_err(wasmtime::Error::from_anyhow)?;
-        store.table.push(updated_message)?;
+        *store.table.get_mut(&self_)? = MessageProxy(updated_message);
         Ok(())
     }
 
@@ -149,7 +149,7 @@ impl HostMessageWithStore for WasiMessaging {
             .ctx
             .remove_metadata(Arc::clone(&message.0), key)
             .map_err(wasmtime::Error::from_anyhow)?;
-        store.table.push(updated_message)?;
+        *store.table.get_mut(&self_)? = MessageProxy(updated_message);
         Ok(())
     }
 

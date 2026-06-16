@@ -4,6 +4,7 @@
 pub mod api;
 mod capabilities;
 mod error;
+pub mod orm;
 
 /// JSON document store types and helpers (from `omnia-wasi-jsondb`).
 pub mod document_store {
