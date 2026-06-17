@@ -71,13 +71,15 @@ impl From<crate::Error> for HttpError {
 
 impl From<anyhow::Error> for HttpError {
     fn from(e: anyhow::Error) -> Self {
-        match e.downcast::<crate::Error>() {
-            Ok(sdk_err) => Self::from(sdk_err),
-            Err(e) => Self {
-                status: StatusCode::INTERNAL_SERVER_ERROR,
-                error: format!("{e}, caused by: {}", e.root_cause()),
-                content_type: None,
-            },
+        if e.downcast_ref::<crate::Error>().is_some() {
+            let sdk_err: crate::Error = e.into();
+            return Self::from(sdk_err);
+        }
+
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            error: format!("{e}, caused by: {}", e.root_cause()),
+            content_type: None,
         }
     }
 }
@@ -109,7 +111,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn json_error_into_response_sets_json_content_type() {
+    async fn json_error_sets_content_type() {
         let body =
             serde_json::json!({"error": "invalid_request", "error_description": "missing field"});
         let err = crate::Error::Json {
@@ -162,5 +164,27 @@ mod tests {
             ct.is_none_or(|v| v != "application/json"),
             "generic anyhow errors should not produce JSON content type"
         );
+    }
+
+    #[tokio::test]
+    async fn wrapped_json_error_preserves_body() {
+        use anyhow::Context;
+
+        let body = serde_json::json!({"error": "invalid_request", "error_description": "bad"});
+        let err = crate::Error::Json {
+            code: "422".to_string(),
+            body: body.clone(),
+        };
+
+        let anyhow_err: anyhow::Error = Err::<(), _>(err).context("extra context").unwrap_err();
+        let http_err = HttpError::from(anyhow_err);
+        let response = http_err.into_response();
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(response.headers().get(CONTENT_TYPE).expect("content-type"), "application/json");
+
+        let response_body = collect_body(response).await;
+        let parsed: serde_json::Value = serde_json::from_slice(&response_body).expect("parse json");
+        assert_eq!(parsed, body);
     }
 }
