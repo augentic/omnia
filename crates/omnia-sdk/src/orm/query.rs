@@ -7,8 +7,8 @@ use sea_query::{
     BinOper, Oper, QueryStatementBuilder, Quote, SimpleExpr, SubQueryStatement, Value,
 };
 
-use crate::DataType;
-use crate::entity::values_to_wasi_datatypes;
+use super::DataType;
+use super::entity::values_to_wasi_datatypes;
 
 pub struct Query {
     pub sql: String,
@@ -51,7 +51,6 @@ impl TableRefBuilder for QueryBuilder {}
 
 impl OperLeftAssocDecider for QueryBuilder {
     fn well_known_left_associative(&self, op: &BinOper) -> bool {
-        // Copied from sea-query 0.32.7 backend/query_builder.rs `common_well_known_left_associative`
         matches!(
             op,
             BinOper::And | BinOper::Or | BinOper::Add | BinOper::Sub | BinOper::Mul | BinOper::Mod
@@ -63,7 +62,6 @@ impl PrecedenceDecider for QueryBuilder {
     fn inner_expr_well_known_greater_precedence(
         &self, _inner: &SimpleExpr, _outer_oper: &Oper,
     ) -> bool {
-        // Conservative approach that forces parentheses
         false
     }
 }

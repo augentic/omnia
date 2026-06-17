@@ -80,7 +80,7 @@ sea-query = { version = "0.32.7", default-features = false, features = ["thread-
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 syn = { version = "2.0.117", features = ["full"] }
-time = "0.3.47"
+time = "0.3.49"
 tokio = { version = "1.50.0", default-features = false }
 tokio-stream = { version = "0.1.18", features = ["sync"] }
 tower = "0.5.3"
@@ -88,17 +88,17 @@ tracing = "0.1.44"
 tracing-opentelemetry = "0.33.0"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt"] }
 wasip3 = { version = "0.6.0", features = ["http-compat"] }
-wasmtime = { version = "45.0.1", default-features = false, features = ["anyhow", "parallel-compilation"] }
-wasmtime-wasi = { version = "45.0.1", features = ["p3"] }
-wasmtime-wasi-config = "45.0.1"
-wasmtime-wasi-http = { version = "45.0.1", features = ["p3"] }
-wasmtime-wasi-io = "45.0.1"
+wasmtime = { version = "45.0.2", default-features = false, features = ["anyhow", "parallel-compilation"] }
+wasmtime-wasi = { version = "45.0.2", features = ["p3"] }
+wasmtime-wasi-config = "45.0.2"
+wasmtime-wasi-http = { version = "45.0.2", features = ["p3"] }
+wasmtime-wasi-io = "45.0.2"
+# Ensure wit-bindgen version matches what's used in wasip3
 wit-bindgen = { version = "0.57.1", features = ["async-spawn"] }
 
 # internally referenced crates
 omnia = { path = "crates/omnia", version = "0.34.0" }
 omnia-guest-macro = { path = "crates/guest-macro", version = "0.34.0" }
-omnia-orm = { path = "crates/orm", version = "0.34.0" }
 omnia-otel = { path = "crates/otel", version = "0.34.0" }
 omnia-runtime-macro = { path = "crates/runtime-macro", version = "0.34.0" }
 omnia-sdk = { path = "crates/omnia-sdk", version = "0.34.0" }

@@ -2,10 +2,10 @@ use std::marker::PhantomData;
 
 use sea_query::{Alias, ColumnRef, IntoIden, Order, SimpleExpr};
 
-use crate::entity::Entity;
-use crate::filter::Filter;
-use crate::join::{Join, JoinSpec};
-use crate::query::{Query, finish};
+use super::entity::Entity;
+use super::filter::Filter;
+use super::join::{Join, JoinSpec};
+use super::query::{Query, finish};
 
 /// Builder for constructing SELECT queries.
 pub struct SelectBuilder<M: Entity> {
@@ -96,21 +96,17 @@ impl<M: Entity> SelectBuilder<M> {
     pub fn build(self) -> anyhow::Result<Query> {
         let mut statement = sea_query::Query::select();
 
-        // Build column specs lookup map
         let column_specs = M::column_specs();
         let spec_map: std::collections::HashMap<&str, (&str, &str)> = column_specs
             .into_iter()
             .map(|(field, table, column)| (field, (table, column)))
             .collect();
 
-        // Build columns with proper table qualification
         for field in M::projection() {
             if let Some(&(table, column)) = spec_map.get(field) {
-                // Use specified table.column AS field
                 statement
                     .expr_as(SimpleExpr::Column(table_column(table, column)), Alias::new(*field));
             } else {
-                // Auto-qualify with main table
                 statement.column(table_column(M::TABLE, field));
             }
         }

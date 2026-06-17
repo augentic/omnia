@@ -12,10 +12,10 @@ omnia-wasi-blobstore.workspace = true
 omnia-wasi-config.workspace = true
 omnia-wasi-http.workspace = true
 omnia-wasi-identity.workspace = true
+omnia-wasi-jsondb.workspace = true
 omnia-wasi-keyvalue.workspace = true
 omnia-wasi-messaging.workspace = true
 omnia-wasi-otel.workspace = true
-omnia-wasi-jsondb.workspace = true
 omnia-wasi-sql.workspace = true
 omnia-wasi-vault.workspace = true
 omnia-wasi-websocket.workspace = true
@@ -33,11 +33,10 @@ http-body-util.workspace = true
 opentelemetry.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tower-http = { version = "0.6.8", features = ["cors", "trace"] }
+tower-http = { version = "0.7.0", features = ["cors", "trace"] }
 tracing.workspace = true
 wasip3.workspace = true
 wit-bindgen.workspace = true
-omnia-orm.workspace = true
 omnia-sdk.workspace = true
 omnia-wasi-otel-attr.workspace = true
 

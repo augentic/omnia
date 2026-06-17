@@ -89,7 +89,11 @@ pub trait Publish: Send + Sync {
         async move {
             let client =
                 Client::connect("host".to_string()).await.context("connecting to broker")?;
-            producer::send(&client, topic.to_string(), wasi::Message::new(&message.payload))
+            let msg = wasi::Message::new(&message.payload);
+            message.headers.iter().for_each(|(k, v)| {
+                msg.add_metadata(k, v);
+            });
+            producer::send(&client, topic.to_string(), msg)
                 .await
                 .with_context(|| format!("sending message to {topic}"))
         }

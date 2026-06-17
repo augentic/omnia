@@ -48,28 +48,143 @@ where
 pub struct HttpError {
     status: StatusCode,
     error: String,
+    content_type: Option<HeaderValue>,
 }
 
 impl From<crate::Error> for HttpError {
     fn from(e: crate::Error) -> Self {
+        if let Some(body) = e.json_body() {
+            return Self {
+                status: e.status(),
+                error: serde_json::to_string(&body).unwrap_or_else(|_| e.to_string()),
+                content_type: Some(HeaderValue::from_static("application/json")),
+            };
+        }
+
         Self {
             status: e.status(),
             error: e.to_string(),
+            content_type: None,
         }
     }
 }
 
 impl From<anyhow::Error> for HttpError {
     fn from(e: anyhow::Error) -> Self {
-        let error = format!("{e}, caused by: {}", e.root_cause());
-        let status =
-            e.downcast_ref().map_or(StatusCode::INTERNAL_SERVER_ERROR, crate::Error::status);
-        Self { status, error }
+        if e.downcast_ref::<crate::Error>().is_some() {
+            let sdk_err: crate::Error = e.into();
+            return Self::from(sdk_err);
+        }
+
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            error: format!("{e}, caused by: {}", e.root_cause()),
+            content_type: None,
+        }
     }
 }
 
 impl IntoResponse for HttpError {
     fn into_response(self) -> axum::response::Response {
-        (self.status, self.error).into_response()
+        match self.content_type {
+            Some(content_type) => {
+                let mut headers = http::HeaderMap::new();
+                headers.insert(CONTENT_TYPE, content_type);
+                (self.status, headers, self.error).into_response()
+            }
+            None => (self.status, self.error).into_response(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::response::IntoResponse;
+    use http::StatusCode;
+    use http::header::CONTENT_TYPE;
+    use http_body_util::BodyExt;
+
+    use super::HttpError;
+
+    async fn collect_body(response: axum::response::Response) -> Vec<u8> {
+        response.into_body().collect().await.expect("collect body").to_bytes().to_vec()
+    }
+
+    #[tokio::test]
+    async fn json_error_sets_content_type() {
+        let body =
+            serde_json::json!({"error": "invalid_request", "error_description": "missing field"});
+        let err = crate::Error::Json {
+            code: "400".to_string(),
+            body: body.clone(),
+        };
+
+        let http_err = HttpError::from(err);
+        let response = http_err.into_response();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.headers().get(CONTENT_TYPE).expect("content-type"), "application/json");
+
+        let response_body = collect_body(response).await;
+        let parsed: serde_json::Value = serde_json::from_slice(&response_body).expect("parse json");
+        assert_eq!(parsed, body);
+    }
+
+    #[tokio::test]
+    async fn fixed_sdk_error_remains_plain_text() {
+        let err = crate::Error::BadRequest {
+            code: "bad_request".to_string(),
+            description: "invalid input".to_string(),
+        };
+
+        let http_err = HttpError::from(err);
+        let response = http_err.into_response();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let ct = response.headers().get(CONTENT_TYPE);
+        assert!(
+            ct.is_none_or(|v| v != "application/json"),
+            "fixed SDK errors should not produce JSON content type"
+        );
+
+        let body = collect_body(response).await;
+        let text = String::from_utf8(body).expect("utf8");
+        assert!(text.contains("bad_request"));
+    }
+
+    #[tokio::test]
+    async fn anyhow_error_remains_plain_text() {
+        let err = anyhow::anyhow!("something went wrong");
+        let http_err = HttpError::from(err);
+        let response = http_err.into_response();
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let ct = response.headers().get(CONTENT_TYPE);
+        assert!(
+            ct.is_none_or(|v| v != "application/json"),
+            "generic anyhow errors should not produce JSON content type"
+        );
+    }
+
+    #[tokio::test]
+    async fn wrapped_json_error_preserves_body() {
+        use anyhow::Context;
+
+        let body = serde_json::json!({"error": "invalid_request", "error_description": "bad"});
+        let err = crate::Error::Json {
+            code: "422".to_string(),
+            body: body.clone(),
+        };
+
+        let anyhow_err: anyhow::Error = Err::<(), _>(err).context("extra context").unwrap_err();
+        let http_err = HttpError::from(anyhow_err);
+        let response = http_err.into_response();
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(response.headers().get(CONTENT_TYPE).expect("content-type"), "application/json");
+
+        let response_body = collect_body(response).await;
+        let parsed: serde_json::Value = serde_json::from_slice(&response_body).expect("parse json");
+        assert_eq!(parsed, body);
     }
 }

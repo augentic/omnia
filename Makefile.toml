@@ -131,10 +131,7 @@ cargo publish -p omnia-wasi-vault $DRY_RUN
 cargo publish -p omnia-wasi-websocket $DRY_RUN
 cargo publish -p omnia-wasi-otel $DRY_RUN
 
-echo "=== Tier 4: ORM ==="
-cargo publish -p omnia-orm $DRY_RUN
-
-echo "=== Tier 5: SDK ==="
+echo "=== Tier 4: SDK ==="
 cargo publish -p omnia-sdk $DRY_RUN
 
 echo "=== Done ==="

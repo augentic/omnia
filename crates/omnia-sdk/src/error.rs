@@ -48,17 +48,32 @@ pub enum Error {
         /// The error description.
         description: String,
     },
+
+    // --- JSON errors ---
+    /// A domain-controlled error carrying a JSON body for the error response.
+    #[error("code: {code}")]
+    Json {
+        /// The error code.
+        code: String,
+        /// JSON body rendered in the error response.
+        body: serde_json::Value,
+    },
 }
 
 impl Error {
     /// Returns the HTTP status code associated with the variant.
     #[must_use]
-    pub const fn status(&self) -> StatusCode {
+    pub fn status(&self) -> StatusCode {
         match self {
             Self::BadRequest { .. } => StatusCode::BAD_REQUEST,
             Self::NotFound { .. } => StatusCode::NOT_FOUND,
             Self::ServerError { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Self::BadGateway { .. } => StatusCode::BAD_GATEWAY,
+            Self::Json { code, .. } => code
+                .parse::<u16>()
+                .ok()
+                .and_then(|n| StatusCode::from_u16(n).ok())
+                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
         }
     }
 
@@ -69,7 +84,8 @@ impl Error {
             Self::BadRequest { code, .. }
             | Self::NotFound { code, .. }
             | Self::ServerError { code, .. }
-            | Self::BadGateway { code, .. } => code.clone(),
+            | Self::BadGateway { code, .. }
+            | Self::Json { code, .. } => code.clone(),
         }
     }
 
@@ -81,6 +97,16 @@ impl Error {
             | Self::NotFound { description, .. }
             | Self::ServerError { description, .. }
             | Self::BadGateway { description, .. } => description.clone(),
+            Self::Json { code, .. } => code.clone(),
+        }
+    }
+
+    /// Returns the JSON body if this is a `Json` variant.
+    #[must_use]
+    pub fn json_body(&self) -> Option<serde_json::Value> {
+        match self {
+            Self::Json { body, .. } => Some(body.clone()),
+            _ => None,
         }
     }
 }
@@ -109,6 +135,10 @@ impl From<anyhow::Error> for Error {
                 Self::BadGateway { code, .. } => Self::BadGateway {
                     code: code.clone(),
                     description: chain,
+                },
+                Self::Json { code, body } => Self::Json {
+                    code: code.clone(),
+                    body: body.clone(),
                 },
             };
         }
@@ -166,6 +196,7 @@ macro_rules! bad_gateway {
 #[cfg(test)]
 mod tests {
     use anyhow::{Context, Result, anyhow};
+    use http::StatusCode;
     use serde_json::Value;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
@@ -233,5 +264,71 @@ mod tests {
             err.to_string(),
             "code: server_error, description: error context: EOF while parsing an object at line 1 column 13"
         );
+    }
+
+    #[test]
+    fn json_error_derives_status_from_code() {
+        let err = Error::Json {
+            code: "422".to_string(),
+            body: serde_json::json!({"error": "validation_failed"}),
+        };
+
+        assert_eq!(err.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(err.code(), "422");
+        assert_eq!(err.to_string(), "code: 422");
+    }
+
+    #[test]
+    fn json_error_invalid_code_falls_back_to_500() {
+        let err = Error::Json {
+            code: "not_a_number".to_string(),
+            body: serde_json::json!({"error": "oops"}),
+        };
+
+        assert_eq!(err.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn json_error_body_round_trips() {
+        let body = serde_json::json!({"field": "email", "reason": "invalid"});
+        let err = Error::Json {
+            code: "400".to_string(),
+            body: body.clone(),
+        };
+
+        let json = serde_json::to_string(&err).expect("serialize");
+        let deserialized: Error = serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(deserialized.json_body(), Some(body));
+        assert_eq!(deserialized.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn json_error_custom_body() {
+        let custom_body = serde_json::json!({"message": "oops", "field": "id"});
+        let err = Error::Json {
+            code: "409".to_string(),
+            body: custom_body.clone(),
+        };
+
+        assert_eq!(err.json_body(), Some(custom_body));
+        assert_eq!(err.status(), StatusCode::CONFLICT);
+    }
+
+    #[test]
+    fn anyhow_context_preserves_json_error() {
+        let body = serde_json::json!({"error": "bad", "error_description": "very bad"});
+        let original = Error::Json {
+            code: "400".to_string(),
+            body: body.clone(),
+        };
+
+        let result: Result<(), Error> = Err(original);
+        let with_context = result.context("extra context");
+        let recovered: Error = with_context.unwrap_err().into();
+
+        assert_eq!(recovered.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(recovered.code(), "400");
+        assert_eq!(recovered.json_body(), Some(body));
     }
 }

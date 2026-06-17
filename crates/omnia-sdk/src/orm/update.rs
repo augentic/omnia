@@ -3,9 +3,9 @@ use std::marker::PhantomData;
 use anyhow::Result;
 use sea_query::{Alias, SimpleExpr, Value};
 
-use crate::entity::Entity;
-use crate::filter::Filter;
-use crate::query::{Query, finish};
+use super::entity::Entity;
+use super::filter::Filter;
+use super::query::{Query, finish};
 
 /// Builder for constructing UPDATE queries.
 pub struct UpdateBuilder<M: Entity> {

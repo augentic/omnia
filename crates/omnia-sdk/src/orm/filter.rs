@@ -1,6 +1,6 @@
 use sea_query::{Expr, ExprTrait, SimpleExpr, Value};
 
-use crate::select::table_column;
+use super::select::table_column;
 
 /// A column reference, optionally qualified with a table name.
 ///
@@ -202,8 +202,6 @@ macro_rules! table_list_ctor {
 }
 
 impl Filter {
-    // Convenience constructors for common single-table queries.
-
     cmp_ctor!(eq, Eq, "Creates an equality filter (column = value).");
 
     cmp_ctor!(ne, Ne, "Creates an inequality filter (column != value).");
@@ -219,9 +217,6 @@ impl Filter {
     list_ctor!(r#in, false, "Creates an IN filter (column IN (values)).");
 
     list_ctor!(not_in, true, "Creates a NOT IN filter (column NOT IN (values)).");
-
-    // Table-qualified variants. Equivalent to constructing the unqualified filter and
-    // calling `.in_table(...)` on the result, but kept as named ctors for ergonomics.
 
     table_cmp_ctor!(
         table_eq,
@@ -307,8 +302,6 @@ impl Filter {
         Self::Between(ColRef::unqualified(col), low.into(), high.into(), true)
     }
 
-    // Logical combinators (alternatives to the bare enum variants).
-
     /// Combines filters with logical AND. Empty list evaluates to `true`.
     #[must_use]
     pub fn and(filters: impl IntoIterator<Item = Self>) -> Self {
@@ -323,7 +316,7 @@ impl Filter {
 
     /// Logically negates a filter.
     #[must_use]
-    #[allow(clippy::should_implement_trait)] // logical NOT ctor; std::ops::Not signature is unsuitable
+    #[allow(clippy::should_implement_trait)]
     pub fn not(filter: Self) -> Self {
         Self::Not(Box::new(filter))
     }
