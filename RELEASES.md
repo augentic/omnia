@@ -6,6 +6,20 @@ Unreleased
 
 ### Changed
 
+<!-- Release notes generated using configuration in .github/release.yaml at main -->
+
+## What's Changed
+* Bump to 0.33.0 by @augentic-releases[bot] in https://github.com/augentic/omnia/pull/197
+* Updated supply chain for 0.33 release by @karthik-phl in https://github.com/augentic/omnia/pull/198
+* Updated wasip3 to resolve guest deadlock by @karthik-phl in https://github.com/augentic/omnia/pull/199
+* Bump to 0.34.0 by @augentic-releases[bot] in https://github.com/augentic/omnia/pull/200
+* Sdk fixes by @karthik-phl in https://github.com/augentic/omnia/pull/201
+
+## New Contributors
+* @augentic-releases[bot] made their first contribution in https://github.com/augentic/omnia/pull/197
+
+**Full Changelog**: https://github.com/augentic/omnia/compare/v0.32.0...v0.34.0
+
 ---
 
 Release notes for previous releases can be found on the respective release
