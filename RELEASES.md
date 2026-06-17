@@ -1,5 +1,7 @@
 ## 0.34.0
 
+Unreleased
+
 ### Added
 
 - `Error::Json` variant for returning domain-controlled JSON error responses
