@@ -1,10 +1,27 @@
 ## 0.34.0
 
-Unreleased
-
 ### Added
 
+- `Error::Json` variant for returning domain-controlled JSON error responses
+  with `application/json` content type
+- `HttpError` now renders `Error::Json` variants as `application/json` responses
+  instead of plain text
+- ORM module consolidated into `omnia-sdk` (`omnia_sdk::orm`); the standalone
+  `omnia-orm` crate has been removed
+
 ### Changed
+
+- Request handler headers now use `HeaderMap<HeaderValue>` instead of
+  `HeaderMap<String>`
+- Upgraded `wasip3` from 0.5.0 to 0.6.0, resolving a guest deadlock under
+  concurrent async calls
+- Upgraded `wasmtime` from 45.0.0 to 45.0.2
+
+### Fixed
+
+- `wasi-messaging` message mutation methods (`set_content_type`, `set_payload`,
+  `add_metadata`, `set_metadata`, `remove_metadata`) now update the resource
+  in-place instead of pushing duplicates to the resource table
 
 <!-- Release notes generated using configuration in .github/release.yaml at main -->
 
@@ -14,9 +31,6 @@ Unreleased
 * Updated wasip3 to resolve guest deadlock by @karthik-phl in https://github.com/augentic/omnia/pull/199
 * Bump to 0.34.0 by @augentic-releases[bot] in https://github.com/augentic/omnia/pull/200
 * Sdk fixes by @karthik-phl in https://github.com/augentic/omnia/pull/201
-
-## New Contributors
-* @augentic-releases[bot] made their first contribution in https://github.com/augentic/omnia/pull/197
 
 **Full Changelog**: https://github.com/augentic/omnia/compare/v0.32.0...v0.34.0
 
