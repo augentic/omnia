@@ -42,4 +42,6 @@ wasip3.workspace = true
 wit-bindgen.workspace = true
 
 [dev-dependencies]
+http-body-util.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
 tracing-subscriber.workspace = true
