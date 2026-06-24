@@ -2057,6 +2057,7 @@ version = "0.35.0"
 dependencies = [
  "anyhow",
  "clap",
+ "fromenv",
  "futures",
  "omnia-otel",
  "omnia-runtime-macro",

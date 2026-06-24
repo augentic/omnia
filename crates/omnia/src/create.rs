@@ -25,7 +25,8 @@ pub fn create<T: WasiView + 'static>(wasm: &PathBuf) -> Result<Compiled<T>> {
     init_env(wasm)?;
     tracing::info!("initializing runtime");
 
-    let runtime_config = RuntimeConfig::from_env()?;
+    let runtime_config =
+        RuntimeConfig::from_env().finalize().context("loading runtime configuration")?;
     let mut config = runtime_config.compile();
 
     // The pooling allocator recycles instance memories/tables/stacks across
@@ -38,7 +39,9 @@ pub fn create<T: WasiView + 'static>(wasm: &PathBuf) -> Result<Compiled<T>> {
             .total_memories(runtime_config.pool_max_instances)
             .total_tables(runtime_config.pool_max_instances)
             .total_stacks(runtime_config.pool_max_instances)
-            .max_memory_size(runtime_config.pool_max_memory_bytes);
+            .max_memory_size(
+                runtime_config.pool_max_memory_bytes.unwrap_or(runtime_config.max_memory_bytes),
+            );
         config.allocation_strategy(InstanceAllocationStrategy::Pooling(pool));
     }
 

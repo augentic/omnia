@@ -24,6 +24,7 @@ jit = ["wasmtime/cranelift"]
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
 clap = { version = "4.6.1", features = ["derive"] }
+fromenv.workspace = true
 futures.workspace = true
 serde.workspace = true
 tracing.workspace = true
