@@ -20,8 +20,8 @@ use hyper::service::service_fn;
 use omnia::State;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
+use tokio::time::timeout;
 use tracing::{Instrument, debug_span};
-use wasmtime::Store;
 use wasmtime_wasi_http::io::TokioIo;
 use wasmtime_wasi_http::p3::WasiHttpView;
 use wasmtime_wasi_http::p3::bindings::ServiceIndices;
@@ -116,14 +116,14 @@ where
         // instantiate the guest and get the proxy
         let instance_pre = self.state.instance_pre();
         let store_data = self.state.store();
-        let mut store = Store::new(instance_pre.engine(), store_data);
+        let mut store = self.state.new_store(store_data);
         let indices = ServiceIndices::new(instance_pre)?;
         let instance = instance_pre.instantiate_async(&mut store).await?;
         let service = indices.load(&mut store, &instance)?;
 
         let (sender, receiver) = oneshot::channel::<Result<hyper::Response<OutgoingBody>>>();
 
-        tokio::spawn(async move {
+        let guest_task = tokio::spawn(async move {
             let send_err = |sender: oneshot::Sender<_>, e: anyhow::Error| {
                 _ = sender.send(Err(e));
             };
@@ -180,7 +180,15 @@ where
             }
         });
 
-        let response = receiver.await.map_err(|_recv| anyhow!("guest task panicked"))??;
+        // bound time-to-response (not the streaming body); cancel a hung guest
+        let response = match timeout(self.state.config().guest_timeout, receiver).await {
+            Ok(result) => result.map_err(|_recv| anyhow!("guest task panicked"))??,
+            Err(_elapsed) => {
+                guest_task.abort();
+                tracing::error!(service = %self.component, "guest handler timed out");
+                return Ok(internal_error());
+            }
+        };
         tracing::debug!("received response: {response:?}");
 
         Ok(response)

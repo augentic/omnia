@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow, bail};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
-use sea_query::{Order, Value, Values};
+use sea_query::{Value, Values};
 
 use super::join::Join;
 use super::{DataType, Row};
@@ -28,12 +28,6 @@ pub trait Entity: Sized {
     /// Column names to select when fetching this entity.
     fn projection() -> &'static [&'static str];
 
-    /// Default ordering specification for queries.
-    #[must_use]
-    fn ordering() -> Vec<OrderSpec> {
-        Vec::new()
-    }
-
     /// Default joins to include when querying this entity.
     #[must_use]
     fn joins() -> Vec<Join> {
@@ -60,13 +54,6 @@ pub trait Entity: Sized {
 #[doc(hidden)]
 pub trait EntityValues {
     fn __to_values(&self) -> Vec<(&'static str, Value)>;
-}
-
-#[derive(Clone)]
-pub struct OrderSpec {
-    pub table: Option<&'static str>,
-    pub column: &'static str,
-    pub order: Order,
 }
 
 pub fn values_to_wasi_datatypes(values: Values) -> Result<Vec<DataType>> {

@@ -7,9 +7,10 @@ use anyhow::{Context, Result};
 use omnia_otel::Telemetry;
 use tracing::instrument;
 use wasmtime::component::{Component, InstancePre, Linker};
-use wasmtime::{Config, Engine};
+use wasmtime::{Engine, InstanceAllocationStrategy, PoolingAllocationConfig};
 use wasmtime_wasi::WasiView;
 
+use crate::RuntimeConfig;
 use crate::traits::Host;
 
 /// Build the Wasmtime `Engine` and `Linker` for this runtime.
@@ -24,14 +25,24 @@ pub fn create<T: WasiView + 'static>(wasm: &PathBuf) -> Result<Compiled<T>> {
     init_env(wasm)?;
     tracing::info!("initializing runtime");
 
-    let mut config = Config::new();
-    config.wasm_component_model_async(true);
-    let engine = Engine::new(&config)?;
+    let runtime_config = RuntimeConfig::from_env()?;
+    let mut config = runtime_config.compile();
 
-    // TODO: cause executing WebAssembly to periodically yield
-    //  1. enable `Config::epoch_interruption`
-    //  2. Set `Store::epoch_deadline_async_yield_and_update`
-    //  3. Call `Engine::increment_epoch` periodically
+    // The pooling allocator recycles instance memories/tables/stacks across
+    // invocations, which is the hot path for this per-request-instantiation
+    // runtime. It is runtime-only and does not affect artifact compatibility.
+    if runtime_config.pooling {
+        let mut pool = PoolingAllocationConfig::new();
+        pool.total_component_instances(runtime_config.pool_max_instances)
+            .total_core_instances(runtime_config.pool_max_instances)
+            .total_memories(runtime_config.pool_max_instances)
+            .total_tables(runtime_config.pool_max_instances)
+            .total_stacks(runtime_config.pool_max_instances)
+            .max_memory_size(runtime_config.pool_max_memory_bytes);
+        config.allocation_strategy(InstanceAllocationStrategy::Pooling(pool));
+    }
+
+    let engine = Engine::new(&config)?;
 
     // SAFETY: The caller should ensure only valid pre-compiled wasm files are provided.
     let component = unsafe { Component::deserialize_file(&engine, wasm) }.or_else(|e| {
@@ -51,16 +62,27 @@ pub fn create<T: WasiView + 'static>(wasm: &PathBuf) -> Result<Compiled<T>> {
 
     tracing::info!("runtime initialized");
 
-    Ok(Compiled { component, linker })
+    Ok(Compiled {
+        component,
+        linker,
+        config: runtime_config,
+    })
 }
 
 /// A compiled WebAssembly component with its associated Linker.
 pub struct Compiled<T: WasiView + 'static> {
     component: Component,
     linker: Linker<T>,
+    config: RuntimeConfig,
 }
 
 impl<T: WasiView> Compiled<T> {
+    /// Returns the environment-derived runtime configuration.
+    #[must_use]
+    pub const fn config(&self) -> &RuntimeConfig {
+        &self.config
+    }
+
     /// Link a WASI component to the runtime.
     ///
     /// # Errors

@@ -88,7 +88,11 @@ tracing = "0.1.44"
 tracing-opentelemetry = "0.33.0"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 wasip3 = { version = "0.7.0", features = ["http-compat"] }
-wasmtime = { version = "46.0.0", default-features = false, features = ["anyhow", "parallel-compilation"] }
+# SECURITY/maintenance: Wasmtime ships security advisories as 46.0.x patch
+# releases (e.g. the pooling-allocator leak fixed in 43.0.1, the fd_renumber
+# leak in 44.0.3/45.0.2). Keep these `46.0.*` pins current and review the
+# Wasmtime RELEASES/advisories when bumping the minor version.
+wasmtime = { version = "46.0.0", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation", "pooling-allocator"] }
 wasmtime-wasi = { version = "46.0.0", features = ["p3"] }
 wasmtime-wasi-config = "46.0.0"
 wasmtime-wasi-http = { version = "46.0.0", features = ["p3"] }

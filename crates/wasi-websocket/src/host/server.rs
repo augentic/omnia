@@ -4,7 +4,6 @@ use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
 use omnia::State;
 use tracing::{Instrument, debug_span, instrument};
-use wasmtime::Store;
 
 use crate::host::WebSocketView;
 use crate::host::generated::Duplex;
@@ -69,11 +68,11 @@ where
             .map_err(|e| anyhow!("failed to push event: {e}"))?;
 
         let instance_pre = self.state.instance_pre();
-        let mut store = Store::new(instance_pre.engine(), store_data);
+        let mut store = self.state.new_store(store_data);
         let instance = instance_pre.instantiate_async(&mut store).await?;
         let websocket = Duplex::new(&mut store, &instance)?;
 
-        store
+        let run = store
             .run_concurrent(async |store| {
                 let guest = websocket.omnia_websocket_handler();
                 guest
@@ -83,15 +82,17 @@ where
                     .map_err(anyhow::Error::from)
                     .context("issue handling event")
             })
-            .instrument(debug_span!("websocket-handle"))
-            .await?
+            .instrument(debug_span!("websocket-handle"));
+
+        tokio::time::timeout(self.state.config().guest_timeout, run)
+            .await
+            .context("websocket handler timed out")??
     }
 
     /// Get events for incoming WebSocket events.
     async fn events(&self) -> Result<Events> {
-        let instance_pre = self.state.instance_pre();
         let store_data = self.state.store();
-        let mut store = Store::new(instance_pre.engine(), store_data);
+        let mut store = self.state.new_store(store_data);
 
         store
             .run_concurrent(async |store| {

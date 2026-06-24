@@ -19,18 +19,13 @@ pub struct SelectBuilder<M: Entity> {
 
 impl<M: Entity> Default for SelectBuilder<M> {
     fn default() -> Self {
-        let ordering = M::ordering()
-            .into_iter()
-            .map(|spec| (table_column(spec.table.unwrap_or(M::TABLE), spec.column), spec.order))
-            .collect();
-
         let joins = M::joins().into_iter().map(|join| join.into_join_spec(M::TABLE)).collect();
 
         Self {
             filters: Vec::new(),
             limit: None,
             offset: None,
-            order: ordering,
+            order: Vec::new(),
             joins,
             _marker: PhantomData,
         }
@@ -97,15 +92,11 @@ impl<M: Entity> SelectBuilder<M> {
         let mut statement = sea_query::Query::select();
 
         let column_specs = M::column_specs();
-        let spec_map: std::collections::HashMap<&str, (&str, &str)> = column_specs
-            .into_iter()
-            .map(|(field, table, column)| (field, (table, column)))
-            .collect();
 
-        for field in M::projection() {
-            if let Some(&(table, column)) = spec_map.get(field) {
+        for &field in M::projection() {
+            if let Some(&(_, table, column)) = column_specs.iter().find(|&&(f, _, _)| f == field) {
                 statement
-                    .expr_as(SimpleExpr::Column(table_column(table, column)), Alias::new(*field));
+                    .expr_as(SimpleExpr::Column(table_column(table, column)), Alias::new(field));
             } else {
                 statement.column(table_column(M::TABLE, field));
             }

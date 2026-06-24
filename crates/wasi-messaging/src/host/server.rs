@@ -4,7 +4,6 @@ use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
 use omnia::State;
 use tracing::{Instrument, debug_span, instrument};
-use wasmtime::Store;
 
 use crate::host::WasiMessagingView;
 use crate::host::generated::MessagingRequestReply;
@@ -70,11 +69,11 @@ where
             .map_err(|e| anyhow!("failed to push message: {e}"))?;
 
         let instance_pre = self.state.instance_pre();
-        let mut store = Store::new(instance_pre.engine(), store_data);
+        let mut store = self.state.new_store(store_data);
         let instance = instance_pre.instantiate_async(&mut store).await?;
         let messaging = MessagingRequestReply::new(&mut store, &instance)?;
 
-        store
+        let run = store
             .run_concurrent(async |store| {
                 let guest = messaging.wasi_messaging_incoming_handler();
                 guest
@@ -84,15 +83,17 @@ where
                     .map_err(anyhow::Error::from)
                     .context("issue sending message")
             })
-            .instrument(debug_span!("messaging-handle"))
-            .await?
+            .instrument(debug_span!("messaging-handle"));
+
+        tokio::time::timeout(self.state.config().guest_timeout, run)
+            .await
+            .context("messaging handler timed out")??
     }
 
     // Get subscriptions for the topics configured in the wasm component.
     async fn subscriptions(&self) -> Result<Subscriptions> {
-        let instance_pre = self.state.instance_pre();
         let store_data = self.state.store();
-        let mut store = Store::new(instance_pre.engine(), store_data);
+        let mut store = self.state.new_store(store_data);
 
         store
             .run_concurrent(async |store| {

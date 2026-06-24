@@ -5,8 +5,10 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
+use wasmtime::Engine;
 use wasmtime::component::Component;
-use wasmtime::{Config, Engine};
+
+use crate::RuntimeConfig;
 
 /// Compile `wasm32-wasip2` component.
 ///
@@ -26,9 +28,8 @@ pub fn compile(wasm: &PathBuf, output: Option<PathBuf>) -> Result<()> {
         return Err(anyhow!("invalid file name"));
     };
 
-    // compile component
-    let mut config = Config::new();
-    config.wasm_component_model_async(true);
+    // compile component (compile-time config must match the loader in `create`)
+    let config = RuntimeConfig::from_env()?.compile();
     let engine = Engine::new(&config)?;
     let component = Component::from_file(&engine, wasm)?;
     let serialized = component.serialize()?;

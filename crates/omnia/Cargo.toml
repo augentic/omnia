@@ -27,7 +27,7 @@ clap = { version = "4.6.1", features = ["derive"] }
 futures.workspace = true
 serde.workspace = true
 tracing.workspace = true
-tokio = { workspace = true, features = ["macros"] }
+tokio = { workspace = true, features = ["macros", "rt", "time"] }
 omnia-otel.workspace = true
 omnia-runtime-macro.workspace = true
 wasmtime = { workspace = true, features = ["runtime"] }

@@ -9,6 +9,8 @@ use syn::{Ident, Path};
 use crate::runtime::Config;
 
 // Generate the runtime from the configuration.
+// A single cohesive code-generation function; its length is inherent.
+#[allow(clippy::too_many_lines)]
 pub fn expand(config: &Config) -> syn::Result<TokenStream> {
     let Expanded {
         context_fields,
@@ -29,8 +31,9 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
             use omnia::futures::future::{try_join_all, BoxFuture};
             use omnia::tokio;
             use omnia::wasmtime::component::{HasData,InstancePre};
+            use omnia::wasmtime::{StoreLimits, StoreLimitsBuilder};
             use omnia::wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
-            use omnia::{Backend, Compiled, Server, State};
+            use omnia::{Backend, Compiled, HasLimits, RuntimeConfig, Server, State};
 
             use super::*;
 
@@ -48,6 +51,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
             #[derive(Clone)]
             struct Context {
                 instance_pre: InstancePre<StoreCtx>,
+                config: RuntimeConfig,
                 #(pub #context_fields,)*
             }
 
@@ -58,6 +62,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                     #(compiled.link(#host_trait_impls)?;)*
 
                     Ok(Self {
+                        config: compiled.config().clone(),
                         instance_pre: compiled.pre_instantiate()?,
                         #(#context_fields::connect().await?,)*
                     })
@@ -67,6 +72,19 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                 ///
                 /// N.B. for simplicity, all hosts are "servers" with a default implementation that does nothing.
                 async fn start(&self) -> Result<()> {
+                    // Drive epoch interruption so guest deadlines (and the
+                    // wall-clock timeouts wrapped around each invocation) fire
+                    // even while a guest executes CPU-bound code.
+                    let engine = self.instance_pre.engine().clone();
+                    let tick = self.config.epoch_tick;
+                    tokio::spawn(async move {
+                        let mut interval = tokio::time::interval(tick);
+                        loop {
+                            interval.tick().await;
+                            engine.increment_epoch();
+                        }
+                    });
+
                     let futures: Vec<BoxFuture<'_, Result<()>>> =
                         vec![#(Box::pin(#server_trait_impls.run(self)),)*];
                     try_join_all(futures).await?;
@@ -81,6 +99,10 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                     &self.instance_pre
                 }
 
+                fn config(&self) -> &RuntimeConfig {
+                    &self.config
+                }
+
                 fn store(&self) -> Self::StoreCtx {
                     let wasi_ctx = WasiCtxBuilder::new()
                         // .inherit_args()
@@ -93,6 +115,9 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                     StoreCtx {
                         table: ResourceTable::new(),
                         wasi: wasi_ctx,
+                        limits: StoreLimitsBuilder::new()
+                            .memory_size(self.config.max_memory_bytes)
+                            .build(),
                         #(#store_ctx_values,)*
                     }
                 }
@@ -102,6 +127,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
             pub struct StoreCtx {
                 pub table: ResourceTable,
                 pub wasi: WasiCtx,
+                pub limits: StoreLimits,
                 #(pub #store_ctx_fields,)*
             }
 
@@ -112,6 +138,13 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                         ctx: &mut self.wasi,
                         table: &mut self.table,
                     }
+                }
+            }
+
+            /// Exposes per-guest resource limits to the runtime.
+            impl HasLimits for StoreCtx {
+                fn limits(&mut self) -> &mut StoreLimits {
+                    &mut self.limits
                 }
             }
 
