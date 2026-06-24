@@ -2059,6 +2059,7 @@ name = "omnia"
 version = "0.35.0"
 dependencies = [
  "anyhow",
+ "cfg-if",
  "clap",
  "fromenv",
  "futures",

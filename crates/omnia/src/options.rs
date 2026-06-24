@@ -19,8 +19,7 @@ use std::time::Duration;
 
 use anyhow::{Result, bail};
 use fromenv::{FromEnv, ParseResult};
-use wasmtime::Enabled;
-use wasmtime::{Config, InstanceAllocationStrategy, PoolingAllocationConfig};
+use wasmtime::{Config, Enabled, InstanceAllocationStrategy, PoolingAllocationConfig};
 
 /// Runtime configuration loaded from the environment.
 ///
@@ -258,8 +257,15 @@ impl From<&RuntimeOptions> for Config {
             pool.decommit_batch_size(size);
         }
 
-        #[cfg(feature = "mpk")]
-        apply_mpk(&mut pool, options);
+        // apply MPK configuration if the feature is enabled
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "mpk")] {
+                pool.memory_protection_keys(options.pool_memory_protection_keys);
+                if let Some(max) = options.pool_max_memory_protection_keys {
+                    pool.max_memory_protection_keys(max);
+                }
+            }
+        }
 
         config.allocation_strategy(InstanceAllocationStrategy::Pooling(pool));
         config

@@ -76,15 +76,10 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                     // Drive epoch interruption so guest deadlines (and the
                     // wall-clock timeouts wrapped around each invocation) fire
                     // even while a guest executes CPU-bound code.
-                    let engine = self.instance_pre.engine().clone();
-                    let tick = self.options.epoch_tick;
-                    tokio::spawn(async move {
-                        let mut interval = tokio::time::interval(tick);
-                        loop {
-                            interval.tick().await;
-                            engine.increment_epoch();
-                        }
-                    });
+                    omnia::drive_epoch(
+                        self.instance_pre.engine().clone(),
+                        self.options.epoch_tick,
+                    );
 
                     // Periodically sample pool occupancy as metrics so pool sizing can be tuned
                     // from real data.

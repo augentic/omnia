@@ -29,6 +29,7 @@ mpk = ["wasmtime/memory-protection-keys"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
+cfg-if.workspace = true
 clap = { version = "4.6.1", features = ["derive"] }
 fromenv.workspace = true
 futures.workspace = true
