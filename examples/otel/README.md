@@ -22,12 +22,6 @@ cargo run --example otel -- run ./target/wasm32-wasip2/debug/examples/otel_wasm.
 curl --header 'Content-Type: application/json' -d '{"text":"hello"}' http://localhost:8080
 ```
 
-## Cleanup
-
-```bash
-docker compose -f docker/otelcol.yaml down -v
-```
-
 ## Using an OpenTelemetry Collector Backend
 
 To use an OpenTelemetry Collector backend, you need to set the `OTEL_GRPC_URL` environment variable to the
@@ -62,3 +56,12 @@ export OTEL_GRPC_URL="http://localhost:4317"
 export RUST_LOG="info,wasi_otel=debug,omnia_wasi_http=debug,otel=debug"
 cargo run --example otel -- run ./target/wasm32-wasip2/debug/examples/otel_wasm.wasm
 ```
+
+
+
+## Cleanup
+
+```bash
+docker compose -f docker/otelcol.yaml down -v
+```
+

@@ -57,7 +57,7 @@ impl SpanProcessor for Processor {
             return Ok(());
         }
 
-        wit_bindgen::spawn(async move {
+        wit_bindgen::block_on(async move {
             let spans = spans.into_iter().map(Into::into).collect::<Vec<_>>();
             if let Err(e) = wasi::export(spans).await {
                 tracing::error!("failed to export spans: {e}");

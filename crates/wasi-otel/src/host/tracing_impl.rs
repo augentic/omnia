@@ -9,6 +9,7 @@ use opentelemetry_proto::tonic::resource::v1::Resource;
 use opentelemetry_proto::tonic::trace::v1::span::{Event, Link};
 use opentelemetry_proto::tonic::trace::v1::status::StatusCode;
 use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span, Status};
+use otel::SpanId;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use wasmtime::component::Accessor;
 
@@ -18,7 +19,7 @@ use crate::{WasiOtel, WasiOtelCtxView};
 
 impl HostWithStore for WasiOtel {
     async fn export<T>(
-        accessor: &Accessor<T, Self>, span_data: Vec<wasi::SpanData>,
+        accessor: &Accessor<T, Self>, mut span_data: Vec<wasi::SpanData>,
     ) -> Result<(), wasi::Error> {
         // return if opentelemetry is not initialized
         let Some(resource) = omnia_otel::init::resource() else {
@@ -26,21 +27,28 @@ impl HostWithStore for WasiOtel {
             return Ok(());
         };
 
-        // set parent span
         let ctx = tracing::Span::current().context();
-        let parent_span = ctx.span();
-        let mut span_data = span_data;
-        for sp in &mut span_data {
-            sp.span_context.trace_id = parent_span.span_context().trace_id().to_string();
-            sp.span_context.is_remote = true;
-            sp.parent_span_id = parent_span.span_context().span_id().to_string();
+        let parent_ctx = ctx.span().span_context().clone();
+        if !parent_ctx.is_valid() {
+            tracing::debug!("no valid host span context, dropping guest spans");
+            return Ok(());
         }
 
-        // convert to opentelemetry export format
+        let invalid_id = SpanId::INVALID.to_string();
+
+        for sp in &mut span_data {
+            sp.span_context.trace_id = parent_ctx.trace_id().to_string();
+            sp.span_context.is_remote = true;
+
+            // top-level spans need to be parented to the host span
+            if sp.parent_span_id == invalid_id || sp.parent_span_id.is_empty() {
+                sp.parent_span_id = parent_ctx.span_id().to_string();
+            }
+        }
+
         let resource_spans = resource_spans(span_data, resource);
         let export = ExportTraceServiceRequest { resource_spans };
 
-        // export via gRPC
         accessor.with(|mut store| store.get().ctx.export_traces(export)).await?;
 
         Ok(())
