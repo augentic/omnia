@@ -57,7 +57,7 @@ impl MetricReader for Reader {
         let mut rm = ResourceMetrics::default();
         self.0.collect(&mut rm)?;
 
-        wit_bindgen::spawn(async move {
+        wit_bindgen::block_on(async move {
             let metrics: wasi::ResourceMetrics = rm.into();
             if let Err(e) = wasi::export(metrics).await {
                 tracing::error!("failed to export metrics: {e}");
