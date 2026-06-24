@@ -3,7 +3,7 @@
 
 #[cfg(feature = "jit")]
 mod compile;
-mod config;
+mod options;
 mod create;
 mod traits;
 
@@ -18,7 +18,7 @@ pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 // re-export internal modules
 #[cfg(feature = "jit")]
 pub use self::compile::*;
-pub use self::config::*;
+pub use self::options::*;
 pub use self::create::*;
 pub use self::traits::*;
 

@@ -25,7 +25,7 @@ use wasmtime::Config;
 ///
 /// Values are read once at start-up via `RuntimeOptions::from_env().finalize()`
 /// and threaded through the generated runtime to every store. Each field maps to
-/// an `OMNIA_*` environment variable (booleans use `true`/`false`); call
+/// an `*` environment variable (booleans use `true`/`false`); call
 /// [`RuntimeOptions::requirements`] to print the full list with defaults.
 ///
 /// # Compile-time vs runtime settings
@@ -37,38 +37,38 @@ use wasmtime::Config;
 #[derive(Clone, Debug, FromEnv)]
 pub struct RuntimeOptions {
     /// Wall-clock cap applied to a single guest invocation
-    /// (`OMNIA_GUEST_TIMEOUT_MS`, default 30s).
-    #[env(from = "OMNIA_GUEST_TIMEOUT_MS", default = "30000", with = parse_millis)]
+    /// (`GUEST_TIMEOUT_MS`, default 30s).
+    #[env(from = "GUEST_TIMEOUT_MS", default = "30000", with = parse_millis)]
     pub guest_timeout: Duration,
     /// Interval between [`wasmtime::Engine::increment_epoch`] ticks, and the
     /// granularity at which CPU-bound guests yield to the async executor
-    /// (`OMNIA_EPOCH_TICK_MS`, default 10ms, clamped to a 1ms minimum).
-    #[env(from = "OMNIA_EPOCH_TICK_MS", default = "10", with = parse_tick)]
+    /// (`EPOCH_TICK_MS`, default 10ms, clamped to a 1ms minimum).
+    #[env(from = "EPOCH_TICK_MS", default = "10", with = parse_tick)]
     pub epoch_tick: Duration,
     /// Maximum linear-memory size, in bytes, a guest may grow to
-    /// (`OMNIA_MAX_MEMORY_BYTES`, default 256 `MiB`).
-    #[env(from = "OMNIA_MAX_MEMORY_BYTES", default = "268435456")]
+    /// (`MAX_MEMORY_BYTES`, default 256 `MiB`).
+    #[env(from = "MAX_MEMORY_BYTES", default = "268435456")]
     pub max_memory_bytes: usize,
     /// Per-invocation fuel budget; `0` disables fuel metering
-    /// (`OMNIA_MAX_FUEL`, default disabled).
-    #[env(from = "OMNIA_MAX_FUEL", default = "0")]
+    /// (`MAX_FUEL`, default disabled).
+    #[env(from = "MAX_FUEL", default = "0")]
     pub max_fuel: u64,
     /// Whether the pooling instance allocator is enabled
-    /// (`OMNIA_POOLING`, default `true`).
-    #[env(from = "OMNIA_POOLING", default = "true")]
+    /// (`POOLING`, default `true`).
+    #[env(from = "POOLING", default = "true")]
     pub pooling: bool,
     /// Maximum number of instances held by the pooling allocator
-    /// (`OMNIA_POOL_MAX_INSTANCES`, default 1000).
-    #[env(from = "OMNIA_POOL_MAX_INSTANCES", default = "1000")]
+    /// (`POOL_MAX_INSTANCES`, default 1000).
+    #[env(from = "POOL_MAX_INSTANCES", default = "1000")]
     pub pool_max_instances: u32,
     /// Maximum linear-memory size, in bytes, reserved per pooled memory
-    /// (`OMNIA_POOL_MAX_MEMORY_BYTES`). When unset it inherits
+    /// (`POOL_MAX_MEMORY_BYTES`). When unset it inherits
     /// `max_memory_bytes`.
-    #[env(from = "OMNIA_POOL_MAX_MEMORY_BYTES")]
+    #[env(from = "POOL_MAX_MEMORY_BYTES")]
     pub pool_max_memory_bytes: Option<usize>,
     /// Whether to honour WebAssembly branch hints during compilation
-    /// (`OMNIA_BRANCH_HINTING`, default `false`).
-    #[env(from = "OMNIA_BRANCH_HINTING", default = "false")]
+    /// (`BRANCH_HINTING`, default `false`).
+    #[env(from = "BRANCH_HINTING", default = "false")]
     pub branch_hinting: bool,
 }
 
@@ -82,7 +82,7 @@ pub struct RuntimeOptions {
 ///
 /// # Compile/run parity
 ///
-/// `OMNIA_MAX_FUEL` (which enables fuel metering) and `OMNIA_BRANCH_HINTING`
+/// `MAX_FUEL` (which enables fuel metering) and `BRANCH_HINTING`
 /// change the compiled artifact. They must hold the same value when a component
 /// is pre-compiled with `omnia compile` and when it is later run, otherwise
 /// [`wasmtime::component::Component::deserialize_file`] will reject the artifact.
