@@ -28,16 +28,31 @@ pub fn create<T: WasiView + 'static>(wasm: &PathBuf) -> Result<Compiled<T>> {
     let options = RuntimeOptions::load()?;
     let engine = Engine::new(&Config::from(&options))?;
 
+    // Prefer a pre-compiled artifact, falling back to JIT-compiling raw wasm
+    // when that feature is enabled.
     // SAFETY: The caller should ensure only valid pre-compiled wasm files are provided.
-    let component = unsafe { Component::deserialize_file(&engine, wasm) }.or_else(|e| {
-        if cfg!(feature = "jit") {
-            Component::from_file(&engine, wasm)
-        } else {
-            Err(wasmtime::Error::msg(format!(
-                "Issue loading component: {e}. Enable `jit` feature to load wasm32 files."
-            )))
-        }
-    })?;
+    let component = unsafe { Component::deserialize_file(&engine, wasm) }
+        .or_else(|e| {
+            if cfg!(feature = "jit") {
+                Component::from_file(&engine, wasm)
+            } else {
+                Err(wasmtime::Error::msg(format!(
+                    "Issue loading component: {e}. Enable `jit` feature to load wasm32 files."
+                )))
+            }
+        })
+        // A pre-compiled artifact is rejected unless the loading engine matches
+        // the compile-affecting settings it was produced with, so surface the
+        // parity-sensitive knobs on any load failure.
+        .map_err(anyhow::Error::from)
+        .with_context(|| {
+            format!(
+                "loading component {}: a pre-compiled artifact must be loaded with the same \
+                 compile-affecting settings used by `omnia compile` (MAX_FUEL, BRANCH_HINTING, \
+                 MEMORY_RESERVATION, MEMORY_GUARD_SIZE)",
+                wasm.display()
+            )
+        })?;
 
     // register services with runtime's Linker
     let mut linker = Linker::new(&engine);

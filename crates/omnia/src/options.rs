@@ -30,9 +30,11 @@ use wasmtime::{Config, Enabled, InstanceAllocationStrategy, PoolingAllocationCon
 ///
 /// # Compile-time vs runtime settings
 ///
-/// `max_fuel` and `branch_hinting` influence generated code, so they are applied
-/// by the [`Config`] conversion and therefore must be identical when a component
-/// is pre-compiled and when it is later loaded. The remaining values only affect
+/// `max_fuel`, `branch_hinting`, `memory_reservation`, and `memory_guard_size`
+/// influence generated code (the latter two via bounds-check elision), so they
+/// are applied by the [`Config`] conversion and must be identical when a
+/// component is pre-compiled and when it is later loaded. Copy-on-write heap
+/// initialisation is likewise pinned there. The remaining values only affect
 /// the engine or individual stores at runtime.
 #[derive(Clone, Debug, FromEnv)]
 pub struct RuntimeOptions {
@@ -49,6 +51,30 @@ pub struct RuntimeOptions {
     /// (`MAX_MEMORY_BYTES`, default 256 `MiB`).
     #[env(from = "MAX_MEMORY_BYTES", default = "268435456")]
     pub max_memory_bytes: usize,
+    /// Bytes of virtual address space reserved up-front for each linear memory
+    /// (`MEMORY_RESERVATION`). Compile-affecting: a large reservation (e.g. 4
+    /// `GiB` for 32-bit guests) lets Wasmtime elide bounds checks, so this must
+    /// match between `omnia compile` and `omnia run`. Unset leaves the Wasmtime
+    /// default.
+    #[env(from = "MEMORY_RESERVATION")]
+    pub memory_reservation: Option<u64>,
+    /// Bytes of unmapped guard region placed after each linear memory
+    /// (`MEMORY_GUARD_SIZE`). Compile-affecting: the guard size lets Wasmtime
+    /// elide and deduplicate bounds checks, so it must match between `omnia
+    /// compile` and `omnia run`. Unset leaves the Wasmtime default.
+    #[env(from = "MEMORY_GUARD_SIZE")]
+    pub memory_guard_size: Option<u64>,
+    /// Extra bytes eagerly reserved beyond a linear memory's current size to
+    /// absorb growth without remapping (`MEMORY_RESERVATION_FOR_GROWTH`).
+    /// Runtime-only; unset leaves the Wasmtime default.
+    #[env(from = "MEMORY_RESERVATION_FOR_GROWTH")]
+    pub memory_reservation_for_growth: Option<u64>,
+    /// Whether to zero async (fiber) stacks before reuse
+    /// (`ASYNC_STACK_ZEROING`, default `false`). Off by default for
+    /// performance; enable as defense-in-depth for untrusted guests, accepting
+    /// the per-instantiation cost. Runtime-only.
+    #[env(from = "ASYNC_STACK_ZEROING", default = "false")]
+    pub async_stack_zeroing: bool,
     /// Per-invocation fuel budget; `0` disables fuel metering
     /// (`MAX_FUEL`, default disabled).
     #[env(from = "MAX_FUEL", default = "0")]
@@ -104,6 +130,13 @@ pub struct RuntimeOptions {
     /// (`POOL_TOTAL_STACKS`, default 1000). Independent of the instance total.
     #[env(from = "POOL_TOTAL_STACKS", default = "1000")]
     pub pool_total_stacks: u32,
+    /// Maximum number of garbage-collected heaps held by the pooling allocator
+    /// (`POOL_TOTAL_GC_HEAPS`). Unset leaves the Wasmtime default and only takes
+    /// effect when built with the opt-in `gc` feature; setting it without that
+    /// feature is rejected at start-up. Only relevant to guests using the
+    /// component-model GC / reference types, which current guests do not.
+    #[env(from = "POOL_TOTAL_GC_HEAPS")]
+    pub pool_total_gc_heaps: Option<u32>,
     /// Upper bound on the number of core instances a single component may
     /// contain (`POOL_MAX_CORE_INSTANCES_PER_COMPONENT`). Unset leaves the
     /// Wasmtime default (unlimited).
@@ -173,19 +206,23 @@ pub struct RuntimeOptions {
     pub branch_hinting: bool,
 }
 
-/// Build the compile-time [`Config`] shared by [`crate::compile`] and
-/// [`crate::create`].
+/// Build the [`Config`] shared by [`crate::compile`] and [`crate::create`].
 ///
-/// Only settings that influence generated code belong here so that a
-/// pre-compiled component remains loadable. The component-model-async feature
+/// Centralising it here guarantees the compile-affecting subset (see the parity
+/// note below) is identical in both paths, so a pre-compiled component remains
+/// loadable. The runtime-only settings (the pooling allocator, async-stack
+/// zeroing, growth reservation) are applied here too for a single source of
+/// truth and have no effect on the artifact. The component-model-async feature
 /// and WASI 0.3.0 are enabled by default in Wasmtime 46, so they are no longer
 /// set explicitly.
 ///
 /// # Compile/run parity
 ///
-/// `MAX_FUEL` (which enables fuel metering) and `BRANCH_HINTING`
-/// change the compiled artifact. They must hold the same value when a component
-/// is pre-compiled with `omnia compile` and when it is later run, otherwise
+/// `MAX_FUEL` (which enables fuel metering), `BRANCH_HINTING`,
+/// `MEMORY_RESERVATION`, and `MEMORY_GUARD_SIZE` change the compiled artifact,
+/// as does copy-on-write heap initialisation (pinned on here). They must hold
+/// the same value when a component is pre-compiled with `omnia compile` and when
+/// it is later run, otherwise
 /// [`wasmtime::component::Component::deserialize_file`] will reject the artifact.
 impl From<&RuntimeOptions> for Config {
     fn from(options: &RuntimeOptions) -> Self {
@@ -195,6 +232,13 @@ impl From<&RuntimeOptions> for Config {
         // and per-store deadlines drive cooperative guest timeouts.
         config.epoch_interruption(true);
 
+        // Copy-on-write heap images are what make per-request instantiation
+        // cheap. The default is already `true`, but pin it: it is
+        // compile-affecting (re-checked by `deserialize_file`) so the compiling
+        // and loading engines must agree, and an explicit value guards against a
+        // future default change silently breaking artifact compatibility.
+        config.memory_init_cow(true);
+
         if options.max_fuel > 0 {
             config.consume_fuel(true);
         }
@@ -202,12 +246,35 @@ impl From<&RuntimeOptions> for Config {
             config.wasm_branch_hinting(true);
         }
 
-        // config
+        // Compile-affecting memory tunables (they drive bounds-check elision).
+        // Applied only when set so an unset value preserves the Wasmtime
+        // default; whatever is chosen must match between `omnia compile` and
+        // `omnia run`.
+        if let Some(bytes) = options.memory_reservation {
+            config.memory_reservation(bytes);
+        }
+        if let Some(bytes) = options.memory_guard_size {
+            config.memory_guard_size(bytes);
+        }
+
+        // Runtime-only engine settings: they do not affect the artifact, so
+        // applying them in both the compile and load paths is harmless. Set
+        // before the pooling early-return so they hold whether or not pooling
+        // is enabled. `async_stack_zeroing` is defense-in-depth for untrusted
+        // guests; `memory_reservation_for_growth` tunes dynamic-memory remaps.
+        config.async_stack_zeroing(options.async_stack_zeroing);
+        if let Some(bytes) = options.memory_reservation_for_growth {
+            config.memory_reservation_for_growth(bytes);
+        }
 
         if !options.pooling {
             return config;
         }
 
+        // SECURITY: the pooling allocator + CoW is exactly the configuration
+        // historical Wasmtime advisories target, so keeping the `46.0.x` pins
+        // current matters most here (see the maintenance note in the workspace
+        // `Cargo.toml`).
         let mut pool = PoolingAllocationConfig::new();
 
         // Totals are kept independent of the component-instance count: a single
@@ -229,6 +296,20 @@ impl From<&RuntimeOptions> for Config {
             // Linux-only fast linear-memory reset; the default (`No`) preserves the
             // prior behaviour and `Auto` falls back cleanly where unsupported.
             .pagemap_scan(options.pool_pagemap_scan);
+
+        // GC heaps are only used by guests that adopt the component-model GC /
+        // reference types; current guests compile to linear memory and never
+        // allocate one. GC support is gated behind the opt-in `gc` feature (the
+        // collector and heap-reservation knobs are left at their Wasmtime
+        // defaults), so the pool count is applied only when that feature is
+        // compiled in, ready for when such a guest appears.
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "gc")] {
+                if let Some(count) = options.pool_total_gc_heaps {
+                    pool.total_gc_heaps(count);
+                }
+            }
+        }
 
         // Structural limits and sizes are applied only when explicitly set so an
         // unset value preserves the Wasmtime default.
@@ -305,6 +386,13 @@ impl RuntimeOptions {
         #[cfg(not(feature = "mpk"))]
         if self.pool_memory_protection_keys == Enabled::Yes {
             bail!("POOL_MEMORY_PROTECTION_KEYS=yes requires building omnia with the `mpk` feature");
+        }
+
+        // Likewise reject a GC heap count when the `gc` feature that compiles in
+        // `total_gc_heaps` is absent, rather than silently ignoring it.
+        #[cfg(not(feature = "gc"))]
+        if self.pool_total_gc_heaps.is_some() {
+            bail!("POOL_TOTAL_GC_HEAPS requires building omnia with the `gc` feature");
         }
 
         if let Some(per_module) = self.pool_max_memories_per_module

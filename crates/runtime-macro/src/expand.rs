@@ -88,6 +88,10 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                         self.options.pool_metrics_interval,
                     );
 
+                    // Every server runs against the same `self`, so they share a
+                    // single pre-instantiated component and therefore one `Engine`.
+                    // The pooling allocator's pool is per-`Engine`, so this keeps
+                    // all per-request instantiation drawing from one shared pool.
                     let futures: Vec<BoxFuture<'_, Result<()>>> =
                         vec![#(Box::pin(#server_trait_impls.run(self)),)*];
                     try_join_all(futures).await?;

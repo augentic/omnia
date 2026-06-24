@@ -27,6 +27,12 @@ jit = ["wasmtime/cranelift"]
 # place). Off by default.
 mpk = ["wasmtime/memory-protection-keys"]
 
+# Enables the WebAssembly GC / reference-types proposal (with the default
+# copying collector) and the pooling allocator's `total_gc_heaps` control
+# (`POOL_TOTAL_GC_HEAPS`). Current guests compile to linear memory and never
+# allocate a GC heap, so this is off by default.
+gc = ["wasmtime/gc", "wasmtime/gc-copying"]
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
 cfg-if.workspace = true
