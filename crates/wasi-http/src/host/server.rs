@@ -20,7 +20,7 @@ use hyper::service::service_fn;
 use omnia::State;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
-use tracing::{Instrument, info_span};
+use tracing::{Instrument, debug_span};
 use wasmtime::Store;
 use wasmtime_wasi_http::io::TokioIo;
 use wasmtime_wasi_http::p3::WasiHttpView;
@@ -113,13 +113,6 @@ where
         // prepare wasmtime http request and response
         let request = fix_request(request).context("preparing request")?;
 
-        let method = request.method().to_string();
-        let uri = request.uri().to_string();
-        let route = request
-            .uri()
-            .path_and_query()
-            .map_or_else(|| "/".to_string(), |pq| pq.path().to_string());
-
         // instantiate the guest and get the proxy
         let instance_pre = self.state.instance_pre();
         let store_data = self.state.store();
@@ -147,7 +140,6 @@ where
                     let wasi_resp = match service.handle(store, request).await? {
                         Ok(resp) => resp,
                         Err(e) => {
-                            tracing::Span::current().record("http.response.status_code", 500_i64);
                             send_err(sender, anyhow!("guest error: {e}"));
                             return anyhow::Ok(());
                         }
@@ -155,14 +147,10 @@ where
                     let resp = match store.with(|mut store| wasi_resp.into_http(&mut store, io)) {
                         Ok(resp) => resp,
                         Err(e) => {
-                            tracing::Span::current().record("http.response.status_code", 500_i64);
                             send_err(sender, anyhow!("converting guest response: {e}"));
                             return anyhow::Ok(());
                         }
                     };
-
-                    tracing::Span::current()
-                        .record("http.response.status_code", i64::from(resp.status().as_u16()));
 
                     // wrap body so we can detect when hyper finishes consuming it
                     let (body_done_tx, body_done_rx) = oneshot::channel::<()>();
@@ -182,14 +170,7 @@ where
 
                     anyhow::Ok(())
                 })
-                .instrument(info_span!(
-                    "http-request",
-                    http.request.method = %method,
-                    http.route = %route,
-                    url.full = %uri,
-                    http.response.status_code = tracing::field::Empty,
-                    otel.kind = "server",
-                ))
+                .instrument(debug_span!("http-request"))
                 .await;
 
             match result {
