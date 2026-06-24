@@ -20,8 +20,8 @@ use hyper::service::service_fn;
 use omnia::State;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
-use tracing::{Instrument, info_span};
-use wasmtime::Store;
+use tokio::time::timeout;
+use tracing::{Instrument, debug_span};
 use wasmtime_wasi_http::io::TokioIo;
 use wasmtime_wasi_http::p3::WasiHttpView;
 use wasmtime_wasi_http::p3::bindings::ServiceIndices;
@@ -45,6 +45,7 @@ where
     let handler = Handler {
         state: Arc::new(state.clone()),
         component,
+        indices: ServiceIndices::new(state.instance_pre())?,
     };
 
     // listen for requests until terminated
@@ -97,6 +98,7 @@ where
 {
     state: Arc<S>,
     component: String,
+    indices: ServiceIndices,
 }
 
 impl<S> Handler<S>
@@ -113,24 +115,15 @@ where
         // prepare wasmtime http request and response
         let request = fix_request(request).context("preparing request")?;
 
-        let method = request.method().to_string();
-        let uri = request.uri().to_string();
-        let route = request
-            .uri()
-            .path_and_query()
-            .map_or_else(|| "/".to_string(), |pq| pq.path().to_string());
-
         // instantiate the guest and get the proxy
-        let instance_pre = self.state.instance_pre();
         let store_data = self.state.store();
-        let mut store = Store::new(instance_pre.engine(), store_data);
-        let indices = ServiceIndices::new(instance_pre)?;
-        let instance = instance_pre.instantiate_async(&mut store).await?;
-        let service = indices.load(&mut store, &instance)?;
+        let mut store = self.state.build_store(store_data);
+        let instance = self.state.instantiate(&mut store).await?;
+        let service = self.indices.load(&mut store, &instance)?;
 
         let (sender, receiver) = oneshot::channel::<Result<hyper::Response<OutgoingBody>>>();
 
-        tokio::spawn(async move {
+        let guest_task = tokio::spawn(async move {
             let send_err = |sender: oneshot::Sender<_>, e: anyhow::Error| {
                 _ = sender.send(Err(e));
             };
@@ -147,7 +140,6 @@ where
                     let wasi_resp = match service.handle(store, request).await? {
                         Ok(resp) => resp,
                         Err(e) => {
-                            tracing::Span::current().record("http.response.status_code", 500_i64);
                             send_err(sender, anyhow!("guest error: {e}"));
                             return anyhow::Ok(());
                         }
@@ -155,14 +147,10 @@ where
                     let resp = match store.with(|mut store| wasi_resp.into_http(&mut store, io)) {
                         Ok(resp) => resp,
                         Err(e) => {
-                            tracing::Span::current().record("http.response.status_code", 500_i64);
                             send_err(sender, anyhow!("converting guest response: {e}"));
                             return anyhow::Ok(());
                         }
                     };
-
-                    tracing::Span::current()
-                        .record("http.response.status_code", i64::from(resp.status().as_u16()));
 
                     // wrap body so we can detect when hyper finishes consuming it
                     let (body_done_tx, body_done_rx) = oneshot::channel::<()>();
@@ -182,14 +170,7 @@ where
 
                     anyhow::Ok(())
                 })
-                .instrument(info_span!(
-                    "http-request",
-                    http.request.method = %method,
-                    http.route = %route,
-                    url.full = %uri,
-                    http.response.status_code = tracing::field::Empty,
-                    otel.kind = "server",
-                ))
+                .instrument(debug_span!("http-request"))
                 .await;
 
             match result {
@@ -199,7 +180,15 @@ where
             }
         });
 
-        let response = receiver.await.map_err(|_recv| anyhow!("guest task panicked"))??;
+        // bound time-to-response (not the streaming body); cancel a hung guest
+        let response = match timeout(self.state.options().guest_timeout, receiver).await {
+            Ok(result) => result.map_err(|_recv| anyhow!("guest task panicked"))??,
+            Err(_elapsed) => {
+                guest_task.abort();
+                tracing::error!(service = %self.component, "guest handler timed out");
+                return Ok(internal_error());
+            }
+        };
         tracing::debug!("received response: {response:?}");
 
         Ok(response)

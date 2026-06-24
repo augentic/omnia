@@ -8,8 +8,8 @@ fn same_object(src: &ObjectId, dest: &ObjectId) -> bool {
     src.container == dest.container && src.object == dest.object
 }
 
-impl HostWithStore for WasiBlobstore {
-    async fn create_container<T>(
+impl<T> HostWithStore<T> for WasiBlobstore {
+    async fn create_container(
         accessor: &Accessor<T, Self>, name: String,
     ) -> Result<Resource<ContainerProxy>> {
         tracing::trace!("create_container: {name}");
@@ -21,7 +21,7 @@ impl HostWithStore for WasiBlobstore {
         accessor.with(|mut store| store.get().table.push(proxy)).map_err(|e| e.to_string())
     }
 
-    async fn get_container<T>(
+    async fn get_container(
         accessor: &Accessor<T, Self>, name: String,
     ) -> Result<Resource<ContainerProxy>> {
         tracing::trace!("get_container: {name}");
@@ -33,7 +33,7 @@ impl HostWithStore for WasiBlobstore {
         accessor.with(|mut store| store.get().table.push(proxy)).map_err(|e| e.to_string())
     }
 
-    async fn delete_container<T>(accessor: &Accessor<T, Self>, name: String) -> Result<()> {
+    async fn delete_container(accessor: &Accessor<T, Self>, name: String) -> Result<()> {
         tracing::trace!("delete_container: {name}");
         accessor
             .with(|mut store| store.get().ctx.delete_container(name))
@@ -41,7 +41,7 @@ impl HostWithStore for WasiBlobstore {
             .map_err(|e| e.to_string())
     }
 
-    async fn container_exists<T>(accessor: &Accessor<T, Self>, name: String) -> Result<bool> {
+    async fn container_exists(accessor: &Accessor<T, Self>, name: String) -> Result<bool> {
         tracing::trace!("container_exists: {name}");
         accessor
             .with(|mut store| store.get().ctx.container_exists(name))
@@ -49,7 +49,7 @@ impl HostWithStore for WasiBlobstore {
             .map_err(|e| e.to_string())
     }
 
-    async fn copy_object<T>(
+    async fn copy_object(
         accessor: &Accessor<T, Self>, src: ObjectId, dest: ObjectId,
     ) -> Result<()> {
         tracing::trace!(
@@ -79,7 +79,7 @@ impl HostWithStore for WasiBlobstore {
         dest_container.write_data(dest.object, data).await.map_err(|e| e.to_string())
     }
 
-    async fn move_object<T>(
+    async fn move_object(
         accessor: &Accessor<T, Self>, src: ObjectId, dest: ObjectId,
     ) -> Result<()> {
         tracing::trace!(

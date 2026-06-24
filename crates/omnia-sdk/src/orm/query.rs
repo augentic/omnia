@@ -4,7 +4,8 @@ use sea_query::backend::{
 };
 use sea_query::prepare::SqlWriter;
 use sea_query::{
-    BinOper, Oper, QueryStatementBuilder, Quote, SimpleExpr, SubQueryStatement, Value,
+    BinOper, ExplainStatement, Oper, QueryStatementBuilder, Quote, SelectInto, SimpleExpr,
+    SubQueryStatement, Value,
 };
 
 use super::DataType;
@@ -67,7 +68,7 @@ impl PrecedenceDecider for QueryBuilder {
 }
 
 impl sea_query::backend::QueryBuilder for QueryBuilder {
-    fn prepare_query_statement(&self, query: &SubQueryStatement, sql: &mut dyn SqlWriter) {
+    fn prepare_query_statement(&self, query: &SubQueryStatement, sql: &mut impl SqlWriter) {
         match query {
             SubQueryStatement::SelectStatement(s) => self.prepare_select_statement(s, sql),
             SubQueryStatement::InsertStatement(s) => self.prepare_insert_statement(s, sql),
@@ -77,11 +78,18 @@ impl sea_query::backend::QueryBuilder for QueryBuilder {
         }
     }
 
-    fn prepare_value(&self, value: &Value, sql: &mut dyn SqlWriter) {
-        sql.push_param(value.clone(), self);
+    fn prepare_value(&self, value: Value, sql: &mut impl SqlWriter) {
+        sql.push_param(value, self);
     }
 
-    fn placeholder(&self) -> (&str, bool) {
+    fn placeholder(&self) -> (&'static str, bool) {
         ("$", true)
     }
+
+    // The ORM only emits SELECT/INSERT/UPDATE/DELETE, so `SELECT ... INTO` and
+    // `EXPLAIN` are never built with this backend, and `sea_query` keeps their
+    // payloads crate-private. Empty bodies satisfy the now-required trait items.
+    fn prepare_select_into(&self, _: &SelectInto, _: &mut impl SqlWriter) {}
+
+    fn prepare_explain_statement(&self, _: &ExplainStatement, _: &mut impl SqlWriter) {}
 }

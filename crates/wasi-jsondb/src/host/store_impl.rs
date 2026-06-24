@@ -11,29 +11,29 @@ fn map_err(e: &anyhow::Error) -> JsonDbError {
     JsonDbError::Other(format!("{e:#}"))
 }
 
-impl HostWithStore for WasiJsonDb {
-    async fn get<T>(
+impl<T> HostWithStore<T> for WasiJsonDb {
+    async fn get(
         accessor: &Accessor<T, Self>, collection: String, id: String,
     ) -> Result<Option<Document>, JsonDbError> {
         let fut = accessor.with(|mut store| store.get().ctx.get(collection, id));
         fut.await.map_err(|e| map_err(&e))
     }
 
-    async fn insert<T>(
+    async fn insert(
         accessor: &Accessor<T, Self>, collection: String, doc: Document,
     ) -> Result<(), JsonDbError> {
         let fut = accessor.with(|mut store| store.get().ctx.insert(collection, doc));
         fut.await.map_err(|e| map_err(&e))
     }
 
-    async fn put<T>(
+    async fn put(
         accessor: &Accessor<T, Self>, collection: String, doc: Document,
     ) -> Result<(), JsonDbError> {
         let fut = accessor.with(|mut store| store.get().ctx.put(collection, doc));
         fut.await.map_err(|e| map_err(&e))
     }
 
-    async fn delete<T>(
+    async fn delete(
         accessor: &Accessor<T, Self>, collection: String, id: String,
     ) -> Result<bool, JsonDbError> {
         let fut = accessor.with(|mut store| store.get().ctx.delete(collection, id));
@@ -41,7 +41,7 @@ impl HostWithStore for WasiJsonDb {
     }
 
     #[allow(clippy::needless_pass_by_value)] // Matches generated `HostWithStore::query` signature.
-    async fn query<T>(
+    async fn query(
         accessor: &Accessor<T, Self>, collection: String, options: QueryOptions,
     ) -> Result<QueryResult, JsonDbError> {
         let QueryOptions {

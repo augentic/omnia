@@ -9,9 +9,13 @@ use syn::{Ident, Path};
 use crate::runtime::Config;
 
 // Generate the runtime from the configuration.
+// A single cohesive code-generation function; its length is inherent.
+#[allow(clippy::too_many_lines)]
 pub fn expand(config: &Config) -> syn::Result<TokenStream> {
     let Expanded {
         context_fields,
+        backend_idents,
+        backend_types,
         store_ctx_fields,
         store_ctx_values,
         host_trait_impls,
@@ -19,6 +23,19 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
         wasi_view_impls,
         main_fn,
     } = Expanded::try_from(config)?;
+
+    // Connect every backend concurrently. `tokio::try_join!` is variadic and
+    // returns on the first error, but rejects an empty argument list, so skip it
+    // entirely when there are no backends.
+    let connect_backends = if backend_idents.is_empty() {
+        quote! {}
+    } else {
+        quote! {
+            let (#(#backend_idents,)*) = tokio::try_join!(
+                #(<#backend_types as Backend>::connect(),)*
+            )?;
+        }
+    };
 
     Ok(quote! {
         mod runtime {
@@ -29,8 +46,9 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
             use omnia::futures::future::{try_join_all, BoxFuture};
             use omnia::tokio;
             use omnia::wasmtime::component::{HasData,InstancePre};
+            use omnia::wasmtime::{StoreLimits, StoreLimitsBuilder};
             use omnia::wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
-            use omnia::{Backend, Compiled, Server, State};
+            use omnia::{Backend, Compiled, HasLimits, RuntimeOptions, Server, State};
 
             use super::*;
 
@@ -48,6 +66,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
             #[derive(Clone)]
             struct Context {
                 instance_pre: InstancePre<StoreCtx>,
+                options: RuntimeOptions,
                 #(pub #context_fields,)*
             }
 
@@ -57,16 +76,40 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                     // link enabled WASI components
                     #(compiled.link(#host_trait_impls)?;)*
 
+                    // connect to all backends concurrently
+                    #connect_backends
+
                     Ok(Self {
+                        options: compiled.options().clone(),
                         instance_pre: compiled.pre_instantiate()?,
-                        #(#context_fields::connect().await?,)*
+                        #(#backend_idents,)*
                     })
                 }
 
                 /// Start servers.
                 ///
-                /// N.B. for simplicity, all hosts are "servers" with a default implementation that does nothing.
+                /// N.B. for simplicity, all hosts are "servers" with a default implementation that
+                /// does nothing.
                 async fn start(&self) -> Result<()> {
+                    // Drive epoch interruption so guest deadlines (and the
+                    // wall-clock timeouts wrapped around each invocation) fire
+                    // even while a guest executes CPU-bound code.
+                    omnia::drive_epoch(
+                        self.instance_pre.engine().clone(),
+                        self.options.epoch_tick,
+                    );
+
+                    // Periodically sample pool occupancy as metrics so pool sizing can be tuned
+                    // from real data.
+                    omnia::sample_pool(
+                        self.instance_pre.engine().clone(),
+                        self.options.pool_metrics_interval,
+                    );
+
+                    // Every server runs against the same `self`, so they share a
+                    // single pre-instantiated component and therefore one `Engine`.
+                    // The pooling allocator's pool is per-`Engine`, so this keeps
+                    // all per-request instantiation drawing from one shared pool.
                     let futures: Vec<BoxFuture<'_, Result<()>>> =
                         vec![#(Box::pin(#server_trait_impls.run(self)),)*];
                     try_join_all(futures).await?;
@@ -81,6 +124,10 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                     &self.instance_pre
                 }
 
+                fn options(&self) -> &RuntimeOptions {
+                    &self.options
+                }
+
                 fn store(&self) -> Self::StoreCtx {
                     let wasi_ctx = WasiCtxBuilder::new()
                         // .inherit_args()
@@ -93,6 +140,9 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                     StoreCtx {
                         table: ResourceTable::new(),
                         wasi: wasi_ctx,
+                        limits: StoreLimitsBuilder::new()
+                            .memory_size(self.options.max_memory_bytes)
+                            .build(),
                         #(#store_ctx_values,)*
                     }
                 }
@@ -102,6 +152,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
             pub struct StoreCtx {
                 pub table: ResourceTable,
                 pub wasi: WasiCtx,
+                pub limits: StoreLimits,
                 #(pub #store_ctx_fields,)*
             }
 
@@ -112,6 +163,13 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                         ctx: &mut self.wasi,
                         table: &mut self.table,
                     }
+                }
+            }
+
+            /// Exposes per-guest resource limits to the runtime.
+            impl HasLimits for StoreCtx {
+                fn limits(&mut self) -> &mut StoreLimits {
+                    &mut self.limits
                 }
             }
 
@@ -126,6 +184,8 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
 
 struct Expanded {
     context_fields: Vec<TokenStream>,
+    backend_idents: Vec<Ident>,
+    backend_types: Vec<Path>,
     store_ctx_fields: Vec<TokenStream>,
     store_ctx_values: Vec<TokenStream>,
     host_trait_impls: Vec<Path>,
@@ -140,6 +200,8 @@ impl TryFrom<&Config> for Expanded {
     fn try_from(input: &Config) -> Result<Self, Self::Error> {
         // `Context` struct
         let mut context_fields = Vec::new();
+        let mut backend_idents = Vec::new();
+        let mut backend_types = Vec::new();
         let mut seen_backends = Vec::new();
 
         for backend in &input.backends {
@@ -152,6 +214,8 @@ impl TryFrom<&Config> for Expanded {
 
             let field = field_ident(backend);
             context_fields.push(quote! {#field: #backend});
+            backend_idents.push(field);
+            backend_types.push(backend.clone());
         }
 
         let mut store_ctx_fields = Vec::new();
@@ -201,6 +265,8 @@ impl TryFrom<&Config> for Expanded {
 
         Ok(Self {
             context_fields,
+            backend_idents,
+            backend_types,
             store_ctx_fields,
             store_ctx_values,
             host_trait_impls,

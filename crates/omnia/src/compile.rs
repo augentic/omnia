@@ -8,6 +8,8 @@ use anyhow::{Result, anyhow};
 use wasmtime::component::Component;
 use wasmtime::{Config, Engine};
 
+use crate::RuntimeOptions;
+
 /// Compile `wasm32-wasip2` component.
 ///
 /// For example, to compile the `http` component, run:
@@ -26,10 +28,11 @@ pub fn compile(wasm: &PathBuf, output: Option<PathBuf>) -> Result<()> {
         return Err(anyhow!("invalid file name"));
     };
 
-    // compile component
-    let mut config = Config::new();
-    config.wasm_component_model_async(true);
-    let engine = Engine::new(&config)?;
+    // compile component (compile-time config must match the loader in `create`)
+    let options = RuntimeOptions::load()?;
+    let wt_config = &Config::from(&options);
+
+    let engine = Engine::new(wt_config)?;
     let component = Component::from_file(&engine, wasm)?;
     let serialized = component.serialize()?;
 

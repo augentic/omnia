@@ -1,7 +1,7 @@
 //! # WebAssembly Initiator
 
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use omnia_otel::Telemetry;
@@ -10,6 +10,7 @@ use wasmtime::component::{Component, InstancePre, Linker};
 use wasmtime::{Config, Engine};
 use wasmtime_wasi::WasiView;
 
+use crate::RuntimeOptions;
 use crate::traits::Host;
 
 /// Build the Wasmtime `Engine` and `Linker` for this runtime.
@@ -20,29 +21,13 @@ use crate::traits::Host;
 /// as a `Component` or the `Linker` cannot be initialized with WASI
 /// support.
 #[instrument]
-pub fn create<T: WasiView + 'static>(wasm: &PathBuf) -> Result<Compiled<T>> {
+pub fn create<T: WasiView + 'static>(wasm: &Path) -> Result<Compiled<T>> {
     init_env(wasm)?;
     tracing::info!("initializing runtime");
 
-    let mut config = Config::new();
-    config.wasm_component_model_async(true);
-    let engine = Engine::new(&config)?;
-
-    // TODO: cause executing WebAssembly to periodically yield
-    //  1. enable `Config::epoch_interruption`
-    //  2. Set `Store::epoch_deadline_async_yield_and_update`
-    //  3. Call `Engine::increment_epoch` periodically
-
-    // SAFETY: The caller should ensure only valid pre-compiled wasm files are provided.
-    let component = unsafe { Component::deserialize_file(&engine, wasm) }.or_else(|e| {
-        if cfg!(feature = "jit") {
-            Component::from_file(&engine, wasm)
-        } else {
-            Err(wasmtime::Error::msg(format!(
-                "Issue loading component: {e}. Enable `jit` feature to load wasm32 files."
-            )))
-        }
-    })?;
+    let options = RuntimeOptions::load()?;
+    let engine = Engine::new(&Config::from(&options))?;
+    let component = load(&engine, wasm)?;
 
     // register services with runtime's Linker
     let mut linker = Linker::new(&engine);
@@ -51,16 +36,57 @@ pub fn create<T: WasiView + 'static>(wasm: &PathBuf) -> Result<Compiled<T>> {
 
     tracing::info!("runtime initialized");
 
-    Ok(Compiled { component, linker })
+    Ok(Compiled {
+        component,
+        linker,
+        options,
+    })
+}
+
+/// Load a component from a file.
+fn load(engine: &Engine, wasm: &Path) -> Result<Component> {
+    // SAFETY: a pre-compiled artifact is rejected (not executed) unless the
+    // loading engine matches the compile-affecting settings it was built with.
+    let result = unsafe { Component::deserialize_file(engine, wasm) }
+        .map_err(anyhow::Error::from)
+        .with_context(|| {
+            format!(
+                "loading component {}: a pre-compiled artifact must be loaded with the same \
+                compile-affecting settings used by `omnia compile` (MAX_FUEL, BRANCH_HINTING, \
+                MEMORY_RESERVATION, MEMORY_GUARD_SIZE)",
+                wasm.display()
+            )
+        });
+
+    // Fall back to JIT-compiling raw wasm when the feature is enabled.
+    #[cfg(feature = "jit")]
+    let component =
+        result.or_else(|_| Component::from_file(engine, wasm).map_err(anyhow::Error::from))?;
+
+    #[cfg(not(feature = "jit"))]
+    let component = result
+        .context("if this is a raw wasm32 component, rebuild with the `jit` feature to load it")?;
+
+    // Build the copy-on-write heap image now (startup) rather than lazily on the
+    // first instantiation, moving that one-time cost off the first request.
+    component.initialize_copy_on_write_image()?;
+    Ok(component)
 }
 
 /// A compiled WebAssembly component with its associated Linker.
 pub struct Compiled<T: WasiView + 'static> {
     component: Component,
     linker: Linker<T>,
+    options: RuntimeOptions,
 }
 
 impl<T: WasiView> Compiled<T> {
+    /// Returns the environment-derived runtime options.
+    #[must_use]
+    pub const fn options(&self) -> &RuntimeOptions {
+        &self.options
+    }
+
     /// Link a WASI component to the runtime.
     ///
     /// # Errors
@@ -75,7 +101,7 @@ impl<T: WasiView> Compiled<T> {
     /// # Errors
     ///
     /// Will fail if the component cannot be pre-instantiated.
-    pub fn pre_instantiate(&mut self) -> Result<InstancePre<T>> {
+    pub fn pre_instantiate(&self) -> Result<InstancePre<T>> {
         self.linker.instantiate_pre(&self.component).map_err(anyhow::Error::from)
     }
 }
@@ -88,7 +114,7 @@ impl<T: WasiView> Compiled<T> {
 fn init_env(wasm: &Path) -> Result<()> {
     let name = wasm.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
 
-    if env::var("COMPONENT").is_err() {
+    if env::var_os("COMPONENT").is_none() {
         // SAFETY: Environment variable modification is safe here because:
         // 1. This runs during single-threaded initialization
         // 2. Backend clients that depend on these vars are created after this
@@ -103,4 +129,48 @@ fn init_env(wasm: &Path) -> Result<()> {
         builder = builder.endpoint(endpoint);
     }
     builder.build().context("initializing telemetry")
+}
+
+#[cfg(test)]
+mod tests {
+    use wasmtime::{Config, Engine};
+
+    use crate::RuntimeOptions;
+
+    #[test]
+    fn builds_with_defaults() {
+        Engine::new(&Config::from(&RuntimeOptions::load().expect("should load")))
+            .expect("default pooling config should build an engine");
+    }
+
+    #[test]
+    fn builds_with_pooling() {
+        // Independent totals plus per-component/per-module limits, sized small
+        // (and with a tiny per-memory cap) so the reservation stays cheap.
+        let options = RuntimeOptions {
+            pool_max_instances: 8,
+            pool_total_core_instances: 8,
+            pool_total_memories: 16,
+            pool_total_tables: 16,
+            pool_total_stacks: 8,
+            pool_max_memory_bytes: Some(1 << 20),
+            pool_max_memories_per_component: Some(4),
+            pool_max_tables_per_component: Some(4),
+            pool_max_memories_per_module: Some(2),
+            pool_max_tables_per_module: Some(2),
+            pool_decommit_batch_size: Some(8),
+            ..RuntimeOptions::load().expect("should load")
+        };
+        Engine::new(&Config::from(&options))
+            .expect("decoupled multi-memory pooling config should build an engine");
+    }
+
+    #[test]
+    fn builds_without_pooling() {
+        let options = RuntimeOptions {
+            pooling: false,
+            ..RuntimeOptions::load().expect("should load")
+        };
+        Engine::new(&Config::from(&options)).expect("non-pooling config should build an engine");
+    }
 }

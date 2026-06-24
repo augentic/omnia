@@ -7,8 +7,8 @@ use crate::host::generated::wasi::sql::readwrite::{
 };
 use crate::host::{WasiSql, WasiSqlCtxView};
 
-impl HostWithStore for WasiSql {
-    async fn query<T>(
+impl<T> HostWithStore<T> for WasiSql {
+    async fn query(
         accessor: &Accessor<T, Self>, c: Resource<Connection>, q: Resource<Statement>,
     ) -> wasmtime::Result<Result<Vec<Row>, Resource<Error>>> {
         let connection = get_connection(accessor, &c).map_err(wasmtime::Error::from_anyhow)?;
@@ -26,7 +26,7 @@ impl HostWithStore for WasiSql {
         Ok(result)
     }
 
-    async fn exec<T>(
+    async fn exec(
         accessor: &Accessor<T, Self>, c: Resource<Connection>, q: Resource<Statement>,
     ) -> wasmtime::Result<Result<u32, Resource<Error>>> {
         let connection = get_connection(accessor, &c).map_err(wasmtime::Error::from_anyhow)?;

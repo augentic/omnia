@@ -21,13 +21,27 @@ default = ["jit"]
 # Enables just-in-time wasm to machine code compilation.
 jit = ["wasmtime/cranelift"]
 
+# Enables memory protection keys (MPK) support in the pooling allocator. MPK
+# only functions on Linux/x86_64; elsewhere it compiles but is inert
+# (`POOL_MEMORY_PROTECTION_KEYS=auto` falls back to leaving guard regions in
+# place). Off by default.
+mpk = ["wasmtime/memory-protection-keys"]
+
+# Enables the WebAssembly GC / reference-types proposal (with the default
+# copying collector) and the pooling allocator's `total_gc_heaps` control
+# (`POOL_TOTAL_GC_HEAPS`). Current guests compile to linear memory and never
+# allocate a GC heap, so this is off by default.
+gc = ["wasmtime/gc", "wasmtime/gc-copying"]
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
-clap = { version = "4.6.0", features = ["derive"] }
+cfg-if.workspace = true
+clap = { version = "4.6.1", features = ["derive"] }
+fromenv.workspace = true
 futures.workspace = true
 serde.workspace = true
 tracing.workspace = true
-tokio = { workspace = true, features = ["macros"] }
+tokio = { workspace = true, features = ["macros", "rt", "time"] }
 omnia-otel.workspace = true
 omnia-runtime-macro.workspace = true
 wasmtime = { workspace = true, features = ["runtime"] }

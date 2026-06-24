@@ -4,10 +4,9 @@ use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
 use omnia::State;
 use tracing::{Instrument, debug_span, instrument};
-use wasmtime::Store;
 
 use crate::host::WebSocketView;
-use crate::host::generated::Duplex;
+use crate::host::generated::DuplexIndices;
 use crate::host::resource::{EventProxy, Events};
 
 #[instrument("websocket-server", skip(state))]
@@ -22,6 +21,7 @@ where
     let handler = Handler {
         state: state.clone(),
         component,
+        indices: DuplexIndices::new(state.instance_pre())?,
     };
 
     // handle events from the websocket clients
@@ -52,6 +52,7 @@ where
 {
     state: S,
     component: String,
+    indices: DuplexIndices,
 }
 
 impl<S> Handler<S>
@@ -68,12 +69,11 @@ where
             .push(event)
             .map_err(|e| anyhow!("failed to push event: {e}"))?;
 
-        let instance_pre = self.state.instance_pre();
-        let mut store = Store::new(instance_pre.engine(), store_data);
-        let instance = instance_pre.instantiate_async(&mut store).await?;
-        let websocket = Duplex::new(&mut store, &instance)?;
+        let mut store = self.state.build_store(store_data);
+        let instance = self.state.instantiate(&mut store).await?;
+        let websocket = self.indices.load(&mut store, &instance)?;
 
-        store
+        let run = store
             .run_concurrent(async |store| {
                 let guest = websocket.omnia_websocket_handler();
                 guest
@@ -83,15 +83,17 @@ where
                     .map_err(anyhow::Error::from)
                     .context("issue handling event")
             })
-            .instrument(debug_span!("websocket-handle"))
-            .await?
+            .instrument(debug_span!("websocket-handle"));
+
+        tokio::time::timeout(self.state.options().guest_timeout, run)
+            .await
+            .context("websocket handler timed out")??
     }
 
     /// Get events for incoming WebSocket events.
     async fn events(&self) -> Result<Events> {
-        let instance_pre = self.state.instance_pre();
         let store_data = self.state.store();
-        let mut store = Store::new(instance_pre.engine(), store_data);
+        let mut store = self.state.build_store(store_data);
 
         store
             .run_concurrent(async |store| {

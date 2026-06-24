@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow, bail};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
-use sea_query::{Order, Value, Values};
+use sea_query::{Value, Values};
 
 use super::join::Join;
 use super::{DataType, Row};
@@ -27,12 +27,6 @@ pub trait Entity: Sized {
 
     /// Column names to select when fetching this entity.
     fn projection() -> &'static [&'static str];
-
-    /// Default ordering specification for queries.
-    #[must_use]
-    fn ordering() -> Vec<OrderSpec> {
-        Vec::new()
-    }
 
     /// Default joins to include when querying this entity.
     #[must_use]
@@ -62,13 +56,6 @@ pub trait EntityValues {
     fn __to_values(&self) -> Vec<(&'static str, Value)>;
 }
 
-#[derive(Clone)]
-pub struct OrderSpec {
-    pub table: Option<&'static str>,
-    pub column: &'static str,
-    pub order: Order,
-}
-
 pub fn values_to_wasi_datatypes(values: Values) -> Result<Vec<DataType>> {
     values.into_iter().map(value_to_wasi_datatype).collect()
 }
@@ -86,16 +73,13 @@ fn value_to_wasi_datatype(value: Value) -> Result<DataType> {
         Value::BigUnsigned(v) => DataType::Uint64(v),
         Value::Float(v) => DataType::Float(v),
         Value::Double(v) => DataType::Double(v),
-        Value::String(v) => DataType::Str(v.map(|value| *value)),
+        Value::String(v) => DataType::Str(v),
         Value::ChronoDate(v) => DataType::Date(v.map(|value| value.to_string())),
         Value::ChronoTime(v) => DataType::Time(v.map(|value| value.to_string())),
         Value::ChronoDateTime(v) => DataType::Timestamp(v.map(|value| value.to_string())),
-        Value::ChronoDateTimeUtc(v) => DataType::Timestamp(v.map(|value| {
-            let dt: DateTime<Utc> = *value;
-            dt.to_rfc3339()
-        })),
+        Value::ChronoDateTimeUtc(v) => DataType::Timestamp(v.map(|value| value.to_rfc3339())),
         Value::Char(v) => DataType::Str(v.map(|ch| ch.to_string())),
-        Value::Bytes(v) => DataType::Binary(v.map(|bytes| *bytes)),
+        Value::Bytes(v) => DataType::Binary(v),
         _ => {
             bail!("unsupported values require explicit conversion before building the query")
         }
@@ -266,8 +250,7 @@ mod tests {
     fn value_to_wasi_string_types() {
         use sea_query::Value;
 
-        let val_string =
-            value_to_wasi_datatype(Value::String(Some(Box::new("test".to_string())))).unwrap();
+        let val_string = value_to_wasi_datatype(Value::String(Some("test".to_string()))).unwrap();
         if let DataType::Str(Some(s)) = &val_string {
             assert_eq!(s, "test");
         } else {
@@ -286,7 +269,7 @@ mod tests {
     fn value_to_wasi_binary_types() {
         use sea_query::Value;
 
-        let val = value_to_wasi_datatype(Value::Bytes(Some(Box::new(vec![1, 2, 3])))).unwrap();
+        let val = value_to_wasi_datatype(Value::Bytes(Some(vec![1, 2, 3]))).unwrap();
         if let DataType::Binary(Some(b)) = &val {
             assert_eq!(b, &vec![1, 2, 3]);
         } else {
@@ -300,7 +283,7 @@ mod tests {
         use sea_query::Value;
 
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
-        let val_date = value_to_wasi_datatype(Value::ChronoDate(Some(Box::new(date)))).unwrap();
+        let val_date = value_to_wasi_datatype(Value::ChronoDate(Some(date))).unwrap();
         if let DataType::Date(Some(s)) = &val_date {
             assert_eq!(s, "2024-01-15");
         } else {
@@ -308,7 +291,7 @@ mod tests {
         }
 
         let time = NaiveTime::from_hms_opt(10, 30, 45).unwrap();
-        let val_time = value_to_wasi_datatype(Value::ChronoTime(Some(Box::new(time)))).unwrap();
+        let val_time = value_to_wasi_datatype(Value::ChronoTime(Some(time))).unwrap();
         if let DataType::Time(Some(s)) = &val_time {
             assert!(s.starts_with("10:30:45"));
         } else {
@@ -316,7 +299,7 @@ mod tests {
         }
 
         let dt = NaiveDateTime::parse_from_str("2024-01-15 10:30:45", "%Y-%m-%d %H:%M:%S").unwrap();
-        let val_dt = value_to_wasi_datatype(Value::ChronoDateTime(Some(Box::new(dt)))).unwrap();
+        let val_dt = value_to_wasi_datatype(Value::ChronoDateTime(Some(dt))).unwrap();
         if let DataType::Timestamp(Some(s)) = &val_dt {
             assert!(s.starts_with("2024-01-15"));
         } else {
@@ -324,8 +307,7 @@ mod tests {
         }
 
         let dt_utc: DateTime<Utc> = "2024-01-15T10:30:45Z".parse().unwrap();
-        let val_dt_utc =
-            value_to_wasi_datatype(Value::ChronoDateTimeUtc(Some(Box::new(dt_utc)))).unwrap();
+        let val_dt_utc = value_to_wasi_datatype(Value::ChronoDateTimeUtc(Some(dt_utc))).unwrap();
         if let DataType::Timestamp(Some(s)) = &val_dt_utc {
             assert!(s.contains("2024-01-15"));
             assert!(s.contains("10:30:45"));

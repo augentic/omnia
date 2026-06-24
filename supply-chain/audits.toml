@@ -143,79 +143,79 @@ end = "2026-09-11"
 
 [[trusted.cranelift-assembler-x64]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2025-02-20"
 end = "2026-11-27"
 
 [[trusted.cranelift-assembler-x64-meta]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2025-02-20"
 end = "2026-11-27"
 
 [[trusted.cranelift-bforest]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2021-10-29"
 end = "2026-11-27"
 
 [[trusted.cranelift-bitset]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2024-07-22"
 end = "2026-11-27"
 
 [[trusted.cranelift-codegen]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2021-10-29"
 end = "2026-11-27"
 
 [[trusted.cranelift-codegen-meta]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2021-10-29"
 end = "2026-11-27"
 
 [[trusted.cranelift-codegen-shared]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2021-10-29"
 end = "2026-11-27"
 
 [[trusted.cranelift-control]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2023-05-22"
 end = "2026-11-27"
 
 [[trusted.cranelift-entity]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2021-10-29"
 end = "2026-11-27"
 
 [[trusted.cranelift-frontend]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2021-10-29"
 end = "2026-11-27"
 
 [[trusted.cranelift-isle]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2021-12-13"
 end = "2026-11-27"
 
 [[trusted.cranelift-native]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2021-10-29"
 end = "2026-11-27"
 
 [[trusted.cranelift-srcgen]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2025-04-21"
 end = "2026-11-27"
 
@@ -407,7 +407,7 @@ end = "2026-09-11"
 
 [[trusted.mach2]]
 criteria = "safe-to-deploy"
-user-id = 51017 # Yuki Okushi (JohnTitor)
+user-id = 51017
 start = "2021-11-15"
 end = "2026-09-11"
 
@@ -479,13 +479,13 @@ end = "2026-09-11"
 
 [[trusted.pulley-interpreter]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2024-09-20"
 end = "2026-11-27"
 
 [[trusted.pulley-macros]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2025-06-20"
 end = "2026-11-27"
 
@@ -773,121 +773,121 @@ end = "2026-09-11"
 
 [[trusted.wasm-encoder]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2024-02-15"
 end = "2026-09-11"
 
 [[trusted.wasmparser]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2024-02-15"
 end = "2026-09-11"
 
 [[trusted.wasmprinter]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2024-02-15"
 end = "2026-09-11"
 
 [[trusted.wasmtime]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2021-10-29"
 end = "2026-11-27"
 
 [[trusted.wasmtime-environ]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2021-10-29"
 end = "2026-11-27"
 
 [[trusted.wasmtime-internal-component-macro]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2025-07-22"
 end = "2026-11-27"
 
 [[trusted.wasmtime-internal-component-util]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2025-07-22"
 end = "2026-11-27"
 
 [[trusted.wasmtime-internal-cranelift]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2025-08-20"
 end = "2026-11-27"
 
 [[trusted.wasmtime-internal-fiber]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2025-07-22"
 end = "2026-11-27"
 
 [[trusted.wasmtime-internal-jit-debug]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2025-07-22"
 end = "2026-11-27"
 
 [[trusted.wasmtime-internal-jit-icache-coherence]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2025-07-22"
 end = "2026-11-27"
 
 [[trusted.wasmtime-internal-math]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2025-07-22"
 end = "2026-11-27"
 
 [[trusted.wasmtime-internal-slab]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2025-07-22"
 end = "2026-11-27"
 
 [[trusted.wasmtime-internal-unwinder]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2025-07-22"
 end = "2026-11-27"
 
 [[trusted.wasmtime-internal-versioned-export-macros]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2025-07-22"
 end = "2026-11-27"
 
 [[trusted.wasmtime-internal-winch]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2025-08-20"
 end = "2026-11-27"
 
 [[trusted.wasmtime-internal-wit-bindgen]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2025-07-22"
 end = "2026-11-27"
 
 [[trusted.wasmtime-wasi]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2021-10-29"
 end = "2026-11-27"
 
 [[trusted.wasmtime-wasi-http]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2023-05-22"
 end = "2026-11-27"
 
 [[trusted.wasmtime-wasi-io]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2025-02-20"
 end = "2026-11-27"
 
@@ -899,19 +899,19 @@ end = "2026-09-11"
 
 [[trusted.wiggle]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2021-10-29"
 end = "2026-11-27"
 
 [[trusted.wiggle-generate]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2021-10-29"
 end = "2026-11-27"
 
 [[trusted.wiggle-macro]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2021-10-29"
 end = "2026-11-27"
 
@@ -923,7 +923,7 @@ end = "2026-09-11"
 
 [[trusted.winch-codegen]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2022-11-21"
 end = "2026-11-27"
 
@@ -1043,7 +1043,7 @@ end = "2026-09-11"
 
 [[trusted.wit-parser]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2024-02-15"
 end = "2026-09-11"
 

@@ -103,7 +103,7 @@ impl Backend for HttpDefault {
 impl p3::WasiHttpHooks for HttpHooks {
     fn send_request(
         &mut self, request: Request<UnsyncBoxBody<Bytes, ErrorCode>>,
-        _options: Option<RequestOptions>, fut: FutureResult<()>,
+        options: Option<RequestOptions>, fut: FutureResult<()>,
     ) -> Box<
         dyn Future<
                 Output = HttpResult<(Response<UnsyncBoxBody<Bytes, ErrorCode>>, FutureResult<()>)>,
@@ -112,21 +112,39 @@ impl p3::WasiHttpHooks for HttpHooks {
         let shared_client = self.client.clone();
         let connect_timeout = self.connect_timeout;
 
+        // guest-supplied timeouts from `wasi:http/types.request-options`
+        let opt_connect = options.and_then(|o| o.connect_timeout);
+        let opt_first_byte = options.and_then(|o| o.first_byte_timeout);
+        let opt_between = options.and_then(|o| o.between_bytes_timeout);
+
         Box::new(async move {
             let (mut parts, body) = request.into_parts();
 
             // remove "Host" headers (`reqwest` adds its own)
             parts.headers.remove(HOST);
 
-            // use a one-off client when a client certificate is required, otherwise
-            // reuse the shared client for connection pooling
-            let client = if let Some(encoded_cert) = parts.headers.remove("Client-Cert") {
-                tracing::debug!("using client certificate");
-                let encoded = encoded_cert.to_str().map_err(internal_err)?;
-                let bytes = Base64::decode_vec(encoded).map_err(internal_err)?;
-                let identity = reqwest::Identity::from_pem(&bytes).map_err(internal_err)?;
-                let builder =
-                    reqwest::Client::builder().connect_timeout(connect_timeout).identity(identity);
+            // A one-off client is required for a client certificate or whenever the
+            // guest overrides the connect/between-bytes timeouts (both are
+            // client-level in `reqwest`); otherwise reuse the shared client so
+            // connection pooling still applies on the common path.
+            let cert = parts.headers.remove("Client-Cert");
+            let client = if cert.is_some() || opt_connect.is_some() || opt_between.is_some() {
+                let builder = reqwest::Client::builder()
+                    .connect_timeout(opt_connect.unwrap_or(connect_timeout));
+                let builder = match opt_between {
+                    Some(between) => builder.read_timeout(between),
+                    None => builder,
+                };
+                let builder = match cert {
+                    Some(encoded_cert) => {
+                        tracing::debug!("using client certificate");
+                        let encoded = encoded_cert.to_str().map_err(internal_err)?;
+                        let bytes = Base64::decode_vec(encoded).map_err(internal_err)?;
+                        let identity = reqwest::Identity::from_pem(&bytes).map_err(internal_err)?;
+                        builder.identity(identity)
+                    }
+                    None => builder,
+                };
 
                 #[cfg(test)]
                 let builder = builder.no_proxy();
@@ -140,13 +158,25 @@ impl p3::WasiHttpHooks for HttpHooks {
 
             // make request
             let url = parts.uri.to_string();
-            let resp = client
+            let send = client
                 .request(parts.method, &url)
                 .headers(parts.headers)
                 .body(collected.to_bytes())
-                .send()
-                .await
-                .map_err(reqwest_err)?;
+                .send();
+
+            // Bound time-to-response (connect + first byte). The response body is
+            // streamed downstream, so it is *not* part of this deadline; its
+            // pacing is governed by `between_bytes` (the read timeout above).
+            let resp = match opt_first_byte {
+                Some(first_byte) => {
+                    let budget = opt_connect.unwrap_or(connect_timeout).saturating_add(first_byte);
+                    match tokio::time::timeout(budget, send).await {
+                        Ok(result) => result.map_err(reqwest_err)?,
+                        Err(_elapsed) => return Err(ErrorCode::ConnectionTimeout.into()),
+                    }
+                }
+                None => send.await.map_err(reqwest_err)?,
+            };
 
             // process response
             let converted: Response<reqwest::Body> = resp.into();

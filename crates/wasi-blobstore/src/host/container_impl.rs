@@ -11,8 +11,8 @@ use crate::host::{OutgoingValue, Result, StreamObjectNames, WasiBlobstore, WasiB
 
 pub type IncomingValue = Bytes;
 
-impl HostContainerWithStore for WasiBlobstore {
-    fn name<T>(mut host: Access<'_, T, Self>, self_: Resource<ContainerProxy>) -> Result<String> {
+impl<T> HostContainerWithStore<T> for WasiBlobstore {
+    fn name(mut host: Access<'_, T, Self>, self_: Resource<ContainerProxy>) -> Result<String> {
         let container = host
             .get()
             .table
@@ -23,7 +23,7 @@ impl HostContainerWithStore for WasiBlobstore {
         container.name().context("getting name").map_err(|e| e.to_string())
     }
 
-    fn info<T>(
+    fn info(
         mut host: Access<'_, T, Self>, self_: Resource<ContainerProxy>,
     ) -> Result<ContainerMetadata> {
         let container = host
@@ -36,7 +36,7 @@ impl HostContainerWithStore for WasiBlobstore {
         container.info().context("getting info").map_err(|e| e.to_string())
     }
 
-    async fn get_data<T>(
+    async fn get_data(
         accessor: &Accessor<T, Self>, self_: Resource<ContainerProxy>, name: String, start: u64,
         end: u64,
     ) -> Result<Resource<IncomingValue>> {
@@ -56,7 +56,7 @@ impl HostContainerWithStore for WasiBlobstore {
         accessor.with(|mut store| store.get().table.push(buf.into())).map_err(|e| e.to_string())
     }
 
-    async fn write_data<T>(
+    async fn write_data(
         accessor: &Accessor<T, Self>, self_: Resource<ContainerProxy>, name: String,
         data: Resource<OutgoingValue>,
     ) -> Result<()> {
@@ -77,7 +77,7 @@ impl HostContainerWithStore for WasiBlobstore {
         Ok(())
     }
 
-    async fn list_objects<T>(
+    async fn list_objects(
         accessor: &Accessor<T, Self>, self_: Resource<ContainerProxy>,
     ) -> Result<Resource<StreamObjectNames>> {
         let container = get_container(accessor, &self_)?;
@@ -87,14 +87,14 @@ impl HostContainerWithStore for WasiBlobstore {
         accessor.with(|mut store| store.get().table.push(stream)).map_err(|e| e.to_string())
     }
 
-    async fn delete_object<T>(
+    async fn delete_object(
         accessor: &Accessor<T, Self>, self_: Resource<ContainerProxy>, name: String,
     ) -> Result<()> {
         let container = get_container(accessor, &self_)?;
         container.delete_object(name).await.context("deleting object").map_err(|e| e.to_string())
     }
 
-    async fn delete_objects<T>(
+    async fn delete_objects(
         accessor: &Accessor<T, Self>, self_: Resource<ContainerProxy>, names: Vec<String>,
     ) -> Result<()> {
         let container = get_container(accessor, &self_)?;
@@ -109,7 +109,7 @@ impl HostContainerWithStore for WasiBlobstore {
         Ok(())
     }
 
-    async fn has_object<T>(
+    async fn has_object(
         accessor: &Accessor<T, Self>, self_: Resource<ContainerProxy>, name: String,
     ) -> Result<bool> {
         let container = get_container(accessor, &self_)?;
@@ -120,14 +120,14 @@ impl HostContainerWithStore for WasiBlobstore {
             .map_err(|e| e.to_string())
     }
 
-    async fn object_info<T>(
+    async fn object_info(
         accessor: &Accessor<T, Self>, self_: Resource<ContainerProxy>, name: String,
     ) -> Result<ObjectMetadata> {
         let container = get_container(accessor, &self_)?;
         container.object_info(name).await.context("getting object info").map_err(|e| e.to_string())
     }
 
-    async fn clear<T>(accessor: &Accessor<T, Self>, self_: Resource<ContainerProxy>) -> Result<()> {
+    async fn clear(accessor: &Accessor<T, Self>, self_: Resource<ContainerProxy>) -> Result<()> {
         let container = get_container(accessor, &self_)?;
 
         let all_objects =
@@ -144,15 +144,15 @@ impl HostContainerWithStore for WasiBlobstore {
         Ok(())
     }
 
-    fn drop<T>(
+    fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<ContainerProxy>,
     ) -> wasmtime::Result<()> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
 
-impl HostStreamObjectNamesWithStore for WasiBlobstore {
-    async fn read_stream_object_names<T>(
+impl<T> HostStreamObjectNamesWithStore<T> for WasiBlobstore {
+    async fn read_stream_object_names(
         accessor: &Accessor<T, Self>, self_: Resource<StreamObjectNames>, len: u64,
     ) -> Result<(Vec<String>, bool)> {
         accessor.with(|mut store| {
@@ -172,7 +172,7 @@ impl HostStreamObjectNamesWithStore for WasiBlobstore {
         })
     }
 
-    async fn skip_stream_object_names<T>(
+    async fn skip_stream_object_names(
         accessor: &Accessor<T, Self>, self_: Resource<StreamObjectNames>, num: u64,
     ) -> Result<(u64, bool)> {
         accessor.with(|mut store| {
@@ -191,7 +191,7 @@ impl HostStreamObjectNamesWithStore for WasiBlobstore {
         })
     }
 
-    fn drop<T>(
+    fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<StreamObjectNames>,
     ) -> wasmtime::Result<()> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)

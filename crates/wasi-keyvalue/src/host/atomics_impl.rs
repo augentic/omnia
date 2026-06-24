@@ -10,7 +10,7 @@ use crate::host::resource::{BucketProxy, Cas};
 use crate::host::store_impl::get_bucket;
 use crate::host::{Result, WasiKeyValue};
 
-impl HostWithStore for WasiKeyValue {
+impl<T> HostWithStore<T> for WasiKeyValue {
     /// Atomically increment the value associated with the key in the store by
     /// the given delta. It returns the new value.
     ///
@@ -18,7 +18,7 @@ impl HostWithStore for WasiKeyValue {
     /// with the value set to the given delta.
     ///
     /// If any other error occurs, it returns an `Err(error)`.
-    async fn increment<T>(
+    async fn increment(
         accessor: &Accessor<T, Self>, bucket: Resource<BucketProxy>, key: String, delta: i64,
     ) -> Result<i64> {
         let bucket = get_bucket(accessor, &bucket)?;
@@ -44,17 +44,17 @@ impl HostWithStore for WasiKeyValue {
 
     /// Perform the swap on a CAS operation. This consumes the CAS handle and
     /// returns an error if the CAS operation failed.
-    async fn swap<T>(
+    async fn swap(
         _store: &Accessor<T, Self>, _self_: Resource<Cas>, _value: Vec<u8>,
     ) -> anyhow::Result<Result<(), CasError>, wasmtime::Error> {
         Err(wasmtime::Error::msg("not implemented"))
     }
 }
 
-impl HostCasWithStore for WasiKeyValue {
+impl<T> HostCasWithStore<T> for WasiKeyValue {
     /// Construct a new CAS operation. Implementors can map the underlying functionality
     /// (transactions, versions, etc) as desired.
-    async fn new<T>(
+    async fn new(
         accessor: &Accessor<T, Self>, bucket: Resource<BucketProxy>, key: String,
     ) -> Result<Resource<Cas>> {
         let bucket = get_bucket(accessor, &bucket)?;
@@ -64,7 +64,7 @@ impl HostCasWithStore for WasiKeyValue {
     }
 
     /// Get the current value of the CAS handle.
-    async fn current<T>(
+    async fn current(
         accessor: &Accessor<T, Self>, self_: Resource<Cas>,
     ) -> Result<Option<Vec<u8>>> {
         let cas = accessor.with(|mut store| {
@@ -75,7 +75,7 @@ impl HostCasWithStore for WasiKeyValue {
     }
 
     /// Drop the CAS handle.
-    fn drop<T>(mut accessor: Access<'_, T, Self>, rep: Resource<Cas>) -> wasmtime::Result<()> {
+    fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<Cas>) -> wasmtime::Result<()> {
         tracing::trace!("atomics::HostCas::drop");
         Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
