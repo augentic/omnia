@@ -38,7 +38,13 @@ pub fn create<T: WasiView + 'static>(wasm: &PathBuf) -> Result<Compiled<T>> {
             .total_memories(options.pool_max_instances)
             .total_tables(options.pool_max_instances)
             .total_stacks(options.pool_max_instances)
-            .max_memory_size(options.pool_max_memory_bytes.unwrap_or(options.max_memory_bytes));
+            .max_memory_size(options.pool_max_memory_bytes.unwrap_or(options.max_memory_bytes))
+            // Keep memory/tables/stacks resident across reuse to skip
+            // decommit/zeroing; defaults of 0 preserve the prior behaviour.
+            .linear_memory_keep_resident(options.pool_memory_keep_resident)
+            .table_keep_resident(options.pool_table_keep_resident)
+            .async_stack_keep_resident(options.pool_async_stack_keep_resident)
+            .max_unused_warm_slots(options.pool_max_unused_warm_slots);
         wt_config.allocation_strategy(InstanceAllocationStrategy::Pooling(pool));
     }
 

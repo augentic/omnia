@@ -6,7 +6,7 @@ use omnia::State;
 use tracing::{Instrument, debug_span, instrument};
 
 use crate::host::WasiMessagingView;
-use crate::host::generated::MessagingRequestReply;
+use crate::host::generated::MessagingRequestReplyIndices;
 use crate::host::resource::{MessageProxy, Subscriptions};
 
 #[instrument("messaging-server", skip(state))]
@@ -21,6 +21,7 @@ where
     let handler = Handler {
         state: state.clone(),
         component,
+        indices: MessagingRequestReplyIndices::new(state.instance_pre())?,
     };
     let mut stream = handler.subscriptions().await?;
 
@@ -52,6 +53,7 @@ where
 {
     state: S,
     component: String,
+    indices: MessagingRequestReplyIndices,
 }
 
 impl<S> Handler<S>
@@ -71,7 +73,7 @@ where
         let instance_pre = self.state.instance_pre();
         let mut store = self.state.build_store(store_data);
         let instance = instance_pre.instantiate_async(&mut store).await?;
-        let messaging = MessagingRequestReply::new(&mut store, &instance)?;
+        let messaging = self.indices.load(&mut store, &instance)?;
 
         let run = store
             .run_concurrent(async |store| {

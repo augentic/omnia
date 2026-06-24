@@ -45,6 +45,7 @@ where
     let handler = Handler {
         state: Arc::new(state.clone()),
         component,
+        indices: ServiceIndices::new(state.instance_pre())?,
     };
 
     // listen for requests until terminated
@@ -97,6 +98,7 @@ where
 {
     state: Arc<S>,
     component: String,
+    indices: ServiceIndices,
 }
 
 impl<S> Handler<S>
@@ -117,9 +119,8 @@ where
         let instance_pre = self.state.instance_pre();
         let store_data = self.state.store();
         let mut store = self.state.build_store(store_data);
-        let indices = ServiceIndices::new(instance_pre)?;
         let instance = instance_pre.instantiate_async(&mut store).await?;
-        let service = indices.load(&mut store, &instance)?;
+        let service = self.indices.load(&mut store, &instance)?;
 
         let (sender, receiver) = oneshot::channel::<Result<hyper::Response<OutgoingBody>>>();
 

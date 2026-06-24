@@ -3,8 +3,8 @@
 
 #[cfg(feature = "jit")]
 mod compile;
-mod options;
 mod create;
+mod options;
 mod traits;
 
 use std::path::PathBuf;
@@ -18,8 +18,8 @@ pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 // re-export internal modules
 #[cfg(feature = "jit")]
 pub use self::compile::*;
-pub use self::options::*;
 pub use self::create::*;
+pub use self::options::*;
 pub use self::traits::*;
 
 /// Command line interface for omnia.

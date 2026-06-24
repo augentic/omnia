@@ -66,6 +66,24 @@ pub struct RuntimeOptions {
     /// `max_memory_bytes`.
     #[env(from = "POOL_MAX_MEMORY_BYTES")]
     pub pool_max_memory_bytes: Option<usize>,
+    /// Bytes of each pooled linear memory kept resident on slot reuse; a
+    /// non-zero value skips the decommit/zeroing the default (`0`) forces
+    /// (`POOL_MEMORY_KEEP_RESIDENT`, default 0).
+    #[env(from = "POOL_MEMORY_KEEP_RESIDENT", default = "0")]
+    pub pool_memory_keep_resident: usize,
+    /// Bytes of each pooled table kept resident on slot reuse
+    /// (`POOL_TABLE_KEEP_RESIDENT`, default 0).
+    #[env(from = "POOL_TABLE_KEEP_RESIDENT", default = "0")]
+    pub pool_table_keep_resident: usize,
+    /// Bytes of each pooled async stack kept resident on slot reuse
+    /// (`POOL_ASYNC_STACK_KEEP_RESIDENT`, default 0).
+    #[env(from = "POOL_ASYNC_STACK_KEEP_RESIDENT", default = "0")]
+    pub pool_async_stack_keep_resident: usize,
+    /// Maximum number of unused warm slots the pooling allocator retains for
+    /// fast reuse (`POOL_MAX_UNUSED_WARM_SLOTS`, default 100, matching the
+    /// Wasmtime default).
+    #[env(from = "POOL_MAX_UNUSED_WARM_SLOTS", default = "100")]
+    pub pool_max_unused_warm_slots: u32,
     /// Whether to honour WebAssembly branch hints during compilation
     /// (`BRANCH_HINTING`, default `false`).
     #[env(from = "BRANCH_HINTING", default = "false")]

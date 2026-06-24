@@ -6,7 +6,7 @@ use omnia::State;
 use tracing::{Instrument, debug_span, instrument};
 
 use crate::host::WebSocketView;
-use crate::host::generated::Duplex;
+use crate::host::generated::DuplexIndices;
 use crate::host::resource::{EventProxy, Events};
 
 #[instrument("websocket-server", skip(state))]
@@ -21,6 +21,7 @@ where
     let handler = Handler {
         state: state.clone(),
         component,
+        indices: DuplexIndices::new(state.instance_pre())?,
     };
 
     // handle events from the websocket clients
@@ -51,6 +52,7 @@ where
 {
     state: S,
     component: String,
+    indices: DuplexIndices,
 }
 
 impl<S> Handler<S>
@@ -70,7 +72,7 @@ where
         let instance_pre = self.state.instance_pre();
         let mut store = self.state.build_store(store_data);
         let instance = instance_pre.instantiate_async(&mut store).await?;
-        let websocket = Duplex::new(&mut store, &instance)?;
+        let websocket = self.indices.load(&mut store, &instance)?;
 
         let run = store
             .run_concurrent(async |store| {
