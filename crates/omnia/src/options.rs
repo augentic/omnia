@@ -359,7 +359,7 @@ impl RuntimeOptions {
     /// # Errors
     ///
     /// Returns an error if the runtime configuration cannot be loaded from the
-    /// environment or fails [`RuntimeOptions::validate`].
+    /// environment or fails cross-field validation.
     pub fn load() -> Result<Self> {
         let options = Self::from_env().finalize().map_err(anyhow::Error::from)?;
         options.validate()?;
