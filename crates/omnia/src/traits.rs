@@ -10,7 +10,7 @@ use std::future::Future;
 
 use anyhow::Result;
 use futures::future::BoxFuture;
-use wasmtime::component::{InstancePre, Linker};
+use wasmtime::component::{Instance, InstancePre, Linker};
 use wasmtime::{Store, StoreLimits};
 
 use crate::RuntimeOptions;
@@ -65,6 +65,29 @@ pub trait State: Clone + Send + Sync + 'static {
 
         store.limiter(|ctx| ctx.limits());
         store
+    }
+
+    /// Instantiate the pre-instantiated component into `store`, recording
+    /// instantiation latency (the `instantiation_duration_us` histogram) and
+    /// failures (the `pool_instantiation_errors` counter, a proxy for pool
+    /// exhaustion) as `OpenTelemetry` metrics.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the component cannot be instantiated, e.g. when the
+    /// pooling allocator is exhausted.
+    fn instantiate(
+        &self, store: &mut Store<Self::StoreCtx>,
+    ) -> impl Future<Output = Result<Instance>> + Send {
+        async move {
+            match self.instance_pre().instantiate_async(store).await {
+                Ok(instance) => {
+                    tracing::debug!("component instantiated");
+                    Ok(instance)
+                }
+                Err(error) => Err(error.into()),
+            }
+        }
     }
 }
 

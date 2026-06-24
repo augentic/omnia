@@ -70,7 +70,8 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
 
                 /// Start servers.
                 ///
-                /// N.B. for simplicity, all hosts are "servers" with a default implementation that does nothing.
+                /// N.B. for simplicity, all hosts are "servers" with a default implementation that
+                /// does nothing.
                 async fn start(&self) -> Result<()> {
                     // Drive epoch interruption so guest deadlines (and the
                     // wall-clock timeouts wrapped around each invocation) fire
@@ -84,6 +85,13 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                             engine.increment_epoch();
                         }
                     });
+
+                    // Periodically sample pool occupancy as metrics so pool sizing can be tuned
+                    // from real data.
+                    omnia::sample_pool(
+                        self.instance_pre.engine().clone(),
+                        self.options.pool_metrics_interval,
+                    );
 
                     let futures: Vec<BoxFuture<'_, Result<()>>> =
                         vec![#(Box::pin(#server_trait_impls.run(self)),)*];

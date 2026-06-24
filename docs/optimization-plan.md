@@ -2,7 +2,7 @@
 
 Plan for tuning the Omnia runtime to better exploit Wasmtime's pooling allocator and the per-request instantiation model used by `wasmtime serve`.
 
-> Status: **draft for review**. Nothing here has been implemented yet.
+> Status: Plan A and Plan B Steps 1 & 2 are **implemented**. MPK (Plan B Step 2) is gated behind the opt-in `mpk` Cargo feature and is off by default. Plan B's remaining ideas and the "Other improvements" section below are still proposals.
 
 ## Background
 
@@ -82,7 +82,7 @@ Add the corresponding `*` env-backed fields to `RuntimeOptions` in `crates/omnia
 
 These are all **runtime-only** settings — they do not affect the compiled artifact, so they are safe to add without touching the compile/run parity contract documented in `config.rs` (i.e. they won't break `Component::deserialize_file`).
 
-> Note on the latent bug: a minimal first step can leave the totals as-is; the full decoupling (independent totals + per-component limits) is in Plan B, Step 1. Document the constraint until then.
+> Note on the latent bug: the full decoupling (independent totals + per-component / per-module limits) landed in Plan B, Step 1 below.
 
 **Validation:** benchmark a representative guest under load; raise keep-resident values and observe the RSS-vs-latency trade-off.
 
@@ -92,24 +92,42 @@ These are all **runtime-only** settings — they do not affect the compiled arti
 
 Goal: bring the pooling configuration to parity with `wasmtime serve`, fix the latent totals bug, and make the whole knob set environment-driven and observable.
 
-### Step 1 — Correct, fully-parameterised pooling configuration
+### Step 1 — Correct, fully-parameterised pooling configuration — **implemented**
 
-Decouple totals and add per-component / per-module structural limits, mirroring the `wasmtime serve` config builder (`crates/cli-flags/src/lib.rs` at the `release-46.0.0` tag):
+Implemented in the `build_config` helper in [`crates/omnia/src/create.rs`](../crates/omnia/src/create.rs) and the new fields in [`crates/omnia/src/options.rs`](../crates/omnia/src/options.rs), mirroring the `wasmtime serve` config builder:
 
-- Keep `total_*` independent (do not pin `total_memories`/`total_tables` to the component-instance count). Provide sane independent defaults with headroom.
-- Add per-component limits: `max_core_instances_per_component`, `max_memories_per_component`, `max_tables_per_component`.
-- Add per-module limits: `max_memories_per_module`, `max_tables_per_module`.
-- Add `max_core_instance_size` / `max_component_instance_size` if guests need more metadata than the defaults.
-- Add `decommit_batch_size` (batch decommits to amortise syscalls).
-- On Linux, expose `pagemap_scan` (uses the `PAGEMAP_SCAN` ioctl for faster linear-memory reset where the kernel supports it).
+- `total_*` are now independent of the component-instance count — `total_core_instances`, `total_memories`, `total_tables`, and `total_stacks` each have their own knob — fixing the latent exhaustion bug.
+- Per-component limits added: `max_core_instances_per_component`, `max_memories_per_component`, `max_tables_per_component`.
+- Per-module limits added: `max_memories_per_module`, `max_tables_per_module`.
+- Instance-size overrides added: `max_core_instance_size`, `max_component_instance_size`.
+- `decommit_batch_size` added (batch decommits to amortise syscalls).
+- `pagemap_scan` exposed (Linux `PAGEMAP_SCAN` ioctl; the default `no`/`auto` fall back cleanly off-Linux).
 
-All exposed as `POOL_*` env vars with documented defaults, validated at start-up.
+Structural limits and sizes are `Option`-typed and only applied when explicitly set, so an unset value preserves the Wasmtime default exactly. Cross-field invariants (e.g. a per-module count exceeding its pool total) are validated at start-up by `RuntimeOptions::validate`.
 
-### Step 2 — Optional MPK + observability + benchmarking harness
+New `POOL_*` env vars (all runtime-only; `RuntimeOptions::requirements()` prints the authoritative list with defaults):
 
-- **Memory protection keys (MPK):** behind a feature flag / env toggle (`memory_protection_keys`, `max_memory_protection_keys`). MPK lets the pool pack more linear memories into less virtual address space, raising achievable density. Requires the `memory-protection-keys` Wasmtime feature and is Linux/x86_64-only; gate accordingly and fall back cleanly.
-- **Observability:** emit metrics around instantiation (instantiation latency histogram, pool slot occupancy / exhaustion counter, warm-slot hit rate) so pool sizing can be tuned from real data rather than guesswork. Tie into the existing OpenTelemetry setup in `crates/otel`.
-- **Benchmark harness:** a small load-test (e.g. against the `examples/http` guest) capturing p50/p99 instantiation + end-to-end latency and RSS, runnable via `cargo make`, to gate residency/MPK tuning and catch regressions.
+| Field                                   | Env var                                 | Default                             |
+| --------------------------------------- | --------------------------------------- | ----------------------------------- |
+| `pool_total_core_instances`             | `POOL_TOTAL_CORE_INSTANCES`             | `1000`                              |
+| `pool_total_memories`                   | `POOL_TOTAL_MEMORIES`                   | `1000`                              |
+| `pool_total_tables`                     | `POOL_TOTAL_TABLES`                     | `1000`                              |
+| `pool_total_stacks`                     | `POOL_TOTAL_STACKS`                     | `1000`                              |
+| `pool_max_core_instances_per_component` | `POOL_MAX_CORE_INSTANCES_PER_COMPONENT` | unset (Wasmtime default: unlimited) |
+| `pool_max_memories_per_component`       | `POOL_MAX_MEMORIES_PER_COMPONENT`       | unset (Wasmtime default: unlimited) |
+| `pool_max_tables_per_component`         | `POOL_MAX_TABLES_PER_COMPONENT`         | unset (Wasmtime default: unlimited) |
+| `pool_max_memories_per_module`          | `POOL_MAX_MEMORIES_PER_MODULE`          | unset (Wasmtime default: 1)         |
+| `pool_max_tables_per_module`            | `POOL_MAX_TABLES_PER_MODULE`            | unset (Wasmtime default: 1)         |
+| `pool_max_core_instance_size`           | `POOL_MAX_CORE_INSTANCE_SIZE`           | unset (Wasmtime default: 1 `MiB`)   |
+| `pool_max_component_instance_size`      | `POOL_MAX_COMPONENT_INSTANCE_SIZE`      | unset (Wasmtime default: 1 `MiB`)   |
+| `pool_decommit_batch_size`              | `POOL_DECOMMIT_BATCH_SIZE`              | unset (Wasmtime default: 1)         |
+| `pool_pagemap_scan`                     | `POOL_PAGEMAP_SCAN`                     | `no` (one of `auto`/`yes`/`no`)     |
+
+### Step 2 — Optional MPK + observability + benchmarking harness — **implemented**
+
+- **Memory protection keys (MPK):** gated behind the opt-in `mpk` Cargo feature on the `omnia` crate (which enables `wasmtime/memory-protection-keys`), off by default. Controlled by `POOL_MEMORY_PROTECTION_KEYS` (`auto`/`yes`/`no`, default `no`) and `POOL_MAX_MEMORY_PROTECTION_KEYS`, applied by `apply_mpk` in [`crates/omnia/src/create.rs`](../crates/omnia/src/create.rs). MPK only functions on Linux/x86_64; elsewhere it compiles but is inert (`auto` keeps guard regions). `POOL_MEMORY_PROTECTION_KEYS=yes` without the `mpk` feature is rejected at start-up. MPK is most effective with a reduced `POOL_MAX_MEMORY_BYTES` so the smaller memories can be striped.
+- **Observability:** a background sampler ([`crates/omnia/src/metrics.rs`](../crates/omnia/src/metrics.rs), spawned from the runtime macro's `start()` in [`crates/runtime-macro/src/expand.rs`](../crates/runtime-macro/src/expand.rs)) reads `Engine::pooling_allocator_metrics()` every `POOL_METRICS_INTERVAL_MS` (default 5000ms; `0` disables) and emits pool-occupancy and warm-slot gauges. `State::instantiate` (in [`crates/omnia/src/traits.rs`](../crates/omnia/src/traits.rs), used by the HTTP/messaging/websocket servers) records an `instantiation_duration_us` histogram and a `pool_instantiation_errors` counter. Everything flows through the existing `tracing` -> OpenTelemetry metrics layer in `crates/otel`.
+- **Benchmark harness:** a self-contained Rust load-test ([`examples/bench/http_bench.rs`](../examples/bench/http_bench.rs), no external load tools) drives concurrent keep-alive requests at the `http` example guest and reports throughput plus p50/p90/p99/p99.9 latency. See [`examples/bench/README.md`](../examples/bench/README.md) for how to build the guest + host + harness, run the host, drive load, and sample host RSS. Tunable via `BENCH_*` env vars (concurrency, duration, address, timeout) and the `POOL_*` knobs on the host.
 
 ---
 
@@ -126,10 +144,10 @@ All exposed as `POOL_*` env vars with documented defaults, validated at start-up
 
 ## Suggested sequencing
 
-1. Plan A, Step 1 (hoist binding lookups) — safe, immediate, no new config.
-2. Plan A, Step 2 (residency + warm slots) — biggest latency win; benchmark.
-3. Plan B, Step 1 (correct/parameterise pooling) — fixes the latent totals bug.
-4. Plan B, Step 2 (MPK + observability + harness) — only after measuring.
+1. Plan A, Step 1 (hoist binding lookups) — **done**; no new config.
+2. Plan A, Step 2 (residency + warm slots) — **done**; biggest latency win.
+3. Plan B, Step 1 (correct/parameterise pooling) — **done**; fixes the latent totals bug.
+4. Plan B, Step 2 (MPK + observability + harness) — **done** (MPK behind the opt-in `mpk` feature). Use the [`http-bench` harness](../examples/bench/README.md) plus the new pool gauges to drive further residency/MPK tuning.
 
 ## Open questions
 

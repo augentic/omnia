@@ -116,10 +116,9 @@ where
         let request = fix_request(request).context("preparing request")?;
 
         // instantiate the guest and get the proxy
-        let instance_pre = self.state.instance_pre();
         let store_data = self.state.store();
         let mut store = self.state.build_store(store_data);
-        let instance = instance_pre.instantiate_async(&mut store).await?;
+        let instance = self.state.instantiate(&mut store).await?;
         let service = self.indices.load(&mut store, &instance)?;
 
         let (sender, receiver) = oneshot::channel::<Result<hyper::Response<OutgoingBody>>>();

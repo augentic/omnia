@@ -17,9 +17,10 @@
 
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use fromenv::{FromEnv, ParseResult};
-use wasmtime::Config;
+use wasmtime::Enabled;
+use wasmtime::{Config, InstanceAllocationStrategy, PoolingAllocationConfig};
 
 /// Runtime configuration loaded from the environment.
 ///
@@ -84,6 +85,89 @@ pub struct RuntimeOptions {
     /// Wasmtime default).
     #[env(from = "POOL_MAX_UNUSED_WARM_SLOTS", default = "100")]
     pub pool_max_unused_warm_slots: u32,
+    /// Maximum number of core instances held by the pooling allocator
+    /// (`POOL_TOTAL_CORE_INSTANCES`, default 1000). Kept independent of the
+    /// component-instance total (`POOL_MAX_INSTANCES`) so a guest whose single
+    /// component embeds several core instances cannot exhaust this pool early.
+    #[env(from = "POOL_TOTAL_CORE_INSTANCES", default = "1000")]
+    pub pool_total_core_instances: u32,
+    /// Maximum number of linear memories held by the pooling allocator
+    /// (`POOL_TOTAL_MEMORIES`, default 1000). Independent of the instance
+    /// total; raise this for guests that use more than one memory.
+    #[env(from = "POOL_TOTAL_MEMORIES", default = "1000")]
+    pub pool_total_memories: u32,
+    /// Maximum number of tables held by the pooling allocator
+    /// (`POOL_TOTAL_TABLES`, default 1000). Independent of the instance total;
+    /// raise this for guests that use more than one table.
+    #[env(from = "POOL_TOTAL_TABLES", default = "1000")]
+    pub pool_total_tables: u32,
+    /// Maximum number of async stacks held by the pooling allocator
+    /// (`POOL_TOTAL_STACKS`, default 1000). Independent of the instance total.
+    #[env(from = "POOL_TOTAL_STACKS", default = "1000")]
+    pub pool_total_stacks: u32,
+    /// Upper bound on the number of core instances a single component may
+    /// contain (`POOL_MAX_CORE_INSTANCES_PER_COMPONENT`). Unset leaves the
+    /// Wasmtime default (unlimited).
+    #[env(from = "POOL_MAX_CORE_INSTANCES_PER_COMPONENT")]
+    pub pool_max_core_instances_per_component: Option<u32>,
+    /// Upper bound on the number of linear memories a single component may
+    /// contain (`POOL_MAX_MEMORIES_PER_COMPONENT`). Unset leaves the Wasmtime
+    /// default (unlimited).
+    #[env(from = "POOL_MAX_MEMORIES_PER_COMPONENT")]
+    pub pool_max_memories_per_component: Option<u32>,
+    /// Upper bound on the number of tables a single component may contain
+    /// (`POOL_MAX_TABLES_PER_COMPONENT`). Unset leaves the Wasmtime default
+    /// (unlimited).
+    #[env(from = "POOL_MAX_TABLES_PER_COMPONENT")]
+    pub pool_max_tables_per_component: Option<u32>,
+    /// Upper bound on the number of linear memories a single core module may
+    /// define (`POOL_MAX_MEMORIES_PER_MODULE`). Unset leaves the Wasmtime
+    /// default (1).
+    #[env(from = "POOL_MAX_MEMORIES_PER_MODULE")]
+    pub pool_max_memories_per_module: Option<u32>,
+    /// Upper bound on the number of tables a single core module may define
+    /// (`POOL_MAX_TABLES_PER_MODULE`). Unset leaves the Wasmtime default (1).
+    #[env(from = "POOL_MAX_TABLES_PER_MODULE")]
+    pub pool_max_tables_per_module: Option<u32>,
+    /// Maximum size, in bytes, of a single core instance's `VMContext`
+    /// metadata (`POOL_MAX_CORE_INSTANCE_SIZE`). Unset leaves the Wasmtime
+    /// default (1 `MiB`).
+    #[env(from = "POOL_MAX_CORE_INSTANCE_SIZE")]
+    pub pool_max_core_instance_size: Option<usize>,
+    /// Maximum size, in bytes, of a single component instance's metadata
+    /// (`POOL_MAX_COMPONENT_INSTANCE_SIZE`). Unset leaves the Wasmtime default
+    /// (1 `MiB`).
+    #[env(from = "POOL_MAX_COMPONENT_INSTANCE_SIZE")]
+    pub pool_max_component_instance_size: Option<usize>,
+    /// Number of slots batched together when decommitting pooled memory to
+    /// amortise syscalls (`POOL_DECOMMIT_BATCH_SIZE`). Unset leaves the
+    /// Wasmtime default (1).
+    #[env(from = "POOL_DECOMMIT_BATCH_SIZE")]
+    pub pool_decommit_batch_size: Option<usize>,
+    /// Whether to use the Linux `PAGEMAP_SCAN` ioctl to reset linear memory
+    /// more cheaply on slot reuse (`POOL_PAGEMAP_SCAN`, one of `auto`/`yes`/
+    /// `no`, default `no`). Requires Linux 6.7+; `auto` falls back to the
+    /// default reset path where unsupported.
+    #[env(from = "POOL_PAGEMAP_SCAN", default = "no", with = parse_enabled)]
+    pub pool_pagemap_scan: Enabled,
+    /// Whether the pooling allocator should use memory protection keys (MPK) to
+    /// pack linear memories more densely (`POOL_MEMORY_PROTECTION_KEYS`, one of
+    /// `auto`/`yes`/`no`, default `no`). Only effective on Linux/`x86_64` and
+    /// only applied when built with the `mpk` feature; `auto` falls back cleanly
+    /// where unsupported, and `yes` without the `mpk` feature is rejected at
+    /// start-up.
+    #[env(from = "POOL_MEMORY_PROTECTION_KEYS", default = "no", with = parse_enabled)]
+    pub pool_memory_protection_keys: Enabled,
+    /// Upper limit on how many memory protection keys the pooling allocator may
+    /// allocate (`POOL_MAX_MEMORY_PROTECTION_KEYS`). Unset leaves the Wasmtime
+    /// default. Only applied when built with the `mpk` feature.
+    #[env(from = "POOL_MAX_MEMORY_PROTECTION_KEYS")]
+    pub pool_max_memory_protection_keys: Option<usize>,
+    /// Interval between background samples of pooling-allocator occupancy,
+    /// emitted as `OpenTelemetry` gauges (`POOL_METRICS_INTERVAL_MS`, default
+    /// 5000ms). `0` disables the sampler.
+    #[env(from = "POOL_METRICS_INTERVAL_MS", default = "5000", with = parse_millis)]
+    pub pool_metrics_interval: Duration,
     /// Whether to honour WebAssembly branch hints during compilation
     /// (`BRANCH_HINTING`, default `false`).
     #[env(from = "BRANCH_HINTING", default = "false")]
@@ -105,20 +189,79 @@ pub struct RuntimeOptions {
 /// is pre-compiled with `omnia compile` and when it is later run, otherwise
 /// [`wasmtime::component::Component::deserialize_file`] will reject the artifact.
 impl From<&RuntimeOptions> for Config {
-    fn from(rc: &RuntimeOptions) -> Self {
+    fn from(options: &RuntimeOptions) -> Self {
         let mut config = Self::new();
 
         // Always enabled so each store can install an epoch deadline; the ticker
         // and per-store deadlines drive cooperative guest timeouts.
         config.epoch_interruption(true);
 
-        if rc.max_fuel > 0 {
+        if options.max_fuel > 0 {
             config.consume_fuel(true);
         }
-        if rc.branch_hinting {
+        if options.branch_hinting {
             config.wasm_branch_hinting(true);
         }
 
+        // config
+
+        if !options.pooling {
+            return config;
+        }
+
+        let mut pool = PoolingAllocationConfig::new();
+
+        // Totals are kept independent of the component-instance count: a single
+        // component can transitively embed several core instances/memories/tables,
+        // so pinning these to `pool_max_instances` would exhaust the memory/table
+        // pools before reaching the advertised instance count under load.
+        pool.total_component_instances(options.pool_max_instances)
+            .total_core_instances(options.pool_total_core_instances)
+            .total_memories(options.pool_total_memories)
+            .total_tables(options.pool_total_tables)
+            .total_stacks(options.pool_total_stacks)
+            .max_memory_size(options.pool_max_memory_bytes.unwrap_or(options.max_memory_bytes))
+            // Keep memory/tables/stacks resident across reuse to skip
+            // decommit/zeroing; defaults of 0 preserve the prior behaviour.
+            .linear_memory_keep_resident(options.pool_memory_keep_resident)
+            .table_keep_resident(options.pool_table_keep_resident)
+            .async_stack_keep_resident(options.pool_async_stack_keep_resident)
+            .max_unused_warm_slots(options.pool_max_unused_warm_slots)
+            // Linux-only fast linear-memory reset; the default (`No`) preserves the
+            // prior behaviour and `Auto` falls back cleanly where unsupported.
+            .pagemap_scan(options.pool_pagemap_scan);
+
+        // Structural limits and sizes are applied only when explicitly set so an
+        // unset value preserves the Wasmtime default.
+        if let Some(count) = options.pool_max_core_instances_per_component {
+            pool.max_core_instances_per_component(count);
+        }
+        if let Some(count) = options.pool_max_memories_per_component {
+            pool.max_memories_per_component(count);
+        }
+        if let Some(count) = options.pool_max_tables_per_component {
+            pool.max_tables_per_component(count);
+        }
+        if let Some(count) = options.pool_max_memories_per_module {
+            pool.max_memories_per_module(count);
+        }
+        if let Some(count) = options.pool_max_tables_per_module {
+            pool.max_tables_per_module(count);
+        }
+        if let Some(size) = options.pool_max_core_instance_size {
+            pool.max_core_instance_size(size);
+        }
+        if let Some(size) = options.pool_max_component_instance_size {
+            pool.max_component_instance_size(size);
+        }
+        if let Some(size) = options.pool_decommit_batch_size {
+            pool.decommit_batch_size(size);
+        }
+
+        #[cfg(feature = "mpk")]
+        apply_mpk(&mut pool, options);
+
+        config.allocation_strategy(InstanceAllocationStrategy::Pooling(pool));
         config
     }
 }
@@ -129,9 +272,53 @@ impl RuntimeOptions {
     /// # Errors
     ///
     /// Returns an error if the runtime configuration cannot be loaded from the
-    /// environment.
+    /// environment or fails [`RuntimeOptions::validate`].
     pub fn load() -> Result<Self> {
-        Self::from_env().finalize().map_err(anyhow::Error::from)
+        let options = Self::from_env().finalize().map_err(anyhow::Error::from)?;
+        options.validate()?;
+        Ok(options)
+    }
+
+    /// Validate cross-field invariants that the per-field `FromEnv` parsing
+    /// cannot express, surfacing a clear error before the engine is built
+    /// (Wasmtime otherwise rejects the same combinations with a less specific
+    /// message when the pool is constructed).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the pooling configuration is internally
+    /// inconsistent, e.g. a per-module structural limit exceeds the
+    /// corresponding pool total.
+    fn validate(&self) -> Result<()> {
+        if !self.pooling {
+            return Ok(());
+        }
+
+        // Fail fast on `yes` rather than silently ignoring MPK when the feature
+        // that compiles in the Wasmtime support is absent.
+        #[cfg(not(feature = "mpk"))]
+        if self.pool_memory_protection_keys == Enabled::Yes {
+            bail!("POOL_MEMORY_PROTECTION_KEYS=yes requires building omnia with the `mpk` feature");
+        }
+
+        if let Some(per_module) = self.pool_max_memories_per_module
+            && per_module > self.pool_total_memories
+        {
+            bail!(
+                "POOL_MAX_MEMORIES_PER_MODULE ({per_module}) exceeds POOL_TOTAL_MEMORIES ({})",
+                self.pool_total_memories
+            );
+        }
+        if let Some(per_module) = self.pool_max_tables_per_module
+            && per_module > self.pool_total_tables
+        {
+            bail!(
+                "POOL_MAX_TABLES_PER_MODULE ({per_module}) exceeds POOL_TOTAL_TABLES ({})",
+                self.pool_total_tables
+            );
+        }
+
+        Ok(())
     }
 }
 
@@ -144,4 +331,60 @@ fn parse_millis(value: &str) -> ParseResult<Duration> {
 /// never be zero; used by the `FromEnv` derive.
 fn parse_tick(value: &str) -> ParseResult<Duration> {
     Ok(Duration::from_millis(value.parse::<u64>()?.max(1)))
+}
+
+/// Parse an `auto`/`yes`/`no` toggle into a [`wasmtime::Enabled`]; used by the
+/// `FromEnv` derive for the pooling allocator's tri-state switches
+/// (`PAGEMAP_SCAN`, memory protection keys).
+fn parse_enabled(value: &str) -> ParseResult<Enabled> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "auto" => Ok(Enabled::Auto),
+        "yes" | "true" | "on" | "1" => Ok(Enabled::Yes),
+        "no" | "false" | "off" | "0" => Ok(Enabled::No),
+        other => Err(format!("expected one of `auto`/`yes`/`no`, got `{other}`").into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Enabled, RuntimeOptions, parse_enabled};
+
+    #[test]
+    fn parse_enabled_values() {
+        assert_eq!(parse_enabled("auto").unwrap(), Enabled::Auto);
+        assert_eq!(parse_enabled("YES").unwrap(), Enabled::Yes);
+        assert_eq!(parse_enabled(" no ").unwrap(), Enabled::No);
+        parse_enabled("maybe").unwrap_err();
+    }
+
+    #[test]
+    fn rejects_per_module_memories_over_total() {
+        let options = RuntimeOptions {
+            pool_total_memories: 8,
+            pool_max_memories_per_module: Some(16),
+            ..RuntimeOptions::load().expect("should load")
+        };
+        options.validate().unwrap_err();
+    }
+
+    #[test]
+    fn rejects_per_module_tables_over_total() {
+        let options = RuntimeOptions {
+            pool_total_tables: 8,
+            pool_max_tables_per_module: Some(16),
+            ..RuntimeOptions::load().expect("should load")
+        };
+        options.validate().unwrap_err();
+    }
+
+    #[test]
+    fn ignores_pool_limits_when_pooling_disabled() {
+        let options = RuntimeOptions {
+            pooling: false,
+            pool_total_memories: 8,
+            pool_max_memories_per_module: Some(16),
+            ..RuntimeOptions::load().expect("should load")
+        };
+        options.validate().unwrap();
+    }
 }

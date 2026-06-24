@@ -69,9 +69,8 @@ where
             .push(event)
             .map_err(|e| anyhow!("failed to push event: {e}"))?;
 
-        let instance_pre = self.state.instance_pre();
         let mut store = self.state.build_store(store_data);
-        let instance = instance_pre.instantiate_async(&mut store).await?;
+        let instance = self.state.instantiate(&mut store).await?;
         let websocket = self.indices.load(&mut store, &instance)?;
 
         let run = store

@@ -21,6 +21,12 @@ default = ["jit"]
 # Enables just-in-time wasm to machine code compilation.
 jit = ["wasmtime/cranelift"]
 
+# Enables memory protection keys (MPK) support in the pooling allocator. MPK
+# only functions on Linux/x86_64; elsewhere it compiles but is inert
+# (`POOL_MEMORY_PROTECTION_KEYS=auto` falls back to leaving guard regions in
+# place). Off by default.
+mpk = ["wasmtime/memory-protection-keys"]
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
 clap = { version = "4.6.1", features = ["derive"] }

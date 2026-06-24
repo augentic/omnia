@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use omnia_otel::Telemetry;
 use tracing::instrument;
 use wasmtime::component::{Component, InstancePre, Linker};
-use wasmtime::{Config, Engine, InstanceAllocationStrategy, PoolingAllocationConfig};
+use wasmtime::{Config, Engine};
 use wasmtime_wasi::WasiView;
 
 use crate::RuntimeOptions;
@@ -26,29 +26,7 @@ pub fn create<T: WasiView + 'static>(wasm: &PathBuf) -> Result<Compiled<T>> {
     tracing::info!("initializing runtime");
 
     let options = RuntimeOptions::load()?;
-    let mut wt_config = Config::from(&options);
-
-    // The pooling allocator recycles instance memories/tables/stacks across
-    // invocations, which is the hot path for this per-request-instantiation
-    // runtime. It is runtime-only and does not affect artifact compatibility.
-    if options.pooling {
-        let mut pool = PoolingAllocationConfig::new();
-        pool.total_component_instances(options.pool_max_instances)
-            .total_core_instances(options.pool_max_instances)
-            .total_memories(options.pool_max_instances)
-            .total_tables(options.pool_max_instances)
-            .total_stacks(options.pool_max_instances)
-            .max_memory_size(options.pool_max_memory_bytes.unwrap_or(options.max_memory_bytes))
-            // Keep memory/tables/stacks resident across reuse to skip
-            // decommit/zeroing; defaults of 0 preserve the prior behaviour.
-            .linear_memory_keep_resident(options.pool_memory_keep_resident)
-            .table_keep_resident(options.pool_table_keep_resident)
-            .async_stack_keep_resident(options.pool_async_stack_keep_resident)
-            .max_unused_warm_slots(options.pool_max_unused_warm_slots);
-        wt_config.allocation_strategy(InstanceAllocationStrategy::Pooling(pool));
-    }
-
-    let engine = Engine::new(&wt_config)?;
+    let engine = Engine::new(&Config::from(&options))?;
 
     // SAFETY: The caller should ensure only valid pre-compiled wasm files are provided.
     let component = unsafe { Component::deserialize_file(&engine, wasm) }.or_else(|e| {
@@ -131,4 +109,48 @@ fn init_env(wasm: &Path) -> Result<()> {
         builder = builder.endpoint(endpoint);
     }
     builder.build().context("initializing telemetry")
+}
+
+#[cfg(test)]
+mod tests {
+    use wasmtime::{Config, Engine};
+
+    use crate::RuntimeOptions;
+
+    #[test]
+    fn builds_with_defaults() {
+        Engine::new(&Config::from(&RuntimeOptions::load().expect("should load")))
+            .expect("default pooling config should build an engine");
+    }
+
+    #[test]
+    fn builds_with_pooling() {
+        // Independent totals plus per-component/per-module limits, sized small
+        // (and with a tiny per-memory cap) so the reservation stays cheap.
+        let options = RuntimeOptions {
+            pool_max_instances: 8,
+            pool_total_core_instances: 8,
+            pool_total_memories: 16,
+            pool_total_tables: 16,
+            pool_total_stacks: 8,
+            pool_max_memory_bytes: Some(1 << 20),
+            pool_max_memories_per_component: Some(4),
+            pool_max_tables_per_component: Some(4),
+            pool_max_memories_per_module: Some(2),
+            pool_max_tables_per_module: Some(2),
+            pool_decommit_batch_size: Some(8),
+            ..RuntimeOptions::load().expect("should load")
+        };
+        Engine::new(&Config::from(&options))
+            .expect("decoupled multi-memory pooling config should build an engine");
+    }
+
+    #[test]
+    fn builds_without_pooling() {
+        let options = RuntimeOptions {
+            pooling: false,
+            ..RuntimeOptions::load().expect("should load")
+        };
+        Engine::new(&Config::from(&options)).expect("non-pooling config should build an engine");
+    }
 }

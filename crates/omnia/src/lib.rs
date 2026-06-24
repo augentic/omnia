@@ -4,6 +4,7 @@
 #[cfg(feature = "jit")]
 mod compile;
 mod create;
+mod runtime;
 mod options;
 mod traits;
 
@@ -19,6 +20,7 @@ pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 #[cfg(feature = "jit")]
 pub use self::compile::*;
 pub use self::create::*;
+pub use self::runtime::*;
 pub use self::options::*;
 pub use self::traits::*;
 
