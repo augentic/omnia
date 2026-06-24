@@ -33,7 +33,7 @@ impl ColRef {
     }
 
     fn resolve(self, default_table: &'static str) -> SimpleExpr {
-        Expr::col(table_column(self.table.unwrap_or(default_table), self.column)).into()
+        Expr::col(table_column(self.table.unwrap_or(default_table), self.column))
     }
 }
 

@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use sea_query::{Alias, ColumnRef, IntoIden, Order, SimpleExpr};
+use sea_query::{Alias, ColumnRef, Order, SimpleExpr};
 
 use super::entity::Entity;
 use super::filter::Filter;
@@ -149,5 +149,5 @@ impl<M: Entity> SelectBuilder<M> {
 }
 
 pub fn table_column(table: &str, column: &str) -> ColumnRef {
-    ColumnRef::TableColumn(Alias::new(table).into_iden(), Alias::new(column).into_iden())
+    (Alias::new(table), Alias::new(column)).into()
 }
