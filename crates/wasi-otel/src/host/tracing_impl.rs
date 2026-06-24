@@ -1,6 +1,6 @@
 //! # WASI Tracing
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use opentelemetry::trace::{self as otel, TraceContextExt};
@@ -26,21 +26,30 @@ impl HostWithStore for WasiOtel {
             return Ok(());
         };
 
-        // set parent span
         let ctx = tracing::Span::current().context();
-        let parent_span = ctx.span();
-        let mut span_data = span_data;
-        for sp in &mut span_data {
-            sp.span_context.trace_id = parent_span.span_context().trace_id().to_string();
-            sp.span_context.is_remote = true;
-            sp.parent_span_id = parent_span.span_context().span_id().to_string();
+        let parent_ctx = ctx.span().span_context().clone();
+
+        if !parent_ctx.is_valid() {
+            tracing::debug!("no valid host span context, dropping guest spans");
+            return Ok(());
         }
 
-        // convert to opentelemetry export format
+        // let batch_ids: HashSet<String> =
+        //     span_data.iter().map(|s| s.span_context.span_id.clone()).collect();
+
+        let mut span_data = span_data;
+        for sp in &mut span_data {
+            sp.span_context.trace_id = parent_ctx.trace_id().to_string();
+            sp.span_context.is_remote = true;
+
+            // if !batch_ids.contains(&sp.parent_span_id) {
+            sp.parent_span_id = parent_ctx.span_id().to_string();
+            // }
+        }
+
         let resource_spans = resource_spans(span_data, resource);
         let export = ExportTraceServiceRequest { resource_spans };
 
-        // export via gRPC
         accessor.with(|mut store| store.get().ctx.export_traces(export)).await?;
 
         Ok(())
