@@ -92,11 +92,11 @@ wasip3 = { version = "0.7.0", features = ["http-compat"] }
 # releases (e.g. the pooling-allocator leak fixed in 43.0.1, the fd_renumber
 # leak in 44.0.3/45.0.2). Keep these `46.0.*` pins current and review the
 # Wasmtime RELEASES/advisories when bumping the minor version.
-wasmtime = { version = "46.0.0", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation", "pooling-allocator"] }
-wasmtime-wasi = { version = "46.0.0", features = ["p3"] }
-wasmtime-wasi-config = "46.0.0"
-wasmtime-wasi-http = { version = "46.0.0", features = ["p3"] }
-wasmtime-wasi-io = "46.0.0"
+wasmtime = { version = "46.0.1", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation", "pooling-allocator"] }
+wasmtime-wasi = { version = "46.0.1", features = ["p3"] }
+wasmtime-wasi-config = "46.0.1"
+wasmtime-wasi-http = { version = "46.0.1", features = ["p3"] }
+wasmtime-wasi-io = "46.0.1"
 # Ensure wit-bindgen version matches what's used in wasip3
 wit-bindgen = { version = "0.58.0", features = ["async-spawn"] }
 

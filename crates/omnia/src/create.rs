@@ -1,7 +1,7 @@
 //! # WebAssembly Initiator
 
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use omnia_otel::Telemetry;
@@ -21,38 +21,13 @@ use crate::traits::Host;
 /// as a `Component` or the `Linker` cannot be initialized with WASI
 /// support.
 #[instrument]
-pub fn create<T: WasiView + 'static>(wasm: &PathBuf) -> Result<Compiled<T>> {
+pub fn create<T: WasiView + 'static>(wasm: &Path) -> Result<Compiled<T>> {
     init_env(wasm)?;
     tracing::info!("initializing runtime");
 
     let options = RuntimeOptions::load()?;
     let engine = Engine::new(&Config::from(&options))?;
-
-    // Prefer a pre-compiled artifact, falling back to JIT-compiling raw wasm
-    // when that feature is enabled.
-    // SAFETY: The caller should ensure only valid pre-compiled wasm files are provided.
-    let component = unsafe { Component::deserialize_file(&engine, wasm) }
-        .or_else(|e| {
-            if cfg!(feature = "jit") {
-                Component::from_file(&engine, wasm)
-            } else {
-                Err(wasmtime::Error::msg(format!(
-                    "Issue loading component: {e}. Enable `jit` feature to load wasm32 files."
-                )))
-            }
-        })
-        // A pre-compiled artifact is rejected unless the loading engine matches
-        // the compile-affecting settings it was produced with, so surface the
-        // parity-sensitive knobs on any load failure.
-        .map_err(anyhow::Error::from)
-        .with_context(|| {
-            format!(
-                "loading component {}: a pre-compiled artifact must be loaded with the same \
-                 compile-affecting settings used by `omnia compile` (MAX_FUEL, BRANCH_HINTING, \
-                 MEMORY_RESERVATION, MEMORY_GUARD_SIZE)",
-                wasm.display()
-            )
-        })?;
+    let component = load(&engine, wasm)?;
 
     // register services with runtime's Linker
     let mut linker = Linker::new(&engine);
@@ -66,6 +41,32 @@ pub fn create<T: WasiView + 'static>(wasm: &PathBuf) -> Result<Compiled<T>> {
         linker,
         options,
     })
+}
+
+/// Load a component from a file.
+fn load(engine: &Engine, wasm: &Path) -> Result<Component> {
+    // SAFETY: a pre-compiled artifact is rejected (not executed) unless the
+    // loading engine matches the compile-affecting settings it was built with.
+    let result = unsafe { Component::deserialize_file(engine, wasm) }
+        .map_err(anyhow::Error::from)
+        .with_context(|| {
+            format!(
+                "loading component {}: a pre-compiled artifact must be loaded with the same \
+             compile-affecting settings used by `omnia compile` (MAX_FUEL, BRANCH_HINTING, \
+             MEMORY_RESERVATION, MEMORY_GUARD_SIZE)",
+                wasm.display()
+            )
+        });
+
+    // Fall back to JIT-compiling raw wasm when the feature is enabled.
+    #[cfg(feature = "jit")]
+    let result =
+        result.or_else(|_| Component::from_file(engine, wasm).map_err(anyhow::Error::from));
+
+    #[cfg(not(feature = "jit"))]
+    let result = result.context("Enable `jit` feature to load wasm32 files.");
+
+    result
 }
 
 /// A compiled WebAssembly component with its associated Linker.
@@ -109,7 +110,7 @@ impl<T: WasiView> Compiled<T> {
 fn init_env(wasm: &Path) -> Result<()> {
     let name = wasm.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
 
-    if env::var("COMPONENT").is_err() {
+    if env::var_os("COMPONENT").is_none() {
         // SAFETY: Environment variable modification is safe here because:
         // 1. This runs during single-threaded initialization
         // 2. Backend clients that depend on these vars are created after this
