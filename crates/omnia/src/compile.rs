@@ -8,7 +8,7 @@ use anyhow::{Result, anyhow};
 use wasmtime::component::Component;
 use wasmtime::{Config, Engine};
 
-use crate::RuntimeConfig;
+use crate::RuntimeOptions;
 
 /// Compile `wasm32-wasip2` component.
 ///
@@ -29,9 +29,9 @@ pub fn compile(wasm: &PathBuf, output: Option<PathBuf>) -> Result<()> {
     };
 
     // compile component (compile-time config must match the loader in `create`)
-    let config = RuntimeConfig::load()?;
-    let wt_config = &Config::from(&config);
-    
+    let options = RuntimeOptions::load()?;
+    let wt_config = &Config::from(&options);
+
     let engine = Engine::new(wt_config)?;
     let component = Component::from_file(&engine, wasm)?;
     let serialized = component.serialize()?;

@@ -68,7 +68,7 @@ where
             .map_err(|e| anyhow!("failed to push event: {e}"))?;
 
         let instance_pre = self.state.instance_pre();
-        let mut store = self.state.new_store(store_data);
+        let mut store = self.state.build_store(store_data);
         let instance = instance_pre.instantiate_async(&mut store).await?;
         let websocket = Duplex::new(&mut store, &instance)?;
 
@@ -84,7 +84,7 @@ where
             })
             .instrument(debug_span!("websocket-handle"));
 
-        tokio::time::timeout(self.state.config().guest_timeout, run)
+        tokio::time::timeout(self.state.options().guest_timeout, run)
             .await
             .context("websocket handler timed out")??
     }
@@ -92,7 +92,7 @@ where
     /// Get events for incoming WebSocket events.
     async fn events(&self) -> Result<Events> {
         let store_data = self.state.store();
-        let mut store = self.state.new_store(store_data);
+        let mut store = self.state.build_store(store_data);
 
         store
             .run_concurrent(async |store| {

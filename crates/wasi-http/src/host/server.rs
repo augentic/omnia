@@ -116,7 +116,7 @@ where
         // instantiate the guest and get the proxy
         let instance_pre = self.state.instance_pre();
         let store_data = self.state.store();
-        let mut store = self.state.new_store(store_data);
+        let mut store = self.state.build_store(store_data);
         let indices = ServiceIndices::new(instance_pre)?;
         let instance = instance_pre.instantiate_async(&mut store).await?;
         let service = indices.load(&mut store, &instance)?;
@@ -181,7 +181,7 @@ where
         });
 
         // bound time-to-response (not the streaming body); cancel a hung guest
-        let response = match timeout(self.state.config().guest_timeout, receiver).await {
+        let response = match timeout(self.state.options().guest_timeout, receiver).await {
             Ok(result) => result.map_err(|_recv| anyhow!("guest task panicked"))??,
             Err(_elapsed) => {
                 guest_task.abort();

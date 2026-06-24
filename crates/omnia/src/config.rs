@@ -4,14 +4,14 @@
 //! per-guest stores.
 //!
 //! Building the compile-time [`Config`] in one place (the
-//! `From<&RuntimeConfig>` conversion) guarantees that the engine used to
+//! `From<&RuntimeOptions>` conversion) guarantees that the engine used to
 //! pre-compile a component ([`crate::compile`]) and the engine used to load it
 //! ([`crate::create`]) agree on every code-affecting setting. This parity is
 //! required for [`wasmtime::component::Component::deserialize_file`] to accept a
 //! pre-compiled artifact.
 
 // `derive(FromEnv)` generates undocumented `from_env`/`requirements` associated
-// functions; `RuntimeConfig` is re-exported from the crate root so they would
+// functions; `RuntimeOptions` is re-exported from the crate root so they would
 // otherwise trip `missing_docs`.
 #![allow(missing_docs)]
 
@@ -23,10 +23,10 @@ use wasmtime::Config;
 
 /// Runtime configuration loaded from the environment.
 ///
-/// Values are read once at start-up via `RuntimeConfig::from_env().finalize()`
+/// Values are read once at start-up via `RuntimeOptions::from_env().finalize()`
 /// and threaded through the generated runtime to every store. Each field maps to
 /// an `OMNIA_*` environment variable (booleans use `true`/`false`); call
-/// [`RuntimeConfig::requirements`] to print the full list with defaults.
+/// [`RuntimeOptions::requirements`] to print the full list with defaults.
 ///
 /// # Compile-time vs runtime settings
 ///
@@ -35,7 +35,7 @@ use wasmtime::Config;
 /// is pre-compiled and when it is later loaded. The remaining values only affect
 /// the engine or individual stores at runtime.
 #[derive(Clone, Debug, FromEnv)]
-pub struct RuntimeConfig {
+pub struct RuntimeOptions {
     /// Wall-clock cap applied to a single guest invocation
     /// (`OMNIA_GUEST_TIMEOUT_MS`, default 30s).
     #[env(from = "OMNIA_GUEST_TIMEOUT_MS", default = "30000", with = parse_millis)]
@@ -86,8 +86,8 @@ pub struct RuntimeConfig {
 /// change the compiled artifact. They must hold the same value when a component
 /// is pre-compiled with `omnia compile` and when it is later run, otherwise
 /// [`wasmtime::component::Component::deserialize_file`] will reject the artifact.
-impl From<&RuntimeConfig> for Config {
-    fn from(rc: &RuntimeConfig) -> Self {
+impl From<&RuntimeOptions> for Config {
+    fn from(rc: &RuntimeOptions) -> Self {
         let mut config = Self::new();
 
         // Always enabled so each store can install an epoch deadline; the ticker
@@ -105,7 +105,7 @@ impl From<&RuntimeConfig> for Config {
     }
 }
 
-impl RuntimeConfig {
+impl RuntimeOptions {
     /// Finalize the runtime configuration.
     ///
     /// # Errors

@@ -13,7 +13,7 @@ use futures::future::BoxFuture;
 use wasmtime::component::{InstancePre, Linker};
 use wasmtime::{Store, StoreLimits};
 
-use crate::RuntimeConfig;
+use crate::RuntimeOptions;
 
 /// Result type for asynchronous operations.
 pub type FutureResult<T> = BoxFuture<'static, Result<T>>;
@@ -37,8 +37,8 @@ pub trait State: Clone + Send + Sync + 'static {
     /// Returns the pre-instantiated component.
     fn instance_pre(&self) -> &InstancePre<Self::StoreCtx>;
 
-    /// Returns the environment-derived runtime configuration.
-    fn config(&self) -> &RuntimeConfig;
+    /// Returns the environment-derived runtime options.
+    fn options(&self) -> &RuntimeOptions;
 
     /// Build a fully configured [`Store`] for a single guest invocation.
     ///
@@ -46,8 +46,8 @@ pub trait State: Clone + Send + Sync + 'static {
     /// the async executor, allowing an enclosing wall-clock timeout to fire),
     /// an optional fuel budget, and the per-guest memory limiter.
     #[must_use]
-    fn new_store(&self, data: Self::StoreCtx) -> Store<Self::StoreCtx> {
-        let config = self.config();
+    fn build_store(&self, data: Self::StoreCtx) -> Store<Self::StoreCtx> {
+        let options = self.options();
         let mut store = Store::new(self.instance_pre().engine(), data);
 
         // Yield to the executor every epoch tick; the deadline is bumped on each
@@ -55,10 +55,10 @@ pub trait State: Clone + Send + Sync + 'static {
         store.set_epoch_deadline(1);
         store.epoch_deadline_async_yield_and_update(1);
 
-        if config.max_fuel > 0 {
+        if options.max_fuel > 0 {
             // `consume_fuel` is enabled in `compile_config` whenever a budget is
             // set, so this only fails on a compile/run configuration mismatch.
-            if let Err(error) = store.set_fuel(config.max_fuel) {
+            if let Err(error) = store.set_fuel(options.max_fuel) {
                 tracing::warn!(%error, "failed to set fuel budget");
             }
         }

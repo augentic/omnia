@@ -33,7 +33,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
             use omnia::wasmtime::component::{HasData,InstancePre};
             use omnia::wasmtime::{StoreLimits, StoreLimitsBuilder};
             use omnia::wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
-            use omnia::{Backend, Compiled, HasLimits, RuntimeConfig, Server, State};
+            use omnia::{Backend, Compiled, HasLimits, RuntimeOptions, Server, State};
 
             use super::*;
 
@@ -51,7 +51,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
             #[derive(Clone)]
             struct Context {
                 instance_pre: InstancePre<StoreCtx>,
-                config: RuntimeConfig,
+                options: RuntimeOptions,
                 #(pub #context_fields,)*
             }
 
@@ -62,7 +62,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                     #(compiled.link(#host_trait_impls)?;)*
 
                     Ok(Self {
-                        config: compiled.config().clone(),
+                        options: compiled.options().clone(),
                         instance_pre: compiled.pre_instantiate()?,
                         #(#context_fields::connect().await?,)*
                     })
@@ -76,7 +76,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                     // wall-clock timeouts wrapped around each invocation) fire
                     // even while a guest executes CPU-bound code.
                     let engine = self.instance_pre.engine().clone();
-                    let tick = self.config.epoch_tick;
+                    let tick = self.options.epoch_tick;
                     tokio::spawn(async move {
                         let mut interval = tokio::time::interval(tick);
                         loop {
@@ -99,8 +99,8 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                     &self.instance_pre
                 }
 
-                fn config(&self) -> &RuntimeConfig {
-                    &self.config
+                fn options(&self) -> &RuntimeOptions {
+                    &self.options
                 }
 
                 fn store(&self) -> Self::StoreCtx {
@@ -116,7 +116,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                         table: ResourceTable::new(),
                         wasi: wasi_ctx,
                         limits: StoreLimitsBuilder::new()
-                            .memory_size(self.config.max_memory_bytes)
+                            .memory_size(self.options.max_memory_bytes)
                             .build(),
                         #(#store_ctx_values,)*
                     }

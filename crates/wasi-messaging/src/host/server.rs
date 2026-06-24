@@ -69,7 +69,7 @@ where
             .map_err(|e| anyhow!("failed to push message: {e}"))?;
 
         let instance_pre = self.state.instance_pre();
-        let mut store = self.state.new_store(store_data);
+        let mut store = self.state.build_store(store_data);
         let instance = instance_pre.instantiate_async(&mut store).await?;
         let messaging = MessagingRequestReply::new(&mut store, &instance)?;
 
@@ -85,7 +85,7 @@ where
             })
             .instrument(debug_span!("messaging-handle"));
 
-        tokio::time::timeout(self.state.config().guest_timeout, run)
+        tokio::time::timeout(self.state.options().guest_timeout, run)
             .await
             .context("messaging handler timed out")??
     }
@@ -93,7 +93,7 @@ where
     // Get subscriptions for the topics configured in the wasm component.
     async fn subscriptions(&self) -> Result<Subscriptions> {
         let store_data = self.state.store();
-        let mut store = self.state.new_store(store_data);
+        let mut store = self.state.build_store(store_data);
 
         store
             .run_concurrent(async |store| {

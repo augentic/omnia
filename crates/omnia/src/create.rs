@@ -10,7 +10,7 @@ use wasmtime::component::{Component, InstancePre, Linker};
 use wasmtime::{Config, Engine, InstanceAllocationStrategy, PoolingAllocationConfig};
 use wasmtime_wasi::WasiView;
 
-use crate::RuntimeConfig;
+use crate::RuntimeOptions;
 use crate::traits::Host;
 
 /// Build the Wasmtime `Engine` and `Linker` for this runtime.
@@ -25,20 +25,20 @@ pub fn create<T: WasiView + 'static>(wasm: &PathBuf) -> Result<Compiled<T>> {
     init_env(wasm)?;
     tracing::info!("initializing runtime");
 
-    let config = RuntimeConfig::load()?;
-    let mut wt_config = Config::from(&config);
+    let options = RuntimeOptions::load()?;
+    let mut wt_config = Config::from(&options);
 
     // The pooling allocator recycles instance memories/tables/stacks across
     // invocations, which is the hot path for this per-request-instantiation
     // runtime. It is runtime-only and does not affect artifact compatibility.
-    if config.pooling {
+    if options.pooling {
         let mut pool = PoolingAllocationConfig::new();
-        pool.total_component_instances(config.pool_max_instances)
-            .total_core_instances(config.pool_max_instances)
-            .total_memories(config.pool_max_instances)
-            .total_tables(config.pool_max_instances)
-            .total_stacks(config.pool_max_instances)
-            .max_memory_size(config.pool_max_memory_bytes.unwrap_or(config.max_memory_bytes));
+        pool.total_component_instances(options.pool_max_instances)
+            .total_core_instances(options.pool_max_instances)
+            .total_memories(options.pool_max_instances)
+            .total_tables(options.pool_max_instances)
+            .total_stacks(options.pool_max_instances)
+            .max_memory_size(options.pool_max_memory_bytes.unwrap_or(options.max_memory_bytes));
         wt_config.allocation_strategy(InstanceAllocationStrategy::Pooling(pool));
     }
 
@@ -65,7 +65,7 @@ pub fn create<T: WasiView + 'static>(wasm: &PathBuf) -> Result<Compiled<T>> {
     Ok(Compiled {
         component,
         linker,
-        config,
+        options,
     })
 }
 
@@ -73,14 +73,14 @@ pub fn create<T: WasiView + 'static>(wasm: &PathBuf) -> Result<Compiled<T>> {
 pub struct Compiled<T: WasiView + 'static> {
     component: Component,
     linker: Linker<T>,
-    config: RuntimeConfig,
+    options: RuntimeOptions,
 }
 
 impl<T: WasiView> Compiled<T> {
-    /// Returns the environment-derived runtime configuration.
+    /// Returns the environment-derived runtime options.
     #[must_use]
-    pub const fn config(&self) -> &RuntimeConfig {
-        &self.config
+    pub const fn options(&self) -> &RuntimeOptions {
+        &self.options
     }
 
     /// Link a WASI component to the runtime.
