@@ -8,8 +8,8 @@ use crate::host::generated::wasi::sql::types::{
 use crate::host::resource::ConnectionProxy;
 use crate::host::{WasiSql, WasiSqlCtxView};
 
-impl HostConnectionWithStore for WasiSql {
-    async fn open<T>(
+impl<T> HostConnectionWithStore<T> for WasiSql {
+    async fn open(
         accessor: &Accessor<T, Self>, name: String,
     ) -> wasmtime::Result<Result<Resource<Connection>, Resource<Error>>> {
         let open_conn = accessor.with(|mut store| store.get().ctx.open(name)).await;
@@ -25,36 +25,36 @@ impl HostConnectionWithStore for WasiSql {
         Ok(result)
     }
 
-    fn drop<T>(
+    fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<ConnectionProxy>,
     ) -> wasmtime::Result<()> {
         accessor.get().table.delete(rep).map(|_| Ok(()))?
     }
 }
 
-impl HostStatementWithStore for WasiSql {
-    async fn prepare<T>(
+impl<T> HostStatementWithStore<T> for WasiSql {
+    async fn prepare(
         accessor: &Accessor<T, Self>, query: String, params: Vec<DataType>,
     ) -> wasmtime::Result<Result<Resource<Statement>, Resource<Error>>> {
         let statement = Statement { query, params };
         Ok(Ok(accessor.with(|mut store| store.get().table.push(statement))?))
     }
 
-    fn drop<T>(
+    fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<Statement>,
     ) -> wasmtime::Result<()> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
 
-impl HostErrorWithStore for WasiSql {
-    fn trace<T>(mut host: Access<'_, T, Self>, self_: Resource<Error>) -> wasmtime::Result<String> {
+impl<T> HostErrorWithStore<T> for WasiSql {
+    fn trace(mut host: Access<'_, T, Self>, self_: Resource<Error>) -> wasmtime::Result<String> {
         let err = host.get().table.get(&self_)?;
         let msgs: Vec<String> = err.chain().map(std::string::ToString::to_string).collect();
         Ok(msgs.join(" -> "))
     }
 
-    fn drop<T>(mut accessor: Access<'_, T, Self>, rep: Resource<Error>) -> wasmtime::Result<()> {
+    fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<Error>) -> wasmtime::Result<()> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }

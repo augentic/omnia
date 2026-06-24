@@ -13,8 +13,8 @@ use crate::host::{OutgoingValue, Result, WasiBlobstore, WasiBlobstoreCtxView};
 
 pub type IncomingValue = Bytes;
 
-impl HostIncomingValueWithStore for WasiBlobstore {
-    fn incoming_value_consume_sync<T>(
+impl<T> HostIncomingValueWithStore<T> for WasiBlobstore {
+    fn incoming_value_consume_sync(
         mut host: Access<'_, T, Self>, this: Resource<IncomingValue>,
     ) -> Result<IncomingValueSyncBody> {
         let value = host
@@ -27,7 +27,7 @@ impl HostIncomingValueWithStore for WasiBlobstore {
         Ok(value)
     }
 
-    async fn incoming_value_consume_async<T>(
+    async fn incoming_value_consume_async(
         accessor: &Accessor<T, Self>, this: Resource<IncomingValue>,
     ) -> Result<Resource<InputStream>> {
         let value = accessor
@@ -41,28 +41,28 @@ impl HostIncomingValueWithStore for WasiBlobstore {
         accessor.with(|mut store| store.get().table.push(stream)).map_err(|e| e.to_string())
     }
 
-    fn size<T>(
+    fn size(
         mut host: Access<'_, T, Self>, self_: Resource<IncomingValue>,
     ) -> wasmtime::Result<u64> {
         let value = host.get().table.get(&self_).context("IncomingValue not found")?;
         Ok(value.len() as u64)
     }
 
-    fn drop<T>(
+    fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<IncomingValue>,
     ) -> wasmtime::Result<()> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
 
-impl HostOutgoingValueWithStore for WasiBlobstore {
-    fn new_outgoing_value<T>(
+impl<T> HostOutgoingValueWithStore<T> for WasiBlobstore {
+    fn new_outgoing_value(
         mut host: Access<'_, T, Self>,
     ) -> wasmtime::Result<Resource<OutgoingValue>> {
         Ok(host.get().table.push(OutgoingValue::new(1024))?)
     }
 
-    async fn outgoing_value_write_body<T>(
+    async fn outgoing_value_write_body(
         accessor: &wasmtime::component::Accessor<T, Self>,
         self_: wasmtime::component::Resource<OutgoingValue>,
     ) -> wasmtime::Result<wasmtime::Result<wasmtime::component::Resource<OutputStream>, ()>> {
@@ -82,7 +82,7 @@ impl HostOutgoingValueWithStore for WasiBlobstore {
         })
     }
 
-    fn finish<T>(mut host: Access<'_, T, Self>, this: Resource<OutgoingValue>) -> Result<()> {
+    fn finish(mut host: Access<'_, T, Self>, this: Resource<OutgoingValue>) -> Result<()> {
         let outgoing = host
             .get()
             .table
@@ -93,7 +93,7 @@ impl HostOutgoingValueWithStore for WasiBlobstore {
         outgoing.finalize().map_err(ToString::to_string)
     }
 
-    fn drop<T>(
+    fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<OutgoingValue>,
     ) -> wasmtime::Result<()> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)

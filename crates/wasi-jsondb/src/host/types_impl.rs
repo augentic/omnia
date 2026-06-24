@@ -12,15 +12,15 @@ use crate::host::{JsonDbError, WasiJsonDb, WasiJsonDbCtxView};
 const MAX_FILTER_DEPTH: usize = 5;
 const MAX_IN_LIST_SIZE: usize = 100;
 
-impl HostFilterWithStore for WasiJsonDb {
-    fn compare<T>(
+impl<T> HostFilterWithStore<T> for WasiJsonDb {
+    fn compare(
         mut host: Access<'_, T, Self>, field: String, op: ComparisonOp, value: ScalarValue,
     ) -> wasmtime::Result<Resource<FilterProxy>> {
         let tree = FilterTree::Compare { field, op, value };
         Ok(host.get().table.push(FilterProxy(tree))?)
     }
 
-    fn in_list<T>(
+    fn in_list(
         mut host: Access<'_, T, Self>, field: String, values: Vec<ScalarValue>,
     ) -> wasmtime::Result<Resource<FilterProxy>> {
         wasmtime::ensure!(
@@ -32,7 +32,7 @@ impl HostFilterWithStore for WasiJsonDb {
         Ok(host.get().table.push(FilterProxy(tree))?)
     }
 
-    fn not_in_list<T>(
+    fn not_in_list(
         mut host: Access<'_, T, Self>, field: String, values: Vec<ScalarValue>,
     ) -> wasmtime::Result<Resource<FilterProxy>> {
         wasmtime::ensure!(
@@ -44,42 +44,42 @@ impl HostFilterWithStore for WasiJsonDb {
         Ok(host.get().table.push(FilterProxy(tree))?)
     }
 
-    fn is_null<T>(
+    fn is_null(
         mut host: Access<'_, T, Self>, field: String,
     ) -> wasmtime::Result<Resource<FilterProxy>> {
         let tree = FilterTree::IsNull(field);
         Ok(host.get().table.push(FilterProxy(tree))?)
     }
 
-    fn is_not_null<T>(
+    fn is_not_null(
         mut host: Access<'_, T, Self>, field: String,
     ) -> wasmtime::Result<Resource<FilterProxy>> {
         let tree = FilterTree::IsNotNull(field);
         Ok(host.get().table.push(FilterProxy(tree))?)
     }
 
-    fn contains<T>(
+    fn contains(
         mut host: Access<'_, T, Self>, field: String, pattern: String,
     ) -> wasmtime::Result<Resource<FilterProxy>> {
         let tree = FilterTree::Contains { field, pattern };
         Ok(host.get().table.push(FilterProxy(tree))?)
     }
 
-    fn starts_with<T>(
+    fn starts_with(
         mut host: Access<'_, T, Self>, field: String, pattern: String,
     ) -> wasmtime::Result<Resource<FilterProxy>> {
         let tree = FilterTree::StartsWith { field, pattern };
         Ok(host.get().table.push(FilterProxy(tree))?)
     }
 
-    fn ends_with<T>(
+    fn ends_with(
         mut host: Access<'_, T, Self>, field: String, pattern: String,
     ) -> wasmtime::Result<Resource<FilterProxy>> {
         let tree = FilterTree::EndsWith { field, pattern };
         Ok(host.get().table.push(FilterProxy(tree))?)
     }
 
-    fn and<T>(
+    fn and(
         mut host: Access<'_, T, Self>, filters: Vec<Resource<FilterProxy>>,
     ) -> wasmtime::Result<Resource<FilterProxy>> {
         wasmtime::ensure!(!filters.is_empty(), "filter.and requires at least one child");
@@ -93,7 +93,7 @@ impl HostFilterWithStore for WasiJsonDb {
         Ok(host.get().table.push(FilterProxy(tree))?)
     }
 
-    fn or<T>(
+    fn or(
         mut host: Access<'_, T, Self>, filters: Vec<Resource<FilterProxy>>,
     ) -> wasmtime::Result<Resource<FilterProxy>> {
         wasmtime::ensure!(!filters.is_empty(), "filter.or requires at least one child");
@@ -107,7 +107,7 @@ impl HostFilterWithStore for WasiJsonDb {
         Ok(host.get().table.push(FilterProxy(tree))?)
     }
 
-    fn not<T>(
+    fn not(
         mut host: Access<'_, T, Self>, inner: Resource<FilterProxy>,
     ) -> wasmtime::Result<Resource<FilterProxy>> {
         let inner_tree = host.get().table.delete(inner)?;
@@ -116,7 +116,7 @@ impl HostFilterWithStore for WasiJsonDb {
         Ok(host.get().table.push(FilterProxy(tree))?)
     }
 
-    fn drop<T>(
+    fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<FilterProxy>,
     ) -> wasmtime::Result<()> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)

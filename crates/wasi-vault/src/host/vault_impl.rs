@@ -6,8 +6,8 @@ use crate::host::resource::LockerProxy;
 use crate::host::vault::{Host, HostLocker, HostLockerWithStore, HostWithStore};
 use crate::host::{Result, WasiVault, WasiVaultCtxView};
 
-impl HostWithStore for WasiVault {
-    async fn open<T>(
+impl<T> HostWithStore<T> for WasiVault {
+    async fn open(
         accessor: &Accessor<T, Self>, locker_id: String,
     ) -> Result<Resource<LockerProxy>> {
         let locker = accessor.with(|mut store| store.get().ctx.open_locker(locker_id)).await?;
@@ -16,8 +16,8 @@ impl HostWithStore for WasiVault {
     }
 }
 
-impl HostLockerWithStore for WasiVault {
-    async fn get<T>(
+impl<T> HostLockerWithStore<T> for WasiVault {
+    async fn get(
         accessor: &Accessor<T, Self>, self_: Resource<LockerProxy>, secret_id: String,
     ) -> Result<Option<Vec<u8>>> {
         let locker = get_locker(accessor, &self_)?;
@@ -25,7 +25,7 @@ impl HostLockerWithStore for WasiVault {
         Ok(value)
     }
 
-    async fn set<T>(
+    async fn set(
         accessor: &Accessor<T, Self>, self_: Resource<LockerProxy>, secret_id: String,
         value: Vec<u8>,
     ) -> Result<(), Error> {
@@ -34,7 +34,7 @@ impl HostLockerWithStore for WasiVault {
         Ok(())
     }
 
-    async fn delete<T>(
+    async fn delete(
         accessor: &Accessor<T, Self>, self_: Resource<LockerProxy>, secret_id: String,
     ) -> Result<()> {
         let locker = get_locker(accessor, &self_)?;
@@ -42,7 +42,7 @@ impl HostLockerWithStore for WasiVault {
         Ok(())
     }
 
-    async fn exists<T>(
+    async fn exists(
         accessor: &Accessor<T, Self>, self_: Resource<LockerProxy>, secret_id: String,
     ) -> Result<bool> {
         let locker = get_locker(accessor, &self_)?;
@@ -50,7 +50,7 @@ impl HostLockerWithStore for WasiVault {
         Ok(value.is_some())
     }
 
-    async fn list_ids<T>(
+    async fn list_ids(
         accessor: &Accessor<T, Self>, self_: Resource<LockerProxy>,
     ) -> Result<Vec<String>> {
         let locker = get_locker(accessor, &self_)?;
@@ -58,7 +58,7 @@ impl HostLockerWithStore for WasiVault {
         Ok(secret_ids)
     }
 
-    fn drop<T>(
+    fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<LockerProxy>,
     ) -> wasmtime::Result<()> {
         accessor.get().table.delete(rep).map(|_| Ok(()))?

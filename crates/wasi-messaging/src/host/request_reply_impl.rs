@@ -10,8 +10,8 @@ use crate::host::resource::{ClientProxy, MessageProxy, RequestOptions};
 use crate::host::types_impl::{get_client, get_message};
 use crate::host::{Result, WasiMessaging, WasiMessagingCtxView};
 
-impl HostWithStore for WasiMessaging {
-    async fn request<T>(
+impl<T> HostWithStore<T> for WasiMessaging {
+    async fn request(
         accessor: &Accessor<T, Self>, c: Resource<ClientProxy>, topic: Topic,
         message: Resource<MessageProxy>, options: Option<Resource<RequestOptions>>,
     ) -> Result<Vec<Resource<MessageProxy>>> {
@@ -34,7 +34,7 @@ impl HostWithStore for WasiMessaging {
     }
 
     /// Replies to the given message with the given response message.
-    async fn reply<T>(
+    async fn reply(
         accessor: &Accessor<T, Self>, reply_to: Resource<MessageProxy>,
         message: Resource<MessageProxy>,
     ) -> Result<()> {
@@ -50,9 +50,9 @@ impl HostWithStore for WasiMessaging {
     }
 }
 
-impl HostRequestOptionsWithStore for WasiMessaging {
+impl<T> HostRequestOptionsWithStore<T> for WasiMessaging {
     /// Creates a new request options resource with no options set.
-    fn new<T>(mut host: Access<'_, T, Self>) -> wasmtime::Result<Resource<RequestOptions>> {
+    fn new(mut host: Access<'_, T, Self>) -> wasmtime::Result<Resource<RequestOptions>> {
         let options = RequestOptions::default();
         Ok(host.get().table.push(options)?)
     }
@@ -60,7 +60,7 @@ impl HostRequestOptionsWithStore for WasiMessaging {
     /// The maximum amount of time to wait for a response. If the timeout value
     /// is not set, then the request/reply operation will block until a message
     /// is received in response.
-    fn set_timeout_ms<T>(
+    fn set_timeout_ms(
         mut host: Access<'_, T, Self>, self_: Resource<RequestOptions>, timeout_ms: u32,
     ) -> wasmtime::Result<()> {
         let options = host.get().table.get_mut(&self_)?;
@@ -71,7 +71,7 @@ impl HostRequestOptionsWithStore for WasiMessaging {
     /// The maximum number of replies to expect before returning.
     ///
     /// For NATS, this is not configurable so this function does nothing.
-    fn set_expected_replies<T>(
+    fn set_expected_replies(
         mut host: Access<'_, T, Self>, self_: Resource<RequestOptions>, expected_replies: u32,
     ) -> wasmtime::Result<()> {
         let options = host.get().table.get_mut(&self_)?;
@@ -80,7 +80,7 @@ impl HostRequestOptionsWithStore for WasiMessaging {
     }
 
     /// Removes the resource from the resource table.
-    fn drop<T>(
+    fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<RequestOptions>,
     ) -> wasmtime::Result<()> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)

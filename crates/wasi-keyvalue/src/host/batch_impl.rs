@@ -7,8 +7,8 @@ use crate::host::resource::BucketProxy;
 use crate::host::store_impl::get_bucket;
 use crate::host::{Result, WasiKeyValue};
 
-impl HostWithStore for WasiKeyValue {
-    async fn get_many<T>(
+impl<T> HostWithStore<T> for WasiKeyValue {
+    async fn get_many(
         accessor: &Accessor<T, Self>, bucket: Resource<BucketProxy>, keys: Vec<String>,
     ) -> Result<Vec<Option<(String, Vec<u8>)>>> {
         let bucket = get_bucket(accessor, &bucket)?;
@@ -23,7 +23,7 @@ impl HostWithStore for WasiKeyValue {
         Ok(many)
     }
 
-    async fn set_many<T>(
+    async fn set_many(
         accessor: &Accessor<T, Self>, bucket: Resource<BucketProxy>,
         key_values: Vec<(String, Vec<u8>)>,
     ) -> Result<()> {
@@ -34,7 +34,7 @@ impl HostWithStore for WasiKeyValue {
         Ok(())
     }
 
-    async fn delete_many<T>(
+    async fn delete_many(
         accessor: &Accessor<T, Self>, bucket: Resource<BucketProxy>, keys: Vec<String>,
     ) -> Result<()> {
         let bucket = get_bucket(accessor, &bucket)?;

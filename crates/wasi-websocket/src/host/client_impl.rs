@@ -6,8 +6,8 @@ use crate::host::resource::{ClientProxy, EventProxy};
 use crate::host::types_impl::{get_client, get_event};
 use crate::host::{Result, WasiWebSocket, WasiWebSocketCtxView};
 
-impl HostWithStore for WasiWebSocket {
-    async fn send<T>(
+impl<T> HostWithStore<T> for WasiWebSocket {
+    async fn send(
         accessor: &Accessor<T, Self>, s: Resource<ClientProxy>, event: Resource<EventProxy>,
         sockets: Option<Vec<SocketAddr>>,
     ) -> Result<()> {

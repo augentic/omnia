@@ -6,8 +6,8 @@ use crate::host::resource::{ClientProxy, MessageProxy};
 use crate::host::types_impl::{get_client, get_message};
 use crate::host::{Result, WasiMessaging, WasiMessagingCtxView};
 
-impl HostWithStore for WasiMessaging {
-    async fn send<T>(
+impl<T> HostWithStore<T> for WasiMessaging {
+    async fn send(
         accessor: &Accessor<T, Self>, c: Resource<ClientProxy>, topic: Topic,
         message: Resource<MessageProxy>,
     ) -> Result<()> {

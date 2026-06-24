@@ -9,8 +9,8 @@ pub use crate::host::generated::wasi::messaging::types::{
 use crate::host::resource::{ClientProxy, MessageProxy};
 use crate::host::{Result, WasiMessaging, WasiMessagingCtxView};
 
-impl HostClientWithStore for WasiMessaging {
-    async fn connect<T>(
+impl<T> HostClientWithStore<T> for WasiMessaging {
+    async fn connect(
         accessor: &Accessor<T, Self>, _name: String,
     ) -> Result<Resource<ClientProxy>> {
         let client = accessor.with(|mut store| store.get().ctx.connect()).await?;
@@ -18,20 +18,20 @@ impl HostClientWithStore for WasiMessaging {
         Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
     }
 
-    fn disconnect<T>(_: Access<'_, T, Self>, _: Resource<ClientProxy>) -> Result<()> {
+    fn disconnect(_: Access<'_, T, Self>, _: Resource<ClientProxy>) -> Result<()> {
         Ok(())
     }
 
-    fn drop<T>(
+    fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<ClientProxy>,
     ) -> wasmtime::Result<()> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
 
-impl HostMessageWithStore for WasiMessaging {
+impl<T> HostMessageWithStore<T> for WasiMessaging {
     /// Create a new message with the given payload.
-    fn new<T>(
+    fn new(
         mut host: Access<'_, T, Self>, data: Vec<u8>,
     ) -> wasmtime::Result<Resource<MessageProxy>> {
         let message = host.get().ctx.new_message(data).map_err(wasmtime::Error::from_anyhow)?;
@@ -40,7 +40,7 @@ impl HostMessageWithStore for WasiMessaging {
     }
 
     /// The topic/subject/channel this message was received on, if any.
-    fn topic<T>(
+    fn topic(
         mut host: Access<'_, T, Self>, self_: Resource<MessageProxy>,
     ) -> wasmtime::Result<Option<Topic>> {
         let message = host.get().table.get(&self_)?;
@@ -50,7 +50,7 @@ impl HostMessageWithStore for WasiMessaging {
 
     /// An optional content-type describing the format of the data in the
     /// message. This is sometimes described as the "format" type".
-    fn content_type<T>(
+    fn content_type(
         mut host: Access<'_, T, Self>, self_: Resource<MessageProxy>,
     ) -> wasmtime::Result<Option<String>> {
         let message = host.get().table.get(&self_)?;
@@ -65,7 +65,7 @@ impl HostMessageWithStore for WasiMessaging {
 
     /// Set the content-type describing the format of the data in the message.
     /// This is sometimes described as the "format" type.
-    fn set_content_type<T>(
+    fn set_content_type(
         mut host: Access<'_, T, Self>, self_: Resource<MessageProxy>, content_type: String,
     ) -> wasmtime::Result<()> {
         let store = host.get();
@@ -79,7 +79,7 @@ impl HostMessageWithStore for WasiMessaging {
     }
 
     /// An opaque blob of data.
-    fn data<T>(
+    fn data(
         mut host: Access<'_, T, Self>, self_: Resource<MessageProxy>,
     ) -> wasmtime::Result<Vec<u8>> {
         let message = host.get().table.get(&self_)?;
@@ -87,7 +87,7 @@ impl HostMessageWithStore for WasiMessaging {
     }
 
     /// Set the opaque blob of data for this message, discarding the old value.
-    fn set_data<T>(
+    fn set_data(
         mut host: Access<'_, T, Self>, self_: Resource<MessageProxy>, data: Vec<u8>,
     ) -> wasmtime::Result<()> {
         let store = host.get();
@@ -101,7 +101,7 @@ impl HostMessageWithStore for WasiMessaging {
     }
 
     /// Get the metadata associated with this message.    
-    fn metadata<T>(
+    fn metadata(
         mut host: Access<'_, T, Self>, self_: Resource<MessageProxy>,
     ) -> wasmtime::Result<Option<types::Metadata>> {
         let message = host.get().table.get(&self_)?;
@@ -112,7 +112,7 @@ impl HostMessageWithStore for WasiMessaging {
     }
 
     /// Append a key-value pair to the metadata of this message.
-    fn add_metadata<T>(
+    fn add_metadata(
         mut host: Access<'_, T, Self>, self_: Resource<MessageProxy>, key: String, value: String,
     ) -> wasmtime::Result<()> {
         let store = host.get();
@@ -126,7 +126,7 @@ impl HostMessageWithStore for WasiMessaging {
     }
 
     /// Set all the metadata on this message, replacing any existing metadata.
-    fn set_metadata<T>(
+    fn set_metadata(
         mut host: Access<'_, T, Self>, self_: Resource<MessageProxy>, meta: types::Metadata,
     ) -> wasmtime::Result<()> {
         let store = host.get();
@@ -140,7 +140,7 @@ impl HostMessageWithStore for WasiMessaging {
     }
 
     /// Remove a key-value pair from the metadata of a message.
-    fn remove_metadata<T>(
+    fn remove_metadata(
         mut host: Access<'_, T, Self>, self_: Resource<MessageProxy>, key: String,
     ) -> wasmtime::Result<()> {
         let store = host.get();
@@ -153,7 +153,7 @@ impl HostMessageWithStore for WasiMessaging {
         Ok(())
     }
 
-    fn drop<T>(
+    fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<MessageProxy>,
     ) -> wasmtime::Result<()> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)

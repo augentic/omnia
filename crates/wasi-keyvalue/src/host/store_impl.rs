@@ -8,8 +8,8 @@ use crate::host::resource::BucketProxy;
 use crate::host::store::{Host, HostBucket};
 use crate::host::{Result, WasiKeyValue, WasiKeyValueCtxView};
 
-impl HostWithStore for WasiKeyValue {
-    async fn open<T>(
+impl<T> HostWithStore<T> for WasiKeyValue {
+    async fn open(
         accessor: &Accessor<T, Self>, identifier: String,
     ) -> Result<Resource<BucketProxy>> {
         let bucket = accessor.with(|mut store| store.get().ctx.open_bucket(identifier)).await?;
@@ -18,8 +18,8 @@ impl HostWithStore for WasiKeyValue {
     }
 }
 
-impl HostBucketWithStore for WasiKeyValue {
-    async fn get<T>(
+impl<T> HostBucketWithStore<T> for WasiKeyValue {
+    async fn get(
         accessor: &Accessor<T, Self>, self_: Resource<BucketProxy>, key: String,
     ) -> Result<Option<Vec<u8>>> {
         let bucket = get_bucket(accessor, &self_)?;
@@ -27,7 +27,7 @@ impl HostBucketWithStore for WasiKeyValue {
         Ok(value)
     }
 
-    async fn set<T>(
+    async fn set(
         accessor: &Accessor<T, Self>, self_: Resource<BucketProxy>, key: String, value: Vec<u8>,
     ) -> Result<()> {
         let bucket = get_bucket(accessor, &self_)?;
@@ -35,7 +35,7 @@ impl HostBucketWithStore for WasiKeyValue {
         Ok(())
     }
 
-    async fn delete<T>(
+    async fn delete(
         accessor: &Accessor<T, Self>, self_: Resource<BucketProxy>, key: String,
     ) -> Result<()> {
         let bucket = get_bucket(accessor, &self_)?;
@@ -43,7 +43,7 @@ impl HostBucketWithStore for WasiKeyValue {
         Ok(())
     }
 
-    async fn exists<T>(
+    async fn exists(
         accessor: &Accessor<T, Self>, self_: Resource<BucketProxy>, key: String,
     ) -> Result<bool> {
         let bucket = get_bucket(accessor, &self_)?;
@@ -51,7 +51,7 @@ impl HostBucketWithStore for WasiKeyValue {
         Ok(value.is_some())
     }
 
-    async fn list_keys<T>(
+    async fn list_keys(
         accessor: &Accessor<T, Self>, self_: Resource<BucketProxy>, cursor: Option<String>,
     ) -> Result<KeyResponse> {
         tracing::trace!("store::HostBucket::list_keys {cursor:?}");
@@ -60,7 +60,7 @@ impl HostBucketWithStore for WasiKeyValue {
         Ok(KeyResponse { keys, cursor })
     }
 
-    fn drop<T>(
+    fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<BucketProxy>,
     ) -> std::result::Result<(), wasmtime::Error> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)

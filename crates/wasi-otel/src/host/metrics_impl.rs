@@ -22,8 +22,8 @@ use crate::host::generated::omnia::otel::metrics::{self as wasi, HostWithStore};
 use crate::host::types_impl::datetime_nanos;
 use crate::host::{WasiOtel, WasiOtelCtxView};
 
-impl HostWithStore for WasiOtel {
-    async fn export<T>(
+impl<T> HostWithStore<T> for WasiOtel {
+    async fn export(
         accessor: &Accessor<T, Self>, rm: wasi::ResourceMetrics,
     ) -> Result<(), wasi::Error> {
         // return if opentelemetry is not initialized
