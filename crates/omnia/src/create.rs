@@ -52,21 +52,25 @@ fn load(engine: &Engine, wasm: &Path) -> Result<Component> {
         .with_context(|| {
             format!(
                 "loading component {}: a pre-compiled artifact must be loaded with the same \
-             compile-affecting settings used by `omnia compile` (MAX_FUEL, BRANCH_HINTING, \
-             MEMORY_RESERVATION, MEMORY_GUARD_SIZE)",
+                compile-affecting settings used by `omnia compile` (MAX_FUEL, BRANCH_HINTING, \
+                MEMORY_RESERVATION, MEMORY_GUARD_SIZE)",
                 wasm.display()
             )
         });
 
     // Fall back to JIT-compiling raw wasm when the feature is enabled.
     #[cfg(feature = "jit")]
-    let result =
-        result.or_else(|_| Component::from_file(engine, wasm).map_err(anyhow::Error::from));
+    let component =
+        result.or_else(|_| Component::from_file(engine, wasm).map_err(anyhow::Error::from))?;
 
     #[cfg(not(feature = "jit"))]
-    let result = result.context("Enable `jit` feature to load wasm32 files.");
+    let component = result
+        .context("if this is a raw wasm32 component, rebuild with the `jit` feature to load it")?;
 
-    result
+    // Build the copy-on-write heap image now (startup) rather than lazily on the
+    // first instantiation, moving that one-time cost off the first request.
+    component.initialize_copy_on_write_image()?;
+    Ok(component)
 }
 
 /// A compiled WebAssembly component with its associated Linker.
@@ -97,7 +101,7 @@ impl<T: WasiView> Compiled<T> {
     /// # Errors
     ///
     /// Will fail if the component cannot be pre-instantiated.
-    pub fn pre_instantiate(&mut self) -> Result<InstancePre<T>> {
+    pub fn pre_instantiate(&self) -> Result<InstancePre<T>> {
         self.linker.instantiate_pre(&self.component).map_err(anyhow::Error::from)
     }
 }

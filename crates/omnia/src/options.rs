@@ -36,6 +36,10 @@ use wasmtime::{Config, Enabled, InstanceAllocationStrategy, PoolingAllocationCon
 /// component is pre-compiled and when it is later loaded. Copy-on-write heap
 /// initialisation is likewise pinned there. The remaining values only affect
 /// the engine or individual stores at runtime.
+// A flat, env-driven configuration record; grouping the independent boolean
+// toggles into enums would obscure their one-to-one mapping to environment
+// variables.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Debug, FromEnv)]
 pub struct RuntimeOptions {
     /// Wall-clock cap applied to a single guest invocation
@@ -75,6 +79,12 @@ pub struct RuntimeOptions {
     /// the per-instantiation cost. Runtime-only.
     #[env(from = "ASYNC_STACK_ZEROING", default = "false")]
     pub async_stack_zeroing: bool,
+    /// Whether guest WebAssembly backtraces are captured and attached to trap
+    /// errors (`WASM_BACKTRACE`, default `false`). Off by default to skip
+    /// per-trap capture overhead; enable for richer error/`OpenTelemetry`
+    /// diagnostics. Runtime-only: does not affect the compiled artifact.
+    #[env(from = "WASM_BACKTRACE", default = "false")]
+    pub wasm_backtrace: bool,
     /// Per-invocation fuel budget; `0` disables fuel metering
     /// (`MAX_FUEL`, default disabled).
     #[env(from = "MAX_FUEL", default = "0")]
@@ -265,6 +275,13 @@ impl From<&RuntimeOptions> for Config {
         config.async_stack_zeroing(options.async_stack_zeroing);
         if let Some(bytes) = options.memory_reservation_for_growth {
             config.memory_reservation_for_growth(bytes);
+        }
+
+        // Guest backtraces are runtime-only (not artifact-affecting). Disable via
+        // the non-deprecated max-frames API; `true` leaves the Wasmtime default
+        // (backtraces on).
+        if !options.wasm_backtrace {
+            config.wasm_backtrace_max_frames(None);
         }
 
         if !options.pooling {

@@ -14,6 +14,8 @@ use crate::runtime::Config;
 pub fn expand(config: &Config) -> syn::Result<TokenStream> {
     let Expanded {
         context_fields,
+        backend_idents,
+        backend_types,
         store_ctx_fields,
         store_ctx_values,
         host_trait_impls,
@@ -21,6 +23,19 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
         wasi_view_impls,
         main_fn,
     } = Expanded::try_from(config)?;
+
+    // Connect every backend concurrently. `tokio::try_join!` is variadic and
+    // returns on the first error, but rejects an empty argument list, so skip it
+    // entirely when there are no backends.
+    let connect_backends = if backend_idents.is_empty() {
+        quote! {}
+    } else {
+        quote! {
+            let (#(#backend_idents,)*) = tokio::try_join!(
+                #(<#backend_types as Backend>::connect(),)*
+            )?;
+        }
+    };
 
     Ok(quote! {
         mod runtime {
@@ -61,10 +76,13 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                     // link enabled WASI components
                     #(compiled.link(#host_trait_impls)?;)*
 
+                    // connect to all backends concurrently
+                    #connect_backends
+
                     Ok(Self {
                         options: compiled.options().clone(),
                         instance_pre: compiled.pre_instantiate()?,
-                        #(#context_fields::connect().await?,)*
+                        #(#backend_idents,)*
                     })
                 }
 
@@ -166,6 +184,8 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
 
 struct Expanded {
     context_fields: Vec<TokenStream>,
+    backend_idents: Vec<Ident>,
+    backend_types: Vec<Path>,
     store_ctx_fields: Vec<TokenStream>,
     store_ctx_values: Vec<TokenStream>,
     host_trait_impls: Vec<Path>,
@@ -180,6 +200,8 @@ impl TryFrom<&Config> for Expanded {
     fn try_from(input: &Config) -> Result<Self, Self::Error> {
         // `Context` struct
         let mut context_fields = Vec::new();
+        let mut backend_idents = Vec::new();
+        let mut backend_types = Vec::new();
         let mut seen_backends = Vec::new();
 
         for backend in &input.backends {
@@ -192,6 +214,8 @@ impl TryFrom<&Config> for Expanded {
 
             let field = field_ident(backend);
             context_fields.push(quote! {#field: #backend});
+            backend_idents.push(field);
+            backend_types.push(backend.clone());
         }
 
         let mut store_ctx_fields = Vec::new();
@@ -241,6 +265,8 @@ impl TryFrom<&Config> for Expanded {
 
         Ok(Self {
             context_fields,
+            backend_idents,
+            backend_types,
             store_ctx_fields,
             store_ctx_values,
             host_trait_impls,
