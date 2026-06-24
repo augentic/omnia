@@ -4,9 +4,9 @@ use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-use anyhow::{Context, Result, anyhow};
-use wasmtime::Engine;
+use anyhow::{Result, anyhow};
 use wasmtime::component::Component;
+use wasmtime::{Config, Engine};
 
 use crate::RuntimeConfig;
 
@@ -29,9 +29,10 @@ pub fn compile(wasm: &PathBuf, output: Option<PathBuf>) -> Result<()> {
     };
 
     // compile component (compile-time config must match the loader in `create`)
-    let config =
-        RuntimeConfig::from_env().finalize().context("loading runtime configuration")?.compile();
-    let engine = Engine::new(&config)?;
+    let config = RuntimeConfig::load()?;
+    let wt_config = &Config::from(&config);
+    
+    let engine = Engine::new(wt_config)?;
     let component = Component::from_file(&engine, wasm)?;
     let serialized = component.serialize()?;
 

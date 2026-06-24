@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use omnia_otel::Telemetry;
 use tracing::instrument;
 use wasmtime::component::{Component, InstancePre, Linker};
-use wasmtime::{Engine, InstanceAllocationStrategy, PoolingAllocationConfig};
+use wasmtime::{Config, Engine, InstanceAllocationStrategy, PoolingAllocationConfig};
 use wasmtime_wasi::WasiView;
 
 use crate::RuntimeConfig;
@@ -25,27 +25,24 @@ pub fn create<T: WasiView + 'static>(wasm: &PathBuf) -> Result<Compiled<T>> {
     init_env(wasm)?;
     tracing::info!("initializing runtime");
 
-    let runtime_config =
-        RuntimeConfig::from_env().finalize().context("loading runtime configuration")?;
-    let mut config = runtime_config.compile();
+    let config = RuntimeConfig::load()?;
+    let mut wt_config = Config::from(&config);
 
     // The pooling allocator recycles instance memories/tables/stacks across
     // invocations, which is the hot path for this per-request-instantiation
     // runtime. It is runtime-only and does not affect artifact compatibility.
-    if runtime_config.pooling {
+    if config.pooling {
         let mut pool = PoolingAllocationConfig::new();
-        pool.total_component_instances(runtime_config.pool_max_instances)
-            .total_core_instances(runtime_config.pool_max_instances)
-            .total_memories(runtime_config.pool_max_instances)
-            .total_tables(runtime_config.pool_max_instances)
-            .total_stacks(runtime_config.pool_max_instances)
-            .max_memory_size(
-                runtime_config.pool_max_memory_bytes.unwrap_or(runtime_config.max_memory_bytes),
-            );
-        config.allocation_strategy(InstanceAllocationStrategy::Pooling(pool));
+        pool.total_component_instances(config.pool_max_instances)
+            .total_core_instances(config.pool_max_instances)
+            .total_memories(config.pool_max_instances)
+            .total_tables(config.pool_max_instances)
+            .total_stacks(config.pool_max_instances)
+            .max_memory_size(config.pool_max_memory_bytes.unwrap_or(config.max_memory_bytes));
+        wt_config.allocation_strategy(InstanceAllocationStrategy::Pooling(pool));
     }
 
-    let engine = Engine::new(&config)?;
+    let engine = Engine::new(&wt_config)?;
 
     // SAFETY: The caller should ensure only valid pre-compiled wasm files are provided.
     let component = unsafe { Component::deserialize_file(&engine, wasm) }.or_else(|e| {
@@ -68,7 +65,7 @@ pub fn create<T: WasiView + 'static>(wasm: &PathBuf) -> Result<Compiled<T>> {
     Ok(Compiled {
         component,
         linker,
-        config: runtime_config,
+        config,
     })
 }
 

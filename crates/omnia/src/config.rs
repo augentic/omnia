@@ -72,47 +72,47 @@ pub struct RuntimeConfig {
     pub branch_hinting: bool,
 }
 
-impl RuntimeConfig {
-    /// Build the compile-time [`Config`] shared by [`crate::compile`] and
-    /// [`crate::create`].
-    ///
-    /// Only settings that influence generated code belong here so that a
-    /// pre-compiled component remains loadable. The component-model-async feature
-    /// and WASI 0.3.0 are enabled by default in Wasmtime 46, so they are no
-    /// longer set explicitly.
-    ///
-    /// # Compile/run parity
-    ///
-    /// `OMNIA_MAX_FUEL` (which enables fuel metering) and `OMNIA_BRANCH_HINTING`
-    /// change the compiled artifact. They must hold the same value when a
-    /// component is pre-compiled with `omnia compile` and when it is later run,
-    /// otherwise [`wasmtime::component::Component::deserialize_file`] will reject
-    /// the artifact.
-    #[must_use]
-    pub fn compile(&self) -> Config {
-        let mut config = Config::new();
+/// Build the compile-time [`Config`] shared by [`crate::compile`] and
+/// [`crate::create`].
+///
+/// Only settings that influence generated code belong here so that a
+/// pre-compiled component remains loadable. The component-model-async feature
+/// and WASI 0.3.0 are enabled by default in Wasmtime 46, so they are no longer
+/// set explicitly.
+///
+/// # Compile/run parity
+///
+/// `OMNIA_MAX_FUEL` (which enables fuel metering) and `OMNIA_BRANCH_HINTING`
+/// change the compiled artifact. They must hold the same value when a component
+/// is pre-compiled with `omnia compile` and when it is later run, otherwise
+/// [`wasmtime::component::Component::deserialize_file`] will reject the artifact.
+impl From<&RuntimeConfig> for Config {
+    fn from(rc: &RuntimeConfig) -> Self {
+        let mut config = Self::new();
 
         // Always enabled so each store can install an epoch deadline; the ticker
         // and per-store deadlines drive cooperative guest timeouts.
         config.epoch_interruption(true);
 
-        if self.max_fuel > 0 {
+        if rc.max_fuel > 0 {
             config.consume_fuel(true);
         }
-        if self.branch_hinting {
+        if rc.branch_hinting {
             config.wasm_branch_hinting(true);
         }
 
         config
     }
+}
 
+impl RuntimeConfig {
     /// Finalize the runtime configuration.
     ///
     /// # Errors
     ///
     /// Returns an error if the runtime configuration cannot be loaded from the
     /// environment.
-    pub fn finalize() -> Result<Self> {
+    pub fn load() -> Result<Self> {
         Self::from_env().finalize().map_err(anyhow::Error::from)
     }
 }
