@@ -40,9 +40,7 @@ impl<T> HostStatementWithStore<T> for WasiSql {
         Ok(Ok(accessor.with(|mut store| store.get().table.push(statement))?))
     }
 
-    fn drop(
-        mut accessor: Access<'_, T, Self>, rep: Resource<Statement>,
-    ) -> wasmtime::Result<()> {
+    fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<Statement>) -> wasmtime::Result<()> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }

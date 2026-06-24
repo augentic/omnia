@@ -7,9 +7,7 @@ use crate::host::resource::{ClientProxy, EventProxy};
 use crate::host::{Result, WasiWebSocket, WasiWebSocketCtxView};
 
 impl<T> HostClientWithStore<T> for WasiWebSocket {
-    async fn connect(
-        accessor: &Accessor<T, Self>, _name: String,
-    ) -> Result<Resource<ClientProxy>> {
+    async fn connect(accessor: &Accessor<T, Self>, _name: String) -> Result<Resource<ClientProxy>> {
         let socket = accessor.with(|mut store| store.get().ctx.connect()).await?;
         let proxy = ClientProxy(socket);
         Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
@@ -19,18 +17,14 @@ impl<T> HostClientWithStore<T> for WasiWebSocket {
         Ok(())
     }
 
-    fn drop(
-        mut accessor: Access<'_, T, Self>, rep: Resource<ClientProxy>,
-    ) -> wasmtime::Result<()> {
+    fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<ClientProxy>) -> wasmtime::Result<()> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
 
 impl<T> HostEventWithStore<T> for WasiWebSocket {
     /// Create a new event with the given payload.
-    fn new(
-        mut host: Access<'_, T, Self>, data: Vec<u8>,
-    ) -> wasmtime::Result<Resource<EventProxy>> {
+    fn new(mut host: Access<'_, T, Self>, data: Vec<u8>) -> wasmtime::Result<Resource<EventProxy>> {
         let event = host.get().ctx.new_event(data).map_err(wasmtime::Error::from_anyhow)?;
         let proxy = EventProxy(event);
         Ok(host.get().table.push(proxy)?)
@@ -52,9 +46,7 @@ impl<T> HostEventWithStore<T> for WasiWebSocket {
         Ok(event.data().to_vec())
     }
 
-    fn drop(
-        mut accessor: Access<'_, T, Self>, rep: Resource<EventProxy>,
-    ) -> wasmtime::Result<()> {
+    fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<EventProxy>) -> wasmtime::Result<()> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }

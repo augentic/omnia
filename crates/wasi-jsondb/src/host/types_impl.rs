@@ -116,9 +116,7 @@ impl<T> HostFilterWithStore<T> for WasiJsonDb {
         Ok(host.get().table.push(FilterProxy(tree))?)
     }
 
-    fn drop(
-        mut accessor: Access<'_, T, Self>, rep: Resource<FilterProxy>,
-    ) -> wasmtime::Result<()> {
+    fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<FilterProxy>) -> wasmtime::Result<()> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }

@@ -10,9 +10,7 @@ use crate::host::resource::{ClientProxy, MessageProxy};
 use crate::host::{Result, WasiMessaging, WasiMessagingCtxView};
 
 impl<T> HostClientWithStore<T> for WasiMessaging {
-    async fn connect(
-        accessor: &Accessor<T, Self>, _name: String,
-    ) -> Result<Resource<ClientProxy>> {
+    async fn connect(accessor: &Accessor<T, Self>, _name: String) -> Result<Resource<ClientProxy>> {
         let client = accessor.with(|mut store| store.get().ctx.connect()).await?;
         let proxy = ClientProxy(client);
         Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
@@ -22,9 +20,7 @@ impl<T> HostClientWithStore<T> for WasiMessaging {
         Ok(())
     }
 
-    fn drop(
-        mut accessor: Access<'_, T, Self>, rep: Resource<ClientProxy>,
-    ) -> wasmtime::Result<()> {
+    fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<ClientProxy>) -> wasmtime::Result<()> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }

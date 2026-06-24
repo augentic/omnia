@@ -58,9 +58,7 @@ impl<T> HostLockerWithStore<T> for WasiVault {
         Ok(secret_ids)
     }
 
-    fn drop(
-        mut accessor: Access<'_, T, Self>, rep: Resource<LockerProxy>,
-    ) -> wasmtime::Result<()> {
+    fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<LockerProxy>) -> wasmtime::Result<()> {
         accessor.get().table.delete(rep).map(|_| Ok(()))?
     }
 }
