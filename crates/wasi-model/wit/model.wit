@@ -1,0 +1,214 @@
+// wit/model.wit — augentic:model@0.1.0
+//
+// This is the authoritative WIT for the `augentic:model/completion` interface
+// (rfcs/wasi-model.md §3.1). Two deliberate deviations from the prose WIT in the
+// RFC, made because the established host-crate patterns win where they differ
+// (RFC §3.2):
+//
+//  1. `complete` / `complete-stream` are `async func` (not plain `func`). Every
+//     backend-touching WASI function in this codebase is an `async func`
+//     implemented in wasmtime's concurrent (`store`) mode — see
+//     `wasi-blobstore`'s `create-container: async func`. `complete` calls an
+//     async backend (`WasiModelCtx::complete` returns a future), so it must be
+//     `async func` for the host binding to await it without blocking the
+//     executor.
+//  2. The working-tree handle tracks `wasi:filesystem@0.2.12` — the version
+//     `wasmtime-wasi` 46 ships — rather than the RFC's `0.2.8` placeholder, so
+//     the `with:` remap onto wasmtime's `Descriptor` resolves to the same
+//     resource the runtime already owns.
+package augentic:model@0.1.0;
+
+/// Models-API-style prompt completion. Guests import `augentic:model/completion`.
+interface completion {
+    /// Working-tree handle lent through `grants.working-tree`. The version tracks
+    /// the wasi-filesystem working-tree host (RFC-55), which is not yet built — the
+    /// tools that consume it (`read`/`list`/`write`, cursor's `local-path`) are
+    /// deferred. The type is in the 0.1.0 WIT so the boundary is final.
+    use wasi:filesystem/types@0.2.12.{descriptor};
+
+    /// JSON document encoded as UTF-8 text.
+    type json = string;
+
+    /// JSON document returned to the guest; validated per `prompt.response-format`.
+    type answer = string;
+
+    /// One chat turn passed to the provider API.
+    record message {
+        /// Turn role: `system`, `user`, or `assistant`.
+        role: string,
+        /// Turn body text.
+        content: string,
+    }
+
+    /// One few-shot pair used when assembling from `sections`.
+    record example {
+        /// Example user input.
+        input: string,
+        /// Example model output.
+        output: string,
+    }
+
+    /// Named substitution slot applied when assembling section text.
+    record variable {
+        /// Placeholder name (e.g. `language`).
+        name: string,
+        /// Value substituted for `name`.
+        value: string,
+    }
+
+    /// Structured prompt template; used when `prompt.messages` is empty.
+    record sections {
+        /// Persona / actor instruction.
+        role: option<string>,
+        /// What the model should do. Required when assembling from sections.
+        task: string,
+        /// Background documents, prior state, or prior turns.
+        context: option<string>,
+        /// Rules, limits, and things to avoid.
+        constraints: list<string>,
+        /// Few-shot input/output pairs.
+        examples: list<example>,
+        /// Template variables applied during assembly.
+        variables: list<variable>,
+    }
+
+    /// JSON Schema constrained output (`response_format.json_schema` in provider APIs).
+    record json-schema-spec {
+        /// Schema name passed to the provider (e.g. `review_result`).
+        name: string,
+        /// JSON Schema document the answer must conform to.
+        schema: json,
+        /// Provider strict-mode hint when supported.
+        strict: option<bool>,
+    }
+
+    /// Selects validation depth for the returned `answer`.
+    enum response-format-kind {
+        /// Answer must be a JSON string value.
+        text,
+        /// Answer must parse as a JSON object.
+        json-object,
+        /// Answer must validate against `response-format.json-schema`.
+        json-schema,
+    }
+
+    /// Output shape constraint for the completion.
+    record response-format {
+        /// Selects validation depth.
+        kind: response-format-kind,
+        /// Required when `kind` is `json-schema`; ignored otherwise.
+        json-schema: option<json-schema-spec>,
+    }
+
+    /// Sampling and length controls. Omitted fields defer to backend defaults.
+    record generation-params {
+        /// Sampling temperature.
+        temperature: option<f32>,
+        /// Nucleus sampling threshold.
+        top-p: option<f32>,
+        /// Maximum output tokens.
+        max-tokens: option<u32>,
+        /// Sequences that halt generation.
+        stop: list<string>,
+    }
+
+    /// Guest-declared tool advertised to the model. Floor tools are injected from `grants`.
+    record function-tool {
+        /// Tool name. Must not collide with reserved floor names (`resolve`, `read`, …).
+        name: string,
+        /// Natural-language description for the model.
+        description: string,
+        /// JSON Schema for the tool's arguments object.
+        parameters: json,
+    }
+
+    /// Tool selection policy (`tool_choice` in provider APIs).
+    variant tool-choice {
+        /// Provider selects whether to call tools.
+        auto,
+        /// Do not call tools.
+        none,
+        /// Must call at least one tool.
+        required,
+        /// Must call the named tool.
+        named(string),
+    }
+
+    /// Opaque tracing key/value pair (`metadata` / `user` in provider APIs).
+    record metadata-entry {
+        /// Metadata key.
+        key: string,
+        /// Metadata value.
+        value: string,
+    }
+
+    /// Host capabilities lent for this completion; drives floor tool injection.
+    record tool-grants {
+        /// Guest id whose `references` export `resolve` targets.
+        references: option<string>,
+        /// Typed `wasi:filesystem` capability for bounded `read` / `list` / `write`
+        /// (genai) and the spawned agent's direct access (cursor). A `borrow`, so the
+        /// floor never trusts a forgeable integer handle — the host resolves it from
+        /// the resource table exactly as other hosts take typed resources.
+        working-tree: option<borrow<descriptor>>,
+        /// Allowed closed verification profile names for `verify`.
+        verify: list<string>,
+    }
+
+    /// Complete models-API-style request for one completion.
+    record prompt {
+        /// Opaque model id hint; passed through unchanged. Backend may override.
+        model: option<string>,
+        /// System / instructions channel. Applied per assembly rules (§3.1.1).
+        system: option<string>,
+        /// Explicit chat turns. When non-empty, takes precedence over `sections`.
+        messages: list<message>,
+        /// Structured template used when `messages` is empty.
+        sections: option<sections>,
+        /// Sampling and length controls.
+        generation: option<generation-params>,
+        /// Required output shape and validation rules.
+        response-format: response-format,
+        /// Guest-declared tools merged with floor tools at the backend.
+        tools: list<function-tool>,
+        /// Tool selection policy. Defaults to provider/backend `auto`.
+        tool-choice: option<tool-choice>,
+        /// Tracing and attribution metadata.
+        metadata: list<metadata-entry>,
+        /// Host capabilities lent for this call.
+        grants: tool-grants,
+    }
+
+    /// Incremental output from `complete-stream`.
+    variant stream-event {
+        /// Token or fragment; diagnostic only, not validated until `done`.
+        delta(string),
+        /// Terminal success — same validated JSON `answer` as `complete` would return.
+        done(answer),
+        /// Terminal failure mid-stream.
+        failed(error),
+    }
+
+    /// Typed completion failure.
+    variant error {
+        /// Backend produced output that never passed validation.
+        invalid-answer(string),
+        /// Iteration, token, time, or verify budget exhausted.
+        budget-exhausted(string),
+        /// Non-repairable tool error.
+        tool-failed(string),
+        /// Transport, process, or provider failure.
+        backend(string),
+    }
+
+    /// Single-shot completion — returns one validated `answer`.
+    complete: async func(prompt: prompt) -> result<answer, error>;
+
+    /// Streaming completion over the same `prompt`. Read until `done` or `failed`.
+    complete-stream: async func(prompt: prompt) -> result<stream<stream-event>, error>;
+}
+
+/// Guest world: import and call `completion`.
+world model {
+    import completion;
+}

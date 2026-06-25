@@ -22,6 +22,11 @@ omnia-wasi-websocket.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 omnia.workspace = true
+# Host-only: the model example guest builds against its own `model/wit`, so the
+# crate is needed only by `runtime.rs` (the host). Keeping it off the wasm32
+# target also avoids compiling the crate's guest `complete-stream` (native
+# `stream<>`) binding for wasip2.
+omnia-wasi-model.workspace = true
 # Used by the `http-bench` load-test harness (anyhow + cfg-if come from the
 # shared `[dependencies]` section above).
 bytes.workspace = true
@@ -104,6 +109,15 @@ crate-type = ["cdylib"]
 [[example]]
 name = "keyvalue"
 path = "keyvalue/runtime.rs"
+
+[[example]]
+name = "model-wasm"
+path = "model/guest.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model"
+path = "model/runtime.rs"
 
 [[example]]
 name = "messaging-wasm"

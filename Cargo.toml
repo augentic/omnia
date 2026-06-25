@@ -125,6 +125,7 @@ omnia-wasi-identity = { path = "crates/wasi-identity", version = "0.35.0" }
 omnia-wasi-jsondb = { path = "crates/wasi-jsondb", version = "0.35.0" }
 omnia-wasi-keyvalue = { path = "crates/wasi-keyvalue", version = "0.35.0" }
 omnia-wasi-messaging = { path = "crates/wasi-messaging", version = "0.35.0" }
+omnia-wasi-model = { path = "crates/wasi-model", version = "0.35.0" }
 omnia-wasi-otel = { path = "crates/wasi-otel", version = "0.35.0" }
 omnia-wasi-otel-attr = { path = "crates/wasi-otel-attr", version = "0.35.0" }
 omnia-wasi-sql = { path = "crates/wasi-sql", version = "0.35.0" }

@@ -99,7 +99,7 @@ omnia::runtime!({
 
 The one structural difference from a plain effect host: **`wasi-model` is not purely guest→host.** During `complete`, a backend may call *back* into guests (`resolve`) and into other host services (the working tree via `wasi:filesystem`). This does not change the trait layering — it is handled by passing the backend a host-provided `ToolHost` argument on `complete` (§3.3, §4.2), the same way `WasiKeyValueCtx::open_bucket` is just handed its arguments.
 
-The `resolve` callback instantiates the adapter guest fresh and calls its `references` export, in a similar manner to the guest instantiation and call in [`wasi-http` `server.rs`](../crates/wasi-http/src/host/server.rs). This is the host-mediated dynamic linking ([guest-registry.md](guest-registry.md) §4) invoked from the host side — so Layer 2 (the tool loop) depends on the registry landing first; Layer 1 does not.
+The `resolve` callback instantiates the adapter guest fresh and calls its `references` export, in a similar manner to the guest instantiation and call in [`wasi-http` `server.rs`](../crates/wasi-http/src/host/server.rs). This is the host-mediated dynamic linking ([guest-registry.md](guest-registry.md) §4) invoked from the host side. That mechanism has **already landed** (`crates/omnia/src/{registry,dispatch,transport,selector,routing}.rs`), but today it only polyfills *guest→guest* imports — `DispatchHandle` is `pub(crate)` and transport-bound — so there is no public *host→guest* entry point yet. `resolve` therefore reuses the same selector + dispatch-depth machinery behind a small new host-side API added in Phase 2a (§7.2), rather than a new mechanism. Layer 2 depends on that thin addition; Layer 1 does not touch the registry at all.
 
 ## 3. Layer 1 — The `wasi-model` host core (the boundary)
 
@@ -113,6 +113,12 @@ package augentic:model@0.1.0;
 
 /// Models-API-style prompt completion. Guests import `augentic:model/completion`.
 interface completion {
+    /// Working-tree handle lent through `grants.working-tree`. The version tracks
+    /// the wasi-filesystem working-tree host (RFC-55), which is not yet built — the
+    /// tools that consume it (`read`/`list`/`write`, cursor's `local-path`) are
+    /// deferred (§4.1, §5.3). The type is in the 0.1.0 WIT so the boundary is final.
+    use wasi:filesystem/types@0.2.8.{descriptor};
+
     /// JSON document encoded as UTF-8 text.
     type json = string;
 
@@ -233,8 +239,11 @@ interface completion {
     record tool-grants {
         /// Guest id whose `references` export `resolve` targets.
         references: option<string>,
-        /// `wasi:filesystem` resource handle for bounded `read` / `list` / `write`.
-        working-tree: option<u32>,
+        /// Typed `wasi:filesystem` capability for bounded `read` / `list` / `write`
+        /// (genai) and the spawned agent's direct access (cursor). A `borrow`, so the
+        /// floor never trusts a forgeable integer handle — the host resolves it from
+        /// the resource table exactly as other hosts take typed resources.
+        working-tree: option<borrow<descriptor>>,
         /// Allowed closed verification profile names for `verify`.
         verify: list<string>,
     }
@@ -334,13 +343,19 @@ The `complete` host binding validates every answer before the guest sees it. Dep
 
 Specify and the proof example (§6) use `json-schema`. Backends that run a repair loop (genai) should self-check against the same rules before returning; the host binding re-validates as the final gate.
 
+**Implementation note (deferred).** The `response-format` WIT is final and ships in 0.1.0, but *full* JSON-Schema validation is a TODO, not a Phase 1 dependency. Phase 1 implements the cheap structural gates with `serde_json` alone — `json-object` (root is an object) and `text` (root is a string) — and treats `json-schema` as parse-only (valid JSON, schema not yet enforced) behind a `TODO`. Choosing and pinning a JSON-Schema validator crate, and turning the `json-schema` gate on, is a tracked follow-up so Phase 1 takes no new dependency beyond `serde_json`.
+
 #### 3.1.4 Streaming
 
 `complete-stream` exposes incremental `delta` events for progress UI or logging, then a terminal `done(answer)` or `failed(error)`. Streaming does not change validation: only the final `done` answer is schema-checked and returned to replay fixtures. Backends that cannot stream return `error::backend("streaming unsupported")`.
 
+**Implementation note (deferred).** The `complete-stream` signature and `stream-event` variant are kept in the 0.1.0 WIT so the boundary is final, but the host binding is a TODO landing in Phase 3 — this is the codebase's first native WIT `stream<>` (existing hosts model streams as resources, e.g. blobstore's `stream-object-names`), so host-side production of a `stream<stream-event>` is exercised once, deliberately, rather than on the Phase 1 critical path. Phase 1 generates the binding via `bindgen!` (confirming `wasmtime-wasi` 46 + `p3` compiles the type) and the host impl returns `error::backend("streaming unsupported")` until Phase 3 wires it.
+
 ### 3.2 Generated types (host side)
 
 Mirroring `wasi-keyvalue`, the host crate runs `wasmtime::component::bindgen!` over `wit/` and uses the generated `prompt`, `answer`, `error`, and `stream-event` types directly — no hand-maintained Rust mirrors. Guest-side code imports the same types through the component bindings.
+
+The `bindgen!` invocation, world selection, async config, and `with:` remapping follow the `wasi-keyvalue` / `wasi-blobstore` template rather than anything this RFC invents — including remapping the imported `wasi:filesystem/types.{descriptor}` onto `wasmtime_wasi`'s `Descriptor` (as those crates remap shared `wasi:io` types) so `grants.working-tree` resolves to the same resource the working-tree host owns. Where this prose and the established crate patterns differ, the patterns win.
 
 Backends receive an owned conversion of the generated `prompt` at the `WasiModelCtx` boundary (so they never hold wasmtime guest handles). The backend return type is a small host-only struct — parsed `answer` value plus an optional tool-call **transcript** for record/replay — which never crosses the WIT boundary; the guest sees only the validated `answer` string.
 
@@ -401,7 +416,7 @@ Like `WasiKeyValueCtx`, each backend also implements `Backend` (the env-driven `
 
 Per [RFC-53](rfc-53-wasi-model.md), answer validation and record/replay are *host* concerns, not behaviour each backend re-implements. They land in the two places the standard pattern already offers, so nothing bespoke is introduced:
 
-- **Validation in the** `complete` **host binding.** The generated `complete` binding is implemented on `WasiModel` in `host/model_impl.rs` — the analogue of `wasi-keyvalue/src/host/store_impl.rs`, which is where keyvalue does its `convert_error` / context work. That impl reads `prompt.response-format`, calls `ctx.complete(prompt, tool_host)`, and validates the returned answer per §3.1.3 before mapping it to the guest-visible `answer` string. A backend that runs its own repair loop (genai, [RFC-59](rfc-59-model-tool-loop.md)) consumes validation failures internally and returns only once it passes.
+- **Validation in the** `complete` **host binding.** The generated `complete` binding is implemented on `WasiModel` in `host/model_impl.rs` — the analogue of `wasi-keyvalue/src/host/store_impl.rs`, which is where keyvalue does its `convert_error` / context work. That impl reads `prompt.response-format`, calls `ctx.complete(prompt, tool_host)`, and validates the returned answer per §3.1.3 before mapping it to the guest-visible `answer` string (the structural gates in Phase 1; the `json-schema` gate is the deferred validator TODO of §3.1.3). A backend that runs its own repair loop (genai, [RFC-59](rfc-59-model-tool-loop.md)) consumes validation failures internally and returns only once it passes.
 - **Record/replay as composable** `WasiModelCtx` **wrappers.** Because the backend is just a `WasiModelCtx`, a recording backend is a `WasiModelCtx` that wraps another and logs `(prompt, transcript) -> answer`; the replay backend (`ModelDefault`) is a `WasiModelCtx` that serves a recorded answer for an equivalent prompt. No decorator framework — just the existing trait, composed. Both sit at the typed `complete` boundary, so the spawned-agent backend (which owns its own loop) records and replays identically to the in-process genai backend: the recording captures what crossed `complete`, not how the backend produced it.
 
 ## 4. Host tool callbacks (`ToolHost`) — lent to the genai backend
@@ -416,6 +431,8 @@ Within one completion, the genai backend may expose these tools to the model ([R
 - **`read(path)` / `list(path)`** — inspect the working tree through the capability lent in `prompt.grants.working-tree`. The model sees bounded results, never an OS path or a `descriptor`.
 - **`write(path, bytes)`** — accumulate an edit against the session's base tree. Pending edits live in host-held state (`wasi:keyvalue`), not guest memory.
 - **`verify(check)`** — request a closed verification profile from `prompt.grants.verify`. The profile definitions and sandboxing are owned by [RFC-60](rfc-60-verify-profiles.md); this design only routes the call.
+
+**Dependency note (deferred).** `read`/`list`/`write` (and the cursor backend's direct access, §5.3) consume the wasi-filesystem working-tree host of [RFC-55](rfc-55-working-tree.md), which is **not yet built**. The `grants.working-tree` `borrow<descriptor>` is the final boundary, but wiring these three tools to a real tree is a TODO that lands with RFC-55; `resolve` and `verify`-routing do not depend on it. Until then the `examples/model` proof (§6) exercises `resolve` only.
 
 ### 4.2 `ToolHost` — host callbacks the floor lends to the genai backend
 
@@ -441,7 +458,7 @@ pub trait ToolHost: Send + Sync {
 }
 ```
 
-The floor constructs each `ToolHost` when entering `complete`: it captures the registry handle (for `resolve`), the working-tree capability id from `prompt.grants.working-tree`, the kv handle for accumulating `write`s, and the allowed verify profiles. The same `ToolHost` is reused for every tool turn within one completion.
+The floor constructs each `ToolHost` when entering `complete`: it captures the registry handle (for `resolve`), the working-tree `descriptor` resolved from the `prompt.grants.working-tree` `borrow` against the resource table, the kv handle for accumulating `write`s, and the allowed verify profiles. The same `ToolHost` is reused for every tool turn within one completion.
 
 ### 4.3 The repair loop (genai)
 
@@ -545,7 +562,7 @@ impl Backend for Client {
 
 This is the **spawned-agent** backend of [RFC-58](rfc-58-model-backends.md): the native layer spawns a fresh, context-free `cursor-agent` session, assembles the prompt per §3.1.1, lets it own its own tool loop and read/write the working tree directly through the `local-path` it is lent ([RFC-55](rfc-55-working-tree.md)), and parses a validated answer back. It still returns through the [RFC-53](rfc-53-wasi-model.md) boundary and stays recordable. It is the `omnia-cursor` crate's `Client`, structured exactly like `omnia-genai` (§5.1).
 
-**Why a different shape.** A filesystem-capable agent cannot use the bounded `read`/`list`/`write` tools — it needs real OS paths. That is exactly the `local-path` face of the working tree: an absent `local-path` is a clean capability signal that an agent-driven build is unavailable on this node ([architecture.md](architecture.md#the-working-tree)). So `complete` on this backend checks `prompt.grants.working-tree` resolves to a `local-path`; if not, it returns `error::backend("no local tree on this node")`.
+**Why a different shape.** A filesystem-capable agent cannot use the bounded `read`/`list`/`write` tools — it needs real OS paths. That is exactly the `local-path` face of the working tree: an absent `local-path` is a clean capability signal that an agent-driven build is unavailable on this node ([architecture.md](architecture.md#the-working-tree)). So `complete` on this backend resolves the `prompt.grants.working-tree` `borrow<descriptor>` to its `local-path` face; if the lent tree has none, it returns `error::backend("no local tree on this node")`. The `local-path` face itself is owned by [RFC-55](rfc-55-working-tree.md), which is **not yet built**, so this backend (Phase 2b) lands with that host — see the §4.1 dependency note.
 
 **Connect.** `ConnectOptions` reads `CURSOR_API_KEY` (or relies on a prior `cursor-agent login`) and an optional `OMNI_MODEL`; `connect_with` just validates the `cursor-agent` binary is on `PATH` (no long-lived client to build). No long-lived process — each completion spawns a fresh, context-free session (no leaked transcript, per [RFC-58](rfc-58-model-backends.md) risks).
 
@@ -571,6 +588,7 @@ The model id, the API key, and the entire agent protocol stay inside this backen
 Replay belongs at the `wasi-model` boundary because it is the test substitute for judgment itself ([RFC-53](rfc-53-wasi-model.md)). `ModelDefault` is the crate's **default backend** — the direct `KeyValueDefault` analogue, living in `host/default_impl.rs`: with no API key and no spawned process, it serves the recorded answer for an equivalent prompt and lets one vertical operation run deterministically in CI without a live model.
 
 - **Fixtures** are the `(prompt + transcript) -> validated answer` rows that the recording wrapper (§3.4) writes, keyed by a stable hash of the prompt. The minimal seam here is a directory of JSON fixtures (`OMNI_REPLAY_DIR`); the full fixture management, matching policy, and cross-backend diagnostics are the [RFC-58](rfc-58-model-backends.md) replay *expansion*, out of scope for this slice.
+- **Recommended keying (canonicalization).** The key is `sha256(canonical_json(key_prompt))`, where `key_prompt` is the `prompt` reduced to the fields that determine the model's output and then serialized canonically — JCS-style: object keys sorted, no insignificant whitespace, UTF-8, numbers in a fixed form. The reduction drops fields that must not perturb a match: `metadata` (tracing/attribution only) and `grants.working-tree` (a non-serializable, run-specific `borrow` handle — replace it with a stable boolean "tree lent" marker). Everything that shapes the answer stays in the key, including `model` (a hint that changes output), `system`/`messages`/`sections`, `response-format`, `generation`, `tools`/`tool-choice`, and `grants.references`/`grants.verify`. Canonicalizing rather than hashing the wire bytes is what lets a fixture recorded against `genai` replay identically under `ModelDefault`. The exact field set is recorded in `DECISIONS.md` (Phase 0) so recorder and replayer never drift.
 - **Determinism.** Because the record happens at the typed boundary, a fixture captured against `genai` or `cursor-agent` replays identically — CI never depends on which backend produced it.
 - A prompt with no matching fixture returns `error::backend("no replay fixture")` (fail loud, never fall through to a live call).
 
@@ -597,6 +615,8 @@ The mechanism/population split from [guest-registry.md](guest-registry.md) §6.2
 
 The architecture is explicit that "the `wasi-model` `complete → resolve` callback is this same mechanism applied by the model backend" ([architecture.md](architecture.md#guest-to-guest-interaction-host-mediated-dynamic-linking)). So `ToolHost::resolve` is a thin host-side caller of the [guest-registry.md](guest-registry.md) §4 dispatch: resolve identity → instantiate fresh → invoke the `references` export → return typed bytes. The genai backend invokes it from its tool loop; the floor implements the dispatch. Instance-per-call (no recursive re-entrance) is inherited from the registry rather than re-proven.
 
+The registry/dispatch layer already exists, but it currently serves only *guest→guest* polyfilled imports (`DispatchHandle` is `pub(crate)`, driven by `link_dynamic` over the shared linker). It exposes no *host→guest* call path. Phase 2a's first task is therefore to **add a small public host-side dispatch entry point** — "given a `GuestId` and an interface/func, select, instantiate fresh, invoke, return typed bytes" — built on the existing `GuestSelector` and the `enter`/`DepthGuard` depth bound (so the `complete`→`resolve`→adapter chain is depth-counted exactly like a guest→guest hop). `ToolHost::resolve` is then a caller of that entry point. This is an addition to the registry, not a parallel mechanism.
+
 ### 7.3 The envelope is JSON-Schema-over-strings at the floor; typed records are a consumer opt-in
 
 The floor cannot know Specify's concrete answer *types*, so its generic envelope carries a `response-format` and validates the JSON `answer` per §3.1.3 — the analogue of the dynamic (`Val`-based) path in [guest-registry.md](guest-registry.md) §6.3. Judgment operations use `json-schema`; `json-object` and `text` are supported escape hatches. A consumer that owns its types (Specify) may generate WIT records and validate richer typed answers above the floor.
@@ -613,11 +633,11 @@ genai and cursor-agent are not arbitrary — they are one of each backend *shape
 
 Each phase is independently shippable and keeps `cargo make ci` green.
 
-- **Phase 0 —** `DECISIONS.md` **entries.** Record the settled choices (the mechanism/judgment split; `resolve` reuses host-mediated linking; JSON-Schema-over-strings at the floor; validation in the `complete` binding and record/replay as composable `WasiModelCtx` wrappers; vendor + keys stay below the boundary) into the shared `DECISIONS.md` that [guest-registry.md](guest-registry.md) §7 already seeds.
-- **Phase 1 — The** `wasi-model` **host core + replay.** New `crates/wasi-model` built verbatim on the `wasi-keyvalue`/`wasi-blobstore` shape: `wit/model.wit`, the `generated` bindgen! module, the `WasiModel` host struct (`HasData` + `Host` + no-op `Server` on `Runtime`), the `WasiModelView` / `WasiModelCtxView` / `WasiModelCtx` traits, the `omnia_wasi_view!` macro, the `complete` host binding in `host/model_impl.rs` (validation gate per §3.1.3), the recording/replay `WasiModelCtx` wrappers, and `ModelDefault` (replay) in `host/default_impl.rs` as the default. `examples/model` run 1 (replay) is the acceptance gate. **No model dependency, no registry dependency** — Layer 1 stands alone. ([RFC-53](rfc-53-wasi-model.md).)
-- **Phase 2a — The genai backend (`omnia-genai`).** A new `omnia-genai` crate in the `backends` repo (`pub struct Client`, `Backend` + `WasiModelCtx`, `fromenv` `ConnectOptions`), adding `genai = "0.6"` as its own dependency. Implement the floor-side `ToolHost` callbacks in `wasi-model` (`resolve` via the guest registry ([guest-registry.md](guest-registry.md) §4), `read`/`list`/`write` over the lent working-tree capability, session state in `wasi:keyvalue`, the `verify` seam — routing only; profiles are [RFC-60](rfc-60-verify-profiles.md)); map the tool surface onto `ChatRequest` / `Tool` / `JsonSpec`; run genai's in-process loop and repair semantics ([RFC-59](rfc-59-model-tool-loop.md)). `examples/model` run 2 (live + record) is the acceptance gate. **Depends on the guest registry (Phase 1 of guest-registry.md).** ([RFC-58](rfc-58-model-backends.md).)
-- **Phase 2b — The cursor backend (`omnia-cursor`).** A new `omnia-cursor` crate in the `backends` repo, same shape. Spawn `cursor-agent -p --force --output-format json --workspace`, parse `.result`, wrap in a timeout, enforce the `local-path` capability signal; `examples/model` run 3 is the acceptance gate. ([RFC-58](rfc-58-model-backends.md).)
-- **Phase 3 — Hardening.** Replay-fixture expansion (matching policy, diagnostics), `complete-stream` host binding, `stream-json` transcript capture for richer recordings, the router seam stub, failure-mode tests, docs. (Defers the rest of [RFC-58](rfc-58-model-backends.md) and [RFC-60](rfc-60-verify-profiles.md).)
+- **Phase 0 —** `DECISIONS.md` **entries.** Record the settled choices into the shared `DECISIONS.md` that [guest-registry.md](guest-registry.md) §7 already seeds: the mechanism/judgment split; `resolve` reuses host-mediated linking via a new public host→guest dispatch entry point (§7.2); JSON-Schema-over-strings at the floor; validation in the `complete` binding and record/replay as composable `WasiModelCtx` wrappers; vendor + keys stay below the boundary; `grants.working-tree` is a typed `borrow<descriptor>`, never a raw handle (§3.1); the `json-schema` validator and the `complete-stream` binding are deliberately deferred (WIT kept, impl is a Phase 3 TODO); and the replay key's canonical-JSON field set (§5.4), so recorder and replayer cannot drift.
+- **Phase 1 — The** `wasi-model` **host core + replay.** New `crates/wasi-model` built verbatim on the `wasi-keyvalue`/`wasi-blobstore` shape: `wit/model.wit`, the `generated` bindgen! module, the `WasiModel` host struct (`HasData` + `Host` + no-op `Server` on `Runtime`), the `WasiModelView` / `WasiModelCtxView` / `WasiModelCtx` traits, the `omnia_wasi_view!` macro, the `complete` host binding in `host/model_impl.rs`, the recording/replay `WasiModelCtx` wrappers (canonical-JSON keying per §5.4), and `ModelDefault` (replay) in `host/default_impl.rs` as the default. Validation is the **structural** gate only (`serde_json`: `json-object` / `text`); the `json-schema` gate is parse-only behind a `TODO` (§3.1.3). `complete-stream`'s binding is generated (confirming `bindgen!` compiles the `stream<>` type) but returns `error::backend("streaming unsupported")` until Phase 3 (§3.1.4). `examples/model` run 1 (replay) is the acceptance gate. **No new dependency beyond `serde_json`; no model dependency, no registry dependency** — Layer 1 stands alone. ([RFC-53](rfc-53-wasi-model.md).)
+- **Phase 2a — The genai backend (`omnia-genai`).** First, **add the host→guest dispatch entry point** to the existing registry (§7.2) — a public `select + instantiate-fresh + invoke + return bytes` call over the current `GuestSelector` and depth bound; the registry/dispatch machinery already exists but exposes only guest→guest polyfill. Then a new `omnia-genai` crate in the `backends` repo (`pub struct Client`, `Backend` + `WasiModelCtx`, `fromenv` `ConnectOptions`), adding `genai = "0.6"` as its own dependency. Implement the floor-side `ToolHost` callbacks in `wasi-model`: `resolve` via that new entry point; `verify` as routing only (profiles are [RFC-60](rfc-60-verify-profiles.md)); session state in `wasi:keyvalue`. (`read`/`list`/`write` are stubbed until RFC-55 — see Phase 2b.) Map the tool surface onto `ChatRequest` / `Tool` / `JsonSpec`; run genai's in-process loop and repair semantics ([RFC-59](rfc-59-model-tool-loop.md)). `examples/model` run 2 (live + record, `resolve` path) is the acceptance gate. **Depends on the host→guest entry point above; the underlying registry has already landed.** ([RFC-58](rfc-58-model-backends.md).)
+- **Phase 2b — The working tree + the cursor backend (`omnia-cursor`).** Gated on the [RFC-55](rfc-55-working-tree.md) wasi-filesystem working-tree host (`descriptor` + `local-path` faces), which is **not yet built**. Once it lands: wire genai's `read`/`list`/`write` to the lent `descriptor`, then add a new `omnia-cursor` crate (same shape) that spawns `cursor-agent -p --force --output-format json --workspace`, parses `.result`, wraps in a timeout, and enforces the `local-path` capability signal; `examples/model` run 3 is the acceptance gate. ([RFC-58](rfc-58-model-backends.md), [RFC-55](rfc-55-working-tree.md).)
+- **Phase 3 — Hardening.** Pick and pin a JSON-Schema validator crate and turn on the `json-schema` validation gate (§3.1.3); the `complete-stream` host binding (§3.1.4); replay-fixture expansion (matching policy, diagnostics); `stream-json` transcript capture for richer recordings; the router seam stub; failure-mode tests; docs. (Defers the rest of [RFC-58](rfc-58-model-backends.md) and [RFC-60](rfc-60-verify-profiles.md).)
 
 ## 9. Implementation planning approach
 
