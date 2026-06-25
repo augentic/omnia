@@ -587,8 +587,12 @@ does not yet exist.
 with a default entry; migrate every trigger server (`wasi-http`, `wasi-messaging`, `wasi-websocket`) to identity
 selection; remove the temporary `instance_pre()` shim once migrated (§3.5); all existing examples stay
 green. No new dependencies — independent of wRPC.
-- **Phase 1b — Inbound routing.** Longest-prefix HTTP route table from the manifest's `[[route.*]]`
-entries + `wasi:http/incoming-handler` capability detection; embedded guest source.
+- **Phase 1b — Inbound routing.** Per-trigger route tables from the manifest's `[[route.*]]` entries
+(longest-prefix for `[[route.http]]`, subject/route match for `[[route.messaging]]` and
+`[[route.websocket]]`) + per-trigger handler-export capability detection (`ServiceIndices` for HTTP,
+`MessagingRequestReplyIndices` for messaging, `DuplexIndices` for websocket) driving the
+capability-based default routing of §3.4; embedded guest source. CLI needs no route table — it names its
+guest directly (§3.4) and is handled by Phase 1's default-entry work.
 - **Spike (gates Phase 2).** The wRPC git-pin builds clean against `wasmtime 46.0.1` (p2/p3 coexistence,
 §6.1); a host import can instantiate and run another guest under the component-model concurrent model
 (§6.5); the in-process wRPC `Invoke`/`Serve` wiring works. Throwaway branch, not shipped.

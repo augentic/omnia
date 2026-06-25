@@ -7,7 +7,7 @@ mod default_impl;
 use std::fmt::Debug;
 
 pub use default_impl::ConfigDefault;
-use omnia::{Host, Server, State};
+use omnia::{Host, Runtime, Server};
 use wasmtime::component::{HasData, Linker};
 pub use wasmtime_wasi_config;
 use wasmtime_wasi_config::WasiConfigVariables;
@@ -29,7 +29,7 @@ where
     }
 }
 
-impl<S> Server<S> for WasiConfig where S: State {}
+impl<S> Server<S> for WasiConfig where S: Runtime {}
 
 /// A trait which provides internal WASI Config state.
 ///

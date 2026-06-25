@@ -40,33 +40,34 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
     Ok(quote! {
         mod runtime {
             use std::path::PathBuf;
+            use std::sync::Arc;
 
             use anyhow::Result;
             use omnia::anyhow::Context as _;
             use omnia::futures::future::{try_join_all, BoxFuture};
             use omnia::tokio;
-            use omnia::wasmtime::component::{HasData,InstancePre};
+            use omnia::wasmtime::component::HasData;
             use omnia::wasmtime::{StoreLimits, StoreLimitsBuilder};
             use omnia::wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
-            use omnia::{Backend, Compiled, HasLimits, RuntimeOptions, Server, State};
+            use omnia::{Backend, Compiled, GuestRegistry, HasLimits, RuntimeOptions, Runtime, Server};
 
             use super::*;
 
-            /// Run the specified wasm guest using the configured runtime.
-            pub async fn run(wasm: PathBuf) -> Result<()> {
-                let mut compiled = omnia::create(&wasm)
-                    .with_context(|| format!("compiling {}", wasm.display()))?;
+            /// Run a guest (single-file shorthand) or a manifest-driven deployment.
+            pub async fn run(wasm: Option<PathBuf>, config: Option<PathBuf>) -> Result<()> {
+                let mut compiled = omnia::create_runtime(wasm, config)
+                    .await
+                    .context("building runtime")?;
                 let run_state = Context::new(&mut compiled)
                     .await
                     .context("preparing runtime state")?;
                 run_state.start().await.context("starting runtime services")
             }
 
-            /// Initiator state holding pre-instantiated components and backend connections.
+            /// Initiator state holding the guest registry and backend connections.
             #[derive(Clone)]
             struct Context {
-                instance_pre: InstancePre<StoreCtx>,
-                options: RuntimeOptions,
+                registry: Arc<GuestRegistry<StoreCtx>>,
                 #(pub #context_fields,)*
             }
 
@@ -79,9 +80,10 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                     // connect to all backends concurrently
                     #connect_backends
 
+                    // Pre-instantiate every guest against the now fully-linked
+                    // linker and assemble the registry.
                     Ok(Self {
-                        options: compiled.options().clone(),
-                        instance_pre: compiled.pre_instantiate()?,
+                        registry: Arc::new(compiled.build_registry()?),
                         #(#backend_idents,)*
                     })
                 }
@@ -95,21 +97,21 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                     // wall-clock timeouts wrapped around each invocation) fire
                     // even while a guest executes CPU-bound code.
                     omnia::drive_epoch(
-                        self.instance_pre.engine().clone(),
-                        self.options.epoch_tick,
+                        self.registry.engine().clone(),
+                        self.registry.options().epoch_tick,
                     );
 
                     // Periodically sample pool occupancy as metrics so pool sizing can be tuned
                     // from real data.
                     omnia::sample_pool(
-                        self.instance_pre.engine().clone(),
-                        self.options.pool_metrics_interval,
+                        self.registry.engine().clone(),
+                        self.registry.options().pool_metrics_interval,
                     );
 
-                    // Every server runs against the same `self`, so they share a
-                    // single pre-instantiated component and therefore one `Engine`.
-                    // The pooling allocator's pool is per-`Engine`, so this keeps
-                    // all per-request instantiation drawing from one shared pool.
+                    // Every server runs against the same `self`, so they share one
+                    // registry and therefore one `Engine`. The pooling allocator's
+                    // pool is per-`Engine`, so this keeps all per-request
+                    // instantiation drawing from one shared pool.
                     let futures: Vec<BoxFuture<'_, Result<()>>> =
                         vec![#(Box::pin(#server_trait_impls.run(self)),)*];
                     try_join_all(futures).await?;
@@ -117,15 +119,15 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                 }
             }
 
-            impl State for Context {
+            impl Runtime for Context {
                 type StoreCtx = StoreCtx;
 
-                fn instance_pre(&self) -> &InstancePre<Self::StoreCtx> {
-                    &self.instance_pre
+                fn registry(&self) -> &GuestRegistry<Self::StoreCtx> {
+                    &self.registry
                 }
 
                 fn options(&self) -> &RuntimeOptions {
-                    &self.options
+                    self.registry.options()
                 }
 
                 fn store(&self) -> Self::StoreCtx {
@@ -141,7 +143,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                         table: ResourceTable::new(),
                         wasi: wasi_ctx,
                         limits: StoreLimitsBuilder::new()
-                            .memory_size(self.options.max_memory_bytes)
+                            .memory_size(self.registry.options().max_memory_bytes)
                             .build(),
                         #(#store_ctx_values,)*
                     }
@@ -254,7 +256,7 @@ impl TryFrom<&Config> for Expanded {
                 async fn main() -> anyhow::Result<()> {
                     use omnia::Parser;
                     match omnia::Cli::parse().command {
-                        omnia::Command::Run { wasm } => runtime::run(wasm).await,
+                        omnia::Command::Run { wasm, config } => runtime::run(wasm, config).await,
                         _ => unreachable!(),
                     }
                 }

@@ -4,8 +4,11 @@
 #[cfg(feature = "jit")]
 mod compile;
 mod create;
+mod manifest;
 mod options;
+mod registry;
 mod runtime;
+mod source;
 mod traits;
 
 use std::path::PathBuf;
@@ -20,8 +23,11 @@ pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 #[cfg(feature = "jit")]
 pub use self::compile::*;
 pub use self::create::*;
+pub use self::manifest::*;
 pub use self::options::*;
+pub use self::registry::*;
 pub use self::runtime::*;
+pub use self::source::*;
 pub use self::traits::*;
 
 /// Command line interface for omnia.
@@ -35,12 +41,18 @@ pub struct Cli {
 /// Subcommands for the omnia CLI.
 #[derive(Subcommand, PartialEq, Eq)]
 pub enum Command {
-    /// Run the specified wasm guest.
+    /// Run a guest (single-file shorthand) or a manifest-driven deployment.
     Run {
         /// The path to the wasm file to run. The file can either be a
         /// serialized (pre-compiled) wasmtime `Component` or standard
-        /// WASI component
-        wasm: PathBuf,
+        /// WASI component. Optional when `--config` (or `OMNI_CONFIG`) names a
+        /// deployment manifest instead.
+        wasm: Option<PathBuf>,
+
+        /// Path to a deployment manifest (`omni.toml`) describing a multi-guest
+        /// deployment. Falls back to the `OMNI_CONFIG` environment variable.
+        #[arg(short, long)]
+        config: Option<PathBuf>,
     },
     /// Compile the specified wasm32-wasip2 component.
     #[cfg(feature = "jit")]

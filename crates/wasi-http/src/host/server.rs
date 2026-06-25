@@ -17,7 +17,7 @@ use hyper::body::{Body, Frame, Incoming, SizeHint};
 use hyper::header::{FORWARDED, HOST};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use omnia::State;
+use omnia::Runtime;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
@@ -33,7 +33,7 @@ const HTTP_ADDR: &str = "0.0.0.0:8080";
 
 pub async fn serve<S>(state: &S) -> Result<()>
 where
-    S: State,
+    S: Runtime,
     S::StoreCtx: WasiHttpView,
 {
     let component = env::var("COMPONENT").unwrap_or_else(|_| "unknown".into());
@@ -42,10 +42,12 @@ where
     let listener = TcpListener::bind(&addr).await?;
     tracing::info!("{component} http server listening on: {addr}");
 
+    // Resolve the guest this trigger serves (the default registry entry); its
+    // typed export indices are built once and reused across requests.
     let handler = Handler {
         state: Arc::new(state.clone()),
         component,
-        indices: ServiceIndices::new(state.instance_pre())?,
+        indices: ServiceIndices::new(state.registry().default_guest().instance_pre())?,
     };
 
     // listen for requests until terminated
@@ -93,7 +95,7 @@ where
 #[derive(Clone)]
 struct Handler<S>
 where
-    S: State,
+    S: Runtime,
     S::StoreCtx: WasiHttpView,
 {
     state: Arc<S>,
@@ -103,7 +105,7 @@ where
 
 impl<S> Handler<S>
 where
-    S: State,
+    S: Runtime,
     S::StoreCtx: WasiHttpView,
 {
     // Forward request to the wasm Guest.
@@ -118,7 +120,8 @@ where
         // instantiate the guest and get the proxy
         let store_data = self.state.store();
         let mut store = self.state.build_store(store_data);
-        let instance = self.state.instantiate(&mut store).await?;
+        let instance_pre = self.state.registry().default_guest().instance_pre();
+        let instance = self.state.instantiate(instance_pre, &mut store).await?;
         let service = self.indices.load(&mut store, &instance)?;
 
         let (sender, receiver) = oneshot::channel::<Result<hyper::Response<OutgoingBody>>>();

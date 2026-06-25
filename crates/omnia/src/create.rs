@@ -1,83 +1,157 @@
 //! # WebAssembly Initiator
 
+use std::collections::HashMap;
 use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use omnia_otel::Telemetry;
 use tracing::instrument;
-use wasmtime::component::{Component, InstancePre, Linker};
+use wasmtime::component::Linker;
 use wasmtime::{Config, Engine};
 use wasmtime_wasi::WasiView;
 
-use crate::RuntimeOptions;
-use crate::traits::Host;
+use crate::manifest::{Manifest, SourceSpec};
+use crate::registry::{Guest, GuestId, GuestRegistry};
+use crate::source::{FileSource, GuestSource, LoadedGuest};
+use crate::{Host, RuntimeOptions};
 
-/// Build the Wasmtime `Engine` and `Linker` for this runtime.
+/// Build a [`Compiled`] runtime, choosing single-file or manifest-driven
+/// population.
+///
+/// Resolution: a `config` path (the `--config` flag or the `OMNI_CONFIG`
+/// environment variable) selects a manifest-driven deployment; otherwise the
+/// positional `wasm` path is the one-guest shorthand. At least one of the two
+/// must be provided.
 ///
 /// # Errors
 ///
-/// Will fail if the provided `wasm` file cannot be compiled/deserialized
-/// as a `Component` or the `Linker` cannot be initialized with WASI
-/// support.
+/// Returns an error if neither a config nor a wasm path is available, or if the
+/// selected source cannot be built.
+pub async fn create_runtime<T: WasiView + 'static>(
+    wasm: Option<PathBuf>, config: Option<PathBuf>,
+) -> Result<Compiled<T>> {
+    let config = config.or_else(|| env::var_os("OMNI_CONFIG").map(PathBuf::from));
+
+    if let Some(config) = config {
+        return create_from_manifest(&config).await;
+    }
+
+    let wasm = wasm.context(
+        "no guest specified: pass a <wasm> path, or --config <omni.toml> (or set OMNI_CONFIG)",
+    )?;
+    create(&wasm).await
+}
+
+/// Build the Wasmtime `Engine` and `Linker` for a single-guest runtime.
+///
+/// This is the `omnia run <guest>.wasm` shorthand: load one component, derive
+/// its identity from the file stem, and register it as the default guest — a
+/// one-entry registry.
+///
+/// # Errors
+///
+/// Will fail if the provided `wasm` file cannot be compiled/deserialized as a
+/// `Component` or the `Linker` cannot be initialized with WASI support.
 #[instrument]
-pub fn create<T: WasiView + 'static>(wasm: &Path) -> Result<Compiled<T>> {
-    init_env(wasm)?;
+pub async fn create<T: WasiView + 'static>(wasm: &Path) -> Result<Compiled<T>> {
+    let name = wasm.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
+    init_env(name)?;
     tracing::info!("initializing runtime");
 
+    let (engine, linker, options) = engine_and_linker()?;
+
+    let source = FileSource::new(wasm);
+    let default = source.id().clone();
+    let guests = source.load(&engine).await?;
+
+    tracing::info!("runtime initialized");
+
+    Ok(Compiled {
+        engine,
+        linker,
+        options,
+        guests,
+        default,
+    })
+}
+
+/// Build a runtime from a deployment manifest (`omni.toml`).
+///
+/// Resolves every `[[guest]]` source, builds the shared engine + linker, and
+/// records the first guest as the default entry. Per-trigger capability routing
+/// is layered on in a later phase.
+///
+/// # Errors
+///
+/// Will fail if the manifest cannot be loaded, if a guest uses a source kind not
+/// yet supported, or if a guest component cannot be loaded.
+#[instrument]
+pub async fn create_from_manifest<T: WasiView + 'static>(manifest: &Path) -> Result<Compiled<T>> {
+    let parsed = Manifest::load(manifest)?;
+
+    // The default entry doubles as the telemetry/component name for now.
+    let default = parsed
+        .guests
+        .first()
+        .map_or_else(|| GuestId::from("omnia"), |entry| GuestId::from(entry.id.as_str()));
+    init_env(default.as_str())?;
+    tracing::info!("initializing runtime from manifest");
+
+    let (engine, linker, options) = engine_and_linker()?;
+
+    // Sources resolve relative to the manifest's directory.
+    let base = manifest.parent().unwrap_or_else(|| Path::new("."));
+    let mut guests = Vec::with_capacity(parsed.guests.len());
+    for entry in &parsed.guests {
+        let id = GuestId::from(entry.id.as_str());
+        let source = match &entry.source {
+            SourceSpec::Path(path) => {
+                let resolved = if path.is_absolute() { path.clone() } else { base.join(path) };
+                FileSource::with_id(id, resolved)
+            }
+            SourceSpec::Embedded(_) => {
+                bail!("guest `{id}`: embedded sources are not yet supported (arrive with Phase 1b)")
+            }
+            SourceSpec::Oci(_) => {
+                bail!("guest `{id}`: OCI sources are not yet supported")
+            }
+        };
+        guests.extend(source.load(&engine).await?);
+    }
+
+    tracing::info!("runtime initialized from manifest");
+
+    Ok(Compiled {
+        engine,
+        linker,
+        options,
+        guests,
+        default,
+    })
+}
+
+/// Build the shared engine, WASI-linked linker, and runtime options.
+fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, RuntimeOptions)> {
     let options = RuntimeOptions::load()?;
     let engine = Engine::new(&Config::from(&options))?;
-    let component = load(&engine, wasm)?;
 
     // register services with runtime's Linker
     let mut linker = Linker::new(&engine);
     wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
     wasmtime_wasi::p3::add_to_linker(&mut linker)?;
 
-    tracing::info!("runtime initialized");
-
-    Ok(Compiled {
-        component,
-        linker,
-        options,
-    })
+    Ok((engine, linker, options))
 }
 
-/// Load a component from a file.
-fn load(engine: &Engine, wasm: &Path) -> Result<Component> {
-    // SAFETY: a pre-compiled artifact is rejected (not executed) unless the
-    // loading engine matches the compile-affecting settings it was built with.
-    let result = unsafe { Component::deserialize_file(engine, wasm) }
-        .map_err(anyhow::Error::from)
-        .with_context(|| {
-            format!(
-                "loading component {}: a pre-compiled artifact must be loaded with the same \
-                compile-affecting settings used by `omnia compile` (MAX_FUEL, BRANCH_HINTING, \
-                MEMORY_RESERVATION, MEMORY_GUARD_SIZE)",
-                wasm.display()
-            )
-        });
-
-    // Fall back to JIT-compiling raw wasm when the feature is enabled.
-    #[cfg(feature = "jit")]
-    let component =
-        result.or_else(|_| Component::from_file(engine, wasm).map_err(anyhow::Error::from))?;
-
-    #[cfg(not(feature = "jit"))]
-    let component = result
-        .context("if this is a raw wasm32 component, rebuild with the `jit` feature to load it")?;
-
-    // Build the copy-on-write heap image now (startup) rather than lazily on the
-    // first instantiation, moving that one-time cost off the first request.
-    component.initialize_copy_on_write_image()?;
-    Ok(component)
-}
-
-/// A compiled WebAssembly component with its associated Linker.
+/// A compiled set of WebAssembly components with their shared Linker, ready to
+/// be assembled into a [`GuestRegistry`].
 pub struct Compiled<T: WasiView + 'static> {
-    component: Component,
+    engine: Engine,
     linker: Linker<T>,
     options: RuntimeOptions,
+    guests: Vec<LoadedGuest>,
+    default: GuestId,
 }
 
 impl<T: WasiView> Compiled<T> {
@@ -87,7 +161,7 @@ impl<T: WasiView> Compiled<T> {
         &self.options
     }
 
-    /// Link a WASI component to the runtime.
+    /// Link a WASI host's interfaces into the shared Linker.
     ///
     /// # Errors
     ///
@@ -96,24 +170,38 @@ impl<T: WasiView> Compiled<T> {
         H::add_to_linker(&mut self.linker)
     }
 
-    /// Pre-instantiate component.
+    /// Pre-instantiate every loaded guest against the shared Linker and assemble
+    /// the [`GuestRegistry`].
+    ///
+    /// Pre-instantiation happens once, here, after all hosts are linked; per call
+    /// only a fresh instantiate on a new store remains.
     ///
     /// # Errors
     ///
-    /// Will fail if the component cannot be pre-instantiated.
-    pub fn pre_instantiate(&self) -> Result<InstancePre<T>> {
-        self.linker.instantiate_pre(&self.component).map_err(anyhow::Error::from)
+    /// Will fail if a component cannot be pre-instantiated (e.g. an import is
+    /// neither host-satisfied nor otherwise provided), or if the registry cannot
+    /// be assembled.
+    pub fn build_registry(&self) -> Result<GuestRegistry<T>> {
+        let mut guests = HashMap::with_capacity(self.guests.len());
+        for loaded in &self.guests {
+            let instance_pre = self
+                .linker
+                .instantiate_pre(&loaded.component)
+                .map_err(anyhow::Error::from)
+                .with_context(|| format!("pre-instantiating guest `{}`", loaded.id))?;
+            guests.insert(loaded.id.clone(), Guest::local(loaded.id.clone(), instance_pre));
+        }
+
+        GuestRegistry::new(self.engine.clone(), self.options.clone(), guests, self.default.clone())
     }
 }
 
-/// Initialize telemetry for the runtime.
+/// Initialize telemetry and the `COMPONENT` environment variable for the runtime.
 ///
 /// # Errors
 ///
 /// Will fail if the telemetry cannot be initialized.
-fn init_env(wasm: &Path) -> Result<()> {
-    let name = wasm.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
-
+fn init_env(name: &str) -> Result<()> {
     if env::var_os("COMPONENT").is_none() {
         // SAFETY: Environment variable modification is safe here because:
         // 1. This runs during single-threaded initialization

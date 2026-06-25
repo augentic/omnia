@@ -2,7 +2,7 @@ use std::env;
 
 use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
-use omnia::State;
+use omnia::Runtime;
 use tracing::{Instrument, debug_span, instrument};
 
 use crate::host::WasiMessagingView;
@@ -12,16 +12,20 @@ use crate::host::resource::{MessageProxy, Subscriptions};
 #[instrument("messaging-server", skip(state))]
 pub async fn run<S>(state: &S) -> Result<()>
 where
-    S: State,
+    S: Runtime,
     S::StoreCtx: WasiMessagingView,
 {
     let component = env::var("COMPONENT").unwrap_or_else(|_| "unknown".into());
     tracing::info!("starting messaging server for: {component}");
 
+    // Resolve the guest this trigger serves (the default registry entry); its
+    // typed export indices are built once and reused across messages.
     let handler = Handler {
         state: state.clone(),
         component,
-        indices: MessagingRequestReplyIndices::new(state.instance_pre())?,
+        indices: MessagingRequestReplyIndices::new(
+            state.registry().default_guest().instance_pre(),
+        )?,
     };
     let mut stream = handler.subscriptions().await?;
 
@@ -48,7 +52,7 @@ where
 #[derive(Clone)]
 struct Handler<S>
 where
-    S: State,
+    S: Runtime,
     S::StoreCtx: WasiMessagingView,
 {
     state: S,
@@ -58,7 +62,7 @@ where
 
 impl<S> Handler<S>
 where
-    S: State,
+    S: Runtime,
     S::StoreCtx: WasiMessagingView,
 {
     // Forward message to the wasm guest.
@@ -71,7 +75,8 @@ where
             .map_err(|e| anyhow!("failed to push message: {e}"))?;
 
         let mut store = self.state.build_store(store_data);
-        let instance = self.state.instantiate(&mut store).await?;
+        let instance_pre = self.state.registry().default_guest().instance_pre();
+        let instance = self.state.instantiate(instance_pre, &mut store).await?;
         let messaging = self.indices.load(&mut store, &instance)?;
 
         let run = store

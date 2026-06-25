@@ -14,6 +14,7 @@ use wasmtime::component::{Instance, InstancePre, Linker};
 use wasmtime::{Store, StoreLimits};
 
 use crate::RuntimeOptions;
+use crate::registry::GuestRegistry;
 
 /// Result type for asynchronous operations.
 pub type FutureResult<T> = BoxFuture<'static, Result<T>>;
@@ -25,8 +26,13 @@ pub trait HasLimits {
     fn limits(&mut self) -> &mut StoreLimits;
 }
 
-/// State trait for WASI components.
-pub trait State: Clone + Send + Sync + 'static {
+/// The long-lived, `Clone` host runtime context every trigger server is handed
+/// to resolve and instantiate a guest.
+///
+/// It owns the [`GuestRegistry`], the runtime options, and the per-call
+/// instantiation helpers. The per-store state is its [`Runtime::StoreCtx`]
+/// associated type — not this trait.
+pub trait Runtime: Clone + Send + Sync + 'static {
     /// The store context type.
     type StoreCtx: Send + HasLimits;
 
@@ -34,8 +40,8 @@ pub trait State: Clone + Send + Sync + 'static {
     #[must_use]
     fn store(&self) -> Self::StoreCtx;
 
-    /// Returns the pre-instantiated component.
-    fn instance_pre(&self) -> &InstancePre<Self::StoreCtx>;
+    /// Returns the multi-guest registry.
+    fn registry(&self) -> &GuestRegistry<Self::StoreCtx>;
 
     /// Returns the environment-derived runtime options.
     fn options(&self) -> &RuntimeOptions;
@@ -48,7 +54,7 @@ pub trait State: Clone + Send + Sync + 'static {
     #[must_use]
     fn build_store(&self, data: Self::StoreCtx) -> Store<Self::StoreCtx> {
         let options = self.options();
-        let mut store = Store::new(self.instance_pre().engine(), data);
+        let mut store = Store::new(self.registry().engine(), data);
 
         // Yield to the executor every epoch tick; the deadline is bumped on each
         // yield so execution continues until a surrounding `timeout` cancels it.
@@ -67,20 +73,24 @@ pub trait State: Clone + Send + Sync + 'static {
         store
     }
 
-    /// Instantiate the pre-instantiated component into `store`, recording
-    /// instantiation latency (the `instantiation_duration_us` histogram) and
-    /// failures (the `pool_instantiation_errors` counter, a proxy for pool
-    /// exhaustion) as `OpenTelemetry` metrics.
+    /// Instantiate a selected guest's pre-instantiated component into `store`,
+    /// recording instantiation latency (the `instantiation_duration_us`
+    /// histogram) and failures (the `pool_instantiation_errors` counter, a proxy
+    /// for pool exhaustion) as `OpenTelemetry` metrics.
+    ///
+    /// The caller passes the [`InstancePre`] resolved from the registry (the
+    /// default guest, or an identity-selected one) so a dispatched call lands in
+    /// a fresh instance.
     ///
     /// # Errors
     ///
     /// Returns an error if the component cannot be instantiated, e.g. when the
     /// pooling allocator is exhausted.
     fn instantiate(
-        &self, store: &mut Store<Self::StoreCtx>,
+        &self, instance_pre: &InstancePre<Self::StoreCtx>, store: &mut Store<Self::StoreCtx>,
     ) -> impl Future<Output = Result<Instance>> + Send {
         async move {
-            match self.instance_pre().instantiate_async(store).await {
+            match instance_pre.instantiate_async(store).await {
                 Ok(instance) => {
                     tracing::debug!("component instantiated");
                     Ok(instance)
@@ -104,7 +114,7 @@ pub trait Host<T>: Debug + Sync + Send {
 
 /// Implemented by WASI hosts that are servers in order to allow the runtime to
 /// start them.
-pub trait Server<S: State>: Debug + Sync + Send {
+pub trait Server<S: Runtime>: Debug + Sync + Send {
     /// Start the service.
     ///
     /// This is typically implemented by services that instantiate (or run)

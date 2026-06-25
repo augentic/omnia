@@ -37,7 +37,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{Host, Server, State};
+use omnia::{Host, Runtime, Server};
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::{ResourceTable, ResourceTableError};
 
@@ -70,7 +70,7 @@ where
 
 impl<S> Server<S> for WasiWebSocket
 where
-    S: State,
+    S: Runtime,
     S::StoreCtx: WebSocketView,
 {
     async fn run(&self, state: &S) -> anyhow::Result<()> {

@@ -26,7 +26,7 @@ mod generated {
 
 use std::fmt::Debug;
 
-use omnia::{FutureResult, Host, Server, State};
+use omnia::{FutureResult, Host, Runtime, Server};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use wasmtime::component::{HasData, Linker, ResourceTable};
@@ -54,7 +54,7 @@ where
     }
 }
 
-impl<S: State> Server<S> for WasiOtel {}
+impl<S: Runtime> Server<S> for WasiOtel {}
 
 /// A trait which provides internal WASI OpenTelemetry state.
 ///
