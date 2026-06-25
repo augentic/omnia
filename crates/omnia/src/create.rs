@@ -12,7 +12,7 @@ use wasmtime::{Config, Engine};
 use wasmtime_wasi::WasiView;
 
 use crate::manifest::{Manifest, SourceSpec};
-use crate::registry::{Guest, GuestId, GuestRegistry};
+use crate::registry::{Guest, GuestId, Registry};
 use crate::source::{FileSource, GuestSource, LoadedGuest};
 use crate::{Host, RuntimeOptions};
 
@@ -145,7 +145,7 @@ fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, Runt
 }
 
 /// A compiled set of WebAssembly components with their shared Linker, ready to
-/// be assembled into a [`GuestRegistry`].
+/// be assembled into a [`Registry`].
 pub struct Compiled<T: WasiView + 'static> {
     engine: Engine,
     linker: Linker<T>,
@@ -171,7 +171,7 @@ impl<T: WasiView> Compiled<T> {
     }
 
     /// Pre-instantiate every loaded guest against the shared Linker and assemble
-    /// the [`GuestRegistry`].
+    /// the [`Registry`].
     ///
     /// Pre-instantiation happens once, here, after all hosts are linked; per call
     /// only a fresh instantiate on a new store remains.
@@ -181,7 +181,7 @@ impl<T: WasiView> Compiled<T> {
     /// Will fail if a component cannot be pre-instantiated (e.g. an import is
     /// neither host-satisfied nor otherwise provided), or if the registry cannot
     /// be assembled.
-    pub fn build_registry(&self) -> Result<GuestRegistry<T>> {
+    pub fn build_registry(&self) -> Result<Registry<T>> {
         let mut guests = HashMap::with_capacity(self.guests.len());
         for loaded in &self.guests {
             let instance_pre = self
@@ -192,7 +192,7 @@ impl<T: WasiView> Compiled<T> {
             guests.insert(loaded.id.clone(), Guest::local(loaded.id.clone(), instance_pre));
         }
 
-        GuestRegistry::new(self.engine.clone(), self.options.clone(), guests, self.default.clone())
+        Registry::new(self.engine.clone(), self.options.clone(), guests, self.default.clone())
     }
 }
 

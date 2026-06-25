@@ -83,7 +83,7 @@ impl<T: WasiView> Compiled<T> {
 ```
 
 The shape of the change: `**Compiled` and `Runtime` stop owning one `InstancePre` and start owning a
-`GuestRegistry**` (a map of identity → `InstancePre`), plus the dynamic-link interceptors registered on the
+`Registry**` (a map of identity → `InstancePre`), plus the dynamic-link interceptors registered on the
 shared `Linker` *before* pre-instantiation. The trigger servers select an entry by identity instead of
 reading "the" instance.
 
@@ -106,7 +106,7 @@ route-table logic operate on these opaque keys only.
 
 ```rust
 /// One Engine + one Linker; many pre-instantiated guests keyed by identity.
-pub struct GuestRegistry<T> {
+pub struct Registry<T> {
     engine: Engine,
     options: RuntimeOptions,
     guests: HashMap<GuestId, Guest<T>>,
@@ -166,7 +166,7 @@ implementation:
 
 `create()` becomes: load the manifest (§3.7) → build engine + linker → add host interfaces (as today) →
 **register dynamic-link interceptors** for the manifest's `link` interfaces (Layer 2, §4) → resolve and
-load every guest's `source` → `instantiate_pre` each → assemble the `GuestRegistry` and route tables.
+load every guest's `source` → `instantiate_pre` each → assemble the `Registry` and route tables.
 
 ### 3.4 Trigger routing — selecting a guest by identity
 
@@ -230,7 +230,7 @@ pub trait Runtime: Clone + Send + Sync + 'static {
     fn options(&self) -> &RuntimeOptions;
 
     /// The multi-guest registry.
-    fn registry(&self) -> &GuestRegistry<Self::StoreCtx>;
+    fn registry(&self) -> &Registry<Self::StoreCtx>;
 
     /// Temporary migration shim: the default guest (CLI/file entry).
     fn instance_pre(&self) -> &InstancePre<Self::StoreCtx> {
@@ -259,7 +259,7 @@ callee component and instantiating it per invocation*. That holder-and-instantia
 So whether a call "goes through the registry" depends only on **where the target lives**:
 
 ```
-GuestRegistry: GuestId -> Target { Local(InstancePre) | Remote(wRPC endpoint) }
+Registry: GuestId -> Target { Local(InstancePre) | Remote(wRPC endpoint) }
 wRPC          : the carrier on every leg
 
 Inbound trigger (HTTP / messaging / ws): identity derived from the request       -> resolve -> serve
@@ -359,7 +359,7 @@ and per-store settings; the manifest is purely *deployment shape*. The two surfa
 
 Startup order: load `omni.toml` **if present** (else use the synthesized default) → resolve every `source`
 (embedded / file / OCI) → build the shared `Engine` + `Linker`, wiring the union of `link` interfaces as
-host-mediated interceptors → pre-instantiate each guest → assemble the `GuestRegistry` and the route
+host-mediated interceptors → pre-instantiate each guest → assemble the `Registry` and the route
 tables. `omnia run <guest>.wasm` needs no manifest — it is "one guest, all supported triggers route to it,
 no links" — while `omnia run --config omni.toml` (or the `OMNI_CONFIG` env var) drives a richer,
 multi-guest deployment.
@@ -522,7 +522,7 @@ The `LinkTransport` seam is that containment.
 registry, routing, and dynamic linking are a long-lived Omnia core. Both hold under a mechanism/population
 split:
 
-- **Omnia owns the mechanism** — the `GuestRegistry` type, the routing (identity resolution, the HTTP
+- **Omnia owns the mechanism** — the `Registry` type, the routing (identity resolution, the HTTP
 route-table machinery, trigger dispatch), the `LinkTransport` seam, the dynamic interceptor, the selector
 trait, and instance-per-call dispatch. This is generic plumbing with subtle correctness requirements (one
 shared `Engine`/`Linker`, pre-instantiation ordering, pool sizing) that no consumer should re-implement.
@@ -581,7 +581,7 @@ Each phase is independently shippable and keeps `cargo make ci` green.
 git-pin, the mechanism/population split, the dynamic-path floor, the breaking-change allowance, and the
 manifest-driven per-guest link allow-list) in a new `DECISIONS.md`, which the RFCs already reference but
 does not yet exist.
-- **Phase 1 — Guest registry.** `GuestId`, `GuestRegistry`, `GuestSource` (file source first); the
+- **Phase 1 — Guest registry.** `GuestId`, `Registry`, `GuestSource` (file source first); the
 `omni.toml` loader for population and transport, with `omnia run <wasm>` kept as the one-guest shorthand
 (§3.7); refactor `Compiled`/`create`/the runtime macro and the `Runtime` trait (§3.5) to hold a registry
 with a default entry; migrate every trigger server (`wasi-http`, `wasi-messaging`, `wasi-websocket`) to identity

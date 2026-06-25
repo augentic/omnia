@@ -14,7 +14,7 @@ use wasmtime::component::{Instance, InstancePre, Linker};
 use wasmtime::{Store, StoreLimits};
 
 use crate::RuntimeOptions;
-use crate::registry::GuestRegistry;
+use crate::registry::Registry;
 
 /// Result type for asynchronous operations.
 pub type FutureResult<T> = BoxFuture<'static, Result<T>>;
@@ -29,7 +29,7 @@ pub trait HasLimits {
 /// The long-lived, `Clone` host runtime context every trigger server is handed
 /// to resolve and instantiate a guest.
 ///
-/// It owns the [`GuestRegistry`], the runtime options, and the per-call
+/// It owns the [`Registry`], the runtime options, and the per-call
 /// instantiation helpers. The per-store state is its [`Runtime::StoreCtx`]
 /// associated type — not this trait.
 pub trait Runtime: Clone + Send + Sync + 'static {
@@ -41,7 +41,7 @@ pub trait Runtime: Clone + Send + Sync + 'static {
     fn store(&self) -> Self::StoreCtx;
 
     /// Returns the multi-guest registry.
-    fn registry(&self) -> &GuestRegistry<Self::StoreCtx>;
+    fn registry(&self) -> &Registry<Self::StoreCtx>;
 
     /// Returns the environment-derived runtime options.
     fn options(&self) -> &RuntimeOptions;

@@ -49,7 +49,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
             use omnia::wasmtime::component::HasData;
             use omnia::wasmtime::{StoreLimits, StoreLimitsBuilder};
             use omnia::wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
-            use omnia::{Backend, Compiled, GuestRegistry, HasLimits, RuntimeOptions, Runtime, Server};
+            use omnia::{Backend, Compiled, Registry, HasLimits, RuntimeOptions, Runtime, Server};
 
             use super::*;
 
@@ -67,7 +67,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
             /// Initiator state holding the guest registry and backend connections.
             #[derive(Clone)]
             struct Context {
-                registry: Arc<GuestRegistry<StoreCtx>>,
+                registry: Arc<Registry<StoreCtx>>,
                 #(pub #context_fields,)*
             }
 
@@ -122,7 +122,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
             impl Runtime for Context {
                 type StoreCtx = StoreCtx;
 
-                fn registry(&self) -> &GuestRegistry<Self::StoreCtx> {
+                fn registry(&self) -> &Registry<Self::StoreCtx> {
                     &self.registry
                 }
 

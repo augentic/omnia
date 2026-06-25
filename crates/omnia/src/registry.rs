@@ -105,14 +105,14 @@ impl<T: 'static> Guest<T> {
 ///
 /// The registry is cheap to share behind an `Arc`, matching how the runtime
 /// context is cloned into each connection handler.
-pub struct GuestRegistry<T: 'static> {
+pub struct Registry<T: 'static> {
     engine: Engine,
     options: RuntimeOptions,
     guests: HashMap<GuestId, Guest<T>>,
     default: GuestId,
 }
 
-impl<T: 'static> GuestRegistry<T> {
+impl<T: 'static> Registry<T> {
     /// Assemble a registry from pre-instantiated guests, with `default` naming
     /// the entry selected when a trigger carries no identity (the CLI / single
     /// `omnia run <wasm>` entry).
@@ -162,7 +162,7 @@ impl<T: 'static> GuestRegistry<T> {
     ///
     /// # Panics
     ///
-    /// Never in practice: [`GuestRegistry::new`] validates the default key is
+    /// Never in practice: [`Registry::new`] validates the default key is
     /// present and the map is not mutated after construction.
     #[must_use]
     pub fn default_guest(&self) -> &Guest<T> {
@@ -189,7 +189,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn guest_id_is_an_opaque_string_key() {
+    fn guest_id() {
         let id = GuestId::from("source:typescript");
         assert_eq!(id.as_str(), "source:typescript");
         assert_eq!(id.to_string(), "source:typescript");
@@ -198,13 +198,13 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_registry_with_no_guests() {
+    fn no_guests() {
         let options = RuntimeOptions::load().expect("options should load");
         let engine = Engine::new(&Config::from(&options)).expect("engine should build");
         // An empty map never constructs a `Guest`, so `T` is unconstrained here.
         let guests: HashMap<GuestId, Guest<()>> = HashMap::new();
 
-        let result = GuestRegistry::new(engine, options, guests, GuestId::from("default"));
+        let result = Registry::new(engine, options, guests, GuestId::from("default"));
         assert!(result.is_err(), "an empty registry must be rejected");
     }
 }

@@ -30,7 +30,7 @@ pub struct Manifest {
     #[serde(rename = "guest")]
     pub guests: Vec<GuestEntry>,
     /// Transport configuration for host-mediated calls.
-    pub transport: TransportConfig,
+    pub transport: Transport,
 }
 
 impl Manifest {
@@ -93,7 +93,7 @@ pub enum SourceSpec {
 /// that consumes it lands with host-mediated linking.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default)]
-pub struct TransportConfig {
+pub struct Transport {
     /// The default transport when no per-target override applies.
     pub default: TransportKind,
     /// Per-target transport overrides (identity -> transport).
@@ -101,7 +101,7 @@ pub struct TransportConfig {
     pub targets: HashMap<String, TransportOverride>,
 }
 
-impl Default for TransportConfig {
+impl Default for Transport {
     fn default() -> Self {
         Self {
             default: TransportKind::InProcess,
@@ -140,7 +140,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_multi_guest_manifest() {
+    fn parse_multi_guest() {
         let toml = r#"
             [[guest]]
             id = "workflow"
@@ -181,7 +181,7 @@ mod tests {
     }
 
     #[test]
-    fn defaults_transport_to_in_process() {
+    fn defaults_to_in_process() {
         let toml = r#"
             [[guest]]
             id = "only"
@@ -194,28 +194,28 @@ mod tests {
     }
 
     #[test]
-    fn load_reads_parses_and_validates_a_file() {
+    fn parse_file() {
         let path =
             std::env::temp_dir().join(format!("omnia_manifest_ok_{}.toml", std::process::id()));
         std::fs::write(&path, "[[guest]]\nid = \"only\"\nsource.path = \"./only.wasm\"\n")
             .expect("temp manifest should write");
 
         let manifest = Manifest::load(&path).expect("manifest should load");
-        std::fs::remove_file(&path).ok();
+        let _ = std::fs::remove_file(&path);
 
         assert_eq!(manifest.guests.len(), 1);
         assert_eq!(manifest.guests[0].id, "only");
     }
 
     #[test]
-    fn load_rejects_a_manifest_without_guests() {
+    fn reject_without_guests() {
         let path =
             std::env::temp_dir().join(format!("omnia_manifest_empty_{}.toml", std::process::id()));
         std::fs::write(&path, "[transport]\ndefault = \"unix\"\n")
             .expect("temp manifest should write");
 
         let result = Manifest::load(&path);
-        std::fs::remove_file(&path).ok();
+        let _ = std::fs::remove_file(&path);
 
         assert!(result.is_err(), "a manifest with no guests must be rejected");
     }

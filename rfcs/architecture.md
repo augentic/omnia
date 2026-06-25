@@ -115,7 +115,7 @@ The seam is a contract, not a wire protocol: every selected call rides [wRPC](ht
 The binary holds every guest on **one runtime** and picks among them in native code:
 
 ```text
-GuestRegistry  (one wasmtime::Engine + one Linker<StoreCtx>)
+Registry  (one wasmtime::Engine + one Linker<StoreCtx>)
   "workflow"             -> InstancePre     (embedded in the binary via include_bytes!)
   "source:typescript"    -> InstancePre   ┐  resolved by digest from an OCI store into a
   "source:documentation" -> InstancePre   │  local cache — only the identities a plan
