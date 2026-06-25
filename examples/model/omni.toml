@@ -1,11 +1,17 @@
-# Model completion example (Phase 1 of rfcs/wasi-model.md).
+# Model completion example (rfcs/wasi-model.md).
 #
-# One guest, `model`, imports `augentic:model/completion` and calls `complete`.
+# The `model` guest imports `augentic:model/completion` and calls `complete`.
 # The host serves it with the in-tree `ModelDefault` (replay) backend: with
 # `OMNI_REPLAY_DIR` pointing at the checked-in fixtures, `complete` returns the
 # recorded, validated answer with no live model and no network.
 #
-# Build the guest first (see README.md), then run from the repository root:
+# The `shelf` guest exports a `references` interface and is reached only via
+# host-mediated `resolve` (Phase 2a) — a backend that emits a `resolve` tool call
+# for a prompt with `grants.references = "shelf"` lands a fresh `shelf` instance
+# per call. It declares no trigger and is inert under the replay backend (replay
+# short-circuits tools); the resolve path is exercised by the integration test.
+#
+# Build both guests first (see README.md), then run from the repository root:
 #
 #   OMNI_REPLAY_DIR=examples/model/fixtures \
 #     cargo run --example model -- run --config examples/model/omni.toml
@@ -13,3 +19,7 @@
 [[guest]]
 id = "model"
 source.path = "../../target/wasm32-wasip2/debug/examples/model_wasm.wasm"
+
+[[guest]]
+id = "shelf"
+source.path = "../../target/wasm32-wasip2/debug/examples/model_shelf_wasm.wasm"

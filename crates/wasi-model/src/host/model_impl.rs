@@ -11,6 +11,7 @@
 use std::sync::Arc;
 
 use futures::FutureExt as _;
+use omnia::{GuestId, HostDispatch};
 use wasmtime::component::{Accessor, StreamReader};
 
 use super::generated::augentic::model::completion as genc;
@@ -32,13 +33,25 @@ impl<T> HostWithStore<T> for WasiModel {
         // returns; capture it before the owned prompt moves into the backend.
         let kind = owned.response_format.kind;
 
-        // Build the per-completion tool host. Phase 1 lends an unbound host:
-        // `resolve` is wired in Phase 2a, `read`/`list`/`write` in Phase 2b.
-        // `ModelDefault` (replay) ignores it.
-        let tool_host: Arc<dyn ToolHost> = Arc::new(UnboundToolHost);
+        // Build the per-completion tool host (§4.2) from the prompt's grants.
+        // `resolve` reaches the host→guest dispatcher threaded into the store
+        // ctx; `verify` is routing-only; `read`/`list`/`write` are deferred to
+        // Phase 2b. `ModelDefault` (replay) ignores it. Capture the grants the
+        // host needs before the owned prompt moves into the backend.
+        let references = owned.grants.references.clone();
+        let verify_allowed = owned.grants.verify.clone();
 
-        let backend_answer =
-            accessor.with(|mut store| store.get().ctx.complete(owned, tool_host)).await?;
+        let backend_answer = accessor
+            .with(|mut store| {
+                let view = store.get();
+                let tool_host: Arc<dyn ToolHost> = Arc::new(BoundToolHost {
+                    dispatch: Arc::clone(&view.host_dispatch),
+                    references,
+                    verify_allowed,
+                });
+                view.ctx.complete(owned, tool_host)
+            })
+            .await?;
 
         // Final validation gate: a backend answer that does not validate is a
         // backend failure, never a guest-visible answer (§3.1.3).
@@ -64,36 +77,80 @@ impl Host for WasiModelCtxView<'_> {
     }
 }
 
-/// The Phase 1 floor tool host: defined so the [`ToolHost`] surface is final,
-/// but bound to nothing yet. Every capability fails loudly until the registry
-/// (`resolve`, Phase 2a) and working tree (`read`/`list`/`write`, Phase 2b) are
-/// wired. `ModelDefault` ignores it, so the Phase 1 replay path never calls it.
-#[derive(Debug)]
-struct UnboundToolHost;
-
-/// A future that immediately fails with an "unwired in Phase 1" error.
-fn unwired<R: Send + 'static>(tool: &'static str) -> FutureResult<R> {
-    async move { Err(anyhow::anyhow!("tool `{tool}` is not wired in phase 1")) }.boxed()
+/// The Phase 2a floor tool host, built fresh per completion from the prompt's
+/// grants. `resolve` is wired to the host→guest dispatcher (§4.1); `verify` is
+/// routing-only (an allow-list check against `grants.verify` — profiles and
+/// their execution are RFC-60); `read`/`list`/`write` stay loud stubs until the
+/// wasi-filesystem working tree lands (Phase 2b, RFC-55), as does the
+/// `wasi:keyvalue` cross-turn session state that backs their visibility.
+/// `ModelDefault` (replay) ignores the whole host.
+struct BoundToolHost {
+    /// Type-erased host→guest dispatcher threaded in via the store ctx.
+    dispatch: Arc<dyn HostDispatch>,
+    /// `grants.references`: the guest id whose `references` shelf `resolve`
+    /// targets. `None` keeps `resolve` failing loudly (no reference granted).
+    references: Option<String>,
+    /// `grants.verify`: the closed verification profiles the model may route to.
+    verify_allowed: Vec<String>,
 }
 
-impl ToolHost for UnboundToolHost {
-    fn resolve(&self, _reference: Reference) -> FutureResult<Vec<u8>> {
-        unwired("resolve")
+/// A future that immediately fails because a capability lands in Phase 2b.
+fn deferred<R: Send + 'static>(tool: &'static str) -> FutureResult<R> {
+    async move {
+        Err(anyhow::anyhow!(
+            "tool `{tool}` is not wired until Phase 2b (RFC-55 working tree)"
+        ))
+    }
+    .boxed()
+}
+
+impl ToolHost for BoundToolHost {
+    fn resolve(&self, reference: Reference) -> FutureResult<Vec<u8>> {
+        // `resolve` is only valid when the prompt granted a reference target.
+        let Some(target) = self.references.clone() else {
+            return async move {
+                Err(anyhow::anyhow!(
+                    "resolve(`{}`) requires grants.references, but none was granted",
+                    reference.name
+                ))
+            }
+            .boxed();
+        };
+        let dispatch = Arc::clone(&self.dispatch);
+        async move { dispatch.resolve(GuestId::from(target), reference.name).await }.boxed()
     }
 
     fn read(&self, _path: String) -> FutureResult<Vec<u8>> {
-        unwired("read")
+        deferred("read")
     }
 
     fn list(&self, _path: String) -> FutureResult<Vec<DirEntry>> {
-        unwired("list")
+        deferred("list")
     }
 
     fn write(&self, _path: String, _bytes: Vec<u8>) -> FutureResult<()> {
-        unwired("write")
+        deferred("write")
     }
 
-    fn verify(&self, _check: String) -> FutureResult<VerifyReport> {
-        unwired("verify")
+    fn verify(&self, check: String) -> FutureResult<VerifyReport> {
+        // Routing-only: validate the requested profile is in `grants.verify`,
+        // then acknowledge the route. Profile definitions, sandboxing, and
+        // execution are owned by RFC-60 and are not implemented here.
+        let granted = self.verify_allowed.contains(&check);
+        async move {
+            if !granted {
+                return Err(anyhow::anyhow!(
+                    "verify profile `{check}` is not in grants.verify"
+                ));
+            }
+            Ok(VerifyReport {
+                ok: false,
+                detail: format!(
+                    "verify profile `{check}` is granted and routed; profile \
+                     execution is RFC-60 (not yet implemented)"
+                ),
+            })
+        }
+        .boxed()
     }
 }

@@ -21,6 +21,42 @@ use crate::selector::FirstArgSelector;
 use crate::source::{EmbeddedSource, FileSource, GuestSource, LoadedGuest};
 use crate::{Host, RuntimeOptions};
 
+/// Build the Wasmtime `Engine` and `Linker` for a single-guest runtime.
+///
+/// This is the `omnia run <guest>.wasm` shorthand: load one component, derive
+/// its identity from the file stem, and register it as the sole entry — a
+/// one-entry registry.
+///
+/// # Errors
+///
+/// Will fail if the provided `wasm` file cannot be compiled/deserialized as a
+/// `Component` or the `Linker` cannot be initialized with WASI support.
+#[instrument]
+pub async fn create<T: WasiView + 'static>(wasm: &Path) -> Result<Compiled<T>> {
+    let name = wasm.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
+    init_env(name)?;
+    tracing::info!("initializing runtime");
+
+    let (engine, linker, options) = engine_and_linker()?;
+
+    let source = FileSource::new(wasm);
+    let guests = source.load(&engine).await?;
+
+    tracing::info!("runtime initialized");
+
+    Ok(Compiled {
+        engine,
+        linker,
+        options,
+        guests,
+        // The single-file shorthand carries no routes: its sole guest is the
+        // catch-all for every trigger it can answer.
+        routes: Routes::default(),
+        // ...and no host-mediated links: one guest has nobody to dispatch to.
+        link_interfaces: BTreeSet::new(),
+    })
+}
+
 /// Build a [`Compiled`] runtime, choosing single-file or manifest-driven
 /// population.
 ///
@@ -53,44 +89,6 @@ pub async fn create_runtime<T: WasiView + 'static>(
     create(&wasm).await
 }
 
-/// Build the Wasmtime `Engine` and `Linker` for a single-guest runtime.
-///
-/// This is the `omnia run <guest>.wasm` shorthand: load one component, derive
-/// its identity from the file stem, and register it as the default guest — a
-/// one-entry registry.
-///
-/// # Errors
-///
-/// Will fail if the provided `wasm` file cannot be compiled/deserialized as a
-/// `Component` or the `Linker` cannot be initialized with WASI support.
-#[instrument]
-pub async fn create<T: WasiView + 'static>(wasm: &Path) -> Result<Compiled<T>> {
-    let name = wasm.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
-    init_env(name)?;
-    tracing::info!("initializing runtime");
-
-    let (engine, linker, options) = engine_and_linker()?;
-
-    let source = FileSource::new(wasm);
-    let default = source.id().clone();
-    let guests = source.load(&engine).await?;
-
-    tracing::info!("runtime initialized");
-
-    Ok(Compiled {
-        engine,
-        linker,
-        options,
-        guests,
-        default,
-        // The single-file shorthand carries no routes: its sole guest is the
-        // catch-all for every trigger it can answer.
-        routes: Routes::default(),
-        // ...and no host-mediated links: one guest has nobody to dispatch to.
-        link_interfaces: BTreeSet::new(),
-    })
-}
-
 /// Build a runtime from a deployment manifest (`omni.toml`).
 ///
 /// Resolves every `[[guest]]` source (file or embedded), builds the shared
@@ -108,12 +106,12 @@ pub async fn create_from_manifest<T: WasiView + 'static>(
 ) -> Result<Compiled<T>> {
     let parsed = Manifest::load(manifest)?;
 
-    // The default entry doubles as the telemetry/component name for now.
-    let default = parsed
+    // The first guest entry doubles as the telemetry/component name for now.
+    let component_name = parsed
         .guests
         .first()
         .map_or_else(|| GuestId::from("omnia"), |entry| GuestId::from(entry.id.as_str()));
-    init_env(default.as_str())?;
+    init_env(component_name.as_str())?;
     tracing::info!("initializing runtime from manifest");
 
     let (engine, linker, options) = engine_and_linker()?;
@@ -160,7 +158,6 @@ pub async fn create_from_manifest<T: WasiView + 'static>(
         linker,
         options,
         guests,
-        default,
         routes,
         link_interfaces,
     })
@@ -209,7 +206,6 @@ pub struct Compiled<T: WasiView + 'static> {
     linker: Linker<T>,
     options: RuntimeOptions,
     guests: Vec<LoadedGuest>,
-    default: GuestId,
     routes: Routes,
     /// Union of the per-guest `link` allow-lists — the host-mediated interfaces
     /// to polyfill onto the shared linker (empty for the single-file shorthand).
@@ -246,7 +242,7 @@ impl<T: WasiView> Compiled<T> {
     ///
     /// Returns an error if host-mediated imports cannot be polyfilled, a
     /// component cannot be pre-instantiated, or the registry cannot be assembled.
-    pub fn build_registry(&self) -> Result<Registry<T>>
+    pub fn registry(&self) -> Result<Registry<T>>
     where
         T: WrpcView,
     {
@@ -277,7 +273,6 @@ impl<T: WasiView> Compiled<T> {
             self.engine.clone(),
             self.options.clone(),
             guests,
-            self.default.clone(),
             self.routes.clone(),
             dispatch,
         )

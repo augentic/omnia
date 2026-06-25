@@ -88,7 +88,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                     // Pre-instantiate every guest against the now fully-linked
                     // linker and assemble the registry.
                     Ok(Self {
-                        registry: Arc::new(compiled.build_registry()?),
+                        registry: Arc::new(compiled.registry()?),
                         #(#backend_idents,)*
                     })
                 }
@@ -160,6 +160,10 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                         // Per-store wRPC view state for host-mediated dynamic
                         // linking; inert unless the deployment declares `link`s.
                         wrpc: omnia::WrpcState::new(),
+                        // Type-erased host→guest dispatcher (e.g. `wasi-model`'s
+                        // `resolve`); a fresh handle to this `Context`. Inert
+                        // unless a host binding reaches for it.
+                        host_dispatch: Arc::new(self.clone()),
                         #(#store_ctx_values,)*
                     }
                 }
@@ -171,6 +175,9 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                 pub wasi: WasiCtx,
                 pub limits: StoreLimits,
                 pub wrpc: omnia::WrpcState,
+                /// Type-erased host→guest dispatcher backing host-mediated calls
+                /// such as `wasi-model`'s `resolve`. Inert unless a host uses it.
+                pub host_dispatch: Arc<dyn omnia::HostDispatch>,
                 #(pub #store_ctx_fields,)*
             }
 

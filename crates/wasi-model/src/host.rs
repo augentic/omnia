@@ -44,7 +44,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{Host, Runtime, Server};
+use omnia::{Host, HostDispatch, Runtime, Server};
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::ResourceTable;
 
@@ -94,6 +94,11 @@ pub struct WasiModelCtxView<'a> {
 
     /// Mutable reference to the table used to manage resources.
     pub table: &'a mut ResourceTable,
+
+    /// Type-erased host→guest dispatcher, used by [`ToolHost::resolve`] to reach
+    /// an adapter's `references` shelf. Threaded in by the `runtime!` macro's
+    /// store context (inert for backends that never resolve).
+    pub host_dispatch: Arc<dyn HostDispatch>,
 }
 
 /// The backend trait — the one place a provider's logic lives.
@@ -160,6 +165,7 @@ macro_rules! omnia_wasi_view {
                 omnia_wasi_model::WasiModelCtxView {
                     ctx: &mut self.$field_name,
                     table: &mut self.table,
+                    host_dispatch: ::std::sync::Arc::clone(&self.host_dispatch),
                 }
             }
         }

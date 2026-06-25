@@ -118,29 +118,23 @@ pub struct Registry<T: 'static> {
     engine: Engine,
     options: RuntimeOptions,
     guests: HashMap<GuestId, Guest<T>>,
-    default: GuestId,
     routes: Routes,
     dispatch: Arc<DispatchHandle>,
 }
 
 impl<T: 'static> Registry<T> {
-    /// Assemble a registry from pre-instantiated guests, with `default` naming
-    /// the entry selected when a trigger carries no identity (the CLI / single
-    /// `omnia run <wasm>` entry).
+    /// Assemble a registry from pre-instantiated guests.
     ///
     /// # Errors
     ///
-    /// Returns an error if `guests` is empty, if `default` is not among the
-    /// registered guests, or if a route targets a guest that is not registered.
+    /// Returns an error if `guests` is empty, or if a route targets a guest that
+    /// is not registered.
     pub fn new(
         engine: Engine, options: RuntimeOptions, guests: HashMap<GuestId, Guest<T>>,
-        default: GuestId, routes: Routes, dispatch: Arc<DispatchHandle>,
+        routes: Routes, dispatch: Arc<DispatchHandle>,
     ) -> Result<Self> {
         if guests.is_empty() {
             bail!("cannot build a guest registry with no guests");
-        }
-        if !guests.contains_key(&default) {
-            bail!("default guest `{default}` is not registered");
         }
         for target in routes.targets() {
             if !guests.contains_key(target) {
@@ -151,7 +145,6 @@ impl<T: 'static> Registry<T> {
             engine,
             options,
             guests,
-            default,
             routes,
             dispatch,
         })
@@ -197,18 +190,6 @@ impl<T: 'static> Registry<T> {
         &self.dispatch
     }
 
-    /// Returns the default guest — the entry a trigger resolves to when it
-    /// carries no identity of its own (e.g. the CLI / single-file shorthand).
-    ///
-    /// # Panics
-    ///
-    /// Never in practice: [`Registry::new`] validates the default key is
-    /// present and the map is not mutated after construction.
-    #[must_use]
-    pub fn default_guest(&self) -> &Guest<T> {
-        self.guests.get(&self.default).expect("default guest is validated to exist at construction")
-    }
-
     /// Returns the number of registered guests.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -248,14 +229,7 @@ mod tests {
         let guests: HashMap<GuestId, Guest<()>> = HashMap::new();
         let dispatch = DispatchHandle::new(Arc::new(FirstArgSelector), BTreeSet::new(), 8);
 
-        let result = Registry::new(
-            engine,
-            options,
-            guests,
-            GuestId::from("default"),
-            Routes::default(),
-            dispatch,
-        );
+        let result = Registry::new(engine, options, guests, Routes::default(), dispatch);
         assert!(result.is_err(), "an empty registry must be rejected");
     }
 }

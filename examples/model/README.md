@@ -13,7 +13,11 @@ receives a **validated, deterministic** answer from the in-tree `ModelDefault`
   `complete(prompt).await`.
 - [`runtime.rs`](runtime.rs) binds the `WasiModel` host to `ModelDefault`, the
   replay backend that serves a recorded answer for an equivalent prompt.
-- [`omni.toml`](omni.toml) declares the single `model` guest.
+- [`shelf.rs`](shelf.rs) is the `references` shelf (Phase 2a): it exports
+  `resolve` and is reached *only* via host-mediated dispatch when a backend
+  follows `grants.references` (instance-per-call, no trigger). It is inert under
+  the replay backend; the resolve path is proven by the integration test.
+- [`omni.toml`](omni.toml) declares the `model` guest and the `shelf` guest.
 - [`fixtures/`](fixtures) holds the checked-in replay fixture: the reduced,
   canonical prompt (the key) mapped to the validated answer.
 
@@ -26,21 +30,23 @@ flowchart LR
 ```
 
 The floor stays generic (Law 2): no model id, provider, or schema dialect lives
-in Omnia. The boundary only ever hands the guest a **validated answer string** —
-replay short-circuits any tool calls, so no `resolve` (and no `shelf` guest) is
-exercised in Phase 1; that lands in Phase 2a.
+in Omnia. The boundary only ever hands the guest a **validated answer string**.
+The replay backend short-circuits tool calls, so this binary never emits a
+`resolve`; the host→guest `resolve` path (a fresh `shelf` instance per call) is
+exercised deterministically by the integration test, and live by the
+`omnia-genai` backend in the `backends` repo (Phase 2a).
 
-## Build the guest
+## Build the guests
 
 A whole-workspace `wasm32-wasip2` build fails on the native-only host crates, so
-build the guest component explicitly:
+build the guest components explicitly:
 
 ```bash
-cargo build -p examples --example model-wasm --target wasm32-wasip2
+cargo build -p examples --example model-wasm --example model-shelf-wasm --target wasm32-wasip2
 ```
 
-This emits `target/wasm32-wasip2/debug/examples/model_wasm.wasm` (the underscored
-name the manifest points at).
+This emits `target/wasm32-wasip2/debug/examples/model_wasm.wasm` and
+`model_shelf_wasm.wasm` (the underscored names the manifest points at).
 
 ## Run
 
@@ -62,7 +68,10 @@ cargo nextest run -p omnia-wasi-model --test replay
 
 The test records the guest's prompt through a stub backend, replays it through
 `ModelDefault`, and finally replays it from the committed fixture — asserting the
-validated answer returns with no network.
+validated answer returns with no network. A second test (`resolve` path) drives a
+stub backend that calls `tool_host.resolve` for the `grants.references = "shelf"`
+prompt, proving the host→guest dispatch reaches a **fresh `shelf` instance per
+call** and the bytes round-trip — no network, fully in CI.
 
 ## Regenerate the fixture
 

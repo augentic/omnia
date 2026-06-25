@@ -115,6 +115,12 @@ name = "model-wasm"
 path = "model/guest.rs"
 crate-type = ["cdylib"]
 
+# The `references` shelf reached only via host-mediated `resolve` (Phase 2a).
+[[example]]
+name = "model-shelf-wasm"
+path = "model/shelf.rs"
+crate-type = ["cdylib"]
+
 [[example]]
 name = "model"
 path = "model/runtime.rs"

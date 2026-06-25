@@ -8,3 +8,20 @@ world complete {
     import augentic:model/completion@0.1.0;
     export run: async func() -> string;
 }
+
+/// A trivial `references` shelf (§4.1): given an opaque reference, return its
+/// bytes. Reached *only* via host-mediated `resolve` dispatch — the floor
+/// instantiates this guest fresh for every call (instance-per-call) and discards
+/// it afterwards, so it declares no trigger and holds no state. Resource-free by
+/// design (§4.5).
+interface references {
+    /// Resolve `reference` to its bytes. The floor invokes this by convention
+    /// (the export named `resolve`), without naming this interface.
+    resolve: func(reference: string) -> list<u8>;
+}
+
+/// The shelf guest: serves `references`. A `complete` prompt that sets
+/// `grants.references = "shelf"` lets the backend's `resolve` land here.
+world shelf {
+    export references;
+}

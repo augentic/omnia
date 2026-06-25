@@ -41,7 +41,7 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context as _, Result, bail, ensure};
 use bytes::BytesMut;
-use futures::StreamExt as _;
+use futures::{FutureExt as _, StreamExt as _};
 use tokio_util::codec::Encoder as _;
 use wasmtime::component::{Linker, Type, Val, types};
 use wasmtime::{AsContextMut as _, Engine, StoreContextMut};
@@ -52,7 +52,7 @@ use wrpc_wasmtime::{ServeExt as _, ValEncoder, WrpcView, read_value};
 use crate::registry::GuestId;
 use crate::selector::GuestSelector;
 use crate::source::LoadedGuest;
-use crate::traits::Runtime;
+use crate::traits::{FutureResult, Runtime};
 use crate::transport::{InProcClient, InProcServer, InProcess, LinkTransport as _};
 
 /// wRPC host-resource map shape (empty for the resource-free dynamic path).
@@ -303,6 +303,211 @@ where
         "dispatched host-mediated call",
     );
     Ok(())
+}
+
+/// Host-originated dynamic dispatch into a *known* guest export — the host→guest
+/// counterpart of [`dispatch`] (which is guest→guest and selector-driven).
+///
+/// This reuses the landed machinery rather than adding a parallel one: the same
+/// dispatch-depth bound ([`DispatchHandle::enter`]) so a `complete`→`resolve`
+/// →adapter chain is depth-counted exactly like a guest→guest hop, and the same
+/// §4.5 resource rejection. The target is instantiated *fresh* on a new store and
+/// the matching export invoked directly (the `wasi-http` `server.rs` pattern), so
+/// the callee can never re-enter its caller (instance-per-call) and needs no
+/// `link` declaration for `interface`.
+///
+/// `args` and the returned values are plain `Val`s; a live resource handle on
+/// either side is rejected.
+///
+/// # Errors
+///
+/// Returns an error if the depth bound is exceeded, an argument or result carries
+/// a resource handle, the target is not registered, the named `interface`/`func`
+/// export is absent or is not a function, or the guest call traps.
+pub async fn dispatch_to_guest<R>(
+    runtime: &R,
+    target: &GuestId,
+    interface: &str,
+    func: &str,
+    args: Vec<Val>,
+) -> Result<Vec<Val>>
+where
+    R: Runtime,
+{
+    // Depth-count this hop exactly like a guest→guest dispatch (§6.6). The guard
+    // is held here (borrowing `runtime`) across the awaited callee task below.
+    let _guard = runtime.registry().dispatch().enter(target)?;
+
+    // §4.5: plain records cross by value; a live resource handle never crosses.
+    for value in &args {
+        if contains_resource(value) {
+            bail!(
+                "a resource handle cannot cross the link seam \
+                 (host→guest `{interface}/{func}`, target `{target}`)"
+            );
+        }
+    }
+
+    let instance_pre = runtime
+        .registry()
+        .get(target)
+        .with_context(|| format!("dispatch target `{target}` is not registered"))?
+        .instance_pre()
+        .clone();
+
+    // Run the callee on its own task. `resolve` is invoked from *within* the
+    // caller guest's concurrent event loop (the backend's loop awaits it inside
+    // the `complete` host call), and wasmtime forbids a recursive
+    // `StoreContextMut::run_concurrent` on the same thread. Spawning gives the
+    // callee a fresh event loop: when the caller's loop parks awaiting this task,
+    // its ambient store clears, so the callee's call runs unnested. The task owns
+    // the whole store lifecycle (build → instantiate → call → drop), so the
+    // callee is a fresh instance that cannot re-enter its caller
+    // (instance-per-call) and needs no `link` declaration for `interface`.
+    let task_runtime = (*runtime).clone();
+    let target_owned = target.clone();
+    let interface_owned = interface.to_owned();
+    let func_owned = func.to_owned();
+    let results = tokio::spawn(async move {
+        let mut store = task_runtime.build_store(task_runtime.store());
+        let instance = task_runtime
+            .instantiate(&instance_pre, &mut store)
+            .await
+            .with_context(|| format!("instantiating dispatch target `{target_owned}`"))?;
+
+        let interface_idx = instance
+            .get_export_index(&mut store, None, &interface_owned)
+            .with_context(|| {
+                format!("guest `{target_owned}` exports no interface `{interface_owned}`")
+            })?;
+        let (item, func_idx) = instance
+            .get_export(&mut store, Some(&interface_idx), &func_owned)
+            .with_context(|| {
+                format!(
+                    "interface `{interface_owned}` (guest `{target_owned}`) exports no \
+                     `{func_owned}`"
+                )
+            })?;
+        let types::ComponentItem::ComponentFunc(func_ty) = item else {
+            bail!("`{interface_owned}/{func_owned}` (guest `{target_owned}`) is not a function");
+        };
+        let result_count = func_ty.results().count();
+        let function = instance
+            .get_func(&mut store, func_idx)
+            .with_context(|| {
+                format!("resolving `{interface_owned}/{func_owned}` on guest `{target_owned}`")
+            })?;
+
+        let mut results = vec![Val::Bool(false); result_count];
+        function
+            .call_async(&mut store, &args, &mut results)
+            .await
+            .map_err(anyhow::Error::from)
+            .with_context(|| {
+                format!("calling `{interface_owned}/{func_owned}` on guest `{target_owned}`")
+            })?;
+        Ok::<Vec<Val>, anyhow::Error>(results)
+    })
+    .await
+    .with_context(|| format!("joining dispatch target `{target}` task"))?
+    .with_context(|| format!("dispatching `{interface}/{func}` to guest `{target}`"))?;
+
+    // A target must not hand back a resource handle either (§4.5).
+    for value in &results {
+        if contains_resource(value) {
+            bail!(
+                "a resource handle cannot cross the link seam \
+                 (result of `{interface}/{func}`, target `{target}`)"
+            );
+        }
+    }
+
+    Ok(results)
+}
+
+/// The conventional export-function name a `references` shelf exposes for
+/// host-mediated `resolve`. This is a floor concept — it mirrors `ToolHost`'s
+/// `resolve` and the RFC tool name — so the floor invokes it without baking in a
+/// consumer package/interface name (Law 2).
+const RESOLVE_FUNC: &str = "resolve";
+
+/// A host→guest call capability, type-erased so a host binding (e.g. `wasi-model`'s
+/// `resolve`) can invoke a guest without naming the concrete [`Runtime`].
+///
+/// Implemented blanket for every [`Runtime`]; the `runtime!` macro threads an
+/// `Arc<dyn HostDispatch>` into each store context (like the per-store wRPC state)
+/// so host bindings can reach it.
+pub trait HostDispatch: Send + Sync + 'static {
+    /// Resolve a reference against a guest's `references` shelf: instantiate
+    /// `target` fresh, invoke its exported [`RESOLVE_FUNC`] function with
+    /// `reference`, and return the typed bytes. Always a fresh instance
+    /// (instance-per-call), depth-bounded like any host-mediated hop.
+    fn resolve(&self, target: GuestId, reference: String) -> FutureResult<Vec<u8>>;
+}
+
+impl<R: Runtime> HostDispatch for R {
+    fn resolve(&self, target: GuestId, reference: String) -> FutureResult<Vec<u8>> {
+        let runtime = self.clone();
+        async move {
+            let interface = resolve_interface(&runtime, &target)?;
+            let results = dispatch_to_guest(
+                &runtime,
+                &target,
+                &interface,
+                RESOLVE_FUNC,
+                vec![Val::String(reference)],
+            )
+            .await?;
+            vals_to_bytes(results)
+        }
+        .boxed()
+    }
+}
+
+/// Find the exported interface on `target`'s component that carries a
+/// [`RESOLVE_FUNC`] function, so the floor invokes it without hardcoding a
+/// consumer interface name.
+fn resolve_interface<R: Runtime>(runtime: &R, target: &GuestId) -> Result<Box<str>> {
+    let registry = runtime.registry();
+    let engine = registry.engine();
+    let guest = registry
+        .get(target)
+        .with_context(|| format!("resolve target `{target}` is not registered"))?;
+    let component_ty = guest.component().component_type();
+    for (interface, types::ComponentExtern { ty, .. }) in component_ty.exports(engine) {
+        let types::ComponentItem::ComponentInstance(instance_ty) = ty else {
+            continue;
+        };
+        let has_resolve = instance_ty
+            .exports(engine)
+            .any(|(func, types::ComponentExtern { ty, .. })| {
+                func == RESOLVE_FUNC && matches!(ty, types::ComponentItem::ComponentFunc(_))
+            });
+        if has_resolve {
+            return Ok(Box::from(interface));
+        }
+    }
+    bail!("resolve target `{target}` exports no interface with a `{RESOLVE_FUNC}` function")
+}
+
+/// Convert a `resolve` export's return value into raw bytes. Accepts `list<u8>`
+/// (the canonical shape) or `string` (a convenience for text shelves).
+fn vals_to_bytes(results: Vec<Val>) -> Result<Vec<u8>> {
+    let first = results
+        .into_iter()
+        .next()
+        .context("resolve export returned no value")?;
+    match first {
+        Val::List(items) => items
+            .into_iter()
+            .map(|value| match value {
+                Val::U8(byte) => Ok(byte),
+                other => bail!("resolve result list element is not a u8: {other:?}"),
+            })
+            .collect(),
+        Val::String(text) => Ok(text.into_bytes()),
+        other => bail!("resolve export must return list<u8> or string, got {other:?}"),
+    }
 }
 
 /// Recursively reports whether a value carries a live resource handle.
