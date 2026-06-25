@@ -1,7 +1,6 @@
 //! #HTTP Server
 
 use std::clone::Clone;
-use std::collections::HashMap;
 use std::convert::Infallible;
 use std::env;
 use std::pin::Pin;
@@ -18,11 +17,11 @@ use hyper::body::{Body, Frame, Incoming, SizeHint};
 use hyper::header::{FORWARDED, HOST};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use omnia::{GuestId, HttpRoutes, Router, Runtime};
+use omnia::{HttpRoutes, Runtime, TriggerRouter};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
-use tracing::{Instrument, debug_span};
+use tracing::{Instrument, debug_span, instrument};
 use wasmtime_wasi_http::io::TokioIo;
 use wasmtime_wasi_http::p3::WasiHttpView;
 use wasmtime_wasi_http::p3::bindings::ServiceIndices;
@@ -32,48 +31,61 @@ type OutgoingBody = UnsyncBoxBody<Bytes, anyhow::Error>;
 
 const HTTP_ADDR: &str = "0.0.0.0:8080";
 
-pub async fn serve<R>(state: &R) -> Result<()>
+#[instrument("http-server", skip(state))]
+pub async fn run<R>(state: &R) -> Result<()>
 where
     R: Runtime,
     R::StoreCtx: WasiHttpView,
 {
     let component = env::var("COMPONENT").unwrap_or_else(|_| "unknown".into());
-    let addr = env::var("HTTP_ADDR").unwrap_or_else(|_| HTTP_ADDR.into());
 
+    // Capability probe: a guest exports `wasi:http/incoming-handler` exactly
+    // when its typed `ServiceIndices` resolve. Build the per-guest indices and
+    // the router that selects among them once, up front.
+    let routing = TriggerRouter::build(
+        state.registry(),
+        "http",
+        state.registry().routes().http().clone(),
+        ServiceIndices::new,
+    )?;
+    if routing.is_inert() {
+        tracing::info!("no guest exports the http handler; http trigger inert");
+        return Ok(());
+    }
+
+    let addr = env::var("HTTP_ADDR").unwrap_or_else(|_| HTTP_ADDR.into());
     let listener = TcpListener::bind(&addr).await?;
     tracing::info!("{component} http server listening on: {addr}");
 
-    // Capability probe: a guest exports `wasi:http/incoming-handler` exactly
-    // when its typed `ServiceIndices` resolve. Build the per-guest indices once
-    // and the router that selects among them.
-    let mut indices = HashMap::new();
-    let mut capable = Vec::new();
-    for guest in state.registry().guests() {
-        if let Ok(service) = ServiceIndices::new(guest.instance_pre()) {
-            capable.push(guest.id().clone());
-            indices.insert(guest.id().clone(), service);
-        }
-    }
-    let router = Router::build("http", &capable, state.registry().routes().http().clone())?;
-
     let handler = Handler {
-        state: Arc::new(state.clone()),
-        component,
-        indices: Arc::new(indices),
-        router: Arc::new(router),
+        state: state.clone(),
+        component: Arc::from(component),
+        routing: Arc::new(routing),
     };
+
+    // `keep_alive` defaults to true; build the connection builder once and
+    // clone it cheaply per accepted connection.
+    let http1 = http1::Builder::new();
 
     // listen for requests until terminated
     loop {
-        let (stream, _) = listener.accept().await?;
-        stream.set_nodelay(true)?;
+        let (stream, _) = match listener.accept().await {
+            Ok(conn) => conn,
+            Err(error) => {
+                // A transient accept error (e.g. file-descriptor exhaustion)
+                // must not tear down the whole server.
+                tracing::error!(%error, "accept error");
+                continue;
+            }
+        };
+        if let Err(error) = stream.set_nodelay(true) {
+            tracing::warn!(%error, "failed to set TCP_NODELAY");
+        }
         let stream = TokioIo::new(stream);
         let handler = handler.clone();
+        let http1 = http1.clone();
 
         tokio::spawn(async move {
-            let mut http1 = http1::Builder::new();
-            http1.keep_alive(true);
-
             if let Err(e) = http1
                 .serve_connection(
                     stream,
@@ -111,10 +123,9 @@ where
     R: Runtime,
     R::StoreCtx: WasiHttpView,
 {
-    state: Arc<R>,
-    component: String,
-    indices: Arc<HashMap<GuestId, ServiceIndices>>,
-    router: Arc<Router<HttpRoutes>>,
+    state: R,
+    component: Arc<str>,
+    routing: Arc<TriggerRouter<ServiceIndices, HttpRoutes>>,
 }
 
 impl<R> Handler<R>
@@ -128,22 +139,25 @@ where
     ) -> Result<hyper::Response<OutgoingBody>> {
         tracing::debug!("handling request: {request:?}");
 
-        // prepare wasmtime http request and response
-        let request = fix_request(request).context("preparing request")?;
+        // Normalise the request (scheme/authority); a request we cannot
+        // normalise (e.g. a missing `Host` header) is a client error, not a 500.
+        let request = match fix_request(request) {
+            Ok(request) => request,
+            Err(error) => {
+                tracing::debug!(%error, "rejecting malformed request");
+                return Ok(bad_request());
+            }
+        };
 
-        // Resolve the guest by request path; an unmatched path (or an inert
-        // trigger with no http-capable guest) is a 404, not a guest invocation.
-        let path = request.uri().path().to_owned();
-        let Some(guest_id) = self.router.resolve(&path) else {
-            tracing::debug!(%path, "no route matched; returning 404");
+        // Resolve the guest by request path; an unmatched path is a 404, not a
+        // guest invocation.
+        let Some((guest_id, indices)) = self.routing.resolve(request.uri().path()) else {
+            tracing::debug!(path = request.uri().path(), "no route matched; returning 404");
             return Ok(not_found());
         };
-        let (Some(guest), Some(indices)) =
-            (self.state.registry().get(guest_id), self.indices.get(guest_id))
-        else {
-            tracing::debug!(%path, "routed guest is not registered or not http-capable");
-            return Ok(not_found());
-        };
+        // Resolution only yields identities drawn from the registry, so the
+        // lookup is total.
+        let guest = self.state.registry().get(guest_id).expect("a capable guest is registered");
 
         // instantiate the selected guest fresh (instance-per-call)
         let store_data = self.state.store();
@@ -154,48 +168,50 @@ where
         let (sender, receiver) = oneshot::channel::<Result<hyper::Response<OutgoingBody>>>();
 
         let guest_task = tokio::spawn(async move {
-            let send_err = |sender: oneshot::Sender<_>, e: anyhow::Error| {
-                _ = sender.send(Err(e));
-            };
-
             let result = store
                 .run_concurrent(async |store| {
-                    // convert hyper::Request to wasi::Request
-                    let (parts, body) = request.into_parts();
-                    let body = body.map_err(ErrorCode::from_hyper_request_error);
-                    let http_req = http::Request::from_parts(parts, body);
-                    let (request, io) = wasi::Request::from_http(http_req);
+                    // Build the guest's response, routing every failure (a trap,
+                    // a guest-returned error, or a response-conversion error)
+                    // through `sender`. A single error path means the caller
+                    // never mistakes a real error for a panicked task.
+                    let built = async move {
+                        let (parts, body) = request.into_parts();
+                        let body = body.map_err(ErrorCode::from_hyper_request_error);
+                        let http_req = http::Request::from_parts(parts, body);
+                        let (request, io) = wasi::Request::from_http(http_req);
 
-                    // forward request to guest
-                    let wasi_resp = match service.handle(store, request).await? {
-                        Ok(resp) => resp,
-                        Err(e) => {
-                            send_err(sender, anyhow!("guest error: {e}"));
-                            return anyhow::Ok(());
-                        }
-                    };
-                    let resp = match store.with(|mut store| wasi_resp.into_http(&mut store, io)) {
-                        Ok(resp) => resp,
-                        Err(e) => {
-                            send_err(sender, anyhow!("converting guest response: {e}"));
-                            return anyhow::Ok(());
-                        }
-                    };
+                        let wasi_resp = service
+                            .handle(store, request)
+                            .await
+                            .map_err(anyhow::Error::from)
+                            .context("guest trap")?
+                            .map_err(|e| anyhow!("guest error: {e}"))?;
+                        store
+                            .with(|mut store| wasi_resp.into_http(&mut store, io))
+                            .map_err(|e| anyhow!("converting guest response: {e}"))
+                    }
+                    .await;
 
-                    // wrap body so we can detect when hyper finishes consuming it
-                    let (body_done_tx, body_done_rx) = oneshot::channel::<()>();
-                    let resp = resp.map(|body| {
-                        BodyDoneWrapper {
-                            body: body.map_err(Into::into),
-                            _tx: body_done_tx,
+                    match built {
+                        Ok(resp) => {
+                            // wrap the body so we can detect when hyper finishes
+                            // consuming it, then keep run_concurrent alive until
+                            // it does so the WASI pipe resources stay valid
+                            let (body_done_tx, body_done_rx) = oneshot::channel::<()>();
+                            let resp = resp.map(|body| {
+                                BodyDoneWrapper {
+                                    body: body.map_err(Into::into),
+                                    _tx: body_done_tx,
+                                }
+                                .boxed_unsync()
+                            });
+                            if sender.send(Ok(resp)).is_ok() {
+                                _ = body_done_rx.await;
+                            }
                         }
-                        .boxed_unsync()
-                    });
-
-                    // send the streaming response to hyper, then keep
-                    // run_concurrent alive until hyper finishes reading
-                    if sender.send(Ok(resp)).is_ok() {
-                        _ = body_done_rx.await;
+                        Err(error) => {
+                            _ = sender.send(Err(error));
+                        }
                     }
 
                     anyhow::Ok(())
@@ -204,15 +220,17 @@ where
                 .await;
 
             match result {
-                Err(e) => tracing::error!("run_concurrent error: {e:?}"),
-                Ok(Err(e)) => tracing::error!("guest error: {e:#}"),
                 Ok(Ok(())) => {}
+                Ok(Err(e)) => tracing::error!("http guest task error: {e:#}"),
+                Err(e) => tracing::error!("run_concurrent error: {e:?}"),
             }
         });
 
         // bound time-to-response (not the streaming body); cancel a hung guest
         let response = match timeout(self.state.options().guest_timeout, receiver).await {
-            Ok(result) => result.map_err(|_recv| anyhow!("guest task panicked"))??,
+            Ok(delivered) => {
+                delivered.map_err(|_canceled| anyhow!("guest produced no response"))??
+            }
             Err(_elapsed) => {
                 guest_task.abort();
                 tracing::error!(service = %self.component, "guest handler timed out");
@@ -227,8 +245,6 @@ where
 
 // Prepare the request for the guest.
 fn fix_request(mut request: hyper::Request<Incoming>) -> Result<hyper::Request<Incoming>> {
-    // let req_id = self.next_id.fetch_add(1, Ordering::Relaxed);
-
     // rebuild Uri with scheme and authority explicitly set so they are passed to the Guest
     let uri = request.uri_mut();
     let p_and_q = uri.path_and_query().map_or_else(|| PathAndQuery::from_static("/"), Clone::clone);
@@ -311,10 +327,22 @@ fn internal_error() -> hyper::Response<OutgoingBody> {
     let body = Full::new(Bytes::from(BODY)).map_err(Into::into).boxed_unsync();
 
     hyper::Response::builder()
-        .status(500)
+        .status(StatusCode::INTERNAL_SERVER_ERROR)
         .header("Content-Type", "text/html; charset=UTF-8")
         .body(body)
         .expect("should build internal error response")
+}
+
+/// A `400 Bad Request` for a request the server could not normalise (e.g. a
+/// missing `Host` header).
+fn bad_request() -> hyper::Response<OutgoingBody> {
+    let body = Full::new(Bytes::from_static(b"Bad Request")).map_err(Into::into).boxed_unsync();
+
+    hyper::Response::builder()
+        .status(StatusCode::BAD_REQUEST)
+        .header("Content-Type", "text/plain; charset=UTF-8")
+        .body(body)
+        .expect("should build bad request response")
 }
 
 /// A `404 Not Found` for a request that matched no route (or a trigger with no

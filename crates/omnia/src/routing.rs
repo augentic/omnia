@@ -13,9 +13,12 @@
 //! catch-all for its trigger, zero exporters is inert, and two or more exporters
 //! require explicit routes to disambiguate.
 
-use anyhow::{Result, bail};
+use std::collections::HashMap;
 
-use crate::registry::GuestId;
+use anyhow::{Result, bail};
+use wasmtime::component::InstancePre;
+
+use crate::registry::{GuestId, Registry};
 
 /// A per-trigger route table resolving a routing key to a target identity.
 pub trait Resolver {
@@ -220,6 +223,70 @@ impl<R: Resolver> Router<R> {
     }
 }
 
+/// Pairs a per-trigger [`Router`] with the typed binding indices of every
+/// capable guest.
+///
+/// A trigger server builds this once, then resolves a routing key straight to
+/// the indices it needs to instantiate. `I` is the handler-specific generated
+/// index type (e.g. `ServiceIndices` for HTTP); the floor never names it — it
+/// only stores it and hands it back.
+pub struct TriggerRouter<I, R> {
+    indices: HashMap<GuestId, I>,
+    router: Router<R>,
+}
+
+impl<I, R: Resolver> TriggerRouter<I, R> {
+    /// Probe every registered guest for the trigger's handler — a guest is
+    /// *capable* exactly when `probe` succeeds — then build the [`Router`] over
+    /// the capable set and the configured route `table`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if [`Router::build`] rejects the capable set and table:
+    /// a route names a guest that does not export the handler, or two or more
+    /// guests export it with no routes to disambiguate.
+    pub fn build<T, E, F>(
+        registry: &Registry<T>, trigger: &str, table: R, mut probe: F,
+    ) -> Result<Self>
+    where
+        F: FnMut(&InstancePre<T>) -> Result<I, E>,
+    {
+        let mut indices = HashMap::new();
+        let mut capable = Vec::new();
+        for guest in registry.guests() {
+            if let Ok(index) = probe(guest.instance_pre()) {
+                capable.push(guest.id().clone());
+                indices.insert(guest.id().clone(), index);
+            }
+        }
+        let router = Router::build(trigger, &capable, table)?;
+        Ok(Self { indices, router })
+    }
+
+    /// Returns `true` when no guest answers this trigger.
+    #[must_use]
+    pub const fn is_inert(&self) -> bool {
+        self.router.is_inert()
+    }
+
+    /// Resolve a routing `key` to the target identity and its binding indices,
+    /// or `None` on a miss or an inert trigger. A catch-all ignores the key.
+    #[must_use]
+    pub fn resolve(&self, key: &str) -> Option<(&GuestId, &I)> {
+        let id = self.router.resolve(key)?;
+        self.indices.get(id).map(|index| (id, index))
+    }
+
+    /// The sole-exporter catch-all target and its binding indices, if this
+    /// trigger fans an unkeyed call into a single exporter (used by websocket
+    /// events that carry no route).
+    #[must_use]
+    pub fn catch_all(&self) -> Option<(&GuestId, &I)> {
+        let id = self.router.catch_all()?;
+        self.indices.get(id).map(|index| (id, index))
+    }
+}
+
 /// Path-prefix match that respects segment boundaries: `/a` matches `/a` and
 /// `/a/b` but not `/ab`.
 fn path_has_prefix(path: &str, prefix: &str) -> bool {
@@ -328,5 +395,59 @@ mod tests {
         let error = Router::build("http", &[id("real")], routes)
             .expect_err("a route to a non-exporter must fail fast");
         assert!(error.to_string().contains("ghost"));
+    }
+
+    #[test]
+    fn trigger_router_catch_all() {
+        let router = Router::build("http", &[id("a")], HttpRoutes::default())
+            .expect("a sole exporter is the catch-all");
+        let tr = TriggerRouter {
+            indices: HashMap::from([(id("a"), 7u32)]),
+            router,
+        };
+        assert!(!tr.is_inert());
+        assert_eq!(tr.resolve("/anything"), Some((&id("a"), &7u32)));
+        assert_eq!(tr.catch_all(), Some((&id("a"), &7u32)));
+    }
+
+    #[test]
+    fn trigger_router_routed() {
+        let routes = HttpRoutes::new([("/a".to_owned(), id("a"))]);
+        let router = Router::build("http", &[id("a")], routes).expect("routes are valid");
+        let tr = TriggerRouter {
+            indices: HashMap::from([(id("a"), 1u32)]),
+            router,
+        };
+        assert_eq!(tr.resolve("/a"), Some((&id("a"), &1u32)));
+        assert_eq!(tr.resolve("/miss"), None);
+        // An explicit route table has no unkeyed catch-all.
+        assert_eq!(tr.catch_all(), None);
+    }
+
+    #[test]
+    fn trigger_router_inert() {
+        let router =
+            Router::build("http", &[], HttpRoutes::default()).expect("no exporters is inert");
+        let tr: TriggerRouter<u32, HttpRoutes> = TriggerRouter {
+            indices: HashMap::new(),
+            router,
+        };
+        assert!(tr.is_inert());
+        assert_eq!(tr.resolve("/anything"), None);
+        assert_eq!(tr.catch_all(), None);
+    }
+
+    #[test]
+    fn trigger_router_missing_index() {
+        // Defensive: the router resolves an identity whose indices entry is
+        // absent (never happens post-build, since both come from the same set).
+        let router = Router::build("http", &[id("a")], HttpRoutes::default())
+            .expect("a sole exporter is the catch-all");
+        let tr: TriggerRouter<u32, HttpRoutes> = TriggerRouter {
+            indices: HashMap::new(),
+            router,
+        };
+        assert_eq!(tr.resolve("/anything"), None);
+        assert_eq!(tr.catch_all(), None);
     }
 }

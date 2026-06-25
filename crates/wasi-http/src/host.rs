@@ -31,7 +31,7 @@ where
     R::StoreCtx: WasiHttpView,
 {
     async fn run(&self, state: &R) -> Result<()> {
-        server::serve(state).await
+        server::run(state).await
     }
 }
 
