@@ -4,19 +4,25 @@
 #[cfg(feature = "jit")]
 mod compile;
 mod create;
+mod dispatch;
 mod manifest;
 mod options;
 mod registry;
 mod routing;
 mod runtime;
+mod selector;
 mod source;
 mod traits;
+mod transport;
 
 use std::path::PathBuf;
 
 pub use clap::Parser;
 use clap::Subcommand;
 pub use omnia_runtime_macro::runtime;
+// Re-exported so the `runtime!` macro can generate the per-store
+// `WrpcView` implementation that host-mediated dynamic linking requires.
+pub use wrpc_wasmtime::{WrpcCtxView, WrpcView};
 #[doc(hidden)]
 pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
@@ -24,13 +30,16 @@ pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 #[cfg(feature = "jit")]
 pub use self::compile::*;
 pub use self::create::*;
+pub use self::dispatch::*;
 pub use self::manifest::*;
 pub use self::options::*;
 pub use self::registry::*;
 pub use self::routing::*;
 pub use self::runtime::*;
+pub use self::selector::*;
 pub use self::source::*;
 pub use self::traits::*;
+pub use self::transport::*;
 
 /// Command line interface for omnia.
 #[derive(Parser, PartialEq, Eq)]

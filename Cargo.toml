@@ -83,6 +83,7 @@ syn = { version = "2.0.118", features = ["full"] }
 time = "0.3.51"
 tokio = { version = "1.52.3", default-features = false }
 tokio-stream = { version = "0.1.18", features = ["sync"] }
+tokio-util = { version = "0.7.18", features = ["codec"] }
 toml = { version = "1.1.2", default-features = false, features = ["parse", "serde", "std"] }
 tower = "0.5.3"
 tracing = "0.1.44"
@@ -100,6 +101,16 @@ wasmtime-wasi-http = { version = "46.0.1", features = ["p3"] }
 wasmtime-wasi-io = "46.0.1"
 # Ensure wit-bindgen version matches what's used in wasip3
 wit-bindgen = { version = "0.58.0", features = ["async-spawn"] }
+# Host-mediated dynamic linking (Phase 2 of rfcs/guest-registry.md): wRPC is the
+# carrier on every leg. The wasmtime-46 line (`wrpc-wasmtime` 0.1 /
+# `wrpc-transport` 0.29) is not yet on crates.io, so pin a single reviewed git
+# rev with the same discipline as the wasmtime security pins above. wRPC's `main`
+# workspace tracks `wasmtime = 46` and `wit-bindgen = 0.58`, matching Omnia, so
+# the graph unifies to one wasmtime. `wrpc-wasmtime` pulls `wasmtime-wasi` with
+# the p2 feature while Omnia enables p3 — features are additive, so they coexist
+# on one linker.
+wrpc-transport = { git = "https://github.com/bytecodealliance/wrpc", rev = "b00e0f7f6266585e59c8881d138c43e939f2da3c" }
+wrpc-wasmtime = { git = "https://github.com/bytecodealliance/wrpc", rev = "b00e0f7f6266585e59c8881d138c43e939f2da3c" }
 
 # internally referenced crates
 omnia = { path = "crates/omnia", version = "0.35.0" }

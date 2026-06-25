@@ -113,6 +113,13 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                         self.registry.options().pool_metrics_interval,
                     );
 
+                    // Wire the serve side of any host-mediated links before
+                    // triggers fire, so a dispatched call always finds its
+                    // target's wRPC server. A no-op when no `link`s are declared.
+                    omnia::serve_links(self)
+                        .await
+                        .context("wiring host-mediated link serve side")?;
+
                     // Every server runs against the same `self`, so they share one
                     // registry and therefore one `Engine`. The pooling allocator's
                     // pool is per-`Engine`, so this keeps all per-request
@@ -150,6 +157,9 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                         limits: StoreLimitsBuilder::new()
                             .memory_size(self.registry.options().max_memory_bytes)
                             .build(),
+                        // Per-store wRPC view state for host-mediated dynamic
+                        // linking; inert unless the deployment declares `link`s.
+                        wrpc: omnia::WrpcState::new(),
                         #(#store_ctx_values,)*
                     }
                 }
@@ -160,6 +170,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                 pub table: ResourceTable,
                 pub wasi: WasiCtx,
                 pub limits: StoreLimits,
+                pub wrpc: omnia::WrpcState,
                 #(pub #store_ctx_fields,)*
             }
 
@@ -177,6 +188,16 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
             impl HasLimits for StoreCtx {
                 fn limits(&mut self) -> &mut StoreLimits {
                     &mut self.limits
+                }
+            }
+
+            /// wRPC view implementation backing host-mediated dynamic linking:
+            /// every store can encode/serve linked calls over the bound carrier.
+            impl omnia::WrpcView for StoreCtx {
+                type Invoke = omnia::LinkClient;
+
+                fn wrpc(&mut self) -> omnia::WrpcCtxView<'_, omnia::LinkClient> {
+                    self.wrpc.view(&mut self.table)
                 }
             }
 

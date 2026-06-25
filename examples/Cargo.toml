@@ -114,6 +114,21 @@ crate-type = ["cdylib"]
 name = "messaging"
 path = "messaging/runtime.rs"
 
+# Host-mediated dynamic linking proof (Phase 2 of rfcs/guest-registry.md).
+[[example]]
+name = "linking-responder-wasm"
+path = "linking/responder.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "linking-router-wasm"
+path = "linking/router.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "linking"
+path = "linking/runtime.rs"
+
 [[example]]
 name = "routing-a-wasm"
 path = "routing/guest_a.rs"

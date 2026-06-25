@@ -15,9 +15,10 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use wasmtime::Engine;
-use wasmtime::component::InstancePre;
+use wasmtime::component::{Component, InstancePre};
 
 use crate::RuntimeOptions;
+use crate::dispatch::DispatchHandle;
 use crate::routing::Routes;
 
 /// Opaque guest identity.
@@ -94,6 +95,13 @@ impl<T: 'static> Guest<T> {
             Target::Local(pre) => pre,
         }
     }
+
+    /// Returns the underlying component, used to introspect a guest's exported
+    /// interfaces when wiring the host-mediated link serve side.
+    #[must_use]
+    pub fn component(&self) -> &Component {
+        self.instance_pre().component()
+    }
 }
 
 /// One [`Engine`] + one `Linker`; many pre-instantiated guests keyed by
@@ -112,6 +120,7 @@ pub struct Registry<T: 'static> {
     guests: HashMap<GuestId, Guest<T>>,
     default: GuestId,
     routes: Routes,
+    dispatch: Arc<DispatchHandle>,
 }
 
 impl<T: 'static> Registry<T> {
@@ -125,7 +134,7 @@ impl<T: 'static> Registry<T> {
     /// registered guests, or if a route targets a guest that is not registered.
     pub fn new(
         engine: Engine, options: RuntimeOptions, guests: HashMap<GuestId, Guest<T>>,
-        default: GuestId, routes: Routes,
+        default: GuestId, routes: Routes, dispatch: Arc<DispatchHandle>,
     ) -> Result<Self> {
         if guests.is_empty() {
             bail!("cannot build a guest registry with no guests");
@@ -144,6 +153,7 @@ impl<T: 'static> Registry<T> {
             guests,
             default,
             routes,
+            dispatch,
         })
     }
 
@@ -180,6 +190,13 @@ impl<T: 'static> Registry<T> {
         &self.routes
     }
 
+    /// Returns the shared host-mediated dynamic-linking dispatch handle (the
+    /// selector strategy, link allow-list union, and bound transport).
+    #[must_use]
+    pub const fn dispatch(&self) -> &Arc<DispatchHandle> {
+        &self.dispatch
+    }
+
     /// Returns the default guest — the entry a trigger resolves to when it
     /// carries no identity of its own (e.g. the CLI / single-file shorthand).
     ///
@@ -207,9 +224,12 @@ impl<T: 'static> Registry<T> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use wasmtime::{Config, Engine};
 
     use super::*;
+    use crate::selector::FirstArgSelector;
 
     #[test]
     fn guest_id() {
@@ -226,9 +246,16 @@ mod tests {
         let engine = Engine::new(&Config::from(&options)).expect("engine should build");
         // An empty map never constructs a `Guest`, so `T` is unconstrained here.
         let guests: HashMap<GuestId, Guest<()>> = HashMap::new();
+        let dispatch = DispatchHandle::new(Arc::new(FirstArgSelector), BTreeSet::new(), 8);
 
-        let result =
-            Registry::new(engine, options, guests, GuestId::from("default"), Routes::default());
+        let result = Registry::new(
+            engine,
+            options,
+            guests,
+            GuestId::from("default"),
+            Routes::default(),
+            dispatch,
+        );
         assert!(result.is_err(), "an empty registry must be rejected");
     }
 }

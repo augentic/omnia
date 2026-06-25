@@ -1,8 +1,9 @@
 //! # WebAssembly Initiator
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::env;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use omnia_otel::Telemetry;
@@ -10,10 +11,13 @@ use tracing::instrument;
 use wasmtime::component::Linker;
 use wasmtime::{Config, Engine};
 use wasmtime_wasi::WasiView;
+use wrpc_wasmtime::WrpcView;
 
+use crate::dispatch::{DispatchHandle, link_dynamic};
 use crate::manifest::{Manifest, RouteSpec, SourceSpec};
 use crate::registry::{Guest, GuestId, Registry};
 use crate::routing::{HttpRoutes, Routes, TopicRoutes};
+use crate::selector::FirstArgSelector;
 use crate::source::{EmbeddedSource, FileSource, GuestSource, LoadedGuest};
 use crate::{Host, RuntimeOptions};
 
@@ -82,6 +86,8 @@ pub async fn create<T: WasiView + 'static>(wasm: &Path) -> Result<Compiled<T>> {
         // The single-file shorthand carries no routes: its sole guest is the
         // catch-all for every trigger it can answer.
         routes: Routes::default(),
+        // ...and no host-mediated links: one guest has nobody to dispatch to.
+        link_interfaces: BTreeSet::new(),
     })
 }
 
@@ -137,6 +143,16 @@ pub async fn create_from_manifest<T: WasiView + 'static>(
 
     let routes = route_tables(&parsed.route);
 
+    // Union the per-guest `link` allow-lists: the linker is shared, so an
+    // interface dispatched for one guest is wired once for all (§4.4). The
+    // floor keeps these as opaque interface strings.
+    let link_interfaces: BTreeSet<Box<str>> = parsed
+        .guests
+        .iter()
+        .flat_map(|entry| entry.link.iter())
+        .map(|interface| Box::from(interface.as_str()))
+        .collect();
+
     tracing::info!("runtime initialized from manifest");
 
     Ok(Compiled {
@@ -146,6 +162,7 @@ pub async fn create_from_manifest<T: WasiView + 'static>(
         guests,
         default,
         routes,
+        link_interfaces,
     })
 }
 
@@ -194,6 +211,9 @@ pub struct Compiled<T: WasiView + 'static> {
     guests: Vec<LoadedGuest>,
     default: GuestId,
     routes: Routes,
+    /// Union of the per-guest `link` allow-lists — the host-mediated interfaces
+    /// to polyfill onto the shared linker (empty for the single-file shorthand).
+    link_interfaces: BTreeSet<Box<str>>,
 }
 
 impl<T: WasiView> Compiled<T> {
@@ -218,16 +238,35 @@ impl<T: WasiView> Compiled<T> {
     /// Pre-instantiation happens once, here, after all hosts are linked; per call
     /// only a fresh instantiate on a new store remains.
     ///
+    /// Will fail if a component cannot be pre-instantiated (e.g. an import is
+    /// neither host-satisfied nor allow-listed for host-mediated linking), or if
+    /// the registry cannot be assembled.
+    ///
     /// # Errors
     ///
-    /// Will fail if a component cannot be pre-instantiated (e.g. an import is
-    /// neither host-satisfied nor otherwise provided), or if the registry cannot
-    /// be assembled.
-    pub fn build_registry(&self) -> Result<Registry<T>> {
+    /// Returns an error if host-mediated imports cannot be polyfilled, a
+    /// component cannot be pre-instantiated, or the registry cannot be assembled.
+    pub fn build_registry(&self) -> Result<Registry<T>>
+    where
+        T: WrpcView,
+    {
+        // The selector strategy is fixed to the floor default; consumers project
+        // their identity scheme onto the opaque `GuestId` it returns.
+        let dispatch = DispatchHandle::new(
+            Arc::new(FirstArgSelector),
+            self.link_interfaces.clone(),
+            self.options.max_dispatch_depth,
+        );
+
+        // Polyfill host-mediated imports onto a private clone of the shared
+        // linker *before* pre-instantiation: an import that is neither
+        // host-satisfied nor allow-listed then fails fast at `instantiate_pre`.
+        let mut linker = self.linker.clone();
+        link_dynamic(&self.engine, &mut linker, &self.guests, &dispatch)?;
+
         let mut guests = HashMap::with_capacity(self.guests.len());
         for loaded in &self.guests {
-            let instance_pre = self
-                .linker
+            let instance_pre = linker
                 .instantiate_pre(&loaded.component)
                 .map_err(anyhow::Error::from)
                 .with_context(|| format!("pre-instantiating guest `{}`", loaded.id))?;
@@ -240,6 +279,7 @@ impl<T: WasiView> Compiled<T> {
             guests,
             self.default.clone(),
             self.routes.clone(),
+            dispatch,
         )
     }
 }

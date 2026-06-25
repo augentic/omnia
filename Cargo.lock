@@ -1233,7 +1233,7 @@ dependencies = [
  "cfg-if",
  "js-sys",
  "libc",
- "wasi",
+ "wasi 0.11.1+wasi-snapshot-preview1",
  "wasm-bindgen",
 ]
 
@@ -1766,6 +1766,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c83bff1d572d6b9aeef67ddfc8448e4a3737909cb28e81f97c791b9018703e52"
 
 [[package]]
+name = "leb128-tokio"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68e94e2f8143ae63a07c670a27f2fc42a333293c249566f8d4cd6609689656bb"
+dependencies = [
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "leb128fmt"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1920,7 +1931,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "02bd0af71c67b473010cbbc60715ee815645a4dc942899111f494b4b737d6fda"
 dependencies = [
  "libc",
- "wasi",
+ "wasi 0.11.1+wasi-snapshot-preview1",
  "windows-sys 0.61.2",
 ]
 
@@ -2042,6 +2053,7 @@ name = "omnia"
 version = "0.35.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "cfg-if",
  "clap",
  "fromenv",
@@ -2050,10 +2062,13 @@ dependencies = [
  "omnia-runtime-macro",
  "serde",
  "tokio",
+ "tokio-util",
  "toml",
  "tracing",
  "wasmtime",
  "wasmtime-wasi",
+ "wrpc-transport",
+ "wrpc-wasmtime",
 ]
 
 [[package]]
@@ -3751,6 +3766,7 @@ checksum = "9ae9cec805b01e8fc3fd2fe289f89149a9b66dd16786abd8b19cfa7b48cb0098"
 dependencies = [
  "bytes",
  "futures-core",
+ "futures-io",
  "futures-sink",
  "pin-project-lite",
  "tokio",
@@ -4052,6 +4068,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "utf8-tokio"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "692aa1d5479fe22dac6ce581e8c6e83a9f8d90238250c1036b0139019a783a87"
+dependencies = [
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "utf8_iter"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4118,6 +4144,15 @@ name = "wasi"
 version = "0.11.1+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
+
+[[package]]
+name = "wasi"
+version = "0.14.7+wasi-0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "883478de20367e224c0090af9cf5f9fa85bed63a95c1abf3afc5c083ebc06e8c"
+dependencies = [
+ "wasip2",
+]
 
 [[package]]
 name = "wasip2"
@@ -4216,6 +4251,19 @@ dependencies = [
  "indexmap",
  "wasm-encoder",
  "wasmparser",
+]
+
+[[package]]
+name = "wasm-tokio"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a89e5174a1312bd31d081a1dd6db8e48e2dc680b2988aba43befabb8459ea999"
+dependencies = [
+ "leb128-tokio",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "utf8-tokio",
 ]
 
 [[package]]
@@ -5046,6 +5094,51 @@ name = "writeable"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
+
+[[package]]
+name = "wrpc-introspect"
+version = "0.7.0"
+source = "git+https://github.com/bytecodealliance/wrpc?rev=b00e0f7f6266585e59c8881d138c43e939f2da3c#b00e0f7f6266585e59c8881d138c43e939f2da3c"
+dependencies = [
+ "wit-parser",
+]
+
+[[package]]
+name = "wrpc-transport"
+version = "0.29.0"
+source = "git+https://github.com/bytecodealliance/wrpc?rev=b00e0f7f6266585e59c8881d138c43e939f2da3c#b00e0f7f6266585e59c8881d138c43e939f2da3c"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "futures",
+ "pin-project-lite",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+ "wasi 0.14.7+wasi-0.2.4",
+ "wasm-tokio",
+]
+
+[[package]]
+name = "wrpc-wasmtime"
+version = "0.1.0"
+source = "git+https://github.com/bytecodealliance/wrpc?rev=b00e0f7f6266585e59c8881d138c43e939f2da3c#b00e0f7f6266585e59c8881d138c43e939f2da3c"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "futures",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "wasm-tokio",
+ "wasmtime",
+ "wasmtime-wasi",
+ "wit-parser",
+ "wrpc-introspect",
+ "wrpc-transport",
+]
 
 [[package]]
 name = "wyz"
