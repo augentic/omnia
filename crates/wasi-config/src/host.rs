@@ -29,7 +29,7 @@ where
     }
 }
 
-impl<S> Server<S> for WasiConfig where S: Runtime {}
+impl<R> Server<R> for WasiConfig where R: Runtime {}
 
 /// A trait which provides internal WASI Config state.
 ///

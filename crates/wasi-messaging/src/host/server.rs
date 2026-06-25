@@ -12,10 +12,10 @@ use crate::host::generated::MessagingRequestReplyIndices;
 use crate::host::resource::{MessageProxy, Subscriptions};
 
 #[instrument("messaging-server", skip(state))]
-pub async fn run<S>(state: &S) -> Result<()>
+pub async fn run<R>(state: &R) -> Result<()>
 where
-    S: Runtime,
-    S::StoreCtx: WasiMessagingView,
+    R: Runtime,
+    R::StoreCtx: WasiMessagingView,
 {
     let component = env::var("COMPONENT").unwrap_or_else(|_| "unknown".into());
     tracing::info!("starting messaging server for: {component}");
@@ -67,21 +67,21 @@ where
 }
 
 #[derive(Clone)]
-struct Handler<S>
+struct Handler<R>
 where
-    S: Runtime,
-    S::StoreCtx: WasiMessagingView,
+    R: Runtime,
+    R::StoreCtx: WasiMessagingView,
 {
-    state: S,
+    state: R,
     component: String,
     indices: Arc<HashMap<GuestId, MessagingRequestReplyIndices>>,
     router: Arc<Router<TopicRoutes>>,
 }
 
-impl<S> Handler<S>
+impl<R> Handler<R>
 where
-    S: Runtime,
-    S::StoreCtx: WasiMessagingView,
+    R: Runtime,
+    R::StoreCtx: WasiMessagingView,
 {
     // Forward message to the wasm guest.
     async fn handle(&self, message: MessageProxy) -> Result<()> {

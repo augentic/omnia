@@ -54,7 +54,7 @@ where
     }
 }
 
-impl<S: Runtime> Server<S> for WasiOtel {}
+impl<R: Runtime> Server<R> for WasiOtel {}
 
 /// A trait which provides internal WASI OpenTelemetry state.
 ///

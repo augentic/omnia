@@ -68,12 +68,12 @@ where
     }
 }
 
-impl<S> Server<S> for WasiWebSocket
+impl<R> Server<R> for WasiWebSocket
 where
-    S: Runtime,
-    S::StoreCtx: WebSocketView,
+    R: Runtime,
+    R::StoreCtx: WebSocketView,
 {
-    async fn run(&self, state: &S) -> anyhow::Result<()> {
+    async fn run(&self, state: &R) -> anyhow::Result<()> {
         server::run(state).await
     }
 }

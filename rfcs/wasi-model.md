@@ -35,7 +35,7 @@ Layer 2 adds the real backends strictly behind the trait, so the floor never lea
 
 ## 2. Where this lands in the current code
 
-`wasi-model` is a new host crate that follows the established `omnia-wasi-*` shape exactly. The closest templates are `crates/wasi-keyvalue` and `crates/wasi-blobstore` (the latter shows the current `Runtime` trait bound; `wasi-keyvalue` still uses the pre-rename `State` and follows once that migration lands). The shared shape is: a `WasiX` host struct implementing `HasData`, `Host<T>` (`add_to_linker`), and `Server<S>` (a no-op `run` for non-server hosts); a `WasiXView` trait the `Linker<T>` type implements; a `WasiXCtxView<'a>` carrying `ctx: &mut dyn WasiXCtx` + `table`; a `WasiXCtx` trait the *backend* implements; an `XDefault` backend implementing `Backend` (env-driven `connect`) + `WasiXCtx`; and an `omnia_wasi_view!` macro the `runtime!` expansion calls.
+`wasi-model` is a new host crate that follows the established `omnia-wasi-*` shape exactly. The closest templates are `crates/wasi-keyvalue` and `crates/wasi-blobstore` (the latter shows the current `Runtime` trait bound; `wasi-keyvalue` still uses the pre-rename `Runtime` and follows once that migration lands). The shared shape is: a `WasiX` host struct implementing `HasData`, `Host<T>` (`add_to_linker`), and `Server<R>` (a no-op `run` for non-server hosts); a `WasiXView` trait the `Linker<T>` type implements; a `WasiXCtxView<'a>` carrying `ctx: &mut dyn WasiXCtx` + `table`; a `WasiXCtx` trait the *backend* implements; an `XDefault` backend implementing `Backend` (env-driven `connect`) + `WasiXCtx`; and an `omnia_wasi_view!` macro the `runtime!` expansion calls.
 
 ```109:164:crates/wasi-blobstore/src/host.rs
 /// Host-side service for `wasi:blobstore`.
@@ -53,7 +53,7 @@ where
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> { /* generated add_to_linker */ }
 }
 
-impl<S> Server<S> for WasiBlobstore where S: Runtime {}   // non-server: default no-op `run`
+impl<R> Server<R> for WasiBlobstore where R: Runtime {}   // non-server: default no-op `run`
 
 /// Implemented by the backend (an in-memory store, a Redis store, …).
 pub trait WasiBlobstoreCtx: Debug + Send + Sync + 'static {
@@ -192,7 +192,7 @@ where
     }
 }
 
-impl<S> Server<S> for WasiModel where S: Runtime {}   // non-server: default no-op `run`
+impl<R> Server<R> for WasiModel where R: Runtime {}   // non-server: default no-op `run`
 
 /// Implemented by `StoreCtx` (the `Linker<T>` type), produced by `omnia_wasi_view!`.
 pub trait WasiModelView: Send {

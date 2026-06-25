@@ -62,7 +62,7 @@ where
     }
 }
 
-impl<S> Server<S> for WasiSql where S: Runtime {}
+impl<R> Server<R> for WasiSql where R: Runtime {}
 
 /// A trait which provides internal WASI SQL state.
 ///

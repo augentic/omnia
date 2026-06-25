@@ -125,7 +125,7 @@ where
     }
 }
 
-impl<S> Server<S> for WasiBlobstore where S: Runtime {}
+impl<R> Server<R> for WasiBlobstore where R: Runtime {}
 
 /// A trait which provides internal WASI Blobstore state.
 ///

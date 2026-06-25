@@ -59,7 +59,7 @@ where
     }
 }
 
-impl<S> Server<S> for WasiIdentity where S: Runtime {}
+impl<R> Server<R> for WasiIdentity where R: Runtime {}
 
 /// A trait which provides internal WASI Identity state.
 ///

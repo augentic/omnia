@@ -80,7 +80,7 @@ where
     }
 }
 
-impl<S> Server<S> for WasiJsonDb where S: Runtime {}
+impl<R> Server<R> for WasiJsonDb where R: Runtime {}
 
 /// Mutable view into JSON DB state for the linker.
 pub trait WasiJsonDbView: Send {

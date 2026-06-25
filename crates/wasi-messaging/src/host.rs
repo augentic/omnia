@@ -70,12 +70,12 @@ where
     }
 }
 
-impl<S> Server<S> for WasiMessaging
+impl<R> Server<R> for WasiMessaging
 where
-    S: Runtime,
-    S::StoreCtx: WasiMessagingView,
+    R: Runtime,
+    R::StoreCtx: WasiMessagingView,
 {
-    async fn run(&self, state: &S) -> anyhow::Result<()> {
+    async fn run(&self, state: &R) -> anyhow::Result<()> {
         server::run(state).await
     }
 }

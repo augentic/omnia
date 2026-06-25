@@ -60,7 +60,7 @@ Today the relevant flow is (all in `crates/omnia` + `crates/runtime-macro`):
 
 - `omnia::create(&wasm)` builds one `Engine`, one `Linker<T>`, loads one `Component`, returns `Compiled<T>`
 (`crates/omnia/src/create.rs`).
-- The `omnia::runtime! { hosts: { … } }` macro generates a `Context` that implements the `State` trait
+- The `omnia::runtime! { hosts: { … } }` macro generates a `Context` that implements the `Runtime` trait
 (`crates/runtime-macro/src/expand.rs`) — which this design renames to `Runtime` (§3.5) and refers to as
 `Runtime` from here on. It exposes exactly one `instance_pre()` and the per-call `store()` /
 `build_store()` / `instantiate()` helpers (`crates/omnia/src/traits.rs`).
@@ -212,12 +212,12 @@ startup error ("trigger `http` has 2 capable guests (`a`, `b`) but no routes"), 
 so a typo'd prefix surfaces as a 404 rather than silently hitting the sole guest. A guest that no route
 names (and that is not a sole exporter) is then reachable only by host-mediated linking (§4).
 
-### 3.5 The `Runtime` trait (renamed from `State`)
+### 3.5 The `Runtime` trait (renamed from `Runtime`)
 
-The trait the generated `Context` implements (`crates/omnia/src/traits.rs`) is renamed `State` →
-`Runtime`. `State` was misleading: this trait is the long-lived, `Clone` handle that owns the registry,
+The trait the generated `Context` implements (`crates/omnia/src/traits.rs`) is renamed `Runtime` →
+`Runtime`. `Runtime` was misleading: this trait is the long-lived, `Clone` handle that owns the registry,
 options, and instantiation helpers — *not* per-`Store` state. The actual per-store state is its `StoreCtx`
-associated type, so keeping the outer trait called `State` put two different "states" in one definition.
+associated type, so keeping the outer trait called `Runtime` put two different "states" in one definition.
 `Runtime` names what it is — the host runtime context every trigger server (`Server::run`) is handed to
 resolve and instantiate a guest.
 
@@ -242,9 +242,9 @@ pub trait Runtime: Clone + Send + Sync + 'static {
 ```
 
 Omnia is pre-1.0, so the refactor breaks the trait — both the rename and the new registry method — cleanly
-rather than carrying permanent shims (§6.4). The blast radius is mechanical: the `Server<S: State>` bound
-becomes `Server<S: Runtime>`, every `wasi-*` server crate's `S: State` bound and the macro's generated
-`use omnia::{… State}` import follow, with no behaviour change. `instance_pre()` is a temporary migration
+rather than carrying permanent shims (§6.4). The blast radius is mechanical: the `Server<R: Runtime>` bound
+becomes `Server<R: Runtime>`, every `wasi-*` server crate's `R: Runtime` bound and the macro's generated
+`use omnia::{… Runtime}` import follow, with no behaviour change. `instance_pre()` is a temporary migration
 aid — it lets the trigger servers and examples compile while they move to identity-based selection one at a
 time — and is removed once the migration completes.
 
@@ -546,7 +546,7 @@ enforced generically on the dynamic path by rejecting a `Val::Resource` crossing
 
 ### 6.4 Breaking changes and the explicit link allow-list
 
-Omnia is pre-1.0 (`0.35.0`), so the refactor breaks the public `Runtime` trait (renamed from `State`,
+Omnia is pre-1.0 (`0.35.0`), so the refactor breaks the public `Runtime` trait (renamed from `Runtime`,
 §3.5) and the `runtime!` macro surface cleanly rather than carrying permanent compatibility shims; the
 `instance_pre()` aid in §3.5 is temporary and removed after migration.
 

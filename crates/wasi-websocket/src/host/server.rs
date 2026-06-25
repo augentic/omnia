@@ -12,10 +12,10 @@ use crate::host::generated::DuplexIndices;
 use crate::host::resource::{EventProxy, Events};
 
 #[instrument("websocket-server", skip(state))]
-pub async fn run<S>(state: &S) -> Result<()>
+pub async fn run<R>(state: &R) -> Result<()>
 where
-    S: Runtime,
-    S::StoreCtx: WebSocketView,
+    R: Runtime,
+    R::StoreCtx: WebSocketView,
 {
     let component = env::var("COMPONENT").unwrap_or_else(|_| "unknown".into());
     tracing::info!("starting websocket server for: {component}");
@@ -66,21 +66,21 @@ where
 }
 
 #[derive(Clone)]
-struct Handler<S>
+struct Handler<R>
 where
-    S: Runtime,
-    S::StoreCtx: WebSocketView,
+    R: Runtime,
+    R::StoreCtx: WebSocketView,
 {
-    state: S,
+    state: R,
     component: String,
     indices: Arc<HashMap<GuestId, DuplexIndices>>,
     router: Arc<Router<TopicRoutes>>,
 }
 
-impl<S> Handler<S>
+impl<R> Handler<R>
 where
-    S: Runtime,
-    S::StoreCtx: WebSocketView,
+    R: Runtime,
+    R::StoreCtx: WebSocketView,
 {
     /// Forward event to the wasm guest.
     async fn handle(&self, event: EventProxy) -> Result<()> {

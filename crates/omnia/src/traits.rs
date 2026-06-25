@@ -114,13 +114,13 @@ pub trait Host<T>: Debug + Sync + Send {
 
 /// Implemented by WASI hosts that are servers in order to allow the runtime to
 /// start them.
-pub trait Server<S: Runtime>: Debug + Sync + Send {
+pub trait Server<R: Runtime>: Debug + Sync + Send {
     /// Start the service.
     ///
     /// This is typically implemented by services that instantiate (or run)
     /// wasm components.
     #[allow(unused_variables)]
-    fn run(&self, state: &S) -> impl Future<Output = Result<()>> {
+    fn run(&self, state: &R) -> impl Future<Output = Result<()>> {
         async { Ok(()) }
     }
 }

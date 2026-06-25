@@ -62,7 +62,7 @@ where
     }
 }
 
-impl<S> Server<S> for WasiKeyValue where S: Runtime {}
+impl<R> Server<R> for WasiKeyValue where R: Runtime {}
 
 /// A trait which provides internal WASI Key-Value state.
 ///

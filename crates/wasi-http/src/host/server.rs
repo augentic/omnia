@@ -32,10 +32,10 @@ type OutgoingBody = UnsyncBoxBody<Bytes, anyhow::Error>;
 
 const HTTP_ADDR: &str = "0.0.0.0:8080";
 
-pub async fn serve<S>(state: &S) -> Result<()>
+pub async fn serve<R>(state: &R) -> Result<()>
 where
-    S: Runtime,
-    S::StoreCtx: WasiHttpView,
+    R: Runtime,
+    R::StoreCtx: WasiHttpView,
 {
     let component = env::var("COMPONENT").unwrap_or_else(|_| "unknown".into());
     let addr = env::var("HTTP_ADDR").unwrap_or_else(|_| HTTP_ADDR.into());
@@ -106,21 +106,21 @@ where
 }
 
 #[derive(Clone)]
-struct Handler<S>
+struct Handler<R>
 where
-    S: Runtime,
-    S::StoreCtx: WasiHttpView,
+    R: Runtime,
+    R::StoreCtx: WasiHttpView,
 {
-    state: Arc<S>,
+    state: Arc<R>,
     component: String,
     indices: Arc<HashMap<GuestId, ServiceIndices>>,
     router: Arc<Router<HttpRoutes>>,
 }
 
-impl<S> Handler<S>
+impl<R> Handler<R>
 where
-    S: Runtime,
-    S::StoreCtx: WasiHttpView,
+    R: Runtime,
+    R::StoreCtx: WasiHttpView,
 {
     // Forward request to the wasm Guest.
     async fn handle(

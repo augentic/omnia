@@ -330,10 +330,10 @@ fn contains_resource(value: &Val) -> bool {
 /// # Errors
 ///
 /// Returns an error if a guest's export cannot be served over the carrier.
-pub async fn serve_links<S>(state: &S) -> Result<()>
+pub async fn serve_links<R>(state: &R) -> Result<()>
 where
-    S: Runtime,
-    S::StoreCtx: WasiView + WrpcView + 'static,
+    R: Runtime,
+    R::StoreCtx: WasiView + WrpcView + 'static,
 {
     let registry = state.registry();
     let handle = registry.dispatch();

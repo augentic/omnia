@@ -13,7 +13,7 @@ use wasmtime::Engine;
 /// Spawn a detached background task that drives epoch interruption.
 ///
 /// Calls [`Engine::increment_epoch`] every `tick`. Together with the per-store
-/// epoch deadline installed in `State::build_store`, this is what lets a
+/// epoch deadline installed in `Runtime::build_store`, this is what lets a
 /// CPU-bound guest periodically yield to the async executor so the wall-clock
 /// timeout wrapped around each invocation can fire.
 ///

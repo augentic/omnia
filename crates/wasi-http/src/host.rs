@@ -25,12 +25,12 @@ where
     }
 }
 
-impl<S> Server<S> for WasiHttp
+impl<R> Server<R> for WasiHttp
 where
-    S: Runtime,
-    S::StoreCtx: WasiHttpView,
+    R: Runtime,
+    R::StoreCtx: WasiHttpView,
 {
-    async fn run(&self, state: &S) -> Result<()> {
+    async fn run(&self, state: &R) -> Result<()> {
         server::serve(state).await
     }
 }

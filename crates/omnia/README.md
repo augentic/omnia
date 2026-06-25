@@ -35,13 +35,13 @@ async fn main() -> anyhow::Result<()> {
 
 The runtime is built around a set of traits that allow services to be plugged in:
 
-| Trait | Purpose |
-| ----- | ------- |
-| `Host<T>` | Links a WASI interface (e.g., `wasi:http`) into the `wasmtime::Linker`. |
-| `Server<S>` | Starts a server (e.g., HTTP listener, NATS subscriber) to handle incoming requests. |
-| `Backend` | Connects to an external service (e.g., Redis, Postgres) during startup. |
-| `State` | Manages per-request state and provides access to the component instance. |
-| `FromEnv` | Configures backend connections from environment variables. |
+| Trait       | Purpose                                                                             |
+| ----------- | ----------------------------------------------------------------------------------- |
+| `Host<T>`   | Links a WASI interface (e.g., `wasi:http`) into the `wasmtime::Linker`.             |
+| `Server<R>` | Starts a server (e.g., HTTP listener, NATS subscriber) to handle incoming requests. |
+| `Backend`   | Connects to an external service (e.g., Redis, Postgres) during startup.             |
+| `Runtime`   | Manages per-request state and provides access to the component instance.            |
+| `FromEnv`   | Configures backend connections from environment variables.                          |
 
 ## Features
 

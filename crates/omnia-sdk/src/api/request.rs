@@ -14,7 +14,7 @@
 //! The type system ensures requests are properly configured at compile time,
 //! preventing execution without required components (owner, provider, request).
 //!
-//! ### Valid State Transitions
+//! ### Valid Runtime Transitions
 //!
 //! ```text
 //! RequestHandler<NoRequest, NoOwner, NoProvider>
@@ -35,7 +35,7 @@
 //! builder pattern:
 //!
 //! ```rust,ignore
-//! 
+//!
 //! // Simple request - await directly (IntoFuture)
 //! let response = MyRequest::handler(bytes)?
 //!     .owner("alice")
@@ -95,7 +95,7 @@
 //!
 //! The typestate pattern ensures these errors are caught at compile time:
 //! ```rust,compile_fail,ignore
-//! 
+//!
 //! // ❌ Cannot handle without all required fields
 //! RequestHandler::new().handle().await?;  // Won't compile!
 //!

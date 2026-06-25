@@ -59,7 +59,7 @@ where
     }
 }
 
-impl<S> Server<S> for WasiVault where S: Runtime {}
+impl<R> Server<R> for WasiVault where R: Runtime {}
 
 /// A trait which provides internal WASI Vault state.
 ///
