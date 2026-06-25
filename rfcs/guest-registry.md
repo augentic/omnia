@@ -178,7 +178,7 @@ table** (`/target/omnia/… → target:omnia`) built from the manifest's `[[rout
 Programmatic routing (compute identity from path/host/headers, mapping held in `wasi:keyvalue`) is
 deferred. Only guests that *export* `wasi:http/incoming-handler` are routable — the registry records this
 capability per guest at registration.
-- **Messaging / WebSocket** — same: derive identity from subject/route (manifest `[[route.messaging]]` /
+- **Messaging / WebSocket** — same: derive identity from topic/route (manifest `[[route.messaging]]` /
 `[[route.websocket]]`), resolve, dispatch.
 
 The change to `Server::run` (e.g. `crates/wasi-http/src/host/server.rs`): instead of one
@@ -324,7 +324,7 @@ prefix = "/mcp"                        # longest-prefix wins
 guest  = "mcp"
 
 [[route.messaging]]
-subject = "specify.build.>"
+topic = "specify.build.>"
 guest   = "workflow"
 
 # --- Transport: how host-mediated calls travel ------------------------------
@@ -588,7 +588,7 @@ with a default entry; migrate every trigger server (`wasi-http`, `wasi-messaging
 selection; remove the temporary `instance_pre()` shim once migrated (§3.5); all existing examples stay
 green. No new dependencies — independent of wRPC.
 - **Phase 1b — Inbound routing.** Per-trigger route tables from the manifest's `[[route.*]]` entries
-(longest-prefix for `[[route.http]]`, subject/route match for `[[route.messaging]]` and
+(longest-prefix for `[[route.http]]`, topic/route match for `[[route.messaging]]` and
 `[[route.websocket]]`) + per-trigger handler-export capability detection (`ServiceIndices` for HTTP,
 `MessagingRequestReplyIndices` for messaging, `DuplexIndices` for websocket) driving the
 capability-based default routing of §3.4; embedded guest source. CLI needs no route table — it names its

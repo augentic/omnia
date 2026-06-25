@@ -1,6 +1,7 @@
 //! #HTTP Server
 
 use std::clone::Clone;
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::env;
 use std::pin::Pin;
@@ -17,7 +18,7 @@ use hyper::body::{Body, Frame, Incoming, SizeHint};
 use hyper::header::{FORWARDED, HOST};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use omnia::Runtime;
+use omnia::{GuestId, HttpRouteTable, Router, Runtime};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
@@ -42,12 +43,24 @@ where
     let listener = TcpListener::bind(&addr).await?;
     tracing::info!("{component} http server listening on: {addr}");
 
-    // Resolve the guest this trigger serves (the default registry entry); its
-    // typed export indices are built once and reused across requests.
+    // Capability probe: a guest exports `wasi:http/incoming-handler` exactly
+    // when its typed `ServiceIndices` resolve. Build the per-guest indices once
+    // and the router that selects among them.
+    let mut indices = HashMap::new();
+    let mut capable = Vec::new();
+    for guest in state.registry().guests() {
+        if let Ok(service) = ServiceIndices::new(guest.instance_pre()) {
+            capable.push(guest.id().clone());
+            indices.insert(guest.id().clone(), service);
+        }
+    }
+    let router = Router::build("http", &capable, state.registry().routes().http().clone())?;
+
     let handler = Handler {
         state: Arc::new(state.clone()),
         component,
-        indices: ServiceIndices::new(state.registry().default_guest().instance_pre())?,
+        indices: Arc::new(indices),
+        router: Arc::new(router),
     };
 
     // listen for requests until terminated
@@ -100,7 +113,8 @@ where
 {
     state: Arc<S>,
     component: String,
-    indices: ServiceIndices,
+    indices: Arc<HashMap<GuestId, ServiceIndices>>,
+    router: Arc<Router<HttpRouteTable>>,
 }
 
 impl<S> Handler<S>
@@ -117,12 +131,25 @@ where
         // prepare wasmtime http request and response
         let request = fix_request(request).context("preparing request")?;
 
-        // instantiate the guest and get the proxy
+        // Resolve the guest by request path; an unmatched path (or an inert
+        // trigger with no http-capable guest) is a 404, not a guest invocation.
+        let path = request.uri().path().to_owned();
+        let Some(guest_id) = self.router.resolve(&path) else {
+            tracing::debug!(%path, "no route matched; returning 404");
+            return Ok(not_found());
+        };
+        let (Some(guest), Some(indices)) =
+            (self.state.registry().get(guest_id), self.indices.get(guest_id))
+        else {
+            tracing::debug!(%path, "routed guest is not registered or not http-capable");
+            return Ok(not_found());
+        };
+
+        // instantiate the selected guest fresh (instance-per-call)
         let store_data = self.state.store();
         let mut store = self.state.build_store(store_data);
-        let instance_pre = self.state.registry().default_guest().instance_pre();
-        let instance = self.state.instantiate(instance_pre, &mut store).await?;
-        let service = self.indices.load(&mut store, &instance)?;
+        let instance = self.state.instantiate(guest.instance_pre(), &mut store).await?;
+        let service = indices.load(&mut store, &instance)?;
 
         let (sender, receiver) = oneshot::channel::<Result<hyper::Response<OutgoingBody>>>();
 
@@ -288,4 +315,16 @@ fn internal_error() -> hyper::Response<OutgoingBody> {
         .header("Content-Type", "text/html; charset=UTF-8")
         .body(body)
         .expect("should build internal error response")
+}
+
+/// A `404 Not Found` for a request that matched no route (or a trigger with no
+/// http-capable guest).
+fn not_found() -> hyper::Response<OutgoingBody> {
+    let body = Full::new(Bytes::from_static(b"Not Found")).map_err(Into::into).boxed_unsync();
+
+    hyper::Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .header("Content-Type", "text/plain; charset=UTF-8")
+        .body(body)
+        .expect("should build not found response")
 }

@@ -11,8 +11,9 @@
 //! concrete file; the floor stays domain-agnostic.
 //!
 //! Phase 1 consumes the `[[guest]]` population (file sources) and parses the
-//! `[transport]` section; `link` allow-lists and `[[route.*]]` tables are
-//! accepted (so a richer file still loads) but acted on in later phases.
+//! `[transport]` section; Phase 1b adds the `[[route.*]]` tables. `link`
+//! allow-lists are accepted (so a richer file still loads) but wired into the
+//! shared linker in a later phase.
 
 use std::collections::HashMap;
 use std::fs;
@@ -29,6 +30,8 @@ pub struct Manifest {
     /// Registry population: each entry maps an identity to a source.
     #[serde(rename = "guest")]
     pub guests: Vec<GuestEntry>,
+    /// Inbound route tables, one list per trigger.
+    pub route: RouteSpec,
     /// Transport configuration for host-mediated calls.
     pub transport: Transport,
 }
@@ -69,6 +72,39 @@ pub struct GuestEntry {
     /// wired into the shared linker in a later phase.
     #[serde(default)]
     pub link: Vec<String>,
+}
+
+/// Inbound routing: one list of routes per trigger, orthogonal to population
+/// (a guest may carry no route).
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct RouteSpec {
+    /// HTTP routes, matched by longest path prefix.
+    pub http: Vec<HttpRoute>,
+    /// Messaging routes, matched by NATS-style topic pattern.
+    pub messaging: Vec<TopicRoute>,
+    /// WebSocket routes, matched by NATS-style route pattern.
+    pub websocket: Vec<TopicRoute>,
+}
+
+/// A single HTTP route: a path prefix mapped to a target guest.
+#[derive(Clone, Debug, Deserialize)]
+pub struct HttpRoute {
+    /// The path prefix; the longest matching prefix wins.
+    pub prefix: String,
+    /// The target guest identity (opaque to the floor).
+    pub guest: String,
+}
+
+/// A single topic/route entry: a NATS-style pattern mapped to a target guest.
+/// Messaging spells the pattern `topic`; websocket spells it `route`.
+#[derive(Clone, Debug, Deserialize)]
+pub struct TopicRoute {
+    /// The match pattern (`.`-tokenised, `*` one token, `>` trailing tokens).
+    #[serde(alias = "route")]
+    pub topic: String,
+    /// The target guest identity (opaque to the floor).
+    pub guest: String,
 }
 
 /// Where a guest's component bytes come from.
@@ -164,8 +200,7 @@ mod tests {
     }
 
     #[test]
-    fn ignores_unknown_sections() {
-        // A future `[[route.*]]`-bearing file must still load (lenient parse).
+    fn parse_route_tables() {
         let toml = r#"
             [[guest]]
             id = "mcp"
@@ -174,10 +209,23 @@ mod tests {
             [[route.http]]
             prefix = "/mcp"
             guest = "mcp"
+
+            [[route.messaging]]
+            topic = "specify.build.>"
+            guest = "mcp"
+
+            [[route.websocket]]
+            route = "events.*"
+            guest = "mcp"
         "#;
 
         let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
-        assert_eq!(manifest.guests.len(), 1);
+        assert_eq!(manifest.route.http.len(), 1);
+        assert_eq!(manifest.route.http[0].prefix, "/mcp");
+        assert_eq!(manifest.route.http[0].guest, "mcp");
+        assert_eq!(manifest.route.messaging[0].topic, "specify.build.>");
+        // The websocket trigger reuses the topic entry via its `route` alias.
+        assert_eq!(manifest.route.websocket[0].topic, "events.*");
     }
 
     #[test]

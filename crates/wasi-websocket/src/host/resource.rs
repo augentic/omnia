@@ -38,6 +38,14 @@ pub trait Event: Debug + Send + Sync + 'static {
 
     /// The event data.
     fn data(&self) -> &[u8];
+
+    /// The route key used to select a guest, when the event carries one.
+    ///
+    /// Defaults to `None`: the event fans into the trigger's catch-all guest
+    /// (the sole websocket exporter), preserving single-guest behaviour.
+    fn route(&self) -> Option<&str> {
+        None
+    }
 }
 
 /// Proxy for a WebSocket event.

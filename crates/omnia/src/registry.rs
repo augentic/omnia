@@ -18,6 +18,7 @@ use wasmtime::Engine;
 use wasmtime::component::InstancePre;
 
 use crate::RuntimeOptions;
+use crate::routing::RouteTables;
 
 /// Opaque guest identity.
 ///
@@ -110,6 +111,7 @@ pub struct Registry<T: 'static> {
     options: RuntimeOptions,
     guests: HashMap<GuestId, Guest<T>>,
     default: GuestId,
+    routes: RouteTables,
 }
 
 impl<T: 'static> Registry<T> {
@@ -119,11 +121,11 @@ impl<T: 'static> Registry<T> {
     ///
     /// # Errors
     ///
-    /// Returns an error if `guests` is empty, or if `default` is not among the
-    /// registered guests.
+    /// Returns an error if `guests` is empty, if `default` is not among the
+    /// registered guests, or if a route targets a guest that is not registered.
     pub fn new(
         engine: Engine, options: RuntimeOptions, guests: HashMap<GuestId, Guest<T>>,
-        default: GuestId,
+        default: GuestId, routes: RouteTables,
     ) -> Result<Self> {
         if guests.is_empty() {
             bail!("cannot build a guest registry with no guests");
@@ -131,11 +133,17 @@ impl<T: 'static> Registry<T> {
         if !guests.contains_key(&default) {
             bail!("default guest `{default}` is not registered");
         }
+        for target in routes.targets() {
+            if !guests.contains_key(target) {
+                bail!("route targets guest `{target}`, which is not registered");
+            }
+        }
         Ok(Self {
             engine,
             options,
             guests,
             default,
+            routes,
         })
     }
 
@@ -155,6 +163,21 @@ impl<T: 'static> Registry<T> {
     #[must_use]
     pub fn get(&self, id: &GuestId) -> Option<&Guest<T>> {
         self.guests.get(id)
+    }
+
+    /// Iterate every registered guest in a deterministic, identity-sorted order
+    /// so per-trigger capability and ambiguity errors are stable across runs.
+    pub fn guests(&self) -> impl Iterator<Item = &Guest<T>> {
+        let mut guests: Vec<&Guest<T>> = self.guests.values().collect();
+        guests.sort_by(|a, b| a.id().cmp(b.id()));
+        guests.into_iter()
+    }
+
+    /// Returns the per-trigger inbound route tables built from the manifest's
+    /// `[[route.*]]` sections.
+    #[must_use]
+    pub const fn routes(&self) -> &RouteTables {
+        &self.routes
     }
 
     /// Returns the default guest — the entry a trigger resolves to when it
@@ -204,7 +227,13 @@ mod tests {
         // An empty map never constructs a `Guest`, so `T` is unconstrained here.
         let guests: HashMap<GuestId, Guest<()>> = HashMap::new();
 
-        let result = Registry::new(engine, options, guests, GuestId::from("default"));
+        let result = Registry::new(
+            engine,
+            options,
+            guests,
+            GuestId::from("default"),
+            RouteTables::default(),
+        );
         assert!(result.is_err(), "an empty registry must be rejected");
     }
 }

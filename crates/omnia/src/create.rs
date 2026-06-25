@@ -11,9 +11,10 @@ use wasmtime::component::Linker;
 use wasmtime::{Config, Engine};
 use wasmtime_wasi::WasiView;
 
-use crate::manifest::{Manifest, SourceSpec};
+use crate::manifest::{Manifest, RouteSpec, SourceSpec};
 use crate::registry::{Guest, GuestId, Registry};
-use crate::source::{FileSource, GuestSource, LoadedGuest};
+use crate::routing::{HttpRouteTable, RouteTables, TopicRouteTable};
+use crate::source::{EmbeddedSource, FileSource, GuestSource, LoadedGuest};
 use crate::{Host, RuntimeOptions};
 
 /// Build a [`Compiled`] runtime, choosing single-file or manifest-driven
@@ -24,17 +25,22 @@ use crate::{Host, RuntimeOptions};
 /// positional `wasm` path is the one-guest shorthand. At least one of the two
 /// must be provided.
 ///
+/// The `embedded` map carries build-time `include_bytes!` blobs (declared in
+/// the `runtime!` macro) that a manifest's `source.embedded = "<name>"` may
+/// activate; the single-file shorthand never consults it.
+///
 /// # Errors
 ///
 /// Returns an error if neither a config nor a wasm path is available, or if the
 /// selected source cannot be built.
 pub async fn create_runtime<T: WasiView + 'static>(
     wasm: Option<PathBuf>, config: Option<PathBuf>,
+    embedded: &'static [(&'static str, &'static [u8])],
 ) -> Result<Compiled<T>> {
     let config = config.or_else(|| env::var_os("OMNI_CONFIG").map(PathBuf::from));
 
     if let Some(config) = config {
-        return create_from_manifest(&config).await;
+        return create_from_manifest(&config, embedded).await;
     }
 
     let wasm = wasm.context(
@@ -73,21 +79,27 @@ pub async fn create<T: WasiView + 'static>(wasm: &Path) -> Result<Compiled<T>> {
         options,
         guests,
         default,
+        // The single-file shorthand carries no routes: its sole guest is the
+        // catch-all for every trigger it can answer.
+        routes: RouteTables::default(),
     })
 }
 
 /// Build a runtime from a deployment manifest (`omni.toml`).
 ///
-/// Resolves every `[[guest]]` source, builds the shared engine + linker, and
-/// records the first guest as the default entry. Per-trigger capability routing
-/// is layered on in a later phase.
+/// Resolves every `[[guest]]` source (file or embedded), builds the shared
+/// engine + linker, records the first guest as the default entry, and assembles
+/// the per-trigger route tables from the `[[route.*]]` sections.
 ///
 /// # Errors
 ///
-/// Will fail if the manifest cannot be loaded, if a guest uses a source kind not
-/// yet supported, or if a guest component cannot be loaded.
-#[instrument]
-pub async fn create_from_manifest<T: WasiView + 'static>(manifest: &Path) -> Result<Compiled<T>> {
+/// Will fail if the manifest cannot be loaded, if a guest names an embedded blob
+/// not declared in `runtime!`, if a guest uses a source kind not yet supported,
+/// or if a guest component cannot be loaded.
+#[instrument(skip(embedded))]
+pub async fn create_from_manifest<T: WasiView + 'static>(
+    manifest: &Path, embedded: &'static [(&'static str, &'static [u8])],
+) -> Result<Compiled<T>> {
     let parsed = Manifest::load(manifest)?;
 
     // The default entry doubles as the telemetry/component name for now.
@@ -105,20 +117,25 @@ pub async fn create_from_manifest<T: WasiView + 'static>(manifest: &Path) -> Res
     let mut guests = Vec::with_capacity(parsed.guests.len());
     for entry in &parsed.guests {
         let id = GuestId::from(entry.id.as_str());
-        let source = match &entry.source {
+        let loaded = match &entry.source {
             SourceSpec::Path(path) => {
                 let resolved = if path.is_absolute() { path.clone() } else { base.join(path) };
-                FileSource::with_id(id, resolved)
+                FileSource::with_id(id, resolved).load(&engine).await?
             }
-            SourceSpec::Embedded(_) => {
-                bail!("guest `{id}`: embedded sources are not yet supported (arrive with Phase 1b)")
+            SourceSpec::Embedded(name) => {
+                let bytes = lookup_embedded(embedded, name).with_context(|| {
+                    format!("guest `{id}`: embedded guest `{name}` is not declared in `runtime!`")
+                })?;
+                EmbeddedSource::new(id, bytes).load(&engine).await?
             }
             SourceSpec::Oci(_) => {
                 bail!("guest `{id}`: OCI sources are not yet supported")
             }
         };
-        guests.extend(source.load(&engine).await?);
+        guests.extend(loaded);
     }
+
+    let routes = route_tables(&parsed.route);
 
     tracing::info!("runtime initialized from manifest");
 
@@ -128,7 +145,31 @@ pub async fn create_from_manifest<T: WasiView + 'static>(manifest: &Path) -> Res
         options,
         guests,
         default,
+        routes,
     })
+}
+
+/// Resolve an embedded guest's bytes by name from the build-time map declared
+/// in the `runtime!` macro.
+fn lookup_embedded(
+    embedded: &'static [(&'static str, &'static [u8])], name: &str,
+) -> Option<&'static [u8]> {
+    embedded.iter().find(|(declared, _)| *declared == name).map(|(_, bytes)| *bytes)
+}
+
+/// Convert the manifest's parsed routes into the registry's `GuestId`-typed,
+/// per-trigger route tables.
+fn route_tables(spec: &RouteSpec) -> RouteTables {
+    let http = HttpRouteTable::new(
+        spec.http.iter().map(|e| (e.prefix.clone(), GuestId::from(e.guest.as_str()))),
+    );
+    let messaging = TopicRouteTable::new(
+        spec.messaging.iter().map(|e| (e.topic.clone(), GuestId::from(e.guest.as_str()))),
+    );
+    let websocket = TopicRouteTable::new(
+        spec.websocket.iter().map(|e| (e.topic.clone(), GuestId::from(e.guest.as_str()))),
+    );
+    RouteTables::new(http, messaging, websocket)
 }
 
 /// Build the shared engine, WASI-linked linker, and runtime options.
@@ -152,6 +193,7 @@ pub struct Compiled<T: WasiView + 'static> {
     options: RuntimeOptions,
     guests: Vec<LoadedGuest>,
     default: GuestId,
+    routes: RouteTables,
 }
 
 impl<T: WasiView> Compiled<T> {
@@ -192,7 +234,13 @@ impl<T: WasiView> Compiled<T> {
             guests.insert(loaded.id.clone(), Guest::local(loaded.id.clone(), instance_pre));
         }
 
-        Registry::new(self.engine.clone(), self.options.clone(), guests, self.default.clone())
+        Registry::new(
+            self.engine.clone(),
+            self.options.clone(),
+            guests,
+            self.default.clone(),
+            self.routes.clone(),
+        )
     }
 }
 
@@ -224,6 +272,17 @@ mod tests {
     use wasmtime::{Config, Engine};
 
     use crate::RuntimeOptions;
+
+    #[test]
+    fn lookup_embedded_by_name() {
+        // Mirrors the `(&str, &[u8])` shape the `runtime!` macro emits.
+        const A: &[u8] = b"component-a";
+        const B: &[u8] = b"component-b";
+        const EMBEDDED: &[(&str, &[u8])] = &[("a", A), ("b", B)];
+
+        assert_eq!(super::lookup_embedded(EMBEDDED, "b"), Some(B));
+        assert_eq!(super::lookup_embedded(EMBEDDED, "missing"), None);
+    }
 
     #[test]
     fn builds_with_defaults() {

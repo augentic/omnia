@@ -487,3 +487,113 @@ Three acceptance runs over the *same* example, swapping only the bound backend i
 3. **`WasiModel: CursorAgentBackend`** — given a `local-path` working tree, a spawned `cursor-agent` run
    returns a schema-valid `.result`; with no `local-path` it returns `error::backend`, proving the capability
    signal. This proves Layer 3b and the spawned-agent shape, with no guest or contract change between runs.
+
+## 7. Design decisions and rationale
+
+### 7.1 The floor owns the boundary, the loop mechanism, and validation; the backend owns the model
+
+The mechanism/population split from [guest-registry.md](guest-registry.md) §6.2 holds here as a
+mechanism/judgment split. **Omnia owns the mechanism** — the `eval` boundary, the prompt / answer / error
+envelope, the `ModelBackend` trait, the `ToolHost` tool implementations (which bind to the registry, the
+working tree, and kv), schema validation, and the record / replay decorators. **The backend owns the
+judgment** — the model id, the provider SDK or spawned process, the prompt-engineering of the brief, and how it
+drives the model. The floor compiles knowing zero model ids and zero providers (Law 2).
+
+### 7.2 `resolve` reuses host-mediated dynamic linking — it does not reinvent it
+
+The architecture is explicit that "the `wasi-model` `eval → resolve` callback is this same mechanism applied by
+the model backend" ([architecture.md](architecture.md#guest-to-guest-interaction-host-mediated-dynamic-linking)).
+So `ToolHost::resolve` is a thin host-side caller of the [guest-registry.md](guest-registry.md) §4 dispatch:
+resolve identity → instantiate fresh → invoke the `references` export → return typed bytes. This is why Layer 2
+depends on the registry and Layer 1 does not, and why instance-per-call (no recursive re-entrance) is inherited
+rather than re-proven.
+
+### 7.3 The envelope is JSON-Schema-over-strings at the floor; typed records are a consumer opt-in
+
+The floor cannot know Specify's brief / answer *types*, so its generic envelope carries an opaque
+`answer-schema` (JSON Schema) and validates a JSON `answer` against it — the analogue of the dynamic
+(`Val`-based) path in [guest-registry.md](guest-registry.md) §6.3. A consumer that owns its types (Specify) may
+generate WIT records and validate richer typed answers above the floor; both reduce to "an answer the floor can
+check against a schema". We start with JSON Schema because it is the minimal thing that makes "validated
+answers only" enforceable generically.
+
+### 7.4 Two backend shapes, deliberately, as the first two
+
+genai and cursor-agent are not arbitrary — they are one of each backend *shape* the architecture names
+(in-process loop vs. spawned filesystem-capable agent), so building both proves the boundary is general enough
+for the whole [RFC-58](rfc-58-model-backends.md) catalogue (SLM and router are further in-process-loop and
+selection variants). The replay backend is built first because it is the only one with no external dependency
+and it is what keeps CI green throughout.
+
+### 7.5 Vendor churn and keys stay below the boundary
+
+`genai` is pre-1.0 and the `cursor-agent` CLI surface evolves; both are pinned, swappable backend dependencies
+(the `genai` crate version, a `cursor-agent` version assumption) confined below `ModelBackend`, never reaching
+the `augentic:model` contract or the guests — the same containment discipline [RFC-56](rfc-56-runtime-move.md)
+applies to wRPC. API keys are read from env inside `connect` and never logged or recorded into fixtures.
+
+## 8. Phased plan
+
+Each phase is independently shippable and keeps `cargo make ci` green.
+
+- **Phase 0 — `DECISIONS.md` entries.** Record the settled choices (the mechanism/judgment split; `resolve`
+  reuses host-mediated linking; JSON-Schema-over-strings at the floor; validation + record/replay are floor
+  decorators; vendor + keys stay below the boundary) into the shared `DECISIONS.md` that
+  [guest-registry.md](guest-registry.md) §7 already seeds.
+- **Phase 1 — The `wasi-model` host core + replay.** New `crates/wasi-model` following the `wasi-keyvalue`
+  shape: `wit/model.wit`, generated bindings, the `Prompt`/`Candidate` mirrors, the `ModelBackend` trait, the
+  `WasiModel` host (`Host` + no-op `Server`), the `omnia_wasi_view!` macro, the `Validate` + `Record` +
+  `Replay` decorators, and `ReplayBackend` as default. `examples/model` run 1 (replay) is the acceptance gate.
+  **No model dependency, no registry dependency** — Layer 1 stands alone. ([RFC-53](rfc-53-wasi-model.md).)
+- **Phase 2 — The tool loop + `resolve`.** The `ToolHost` trait and the floor's implementations: `resolve` via
+  the guest registry ([guest-registry.md](guest-registry.md) §4), `read`/`list`/`write` over the lent
+  working-tree capability, session state in `wasi:keyvalue`, the `verify` seam (routing only; profiles are
+  [RFC-60](rfc-60-verify-profiles.md)), and the repair-loop budgets. **Depends on the guest registry (Phase 1
+  of guest-registry.md).** ([RFC-59](rfc-59-model-tool-loop.md).)
+- **Phase 3a — `GenaiBackend`.** Add `genai = "0.6"` as a backend-only dependency; map the tool surface onto
+  `ChatRequest` / `Tool` / `JsonSpec`; run the in-process loop; `examples/model` run 2 (live + record) is the
+  acceptance gate. ([RFC-58](rfc-58-model-backends.md).)
+- **Phase 3b — `CursorAgentBackend`.** Spawn `cursor-agent -p --force --output-format json --workspace`,
+  parse `.result`, wrap in a timeout, enforce the `local-path` capability signal; `examples/model` run 3 is the
+  acceptance gate. ([RFC-58](rfc-58-model-backends.md).)
+- **Phase 4 — Hardening.** Replay-fixture expansion (matching policy, diagnostics), `stream-json` transcript
+  capture for richer recordings, the router seam stub, failure-mode tests, docs. (Defers the rest of
+  [RFC-58](rfc-58-model-backends.md) and [RFC-60](rfc-60-verify-profiles.md).)
+
+## 9. Implementation planning approach
+
+As in [guest-registry.md](guest-registry.md) §8, this RFC is the design source of truth, not the execution
+plan. Turn it into work with the same hybrid: one durable index (the §8 phase list with each phase's exit
+criteria, dependencies, and the invariants every phase preserves) plus just-in-time per-phase plans.
+
+- **Write Phase 0 + Phase 1 detailed plans now** — they are well-understood, dependency-free, and pure
+  wasmtime + a directory of fixtures.
+- **Defer Phase 2's detailed plan until the guest registry lands**, because `resolve` binds to whatever
+  `GuestRegistry`/dispatch API that work produces — planning it now would be speculation against an unbuilt
+  seam.
+- **Defer Phase 3a/3b detailed plans until Phase 2**, once the `ToolHost` surface is concrete.
+- **Every plan preserves the invariants** and states how in its acceptance test: instance-per-call through the
+  `resolve` callback; validated-answers-only across `eval`; the floor stays generic (Law 2 — no model id,
+  provider, or Specify schema leaks into Omnia); record/replay works at the boundary for *every* backend;
+  per-call budgets and the dispatch-depth bound hold; `cargo make ci` and all existing examples stay green.
+
+## 10. References
+
+- [architecture.md](architecture.md) — §"Judgment: the `wasi-model` host", §"Resolving references", §"The
+  model backend is swappable", §"The working tree".
+- [RFC-53](rfc-53-wasi-model.md) — the `wasi-model` host core: the boundary, backend trait, validation, minimal
+  replay (Layer 1).
+- [RFC-59](rfc-59-model-tool-loop.md) — the model tool loop: `resolve`/`read`/`list`/`write`/`verify`, session
+  state, repair loop (Layer 2).
+- [RFC-58](rfc-58-model-backends.md) — the backend catalogue and router; this RFC builds its frontier (genai)
+  and spawned-agent (cursor-agent) entries plus replay expansion (Layer 3).
+- [RFC-56](rfc-56-runtime-move.md) — the runtime move and multi-guest registry that `resolve` dispatches
+  through.
+- [guest-registry.md](guest-registry.md) — host-mediated dynamic linking; `resolve` is the same mechanism
+  invoked host-side (§4, §6.2, §6.3).
+- [RFC-55](rfc-55-working-tree.md) — the working tree's `descriptor` / `local-path` faces the tool loop and the
+  spawned agent read and write.
+- [`genai`](https://github.com/jeremychone/rust-genai) — the frontier-backend dependency: `Client`,
+  `ChatRequest`, `Tool`, `ChatResponseFormat::JsonSpec`, `exec_chat`.
+- [Cursor CLI headless docs](https://cursor.com/docs/cli/headless) — the spawned-agent dependency:
+  `--print --force --output-format json --workspace`.

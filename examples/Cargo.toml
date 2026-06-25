@@ -115,6 +115,20 @@ name = "messaging"
 path = "messaging/runtime.rs"
 
 [[example]]
+name = "routing-a-wasm"
+path = "routing/guest_a.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "routing-b-wasm"
+path = "routing/guest_b.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "routing"
+path = "routing/runtime.rs"
+
+[[example]]
 name = "otel-wasm"
 path = "otel/guest.rs"
 crate-type = ["cdylib"]
