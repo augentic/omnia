@@ -1,6 +1,6 @@
 # RFC-53: The `wasi-model` Host Core
 
-> Status: Draft · Order 3 of 10 · Stage S2 · Depends: [RFC-51](rfc-51-adapter-wit.md), [RFC-52](rfc-52-effect.md) · Enables: [RFC-59](rfc-59-model-tool-loop.md), [RFC-58](rfc-58-model-backends.md) · Owns: judgment as a host effect
+> Status: Draft · Order 3 of 10 · Stage S2 · Depends: [RFC-51](rfc-51-adapter-wit.md), [RFC-52](rfc-52-effect.md) · Enables: [RFC-58](rfc-58-model-backends.md) · Owns: judgment as a host effect
 
 ## Abstract
 
@@ -10,7 +10,7 @@ Judgment is a host effect. Omnia exposes a `wasi-model` host whose `eval` export
 eval: func(prompt: prompt) -> result<answer, error>;
 ```
 
-This RFC owns the boundary only: prompt / answer records, the backend trait behind `eval`, schema validation, error mapping, and the minimal replay-capable backend needed for deterministic tests. The model tool loop is [RFC-59](rfc-59-model-tool-loop.md). Closed verify profiles are [RFC-60](rfc-60-verify-profiles.md). Backend variety and routing are [RFC-58](rfc-58-model-backends.md).
+This RFC owns the boundary only: prompt / answer records, the backend trait behind `eval`, schema validation, error mapping, and the minimal replay-capable backend needed for deterministic tests. The genai backend's in-process tool loop is [RFC-59](rfc-59-model-tool-loop.md). Closed verify profiles are [RFC-60](rfc-60-verify-profiles.md). Backend variety and routing are [RFC-58](rfc-58-model-backends.md).
 
 ## The boundary
 
@@ -38,7 +38,7 @@ Replay belongs at the `wasi-model` boundary because it is the test substitute fo
 
 ## Out of scope
 
-- Tool-call dispatch (`resolve`, `read`, `list`, `write`) and repair-loop semantics; see [RFC-59](rfc-59-model-tool-loop.md).
+- Tool-call dispatch (`resolve`, `read`, `list`, `write`), repair-loop semantics, and session state inside `GenaiBackend`; see [RFC-59](rfc-59-model-tool-loop.md).
 - Closed verification profiles, sandboxing, and severity mapping; see [RFC-60](rfc-60-verify-profiles.md).
 - Frontier, spawned-agent, SLM, and router backends; see [RFC-58](rfc-58-model-backends.md).
 
@@ -53,6 +53,6 @@ Replay belongs at the `wasi-model` boundary because it is the test substitute fo
 ## Risks and invariants
 
 - **Law 2 at the floor.** The model id and vendor SDK live in the `wasi-model` backend, never in Omnia core or the typed contract.
-- **Validated answers only.** A model response that does not validate is not an answer; it is a backend failure or a repair-loop input.
+- **Validated answers only.** A model response that does not validate is not an answer; it is a backend failure. Backends that run a repair loop (genai; [RFC-59](rfc-59-model-tool-loop.md)) consume invalid candidates internally.
 - **Replay is boundary-level.** Recording and replay happen around the typed prompt / answer boundary, so CI does not depend on any one backend implementation.
 - **No transcript leakage.** The operator's live editor conversation is never reused as a model session.

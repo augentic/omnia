@@ -1,16 +1,16 @@
 # RFC-58: Model Backends — frontier, spawned agent, SLM, and routing
 
-> Status: Draft · Order 9 of 10 · Parallel after [RFC-53](rfc-53-wasi-model.md) · Depends: [RFC-53](rfc-53-wasi-model.md), [RFC-59](rfc-59-model-tool-loop.md), [RFC-55](rfc-55-working-tree.md) · Enables: [RFC-18](future/rfc-18-slm.md) · Owns: backend variety and routing behind `wasi-model`
+> Status: Draft · Order 9 of 10 · Parallel after [RFC-53](rfc-53-wasi-model.md) · Depends: [RFC-53](rfc-53-wasi-model.md), [RFC-55](rfc-55-working-tree.md) · Enables: [RFC-18](future/rfc-18-slm.md) · Owns: backend variety and routing behind `wasi-model`
 
 ## Abstract
 
-The `wasi-model` host ([RFC-53](rfc-53-wasi-model.md)) dispatches `eval` to a backend. This RFC owns the backend catalogue and router: frontier / hosted, spawned-agent, replay expansion, local SLM, and the decision key that selects one per call. It builds on the core replay seam in [RFC-53](rfc-53-wasi-model.md) and the tool-loop semantics in [RFC-59](rfc-59-model-tool-loop.md); it does not redefine either.
+The `wasi-model` host ([RFC-53](rfc-53-wasi-model.md)) dispatches `eval` to a backend. This RFC owns the backend catalogue and router: frontier / hosted, spawned-agent, replay expansion, local SLM, and the decision key that selects one per call. It builds on the core replay seam in [RFC-53](rfc-53-wasi-model.md); it does not redefine the boundary. The genai backend's in-process tool loop is specified in [RFC-59](rfc-59-model-tool-loop.md).
 
 ## Backend catalogue
 
 The backend is the single seam the model is reached through. The fleet lives inside it, and the model id never crosses `eval`.
 
-- **Frontier / hosted** — hard synthesis and review through a hosted API via [`genai`](https://github.com/jeremychone/rust-genai), one API over OpenAI / Anthropic / Gemini / Ollama / other providers. Switching frontier, hosted, and local providers is backend configuration.
+- **Frontier / hosted** — hard synthesis and review through a hosted API via [`genai`](https://github.com/jeremychone/rust-genai), one API over OpenAI / Anthropic / Gemini / Ollama / other providers. Switching frontier, hosted, and local providers is backend configuration. The in-process tool loop (`resolve`, `read`, `list`, `write`, `verify`, session state, repair) is owned by this backend; see [RFC-59](rfc-59-model-tool-loop.md).
 - **Spawned agent** — the native layer spawns a fresh, context-free agent session, hands it the brief, and parses the validated answer. It may own its own tool loop and read / write the working tree through the `local-path` it is lent ([RFC-55](rfc-55-working-tree.md)). It still returns through the [RFC-53](rfc-53-wasi-model.md) typed boundary and must remain recordable.
 - **Replay expansion** — [RFC-53](rfc-53-wasi-model.md) defines the minimal replay seam. This RFC expands replay into a production backend with fixture management, matching policy, and diagnostics across backend families.
 - **Local SLM** — narrow, high-volume transformations via a local model and constrained decoding, carried by [RFC-18](future/rfc-18-slm.md).
@@ -24,7 +24,7 @@ The backend is the single seam the model is reached through. The fleet lives ins
 
 ## Scope
 
-- Frontier / hosted backend configuration.
+- Frontier / hosted backend configuration and the genai tool loop ([RFC-59](rfc-59-model-tool-loop.md)).
 - Spawned-agent backend protocol and process management.
 - Replay fixture management beyond the minimal [RFC-53](rfc-53-wasi-model.md) seam.
 - Router decision keys and deployment-mode selection.
@@ -33,7 +33,7 @@ The backend is the single seam the model is reached through. The fleet lives ins
 ## Out of scope
 
 - The `eval` host boundary and backend trait; see [RFC-53](rfc-53-wasi-model.md).
-- The standard model tool loop; see [RFC-59](rfc-59-model-tool-loop.md).
+- The `ToolHost` host callbacks the floor lends to genai; see [wasi-model.md](wasi-model.md) §4.
 - Verify profile definitions; see [RFC-60](rfc-60-verify-profiles.md).
 
 ## Open questions

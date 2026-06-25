@@ -49,7 +49,7 @@ shorthand.
 
 - The `augentic:specify` WIT package (`source` / `target` / `references`) and the Specify guests — those
 live in the Specify consumer, built *on* this mechanism.
-- The `wasi-model` `eval`/`resolve` callback ([RFC-53](rfc-53-wasi-model.md)/[RFC-59](rfc-59-model-tool-loop.md)).
+- The `wasi-model` `eval`/`resolve` callback from `GenaiBackend` ([RFC-53](rfc-53-wasi-model.md)/[RFC-59](rfc-59-model-tool-loop.md)).
 It is the *same* mechanism applied by the model backend; we make sure our primitive is general enough to
 serve it, but we do not build the model host here.
 - OCI distribution of guests beyond a stubbed-out acquisition trait (we design the seam, defer the puller).
@@ -645,7 +645,7 @@ invariants it must hold; and its dependencies / what it unlocks.
 
 - [architecture.md](architecture.md) — §"Guest-to-guest interaction" and §"Many guests, selected by identity".
 - [RFC-56](rfc-56-runtime-move.md) — the runtime move and multi-guest registry.
-- [RFC-53](rfc-53-wasi-model.md) / [RFC-59](rfc-59-model-tool-loop.md) — `eval`/`resolve`, the same mechanism applied by the model backend.
+- [RFC-53](rfc-53-wasi-model.md) / [RFC-59](rfc-59-model-tool-loop.md) — `eval`/`resolve` from `GenaiBackend`, the same mechanism applied host-side.
 - [wRPC](https://github.com/bytecodealliance/wrpc) — the carrier. Relevant crates on `main`: `wrpc-transport` (0.29), `wrpc-wasmtime` (0.1, the wasmtime polyfill/serve integration, successor to the published `wrpc-runtime-wasmtime`), `wrpc-introspect`; the workspace pins `wasmtime = 46` and `wit-bindgen = 0.58`, matching Omnia.
 - [wasmtime#9309](https://github.com/bytecodealliance/wasmtime/issues/9309) — confirmation that component-to-component linking must go through the host.
 - wasmCloud [linking components](https://wasmcloud.com/docs/v1/concepts/linking-components/) — prior art for host-mediated runtime links over wRPC.

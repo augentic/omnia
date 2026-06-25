@@ -205,13 +205,12 @@ The architecture is approached in stages. Each is independently valuable and for
 - **S1 · Typed contract** ([RFC-51](rfc-51-adapter-wit.md)) — the versioned `augentic:specify` WIT package: records, per-axis `source` / `target` interfaces, the `references` shelf, and the worlds, with host bindings.
 - **S2 · Effect map** ([RFC-52](rfc-52-effect.md)) — the typed effects are named and assigned owners: `wasi:filesystem`, `wasi:keyvalue`, lifecycle, `references`, and `wasi-model`.
 - **S2 · Judgment boundary** ([RFC-53](rfc-53-wasi-model.md)) — the `wasi-model` `eval` host, prompt / answer records, backend trait, answer validation, and minimal replay seam.
-- **S3 · Model tool loop** ([RFC-59](rfc-59-model-tool-loop.md)) — `resolve`, `read`, `list`, `write`, session state, repair-loop semantics, and lazy reference loading over the adapter's shelf.
 - **S3 · Vertical operation proof** ([RFC-54](rfc-54-orchestration.md)) — one deterministic `tool` operation through generated bindings and one judgment operation through `wasi-model.eval`, proving the path before the workflow moves.
 - **S4 · Working-tree backend** ([RFC-55](rfc-55-working-tree.md)) — the git-aware `wasi:filesystem` backend that materializes a content-addressed tree per operation, so `build` and `merge` can run on different nodes and out of order.
 - **S4 · Verify profiles** ([RFC-60](rfc-60-verify-profiles.md)) — closed verification profiles, sandboxing, report mapping, and capability signaling for nodes that cannot verify.
 - **S4 · Runtime move** ([RFC-56](rfc-56-runtime-move.md)) — the generic Omnia binary plus Specify backends, instance-per-call, the multi-guest registry, the CLI trigger, and the mandatory component on both axes; the working-tree backend is bound behind `wasi:filesystem`.
 - **S4 · Workflow (and development) as guests** ([RFC-57](rfc-57-specify-guests.md)) — the workflow and the development tooling run on the runtime like every adapter.
-- **Parallel · Model backends** ([RFC-58](rfc-58-model-backends.md)) — the frontier, spawned-agent, SLM, replay expansion, and routing backends behind `wasi-model`.
+- **Parallel · Model backends** ([RFC-58](rfc-58-model-backends.md)) — the frontier (genai, including its in-process tool loop per [RFC-59](rfc-59-model-tool-loop.md)), spawned-agent, SLM, replay expansion, and routing backends behind `wasi-model`.
 
 ## Key trade-offs
 
