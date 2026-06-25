@@ -63,14 +63,14 @@ Specify extends this surface in exactly one sanctioned way: **custom backends be
 
 ## Judgment: the `wasi-model` host
 
-Model evaluation is a host capability like any other. Omnia exposes a `wasi-model` host whose `eval` export a guest calls to have a prompt evaluated:
+Model evaluation is a host capability like any other. Omnia exposes a `wasi-model` host whose `complete` export a guest calls to have a prompt completed (see [wasi-model.md](wasi-model.md) for the full `augentic:model/completion` WIT):
 
 ```wit
 // wasi-model host — judgment as a typed effect a guest imports
-eval: func(prompt: prompt) -> result<answer, error>;
+complete: func(prompt: prompt) -> result<answer, error>;
 ```
 
-Behind the host sits a **swappable model backend**. The backend runs an LLM tool-use loop: it drives a model through its API, advertises a typed tool surface, dispatches the model's tool calls, runs the verify-repair cycle, and returns a validated, typed answer to the calling guest. The guest treats `eval` exactly like `wasi:keyvalue.get` — a typed call whose backend it never sees.
+Behind the host sits a **swappable model backend**. The backend runs an LLM tool-use loop: it drives a model through its API, advertises a typed tool surface, dispatches the model's tool calls, runs the verify-repair cycle, and returns a validated, typed answer to the calling guest. The guest treats `complete` exactly like `wasi:keyvalue.get` — a typed call whose backend it never sees.
 
 ### Resolving references — the host calls back into a guest
 
@@ -81,7 +81,7 @@ A brief points at internal references (e.g. `../references/business-logic.md`). 
 resolve: func(id: adapter-id, reference: reference) -> result<list<u8>, error>;
 ```
 
-Because recursively re-entering a live instance would trap, this resolution lands in a **fresh adapter instance** every time — isolated from whatever guest called `eval`. The adapter's prose (briefs and references) is **embedded in its module at build time**, so `resolve` is an in-module lookup, not a host filesystem read. The shelf is the adapter's, not the runtime's: a *computed* reference is served by a fresh instance, and the runtime floor stays free of any reference-injection machinery.
+Because recursively re-entering a live instance would trap, this resolution lands in a **fresh adapter instance** every time — isolated from whatever guest called `complete`. The adapter's prose (briefs and references) is **embedded in its module at build time**, so `resolve` is an in-module lookup, not a host filesystem read. The shelf is the adapter's, not the runtime's: a *computed* reference is served by a fresh instance, and the runtime floor stays free of any reference-injection machinery.
 
 Logical sequence: extract
 
@@ -104,7 +104,7 @@ A single operation spans several guests: the workflow guest plus the source and 
 
 - **How it works**: the caller imports the per-axis host interfaces (`source` / `target`) and names a plan-bound `adapter-id` as the first argument of each call (`build(id, …)`, `survey(id)`, …) — the very interfaces the adapters export, so there is no separate dispatch facade to keep in sync. The Omnia host intercepts these imports through the Wasmtime `Linker` and issues a wRPC invocation to the named adapter's matching export (`augentic:specify/source` / `target`) over the bound transport.
 - **The host's role**: the host selects the adapter **by identity**, instantiates a fresh, stateless instance, carries the typed WIT records to it over wRPC, invokes the exported function, and returns the typed result.
-- **Why it fits**: it preserves strict WIT typing with no manual byte serialization, supports dynamic (config-driven, OCI-resolved) adapter selection, and enforces instance-per-call — so a dispatched call cannot recursively re-enter its caller. The `wasi-model` `eval → resolve` callback is this same mechanism applied by the model backend.
+- **Why it fits**: it preserves strict WIT typing with no manual byte serialization, supports dynamic (config-driven, OCI-resolved) adapter selection, and enforces instance-per-call — so a dispatched call cannot recursively re-enter its caller. The `wasi-model` `complete → resolve` callback is this same mechanism applied by the model backend.
 
 Because the interfaces (`target` / `source` / `references`) are statically known and only the adapter *instances* are dynamic, the host serves them with `wit-bindgen-wrpc`**-generated typed bindings** rather than wRPC's dynamic value-introspection path; the dynamic path remains available if an interface is ever unknown at host-compile time.
 
@@ -124,7 +124,7 @@ Registry  (one wasmtime::Engine + one Linker<StoreCtx>)
 
 Each call selects an `InstancePre` by identity, instantiates a fresh instance on a new `Store`, calls the typed export, and discards it. **Identity is data, resolved by the host — not topology**: it arrives as an `adapter-id` call argument on the host-satisfied `source` / `target` imports, so one caller instance can drive many same-axis adapters in a loop. Two same-world adapters (two sources, two targets) are distinct registry entries, so there is no collision and no ahead-of-time composition. Which adapter a call targets comes from the operation's context:
 
-- the `wasi-model` callback resolves against the adapter whose brief is being evaluated — its identity is fixed for the duration of that `eval`;
+- the `wasi-model` callback resolves against the adapter in scope for `prompt.grants.references` — its identity is fixed for the duration of that `complete`;
 - a workflow→target call (`build`, `merge`, `guidance`) targets the slice's bound target; a workflow→source call (`survey`, `extract`) targets a bound source. Both bindings come from the plan.
 
 The same select-by-identity resolves an **inbound trigger**, not only a guest-to-guest call:
@@ -140,13 +140,13 @@ A `build` flows like this:
 
 1. The workflow guest resolves the slice to a base revision and asks the host to materialize the slice's [working tree](#the-working-tree); the slice and its inputs stay pure, node-independent data, while the mutable tree is the one capability.
 2. It runs any deterministic setup (a `tool` adapter export, reached by host-mediated dynamic linking).
-3. For the judgment leg it calls `wasi-model.eval` with the `build` brief.
-4. The model backend drives the model. `resolve` follows the brief's reference shelf (the adapter's `references` export); `read` / `list` scan existing code through the working tree; `write` accumulates an edit.
-5. When the brief calls for it the model emits `verify(<check>)`; the backend runs that vetted, sandboxed profile and feeds the severity-tiered `report` back; the model repairs and re-verifies.
-6. `eval` returns the validated, typed answer to the guest.
+3. For the judgment leg it calls `wasi-model.complete` with a structured `prompt` (see [wasi-model.md](wasi-model.md)).
+4. The model backend drives the model. `resolve` follows the adapter's reference shelf (the adapter's `references` export); `read` / `list` scan existing code through the working tree; `write` accumulates an edit.
+5. When the prompt calls for it the model emits `verify(<check>)`; the backend runs that vetted, sandboxed profile and feeds the severity-tiered `report` back; the model repairs and re-verifies.
+6. `complete` returns the validated, typed answer to the guest.
 7. The report carries only judgment (status and findings); the host extracts the resulting mutations as a content-addressed `change-set` (a `git diff` against the base revision), and the guest requests the lifecycle `transition` effect.
 
-In short: deterministic control lives in guest code, judgment is a typed `eval` call, references load lazily through the shelf, and what crosses out is a typed report plus a content-addressed change-set.
+In short: deterministic control lives in guest code, judgment is a typed `complete` call, references load lazily through the shelf, and what crosses out is a typed report plus a content-addressed change-set.
 
 ## The working tree
 
@@ -178,7 +178,7 @@ When evaluating a design decision — prose or code, what a function takes, wher
 
 1. **Typed boundaries**: WIT records for data, WIT interfaces for effects. Untyped text is not passed across boundaries.
 2. **The runtime floor only knows effects**: Omnia core doesn't know about workflows, adapters, or models — only how to host guests and satisfy typed effects. Which backend satisfies an interface — including which model backs `wasi-model` — is deployment configuration the floor never sees.
-3. **Determinism by default, judgment by exception**: control flow lives in deterministic guest code. `wasi-model.eval` returns a typed, validated decision that steers the next deterministic step. Models do not guess control flow.
+3. **Determinism by default, judgment by exception**: control flow lives in deterministic guest code. `wasi-model.complete` returns a typed, validated decision that steers the next deterministic step. Models do not guess control flow.
 4. **Laziness is key**: handles (file paths, reference ids) cross boundaries instead of corpora, keeping context windows small and operations scalable.
 
 ## Deployment modes
@@ -204,8 +204,8 @@ The architecture is approached in stages. Each is independently valuable and for
 
 - **S1 · Typed contract** ([RFC-51](rfc-51-adapter-wit.md)) — the versioned `augentic:specify` WIT package: records, per-axis `source` / `target` interfaces, the `references` shelf, and the worlds, with host bindings.
 - **S2 · Effect map** ([RFC-52](rfc-52-effect.md)) — the typed effects are named and assigned owners: `wasi:filesystem`, `wasi:keyvalue`, lifecycle, `references`, and `wasi-model`.
-- **S2 · Judgment boundary** ([RFC-53](rfc-53-wasi-model.md)) — the `wasi-model` `eval` host, prompt / answer records, backend trait, answer validation, and minimal replay seam.
-- **S3 · Vertical operation proof** ([RFC-54](rfc-54-orchestration.md)) — one deterministic `tool` operation through generated bindings and one judgment operation through `wasi-model.eval`, proving the path before the workflow moves.
+- **S2 · Judgment boundary** ([RFC-53](rfc-53-wasi-model.md)) — the `wasi-model` `complete` host, prompt / answer records, backend trait, answer validation, and minimal replay seam.
+- **S3 · Vertical operation proof** ([RFC-54](rfc-54-orchestration.md)) — one deterministic `tool` operation through generated bindings and one judgment operation through `wasi-model.complete`, proving the path before the workflow moves.
 - **S4 · Working-tree backend** ([RFC-55](rfc-55-working-tree.md)) — the git-aware `wasi:filesystem` backend that materializes a content-addressed tree per operation, so `build` and `merge` can run on different nodes and out of order.
 - **S4 · Verify profiles** ([RFC-60](rfc-60-verify-profiles.md)) — closed verification profiles, sandboxing, report mapping, and capability signaling for nodes that cannot verify.
 - **S4 · Runtime move** ([RFC-56](rfc-56-runtime-move.md)) — the generic Omnia binary plus Specify backends, instance-per-call, the multi-guest registry, the CLI trigger, and the mandatory component on both axes; the working-tree backend is bound behind `wasi:filesystem`.
@@ -215,5 +215,5 @@ The architecture is approached in stages. Each is independently valuable and for
 ## Key trade-offs
 
 - **Omnia is the sole runtime**: the *same* binary and guests run from desktop to cloud with only backends swapping (filesystem → S3, kv → Redis, model → fleet) — at the cost of a hard dependency on Omnia's host surface.
-- **Model evaluation needs egress (or a local model) at** `eval` **time**: the binary carries a model-backend dependency; the replay backend covers CI, and a local SLM backend covers air-gapped runs.
+- **Model evaluation needs egress (or a local model) at** `complete` **time**: the binary carries a model-backend dependency; the replay backend covers CI, and a local SLM backend covers air-gapped runs.
 

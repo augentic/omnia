@@ -4,19 +4,19 @@
 
 ## Abstract
 
-Judgment is a host effect. Omnia exposes a `wasi-model` host whose `eval` export a guest calls to have a prompt evaluated:
+Judgment is a host effect. Omnia exposes a `wasi-model` host whose `complete` export a guest calls to have a prompt completed:
 
 ```wit
-eval: func(prompt: prompt) -> result<answer, error>;
+complete: func(prompt: prompt) -> result<answer, error>;
 ```
 
-This RFC owns the boundary only: prompt / answer records, the backend trait behind `eval`, schema validation, error mapping, and the minimal replay-capable backend needed for deterministic tests. The genai backend's in-process tool loop is [RFC-59](rfc-59-model-tool-loop.md). Closed verify profiles are [RFC-60](rfc-60-verify-profiles.md). Backend variety and routing are [RFC-58](rfc-58-model-backends.md).
+The full `augentic:model/completion` WIT — prompt shape, streaming, validation rules — is specified in [wasi-model.md](wasi-model.md) §3.1. This RFC owns the boundary intent: prompt / answer records, the backend trait behind `complete`, schema validation, error mapping, and the minimal replay-capable backend needed for deterministic tests. The genai backend's in-process tool loop is [RFC-59](rfc-59-model-tool-loop.md). Closed verify profiles are [RFC-60](rfc-60-verify-profiles.md). Backend variety and routing are [RFC-58](rfc-58-model-backends.md).
 
 ## The boundary
 
-A guest treats `eval` like any other typed host effect. It supplies a complete prompt request, including the brief identity, operation type, expected answer shape, and any handles the backend is allowed to expose as tools. The host returns either a validated typed answer or a typed error. No vendor model id, SDK type, transcript, or free-form tool contract crosses the boundary.
+A guest treats `complete` like any other typed host effect. It supplies a complete models-API-style `prompt` (messages or structured `sections`, `response-format`, optional tool grants) and receives either a validated typed answer or a typed error. No vendor SDK type, tool-call transcript, or free-form provider contract crosses the boundary.
 
-Behind `eval` sits a backend trait. The trait is responsible for evaluating the prompt, producing an answer candidate, and returning enough transcript metadata for record/replay. The host wrapper validates the answer against the operation's expected schema before returning it to the guest.
+Behind `complete` sits a backend trait. The trait is responsible for driving the model, producing an answer candidate, and returning enough host-internal transcript metadata for record/replay. The host wrapper validates the answer against `prompt.response-format` before returning it to the guest.
 
 ## Minimal replay
 
@@ -30,7 +30,7 @@ Replay belongs at the `wasi-model` boundary because it is the test substitute fo
 
 ## Scope
 
-- The `wasi-model` host interface (`eval`).
+- The `wasi-model` host interface (`complete`; optional `complete-stream` per [wasi-model.md](wasi-model.md)).
 - Prompt, answer, and error records.
 - The backend trait used by the host.
 - Answer validation before returning to the guest.
@@ -44,7 +44,7 @@ Replay belongs at the `wasi-model` boundary because it is the test substitute fo
 
 ## Acceptance criteria
 
-1. A guest can call `eval` and receive either a validated typed answer or a typed error.
+1. A guest can call `complete` and receive either a validated typed answer or a typed error.
 2. The backend trait carries no vendor-specific type above the backend boundary.
 3. The host validates answers before returning them to guests.
 4. One recorded prompt replays deterministically without a live model.
