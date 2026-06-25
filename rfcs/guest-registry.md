@@ -10,13 +10,12 @@ The architecture sketch bundles two related-but-separable capabilities. We treat
 because the first is independently valuable and the second is built on top of it.
 
 1. **The guest registry** — today Omnia loads exactly one component per process (`omnia run <guest>.wasm`).
-   We want one Omnia process to hold *many* guests at once on a single `Engine` + `Linker`, each
+  We want one Omnia process to hold *many* guests at once on a single `Engine` + `Linker`, each
    pre-instantiated and selectable by an opaque **identity**, instantiated fresh-per-call and discarded.
    This is pure infrastructure: it has value even before any guest calls another (it is what lets one
    binary route an HTTP request, a CLI command, and a topic message to *different* guests).
-
 2. **Host-mediated dynamic linking** — a guest reaches another guest not by ahead-of-time composition but
-   by importing an interface whose implementation the host satisfies at runtime: the host reads a
+  by importing an interface whose implementation the host satisfies at runtime: the host reads a
    **selector** from the call, looks the target guest up in the registry, instantiates it fresh, invokes
    the matching export, and returns the typed result. The carrier is
    [wRPC](https://github.com/bytecodealliance/wrpc) **from day one**, behind a thin transport seam: the
@@ -31,28 +30,28 @@ no new dependencies and is independently valuable; Layer 2 adds the wRPC carrier
 ### Goals
 
 - A **generic, domain-agnostic** registry and linking mechanism that lives in the Omnia floor. The floor
-  knows *opaque identities* and *the mechanism* — never `source`/`target`/`workflow` or any Specify
-  concept (Law 2 in [architecture.md](architecture.md#the-four-laws)).
+knows *opaque identities* and *the mechanism* — never `source`/`target`/`workflow` or any Specify
+concept (Law 2 in [architecture.md](architecture.md#the-four-laws)).
 - **Instance-per-call** preserved everywhere, including dispatched calls — so a dispatched call lands in a
-  fresh instance and can never *recursively* re-enter its caller.
+fresh instance and can never *recursively* re-enter its caller.
 - **Strict WIT typing across the seam** with no hand-rolled byte (de)serialization in guest code.
 - A **transport seam** so "desktop → cloud" is a transport swap, not a code change — with **wRPC as the
-  universal carrier from day one** ([RFC-56](rfc-56-runtime-move.md): wRPC is the carrier on *every* leg,
-  not just the cross-node one), and an in-process byte pipe as its co-located fast transport.
+universal carrier from day one** ([RFC-56](rfc-56-runtime-move.md): wRPC is the carrier on *every* leg,
+not just the cross-node one), and an in-process byte pipe as its co-located fast transport.
 - **Manifest-driven deployment**: which guests load, which imports are host-mediated, how requests route,
-  and which transport carries them are a startup `omni.toml` (§3.7), not build-time macro state — so a
-  consumer can add a digest-pinned adapter without recompiling the host.
+and which transport carries them are a startup `omni.toml` (§3.7), not build-time macro state — so a
+consumer can add a digest-pinned adapter without recompiling the host.
 - Backward compatibility: every current example (`examples/http`, `examples/messaging`, …) keeps working —
-  the single-guest case becomes "a registry with one default entry", driven by the `omnia run <wasm>`
-  shorthand.
+the single-guest case becomes "a registry with one default entry", driven by the `omnia run <wasm>`
+shorthand.
 
 ### Non-goals (for this work)
 
 - The `augentic:specify` WIT package (`source` / `target` / `references`) and the Specify guests — those
-  live in the Specify consumer, built *on* this mechanism.
+live in the Specify consumer, built *on* this mechanism.
 - The `wasi-model` `eval`/`resolve` callback ([RFC-53](rfc-53-wasi-model.md)/[RFC-59](rfc-59-model-tool-loop.md)).
-  It is the *same* mechanism applied by the model backend; we make sure our primitive is general enough to
-  serve it, but we do not build the model host here.
+It is the *same* mechanism applied by the model backend; we make sure our primitive is general enough to
+serve it, but we do not build the model host here.
 - OCI distribution of guests beyond a stubbed-out acquisition trait (we design the seam, defer the puller).
 
 ## 2. Where this lands in the current code
@@ -60,13 +59,13 @@ no new dependencies and is independently valuable; Layer 2 adds the wRPC carrier
 Today the relevant flow is (all in `crates/omnia` + `crates/runtime-macro`):
 
 - `omnia::create(&wasm)` builds one `Engine`, one `Linker<T>`, loads one `Component`, returns `Compiled<T>`
-  (`crates/omnia/src/create.rs`).
+(`crates/omnia/src/create.rs`).
 - The `omnia::runtime! { hosts: { … } }` macro generates a `Context` that implements the `State` trait
-  (`crates/runtime-macro/src/expand.rs`) — which this design renames to `Runtime` (§3.5) and refers to as
-  `Runtime` from here on. It exposes exactly one `instance_pre()` and the per-call `store()` /
-  `build_store()` / `instantiate()` helpers (`crates/omnia/src/traits.rs`).
+(`crates/runtime-macro/src/expand.rs`) — which this design renames to `Runtime` (§3.5) and refers to as
+`Runtime` from here on. It exposes exactly one `instance_pre()` and the per-call `store()` /
+`build_store()` / `instantiate()` helpers (`crates/omnia/src/traits.rs`).
 - Trigger servers (`Server::run`) instantiate that single guest per request — e.g. the HTTP server in
-  `crates/wasi-http/src/host/server.rs` calls `state.instance_pre()` → `build_store` → `instantiate`.
+`crates/wasi-http/src/host/server.rs` calls `state.instance_pre()` → `build_store` → `instantiate`.
 
 ```77:107:crates/omnia/src/create.rs
 pub struct Compiled<T: WasiView + 'static> {
@@ -83,8 +82,8 @@ impl<T: WasiView> Compiled<T> {
 }
 ```
 
-The shape of the change: **`Compiled` and `Runtime` stop owning one `InstancePre` and start owning a
-`GuestRegistry`** (a map of identity → `InstancePre`), plus the dynamic-link interceptors registered on the
+The shape of the change: `**Compiled` and `Runtime` stop owning one `InstancePre` and start owning a
+`GuestRegistry**` (a map of identity → `InstancePre`), plus the dynamic-link interceptors registered on the
 shared `Linker` *before* pre-instantiation. The trigger servers select an entry by identity instead of
 reading "the" instance.
 
@@ -132,13 +131,13 @@ enum Target<T> {
 Invariants:
 
 - **One `Engine`, one `Linker<T>`.** Every guest is pre-instantiated against the *same* linker, so they
-  share one set of host interfaces and one pooling pool. This is load-bearing for the
-  instance-per-call cost story (`InstancePre` resolves imports + type-checks ahead of time;
-  `crates/omnia/src/runtime.rs` already drives the epoch + pool metrics off one engine).
+share one set of host interfaces and one pooling pool. This is load-bearing for the
+instance-per-call cost story (`InstancePre` resolves imports + type-checks ahead of time;
+`crates/omnia/src/runtime.rs` already drives the epoch + pool metrics off one engine).
 - **Pre-instantiation happens once, at registration.** Per call we only `instantiate_async` on a fresh
-  `Store`, exactly as today.
+`Store`, exactly as today.
 - The registry is `Clone`-cheap (it is behind an `Arc`), matching how `Context`/`Runtime` is cloned into
-  each connection handler today.
+each connection handler today.
 
 ### 3.3 Acquisition (how guests enter the registry)
 
@@ -157,13 +156,13 @@ The deployment manifest's `source` field (§3.7) selects one per guest; each map
 implementation:
 
 1. **Embedded** — first-party core guests baked in via `include_bytes!` for offline, zero-skew startup.
-   The binary carries a build-time `name → bytes` map (declared alongside `runtime!`); the manifest
+  The binary carries a build-time `name → bytes` map (declared alongside `runtime!`); the manifest
    activates and routes them by name.
 2. **File** — a local `.wasm` path. `omnia run <guest>.wasm` is the one-guest shorthand: load it, derive
-   its identity from the file stem, register it as the **default** guest — preserving today's behaviour
+  its identity from the file stem, register it as the **default** guest — preserving today's behaviour
    and keeping every example working with a one-entry registry.
 3. **OCI, digest-pinned** — resolve adapters lazily from an OCI store into a local cache. We define
-   `GuestSource` + the cache path now and land the puller as a follow-up.
+  `GuestSource` + the cache path now and land the puller as a follow-up.
 
 `create()` becomes: load the manifest (§3.7) → build engine + linker → add host interfaces (as today) →
 **register dynamic-link interceptors** for the manifest's `link` interfaces (Layer 2, §4) → resolve and
@@ -175,12 +174,12 @@ The four triggers from [RFC-56](rfc-56-runtime-move.md) all reduce to "resolve a
 
 - **CLI** — names its guest directly (the default registry entry).
 - **HTTP** — no identity on the wire, so the host derives it from a **declarative longest-prefix route
-  table** (`/target/omnia/… → target:omnia`) built from the manifest's `[[route.http]]` entries (§3.7).
-  Programmatic routing (compute identity from path/host/headers, mapping held in `wasi:keyvalue`) is
-  deferred. Only guests that *export* `wasi:http/incoming-handler` are routable — the registry records this
-  capability per guest at registration.
+table** (`/target/omnia/… → target:omnia`) built from the manifest's `[[route.http]]` entries (§3.7).
+Programmatic routing (compute identity from path/host/headers, mapping held in `wasi:keyvalue`) is
+deferred. Only guests that *export* `wasi:http/incoming-handler` are routable — the registry records this
+capability per guest at registration.
 - **Messaging / WebSocket** — same: derive identity from subject/route (manifest `[[route.messaging]]` /
-  `[[route.websocket]]`), resolve, dispatch.
+`[[route.websocket]]`), resolve, dispatch.
 
 The change to `Server::run` (e.g. `crates/wasi-http/src/host/server.rs`): instead of one
 `ServiceIndices::new(state.instance_pre())`, the handler resolves a `GuestId` per request and pulls the
@@ -194,9 +193,9 @@ the handler" is precisely whether the typed indices each server already builds f
 
 - **0 exporters** — the trigger is inert; nothing answers it.
 - **Exactly 1 exporter** — that guest is the catch-all for the trigger; no route needed. The whole trigger
-  fans into it.
+fans into it.
 - **2+ exporters** — explicit `[[route.<trigger>]]` entries are required to disambiguate; the collision is
-  scoped to *that* interface only.
+scoped to *that* interface only.
 
 So routing stays zero-config exactly as far as it is unambiguous. `omnia run <guest>.wasm` is the
 degenerate case — one guest, every handler has a single exporter, so every trigger it can answer routes to
@@ -206,12 +205,12 @@ messaging to the second. Only when two guests export the *same* handler must tha
 declared. Two refinements keep this unsurprising:
 
 - **Ambiguity fails fast.** If a trigger has 2+ exporters and no `[[route.<trigger>]]` entries, that is a
-  startup error ("trigger `http` has 2 capable guests (`a`, `b`) but no routes"), not a deferred runtime
-  404. A request that simply matches no configured route still falls through to a normal 404 / unrouteable.
+startup error ("trigger `http` has 2 capable guests (`a`, `b`) but no routes"), not a deferred runtime
+  1. A request that simply matches no configured route still falls through to a normal 404 / unrouteable.
 - **An explicit route suppresses the implicit catch-all for its trigger.** Declaring any
-  `[[route.<trigger>]]` makes that trigger fully route-driven even if only one guest exports the handler —
-  so a typo'd prefix surfaces as a 404 rather than silently hitting the sole guest. A guest that no route
-  names (and that is not a sole exporter) is then reachable only by host-mediated linking (§4).
+`[[route.<trigger>]]` makes that trigger fully route-driven even if only one guest exports the handler —
+so a typo'd prefix surfaces as a 404 rather than silently hitting the sole guest. A guest that no route
+names (and that is not a sole exporter) is then reachable only by host-mediated linking (§4).
 
 ### 3.5 The `Runtime` trait (renamed from `State`)
 
@@ -270,15 +269,15 @@ Inter-guest dispatch                   : identity from the call argument (adapte
 The consequences:
 
 - **Co-located guests (the single-binary desktop mode)** — to serve guest B's exports for a call from
-  guest A *in the same process*, the host must instantiate B from the identity→`InstancePre` map. There is
-  no "inter-guest comms with no registry" here; the registry is precisely the serve side of in-process
-  wRPC. This is the mode [architecture.md](architecture.md#many-guests-selected-by-identity) centers on
-  ("the binary holds every guest on one runtime").
+guest A *in the same process*, the host must instantiate B from the identity→`InstancePre` map. There is
+no "inter-guest comms with no registry" here; the registry is precisely the serve side of in-process
+wRPC. This is the mode [architecture.md](architecture.md#many-guests-selected-by-identity) centers on
+("the binary holds every guest on one runtime").
 - **Remote guests (cluster mode)** — guest B runs as its own wRPC server on another process/node; A's
-  process does not hold B's `InstancePre`, only B's **endpoint**. But A still resolves the `adapter-id`
-  to that endpoint — an identity→endpoint lookup, i.e. a *distributed* registry. The registry concept is
-  unavoidable; only its *contents* change (local instances vs. remote endpoints), and that swap is exactly
-  what `Target::Remote` and a transport change express.
+process does not hold B's `InstancePre`, only B's **endpoint**. But A still resolves the `adapter-id`
+to that endpoint — an identity→endpoint lookup, i.e. a *distributed* registry. The registry concept is
+unavoidable; only its *contents* change (local instances vs. remote endpoints), and that swap is exactly
+what `Target::Remote` and a transport change express.
 
 So the design is **one registry + wRPC as the carrier**, with two callers (inbound routing and inter-guest
 dispatch) that differ only in *where the identity comes from* and *whether the target resolves local or
@@ -339,24 +338,24 @@ default = "in-process"                 # in-process | unix | nats | quic
 The settled shape:
 
 - **The manifest is optional; defaults fill every gap.** It is a sparse override layer, not the source of
-  truth: with no file, Omnia synthesizes a one-guest deployment (the CLI/embedded guest as default,
-  capability-gated catch-all routing to it, no links, in-process transport); a present manifest overrides
-  field-by-field. Routing defaults **per handler interface by exporter count** (§3.4) — a sole exporter is
-  the catch-all for its trigger, and explicit routes are required only where two or more guests export the
-  *same* handler.
+truth: with no file, Omnia synthesizes a one-guest deployment (the CLI/embedded guest as default,
+capability-gated catch-all routing to it, no links, in-process transport); a present manifest overrides
+field-by-field. Routing defaults **per handler interface by exporter count** (§3.4) — a sole exporter is
+the catch-all for its trigger, and explicit routes are required only where two or more guests export the
+*same* handler.
 - **Population and routing are separate sections.** A `[[guest]]` may carry no route — it is then reachable
-  only by the CLI trigger and host-mediated linking (§3.4) — so routing is not nested under the guest the
-  way Spin nests a component under a trigger.
-- **`link` is per-guest.** Each guest names the imports the host should dispatch; the floor unions them
-  when wiring the shared linker (§4.4).
+only by the CLI trigger and host-mediated linking (§3.4) — so routing is not nested under the guest the
+way Spin nests a component under a trigger.
+- `**link` is per-guest.** Each guest names the imports the host should dispatch; the floor unions them
+when wiring the shared linker (§4.4).
 - **The selector ships with its default** ("first call argument is the identity", §4.3); making it
-  per-interface configurable in the manifest is a later refinement.
+per-interface configurable in the manifest is a later refinement.
 - **Transport is a global `default` plus optional per-target overrides** — this is the desktop→cloud swap
-  (§4.2), expressed as config.
+(§4.2), expressed as config.
 - **Programmatic routing is deferred.** The static table is the floor; computing identity from
-  path/host/headers via `wasi:keyvalue` (the architecture's "ceiling") is designed when needed.
+path/host/headers via `wasi:keyvalue` (the architecture's "ceiling") is designed when needed.
 - **Engine tunables stay env-driven.** `RuntimeOptions` (`crates/omnia/src/options.rs`) keeps owning engine
-  and per-store settings; the manifest is purely *deployment shape*. The two surfaces do not overlap.
+and per-store settings; the manifest is purely *deployment shape*. The two surfaces do not overlap.
 
 Startup order: load `omni.toml` **if present** (else use the synthesized default) → resolve every `source`
 (embedded / file / OCI) → build the shared `Engine` + `Linker`, wiring the union of `link` interfaces as
@@ -373,11 +372,11 @@ A caller guest imports an interface (say `omnia:link/echo`) and calls `echo(id, 
 shared `Linker`, *polyfilled* that import so that invoking it:
 
 1. **Extracts a selector** (a `GuestId`) from the call — by default the first argument, but the strategy is
-   pluggable (see §4.3).
+  pluggable (see §4.3).
 2. **Looks the target up** in the registry by identity.
 3. **Instantiates it fresh** on a new `Store` with a fresh `StoreCtx` (instance-per-call).
 4. **Invokes the matching export** — the same interface + function name the caller imported — over the
-   bound **transport**, carrying the typed arguments.
+  bound **transport**, carrying the typed arguments.
 5. **Returns the typed result** to the caller and discards the callee instance.
 
 Because step 3 is always a fresh instance on a new store, a dispatched call **cannot recursively re-enter
@@ -390,11 +389,11 @@ not bolted on.
 wasmtime integration:
 
 - **Imports** (caller side) are polyfilled onto a `wrpc_transport::Invoke` client — wRPC's
-  `wrpc-wasmtime` crate provides `link_instance` / `link_function`, which walk an imported interface's type
-  and define each function on a `LinkerInstance` so a call is encoded and sent over the wRPC transport.
+`wrpc-wasmtime` crate provides `link_instance` / `link_function`, which walk an imported interface's type
+and define each function on a `LinkerInstance` so a call is encoded and sent over the wRPC transport.
 - **Exports** (callee side) are served over a `wrpc_transport::Serve` handle — the host accepts an
-  invocation, resolves the target identity, instantiates the registry guest fresh, calls the matching
-  export, and streams the typed result back.
+invocation, resolves the target identity, instantiates the registry guest fresh, calls the matching
+export, and streams the typed result back.
 
 What is *pluggable* is the wRPC **transport**, not the RPC framework. We model that as a thin seam so the
 same dispatch path runs co-located or distributed:
@@ -413,14 +412,14 @@ pub trait LinkTransport: Clone + Send + Sync + 'static {
 Transport implementations, in the order we need them:
 
 - **In-process pipe (day one).** wRPC's frame transport over an in-memory `tokio::io::duplex` byte stream:
-  full wRPC encode/decode, zero network, both peers in one process. This is the co-located fast transport
-  and the manifest's `default` when no other is bound (§3.7). (If profiling ever shows the encode/decode is
-  on a hot path, the RFC's
-  "native in-process fast-path" — a direct `Instance::get_func` + `Func::call_async`, bypassing
-  serialization — stays available behind the same seam as an optimization. We do **not** build it first;
-  wRPC-in-process is the baseline.)
+full wRPC encode/decode, zero network, both peers in one process. This is the co-located fast transport
+and the manifest's `default` when no other is bound (§3.7). (If profiling ever shows the encode/decode is
+on a hot path, the RFC's
+"native in-process fast-path" — a direct `Instance::get_func` + `Func::call_async`, bypassing
+serialization — stays available behind the same seam as an optimization. We do **not** build it first;
+wRPC-in-process is the baseline.)
 - **Unix-domain socket (day one / next).** `wrpc-transport`'s UDS `Client`/`UnixListener` — same node,
-  separate processes; the natural step between in-process and the network.
+separate processes; the natural step between in-process and the network.
 - **NATS / QUIC (cluster).** Distributed legs; wRPC ships both. This is purely a bound-transport change.
 
 The dispatch interceptor on the linker is identical across all of them — it only ever talks to wRPC.
@@ -451,11 +450,11 @@ wRPC's `wrpc-wasmtime` crate already provides exactly the right primitives, used
 and by wasmCloud:
 
 1. At registration, introspect the importing component's type
-   (`component.component_type().imports(&engine)`), find the targeted interface(s).
+  (`component.component_type().imports(&engine)`), find the targeted interface(s).
 2. Polyfill each targeted interface onto the shared linker with `wrpc_wasmtime::link_instance` (which calls
-   `link_function` / `func_new` under the hood), bound to our wRPC `Invoke` client.
+  `link_function` / `func_new` under the hood), bound to our wRPC `Invoke` client.
 3. Wrap the client so the **selector** (§4.3) picks the wRPC peer/target from the call before the
-   invocation is encoded — this is the one place Omnia's identity resolution sits in the path.
+  invocation is encoded — this is the one place Omnia's identity resolution sits in the path.
 
 Because the call is async (it crosses wRPC and ultimately instantiates and runs a guest), this rides the
 component-model concurrent path — the same futures / `run_concurrent` machinery already used in
@@ -511,11 +510,11 @@ The rev is held with the same discipline as the wasmtime security pins — bumpe
 bump — and re-pinned to crates.io once a wasmtime-46 line is published. Two constraints follow:
 
 - `wrpc-wasmtime` pulls `wasmtime-wasi` with the **p2** feature; Omnia enables **p3**. Features are
-  additive so these coexist; the linker wiring (both `p2::add_to_linker_async` and `p3::add_to_linker` in
-  `crates/omnia/src/create.rs`) is verified in the spike.
+additive so these coexist; the linker wiring (both `p2::add_to_linker_async` and `p3::add_to_linker` in
+`crates/omnia/src/create.rs`) is verified in the spike.
 - wRPC is **pre-1.0**. Its churn is contained behind the dispatch seam (the targeted imports) and never
-  reaches the typed contract or the guests — [RFC-56](rfc-56-runtime-move.md) records the same constraint.
-  The `LinkTransport` seam is that containment.
+reaches the typed contract or the guests — [RFC-56](rfc-56-runtime-move.md) records the same constraint.
+The `LinkTransport` seam is that containment.
 
 ### 6.2 Omnia owns the mechanism; the consumer owns population and policy
 
@@ -524,13 +523,13 @@ registry, routing, and dynamic linking are a long-lived Omnia core. Both hold un
 split:
 
 - **Omnia owns the mechanism** — the `GuestRegistry` type, the routing (identity resolution, the HTTP
-  route-table machinery, trigger dispatch), the `LinkTransport` seam, the dynamic interceptor, the selector
-  trait, and instance-per-call dispatch. This is generic plumbing with subtle correctness requirements (one
-  shared `Engine`/`Linker`, pre-instantiation ordering, pool sizing) that no consumer should re-implement.
+route-table machinery, trigger dispatch), the `LinkTransport` seam, the dynamic interceptor, the selector
+trait, and instance-per-call dispatch. This is generic plumbing with subtle correctness requirements (one
+shared `Engine`/`Linker`, pre-instantiation ordering, pool sizing) that no consumer should re-implement.
 - **The consumer owns population and policy** — which guests it loads (the `include_bytes!` core list, the
-  OCI puller), the identity scheme it projects onto `GuestId` (e.g. Specify's `source:`/`target:`), the
-  typed interfaces, the bound transport, the per-guest link allow-list, and the route-table *contents* —
-  most of it expressed in the deployment manifest (§3.7), which the floor parses generically.
+OCI puller), the identity scheme it projects onto `GuestId` (e.g. Specify's `source:`/`target:`), the
+typed interfaces, the bound transport, the per-guest link allow-list, and the route-table *contents* —
+most of it expressed in the deployment manifest (§3.7), which the floor parses generically.
 
 The route-table machinery is Omnia-generic (prefix → opaque `GuestId`); only its entries are consumer
 config. The floor compiles knowing zero identities, interface names, or route contents, preserving Law 2.
@@ -567,41 +566,78 @@ wasmtime APIs Omnia uses (`func_new` + concurrent futures), and the HTTP server 
 ### 6.6 Budgets, recursion, observability
 
 - The per-call wall-clock `guest_timeout`, epoch yielding, fuel, and memory limits
-  (`crates/omnia/src/options.rs`, `traits.rs`) wrap dispatched calls too: a dispatched call gets its own
-  fresh store and therefore its own budgets.
+(`crates/omnia/src/options.rs`, `traits.rs`) wrap dispatched calls too: a dispatched call gets its own
+fresh store and therefore its own budgets.
 - Instance-per-call prevents *recursive* re-entrance, but A→B→A (fresh each time) can still run unbounded,
-  so a dispatch-depth counter carried in `StoreCtx` enforces a configurable maximum depth.
+so a dispatch-depth counter carried in `StoreCtx` enforces a configurable maximum depth.
 - Each dispatch emits metrics (target identity, latency, transport) alongside the existing
-  pool/instantiation metrics, so nested instantiation cost is visible for pool sizing.
+pool/instantiation metrics, so nested instantiation cost is visible for pool sizing.
 
 ## 7. Phased plan
 
 Each phase is independently shippable and keeps `cargo make ci` green.
 
 - **Phase 0 — `DECISIONS.md`.** Record the design decisions (resources never cross the seam, the wRPC
-  git-pin, the mechanism/population split, the dynamic-path floor, the breaking-change allowance, and the
-  manifest-driven per-guest link allow-list) in a new `DECISIONS.md`, which the RFCs already reference but
-  does not yet exist.
+git-pin, the mechanism/population split, the dynamic-path floor, the breaking-change allowance, and the
+manifest-driven per-guest link allow-list) in a new `DECISIONS.md`, which the RFCs already reference but
+does not yet exist.
 - **Phase 1 — Guest registry.** `GuestId`, `GuestRegistry`, `GuestSource` (file source first); the
-  `omni.toml` loader for population and transport, with `omnia run <wasm>` kept as the one-guest shorthand
-  (§3.7); refactor `Compiled`/`create`/the runtime macro and the `Runtime` trait (§3.5) to hold a registry
-  with a default entry; migrate every trigger server (`wasi-http`, `wasi-messaging`, `wasi-websocket`) to identity
-  selection; remove the temporary `instance_pre()` shim once migrated (§3.5); all existing examples stay
-  green. No new dependencies — independent of wRPC.
+`omni.toml` loader for population and transport, with `omnia run <wasm>` kept as the one-guest shorthand
+(§3.7); refactor `Compiled`/`create`/the runtime macro and the `Runtime` trait (§3.5) to hold a registry
+with a default entry; migrate every trigger server (`wasi-http`, `wasi-messaging`, `wasi-websocket`) to identity
+selection; remove the temporary `instance_pre()` shim once migrated (§3.5); all existing examples stay
+green. No new dependencies — independent of wRPC.
 - **Phase 1b — Inbound routing.** Longest-prefix HTTP route table from the manifest's `[[route.*]]`
-  entries + `wasi:http/incoming-handler` capability detection; embedded guest source.
+entries + `wasi:http/incoming-handler` capability detection; embedded guest source.
 - **Spike (gates Phase 2).** The wRPC git-pin builds clean against `wasmtime 46.0.1` (p2/p3 coexistence,
-  §6.1); a host import can instantiate and run another guest under the component-model concurrent model
-  (§6.5); the in-process wRPC `Invoke`/`Serve` wiring works. Throwaway branch, not shipped.
+§6.1); a host import can instantiate and run another guest under the component-model concurrent model
+(§6.5); the in-process wRPC `Invoke`/`Serve` wiring works. Throwaway branch, not shipped.
 - **Phase 2 — Dynamic linking over in-process wRPC.** The per-guest manifest `link` allow-list (§3.7,
-  §4.4), the `LinkTransport` seam, the in-process wRPC transport, `wrpc-wasmtime` import polyfill + export serving,
-  `GuestSelector`, resource-crossing rejection, depth/budget controls; the `examples/linking` proof.
+§4.4), the `LinkTransport` seam, the in-process wRPC transport, `wrpc-wasmtime` import polyfill + export serving,
+`GuestSelector`, resource-crossing rejection, depth/budget controls; the `examples/linking` proof.
 - **Phase 3 — Additional transports.** UDS (same node, separate processes), then NATS / QUIC for
-  cross-node; demonstrate the desktop→cloud transport swap with no guest or dispatch change.
+cross-node; demonstrate the desktop→cloud transport swap with no guest or dispatch change.
 - **Phase 4 — Hardening.** Optional native fast-path behind the seam (only if profiling demands), richer
-  metrics, fault injection / failure-mode tests, docs.
+metrics, fault injection / failure-mode tests, docs.
 
-## 8. References
+## 8. Implementation planning approach
+
+This RFC is the design source of truth; it is **not** the execution plan. Turn it into work with a
+**hybrid** of one durable index plus just-in-time per-phase plans — not a single monolithic plan, and not a
+full set of per-phase plans written up front (phases 2+ are reshaped by the spike, so detailed plans for
+them now would be speculation).
+
+Three artifacts, each with one job:
+
+1. **This RFC** — the *design*. Plans reference it; they do not duplicate or re-litigate it.
+2. `**DECISIONS.md` + a thin master index** (Phase 0). The master index mirrors §7: the phase list, each
+  phase's **exit criteria** and **dependencies**, and the cross-phase **invariants** every phase must
+   preserve. `DECISIONS.md` holds the settled-choices half (the list in Phase 0). This is the durable
+   tracking surface; it is updated as phases land.
+3. **A detailed per-phase plan, authored immediately before that phase starts** — file-level changes, task
+  ordering, and the concrete acceptance test. Write **Phase 0 + Phase 1 (+ 1b) now** (well-understood,
+   dependency-free, pure wasmtime). **Defer the Phase 2+ detailed plans until the spike resolves the
+   unknowns** — the spike's output is what unlocks a non-speculative Phase 2 plan.
+
+Rules for whoever (human or agent) drafts the plans:
+
+- **One plan per phase, scoped to a commit boundary.** Each phase is independently shippable and keeps `cargo make ci` green (§7); a phase — or a sub-step like 1 vs 1b — is the unit of both a plan and a locally reviewable commit. Phase 1 is large (it breaks the `Runtime` trait and the macro and migrates *every* trigger server), so its plan enumerates sub-steps that each land green.
+- **The spike is a throwaway checklist, not a plan.** It lives on a branch that is not shipped; its job is
+to answer the questions in §7's spike entry (p2/p3 coexistence and the git-pin building against
+`wasmtime 46.0.1` per §6.1; a host import instantiating and running another guest under the concurrent
+model per §6.5; the in-process wRPC `Invoke`/`Serve` wiring). Capture findings, then write the Phase 2
+plan against them.
+- **Every plan must preserve the invariants**, and state how it does so in its acceptance test:
+instance-per-call everywhere (including dispatched calls); `cargo make ci` green and all existing
+examples working; the floor stays generic (Law 2 — no `source`/`target`/Specify identity leaks into
+Omnia); resources never cross the seam (§4.5); per-call budgets/limits and dispatch-depth bounds hold
+(§6.6).
+
+A per-phase plan should contain: scope and the §7 entry it implements; ordered sub-steps mapped to commits
+or PRs; the files/crates each touches; the acceptance test (the observable green-CI outcome); the
+invariants it must hold; and its dependencies / what it unlocks.
+
+## 9. References
 
 - [architecture.md](architecture.md) — §"Guest-to-guest interaction" and §"Many guests, selected by identity".
 - [RFC-56](rfc-56-runtime-move.md) — the runtime move and multi-guest registry.
@@ -609,3 +645,4 @@ Each phase is independently shippable and keeps `cargo make ci` green.
 - [wRPC](https://github.com/bytecodealliance/wrpc) — the carrier. Relevant crates on `main`: `wrpc-transport` (0.29), `wrpc-wasmtime` (0.1, the wasmtime polyfill/serve integration, successor to the published `wrpc-runtime-wasmtime`), `wrpc-introspect`; the workspace pins `wasmtime = 46` and `wit-bindgen = 0.58`, matching Omnia.
 - [wasmtime#9309](https://github.com/bytecodealliance/wasmtime/issues/9309) — confirmation that component-to-component linking must go through the host.
 - wasmCloud [linking components](https://wasmcloud.com/docs/v1/concepts/linking-components/) — prior art for host-mediated runtime links over wRPC.
+
