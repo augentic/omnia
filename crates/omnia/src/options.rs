@@ -89,6 +89,12 @@ pub struct RuntimeOptions {
     /// (`MAX_FUEL`, default disabled).
     #[env(from = "MAX_FUEL", default = "0")]
     pub max_fuel: u64,
+    /// Maximum host-mediated dynamic-linking dispatch depth — how deep a chain
+    /// of guest-to-guest calls (A->B->C) may nest before the floor refuses
+    /// further dispatch, bounding runaway recursion (`MAX_DISPATCH_DEPTH`,
+    /// default 8). Runtime-only.
+    #[env(from = "MAX_DISPATCH_DEPTH", default = "8")]
+    pub max_dispatch_depth: usize,
     /// Whether the pooling instance allocator is enabled
     /// (`POOLING`, default `true`).
     #[env(from = "POOLING", default = "true")]

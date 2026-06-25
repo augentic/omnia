@@ -366,6 +366,10 @@ criteria = "safe-to-deploy"
 version = "0.2.7"
 criteria = "safe-to-deploy"
 
+[[exemptions.leb128-tokio]]
+version = "0.1.7"
+criteria = "safe-to-deploy"
+
 [[exemptions.libloading]]
 version = "0.8.9"
 criteria = "safe-to-deploy"
@@ -626,6 +630,10 @@ criteria = "safe-to-deploy"
 version = "2.17.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.serde_spanned]]
+version = "1.1.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.serde_urlencoded]]
 version = "0.7.1"
 criteria = "safe-to-deploy"
@@ -698,6 +706,14 @@ criteria = "safe-to-deploy"
 version = "0.29.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.toml]]
+version = "1.1.2+spec-1.1.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.toml_writer]]
+version = "1.1.1+spec-1.1.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.tonic]]
 version = "0.14.6"
 criteria = "safe-to-deploy"
@@ -750,6 +766,10 @@ criteria = "safe-to-deploy"
 version = "0.9.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.utf8-tokio]]
+version = "0.2.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.uuid]]
 version = "1.23.4"
 criteria = "safe-to-deploy"
@@ -780,6 +800,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.wasm-bindgen-shared]]
 version = "0.2.126"
+criteria = "safe-to-deploy"
+
+[[exemptions.wasm-tokio]]
+version = "0.6.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.web-sys]]

@@ -14,7 +14,7 @@
 //! The type system ensures requests are properly configured at compile time,
 //! preventing execution without required components (owner, provider, request).
 //!
-//! ### Valid State Transitions
+//! ### Valid Runtime Transitions
 //!
 //! ```text
 //! RequestHandler<NoRequest, NoOwner, NoProvider>

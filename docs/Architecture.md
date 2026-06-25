@@ -72,7 +72,7 @@ Omnia is organized into three distinct layers:
 The foundation of the runtime. Provides:
 
 - **CLI infrastructure**: Command-line interface for running and compiling WebAssembly components
-- **Core traits**: `State`, `Host`, `Server`, and `Backend` traits that all components implement
+- **Core traits**: `Runtime`, `Host`, `Server`, and `Backend` traits that all components implement
 - **Wasmtime integration**: Re-exports and wrappers for wasmtime functionality
 
 Key traits:
@@ -84,8 +84,8 @@ pub trait Host<T>: Debug + Sync + Send {
 }
 
 /// Implemented by WASI hosts that are servers
-pub trait Server<S: State>: Debug + Sync + Send {
-    fn run(&self, state: &S) -> impl Future<Output = Result<()>>;
+pub trait Server<R: Runtime>: Debug + Sync + Send {
+    fn run(&self, state: &R) -> impl Future<Output = Result<()>>;
 }
 
 /// Implemented by backend resources for connection management
@@ -204,7 +204,7 @@ The macro generates:
 
 - `RuntimeContext`: Holds pre-instantiated components and backend connections
 - `RuntimeStoreCtx`: Per-instance data shared between runtime and host functions
-- `State` trait implementation
+- `Runtime` trait implementation
 - WASI view trait implementations for each interface
 - `runtime::run()` function to start the runtime
 

@@ -38,7 +38,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{Host, Server, State};
+use omnia::{Host, Runtime, Server};
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::{ResourceTable, ResourceTableError};
 
@@ -70,12 +70,12 @@ where
     }
 }
 
-impl<S> Server<S> for WasiMessaging
+impl<R> Server<R> for WasiMessaging
 where
-    S: State,
-    S::StoreCtx: WasiMessagingView,
+    R: Runtime,
+    R::StoreCtx: WasiMessagingView,
 {
-    async fn run(&self, state: &S) -> anyhow::Result<()> {
+    async fn run(&self, state: &R) -> anyhow::Result<()> {
         server::run(state).await
     }
 }

@@ -40,7 +40,7 @@ runtime!({
 // The macro generates:
 // - RuntimeContext struct with backend connections
 // - RuntimeStoreCtx struct with per-instance contexts
-// - State trait implementation
+// - Runtime trait implementation
 // - WASI view trait implementations
 // - runtime_run() function
 ```
@@ -113,9 +113,9 @@ pub struct RuntimeStoreCtx {
 }
 ```
 
-### State Trait Implementation
+### Runtime Trait Implementation
 
-Implements the `State` trait from the `runtime` crate, providing methods to create new store contexts and access the pre-instantiated component.
+Implements the `Runtime` trait from the `runtime` crate, providing methods to create new store contexts and access the pre-instantiated component.
 
 ### WASI View Implementations
 

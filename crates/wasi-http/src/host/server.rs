@@ -1,6 +1,7 @@
 //! #HTTP Server
 
 use std::clone::Clone;
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::env;
 use std::pin::Pin;
@@ -17,7 +18,7 @@ use hyper::body::{Body, Frame, Incoming, SizeHint};
 use hyper::header::{FORWARDED, HOST};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use omnia::State;
+use omnia::{GuestId, HttpRoutes, Router, Runtime};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
@@ -31,10 +32,10 @@ type OutgoingBody = UnsyncBoxBody<Bytes, anyhow::Error>;
 
 const HTTP_ADDR: &str = "0.0.0.0:8080";
 
-pub async fn serve<S>(state: &S) -> Result<()>
+pub async fn serve<R>(state: &R) -> Result<()>
 where
-    S: State,
-    S::StoreCtx: WasiHttpView,
+    R: Runtime,
+    R::StoreCtx: WasiHttpView,
 {
     let component = env::var("COMPONENT").unwrap_or_else(|_| "unknown".into());
     let addr = env::var("HTTP_ADDR").unwrap_or_else(|_| HTTP_ADDR.into());
@@ -42,10 +43,24 @@ where
     let listener = TcpListener::bind(&addr).await?;
     tracing::info!("{component} http server listening on: {addr}");
 
+    // Capability probe: a guest exports `wasi:http/incoming-handler` exactly
+    // when its typed `ServiceIndices` resolve. Build the per-guest indices once
+    // and the router that selects among them.
+    let mut indices = HashMap::new();
+    let mut capable = Vec::new();
+    for guest in state.registry().guests() {
+        if let Ok(service) = ServiceIndices::new(guest.instance_pre()) {
+            capable.push(guest.id().clone());
+            indices.insert(guest.id().clone(), service);
+        }
+    }
+    let router = Router::build("http", &capable, state.registry().routes().http().clone())?;
+
     let handler = Handler {
         state: Arc::new(state.clone()),
         component,
-        indices: ServiceIndices::new(state.instance_pre())?,
+        indices: Arc::new(indices),
+        router: Arc::new(router),
     };
 
     // listen for requests until terminated
@@ -91,20 +106,21 @@ where
 }
 
 #[derive(Clone)]
-struct Handler<S>
+struct Handler<R>
 where
-    S: State,
-    S::StoreCtx: WasiHttpView,
+    R: Runtime,
+    R::StoreCtx: WasiHttpView,
 {
-    state: Arc<S>,
+    state: Arc<R>,
     component: String,
-    indices: ServiceIndices,
+    indices: Arc<HashMap<GuestId, ServiceIndices>>,
+    router: Arc<Router<HttpRoutes>>,
 }
 
-impl<S> Handler<S>
+impl<R> Handler<R>
 where
-    S: State,
-    S::StoreCtx: WasiHttpView,
+    R: Runtime,
+    R::StoreCtx: WasiHttpView,
 {
     // Forward request to the wasm Guest.
     async fn handle(
@@ -115,11 +131,25 @@ where
         // prepare wasmtime http request and response
         let request = fix_request(request).context("preparing request")?;
 
-        // instantiate the guest and get the proxy
+        // Resolve the guest by request path; an unmatched path (or an inert
+        // trigger with no http-capable guest) is a 404, not a guest invocation.
+        let path = request.uri().path().to_owned();
+        let Some(guest_id) = self.router.resolve(&path) else {
+            tracing::debug!(%path, "no route matched; returning 404");
+            return Ok(not_found());
+        };
+        let (Some(guest), Some(indices)) =
+            (self.state.registry().get(guest_id), self.indices.get(guest_id))
+        else {
+            tracing::debug!(%path, "routed guest is not registered or not http-capable");
+            return Ok(not_found());
+        };
+
+        // instantiate the selected guest fresh (instance-per-call)
         let store_data = self.state.store();
         let mut store = self.state.build_store(store_data);
-        let instance = self.state.instantiate(&mut store).await?;
-        let service = self.indices.load(&mut store, &instance)?;
+        let instance = self.state.instantiate(guest.instance_pre(), &mut store).await?;
+        let service = indices.load(&mut store, &instance)?;
 
         let (sender, receiver) = oneshot::channel::<Result<hyper::Response<OutgoingBody>>>();
 
@@ -285,4 +315,16 @@ fn internal_error() -> hyper::Response<OutgoingBody> {
         .header("Content-Type", "text/html; charset=UTF-8")
         .body(body)
         .expect("should build internal error response")
+}
+
+/// A `404 Not Found` for a request that matched no route (or a trigger with no
+/// http-capable guest).
+fn not_found() -> hyper::Response<OutgoingBody> {
+    let body = Full::new(Bytes::from_static(b"Not Found")).map_err(Into::into).boxed_unsync();
+
+    hyper::Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .header("Content-Type", "text/plain; charset=UTF-8")
+        .body(body)
+        .expect("should build not found response")
 }

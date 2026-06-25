@@ -1,8 +1,10 @@
+use std::collections::HashMap;
 use std::env;
+use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
-use omnia::State;
+use omnia::{GuestId, Router, Runtime, TopicRoutes};
 use tracing::{Instrument, debug_span, instrument};
 
 use crate::host::WasiMessagingView;
@@ -10,18 +12,37 @@ use crate::host::generated::MessagingRequestReplyIndices;
 use crate::host::resource::{MessageProxy, Subscriptions};
 
 #[instrument("messaging-server", skip(state))]
-pub async fn run<S>(state: &S) -> Result<()>
+pub async fn run<R>(state: &R) -> Result<()>
 where
-    S: State,
-    S::StoreCtx: WasiMessagingView,
+    R: Runtime,
+    R::StoreCtx: WasiMessagingView,
 {
     let component = env::var("COMPONENT").unwrap_or_else(|_| "unknown".into());
     tracing::info!("starting messaging server for: {component}");
 
+    // Capability probe: a guest exports the messaging handler exactly when its
+    // typed indices resolve. Build the per-guest indices once and the topic
+    // router that selects among them.
+    let mut indices = HashMap::new();
+    let mut capable = Vec::new();
+    for guest in state.registry().guests() {
+        if let Ok(messaging) = MessagingRequestReplyIndices::new(guest.instance_pre()) {
+            capable.push(guest.id().clone());
+            indices.insert(guest.id().clone(), messaging);
+        }
+    }
+    let router =
+        Router::build("messaging", &capable, state.registry().routes().messaging().clone())?;
+    if router.is_inert() {
+        tracing::info!("no guest exports the messaging handler; messaging trigger inert");
+        return Ok(());
+    }
+
     let handler = Handler {
         state: state.clone(),
         component,
-        indices: MessagingRequestReplyIndices::new(state.instance_pre())?,
+        indices: Arc::new(indices),
+        router: Arc::new(router),
     };
     let mut stream = handler.subscriptions().await?;
 
@@ -46,23 +67,38 @@ where
 }
 
 #[derive(Clone)]
-struct Handler<S>
+struct Handler<R>
 where
-    S: State,
-    S::StoreCtx: WasiMessagingView,
+    R: Runtime,
+    R::StoreCtx: WasiMessagingView,
 {
-    state: S,
+    state: R,
     component: String,
-    indices: MessagingRequestReplyIndices,
+    indices: Arc<HashMap<GuestId, MessagingRequestReplyIndices>>,
+    router: Arc<Router<TopicRoutes>>,
 }
 
-impl<S> Handler<S>
+impl<R> Handler<R>
 where
-    S: State,
-    S::StoreCtx: WasiMessagingView,
+    R: Runtime,
+    R::StoreCtx: WasiMessagingView,
 {
     // Forward message to the wasm guest.
     async fn handle(&self, message: MessageProxy) -> Result<()> {
+        // Resolve the guest by topic; an unmatched topic is dropped, not an
+        // error (the message simply has no handler in this deployment).
+        let topic = message.topic();
+        let Some(guest_id) = self.router.resolve(&topic) else {
+            tracing::debug!(%topic, "no route for topic; dropping message");
+            return Ok(());
+        };
+        let (Some(guest), Some(indices)) =
+            (self.state.registry().get(guest_id), self.indices.get(guest_id))
+        else {
+            tracing::debug!(%topic, "routed guest is not registered or not messaging-capable");
+            return Ok(());
+        };
+
         let mut store_data = self.state.store();
         let msg_res = store_data
             .messaging()
@@ -71,8 +107,8 @@ where
             .map_err(|e| anyhow!("failed to push message: {e}"))?;
 
         let mut store = self.state.build_store(store_data);
-        let instance = self.state.instantiate(&mut store).await?;
-        let messaging = self.indices.load(&mut store, &instance)?;
+        let instance = self.state.instantiate(guest.instance_pre(), &mut store).await?;
+        let messaging = indices.load(&mut store, &instance)?;
 
         let run = store
             .run_concurrent(async |store| {
