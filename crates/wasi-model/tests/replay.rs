@@ -172,7 +172,7 @@ async fn registry(wasm: &Path) -> Result<Arc<Registry<TestCtx>>> {
     std::fs::write(&manifest_path, manifest).context("writing test manifest")?;
 
     let mut compiled: Compiled<TestCtx> =
-        create_from_manifest(&manifest_path, &[]).await.context("building runtime")?;
+        create_from_manifest(&manifest_path).await.context("building runtime")?;
     compiled.link(WasiModel).context("linking WasiModel")?;
     let registry = compiled.registry().context("assembling registry")?;
 
@@ -374,7 +374,7 @@ async fn build_resolve_registry(model: &Path, shelf: &Path) -> Result<Arc<Regist
     std::fs::write(&manifest_path, manifest).context("writing resolve test manifest")?;
 
     let mut compiled: Compiled<TestCtx> =
-        create_from_manifest(&manifest_path, &[]).await.context("building runtime")?;
+        create_from_manifest(&manifest_path).await.context("building runtime")?;
     compiled.link(WasiModel).context("linking WasiModel")?;
     let registry = compiled.registry().context("assembling registry")?;
 

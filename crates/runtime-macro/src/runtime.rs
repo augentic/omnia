@@ -1,6 +1,6 @@
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::{Expr, LitBool, LitStr, Path, Result, Token};
+use syn::{LitBool, Path, Result, Token};
 
 /// Configuration for the runtime macro.
 ///
@@ -16,14 +16,12 @@ pub struct Config {
     pub gen_main: bool,
     pub hosts: Vec<Host>,
     pub backends: Vec<Path>,
-    pub embedded: Vec<(LitStr, Expr)>,
 }
 
 impl Parse for Config {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut main = false;
         let mut hosts = Hosts(Vec::new());
-        let mut embedded = Vec::new();
 
         let settings;
         syn::braced!(settings in input);
@@ -33,7 +31,6 @@ impl Parse for Config {
             match setting.into_value() {
                 Opt::Main(m) => main = m,
                 Opt::Host(h) => hosts = h,
-                Opt::Embedded(e) => embedded = e,
             }
         }
 
@@ -50,7 +47,6 @@ impl Parse for Config {
             gen_main: main,
             hosts: hosts.0,
             backends,
-            embedded,
         })
     }
 }
@@ -58,14 +54,12 @@ impl Parse for Config {
 mod kw {
     syn::custom_keyword!(main);
     syn::custom_keyword!(hosts);
-    syn::custom_keyword!(embedded);
 }
 
 #[allow(clippy::large_enum_variant)]
 enum Opt {
     Main(bool),
     Host(Hosts),
-    Embedded(Vec<(LitStr, Expr)>),
 }
 
 impl Parse for Opt {
@@ -81,32 +75,9 @@ impl Parse for Opt {
             let list;
             syn::braced!(list in input);
             Ok(Self::Host(list.parse()?))
-        } else if l.peek(kw::embedded) {
-            input.parse::<kw::embedded>()?;
-            input.parse::<Token![:]>()?;
-            let list;
-            syn::braced!(list in input);
-            let entries = Punctuated::<EmbeddedEntry, Token![,]>::parse_terminated(&list)?;
-            Ok(Self::Embedded(entries.into_iter().map(|e| (e.name, e.bytes)).collect()))
         } else {
             Err(l.error())
         }
-    }
-}
-
-/// A single `"name" => <bytes-expr>` embedded-guest entry, where `<bytes-expr>`
-/// is typically `include_bytes!("path/to/guest.wasm")`.
-struct EmbeddedEntry {
-    name: LitStr,
-    bytes: Expr,
-}
-
-impl Parse for EmbeddedEntry {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let name = input.parse::<LitStr>()?;
-        input.parse::<Token![=>]>()?;
-        let bytes = input.parse::<Expr>()?;
-        Ok(Self { name, bytes })
     }
 }
 

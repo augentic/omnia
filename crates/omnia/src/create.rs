@@ -18,7 +18,7 @@ use crate::manifest::{Manifest, RouteSpec, SourceSpec};
 use crate::registry::{Guest, GuestId, Registry};
 use crate::routing::{HttpRoutes, Routes, TopicRoutes};
 use crate::selector::FirstArgSelector;
-use crate::source::{EmbeddedSource, FileSource, GuestSource, LoadedGuest};
+use crate::source::{FileSource, GuestSource, LoadedGuest};
 use crate::{Host, RuntimeOptions};
 
 /// Build the Wasmtime `Engine` and `Linker` for a single-guest runtime.
@@ -65,22 +65,17 @@ pub async fn create<T: WasiView + 'static>(wasm: &Path) -> Result<Compiled<T>> {
 /// positional `wasm` path is the one-guest shorthand. At least one of the two
 /// must be provided.
 ///
-/// The `embedded` map carries build-time `include_bytes!` blobs (declared in
-/// the `runtime!` macro) that a manifest's `source.embedded = "<name>"` may
-/// activate; the single-file shorthand never consults it.
-///
 /// # Errors
 ///
 /// Returns an error if neither a config nor a wasm path is available, or if the
 /// selected source cannot be built.
 pub async fn create_runtime<T: WasiView + 'static>(
     wasm: Option<PathBuf>, config: Option<PathBuf>,
-    embedded: &'static [(&'static str, &'static [u8])],
 ) -> Result<Compiled<T>> {
     let config = config.or_else(|| env::var_os("OMNI_CONFIG").map(PathBuf::from));
 
     if let Some(config) = config {
-        return create_from_manifest(&config, embedded).await;
+        return create_from_manifest(&config).await;
     }
 
     let wasm = wasm.context(
@@ -91,18 +86,17 @@ pub async fn create_runtime<T: WasiView + 'static>(
 
 /// Build a runtime from a deployment manifest (`omni.toml`).
 ///
-/// Resolves every `[[guest]]` source (file or embedded), builds the shared
-/// engine + linker, records the first guest as the default entry, and assembles
-/// the per-trigger route tables from the `[[route.*]]` sections.
+/// Resolves every `[[guest]]` source, builds the shared engine + linker, records
+/// the first guest as the default entry, and assembles the per-trigger route
+/// tables from the `[[route.*]]` sections.
 ///
 /// # Errors
 ///
-/// Will fail if the manifest cannot be loaded, if a guest names an embedded blob
-/// not declared in `runtime!`, if a guest uses a source kind not yet supported,
-/// or if a guest component cannot be loaded.
-#[instrument(skip(embedded))]
+/// Will fail if the manifest cannot be loaded, if a guest uses a source kind not
+/// yet supported, or if a guest component cannot be loaded.
+#[instrument]
 pub async fn create_from_manifest<T: WasiView + 'static>(
-    manifest: &Path, embedded: &'static [(&'static str, &'static [u8])],
+    manifest: &Path,
 ) -> Result<Compiled<T>> {
     let parsed = Manifest::load(manifest)?;
 
@@ -125,12 +119,6 @@ pub async fn create_from_manifest<T: WasiView + 'static>(
             SourceSpec::Path(path) => {
                 let resolved = if path.is_absolute() { path.clone() } else { base.join(path) };
                 FileSource::with_id(id, resolved).load(&engine).await?
-            }
-            SourceSpec::Embedded(name) => {
-                let bytes = lookup_embedded(embedded, name).with_context(|| {
-                    format!("guest `{id}`: embedded guest `{name}` is not declared in `runtime!`")
-                })?;
-                EmbeddedSource::new(id, bytes).load(&engine).await?
             }
             SourceSpec::Oci(_) => {
                 bail!("guest `{id}`: OCI sources are not yet supported")
@@ -161,14 +149,6 @@ pub async fn create_from_manifest<T: WasiView + 'static>(
         routes,
         link_interfaces,
     })
-}
-
-/// Resolve an embedded guest's bytes by name from the build-time map declared
-/// in the `runtime!` macro.
-fn lookup_embedded(
-    embedded: &'static [(&'static str, &'static [u8])], name: &str,
-) -> Option<&'static [u8]> {
-    embedded.iter().find(|(declared, _)| *declared == name).map(|(_, bytes)| *bytes)
 }
 
 /// Convert the manifest's parsed routes into the registry's `GuestId`-typed,
@@ -307,17 +287,6 @@ mod tests {
     use wasmtime::{Config, Engine};
 
     use crate::RuntimeOptions;
-
-    #[test]
-    fn lookup_embedded_by_name() {
-        // Mirrors the `(&str, &[u8])` shape the `runtime!` macro emits.
-        const A: &[u8] = b"component-a";
-        const B: &[u8] = b"component-b";
-        const EMBEDDED: &[(&str, &[u8])] = &[("a", A), ("b", B)];
-
-        assert_eq!(super::lookup_embedded(EMBEDDED, "b"), Some(B));
-        assert_eq!(super::lookup_embedded(EMBEDDED, "missing"), None);
-    }
 
     #[test]
     fn builds_with_defaults() {

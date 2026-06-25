@@ -109,17 +109,14 @@ pub struct TopicRoute {
 
 /// Where a guest's component bytes come from.
 ///
-/// Modelled as an externally tagged enum so TOML's `source.path = "..."`,
-/// `source.embedded = "..."`, and `source.oci = "..."` each select a variant.
+/// Modelled as an externally tagged enum so TOML's `source.path = "..."` and
+/// `source.oci = "..."` each select a variant.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SourceSpec {
     /// A local `.wasm` / pre-compiled `.bin` path (resolved relative to the
     /// manifest's directory).
     Path(PathBuf),
-    /// A build-time `include_bytes!` blob, by name. Accepted by the parser;
-    /// resolving it lands with the embedded source phase.
-    Embedded(String),
     /// A digest-pinned OCI reference. Accepted by the parser; the puller lands
     /// as a follow-up.
     Oci(String),

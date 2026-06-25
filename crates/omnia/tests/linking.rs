@@ -171,7 +171,7 @@ async fn router_dispatches_to_responder() -> Result<()> {
     std::fs::write(&manifest_path, manifest).context("writing test manifest")?;
 
     let compiled =
-        create_from_manifest::<TestCtx>(&manifest_path, &[]).await.context("building runtime")?;
+        create_from_manifest::<TestCtx>(&manifest_path).await.context("building runtime")?;
     let registry = compiled.registry().context("assembling registry")?;
     let runtime = TestRuntime {
         registry: Arc::new(registry),

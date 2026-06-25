@@ -21,7 +21,6 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
         host_trait_impls,
         server_trait_impls,
         wasi_view_impls,
-        embedded,
         main_fn,
     } = Expanded::try_from(config)?;
 
@@ -54,13 +53,9 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
 
             use super::*;
 
-            /// Build-time embedded guest blobs (`name -> bytes`), activated by a
-            /// deployment manifest's `source.embedded = "<name>"`.
-            const EMBEDDED: &[(&str, &[u8])] = &[#(#embedded,)*];
-
             /// Run a guest (single-file shorthand) or a manifest-driven deployment.
             pub async fn run(wasm: Option<PathBuf>, config: Option<PathBuf>) -> Result<()> {
-                let mut compiled = omnia::create_runtime(wasm, config, EMBEDDED)
+                let mut compiled = omnia::create_runtime(wasm, config)
                     .await
                     .context("building runtime")?;
                 let run_state = Context::new(&mut compiled)
@@ -226,7 +221,6 @@ struct Expanded {
     host_trait_impls: Vec<Path>,
     server_trait_impls: Vec<TokenStream>,
     wasi_view_impls: Vec<TokenStream>,
-    embedded: Vec<TokenStream>,
     main_fn: TokenStream,
 }
 
@@ -281,14 +275,6 @@ impl TryFrom<&Config> for Expanded {
             });
         }
 
-        // Embedded guest blobs: `("name", (<expr>).as_slice())` tuples, coerced
-        // to `(&str, &[u8])` so the generated `EMBEDDED` slice is well-typed.
-        let embedded = input
-            .embedded
-            .iter()
-            .map(|(name, bytes)| quote! { (#name, (#bytes).as_slice()) })
-            .collect();
-
         // main function (optional)
         let main_fn = if input.gen_main {
             quote! {
@@ -316,7 +302,6 @@ impl TryFrom<&Config> for Expanded {
             host_trait_impls,
             server_trait_impls,
             wasi_view_impls,
-            embedded,
             main_fn,
         })
     }
