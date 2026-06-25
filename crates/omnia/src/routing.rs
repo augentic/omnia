@@ -4,8 +4,8 @@
 //! on opaque identities and route strings only, never on domain concepts.
 //!
 //! Two table shapes cover the triggers:
-//! - [`HttpRouteTable`] — longest-prefix match on a request path.
-//! - [`TopicRouteTable`] — NATS-style token match on a messaging topic (also
+//! - [`HttpRoutes`] — longest-prefix match on a request path.
+//! - [`TopicRoutes`] — NATS-style token match on a messaging topic (also
 //!   used for websocket routes via the manifest's `route` alias).
 //!
 //! [`Router`] layers the capability-based default routing of the guest-registry
@@ -31,13 +31,13 @@ pub trait RouteResolve {
 
 /// Longest-prefix HTTP route table: `/target/omnia` wins over `/target`.
 #[derive(Clone, Debug, Default)]
-pub struct HttpRouteTable {
+pub struct HttpRoutes {
     /// `(prefix, target)` pairs, sorted by prefix length descending so the
     /// first match is the longest.
     entries: Vec<(String, GuestId)>,
 }
 
-impl HttpRouteTable {
+impl HttpRoutes {
     /// Build a table from `(prefix, target)` pairs, ordering longest prefix
     /// first so resolution is a simple find.
     #[must_use]
@@ -48,7 +48,7 @@ impl HttpRouteTable {
     }
 }
 
-impl RouteResolve for HttpRouteTable {
+impl RouteResolve for HttpRoutes {
     fn resolve(&self, key: &str) -> Option<&GuestId> {
         self.entries.iter().find(|(prefix, _)| path_has_prefix(key, prefix)).map(|(_, id)| id)
     }
@@ -66,12 +66,12 @@ impl RouteResolve for HttpRouteTable {
 /// `>` matches one or more trailing tokens. Drives messaging (`topic`) and
 /// websocket (`route`).
 #[derive(Clone, Debug, Default)]
-pub struct TopicRouteTable {
+pub struct TopicRoutes {
     /// `(pattern, target)` pairs; the first match in declaration order wins.
     entries: Vec<(String, GuestId)>,
 }
 
-impl TopicRouteTable {
+impl TopicRoutes {
     /// Build a table from `(pattern, target)` pairs, preserving declaration
     /// order (first match wins).
     #[must_use]
@@ -82,7 +82,7 @@ impl TopicRouteTable {
     }
 }
 
-impl RouteResolve for TopicRouteTable {
+impl RouteResolve for TopicRoutes {
     fn resolve(&self, key: &str) -> Option<&GuestId> {
         self.entries.iter().find(|(pattern, _)| topic_matches(key, pattern)).map(|(_, id)| id)
     }
@@ -99,18 +99,16 @@ impl RouteResolve for TopicRouteTable {
 /// The per-trigger route tables a registry carries, parsed from the manifest's
 /// `[[route.*]]` sections.
 #[derive(Clone, Debug, Default)]
-pub struct RouteTables {
-    http: HttpRouteTable,
-    messaging: TopicRouteTable,
-    websocket: TopicRouteTable,
+pub struct Routess {
+    http: HttpRoutes,
+    messaging: TopicRoutes,
+    websocket: TopicRoutes,
 }
 
-impl RouteTables {
+impl Routess {
     /// Assemble the per-trigger tables.
     #[must_use]
-    pub const fn new(
-        http: HttpRouteTable, messaging: TopicRouteTable, websocket: TopicRouteTable,
-    ) -> Self {
+    pub const fn new(http: HttpRoutes, messaging: TopicRoutes, websocket: TopicRoutes) -> Self {
         Self {
             http,
             messaging,
@@ -120,19 +118,19 @@ impl RouteTables {
 
     /// The HTTP (longest-prefix) route table.
     #[must_use]
-    pub const fn http(&self) -> &HttpRouteTable {
+    pub const fn http(&self) -> &HttpRoutes {
         &self.http
     }
 
     /// The messaging (topic) route table.
     #[must_use]
-    pub const fn messaging(&self) -> &TopicRouteTable {
+    pub const fn messaging(&self) -> &TopicRoutes {
         &self.messaging
     }
 
     /// The websocket (route) route table.
     #[must_use]
-    pub const fn websocket(&self) -> &TopicRouteTable {
+    pub const fn websocket(&self) -> &TopicRoutes {
         &self.websocket
     }
 
@@ -265,7 +263,7 @@ mod tests {
     #[test]
     fn http_longest_prefix_wins() {
         let table =
-            HttpRouteTable::new([("/a".to_owned(), id("short")), ("/a/b".to_owned(), id("long"))]);
+            HttpRoutes::new([("/a".to_owned(), id("short")), ("/a/b".to_owned(), id("long"))]);
         assert_eq!(table.resolve("/a/b/c"), Some(&id("long")));
         assert_eq!(table.resolve("/a/x"), Some(&id("short")));
         assert_eq!(table.resolve("/other"), None);
@@ -273,7 +271,7 @@ mod tests {
 
     #[test]
     fn http_prefix_respects_segments() {
-        let table = HttpRouteTable::new([("/a".to_owned(), id("a"))]);
+        let table = HttpRoutes::new([("/a".to_owned(), id("a"))]);
         assert_eq!(table.resolve("/a"), Some(&id("a")));
         assert_eq!(table.resolve("/a/deep"), Some(&id("a")));
         assert_eq!(table.resolve("/abc"), None);
@@ -281,7 +279,7 @@ mod tests {
 
     #[test]
     fn topic_wildcards_match() {
-        let table = TopicRouteTable::new([
+        let table = TopicRoutes::new([
             ("specify.build.>".to_owned(), id("workflow")),
             ("events.*.created".to_owned(), id("audit")),
         ]);
@@ -294,14 +292,14 @@ mod tests {
 
     #[test]
     fn build_catch_all_with_sole_exporter() {
-        let router = Router::build("http", &[id("only")], HttpRouteTable::default())
+        let router = Router::build("http", &[id("only")], HttpRoutes::default())
             .expect("a sole exporter is the catch-all");
         assert_eq!(router.resolve("/anything"), Some(&id("only")));
     }
 
     #[test]
     fn build_inert_without_exporters() {
-        let router = Router::build("http", &[], HttpRouteTable::default())
+        let router = Router::build("http", &[], HttpRoutes::default())
             .expect("no exporters is inert, not an error");
         assert!(router.is_inert());
         assert_eq!(router.resolve("/anything"), None);
@@ -309,14 +307,14 @@ mod tests {
 
     #[test]
     fn build_ambiguous_without_routes_errors() {
-        let error = Router::build("http", &[id("a"), id("b")], HttpRouteTable::default())
+        let error = Router::build("http", &[id("a"), id("b")], HttpRoutes::default())
             .expect_err("two exporters with no routes is ambiguous");
         assert!(error.to_string().contains("2 capable guests"));
     }
 
     #[test]
     fn build_routes_suppress_catch_all() {
-        let table = HttpRouteTable::new([("/a".to_owned(), id("a"))]);
+        let table = HttpRoutes::new([("/a".to_owned(), id("a"))]);
         let router = Router::build("http", &[id("a")], table).expect("routes are valid");
         assert_eq!(router.resolve("/a"), Some(&id("a")));
         // An explicit route makes the trigger fully route-driven: a miss is a
@@ -326,7 +324,7 @@ mod tests {
 
     #[test]
     fn build_rejects_route_to_incapable_guest() {
-        let table = HttpRouteTable::new([("/a".to_owned(), id("ghost"))]);
+        let table = HttpRoutes::new([("/a".to_owned(), id("ghost"))]);
         let error = Router::build("http", &[id("real")], table)
             .expect_err("a route to a non-exporter must fail fast");
         assert!(error.to_string().contains("ghost"));

@@ -18,7 +18,7 @@ use wasmtime::Engine;
 use wasmtime::component::InstancePre;
 
 use crate::RuntimeOptions;
-use crate::routing::RouteTables;
+use crate::routing::Routess;
 
 /// Opaque guest identity.
 ///
@@ -111,7 +111,7 @@ pub struct Registry<T: 'static> {
     options: RuntimeOptions,
     guests: HashMap<GuestId, Guest<T>>,
     default: GuestId,
-    routes: RouteTables,
+    routes: Routess,
 }
 
 impl<T: 'static> Registry<T> {
@@ -125,7 +125,7 @@ impl<T: 'static> Registry<T> {
     /// registered guests, or if a route targets a guest that is not registered.
     pub fn new(
         engine: Engine, options: RuntimeOptions, guests: HashMap<GuestId, Guest<T>>,
-        default: GuestId, routes: RouteTables,
+        default: GuestId, routes: Routess,
     ) -> Result<Self> {
         if guests.is_empty() {
             bail!("cannot build a guest registry with no guests");
@@ -176,7 +176,7 @@ impl<T: 'static> Registry<T> {
     /// Returns the per-trigger inbound route tables built from the manifest's
     /// `[[route.*]]` sections.
     #[must_use]
-    pub const fn routes(&self) -> &RouteTables {
+    pub const fn routes(&self) -> &Routess {
         &self.routes
     }
 
@@ -232,7 +232,7 @@ mod tests {
             options,
             guests,
             GuestId::from("default"),
-            RouteTables::default(),
+            Routess::default(),
         );
         assert!(result.is_err(), "an empty registry must be rejected");
     }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
-use omnia::{GuestId, Router, Runtime, TopicRouteTable};
+use omnia::{GuestId, Router, Runtime, TopicRoutes};
 use tracing::{Instrument, debug_span, instrument};
 
 use crate::host::WebSocketView;
@@ -74,7 +74,7 @@ where
     state: S,
     component: String,
     indices: Arc<HashMap<GuestId, DuplexIndices>>,
-    router: Arc<Router<TopicRouteTable>>,
+    router: Arc<Router<TopicRoutes>>,
 }
 
 impl<S> Handler<S>
