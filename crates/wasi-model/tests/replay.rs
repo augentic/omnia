@@ -55,7 +55,10 @@ struct TestCtx {
 
 impl WasiView for TestCtx {
     fn ctx(&mut self) -> WasiCtxView<'_> {
-        WasiCtxView { ctx: &mut self.wasi, table: &mut self.table }
+        WasiCtxView {
+            ctx: &mut self.wasi,
+            table: &mut self.table,
+        }
     }
 }
 
@@ -75,7 +78,10 @@ impl WrpcView for TestCtx {
 
 impl WasiModelView for TestCtx {
     fn model(&mut self) -> WasiModelCtxView<'_> {
-        WasiModelCtxView { ctx: self.model.as_mut(), table: &mut self.table }
+        WasiModelCtxView {
+            ctx: self.model.as_mut(),
+            table: &mut self.table,
+        }
     }
 }
 
@@ -118,9 +124,17 @@ struct StubBackend {
 }
 
 impl WasiModelCtx for StubBackend {
-    fn complete(&self, _prompt: Prompt, _tool_host: Arc<dyn ToolHost>) -> FutureResult<BackendAnswer> {
+    fn complete(
+        &self, _prompt: Prompt, _tool_host: Arc<dyn ToolHost>,
+    ) -> FutureResult<BackendAnswer> {
         let value = self.value.clone();
-        async move { Ok(BackendAnswer { value, transcript: None }) }.boxed()
+        async move {
+            Ok(BackendAnswer {
+                value,
+                transcript: None,
+            })
+        }
+        .boxed()
     }
 }
 
@@ -164,8 +178,10 @@ async fn call_run(runtime: &TestRuntime) -> Result<String> {
     let guest =
         runtime.registry().get(&GuestId::from("model")).context("model guest is registered")?;
     let mut store = runtime.build_store(runtime.store());
-    let instance =
-        runtime.instantiate(guest.instance_pre(), &mut store).await.context("instantiating guest")?;
+    let instance = runtime
+        .instantiate(guest.instance_pre(), &mut store)
+        .await
+        .context("instantiating guest")?;
     let run = instance.get_func(&mut store, "run").context("guest exports `run`")?;
 
     let mut results = vec![Val::String(String::new())];
@@ -200,22 +216,7 @@ async fn replays_completion_with_no_network() -> Result<()> {
     let record_dir =
         std::env::temp_dir().join(format!("omnia-model-fixtures-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&record_dir);
-    {
-        let value = expected.clone();
-        let dir = record_dir.clone();
-        let runtime = TestRuntime {
-            registry: Arc::clone(&registry),
-            backend: Arc::new(move || {
-                Box::new(Recording::new(StubBackend { value: value.clone() }, dir.clone()))
-            }),
-        };
-        let answer = call_run(&runtime).await.context("record phase")?;
-        assert_eq!(
-            serde_json::from_str::<Value>(&answer).context("answer is JSON")?,
-            expected,
-            "recorded run should return the validated answer"
-        );
-    }
+    record_phase(&registry, &record_dir, &expected).await?;
     let written = std::fs::read_dir(&record_dir)
         .context("reading record dir")?
         .filter_map(std::result::Result::ok)
@@ -288,11 +289,35 @@ async fn record_example_fixture() -> Result<()> {
     Ok(())
 }
 
+/// Record the guest once: a stub backend answers through `complete`, and the
+/// `Recording` wrapper persists the fixture keyed by the guest's real prompt.
+async fn record_phase(
+    registry: &Arc<Registry<TestCtx>>, dir: &Path, expected: &Value,
+) -> Result<()> {
+    let value = expected.clone();
+    let backend_dir = dir.to_path_buf();
+    let runtime = TestRuntime {
+        registry: Arc::clone(registry),
+        backend: Arc::new(move || {
+            Box::new(Recording::new(StubBackend { value: value.clone() }, backend_dir.clone()))
+        }),
+    };
+    let answer = call_run(&runtime).await.context("record phase")?;
+    assert_eq!(
+        serde_json::from_str::<Value>(&answer).context("answer is JSON")?,
+        *expected,
+        "recorded run should return the validated answer"
+    );
+    Ok(())
+}
+
 /// Replay the guest with a `ModelDefault` backend loaded from `dir`.
 async fn replay_from(registry: &Arc<Registry<TestCtx>>, dir: &Path) -> Result<String> {
-    let backend = ModelDefault::connect_with(ConnectOptions { replay_dir: dir.to_path_buf() })
-        .await
-        .context("connecting replay backend")?;
+    let backend = ModelDefault::connect_with(ConnectOptions {
+        replay_dir: dir.to_path_buf(),
+    })
+    .await
+    .context("connecting replay backend")?;
     let runtime = TestRuntime {
         registry: Arc::clone(registry),
         backend: Arc::new(move || Box::new(backend.clone())),

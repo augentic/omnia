@@ -131,7 +131,11 @@ pub fn assemble(prompt: &Prompt) -> Result<Assembled, Error> {
         user_parts.push(subst(context));
     }
     for example in &sections.examples {
-        user_parts.push(format!("Input: {}\nOutput: {}", subst(&example.input), subst(&example.output)));
+        user_parts.push(format!(
+            "Input: {}\nOutput: {}",
+            subst(&example.input),
+            subst(&example.output)
+        ));
     }
 
     let system = join_non_empty(&system_parts);
@@ -154,8 +158,7 @@ fn substitute(text: &str, sections: &super::types::Sections) -> String {
 
 /// Join non-empty parts with blank lines, yielding `None` when all are empty.
 fn join_non_empty(parts: &[String]) -> Option<String> {
-    let kept: Vec<&str> =
-        parts.iter().map(|p| p.trim()).filter(|p| !p.is_empty()).collect();
+    let kept: Vec<&str> = parts.iter().map(|p| p.trim()).filter(|p| !p.is_empty()).collect();
     if kept.is_empty() { None } else { Some(kept.join("\n\n")) }
 }
 
@@ -189,7 +192,11 @@ mod tests {
             tools: vec![],
             tool_choice: None,
             metadata: vec![],
-            grants: ToolGrants { references: None, working_tree_lent: false, verify: vec![] },
+            grants: ToolGrants {
+                references: None,
+                working_tree_lent: false,
+                verify: vec![],
+            },
         }
     }
 
@@ -205,19 +212,22 @@ mod tests {
     }
 
     fn message(role: &str, content: &str) -> Message {
-        Message { role: role.to_owned(), content: content.to_owned() }
+        Message {
+            role: role.to_owned(),
+            content: content.to_owned(),
+        }
     }
 
     #[test]
     fn text_gate_requires_a_json_string() {
-        assert!(validate_answer(&json!("hi"), ResponseFormatKind::Text).is_ok());
+        validate_answer(&json!("hi"), ResponseFormatKind::Text).unwrap();
         let err = validate_answer(&json!({ "a": 1 }), ResponseFormatKind::Text).unwrap_err();
         assert!(matches!(err, Error::InvalidAnswer(_)));
     }
 
     #[test]
     fn json_object_gate_requires_an_object() {
-        assert!(validate_answer(&json!({ "verdict": "pass" }), ResponseFormatKind::JsonObject).is_ok());
+        validate_answer(&json!({ "verdict": "pass" }), ResponseFormatKind::JsonObject).unwrap();
         let err = validate_answer(&json!("nope"), ResponseFormatKind::JsonObject).unwrap_err();
         assert!(matches!(err, Error::InvalidAnswer(_)));
     }
@@ -225,8 +235,8 @@ mod tests {
     #[test]
     fn json_schema_gate_is_parse_only_in_phase_1() {
         // Any well-formed JSON value passes the Phase 1 (parse-only) schema gate.
-        assert!(validate_answer(&json!({ "x": [1, 2, 3] }), ResponseFormatKind::JsonSchema).is_ok());
-        assert!(validate_answer(&json!(42), ResponseFormatKind::JsonSchema).is_ok());
+        validate_answer(&json!({ "x": [1, 2, 3] }), ResponseFormatKind::JsonSchema).unwrap();
+        validate_answer(&json!(42), ResponseFormatKind::JsonSchema).unwrap();
     }
 
     #[test]
@@ -253,8 +263,8 @@ mod tests {
 
     #[test]
     fn non_empty_prompt_passes_checks() {
-        assert!(check_prompt(&prompt_with(vec![message("user", "hi")], None)).is_ok());
-        assert!(check_prompt(&prompt_with(vec![], Some(sections("do it")))).is_ok());
+        check_prompt(&prompt_with(vec![message("user", "hi")], None)).unwrap();
+        check_prompt(&prompt_with(vec![], Some(sections("do it")))).unwrap();
     }
 
     #[test]

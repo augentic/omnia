@@ -21,9 +21,7 @@ use super::{Error, FutureResult, ToolHost, WasiModel, WasiModelCtxView};
 use crate::host::types::{DirEntry, Reference, VerifyReport};
 
 impl<T> HostWithStore<T> for WasiModel {
-    async fn complete(
-        accessor: &Accessor<T, Self>, prompt: genc::Prompt,
-    ) -> Result<String, Error> {
+    async fn complete(accessor: &Accessor<T, Self>, prompt: genc::Prompt) -> Result<String, Error> {
         let owned: Prompt = prompt.into();
 
         // Floor pre-checks: reserved tool names and empty prompts never reach a

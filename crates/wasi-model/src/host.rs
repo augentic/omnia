@@ -110,7 +110,8 @@ pub trait WasiModelCtx: Debug + Send + Sync + 'static {
     /// [`BackendAnswer`] is host-only (its transcript is for record/replay); the
     /// guest sees only the validated `answer` string the `complete` binding
     /// derives from it.
-    fn complete(&self, prompt: Prompt, tool_host: Arc<dyn ToolHost>) -> FutureResult<BackendAnswer>;
+    fn complete(&self, prompt: Prompt, tool_host: Arc<dyn ToolHost>)
+    -> FutureResult<BackendAnswer>;
 }
 
 /// Host-side capabilities for one completion, lent to backends that need them.

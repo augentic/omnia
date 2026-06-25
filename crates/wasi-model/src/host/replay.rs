@@ -132,8 +132,8 @@ impl FixtureStore {
     pub fn load(dir: &Path) -> Result<Self> {
         let mut answers = HashMap::new();
         if dir.exists() {
-            for entry in
-                fs::read_dir(dir).with_context(|| format!("reading replay dir {}", dir.display()))?
+            for entry in fs::read_dir(dir)
+                .with_context(|| format!("reading replay dir {}", dir.display()))?
             {
                 let path = entry?.path();
                 if path.extension().and_then(|e| e.to_str()) != Some("json") {
@@ -145,7 +145,10 @@ impl FixtureStore {
                     .with_context(|| format!("parsing fixture {}", path.display()))?;
                 answers.insert(
                     key_from_value(&fixture.key_prompt),
-                    BackendAnswer { value: fixture.answer, transcript: fixture.transcript },
+                    BackendAnswer {
+                        value: fixture.answer,
+                        transcript: fixture.transcript,
+                    },
                 );
             }
         }
@@ -185,12 +188,17 @@ pub struct Recording<C: WasiModelCtx> {
 impl<C: WasiModelCtx> Recording<C> {
     /// Wrap `inner`, writing fixtures into `dir`.
     pub fn new(inner: C, dir: impl Into<PathBuf>) -> Self {
-        Self { inner, dir: dir.into() }
+        Self {
+            inner,
+            dir: dir.into(),
+        }
     }
 }
 
 impl<C: WasiModelCtx> WasiModelCtx for Recording<C> {
-    fn complete(&self, prompt: Prompt, tool_host: Arc<dyn ToolHost>) -> FutureResult<BackendAnswer> {
+    fn complete(
+        &self, prompt: Prompt, tool_host: Arc<dyn ToolHost>,
+    ) -> FutureResult<BackendAnswer> {
         let inner = self.inner.complete(prompt.clone(), tool_host);
         let dir = self.dir.clone();
         async move {
@@ -236,7 +244,11 @@ mod tests {
             tools: vec![],
             tool_choice: None,
             metadata: vec![],
-            grants: ToolGrants { references: None, working_tree_lent: false, verify: vec![] },
+            grants: ToolGrants {
+                references: None,
+                working_tree_lent: false,
+                verify: vec![],
+            },
         }
     }
 
@@ -254,8 +266,10 @@ mod tests {
     fn key_ignores_metadata_only() {
         let base = prompt();
         let mut with_metadata = prompt();
-        with_metadata.metadata =
-            vec![MetadataEntry { key: "trace".to_owned(), value: "abc".to_owned() }];
+        with_metadata.metadata = vec![MetadataEntry {
+            key: "trace".to_owned(),
+            value: "abc".to_owned(),
+        }];
         // Tracing metadata must not change the replay key (§5.4).
         assert_eq!(canonical_key(&base), canonical_key(&with_metadata));
     }

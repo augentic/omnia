@@ -60,7 +60,9 @@ impl Backend for ModelDefault {
             fixtures = store.len(),
             "initialized replay backend"
         );
-        Ok(Self { store: Arc::new(store) })
+        Ok(Self {
+            store: Arc::new(store),
+        })
     }
 }
 
@@ -79,10 +81,9 @@ impl WasiModelCtx for ModelDefault {
 mod tests {
     use std::sync::Arc;
 
+    use futures::FutureExt as _;
     use omnia::Backend;
     use serde_json::json;
-
-    use futures::FutureExt as _;
 
     use super::{ConnectOptions, ModelDefault};
     use crate::host::replay::{Recording, write_fixture};
@@ -100,15 +101,19 @@ mod tests {
         fn resolve(&self, _reference: Reference) -> FutureResult<Vec<u8>> {
             async { Err(anyhow::anyhow!("stub")) }.boxed()
         }
+
         fn read(&self, _path: String) -> FutureResult<Vec<u8>> {
             async { Err(anyhow::anyhow!("stub")) }.boxed()
         }
+
         fn list(&self, _path: String) -> FutureResult<Vec<DirEntry>> {
             async { Err(anyhow::anyhow!("stub")) }.boxed()
         }
+
         fn write(&self, _path: String, _bytes: Vec<u8>) -> FutureResult<()> {
             async { Err(anyhow::anyhow!("stub")) }.boxed()
         }
+
         fn verify(&self, _check: String) -> FutureResult<VerifyReport> {
             async { Err(anyhow::anyhow!("stub")) }.boxed()
         }
@@ -136,7 +141,11 @@ mod tests {
             tools: vec![],
             tool_choice: None,
             metadata: vec![],
-            grants: ToolGrants { references: None, working_tree_lent: false, verify: vec![] },
+            grants: ToolGrants {
+                references: None,
+                working_tree_lent: false,
+                verify: vec![],
+            },
         }
     }
 
@@ -146,12 +155,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
 
         let prompt = sample_prompt();
-        let answer = BackendAnswer { value: json!({ "verdict": "pass" }), transcript: None };
+        let answer = BackendAnswer {
+            value: json!({ "verdict": "pass" }),
+            transcript: None,
+        };
         write_fixture(&dir, &prompt, &answer).expect("write fixture");
 
-        let backend = ModelDefault::connect_with(ConnectOptions { replay_dir: dir.clone() })
-            .await
-            .expect("connect");
+        let backend = ModelDefault::connect_with(ConnectOptions {
+            replay_dir: dir.clone(),
+        })
+        .await
+        .expect("connect");
         let replayed = backend
             .complete(prompt, Arc::new(StubToolHost))
             .await
@@ -166,9 +180,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("omnia-model-empty-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
 
-        let backend = ModelDefault::connect_with(ConnectOptions { replay_dir: dir })
-            .await
-            .expect("connect");
+        let backend =
+            ModelDefault::connect_with(ConnectOptions { replay_dir: dir }).await.expect("connect");
         let error = backend
             .complete(sample_prompt(), Arc::new(StubToolHost))
             .await
@@ -188,7 +201,10 @@ mod tests {
                 &self, _prompt: Prompt, _tool_host: Arc<dyn ToolHost>,
             ) -> FutureResult<BackendAnswer> {
                 async move {
-                    Ok(BackendAnswer { value: json!({ "verdict": "fail" }), transcript: None })
+                    Ok(BackendAnswer {
+                        value: json!({ "verdict": "fail" }),
+                        transcript: None,
+                    })
                 }
                 .boxed()
             }
@@ -199,16 +215,15 @@ mod tests {
 
         let prompt = sample_prompt();
         let recording = Recording::new(AlwaysOk, dir.clone());
-        let recorded = recording
-            .complete(prompt.clone(), Arc::new(StubToolHost))
-            .await
-            .expect("record");
+        let recorded =
+            recording.complete(prompt.clone(), Arc::new(StubToolHost)).await.expect("record");
 
-        let backend = ModelDefault::connect_with(ConnectOptions { replay_dir: dir.clone() })
-            .await
-            .expect("connect");
-        let replayed =
-            backend.complete(prompt, Arc::new(StubToolHost)).await.expect("replay");
+        let backend = ModelDefault::connect_with(ConnectOptions {
+            replay_dir: dir.clone(),
+        })
+        .await
+        .expect("connect");
+        let replayed = backend.complete(prompt, Arc::new(StubToolHost)).await.expect("replay");
 
         assert_eq!(recorded.value, replayed.value);
         let _ = std::fs::remove_dir_all(&dir);
