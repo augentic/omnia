@@ -13,7 +13,7 @@ use wasmtime_wasi::WasiView;
 
 use crate::manifest::{Manifest, RouteSpec, SourceSpec};
 use crate::registry::{Guest, GuestId, Registry};
-use crate::routing::{HttpRoutes, Routess, TopicRoutes};
+use crate::routing::{HttpRoutes, Routes, TopicRoutes};
 use crate::source::{EmbeddedSource, FileSource, GuestSource, LoadedGuest};
 use crate::{Host, RuntimeOptions};
 
@@ -81,7 +81,7 @@ pub async fn create<T: WasiView + 'static>(wasm: &Path) -> Result<Compiled<T>> {
         default,
         // The single-file shorthand carries no routes: its sole guest is the
         // catch-all for every trigger it can answer.
-        routes: Routess::default(),
+        routes: Routes::default(),
     })
 }
 
@@ -159,7 +159,7 @@ fn lookup_embedded(
 
 /// Convert the manifest's parsed routes into the registry's `GuestId`-typed,
 /// per-trigger route tables.
-fn route_tables(spec: &RouteSpec) -> Routess {
+fn route_tables(spec: &RouteSpec) -> Routes {
     let http = HttpRoutes::new(
         spec.http.iter().map(|e| (e.prefix.clone(), GuestId::from(e.guest.as_str()))),
     );
@@ -169,7 +169,7 @@ fn route_tables(spec: &RouteSpec) -> Routess {
     let websocket = TopicRoutes::new(
         spec.websocket.iter().map(|e| (e.topic.clone(), GuestId::from(e.guest.as_str()))),
     );
-    Routess::new(http, messaging, websocket)
+    Routes::new(http, messaging, websocket)
 }
 
 /// Build the shared engine, WASI-linked linker, and runtime options.
@@ -193,7 +193,7 @@ pub struct Compiled<T: WasiView + 'static> {
     options: RuntimeOptions,
     guests: Vec<LoadedGuest>,
     default: GuestId,
-    routes: Routess,
+    routes: Routes,
 }
 
 impl<T: WasiView> Compiled<T> {

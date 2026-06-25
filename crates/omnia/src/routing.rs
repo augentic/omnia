@@ -18,7 +18,7 @@ use anyhow::{Result, bail};
 use crate::registry::GuestId;
 
 /// A per-trigger route table resolving a routing key to a target identity.
-pub trait RouteResolve {
+pub trait Resolver {
     /// Resolve a routing key (a path, topic, ...) to a target guest identity.
     fn resolve(&self, key: &str) -> Option<&GuestId>;
 
@@ -48,7 +48,7 @@ impl HttpRoutes {
     }
 }
 
-impl RouteResolve for HttpRoutes {
+impl Resolver for HttpRoutes {
     fn resolve(&self, key: &str) -> Option<&GuestId> {
         self.entries.iter().find(|(prefix, _)| path_has_prefix(key, prefix)).map(|(_, id)| id)
     }
@@ -82,7 +82,7 @@ impl TopicRoutes {
     }
 }
 
-impl RouteResolve for TopicRoutes {
+impl Resolver for TopicRoutes {
     fn resolve(&self, key: &str) -> Option<&GuestId> {
         self.entries.iter().find(|(pattern, _)| topic_matches(key, pattern)).map(|(_, id)| id)
     }
@@ -99,13 +99,13 @@ impl RouteResolve for TopicRoutes {
 /// The per-trigger route tables a registry carries, parsed from the manifest's
 /// `[[route.*]]` sections.
 #[derive(Clone, Debug, Default)]
-pub struct Routess {
+pub struct Routes {
     http: HttpRoutes,
     messaging: TopicRoutes,
     websocket: TopicRoutes,
 }
 
-impl Routess {
+impl Routes {
     /// Assemble the per-trigger tables.
     #[must_use]
     pub const fn new(http: HttpRoutes, messaging: TopicRoutes, websocket: TopicRoutes) -> Self {
@@ -143,9 +143,9 @@ impl Routess {
 
 /// Capability-based routing for one trigger, layered over a route table.
 #[derive(Clone, Debug)]
-pub enum Router<Tbl> {
+pub enum Router<R> {
     /// Explicit routes drive the trigger; an unmatched key is a miss.
-    Routed(Tbl),
+    Routed(R),
     /// A sole handler exporter catches the whole trigger; every call fans into
     /// it regardless of the routing key.
     CatchAll(GuestId),
@@ -153,7 +153,7 @@ pub enum Router<Tbl> {
     Inert,
 }
 
-impl<Tbl: RouteResolve> Router<Tbl> {
+impl<R: Resolver> Router<R> {
     /// Decide how `trigger` routes, given the guests that export its handler
     /// (`capable`, in a stable order) and the configured `table`.
     ///
@@ -166,9 +166,9 @@ impl<Tbl: RouteResolve> Router<Tbl> {
     /// Returns an error if a route targets a guest that does not export the
     /// handler, or if two or more guests export it with no routes to
     /// disambiguate.
-    pub fn build(trigger: &str, capable: &[GuestId], table: Tbl) -> Result<Self> {
-        if !table.is_empty() {
-            for target in table.targets() {
+    pub fn build(trigger: &str, capable: &[GuestId], resolver: R) -> Result<Self> {
+        if !resolver.is_empty() {
+            for target in resolver.targets() {
                 if !capable.contains(target) {
                     bail!(
                         "route for trigger `{trigger}` names `{target}`, which does not export \
@@ -176,7 +176,7 @@ impl<Tbl: RouteResolve> Router<Tbl> {
                     );
                 }
             }
-            return Ok(Self::Routed(table));
+            return Ok(Self::Routed(resolver));
         }
 
         match capable {
@@ -197,7 +197,7 @@ impl<Tbl: RouteResolve> Router<Tbl> {
     #[must_use]
     pub fn resolve(&self, key: &str) -> Option<&GuestId> {
         match self {
-            Self::Routed(table) => table.resolve(key),
+            Self::Routed(resolver) => resolver.resolve(key),
             Self::CatchAll(id) => Some(id),
             Self::Inert => None,
         }
@@ -261,44 +261,44 @@ mod tests {
     }
 
     #[test]
-    fn http_longest_prefix_wins() {
-        let table =
+    fn http_longest_prefix_() {
+        let routes =
             HttpRoutes::new([("/a".to_owned(), id("short")), ("/a/b".to_owned(), id("long"))]);
-        assert_eq!(table.resolve("/a/b/c"), Some(&id("long")));
-        assert_eq!(table.resolve("/a/x"), Some(&id("short")));
-        assert_eq!(table.resolve("/other"), None);
+        assert_eq!(routes.resolve("/a/b/c"), Some(&id("long")));
+        assert_eq!(routes.resolve("/a/x"), Some(&id("short")));
+        assert_eq!(routes.resolve("/other"), None);
     }
 
     #[test]
-    fn http_prefix_respects_segments() {
-        let table = HttpRoutes::new([("/a".to_owned(), id("a"))]);
-        assert_eq!(table.resolve("/a"), Some(&id("a")));
-        assert_eq!(table.resolve("/a/deep"), Some(&id("a")));
-        assert_eq!(table.resolve("/abc"), None);
+    fn http_prefix_segments() {
+        let routes = HttpRoutes::new([("/a".to_owned(), id("a"))]);
+        assert_eq!(routes.resolve("/a"), Some(&id("a")));
+        assert_eq!(routes.resolve("/a/deep"), Some(&id("a")));
+        assert_eq!(routes.resolve("/abc"), None);
     }
 
     #[test]
-    fn topic_wildcards_match() {
-        let table = TopicRoutes::new([
+    fn topic_wildcard() {
+        let routes = TopicRoutes::new([
             ("specify.build.>".to_owned(), id("workflow")),
             ("events.*.created".to_owned(), id("audit")),
         ]);
-        assert_eq!(table.resolve("specify.build.rust"), Some(&id("workflow")));
-        assert_eq!(table.resolve("specify.build.rust.extra"), Some(&id("workflow")));
-        assert_eq!(table.resolve("events.user.created"), Some(&id("audit")));
-        assert_eq!(table.resolve("events.user.deleted"), None);
-        assert_eq!(table.resolve("specify.build"), None);
+        assert_eq!(routes.resolve("specify.build.rust"), Some(&id("workflow")));
+        assert_eq!(routes.resolve("specify.build.rust.extra"), Some(&id("workflow")));
+        assert_eq!(routes.resolve("events.user.created"), Some(&id("audit")));
+        assert_eq!(routes.resolve("events.user.deleted"), None);
+        assert_eq!(routes.resolve("specify.build"), None);
     }
 
     #[test]
-    fn build_catch_all_with_sole_exporter() {
+    fn build_catch_all() {
         let router = Router::build("http", &[id("only")], HttpRoutes::default())
             .expect("a sole exporter is the catch-all");
         assert_eq!(router.resolve("/anything"), Some(&id("only")));
     }
 
     #[test]
-    fn build_inert_without_exporters() {
+    fn build_inert() {
         let router = Router::build("http", &[], HttpRoutes::default())
             .expect("no exporters is inert, not an error");
         assert!(router.is_inert());
@@ -306,26 +306,26 @@ mod tests {
     }
 
     #[test]
-    fn build_ambiguous_without_routes_errors() {
+    fn build_ambiguous() {
         let error = Router::build("http", &[id("a"), id("b")], HttpRoutes::default())
             .expect_err("two exporters with no routes is ambiguous");
         assert!(error.to_string().contains("2 capable guests"));
     }
 
     #[test]
-    fn build_routes_suppress_catch_all() {
-        let table = HttpRoutes::new([("/a".to_owned(), id("a"))]);
-        let router = Router::build("http", &[id("a")], table).expect("routes are valid");
-        assert_eq!(router.resolve("/a"), Some(&id("a")));
+    fn build_routes() {
+        let routes = HttpRoutes::new([("/a".to_owned(), id("a"))]);
+        let r = Router::build("http", &[id("a")], routes).expect("routes are valid");
+        assert_eq!(r.resolve("/a"), Some(&id("a")));
         // An explicit route makes the trigger fully route-driven: a miss is a
         // miss even though `a` is the sole exporter.
-        assert_eq!(router.resolve("/b"), None);
+        assert_eq!(r.resolve("/b"), None);
     }
 
     #[test]
-    fn build_rejects_route_to_incapable_guest() {
-        let table = HttpRoutes::new([("/a".to_owned(), id("ghost"))]);
-        let error = Router::build("http", &[id("real")], table)
+    fn reject_route() {
+        let routes = HttpRoutes::new([("/a".to_owned(), id("ghost"))]);
+        let error = Router::build("http", &[id("real")], routes)
             .expect_err("a route to a non-exporter must fail fast");
         assert!(error.to_string().contains("ghost"));
     }

@@ -18,7 +18,7 @@ use wasmtime::Engine;
 use wasmtime::component::InstancePre;
 
 use crate::RuntimeOptions;
-use crate::routing::Routess;
+use crate::routing::Routes;
 
 /// Opaque guest identity.
 ///
@@ -111,7 +111,7 @@ pub struct Registry<T: 'static> {
     options: RuntimeOptions,
     guests: HashMap<GuestId, Guest<T>>,
     default: GuestId,
-    routes: Routess,
+    routes: Routes,
 }
 
 impl<T: 'static> Registry<T> {
@@ -125,7 +125,7 @@ impl<T: 'static> Registry<T> {
     /// registered guests, or if a route targets a guest that is not registered.
     pub fn new(
         engine: Engine, options: RuntimeOptions, guests: HashMap<GuestId, Guest<T>>,
-        default: GuestId, routes: Routess,
+        default: GuestId, routes: Routes,
     ) -> Result<Self> {
         if guests.is_empty() {
             bail!("cannot build a guest registry with no guests");
@@ -176,7 +176,7 @@ impl<T: 'static> Registry<T> {
     /// Returns the per-trigger inbound route tables built from the manifest's
     /// `[[route.*]]` sections.
     #[must_use]
-    pub const fn routes(&self) -> &Routess {
+    pub const fn routes(&self) -> &Routes {
         &self.routes
     }
 
@@ -227,13 +227,8 @@ mod tests {
         // An empty map never constructs a `Guest`, so `T` is unconstrained here.
         let guests: HashMap<GuestId, Guest<()>> = HashMap::new();
 
-        let result = Registry::new(
-            engine,
-            options,
-            guests,
-            GuestId::from("default"),
-            Routess::default(),
-        );
+        let result =
+            Registry::new(engine, options, guests, GuestId::from("default"), Routes::default());
         assert!(result.is_err(), "an empty registry must be rejected");
     }
 }
