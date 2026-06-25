@@ -15,6 +15,8 @@ Layer 2 adds the real backends strictly behind the trait, so the floor never lea
 
 ## 1. Goals and non-goals
 
+
+
 ### Goals
 
 - A **domain-agnostic** `wasi-model` host in the Omnia floor: it knows the *shape* of judgment (a typed prompt in, a validated typed answer out) and the *mechanism* (the backend trait, record / replay) — never which model, which provider, or any Specify concept (Law 2 in [architecture.md](architecture.md#the-four-laws)).
@@ -26,6 +28,8 @@ Layer 2 adds the real backends strictly behind the trait, so the floor never lea
 - **Two real backends behind one seam**, selected by deployment config: `genai` (frontier) and `cursor-agent` (spawned agent), both recordable through the same boundary.
 - Follows the existing host-crate shape exactly (`crates/wasi-keyvalue` is the template), so `wasi-model` drops into the `runtime!` macro as `WasiModel: <Backend>` with no new runtime machinery.
 
+
+
 ### Non-goals (for this work)
 
 - The `augentic:specify` WIT package and the concrete brief / answer *types*. The floor defines the *generic* prompt / answer envelope; Specify projects its operation-specific schemas onto it (§3.2). Those schemas live in the Specify consumer.
@@ -33,9 +37,15 @@ Layer 2 adds the real backends strictly behind the trait, so the floor never lea
 - Closed **verify profile** definitions, sandboxing, and severity mapping — [RFC-60](rfc-60-verify-profiles.md). We design the `verify` tool seam; the profiles are landed there.
 - The guest registry and host-mediated dynamic linking themselves — designed in [guest-registry.md](guest-registry.md). This RFC *consumes* that mechanism for `resolve`; it does not rebuild it.
 
+
+
 ## 2. Where this lands in the current code
 
-`wasi-model` is a new host crate that follows the established `omnia-wasi-*` shape exactly. The closest templates are `crates/wasi-keyvalue` and `crates/wasi-blobstore` (the latter shows the current `Runtime` trait bound; `wasi-keyvalue` still uses the pre-rename `Runtime` and follows once that migration lands). The shared shape is: a `WasiX` host struct implementing `HasData`, `Host<T>` (`add_to_linker`), and `Server<R>` (a no-op `run` for non-server hosts); a `WasiXView` trait the `Linker<T>` type implements; a `WasiXCtxView<'a>` carrying `ctx: &mut dyn WasiXCtx` + `table`; a `WasiXCtx` trait the *backend* implements; an `XDefault` backend implementing `Backend` (env-driven `connect`) + `WasiXCtx`; and an `omnia_wasi_view!` macro the `runtime!` expansion calls.
+`wasi-model` is a new host crate that follows the established `omnia-wasi-*` shape exactly. The closest templates are `crates/wasi-keyvalue` and `crates/wasi-blobstore` (the latter shows the current `Runtime` trait bound; `wasi-keyvalue` still uses the pre-rename `Runtime` and follows once that migration lands).
+
+The shared shape is: a `WasiX` host struct implementing `HasData`, `Host<T>` (`add_to_linker`), and `Server<R>` (a no-op `run` for non-server hosts); a `WasiXView` trait the `Linker<T>` type implements; a `WasiXCtxView<'a>` carrying `ctx: &mut dyn WasiXCtx` + `table`.
+
+A `WasiXCtx` trait the *backend* implements; an `XDefault` backend implementing `Backend` (env-driven `connect`) + `WasiXCtx`; and an `omnia_wasi_view!` macro the `runtime!` expansion calls.
 
 ```109:164:crates/wasi-blobstore/src/host.rs
 /// Host-side service for `wasi:blobstore`.
@@ -76,7 +86,7 @@ crates/wasi-model/                      # the host crate, in the omnia repo
     default_impl.rs           # ModelDefault (replay) — the KeyValueDefault analogue
 ```
 
-As with `wasi-keyvalue` and its `KeyValueDefault`, the host crate ships the **default backend** (`ModelDefault`, replay) in-tree, while **real backends are separate `omnia-<provider>` crates in the `backends` repo** — exactly as `omnia-redis` / `omnia-nats` provide `WasiKeyValueCtx`. So the two model backends are `omnia-genai` and `omnia-cursor` (§5), each a host-only crate exposing `pub struct Client` that implements `Backend` + `WasiModelCtx`. A deployment binds whichever it wants in `runtime!`, exactly as `WasiKeyValue: KeyValueDefault`:
+As with `wasi-keyvalue` and its `KeyValueDefault`, the host crate ships the **default backend** (`ModelDefault`, replay) in-tree, while **real backends are separate** `omnia-<provider>` **crates in the** `backends` **repo** — exactly as `omnia-redis` / `omnia-nats` provide `WasiKeyValueCtx`. So the two model backends are `omnia-genai` and `omnia-cursor` (§5), each a host-only crate exposing `pub struct Client` that implements `Backend` + `WasiModelCtx`. A deployment binds whichever it wants in `runtime!`, exactly as `WasiKeyValue: KeyValueDefault`:
 
 ```rust
 use omnia_genai::Client as Genai;       // model backend from the backends repo
@@ -96,6 +106,8 @@ omnia::runtime!({
 The one structural difference from a plain effect host: `**wasi-model` is not purely guest→host.** During `eval`, a backend may call *back* into guests (`resolve`) and into other host services (the working tree via `wasi:filesystem`). This does not change the trait layering — it is handled by passing the backend a host-provided `ToolHost` argument on `eval` (§3.3, §4.2), the same way `WasiKeyValueCtx::open_bucket` is just handed its arguments. The `resolve` callback instantiates the adapter guest fresh and calls its `references` export, which is precisely host-mediated dynamic linking ([guest-registry.md](guest-registry.md) §4) invoked from the host side — so Layer 2 (the tool loop) depends on the registry landing first; Layer 1 does not.
 
 ## 3. Layer 1 — The `wasi-model` host core (the boundary)
+
+
 
 ### 3.1 The WIT
 
@@ -170,6 +182,8 @@ pub struct Answer {
 }
 ```
 
+
+
 ### 3.3 The full host scaffold + the `WasiModelCtx` backend trait
 
 `wasi-model` instantiates the shared shape verbatim. The backend trait is `WasiModelCtx` — the direct `WasiKeyValueCtx`/`WasiBlobstoreCtx` analogue, the one place a provider's logic lives — and its method is `eval`. There is **no** bespoke "ModelBackend" trait; the backend *is* the Ctx.
@@ -223,8 +237,10 @@ Like `WasiKeyValueCtx`, each backend also implements `Backend` (the env-driven `
 
 Per [RFC-53](rfc-53-wasi-model.md), answer validation and record/replay are *host* concerns, not behaviour each backend re-implements. They land in the two places the standard pattern already offers, so nothing bespoke is introduced:
 
-- **Validation in the `eval` host binding.** The generated `eval` binding is implemented on `WasiModel` in `host/model_impl.rs` — the analogue of `wasi-keyvalue/src/host/store_impl.rs`, which is where keyvalue does its `convert_error` / context work. That impl reads `prompt.answer-schema`, calls `ctx.eval(prompt, tools)`, validates the returned `Answer` against the schema, and maps a miss to `error::invalid-answer`. The guest only ever sees a validated answer or a typed error. A backend that runs its own repair loop (genai, [RFC-59](rfc-59-model-tool-loop.md)) consumes validation failures internally and returns only once it passes.
-- **Record/replay as composable `WasiModelCtx` wrappers.** Because the backend is just a `WasiModelCtx`, a recording backend is a `WasiModelCtx` that wraps another and logs `(prompt, transcript) -> answer`; the replay backend (`ModelDefault`) is a `WasiModelCtx` that serves a recorded answer for an equivalent prompt. No decorator framework — just the existing trait, composed. Both sit at the typed `eval` boundary, so the spawned-agent backend (which owns its own loop) records and replays identically to the in-process genai backend: the recording captures what crossed `eval`, not how the backend produced it.
+- **Validation in the** `eval` **host binding.** The generated `eval` binding is implemented on `WasiModel` in `host/model_impl.rs` — the analogue of `wasi-keyvalue/src/host/store_impl.rs`, which is where keyvalue does its `convert_error` / context work. That impl reads `prompt.answer-schema`, calls `ctx.eval(prompt, tools)`, validates the returned `Answer` against the schema, and maps a miss to `error::invalid-answer`. The guest only ever sees a validated answer or a typed error. A backend that runs its own repair loop (genai, [RFC-59](rfc-59-model-tool-loop.md)) consumes validation failures internally and returns only once it passes.
+- **Record/replay as composable** `WasiModelCtx` **wrappers.** Because the backend is just a `WasiModelCtx`, a recording backend is a `WasiModelCtx` that wraps another and logs `(prompt, transcript) -> answer`; the replay backend (`ModelDefault`) is a `WasiModelCtx` that serves a recorded answer for an equivalent prompt. No decorator framework — just the existing trait, composed. Both sit at the typed `eval` boundary, so the spawned-agent backend (which owns its own loop) records and replays identically to the in-process genai backend: the recording captures what crossed `eval`, not how the backend produced it.
+
+
 
 ## 4. Host tool callbacks (`ToolHost`) — lent to the genai backend
 
@@ -238,6 +254,8 @@ Within one `eval`, the genai backend may expose these tools to the model ([RFC-5
 - `**read(path)` / `list(path)**` — inspect the working tree through the capability lent in `prompt.grants.working-tree`. The model sees bounded results, never an OS path or a `descriptor`.
 - `**write(path, bytes)**` — accumulate an edit against the session's base tree. Pending edits live in host-held state (`wasi:keyvalue`), not guest memory.
 - `**verify(check)**` — request a closed verification profile from `prompt.grants.verify`. The profile definitions and sandboxing are owned by [RFC-60](rfc-60-verify-profiles.md); this design only routes the call.
+
+
 
 ### 4.2 `ToolHost` — host callbacks the floor lends to the genai backend
 
@@ -289,6 +307,8 @@ Two shapes of backend fall out of the architecture, and the two we build are one
 - **In-process tool loop (genai)** — the genai backend owns the model API, the tool-use loop, session state, and repair semantics ([RFC-59](rfc-59-model-tool-loop.md)). It turns the model's tool calls into `ToolHost` callbacks. The working tree is reached through the *bounded* `read`/`list`/`write` tools (no OS path crosses to the model).
 - **Spawned, filesystem-capable agent (cursor)** — the cursor backend spawns an external agent that owns its own loop and reads/writes the working tree directly through the node-local `local-path` it is lent ([architecture.md](architecture.md#the-working-tree), [RFC-55](rfc-55-working-tree.md)). It ignores `ToolHost`. It still returns a validated answer through the same boundary and stays recordable.
 
+
+
 ### 5.1 Each real backend is an `omnia-<provider>` crate in the `backends` repo
 
 The two real backends follow the `backends`-repo idiom verbatim — the same shape as `omnia-redis` / `omnia-nats`. A provider crate is **host-only** (`#![cfg(not(target_arch = "wasm32"))]`), names its handle `pub struct Client` (`#[derive(Clone)]`), implements `Backend` (`connect_with` + `ConnectOptions`) in `lib.rs`, and implements the WASI-effect Ctx in a per-interface module:
@@ -333,6 +353,8 @@ Only the default replay backend (`ModelDefault`) lives in the `wasi-model` host 
 // backends: crates/genai/src/model.rs                    -> impl WasiModelCtx for Client
 // backends: crates/cursor/src/model.rs                   -> impl WasiModelCtx for Client
 ```
+
+
 
 ### 5.2 The genai backend — `omnia-genai` (`Client`), frontier / hosted, in-process tool loop
 
@@ -396,6 +418,8 @@ Replay belongs at the `wasi-model` boundary because it is the test substitute fo
 - **Determinism.** Because the record happens at the typed boundary, a fixture captured against `genai` or `cursor-agent` replays identically — CI never depends on which backend produced it.
 - A prompt with no matching fixture returns `error::backend("no replay fixture")` (fail loud, never fall through to a live call).
 
+
+
 ## 6. Proof example (the acceptance vehicle)
 
 A new `examples/model` with one tiny guest, proving the boundary and the loop with no Specify concepts:
@@ -409,7 +433,11 @@ Three acceptance runs over the *same* example, swapping only the bound backend i
 2. `**WasiModel: omnia_genai::Client**` — against a real provider (gated on a key), the model emits a `resolve` tool call that dispatches into `shelf` (fresh instance, host-mediated linking), then returns a schema-valid answer; the recording wrapper writes the fixture run 1 replays. This proves the boundary + genai backend end-to-end ([RFC-59](rfc-59-model-tool-loop.md)).
 3. `**WasiModel: omnia_cursor::Client**` — given a `local-path` working tree, a spawned `cursor-agent` run returns a schema-valid `.result`; with no `local-path` it returns `error::backend`, proving the capability signal. This proves the spawned-agent shape, with no guest or contract change between runs.
 
+
+
 ## 7. Design decisions and rationale
+
+
 
 ### 7.1 The floor owns the boundary and validation; the backend owns the model and its loop
 
@@ -435,11 +463,13 @@ genai and cursor-agent are not arbitrary — they are one of each backend *shape
 
 Each phase is independently shippable and keeps `cargo make ci` green.
 
-- **Phase 0 — `DECISIONS.md` entries.** Record the settled choices (the mechanism/judgment split; `resolve` reuses host-mediated linking; JSON-Schema-over-strings at the floor; validation in the `eval` binding and record/replay as composable `WasiModelCtx` wrappers; vendor + keys stay below the boundary) into the shared `DECISIONS.md` that [guest-registry.md](guest-registry.md) §7 already seeds.
-- **Phase 1 — The `wasi-model` host core + replay.** New `crates/wasi-model` built verbatim on the `wasi-keyvalue`/`wasi-blobstore` shape: `wit/model.wit`, the `generated` bindgen! module, the `Prompt`/`Answer` mirrors, the `WasiModel` host struct (`HasData` + `Host` + no-op `Server` on `Runtime`), the `WasiModelView` / `WasiModelCtxView` / `WasiModelCtx` traits, the `omnia_wasi_view!` macro, the `eval` host binding in `host/model_impl.rs` (validation gate), the recording/replay `WasiModelCtx` wrappers, and `ModelDefault` (replay) in `host/default_impl.rs` as the default. `examples/model` run 1 (replay) is the acceptance gate. **No model dependency, no registry dependency** — Layer 1 stands alone. ([RFC-53](rfc-53-wasi-model.md).)
-- **Phase 2a — The genai backend (`omnia-genai`).** A new `omnia-genai` crate in the `backends` repo (`pub struct Client`, `Backend` + `WasiModelCtx`, `fromenv` `ConnectOptions`), adding `genai = "0.6"` as its own dependency. Implement the floor-side `ToolHost` callbacks in `wasi-model` (`resolve` via the guest registry ([guest-registry.md](guest-registry.md) §4), `read`/`list`/`write` over the lent working-tree capability, session state in `wasi:keyvalue`, the `verify` seam — routing only; profiles are [RFC-60](rfc-60-verify-profiles.md)); map the tool surface onto `ChatRequest` / `Tool` / `JsonSpec`; run genai's in-process loop and repair semantics ([RFC-59](rfc-59-model-tool-loop.md)). `examples/model` run 2 (live + record) is the acceptance gate. **Depends on the guest registry (Phase 1 of guest-registry.md).** ([RFC-58](rfc-58-model-backends.md).)
-- **Phase 2b — The cursor backend (`omnia-cursor`).** A new `omnia-cursor` crate in the `backends` repo, same shape. Spawn `cursor-agent -p --force --output-format json --workspace`, parse `.result`, wrap in a timeout, enforce the `local-path` capability signal; `examples/model` run 3 is the acceptance gate. ([RFC-58](rfc-58-model-backends.md).)
+- **Phase 0 —** `DECISIONS.md` **entries.** Record the settled choices (the mechanism/judgment split; `resolve` reuses host-mediated linking; JSON-Schema-over-strings at the floor; validation in the `eval` binding and record/replay as composable `WasiModelCtx` wrappers; vendor + keys stay below the boundary) into the shared `DECISIONS.md` that [guest-registry.md](guest-registry.md) §7 already seeds.
+- **Phase 1 — The** `wasi-model` **host core + replay.** New `crates/wasi-model` built verbatim on the `wasi-keyvalue`/`wasi-blobstore` shape: `wit/model.wit`, the `generated` bindgen! module, the `Prompt`/`Answer` mirrors, the `WasiModel` host struct (`HasData` + `Host` + no-op `Server` on `Runtime`), the `WasiModelView` / `WasiModelCtxView` / `WasiModelCtx` traits, the `omnia_wasi_view!` macro, the `eval` host binding in `host/model_impl.rs` (validation gate), the recording/replay `WasiModelCtx` wrappers, and `ModelDefault` (replay) in `host/default_impl.rs` as the default. `examples/model` run 1 (replay) is the acceptance gate. **No model dependency, no registry dependency** — Layer 1 stands alone. ([RFC-53](rfc-53-wasi-model.md).)
+- **Phase 2a — The genai backend (**`omnia-genai`**).** A new `omnia-genai` crate in the `backends` repo (`pub struct Client`, `Backend` + `WasiModelCtx`, `fromenv` `ConnectOptions`), adding `genai = "0.6"` as its own dependency. Implement the floor-side `ToolHost` callbacks in `wasi-model` (`resolve` via the guest registry ([guest-registry.md](guest-registry.md) §4), `read`/`list`/`write` over the lent working-tree capability, session state in `wasi:keyvalue`, the `verify` seam — routing only; profiles are [RFC-60](rfc-60-verify-profiles.md)); map the tool surface onto `ChatRequest` / `Tool` / `JsonSpec`; run genai's in-process loop and repair semantics ([RFC-59](rfc-59-model-tool-loop.md)). `examples/model` run 2 (live + record) is the acceptance gate. **Depends on the guest registry (Phase 1 of guest-registry.md).** ([RFC-58](rfc-58-model-backends.md).)
+- **Phase 2b — The cursor backend (**`omnia-cursor`**).** A new `omnia-cursor` crate in the `backends` repo, same shape. Spawn `cursor-agent -p --force --output-format json --workspace`, parse `.result`, wrap in a timeout, enforce the `local-path` capability signal; `examples/model` run 3 is the acceptance gate. ([RFC-58](rfc-58-model-backends.md).)
 - **Phase 3 — Hardening.** Replay-fixture expansion (matching policy, diagnostics), `stream-json` transcript capture for richer recordings, the router seam stub, failure-mode tests, docs. (Defers the rest of [RFC-58](rfc-58-model-backends.md) and [RFC-60](rfc-60-verify-profiles.md).)
+
+
 
 ## 9. Implementation planning approach
 
@@ -449,6 +479,8 @@ As in [guest-registry.md](guest-registry.md) §8, this RFC is the design source 
 - **Defer Phase 2a's detailed plan until the guest registry lands**, because `ToolHost::resolve` binds to whatever `GuestRegistry`/dispatch API that work produces — planning it now would be speculation against an unbuilt seam.
 - **Defer Phase 2b's detailed plan until Phase 2a**, once the boundary + genai path is concrete.
 - **Every plan preserves the invariants** and states how in its acceptance test: instance-per-call through the `resolve` callback; validated-answers-only across `eval`; the floor stays generic (Law 2 — no model id, provider, or Specify schema leaks into Omnia); record/replay works at the boundary for *every* backend; per-call budgets and the dispatch-depth bound hold; `cargo make ci` and all existing examples stay green.
+
+
 
 ## 10. References
 
