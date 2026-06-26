@@ -1,11 +1,9 @@
 //! # Guest acquisition
 //!
-//! A small, pluggable seam for *where* a guest's component bytes come from. The
-//! deployment manifest's `source` field selects one implementation per guest.
-//! Phase 1 ships the [`FileSource`] (a local `.wasm` / pre-compiled `.bin`
-//! path). OCI lands later behind the same trait.
+//! Where a guest's component bytes come from. The deployment manifest's
+//! `source` field selects a kind per guest. Phase 1 ships [`Source`] (a local
+//! `.wasm` / pre-compiled `.bin` path); OCI lands later as another source kind.
 
-use std::future::Future;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
@@ -22,26 +20,16 @@ pub struct LoadedGuest {
     pub component: Component,
 }
 
-/// A pluggable source of guests to register.
-pub trait GuestSource {
-    /// Produce the component(s) and identities to register.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if a component cannot be acquired or compiled.
-    fn load(&self, engine: &Engine) -> impl Future<Output = Result<Vec<LoadedGuest>>> + Send;
-}
-
 /// A guest loaded from a local `.wasm` (or pre-compiled `.bin`) file.
 ///
 /// `omnia run <guest>.wasm` is the one-guest shorthand: load it, derive its
 /// identity from the file stem, and register it as the default guest.
-pub struct FileSource {
+pub struct Source {
     id: GuestId,
     path: PathBuf,
 }
 
-impl FileSource {
+impl Source {
     /// Create a file source, deriving the identity from the file stem
     /// (`./guests/echo.wasm` -> `echo`).
     #[must_use]
@@ -66,24 +54,22 @@ impl FileSource {
         &self.id
     }
 
-    /// Load the component from disk.
+    /// Load the component(s) this source registers.
+    ///
+    /// Async so a future source kind (an OCI pull) fits the same signature; a
+    /// local file is read synchronously today.
     ///
     /// # Errors
     ///
     /// Returns an error if the component cannot be loaded from the path.
-    pub fn load_into(&self, engine: &Engine) -> Result<Vec<LoadedGuest>> {
+    #[allow(clippy::unused_async)]
+    pub async fn load(&self, engine: &Engine) -> Result<Vec<LoadedGuest>> {
         let component = load_component(engine, &self.path)
             .with_context(|| format!("loading guest from {}", self.path.display()))?;
         Ok(vec![LoadedGuest {
             id: self.id.clone(),
             component,
         }])
-    }
-}
-
-impl GuestSource for FileSource {
-    async fn load(&self, engine: &Engine) -> Result<Vec<LoadedGuest>> {
-        self.load_into(engine)
     }
 }
 

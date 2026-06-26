@@ -17,7 +17,7 @@ use crate::manifest::Manifest;
 use crate::registry::{Guest, Registry};
 use crate::routing::Routes;
 use crate::selector::{FirstArgSelector, GuestSelector};
-use crate::source::{FileSource, GuestSource, LoadedGuest};
+use crate::source::{LoadedGuest, Source};
 use crate::{Host, RuntimeOptions};
 
 /// Selects where a runtime's guests come from, then [`compile`]s them into a
@@ -82,14 +82,14 @@ impl RegistryBuilder {
         let manifest =
             self.config.clone().or_else(|| env::var_os("OMNIA_CONFIG").map(PathBuf::from));
 
-        let dp = if let Some(manifest) = manifest {
+        let plan = if let Some(manifest) = manifest {
             let parsed = Manifest::load(&manifest)?;
             let base = manifest.parent().unwrap_or_else(|| Path::new("."));
-            DeploymentPlan {
+            Plan {
                 name: parsed.telemetry_name().to_owned(),
-                sources: parsed.file_sources(base)?,
+                sources: parsed.sources(base)?,
                 routes: parsed.routes(),
-                link_interfaces: parsed.link_interfaces(),
+                mediated_interfaces: parsed.mediated_interfaces(),
             }
         } else {
             let wasm = self.wasm.as_ref().context(
@@ -99,38 +99,38 @@ impl RegistryBuilder {
             // The single-file shorthand is a one-guest deployment: its sole guest is
             // the catch-all for every trigger it can answer, with no routes and no
             // host-mediated links (it has nobody to dispatch to).
-            let source = FileSource::new(wasm.clone());
+            let source = Source::new(wasm.clone());
 
-            DeploymentPlan {
+            Plan {
                 name: source.id().as_str().to_owned(),
                 sources: vec![source],
                 routes: Routes::default(),
-                link_interfaces: BTreeSet::new(),
+                mediated_interfaces: BTreeSet::new(),
             }
         };
 
-        init_env(&dp.name)?;
+        init_env(&plan.name)?;
         tracing::info!("initializing runtime");
 
-        Compiled::from_plan(dp).await
+        Compiled::from_plan(plan).await
     }
 }
 
 /// Resolved deployment inputs shared by the manifest and single-file paths.
-struct DeploymentPlan {
+struct Plan {
     name: String,
-    sources: Vec<FileSource>,
+    sources: Vec<Source>,
     routes: Routes,
-    link_interfaces: BTreeSet<Box<str>>,
+    mediated_interfaces: BTreeSet<Box<str>>,
 }
 
 impl<T: WasiView + 'static> Compiled<T> {
-    /// Acquire every guest named in `plan` through its [`GuestSource`] and pair
-    /// them with the shared engine and WASI-linked linker.
+    /// Acquire every guest named in `plan` through its [`Source`] and pair them
+    /// with the shared engine and WASI-linked linker.
     ///
-    /// Acquisition runs through the async [`GuestSource::load`] seam so a future
+    /// Acquisition runs through the async [`Source::load`] seam so a future
     /// source kind (an OCI pull) slots in without a parallel loading path.
-    async fn from_plan(plan: DeploymentPlan) -> Result<Self> {
+    async fn from_plan(plan: Plan) -> Result<Self> {
         let (engine, linker, options) = engine_and_linker()?;
 
         let mut guests = Vec::with_capacity(plan.sources.len());
@@ -144,7 +144,7 @@ impl<T: WasiView + 'static> Compiled<T> {
             options,
             guests,
             routes: plan.routes,
-            link_interfaces: plan.link_interfaces,
+            mediated_interfaces: plan.mediated_interfaces,
             selector: Arc::new(FirstArgSelector),
         })
     }
@@ -176,7 +176,7 @@ pub struct Compiled<T: WasiView + 'static> {
     routes: Routes,
     /// Union of the per-guest `link` allow-lists — the host-mediated interfaces
     /// to polyfill onto the shared linker (empty for the single-file shorthand).
-    link_interfaces: BTreeSet<Box<str>>,
+    mediated_interfaces: BTreeSet<Box<str>>,
     /// Host-mediated dispatch selector; defaults to [`FirstArgSelector`] and is
     /// overridable via [`selector`](Self::selector).
     selector: Arc<dyn GuestSelector>,
@@ -224,7 +224,7 @@ impl<T: WasiView> Compiled<T> {
         // `GuestId` it returns.
         let dispatch = DispatchHandle::new(
             self.selector,
-            self.link_interfaces,
+            self.mediated_interfaces,
             self.options.max_dispatch_depth,
         );
 

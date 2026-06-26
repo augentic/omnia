@@ -24,7 +24,7 @@ use serde::Deserialize;
 
 use crate::registry::GuestId;
 use crate::routing::{HttpRoutes, Routes, TopicRoutes};
-use crate::source::FileSource;
+use crate::source::Source;
 
 /// The deployment manifest: which guests load and how host-mediated calls
 /// travel.
@@ -72,7 +72,7 @@ impl Manifest {
         self.guests.first().map_or("omnia", |entry| entry.id.as_str())
     }
 
-    /// Resolve every `[[guest]]` source into a loadable file source.
+    /// Resolve every `[[guest]]` source into a loadable [`Source`].
     ///
     /// Paths in the manifest are resolved relative to `base` (typically the
     /// manifest's parent directory).
@@ -80,14 +80,14 @@ impl Manifest {
     /// # Errors
     ///
     /// Returns an error if a guest uses a source kind not yet supported.
-    pub fn file_sources(&self, base: &Path) -> Result<Vec<FileSource>> {
+    pub fn sources(&self, base: &Path) -> Result<Vec<Source>> {
         let mut sources = Vec::with_capacity(self.guests.len());
         for entry in &self.guests {
             let id = GuestId::from(entry.id.as_str());
             match &entry.source {
                 SourceSpec::Path(path) => {
                     let resolved = if path.is_absolute() { path.clone() } else { base.join(path) };
-                    sources.push(FileSource::with_id(id, resolved));
+                    sources.push(Source::with_id(id, resolved));
                 }
                 SourceSpec::Oci(_) => bail!("guest `{id}`: OCI sources are not yet supported"),
             }
@@ -95,12 +95,12 @@ impl Manifest {
         Ok(sources)
     }
 
-    /// Union of the per-guest `link` allow-lists.
+    /// Union of the per-guest `link` allow-lists — the host-mediated interfaces.
     ///
     /// The linker is shared, so an interface dispatched for one guest is wired
     /// once for all.
     #[must_use]
-    pub fn link_interfaces(&self) -> BTreeSet<Box<str>> {
+    pub fn mediated_interfaces(&self) -> BTreeSet<Box<str>> {
         self.guests
             .iter()
             .flat_map(|entry| entry.link.iter())
