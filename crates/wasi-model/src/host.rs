@@ -128,7 +128,7 @@ pub trait WasiModelCtx: Debug + Send + Sync + 'static {
 /// Phase 1 defines the surface (the boundary is final) but wires no capability:
 /// `resolve` binds to the guest registry in Phase 2a, and `read`/`list`/`write`
 /// to the wasi-filesystem working tree in Phase 2b (RFC-55). Until then the
-/// floor lends a [`model_impl`]-built host that fails every call loudly.
+/// floor lends a stub host that fails every call loudly.
 pub trait ToolHost: Send + Sync {
     /// `resolve` — host-mediated dynamic linking into the adapter's `references`
     /// export (guest-registry.md §4). Always a fresh instance: a resolve cannot

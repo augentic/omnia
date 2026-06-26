@@ -306,10 +306,10 @@ where
 }
 
 /// Host-originated dynamic dispatch into a *known* guest export — the host→guest
-/// counterpart of [`dispatch`] (which is guest→guest and selector-driven).
+/// counterpart of guest→guest `dispatch` (selector-driven).
 ///
 /// This reuses the landed machinery rather than adding a parallel one: the same
-/// dispatch-depth bound ([`DispatchHandle::enter`]) so a `complete`→`resolve`
+/// dispatch-depth bound (`DispatchHandle::enter`) so a `complete`→`resolve`
 /// →adapter chain is depth-counted exactly like a guest→guest hop, and the same
 /// §4.5 resource rejection. The target is instantiated *fresh* on a new store and
 /// the matching export invoked directly (the `wasi-http` `server.rs` pattern), so
@@ -432,7 +432,7 @@ const RESOLVE_FUNC: &str = "resolve";
 /// so host bindings can reach it.
 pub trait HostDispatch: Send + Sync + 'static {
     /// Resolve a reference against a guest's `references` shelf: instantiate
-    /// `target` fresh, invoke its exported [`RESOLVE_FUNC`] function with
+    /// `target` fresh, invoke its exported `resolve` function with
     /// `reference`, and return the typed bytes. Always a fresh instance
     /// (instance-per-call), depth-bounded like any host-mediated hop.
     fn resolve(&self, target: GuestId, reference: String) -> FutureResult<Vec<u8>>;
