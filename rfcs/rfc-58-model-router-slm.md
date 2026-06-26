@@ -1,60 +1,74 @@
-# RFC-58: Model Backends — frontier, spawned agent, SLM, and routing
+# RFC-58: Model Backends — router, SLM, and replay expansion
 
-> Status: Draft · Order 9 of 10 · Parallel after [RFC-53](rfc-53-wasi-model.md) · Depends: [RFC-53](rfc-53-wasi-model.md), [RFC-55](rfc-55-working-tree.md) · Enables: [RFC-18](future/rfc-18-slm.md) · Owns: backend variety and routing behind `wasi-model`
+> Status: Draft · Order 9 of 10 · **remaining work only** · Depends: the landed
+> `wasi-model` boundary, [RFC-55](rfc-55-working-tree.md) · Enables:
+> [RFC-18](future/rfc-18-slm.md) · Owns: the rest of the backend catalogue and routing
+> behind `wasi-model`
 
 ## Abstract
 
-The `wasi-model` host ([RFC-53](rfc-53-wasi-model.md)) dispatches `eval` to a backend. This RFC owns the backend catalogue and router: frontier / hosted, spawned-agent, replay expansion, local SLM, and the decision key that selects one per call. It builds on the core replay seam in [RFC-53](rfc-53-wasi-model.md); it does not redefine the boundary. The genai backend's in-process tool loop is specified in [RFC-59](rfc-59-model-tool-loop.md).
+Two backends already sit behind the one `wasi-model` boundary and are selected by config:
+**frontier / hosted** (`omnia-genai`, with its in-process tool loop per
+[RFC-59](rfc-59-working-tree-tools.md)) and the **spawned agent** (`omnia-cursor`), plus the
+in-tree **replay** backend (`ModelDefault`). This RFC now owns only what is **not yet
+built**: the per-call **router**, the **local SLM** backend, and the **replay expansion**
+beyond the minimal seam.
 
-## Backend catalogue
+## Remaining backends
 
-The backend is the single seam the model is reached through. The fleet lives inside it, and the model id never crosses `eval`.
-
-- **Frontier / hosted** — hard synthesis and review through a hosted API via [`genai`](https://github.com/jeremychone/rust-genai), one API over OpenAI / Anthropic / Gemini / Ollama / other providers. Switching frontier, hosted, and local providers is backend configuration. The in-process tool loop (`resolve`, `read`, `list`, `write`, `verify`, session state, repair) is owned by this backend; see [RFC-59](rfc-59-model-tool-loop.md).
-- **Spawned agent** — the native layer spawns a fresh, context-free agent session, hands it the brief, and parses the validated answer. It may own its own tool loop and read / write the working tree through the `local-path` it is lent ([RFC-55](rfc-55-working-tree.md)). It still returns through the [RFC-53](rfc-53-wasi-model.md) typed boundary and must remain recordable.
-- **Replay expansion** — [RFC-53](rfc-53-wasi-model.md) defines the minimal replay seam. This RFC expands replay into a production backend with fixture management, matching policy, and diagnostics across backend families.
-- **Local SLM** — narrow, high-volume transformations via a local model and constrained decoding, carried by [RFC-18](future/rfc-18-slm.md).
-- **Router** — selects a backend per call by brief path, difficulty, deployment mode, or an abstract cost / quality hint. It never routes on a vendor model id supplied by a guest.
-
-## Deployment modes
-
-- **Interactive** — frontier API or spawned agent against concrete artifacts.
-- **Headless** — hosted API or local SLM at fleet scale, no editor in the loop.
-- **CI / testing** — replay fixtures served through the replay backend.
+- **Router** — selects a backend per call by brief path, difficulty, deployment mode, or
+  an abstract cost / quality hint. It **never** routes on a vendor model id supplied by a
+  guest. This is the one selection mechanism still missing; today a deployment binds a
+  single backend in `runtime!`.
+- **Local SLM** — narrow, high-volume transformations via a local model and constrained
+  decoding, carried by [RFC-18](future/rfc-18-slm.md). It is a further in-process-loop
+  variant behind the same `WasiModelCtx` trait.
+- **Replay expansion** — the minimal replay seam (a directory of canonical-JSON-keyed
+  fixtures) is live. This RFC expands it into a production backend: content-addressed
+  `sha256` keying, fixture management, matching policy, and cross-backend diagnostics.
 
 ## Scope
 
-- Frontier / hosted backend configuration and the genai tool loop ([RFC-59](rfc-59-model-tool-loop.md)).
-- Spawned-agent backend protocol and process management.
-- Replay fixture management beyond the minimal [RFC-53](rfc-53-wasi-model.md) seam.
 - Router decision keys and deployment-mode selection.
-- Local SLM integration via [RFC-18](future/rfc-18-slm.md).
+- Local SLM integration via [RFC-18](future/rfc-18-slm.md), including the
+  constrained-decoding hook that keeps typed reports schema-valid.
+- Replay fixture management beyond the minimal seam (matching policy, diagnostics,
+  `stream-json` transcript capture).
 
 ## Out of scope
 
-- The `eval` host boundary and backend trait; see [RFC-53](rfc-53-wasi-model.md).
-- The `ToolHost` host callbacks the floor lends to genai; see [wasi-model.md](wasi-model.md) §4.
+- The `complete` host boundary and backend trait — landed in `crates/wasi-model`.
+- The genai (`omnia-genai`) and spawned-agent (`omnia-cursor`) backends — landed in the
+  `backends` repo.
+- The genai in-process tool loop's remaining `read` / `list` / `write` work; see
+  [RFC-59](rfc-59-working-tree-tools.md).
 - Verify profile definitions; see [RFC-60](rfc-60-verify-profiles.md).
 
 ## Open questions
 
 - The routing key: brief path, difficulty, deployment mode, or a combination.
-- The spawned-agent protocol: how a session is spawned, handed the brief, returns a schema-valid answer, and consumes the prose shelf.
-- The record/replay capture point for spawned-agent runs that own their own loop.
-- The constrained-decoding hook a non-agent SLM backend uses to keep typed reports schema-valid ([RFC-18](future/rfc-18-slm.md)).
+- The constrained-decoding hook a non-agent SLM backend uses to keep typed reports
+  schema-valid ([RFC-18](future/rfc-18-slm.md)).
+- The matching policy for replay expansion (exact hash vs. tolerant matching) and its
+  diagnostics across backend families.
 
 ## Acceptance criteria
 
-1. At least two real backends, such as frontier API and spawned agent, sit behind the one `wasi-model` boundary and are selected by config.
-2. Interactive and headless modes both run a real operation.
-3. CI replays through the replay backend without a live model.
-4. The router keys on abstract operation information, never a vendor model id exposed to guests.
-5. Every backend's run is recordable and replayable through the [RFC-53](rfc-53-wasi-model.md) boundary.
-6. `make lint` and `cargo make ci` stay green.
+1. The router keys on abstract operation information, never a vendor model id exposed to
+   guests, and selects among the bound backends per call.
+2. A local SLM backend runs a narrow transformation behind the same boundary with
+   schema-valid output.
+3. CI replays through the expanded replay backend with content-addressed keying and
+   useful diagnostics on a miss.
+4. Every backend's run remains recordable and replayable through the `wasi-model`
+   boundary.
+5. `make lint` and `cargo make ci` stay green.
 
 ## Risks and invariants
 
-- **Vendor coupling stays behind the boundary.** Any one model is one backend detail, never part of the contract or runtime floor.
-- **Router stays abstract.** Its key is difficulty, deployment mode, or operation identity, not a vendor id.
-- **Spawned process management.** Sessions stay robust and context-free; a leaked transcript reintroduces the dependency the architecture sheds.
-- **The embedded topology is a non-goal.** Judgment never runs inside the operator's live editor session.
+- **Vendor coupling stays behind the boundary.** Any one model is one backend detail,
+  never part of the contract or runtime floor.
+- **Router stays abstract.** Its key is difficulty, deployment mode, or operation
+  identity, not a vendor id.
+- **The embedded topology is a non-goal.** Judgment never runs inside the operator's live
+  editor session.
