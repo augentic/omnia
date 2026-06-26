@@ -55,10 +55,13 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
 
             /// Run a guest (single-file shorthand) or a manifest-driven deployment.
             pub async fn run(wasm: Option<PathBuf>, config: Option<PathBuf>) -> Result<()> {
-                let mut compiled = omnia::create_runtime(wasm, config)
+                let compiled = omnia::RegistryBuilder::new()
+                    .wasm(wasm)
+                    .config(config)
+                    .compile::<StoreCtx>()
                     .await
                     .context("building runtime")?;
-                let run_state = Context::new(&mut compiled)
+                let run_state = Context::new(compiled)
                     .await
                     .context("preparing runtime state")?;
                 run_state.start().await.context("starting runtime services")
@@ -73,9 +76,9 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
 
             impl Context {
                 /// Creates a new runtime state by linking WASI interfaces and connecting to backends.
-                async fn new(compiled: &mut Compiled<StoreCtx>) -> Result<Self> {
+                async fn new(mut compiled: Compiled<StoreCtx>) -> Result<Self> {
                     // link enabled WASI components
-                    #(compiled.link(#host_trait_impls)?;)*
+                    #(compiled.link::<#host_trait_impls>()?;)*
 
                     // connect to all backends concurrently
                     #connect_backends
@@ -83,7 +86,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                     // Pre-instantiate every guest against the now fully-linked
                     // linker and assemble the registry.
                     Ok(Self {
-                        registry: Arc::new(compiled.registry()?),
+                        registry: Arc::new(compiled.build()?),
                         #(#backend_idents,)*
                     })
                 }

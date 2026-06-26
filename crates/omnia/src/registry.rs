@@ -125,11 +125,14 @@ pub struct Registry<T: 'static> {
 impl<T: 'static> Registry<T> {
     /// Assemble a registry from pre-instantiated guests.
     ///
+    /// Crate-internal: [`Compiled::build`](crate::Compiled::build) is the public
+    /// path to a [`Registry`].
+    ///
     /// # Errors
     ///
     /// Returns an error if `guests` is empty, or if a route targets a guest that
     /// is not registered.
-    pub fn new(
+    pub(crate) fn new(
         engine: Engine, options: RuntimeOptions, guests: HashMap<GuestId, Guest<T>>,
         routes: Routes, dispatch: Arc<DispatchHandle>,
     ) -> Result<Self> {

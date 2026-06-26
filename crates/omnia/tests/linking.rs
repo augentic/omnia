@@ -172,7 +172,7 @@ async fn router_dispatches_to_responder() -> Result<()> {
 
     let compiled =
         create_from_manifest::<TestCtx>(&manifest_path).await.context("building runtime")?;
-    let registry = compiled.registry().context("assembling registry")?;
+    let registry = compiled.build().context("assembling registry")?;
     let runtime = TestRuntime {
         registry: Arc::new(registry),
         stores_built: Arc::new(AtomicUsize::new(0)),
