@@ -1,4 +1,4 @@
-guest_macro::guest!({
+omnia_guest_macros::guest!({
     owner: "at",
     provider: MyProvider,
     http: [

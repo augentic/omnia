@@ -1030,7 +1030,6 @@ dependencies = [
  "omnia-wasi-messaging",
  "omnia-wasi-model",
  "omnia-wasi-otel",
- "omnia-wasi-otel-attr",
  "omnia-wasi-sql",
  "omnia-wasi-vault",
  "omnia-wasi-websocket",
@@ -2079,7 +2078,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "omnia-guest-macro"
+name = "omnia-guest-macros"
 version = "0.35.0"
 dependencies = [
  "proc-macro2",
@@ -2107,7 +2106,7 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
- "omnia-guest-macro",
+ "omnia-guest-macros",
  "omnia-wasi-blobstore",
  "omnia-wasi-config",
  "omnia-wasi-http",
@@ -2288,7 +2287,7 @@ dependencies = [
  "hex",
  "num-traits",
  "omnia",
- "omnia-wasi-otel-attr",
+ "omnia-guest-macros",
  "opentelemetry",
  "opentelemetry-proto",
  "opentelemetry_sdk",
@@ -2299,15 +2298,6 @@ dependencies = [
  "wasmtime",
  "wasmtime-wasi",
  "wit-bindgen 0.58.0",
-]
-
-[[package]]
-name = "omnia-wasi-otel-attr"
-version = "0.35.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

@@ -1,5 +1,5 @@
 [package]
-name = "omnia-guest-macro"
+name = "omnia-guest-macros"
 description = "Procedural macros for Omnia WASI guest code generation"
 authors.workspace = true
 categories.workspace = true

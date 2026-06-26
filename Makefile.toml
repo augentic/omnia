@@ -111,9 +111,8 @@ if [ "${PUBLISH_FOR_REAL}" = "true" ]; then
 fi
 
 echo "=== Tier 1: No internal dependencies ==="
-cargo publish -p omnia-guest-macro $DRY_RUN
+cargo publish -p omnia-guest-macros $DRY_RUN
 cargo publish -p omnia-runtime-macro $DRY_RUN
-cargo publish -p omnia-wasi-otel-attr $DRY_RUN
 
 echo "=== Tier 2: Core runtime ==="
 cargo publish -p omnia $DRY_RUN

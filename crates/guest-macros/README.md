@@ -1,24 +1,27 @@
-# guest-macro
+# omnia-guest-macros
 
 Procedural macros for generating WebAssembly guest infrastructure.
 
 ## Overview
 
-This crate provides the `guest!` macro that generates the necessary guest infrastructure for WebAssembly components with WASI capabilities. Instead of manually implementing HTTP handlers and messaging consumers, you declaratively specify your routes and topics.
+This crate provides:
+
+- the `guest!` macro that generates the necessary guest infrastructure for WebAssembly components with WASI capabilities. Instead of manually implementing HTTP handlers and messaging consumers, you declaratively specify your routes and topics.
+- the `#[instrument]` attribute macro that wraps a function body in an OpenTelemetry span for guest-side observability.
 
 ## Usage
 
-Add `guest-macro` to your dependencies:
+Add `omnia-guest-macros` to your dependencies:
 
 ```toml
 [dependencies]
-guest-macro = { workspace = true }
+omnia-guest-macros = { workspace = true }
 ```
 
 Then use the `guest!` macro to generate your guest infrastructure:
 
 ```rust,ignore
-use guest_macro::guest;
+use omnia_guest_macros::guest;
 
 guest!({
     owner: "my-org",
@@ -105,7 +108,7 @@ The macro generates the following modules under `#[cfg(target_arch = "wasm32")]`
 ## Example
 
 ```rust,ignore
-use guest_macro::guest;
+use omnia_guest_macros::guest;
 
 // Define your provider
 struct MyProvider;
@@ -130,6 +133,30 @@ guest!({
     ]
 });
 ```
+
+## Instrumentation
+
+The `#[instrument]` attribute macro wraps a function so its body runs inside a
+`tracing` span, initializing the guest OpenTelemetry subscriber on entry:
+
+```rust,ignore
+use omnia_guest_macros::instrument;
+
+#[instrument]
+fn handle() {
+    // a span named "handle" is active for the duration of this body
+}
+
+#[instrument(name = "custom_span", level = Level::DEBUG)]
+async fn process() {
+    // async bodies are instrumented too
+}
+```
+
+Accepted arguments:
+
+- `name` -- overrides the span name (defaults to the function name)
+- `level` -- sets the span level (e.g. `Level::DEBUG`; defaults to `INFO`)
 
 ## License
 

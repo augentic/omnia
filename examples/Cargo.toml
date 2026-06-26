@@ -50,7 +50,6 @@ tracing.workspace = true
 wasip3.workspace = true
 wit-bindgen.workspace = true
 omnia-sdk.workspace = true
-omnia-wasi-otel-attr.workspace = true
 
 [[example]]
 name = "blobstore-wasm"

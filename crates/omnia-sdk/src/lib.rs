@@ -12,7 +12,7 @@ pub mod document_store {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub use omnia_guest_macro::*;
+pub use omnia_guest_macros::*;
 #[doc(hidden)]
 pub use {anyhow, axum, bytes, http, http_body, tracing};
 #[cfg(target_arch = "wasm32")]
