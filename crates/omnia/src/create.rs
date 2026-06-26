@@ -222,11 +222,8 @@ impl<T: WasiView> Compiled<T> {
         // The selector defaults to `FirstArgSelector` but may be overridden via
         // `selector`; consumers project their identity scheme onto the opaque
         // `GuestId` it returns.
-        let dispatch = DispatchHandle::new(
-            self.selector,
-            self.links,
-            self.options.max_dispatch_depth,
-        );
+        let dispatch =
+            DispatchHandle::new(self.selector, self.links, self.options.max_dispatch_depth);
 
         // Polyfill host-mediated imports onto the shared linker *before*
         // pre-instantiation: an import that is neither host-satisfied nor

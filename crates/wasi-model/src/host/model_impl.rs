@@ -10,9 +10,10 @@
 
 use std::sync::Arc;
 
+use anyhow::{Context as _, bail};
 use futures::FutureExt as _;
 use omnia::{GuestId, HostDispatch};
-use wasmtime::component::{Accessor, StreamReader};
+use wasmtime::component::{Accessor, StreamReader, Val};
 
 use super::generated::augentic::model::completion as genc;
 use super::generated::augentic::model::completion::{Host, HostWithStore};
@@ -102,6 +103,29 @@ fn deferred<R: Send + 'static>(tool: &'static str) -> FutureResult<R> {
     .boxed()
 }
 
+/// The conventional export-function name a `references` shelf exposes for
+/// host-mediated `resolve` (`examples/model/wit/world.wit` invokes it by
+/// convention, without naming the interface). `wasi-model` owns this verb name
+/// and the bytes shape below; the floor's [`HostDispatch::invoke`] stays generic.
+const RESOLVE_FUNC: &str = "resolve";
+
+/// Convert a `resolve` export's return value into raw bytes. Accepts `list<u8>`
+/// (the canonical shape) or `string` (a convenience for text shelves).
+fn vals_to_bytes(results: Vec<Val>) -> anyhow::Result<Vec<u8>> {
+    let first = results.into_iter().next().context("resolve export returned no value")?;
+    match first {
+        Val::List(items) => items
+            .into_iter()
+            .map(|value| match value {
+                Val::U8(byte) => Ok(byte),
+                other => bail!("resolve result list element is not a u8: {other:?}"),
+            })
+            .collect(),
+        Val::String(text) => Ok(text.into_bytes()),
+        other => bail!("resolve export must return list<u8> or string, got {other:?}"),
+    }
+}
+
 impl ToolHost for BoundToolHost {
     fn resolve(&self, reference: Reference) -> FutureResult<Vec<u8>> {
         // `resolve` is only valid when the prompt granted a reference target.
@@ -115,7 +139,18 @@ impl ToolHost for BoundToolHost {
             .boxed();
         };
         let dispatch = Arc::clone(&self.dispatch);
-        async move { dispatch.resolve(GuestId::from(target), reference.name).await }.boxed()
+        async move {
+            let results = dispatch
+                .invoke(
+                    GuestId::from(target),
+                    None,
+                    RESOLVE_FUNC.to_owned(),
+                    vec![Val::String(reference.name)],
+                )
+                .await?;
+            vals_to_bytes(results)
+        }
+        .boxed()
     }
 
     fn read(&self, _path: String) -> FutureResult<Vec<u8>> {

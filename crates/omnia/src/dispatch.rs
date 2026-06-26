@@ -418,85 +418,69 @@ where
     Ok(results)
 }
 
-/// The conventional export-function name a `references` shelf exposes for
-/// host-mediated `resolve`. This is a floor concept — it mirrors `ToolHost`'s
-/// `resolve` and the RFC tool name — so the floor invokes it without baking in a
-/// consumer package/interface name (Law 2).
-const RESOLVE_FUNC: &str = "resolve";
-
-/// A host→guest call capability, type-erased so a host binding (e.g. `wasi-model`'s
-/// `resolve`) can invoke a guest without naming the concrete [`Runtime`].
+/// A host→guest call capability, type-erased so a host binding (e.g.
+/// `wasi-model`'s `resolve`) can invoke a guest without naming the concrete
+/// [`Runtime`].
 ///
-/// Implemented blanket for every [`Runtime`]; the `runtime!` macro threads an
-/// `Arc<dyn HostDispatch>` into each store context (like the per-store wRPC state)
-/// so host bindings can reach it.
+/// This is the type-erased mirror of the [`dispatch`] free function: the
+/// `runtime!` macro threads an `Arc<dyn HostDispatch>` into each store context
+/// (like the per-store wRPC state) so any host binding gets dynamic host→guest
+/// calls for free. It carries no consumer vocabulary (Law 2) — a consumer owns
+/// its own verb names and return shapes and composes this generic seam.
 pub trait HostDispatch: Send + Sync + 'static {
-    /// Resolve a reference against a guest's `references` shelf: instantiate
-    /// `target` fresh, invoke its exported `resolve` function with
-    /// `reference`, and return the typed bytes. Always a fresh instance
-    /// (instance-per-call), depth-bounded like any host-mediated hop.
-    fn resolve(&self, target: GuestId, reference: String) -> FutureResult<Vec<u8>>;
+    /// Invoke `target`'s `interface`/`func` with `args`, returning the typed
+    /// results. The target is instantiated *fresh* (instance-per-call), the hop
+    /// is depth-bounded like any host-mediated call, and a live resource handle
+    /// on either side is rejected.
+    ///
+    /// A `None` `interface` discovers the unique exported interface carrying a
+    /// function named `func` — a structural component-model query that names no
+    /// consumer scheme.
+    fn invoke(
+        &self, target: GuestId, interface: Option<String>, func: String, args: Vec<Val>,
+    ) -> FutureResult<Vec<Val>>;
 }
 
 impl<R: Runtime> HostDispatch for R {
-    fn resolve(&self, target: GuestId, reference: String) -> FutureResult<Vec<u8>> {
+    fn invoke(
+        &self, target: GuestId, interface: Option<String>, func: String, args: Vec<Val>,
+    ) -> FutureResult<Vec<Val>> {
         let runtime = self.clone();
         async move {
-            let interface = resolve_interface(&runtime, &target)?;
-            let results = dispatch(
-                &runtime,
-                &target,
-                &interface,
-                RESOLVE_FUNC,
-                vec![Val::String(reference)],
-            )
-            .await?;
-            to_bytes(results)
+            let interface: Box<str> = match interface {
+                Some(name) => Box::from(name),
+                None => interface_exporting(&runtime, &target, &func)?,
+            };
+            dispatch(&runtime, &target, &interface, &func, args).await
         }
         .boxed()
     }
 }
 
-/// Find the exported interface on `target`'s component that carries a
-/// [`RESOLVE_FUNC`] function, so the floor invokes it without hardcoding a
-/// consumer interface name.
-fn resolve_interface<R: Runtime>(runtime: &R, target: &GuestId) -> Result<Box<str>> {
+/// Find the exported interface on `target`'s component that carries a function
+/// named `func`, so a host can invoke it without hardcoding a consumer interface
+/// name. "Find the interface exporting function X" is a structural
+/// component-model query and names no consumer scheme (Law 2).
+fn interface_exporting<R: Runtime>(runtime: &R, target: &GuestId, func: &str) -> Result<Box<str>> {
     let registry = runtime.registry();
     let engine = registry.engine();
     let guest = registry
         .get(target)
-        .with_context(|| format!("resolve target `{target}` is not registered"))?;
+        .with_context(|| format!("dispatch target `{target}` is not registered"))?;
     let component_ty = guest.component().component_type();
     for (interface, types::ComponentExtern { ty, .. }) in component_ty.exports(engine) {
         let types::ComponentItem::ComponentInstance(instance_ty) = ty else {
             continue;
         };
-        let has_resolve =
-            instance_ty.exports(engine).any(|(func, types::ComponentExtern { ty, .. })| {
-                func == RESOLVE_FUNC && matches!(ty, types::ComponentItem::ComponentFunc(_))
+        let has_func =
+            instance_ty.exports(engine).any(|(name, types::ComponentExtern { ty, .. })| {
+                name == func && matches!(ty, types::ComponentItem::ComponentFunc(_))
             });
-        if has_resolve {
+        if has_func {
             return Ok(Box::from(interface));
         }
     }
-    bail!("resolve target `{target}` exports no interface with a `{RESOLVE_FUNC}` function")
-}
-
-/// Convert a `resolve` export's return value into raw bytes. Accepts `list<u8>`
-/// (the canonical shape) or `string` (a convenience for text shelves).
-fn to_bytes(results: Vec<Val>) -> Result<Vec<u8>> {
-    let first = results.into_iter().next().context("resolve export returned no value")?;
-    match first {
-        Val::List(items) => items
-            .into_iter()
-            .map(|value| match value {
-                Val::U8(byte) => Ok(byte),
-                other => bail!("resolve result list element is not a u8: {other:?}"),
-            })
-            .collect(),
-        Val::String(text) => Ok(text.into_bytes()),
-        other => bail!("resolve export must return list<u8> or string, got {other:?}"),
-    }
+    bail!("dispatch target `{target}` exports no interface with a `{func}` function")
 }
 
 /// Recursively reports whether a value carries a live resource handle.
