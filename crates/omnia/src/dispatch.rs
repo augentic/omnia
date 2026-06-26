@@ -61,247 +61,88 @@ type HostResources = HashMap<
     HashMap<Box<str>, (wasmtime::component::ResourceType, wasmtime::component::ResourceType)>,
 >;
 
-/// The long-lived dispatch state shared by every polyfilled import.
+/// Wire the serve side of every host-mediated interface.
 ///
-/// It carries the selector strategy, the union of host-mediated interfaces, the
-/// bound transport (installed once the serve side is wired), and the
-/// process-wide dispatch-depth counter.
-pub struct DispatchHandle {
-    selector: Arc<dyn GuestSelector>,
-    links: BTreeSet<Box<str>>,
-    transport: OnceLock<InProcess>,
-    depth: AtomicUsize,
-    max_depth: usize,
-}
-
-impl DispatchHandle {
-    /// Create a shared dispatch handle. The transport is installed later by
-    /// [`serve_links`], once each target's serve side is wired.
-    #[must_use]
-    pub(crate) fn new(
-        selector: Arc<dyn GuestSelector>, links: BTreeSet<Box<str>>, max_depth: usize,
-    ) -> Arc<Self> {
-        Arc::new(Self {
-            selector,
-            links,
-            transport: OnceLock::new(),
-            depth: AtomicUsize::new(0),
-            max_depth,
-        })
-    }
-
-    /// The union of host-mediated interface names across every guest's `link`
-    /// allow-list — the set of interfaces to polyfill (caller side) and serve
-    /// (callee side).
-    #[must_use]
-    pub(crate) const fn links(&self) -> &BTreeSet<Box<str>> {
-        &self.links
-    }
-
-    /// Install the bound transport carrier (called once by [`serve_links`]).
-    fn install(&self, transport: InProcess) {
-        // Set-once: a second install (there is only ever one) is ignored.
-        let _ = self.transport.set(transport);
-    }
-
-    /// The bound transport carrier.
-    fn transport(&self) -> Result<&InProcess> {
-        self.transport
-            .get()
-            .context("link transport not initialized; `serve_links` must run before dispatch")
-    }
-
-    /// Enter a dispatch, bounding nesting depth (§6.6). The returned guard
-    /// decrements the shared counter on drop.
-    ///
-    /// The counter is process-wide and tracks *synchronous* nesting (A->B->C,
-    /// each awaited to completion before the caller returns), which is the
-    /// unbounded-recursion concern; it is a safety bound, not a precise
-    /// per-chain limit under heavy concurrency.
-    fn enter(&self, target: &GuestId) -> Result<DepthGuard<'_>> {
-        let depth = self.depth.fetch_add(1, Ordering::SeqCst) + 1;
-        if depth > self.max_depth {
-            self.depth.fetch_sub(1, Ordering::SeqCst);
-            bail!(
-                "link dispatch depth {depth} exceeds maximum {} (target `{target}`); raise \
-                 MAX_DISPATCH_DEPTH if this is intentional",
-                self.max_depth
-            );
-        }
-        Ok(DepthGuard { depth: &self.depth })
-    }
-}
-
-/// Decrements the shared dispatch-depth counter when a dispatch unwinds.
-#[derive(Debug)]
-struct DepthGuard<'a> {
-    depth: &'a AtomicUsize,
-}
-
-impl Drop for DepthGuard<'_> {
-    fn drop(&mut self) {
-        self.depth.fetch_sub(1, Ordering::SeqCst);
-    }
-}
-
-/// Polyfill every host-mediated import named in the `link` allow-list union onto
-/// the shared linker, bound to the dispatch handle.
+/// Each target guest that exports a linked interface runs a wRPC server whose
+/// handlers instantiate the guest *fresh per call* (instance-per-call); the
+/// bound transport is then installed so polyfilled imports can reach it.
 ///
-/// Each interface is linked exactly once (the linker is shared, so the per-guest
-/// allow-lists are unioned, per §4.4). `wasi:*` imports are never touched here —
-/// they are host-satisfied — so only the manifest-declared interfaces are
-/// dispatched.
-///
-/// Runs *before* pre-instantiation, so an import that is neither host-satisfied
-/// nor allow-listed remains unresolved and fails at `instantiate_pre` — the
-/// explicit, fail-fast startup error of §4.4/§6.4.
+/// Spawns one detached task per served function to drain its invocation stream.
+/// A no-op when no guest declares any `link` interface.
 ///
 /// # Errors
 ///
-/// Returns an error if a named link target is not an interface import, or if a
-/// function cannot be defined on the linker.
-pub(crate) fn link_dynamic<T>(
-    engine: &Engine, linker: &mut Linker<T>, guests: &[LoadedGuest], handle: &Arc<DispatchHandle>,
-) -> Result<()>
+/// Returns an error if a guest's export cannot be served over the carrier.
+pub async fn serve_links<R>(state: &R) -> Result<()>
 where
-    T: WasiView + WrpcView + 'static,
+    R: Runtime,
+    R::StoreCtx: WasiView + WrpcView + 'static,
 {
-    if handle.links.is_empty() {
+    let registry = state.registry();
+    let handle = registry.dispatch();
+    if handle.links().is_empty() {
         return Ok(());
     }
+    let engine = registry.engine().clone();
 
-    let mut wired: BTreeSet<Box<str>> = BTreeSet::new();
-    for LoadedGuest { id, component } in guests {
-        let component_ty = component.component_type();
-        for (name, types::ComponentExtern { ty, .. }) in component_ty.imports(engine) {
-            if !handle.links.contains(name) || wired.contains(name) {
+    let mut servers: HashMap<GuestId, Arc<InProcServer>> = HashMap::new();
+    for guest in registry.guests() {
+        let component_ty = guest.component().component_type();
+        let mut server: Option<Arc<InProcServer>> = None;
+
+        for (interface, types::ComponentExtern { ty, .. }) in component_ty.exports(&engine) {
+            if !handle.links().contains(interface) {
                 continue;
             }
             let types::ComponentItem::ComponentInstance(instance_ty) = ty else {
-                bail!("link target `{name}` (imported by guest `{id}`) is not an interface");
+                continue;
             };
+            for (func, types::ComponentExtern { ty, .. }) in instance_ty.exports(&engine) {
+                let types::ComponentItem::ComponentFunc(func_ty) = ty else {
+                    continue;
+                };
+                let server =
+                    Arc::clone(server.get_or_insert_with(|| Arc::new(InProcServer::default())));
+                let runtime = state.clone();
+                let factory = move || runtime.build_store(runtime.store());
+                let stream = server
+                    .serve_function(
+                        factory,
+                        guest.instance_pre().clone(),
+                        Arc::<HostResources>::default(),
+                        func_ty,
+                        interface,
+                        func,
+                    )
+                    .await
+                    .with_context(|| {
+                        format!("serving `{interface}/{func}` from guest `{}`", guest.id())
+                    })?;
 
-            // Snapshot the interface's function types before mutably borrowing
-            // the linker.
-            let funcs: Vec<Arc<str>> = instance_ty
-                .exports(engine)
-                .filter_map(|(func, types::ComponentExtern { ty, .. })| {
-                    matches!(ty, types::ComponentItem::ComponentFunc(_)).then(|| Arc::from(func))
-                })
-                .collect();
-
-            let mut root = linker.root();
-            let mut interface = root
-                .instance(name)
-                .map_err(anyhow::Error::from)
-                .with_context(|| format!("defining host-mediated interface `{name}`"))?;
-            let iface_name: Arc<str> = Arc::from(name);
-
-            for func in &funcs {
-                let handle = Arc::clone(handle);
-                let iface_name = Arc::clone(&iface_name);
-                let func_name = Arc::clone(func);
-                interface
-                    .func_new_async(func, move |store, ty, params, results| {
-                        let handle = Arc::clone(&handle);
-                        let iface_name = Arc::clone(&iface_name);
-                        let func_name = Arc::clone(&func_name);
-                        Box::new(async move {
-                            send(store, &handle, &iface_name, &func_name, &ty, params, results)
-                                .await
-                                .map_err(wasmtime::Error::from_anyhow)
-                        })
-                    })
-                    .map_err(anyhow::Error::from)
-                    .with_context(|| format!("polyfilling `{name}` function `{func}`"))?;
+                tokio::spawn(async move {
+                    let mut stream = pin!(stream);
+                    while let Some(invocation) = stream.next().await {
+                        match invocation {
+                            Ok((_cx, fut)) => {
+                                tokio::spawn(async move {
+                                    if let Err(error) = fut.await {
+                                        tracing::error!(%error, "link serve invocation failed");
+                                    }
+                                });
+                            }
+                            Err(error) => tracing::error!(%error, "link serve accept failed"),
+                        }
+                    }
+                });
             }
-            wired.insert(Box::from(name));
         }
-    }
-    Ok(())
-}
 
-/// The per-call dispatch: select the target, reject crossing resources, bound
-/// depth, then round-trip the call over the in-process wRPC carrier to a
-/// freshly-instantiated target export.
-async fn send<T>(
-    mut store: StoreContextMut<'_, T>, handle: &DispatchHandle, interface: &str, func: &str,
-    ty: &types::ComponentFunc, params: &[Val], results: &mut [Val],
-) -> Result<()>
-where
-    T: WrpcView + 'static,
-{
-    let start = std::time::Instant::now();
-
-    let (target, forwarded) = handle
-        .selector
-        .select(interface, func, params)
-        .with_context(|| format!("selecting target for `{interface}/{func}`"))?;
-
-    // §4.5: plain records cross by value; a live resource handle never crosses.
-    for value in &forwarded {
-        if contains_resource(value) {
-            bail!(
-                "a resource handle cannot cross the link seam (call to `{interface}/{func}`, \
-                 target `{target}`)"
-            );
+        if let Some(server) = server {
+            servers.insert(guest.id().clone(), server);
         }
     }
 
-    let _guard = handle.enter(&target)?;
-
-    let param_types: Vec<Type> = ty.params().map(|(_, ty)| ty).collect();
-    let result_types: Vec<Type> = ty.results().collect();
-    ensure!(
-        forwarded.len() == param_types.len(),
-        "selector forwarded {} arguments but `{interface}/{func}` expects {}",
-        forwarded.len(),
-        param_types.len()
-    );
-
-    let client = handle.transport()?.connect(&target)?;
-
-    // Encode the forwarded parameters with wRPC's value codec.
-    let mut buf = BytesMut::new();
-    for (value, ty) in zip(&forwarded, &param_types) {
-        let mut encoder: ValEncoder<'_, T, <InProcClient as Invoke>::Outgoing> =
-            ValEncoder::new(store.as_context_mut(), ty, &[], &[]);
-        encoder
-            .encode(value, &mut buf)
-            .map_err(anyhow::Error::from)
-            .with_context(|| format!("encoding parameter for `{interface}/{func}`"))?;
-        ensure!(
-            encoder.deferred.is_none(),
-            "async/stream parameters cannot cross the link seam (`{interface}/{func}`)"
-        );
-    }
-
-    // Invoke over the carrier; the request is written and flushed here, the
-    // results stream back on `incoming`. No deferred (async) parameters, so the
-    // outgoing half carries nothing further and is dropped.
-    let (_outgoing, incoming) = client
-        .invoke((), interface, func, buf.freeze(), &[[]; 0])
-        .await
-        .with_context(|| format!("invoking link target `{target}` for `{interface}/{func}`"))?;
-
-    let mut incoming = pin!(incoming);
-    for (index, (value, ty)) in zip(results.iter_mut(), &result_types).enumerate() {
-        read_value(&mut store, &mut incoming, &[], &[], value, ty, &[index])
-            .await
-            .map_err(anyhow::Error::from)
-            .with_context(|| format!("decoding result {index} from `{target}`"))?;
-    }
-
-    let elapsed_us = u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX);
-    tracing::debug!(
-        target = %target,
-        interface,
-        func,
-        transport = "in-process",
-        histogram.link_dispatch_duration_us = elapsed_us,
-        monotonic_counter.link_dispatches = 1_u64,
-        "dispatched host-mediated call",
-    );
+    handle.install(InProcess::new(servers));
     Ok(())
 }
 
@@ -449,7 +290,7 @@ impl<R: Runtime> HostDispatch for R {
         async move {
             let interface: Box<str> = match interface {
                 Some(name) => Box::from(name),
-                None => interface_exporting(&runtime, &target, &func)?,
+                None => find_interface(&runtime, &target, &func)?,
             };
             dispatch(&runtime, &target, &interface, &func, args).await
         }
@@ -461,7 +302,7 @@ impl<R: Runtime> HostDispatch for R {
 /// named `func`, so a host can invoke it without hardcoding a consumer interface
 /// name. "Find the interface exporting function X" is a structural
 /// component-model query and names no consumer scheme (Law 2).
-fn interface_exporting<R: Runtime>(runtime: &R, target: &GuestId, func: &str) -> Result<Box<str>> {
+fn find_interface<R: Runtime>(runtime: &R, target: &GuestId, func: &str) -> Result<Box<str>> {
     let registry = runtime.registry();
     let engine = registry.engine();
     let guest = registry
@@ -483,6 +324,250 @@ fn interface_exporting<R: Runtime>(runtime: &R, target: &GuestId, func: &str) ->
     bail!("dispatch target `{target}` exports no interface with a `{func}` function")
 }
 
+/// The long-lived dispatch state shared by every polyfilled import.
+///
+/// It carries the selector strategy, the union of host-mediated interfaces, the
+/// bound transport (installed once the serve side is wired), and the
+/// process-wide dispatch-depth counter.
+pub struct DispatchHandle {
+    selector: Arc<dyn GuestSelector>,
+    links: BTreeSet<Box<str>>,
+    transport: OnceLock<InProcess>,
+    depth: AtomicUsize,
+    max_depth: usize,
+}
+
+impl DispatchHandle {
+    /// Create a shared dispatch handle. The transport is installed later by
+    /// [`serve_links`], once each target's serve side is wired.
+    #[must_use]
+    pub(crate) fn new(
+        selector: Arc<dyn GuestSelector>, links: BTreeSet<Box<str>>, max_depth: usize,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            selector,
+            links,
+            transport: OnceLock::new(),
+            depth: AtomicUsize::new(0),
+            max_depth,
+        })
+    }
+
+    /// The union of host-mediated interface names across every guest's `link`
+    /// allow-list — the set of interfaces to polyfill (caller side) and serve
+    /// (callee side).
+    #[must_use]
+    pub(crate) const fn links(&self) -> &BTreeSet<Box<str>> {
+        &self.links
+    }
+
+    /// Install the bound transport carrier (called once by [`serve_links`]).
+    fn install(&self, transport: InProcess) {
+        // Set-once: a second install (there is only ever one) is ignored.
+        let _ = self.transport.set(transport);
+    }
+
+    /// The bound transport carrier.
+    fn transport(&self) -> Result<&InProcess> {
+        self.transport
+            .get()
+            .context("link transport not initialized; `serve_links` must run before dispatch")
+    }
+
+    /// Enter a dispatch, bounding nesting depth (§6.6). The returned guard
+    /// decrements the shared counter on drop.
+    ///
+    /// The counter is process-wide and tracks *synchronous* nesting (A->B->C,
+    /// each awaited to completion before the caller returns), which is the
+    /// unbounded-recursion concern; it is a safety bound, not a precise
+    /// per-chain limit under heavy concurrency.
+    fn enter(&self, target: &GuestId) -> Result<DepthGuard<'_>> {
+        let depth = self.depth.fetch_add(1, Ordering::SeqCst) + 1;
+        if depth > self.max_depth {
+            self.depth.fetch_sub(1, Ordering::SeqCst);
+            bail!(
+                "link dispatch depth {depth} exceeds maximum {} (target `{target}`); raise \
+                 MAX_DISPATCH_DEPTH if this is intentional",
+                self.max_depth
+            );
+        }
+        Ok(DepthGuard { depth: &self.depth })
+    }
+}
+
+/// Decrements the shared dispatch-depth counter when a dispatch unwinds.
+#[derive(Debug)]
+struct DepthGuard<'a> {
+    depth: &'a AtomicUsize,
+}
+
+impl Drop for DepthGuard<'_> {
+    fn drop(&mut self) {
+        self.depth.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Polyfill every host-mediated import named in the `link` allow-list union onto
+/// the shared linker, bound to the dispatch handle.
+///
+/// Each interface is linked exactly once (the linker is shared, so the per-guest
+/// allow-lists are unioned, per §4.4). `wasi:*` imports are never touched here —
+/// they are host-satisfied — so only the manifest-declared interfaces are
+/// dispatched.
+///
+/// Runs *before* pre-instantiation, so an import that is neither host-satisfied
+/// nor allow-listed remains unresolved and fails at `instantiate_pre` — the
+/// explicit, fail-fast startup error of §4.4/§6.4.
+///
+/// # Errors
+///
+/// Returns an error if a named link target is not an interface import, or if a
+/// function cannot be defined on the linker.
+pub(crate) fn link<T>(
+    engine: &Engine, linker: &mut Linker<T>, guests: &[LoadedGuest], handle: &Arc<DispatchHandle>,
+) -> Result<()>
+where
+    T: WasiView + WrpcView + 'static,
+{
+    if handle.links.is_empty() {
+        return Ok(());
+    }
+
+    let mut wired: BTreeSet<Box<str>> = BTreeSet::new();
+    for LoadedGuest { id, component } in guests {
+        let component_ty = component.component_type();
+        for (name, types::ComponentExtern { ty, .. }) in component_ty.imports(engine) {
+            if !handle.links.contains(name) || wired.contains(name) {
+                continue;
+            }
+            let types::ComponentItem::ComponentInstance(instance_ty) = ty else {
+                bail!("link target `{name}` (imported by guest `{id}`) is not an interface");
+            };
+
+            // Snapshot the interface's function types before mutably borrowing
+            // the linker.
+            let funcs: Vec<Arc<str>> = instance_ty
+                .exports(engine)
+                .filter_map(|(func, types::ComponentExtern { ty, .. })| {
+                    matches!(ty, types::ComponentItem::ComponentFunc(_)).then(|| Arc::from(func))
+                })
+                .collect();
+
+            let mut root = linker.root();
+            let mut interface = root
+                .instance(name)
+                .map_err(anyhow::Error::from)
+                .with_context(|| format!("defining host-mediated interface `{name}`"))?;
+            let iface_name: Arc<str> = Arc::from(name);
+
+            for func in &funcs {
+                let handle = Arc::clone(handle);
+                let iface_name = Arc::clone(&iface_name);
+                let func_name = Arc::clone(func);
+                interface
+                    .func_new_async(func, move |store, ty, params, results| {
+                        let handle = Arc::clone(&handle);
+                        let iface_name = Arc::clone(&iface_name);
+                        let func_name = Arc::clone(&func_name);
+                        Box::new(async move {
+                            send(store, &handle, &iface_name, &func_name, &ty, params, results)
+                                .await
+                                .map_err(wasmtime::Error::from_anyhow)
+                        })
+                    })
+                    .map_err(anyhow::Error::from)
+                    .with_context(|| format!("polyfilling `{name}` function `{func}`"))?;
+            }
+            wired.insert(Box::from(name));
+        }
+    }
+    Ok(())
+}
+
+/// The per-call dispatch: select the target, reject crossing resources, bound
+/// depth, then round-trip the call over the in-process wRPC carrier to a
+/// freshly-instantiated target export.
+async fn send<T>(
+    mut store: StoreContextMut<'_, T>, handle: &DispatchHandle, interface: &str, func: &str,
+    ty: &types::ComponentFunc, params: &[Val], results: &mut [Val],
+) -> Result<()>
+where
+    T: WrpcView + 'static,
+{
+    let start = std::time::Instant::now();
+
+    let (target, forwarded) = handle
+        .selector
+        .select(interface, func, params)
+        .with_context(|| format!("selecting target for `{interface}/{func}`"))?;
+
+    // §4.5: plain records cross by value; a live resource handle never crosses.
+    for value in &forwarded {
+        if contains_resource(value) {
+            bail!(
+                "a resource handle cannot cross the link seam (call to `{interface}/{func}`, \
+                 target `{target}`)"
+            );
+        }
+    }
+
+    let _guard = handle.enter(&target)?;
+
+    let param_types: Vec<Type> = ty.params().map(|(_, ty)| ty).collect();
+    let result_types: Vec<Type> = ty.results().collect();
+    ensure!(
+        forwarded.len() == param_types.len(),
+        "selector forwarded {} arguments but `{interface}/{func}` expects {}",
+        forwarded.len(),
+        param_types.len()
+    );
+
+    let client = handle.transport()?.connect(&target)?;
+
+    // Encode the forwarded parameters with wRPC's value codec.
+    let mut buf = BytesMut::new();
+    for (value, ty) in zip(&forwarded, &param_types) {
+        let mut encoder: ValEncoder<'_, T, <InProcClient as Invoke>::Outgoing> =
+            ValEncoder::new(store.as_context_mut(), ty, &[], &[]);
+        encoder
+            .encode(value, &mut buf)
+            .map_err(anyhow::Error::from)
+            .with_context(|| format!("encoding parameter for `{interface}/{func}`"))?;
+        ensure!(
+            encoder.deferred.is_none(),
+            "async/stream parameters cannot cross the link seam (`{interface}/{func}`)"
+        );
+    }
+
+    // Invoke over the carrier; the request is written and flushed here, the
+    // results stream back on `incoming`. No deferred (async) parameters, so the
+    // outgoing half carries nothing further and is dropped.
+    let (_outgoing, incoming) = client
+        .invoke((), interface, func, buf.freeze(), &[[]; 0])
+        .await
+        .with_context(|| format!("invoking link target `{target}` for `{interface}/{func}`"))?;
+
+    let mut incoming = pin!(incoming);
+    for (index, (value, ty)) in zip(results.iter_mut(), &result_types).enumerate() {
+        read_value(&mut store, &mut incoming, &[], &[], value, ty, &[index])
+            .await
+            .map_err(anyhow::Error::from)
+            .with_context(|| format!("decoding result {index} from `{target}`"))?;
+    }
+
+    let elapsed_us = u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX);
+    tracing::debug!(
+        target = %target,
+        interface,
+        func,
+        transport = "in-process",
+        histogram.link_dispatch_duration_us = elapsed_us,
+        monotonic_counter.link_dispatches = 1_u64,
+        "dispatched host-mediated call",
+    );
+    Ok(())
+}
+
 /// Recursively reports whether a value carries a live resource handle.
 fn contains_resource(value: &Val) -> bool {
     match value {
@@ -494,91 +579,6 @@ fn contains_resource(value: &Val) -> bool {
         | Val::Result(Ok(Some(value)) | Err(Some(value))) => contains_resource(value),
         _ => false,
     }
-}
-
-/// Wire the serve side of every host-mediated interface.
-///
-/// Each target guest that exports a linked interface runs a wRPC server whose
-/// handlers instantiate the guest *fresh per call* (instance-per-call); the
-/// bound transport is then installed so polyfilled imports can reach it.
-///
-/// Spawns one detached task per served function to drain its invocation stream.
-/// A no-op when no guest declares any `link` interface.
-///
-/// # Errors
-///
-/// Returns an error if a guest's export cannot be served over the carrier.
-pub async fn serve_links<R>(state: &R) -> Result<()>
-where
-    R: Runtime,
-    R::StoreCtx: WasiView + WrpcView + 'static,
-{
-    let registry = state.registry();
-    let handle = registry.dispatch();
-    if handle.links().is_empty() {
-        return Ok(());
-    }
-    let engine = registry.engine().clone();
-
-    let mut servers: HashMap<GuestId, Arc<InProcServer>> = HashMap::new();
-    for guest in registry.guests() {
-        let component_ty = guest.component().component_type();
-        let mut server: Option<Arc<InProcServer>> = None;
-
-        for (interface, types::ComponentExtern { ty, .. }) in component_ty.exports(&engine) {
-            if !handle.links().contains(interface) {
-                continue;
-            }
-            let types::ComponentItem::ComponentInstance(instance_ty) = ty else {
-                continue;
-            };
-            for (func, types::ComponentExtern { ty, .. }) in instance_ty.exports(&engine) {
-                let types::ComponentItem::ComponentFunc(func_ty) = ty else {
-                    continue;
-                };
-                let server =
-                    Arc::clone(server.get_or_insert_with(|| Arc::new(InProcServer::default())));
-                let runtime = state.clone();
-                let factory = move || runtime.build_store(runtime.store());
-                let stream = server
-                    .serve_function(
-                        factory,
-                        guest.instance_pre().clone(),
-                        Arc::<HostResources>::default(),
-                        func_ty,
-                        interface,
-                        func,
-                    )
-                    .await
-                    .with_context(|| {
-                        format!("serving `{interface}/{func}` from guest `{}`", guest.id())
-                    })?;
-
-                tokio::spawn(async move {
-                    let mut stream = pin!(stream);
-                    while let Some(invocation) = stream.next().await {
-                        match invocation {
-                            Ok((_cx, fut)) => {
-                                tokio::spawn(async move {
-                                    if let Err(error) = fut.await {
-                                        tracing::error!(%error, "link serve invocation failed");
-                                    }
-                                });
-                            }
-                            Err(error) => tracing::error!(%error, "link serve accept failed"),
-                        }
-                    }
-                });
-            }
-        }
-
-        if let Some(server) = server {
-            servers.insert(guest.id().clone(), server);
-        }
-    }
-
-    handle.install(InProcess::new(servers));
-    Ok(())
 }
 
 #[cfg(test)]

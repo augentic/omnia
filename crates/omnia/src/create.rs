@@ -12,7 +12,7 @@ use wasmtime::{Config, Engine};
 use wasmtime_wasi::WasiView;
 use wrpc_wasmtime::WrpcView;
 
-use crate::dispatch::{DispatchHandle, link_dynamic};
+use crate::dispatch::{self, DispatchHandle};
 use crate::manifest::Manifest;
 use crate::registry::{Guest, Registry};
 use crate::routing::Routes;
@@ -230,7 +230,7 @@ impl<T: WasiView> Compiled<T> {
         // allow-listed then fails fast at `instantiate_pre`. Consuming `self`
         // makes the linker ours to mutate — no defensive clone.
         let mut linker = self.linker;
-        link_dynamic(&self.engine, &mut linker, &self.guests, &dispatch)?;
+        dispatch::link(&self.engine, &mut linker, &self.guests, &dispatch)?;
 
         let mut guests = BTreeMap::new();
         for loaded in &self.guests {
