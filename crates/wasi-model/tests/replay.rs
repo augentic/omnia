@@ -32,8 +32,8 @@ use omnia::wasmtime::component::Val;
 use omnia::wasmtime::{StoreLimits, StoreLimitsBuilder};
 use omnia::wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use omnia::{
-    Backend, Compiled, GuestId, HasLimits, HostDispatch, LinkClient, Registry, Runtime,
-    RuntimeOptions, WrpcCtxView, WrpcState, WrpcView, create_from_manifest,
+    Backend, Compiled, GuestId, HasLimits, HostDispatch, LinkClient, Registry, RegistryBuilder,
+    Runtime, RuntimeOptions, WrpcCtxView, WrpcState, WrpcView,
 };
 use omnia_wasi_model::{
     BackendAnswer, ConnectOptions, FutureResult, ModelDefault, Prompt, Recording, Reference,
@@ -171,8 +171,11 @@ async fn registry(wasm: &Path) -> Result<Arc<Registry<TestCtx>>> {
     let manifest = format!("[[guest]]\nid = \"model\"\nsource.path = \"{}\"\n", wasm.display());
     std::fs::write(&manifest_path, manifest).context("writing test manifest")?;
 
-    let mut compiled: Compiled<TestCtx> =
-        create_from_manifest(&manifest_path).await.context("building runtime")?;
+    let mut compiled: Compiled<TestCtx> = RegistryBuilder::new()
+        .config(manifest_path.clone())
+        .compile()
+        .await
+        .context("building runtime")?;
     compiled.link::<WasiModel>().context("linking WasiModel")?;
     let registry = compiled.build().context("assembling registry")?;
 
@@ -373,8 +376,11 @@ async fn build_resolve_registry(model: &Path, shelf: &Path) -> Result<Arc<Regist
     );
     std::fs::write(&manifest_path, manifest).context("writing resolve test manifest")?;
 
-    let mut compiled: Compiled<TestCtx> =
-        create_from_manifest(&manifest_path).await.context("building runtime")?;
+    let mut compiled: Compiled<TestCtx> = RegistryBuilder::new()
+        .config(manifest_path.clone())
+        .compile()
+        .await
+        .context("building runtime")?;
     compiled.link::<WasiModel>().context("linking WasiModel")?;
     let registry = compiled.build().context("assembling registry")?;
 

@@ -29,8 +29,8 @@ use omnia::wasmtime::component::Val;
 use omnia::wasmtime::{StoreLimits, StoreLimitsBuilder};
 use omnia::wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use omnia::{
-    GuestId, HasLimits, LinkClient, Registry, Runtime, RuntimeOptions, WrpcCtxView, WrpcState,
-    WrpcView, create_from_manifest, serve_links,
+    GuestId, HasLimits, LinkClient, Registry, RegistryBuilder, Runtime, RuntimeOptions, WrpcCtxView,
+    WrpcState, WrpcView, serve_links,
 };
 
 /// Per-store context mirroring the macro-generated `StoreCtx`: a WASI view plus
@@ -170,8 +170,11 @@ async fn router_dispatches_to_responder() -> Result<()> {
     );
     std::fs::write(&manifest_path, manifest).context("writing test manifest")?;
 
-    let compiled =
-        create_from_manifest::<TestCtx>(&manifest_path).await.context("building runtime")?;
+    let compiled = RegistryBuilder::new()
+        .config(manifest_path.clone())
+        .compile::<TestCtx>()
+        .await
+        .context("building runtime")?;
     let registry = compiled.build().context("assembling registry")?;
     let runtime = TestRuntime {
         registry: Arc::new(registry),

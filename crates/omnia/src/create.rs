@@ -17,45 +17,9 @@ use crate::dispatch::{DispatchHandle, link_dynamic};
 use crate::manifest::{Manifest, RouteSpec, SourceSpec};
 use crate::registry::{Guest, GuestId, Registry};
 use crate::routing::{HttpRoutes, Routes, TopicRoutes};
-use crate::selector::FirstArgSelector;
+use crate::selector::{FirstArgSelector, GuestSelector};
 use crate::source::{FileSource, GuestSource, LoadedGuest};
 use crate::{Host, RuntimeOptions};
-
-// /// Build the Wasmtime `Engine` and `Linker` for a single-guest runtime.
-// ///
-// /// This is the `omnia run <guest>.wasm` shorthand: load one component, derive
-// /// its identity from the file stem, and register it as the sole entry — a
-// /// one-entry registry.
-// ///
-// /// # Errors
-// ///
-// /// Will fail if the provided `wasm` file cannot be compiled/deserialized as a
-// /// `Component` or the `Linker` cannot be initialized with WASI support.
-// #[instrument]
-// pub async fn create<T: WasiView + 'static>(wasm: &Path) -> Result<Compiled<T>> {
-//     let name = wasm.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
-//     init_env(name)?;
-//     tracing::info!("initializing runtime");
-
-//     let (engine, linker, options) = engine_and_linker()?;
-
-//     let source = FileSource::new(wasm);
-//     let guests = source.load(&engine).await?;
-
-//     tracing::info!("runtime initialized");
-
-//     Ok(Compiled {
-//         engine,
-//         linker,
-//         options,
-//         guests,
-//         // The single-file shorthand carries no routes: its sole guest is the
-//         // catch-all for every trigger it can answer.
-//         routes: Routes::default(),
-//         // ...and no host-mediated links: one guest has nobody to dispatch to.
-//         link_interfaces: BTreeSet::new(),
-//     })
-// }
 
 /// Selects where a runtime's guests come from, then [`compile`]s them into a
 /// [`Compiled`] runtime ready for host linking.
@@ -147,6 +111,8 @@ impl RegistryBuilder {
             routes: Routes::default(),
             // ...and no host-mediated links: one guest has nobody to dispatch to.
             link_interfaces: BTreeSet::new(),
+            // Host-mediated dispatch uses the floor default unless overridden.
+            selector: Arc::new(FirstArgSelector),
         })
     }
 }
@@ -155,14 +121,15 @@ impl RegistryBuilder {
 ///
 /// Resolves every `[[guest]]` source, builds the shared engine + linker, records
 /// the first guest as the default entry, and assembles the per-trigger route
-/// tables from the `[[route.*]]` sections.
+/// tables from the `[[route.*]]` sections. The manifest branch of
+/// [`RegistryBuilder::compile`].
 ///
 /// # Errors
 ///
 /// Will fail if the manifest cannot be loaded, if a guest uses a source kind not
 /// yet supported, or if a guest component cannot be loaded.
 #[instrument]
-pub async fn create_from_manifest<T: WasiView + 'static>(manifest: &Path) -> Result<Compiled<T>> {
+async fn create_from_manifest<T: WasiView + 'static>(manifest: &Path) -> Result<Compiled<T>> {
     let parsed = Manifest::load(manifest)?;
 
     // The first guest entry doubles as the telemetry/component name for now.
@@ -213,6 +180,8 @@ pub async fn create_from_manifest<T: WasiView + 'static>(manifest: &Path) -> Res
         guests,
         routes,
         link_interfaces,
+        // Host-mediated dispatch uses the floor default unless overridden.
+        selector: Arc::new(FirstArgSelector),
     })
 }
 
@@ -258,6 +227,9 @@ pub struct Compiled<T: WasiView + 'static> {
     /// Union of the per-guest `link` allow-lists — the host-mediated interfaces
     /// to polyfill onto the shared linker (empty for the single-file shorthand).
     link_interfaces: BTreeSet<Box<str>>,
+    /// Host-mediated dispatch selector; defaults to [`FirstArgSelector`] and is
+    /// overridable via [`selector`](Self::selector).
+    selector: Arc<dyn GuestSelector>,
 }
 
 impl<T: WasiView> Compiled<T> {
@@ -271,6 +243,15 @@ impl<T: WasiView> Compiled<T> {
     pub fn link<H: Host<T>>(&mut self) -> Result<&mut Self> {
         H::add_to_linker(&mut self.linker)?;
         Ok(self)
+    }
+
+    /// Override the host-mediated dispatch [`GuestSelector`].
+    ///
+    /// Defaults to [`FirstArgSelector`] — the floor's "first call argument is the
+    /// identity" strategy. Chainable.
+    pub fn selector(&mut self, selector: impl GuestSelector) -> &mut Self {
+        self.selector = Arc::new(selector);
+        self
     }
 
     /// Pre-instantiate every loaded guest against the shared Linker and assemble
@@ -288,10 +269,11 @@ impl<T: WasiView> Compiled<T> {
     where
         T: WrpcView,
     {
-        // The selector strategy is fixed to the floor default; consumers project
-        // their identity scheme onto the opaque `GuestId` it returns.
+        // The selector defaults to `FirstArgSelector` but may be overridden via
+        // `selector`; consumers project their identity scheme onto the opaque
+        // `GuestId` it returns.
         let dispatch = DispatchHandle::new(
-            Arc::new(FirstArgSelector),
+            self.selector,
             self.link_interfaces,
             self.options.max_dispatch_depth,
         );
