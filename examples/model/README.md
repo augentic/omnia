@@ -50,10 +50,10 @@ This emits `target/wasm32-wasip2/debug/examples/model_wasm.wasm` and
 
 ## Run
 
-Point `OMNI_REPLAY_DIR` at the checked-in fixtures and start the host:
+Point `OMNIA_REPLAY_DIR` at the checked-in fixtures and start the host:
 
 ```bash
-OMNI_REPLAY_DIR=examples/model/fixtures \
+OMNIA_REPLAY_DIR=examples/model/fixtures \
   cargo run --example model -- run --config examples/model/omni.toml
 ```
 

@@ -21,7 +21,7 @@ Implements the `augentic:model` WIT interface (`completion`).
 
 - **Default**: `ModelDefault` (replay). With no API key and no spawned process,
   it serves the recorded answer for an equivalent prompt from a directory of
-  JSON fixtures (`OMNI_REPLAY_DIR`), so a vertical operation runs deterministically
+  JSON fixtures (`OMNIA_REPLAY_DIR`), so a vertical operation runs deterministically
   in CI without a live model. A prompt with no matching fixture fails loud.
 
 ## Usage

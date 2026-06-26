@@ -105,7 +105,7 @@ it. New phases append their settled choices here as they land.
   `omnia-redis` (`pub struct Client`, `Backend` + `WasiModelCtx`, `fromenv`
   `ConnectOptions`) and reuses the existing `0.35.0` pin + `[patch.crates-io]`
   override (no new workspace wiring).
-- **The workspace is sourced from config (`OMNI_WORKSPACE`) as a stopgap** for
+- **The workspace is sourced from config (`OMNIA_WORKSPACE`) as a stopgap** for
   the not-yet-built RFC-55 `local-path` face. The §5.3 capability signal is
   preserved as a per-call check: an absent workspace returns `error::backend("no
   local tree on this node")`. When RFC-55 lands, this one spot switches to
@@ -120,7 +120,7 @@ it. New phases append their settled choices here as they land.
   edits the tree directly), so its `BackendAnswer.transcript` is `None`. It still
   records/replays at the typed boundary — a cursor-recorded fixture replays
   identically under `ModelDefault`.
-- **A hung agent is bounded by a wall-clock timeout** (`OMNI_CURSOR_TIMEOUT_SECS`,
+- **A hung agent is bounded by a wall-clock timeout** (`OMNIA_CURSOR_TIMEOUT_SECS`,
   default 120s) inside the per-call `guest_timeout`. Because a backend can only
   return `anyhow::Error` (mapped to `error::backend` by the floor), the timeout
   and the capability signal both surface as `error::backend` rather than the
@@ -131,6 +131,6 @@ it. New phases append their settled choices here as they land.
   content-addressed change-set after a run, remain deferred to the RFC-55
   working-tree host.
 - **Acceptance gate (run 3)** is `omnia-cursor`'s `tests/live.rs`, gated by
-  `OMNI_CURSOR_LIVE=1` (mirroring genai's run 2): it records a live spawned-agent
+  `OMNIA_CURSOR_LIVE=1` (mirroring genai's run 2): it records a live spawned-agent
   completion and replays the fixture under `ModelDefault`. CI-safe unit tests
   cover the capability signal, prompt assembly, and `.result` parsing.

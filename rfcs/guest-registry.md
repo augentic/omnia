@@ -361,7 +361,7 @@ Startup order: load `omni.toml` **if present** (else use the synthesized default
 (embedded / file / OCI) → build the shared `Engine` + `Linker`, wiring the union of `link` interfaces as
 host-mediated interceptors → pre-instantiate each guest → assemble the `Registry` and the route
 tables. `omnia run <guest>.wasm` needs no manifest — it is "one guest, all supported triggers route to it,
-no links" — while `omnia run --config omni.toml` (or the `OMNI_CONFIG` env var) drives a richer,
+no links" — while `omnia run --config omni.toml` (or the `OMNIA_CONFIG` env var) drives a richer,
 multi-guest deployment.
 
 ## 4. Layer 2 — Host-mediated dynamic linking

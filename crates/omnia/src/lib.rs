@@ -56,12 +56,12 @@ pub enum Command {
     Run {
         /// The path to the wasm file to run. The file can either be a
         /// serialized (pre-compiled) wasmtime `Component` or standard
-        /// WASI component. Optional when `--config` (or `OMNI_CONFIG`) names a
+        /// WASI component. Optional when `--config` (or `OMNIA_CONFIG`) names a
         /// deployment manifest instead.
         wasm: Option<PathBuf>,
 
         /// Path to a deployment manifest (`omni.toml`) describing a multi-guest
-        /// deployment. Falls back to the `OMNI_CONFIG` environment variable.
+        /// deployment. Falls back to the `OMNIA_CONFIG` environment variable.
         #[arg(short, long)]
         config: Option<PathBuf>,
     },

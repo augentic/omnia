@@ -97,9 +97,7 @@ struct BoundToolHost {
 /// A future that immediately fails because a capability lands in Phase 2b.
 fn deferred<R: Send + 'static>(tool: &'static str) -> FutureResult<R> {
     async move {
-        Err(anyhow::anyhow!(
-            "tool `{tool}` is not wired until Phase 2b (RFC-55 working tree)"
-        ))
+        Err(anyhow::anyhow!("tool `{tool}` is not wired until Phase 2b (RFC-55 working tree)"))
     }
     .boxed()
 }
@@ -139,9 +137,7 @@ impl ToolHost for BoundToolHost {
         let granted = self.verify_allowed.contains(&check);
         async move {
             if !granted {
-                return Err(anyhow::anyhow!(
-                    "verify profile `{check}` is not in grants.verify"
-                ));
+                return Err(anyhow::anyhow!("verify profile `{check}` is not in grants.verify"));
             }
             Ok(VerifyReport {
                 ok: false,

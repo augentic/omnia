@@ -346,10 +346,20 @@ async fn replay_from(registry: &Arc<Registry<TestCtx>>, dir: &Path) -> Result<St
 struct ResolvingStub;
 
 impl WasiModelCtx for ResolvingStub {
-    fn complete(&self, _prompt: Prompt, tool_host: Arc<dyn ToolHost>) -> FutureResult<BackendAnswer> {
+    fn complete(
+        &self, _prompt: Prompt, tool_host: Arc<dyn ToolHost>,
+    ) -> FutureResult<BackendAnswer> {
         async move {
-            let alpha = tool_host.resolve(Reference { name: "alpha".to_owned() }).await?;
-            let beta = tool_host.resolve(Reference { name: "beta".to_owned() }).await?;
+            let alpha = tool_host
+                .resolve(Reference {
+                    name: "alpha".to_owned(),
+                })
+                .await?;
+            let beta = tool_host
+                .resolve(Reference {
+                    name: "beta".to_owned(),
+                })
+                .await?;
             Ok(BackendAnswer {
                 value: json!({
                     "alpha": String::from_utf8(alpha).context("alpha bytes are utf-8")?,
@@ -398,10 +408,9 @@ async fn build_resolve_registry(model: &Path, shelf: &Path) -> Result<Arc<Regist
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn resolve_dispatches_to_a_fresh_shelf_per_call() -> Result<()> {
     let target = target_dir();
-    let (Some(model), Some(shelf)) = (
-        guest_wasm(&target, "model_wasm.wasm"),
-        guest_wasm(&target, "model_shelf_wasm.wasm"),
-    ) else {
+    let (Some(model), Some(shelf)) =
+        (guest_wasm(&target, "model_wasm.wasm"), guest_wasm(&target, "model_shelf_wasm.wasm"))
+    else {
         eprintln!(
             "skipping `resolve_dispatches_to_a_fresh_shelf_per_call`: model/shelf guests not \
              built. Run:\n  cargo build -p examples --example model-wasm \
@@ -433,10 +442,7 @@ async fn resolve_dispatches_to_a_fresh_shelf_per_call() -> Result<()> {
     // Instance-per-call: one store for the `model` guest (the `complete` caller)
     // plus one fresh `shelf` store per `resolve`. The shelf is never reused
     // across calls and can never re-enter the caller.
-    assert_eq!(
-        built, 3,
-        "one caller store + one fresh shelf store per resolve (two resolves)"
-    );
+    assert_eq!(built, 3, "one caller store + one fresh shelf store per resolve (two resolves)");
 
     Ok(())
 }

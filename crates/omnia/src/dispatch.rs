@@ -325,11 +325,7 @@ where
 /// a resource handle, the target is not registered, the named `interface`/`func`
 /// export is absent or is not a function, or the guest call traps.
 pub async fn dispatch_to_guest<R>(
-    runtime: &R,
-    target: &GuestId,
-    interface: &str,
-    func: &str,
-    args: Vec<Val>,
+    runtime: &R, target: &GuestId, interface: &str, func: &str, args: Vec<Val>,
 ) -> Result<Vec<Val>>
 where
     R: Runtime,
@@ -375,28 +371,25 @@ where
             .await
             .with_context(|| format!("instantiating dispatch target `{target_owned}`"))?;
 
-        let interface_idx = instance
-            .get_export_index(&mut store, None, &interface_owned)
-            .with_context(|| {
+        let interface_idx =
+            instance.get_export_index(&mut store, None, &interface_owned).with_context(|| {
                 format!("guest `{target_owned}` exports no interface `{interface_owned}`")
             })?;
         let (item, func_idx) = instance
             .get_export(&mut store, Some(&interface_idx), &func_owned)
             .with_context(|| {
-                format!(
-                    "interface `{interface_owned}` (guest `{target_owned}`) exports no \
+            format!(
+                "interface `{interface_owned}` (guest `{target_owned}`) exports no \
                      `{func_owned}`"
-                )
-            })?;
+            )
+        })?;
         let types::ComponentItem::ComponentFunc(func_ty) = item else {
             bail!("`{interface_owned}/{func_owned}` (guest `{target_owned}`) is not a function");
         };
         let result_count = func_ty.results().count();
-        let function = instance
-            .get_func(&mut store, func_idx)
-            .with_context(|| {
-                format!("resolving `{interface_owned}/{func_owned}` on guest `{target_owned}`")
-            })?;
+        let function = instance.get_func(&mut store, func_idx).with_context(|| {
+            format!("resolving `{interface_owned}/{func_owned}` on guest `{target_owned}`")
+        })?;
 
         let mut results = vec![Val::Bool(false); result_count];
         function
@@ -478,9 +471,8 @@ fn resolve_interface<R: Runtime>(runtime: &R, target: &GuestId) -> Result<Box<st
         let types::ComponentItem::ComponentInstance(instance_ty) = ty else {
             continue;
         };
-        let has_resolve = instance_ty
-            .exports(engine)
-            .any(|(func, types::ComponentExtern { ty, .. })| {
+        let has_resolve =
+            instance_ty.exports(engine).any(|(func, types::ComponentExtern { ty, .. })| {
                 func == RESOLVE_FUNC && matches!(ty, types::ComponentItem::ComponentFunc(_))
             });
         if has_resolve {
@@ -493,10 +485,7 @@ fn resolve_interface<R: Runtime>(runtime: &R, target: &GuestId) -> Result<Box<st
 /// Convert a `resolve` export's return value into raw bytes. Accepts `list<u8>`
 /// (the canonical shape) or `string` (a convenience for text shelves).
 fn vals_to_bytes(results: Vec<Val>) -> Result<Vec<u8>> {
-    let first = results
-        .into_iter()
-        .next()
-        .context("resolve export returned no value")?;
+    let first = results.into_iter().next().context("resolve export returned no value")?;
     match first {
         Val::List(items) => items
             .into_iter()

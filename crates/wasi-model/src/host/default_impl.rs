@@ -2,7 +2,7 @@
 //!
 //! The direct `KeyValueDefault` analogue: with no API key and no spawned
 //! process, it serves the recorded answer for an equivalent prompt from a
-//! directory of JSON fixtures (`OMNI_REPLAY_DIR`), so one vertical operation runs
+//! directory of JSON fixtures (`OMNIA_REPLAY_DIR`), so one vertical operation runs
 //! deterministically in CI without a live model. A prompt with no matching
 //! fixture fails loud (`error::backend("no replay fixture")`) — it never falls
 //! through to a live call.
@@ -20,7 +20,7 @@ use super::types::{BackendAnswer, Prompt};
 use super::{FutureResult, ToolHost, WasiModelCtx};
 
 /// Environment variable naming the directory of replay fixtures.
-const REPLAY_DIR_ENV: &str = "OMNI_REPLAY_DIR";
+const REPLAY_DIR_ENV: &str = "OMNIA_REPLAY_DIR";
 
 /// Options used to connect the replay backend.
 #[derive(Debug, Clone)]

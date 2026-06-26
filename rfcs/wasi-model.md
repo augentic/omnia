@@ -11,7 +11,7 @@ The architecture sketch bundles judgment-as-an-effect into one `complete` call, 
 
 Keeping these layered matters for sequencing: Layer 1 is a self-contained host crate with no model dependency (its default backend is replay).
 
-Layer 2 adds the real backends strictly behind the trait, so the floor never interprets provider credentials or defaults (Law 2). An optional `prompt.model` hint may cross the boundary as opaque data; the backend chooses whether to honour it or fall back to deployment config (`OMNI_MODEL`).
+Layer 2 adds the real backends strictly behind the trait, so the floor never interprets provider credentials or defaults (Law 2). An optional `prompt.model` hint may cross the boundary as opaque data; the backend chooses whether to honour it or fall back to deployment config (`OMNIA_MODEL`).
 
 ## 1. Goals and non-goals
 
@@ -324,9 +324,9 @@ This matches common practice: callers with a full chat history use `messages`; c
 
 Split tools the way production agent APIs do: **the guest declares semantic tools; the host injects capability tools.**
 
-| Source | What it carries | Examples |
-|--------|-----------------|----------|
-| `prompt.tools` | Guest-declared tools forwarded to the model API | domain-specific helpers the guest defines |
+| Source          | What it carries                                           | Examples                                     |
+| --------------- | --------------------------------------------------------- | -------------------------------------------- |
+| `prompt.tools`  | Guest-declared tools forwarded to the model API           | domain-specific helpers the guest defines    |
 | `prompt.grants` | Host capabilities the floor wires as `ToolHost` callbacks | `resolve`, `read`, `list`, `write`, `verify` |
 
 The backend builds the provider tool list as **`floor_tools(grants)` ++ `prompt.tools`**. Guests never list floor tools in `prompt.tools` — grants declare *whether* each capability is lent; the backend advertises the corresponding JSON Schema to the model. Floor tool names are reserved (`resolve`, `read`, `list`, `write`, `verify`); a collision in `prompt.tools` is `error::backend("reserved tool name")`.
@@ -335,11 +335,11 @@ The backend builds the provider tool list as **`floor_tools(grants)` ++ `prompt.
 
 The `complete` host binding validates every answer before the guest sees it. Depth depends on `response-format.kind`:
 
-| Kind | Floor gate | Typical use |
-|------|------------|-------------|
+| Kind          | Floor gate                                              | Typical use                                                  |
+| ------------- | ------------------------------------------------------- | ------------------------------------------------------------ |
 | `json-schema` | Parse as JSON and validate against `json-schema.schema` | judgment / Specify operations (required for typed decisions) |
-| `json-object` | Parse as JSON; root must be an object | structured but schema-less payloads |
-| `text` | Parse as JSON; root must be a string | free-text answers still JSON-encoded (`"…"`) |
+| `json-object` | Parse as JSON; root must be an object                   | structured but schema-less payloads                          |
+| `text`        | Parse as JSON; root must be a string                    | free-text answers still JSON-encoded (`"…"`)                 |
 
 Specify and the proof example (§6) use `json-schema`. Backends that run a repair loop (genai) should self-check against the same rules before returning; the host binding re-validates as the final gate.
 
@@ -506,7 +506,7 @@ mod config {
 
     #[derive(Debug, Clone, FromEnv)]
     pub struct ConnectOptions {
-        #[env(from = "OMNI_MODEL", default = "gpt-5.5")]
+        #[env(from = "OMNIA_MODEL", default = "gpt-5.5")]
         pub model: String,
         // genai:  provider auth (OPENAI_API_KEY / ANTHROPIC_API_KEY / …) is read by `genai` itself.
         // cursor: #[env(from = "CURSOR_API_KEY")] pub api_key: Option<String>,
@@ -533,7 +533,7 @@ Only the default replay backend (`ModelDefault`) lives in the `wasi-model` host 
 
 `[genai](https://github.com/jeremychone/rust-genai)` (`genai = "0.6"`) is one ergonomic Rust API over 25+ providers (OpenAI, Anthropic, Gemini, Ollama, …), so "switch frontier / hosted / local providers" is backend config, never a contract change ([RFC-58](rfc-58-model-backends.md)). The model id and provider live entirely here.
 
-**Connect.** `ConnectOptions` reads the model id from env (`OMNI_MODEL`; provider auth like `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` is read by `genai` itself), and `connect_with` builds the underlying `genai::Client` once at startup — the handle is `Client`, like `omnia_redis::Client`:
+**Connect.** `ConnectOptions` reads the model id from env (`OMNIA_MODEL`; provider auth like `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` is read by `genai` itself), and `connect_with` builds the underlying `genai::Client` once at startup — the handle is `Client`, like `omnia_redis::Client`:
 
 ```rust
 // backends/crates/genai/src/lib.rs
@@ -564,14 +564,14 @@ This is the **spawned-agent** backend of [RFC-58](rfc-58-model-backends.md): the
 
 **Why a different shape.** A filesystem-capable agent cannot use the bounded `read`/`list`/`write` tools — it needs real OS paths. That is exactly the `local-path` face of the working tree: an absent `local-path` is a clean capability signal that an agent-driven build is unavailable on this node ([architecture.md](architecture.md#the-working-tree)). So `complete` on this backend resolves the `prompt.grants.working-tree` `borrow<descriptor>` to its `local-path` face; if the lent tree has none, it returns `error::backend("no local tree on this node")`. The `local-path` face itself is owned by [RFC-55](rfc-55-working-tree.md), which is **not yet built**, so this backend (Phase 2b) lands with that host — see the §4.1 dependency note.
 
-**Connect.** `ConnectOptions` reads `CURSOR_API_KEY` (or relies on a prior `cursor-agent login`) and an optional `OMNI_MODEL`; `connect_with` just validates the `cursor-agent` binary is on `PATH` (no long-lived client to build). No long-lived process — each completion spawns a fresh, context-free session (no leaked transcript, per [RFC-58](rfc-58-model-backends.md) risks).
+**Connect.** `ConnectOptions` reads `CURSOR_API_KEY` (or relies on a prior `cursor-agent login`) and an optional `OMNIA_MODEL`; `connect_with` just validates the `cursor-agent` binary is on `PATH` (no long-lived client to build). No long-lived process — each completion spawns a fresh, context-free session (no leaked transcript, per [RFC-58](rfc-58-model-backends.md) risks).
 
 **`complete` — spawn, run to completion, parse.** Assemble the agent prompt string from §3.1.1 (system + user content) and append the JSON Schema from `prompt.response-format` when `kind` is `json-schema`. Using the documented headless surface ([Cursor CLI docs](https://cursor.com/docs/cli/headless)):
 
 ```bash
 cursor-agent --print --force \
   --output-format json \
-  --model "$OMNI_MODEL" \
+  --model "$OMNIA_MODEL" \
   --workspace "$LOCAL_PATH" \
   "<assembled prompt + 'emit a final JSON answer conforming to this schema: …'>"
 ```
@@ -587,7 +587,7 @@ The model id, the API key, and the entire agent protocol stay inside this backen
 
 Replay belongs at the `wasi-model` boundary because it is the test substitute for judgment itself ([RFC-53](rfc-53-wasi-model.md)). `ModelDefault` is the crate's **default backend** — the direct `KeyValueDefault` analogue, living in `host/default_impl.rs`: with no API key and no spawned process, it serves the recorded answer for an equivalent prompt and lets one vertical operation run deterministically in CI without a live model.
 
-- **Fixtures** are the `(prompt + transcript) -> validated answer` rows that the recording wrapper (§3.4) writes, keyed by a stable hash of the prompt. The minimal seam here is a directory of JSON fixtures (`OMNI_REPLAY_DIR`); the full fixture management, matching policy, and cross-backend diagnostics are the [RFC-58](rfc-58-model-backends.md) replay *expansion*, out of scope for this slice.
+- **Fixtures** are the `(prompt + transcript) -> validated answer` rows that the recording wrapper (§3.4) writes, keyed by a stable hash of the prompt. The minimal seam here is a directory of JSON fixtures (`OMNIA_REPLAY_DIR`); the full fixture management, matching policy, and cross-backend diagnostics are the [RFC-58](rfc-58-model-backends.md) replay *expansion*, out of scope for this slice.
 - **Recommended keying (canonicalization).** The key is `sha256(canonical_json(key_prompt))`, where `key_prompt` is the `prompt` reduced to the fields that determine the model's output and then serialized canonically — JCS-style: object keys sorted, no insignificant whitespace, UTF-8, numbers in a fixed form. The reduction drops fields that must not perturb a match: `metadata` (tracing/attribution only) and `grants.working-tree` (a non-serializable, run-specific `borrow` handle — replace it with a stable boolean "tree lent" marker). Everything that shapes the answer stays in the key, including `model` (a hint that changes output), `system`/`messages`/`sections`, `response-format`, `generation`, `tools`/`tool-choice`, and `grants.references`/`grants.verify`. Canonicalizing rather than hashing the wire bytes is what lets a fixture recorded against `genai` replay identically under `ModelDefault`. The exact field set is recorded in `DECISIONS.md` (Phase 0) so recorder and replayer never drift.
 - **Determinism.** Because the record happens at the typed boundary, a fixture captured against `genai` or `cursor-agent` replays identically — CI never depends on which backend produced it.
 - A prompt with no matching fixture returns `error::backend("no replay fixture")` (fail loud, never fall through to a live call).

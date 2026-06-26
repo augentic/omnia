@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use omnia_otel::Telemetry;
-use tracing::instrument;
 use wasmtime::component::Linker;
 use wasmtime::{Config, Engine};
 use wasmtime_wasi::WasiView;
@@ -26,7 +25,7 @@ use crate::{Host, RuntimeOptions};
 ///
 /// The single-file shorthand ([`wasm`]) and the manifest-driven deployment
 /// ([`config`]) are both expressed here; [`compile`] resolves whichever is set —
-/// falling back to the `OMNI_CONFIG` environment variable for the manifest.
+/// falling back to the `OMNIA_CONFIG` environment variable for the manifest.
 ///
 /// ```ignore
 /// let compiled = RegistryBuilder::new()
@@ -71,7 +70,7 @@ impl RegistryBuilder {
     /// single-file or manifest-driven population.
     ///
     /// Resolution: a `config` path (set via [`config`](Self::config) or the
-    /// `OMNI_CONFIG` environment variable) selects a manifest-driven deployment;
+    /// `OMNIA_CONFIG` environment variable) selects a manifest-driven deployment;
     /// otherwise the `wasm` path is the one-guest shorthand. At least one of the
     /// two must be provided.
     ///
@@ -80,110 +79,145 @@ impl RegistryBuilder {
     /// Returns an error if neither a config nor a wasm path is available, or if
     /// the selected source cannot be built.
     pub async fn compile<T: WasiView + 'static>(self) -> Result<Compiled<T>> {
-        let config = self.config.or_else(|| env::var_os("OMNI_CONFIG").map(PathBuf::from));
+        let manifest = self.config.or_else(|| env::var_os("OMNIA_CONFIG").map(PathBuf::from));
 
-        if let Some(config) = config {
-            return create_from_manifest(&config).await;
-        }
+        let (name, sources, routes, link_interfaces) = if let Some(manifest) = &manifest {
+            // resolve each `[[guest]]` source and the `[[route.*]]` tables from a deployment
+            let parsed = Manifest::load(manifest)?;
 
-        let wasm = self.wasm.context(
-            "no guest specified: pass a <wasm> path, or --config <omni.toml> (or set OMNI_CONFIG)",
-        )?;
+            // sources resolve relative to the manifest's directory
+            let base = manifest.parent().unwrap_or_else(|| Path::new("."));
+            let mut sources = Vec::with_capacity(parsed.guests.len());
 
-        let name = wasm.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
-        init_env(name)?;
+            for entry in &parsed.guests {
+                let id = GuestId::from(entry.id.as_str());
+                match &entry.source {
+                    SourceSpec::Path(path) => {
+                        let resolved =
+                            if path.is_absolute() { path.clone() } else { base.join(path) };
+                        sources.push(FileSource::with_id(id, resolved));
+                    }
+                    SourceSpec::Oci(_) => bail!("guest `{id}`: OCI sources are not yet supported"),
+                }
+            }
+
+            // the first guest entry doubles as the telemetry/component name for now.
+            let name = parsed.guests.first().map_or("omnia", |entry| entry.id.as_str());
+
+            // union the per-guest `link` allow-lists: the linker is shared, so an
+            let link_interfaces: BTreeSet<Box<str>> = parsed
+                .guests
+                .iter()
+                .flat_map(|entry| entry.link.iter())
+                .map(|i| Box::from(i.as_str()))
+                .collect();
+
+            (name.to_owned(), sources, route_tables(&parsed.route), link_interfaces)
+        } else {
+            let wasm = self.wasm.context(
+                "no guest specified: pass a <wasm> path, or --config <omni.toml> (or set OMNIA_CONFIG)"
+            )?;
+
+            // The single-file shorthand is a one-guest deployment: its sole guest is
+            // the catch-all for every trigger it can answer, with no routes and no
+            // host-mediated links (it has nobody to dispatch to).
+            let source = FileSource::new(wasm);
+            let name = source.id().as_str().to_owned();
+            (name, vec![source], Routes::default(), BTreeSet::new())
+        };
+
+        // from_sources(&name, sources, routes, link_interfaces).await
+
+        init_env(&name)?;
         tracing::info!("initializing runtime");
 
         let (engine, linker, options) = engine_and_linker()?;
 
-        let source = FileSource::new(wasm);
-        let guests = source.load(&engine).await?;
+        let mut guests = Vec::with_capacity(sources.len());
+        for source in &sources {
+            guests.extend(source.load(&engine).await?);
+        }
 
-        tracing::info!("runtime initialized");
+        tracing::info!(guests = guests.len(), "runtime initialized");
 
         Ok(Compiled {
             engine,
             linker,
             options,
             guests,
-            // The single-file shorthand carries no routes: its sole guest is the
-            // catch-all for every trigger it can answer.
-            routes: Routes::default(),
-            // ...and no host-mediated links: one guest has nobody to dispatch to.
-            link_interfaces: BTreeSet::new(),
+            routes,
+            link_interfaces,
             // Host-mediated dispatch uses the floor default unless overridden.
             selector: Arc::new(FirstArgSelector),
         })
     }
 }
 
-/// Build a runtime from a deployment manifest (`omni.toml`).
-///
-/// Resolves every `[[guest]]` source, builds the shared engine + linker, records
-/// the first guest as the default entry, and assembles the per-trigger route
-/// tables from the `[[route.*]]` sections. The manifest branch of
-/// [`RegistryBuilder::compile`].
-///
-/// # Errors
-///
-/// Will fail if the manifest cannot be loaded, if a guest uses a source kind not
-/// yet supported, or if a guest component cannot be loaded.
-#[instrument]
-async fn create_from_manifest<T: WasiView + 'static>(manifest: &Path) -> Result<Compiled<T>> {
-    let parsed = Manifest::load(manifest)?;
+// resolve each `[[guest]]` source and the `[[route.*]]` tables from a deployment
+// manifest (`omni.toml`), then assemble.
+// async fn from_manifest<T: WasiView + 'static>(manifest: &Path) -> Result<Compiled<T>> {
+//     let parsed = Manifest::load(manifest)?;
 
-    // The first guest entry doubles as the telemetry/component name for now.
-    let component_name = parsed
-        .guests
-        .first()
-        .map_or_else(|| GuestId::from("omnia"), |entry| GuestId::from(entry.id.as_str()));
-    init_env(component_name.as_str())?;
-    tracing::info!("initializing runtime from manifest");
+//     // Sources resolve relative to the manifest's directory.
+//     let base = manifest.parent().unwrap_or_else(|| Path::new("."));
+//     let mut sources = Vec::with_capacity(parsed.guests.len());
+//     for entry in &parsed.guests {
+//         let id = GuestId::from(entry.id.as_str());
+//         match &entry.source {
+//             SourceSpec::Path(path) => {
+//                 let resolved = if path.is_absolute() { path.clone() } else { base.join(path) };
+//                 sources.push(FileSource::with_id(id, resolved));
+//             }
+//             SourceSpec::Oci(_) => bail!("guest `{id}`: OCI sources are not yet supported"),
+//         }
+//     }
 
-    let (engine, linker, options) = engine_and_linker()?;
+//     // The first guest entry doubles as the telemetry/component name for now.
+//     let name = parsed.guests.first().map_or("omnia", |entry| entry.id.as_str());
 
-    // Sources resolve relative to the manifest's directory.
-    let base = manifest.parent().unwrap_or_else(|| Path::new("."));
-    let mut guests = Vec::with_capacity(parsed.guests.len());
-    for entry in &parsed.guests {
-        let id = GuestId::from(entry.id.as_str());
-        let loaded = match &entry.source {
-            SourceSpec::Path(path) => {
-                let resolved = if path.is_absolute() { path.clone() } else { base.join(path) };
-                FileSource::with_id(id, resolved).load(&engine).await?
-            }
-            SourceSpec::Oci(_) => {
-                bail!("guest `{id}`: OCI sources are not yet supported")
-            }
-        };
-        guests.extend(loaded);
-    }
+//     // Union the per-guest `link` allow-lists: the linker is shared, so an
+//     // interface dispatched for one guest is wired once for all (§4.4). The floor
+//     // keeps these as opaque interface strings.
+//     let link_interfaces: BTreeSet<Box<str>> = parsed
+//         .guests
+//         .iter()
+//         .flat_map(|entry| entry.link.iter())
+//         .map(|interface| Box::from(interface.as_str()))
+//         .collect();
 
-    let routes = route_tables(&parsed.route);
+//     from_sources(name, sources, route_tables(&parsed.route), link_interfaces).await
+// }
 
-    // Union the per-guest `link` allow-lists: the linker is shared, so an
-    // interface dispatched for one guest is wired once for all (§4.4). The
-    // floor keeps these as opaque interface strings.
-    let link_interfaces: BTreeSet<Box<str>> = parsed
-        .guests
-        .iter()
-        .flat_map(|entry| entry.link.iter())
-        .map(|interface| Box::from(interface.as_str()))
-        .collect();
+// // link WASI, load every `source` against the shared engine, and freeze the
+// // result into a `Compiled` — the shared tail of the single-file and
+// // manifest-driven population paths. The dispatch selector is the floor default
+// // (overridable via `Compiled::selector`).
+// async fn from_sources<T: WasiView + 'static>(
+//     name: &str, sources: Vec<FileSource>, routes: Routes, link_interfaces: BTreeSet<Box<str>>,
+// ) -> Result<Compiled<T>> {
+//     init_env(name)?;
+//     tracing::info!("initializing runtime");
 
-    tracing::info!("runtime initialized from manifest");
+//     let (engine, linker, options) = engine_and_linker()?;
 
-    Ok(Compiled {
-        engine,
-        linker,
-        options,
-        guests,
-        routes,
-        link_interfaces,
-        // Host-mediated dispatch uses the floor default unless overridden.
-        selector: Arc::new(FirstArgSelector),
-    })
-}
+//     let mut guests = Vec::with_capacity(sources.len());
+//     for source in &sources {
+//         guests.extend(source.load(&engine).await?);
+//     }
+
+//     tracing::info!(guests = guests.len(), "runtime initialized");
+
+//     Ok(Compiled {
+//         engine,
+//         linker,
+//         options,
+//         guests,
+//         routes,
+//         link_interfaces,
+//         // Host-mediated dispatch uses the floor default unless overridden.
+//         selector: Arc::new(FirstArgSelector),
+//     })
+// }
 
 /// Convert the manifest's parsed routes into the registry's `GuestId`-typed,
 /// per-trigger route tables.

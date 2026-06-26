@@ -29,8 +29,8 @@ use omnia::wasmtime::component::Val;
 use omnia::wasmtime::{StoreLimits, StoreLimitsBuilder};
 use omnia::wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use omnia::{
-    GuestId, HasLimits, LinkClient, Registry, RegistryBuilder, Runtime, RuntimeOptions, WrpcCtxView,
-    WrpcState, WrpcView, serve_links,
+    GuestId, HasLimits, LinkClient, Registry, RegistryBuilder, Runtime, RuntimeOptions,
+    WrpcCtxView, WrpcState, WrpcView, serve_links,
 };
 
 /// Per-store context mirroring the macro-generated `StoreCtx`: a WASI view plus

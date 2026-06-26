@@ -4,7 +4,7 @@
 //! backend. The `complete` guest exports a plain `run` rather than an
 //! HTTP/messaging trigger, so the end-to-end completion is driven by the
 //! integration test (`crates/wasi-model/tests/replay.rs`); running this binary
-//! starts the host with the replay backend reading `OMNI_REPLAY_DIR`. See
+//! starts the host with the replay backend reading `OMNIA_REPLAY_DIR`. See
 //! `README.md`.
 
 cfg_if::cfg_if! {
