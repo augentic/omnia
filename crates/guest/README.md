@@ -1,4 +1,4 @@
-# Omnia SDK
+# Omnia Guest
 
 Shared traits, error types, and abstractions for building WASI guest components. This crate provides the glue between your business logic and the Omnia runtime capabilities.
 
@@ -7,7 +7,7 @@ Shared traits, error types, and abstractions for building WASI guest components.
 Use the `guest!` macro to define your component's API surface. This wires up the necessary WASI exports and routing logic.
 
 ```rust,ignore
-use omnia_sdk::{guest, Handler, Json};
+use omnia_guest::{guest, Handler, Json};
 use serde::{Deserialize, Serialize};
 
 // Define your data models
@@ -38,7 +38,7 @@ guest!({
 impl Handler<MyProvider> for CreateItem {
     type Response = ItemResponse;
 
-    async fn handle(self, _provider: &MyProvider) -> Result<Self::Response, omnia_sdk::Error> {
+    async fn handle(self, _provider: &MyProvider) -> Result<Self::Response, omnia_guest::Error> {
         Ok(ItemResponse {
             id: "123".to_string(),
             name: self.name,
@@ -49,7 +49,7 @@ impl Handler<MyProvider> for CreateItem {
 
 ## Capabilities
 
-The SDK exposes trait-based abstractions for host capabilities. When compiled to `wasm32`, these delegate to WASI host calls.
+The guest crate exposes trait-based abstractions for host capabilities. When compiled to `wasm32`, these delegate to WASI host calls.
 
 | Trait | Purpose |
 | ----- | ------- |
@@ -64,7 +64,7 @@ The SDK exposes trait-based abstractions for host capabilities. When compiled to
 ### Example: Using Capabilities
 
 ```rust,ignore
-use omnia_sdk::{StateStore, Publish, Message};
+use omnia_guest::{StateStore, Publish, Message};
 
 async fn process(provider: &impl StateStore + Publish) -> anyhow::Result<()> {
     // Store some state
@@ -83,9 +83,9 @@ async fn process(provider: &impl StateStore + Publish) -> anyhow::Result<()> {
 The crate provides an `Error` enum with HTTP-aware variants (`BadRequest`, `NotFound`, `ServerError`, `BadGateway`) and helper macros for ergonomic error creation.
 
 ```rust,ignore
-use omnia_sdk::{bad_request, server_error, not_found};
+use omnia_guest::{bad_request, server_error, not_found};
 
-fn validate(name: &str) -> Result<(), omnia_sdk::Error> {
+fn validate(name: &str) -> Result<(), omnia_guest::Error> {
     if name.is_empty() {
         return Err(bad_request!("name cannot be empty"));
     }

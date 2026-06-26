@@ -115,8 +115,8 @@ pub fn expand(config: &Config) -> TokenStream {
     quote! {
         #[cfg(target_arch = "wasm32")]
         mod __buildgen_guest {
-            use omnia_sdk::anyhow::{Context, Result};
-            use omnia_sdk::api::Client;
+            use omnia_guest::anyhow::{Context, Result};
+            use omnia_guest::api::Client;
 
             use super::*;
 

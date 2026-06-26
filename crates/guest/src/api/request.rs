@@ -53,7 +53,7 @@
 //! ### Example: Using [`RequestHandler`] Directly
 //!
 //! ```rust,ignore
-//! use omnia_sdk::api::{RequestHandler, Handler};
+//! use omnia_guest::api::{RequestHandler, Handler};
 //!
 //! // Manual construction with typestate safety
 //! let response = RequestHandler::new()
@@ -69,7 +69,7 @@
 //!
 //! The [`Client`] provides a more convenient API that sets owner and provider upfront:
 //! ```rust,ignore
-//! use omnia_sdk::Client;
+//! use omnia_guest::Client;
 //!
 //! // Create a client with owner and provider
 //! let client = Client::new("alice").provider(my_provider);

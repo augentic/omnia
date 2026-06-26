@@ -8,7 +8,7 @@ While it can be used standalone, Omnia is primarily designed to be the runtime f
 
 - **Secure by Default**: All guest code runs in a strict WebAssembly sandbox. Capabilities (network, filesystem) are explicitly granted.
 - **Batteries Included**: Comes with built-in support for common WASI interfaces: HTTP, Key-Value, Messaging, SQL, and more.
-- **Developer Friendly**: Provides a rich SDK (`omnia-sdk`) and macros (`guest!`, `runtime!`) to eliminate boilerplate.
+- **Developer Friendly**: Provides a rich guest SDK (`omnia-guest`) and macros (`guest!`, `runtime!`) to eliminate boilerplate.
 - **Pluggable Architecture**: Easily swap out backend implementations (e.g., switch from in-memory to Redis for Key-Value) without changing guest code.
 
 ## Features
@@ -66,7 +66,7 @@ docker build --tag ghcr.io/augentic/omnia .
 | Crate                                           | Description                                                                |
 | ----------------------------------------------- | -------------------------------------------------------------------------- |
 | `[omnia](crates/omnia)`                         | Core runtime -- wasmtime wrapper with CLI, OpenTelemetry, and pluggable WASI host services |
-| `[omnia-sdk](crates/omnia-sdk)`                 | Guest SDK -- traits, error types, ORM, and macros for WASI component authors |
+| `[omnia-guest](crates/guest)`                   | Guest SDK -- traits, error types, ORM, and macros for WASI component authors |
 | `[omnia-guest-macros](crates/guest-macros)`     | `guest!` and `#[instrument]` proc-macros for guests                      |
 | `[omnia-runtime-macro](crates/runtime-macro)`   | `runtime!` proc-macro for host runtime generation                          |
 | `[omnia-wasi-blobstore](crates/wasi-blobstore)` | wasi:blobstore host and guest bindings                                     |

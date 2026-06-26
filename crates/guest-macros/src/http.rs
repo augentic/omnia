@@ -165,9 +165,9 @@ pub fn expand(http: &Http, config: &Config) -> TokenStream {
 
     quote! {
         mod http {
-            use omnia_sdk::api::{HttpResult, Reply};
-            use omnia_sdk::{axum, omnia_wasi_http, omnia_wasi_otel, wasip3};
-            use omnia_sdk::Handler;
+            use omnia_guest::api::{HttpResult, Reply};
+            use omnia_guest::{axum, omnia_wasi_http, omnia_wasi_otel, wasip3};
+            use omnia_guest::Handler;
 
             use super::*;
 

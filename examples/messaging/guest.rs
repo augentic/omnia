@@ -29,7 +29,7 @@ use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
 use http_body_util::Full;
-use omnia_sdk::HttpResult;
+use omnia_guest::HttpResult;
 use omnia_wasi_messaging::types::{Client, Error, Message};
 use omnia_wasi_messaging::{producer, request_reply};
 use serde_json::{Value, json};

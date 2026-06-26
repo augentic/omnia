@@ -49,7 +49,7 @@ tower-http = { version = "0.7.0", features = ["cors", "trace"] }
 tracing.workspace = true
 wasip3.workspace = true
 wit-bindgen.workspace = true
-omnia-sdk.workspace = true
+omnia-guest.workspace = true
 
 [[example]]
 name = "blobstore-wasm"

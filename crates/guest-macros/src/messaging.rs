@@ -47,9 +47,9 @@ pub fn expand(messaging: &Messaging, config: &Config) -> TokenStream {
 
     quote! {
         mod messaging {
-            use omnia_sdk::omnia_wasi_messaging::types::{Error, Message};
-            use omnia_sdk::{wasi_messaging, omnia_wasi_otel};
-            use omnia_sdk::Handler;
+            use omnia_guest::omnia_wasi_messaging::types::{Error, Message};
+            use omnia_guest::{wasi_messaging, omnia_wasi_otel};
+            use omnia_guest::Handler;
 
             use super::*;
 

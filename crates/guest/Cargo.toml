@@ -1,6 +1,6 @@
 [package]
-name = "omnia-sdk"
-description = "SDK for building WASI component guests with Omnia runtime support"
+name = "omnia-guest"
+description = "Guest framework for building WASI component applications with Omnia runtime support"
 readme = "README.md"
 version.workspace = true
 edition.workspace = true

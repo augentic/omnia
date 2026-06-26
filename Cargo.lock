@@ -1020,7 +1020,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "omnia",
- "omnia-sdk",
+ "omnia-guest",
  "omnia-wasi-blobstore",
  "omnia-wasi-config",
  "omnia-wasi-http",
@@ -2078,25 +2078,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "omnia-guest-macros"
-version = "0.35.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "omnia-runtime-macro"
-version = "0.35.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "omnia-sdk"
+name = "omnia-guest"
 version = "0.35.0"
 dependencies = [
  "anyhow",
@@ -2126,6 +2108,24 @@ dependencies = [
  "tracing-subscriber",
  "wasip3",
  "wit-bindgen 0.58.0",
+]
+
+[[package]]
+name = "omnia-guest-macros"
+version = "0.35.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "omnia-runtime-macro"
+version = "0.35.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

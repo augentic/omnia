@@ -16,7 +16,7 @@
 use anyhow::Context;
 use axum::routing::get;
 use axum::{Json, Router};
-use omnia_sdk::HttpResult;
+use omnia_guest::HttpResult;
 use omnia_wasi_identity::credentials::get_identity;
 use serde_json::{Value, json};
 use tracing::Level;

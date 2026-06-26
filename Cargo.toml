@@ -114,9 +114,9 @@ wrpc-wasmtime = { git = "https://github.com/bytecodealliance/wrpc", rev = "b00e0
 
 # internally referenced crates
 omnia = { path = "crates/omnia", version = "0.35.0" }
+omnia-guest = { path = "crates/guest", version = "0.35.0" }
 omnia-guest-macros = { path = "crates/guest-macros", version = "0.35.0" }
 omnia-runtime-macro = { path = "crates/runtime-macro", version = "0.35.0" }
-omnia-sdk = { path = "crates/omnia-sdk", version = "0.35.0" }
 omnia-wasi-blobstore = { path = "crates/wasi-blobstore", version = "0.35.0" }
 omnia-wasi-config = { path = "crates/wasi-config", version = "0.35.0" }
 omnia-wasi-http = { path = "crates/wasi-http", version = "0.35.0" }

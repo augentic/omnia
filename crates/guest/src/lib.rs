@@ -31,7 +31,7 @@ pub use crate::error::*;
 ///
 /// # Example
 /// ```rust,ignore
-/// omnia_sdk::ensure_env!("API_KEY", "SOME_URL");
+/// omnia_guest::ensure_env!("API_KEY", "SOME_URL");
 /// ```
 #[macro_export]
 macro_rules! ensure_env {
