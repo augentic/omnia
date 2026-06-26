@@ -12,6 +12,7 @@ mod routing;
 mod runtime;
 mod selector;
 mod source;
+mod telemetry;
 mod traits;
 mod transport;
 
@@ -38,6 +39,7 @@ pub use self::routing::*;
 pub use self::runtime::*;
 pub use self::selector::*;
 pub use self::source::*;
+pub use self::telemetry::{Telemetry, TracingLayer, resource};
 pub use self::traits::*;
 pub use self::transport::*;
 

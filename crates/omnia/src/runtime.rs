@@ -33,7 +33,7 @@ pub fn drive_epoch(engine: Engine, tick: Duration) {
 ///
 /// Periodically reads `engine`'s pooling-allocator occupancy and emits it as
 /// `OpenTelemetry` gauges (through the `tracing` -> `OpenTelemetry` metrics
-/// layer configured in `omnia-otel`).
+/// layer configured by [`Telemetry`]).
 ///
 /// The task is a no-op and is never spawned when `interval` is zero. If the
 /// engine was not configured with the pooling allocator (so there are no pool

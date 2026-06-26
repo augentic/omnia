@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use omnia_otel::Telemetry;
 use wasmtime::component::Linker;
 use wasmtime::{Config, Engine};
 use wasmtime_wasi::WasiView;
@@ -18,7 +17,7 @@ use crate::registry::{Guest, Registry};
 use crate::routing::Routes;
 use crate::selector::{FirstArgSelector, GuestSelector};
 use crate::source::{LoadedGuest, Source};
-use crate::{Host, RuntimeOptions};
+use crate::{Host, RuntimeOptions, Telemetry};
 
 /// Selects where a runtime's guests come from, then [`compile`]s them into a
 /// [`Compiled`] runtime ready for host linking.

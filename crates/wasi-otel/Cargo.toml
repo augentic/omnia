@@ -36,7 +36,6 @@ hex = "0.4.3"
 opentelemetry-proto = "0.32.0"
 prost = "0.14.4"
 omnia.workspace = true
-omnia-otel.workspace = true
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true
 

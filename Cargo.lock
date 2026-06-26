@@ -2059,13 +2059,19 @@ dependencies = [
  "clap",
  "fromenv",
  "futures",
- "omnia-otel",
+ "http",
  "omnia-runtime-macro",
+ "opentelemetry",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
  "serde",
  "tokio",
  "tokio-util",
  "toml",
+ "tower",
  "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
  "wasmtime",
  "wasmtime-wasi",
  "wrpc-transport",
@@ -2079,22 +2085,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "omnia-otel"
-version = "0.35.0"
-dependencies = [
- "anyhow",
- "http",
- "opentelemetry",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
- "rand 0.10.1",
- "tower",
- "tracing",
- "tracing-opentelemetry",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -2298,7 +2288,6 @@ dependencies = [
  "hex",
  "num-traits",
  "omnia",
- "omnia-otel",
  "omnia-wasi-otel-attr",
  "opentelemetry",
  "opentelemetry-proto",

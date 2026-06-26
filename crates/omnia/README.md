@@ -52,7 +52,25 @@ The runtime is built around a set of traits that allow services to be plugged in
 The runtime and its included services are configured via environment variables:
 
 - **`RUST_LOG`**: Controls logging verbosity (e.g., `info`, `debug`, `omnia=trace`).
-- **`OTEL_GRPC_URL`**: Endpoint for OpenTelemetry collector (if `omnia-otel` is used).
+- **`OTEL_GRPC_URL`**: Endpoint for the OpenTelemetry collector used to export traces and metrics.
+
+## Telemetry
+
+The runtime reports OpenTelemetry tracing and metrics out-of-the-box. During startup, `omnia` configures `tracing-subscriber`, OTLP span exporters, and metric readers via the `Telemetry` builder, so host runtimes emit telemetry without extra wiring. Most applications never need to call this directly:
+
+```rust,ignore
+use omnia::Telemetry;
+
+// Minimal -- uses RUST_LOG for filtering, no OTLP export
+Telemetry::new("my-service").build()?;
+
+// With OTLP export to a collector
+Telemetry::new("my-service")
+    .endpoint("http://localhost:4317")
+    .build()?;
+```
+
+The `OTEL_GRPC_URL` environment variable is respected if no explicit endpoint is set.
 
 ## Architecture
 
