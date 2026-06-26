@@ -207,7 +207,7 @@ where
                         let iface_name = Arc::clone(&iface_name);
                         let func_name = Arc::clone(&func_name);
                         Box::new(async move {
-                            dispatch(store, &handle, &iface_name, &func_name, &ty, params, results)
+                            send(store, &handle, &iface_name, &func_name, &ty, params, results)
                                 .await
                                 .map_err(wasmtime::Error::from_anyhow)
                         })
@@ -224,7 +224,7 @@ where
 /// The per-call dispatch: select the target, reject crossing resources, bound
 /// depth, then round-trip the call over the in-process wRPC carrier to a
 /// freshly-instantiated target export.
-async fn dispatch<T>(
+async fn send<T>(
     mut store: StoreContextMut<'_, T>, handle: &DispatchHandle, interface: &str, func: &str,
     ty: &types::ComponentFunc, params: &[Val], results: &mut [Val],
 ) -> Result<()>
@@ -324,7 +324,7 @@ where
 /// Returns an error if the depth bound is exceeded, an argument or result carries
 /// a resource handle, the target is not registered, the named `interface`/`func`
 /// export is absent or is not a function, or the guest call traps.
-pub async fn dispatch_to_guest<R>(
+pub async fn dispatch<R>(
     runtime: &R, target: &GuestId, interface: &str, func: &str, args: Vec<Val>,
 ) -> Result<Vec<Val>>
 where
@@ -443,7 +443,7 @@ impl<R: Runtime> HostDispatch for R {
         let runtime = self.clone();
         async move {
             let interface = resolve_interface(&runtime, &target)?;
-            let results = dispatch_to_guest(
+            let results = dispatch(
                 &runtime,
                 &target,
                 &interface,
@@ -451,7 +451,7 @@ impl<R: Runtime> HostDispatch for R {
                 vec![Val::String(reference)],
             )
             .await?;
-            vals_to_bytes(results)
+            to_bytes(results)
         }
         .boxed()
     }
@@ -484,7 +484,7 @@ fn resolve_interface<R: Runtime>(runtime: &R, target: &GuestId) -> Result<Box<st
 
 /// Convert a `resolve` export's return value into raw bytes. Accepts `list<u8>`
 /// (the canonical shape) or `string` (a convenience for text shelves).
-fn vals_to_bytes(results: Vec<Val>) -> Result<Vec<u8>> {
+fn to_bytes(results: Vec<Val>) -> Result<Vec<u8>> {
     let first = results.into_iter().next().context("resolve export returned no value")?;
     match first {
         Val::List(items) => items
@@ -613,7 +613,7 @@ mod tests {
     }
 
     #[test]
-    fn depth_guard_bounds_nesting() {
+    fn depth_guard() {
         let handle = handle(2);
         let target = GuestId::from("t");
 
@@ -629,7 +629,7 @@ mod tests {
     }
 
     #[test]
-    fn detects_nested_resources() {
+    fn detect_nested() {
         // Plain values never count as resources.
         assert!(!contains_resource(&Val::String("x".to_owned())));
         assert!(!contains_resource(&Val::Record(vec![("f".to_owned(), Val::U32(1),)])));

@@ -401,12 +401,12 @@ async fn build_registry(model: &Path, shelf: &Path) -> Result<Arc<Registry<TestC
 /// Phase 2a — the CI-runnable `resolve` acceptance gate (no network).
 ///
 /// A stub backend drives the host→guest `resolve` path for the guest's
-/// `grants.references = "shelf"` prompt. It proves Task A (the `dispatch_to_guest`
+/// `grants.references = "shelf"` prompt. It proves Task A (the `dispatch`
 /// entry point) + Task B (the `BoundToolHost` wiring) deterministically: every
 /// `resolve` lands a **fresh `shelf` instance** (instance-per-call witness) and
 /// the bytes round-trip through the seam.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn resolve_dispatches_to_a_fresh_shelf_per_call() -> Result<()> {
+async fn resolve_dispatches() -> Result<()> {
     let target = target_dir();
     let (Some(model), Some(shelf)) =
         (guest_wasm(&target, "model_wasm.wasm"), guest_wasm(&target, "model_shelf_wasm.wasm"))
