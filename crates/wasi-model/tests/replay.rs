@@ -164,7 +164,7 @@ fn guest_wasm(target: &Path, file: &str) -> Option<PathBuf> {
 
 /// Build the model runtime for `wasm`, linking `WasiModel`, and return the shared
 /// registry.
-fn registry(wasm: &Path) -> Result<Arc<Registry<TestCtx>>> {
+async fn registry(wasm: &Path) -> Result<Arc<Registry<TestCtx>>> {
     // A one-guest manifest with an absolute source path.
     let manifest_path =
         std::env::temp_dir().join(format!("omnia-model-{}.toml", std::process::id()));
@@ -174,6 +174,7 @@ fn registry(wasm: &Path) -> Result<Arc<Registry<TestCtx>>> {
     let mut compiled: Compiled<TestCtx> = RegistryBuilder::new()
         .config(manifest_path.clone())
         .compile()
+        .await
         .context("building runtime")?;
     compiled.link::<WasiModel>().context("linking WasiModel")?;
     let registry = compiled.build().context("assembling registry")?;
@@ -215,7 +216,7 @@ async fn replays_completion_with_no_network() -> Result<()> {
         return Ok(());
     };
 
-    let registry = registry(&wasm)?;
+    let registry = registry(&wasm).await?;
 
     // The answer the recorded run produces and the replay must reproduce.
     let expected = expected_answer();
@@ -281,7 +282,7 @@ fn committed_fixtures() -> PathBuf {
 async fn record_example_fixture() -> Result<()> {
     let wasm = guest_wasm(&target_dir(), "model_wasm.wasm")
         .context("model guest not built; build it before regenerating the fixture")?;
-    let registry = registry(&wasm)?;
+    let registry = registry(&wasm).await?;
 
     let dir = committed_fixtures();
     let _ = std::fs::remove_dir_all(&dir);
@@ -374,7 +375,7 @@ impl WasiModelCtx for ResolvingStub {
 /// Build a two-guest registry (`model` + `shelf`) for the resolve path, linking
 /// `WasiModel`. The `shelf` needs no `link` declaration: host→guest `resolve` is
 /// a direct instantiate-and-call.
-fn build_registry(model: &Path, shelf: &Path) -> Result<Arc<Registry<TestCtx>>> {
+async fn build_registry(model: &Path, shelf: &Path) -> Result<Arc<Registry<TestCtx>>> {
     let manifest_path =
         std::env::temp_dir().join(format!("omnia-model-resolve-{}.toml", std::process::id()));
     let manifest = format!(
@@ -388,6 +389,7 @@ fn build_registry(model: &Path, shelf: &Path) -> Result<Arc<Registry<TestCtx>>> 
     let mut compiled: Compiled<TestCtx> = RegistryBuilder::new()
         .config(manifest_path.clone())
         .compile()
+        .await
         .context("building runtime")?;
     compiled.link::<WasiModel>().context("linking WasiModel")?;
     let registry = compiled.build().context("assembling registry")?;
@@ -417,7 +419,7 @@ async fn resolve_dispatches_to_a_fresh_shelf_per_call() -> Result<()> {
         return Ok(());
     };
 
-    let registry = build_registry(&model, &shelf)?;
+    let registry = build_registry(&model, &shelf).await?;
     let runtime = TestRuntime {
         registry,
         backend: Arc::new(|| Box::new(ResolvingStub)),

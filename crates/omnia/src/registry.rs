@@ -9,7 +9,7 @@
 //! The floor treats identities as opaque keys; consumers project their own
 //! scheme onto them. Omnia never parses a [`GuestId`].
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
@@ -117,7 +117,10 @@ impl<T: 'static> Guest<T> {
 pub struct Registry<T: 'static> {
     engine: Engine,
     options: RuntimeOptions,
-    guests: HashMap<GuestId, Guest<T>>,
+    /// Guests keyed by identity. A [`BTreeMap`] so iteration is identity-sorted
+    /// for free, making per-trigger capability and ambiguity errors stable
+    /// across runs without a per-call sort.
+    guests: BTreeMap<GuestId, Guest<T>>,
     routes: Routes,
     dispatch: Arc<DispatchHandle>,
 }
@@ -133,7 +136,7 @@ impl<T: 'static> Registry<T> {
     /// Returns an error if `guests` is empty, or if a route targets a guest that
     /// is not registered.
     pub(crate) fn new(
-        engine: Engine, options: RuntimeOptions, guests: HashMap<GuestId, Guest<T>>,
+        engine: Engine, options: RuntimeOptions, guests: BTreeMap<GuestId, Guest<T>>,
         routes: Routes, dispatch: Arc<DispatchHandle>,
     ) -> Result<Self> {
         if guests.is_empty() {
@@ -173,10 +176,10 @@ impl<T: 'static> Registry<T> {
 
     /// Iterate every registered guest in a deterministic, identity-sorted order
     /// so per-trigger capability and ambiguity errors are stable across runs.
+    ///
+    /// The order falls out of the [`BTreeMap`] keying; no per-call sort.
     pub fn guests(&self) -> impl Iterator<Item = &Guest<T>> {
-        let mut guests: Vec<&Guest<T>> = self.guests.values().collect();
-        guests.sort_by(|a, b| a.id().cmp(b.id()));
-        guests.into_iter()
+        self.guests.values()
     }
 
     /// Returns the per-trigger inbound route tables built from the manifest's
@@ -229,7 +232,7 @@ mod tests {
         let options = RuntimeOptions::load().expect("options should load");
         let engine = Engine::new(&Config::from(&options)).expect("engine should build");
         // An empty map never constructs a `Guest`, so `T` is unconstrained here.
-        let guests: HashMap<GuestId, Guest<()>> = HashMap::new();
+        let guests: BTreeMap<GuestId, Guest<()>> = BTreeMap::new();
         let dispatch = DispatchHandle::new(Arc::new(FirstArgSelector), BTreeSet::new(), 8);
 
         let result = Registry::new(engine, options, guests, Routes::default(), dispatch);

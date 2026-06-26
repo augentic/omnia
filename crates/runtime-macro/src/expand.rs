@@ -59,6 +59,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                     .wasm(wasm)
                     .config(config)
                     .compile::<StoreCtx>()
+                    .await
                     .context("building runtime")?;
                 let run_state = Context::new(compiled)
                     .await

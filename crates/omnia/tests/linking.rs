@@ -173,6 +173,7 @@ async fn router_dispatches_to_responder() -> Result<()> {
     let compiled = RegistryBuilder::new()
         .config(manifest_path.clone())
         .compile::<TestCtx>()
+        .await
         .context("building runtime")?;
     let registry = compiled.build().context("assembling registry")?;
     let runtime = TestRuntime {

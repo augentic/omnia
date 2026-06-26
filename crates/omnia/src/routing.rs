@@ -297,26 +297,31 @@ fn path_has_prefix(path: &str, prefix: &str) -> bool {
 /// NATS-style topic match: `.`-tokenised, `*` matches exactly one token, and `>`
 /// matches one or more trailing tokens (and must be the final pattern token).
 fn topic_matches(topic: &str, pattern: &str) -> bool {
-    let topic_tokens: Vec<&str> = topic.split('.').collect();
-    let pattern_tokens: Vec<&str> = pattern.split('.').collect();
+    // Walk both token streams in lockstep without materialising either: `*`
+    // consumes exactly one topic token, a literal must match it, and `>` (which
+    // must be the final pattern token) swallows one or more trailing tokens.
+    let mut topic_tokens = topic.split('.');
+    let mut pattern_tokens = pattern.split('.').peekable();
 
-    for (i, token) in pattern_tokens.iter().enumerate() {
-        match *token {
-            ">" => return i == pattern_tokens.len() - 1 && i < topic_tokens.len(),
+    while let Some(token) = pattern_tokens.next() {
+        match token {
+            ">" => return pattern_tokens.peek().is_none() && topic_tokens.next().is_some(),
             "*" => {
-                if i >= topic_tokens.len() {
+                if topic_tokens.next().is_none() {
                     return false;
                 }
             }
             literal => {
-                if topic_tokens.get(i) != Some(&literal) {
+                if topic_tokens.next() != Some(literal) {
                     return false;
                 }
             }
         }
     }
 
-    pattern_tokens.len() == topic_tokens.len()
+    // Every pattern token matched; it is a full match only if the topic is also
+    // exhausted (equal token counts).
+    topic_tokens.next().is_none()
 }
 
 #[cfg(test)]

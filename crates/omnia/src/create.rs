@@ -1,7 +1,6 @@
 //! # WebAssembly Initiator
 
-use std::collections::{BTreeSet, HashMap};
-use std::convert::TryFrom;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -18,7 +17,7 @@ use crate::manifest::Manifest;
 use crate::registry::{Guest, Registry};
 use crate::routing::Routes;
 use crate::selector::{FirstArgSelector, GuestSelector};
-use crate::source::{FileSource, LoadedGuest};
+use crate::source::{FileSource, GuestSource, LoadedGuest};
 use crate::{Host, RuntimeOptions};
 
 /// Selects where a runtime's guests come from, then [`compile`]s them into a
@@ -32,7 +31,8 @@ use crate::{Host, RuntimeOptions};
 /// let compiled = RegistryBuilder::new()
 ///     .wasm(wasm)
 ///     .config(config)
-///     .compile::<StoreCtx>()?;
+///     .compile::<StoreCtx>()
+///     .await?;
 /// ```
 ///
 /// [`wasm`]: Self::wasm
@@ -78,7 +78,7 @@ impl RegistryBuilder {
     ///
     /// Returns an error if neither a config nor a wasm path is available, or if
     /// the selected source cannot be built.
-    pub fn compile<T: WasiView + 'static>(self) -> Result<Compiled<T>> {
+    pub async fn compile<T: WasiView + 'static>(self) -> Result<Compiled<T>> {
         let manifest =
             self.config.clone().or_else(|| env::var_os("OMNIA_CONFIG").map(PathBuf::from));
 
@@ -112,7 +112,7 @@ impl RegistryBuilder {
         init_env(&dp.name)?;
         tracing::info!("initializing runtime");
 
-        Compiled::try_from(dp)
+        Compiled::from_plan(dp).await
     }
 }
 
@@ -124,15 +124,18 @@ struct DeploymentPlan {
     link_interfaces: BTreeSet<Box<str>>,
 }
 
-impl<T: WasiView + 'static> TryFrom<DeploymentPlan> for Compiled<T> {
-    type Error = anyhow::Error;
-
-    fn try_from(plan: DeploymentPlan) -> Result<Self, Self::Error> {
+impl<T: WasiView + 'static> Compiled<T> {
+    /// Acquire every guest named in `plan` through its [`GuestSource`] and pair
+    /// them with the shared engine and WASI-linked linker.
+    ///
+    /// Acquisition runs through the async [`GuestSource::load`] seam so a future
+    /// source kind (an OCI pull) slots in without a parallel loading path.
+    async fn from_plan(plan: DeploymentPlan) -> Result<Self> {
         let (engine, linker, options) = engine_and_linker()?;
 
         let mut guests = Vec::with_capacity(plan.sources.len());
         for source in &plan.sources {
-            guests.extend(source.load_into(&engine)?);
+            guests.extend(source.load(&engine).await?);
         }
 
         Ok(Self {
@@ -232,7 +235,7 @@ impl<T: WasiView> Compiled<T> {
         let mut linker = self.linker;
         link_dynamic(&self.engine, &mut linker, &self.guests, &dispatch)?;
 
-        let mut guests = HashMap::with_capacity(self.guests.len());
+        let mut guests = BTreeMap::new();
         for loaded in &self.guests {
             let instance_pre = linker
                 .instantiate_pre(&loaded.component)
