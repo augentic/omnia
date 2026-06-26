@@ -68,7 +68,7 @@ type HostResources = HashMap<
 /// process-wide dispatch-depth counter.
 pub struct DispatchHandle {
     selector: Arc<dyn GuestSelector>,
-    mediated_interfaces: BTreeSet<Box<str>>,
+    links: BTreeSet<Box<str>>,
     transport: OnceLock<InProcess>,
     depth: AtomicUsize,
     max_depth: usize,
@@ -79,11 +79,11 @@ impl DispatchHandle {
     /// [`serve_links`], once each target's serve side is wired.
     #[must_use]
     pub(crate) fn new(
-        selector: Arc<dyn GuestSelector>, mediated_interfaces: BTreeSet<Box<str>>, max_depth: usize,
+        selector: Arc<dyn GuestSelector>, links: BTreeSet<Box<str>>, max_depth: usize,
     ) -> Arc<Self> {
         Arc::new(Self {
             selector,
-            mediated_interfaces,
+            links,
             transport: OnceLock::new(),
             depth: AtomicUsize::new(0),
             max_depth,
@@ -94,8 +94,8 @@ impl DispatchHandle {
     /// allow-list — the set of interfaces to polyfill (caller side) and serve
     /// (callee side).
     #[must_use]
-    pub(crate) const fn mediated_interfaces(&self) -> &BTreeSet<Box<str>> {
-        &self.mediated_interfaces
+    pub(crate) const fn links(&self) -> &BTreeSet<Box<str>> {
+        &self.links
     }
 
     /// Install the bound transport carrier (called once by [`serve_links`]).
@@ -166,7 +166,7 @@ pub(crate) fn link_dynamic<T>(
 where
     T: WasiView + WrpcView + 'static,
 {
-    if handle.mediated_interfaces.is_empty() {
+    if handle.links.is_empty() {
         return Ok(());
     }
 
@@ -174,7 +174,7 @@ where
     for LoadedGuest { id, component } in guests {
         let component_ty = component.component_type();
         for (name, types::ComponentExtern { ty, .. }) in component_ty.imports(engine) {
-            if !handle.mediated_interfaces.contains(name) || wired.contains(name) {
+            if !handle.links.contains(name) || wired.contains(name) {
                 continue;
             }
             let types::ComponentItem::ComponentInstance(instance_ty) = ty else {
@@ -531,7 +531,7 @@ where
 {
     let registry = state.registry();
     let handle = registry.dispatch();
-    if handle.mediated_interfaces().is_empty() {
+    if handle.links().is_empty() {
         return Ok(());
     }
     let engine = registry.engine().clone();
@@ -542,7 +542,7 @@ where
         let mut server: Option<Arc<InProcServer>> = None;
 
         for (interface, types::ComponentExtern { ty, .. }) in component_ty.exports(&engine) {
-            if !handle.mediated_interfaces().contains(interface) {
+            if !handle.links().contains(interface) {
                 continue;
             }
             let types::ComponentItem::ComponentInstance(instance_ty) = ty else {

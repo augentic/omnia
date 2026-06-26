@@ -100,7 +100,7 @@ impl Manifest {
     /// The linker is shared, so an interface dispatched for one guest is wired
     /// once for all.
     #[must_use]
-    pub fn mediated_interfaces(&self) -> BTreeSet<Box<str>> {
+    pub fn links(&self) -> BTreeSet<Box<str>> {
         self.guests
             .iter()
             .flat_map(|entry| entry.link.iter())

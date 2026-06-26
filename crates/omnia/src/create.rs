@@ -89,7 +89,7 @@ impl RegistryBuilder {
                 name: parsed.telemetry_name().to_owned(),
                 sources: parsed.sources(base)?,
                 routes: parsed.routes(),
-                mediated_interfaces: parsed.mediated_interfaces(),
+                links: parsed.links(),
             }
         } else {
             let wasm = self.wasm.as_ref().context(
@@ -105,7 +105,7 @@ impl RegistryBuilder {
                 name: source.id().as_str().to_owned(),
                 sources: vec![source],
                 routes: Routes::default(),
-                mediated_interfaces: BTreeSet::new(),
+                links: BTreeSet::new(),
             }
         };
 
@@ -121,7 +121,7 @@ struct Plan {
     name: String,
     sources: Vec<Source>,
     routes: Routes,
-    mediated_interfaces: BTreeSet<Box<str>>,
+    links: BTreeSet<Box<str>>,
 }
 
 impl<T: WasiView + 'static> Compiled<T> {
@@ -144,7 +144,7 @@ impl<T: WasiView + 'static> Compiled<T> {
             options,
             guests,
             routes: plan.routes,
-            mediated_interfaces: plan.mediated_interfaces,
+            links: plan.links,
             selector: Arc::new(FirstArgSelector),
         })
     }
@@ -164,9 +164,9 @@ fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, Runt
 }
 
 /// A compiled set of WebAssembly components with their shared Linker, ready to
-/// be [`link`]ed against host interfaces and [`build`]t into a [`Registry`].
+/// be [`host`]ed against WASI interfaces and [`build`]t into a [`Registry`].
 ///
-/// [`link`]: Self::link
+/// [`host`]: Self::host
 /// [`build`]: Self::build
 pub struct Compiled<T: WasiView + 'static> {
     engine: Engine,
@@ -176,7 +176,7 @@ pub struct Compiled<T: WasiView + 'static> {
     routes: Routes,
     /// Union of the per-guest `link` allow-lists — the host-mediated interfaces
     /// to polyfill onto the shared linker (empty for the single-file shorthand).
-    mediated_interfaces: BTreeSet<Box<str>>,
+    links: BTreeSet<Box<str>>,
     /// Host-mediated dispatch selector; defaults to [`FirstArgSelector`] and is
     /// overridable via [`selector`](Self::selector).
     selector: Arc<dyn GuestSelector>,
@@ -190,7 +190,7 @@ impl<T: WasiView> Compiled<T> {
     /// # Errors
     ///
     /// Will fail if the host cannot be added to the Linker.
-    pub fn link<H: Host<T>>(&mut self) -> Result<&mut Self> {
+    pub fn host<H: Host<T>>(&mut self) -> Result<&mut Self> {
         H::add_to_linker(&mut self.linker)?;
         Ok(self)
     }
@@ -224,7 +224,7 @@ impl<T: WasiView> Compiled<T> {
         // `GuestId` it returns.
         let dispatch = DispatchHandle::new(
             self.selector,
-            self.mediated_interfaces,
+            self.links,
             self.options.max_dispatch_depth,
         );
 

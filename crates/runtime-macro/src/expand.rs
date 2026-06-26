@@ -78,7 +78,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                 /// Creates a new runtime state by linking WASI interfaces and connecting to backends.
                 async fn new(mut compiled: Compiled<StoreCtx>) -> Result<Self> {
                     // link enabled WASI components
-                    #(compiled.link::<#host_trait_impls>()?;)*
+                    #(compiled.host::<#host_trait_impls>()?;)*
 
                     // connect to all backends concurrently
                     #connect_backends
