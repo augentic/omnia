@@ -95,9 +95,7 @@ pub async fn create_runtime<T: WasiView + 'static>(
 /// Will fail if the manifest cannot be loaded, if a guest uses a source kind not
 /// yet supported, or if a guest component cannot be loaded.
 #[instrument]
-pub async fn create_from_manifest<T: WasiView + 'static>(
-    manifest: &Path,
-) -> Result<Compiled<T>> {
+pub async fn create_from_manifest<T: WasiView + 'static>(manifest: &Path) -> Result<Compiled<T>> {
     let parsed = Manifest::load(manifest)?;
 
     // The first guest entry doubles as the telemetry/component name for now.
@@ -193,12 +191,6 @@ pub struct Compiled<T: WasiView + 'static> {
 }
 
 impl<T: WasiView> Compiled<T> {
-    /// Returns the environment-derived runtime options.
-    #[must_use]
-    pub const fn options(&self) -> &RuntimeOptions {
-        &self.options
-    }
-
     /// Link a WASI host's interfaces into the shared Linker.
     ///
     /// # Errors

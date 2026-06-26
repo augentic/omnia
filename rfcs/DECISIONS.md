@@ -97,3 +97,40 @@ it. New phases append their settled choices here as they land.
   local path), so the two omnia versions coexist and every other backend keeps
   resolving the published 0.34.0 crates untouched. The patch (and the genai
   `0.35.0` pin) collapse to a normal published dependency at the release gate.
+
+### Phase 2b (this work) — the cursor spawned-agent backend
+
+- **The cursor backend is `omnia-cursor` in the backends repo**, the spawned,
+  filesystem-capable agent shape of §5.3. It mirrors `omnia-genai` /
+  `omnia-redis` (`pub struct Client`, `Backend` + `WasiModelCtx`, `fromenv`
+  `ConnectOptions`) and reuses the existing `0.35.0` pin + `[patch.crates-io]`
+  override (no new workspace wiring).
+- **The workspace is sourced from config (`OMNI_WORKSPACE`) as a stopgap** for
+  the not-yet-built RFC-55 `local-path` face. The §5.3 capability signal is
+  preserved as a per-call check: an absent workspace returns `error::backend("no
+  local tree on this node")`. When RFC-55 lands, this one spot switches to
+  resolving the lent `grants.working-tree` descriptor's `local-path`.
+- **`complete` spawns a fresh headless session per call:** `cursor-agent --print
+  --force --trust --output-format json --workspace <ws> [--model <m>] "<prompt>"`,
+  parses the single JSON object's `.result` (tolerating a code fence) per
+  `response-format.kind`, and returns it; the floor re-validates (§3.1.3). The
+  `--trust` flag (skip the workspace-trust prompt) is required for the current
+  headless CLI and is added over the RFC's literal command.
+- **The cursor backend ignores `ToolHost`** (the agent owns its own loop and
+  edits the tree directly), so its `BackendAnswer.transcript` is `None`. It still
+  records/replays at the typed boundary — a cursor-recorded fixture replays
+  identically under `ModelDefault`.
+- **A hung agent is bounded by a wall-clock timeout** (`OMNI_CURSOR_TIMEOUT_SECS`,
+  default 120s) inside the per-call `guest_timeout`. Because a backend can only
+  return `anyhow::Error` (mapped to `error::backend` by the floor), the timeout
+  and the capability signal both surface as `error::backend` rather than the
+  typed `budget-exhausted`; widening the backend error channel to emit the typed
+  variants (shared with genai's `MAX_TURNS` exhaustion) is a tracked follow-up.
+- **`read` / `list` / `write` stay loud stubs.** Wiring genai's bounded
+  working-tree tools to a real `descriptor`, and extracting the agent's
+  content-addressed change-set after a run, remain deferred to the RFC-55
+  working-tree host.
+- **Acceptance gate (run 3)** is `omnia-cursor`'s `tests/live.rs`, gated by
+  `OMNI_CURSOR_LIVE=1` (mirroring genai's run 2): it records a live spawned-agent
+  completion and replays the fixture under `ModelDefault`. CI-safe unit tests
+  cover the capability signal, prompt assembly, and `.result` parsing.

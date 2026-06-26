@@ -413,10 +413,10 @@ mod tests {
     #[test]
     fn trigger_router_routed() {
         let routes = HttpRoutes::new([("/a".to_owned(), id("a"))]);
-        let router = Router::build("http", &[id("a")], routes).expect("routes are valid");
+        let r = Router::build("http", &[id("a")], routes).expect("routes are valid");
         let tr = TriggerRouter {
             indices: HashMap::from([(id("a"), 1u32)]),
-            router,
+            router: r,
         };
         assert_eq!(tr.resolve("/a"), Some((&id("a"), &1u32)));
         assert_eq!(tr.resolve("/miss"), None);
