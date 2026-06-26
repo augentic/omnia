@@ -1,11 +1,12 @@
 //! # WebAssembly Initiator
 
 use std::collections::{BTreeSet, HashMap};
+use std::convert::TryFrom;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use omnia_otel::Telemetry;
 use wasmtime::component::Linker;
 use wasmtime::{Config, Engine};
@@ -13,11 +14,11 @@ use wasmtime_wasi::WasiView;
 use wrpc_wasmtime::WrpcView;
 
 use crate::dispatch::{DispatchHandle, link_dynamic};
-use crate::manifest::{Manifest, RouteSpec, SourceSpec};
-use crate::registry::{Guest, GuestId, Registry};
-use crate::routing::{HttpRoutes, Routes, TopicRoutes};
+use crate::manifest::Manifest;
+use crate::registry::{Guest, Registry};
+use crate::routing::Routes;
 use crate::selector::{FirstArgSelector, GuestSelector};
-use crate::source::{FileSource, GuestSource, LoadedGuest};
+use crate::source::{FileSource, LoadedGuest};
 use crate::{Host, RuntimeOptions};
 
 /// Selects where a runtime's guests come from, then [`compile`]s them into a
@@ -31,8 +32,7 @@ use crate::{Host, RuntimeOptions};
 /// let compiled = RegistryBuilder::new()
 ///     .wasm(wasm)
 ///     .config(config)
-///     .compile::<StoreCtx>()
-///     .await?;
+///     .compile::<StoreCtx>()?;
 /// ```
 ///
 /// [`wasm`]: Self::wasm
@@ -78,94 +78,73 @@ impl RegistryBuilder {
     ///
     /// Returns an error if neither a config nor a wasm path is available, or if
     /// the selected source cannot be built.
-    pub async fn compile<T: WasiView + 'static>(self) -> Result<Compiled<T>> {
-        let manifest = self.config.or_else(|| env::var_os("OMNIA_CONFIG").map(PathBuf::from));
+    pub fn compile<T: WasiView + 'static>(self) -> Result<Compiled<T>> {
+        let manifest =
+            self.config.clone().or_else(|| env::var_os("OMNIA_CONFIG").map(PathBuf::from));
 
-        let (name, sources, routes, link_interfaces) = if let Some(manifest) = &manifest {
-            // resolve each `[[guest]]` source and the `[[route.*]]` tables from a deployment
-            let parsed = Manifest::load(manifest)?;
-
-            // sources resolve relative to the manifest's directory
+        let dp = if let Some(manifest) = manifest {
+            let parsed = Manifest::load(&manifest)?;
             let base = manifest.parent().unwrap_or_else(|| Path::new("."));
-            let mut sources = Vec::with_capacity(parsed.guests.len());
-
-            for entry in &parsed.guests {
-                let id = GuestId::from(entry.id.as_str());
-                match &entry.source {
-                    SourceSpec::Path(path) => {
-                        let resolved =
-                            if path.is_absolute() { path.clone() } else { base.join(path) };
-                        sources.push(FileSource::with_id(id, resolved));
-                    }
-                    SourceSpec::Oci(_) => bail!("guest `{id}`: OCI sources are not yet supported"),
-                }
+            DeploymentPlan {
+                name: parsed.telemetry_name().to_owned(),
+                sources: parsed.file_sources(base)?,
+                routes: parsed.routes(),
+                link_interfaces: parsed.link_interfaces(),
             }
-
-            // the first guest entry doubles as the telemetry/component name for now.
-            let name = parsed.guests.first().map_or("omnia", |entry| entry.id.as_str());
-
-            // union the per-guest `link` allow-lists: the linker is shared, so an
-            let link_interfaces: BTreeSet<Box<str>> = parsed
-                .guests
-                .iter()
-                .flat_map(|entry| entry.link.iter())
-                .map(|i| Box::from(i.as_str()))
-                .collect();
-
-            (name.to_owned(), sources, route_tables(&parsed.route), link_interfaces)
         } else {
-            let wasm = self.wasm.context(
-                "no guest specified: pass a <wasm> path, or --config <omni.toml> (or set OMNIA_CONFIG)"
+            let wasm = self.wasm.as_ref().context(
+                "no guest specified: pass a <wasm> path, or --config <omni.toml> (or set OMNIA_CONFIG)",
             )?;
 
             // The single-file shorthand is a one-guest deployment: its sole guest is
             // the catch-all for every trigger it can answer, with no routes and no
             // host-mediated links (it has nobody to dispatch to).
-            let source = FileSource::new(wasm);
-            let name = source.id().as_str().to_owned();
-            (name, vec![source], Routes::default(), BTreeSet::new())
+            let source = FileSource::new(wasm.clone());
+
+            DeploymentPlan {
+                name: source.id().as_str().to_owned(),
+                sources: vec![source],
+                routes: Routes::default(),
+                link_interfaces: BTreeSet::new(),
+            }
         };
 
-        // from_sources(&name, sources, routes, link_interfaces).await
-
-        init_env(&name)?;
+        init_env(&dp.name)?;
         tracing::info!("initializing runtime");
 
+        Compiled::try_from(dp)
+    }
+}
+
+/// Resolved deployment inputs shared by the manifest and single-file paths.
+struct DeploymentPlan {
+    name: String,
+    sources: Vec<FileSource>,
+    routes: Routes,
+    link_interfaces: BTreeSet<Box<str>>,
+}
+
+impl<T: WasiView + 'static> TryFrom<DeploymentPlan> for Compiled<T> {
+    type Error = anyhow::Error;
+
+    fn try_from(plan: DeploymentPlan) -> Result<Self, Self::Error> {
         let (engine, linker, options) = engine_and_linker()?;
 
-        let mut guests = Vec::with_capacity(sources.len());
-        for source in &sources {
-            guests.extend(source.load(&engine).await?);
+        let mut guests = Vec::with_capacity(plan.sources.len());
+        for source in &plan.sources {
+            guests.extend(source.load_into(&engine)?);
         }
 
-        tracing::info!(guests = guests.len(), "runtime initialized");
-
-        Ok(Compiled {
+        Ok(Self {
             engine,
             linker,
             options,
             guests,
-            routes,
-            link_interfaces,
-            // Host-mediated dispatch uses the floor default unless overridden.
+            routes: plan.routes,
+            link_interfaces: plan.link_interfaces,
             selector: Arc::new(FirstArgSelector),
         })
     }
-}
-
-/// Convert the manifest's parsed routes into the registry's `GuestId`-typed,
-/// per-trigger route tables.
-fn route_tables(spec: &RouteSpec) -> Routes {
-    let http = HttpRoutes::new(
-        spec.http.iter().map(|e| (e.prefix.clone(), GuestId::from(e.guest.as_str()))),
-    );
-    let messaging = TopicRoutes::new(
-        spec.messaging.iter().map(|e| (e.topic.clone(), GuestId::from(e.guest.as_str()))),
-    );
-    let websocket = TopicRoutes::new(
-        spec.websocket.iter().map(|e| (e.topic.clone(), GuestId::from(e.guest.as_str()))),
-    );
-    Routes::new(http, messaging, websocket)
 }
 
 /// Build the shared engine, WASI-linked linker, and runtime options.
@@ -261,6 +240,8 @@ impl<T: WasiView> Compiled<T> {
                 .with_context(|| format!("pre-instantiating guest `{}`", loaded.id))?;
             guests.insert(loaded.id.clone(), Guest::local(loaded.id.clone(), instance_pre));
         }
+
+        tracing::info!(guests = guests.len(), "runtime initialized");
 
         Registry::new(self.engine, self.options, guests, self.routes, dispatch)
     }

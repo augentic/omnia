@@ -65,16 +65,25 @@ impl FileSource {
     pub const fn id(&self) -> &GuestId {
         &self.id
     }
-}
 
-impl GuestSource for FileSource {
-    async fn load(&self, engine: &Engine) -> Result<Vec<LoadedGuest>> {
+    /// Load the component from disk.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the component cannot be loaded from the path.
+    pub fn load_into(&self, engine: &Engine) -> Result<Vec<LoadedGuest>> {
         let component = load_component(engine, &self.path)
             .with_context(|| format!("loading guest from {}", self.path.display()))?;
         Ok(vec![LoadedGuest {
             id: self.id.clone(),
             component,
         }])
+    }
+}
+
+impl GuestSource for FileSource {
+    async fn load(&self, engine: &Engine) -> Result<Vec<LoadedGuest>> {
+        self.load_into(engine)
     }
 }
 

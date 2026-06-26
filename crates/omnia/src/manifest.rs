@@ -15,12 +15,16 @@
 //! allow-lists are accepted (so a richer file still loads) but wired into the
 //! shared linker in a later phase.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
 use serde::Deserialize;
+
+use crate::registry::GuestId;
+use crate::routing::{HttpRoutes, Routes, TopicRoutes};
+use crate::source::FileSource;
 
 /// The deployment manifest: which guests load and how host-mediated calls
 /// travel.
@@ -59,6 +63,56 @@ impl Manifest {
         }
         Ok(())
     }
+
+    /// Telemetry/component name for this deployment.
+    ///
+    /// The first `[[guest]]` entry doubles as the name for now.
+    #[must_use]
+    pub fn telemetry_name(&self) -> &str {
+        self.guests.first().map_or("omnia", |entry| entry.id.as_str())
+    }
+
+    /// Resolve every `[[guest]]` source into a loadable file source.
+    ///
+    /// Paths in the manifest are resolved relative to `base` (typically the
+    /// manifest's parent directory).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a guest uses a source kind not yet supported.
+    pub fn file_sources(&self, base: &Path) -> Result<Vec<FileSource>> {
+        let mut sources = Vec::with_capacity(self.guests.len());
+        for entry in &self.guests {
+            let id = GuestId::from(entry.id.as_str());
+            match &entry.source {
+                SourceSpec::Path(path) => {
+                    let resolved = if path.is_absolute() { path.clone() } else { base.join(path) };
+                    sources.push(FileSource::with_id(id, resolved));
+                }
+                SourceSpec::Oci(_) => bail!("guest `{id}`: OCI sources are not yet supported"),
+            }
+        }
+        Ok(sources)
+    }
+
+    /// Union of the per-guest `link` allow-lists.
+    ///
+    /// The linker is shared, so an interface dispatched for one guest is wired
+    /// once for all.
+    #[must_use]
+    pub fn link_interfaces(&self) -> BTreeSet<Box<str>> {
+        self.guests
+            .iter()
+            .flat_map(|entry| entry.link.iter())
+            .map(|interface| Box::from(interface.as_str()))
+            .collect()
+    }
+
+    /// Per-trigger route tables parsed from the manifest's `[[route.*]]` sections.
+    #[must_use]
+    pub fn routes(&self) -> Routes {
+        self.route.to_routes()
+    }
 }
 
 /// A single registry population entry.
@@ -85,6 +139,24 @@ pub struct RouteSpec {
     pub messaging: Vec<TopicRoute>,
     /// WebSocket routes, matched by NATS-style route pattern.
     pub websocket: Vec<TopicRoute>,
+}
+
+impl RouteSpec {
+    /// Convert the manifest's parsed routes into the registry's `GuestId`-typed,
+    /// per-trigger route tables.
+    #[must_use]
+    pub fn to_routes(&self) -> Routes {
+        let http = HttpRoutes::new(
+            self.http.iter().map(|e| (e.prefix.clone(), GuestId::from(e.guest.as_str()))),
+        );
+        let messaging = TopicRoutes::new(
+            self.messaging.iter().map(|e| (e.topic.clone(), GuestId::from(e.guest.as_str()))),
+        );
+        let websocket = TopicRoutes::new(
+            self.websocket.iter().map(|e| (e.topic.clone(), GuestId::from(e.guest.as_str()))),
+        );
+        Routes::new(http, messaging, websocket)
+    }
 }
 
 /// A single HTTP route: a path prefix mapped to a target guest.
