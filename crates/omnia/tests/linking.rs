@@ -26,43 +26,16 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
-use omnia::wasmtime::{StoreLimits, StoreLimitsBuilder};
-use omnia::wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
-use omnia::{
-    GuestId, HasLimits, LinkClient, Registry, RegistryBuilder, Runtime, RuntimeOptions,
-    WrpcCtxView, WrpcState, WrpcView, serve_links,
-};
+use omnia::{GuestId, Registry, RegistryBuilder, Runtime, StoreBase, serve_links};
 
-/// Per-store context mirroring the macro-generated `StoreCtx`: a WASI view plus
-/// the wRPC view that host-mediated dispatch encodes and serves through.
+/// Per-store context mirroring the macro-generated `StoreCtx`: the fixed [`StoreBase`]
+/// state, with the `WasiView` / `WrpcView` / `HasLimits` impls supplied by the
+/// `StoreContext` derive. No host backend — the link path needs only the WASI
+/// and wRPC views.
+#[derive(omnia::StoreContext)]
 struct TestCtx {
-    table: ResourceTable,
-    wasi: WasiCtx,
-    limits: StoreLimits,
-    wrpc: WrpcState,
-}
-
-impl WasiView for TestCtx {
-    fn ctx(&mut self) -> WasiCtxView<'_> {
-        WasiCtxView {
-            ctx: &mut self.wasi,
-            table: &mut self.table,
-        }
-    }
-}
-
-impl HasLimits for TestCtx {
-    fn limits(&mut self) -> &mut StoreLimits {
-        &mut self.limits
-    }
-}
-
-impl WrpcView for TestCtx {
-    type Invoke = LinkClient;
-
-    fn wrpc(&mut self) -> WrpcCtxView<'_, LinkClient> {
-        self.wrpc.view(&mut self.table)
-    }
+    #[base]
+    base: StoreBase,
 }
 
 /// A minimal [`Runtime`] over the linking registry that counts guest store
@@ -81,21 +54,12 @@ impl Runtime for TestRuntime {
         // from here, so this counter is the instance-per-call witness.
         self.stores_built.fetch_add(1, Ordering::SeqCst);
         TestCtx {
-            table: ResourceTable::new(),
-            wasi: WasiCtxBuilder::new().build(),
-            limits: StoreLimitsBuilder::new()
-                .memory_size(self.registry.options().max_memory_bytes)
-                .build(),
-            wrpc: WrpcState::new(),
+            base: StoreBase::new(self.options(), Arc::new(self.clone())),
         }
     }
 
     fn registry(&self) -> &Registry<Self::StoreCtx> {
         &self.registry
-    }
-
-    fn options(&self) -> &RuntimeOptions {
-        self.registry.options()
     }
 }
 

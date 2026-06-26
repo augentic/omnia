@@ -140,7 +140,7 @@ macro_rules! omnia_wasi_view {
             fn jsondb(&mut self) -> $crate::WasiJsonDbCtxView<'_> {
                 $crate::WasiJsonDbCtxView {
                     ctx: &mut self.$field_name,
-                    table: &mut self.table,
+                    table: &mut self.base.table,
                 }
             }
         }

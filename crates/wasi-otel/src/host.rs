@@ -100,7 +100,7 @@ macro_rules! omnia_wasi_view {
             fn otel(&mut self) -> omnia_wasi_otel::WasiOtelCtxView<'_> {
                 omnia_wasi_otel::WasiOtelCtxView {
                     ctx: &mut self.$field_name,
-                    table: &mut self.table,
+                    table: &mut self.base.table,
                 }
             }
         }

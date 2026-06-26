@@ -193,7 +193,7 @@ macro_rules! omnia_wasi_view {
             fn messaging(&mut self) -> omnia_wasi_messaging::WasiMessagingCtxView<'_> {
                 omnia_wasi_messaging::WasiMessagingCtxView {
                     ctx: &mut self.$field_name,
-                    table: &mut self.table,
+                    table: &mut self.base.table,
                 }
             }
         }

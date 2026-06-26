@@ -8,7 +8,14 @@
 
 use std::time::Duration;
 
+use anyhow::{Context as _, Result};
+use futures::future::{BoxFuture, try_join_all};
 use wasmtime::Engine;
+use wasmtime_wasi::WasiView;
+use wrpc_wasmtime::WrpcView;
+
+use crate::dispatch::serve_links;
+use crate::traits::Runtime;
 
 /// Spawn a detached background task that drives epoch interruption.
 ///
@@ -64,4 +71,41 @@ pub fn sample_pool(engine: Engine, interval: Duration) {
             );
         }
     });
+}
+
+/// Drive a runtime's lifecycle: start its background tasks, wire the serve side
+/// of any host-mediated links, then run every trigger server to completion.
+///
+/// Spawns [`drive_epoch`] and [`sample_pool`] off the runtime's engine, calls
+/// [`serve_links`] so a dispatched call always finds its target's wRPC server
+/// (a no-op when no `link`s are declared), then awaits all `servers` together.
+/// Every server shares the runtime's single [`Registry`](crate::Registry) and
+/// therefore one `Engine`, so per-request instantiation draws from one pool.
+///
+/// This is the fixed orchestration the `runtime!` macro previously inlined; the
+/// only deployment-specific input is the `servers` list.
+///
+/// # Errors
+///
+/// Returns an error if wiring the link serve side fails, or if any server
+/// returns an error (the first error cancels the rest).
+pub async fn serve<R: Runtime>(runtime: &R, servers: Vec<BoxFuture<'_, Result<()>>>) -> Result<()>
+where
+    R::StoreCtx: WasiView + WrpcView + 'static,
+{
+    // Drive epoch interruption so guest deadlines (and the wall-clock timeouts
+    // wrapped around each invocation) fire even while a guest executes
+    // CPU-bound code.
+    drive_epoch(runtime.registry().engine().clone(), runtime.options().epoch_tick);
+
+    // Periodically sample pool occupancy as metrics so pool sizing can be tuned
+    // from real data.
+    sample_pool(runtime.registry().engine().clone(), runtime.options().pool_metrics_interval);
+
+    // Wire the serve side of any host-mediated links before triggers fire, so a
+    // dispatched call always finds its target's wRPC server.
+    serve_links(runtime).await.context("wiring host-mediated link serve side")?;
+
+    try_join_all(servers).await?;
+    Ok(())
 }

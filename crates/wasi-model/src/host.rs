@@ -119,6 +119,19 @@ pub trait WasiModelCtx: Debug + Send + Sync + 'static {
     -> FutureResult<BackendAnswer>;
 }
 
+/// Forward the backend trait through a boxed trait object so a store context can
+/// hold a swappable `Box<dyn WasiModelCtx>` field and still satisfy the
+/// `omnia_wasi_view!` macro's `&mut self.field` coercion to `&mut dyn
+/// WasiModelCtx` — exactly what `#[wasi(omnia_wasi_model)]` on a boxed field
+/// (e.g. a record-vs-replay test runtime) needs.
+impl WasiModelCtx for Box<dyn WasiModelCtx> {
+    fn complete(
+        &self, prompt: Prompt, tool_host: Arc<dyn ToolHost>,
+    ) -> FutureResult<BackendAnswer> {
+        (**self).complete(prompt, tool_host)
+    }
+}
+
 /// Host-side capabilities for one completion, lent to backends that need them.
 ///
 /// Primarily the genai backend (RFC-59) uses these: each method is a typed
@@ -164,8 +177,8 @@ macro_rules! omnia_wasi_view {
             fn model(&mut self) -> omnia_wasi_model::WasiModelCtxView<'_> {
                 omnia_wasi_model::WasiModelCtxView {
                     ctx: &mut self.$field_name,
-                    table: &mut self.table,
-                    host_dispatch: ::std::sync::Arc::clone(&self.host_dispatch),
+                    table: &mut self.base.table,
+                    host_dispatch: ::std::sync::Arc::clone(&self.base.host_dispatch),
                 }
             }
         }

@@ -20,7 +20,6 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
         store_ctx_values,
         host_trait_impls,
         server_trait_impls,
-        wasi_view_impls,
         main_fn,
     } = Expanded::try_from(config)?;
 
@@ -37,6 +36,14 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
         }
     };
 
+    // `tokio` is only referenced by `try_join!` above, so import it only when
+    // there is at least one backend to connect (avoids an unused import).
+    let tokio_import = if backend_idents.is_empty() {
+        quote! {}
+    } else {
+        quote! { use omnia::tokio; }
+    };
+
     Ok(quote! {
         mod runtime {
             use std::path::PathBuf;
@@ -44,12 +51,9 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
 
             use anyhow::Result;
             use omnia::anyhow::Context as _;
-            use omnia::futures::future::{try_join_all, BoxFuture};
-            use omnia::tokio;
-            use omnia::wasmtime::component::HasData;
-            use omnia::wasmtime::{StoreLimits, StoreLimitsBuilder};
-            use omnia::wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
-            use omnia::{Backend, Compiled, Registry, HasLimits, RuntimeOptions, Runtime, Server};
+            use omnia::futures::future::BoxFuture;
+            #tokio_import
+            use omnia::{Backend, Compiled, Registry, Runtime, Server, StoreBase, StoreContext};
 
             use super::*;
 
@@ -64,7 +68,15 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                 let run_state = Context::new(compiled)
                     .await
                     .context("preparing runtime state")?;
-                run_state.start().await.context("starting runtime services")
+
+                // Every server runs against the same `run_state`, so they share
+                // one registry and therefore one `Engine` (and its pooling
+                // allocator's pool). `omnia::serve` drives epoch interruption,
+                // pool-metric sampling, and the host-mediated link serve side
+                // around them.
+                let servers: Vec<BoxFuture<'_, Result<()>>> =
+                    vec![#(Box::pin(#server_trait_impls.run(&run_state)),)*];
+                omnia::serve(&run_state, servers).await.context("starting runtime services")
             }
 
             /// Initiator state holding the guest registry and backend connections.
@@ -90,43 +102,6 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                         #(#backend_idents,)*
                     })
                 }
-
-                /// Start servers.
-                ///
-                /// N.B. for simplicity, all hosts are "servers" with a default implementation that
-                /// does nothing.
-                async fn start(&self) -> Result<()> {
-                    // Drive epoch interruption so guest deadlines (and the
-                    // wall-clock timeouts wrapped around each invocation) fire
-                    // even while a guest executes CPU-bound code.
-                    omnia::drive_epoch(
-                        self.registry.engine().clone(),
-                        self.registry.options().epoch_tick,
-                    );
-
-                    // Periodically sample pool occupancy as metrics so pool sizing can be tuned
-                    // from real data.
-                    omnia::sample_pool(
-                        self.registry.engine().clone(),
-                        self.registry.options().pool_metrics_interval,
-                    );
-
-                    // Wire the serve side of any host-mediated links before
-                    // triggers fire, so a dispatched call always finds its
-                    // target's wRPC server. A no-op when no `link`s are declared.
-                    omnia::serve_links(self)
-                        .await
-                        .context("wiring host-mediated link serve side")?;
-
-                    // Every server runs against the same `self`, so they share one
-                    // registry and therefore one `Engine`. The pooling allocator's
-                    // pool is per-`Engine`, so this keeps all per-request
-                    // instantiation drawing from one shared pool.
-                    let futures: Vec<BoxFuture<'_, Result<()>>> =
-                        vec![#(Box::pin(#server_trait_impls.run(self)),)*];
-                    try_join_all(futures).await?;
-                    Ok(())
-                }
             }
 
             impl Runtime for Context {
@@ -136,78 +111,28 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                     &self.registry
                 }
 
-                fn options(&self) -> &RuntimeOptions {
-                    self.registry.options()
-                }
-
                 fn store(&self) -> Self::StoreCtx {
-                    let wasi_ctx = WasiCtxBuilder::new()
-                        // .inherit_args()
-                        .inherit_env()
-                        .inherit_stdin()
-                        .stdout(tokio::io::stdout())
-                        .stderr(tokio::io::stderr())
-                        .build();
-
                     StoreCtx {
-                        table: ResourceTable::new(),
-                        wasi: wasi_ctx,
-                        limits: StoreLimitsBuilder::new()
-                            .memory_size(self.registry.options().max_memory_bytes)
-                            .build(),
-                        // Per-store wRPC view state for host-mediated dynamic
-                        // linking; inert unless the deployment declares `link`s.
-                        wrpc: omnia::WrpcState::new(),
-                        // Type-erased host→guest dispatcher (e.g. `wasi-model`'s
-                        // `resolve`); a fresh handle to this `Context`. Inert
-                        // unless a host binding reaches for it.
-                        host_dispatch: Arc::new(self.clone()),
+                        // Fixed per-store state: WASI inheritance, the memory
+                        // limiter, inert wRPC view state, and a fresh host->guest
+                        // dispatch handle to this `Context`.
+                        base: StoreBase::new(self.options(), Arc::new(self.clone())),
                         #(#store_ctx_values,)*
                     }
                 }
             }
 
             /// Per-guest instance data shared between the runtime and the guest.
+            ///
+            /// The `StoreContext` derive implements `WasiView`, `WrpcView`, and
+            /// `HasLimits` against `base`, plus one host view per `#[wasi(...)]`
+            /// backend field.
+            #[derive(StoreContext)]
             pub struct StoreCtx {
-                pub table: ResourceTable,
-                pub wasi: WasiCtx,
-                pub limits: StoreLimits,
-                pub wrpc: omnia::WrpcState,
-                /// Type-erased host→guest dispatcher backing host-mediated calls
-                /// such as `wasi-model`'s `resolve`. Inert unless a host uses it.
-                pub host_dispatch: Arc<dyn omnia::HostDispatch>,
-                #(pub #store_ctx_fields,)*
+                #[base]
+                pub base: StoreBase,
+                #(#store_ctx_fields,)*
             }
-
-            /// WASI view implementation for the default WASI context.
-            impl WasiView for StoreCtx {
-                fn ctx(&mut self) -> WasiCtxView<'_> {
-                    WasiCtxView {
-                        ctx: &mut self.wasi,
-                        table: &mut self.table,
-                    }
-                }
-            }
-
-            /// Exposes per-guest resource limits to the runtime.
-            impl HasLimits for StoreCtx {
-                fn limits(&mut self) -> &mut StoreLimits {
-                    &mut self.limits
-                }
-            }
-
-            /// wRPC view implementation backing host-mediated dynamic linking:
-            /// every store can encode/serve linked calls over the bound carrier.
-            impl omnia::WrpcView for StoreCtx {
-                type Invoke = omnia::LinkClient;
-
-                fn wrpc(&mut self) -> omnia::WrpcCtxView<'_, omnia::LinkClient> {
-                    self.wrpc.view(&mut self.table)
-                }
-            }
-
-            // WASI view implementations for enabled hosts.
-            #(#wasi_view_impls)*
         }
 
         // Main function (optional)
@@ -223,7 +148,6 @@ struct Expanded {
     store_ctx_values: Vec<TokenStream>,
     host_trait_impls: Vec<Path>,
     server_trait_impls: Vec<TokenStream>,
-    wasi_view_impls: Vec<TokenStream>,
     main_fn: TokenStream,
 }
 
@@ -255,27 +179,26 @@ impl TryFrom<&Config> for Expanded {
         let mut store_ctx_values = Vec::new();
         let mut host_trait_impls = Vec::new();
         let mut server_trait_impls = Vec::new();
-        let mut wasi_view_impls = Vec::new();
 
         for host in &input.hosts {
             let host_type = &host.type_;
+            // The host's `StoreCtx` field name and host-crate module path
+            // coincide (e.g. `WasiHttp` -> `omnia_wasi_http`), so the
+            // `StoreContext` derive's `#[wasi(omnia_wasi_http)]` attribute emits
+            // `omnia_wasi_http::omnia_wasi_view!(StoreCtx, omnia_wasi_http)`.
             let host_ident = wasi_ident(host_type);
             let backend_type = &host.backend;
             let backend_ident = field_ident(backend_type);
 
             host_trait_impls.push(host_type.clone());
-            store_ctx_fields.push(quote! {#host_ident: #backend_type});
+            store_ctx_fields.push(quote! {
+                #[wasi(#host_ident)]
+                pub #host_ident: #backend_type
+            });
             store_ctx_values.push(quote! {#host_ident: self.#backend_ident.clone()});
 
             // servers
             server_trait_impls.push(quote! {#host_type});
-
-            // WASI view impls
-            // HACK: derive module name from WASI type
-            let module = wasi_ident(host_type);
-            wasi_view_impls.push(quote! {
-                #module::omnia_wasi_view!(StoreCtx, #host_ident);
-            });
         }
 
         // main function (optional)
@@ -304,7 +227,6 @@ impl TryFrom<&Config> for Expanded {
             store_ctx_values,
             host_trait_impls,
             server_trait_impls,
-            wasi_view_impls,
             main_fn,
         })
     }

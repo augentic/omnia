@@ -110,7 +110,7 @@ macro_rules! omnia_wasi_view {
             fn vault(&mut self) -> omnia_wasi_vault::WasiVaultCtxView<'_> {
                 omnia_wasi_vault::WasiVaultCtxView {
                     ctx: &mut self.$field_name,
-                    table: &mut self.table,
+                    table: &mut self.base.table,
                 }
             }
         }

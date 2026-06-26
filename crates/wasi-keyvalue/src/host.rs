@@ -113,7 +113,7 @@ macro_rules! omnia_wasi_view {
             fn keyvalue(&mut self) -> omnia_wasi_keyvalue::WasiKeyValueCtxView<'_> {
                 omnia_wasi_keyvalue::WasiKeyValueCtxView {
                     ctx: &mut self.$field_name,
-                    table: &mut self.table,
+                    table: &mut self.base.table,
                 }
             }
         }

@@ -44,7 +44,12 @@ pub trait Runtime: Clone + Send + Sync + 'static {
     fn registry(&self) -> &Registry<Self::StoreCtx>;
 
     /// Returns the environment-derived runtime options.
-    fn options(&self) -> &RuntimeOptions;
+    ///
+    /// Defaults to the registry's options, which every runtime already owns; an
+    /// implementation only overrides this if it sources options elsewhere.
+    fn options(&self) -> &RuntimeOptions {
+        self.registry().options()
+    }
 
     /// Build a fully configured [`Store`] for a single guest invocation.
     ///

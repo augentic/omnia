@@ -12,6 +12,7 @@ mod routing;
 mod runtime;
 mod selector;
 mod source;
+mod store;
 mod telemetry;
 mod traits;
 mod transport;
@@ -20,7 +21,7 @@ use std::path::PathBuf;
 
 pub use clap::Parser;
 use clap::Subcommand;
-pub use omnia_runtime_macro::runtime;
+pub use omnia_runtime_macro::{StoreContext, runtime};
 // Re-exported so the `runtime!` macro can generate the per-store
 // `WrpcView` implementation that host-mediated dynamic linking requires.
 pub use wrpc_wasmtime::{WrpcCtxView, WrpcView};
@@ -39,6 +40,7 @@ pub use self::routing::*;
 pub use self::runtime::*;
 pub use self::selector::*;
 pub use self::source::*;
+pub use self::store::*;
 pub use self::telemetry::{Telemetry, TracingLayer, resource};
 pub use self::traits::*;
 pub use self::transport::*;

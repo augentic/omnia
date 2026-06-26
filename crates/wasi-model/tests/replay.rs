@@ -29,63 +29,26 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use anyhow::{Context as _, Result, bail};
 use futures::FutureExt as _;
 use omnia::wasmtime::component::Val;
-use omnia::wasmtime::{StoreLimits, StoreLimitsBuilder};
-use omnia::wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
-use omnia::{
-    Backend, Compiled, GuestId, HasLimits, HostDispatch, LinkClient, Registry, RegistryBuilder,
-    Runtime, RuntimeOptions, WrpcCtxView, WrpcState, WrpcView,
-};
+use omnia::{Backend, Compiled, GuestId, Registry, RegistryBuilder, Runtime, StoreBase};
 use omnia_wasi_model::{
     BackendAnswer, ConnectOptions, FutureResult, ModelDefault, Prompt, Recording, Reference,
-    ToolHost, WasiModel, WasiModelCtx, WasiModelCtxView, WasiModelView,
+    ToolHost, WasiModel, WasiModelCtx,
 };
 use serde_json::{Value, json};
 
 /// A factory the test runtime calls per store to install a fresh backend.
 type BackendFactory = Arc<dyn Fn() -> Box<dyn WasiModelCtx> + Send + Sync>;
 
-/// Per-store context: the WASI + wRPC views the floor needs, plus the swappable
-/// model backend the test installs (record vs replay).
+/// Per-store context: the fixed [`StoreBase`] state the floor needs, plus the
+/// swappable model backend the test installs (record vs replay). The
+/// `StoreContext` derive supplies the `WasiView` / `WrpcView` / `HasLimits`
+/// impls and the `WasiModel` host view against `base`.
+#[derive(omnia::StoreContext)]
 struct TestCtx {
-    table: ResourceTable,
-    wasi: WasiCtx,
-    limits: StoreLimits,
-    wrpc: WrpcState,
-    host_dispatch: Arc<dyn HostDispatch>,
+    #[base]
+    base: StoreBase,
+    #[wasi(omnia_wasi_model)]
     model: Box<dyn WasiModelCtx>,
-}
-
-impl WasiView for TestCtx {
-    fn ctx(&mut self) -> WasiCtxView<'_> {
-        WasiCtxView {
-            ctx: &mut self.wasi,
-            table: &mut self.table,
-        }
-    }
-}
-
-impl HasLimits for TestCtx {
-    fn limits(&mut self) -> &mut StoreLimits {
-        &mut self.limits
-    }
-}
-
-impl WrpcView for TestCtx {
-    type Invoke = LinkClient;
-
-    fn wrpc(&mut self) -> WrpcCtxView<'_, LinkClient> {
-        self.wrpc.view(&mut self.table)
-    }
-}
-
-impl WasiModelView for TestCtx {
-    fn model(&mut self) -> WasiModelCtxView<'_> {
-        WasiModelCtxView {
-            ctx: self.model.as_mut(),
-            table: &mut self.table,
-            host_dispatch: Arc::clone(&self.host_dispatch),
-        }
-    }
 }
 
 /// A minimal [`Runtime`] over the model registry; `store()` installs the backend
@@ -106,23 +69,13 @@ impl Runtime for TestRuntime {
         // `resolve` callee) draws one store here — the instance-per-call witness.
         self.stores_built.fetch_add(1, Ordering::SeqCst);
         TestCtx {
-            table: ResourceTable::new(),
-            wasi: WasiCtxBuilder::new().build(),
-            limits: StoreLimitsBuilder::new()
-                .memory_size(self.registry.options().max_memory_bytes)
-                .build(),
-            wrpc: WrpcState::new(),
-            host_dispatch: Arc::new(self.clone()),
+            base: StoreBase::new(self.options(), Arc::new(self.clone())),
             model: (self.backend)(),
         }
     }
 
     fn registry(&self) -> &Registry<Self::StoreCtx> {
         &self.registry
-    }
-
-    fn options(&self) -> &RuntimeOptions {
-        self.registry.options()
     }
 }
 

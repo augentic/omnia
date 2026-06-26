@@ -110,7 +110,7 @@ macro_rules! omnia_wasi_view {
             fn identity(&mut self) -> omnia_wasi_identity::WasiIdentityCtxView<'_> {
                 omnia_wasi_identity::WasiIdentityCtxView {
                     ctx: &mut self.$field_name,
-                    table: &mut self.table,
+                    table: &mut self.base.table,
                 }
             }
         }
