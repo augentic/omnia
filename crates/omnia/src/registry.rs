@@ -192,7 +192,7 @@ impl<T: 'static> Registry<T> {
     /// Returns the shared host-mediated dynamic-linking dispatch handle (the
     /// selector strategy, link allow-list union, and bound transport).
     #[must_use]
-    pub const fn dispatch(&self) -> &Arc<DispatchHandle> {
+    pub(crate) const fn dispatch(&self) -> &Arc<DispatchHandle> {
         &self.dispatch
     }
 

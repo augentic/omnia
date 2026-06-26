@@ -126,7 +126,7 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
                 let timer = Instant::now();
 
                 for i in 0..1000 {
-                    wit_bindgen::spawn(async move {
+                    wit_bindgen::spawn_local(async move {
                         tracing::debug!("sending message iteration {i}");
                         let Ok(client) = Client::connect("default".to_string()).await else {
                             tracing::error!("failed to connect default client");

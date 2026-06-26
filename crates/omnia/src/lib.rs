@@ -21,29 +21,33 @@ use std::path::PathBuf;
 
 pub use clap::Parser;
 use clap::Subcommand;
-pub use omnia_runtime_macro::{StoreContext, runtime};
-// Re-exported so the `runtime!` macro can generate the per-store
-// `WrpcView` implementation that host-mediated dynamic linking requires.
+// The `Runtime` derive macro and the `Runtime` trait (re-exported below from
+// `traits`) share a name but live in different namespaces, like `Clone`.
+pub use omnia_runtime_macro::{Runtime, StoreContext, runtime};
+// Macro-support re-exports: named by `runtime!`/`StoreContext`-generated code via
+// `::omnia::…`, not part of the documented public surface.
+#[doc(hidden)]
 pub use wrpc_wasmtime::{WrpcCtxView, WrpcView};
 #[doc(hidden)]
 pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
-// re-export internal modules
+// Curated public surface: only what a host server, a hand-written runtime, or the
+// `runtime!` macro needs. Everything else (lifecycle helpers, dispatch, manifest,
+// source, routing strategy, transport carriers) is `pub` inside a private module
+// and simply not re-exported here.
 #[cfg(feature = "jit")]
-pub use self::compile::*;
-pub use self::create::*;
-pub use self::dispatch::*;
-pub use self::manifest::*;
-pub use self::options::*;
-pub use self::registry::*;
-pub use self::routing::*;
-pub use self::runtime::*;
-pub use self::selector::*;
-pub use self::source::*;
-pub use self::store::*;
-pub use self::telemetry::{Telemetry, TracingLayer, resource};
-pub use self::traits::*;
-pub use self::transport::*;
+pub use self::compile::compile;
+pub use self::create::{Compiled, RegistryBuilder};
+pub use self::dispatch::{HostDispatch, serve_links};
+pub use self::options::RuntimeOptions;
+pub use self::registry::{Guest, GuestId, Registry};
+pub use self::routing::{HttpRoutes, Resolver, Routes, TopicRoutes, TriggerRouter};
+pub use self::runtime::serve;
+pub use self::selector::{FirstArgSelector, GuestSelector};
+pub use self::store::StoreBase;
+pub use self::telemetry::{Telemetry, resource};
+pub use self::traits::{Backend, FromEnv, FutureResult, HasLimits, Host, Runtime, Server};
+pub use self::transport::{LinkClient, WrpcState};
 
 /// Command line interface for omnia.
 #[derive(Parser, PartialEq, Eq)]

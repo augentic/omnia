@@ -61,6 +61,11 @@ impl Manifest {
         if self.guests.is_empty() {
             bail!("manifest defines no [[guest]] entries");
         }
+        for (target, over) in &self.transport.targets {
+            if over.kind == TransportKind::InProcess && over.address.is_some() {
+                bail!("transport target `{target}`: in-process transport takes no address");
+            }
+        }
         Ok(())
     }
 
@@ -89,7 +94,9 @@ impl Manifest {
                     let resolved = if path.is_absolute() { path.clone() } else { base.join(path) };
                     sources.push(Source::with_id(id, resolved));
                 }
-                SourceSpec::Oci(_) => bail!("guest `{id}`: OCI sources are not yet supported"),
+                SourceSpec::Oci(reference) => {
+                    bail!("guest `{id}`: OCI source `{reference}` is not yet supported")
+                }
             }
         }
         Ok(sources)
@@ -189,8 +196,9 @@ pub enum SourceSpec {
     /// A local `.wasm` / pre-compiled `.bin` path (resolved relative to the
     /// manifest's directory).
     Path(PathBuf),
-    /// A digest-pinned OCI reference. Accepted by the parser; the puller lands
-    /// as a follow-up.
+    /// A digest-pinned OCI reference. Accepted by the parser and surfaced in the
+    /// "not yet supported" error; the puller that consumes it lands as a
+    /// follow-up.
     Oci(String),
 }
 
@@ -230,7 +238,9 @@ pub enum TransportKind {
     Quic,
 }
 
-/// A per-target transport override for distributed nodes.
+/// A per-target transport override for distributed nodes. Parsed and validated
+/// in Phase 1; the dispatch path that routes by kind/address lands with
+/// distributed transports.
 #[derive(Clone, Debug, Deserialize)]
 pub struct TransportOverride {
     /// The transport mechanism.
@@ -308,6 +318,44 @@ mod tests {
         let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
         assert_eq!(manifest.transport.default, TransportKind::InProcess);
         assert!(manifest.transport.targets.is_empty());
+    }
+
+    #[test]
+    fn parse_target_override() {
+        let toml = r#"
+            [[guest]]
+            id = "only"
+            source.path = "./only.wasm"
+
+            [transport]
+            default = "in-process"
+
+            [transport.target.remote]
+            kind = "unix"
+            address = "/run/omnia/remote.sock"
+        "#;
+
+        let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
+        let over = &manifest.transport.targets["remote"];
+        assert_eq!(over.kind, TransportKind::Unix);
+        assert_eq!(over.address.as_deref(), Some("/run/omnia/remote.sock"));
+    }
+
+    #[test]
+    fn reject_in_process_address() {
+        let path =
+            std::env::temp_dir().join(format!("omnia_manifest_inproc_{}.toml", std::process::id()));
+        std::fs::write(
+            &path,
+            "[[guest]]\nid = \"only\"\nsource.path = \"./only.wasm\"\n\n\
+             [transport.target.x]\nkind = \"in-process\"\naddress = \"nope\"\n",
+        )
+        .expect("temp manifest should write");
+
+        let result = Manifest::load(&path);
+        let _ = std::fs::remove_file(&path);
+
+        assert!(result.is_err(), "in-process transport must not carry an address");
     }
 
     #[test]

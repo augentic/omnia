@@ -2067,7 +2067,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "toml",
- "tower",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",

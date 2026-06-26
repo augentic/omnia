@@ -16,12 +16,6 @@
 //! per invocation — closing the single-use limitation of a bare
 //! [`Oneshot`](wrpc_transport::frame::Oneshot).
 
-// The in-process server/client aliases and the carrier constructor are
-// `pub(crate)` on purpose: `lib.rs` re-exports this module's public items with a
-// glob, so `pub` would leak these internals into the crate's API. The nursery
-// lint's `pub` suggestion is wrong here.
-#![allow(clippy::redundant_pub_crate)]
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -38,11 +32,11 @@ const DUPLEX_BUF: usize = 1 << 16;
 
 /// The in-process wRPC server type: framed transport over a `tokio::io::duplex`
 /// byte stream, one connection accepted per dispatched call.
-pub(crate) type InProcServer = Server<(), ReadHalf<DuplexStream>, WriteHalf<DuplexStream>>;
+pub type InProcServer = Server<(), ReadHalf<DuplexStream>, WriteHalf<DuplexStream>>;
 
 /// The in-process wRPC client handle: a single stream pair to one target's
 /// server, used for exactly one invocation.
-pub(crate) type InProcClient = Oneshot<ReadHalf<DuplexStream>, WriteHalf<DuplexStream>>;
+pub type InProcClient = Oneshot<ReadHalf<DuplexStream>, WriteHalf<DuplexStream>>;
 
 /// The wRPC client handle type a guest store advertises to `wrpc-wasmtime`.
 ///
@@ -79,13 +73,13 @@ impl InProcess {
     /// Assemble the carrier from per-target servers (each already wired with its
     /// served exports by [`crate::serve_links`]).
     #[must_use]
-    pub(crate) const fn new(servers: HashMap<GuestId, Arc<InProcServer>>) -> Self {
+    pub const fn new(servers: HashMap<GuestId, Arc<InProcServer>>) -> Self {
         Self { servers }
     }
 
     /// Returns the wRPC server serving `target`'s host-mediated exports, if any.
     #[must_use]
-    pub(crate) fn server(&self, target: &GuestId) -> Option<&Arc<InProcServer>> {
+    pub fn server(&self, target: &GuestId) -> Option<&Arc<InProcServer>> {
         self.servers.get(target)
     }
 }

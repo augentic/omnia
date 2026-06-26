@@ -6,30 +6,22 @@ It allows you to declaratively assemble a runtime that provides specific capabil
 
 ## Quick Start
 
-Use the `runtime!` macro to configure which WASI interfaces and backends your host runtime needs. This generates a `runtime_run` function that handles the entire lifecycle.
+Use the `runtime!` macro to declare which WASI interfaces (`hosts`) and backends your host runtime needs. It generates the `StoreCtx`, the `Runtime` implementation, the WASI links, the trigger servers, and — with `main: true` — a `main` that parses the CLI and serves.
 
 ```rust,ignore
-use omnia::runtime;
-use omnia_wasi_http::WasiHttpCtx;
-use omnia_wasi_keyvalue::KeyValueDefault;
-use omnia_wasi_otel::DefaultOtel;
+use omnia_wasi_http::{HttpDefault, WasiHttp};
+use omnia_wasi_otel::{OtelDefault, WasiOtel};
 
-// Define the runtime with required capabilities
 omnia::runtime!({
-    "http": WasiHttpCtx,
-    "keyvalue": KeyValueDefault,
-    "otel": DefaultOtel,
+    main: true,
+    hosts: {
+        WasiHttp: HttpDefault,
+        WasiOtel: OtelDefault,
+    }
 });
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // Parse command line arguments (provided by the macro-generated Cli)
-    let cli = Cli::parse();
-
-    // Run the runtime
-    runtime_run(cli).await
-}
 ```
+
+Each `Host: Backend` pair links a WASI interface and binds it to a host backend. Set `main: false` to supply your own entry point (drive it with `omnia::Cli` and `omnia::serve`).
 
 ## Core Traits
 
@@ -42,6 +34,20 @@ The runtime is built around a set of traits that allow services to be plugged in
 | `Backend`   | Connects to an external service (e.g., Redis, Postgres) during startup.             |
 | `Runtime`   | Manages per-request state and provides access to the component instance.            |
 | `FromEnv`   | Configures backend connections from environment variables.                          |
+
+## Public API
+
+`omnia` exposes only what a deployment author, a host-server crate, or a hand-written runtime needs; lifecycle, dispatch, manifest, and transport-carrier internals are crate-private.
+
+- **Macros:** `runtime!`, `#[derive(Runtime)]`, `#[derive(StoreContext)]`
+- **Lifecycle:** `serve` — drives epoch interruption, pool-metric sampling, and host-mediated link serving
+- **Runtime + store:** `Runtime`, `StoreBase`, `Host`, `Server`, `Backend`, `FromEnv`, `HasLimits`, `HostDispatch`, `FutureResult`
+- **Registry pipeline:** `RegistryBuilder`, `Compiled`, `Registry`, `Guest`, `GuestId`, `RuntimeOptions`
+- **Trigger routing (host servers):** `HttpRoutes`, `TopicRoutes`, `Routes`, `Resolver`, `TriggerRouter`
+- **Host-mediated linking (advanced):** `serve_links`, `GuestSelector`, `FirstArgSelector`, `LinkClient`, `WrpcState`
+- **Telemetry + CLI:** `Telemetry`, `resource`, `Cli`, `Command`, `Parser`
+
+Most deployments only touch the `runtime!` macro; a hand-written runtime instead derives `Runtime`/`StoreContext` (or implements them) and calls `serve`.
 
 ## Features
 

@@ -17,7 +17,6 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
         backend_idents,
         backend_types,
         store_ctx_fields,
-        store_ctx_values,
         host_trait_impls,
         server_trait_impls,
         main_fn,
@@ -80,10 +79,16 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
             }
 
             /// Initiator state holding the guest registry and backend connections.
-            #[derive(Clone)]
+            ///
+            /// The `Runtime` derive generates `registry()` and `store()` from the
+            /// `#[runtime(...)]` attributes: `store()` builds the fixed `base`
+            /// plus one cloned backend per `#[runtime(store = ...)]` field.
+            #[derive(Clone, Runtime)]
+            #[runtime(store = StoreCtx)]
             struct Context {
+                #[runtime(registry)]
                 registry: Arc<Registry<StoreCtx>>,
-                #(pub #context_fields,)*
+                #(#context_fields,)*
             }
 
             impl Context {
@@ -101,24 +106,6 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                         registry: Arc::new(compiled.build()?),
                         #(#backend_idents,)*
                     })
-                }
-            }
-
-            impl Runtime for Context {
-                type StoreCtx = StoreCtx;
-
-                fn registry(&self) -> &Registry<Self::StoreCtx> {
-                    &self.registry
-                }
-
-                fn store(&self) -> Self::StoreCtx {
-                    StoreCtx {
-                        // Fixed per-store state: WASI inheritance, the memory
-                        // limiter, inert wRPC view state, and a fresh host->guest
-                        // dispatch handle to this `Context`.
-                        base: StoreBase::new(self.options(), Arc::new(self.clone())),
-                        #(#store_ctx_values,)*
-                    }
                 }
             }
 
@@ -145,7 +132,6 @@ struct Expanded {
     backend_idents: Vec<Ident>,
     backend_types: Vec<Path>,
     store_ctx_fields: Vec<TokenStream>,
-    store_ctx_values: Vec<TokenStream>,
     host_trait_impls: Vec<Path>,
     server_trait_impls: Vec<TokenStream>,
     main_fn: TokenStream,
@@ -155,30 +141,15 @@ impl TryFrom<&Config> for Expanded {
     type Error = syn::Error;
 
     fn try_from(input: &Config) -> Result<Self, Self::Error> {
-        // `Context` struct
-        let mut context_fields = Vec::new();
-        let mut backend_idents = Vec::new();
-        let mut backend_types = Vec::new();
-        let mut seen_backends = Vec::new();
-
-        for backend in &input.backends {
-            // deduplicate backends based on their string representation
-            let backend_str = quote! {#backend}.to_string();
-            if seen_backends.contains(&backend_str) {
-                continue;
-            }
-            seen_backends.push(backend_str);
-
-            let field = field_ident(backend);
-            context_fields.push(quote! {#field: #backend});
-            backend_idents.push(field);
-            backend_types.push(backend.clone());
-        }
-
         let mut store_ctx_fields = Vec::new();
-        let mut store_ctx_values = Vec::new();
         let mut host_trait_impls = Vec::new();
         let mut server_trait_impls = Vec::new();
+
+        // For each backend field, the `StoreCtx` field names that clone from it,
+        // keyed by backend field ident in host-declaration order. Emitted as
+        // `#[runtime(store = ...)]` on the `Context` backend field so the
+        // `Runtime` derive generates the matching `store()` assignment.
+        let mut store_targets: Vec<(Ident, Vec<Ident>)> = Vec::new();
 
         for host in &input.hosts {
             let host_type = &host.type_;
@@ -195,10 +166,42 @@ impl TryFrom<&Config> for Expanded {
                 #[wasi(#host_ident)]
                 pub #host_ident: #backend_type
             });
-            store_ctx_values.push(quote! {#host_ident: self.#backend_ident.clone()});
-
-            // servers
             server_trait_impls.push(quote! {#host_type});
+
+            // Record the StoreCtx target this backend field feeds; several hosts
+            // may share one (deduplicated) backend.
+            if let Some((_, targets)) =
+                store_targets.iter_mut().find(|(backend, _)| *backend == backend_ident)
+            {
+                targets.push(host_ident);
+            } else {
+                store_targets.push((backend_ident, vec![host_ident]));
+            }
+        }
+
+        // `Context` backend fields (deduplicated upstream in `Config`). Each
+        // carries its `#[runtime(store = ...)]` attributes plus the backend
+        // connection plumbing.
+        let mut context_fields = Vec::new();
+        let mut backend_idents = Vec::new();
+        let mut backend_types = Vec::new();
+
+        for backend in &input.backends {
+            let field = field_ident(backend);
+            let store_attrs: Vec<TokenStream> = store_targets
+                .iter()
+                .find(|(other, _)| *other == field)
+                .into_iter()
+                .flat_map(|(_, targets)| targets)
+                .map(|target| quote! { #[runtime(store = #target)] })
+                .collect();
+
+            context_fields.push(quote! {
+                #(#store_attrs)*
+                pub #field: #backend
+            });
+            backend_idents.push(field);
+            backend_types.push(backend.clone());
         }
 
         // main function (optional)
@@ -224,7 +227,6 @@ impl TryFrom<&Config> for Expanded {
             backend_idents,
             backend_types,
             store_ctx_fields,
-            store_ctx_values,
             host_trait_impls,
             server_trait_impls,
             main_fn,

@@ -59,7 +59,7 @@ The fixed portion is duplicated in every generated runtime and reproduced by han
 ## 4. Non-goals
 
 - Changing the `runtime!` input syntax (`hosts: { WasiHttp: HttpDefault, … }`).
-- A `#[derive(Runtime)]` on `Context` in the first pass (optional follow-on; see §8).
+- A `#[derive(Runtime)]` on `Context` in the first pass (landed as a follow-on; see §8).
 - Replacing per-host-crate `omnia_wasi_view!` macros with generated code inside each host crate (they stay; only their field paths change).
 - Changing `RegistryBuilder`, `Compiled`, or the guest registry / dispatch machinery.
 
@@ -350,9 +350,9 @@ pub trait Runtime: Clone + Send + Sync + 'static {
 }
 ```
 
-## 8. Optional follow-on: `#[derive(Runtime)]`
+## 8. Follow-on (implemented): `#[derive(Runtime)]`
 
-If hand-written runtimes become common, a second derive on `Context` could generate `registry()` / `store()` from attributes:
+Implemented in `omnia-runtime-macro` and re-exported as `omnia::Runtime` (the derive macro shares its name with the `Runtime` trait, like `Clone` — different namespaces). It generates `registry()` / `store()` from attributes:
 
 ```rust
 #[derive(Clone, Runtime)]
@@ -363,7 +363,7 @@ struct Context {
 }
 ```
 
-Defer until the `StoreContext` derive + `StoreBase` + `serve` land. The attribute coupling between `Context` field names and `StoreCtx` field names adds proc-macro machinery that only earns its place if manual runtimes are frequent.
+`#[runtime(store = StoreCtx)]` sets the associated type; the lone `#[runtime(registry)]` field backs `registry()`; each `#[runtime(store = <field>)]` clones a backend into that `StoreCtx` field, after the fixed `base: StoreBase::new(...)` tail. `runtime!` now emits exactly this shape, so deployment authors never write the attributes by hand. Hand-written runtimes whose `store()` carries side effects (e.g. `replay.rs` / `linking.rs`, which count `stores_built`) keep their manual `impl Runtime`.
 
 ## 9. Migration plan
 

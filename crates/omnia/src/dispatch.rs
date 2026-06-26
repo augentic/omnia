@@ -27,12 +27,6 @@
 //! ([`ValEncoder`]/[`read_value`]) and instance-per-call serve integration
 //! ([`ServeExt::serve_function`]) for the actual carrier round-trip.
 
-// This module declares a few crate-internal helpers (`link_dynamic`, the
-// dispatch-handle constructor) as `pub(crate)`. That is deliberate: `lib.rs`
-// re-exports the module's public items with a glob, so `pub` would leak them
-// into the crate's API. The nursery lint's `pub` suggestion is wrong here.
-#![allow(clippy::redundant_pub_crate)]
-
 use std::collections::{BTreeSet, HashMap};
 use std::iter::zip;
 use std::pin::pin;
@@ -341,7 +335,7 @@ impl DispatchHandle {
     /// Create a shared dispatch handle. The transport is installed later by
     /// [`serve_links`], once each target's serve side is wired.
     #[must_use]
-    pub(crate) fn new(
+    pub fn new(
         selector: Arc<dyn GuestSelector>, links: BTreeSet<Box<str>>, max_depth: usize,
     ) -> Arc<Self> {
         Arc::new(Self {
@@ -357,7 +351,7 @@ impl DispatchHandle {
     /// allow-list — the set of interfaces to polyfill (caller side) and serve
     /// (callee side).
     #[must_use]
-    pub(crate) const fn links(&self) -> &BTreeSet<Box<str>> {
+    pub const fn links(&self) -> &BTreeSet<Box<str>> {
         &self.links
     }
 
@@ -423,7 +417,7 @@ impl Drop for DepthGuard<'_> {
 ///
 /// Returns an error if a named link target is not an interface import, or if a
 /// function cannot be defined on the linker.
-pub(crate) fn link<T>(
+pub fn link<T>(
     engine: &Engine, linker: &mut Linker<T>, guests: &[LoadedGuest], handle: &Arc<DispatchHandle>,
 ) -> Result<()>
 where
