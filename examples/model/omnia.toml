@@ -14,7 +14,7 @@
 # Build both guests first (see README.md), then run from the repository root:
 #
 #   OMNIA_REPLAY_DIR=examples/model/fixtures \
-#     cargo run --example model -- run --config examples/model/omni.toml
+#     cargo run --example model -- run --config examples/model/omnia.toml
 
 [[guest]]
 id = "model"

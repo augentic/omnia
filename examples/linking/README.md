@@ -10,7 +10,7 @@ carried over in-process [wRPC](https://github.com/bytecodealliance/wrpc).
   declares no trigger of its own, so it is reachable *only* via dispatch.
 - `router` ([`router.rs`](router.rs)) **imports** `omnia:link/echo` and exposes
   `run(message)`. Its component does not satisfy the import.
-- [`omni.toml`](omni.toml) names `omnia:link/echo` in the router's `link`
+- [`omnia.toml`](omnia.toml) names `omnia:link/echo` in the router's `link`
   allow-list. The floor polyfills that import onto the shared linker and, at
   startup, wires the serve side of every linked interface.
 
@@ -50,7 +50,7 @@ This emits `target/wasm32-wasip2/debug/examples/linking_responder_wasm.wasm` and
 ## Run
 
 ```bash
-cargo run --example linking -- run --config examples/linking/omni.toml
+cargo run --example linking -- run --config examples/linking/omnia.toml
 ```
 
 The host starts, polyfills the router's import, and wires the responder's serve

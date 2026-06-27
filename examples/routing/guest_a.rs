@@ -1,7 +1,7 @@
 //! # Routing example — guest A
 //!
 //! A minimal HTTP guest that identifies itself as `a`. The deployment manifest
-//! (`omni.toml`) routes the `/a` path prefix to this guest.
+//! (`omnia.toml`) routes the `/a` path prefix to this guest.
 
 #![cfg(target_arch = "wasm32")]
 

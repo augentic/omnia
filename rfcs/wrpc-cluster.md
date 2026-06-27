@@ -11,7 +11,7 @@
 ## 1. What remains
 
 The mechanism is in place: one `Engine` + one `Linker`, a `Registry` of identity →
-`InstancePre`, capability-based trigger routing from `omni.toml`, the `LinkTransport`
+`InstancePre`, capability-based trigger routing from `omnia.toml`, the `LinkTransport`
 seam, the in-process wRPC carrier, the `GuestSelector`, instance-per-call dispatch,
 resource-crossing rejection, and the dispatch-depth bound. What is missing is the
 "desktop → cloud" half — carrying the *same* dispatch over the wire — and the
@@ -38,7 +38,7 @@ location a config decision rather than a code one.
 
 - **Unix-domain socket (next).** `wrpc-transport`'s UDS `Client` / `UnixListener` —
 same node, separate processes. This is the natural first proof that the dispatch path
-is unchanged across a real transport boundary: bind UDS in `omni.toml`
+is unchanged across a real transport boundary: bind UDS in `omnia.toml`
 (`[transport] default = "unix"`), run `examples/linking` with the two guests in
 separate processes, and confirm the echo round-trips with no guest or dispatch-code
 change.
@@ -62,7 +62,7 @@ dispatch gains a remote arm.
 
 **Acceptance:** demonstrate the desktop → cloud transport swap — the same
 `examples/linking` (and a representative two-guest deployment) running co-located, then
-over UDS, then across two processes/nodes over NATS — driven entirely by `omni.toml`,
+over UDS, then across two processes/nodes over NATS — driven entirely by `omnia.toml`,
 with no guest or dispatch-code change. `cargo make ci` stays green.
 
 ## 3. Phase 4 — Hardening

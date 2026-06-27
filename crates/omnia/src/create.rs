@@ -57,7 +57,7 @@ impl RegistryBuilder {
         self
     }
 
-    /// Set the deployment manifest (`omni.toml`) path for a multi-guest
+    /// Set the deployment manifest (`omnia.toml`) path for a multi-guest
     /// deployment.
     #[must_use]
     pub fn config(mut self, config: impl Into<Option<PathBuf>>) -> Self {
@@ -92,7 +92,7 @@ impl RegistryBuilder {
             }
         } else {
             let wasm = self.wasm.as_ref().context(
-                "no guest specified: pass a <wasm> path, or --config <omni.toml> (or set OMNIA_CONFIG)",
+                "no guest specified: pass a <wasm> path, or --config <omnia.toml> (or set OMNIA_CONFIG)",
             )?;
 
             // The single-file shorthand is a one-guest deployment: its sole guest is

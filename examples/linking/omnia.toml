@@ -11,7 +11,7 @@
 #
 # Build the guests first (see README.md), then run from the repository root:
 #
-#   cargo run --example linking -- run --config examples/linking/omni.toml
+#   cargo run --example linking -- run --config examples/linking/omnia.toml
 
 [[guest]]
 id = "responder"

@@ -1,6 +1,6 @@
 //! Multi-guest HTTP routing example runtime.
 //!
-//! One HTTP server fronts two guests; `omni.toml`'s `[[route.http]]` table
+//! One HTTP server fronts two guests; `omnia.toml`'s `[[route.http]]` table
 //! selects the guest per request by longest-prefix match.
 
 cfg_if::cfg_if! {

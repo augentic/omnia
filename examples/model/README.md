@@ -17,7 +17,7 @@ receives a **validated, deterministic** answer from the in-tree `ModelDefault`
   `resolve` and is reached *only* via host-mediated dispatch when a backend
   follows `grants.references` (instance-per-call, no trigger). It is inert under
   the replay backend; the resolve path is proven by the integration test.
-- [`omni.toml`](omni.toml) declares the `model` guest and the `shelf` guest.
+- [`omnia.toml`](omnia.toml) declares the `model` guest and the `shelf` guest.
 - [`fixtures/`](fixtures) holds the checked-in replay fixture: the reduced,
   canonical prompt (the key) mapped to the validated answer.
 
@@ -54,7 +54,7 @@ Point `OMNIA_REPLAY_DIR` at the checked-in fixtures and start the host:
 
 ```bash
 OMNIA_REPLAY_DIR=examples/model/fixtures \
-  cargo run --example model -- run --config examples/model/omni.toml
+  cargo run --example model -- run --config examples/model/omnia.toml
 ```
 
 Because the guest exports a plain async `run` (not an HTTP/messaging trigger),

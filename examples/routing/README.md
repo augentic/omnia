@@ -19,7 +19,7 @@ cargo build --example routing-b-wasm --target wasm32-wasip2
 ## Run the host
 
 ```sh
-cargo run --example routing -- run --config examples/routing/omni.toml
+cargo run --example routing -- run --config examples/routing/omnia.toml
 ```
 
 The server listens on `localhost:8080`.

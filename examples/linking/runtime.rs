@@ -1,7 +1,7 @@
 //! Host-mediated dynamic linking example runtime (Phase 2 of
 //! `rfcs/guest-registry.md`).
 //!
-//! Two guests are registered from `omni.toml`: `responder` (exports
+//! Two guests are registered from `omnia.toml`: `responder` (exports
 //! `omnia:link/echo`) and `router` (imports it, exports `run`). The router's
 //! import is unsatisfied by its own component — the host polyfills it on the
 //! shared linker and, at startup, wires the serve side of every linked interface

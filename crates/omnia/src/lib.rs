@@ -68,7 +68,7 @@ pub enum Command {
         /// deployment manifest instead.
         wasm: Option<PathBuf>,
 
-        /// Path to a deployment manifest (`omni.toml`) describing a multi-guest
+        /// Path to a deployment manifest (`omnia.toml`) describing a multi-guest
         /// deployment. Falls back to the `OMNIA_CONFIG` environment variable.
         #[arg(short, long)]
         config: Option<PathBuf>,

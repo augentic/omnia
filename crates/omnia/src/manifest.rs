@@ -1,4 +1,4 @@
-//! # Deployment manifest (`omni.toml`)
+//! # Deployment manifest (`omnia.toml`)
 //!
 //! Registry population, routing, linking, and transport are *deployment*
 //! decisions, not build-time ones. They live in a startup manifest loaded

@@ -117,7 +117,7 @@ async fn router_dispatches_to_responder() -> Result<()> {
         return Ok(());
     };
 
-    // A manifest mirroring examples/linking/omni.toml, with absolute source paths
+    // A manifest mirroring examples/linking/omnia.toml, with absolute source paths
     // so it resolves regardless of the working directory.
     let manifest_path =
         std::env::temp_dir().join(format!("omnia-linking-{}.toml", std::process::id()));
