@@ -45,6 +45,8 @@ pub use self::dispatch::{HostDispatch, serve_links};
 pub use self::options::RuntimeOptions;
 pub use self::registry::{Guest, GuestId, Registry};
 pub use self::routing::{CliRoutes, HttpRoutes, Resolver, Routes, TopicRoutes, TriggerRouter};
+#[doc(hidden)]
+pub use self::runtime::{drive, run_main};
 pub use self::runtime::{ExitStatus, serve};
 pub use self::selector::{FirstArgSelector, GuestSelector};
 // Type-state markers naming the `StoreBaseBuilder` member states; users chain the

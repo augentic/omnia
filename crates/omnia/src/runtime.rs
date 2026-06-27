@@ -7,16 +7,22 @@
 //! gauges via the `tracing` metrics bridge) and the [`ExitStatus`] a deployment
 //! yields.
 
+use std::future::Future;
+use std::path::PathBuf;
+use std::process::ExitCode;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result};
+use clap::Parser as _;
 use futures::future::{BoxFuture, try_join_all};
 use wasmtime::Engine;
 use wasmtime_wasi::WasiView;
 use wrpc_wasmtime::WrpcView;
 
+use crate::command::run_command;
 use crate::dispatch::serve_links;
 use crate::traits::Runtime;
+use crate::{Cli, Command};
 
 /// Spawn a detached background task that drives epoch interruption.
 ///
@@ -124,6 +130,65 @@ where
     prepare(runtime).await?;
     try_join_all(servers).await?;
     Ok(())
+}
+
+/// Drive a deployment after runtime state is built: a one-shot `wasi:cli` command
+/// or every long-lived trigger server to completion.
+///
+/// When `command` is `true`, `servers` is ignored and [`run_command`] is invoked.
+/// Otherwise [`serve`] runs every future in `servers` concurrently and returns
+/// [`ExitStatus::SUCCESS`] on clean shutdown.
+///
+/// # Errors
+///
+/// Returns an error if preparation, command execution, or any server fails.
+#[doc(hidden)]
+pub async fn drive<R: Runtime>(
+    runtime: &R, command: bool, servers: Vec<BoxFuture<'_, Result<()>>>,
+) -> Result<ExitStatus>
+where
+    R::StoreCtx: WasiView + WrpcView + 'static,
+{
+    if command {
+        run_command(runtime).await
+    } else {
+        serve(runtime, servers).await.context("starting runtime services")?;
+        Ok(ExitStatus::SUCCESS)
+    }
+}
+
+/// Parse the CLI `run` subcommand and map the outcome to a process exit code.
+///
+/// Generated `main` functions delegate here so CLI parsing and error reporting
+/// stay in the library rather than in proc-macro output.
+///
+/// # Errors
+///
+/// Failures from `run` are printed to stderr and mapped to
+/// [`ExitCode::FAILURE`]; success yields the guest or deployment status.
+#[doc(hidden)]
+pub async fn run_main<F, Fut>(run: F) -> ExitCode
+where
+    F: FnOnce(Option<PathBuf>, Option<PathBuf>, Vec<String>) -> Fut,
+    Fut: Future<Output = Result<ExitStatus>>,
+{
+    match Cli::parse().command {
+        Command::Run { wasm, config, args } => match run(wasm, config, args).await {
+            Ok(status) => status.into(),
+            Err(error) => {
+                eprintln!("{error:#}");
+                ExitCode::FAILURE
+            }
+        },
+        #[cfg(feature = "jit")]
+        Command::Compile { .. } => {
+            eprintln!(
+                "the generated `main` only supports `run`; supply a custom `main` for other \
+                 subcommands"
+            );
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// A guest's process exit status.
