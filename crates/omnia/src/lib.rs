@@ -53,9 +53,9 @@ pub use self::telemetry::{Telemetry, resource};
 // Macro-support: named by `runtime!`-generated code via `::omnia::…` to guard
 // host co-listing at compile time; not part of the documented public surface.
 #[doc(hidden)]
-pub use self::traits::assert_command_solo;
+pub use self::traits::assert_hosts;
 pub use self::traits::{
-    Backend, FromEnv, FutureResult, HasLimits, Host, Runtime, Server, TriggerKind,
+    Backend, FromEnv, FutureResult, HasLimits, Host, HostKind, Runtime, Server,
 };
 pub use self::transport::{LinkClient, WrpcState};
 

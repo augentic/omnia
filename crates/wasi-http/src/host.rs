@@ -7,7 +7,7 @@ mod server;
 
 use anyhow::Result;
 pub use default_impl::HttpDefault;
-use omnia::{Host, Runtime, Server, TriggerKind};
+use omnia::{Host, Runtime, Server, HostKind};
 use wasmtime::component::Linker;
 pub use wasmtime_wasi_http::WasiHttpCtx;
 pub use wasmtime_wasi_http::p3::{WasiHttpCtxView, WasiHttpView};
@@ -30,7 +30,7 @@ where
     R: Runtime,
     R::StoreCtx: WasiHttpView,
 {
-    const KIND: TriggerKind = TriggerKind::LongLived;
+    const KIND: HostKind = HostKind::Server;
 
     async fn run(&self, state: &R) -> Result<()> {
         server::run(state).await

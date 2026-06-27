@@ -24,7 +24,7 @@
 //! capability hosts but **not** with a long-lived trigger (`WasiHttp`,
 //! `WasiMessaging`, `WasiWebSocket`): [`omnia::serve`] would wait on the server
 //! forever. The `runtime!` macro enforces this at compile time from each host's
-//! [`omnia::Server::KIND`] (see [`omnia::TriggerKind`]), so an invalid
+//! [`omnia::Server::KIND`] (see [`omnia::HostKind`]), so an invalid
 //! deployment fails to build:
 //!
 //! ```compile_fail

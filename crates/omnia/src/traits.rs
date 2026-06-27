@@ -121,22 +121,22 @@ pub trait Host<T>: Debug + Sync + Send {
 ///
 /// Every [`Server`] carries its kind as [`Server::KIND`], so the `runtime!`
 /// macro can reject invalid host co-listings at compile time (via
-/// [`assert_command_solo`]) by reading the *type system* rather than matching a
+/// [`assert_hosts`]) by reading the *type system* rather than matching a
 /// hard-coded list of host names — which would silently miss a newly added
 /// trigger or trip on an aliased import.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum TriggerKind {
+pub enum HostKind {
+    /// A long-lived server whose `run` loops on a transport and returns only on
+    /// shutdown (e.g. `WasiHttp`, `WasiMessaging`, `WasiWebSocket`).
+    Server,
+    /// A one-shot trigger that drives a guest once and exits (`WasiCli`). Cannot
+    /// be co-listed with a [`Server`](Self::Server) trigger, which would
+    /// keep [`serve`](crate::serve) running forever.
+    OneShot,
     /// Provides capabilities only; its [`Server::run`] is the no-op default
     /// (e.g. `WasiKeyValue`, `WasiBlobstore`, `WasiOtel`). Any number may be
     /// co-listed with any trigger.
     Capability,
-    /// A long-lived trigger whose `run` loops on a transport and returns only on
-    /// shutdown (e.g. `WasiHttp`, `WasiMessaging`, `WasiWebSocket`).
-    LongLived,
-    /// A one-shot trigger that drives a guest once and exits (`WasiCli`). Cannot
-    /// be co-listed with a [`LongLived`](Self::LongLived) trigger, which would
-    /// keep [`serve`](crate::serve) running forever.
-    OneShot,
 }
 
 /// Implemented by WASI hosts that are servers in order to allow the runtime to
@@ -144,9 +144,9 @@ pub enum TriggerKind {
 pub trait Server<R: Runtime>: Debug + Sync + Send {
     /// This host's lifecycle role, used by `runtime!` to validate co-listing.
     ///
-    /// Defaults to [`TriggerKind::Capability`] (a no-op [`run`](Self::run));
+    /// Defaults to [`HostKind::Capability`] (a no-op [`run`](Self::run));
     /// long-lived and one-shot trigger hosts override it.
-    const KIND: TriggerKind = TriggerKind::Capability;
+    const KIND: HostKind = HostKind::Capability;
 
     /// Start the service.
     ///
@@ -161,9 +161,9 @@ pub trait Server<R: Runtime>: Debug + Sync + Send {
 /// Compile-time guard that a one-shot command host is not co-listed with a
 /// long-lived trigger.
 ///
-/// When a deployment lists a [`TriggerKind::OneShot`] host, the `runtime!` macro
-/// emits `const _: () = assert_command_solo(&[/* each host's KIND */]);`. A
-/// co-listed [`TriggerKind::LongLived`] trigger would make
+/// When a deployment lists a [`HostKind::OneShot`] host, the `runtime!` macro
+/// emits `const _: () = assert_hosts(&[/* each host's KIND */]);`. A
+/// co-listed [`HostKind::Server`] trigger would make
 /// [`serve`](crate::serve) block on the long-lived server forever (the command
 /// could never exit), so this fails the build instead.
 ///
@@ -173,21 +173,23 @@ pub trait Server<R: Runtime>: Debug + Sync + Send {
 /// # Panics
 ///
 /// Panics (at compile time, as a `const` evaluation error) when `kinds` contains
-/// both a [`TriggerKind::OneShot`] and a [`TriggerKind::LongLived`] entry.
-pub const fn assert_command_solo(kinds: &[TriggerKind]) {
+/// both a [`HostKind::OneShot`] and a [`HostKind::Server`] entry.
+pub const fn assert_hosts(kinds: &[HostKind]) {
     let mut index = 0;
-    let mut has_one_shot = false;
-    let mut has_long_lived = false;
+    let mut one_shot = false;
+    let mut long_lived = false;
+
     while index < kinds.len() {
         match kinds[index] {
-            TriggerKind::OneShot => has_one_shot = true,
-            TriggerKind::LongLived => has_long_lived = true,
-            TriggerKind::Capability => {}
+            HostKind::OneShot => one_shot = true,
+            HostKind::Server => long_lived = true,
+            HostKind::Capability => {}
         }
         index += 1;
     }
+
     assert!(
-        !(has_one_shot && has_long_lived),
+        !(one_shot && long_lived),
         "`WasiCli` is a one-shot command trigger and cannot be co-listed with a long-lived \
          trigger server (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`): a command runs to \
          completion and exits, but `serve` would wait on the long-lived server forever. Split \
@@ -224,31 +226,27 @@ pub trait FromEnv: Sized {
 
 #[cfg(test)]
 mod tests {
-    use super::{TriggerKind, assert_command_solo};
+    use super::{HostKind, assert_hosts};
 
     #[test]
     fn capability_only_is_allowed() {
-        assert_command_solo(&[TriggerKind::Capability, TriggerKind::Capability]);
+        assert_hosts(&[HostKind::Capability, HostKind::Capability]);
     }
 
     #[test]
     fn one_shot_with_capabilities_is_allowed() {
-        assert_command_solo(&[
-            TriggerKind::OneShot,
-            TriggerKind::Capability,
-            TriggerKind::Capability,
-        ]);
+        assert_hosts(&[HostKind::OneShot, HostKind::Capability, HostKind::Capability]);
     }
 
     #[test]
     fn long_lived_without_one_shot_is_allowed() {
         // Two long-lived servers are a `serve` concern, not a co-list error.
-        assert_command_solo(&[TriggerKind::LongLived, TriggerKind::LongLived]);
+        assert_hosts(&[HostKind::Server, HostKind::Server]);
     }
 
     #[test]
     #[should_panic(expected = "one-shot command trigger")]
     fn one_shot_with_long_lived_is_rejected() {
-        assert_command_solo(&[TriggerKind::OneShot, TriggerKind::LongLived]);
+        assert_hosts(&[HostKind::OneShot, HostKind::Server]);
     }
 }

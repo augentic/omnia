@@ -38,7 +38,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{Host, Runtime, Server, TriggerKind};
+use omnia::{Host, HostKind, Runtime, Server};
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::{ResourceTable, ResourceTableError};
 
@@ -75,7 +75,7 @@ where
     R: Runtime,
     R::StoreCtx: WasiMessagingView,
 {
-    const KIND: TriggerKind = TriggerKind::LongLived;
+    const KIND: HostKind = HostKind::Server;
 
     async fn run(&self, state: &R) -> anyhow::Result<()> {
         server::run(state).await

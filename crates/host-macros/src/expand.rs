@@ -191,11 +191,11 @@ impl TryFrom<&Config> for Expanded {
         // would never return). Instead of matching host names here — which would
         // miss a future trigger or trip on an aliased import — emit a `const`
         // check over each listed host's `Server::KIND`, so the classification
-        // lives in the type system. Capability hosts (`TriggerKind::Capability`)
+        // lives in the type system. Capability hosts (`HostKind::Capability`)
         // are fine; the check is a no-op unless a one-shot host is present.
         let colist_guard = if cli_type.is_some() {
             quote! {
-                const _: () = omnia::assert_command_solo(&[
+                const _: () = omnia::assert_hosts(&[
                     #(<#host_trait_impls as Server<Context>>::KIND,)*
                 ]);
             }
