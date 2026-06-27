@@ -2059,7 +2059,7 @@ dependencies = [
  "fromenv",
  "futures",
  "http",
- "omnia-runtime-macro",
+ "omnia-host-macros",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
@@ -2119,7 +2119,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "omnia-runtime-macro"
+name = "omnia-host-macros"
 version = "0.35.0"
 dependencies = [
  "proc-macro2",

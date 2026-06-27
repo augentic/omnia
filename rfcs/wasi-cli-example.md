@@ -331,7 +331,7 @@ Wiring it through `runtime!({ hosts: { WasiCli: … } })` fights two conventions
 
 - The macro derives a `StoreCtx` field and view-macro path per host (`wasi_ident`:
   `WasiCli` → `omnia_wasi_cli`, expecting `omnia_wasi_cli::omnia_wasi_view!`) and a
-  `Backend` per host (`crates/runtime-macro/src/expand.rs` lines 154–205). `wasi:cli`
+  `Backend` per host (`crates/host-macros/src/expand.rs` lines 154–205). `wasi:cli`
   needs neither a backend nor host state — its imports are linked by the base linker and
   it holds no view.
 - Argv still has no home without §5.3 option **B**.

@@ -5,7 +5,7 @@
 //! limiter, the wRPC view state backing host-mediated dynamic linking, and the
 //! type-erased host->guest dispatcher. A concrete `StoreCtx` embeds one `StoreBase`
 //! field plus its deployment-specific backend fields; the
-//! [`StoreContext`](omnia_runtime_macro::StoreContext) derive implements the
+//! [`StoreContext`](omnia_host_macros::StoreContext) derive implements the
 //! three fixed views (`WasiView`, `WrpcView`, `HasLimits`) against it.
 
 use std::sync::Arc;

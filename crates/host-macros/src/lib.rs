@@ -1,6 +1,6 @@
 #![doc = include_str!("../README.md")]
 
-//! Procedural macros for the omnia runtime.
+//! Procedural macros for the omnia host runtime.
 
 #![forbid(unsafe_code)]
 

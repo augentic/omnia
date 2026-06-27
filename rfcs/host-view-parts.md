@@ -14,7 +14,7 @@
 
 Every WASI host crate today exports a `macro_rules! omnia_wasi_view` that implements
 that crate's per-store view trait on the concrete `StoreCtx`. The
-`#[derive(StoreContext)]` proc-macro (`crates/runtime-macro/src/store_context.rs`)
+`#[derive(StoreContext)]` proc-macro (`crates/host-macros/src/store_context.rs`)
 invokes it once per `#[wasi(...)]` field:
 
 ```rust
@@ -404,7 +404,7 @@ model: Box<dyn WasiModelCtx>,
 ```
 
 Removes exported macros entirely but pays in attribute verbosity, more parsing
-in `runtime-macro`, and host crates losing local ownership of view shape.
+in `host-macros`, and host crates losing local ownership of view shape.
 
 ### 8.5 Central host registry in `omnia-macros`
 

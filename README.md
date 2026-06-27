@@ -68,7 +68,7 @@ docker build --tag ghcr.io/augentic/omnia .
 | `[omnia](crates/omnia)`                         | Core runtime -- wasmtime wrapper with CLI, OpenTelemetry, and pluggable WASI host services |
 | `[omnia-guest](crates/guest)`                   | Guest SDK -- traits, error types, ORM, and macros for WASI component authors |
 | `[omnia-guest-macros](crates/guest-macros)`     | `guest!` and `#[instrument]` proc-macros for guests                      |
-| `[omnia-runtime-macro](crates/runtime-macro)`   | `runtime!` proc-macro for host runtime generation                          |
+| `[omnia-host-macros](crates/host-macros)`       | `runtime!` proc-macro for host runtime generation                          |
 | `[omnia-wasi-blobstore](crates/wasi-blobstore)` | wasi:blobstore host and guest bindings                                     |
 | `[omnia-wasi-config](crates/wasi-config)`       | wasi:config host and guest bindings                                        |
 | `[omnia-wasi-http](crates/wasi-http)`           | wasi:http host and guest bindings                                          |

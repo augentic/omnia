@@ -1,6 +1,6 @@
 [package]
-name = "omnia-runtime-macro"
-description = "Procedural macros for Omnia runtime build code generation"
+name = "omnia-host-macros"
+description = "Procedural macros for Omnia host runtime code generation"
 authors.workspace = true
 categories.workspace = true
 edition.workspace = true

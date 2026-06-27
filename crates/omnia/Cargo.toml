@@ -51,7 +51,7 @@ tracing-opentelemetry.workspace = true
 tracing-subscriber.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "rt", "sync", "time"] }
 tokio-util = { workspace = true, features = ["codec"] }
-omnia-runtime-macro.workspace = true
+omnia-host-macros.workspace = true
 wasmtime = { workspace = true, features = ["runtime"] }
 wasmtime-wasi.workspace = true
 # Host-mediated dynamic linking (Phase 2): wRPC is the carrier on every leg.

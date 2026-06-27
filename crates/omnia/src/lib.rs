@@ -23,7 +23,7 @@ pub use clap::Parser;
 use clap::Subcommand;
 // The `Runtime` derive macro and the `Runtime` trait (re-exported below from
 // `traits`) share a name but live in different namespaces, like `Clone`.
-pub use omnia_runtime_macro::{Runtime, StoreContext, runtime};
+pub use omnia_host_macros::{Runtime, StoreContext, runtime};
 // Macro-support re-exports: named by `runtime!`/`StoreContext`-generated code via
 // `::omnia::…`, not part of the documented public surface.
 #[doc(hidden)]

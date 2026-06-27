@@ -75,7 +75,7 @@ existing integration tests pass vacuously by skipping.
 
 `crates/wasi-otel-attr` is a proc-macro crate with no `[dev-dependencies]` and
 no test infrastructure (`trybuild`, `macrotest`, `insta`) anywhere in the repo.
-The same applies to `runtime-macro` and `guest-macro`.
+The same applies to `host-macros` and `guest-macro`.
 
 ## 3. Proposed improvements
 
@@ -136,7 +136,7 @@ errors), add `trybuild` as a dev-dependency with a `tests/ui/` folder:
 - **Pass cases:** named span, leveled span, async/sync functions
 - **Fail case:** `#[instrument(bogus = 1)]` → `"unsupported property"`
 
-This generalizes to `runtime-macro` and `guest-macro`.
+This generalizes to `host-macros` and `guest-macro`.
 
 #### Tier 2 — behavioural (does instrumentation export spans?)
 

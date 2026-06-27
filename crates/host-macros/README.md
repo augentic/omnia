@@ -1,6 +1,6 @@
-# omnia-runtime-macro
+# omnia-host-macros
 
-Procedural macros for generating WebAssembly Component Runtime infrastructure.
+Procedural macros for generating host-side WebAssembly Component Runtime infrastructure.
 
 ## Overview
 
