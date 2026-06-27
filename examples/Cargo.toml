@@ -22,6 +22,9 @@ omnia-wasi-websocket.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 omnia.workspace = true
+# Host-only: the `wasi:cli` trigger has no guest side (the guest uses `wasip3`
+# directly), so the crate is needed only by `runtime.rs` (the host).
+omnia-wasi-cli.workspace = true
 # Host-only: the model example guest builds against its own `model/wit`, so the
 # crate is needed only by `runtime.rs` (the host). Keeping it off the wasm32
 # target also avoids compiling the crate's guest `complete-stream` (native
@@ -63,7 +66,7 @@ path = "blobstore/runtime.rs"
 [[example]]
 name = "cli-wasm"
 path = "cli/guest.rs"
-# no crate-type: a binary -> wasi:cli/command component
+crate-type = ["cdylib"]
 
 [[example]]
 name = "cli"

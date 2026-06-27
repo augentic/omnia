@@ -1,0 +1,26 @@
+[package]
+name = "omnia-wasi-cli"
+description = "WASI CLI (one-shot command) trigger for the Omnia runtime"
+readme = "README.md"
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+# Host-only crate: there is no guest side (the guest uses `wasip3` directly), so
+# every dependency is gated to the host target. This keeps `wasmtime` out of any
+# wasm32 resolution even though this crate is a `crates/*` workspace member.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+anyhow.workspace = true
+tracing.workspace = true
+wasmtime = { workspace = true, features = ["component-model-async"] }
+wasmtime-wasi.workspace = true
+omnia.workspace = true

@@ -109,3 +109,42 @@ where
     try_join_all(servers).await?;
     Ok(())
 }
+
+/// A guest's process exit status.
+///
+/// The one-shot `wasi:cli` trigger drives a `wasi:cli/run` guest exactly once
+/// and reports its exit code through this newtype. The generated `main`
+/// converts it to a [`std::process::ExitCode`] at the process boundary.
+///
+/// The status rides an `Arc<OnceLock<ExitStatus>>` side channel rather than a
+/// return value because [`serve`] returns `Result<()>` and discards each
+/// server's value — the same way the HTTP trigger delivers its response out of
+/// band (over the socket) instead of through `run`'s return type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExitStatus(i32);
+
+impl ExitStatus {
+    /// The success status (exit code `0`).
+    pub const SUCCESS: Self = Self(0);
+
+    /// The wrapped exit code.
+    #[must_use]
+    pub const fn code(self) -> i32 {
+        self.0
+    }
+}
+
+impl From<i32> for ExitStatus {
+    fn from(code: i32) -> Self {
+        Self(code)
+    }
+}
+
+impl From<ExitStatus> for std::process::ExitCode {
+    fn from(status: ExitStatus) -> Self {
+        // POSIX surfaces only the low 8 bits of a process exit status; mirror
+        // that (and the `wasmtime` CLI) by truncating to a `u8`.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        Self::from(status.0 as u8)
+    }
+}

@@ -27,7 +27,7 @@ host-held state, not guest memory.
 
 These consume the wasi-filesystem working-tree host of
 [RFC-55](rfc-55-working-tree.md), which is **not yet built**. Wiring them is gated on
-RFC-55; the floor-side host wiring is tracked in [wasi-model-remaining.md](wasi-model-remaining.md) §3, and
+RFC-55; the floor-side host wiring is tracked in [wasi-model](wasi-model.md) §3, and
 this RFC owns the genai-side dispatch and transcript capture for them.
 
 ## Remaining session state
@@ -55,7 +55,7 @@ lands with the working-tree tools above. A leaked in-memory session is a regress
 
 - `resolve` and the repair loop — landed.
 - The floor-side host wiring of the working-tree capability; see
-[wasi-model-remaining.md](wasi-model-remaining.md) §3.
+[wasi-model](wasi-model.md) §3.
 - Verify profile definitions and sandboxing; see [RFC-60](rfc-60-verify-profiles.md).
 - Backend catalogue and routing; see [RFC-58](rfc-58-model-router-slm.md).
 

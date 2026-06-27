@@ -118,6 +118,7 @@ omnia-guest = { path = "crates/guest", version = "0.35.0" }
 omnia-guest-macros = { path = "crates/guest-macros", version = "0.35.0" }
 omnia-host-macros = { path = "crates/host-macros", version = "0.35.0" }
 omnia-wasi-blobstore = { path = "crates/wasi-blobstore", version = "0.35.0" }
+omnia-wasi-cli = { path = "crates/wasi-cli", version = "0.35.0" }
 omnia-wasi-config = { path = "crates/wasi-config", version = "0.35.0" }
 omnia-wasi-http = { path = "crates/wasi-http", version = "0.35.0" }
 omnia-wasi-identity = { path = "crates/wasi-identity", version = "0.35.0" }

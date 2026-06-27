@@ -41,6 +41,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     };
 
     let mut registry_field: Option<&Ident> = None;
+    let mut args_field: Option<&Ident> = None;
     let mut store_assignments: Vec<TokenStream> = Vec::new();
     let mut seen_targets: Vec<Ident> = Vec::new();
 
@@ -63,6 +64,13 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
                     }
                     registry_field = Some(field_ident);
                     Ok(())
+                } else if meta.path.is_ident("args") {
+                    if args_field.is_some() {
+                        return Err(meta
+                            .error("duplicate `#[runtime(args)]`; at most one field is allowed"));
+                    }
+                    args_field = Some(field_ident);
+                    Ok(())
                 } else if meta.path.is_ident("store") {
                     let target: Ident = meta.value()?.parse()?;
                     if seen_targets.contains(&target) {
@@ -75,12 +83,18 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
                     Ok(())
                 } else {
                     Err(meta.error(
-                        "expected `#[runtime(registry)]` or `#[runtime(store = <store field>)]`",
+                        "expected `#[runtime(registry)]`, `#[runtime(args)]`, or \
+                         `#[runtime(store = <store field>)]`",
                     ))
                 }
             })?;
         }
     }
+
+    // A `#[runtime(args)]` field threads guest argv into the per-store WASI
+    // context; without one the store defaults to empty argv (the long-lived
+    // server case).
+    let args_call = args_field.map_or_else(|| quote! {}, |field| quote! { .args(&self.#field) });
 
     let Some(registry_field) = registry_field else {
         return Err(syn::Error::new(
@@ -100,10 +114,12 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
             fn store(&self) -> Self::StoreCtx {
                 #store_ctx {
                     // Fixed per-store state, plus one cloned backend per
-                    // `#[runtime(store = ...)]` field.
+                    // `#[runtime(store = ...)]` field. A `#[runtime(args)]`
+                    // field (if present) supplies the guest's argv.
                     base: ::omnia::StoreBase::builder()
                         .options(::omnia::Runtime::options(self))
                         .dispatch(::std::sync::Arc::new(::core::clone::Clone::clone(self)))
+                        #args_call
                         .build(),
                     #(#store_assignments,)*
                 }

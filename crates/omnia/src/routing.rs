@@ -99,6 +99,44 @@ impl Resolver for TopicRoutes {
     }
 }
 
+/// CLI route table: maps a subcommand to a target guest.
+///
+/// The subcommand is the guest's first argument. `[[route.cli]]` manifest
+/// parsing is not yet wired, so this table is empty today and a sole
+/// `wasi:cli/run` exporter is the catch-all; the type exists so the `cli`
+/// trigger routes through the same machinery as every other trigger when
+/// multi-command routing lands.
+#[derive(Clone, Debug, Default)]
+pub struct CliRoutes {
+    /// `(subcommand, target)` pairs; the first exact match wins.
+    entries: Vec<(String, GuestId)>,
+}
+
+impl CliRoutes {
+    /// Build a table from `(subcommand, target)` pairs, preserving declaration
+    /// order (first match wins).
+    #[must_use]
+    pub fn new(entries: impl IntoIterator<Item = (String, GuestId)>) -> Self {
+        Self {
+            entries: entries.into_iter().collect(),
+        }
+    }
+}
+
+impl Resolver for CliRoutes {
+    fn resolve(&self, key: &str) -> Option<&GuestId> {
+        self.entries.iter().find(|(subcommand, _)| subcommand == key).map(|(_, id)| id)
+    }
+
+    fn targets(&self) -> impl Iterator<Item = &GuestId> {
+        self.entries.iter().map(|(_, id)| id)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
 /// The per-trigger route tables a registry carries, parsed from the manifest's
 /// `[[route.*]]` sections.
 #[derive(Clone, Debug, Default)]
@@ -106,16 +144,20 @@ pub struct Routes {
     http: HttpRoutes,
     messaging: TopicRoutes,
     websocket: TopicRoutes,
+    cli: CliRoutes,
 }
 
 impl Routes {
     /// Assemble the per-trigger tables.
     #[must_use]
-    pub const fn new(http: HttpRoutes, messaging: TopicRoutes, websocket: TopicRoutes) -> Self {
+    pub const fn new(
+        http: HttpRoutes, messaging: TopicRoutes, websocket: TopicRoutes, cli: CliRoutes,
+    ) -> Self {
         Self {
             http,
             messaging,
             websocket,
+            cli,
         }
     }
 
@@ -137,10 +179,20 @@ impl Routes {
         &self.websocket
     }
 
+    /// The CLI (subcommand) route table.
+    #[must_use]
+    pub const fn cli(&self) -> &CliRoutes {
+        &self.cli
+    }
+
     /// Iterate every identity any route targets across all triggers — used to
     /// validate routes name registered guests.
     pub fn targets(&self) -> impl Iterator<Item = &GuestId> {
-        self.http.targets().chain(self.messaging.targets()).chain(self.websocket.targets())
+        self.http
+            .targets()
+            .chain(self.messaging.targets())
+            .chain(self.websocket.targets())
+            .chain(self.cli.targets())
     }
 }
 

@@ -4,7 +4,7 @@
 >
 > This is the **Level-1 convergence** target (deployment-level): the same guest-handler model, the same `Server` trait, the same `TriggerRouter`, the same `runtime!` macro, and the same manifest serve every event source — so moving a guest from a CLI trigger today to an HTTP / messaging / websocket / wRPC trigger tomorrow is a *wiring* change, not a *path* change. Guest-level convergence (one uniform handler the floor adapts every event into) is **Level 2** and explicitly out of scope; it slots in cleanly later precisely because the trigger machinery is unified now.
 >
-> Owns: the committed design for aligning `examples/cli` on both axes. Touches: `examples/cli/{guest.rs,runtime.rs,README.md}`, `examples/Cargo.toml`, a new host-only crate `crates/wasi-cli`, `crates/omnia/src/{runtime.rs,lib.rs,routing.rs}` (the `ExitStatus` newtype and the optional `cli` route table), and `crates/host-macros/src/{runtime.rs,expand.rs,runtime_derive.rs}` (a backend-optional host grammar, an argv field, and a one-shot `main` tail). Depends: the landed `StoreBase::builder` argv setter, the `Runtime` / `StoreContext` derives, `omnia::serve` + `TriggerRouter` (`crates/omnia/src/{runtime.rs,routing.rs}`), the base linker's `wasi:cli` import linking (`crates/omnia/src/create.rs`), `wasmtime-wasi`'s p2 `Command` / `CommandPre` bindings, and [`wasip3`](https://docs.rs/wasip3) guest export macros (Bytecode Alliance [`wasi-rs`](https://github.com/bytecodealliance/wasi-rs)).
+> Owns: the committed design for aligning `examples/cli` on both axes. Touches: `examples/cli/{guest.rs,runtime.rs,README.md}`, `examples/Cargo.toml`, a new host-only crate `crates/wasi-cli`, `crates/omnia/src/{runtime.rs,lib.rs,routing.rs}` (the `ExitStatus` newtype and the optional `cli` route table), and `crates/host-macros/src/{runtime.rs,expand.rs,runtime_derive.rs}` (a backend-optional host grammar, an argv field, and a one-shot `main` tail). Depends: the landed `StoreBase::builder` argv setter, the `Runtime` / `StoreContext` derives, `omnia::serve` + `TriggerRouter` (`crates/omnia/src/{runtime.rs,routing.rs}`), the base linker's `wasi:cli` import linking (`crates/omnia/src/create.rs`), `wasmtime-wasi`'s p3 `Command` / `CommandPre` bindings, and [`wasip3`](https://docs.rs/wasip3) guest export macros (Bytecode Alliance [`wasi-rs`](https://github.com/bytecodealliance/wasi-rs)).
 
 ## 1. Abstract
 
@@ -92,45 +92,50 @@ impl Guest for HttpGuest { /* ... */ }
 The aligned cli guest is the same export-side shape — `wasip3` throughout, reusing the workspace dependency the HTTP examples already carry:
 
 ```rust
-// examples/cli/guest.rs (aligned) — wasip3, the same guest SDK as HTTP
+// examples/cli/guest.rs (aligned) — wasip3 export, std-bridge body
 #![cfg(target_arch = "wasm32")]
 
-struct Cli;
+use wasip3::exports::cli::run::Guest;
 
-impl wasip3::exports::cli::run::Guest for Cli {
+struct Cli;
+wasip3::cli::command::export!(Cli);
+
+impl Guest for Cli {
     async fn run() -> Result<(), ()> {
-        // argv via wasi-rs import bindings, not std::env::args()
-        let args = wasip3::cli::environment::get_arguments();
+        // argv/stdout through the p2 `std` bridge the floor links (the same as
+        // every reactor guest); only the *export* shape is `wasip3`.
+        let args: Vec<String> = std::env::args().collect();
         match args.get(1).map(String::as_str) {
             Some("greet") => {
-                let who = args.get(2).map_or("world", |s| s.as_str());
-                let msg = format!("Hello, {who}!\n");
-                wasip3::cli::stdout::get_stdout().blocking_write_and_flush(msg.as_bytes())?;
+                let who = args.get(2).map_or("world", String::as_str);
+                println!("Hello, {who}!");
             }
-            // add / env / unknown ...
-            _ => return Err(()),
+            // add / env ...
+            Some(other) => {
+                eprintln!("unknown command: {other}");
+                wasip3::cli::exit::exit_with_code(2); // a specific code, via wasi:cli/exit
+            }
+            None => return Err(()), // a plain failure → exit 1
         }
         Ok(())
     }
 }
-
-wasip3::cli::command::export!(Cli);
 ```
 
-The p2 host invoke path is unaffected: the floor links both p2 and p3 (`crates/omnia/src/create.rs` lines 159–160), and the host's `CommandPre` keys on the presence of `wasi:cli/run`, not on which guest SDK produced the export — the same split the HTTP examples already rely on (`wasip3` guest, mixed p2/p3 host linker).
+The host drives the export through the p3 `Command` bindings (`run_concurrent`), exactly as the HTTP host drives `wasi:http`'s handler. The floor links both p2 and p3 (`crates/omnia/src/create.rs` lines 159–160), so the guest's `wasip3` *export* resolves *and* its `std`-bridge *imports* (p2 `wasi:cli/*`, `wasi:io`) are satisfied — the same mixed-linker split the HTTP examples already rely on.
 
 ### 4.2 What it takes
 
 1. **`wasip3` on the `cli-wasm` example target** — already a workspace dep for HTTP; provides `cli::command::export!`, `exports::cli::run::Guest`, and the `wasi:cli/*` import bindings (`environment`, `stdout`, `stderr`, …). No local `wit/` directory, no new dependency.
 2. **`wasip3::cli::command::export!` + `impl exports::cli::run::Guest`** (`async fn run`).
-3. **Dispatch over wasi-rs import bindings**: `wasip3::cli::environment::get_arguments()` for argv, `get_environment()` for the `env` subcommand, and `stdout`/`stderr` writes via the generated helpers in place of `println!`/`eprintln!`. A nonzero result becomes `Err(())` (rather than `std::process::exit`).
+3. **Dispatch over the `std` bridge** the floor links — `std::env::args()` for argv, `std::env::vars()` for the `env` subcommand, `println!`/`eprintln!` for output — the same as every reactor guest. A *specific* exit code uses `wasip3::cli::exit::exit_with_code` (surfaced host-side as `I32Exit`); a plain failure returns `Err(())` (which the host maps to `1`).
 4. **`examples/Cargo.toml`**: give the `cli-wasm` entry `crate-type = ["cdylib"]`, which also flips its component filename from `cli-wasm.wasm` to `cli_wasm.wasm` — a README/run-command update.
 
 ### 4.3 The tradeoff, accepted
 
-The binary form *is* the canonical "write a `wasi:cli` command in Rust": `fn main`, `std::env`, `println!`, and `std::process::exit` all map onto `wasi:cli/*` for free. The `cdylib` form discards that std bridge — the `wasip3::cli::command::export!` macro is [incompatible with the `bin` target](https://docs.rs/wasip3/latest/wasip3/cli/command/macro.export.html) — and routes dispatch through `wasip3::cli::*` import APIs instead. So as a *standalone* artifact the `cdylib` guest is the less idiomatic "how to write a command."
+The only thing the `cdylib` form gives up is `fn main` as the entrypoint — the `wasip3::cli::command::export!` macro is [incompatible with the `bin` target](https://docs.rs/wasip3/latest/wasip3/cli/command/macro.export.html). The `std` bridge is **retained**: because the floor links both p2 and p3, `std::env`, `println!`, and `eprintln!` work inside the export exactly as they do in a binary, so the body stays idiomatic. The one place a command reaches past `std` is a *specific* exit code — `run -> result<(), ()>` distinguishes only success from failure, so a code like `2` goes through `wasi:cli/exit`'s `exit-with-code`.
 
-We accept that cost deliberately, because this is a teaching repo and **one consistent guest mental model beats per-example idiom**: every guest is a `cdylib` that exports a handler. The command's handler is `wasi:cli/run`. A reader who has internalised the reactor shape reads the cli guest with no new concepts — the learnability win the binary form forfeits. (If Omnia-specific CLI ergonomics ever emerge, an `omnia-wasi-cli` guest helper analogous to `omnia_wasi_http::serve` can wrap the `wasip3` export; it is not on the critical path.)
+This is the alignment win, at no idiomatic cost to the body: **one consistent guest mental model**. Every guest is a `cdylib` that exports a handler; the command's handler is `wasi:cli/run`. A reader who has internalised the reactor shape reads the cli guest with no new concepts. (If Omnia-specific CLI ergonomics ever emerge, an `omnia-wasi-cli` guest helper analogous to `omnia_wasi_http::serve` can wrap the `wasip3` export; it is not on the critical path.)
 
 ## 5. Host alignment — `WasiCli` as a one-shot trigger
 
@@ -146,12 +151,10 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::{Result, bail};
 use omnia::wasmtime_wasi::I32Exit;
-use omnia::wasmtime_wasi::p2::bindings::Command;
+use omnia::wasmtime_wasi::WasiView;
+use omnia::wasmtime_wasi::p3::bindings::{Command, CommandPre};
 use omnia::{ExitStatus, Host, Runtime, Server, TriggerRouter};
-use omnia::wasmtime_wasi::p2::bindings::CommandPre;
 use wasmtime::component::Linker;
-use wasmtime_wasi::WasiView;
-use wrpc_wasmtime::WrpcView;
 
 /// Host-side trigger for `wasi:cli`. Drives the `wasi:cli/run` export of the
 /// sole command-capable guest exactly once and reports its exit status.
@@ -172,10 +175,7 @@ impl WasiCli {
     }
 }
 
-impl<T> Host<T> for WasiCli
-where
-    T: WasiView + 'static,
-{
+impl<T> Host<T> for WasiCli {
     // `wasi:cli`'s imports are ambient (base linker); a trigger drives an
     // export, so there is nothing to add here. Cf. the no-op `Server` default
     // (`crates/omnia/src/traits.rs` lines 122–131).
@@ -187,7 +187,7 @@ where
 impl<R> Server<R> for WasiCli
 where
     R: Runtime,
-    R::StoreCtx: WasiView + WrpcView + 'static,
+    R::StoreCtx: WasiView,
 {
     async fn run(&self, state: &R) -> Result<()> {
         // (1) Capability probe + routing — the same `TriggerRouter` HTTP and
@@ -221,16 +221,21 @@ where
         let instance = state.instantiate(guest.instance_pre(), &mut store).await?;
         let command = Command::new(&mut store, &instance)?;
 
-        // (3) Invoke once; map the result to an `ExitStatus`. A guest
-        // `process::exit` / panic surfaces as `I32Exit`, not `Ok(Err(()))`
-        // (the shape the wasmtime CLI's runner uses, mirrored by today's
-        // hand-written host, `examples/cli/runtime.rs` lines 96–105).
-        let status = match command.wasi_cli_run().call_run(&mut store).await {
-            Ok(Ok(())) => ExitStatus::SUCCESS,
-            Ok(Err(())) => ExitStatus::from(1),
-            Err(error) => match error.downcast_ref::<I32Exit>() {
+        // (3) Invoke once via the p3 concurrent convention (`run_concurrent`,
+        // the same idiom the HTTP host uses). `run_concurrent` wraps the call in
+        // its own `Result` and `call_run` returns `Result<Result<(), ()>>`: the
+        // two outer layers carry host traps (a guest `wasi:cli/exit` surfaces as
+        // `I32Exit`), the innermost is the guest's `run` result. `wasmtime`'s
+        // error type is distinct from `anyhow`'s in wasmtime 46, hence `.into()`.
+        let outcome = store
+            .run_concurrent(async move |store| command.wasi_cli_run().call_run(store).await)
+            .await;
+        let status = match outcome {
+            Ok(Ok(Ok(()))) => ExitStatus::SUCCESS,
+            Ok(Ok(Err(()))) => ExitStatus::from(1),
+            Ok(Err(error)) | Err(error) => match error.downcast_ref::<I32Exit>() {
                 Some(exit) => ExitStatus::from(exit.0),
-                None => return Err(error), // a real host trap propagates through `serve`
+                None => return Err(error.into()), // a real host trap propagates through `serve`
             },
         };
 
@@ -282,15 +287,21 @@ mod runtime {
     pub async fn run(
         wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>,
     ) -> Result<ExitStatus> {
+        // argv[0] is conventionally the program name; derive it from the wasm
+        // file (like the wasmtime CLI) and prepend it to the user's `args`.
+        let program = wasm.as_deref().and_then(Path::file_stem)
+            .map_or_else(|| String::from("guest"), |s| s.to_string_lossy().into_owned());
         let compiled = omnia::RegistryBuilder::new()
-            .wasm(wasm)
-            .config(config)
-            .compile::<StoreCtx>()
-            .await?;
+            .wasm(wasm).config(config).compile::<StoreCtx>().await?;
+        let mut argv = vec![program];
+        argv.extend(args);
         let exit = Arc::new(OnceLock::new());
-        let run_state = Context::new(compiled, Arc::new(args)).await?; // argv → store
-        let servers: Vec<BoxFuture<'_, Result<()>>> =
-            vec![Box::pin(WasiCli::new(exit.clone()).run(&run_state))];
+        let run_state = Context::new(compiled, Arc::new(argv)).await?; // argv → store
+        // Bound to a local: `WasiCli` carries the exit cell (unlike the
+        // unit-struct servers, which const-promote), so the future `run`
+        // returns must borrow a named value that outlives `serve`.
+        let cli = WasiCli::new(exit.clone());
+        let servers: Vec<BoxFuture<'_, Result<()>>> = vec![Box::pin(cli.run(&run_state))];
         omnia::serve(&run_state, servers).await?; // unchanged; resolves after the one-shot
         Ok(exit.get().copied().unwrap_or(ExitStatus::SUCCESS))
     }
@@ -314,7 +325,7 @@ async fn main() -> std::process::ExitCode {
 
 A command's argv flows through the **same** `omnia` CLI surface a server uses — there is no second entry point. Two small pieces, both reused from the floor:
 
-1. **`omnia::Command::Run` grows a trailing `args`** (`crates/omnia/src/lib.rs` lines 66–79): `#[arg(last = true)] args: Vec<String>`, captured after `--`. So a command is launched as `omnia run <wasm> -- greet Ada` (or `omnia --config omnia.toml -- …`). A server passes no `--`, so `args` is empty and its path is byte-identical to today. This deliberately keeps **one** CLI surface — a command shares the `omnia` entrypoint rather than parsing its own argv — and single-surface convergence is worth the `--` separator. (A distributor that wants a bare `mycli greet Ada` UX can ship a thin renamed wrapper; that is packaging, not floor.)
+1. **`omnia::Command::Run` grows a trailing `args`** (`crates/omnia/src/lib.rs` lines 66–79): `#[arg(last = true)] args: Vec<String>`, captured after `--`. So a command is launched as `omnia run <wasm> -- greet Ada` (or `omnia --config omnia.toml -- …`). The command tail prepends a program name (the wasm file stem) as `argv[0]` — matching the `wasmtime` CLI — so the guest sees `[<prog>, greet, Ada]`. A server passes no `--`, so `args` is empty and its path is byte-identical to today. This deliberately keeps **one** CLI surface — a command shares the `omnia` entrypoint rather than parsing its own argv — and single-surface convergence is worth the `--` separator. (A distributor that wants a bare `mycli greet Ada` UX can ship a thin renamed wrapper; that is packaging, not floor.)
 2. **`StoreBase::builder().args(...)`** — landed (`crates/omnia/src/store.rs` lines 39–49). The generated `Context` carries `#[runtime(args)] args: Arc<Vec<String>>`, and the `Runtime` derive's `store()` adds `.args(&self.args)` to the builder chain (`crates/host-macros/src/runtime_derive.rs` lines 100–110). For a server `args` is empty, so `.args(&[])` equals today's omitted call (`build` already defaults argv to empty, `store.rs` lines 36–37, 101) — the server path is unchanged either way.
 
 ### 5.4 The macro — one `runtime!`, a backend-optional grammar, a one-shot tail
@@ -402,7 +413,7 @@ The two axes are independent in code; each step compiles and is independently re
 
 ## 9. Risks and invariants
 
-- **`process::exit` fidelity.** The exit code is set on the cell by `WasiCli::run` and applied by `main` *after* `serve` returns, so destructors on the `serve` path run normally; only the final, intended `process::exit` at the boundary skips unwinding (as a one-shot's terminal step should). Guest stdout/stderr is flushed by `call_run`'s completion (the guest's `blocking_write_and_flush`) before the cell is read.
+- **`process::exit` fidelity.** The exit code is set on the cell by `WasiCli::run` and applied by `main` *after* `serve` returns, so destructors on the `serve` path run normally; only the final, intended `process::exit` at the boundary skips unwinding (as a one-shot's terminal step should). Guest stdout/stderr is flushed through the `std` bridge during `call_run` (before it returns), so all guest output is written before the cell is read.
 - **Co-list guardrail must be enforced.** §5.5 is the one place a wrong wiring could hang. The guardrail is a compile-time rejection in `expand.rs`; landing it in the same step as the one-shot tail (plan step 7) keeps the invariant and its enforcement together.
 - **Single CLI surface changes `Command::Run`.** Growing `Run` a trailing `args` is additive and gated behind `--`, so existing `omnia run <wasm>` and `omnia run --config …` invocations are unchanged; only `-- <guest args>` is new.
 - **Instance-per-call unchanged.** The command is instantiated fresh on a new store and discarded; `build_store` guards (epoch deadline, fuel, memory limiter) still apply, now via `Runtime::instantiate` rather than the hand-written host.
@@ -412,7 +423,7 @@ The two axes are independent in code; each step compiles and is independently re
 ## 10. References
 
 - [`wasip3::cli::command::export!`](https://docs.rs/wasip3/latest/wasip3/cli/command/macro.export.html) — guest-side export macro for `wasi:cli/command` ([`wasi-rs`](https://github.com/bytecodealliance/wasi-rs)); the §4 export-side parallel to `wasip3::http::service::export!`.
-- [`wasmtime_wasi::p2::bindings::Command`](https://docs.rs/wasmtime-wasi/latest/wasmtime_wasi/p2/bindings/struct.Command.html) — host-side command invoke (`CommandPre`, `Command`, `call_run`, `I32Exit`) used by `WasiCli::run`; distinct from the guest SDK above.
+- [`wasmtime_wasi::p3::bindings::Command`](https://docs.rs/wasmtime-wasi/latest/wasmtime_wasi/p3/bindings/struct.Command.html) — host-side command invoke (`CommandPre`, `Command`, `call_run` via `store.run_concurrent`, `I32Exit`) used by `WasiCli::run`; distinct from the guest SDK above.
 - `crates/wasi-http/src/host.rs`, `crates/wasi-http/src/host/server.rs` — the `Host` + `Server` + `TriggerRouter` trigger pattern §5.1 mirrors (including out-of-band response delivery).
 - `crates/wasi-messaging/src/host/server.rs` — a second `TriggerRouter`-driven trigger, showing the probe-then-resolve shape is the floor's norm.
 - `examples/http/guest.rs` — the reactor export-side idiom §4 mirrors.

@@ -23,7 +23,7 @@ use anyhow::{Context as _, Result, bail};
 use serde::Deserialize;
 
 use crate::registry::GuestId;
-use crate::routing::{HttpRoutes, Routes, TopicRoutes};
+use crate::routing::{CliRoutes, HttpRoutes, Routes, TopicRoutes};
 use crate::source::Source;
 
 /// The deployment manifest: which guests load and how host-mediated calls
@@ -178,7 +178,10 @@ impl RouteSpec {
         let websocket = TopicRoutes::new(
             self.websocket.iter().map(|e| (e.topic.clone(), GuestId::from(e.guest.as_str()))),
         );
-        Routes::new(http, messaging, websocket)
+        // `[[route.cli]]` is not yet parsed; an empty table makes a sole
+        // `wasi:cli/run` exporter the catch-all (multi-command routing is
+        // deferred).
+        Routes::new(http, messaging, websocket, CliRoutes::default())
     }
 }
 

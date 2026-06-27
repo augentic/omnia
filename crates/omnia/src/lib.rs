@@ -41,14 +41,14 @@ pub use self::create::{Compiled, RegistryBuilder};
 pub use self::dispatch::{HostDispatch, serve_links};
 pub use self::options::RuntimeOptions;
 pub use self::registry::{Guest, GuestId, Registry};
-pub use self::routing::{HttpRoutes, Resolver, Routes, TopicRoutes, TriggerRouter};
-pub use self::runtime::serve;
+pub use self::routing::{CliRoutes, HttpRoutes, Resolver, Routes, TopicRoutes, TriggerRouter};
+pub use self::runtime::{ExitStatus, serve};
 pub use self::selector::{FirstArgSelector, GuestSelector};
-pub use self::store::{StoreBase, StoreBaseBuilder};
 // Type-state markers naming the `StoreBaseBuilder` member states; users chain the
 // setters and never name these directly, so they are hidden from the docs.
 #[doc(hidden)]
 pub use self::store::{Set, Unset};
+pub use self::store::{StoreBase, StoreBaseBuilder};
 pub use self::telemetry::{Telemetry, resource};
 pub use self::traits::{Backend, FromEnv, FutureResult, HasLimits, Host, Runtime, Server};
 pub use self::transport::{LinkClient, WrpcState};
@@ -76,6 +76,13 @@ pub enum Command {
         /// deployment. Falls back to the `OMNIA_CONFIG` environment variable.
         #[arg(short, long)]
         config: Option<PathBuf>,
+
+        /// Arguments forwarded to the guest as its argv (everything after
+        /// `--`). Empty for a long-lived server; a `wasi:cli` command reads
+        /// them as `wasi:cli/environment`'s `get-arguments`. `args[0]` is the
+        /// program name, which the floor supplies.
+        #[arg(last = true)]
+        args: Vec<String>,
     },
     /// Compile the specified wasm32-wasip2 component.
     #[cfg(feature = "jit")]

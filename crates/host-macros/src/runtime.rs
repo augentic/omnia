@@ -34,13 +34,16 @@ impl Parse for Config {
             }
         }
 
-        // deduplicate backends
-        let mut backends = vec![];
+        // deduplicate backends (skipping backend-less hosts such as `WasiCli`)
+        let mut backends: Vec<Path> = vec![];
         for host in &hosts.0 {
-            if backends.iter().any(|b: &Path| b.get_ident() == host.backend.get_ident()) {
+            let Some(backend) = &host.backend else {
+                continue;
+            };
+            if backends.iter().any(|b| b.get_ident() == backend.get_ident()) {
                 continue;
             }
-            backends.push(host.backend.clone());
+            backends.push(backend.clone());
         }
 
         Ok(Self {
@@ -91,16 +94,25 @@ impl Parse for Hosts {
 }
 
 /// Information about a WASI host and its configuration.
+///
+/// `backend` is optional: a trigger host that drives an export rather than
+/// connecting a backend (such as `WasiCli`) is declared bare, with no
+/// `: Backend`.
 pub struct Host {
     pub type_: Path,
-    pub backend: Path,
+    pub backend: Option<Path>,
 }
 
 impl Parse for Host {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let type_ = input.parse::<Path>()?;
-        input.parse::<Token![:]>()?;
-        let backend = input.parse::<Path>()?;
+        // `Host: Backend` (a backend-backed host) or bare `Host` (backend-less).
+        let backend = if input.peek(Token![:]) {
+            input.parse::<Token![:]>()?;
+            Some(input.parse::<Path>()?)
+        } else {
+            None
+        };
         Ok(Self { type_, backend })
     }
 }
