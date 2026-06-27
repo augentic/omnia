@@ -61,6 +61,15 @@ name = "blobstore"
 path = "blobstore/runtime.rs"
 
 [[example]]
+name = "cli-wasm"
+path = "cli/guest.rs"
+# no crate-type: a binary -> wasi:cli/command component
+
+[[example]]
+name = "cli"
+path = "cli/runtime.rs"
+
+[[example]]
 name = "config-wasm"
 path = "config/guest.rs"
 crate-type = ["cdylib"]
