@@ -1,21 +1,23 @@
-# Design: Aligning `wasi:cli` — a `cdylib` Guest and the `server!` / `cli!` Macro Split
+# Design: Aligning `wasi:cli` — a `cdylib` Guest and a One-Shot Trigger Host
 
-> Status: Accepted — a committed design, not a study. `examples/cli` diverges from every other example on **two** axes: its guest is a binary (not a `cdylib` reactor) and its host is hand-written (not macro-wired). This document commits to erasing both: the guest becomes a `cdylib` exporting `wasi:cli/run` via `wasip3`, and the host gains a first-class command form. Rather than bend the server-shaped `runtime!` around a command, we **split the host macro**: `runtime!` is renamed to `server!` (the long-lived-server form) and a corollary `cli!` runs a single command to completion through a new floor helper, `omnia::run`. The rename is a hard break — no compatibility alias.
+> Status: Accepted. `examples/cli` diverges from every other example on **two** axes: its guest is a binary (not a `cdylib` reactor) and its host is hand-written (not macro-wired). This design erases both **without forking the floor**: the guest becomes a `cdylib` exporting `wasi:cli/run` via `wasip3`, and `wasi:cli` becomes a first-class **trigger** — a `WasiCli` host that implements `Host` + `Server` exactly like `WasiHttp`, builds a `TriggerRouter`, instantiates instance-per-call, and runs through the existing `omnia::serve` lifecycle, with the `runtime!` macro unchanged. The only thing that differs from a long-lived trigger is the lifecycle *tail*: a command fires once and its response is an exit code.
 >
-> Owns: the committed design for aligning `examples/cli` on both axes. Touches: `examples/cli/{guest.rs,runtime.rs,README.md}`, `examples/Cargo.toml`, `crates/omnia/src/{runtime.rs,lib.rs}`, `crates/host-macros/src/{lib.rs,expand.rs,runtime.rs,runtime_derive.rs}`, every reactor example's `runtime.rs` (the `runtime!`→`server!` rename), and the crate READMEs/`docs` that name `runtime!`. Depends: the landed `StoreBase::builder` argv setter, the `Runtime` / `StoreContext` derives, `omnia::serve`, the base linker's `wasi:cli` linking (`crates/omnia/src/create.rs`), `wasmtime-wasi`'s p2 `Command` / `CommandPre` bindings, and [`wasip3`](https://docs.rs/wasip3) guest export macros (Bytecode Alliance [`wasi-rs`](https://github.com/bytecodealliance/wasi-rs)).
+> This is the **Level-1 convergence** target (deployment-level): the same guest-handler model, the same `Server` trait, the same `TriggerRouter`, the same `runtime!` macro, and the same manifest serve every event source — so moving a guest from a CLI trigger today to an HTTP / messaging / websocket / wRPC trigger tomorrow is a *wiring* change, not a *path* change. Guest-level convergence (one uniform handler the floor adapts every event into) is **Level 2** and explicitly out of scope; it slots in cleanly later precisely because the trigger machinery is unified now.
+>
+> Owns: the committed design for aligning `examples/cli` on both axes. Touches: `examples/cli/{guest.rs,runtime.rs,README.md}`, `examples/Cargo.toml`, a new host-only crate `crates/wasi-cli`, `crates/omnia/src/{runtime.rs,lib.rs,routing.rs}` (the `ExitStatus` newtype and the optional `cli` route table), and `crates/host-macros/src/{runtime.rs,expand.rs,runtime_derive.rs}` (a backend-optional host grammar, an argv field, and a one-shot `main` tail). Depends: the landed `StoreBase::builder` argv setter, the `Runtime` / `StoreContext` derives, `omnia::serve` + `TriggerRouter` (`crates/omnia/src/{runtime.rs,routing.rs}`), the base linker's `wasi:cli` import linking (`crates/omnia/src/create.rs`), `wasmtime-wasi`'s p2 `Command` / `CommandPre` bindings, and [`wasip3`](https://docs.rs/wasip3) guest export macros (Bytecode Alliance [`wasi-rs`](https://github.com/bytecodealliance/wasi-rs)).
 
 ## 1. Abstract
 
 `examples/cli` is the repo's only *command* (a guest that exports `wasi:cli/run`, invoked once); every other example is a *reactor* (a `cdylib` exporting a handler that a long-lived `Server` drives on each inbound event). To keep the first command self-contained it took the two localized shortcuts — a binary guest and a hand-written host — which leave it reading nothing like the deployments a newcomer learns first.
 
-This document commits to removing both divergences:
+This design removes both divergences **by treating a command as one more trigger**, not as a separate species:
 
 - **[§4 Guest](#4-guest-alignment--cdylib-reactor)** — rewrite the guest as a `cdylib` reactor exporting `wasi:cli/run` via `wasip3::cli::command::export!` (the same guest-SDK layer HTTP uses), so it shares the target shape, filename rule, and cfg convention of every other guest.
-- **[§5 Host](#5-host-alignment--the-server--cli-split)** — give commands a first-class host form *without* pretending a command is a server. Rename `runtime!` → `server!` (the long-lived-server macro, behaviour unchanged) and add a corollary `cli!` that runs one command to completion via a new floor helper `omnia::run` (the command analog of `omnia::serve`).
+- **[§5 Host](#5-host-alignment--wasicli-as-a-one-shot-trigger)** — add a `WasiCli` host that is a trigger in the same sense `WasiHttp` is: it implements `Host` (a no-op linker — `wasi:cli`'s *imports* are ambient, and a trigger *drives an export* rather than linking an import) and `Server` (a one-shot `run` that capability-probes `wasi:cli/run` through `TriggerRouter`, instantiates instance-per-call through `Runtime::instantiate`, calls `call_run`, and reports an `ExitStatus`). It is wired by the **existing** `runtime!` macro and run by the **existing** `omnia::serve`.
 
-The unifying idea: **every guest is a `cdylib` exporting a handler; every host is either `server!` (drives long-lived servers) or `cli!` (runs one command).** A command's handler is `wasi:cli/run`; its driver is `omnia::run`. The command/server distinction becomes a first-class, teachable axis rather than a hand-written special case — and the deadlocking co-list of a command with a server (the central hazard of the trigger-host alternative, §8) becomes *unrepresentable* instead of merely documented.
+The unifying idea: **every guest is a `cdylib` exporting a handler; every trigger is a `Server` selected by a `TriggerRouter` and driven by `omnia::serve`.** A command's handler is `wasi:cli/run`; its trigger is `WasiCli`; its per-invocation response is an exit code, just as an HTTP trigger's response is a status code and body. The "command vs. server" distinction collapses into a single, smaller fact — **a command is a one-shot trigger whose transport is the process** — which the `Server` abstraction already encapsulates.
 
-This explicitly **rejects** modelling `wasi:cli` as a trigger host inside `server!` (the approach the rest of this document's earlier drafts explored); that path is retained as a rejected alternative in [§8](#8-alternatives-considered-and-rejected).
+Crucially, the command path reuses `Server`, `TriggerRouter`, and `omnia::serve` rather than a command-only lifecycle running parallel to them. A parallel path would erase the *surface* divergence (example shape) only to introduce a deeper *architectural* one — a "command world" that bypasses the floor's trigger machinery — which is exactly the divergence Level-1 convergence forbids. [§8](#8-alternatives-considered-and-rejected) weighs that alternative.
 
 ## 2. Problem — where `examples/cli` diverges
 
@@ -37,25 +39,26 @@ This explicitly **rejects** modelling `wasi:cli` as a trigger host inside `serve
 | Divergence | `examples/cli` (hand-written) | Every reactor host (`runtime!`) |
 | --- | --- | --- |
 | Host body | a `#[derive(StoreContext)]` ctx, a `Runtime` impl, and a `#[tokio::main]` | `omnia::runtime!({ main: true, hosts: { … } })` |
-| Lifecycle | instantiate, `call_run`, map exit code, exit (`runtime.rs` lines 96–105) | `omnia::serve` joins long-lived servers forever |
+| Lifecycle | instantiate, `call_run`, map exit code, exit (`runtime.rs` lines 88–105) | `omnia::serve` joins long-lived servers (`crates/omnia/src/runtime.rs` line 109) |
 | argv | injected via `StoreBase::builder().args(&args)` (`runtime.rs` lines 49–54) | no path exists; the generated `store()` omits `.args` |
-| Exit status | a guest `i32` honoured via `std::process::exit` | none — servers do not return a status |
+| Routing | a hand-inlined `CommandPre::new(..).is_ok()` probe over `guests().next()` (`runtime.rs` lines 87–90) | `TriggerRouter::build(.., probe)` capability-probes + routes (`wasi-http`/`wasi-messaging` `server.rs`) |
+| Exit status | a guest `i32` honoured via `std::process::exit` *inside* the host body | none — servers do not return a status |
 
-Both halves are *correct*; they are just bespoke. A reader who has learned Omnia as a server cannot place this file, because nothing else in the repo looks like it.
+Both halves are *correct*; they are just bespoke. The hand-written probe in particular is a one-off reimplementation of `TriggerRouter` — the same capability-probe-then-select that every real trigger already does generically.
 
-## 3. The command / server dichotomy
+## 3. A command is a one-shot trigger, not a separate species
 
-A *command* and a *server* differ on five axes the current floor conflates into one server-shaped path:
+It is tempting to treat "command" and "server" as different species — five axes seem to separate them, and they could motivate a `server!`/`cli!` macro split. But every one of those axes is a property of the **transport** — one-shot vs. long-lived I/O — which the `Server` abstraction is meant to *encapsulate*, not *fork on*:
 
-| Axis | Server (`runtime!`) | Command |
+| Axis | Read as "command ≠ server" | Read as "CLI is a one-shot trigger" |
 | --- | --- | --- |
-| Lifecycle | `try_join_all` over long-lived servers (`crates/omnia/src/runtime.rs` line 109) | one invoke, then exit |
-| Exit status | none (`Server::run -> Result<()>`) | an `i32` (`I32Exit` / `Ok(Err(()))`) |
-| argv | none | consumes argv |
-| Backend / view | one per host, **required** by the parser (`crates/host-macros/src/runtime.rs` lines 99–106) | none (a bare `wasi:cli` command) |
-| Background tasks | epoch interruption + pool sampling justified | vestigial for a one-shot |
+| Lifecycle | a command does "one invoke, then exit"; a server `try_join_all`s forever | "fires once" is what a CLI *transport* does, as "loops forever" is what an HTTP *transport* does. `serve`'s `try_join_all` already completes for a sole one-shot server (its future resolves after the single invocation). |
+| Exit status | a command returns an `i32`; a server returns nothing | the exit code is the CLI trigger's **per-invocation response** — the analog of an HTTP status code. Triggers already produce a response and deliver it over their transport (HTTP via a `oneshot` to hyper, `crates/wasi-http/src/host/server.rs` lines 168–239). CLI's transport is the process; its response is the exit code. It never needed to ride `Server::run`'s `Result<()>`. |
+| argv | a command consumes argv; a server has none | argv is the CLI trigger's **input** — the analog of the HTTP `Request`. Already solved by `StoreBase::builder().args` (`crates/omnia/src/store.rs` lines 39–49). |
+| Backend / view | the macro parser requires a backend per host | a self-imposed grammar constraint (`crates/host-macros/src/runtime.rs` lines 99–106), relaxed once in §5.4 (backend-optional hosts) for the *one* macro. |
+| Background tasks | epoch/pool tasks are vestigial for a one-shot | epoch interruption is *useful* for a one-shot (it lets a guest deadline fire); `sample_pool` is already a no-op when disabled (`crates/omnia/src/runtime.rs` lines 48–51). `serve` spawns both regardless and they die with the process. |
 
-The design follows from this table: a command is not a server, so it gets its own corollary entry point (`cli!` + `omnia::run`) that shares the *linking* machinery with `server!` but not the *lifecycle*. Forcing a command through `server!` instead — the trigger-host alternative — produces a vestigial artifact on every one of these axes and an unsafe co-list footgun ([§8](#8-alternatives-considered-and-rejected)).
+The decisive evidence that this is the floor's grain: **HTTP, messaging, and websocket already coexist as triggers in one `runtime!`, one `serve`, and one `TriggerRouter`** — `examples/messaging/runtime.rs` wires four hosts at once, and both `wasi-http` and `wasi-messaging` build via `TriggerRouter::build(state.registry(), trigger, table, probe)`. CLI is the *only* event source being singled out for a parallel path. Folding it into the same machinery is the alignment; carving it out is the divergence.
 
 ## 4. Guest alignment — `cdylib` reactor
 
@@ -129,51 +132,120 @@ The binary form *is* the canonical "write a `wasi:cli` command in Rust": `fn mai
 
 We accept that cost deliberately, because this is a teaching repo and **one consistent guest mental model beats per-example idiom**: every guest is a `cdylib` that exports a handler. The command's handler is `wasi:cli/run`. A reader who has internalised the reactor shape reads the cli guest with no new concepts — the learnability win the binary form forfeits. (If Omnia-specific CLI ergonomics ever emerge, an `omnia-wasi-cli` guest helper analogous to `omnia_wasi_http::serve` can wrap the `wasip3` export; it is not on the critical path.)
 
-## 5. Host alignment — the `server!` / `cli!` split
+## 5. Host alignment — `WasiCli` as a one-shot trigger
 
-> Give commands a first-class host form. Rename `runtime!` → `server!`, add a corollary `cli!`, and back both with a shared expansion plus two floor lifecycle helpers: the existing `omnia::serve` and a new `omnia::run`.
+> Add a `WasiCli` host that is a trigger like `WasiHttp`: `Host` (no-op linker) + `Server` (one-shot `run` via `TriggerRouter`). Wire it with the existing `runtime!` macro; run it with the existing `omnia::serve`. The only new floor types are an `ExitStatus` newtype and an optional `cli` route table.
 
-### 5.1 `omnia::run` — the command runner
+### 5.1 The `WasiCli` host — `Host` + `Server`, exactly like `WasiHttp`
 
-Today the invoke logic is hand-inlined in the example (`examples/cli/runtime.rs` lines 96–105). Lift it into `crates/omnia/src/runtime.rs`, beside `serve`, but **return** the status instead of exiting from inside:
+`WasiHttp` is two impls: a `Host` that links the `wasi:http` *imports* a guest may call, and a `Server` whose `run` drives the `wasi:http/incoming-handler` *export* (`crates/wasi-http/src/host.rs` lines 19–36). `WasiCli` mirrors that shape. Its `Host` impl is a no-op — and that is *correct, not awkward*: `wasi:cli`'s imports (`environment`, `stdout`, `stderr`, …) are **ambient** (any reactor guest may write to stderr), so they live in the base linker already (`crates/omnia/src/create.rs` lines 159–160); and a trigger **drives an export**, which needs no linking, exactly as `WasiHttp`'s server drives `incoming-handler` without linking it.
 
 ```rust
-/// Run the single `wasi:cli/run` exporter once and report its exit status.
-///
-/// The command analog of [`serve`]: `serve` joins long-lived servers; this runs
-/// one command to completion. Routes through `Runtime::instantiate` so a command
-/// records the same `instantiation_duration_us` / `pool_instantiation_errors`
-/// metrics a trigger does (which the hand-written host skips). Unlike `serve`,
-/// it spawns no epoch/pool background tasks — a command runs to completion.
-pub async fn run<R: Runtime>(runtime: &R) -> Result<ExitStatus>
+// crates/wasi-cli/src/host.rs  (new, host-only crate; the guest uses wasip3 directly per §4.1)
+use std::sync::{Arc, OnceLock};
+
+use anyhow::{Result, bail};
+use omnia::wasmtime_wasi::I32Exit;
+use omnia::wasmtime_wasi::p2::bindings::Command;
+use omnia::{ExitStatus, Host, Runtime, Server, TriggerRouter};
+use omnia::wasmtime_wasi::p2::bindings::CommandPre;
+use wasmtime::component::Linker;
+use wasmtime_wasi::WasiView;
+use wrpc_wasmtime::WrpcView;
+
+/// Host-side trigger for `wasi:cli`. Drives the `wasi:cli/run` export of the
+/// sole command-capable guest exactly once and reports its exit status.
+#[derive(Debug, Clone, Default)]
+pub struct WasiCli {
+    /// The one-shot's result, read by the generated `main` at the process
+    /// boundary (see §5.2). The status rides this side channel because
+    /// `Server::run` / `omnia::serve` return `Result<()>` and discard each
+    /// server's value — the same way `WasiHttp` delivers its response out of
+    /// band (over the socket) rather than through `run`'s return type.
+    exit: Arc<OnceLock<ExitStatus>>,
+}
+
+impl WasiCli {
+    #[must_use]
+    pub fn new(exit: Arc<OnceLock<ExitStatus>>) -> Self {
+        Self { exit }
+    }
+}
+
+impl<T> Host<T> for WasiCli
 where
+    T: WasiView + 'static,
+{
+    // `wasi:cli`'s imports are ambient (base linker); a trigger drives an
+    // export, so there is nothing to add here. Cf. the no-op `Server` default
+    // (`crates/omnia/src/traits.rs` lines 122–131).
+    fn add_to_linker(_linker: &mut Linker<T>) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl<R> Server<R> for WasiCli
+where
+    R: Runtime,
     R::StoreCtx: WasiView + WrpcView + 'static,
 {
-    // Probe: a guest is command-capable iff `CommandPre::new(..)` is Ok.
-    let guest = runtime
-        .registry()
-        .guests()
-        .find(|g| CommandPre::new(g.instance_pre().clone()).is_ok())
-        .context("no guest exports wasi:cli/run")?;
+    async fn run(&self, state: &R) -> Result<()> {
+        // (1) Capability probe + routing — the same `TriggerRouter` HTTP and
+        // messaging use. A guest is command-capable exactly when its
+        // `wasi:cli/run` export resolves (`CommandPre::new` is `Ok`). The `cli`
+        // route table is empty today, so a sole exporter is the catch-all,
+        // zero is inert, and ">1 with no routes" is the same ambiguity error
+        // HTTP raises (`crates/omnia/src/routing.rs` lines 172–196).
+        let routing = TriggerRouter::build(
+            state.registry(),
+            "cli",
+            state.registry().routes().cli().clone(),
+            |pre| CommandPre::new(pre.clone()).map(|_| ()), // I = () capability marker
+        )?;
+        if routing.is_inert() {
+            tracing::info!("no guest exports wasi:cli/run; cli trigger inert");
+            return Ok(()); // nothing to drive; `serve` then completes
+        }
+        let Some((guest_id, _)) = routing.catch_all() else {
+            // >1 command-capable guest but no `[[route.cli]]` to disambiguate.
+            // Multi-command routing is §5.6; until then this is a clean error.
+            bail!("multiple wasi:cli/run guests but no [[route.cli]] to disambiguate");
+        };
+        let guest = state.registry().get(guest_id).expect("a capable guest is registered");
 
-    let mut store = runtime.build_store(runtime.store());
-    let instance = runtime.instantiate(guest.instance_pre(), &mut store).await?;
-    let command = Command::new(&mut store, &instance)?;
+        // (2) Instance-per-call, *through* `Runtime::instantiate` — so a command
+        // records the same `instantiation_duration_us` / `pool_instantiation_errors`
+        // metrics every trigger does (which the hand-written host skips). argv is
+        // already in the store via `StoreBase::builder().args` (§5.3).
+        let mut store = state.build_store(state.store());
+        let instance = state.instantiate(guest.instance_pre(), &mut store).await?;
+        let command = Command::new(&mut store, &instance)?;
 
-    Ok(match command.wasi_cli_run().call_run(&mut store).await {
-        Ok(Ok(())) => ExitStatus::SUCCESS,
-        Ok(Err(())) => ExitStatus::from(1),
-        // A guest `std::process::exit` (or panic) surfaces as an `I32Exit`
-        // error rather than `Ok(Err(()))`; honour its code.
-        Err(error) => match error.downcast_ref::<I32Exit>() {
-            Some(exit) => ExitStatus::from(exit.0),
-            None => return Err(error),
-        },
-    })
+        // (3) Invoke once; map the result to an `ExitStatus`. A guest
+        // `process::exit` / panic surfaces as `I32Exit`, not `Ok(Err(()))`
+        // (the shape the wasmtime CLI's runner uses, mirrored by today's
+        // hand-written host, `examples/cli/runtime.rs` lines 96–105).
+        let status = match command.wasi_cli_run().call_run(&mut store).await {
+            Ok(Ok(())) => ExitStatus::SUCCESS,
+            Ok(Err(())) => ExitStatus::from(1),
+            Err(error) => match error.downcast_ref::<I32Exit>() {
+                Some(exit) => ExitStatus::from(exit.0),
+                None => return Err(error), // a real host trap propagates through `serve`
+            },
+        };
+
+        // (4) Hand the response to the boundary and complete. `serve`'s
+        // `try_join_all` resolves here (this is the only server in a command
+        // deployment — see §5.5), and the generated `main` reads the cell.
+        let _ = self.exit.set(status);
+        Ok(())
+    }
 }
 ```
 
-`ExitStatus` is a thin floor newtype over the guest's `i32`, exported from `omnia`:
+Compared with `wasi-http/src/host/server.rs`, the *shape* is identical — probe via `TriggerRouter::build`, bail on inert, resolve, `state.build_store` → `state.instantiate` → load typed bindings → invoke. The differences are exactly the two transport facts from §3: the "accept loop" is a single iteration, and the response (an `ExitStatus`) is delivered to the process rather than a socket.
+
+`ExitStatus` is a thin floor newtype over the guest's `i32`, exported from `omnia` (`crates/omnia/src/runtime.rs`, beside `serve`):
 
 ```rust
 pub struct ExitStatus(i32);
@@ -191,88 +263,99 @@ impl From<ExitStatus> for std::process::ExitCode {
 }
 ```
 
-The process exit happens at the boundary (the generated `main`), never inside a `Server`. This resolves the trigger-host design's "exit codes can't ride `Result<()>`" problem ([§8](#8-alternatives-considered-and-rejected)) by construction: a command is not a `Server`.
+### 5.2 The one-shot / exit-code seam — against the current `serve` / `TriggerRouter`
 
-This addition is purely additive — it does not touch `serve` — so it carries no risk to any existing deployment, and it slims the hand-written host immediately even before `cli!` exists.
+Neither `omnia::serve` nor `TriggerRouter` changes. The seam is two observations about the *current* signatures:
 
-### 5.2 `server!` and `cli!` — one expansion, two tails
+1. **One-shot rides `serve` unchanged.** `serve(runtime, servers)` ends with `try_join_all(servers)` (`crates/omnia/src/runtime.rs` line 109). `WasiCli::run`'s future resolves after its single invocation, so for a command deployment — whose `servers` vec holds exactly that one future (§5.5) — `try_join_all` resolves and `serve` returns `Ok(())`. The epoch/pool background tasks `serve` spawns are detached and die with the process. No `serve` variant, no `omnia::run`, is needed.
 
-Both macros parse the same grammar (`{ main: bool, hosts: { Host: Backend, … } }`) and emit the same `Context` + `StoreCtx` + host-linking + backend-connect (`crates/host-macros/src/expand.rs`). They differ only in the lifecycle tail and argv:
+2. **The exit code rides a side channel, read at the boundary.** `serve` returns `Result<()>` and `try_join_all` discards each server's `()`, so the `ExitStatus` cannot ride the lifecycle `Result` — and it should not, any more than an HTTP 500 rides `WasiHttp::run`'s return type. Instead `WasiCli` carries an `Arc<OnceLock<ExitStatus>>`; `run` sets it; the generated `main` (which constructed the cell and handed a clone to `WasiCli::new`) reads it *after* `serve` returns and performs the single `process::exit` **at the boundary**. The process exit therefore never happens inside a `Server`, and needs no second macro to keep it there.
 
-| | `server!` (was `runtime!`) | `cli!` |
-| --- | --- | --- |
-| `hosts` | required (a server with none does nothing useful) | optional (a bare command has none) |
-| Lifecycle tail | build `servers` vec → `omnia::serve` (`expand.rs` lines 76–78) | call `omnia::run` |
-| argv | none | `Context` carries `args`; `store()` adds `.args(&self.args)` |
-| `main` | `omnia::Cli::parse()` → `Command::Run { wasm, config }`, returns `Result<()>` | parses `<wasm> [args…]` directly, returns `ExitCode` |
-
-Because a command is single-guest by nature, `cli!` accepts the *optional* `hosts: { … : Backend }` grammar too — for a command that imports extension WASI (say, one that reads `wasi-keyvalue`). Those hosts are **linked** (the `Host` / connect / view half of `expand.rs`) but **not driven as servers**: the generated `run` calls `omnia::run`, not `omnia::serve`. So the two macros share ~80% of the expansion and the split is clean rather than duplicative — one parameterized `Expanded` with two public entry points in `crates/host-macros/src/lib.rs`.
-
-The deployment author writes, for the bare command:
+The generated command-shaped `main` and its `runtime::run` (the only parts the macro emits differently for a command — see §5.4):
 
 ```rust
-// examples/cli/runtime.rs (with cli!) — parity with the ~12-line server form
-cfg_if::cfg_if! {
-    if #[cfg(not(target_arch = "wasm32"))] {
-        omnia::cli!({ main: true });   // no hosts → no backend, no view
-    } else { fn main() {} }
+// generated by `omnia::runtime!({ main: true, hosts: { WasiCli } })`
+mod runtime {
+    // The cli counterpart of the server `runtime::run`: same compile + Context +
+    // host-link + backend-connect, then `serve` — but returns the one-shot's
+    // status read from the cell instead of `Result<()>`.
+    pub async fn run(
+        wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>,
+    ) -> Result<ExitStatus> {
+        let compiled = omnia::RegistryBuilder::new()
+            .wasm(wasm)
+            .config(config)
+            .compile::<StoreCtx>()
+            .await?;
+        let exit = Arc::new(OnceLock::new());
+        let run_state = Context::new(compiled, Arc::new(args)).await?; // argv → store
+        let servers: Vec<BoxFuture<'_, Result<()>>> =
+            vec![Box::pin(WasiCli::new(exit.clone()).run(&run_state))];
+        omnia::serve(&run_state, servers).await?; // unchanged; resolves after the one-shot
+        Ok(exit.get().copied().unwrap_or(ExitStatus::SUCCESS))
+    }
 }
-```
 
-…and `cli!` generates the command-shaped `main` (mirroring what the example hand-rolls today, lines 62–106):
-
-```rust
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
-    // A command owns its argv: `<binary> <wasm> [guest args…]`.
-    let mut argv = std::env::args().skip(1);
-    let Some(wasm) = argv.next() else {
-        eprintln!("usage: <wasm> [args…]");
-        return std::process::ExitCode::FAILURE;
-    };
-    let mut args = vec!["cli".to_string()];
-    args.extend(argv);
-
-    match runtime::run(PathBuf::from(wasm), args).await {
-        Ok(status) => status.into(),            // ExitStatus → ExitCode, at the boundary
-        Err(error) => { eprintln!("{error:#}"); std::process::ExitCode::FAILURE }
+    use omnia::Parser;
+    match omnia::Cli::parse().command {
+        // `args` are the guest's argv (everything after `--`); see §5.3.
+        omnia::Command::Run { wasm, config, args } => match runtime::run(wasm, config, args).await {
+            Ok(status) => status.into(),  // ExitStatus → ExitCode, at the boundary
+            Err(error) => { eprintln!("{error:#}"); std::process::ExitCode::FAILURE }
+        },
+        _ => unreachable!(),
     }
 }
 ```
 
-The generated `runtime::run` builds the registry and `Context { registry, args }`, then calls `omnia::run(&context)` — the cli counterpart to the `server!` module's `runtime::run` that calls `omnia::serve`.
-
-The bare base-only `StoreCtx` (no `#[wasi(...)]` fields) already works: the `StoreContext` derive tolerates a context with only `#[base]` (the hand-written `CliCtx`, `examples/cli/runtime.rs` lines 29–33, proves it), and the base linker already links `wasi:cli/*`, so **no `Host` impl is needed**.
-
 ### 5.3 Argv home
 
-The argv path needs only two pieces, both small:
+A command's argv flows through the **same** `omnia` CLI surface a server uses — there is no second entry point. Two small pieces, both reused from the floor:
 
-1. **`StoreBase::builder().args(...)`** — the type-state builder's optional `.args` setter. **Landed.** It is the WASI-policy home that ends the re-inlining the hand-written host used to do.
-2. **An opt-in `#[runtime(args)]` field attribute on the `Runtime` derive** (`crates/host-macros/src/runtime_derive.rs`). When present, `store()` adds `.args(&self.<field>)` to the builder chain (`crates/host-macros/src/runtime_derive.rs` lines 100–110). `cli!` emits `#[runtime(args)] args: Arc<Vec<String>>` on its `Context`; `server!` never emits it, so the server path is unchanged.
+1. **`omnia::Command::Run` grows a trailing `args`** (`crates/omnia/src/lib.rs` lines 66–79): `#[arg(last = true)] args: Vec<String>`, captured after `--`. So a command is launched as `omnia run <wasm> -- greet Ada` (or `omnia --config omnia.toml -- …`). A server passes no `--`, so `args` is empty and its path is byte-identical to today. This deliberately keeps **one** CLI surface — a command shares the `omnia` entrypoint rather than parsing its own argv — and single-surface convergence is worth the `--` separator. (A distributor that wants a bare `mycli greet Ada` UX can ship a thin renamed wrapper; that is packaging, not floor.)
+2. **`StoreBase::builder().args(...)`** — landed (`crates/omnia/src/store.rs` lines 39–49). The generated `Context` carries `#[runtime(args)] args: Arc<Vec<String>>`, and the `Runtime` derive's `store()` adds `.args(&self.args)` to the builder chain (`crates/host-macros/src/runtime_derive.rs` lines 100–110). For a server `args` is empty, so `.args(&[])` equals today's omitted call (`build` already defaults argv to empty, `store.rs` lines 36–37, 101) — the server path is unchanged either way.
 
-Crucially, the `cli!` `main` parses `<wasm> [args…]` itself and does **not** route through `omnia::Cli` / `Command::Run`. So the shared CLI surface (`crates/omnia/src/lib.rs` lines 66–91) stays untouched — a command *is* its own CLI and should not be forced under an `omnia run` subcommand. This avoids growing `Command::Run` an `args` field and threading it through the generated `main`, which the trigger-host alternative would have required.
+### 5.4 The macro — one `runtime!`, a backend-optional grammar, a one-shot tail
 
-### 5.4 The rename: `runtime!` → `server!`, no alias
+`runtime!` is **not** renamed and **not** split. Two contained changes let it wire a command:
 
-The `runtime` proc-macro (`crates/host-macros/src/lib.rs` lines 26–33) is renamed to `server`; `crates/omnia/src/lib.rs` re-exports `server` (and the new `cli`) in place of `runtime`. This is a **hard break with no compatibility alias**: a stale `runtime!` is a clean compile error pointing at the new name, not a silent deprecation.
+1. **Backend-optional hosts.** The grammar `Host: Backend` becomes `Host` *optionally* `: Backend` (`crates/host-macros/src/runtime.rs` lines 99–106: peek for `:`). A backend-less host contributes no `Backend::connect`, no `#[wasi(...)]` `StoreCtx` field, and no view — so `runtime!({ main: true, hosts: { WasiCli } })` needs no ZST backend and no no-op view. This is strictly more general than today and is the *only* grammar change; servers with backends are unaffected.
+2. **A one-shot `main` tail.** When a one-shot trigger (`WasiCli`) is among the hosts, `expand.rs` emits the command-shaped `runtime::run` + `main` of §5.2 (returns `ExitCode`, threads `args`, reads the exit cell) instead of the server-shaped `main` (`crates/host-macros/src/expand.rs` lines 208–223). The shared 80% — `Context`, `StoreCtx`, host-linking (line 98), backend-connect, registry build, **and the `omnia::serve` call** — is identical. The fork is one branch on the `main` tail, not a second macro, not a second lifecycle helper, and not a rename.
 
-Blast radius (all updated in the same change): every reactor example's `runtime.rs` (`examples/*/runtime.rs`), and every crate README / `docs` file that names `runtime!` (the `wasi-*` crate READMEs, `crates/omnia/README.md`, `crates/host-macros/README.md`, the top-level `README.md`, and `docs/Architecture.md`). The `Runtime` *derive* and its `#[runtime(...)]` helper attribute keep their names — they are a separate macro (`#[proc_macro_derive(Runtime, attributes(runtime))]`) and the `Runtime` trait it implements is unchanged.
+The deployment author writes the same `runtime!` every other example uses:
 
-Downstream consumers outside this repo (e.g. the `backends` workspace) must update their `runtime!` call sites; that is the intended, visible cost of the clean break.
+```rust
+// examples/cli/runtime.rs (aligned) — the same macro as every reactor host
+cfg_if::cfg_if! {
+    if #[cfg(not(target_arch = "wasm32"))] {
+        use omnia_wasi_cli::WasiCli;
+        omnia::runtime!({ main: true, hosts: { WasiCli } }); // backend-less; one-shot tail
+    } else { fn main() {} }
+}
+```
 
-### 5.5 Lifecycle and exit semantics — resolved
+The bare base-only `StoreCtx` (no `#[wasi(...)]` fields) already works: the `StoreContext` derive tolerates a context with only `#[base]` (the hand-written `CliCtx`, `examples/cli/runtime.rs` lines 29–33, proves it), and the base linker already links `wasi:cli/*`, so **no `Host` view is needed**.
 
-The `server!`/`cli!` split dissolves every lifecycle wrinkle the trigger-host approach had to work around:
+A command that also imports an extension WASI capability (say, one that reads `wasi-keyvalue`) writes `hosts: { WasiCli, WasiKeyValue: KeyValueDefault }`: `WasiKeyValue` is *linked* as a capability and *not* driven as a trigger (it has only the no-op `Server::run` default), exactly as in a server deployment. This is how a command stays a command while consuming host capabilities — no special path.
 
-- **Exit codes leave the boundary clean.** `omnia::run` returns `ExitStatus`; the generated `main` converts to `ExitCode`. No `std::process::exit` inside a `Server`, and no need to widen `Server::run`'s return type (which would touch every host).
-- **No vestigial background tasks.** `omnia::run` does not spawn `drive_epoch` / `sample_pool` — those exist for long-lived servers. A command runs to completion. (If a future command needs a wall-clock deadline, epoch driving can be added to `omnia::run` then, gated on a configured timeout.)
-- **Co-listing is unrepresentable.** You cannot express "a command plus an HTTP server" and get a hung join, because `cli!` runs exactly one command and never calls `serve`. The invariant "a command is its own deployment" is enforced by the shape of the macro, not by documentation. (Contrast `serve`'s `try_join_all`, `crates/omnia/src/runtime.rs` line 109: a successful command co-listed with a long-lived server under one `serve` would never let the join complete.)
-- **No vestigial host machinery.** No no-op `Host`, no ZST backend, no empty view, no server-only-host parser feature — `cli!`'s `hosts` is simply optional.
+### 5.5 Co-listing — a guardrail, not a separate macro
 
-### 5.6 Multi-command routing (future)
+A one-shot trigger co-listed with a long-lived one would hang: `try_join_all` waits for the forever-server while the command's exit code sits unread (`crates/omnia/src/runtime.rs` line 109). A separate command-only macro could make that combination unrepresentable (§8); this design instead prevents it with a **guardrail**, equally safe and far cheaper, in two layers:
 
-`cli!` is single-guest today: `omnia::run` probes for the sole `wasi:cli/run` exporter. If commands ever multiply within one deployment, the floor already has the parts — `TriggerRouter::build` for the capability probe (`crates/omnia/src/routing.rs` lines 248–264) and a `FirstArgSelector`-style read of the leading argv token (`crates/omnia/src/selector.rs`) — so `omnia::run` can grow a `[[route.cli]]`-keyed selection without changing the `cli!` surface. Out of scope here; noted so the door stays open. Law 2 holds: such a table keys on an argv token without the floor learning any consumer vocabulary, and `GuestId` stays opaque.
+1. **The command tail drives only the one-shot.** When the macro selects the command tail (because `WasiCli` is present, §5.4) it puts **only** the `WasiCli` server in the `servers` vec. Any co-listed capability host (`WasiKeyValue`, `WasiOtel`, …) is still *linked* but, having only the no-op `Server::run` default, contributes nothing to drive — so a command that reads `wasi-keyvalue` is fine, and there is no future to deadlock on.
+2. **Co-listing a long-lived trigger is a compile error.** The macro already recognises hosts by name (it name-maps `WasiHttp` → `omnia_wasi_http` via `wasi_ident`, `crates/host-macros/src/expand.rs` lines 260–268), so it can recognise the built-in *trigger* hosts (`WasiHttp`, `WasiMessaging`, `WasiWebsocket`, and future additions) the same way. Wiring any of them alongside `WasiCli` is rejected at expansion time with a clean message ("a one-shot `WasiCli` trigger cannot be co-listed with the long-lived trigger `WasiHttp`; split them into separate deployments"). This turns layer 1's *silent* non-serving into a *loud* error.
+
+A compile error is exactly as strong as "unrepresentable" for the property that matters (you cannot ship the broken deployment) without forking the macro, the lifecycle, and the mental model to get there. (A third-party trigger host the macro does not know by name still falls under layer 1 — linked, not driven — so it degrades safely to "the command runs and exits"; the day that matters, the recogniser is a list to extend, not a redesign.)
+
+### 5.6 Multi-command routing (future), and the path to Level 2
+
+Because CLI now rides `TriggerRouter` and `Routes`, multi-command routing is a pure extension, fully consistent with the other triggers:
+
+- Add a `cli: CliRoutes` field to `Routes` (`crates/omnia/src/routing.rs` lines 104–145) and a `[[route.cli]]` parser to the manifest, keyed on the leading argv token. `WasiCli::run` then `resolve`s that token instead of taking the sole catch-all. The leading-token rule *is* the floor's existing `FirstArgSelector` (`crates/omnia/src/selector.rs` lines 47–61): "the first argument is the identity" is precisely "the first argv token is the subcommand." `GuestId` stays opaque; the floor learns no consumer vocabulary (Law 2 holds).
+
+**Level 2** (a single uniform handler the floor adapts every event — HTTP request, message, argv — into, so the *guest* never changes when triggers swap) is out of scope. But it is reachable *only* because the trigger machinery is unified here: a uniform "event" interface would be one more `TriggerRouter`-selected handler that `WasiCli`/`WasiHttp`/`WasiMessaging` each adapt into, rather than a reconciliation of two divergent worlds.
 
 ## 6. Before → after
 
@@ -282,54 +365,59 @@ The `server!`/`cli!` split dissolves every lifecycle wrinkle the trigger-host ap
 | Guest export | `fn main` → `wasi:cli/run` | `wasip3::cli::command::export!` + `impl run::Guest` |
 | Guest argv/IO | `std::env`, `println!` | `wasip3::cli::environment`, `stdout`/`stderr` helpers |
 | Guest filename | `cli-wasm.wasm` | `cli_wasm.wasm` |
-| Host | hand-written `Runtime` + `main` (~50 lines) | `omnia::cli!({ main: true })` (~6 lines) |
-| Command lifecycle | inlined in the example | `omnia::run` (floor, beside `serve`) |
-| Exit status | `std::process::exit` in the host body | `ExitStatus` returned to `main` |
-| Reactor host macro | `omnia::runtime!` | `omnia::server!` (hard rename) |
-| Floor changes | none | `omnia::run` + `ExitStatus`, `cli!`, the rename, opt-in `#[runtime(args)]` |
+| Host | hand-written `Runtime` + `main` (~50 lines) | `omnia::runtime!({ main: true, hosts: { WasiCli } })` (~4 lines) |
+| CLI as a trigger | hand-inlined `CommandPre` probe | `WasiCli: Host + Server`, via `TriggerRouter` (like `WasiHttp`) |
+| Command lifecycle | inlined in the example | `omnia::serve` (unchanged), one-shot tail |
+| Exit status | `std::process::exit` in the host body | `ExitStatus` via a cell, `process::exit` at the `main` boundary |
+| Reactor host macro | `omnia::runtime!` | `omnia::runtime!` (**unchanged name**; backend-optional grammar) |
+| Floor changes | none | `ExitStatus`, optional `cli` route table, `crates/wasi-cli` host, macro grammar + one-shot tail |
 
 ## 7. Implementation plan
 
-The two axes are independent in code; this is the recommended order (each step compiles and is independently reviewable).
+The two axes are independent in code; each step compiles and is independently reviewable.
 
 **Floor first (additive, zero risk to servers):**
-1. Add `omnia::run` + `ExitStatus` to `crates/omnia/src/runtime.rs`; re-export both from `crates/omnia/src/lib.rs`. (`StoreBase::builder().args` is already landed.)
-2. Optionally rewrite `examples/cli/runtime.rs`'s hand-written host to call `omnia::run` now — it slims to ~20 lines and validates the helper before any macro work.
+1. Add the `ExitStatus` newtype to `crates/omnia/src/runtime.rs`; re-export from `crates/omnia/src/lib.rs`. (`StoreBase::builder().args` is already landed.)
+2. Add an empty `cli: CliRoutes` table to `Routes` and a `routes().cli()` accessor (`crates/omnia/src/routing.rs`); the manifest `[[route.cli]]` parser is deferred to §5.6 (the table stays empty → catch-all until then).
 
-**Host macro:**
-3. Add the opt-in `#[runtime(args)]` field attribute to the `Runtime` derive (`crates/host-macros/src/runtime_derive.rs`).
-4. Factor `crates/host-macros/src/expand.rs` into a shared expansion with two tails; add the `cli` proc-macro entry point (`crates/host-macros/src/lib.rs`) and re-export `omnia::cli`.
+**The trigger host:**
+3. Add `crates/wasi-cli` (host-only) with `WasiCli: Host + Server` per §5.1.
+4. Optionally rewrite the hand-written `examples/cli/runtime.rs` to construct `WasiCli` directly (cell + `serve`) — validates the host before any macro work and slims it to ~20 lines.
 
-**Rename (hard break):**
-5. Rename the `runtime` proc-macro to `server` (`crates/host-macros/src/lib.rs`), re-export `omnia::server`, and update every `runtime!` call site and doc (`examples/*/runtime.rs`, crate READMEs, `docs/Architecture.md`, top-level `README.md`). No alias.
+**Host macro (no rename):**
+5. Make the `runtime!` grammar backend-optional (`crates/host-macros/src/runtime.rs`); ensure backend-less hosts emit no `StoreCtx`/view/connect.
+6. Add the always-emitted `#[runtime(args)] args` field + the derive's `.args(&self.args)` (`crates/host-macros/src/runtime_derive.rs`), and grow `omnia::Command::Run` a trailing `args` (`crates/omnia/src/lib.rs`).
+7. Emit the one-shot `main` tail + co-list guardrail when a `WasiCli` host is present (`crates/host-macros/src/expand.rs`).
 
 **Guest + example:**
-6. Rewrite `examples/cli/guest.rs` as a `cdylib` reactor (`wasip3::cli::command::export!` + `async impl exports::cli::run::Guest`), dispatching over `wasip3::cli::environment` and stdout/stderr helpers; add `crate-type = ["cdylib"]` to the `cli-wasm` entry in `examples/Cargo.toml`.
-7. Rewrite `examples/cli/runtime.rs` as `omnia::cli!({ main: true })`; update `examples/cli/README.md` for the `cli_wasm.wasm` filename and the new command shape.
+8. Rewrite `examples/cli/guest.rs` as a `cdylib` reactor (`wasip3::cli::command::export!` + `async impl exports::cli::run::Guest`); add `crate-type = ["cdylib"]` to the `cli-wasm` entry in `examples/Cargo.toml`.
+9. Rewrite `examples/cli/runtime.rs` as `omnia::runtime!({ main: true, hosts: { WasiCli } })`; update `examples/cli/README.md` for the `cli_wasm.wasm` filename and the `omnia run <wasm> -- …` shape.
 
 ## 8. Alternatives considered and rejected
 
-- **`wasi:cli` as a trigger host inside `server!`** (the earlier-draft approach). A `WasiCli` host with a no-op `add_to_linker` (the base linker already links `wasi:cli/*`, so linking again errors — `crates/omnia/src/create.rs` lines 159–160), a capability-probing `Server`, and — because the parser requires a backend per host (`crates/host-macros/src/runtime.rs` lines 99–106) — either a ZST "noop backend" the command never reads or a new server-only-host parser feature, plus an empty view. Exit codes can't ride `Server::run -> Result<()>`, forcing `std::process::exit` *inside* a trigger; the epoch/pool background tasks are vestigial for a one-shot; and — worst — co-listing `WasiCli` with `WasiHttp` deadlocks the command behind the HTTP accept loop because `serve`'s `try_join_all` never completes (`crates/omnia/src/runtime.rs` line 109), a footgun the macro *invites* with no compile-time guard. The `cli!` split makes all of this unnecessary and the co-list state unrepresentable. **Rejected.**
-- **One macro with a mode switch** (e.g. `runtime!({ command: WasiCli, … })`). Keeps server and command entangled in one code path; the invalid "command + server" combination stays representable and must be hand-rejected at expansion time. The two-macro split moves that rejection into the grammar. **Rejected.**
-- **Keep `runtime!` as a deprecated alias for `server!`.** Dilutes the rename's pedagogical value (the whole point is to make "server vs. command" legible) and leaves a second name to maintain. Per the committed scope, the rename is a clean break. **Rejected.**
+- **A `server!`/`cli!` macro split, with a `runtime!`→`server!` rename and a command-only `omnia::run` lifecycle parallel to `serve`.** This would erase the surface divergence (example shape) but introduce a deeper one: a "command world" with its own macro, its own lifecycle helper, and a hand-rolled `CommandPre` probe duplicating `TriggerRouter`. It would violate Level-1 convergence — moving a guest from a CLI trigger to an HTTP trigger would become a *path* change (cross from `cli!`/`omnia::run` to `server!`/`omnia::serve`), not a *wiring* change. Its apparent wins dissolve once a command is seen as a one-shot trigger: exit codes ride a side channel like every trigger's response (§5.2), the co-list footgun is a compile-time guardrail (§5.5), the no-op linker is *correct* (a trigger drives an export; §5.1), the backend requirement is one grammar relaxation (§5.4), and the "vestigial" background tasks are cheap-or-useful (§3). It would also strand §5.6's multi-command routing, which wants the very `TriggerRouter`/`FirstArgSelector` such a split bypasses. **Rejected.**
+- **One macro with a mode switch** (e.g. `runtime!({ command: WasiCli, … })`). Unnecessary: `WasiCli` is just a host in the `hosts` list, and "command vs. server" is read from whether a one-shot trigger is present — no new grammar axis. The co-list guardrail (§5.5) covers the one invalid combination. **Rejected.**
+- **Keep `wasi:cli` invocation in a hand-written host** (today's `examples/cli/runtime.rs`). Correct but bespoke; it re-implements `TriggerRouter` and skips the instantiation metrics every real trigger records. **Rejected** in favour of the `WasiCli` trigger.
 - **Keep the binary guest.** The binary is the more idiomatic *standalone* command (§4.3), but the repo optimizes for one consistent guest mental model; a lone binary guest is exactly the divergence a newcomer trips on. **Rejected** in favour of the `cdylib`.
 
 ## 9. Risks and invariants
 
-- **Rename churn.** §5.4 touches every example and many docs, plus downstream consumers. The clean break is intentional, but it is the one non-additive change; landing it as its own step (plan step 5) keeps the diff legible.
-- **Idiom regression (guest).** §4 removes the canonical std command form from the repo. Accepted (§4.3) for guest-shape uniformity; an `omnia-wasi-cli` guest helper can restore ergonomics later without reintroducing the binary divergence.
-- **Instance-per-call unchanged.** The command is still instantiated fresh on a new store and discarded; `build_store` guards (epoch deadline, fuel, memory limiter) still apply, now via `omnia::run` rather than the hand-written host.
+- **`process::exit` fidelity.** The exit code is set on the cell by `WasiCli::run` and applied by `main` *after* `serve` returns, so destructors on the `serve` path run normally; only the final, intended `process::exit` at the boundary skips unwinding (as a one-shot's terminal step should). Guest stdout/stderr is flushed by `call_run`'s completion (the guest's `blocking_write_and_flush`) before the cell is read.
+- **Co-list guardrail must be enforced.** §5.5 is the one place a wrong wiring could hang. The guardrail is a compile-time rejection in `expand.rs`; landing it in the same step as the one-shot tail (plan step 7) keeps the invariant and its enforcement together.
+- **Single CLI surface changes `Command::Run`.** Growing `Run` a trailing `args` is additive and gated behind `--`, so existing `omnia run <wasm>` and `omnia run --config …` invocations are unchanged; only `-- <guest args>` is new.
+- **Instance-per-call unchanged.** The command is instantiated fresh on a new store and discarded; `build_store` guards (epoch deadline, fuel, memory limiter) still apply, now via `Runtime::instantiate` rather than the hand-written host.
 - **Metrics gap closed.** Routing the command through `Runtime::instantiate` records `instantiation_duration_us` / `pool_instantiation_errors` for commands too — the hand-written host skipped these.
 - **Law 2 preserved.** `wasi:cli` stays a standard WASI interface and `GuestId` stays opaque; the future `[[route.cli]]` table (§5.6) keys on an argv token without the floor learning any consumer vocabulary.
 
 ## 10. References
 
 - [`wasip3::cli::command::export!`](https://docs.rs/wasip3/latest/wasip3/cli/command/macro.export.html) — guest-side export macro for `wasi:cli/command` ([`wasi-rs`](https://github.com/bytecodealliance/wasi-rs)); the §4 export-side parallel to `wasip3::http::service::export!`.
-- [`wasmtime_wasi::p2::bindings::Command`](https://docs.rs/wasmtime-wasi/latest/wasmtime_wasi/p2/bindings/struct.Command.html) — host-side command invoke (`CommandPre`, `Command`, `call_run`, `I32Exit`) used by `omnia::run`; distinct from the guest SDK above.
+- [`wasmtime_wasi::p2::bindings::Command`](https://docs.rs/wasmtime-wasi/latest/wasmtime_wasi/p2/bindings/struct.Command.html) — host-side command invoke (`CommandPre`, `Command`, `call_run`, `I32Exit`) used by `WasiCli::run`; distinct from the guest SDK above.
+- `crates/wasi-http/src/host.rs`, `crates/wasi-http/src/host/server.rs` — the `Host` + `Server` + `TriggerRouter` trigger pattern §5.1 mirrors (including out-of-band response delivery).
+- `crates/wasi-messaging/src/host/server.rs` — a second `TriggerRouter`-driven trigger, showing the probe-then-resolve shape is the floor's norm.
 - `examples/http/guest.rs` — the reactor export-side idiom §4 mirrors.
-- `examples/config/guest.rs`, `examples/keyvalue/guest.rs` — reactor guests combining `wasip3` exports with `omnia-wasi-*` import bindings.
-- `crates/omnia/src/runtime.rs` — `omnia::serve` (the server lifecycle helper) and the home for the new `omnia::run`.
-- `crates/omnia/src/create.rs` — the base linker that links `wasi:cli/*` (p2 + p3), which is why a command needs no `Host`.
-- `crates/host-macros/src/{lib.rs,expand.rs,runtime.rs,runtime_derive.rs,store_context.rs}` — the macro machinery the `server!`/`cli!` split and the `#[runtime(args)]` attribute extend.
-- `crates/omnia/src/{store.rs,traits.rs,routing.rs,selector.rs}` — `StoreBase::builder`, the `Runtime`/`Server` traits, and the routing/selector parts a future multi-command `omnia::run` would reuse.
-- `crates/wasi-otel/src/host.rs` (line 57) — the no-op `Server` precedent, retained only as context for the rejected trigger-host alternative (§8).
+- `crates/omnia/src/runtime.rs` — `omnia::serve` (the unchanged lifecycle helper) and the home for the new `ExitStatus`.
+- `crates/omnia/src/routing.rs`, `crates/omnia/src/selector.rs` — `TriggerRouter`, `Routes`, and the `FirstArgSelector` that the future `[[route.cli]]` table (§5.6) reuses.
+- `crates/omnia/src/create.rs` — the base linker that links `wasi:cli/*` (p2 + p3), which is why `WasiCli::add_to_linker` is a correct no-op.
+- `crates/host-macros/src/{lib.rs,runtime.rs,expand.rs,runtime_derive.rs,store_context.rs}` — the macro machinery the backend-optional grammar, the argv field, and the one-shot `main` tail extend.
+- `crates/omnia/src/{store.rs,traits.rs}` — `StoreBase::builder` and the `Runtime`/`Server`/`Host` traits the trigger reuses unchanged.
