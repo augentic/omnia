@@ -50,7 +50,13 @@ pub use self::selector::{FirstArgSelector, GuestSelector};
 pub use self::store::{Set, Unset};
 pub use self::store::{StoreBase, StoreBaseBuilder};
 pub use self::telemetry::{Telemetry, resource};
-pub use self::traits::{Backend, FromEnv, FutureResult, HasLimits, Host, Runtime, Server};
+// Macro-support: named by `runtime!`-generated code via `::omnia::…` to guard
+// host co-listing at compile time; not part of the documented public surface.
+#[doc(hidden)]
+pub use self::traits::assert_command_solo;
+pub use self::traits::{
+    Backend, FromEnv, FutureResult, HasLimits, Host, Runtime, Server, TriggerKind,
+};
 pub use self::transport::{LinkClient, WrpcState};
 
 /// Command line interface for omnia.

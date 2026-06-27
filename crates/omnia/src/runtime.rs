@@ -120,6 +120,14 @@ where
 /// return value because [`serve`] returns `Result<()>` and discards each
 /// server's value — the same way the HTTP trigger delivers its response out of
 /// band (over the socket) instead of through `run`'s return type.
+///
+/// # Truncation
+///
+/// [`code`](Self::code) preserves the full `i32` a guest reports, but a process
+/// exit status is only 8 bits on POSIX. The [`ExitCode`](std::process::ExitCode)
+/// conversion (and [`code_u8`](Self::code_u8)) therefore keeps just the low
+/// byte, matching the `wasmtime` CLI: `256` becomes `0`, `257` becomes `1`, and
+/// `-1` becomes `255`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExitStatus(i32);
 
@@ -127,10 +135,19 @@ impl ExitStatus {
     /// The success status (exit code `0`).
     pub const SUCCESS: Self = Self(0);
 
-    /// The wrapped exit code.
+    /// The wrapped exit code, as the guest reported it (full `i32`).
     #[must_use]
     pub const fn code(self) -> i32 {
         self.0
+    }
+
+    /// The exit code truncated to the low 8 bits — the value a process actually
+    /// surfaces on POSIX (and what the [`ExitCode`](std::process::ExitCode)
+    /// conversion uses). See [the truncation note](Self#truncation).
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub const fn code_u8(self) -> u8 {
+        self.0 as u8
     }
 }
 
@@ -142,9 +159,46 @@ impl From<i32> for ExitStatus {
 
 impl From<ExitStatus> for std::process::ExitCode {
     fn from(status: ExitStatus) -> Self {
-        // POSIX surfaces only the low 8 bits of a process exit status; mirror
-        // that (and the `wasmtime` CLI) by truncating to a `u8`.
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        Self::from(status.0 as u8)
+        Self::from(status.code_u8())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ExitStatus;
+
+    #[test]
+    fn success_is_zero() {
+        assert_eq!(ExitStatus::SUCCESS.code(), 0);
+        assert_eq!(ExitStatus::SUCCESS.code_u8(), 0);
+    }
+
+    #[test]
+    fn from_i32_preserves_full_code() {
+        // `code()` keeps the whole i32; only the byte view / `ExitCode`
+        // conversion truncates.
+        assert_eq!(ExitStatus::from(2).code(), 2);
+        assert_eq!(ExitStatus::from(256).code(), 256);
+        assert_eq!(ExitStatus::from(-1).code(), -1);
+    }
+
+    #[test]
+    fn code_u8_keeps_low_byte() {
+        assert_eq!(ExitStatus::from(0).code_u8(), 0);
+        assert_eq!(ExitStatus::from(2).code_u8(), 2);
+        assert_eq!(ExitStatus::from(255).code_u8(), 255);
+        assert_eq!(ExitStatus::from(256).code_u8(), 0);
+        assert_eq!(ExitStatus::from(257).code_u8(), 1);
+        assert_eq!(ExitStatus::from(-1).code_u8(), 255);
+        // The `ExitCode` conversion runs (its value is opaque, so only the
+        // byte rule above is asserted).
+        let _ = std::process::ExitCode::from(ExitStatus::from(2));
+    }
+
+    #[test]
+    fn is_copy_and_eq() {
+        let status = ExitStatus::from(7);
+        let copied = status;
+        assert_eq!(status, copied);
     }
 }

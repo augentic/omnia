@@ -24,3 +24,14 @@ tracing.workspace = true
 wasmtime = { workspace = true, features = ["component-model-async"] }
 wasmtime-wasi.workspace = true
 omnia.workspace = true
+
+# Dev-only. `tests/run.rs` builds a minimal runtime over the `cli-wasm` example
+# guest and drives `WasiCli` to assert exit-status fidelity; the crate-level
+# compile-fail doctest co-lists `WasiHttp` to prove the co-list guardrail
+# rejects it. Integration tests / doctests see only dev-dependencies, so the
+# normal deps above are repeated here as needed.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+anyhow.workspace = true
+omnia.workspace = true
+omnia-wasi-http.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -2,7 +2,7 @@
 //!
 //! Expands the parsed runtime configuration into a complete runtime implementation.
 
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Ident, Path};
 
@@ -18,6 +18,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
         backend_types,
         store_ctx_fields,
         host_trait_impls,
+        colist_guard,
         run_fn,
         main_fn,
     } = Expanded::try_from(config)?;
@@ -57,6 +58,8 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
             use super::*;
 
             #run_fn
+
+            #colist_guard
 
             /// Initiator state holding the guest registry and backend connections.
             ///
@@ -122,6 +125,7 @@ struct Expanded {
     backend_types: Vec<Path>,
     store_ctx_fields: Vec<TokenStream>,
     host_trait_impls: Vec<Path>,
+    colist_guard: TokenStream,
     run_fn: TokenStream,
     main_fn: TokenStream,
 }
@@ -144,8 +148,6 @@ impl TryFrom<&Config> for Expanded {
         // constructed specially in the command tail (it carries the exit cell),
         // not driven as a bare unit-struct value like every other server.
         let mut cli_type: Option<Path> = None;
-        // The first co-listed long-lived trigger, used by the guardrail below.
-        let mut long_lived_trigger: Option<String> = None;
 
         for host in &input.hosts {
             let host_type = &host.type_;
@@ -181,28 +183,25 @@ impl TryFrom<&Config> for Expanded {
                 cli_type = Some(host_type.clone());
             } else {
                 server_trait_impls.push(quote! {#host_type});
-                if is_long_lived_trigger(host_type) {
-                    long_lived_trigger = Some(last_segment(host_type));
-                }
             }
         }
 
         // Guardrail: a one-shot command runs to completion and exits, so it
         // cannot share a deployment with a long-lived trigger server (`serve`
-        // would never return). Capability hosts (no-op `Server::run`) are fine.
-        if cli_type.is_some()
-            && let Some(other) = &long_lived_trigger
-        {
-            return Err(syn::Error::new(
-                Span::call_site(),
-                format!(
-                    "`WasiCli` is a one-shot command trigger and cannot be co-listed with the \
-                     long-lived trigger `{other}`; a command deployment runs to completion and \
-                     exits, so split them into separate runtimes (capability hosts such as \
-                     `WasiKeyValue` are fine to co-list)"
-                ),
-            ));
-        }
+        // would never return). Instead of matching host names here — which would
+        // miss a future trigger or trip on an aliased import — emit a `const`
+        // check over each listed host's `Server::KIND`, so the classification
+        // lives in the type system. Capability hosts (`TriggerKind::Capability`)
+        // are fine; the check is a no-op unless a one-shot host is present.
+        let colist_guard = if cli_type.is_some() {
+            quote! {
+                const _: () = omnia::assert_command_solo(&[
+                    #(<#host_trait_impls as Server<Context>>::KIND,)*
+                ]);
+            }
+        } else {
+            quote! {}
+        };
 
         // `Context` backend fields (deduplicated upstream in `Config`). Each
         // carries its `#[runtime(store = ...)]` attributes plus the backend
@@ -247,6 +246,7 @@ impl TryFrom<&Config> for Expanded {
             backend_types,
             store_ctx_fields,
             host_trait_impls,
+            colist_guard,
             run_fn,
             main_fn,
         })
@@ -381,13 +381,6 @@ fn last_segment(path: &Path) -> String {
 /// Whether a host is the one-shot `wasi:cli` trigger.
 fn is_wasi_cli(path: &Path) -> bool {
     last_segment(path) == "WasiCli"
-}
-
-/// Whether a host is a long-lived trigger server (one whose `run` loops on a
-/// transport and never returns on its own). Co-listing one with `WasiCli` is a
-/// configuration error.
-fn is_long_lived_trigger(path: &Path) -> bool {
-    matches!(last_segment(path).as_str(), "WasiHttp" | "WasiMessaging" | "WasiWebSocket")
 }
 
 /// Generates a field name for a backend type.

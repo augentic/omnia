@@ -8,7 +8,7 @@ use std::sync::{Arc, OnceLock};
 use anyhow::{Result, bail};
 use omnia::wasmtime_wasi::p3::bindings::{Command, CommandPre};
 use omnia::wasmtime_wasi::{I32Exit, WasiView};
-use omnia::{ExitStatus, Host, Runtime, Server, TriggerRouter};
+use omnia::{ExitStatus, Host, Runtime, Server, TriggerKind, TriggerRouter};
 use wasmtime::component::Linker;
 
 /// Host-side, one-shot trigger for `wasi:cli`.
@@ -47,6 +47,8 @@ where
     R: Runtime,
     R::StoreCtx: WasiView,
 {
+    const KIND: TriggerKind = TriggerKind::OneShot;
+
     async fn run(&self, state: &R) -> Result<()> {
         // Capability probe + routing — the same `TriggerRouter` HTTP and
         // messaging use. A guest is command-capable exactly when its
@@ -70,6 +72,7 @@ where
             bail!("multiple wasi:cli/run guests but no [[route.cli]] to disambiguate");
         };
         let guest = state.registry().get(guest_id).expect("a capable guest is registered");
+        tracing::debug!(guest = %guest_id, "driving wasi:cli/run");
 
         // Instance-per-call, *through* `Runtime::instantiate`, so a command
         // records the same instantiation metrics every trigger does. argv is
@@ -98,6 +101,8 @@ where
                 None => return Err(error.into()),
             },
         };
+
+        tracing::info!(guest = %guest_id, code = status.code(), "wasi:cli/run exited");
 
         // Hand the status to the boundary and complete. `serve`'s
         // `try_join_all` resolves here (this is the only server in a command

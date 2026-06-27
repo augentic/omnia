@@ -2150,6 +2150,8 @@ version = "0.35.0"
 dependencies = [
  "anyhow",
  "omnia",
+ "omnia-wasi-http",
+ "tokio",
  "tracing",
  "wasmtime",
  "wasmtime-wasi",
