@@ -1,4 +1,4 @@
-//! # [`HostKind`] routing
+//! # Trigger routing
 //!
 //! Maps an inbound trigger to a guest [`GuestId`] generically: the floor routes
 //! on opaque identities and route strings only, never on domain concepts.

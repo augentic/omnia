@@ -55,7 +55,7 @@ impl Guest for Cli {
             Some(other) => {
                 eprintln!("unknown command: {other}");
                 // A specific nonzero code: `wasi:cli/exit`'s exit-with-code
-                // surfaces host-side as wasmtime's `I32Exit`, which `WasiCli`
+                // surfaces host-side as wasmtime's `I32Exit`, which command mode
                 // maps to the process exit status — fidelity beyond the plain
                 // success/failure `run` returns.
                 wasip3::cli::exit::exit_with_code(2);

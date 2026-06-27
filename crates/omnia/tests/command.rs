@@ -1,10 +1,10 @@
-//! Exit-status integration test for the `wasi:cli` trigger.
+//! Exit-status integration test for command mode (`omnia::run_command`).
 //!
 //! Builds a minimal runtime over the `cli-wasm` example guest and drives it
-//! through [`WasiCli`] exactly as a one-shot deployment would, asserting the
-//! exit status the host records for each subcommand — including the nonzero
-//! paths: a specific code carried by `wasi:cli/exit` (surfaced as `I32Exit`,
-//! proving codes are *not* collapsed to `1`) and the `Err(())` → `1` mapping.
+//! exactly as a one-shot command deployment would, asserting the exit status
+//! for each subcommand — including the nonzero paths: a specific code carried by
+//! `wasi:cli/exit` (surfaced as `I32Exit`, proving codes are *not* collapsed to
+//! `1`) and the `Err(())` -> `1` mapping.
 //!
 //! The guest must be built first; the test skips (rather than fails) when it is
 //! absent, because `cargo make ci` cleans the target directory before tests:
@@ -16,11 +16,10 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
-use omnia::{ExitStatus, Registry, RegistryBuilder, Runtime, Server, StoreBase};
-use omnia_wasi_cli::WasiCli;
+use omnia::{ExitStatus, Registry, RegistryBuilder, Runtime, StoreBase};
 
 /// Per-store context: just the fixed [`StoreBase`]. The `wasi:cli` guest needs
 /// only the WASI view, which the `StoreContext` derive supplies from `base`.
@@ -32,7 +31,7 @@ struct TestCtx {
 
 /// A minimal [`Runtime`] over a single `wasi:cli` guest, threading a fixed argv
 /// into every store (the guest reads it as `wasi:cli/environment`). `args[0]` is
-/// the program name, as the floor's command tail prepends.
+/// the program name, as command mode prepends.
 #[derive(Clone)]
 struct TestRuntime {
     registry: Arc<Registry<TestCtx>>,
@@ -87,7 +86,7 @@ async fn build_registry(wasm: &Path) -> Result<Arc<Registry<TestCtx>>> {
 }
 
 /// Drive `wasi:cli/run` once over `registry` with `tail` (the program name is
-/// prepended as `args[0]`) and return the exit status the trigger recorded.
+/// prepended as `args[0]`) and return the guest's exit status.
 async fn run_cli(registry: &Arc<Registry<TestCtx>>, tail: &[&str]) -> Result<ExitStatus> {
     let mut argv = vec![String::from("cli_wasm")];
     argv.extend(tail.iter().map(|arg| (*arg).to_owned()));
@@ -96,9 +95,7 @@ async fn run_cli(registry: &Arc<Registry<TestCtx>>, tail: &[&str]) -> Result<Exi
         args: Arc::new(argv),
     };
 
-    let exit = Arc::new(OnceLock::new());
-    WasiCli::new(Arc::clone(&exit)).run(&runtime).await.context("running wasi:cli trigger")?;
-    Ok(exit.get().copied().unwrap_or(ExitStatus::SUCCESS))
+    omnia::run_command(&runtime).await.context("running command")
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

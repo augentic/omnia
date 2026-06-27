@@ -1,10 +1,11 @@
-//! # Runtime background tasks
+//! # Runtime lifecycle
 //!
-//! Detached background tasks that drive a running runtime off its Wasmtime
-//! [`Engine`]: epoch interruption (so guest deadlines fire while CPU-bound
-//! guests execute) and pooling-allocator occupancy sampling (emitted as
-//! `OpenTelemetry` gauges via the `tracing` metrics bridge so pool sizing can
-//! be tuned from real data rather than guesswork).
+//! The startup [`prepare`] every deployment shares and the long-lived [`serve`]
+//! loop, plus the detached background tasks they drive off the Wasmtime
+//! [`Engine`] (epoch interruption so guest deadlines fire while CPU-bound guests
+//! execute, and pooling-allocator occupancy sampling emitted as `OpenTelemetry`
+//! gauges via the `tracing` metrics bridge) and the [`ExitStatus`] a deployment
+//! yields.
 
 use std::time::Duration;
 
@@ -73,23 +74,18 @@ pub fn sample_pool(engine: Engine, interval: Duration) {
     });
 }
 
-/// Drive a runtime's lifecycle: start its background tasks, wire the serve side
-/// of any host-mediated links, then run every trigger server to completion.
+/// Start a runtime's background tasks and wire host-mediated links — the shared
+/// startup both [`serve`] and [`run_command`](crate::run_command) perform before
+/// driving any guest.
 ///
-/// Spawns `drive_epoch` and `sample_pool` off the runtime's engine, calls
-/// [`serve_links`] so a dispatched call always finds its target's wRPC server
-/// (a no-op when no `link`s are declared), then awaits all `servers` together.
-/// Every server shares the runtime's single [`Registry`](crate::Registry) and
-/// therefore one `Engine`, so per-request instantiation draws from one pool.
-///
-/// This is the fixed orchestration the `runtime!` macro previously inlined; the
-/// only deployment-specific input is the `servers` list.
+/// Spawns [`drive_epoch`] and [`sample_pool`] off the runtime's engine, then
+/// calls [`serve_links`] so a dispatched call always finds its target's wRPC
+/// server (a no-op when no `link`s are declared).
 ///
 /// # Errors
 ///
-/// Returns an error if wiring the link serve side fails, or if any server
-/// returns an error (the first error cancels the rest).
-pub async fn serve<R: Runtime>(runtime: &R, servers: Vec<BoxFuture<'_, Result<()>>>) -> Result<()>
+/// Returns an error if wiring the link serve side fails.
+pub async fn prepare<R: Runtime>(runtime: &R) -> Result<()>
 where
     R::StoreCtx: WasiView + WrpcView + 'static,
 {
@@ -106,20 +102,37 @@ where
     // dispatched call always finds its target's wRPC server.
     serve_links(runtime).await.context("wiring host-mediated link serve side")?;
 
+    Ok(())
+}
+
+/// Drive a long-lived deployment: `prepare` the runtime, then run every trigger
+/// server to completion.
+///
+/// Every server shares the runtime's single [`Registry`](crate::Registry) and
+/// therefore one `Engine`, so per-request instantiation draws from one pool.
+/// This is the fixed orchestration the `runtime!` macro previously inlined; the
+/// only deployment-specific input is the `servers` list.
+///
+/// # Errors
+///
+/// Returns an error if `prepare` fails, or if any server returns an error (the
+/// first error cancels the rest).
+pub async fn serve<R: Runtime>(runtime: &R, servers: Vec<BoxFuture<'_, Result<()>>>) -> Result<()>
+where
+    R::StoreCtx: WasiView + WrpcView + 'static,
+{
+    prepare(runtime).await?;
     try_join_all(servers).await?;
     Ok(())
 }
 
 /// A guest's process exit status.
 ///
-/// The one-shot `wasi:cli` trigger drives a `wasi:cli/run` guest exactly once
-/// and reports its exit code through this newtype. The generated `main`
-/// converts it to a [`std::process::ExitCode`] at the process boundary.
-///
-/// The status rides an `Arc<OnceLock<ExitStatus>>` side channel rather than a
-/// return value because [`serve`] returns `Result<()>` and discards each
-/// server's value — the same way the HTTP trigger delivers its response out of
-/// band (over the socket) instead of through `run`'s return type.
+/// Command mode ([`run_command`](crate::run_command)) drives a `wasi:cli/run`
+/// guest exactly once and returns its exit code through this newtype; the
+/// generated `main` converts it to a [`std::process::ExitCode`] at the process
+/// boundary. A long-lived [`serve`] deployment yields
+/// [`SUCCESS`](Self::SUCCESS) on clean shutdown.
 ///
 /// # Truncation
 ///

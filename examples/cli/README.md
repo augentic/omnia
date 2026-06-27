@@ -3,9 +3,9 @@
 A `wasi:cli/command` guest driven as a **one-shot trigger**: the host invokes
 its `wasi:cli/run` export exactly once and exits with the guest's status. Unlike
 the long-lived triggers (HTTP, messaging, …) that loop on a transport, a command
-runs to completion — but it rides the *same* `runtime!` / `serve` /
-`TriggerRouter` floor, so the same guest could be driven by an inbound event
-tomorrow with only a host-wiring change.
+runs to completion — but it rides the *same* `runtime!` / `TriggerRouter` floor,
+so the same guest could be driven by an inbound event tomorrow with only a
+host-wiring change.
 
 ## What it shows
 
@@ -19,10 +19,10 @@ tomorrow with only a host-wiring change.
 
   An unknown subcommand exits `2`; missing usage exits `1`.
 - [`runtime.rs`](runtime.rs) is the whole host: a single
-  `omnia::runtime!({ main: true, hosts: { WasiCli } })`. The `WasiCli` trigger
-  finds the sole command-capable guest, instantiates it through the registry
-  pipeline, drives `wasi:cli/run` once, and hands back the exit status the
-  generated `main` exits with.
+  `omnia::runtime!({ main: true, command: true })`. Command mode finds the sole
+  command-capable guest, instantiates it through the registry pipeline, drives
+  `wasi:cli/run` once, and hands back the exit status the generated `main` exits
+  with.
 
 ## Build the guest
 
@@ -54,7 +54,7 @@ Hello, Ada!
 ```
 
 A nonzero subcommand sets the process exit code, demonstrating the one-shot
-exit-code seam (the guest's status flows back through `WasiCli` to `main`):
+exit-code seam (the guest's status flows back through command mode to `main`):
 
 ```bash
 cargo run --example cli -- run ./target/wasm32-wasip2/debug/examples/cli_wasm.wasm -- nope

@@ -1022,7 +1022,6 @@ dependencies = [
  "omnia",
  "omnia-guest",
  "omnia-wasi-blobstore",
- "omnia-wasi-cli",
  "omnia-wasi-config",
  "omnia-wasi-http",
  "omnia-wasi-identity",
@@ -2144,19 +2143,6 @@ dependencies = [
  "wasmtime",
  "wasmtime-wasi",
  "wit-bindgen 0.58.0",
-]
-
-[[package]]
-name = "omnia-wasi-cli"
-version = "0.35.0"
-dependencies = [
- "anyhow",
- "omnia",
- "omnia-wasi-http",
- "tokio",
- "tracing",
- "wasmtime",
- "wasmtime-wasi",
 ]
 
 [[package]]

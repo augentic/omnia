@@ -40,10 +40,10 @@ The runtime is built around a set of traits that allow services to be plugged in
 `omnia` exposes only what a deployment author, a host-server crate, or a hand-written runtime needs; lifecycle, dispatch, manifest, and transport-carrier internals are crate-private.
 
 - **Macros:** `runtime!`, `#[derive(Runtime)]`, `#[derive(StoreContext)]`
-- **Lifecycle:** `serve` — drives epoch interruption, pool-metric sampling, and host-mediated link serving
+- **Lifecycle:** `serve` (long-lived triggers) and `run_command` (one-shot `wasi:cli` command) — both drive epoch interruption, pool-metric sampling, and host-mediated link serving
 - **Runtime + store:** `Runtime`, `StoreBase`, `Host`, `Server`, `Backend`, `FromEnv`, `HasLimits`, `HostDispatch`, `FutureResult`
 - **Registry pipeline:** `RegistryBuilder`, `Compiled`, `Registry`, `Guest`, `GuestId`, `RuntimeOptions`
-- **`HostKind` routing (host servers):** `HttpRoutes`, `TopicRoutes`, `Routes`, `Resolver`, `TriggerRouter`
+- **Trigger routing (host servers):** `HttpRoutes`, `TopicRoutes`, `Routes`, `Resolver`, `TriggerRouter`
 - **Host-mediated linking (advanced):** `serve_links`, `GuestSelector`, `FirstArgSelector`, `LinkClient`, `WrpcState`
 - **Telemetry + CLI:** `Telemetry`, `resource`, `Cli`, `Command`, `Parser`
 

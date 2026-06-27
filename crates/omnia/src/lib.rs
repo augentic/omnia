@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 #![cfg(not(target_arch = "wasm32"))]
 
+mod command;
 #[cfg(feature = "jit")]
 mod compile;
 mod create;
@@ -36,6 +37,7 @@ pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 // `runtime!` macro needs. Everything else (lifecycle helpers, dispatch, manifest,
 // source, routing strategy, transport carriers) is `pub` inside a private module
 // and simply not re-exported here.
+pub use self::command::run_command;
 #[cfg(feature = "jit")]
 pub use self::compile::compile;
 pub use self::create::{Compiled, RegistryBuilder};
@@ -54,10 +56,8 @@ pub use self::telemetry::{Telemetry, resource};
 // Macro-support: named by `runtime!`-generated code via `::omnia::…` to guard
 // host co-listing at compile time; not part of the documented public surface.
 #[doc(hidden)]
-pub use self::traits::assert_hosts;
-pub use self::traits::{
-    Backend, FromEnv, FutureResult, HasLimits, Host, HostKind, Runtime, Server,
-};
+pub use self::traits::assert_command_hosts;
+pub use self::traits::{Backend, FromEnv, FutureResult, HasLimits, Host, Runtime, Server};
 pub use self::transport::{LinkClient, WrpcState};
 // The working-tree registry (RFC-55): `WorkingTreeRegistry` is threaded into
 // every store and read by the floor; `WorkingTreeEntry` exposes the two faces

@@ -18,7 +18,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
         backend_types,
         store_ctx_fields,
         host_trait_impls,
-        colist_guard,
+        command_guard,
         run_fn,
         main_fn,
     } = Expanded::try_from(config)?;
@@ -60,31 +60,19 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
 
             use super::*;
 
-            #run_fn
+            #command_guard
 
-            #colist_guard
-
-            /// Initiator state holding the guest registry and backend connections.
-            ///
-            /// The `Runtime` derive generates `registry()` and `store()` from the
-            /// `#[runtime(...)]` attributes: `store()` builds the fixed `base`
-            /// (with the `#[runtime(args)]` argv) plus one cloned backend per
-            /// `#[runtime(store = ...)]` field.
+            // Runtime state holding the guest registry and backend connections.
             #[derive(Clone, Runtime)]
             #[runtime(store = StoreCtx)]
             struct Context {
                 #[runtime(registry)]
                 registry: Arc<Registry<StoreCtx>>,
-                /// Guest argv (`args[0]` is the program name), threaded into
-                /// every store. Empty for a long-lived server; a `wasi:cli`
-                /// command reads it as `wasi:cli/environment`.
+                // Guest args (`args[0]` = program name). Empty for servers.
                 #[runtime(args)]
                 args: Arc<Vec<String>>,
-                /// Working-tree registry (RFC-55): the startup-validated mounts
-                /// preopened into every store, so the floor can match a lent
-                /// `descriptor` back to its mount by directory identity. Empty
-                /// unless the deployment configures `[[mount]]`s or
-                /// `OMNIA_WORKING_TREE`.
+                // Working-tree contains startup-validated preopens. Empty unless the deployment
+                // configures `[[mount]]`s or sets `OMNIA_WORKING_TREE`.
                 #[runtime(preopens)]
                 working_trees: Arc<WorkingTreeRegistry>,
                 #(#context_fields,)*
@@ -101,12 +89,10 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                     // connect to all backends concurrently
                     #connect_backends
 
-                    // Snapshot the startup-validated working-tree registry
-                    // before `build` consumes `compiled` (RFC-55).
+                    // snapshot the startup-validated working-tree
                     let working_trees = compiled.working_trees();
 
-                    // Pre-instantiate every guest against the now fully-linked
-                    // linker and assemble the registry.
+                    // build the store context
                     Ok(Self {
                         registry: Arc::new(compiled.build()?),
                         args,
@@ -127,9 +113,11 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                 pub base: StoreBase,
                 #(#store_ctx_fields,)*
             }
+
+
+            #run_fn
         }
 
-        // Main function (optional)
         #main_fn
     })
 }
@@ -140,7 +128,7 @@ struct Expanded {
     backend_types: Vec<Path>,
     store_ctx_fields: Vec<TokenStream>,
     host_trait_impls: Vec<Path>,
-    colist_guard: TokenStream,
+    command_guard: TokenStream,
     run_fn: TokenStream,
     main_fn: TokenStream,
 }
@@ -151,7 +139,6 @@ impl TryFrom<&Config> for Expanded {
     fn try_from(input: &Config) -> Result<Self, Self::Error> {
         let mut store_ctx_fields = Vec::new();
         let mut host_trait_impls = Vec::new();
-        let mut server_trait_impls = Vec::new();
 
         // For each backend field, the `StoreCtx` field names that clone from it,
         // keyed by backend field ident in host-declaration order. Emitted as
@@ -159,18 +146,12 @@ impl TryFrom<&Config> for Expanded {
         // `Runtime` derive generates the matching `store()` assignment.
         let mut store_targets: Vec<(Ident, Vec<Ident>)> = Vec::new();
 
-        // The backend-less one-shot `wasi:cli` trigger, if listed. It is
-        // constructed specially in the command tail (it carries the exit cell),
-        // not driven as a bare unit-struct value like every other server.
-        let mut cli_type: Option<Path> = None;
-
         for host in &input.hosts {
             let host_type = &host.type_;
             host_trait_impls.push(host_type.clone());
 
-            // A backend-less host (e.g. `WasiCli`) contributes no `StoreCtx`
-            // backend field or host view; it only links (a no-op for `WasiCli`)
-            // and drives an export.
+            // A backend-less host contributes no `StoreCtx` backend field or
+            // host view; it only links its interface.
             if let Some(backend_type) = &host.backend {
                 // The host's `StoreCtx` field name and host-crate module path
                 // coincide (e.g. `WasiHttp` -> `omnia_wasi_http`), so the
@@ -193,34 +174,22 @@ impl TryFrom<&Config> for Expanded {
                     store_targets.push((backend_ident, vec![host_ident]));
                 }
             }
-
-            if is_wasi_cli(host_type) {
-                cli_type = Some(host_type.clone());
-            } else {
-                server_trait_impls.push(quote! {#host_type});
-            }
         }
 
-        // Guardrail: a one-shot command runs to completion and exits, so it
-        // cannot share a deployment with a long-lived trigger server (`serve`
-        // would never return). Instead of matching host names here — which would
-        // miss a future trigger or trip on an aliased import — emit a `const`
-        // check over each listed host's `Server::KIND`, so the classification
-        // lives in the type system. Capability hosts (`HostKind::Capability`)
-        // are fine; the check is a no-op unless a one-shot host is present.
-        let colist_guard = if cli_type.is_some() {
+        // Guardrail: a command deployment cannot link a long-lived trigger
+        // server (it runs once and exits). Each host's `IS_SERVER` flag is read
+        // from the type system, so a newly added trigger is covered without
+        // touching this macro.
+        let command_guard = if input.command {
             quote! {
-                const _: () = omnia::assert_hosts(&[
-                    #(<#host_trait_impls as Server<Context>>::KIND,)*
+                const _: () = omnia::assert_command_hosts(&[
+                    #(<#host_trait_impls as Server<Context>>::IS_SERVER,)*
                 ]);
             }
         } else {
             quote! {}
         };
 
-        // `Context` backend fields (deduplicated upstream in `Config`). Each
-        // carries its `#[runtime(store = ...)]` attributes plus the backend
-        // connection plumbing.
         let mut context_fields = Vec::new();
         let mut backend_idents = Vec::new();
         let mut backend_types = Vec::new();
@@ -243,16 +212,13 @@ impl TryFrom<&Config> for Expanded {
             backend_types.push(backend.clone());
         }
 
-        // The `run` body and `main` shape differ for a one-shot command (which
-        // returns the guest's exit status) versus a long-lived server.
-        let run_fn =
-            cli_type.as_ref().map_or_else(|| server_run_fn(&server_trait_impls), command_run_fn);
-        let main_fn = if !input.gen_main {
-            quote! {}
-        } else if cli_type.is_some() {
-            command_main_fn()
+        // `run` differs for command vs server deployments.
+        let run_fn = run_fn(input.command, &host_trait_impls);
+
+        let main_fn = if input.gen_main {
+            main_fn()
         } else {
-            server_main_fn()
+            quote! {}
         };
 
         Ok(Self {
@@ -261,21 +227,44 @@ impl TryFrom<&Config> for Expanded {
             backend_types,
             store_ctx_fields,
             host_trait_impls,
-            colist_guard,
+            command_guard,
             run_fn,
             main_fn,
         })
     }
 }
 
-/// The long-lived server `run`: compile, prepare state, then drive every
-/// trigger server to completion via `omnia::serve`.
-fn server_run_fn(server_trait_impls: &[TokenStream]) -> TokenStream {
-    quote! {
-        /// Run a guest (single-file shorthand) or a manifest-driven deployment.
-        pub async fn run(
-            wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>,
-        ) -> Result<()> {
+/// The deployment's `run`: compile the registry and build runtime state, then
+/// either drive the one-shot `wasi:cli` command (returning the guest's exit
+/// status) or serve every long-lived trigger to completion.
+fn run_fn(command: bool, hosts: &[Path]) -> TokenStream {
+    let run_body = if command {
+        quote! {
+            // argv[0] is conventionally the program name (`wasmtime` does the
+            // same); the guest reads it via `wasi:cli/environment`.
+            let program = wasm
+                .as_deref()
+                .and_then(::std::path::Path::file_stem)
+                .map_or_else(|| String::from("guest"), |stem| stem.to_string_lossy().into_owned());
+
+            let compiled = omnia::RegistryBuilder::new()
+                .wasm(wasm)
+                .config(config)
+                .compile::<StoreCtx>()
+                .await
+                .context("building runtime")?;
+
+            let mut argv = Vec::with_capacity(args.len() + 1);
+            argv.push(program);
+            argv.extend(args);
+            let run_state = Context::new(compiled, Arc::new(argv))
+                .await
+                .context("preparing runtime state")?;
+
+            omnia::run_command(&run_state).await.context("running command")
+        }
+    } else {
+        quote! {
             let compiled = omnia::RegistryBuilder::new()
                 .wasm(wasm)
                 .config(config)
@@ -286,85 +275,31 @@ fn server_run_fn(server_trait_impls: &[TokenStream]) -> TokenStream {
                 .await
                 .context("preparing runtime state")?;
 
-            // Every server runs against the same `run_state`, so they share one
-            // registry and therefore one `Engine` (and its pooling allocator's
-            // pool). `omnia::serve` drives epoch interruption, pool-metric
-            // sampling, and the host-mediated link serve side around them.
             let servers: Vec<BoxFuture<'_, Result<()>>> =
-                vec![#(Box::pin(#server_trait_impls.run(&run_state)),)*];
-            omnia::serve(&run_state, servers).await.context("starting runtime services")
-        }
-    }
-}
+                vec![#(Box::pin(#hosts.run(&run_state)),)*];
+            omnia::serve(&run_state, servers).await.context("starting runtime services")?;
 
-/// The one-shot command `run`: identical compile + state + `serve` as the
-/// server, but it drives only the `wasi:cli` trigger and returns the guest's
-/// exit status, read from a cell the trigger fills.
-fn command_run_fn(cli_type: &Path) -> TokenStream {
+            Ok(omnia::ExitStatus::SUCCESS)
+        }
+    };
+
     quote! {
-        /// Drive the sole `wasi:cli/run` guest once and return its exit status.
+        /// Run a guest (single-file shorthand) or a manifest-driven deployment.
         pub async fn run(
             wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>,
         ) -> Result<omnia::ExitStatus> {
-            // argv[0] is conventionally the program name (the `wasmtime` CLI
-            // does the same), so derive it from the wasm file and prepend it to
-            // the user's arguments before they reach the guest.
-            let program = wasm
-                .as_deref()
-                .and_then(::std::path::Path::file_stem)
-                .map_or_else(|| String::from("guest"), |stem| stem.to_string_lossy().into_owned());
-            let compiled = omnia::RegistryBuilder::new()
-                .wasm(wasm)
-                .config(config)
-                .compile::<StoreCtx>()
-                .await
-                .context("building runtime")?;
-            let mut argv = Vec::with_capacity(args.len() + 1);
-            argv.push(program);
-            argv.extend(args);
-            let exit = Arc::new(::std::sync::OnceLock::new());
-            let run_state = Context::new(compiled, Arc::new(argv))
-                .await
-                .context("preparing runtime state")?;
-
-            // The command is the only driven server; any co-listed capability
-            // host is linked in `Context::new` but its `Server::run` is a no-op.
-            // Bind the trigger to a local: unlike the unit-struct servers (which
-            // const-promote), `WasiCli` carries the exit cell, so the future
-            // `run` returns must borrow a named value that outlives `serve`.
-            let cli = #cli_type::new(exit.clone());
-            let servers: Vec<BoxFuture<'_, Result<()>>> = vec![Box::pin(cli.run(&run_state))];
-            omnia::serve(&run_state, servers).await.context("starting runtime services")?;
-
-            // `serve` returns once the one-shot completes; the cell holds the
-            // guest's status (success if it never ran).
-            Ok(exit.get().copied().unwrap_or(omnia::ExitStatus::SUCCESS))
+            #run_body
         }
     }
 }
 
-/// The server entrypoint: parse the CLI and run to completion, propagating any
-/// error as a process failure.
-fn server_main_fn() -> TokenStream {
-    quote! {
-        use omnia::tokio;
-
-        #[tokio::main]
-        async fn main() -> anyhow::Result<()> {
-            use omnia::Parser;
-            match omnia::Cli::parse().command {
-                omnia::Command::Run { wasm, config, args } => {
-                    runtime::run(wasm, config, args).await
-                }
-                _ => unreachable!(),
-            }
-        }
-    }
-}
-
-/// The command entrypoint: parse the CLI, run the one-shot, and exit with the
+/// The runtime entrypoint: parse the CLI, run to completion, and exit with the
 /// guest's status (or a failure on a host error).
-fn command_main_fn() -> TokenStream {
+///
+/// Both runtime shapes share this `main`: `run` always yields an
+/// `ExitStatus` — the guest's for a one-shot command, `SUCCESS` for a
+/// long-lived server's clean shutdown.
+fn main_fn() -> TokenStream {
     quote! {
         use omnia::tokio;
 
@@ -385,17 +320,6 @@ fn command_main_fn() -> TokenStream {
             }
         }
     }
-}
-
-/// The last path segment of a host type (e.g. `WasiHttp` for
-/// `omnia_wasi_http::WasiHttp`), used to recognise known hosts by name.
-fn last_segment(path: &Path) -> String {
-    path.segments.last().map_or_else(String::new, |segment| segment.ident.to_string())
-}
-
-/// Whether a host is the one-shot `wasi:cli` trigger.
-fn is_wasi_cli(path: &Path) -> bool {
-    last_segment(path) == "WasiCli"
 }
 
 /// Generates a field name for a backend type.
