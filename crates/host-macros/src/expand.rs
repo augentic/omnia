@@ -19,9 +19,14 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
         store_ctx_fields,
         host_trait_impls,
         command_guard,
-        run_fn,
-        main_fn,
     } = Expanded::try_from(config)?;
+
+    // The deployment entrypoint and its crate-root export. With `main: true` the
+    // entrypoint is a `#[tokio::main]` re-exported from this module (so it can
+    // name `Context`/`StoreCtx`); with `main: false` it is the `pub async fn run`
+    // escape hatch a caller-supplied `main` drives, and the export is empty.
+    let (entrypoint, entrypoint_export) =
+        entrypoint(config.command, config.gen_main, &host_trait_impls);
 
     // Connect every backend concurrently. `tokio::try_join!` is variadic and
     // returns on the first error, but rejects an empty argument list, so skip it
@@ -36,12 +41,12 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
         }
     };
 
-    // `tokio` is only referenced by `try_join!` above, so import it only when
-    // there is at least one backend to connect (avoids an unused import).
-    let tokio_import = if backend_idents.is_empty() {
-        quote! {}
-    } else {
+    // `tokio` is referenced by `try_join!` (backend connection) and by the
+    // generated `main`'s `#[tokio::main]`; import it once when either is in play.
+    let tokio_import = if config.gen_main || !backend_idents.is_empty() {
         quote! { use omnia::tokio; }
+    } else {
+        quote! {}
     };
 
     Ok(quote! {
@@ -115,10 +120,10 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
             }
 
 
-            #run_fn
+            #entrypoint
         }
 
-        #main_fn
+        #entrypoint_export
     })
 }
 
@@ -129,8 +134,6 @@ struct Expanded {
     store_ctx_fields: Vec<TokenStream>,
     host_trait_impls: Vec<Path>,
     command_guard: TokenStream,
-    run_fn: TokenStream,
-    main_fn: TokenStream,
 }
 
 impl TryFrom<&Config> for Expanded {
@@ -212,15 +215,6 @@ impl TryFrom<&Config> for Expanded {
             backend_types.push(backend.clone());
         }
 
-        // `run` differs for command vs server deployments.
-        let run_fn = run_fn(input.command, &host_trait_impls);
-
-        let main_fn = if input.gen_main {
-            main_fn()
-        } else {
-            quote! {}
-        };
-
         Ok(Self {
             context_fields,
             backend_idents,
@@ -228,129 +222,142 @@ impl TryFrom<&Config> for Expanded {
             store_ctx_fields,
             host_trait_impls,
             command_guard,
-            run_fn,
-            main_fn,
         })
     }
 }
 
-/// The deployment's `run`: compile the registry and build runtime state, then
-/// either drive the one-shot `wasi:cli` command (returning the guest's exit
-/// status) or serve every long-lived trigger to completion.
-fn run_fn(command: bool, hosts: &[Path]) -> TokenStream {
-    let run_body = if command {
-        quote! {
-            // argv[0] is conventionally the program name (`wasmtime` does the
-            // same); the guest reads it via `wasi:cli/environment`.
-            let program = wasm
-                .as_deref()
-                .and_then(::std::path::Path::file_stem)
-                .map_or_else(|| String::from("guest"), |stem| stem.to_string_lossy().into_owned());
-
-            let compiled = omnia::RegistryBuilder::new()
-                .wasm(wasm)
-                .config(config)
-                .compile::<StoreCtx>()
-                .await
-                .context("building runtime")?;
-
-            let mut argv = Vec::with_capacity(args.len() + 1);
-            argv.push(program);
-            argv.extend(args);
-            let run_state = Context::new(compiled, Arc::new(argv))
-                .await
-                .context("preparing runtime state")?;
-
-            omnia::run_command(&run_state).await.context("running command")
-        }
+/// The deployment's core orchestration, shared by the generated `main`
+/// (`main: true`) and the `pub async fn run` escape hatch (`main: false`):
+/// compile the registry and build runtime state, then either drive the one-shot
+/// `wasi:cli` command (returning the guest's exit status) or serve every
+/// long-lived trigger to completion.
+///
+/// Expands to a block that expects `wasm`, `config`, and `args` bindings in
+/// scope and evaluates to `Result<omnia::ExitStatus>`.
+fn run_body(command: bool, hosts: &[Path]) -> TokenStream {
+    // The two deployment shapes share the compile + state-build prologue and
+    // differ only in the guest argv and how guests are driven. A command makes
+    // the deployment name `argv[0]` (`Compiled::argv`, read via
+    // `wasi:cli/environment` like `wasmtime`) and drives the sole `wasi:cli/run`
+    // guest once; a server inherits the passed-through args (empty unless
+    // forwarded) and serves every trigger to completion.
+    let (argv, drive) = if command {
+        (
+            quote! { compiled.argv(args) },
+            quote! { omnia::run_command(&run_state).await.context("running command") },
+        )
     } else {
-        quote! {
-            let compiled = omnia::RegistryBuilder::new()
-                .wasm(wasm)
-                .config(config)
-                .compile::<StoreCtx>()
-                .await
-                .context("building runtime")?;
-            let run_state = Context::new(compiled, Arc::new(args))
-                .await
-                .context("preparing runtime state")?;
-
-            let servers: Vec<BoxFuture<'_, Result<()>>> =
-                vec![#(Box::pin(#hosts.run(&run_state)),)*];
-            omnia::serve(&run_state, servers).await.context("starting runtime services")?;
-
-            Ok(omnia::ExitStatus::SUCCESS)
-        }
+        (
+            quote! { args },
+            quote! {
+                let servers: Vec<BoxFuture<'_, Result<()>>> =
+                    vec![#(Box::pin(#hosts.run(&run_state)),)*];
+                omnia::serve(&run_state, servers).await.context("starting runtime services")?;
+                Ok(omnia::ExitStatus::SUCCESS)
+            },
+        )
     };
 
     quote! {
-        /// Run a guest (single-file shorthand) or a manifest-driven deployment.
-        pub async fn run(
-            wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>,
-        ) -> Result<omnia::ExitStatus> {
-            #run_body
-        }
+        let compiled = omnia::RegistryBuilder::new()
+            .wasm(wasm)
+            .config(config)
+            .compile::<StoreCtx>()
+            .await
+            .context("building runtime")?;
+        // Bound before `Context::new` consumes `compiled`: the command shape
+        // borrows it for `argv`, which must end before the move.
+        let argv = #argv;
+        let run_state = Context::new(compiled, Arc::new(argv))
+            .await
+            .context("preparing runtime state")?;
+        #drive
     }
 }
 
-/// The runtime entrypoint: parse the CLI, run to completion, and exit with the
-/// guest's status (or a failure on a host error).
+/// Build the deployment entrypoint and its crate-root export from the shared
+/// [`run_body`].
 ///
-/// Both runtime shapes share this `main`: `run` always yields an
-/// `ExitStatus` — the guest's for a one-shot command, `SUCCESS` for a
-/// long-lived server's clean shutdown.
-fn main_fn() -> TokenStream {
-    quote! {
-        use omnia::tokio;
+/// With `gen_main`, the entrypoint is a `#[tokio::main]` that parses the CLI and
+/// maps the run to a process exit code. It lives *inside* the runtime module so
+/// it can name `Context`/`StoreCtx` directly, and is surfaced as the binary
+/// entrypoint by a `use runtime::main;` re-export at the crate root. Without it,
+/// the same orchestration is the `pub async fn run` escape hatch a
+/// caller-supplied `main` drives, and the export is empty.
+fn entrypoint(command: bool, gen_main: bool, hosts: &[Path]) -> (TokenStream, TokenStream) {
+    let body = run_body(command, hosts);
 
-        #[tokio::main]
-        async fn main() -> ::std::process::ExitCode {
-            use omnia::Parser;
-            match omnia::Cli::parse().command {
-                omnia::Command::Run { wasm, config, args } => {
-                    match runtime::run(wasm, config, args).await {
-                        Ok(status) => status.into(),
-                        Err(error) => {
-                            eprintln!("{error:#}");
-                            ::std::process::ExitCode::FAILURE
+    if gen_main {
+        let main = quote! {
+            /// Parse the CLI and drive the deployment to a process exit code: the
+            /// guest's status for a one-shot `command`, success for a long-lived
+            /// server's clean shutdown, or failure on a host error.
+            #[tokio::main]
+            pub async fn main() -> ::std::process::ExitCode {
+                use omnia::Parser;
+                match omnia::Cli::parse().command {
+                    omnia::Command::Run { wasm, config, args } => {
+                        // The annotation pins the orchestration's error type to
+                        // `anyhow::Error`; without it `?` is ambiguous when a
+                        // linked host (e.g. otel) is also in scope with its own
+                        // `From<anyhow::Error>`.
+                        let outcome: Result<omnia::ExitStatus> = async move { #body }.await;
+                        match outcome {
+                            Ok(status) => status.into(),
+                            Err(error) => {
+                                eprintln!("{error:#}");
+                                ::std::process::ExitCode::FAILURE
+                            }
                         }
                     }
+                    _ => unreachable!(),
                 }
-                _ => unreachable!(),
             }
-        }
+        };
+        (main, quote! { use runtime::main; })
+    } else {
+        let run = quote! {
+            /// Run a guest (single-file shorthand) or a manifest-driven deployment.
+            pub async fn run(
+                wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>,
+            ) -> Result<omnia::ExitStatus> {
+                #body
+            }
+        };
+        (run, quote! {})
     }
 }
 
-/// Generates a field name for a backend type.
+/// Derives a `snake_case` field name from a backend type's final path segment
+/// (e.g. `HttpDefault` -> `http_default`).
 fn field_ident(path: &Path) -> Ident {
-    let Some(ident) = path.segments.last() else {
+    let Some(segment) = path.segments.last() else {
         return format_ident!("field");
     };
-    let ident_str = quote! {#ident}.to_string();
 
-    // convert the type string to snake_case
-    let mut field_str = String::new();
-    for char in ident_str.chars() {
-        if char.is_uppercase() {
-            if !field_str.is_empty() {
-                field_str.push('_');
+    let mut snake = String::new();
+    for ch in segment.ident.to_string().chars() {
+        if ch.is_uppercase() {
+            if !snake.is_empty() {
+                snake.push('_');
             }
-            field_str.push_str(&char.to_lowercase().to_string());
+            snake.extend(ch.to_lowercase());
         } else {
-            field_str.push(char);
+            snake.push(ch);
         }
     }
 
-    format_ident!("{field_str}")
+    format_ident!("{snake}")
 }
 
+/// Derives a host crate's module ident from a host type's final path segment
+/// (e.g. `WasiHttp` -> `omnia_wasi_http`), matching the host-crate naming the
+/// `StoreContext` derive's `#[wasi(...)]` attribute expects.
 fn wasi_ident(path: &Path) -> Ident {
-    let Some(ident) = path.segments.last() else {
+    let Some(segment) = path.segments.last() else {
         return format_ident!("wasi");
     };
 
-    let name = quote! {#ident}.to_string();
-    let name = name.replace("Wasi", "omnia_wasi_").to_lowercase();
+    let name = segment.ident.to_string().replace("Wasi", "omnia_wasi_").to_lowercase();
     format_ident!("{name}")
 }

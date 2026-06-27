@@ -79,8 +79,7 @@ impl RegistryBuilder {
     /// Returns an error if neither a config nor a wasm path is available, or if
     /// the selected source cannot be built.
     pub async fn compile<T: WasiView + 'static>(self) -> Result<Compiled<T>> {
-        let manifest =
-            self.config.clone().or_else(|| env::var_os("OMNIA_CONFIG").map(PathBuf::from));
+        let manifest = self.config.or_else(|| env::var_os("OMNIA_CONFIG").map(PathBuf::from));
 
         let plan = if let Some(manifest) = manifest {
             let parsed = Manifest::load(&manifest)?;
@@ -94,12 +93,12 @@ impl RegistryBuilder {
                 preopens: working_tree(parsed.mounts(base)),
             }
         } else {
-            let wasm = self.wasm.as_ref().context(
+            let wasm = self.wasm.context(
                 "no guest specified: pass a <wasm> path, or --config <omnia.toml> (or set OMNIA_CONFIG)",
             )?;
 
             // The single-file shorthand is a one-guest deployment
-            let source = Source::new(wasm.clone());
+            let source = Source::new(wasm);
 
             Plan {
                 name: source.id().as_str().to_owned(),
@@ -155,6 +154,7 @@ impl<T: WasiView + 'static> Compiled<T> {
         }
 
         Ok(Self {
+            name: plan.name,
             engine,
             linker,
             options,
@@ -186,16 +186,19 @@ fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, Runt
 /// [`host`]: Self::host
 /// [`build`]: Self::build
 pub struct Compiled<T: WasiView + 'static> {
+    // The deployment's telemetry/`COMPONENT` name — the guest file stem for the
+    // single-file shorthand, or the manifest name for a multi-guest deployment.
+    name: String,
     engine: Engine,
     linker: Linker<T>,
     options: RuntimeOptions,
     guests: Vec<LoadedGuest>,
     routes: Routes,
-    /// Guest links — the host-mediated interfaces.
+    // Guest links — the host-mediated interfaces.
     links: BTreeSet<Box<str>>,
-    /// Host-mediated dispatch selector.
+    // Host-mediated dispatch selector.
     selector: Arc<dyn GuestSelector>,
-    /// Working-tree registry from resolved preopens in [`from_plan`](Self::from_plan).
+    // Working-tree registry from resolved preopens in [`from_plan`](Self::from_plan).
     working_trees: Arc<WorkingTreeRegistry>,
 }
 
@@ -225,6 +228,16 @@ impl<T: WasiView> Compiled<T> {
     #[must_use]
     pub fn working_trees(&self) -> Arc<WorkingTreeRegistry> {
         Arc::clone(&self.working_trees)
+    }
+
+    /// The guest argv to hand a `wasi:cli` command: the deployment's
+    /// telemetry/`COMPONENT` name as `argv[0]` — the program-name convention a
+    /// guest reads via `wasi:cli/environment` (mirroring `wasmtime`) — followed
+    /// by `args`. Reusing the registry-derived name keeps `argv[0]` and the
+    /// traces in agreement.
+    #[must_use]
+    pub fn argv(&self, args: Vec<String>) -> Vec<String> {
+        std::iter::once(self.name.clone()).chain(args).collect()
     }
 
     /// Pre-instantiate every loaded guest against the shared Linker and assemble
