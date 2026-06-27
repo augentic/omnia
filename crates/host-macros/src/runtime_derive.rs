@@ -101,10 +101,10 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
                 #store_ctx {
                     // Fixed per-store state, plus one cloned backend per
                     // `#[runtime(store = ...)]` field.
-                    base: ::omnia::StoreBase::new(
-                        ::omnia::Runtime::options(self),
-                        ::std::sync::Arc::new(::core::clone::Clone::clone(self)),
-                    ),
+                    base: ::omnia::StoreBase::builder()
+                        .options(::omnia::Runtime::options(self))
+                        .dispatch(::std::sync::Arc::new(::core::clone::Clone::clone(self)))
+                        .build(),
                     #(#store_assignments,)*
                 }
             }

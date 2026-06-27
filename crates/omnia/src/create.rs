@@ -85,7 +85,7 @@ impl RegistryBuilder {
             let parsed = Manifest::load(&manifest)?;
             let base = manifest.parent().unwrap_or_else(|| Path::new("."));
             Plan {
-                name: parsed.telemetry_name().to_owned(),
+                name: parsed.name().to_owned(),
                 sources: parsed.sources(base)?,
                 routes: parsed.routes(),
                 links: parsed.links(),

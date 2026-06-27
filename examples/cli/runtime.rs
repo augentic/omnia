@@ -6,8 +6,9 @@
 //! status. Modelled on `crates/omnia/tests/linking.rs`; see `README.md`.
 //!
 //! Two things the floor does not yet provide for a command are handled locally:
-//! nothing else invokes `wasi:cli/run`, and `StoreBase` never sets guest argv.
-//! The `run` func lives inside the versioned `wasi:cli/run@…` instance rather
+//! nothing else invokes `wasi:cli/run`, and the macro path does not yet thread
+//! argv into `Runtime::store()`. This host passes argv through
+//! [`StoreBase::builder`]. The `run` func lives inside the versioned `wasi:cli/run@…` instance rather
 //! than at the component root, so the typed `CommandPre` bindings (not
 //! `Instance::get_func`) perform the export lookup.
 
@@ -18,7 +19,7 @@ cfg_if::cfg_if! {
 
         use anyhow::{Context, Result};
         use omnia::wasmtime_wasi::p2::bindings::CommandPre;
-        use omnia::wasmtime_wasi::{I32Exit, WasiCtxBuilder};
+        use omnia::wasmtime_wasi::I32Exit;
         use omnia::{Registry, RegistryBuilder, Runtime, StoreBase, StoreContext};
 
         /// Per-store context mirroring a macro-generated `StoreCtx`: the fixed
@@ -44,18 +45,13 @@ cfg_if::cfg_if! {
             type StoreCtx = CliCtx;
 
             fn store(&self) -> CliCtx {
-                // `StoreBase::new` wires env + stdio but omits argv, so rebuild
-                // `wasi` with `.args(...)`. `base.wasi` is a public field, so the
-                // override stays local to the example — no floor change.
-                let mut base = StoreBase::new(self.options(), Arc::new(self.clone()));
-                base.wasi = WasiCtxBuilder::new()
-                    .inherit_env()
-                    .inherit_stdin()
-                    .stdout(tokio::io::stdout())
-                    .stderr(tokio::io::stderr())
-                    .args(&self.args[..])
-                    .build();
-                CliCtx { base }
+                CliCtx {
+                    base: StoreBase::builder()
+                        .options(self.options())
+                        .dispatch(Arc::new(self.clone()))
+                        .args(&self.args)
+                        .build(),
+                }
             }
 
             fn registry(&self) -> &Registry<Self::StoreCtx> {

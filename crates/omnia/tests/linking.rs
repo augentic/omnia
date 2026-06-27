@@ -54,7 +54,7 @@ impl Runtime for TestRuntime {
         // from here, so this counter is the instance-per-call witness.
         self.stores_built.fetch_add(1, Ordering::SeqCst);
         TestCtx {
-            base: StoreBase::new(self.options(), Arc::new(self.clone())),
+            base: StoreBase::builder().options(self.options()).dispatch(Arc::new(self.clone())).build(),
         }
     }
 

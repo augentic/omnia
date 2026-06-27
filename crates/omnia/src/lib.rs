@@ -44,7 +44,11 @@ pub use self::registry::{Guest, GuestId, Registry};
 pub use self::routing::{HttpRoutes, Resolver, Routes, TopicRoutes, TriggerRouter};
 pub use self::runtime::serve;
 pub use self::selector::{FirstArgSelector, GuestSelector};
-pub use self::store::StoreBase;
+pub use self::store::{StoreBase, StoreBaseBuilder};
+// Type-state markers naming the `StoreBaseBuilder` member states; users chain the
+// setters and never name these directly, so they are hidden from the docs.
+#[doc(hidden)]
+pub use self::store::{Set, Unset};
 pub use self::telemetry::{Telemetry, resource};
 pub use self::traits::{Backend, FromEnv, FutureResult, HasLimits, Host, Runtime, Server};
 pub use self::transport::{LinkClient, WrpcState};

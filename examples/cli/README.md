@@ -20,9 +20,8 @@ the host invokes it **once** and exits with its status.
   invokes `wasi:cli/run` through Wasmtime's typed `CommandPre` bindings.
 
 A hand-written host is used because the floor has no `wasi:cli/run` invoker
-(every trigger is a long-lived `Server`) and `StoreBase` wires env + stdio but
-never sets guest argv. Both gaps are closed locally in `runtime.rs` with no
-floor change.
+(every trigger is a long-lived `Server`) and the macro path does not thread argv
+into `Runtime::store()`. Argv injection uses [`StoreBase::builder`](../../crates/omnia/src/store.rs); the invoke path stays local in `runtime.rs`.
 
 ## Build the guest
 

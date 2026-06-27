@@ -73,7 +73,7 @@ impl Manifest {
     ///
     /// The first `[[guest]]` entry doubles as the name for now.
     #[must_use]
-    pub fn telemetry_name(&self) -> &str {
+    pub fn name(&self) -> &str {
         self.guests.first().map_or("omnia", |entry| entry.id.as_str())
     }
 
@@ -135,6 +135,22 @@ pub struct GuestEntry {
     pub link: Vec<String>,
 }
 
+/// Where a guest's component bytes come from.
+///
+/// Modelled as an externally tagged enum so TOML's `source.path = "..."` and
+/// `source.oci = "..."` each select a variant.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SourceSpec {
+    /// A local `.wasm` / pre-compiled `.bin` path (resolved relative to the
+    /// manifest's directory).
+    Path(PathBuf),
+    /// A digest-pinned OCI reference. Accepted by the parser and surfaced in the
+    /// "not yet supported" error; the puller that consumes it lands as a
+    /// follow-up.
+    Oci(String),
+}
+
 /// Inbound routing: one list of routes per trigger, orthogonal to population
 /// (a guest may carry no route).
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -184,22 +200,6 @@ pub struct TopicRoute {
     pub topic: String,
     /// The target guest identity (opaque to the floor).
     pub guest: String,
-}
-
-/// Where a guest's component bytes come from.
-///
-/// Modelled as an externally tagged enum so TOML's `source.path = "..."` and
-/// `source.oci = "..."` each select a variant.
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SourceSpec {
-    /// A local `.wasm` / pre-compiled `.bin` path (resolved relative to the
-    /// manifest's directory).
-    Path(PathBuf),
-    /// A digest-pinned OCI reference. Accepted by the parser and surfaced in the
-    /// "not yet supported" error; the puller that consumes it lands as a
-    /// follow-up.
-    Oci(String),
 }
 
 /// Transport configuration. Parsed and validated in Phase 1; the dispatch path
