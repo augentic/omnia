@@ -1,5 +1,7 @@
 //! Domain types for JSON document storage and queries (shared by host and guest).
 
+use std::ops::Not;
+
 /// Scalar values for filter comparisons.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ScalarValue {
@@ -319,9 +321,8 @@ impl Filter {
 
     /// Logical NOT.
     #[must_use]
-    #[allow(clippy::should_implement_trait)] // Domain API mirrors `std::ops::Not`, not the trait.
-    pub fn not(inner: Self) -> Self {
-        Self::Not(Box::new(inner))
+    pub fn negate(inner: Self) -> Self {
+        !inner
     }
 
     /// Restrict `field` to a calendar date (UTC day) using range on timestamp strings.
@@ -335,6 +336,14 @@ impl Filter {
         let start = format!("{iso_date}T00:00:00Z");
         let end = format!("{next}T00:00:00Z");
         Ok(Self::And(vec![Self::gte(field, Timestamp(start)), Self::lt(field, Timestamp(end))]))
+    }
+}
+
+impl Not for Filter {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        Self::Not(Box::new(self))
     }
 }
 

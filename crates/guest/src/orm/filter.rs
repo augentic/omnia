@@ -1,3 +1,5 @@
+use std::ops::Not;
+
 use sea_query::{Expr, ExprTrait, SimpleExpr, Value};
 
 use super::select::table_column;
@@ -136,7 +138,17 @@ impl Filter {
             FilterKind::Not(filter) => Expr::expr(filter.into_expr(default_table)).not(),
         }
     }
+}
 
+impl Not for Filter {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        Self(FilterKind::Not(Box::new(self)))
+    }
+}
+
+impl Filter {
     /// Qualifies an existing filter with a specific table name.
     ///
     /// Applies recursively to nested combinators (`And`/`Or`/`Not`). For column-to-column
@@ -331,9 +343,8 @@ impl Filter {
 
     /// Logically negates a filter.
     #[must_use]
-    #[allow(clippy::should_implement_trait)]
-    pub fn not(filter: Self) -> Self {
-        Self(FilterKind::Not(Box::new(filter)))
+    pub fn negate(filter: Self) -> Self {
+        !filter
     }
 
     /// Creates a table-qualified IS NULL filter (table.column IS NULL).

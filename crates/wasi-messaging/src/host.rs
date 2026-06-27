@@ -104,7 +104,6 @@ pub struct WasiMessagingCtxView<'a> {
 ///
 /// This is implemented by the resource-specific provider of messaging
 /// functionality. For example, a NATS, or a Kafka broker.
-#[allow(unused)]
 pub trait WasiMessagingCtx: Debug + Send + Sync + 'static {
     /// Connect to the messaging system and return a client proxy.
     ///

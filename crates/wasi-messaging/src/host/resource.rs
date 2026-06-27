@@ -14,7 +14,6 @@ use crate::host::generated::wasi::messaging::types;
 pub type Subscriptions = Pin<Box<dyn Stream<Item = MessageProxy> + Send>>;
 
 /// Messaging client trait.
-#[allow(unused_variables)]
 pub trait Client: Debug + Send + Sync + 'static {
     /// Subscribe to messages.
     fn subscribe(&self) -> FutureResult<Subscriptions>;

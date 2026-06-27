@@ -145,9 +145,8 @@ impl ExitStatus {
     /// surfaces on POSIX (and what the [`ExitCode`](std::process::ExitCode)
     /// conversion uses). See [the truncation note](Self#truncation).
     #[must_use]
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub const fn code_u8(self) -> u8 {
-        self.0 as u8
+        self.0.to_le_bytes()[0]
     }
 }
 

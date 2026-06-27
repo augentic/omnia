@@ -269,10 +269,10 @@ async fn list_routes(Query(p): Query<RouteQuery>) -> HttpResult<Json<Value>> {
         filters.push(Filter::eq("agency_id", agency.as_str()));
     }
     if let Some(exclude) = p.exclude_type {
-        filters.push(Filter::not(Filter::eq("route_type", exclude)));
+        filters.push(Filter::negate(Filter::eq("route_type", exclude)));
     }
     if let (Some(agency), Some(rtype)) = (&p.not_agency, p.not_type) {
-        filters.push(Filter::not(Filter::and([
+        filters.push(Filter::negate(Filter::and([
             Filter::eq("agency_id", agency.as_str()),
             Filter::eq("route_type", rtype),
         ])));
