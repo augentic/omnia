@@ -35,7 +35,7 @@ pub fn runtime(input: TokenStream) -> TokenStream {
 /// Derives the fixed store-context trait impls for a `StoreCtx`.
 ///
 /// Implements `WasiView`, `WrpcView`, and `HasLimits` against the `#[base]`
-/// field (of type [`omnia::StoreBase`]) and emits one host view per `#[wasi(path)]`
+/// field (of type `omnia::StoreBase`) and emits one host view per `#[wasi(path)]`
 /// backend field via that host crate's `omnia_wasi_view!` macro.
 ///
 /// # Example
@@ -58,7 +58,7 @@ pub fn store_context(input: TokenStream) -> TokenStream {
     }
 }
 
-/// Derives the standard [`omnia::Runtime`] impl for a deployment runtime.
+/// Derives the standard `omnia::Runtime` impl for a deployment runtime.
 ///
 /// Generates `type StoreCtx`, the `registry()` accessor, and a `store()` that
 /// builds the fixed `base: omnia::StoreBase` plus one cloned backend per

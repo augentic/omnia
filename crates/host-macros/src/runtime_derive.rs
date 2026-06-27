@@ -1,6 +1,6 @@
 //! # `Runtime` derive expansion
 //!
-//! Generates the standard [`omnia::Runtime`] impl a deployment runtime would
+//! Generates the standard `omnia::Runtime` impl a deployment runtime would
 //! otherwise hand-write: `type StoreCtx`, a `registry()` accessor, and a
 //! `store()` that builds the fixed `base: omnia::StoreBase` plus one cloned
 //! backend per `#[runtime(store = ...)]` field. This is the boilerplate the
@@ -18,7 +18,7 @@
 //! ```
 //!
 //! The generated `store()` assumes the `StoreCtx` carries its
-//! [`omnia::StoreBase`] in a field named `base` (the convention the
+//! `omnia::StoreBase` in a field named `base` (the convention the
 //! `StoreContext` derive and `runtime!` macro establish).
 
 use proc_macro2::TokenStream;

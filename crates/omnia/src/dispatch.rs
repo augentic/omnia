@@ -257,7 +257,7 @@ where
 /// `wasi-model`'s `resolve`) can invoke a guest without naming the concrete
 /// [`Runtime`].
 ///
-/// This is the type-erased mirror of the [`dispatch`] free function: the
+/// This is the type-erased mirror of the `dispatch` free function: the
 /// `runtime!` macro threads an `Arc<dyn HostDispatch>` into each store context
 /// (like the per-store wRPC state) so any host binding gets dynamic host→guest
 /// calls for free. It carries no consumer vocabulary (Law 2) — a consumer owns

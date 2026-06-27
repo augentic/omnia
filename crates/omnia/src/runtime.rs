@@ -76,7 +76,7 @@ pub fn sample_pool(engine: Engine, interval: Duration) {
 /// Drive a runtime's lifecycle: start its background tasks, wire the serve side
 /// of any host-mediated links, then run every trigger server to completion.
 ///
-/// Spawns [`drive_epoch`] and [`sample_pool`] off the runtime's engine, calls
+/// Spawns `drive_epoch` and `sample_pool` off the runtime's engine, calls
 /// [`serve_links`] so a dispatched call always finds its target's wRPC server
 /// (a no-op when no `link`s are declared), then awaits all `servers` together.
 /// Every server shares the runtime's single [`Registry`](crate::Registry) and

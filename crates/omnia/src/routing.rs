@@ -223,7 +223,7 @@ impl<R: Resolver> Router<R> {
     }
 }
 
-/// Pairs a per-trigger [`Router`] with the typed binding indices of every
+/// Pairs a per-trigger `Router` with the typed binding indices of every
 /// capable guest.
 ///
 /// A trigger server builds this once, then resolves a routing key straight to
@@ -237,12 +237,12 @@ pub struct TriggerRouter<I, R> {
 
 impl<I, R: Resolver> TriggerRouter<I, R> {
     /// Probe every registered guest for the trigger's handler — a guest is
-    /// *capable* exactly when `probe` succeeds — then build the [`Router`] over
+    /// *capable* exactly when `probe` succeeds — then build the `Router` over
     /// the capable set and the configured route `table`.
     ///
     /// # Errors
     ///
-    /// Returns an error if [`Router::build`] rejects the capable set and table:
+    /// Returns an error if `Router::build` rejects the capable set and table:
     /// a route names a guest that does not export the handler, or two or more
     /// guests export it with no routes to disambiguate.
     pub fn build<T, E, F>(
