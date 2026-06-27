@@ -25,6 +25,7 @@ use serde::Deserialize;
 use crate::registry::GuestId;
 use crate::routing::{CliRoutes, HttpRoutes, Routes, TopicRoutes};
 use crate::source::Source;
+use crate::working_tree::ResolvedPreopen;
 
 /// The deployment manifest: which guests load and how host-mediated calls
 /// travel.
@@ -34,6 +35,9 @@ pub struct Manifest {
     /// Registry population: each entry maps an identity to a source.
     #[serde(rename = "guest")]
     pub guests: Vec<GuestEntry>,
+    /// Working-tree mounts preopened into the guest sandbox (RFC-55).
+    #[serde(rename = "mount")]
+    pub mounts: Vec<MountEntry>,
     /// Inbound route tables, one list per trigger.
     pub route: RouteSpec,
     /// Transport configuration for host-mediated calls.
@@ -120,6 +124,39 @@ impl Manifest {
     pub fn routes(&self) -> Routes {
         self.route.to_routes()
     }
+
+    /// Resolve every `[[mount]]` into a [`ResolvedPreopen`] (RFC-55).
+    ///
+    /// Host paths resolve relative to `base` exactly as `[[guest]]` sources do,
+    /// and `writable` selects read-only (review) versus read+write (edit) WASI
+    /// permissions.
+    #[must_use]
+    pub fn mounts(&self, base: &Path) -> Vec<ResolvedPreopen> {
+        self.mounts
+            .iter()
+            .map(|entry| {
+                let host_path = if entry.path.is_absolute() {
+                    entry.path.clone()
+                } else {
+                    base.join(&entry.path)
+                };
+                ResolvedPreopen::new(entry.name.clone(), host_path, entry.writable)
+            })
+            .collect()
+    }
+}
+
+/// A single working-tree mount: a host directory preopened into the guest
+/// sandbox under a guest-visible name (RFC-55).
+#[derive(Clone, Debug, Deserialize)]
+pub struct MountEntry {
+    /// Guest-visible name `preopens.get-directories()` returns (e.g. `.`).
+    pub name: String,
+    /// Host path (absolute, or relative to the manifest's directory).
+    pub path: PathBuf,
+    /// Read+write when `true`; read-only (the review-flow default) otherwise.
+    #[serde(default)]
+    pub writable: bool,
 }
 
 /// A single registry population entry.

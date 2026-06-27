@@ -2055,6 +2055,8 @@ version = "0.35.0"
 dependencies = [
  "anyhow",
  "bytes",
+ "cap-fs-ext",
+ "cap-std",
  "cfg-if",
  "clap",
  "fromenv",
@@ -2279,6 +2281,8 @@ name = "omnia-wasi-model"
 version = "0.35.0"
 dependencies = [
  "anyhow",
+ "cap-fs-ext",
+ "cap-std",
  "futures",
  "omnia",
  "serde",

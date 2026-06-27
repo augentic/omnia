@@ -17,6 +17,7 @@ use crate::registry::{Guest, Registry};
 use crate::routing::Routes;
 use crate::selector::{FirstArgSelector, GuestSelector};
 use crate::source::{LoadedGuest, Source};
+use crate::working_tree::{ResolvedPreopen, WorkingTreeRegistry};
 use crate::{Host, RuntimeOptions, Telemetry};
 
 /// Selects where a runtime's guests come from, then [`compile`]s them into a
@@ -89,6 +90,7 @@ impl RegistryBuilder {
                 sources: parsed.sources(base)?,
                 routes: parsed.routes(),
                 links: parsed.links(),
+                preopens: merge_env_working_tree(parsed.mounts(base)),
             }
         } else {
             let wasm = self.wasm.as_ref().context(
@@ -105,6 +107,7 @@ impl RegistryBuilder {
                 sources: vec![source],
                 routes: Routes::default(),
                 links: BTreeSet::new(),
+                preopens: merge_env_working_tree(Vec::new()),
             }
         };
 
@@ -121,6 +124,22 @@ struct Plan {
     sources: Vec<Source>,
     routes: Routes,
     links: BTreeSet<Box<str>>,
+    /// Working-tree mounts to preopen into every guest sandbox (RFC-55).
+    preopens: Vec<ResolvedPreopen>,
+}
+
+/// Fold the `OMNIA_WORKING_TREE` env shorthand — a single read-only mount named
+/// `.` — into the resolved preopens, unless a `[[mount]]` already claims that
+/// name. Covers the single-guest "review this repo" case without a manifest
+/// (RFC-55).
+fn merge_env_working_tree(mut preopens: Vec<ResolvedPreopen>) -> Vec<ResolvedPreopen> {
+    const ROOT: &str = ".";
+    if let Some(path) = env::var_os("OMNIA_WORKING_TREE")
+        && !preopens.iter().any(|preopen| preopen.name == ROOT)
+    {
+        preopens.push(ResolvedPreopen::new(ROOT.to_owned(), PathBuf::from(path), false));
+    }
+    preopens
 }
 
 impl<T: WasiView + 'static> Compiled<T> {
@@ -131,6 +150,10 @@ impl<T: WasiView + 'static> Compiled<T> {
     /// source kind (an OCI pull) slots in without a parallel loading path.
     async fn from_plan(plan: Plan) -> Result<Self> {
         let (engine, linker, options) = engine_and_linker()?;
+
+        // Open + identity-stamp every preopen once, here, so a misconfigured
+        // mount fails fast at startup rather than per store (RFC-55).
+        let working_trees = Arc::new(WorkingTreeRegistry::open(plan.preopens)?);
 
         let mut guests = Vec::with_capacity(plan.sources.len());
         for source in &plan.sources {
@@ -145,6 +168,7 @@ impl<T: WasiView + 'static> Compiled<T> {
             routes: plan.routes,
             links: plan.links,
             selector: Arc::new(FirstArgSelector),
+            working_trees,
         })
     }
 }
@@ -179,6 +203,9 @@ pub struct Compiled<T: WasiView + 'static> {
     /// Host-mediated dispatch selector; defaults to [`FirstArgSelector`] and is
     /// overridable via [`selector`](Self::selector).
     selector: Arc<dyn GuestSelector>,
+    /// Working-tree registry (RFC-55): built once from the resolved preopens in
+    /// [`from_plan`](Self::from_plan), shared read-only across every store.
+    working_trees: Arc<WorkingTreeRegistry>,
 }
 
 impl<T: WasiView> Compiled<T> {
@@ -201,6 +228,15 @@ impl<T: WasiView> Compiled<T> {
     pub fn selector(&mut self, selector: impl GuestSelector) -> &mut Self {
         self.selector = Arc::new(selector);
         self
+    }
+
+    /// The working-tree registry built from the deployment's preopens (RFC-55).
+    ///
+    /// Cloned (cheaply — an `Arc`) into the runtime state by the `runtime!`
+    /// macro so every store shares the one startup-validated registry.
+    #[must_use]
+    pub fn working_trees(&self) -> Arc<WorkingTreeRegistry> {
+        Arc::clone(&self.working_trees)
     }
 
     /// Pre-instantiate every loaded guest against the shared Linker and assemble

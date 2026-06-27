@@ -19,12 +19,24 @@ use super::generated::augentic::model::completion as genc;
 use super::generated::augentic::model::completion::{Host, HostWithStore};
 use super::types::Prompt;
 use super::validate::{check_prompt, validate_answer};
+use super::working_tree::{WorkingTree, resolve_working_tree};
 use super::{Error, FutureResult, ToolHost, WasiModel, WasiModelCtxView};
 use crate::host::types::{DirEntry, Reference, VerifyReport};
 
 impl<T> HostWithStore<T> for WasiModel {
-    async fn complete(accessor: &Accessor<T, Self>, prompt: genc::Prompt) -> Result<String, Error> {
-        let owned: Prompt = prompt.into();
+    async fn complete(
+        accessor: &Accessor<T, Self>, mut prompt: genc::Prompt,
+    ) -> Result<String, Error> {
+        // Move the lent working-tree borrow out before the owned conversion
+        // consumes the grants — `Resource<Descriptor>` is not `Clone` in
+        // wasmtime 46, so it must be taken, not copied. The descriptor is
+        // resolved against the registry inside `accessor.with` below; the owned
+        // prompt re-derives its stable `working_tree_lent` marker (§5.4) from
+        // whether a borrow was present (RFC-55).
+        let working_tree_res = prompt.grants.working_tree.take();
+
+        let mut owned: Prompt = prompt.into();
+        owned.grants.working_tree_lent = working_tree_res.is_some();
 
         // Floor pre-checks: reserved tool names and empty prompts never reach a
         // backend (§3.1.1–§3.1.2).
@@ -36,22 +48,32 @@ impl<T> HostWithStore<T> for WasiModel {
 
         // Build the per-completion tool host (§4.2) from the prompt's grants.
         // `resolve` reaches the host→guest dispatcher threaded into the store
-        // ctx; `verify` is routing-only; `read`/`list`/`write` are deferred to
-        // Phase 2b. `ModelDefault` (replay) ignores it. Capture the grants the
-        // host needs before the owned prompt moves into the backend.
+        // ctx; `verify` is routing-only; `read`/`list`/`write` + `local_path`
+        // ride the working tree resolved from the lent descriptor (RFC-55).
+        // `ModelDefault` (replay) ignores it. Capture the grants the host needs
+        // before the owned prompt moves into the backend.
         let references = owned.grants.references.clone();
         let verify_allowed = owned.grants.verify.clone();
 
         let backend_answer = accessor
             .with(|mut store| {
                 let view = store.get();
+                // Resolve the lent descriptor to an authorized mount by
+                // directory identity, here at the floor: an out-of-scope or
+                // non-directory tree is rejected before any backend sees it.
+                let working_tree = resolve_working_tree(
+                    view.table,
+                    view.working_trees,
+                    working_tree_res.as_ref(),
+                )?;
                 let tool_host: Arc<dyn ToolHost> = Arc::new(BoundToolHost {
                     dispatch: Arc::clone(&view.host_dispatch),
                     references,
                     verify_allowed,
+                    working_tree,
                 });
-                view.ctx.complete(owned, tool_host)
-            })
+                Ok::<_, Error>(view.ctx.complete(owned, tool_host))
+            })?
             .await?;
 
         // Final validation gate: a backend answer that does not validate is a
@@ -78,13 +100,12 @@ impl Host for WasiModelCtxView<'_> {
     }
 }
 
-/// The Phase 2a floor tool host, built fresh per completion from the prompt's
-/// grants. `resolve` is wired to the host→guest dispatcher (§4.1); `verify` is
+/// The floor tool host, built fresh per completion from the prompt's grants.
+/// `resolve` is wired to the host→guest dispatcher (§4.1); `verify` is
 /// routing-only (an allow-list check against `grants.verify` — profiles and
-/// their execution are RFC-60); `read`/`list`/`write` stay loud stubs until the
-/// wasi-filesystem working tree lands (Phase 2b, RFC-55), as does the
-/// `wasi:keyvalue` cross-turn session state that backs their visibility.
-/// `ModelDefault` (replay) ignores the whole host.
+/// their execution are RFC-60); `read`/`list`/`write` + `local_path` ride the
+/// [`WorkingTree`] resolved from the lent descriptor (RFC-55), and fail loudly
+/// when no tree was lent. `ModelDefault` (replay) ignores the whole host.
 struct BoundToolHost {
     /// Type-erased host→guest dispatcher threaded in via the store ctx.
     dispatch: Arc<dyn HostDispatch>,
@@ -93,12 +114,17 @@ struct BoundToolHost {
     references: Option<String>,
     /// `grants.verify`: the closed verification profiles the model may route to.
     verify_allowed: Vec<String>,
+    /// The working tree resolved from the lent `grants.working-tree` descriptor
+    /// (RFC-55), or `None` when none was lent. Backs `read`/`list`/`write` and
+    /// the `local_path` face.
+    working_tree: Option<WorkingTree>,
 }
 
-/// A future that immediately fails because a capability lands in Phase 2b.
-fn deferred<R: Send + 'static>(tool: &'static str) -> FutureResult<R> {
+/// A future that fails because a working-tree tool was called without a tree
+/// having been lent in `grants.working-tree`.
+fn no_working_tree<R: Send + 'static>(tool: &'static str) -> FutureResult<R> {
     async move {
-        Err(anyhow::anyhow!("tool `{tool}` is not wired until Phase 2b (RFC-55 working tree)"))
+        Err(anyhow::anyhow!("tool `{tool}` requires grants.working-tree, but none was lent"))
     }
     .boxed()
 }
@@ -153,16 +179,22 @@ impl ToolHost for BoundToolHost {
         .boxed()
     }
 
-    fn read(&self, _path: String) -> FutureResult<Vec<u8>> {
-        deferred("read")
+    fn read(&self, path: String) -> FutureResult<Vec<u8>> {
+        self.working_tree.as_ref().map_or_else(|| no_working_tree("read"), |tree| tree.read(path))
     }
 
-    fn list(&self, _path: String) -> FutureResult<Vec<DirEntry>> {
-        deferred("list")
+    fn list(&self, path: String) -> FutureResult<Vec<DirEntry>> {
+        self.working_tree.as_ref().map_or_else(|| no_working_tree("list"), |tree| tree.list(path))
     }
 
-    fn write(&self, _path: String, _bytes: Vec<u8>) -> FutureResult<()> {
-        deferred("write")
+    fn write(&self, path: String, bytes: Vec<u8>) -> FutureResult<()> {
+        self.working_tree
+            .as_ref()
+            .map_or_else(|| no_working_tree("write"), |tree| tree.write(path, bytes))
+    }
+
+    fn local_path(&self) -> Option<&std::path::Path> {
+        self.working_tree.as_ref().map(WorkingTree::local_path)
     }
 
     fn verify(&self, check: String) -> FutureResult<VerifyReport> {

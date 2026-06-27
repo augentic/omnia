@@ -5,10 +5,15 @@
 // Phase 1 example guest only calls `complete`, and a wasm32-wasip2 guest does
 // not use the native `stream<>` type. The host provides the full `completion`
 // (both functions); a guest that imports this subset is structurally compatible.
+//
+// `descriptor` tracks `wasi:filesystem@0.3.0` (RFC-55) — the version the host
+// serves via `wasmtime_wasi::p3::add_to_linker` — so the lent `working-tree`
+// handle is the same resource the host and floor own. See `deps/filesystem.wit`
+// for the trimmed (method-free) subset the wasip2 guest vendors.
 package augentic:model@0.1.0;
 
 interface completion {
-    use wasi:filesystem/types@0.2.12.{descriptor};
+    use wasi:filesystem/types@0.3.0.{descriptor};
 
     type json = string;
     type answer = string;

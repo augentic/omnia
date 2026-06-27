@@ -42,6 +42,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
 
     let mut registry_field: Option<&Ident> = None;
     let mut args_field: Option<&Ident> = None;
+    let mut preopens_field: Option<&Ident> = None;
     let mut store_assignments: Vec<TokenStream> = Vec::new();
     let mut seen_targets: Vec<Ident> = Vec::new();
 
@@ -71,6 +72,14 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
                     }
                     args_field = Some(field_ident);
                     Ok(())
+                } else if meta.path.is_ident("preopens") {
+                    if preopens_field.is_some() {
+                        return Err(meta.error(
+                            "duplicate `#[runtime(preopens)]`; at most one field is allowed",
+                        ));
+                    }
+                    preopens_field = Some(field_ident);
+                    Ok(())
                 } else if meta.path.is_ident("store") {
                     let target: Ident = meta.value()?.parse()?;
                     if seen_targets.contains(&target) {
@@ -83,8 +92,8 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
                     Ok(())
                 } else {
                     Err(meta.error(
-                        "expected `#[runtime(registry)]`, `#[runtime(args)]`, or \
-                         `#[runtime(store = <store field>)]`",
+                        "expected `#[runtime(registry)]`, `#[runtime(args)]`, \
+                         `#[runtime(preopens)]`, or `#[runtime(store = <store field>)]`",
                     ))
                 }
             })?;
@@ -95,6 +104,14 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     // context; without one the store defaults to empty argv (the long-lived
     // server case).
     let args_call = args_field.map_or_else(|| quote! {}, |field| quote! { .args(&self.#field) });
+
+    // A `#[runtime(preopens)]` field threads the startup-validated working-tree
+    // registry into every store (RFC-55); without one the store defaults to an
+    // empty registry (no mounts).
+    let preopens_call = preopens_field.map_or_else(
+        || quote! {},
+        |field| quote! { .working_trees(::std::sync::Arc::clone(&self.#field)) },
+    );
 
     let Some(registry_field) = registry_field else {
         return Err(syn::Error::new(
@@ -120,6 +137,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
                         .options(::omnia::Runtime::options(self))
                         .dispatch(::std::sync::Arc::new(::core::clone::Clone::clone(self)))
                         #args_call
+                        #preopens_call
                         .build(),
                     #(#store_assignments,)*
                 }

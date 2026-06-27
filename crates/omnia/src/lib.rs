@@ -16,6 +16,7 @@ mod store;
 mod telemetry;
 mod traits;
 mod transport;
+mod working_tree;
 
 use std::path::PathBuf;
 
@@ -58,6 +59,12 @@ pub use self::traits::{
     Backend, FromEnv, FutureResult, HasLimits, Host, HostKind, Runtime, Server,
 };
 pub use self::transport::{LinkClient, WrpcState};
+// The working-tree registry (RFC-55): `WorkingTreeRegistry` is threaded into
+// every store and read by the floor; `WorkingTreeEntry` exposes the two faces
+// (cap-std `Dir` + absolute path) the floor resolves a lent descriptor to.
+// `ResolvedPreopen` is the mount a registry is built from (a manifest `[[mount]]`
+// or an alternate runtime assembling preopens programmatically).
+pub use self::working_tree::{ResolvedPreopen, WorkingTreeEntry, WorkingTreeRegistry};
 
 /// Command line interface for omnia.
 #[derive(Parser, PartialEq, Eq)]

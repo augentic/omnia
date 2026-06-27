@@ -8,7 +8,7 @@ use std::sync::{Arc, OnceLock};
 use anyhow::{Result, bail};
 use omnia::wasmtime_wasi::p3::bindings::{Command, CommandPre};
 use omnia::wasmtime_wasi::{I32Exit, WasiView};
-use omnia::{ExitStatus, Host, Runtime, Server, HostKind, TriggerRouter};
+use omnia::{ExitStatus, Host, HostKind, Runtime, Server, TriggerRouter};
 use wasmtime::component::Linker;
 
 /// Host-side, one-shot trigger for `wasi:cli`.

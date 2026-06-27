@@ -13,6 +13,7 @@ mod model_impl;
 mod replay;
 mod types;
 mod validate;
+mod working_tree;
 
 mod generated {
     #![allow(missing_docs)]
@@ -26,13 +27,14 @@ mod generated {
             default: store | tracing | trappable,
         },
         with: {
-            // The working-tree `descriptor` (and its transitive deps) resolve to
-            // the resources the runtime already owns, exactly as `wasi-blobstore`
-            // remaps `wasi:io`. We never add these to our linker — `wasmtime-wasi`
-            // provides them; we only borrow the type.
-            "wasi:io": wasmtime_wasi::p2::bindings::io,
-            "wasi:clocks": wasmtime_wasi::p2::bindings::clocks,
-            "wasi:filesystem": wasmtime_wasi::p2::bindings::filesystem,
+            // The working-tree `descriptor` (and its transitive `wasi:clocks`
+            // dep) resolve to the p3 resources the runtime already owns via
+            // `wasmtime_wasi::p3::add_to_linker`. We never add these to our
+            // linker — `wasmtime-wasi` provides them; we only borrow the type.
+            // p3 filesystem reads use native component-model `stream`/`future`,
+            // so the p2 `wasi:io` remap is no longer pulled in (RFC-55).
+            "wasi:clocks": wasmtime_wasi::p3::bindings::clocks,
+            "wasi:filesystem": wasmtime_wasi::p3::bindings::filesystem,
         },
         trappable_error_type: {
             "augentic:model/completion.error" => Error,
@@ -44,7 +46,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{Host, HostDispatch, Runtime, Server};
+use omnia::{Host, HostDispatch, Runtime, Server, WorkingTreeRegistry};
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::ResourceTable;
 
@@ -99,6 +101,12 @@ pub struct WasiModelCtxView<'a> {
     /// an adapter's `references` shelf. Threaded in by the `runtime!` macro's
     /// store context (inert for backends that never resolve).
     pub host_dispatch: Arc<dyn HostDispatch>,
+
+    /// The host-side working-tree registry (RFC-55). The floor reads it to
+    /// resolve a lent `grants.working-tree` `borrow<descriptor>` to an
+    /// authorized mount by directory identity. Threaded in by `omnia_wasi_view!`
+    /// from the store base; empty unless the deployment configures mounts.
+    pub working_trees: &'a WorkingTreeRegistry,
 }
 
 /// The backend trait — the one place a provider's logic lives.
@@ -159,6 +167,17 @@ pub trait ToolHost: Send + Sync {
 
     /// Route a verify request to a closed profile (RFC-60).
     fn verify(&self, check: String) -> FutureResult<VerifyReport>;
+
+    /// The absolute host path of the lent working tree (RFC-55), when one was
+    /// lent for this completion and resolved to an authorized mount.
+    ///
+    /// Backends that spawn a node-local agent (cursor) source their
+    /// `--workspace` from this. The default is `None` — no local tree, e.g.
+    /// replay, or a node that does not carry the mount — which such a backend
+    /// treats as "no local tree on this node".
+    fn local_path(&self) -> Option<&std::path::Path> {
+        None
+    }
 }
 
 /// `anyhow::Error` to [`Error`] mapping: an untyped host failure is a
@@ -179,6 +198,7 @@ macro_rules! omnia_wasi_view {
                     ctx: &mut self.$field_name,
                     table: &mut self.base.table,
                     host_dispatch: ::std::sync::Arc::clone(&self.base.host_dispatch),
+                    working_trees: &*self.base.working_trees,
                 }
             }
         }

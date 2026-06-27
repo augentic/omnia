@@ -4,7 +4,7 @@
     "grants": {
       "references": "shelf",
       "verify": [],
-      "working_tree_lent": false
+      "working_tree_lent": true
     },
     "messages": [],
     "model": null,

@@ -13,7 +13,7 @@ use std::sync::Arc;
 use wasmtime::{StoreLimits, StoreLimitsBuilder};
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder};
 
-use crate::{HostDispatch, RuntimeOptions, WrpcState};
+use crate::{HostDispatch, RuntimeOptions, WorkingTreeRegistry, WrpcState};
 
 /// Type-state marker for a [`StoreBaseBuilder`] member that has been supplied,
 /// carrying its value until [`build`](StoreBaseBuilder::build) consumes it.
@@ -34,6 +34,7 @@ pub struct StoreBaseBuilder<O = Unset, D = Unset> {
     options: O,
     dispatch: D,
     args: Vec<String>,
+    working_trees: Option<Arc<WorkingTreeRegistry>>,
 }
 
 impl<O, D> StoreBaseBuilder<O, D> {
@@ -44,6 +45,18 @@ impl<O, D> StoreBaseBuilder<O, D> {
     #[must_use]
     pub fn args(mut self, args: &[String]) -> Self {
         self.args = args.to_vec();
+        self
+    }
+
+    /// Set the working-tree registry preopened into the guest sandbox (RFC-55).
+    ///
+    /// Optional; defaults to an empty registry (no mounts) so reactor
+    /// deployments without `[[mount]]`s — and the hand-written test runtimes —
+    /// build unchanged. The `runtime!` macro threads the startup-validated
+    /// registry here.
+    #[must_use]
+    pub fn working_trees(mut self, working_trees: Arc<WorkingTreeRegistry>) -> Self {
+        self.working_trees = Some(working_trees);
         self
     }
 }
@@ -58,6 +71,7 @@ impl<D> StoreBaseBuilder<Unset, D> {
             options: Set(options),
             dispatch: self.dispatch,
             args: self.args,
+            working_trees: self.working_trees,
         }
     }
 }
@@ -77,6 +91,7 @@ impl<O> StoreBaseBuilder<O, Unset> {
             options: self.options,
             dispatch: Set(dispatch),
             args: self.args,
+            working_trees: self.working_trees,
         }
     }
 }
@@ -92,14 +107,38 @@ impl StoreBaseBuilder<Set<&RuntimeOptions>, Set<Arc<dyn HostDispatch>>> {
     pub fn build(self) -> StoreBase {
         let Set(options) = self.options;
         let Set(host_dispatch) = self.dispatch;
+        let working_trees = self.working_trees.unwrap_or_default();
 
-        let wasi = WasiCtxBuilder::new()
+        let mut wasi_builder = WasiCtxBuilder::new();
+        wasi_builder
             .inherit_env()
             .inherit_stdin()
             .stdout(tokio::io::stdout())
             .stderr(tokio::io::stderr())
-            .args(&self.args)
-            .build();
+            .args(&self.args);
+
+        // Preopen each authorized working-tree mount into the guest sandbox
+        // (RFC-55). The registry was opened + validated once at startup, so a
+        // failure here is rare (e.g. a mount removed mid-run); log and skip —
+        // the guest simply can't lend that tree and the floor's identity match
+        // then fails cleanly, with no ambient fallback.
+        for entry in working_trees.entries() {
+            if let Err(error) = wasi_builder.preopened_dir(
+                &entry.host_path,
+                &entry.name,
+                entry.dir_perms,
+                entry.file_perms,
+            ) {
+                tracing::warn!(
+                    %error,
+                    name = %entry.name,
+                    path = %entry.host_path.display(),
+                    "failed to preopen working-tree mount; guest will not see it",
+                );
+            }
+        }
+
+        let wasi = wasi_builder.build();
 
         StoreBase {
             table: ResourceTable::new(),
@@ -107,6 +146,7 @@ impl StoreBaseBuilder<Set<&RuntimeOptions>, Set<Arc<dyn HostDispatch>>> {
             limits: StoreLimitsBuilder::new().memory_size(options.max_memory_bytes).build(),
             wrpc: WrpcState::new(),
             host_dispatch,
+            working_trees,
         }
     }
 }
@@ -133,6 +173,11 @@ pub struct StoreBase {
     /// fresh handle to the owning runtime. Inert unless a host binding reaches
     /// for it.
     pub host_dispatch: Arc<dyn HostDispatch>,
+    /// Working-tree registry (RFC-55): the startup-validated mounts also
+    /// preopened into [`wasi`](Self::wasi). The floor reads it to match a lent
+    /// `descriptor` back to its mount by directory identity. Empty unless the
+    /// deployment configures `[[mount]]`s or `OMNIA_WORKING_TREE`.
+    pub working_trees: Arc<WorkingTreeRegistry>,
 }
 
 impl StoreBase {
@@ -155,6 +200,7 @@ impl StoreBase {
             options: Unset,
             dispatch: Unset,
             args: Vec::new(),
+            working_trees: None,
         }
     }
 }

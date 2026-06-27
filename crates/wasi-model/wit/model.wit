@@ -12,19 +12,21 @@
 //     async backend (`WasiModelCtx::complete` returns a future), so it must be
 //     `async func` for the host binding to await it without blocking the
 //     executor.
-//  2. The working-tree handle tracks `wasi:filesystem@0.2.12` — the version
-//     `wasmtime-wasi` 46 ships — rather than the RFC's `0.2.8` placeholder, so
-//     the `with:` remap onto wasmtime's `Descriptor` resolves to the same
-//     resource the runtime already owns.
+//  2. The working-tree handle tracks `wasi:filesystem@0.3.0` (p3) — the version
+//     the runtime serves via `wasmtime_wasi::p3::add_to_linker` — so the `with:`
+//     remap onto wasmtime's p3 `Descriptor` resolves to the same resource the
+//     runtime already owns. p3 filesystem reads ride native component-model
+//     `stream`/`future`, so the boundary no longer pulls in `wasi:io` (RFC-55).
 package augentic:model@0.1.0;
 
 /// Models-API-style prompt completion. Guests import `augentic:model/completion`.
 interface completion {
     /// Working-tree handle lent through `grants.working-tree`. The version tracks
-    /// the wasi-filesystem working-tree host (RFC-55), which is not yet built — the
-    /// tools that consume it (`read`/`list`/`write`, cursor's `local-path`) are
-    /// deferred. The type is carried in the 0.1.0 WIT ahead of those tools.
-    use wasi:filesystem/types@0.2.12.{descriptor};
+    /// the wasi-filesystem working-tree host (RFC-55): the floor resolves the lent
+    /// descriptor to an authorized mount by directory identity, then exposes it to
+    /// backends as bounded `read`/`list`/`write` (genai) and the absolute
+    /// `local-path` (cursor's `--workspace`).
+    use wasi:filesystem/types@0.3.0.{descriptor};
 
     /// JSON document encoded as UTF-8 text.
     type json = string;

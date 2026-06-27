@@ -57,6 +57,11 @@ anyhow = "1.0.102"
 axum = { version = "0.8.9", default-features = false, features = ["json"] }
 base64ct = { version = "1.8.3", features = ["std"] }
 bytes = "1.12.0"
+# Pinned to the versions `wasmtime-wasi` 46.0.1 resolves so the
+# `Arc<cap_std::fs::Dir>` behind a p3 `Descriptor` unifies with the
+# working-tree registry's own handles (RFC-55).
+cap-fs-ext = "3.4.5"
+cap-std = "3.4.5"
 cfg-if = "1.0.4"
 chrono = "0.4.45"
 dashmap = "6.2.1"

@@ -53,7 +53,10 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
             use omnia::anyhow::Context as _;
             use omnia::futures::future::BoxFuture;
             #tokio_import
-            use omnia::{Backend, Compiled, Registry, Runtime, Server, StoreBase, StoreContext};
+            use omnia::{
+                Backend, Compiled, Registry, Runtime, Server, StoreBase, StoreContext,
+                WorkingTreeRegistry,
+            };
 
             use super::*;
 
@@ -77,6 +80,13 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                 /// command reads it as `wasi:cli/environment`.
                 #[runtime(args)]
                 args: Arc<Vec<String>>,
+                /// Working-tree registry (RFC-55): the startup-validated mounts
+                /// preopened into every store, so the floor can match a lent
+                /// `descriptor` back to its mount by directory identity. Empty
+                /// unless the deployment configures `[[mount]]`s or
+                /// `OMNIA_WORKING_TREE`.
+                #[runtime(preopens)]
+                working_trees: Arc<WorkingTreeRegistry>,
                 #(#context_fields,)*
             }
 
@@ -91,11 +101,16 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                     // connect to all backends concurrently
                     #connect_backends
 
+                    // Snapshot the startup-validated working-tree registry
+                    // before `build` consumes `compiled` (RFC-55).
+                    let working_trees = compiled.working_trees();
+
                     // Pre-instantiate every guest against the now fully-linked
                     // linker and assemble the registry.
                     Ok(Self {
                         registry: Arc::new(compiled.build()?),
                         args,
+                        working_trees,
                         #(#backend_idents,)*
                     })
                 }

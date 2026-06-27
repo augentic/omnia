@@ -11,6 +11,13 @@
 # per call. It declares no trigger and is inert under the replay backend (replay
 # short-circuits tools); the resolve path is exercised by the integration test.
 #
+# The `[[mount]]` preopens the repository root into every guest sandbox as a
+# read-only working tree named `.` (RFC-55). The `model` guest reads it via
+# `wasi:filesystem/preopens` and lends it through `grants.working-tree`, so the
+# recorded prompt carries `working_tree_lent = true`. The replay backend ignores
+# the tree (Phase 1 short-circuits tools); the host-side resolution + identity
+# match are proven by the integration test.
+#
 # Build both guests first (see README.md), then run from the repository root:
 #
 #   OMNIA_REPLAY_DIR=examples/model/fixtures \
@@ -23,3 +30,11 @@ source.path = "../../target/wasm32-wasip2/debug/examples/model_wasm.wasm"
 [[guest]]
 id = "shelf"
 source.path = "../../target/wasm32-wasip2/debug/examples/model_shelf_wasm.wasm"
+
+# Read-only working tree the `model` guest lends through `grants.working-tree`.
+# `path` resolves relative to this manifest's directory, so `../..` is the repo
+# root; `name = "."` is what `preopens.get-directories()` returns and the guest
+# selects on.
+[[mount]]
+name = "."
+path = "../.."
