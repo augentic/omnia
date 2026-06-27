@@ -138,7 +138,7 @@ impl WasiModelCtx for Box<dyn WasiModelCtx> {
 /// callback, and genai turns model tool-calls into them. `ModelDefault` (replay)
 /// and the cursor backend ignore it.
 ///
-/// Phase 1 defines the surface (the boundary is final) but wires no capability:
+/// Phase 1 defines the surface but wires no capability:
 /// `resolve` binds to the guest registry in Phase 2a, and `read`/`list`/`write`
 /// to the wasi-filesystem working tree in Phase 2b (RFC-55). Until then the
 /// floor lends a stub host that fails every call loudly.

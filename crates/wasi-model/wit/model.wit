@@ -23,7 +23,7 @@ interface completion {
     /// Working-tree handle lent through `grants.working-tree`. The version tracks
     /// the wasi-filesystem working-tree host (RFC-55), which is not yet built — the
     /// tools that consume it (`read`/`list`/`write`, cursor's `local-path`) are
-    /// deferred. The type is in the 0.1.0 WIT so the boundary is final.
+    /// deferred. The type is carried in the 0.1.0 WIT ahead of those tools.
     use wasi:filesystem/types@0.2.12.{descriptor};
 
     /// JSON document encoded as UTF-8 text.

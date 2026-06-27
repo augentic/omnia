@@ -65,8 +65,8 @@ impl<T> HostWithStore<T> for WasiModel {
     async fn complete_stream(
         _accessor: &Accessor<T, Self>, _prompt: genc::Prompt,
     ) -> Result<StreamReader<genc::StreamEvent>, Error> {
-        // The binding is generated so the 0.1.0 boundary is final and `bindgen!`
-        // is confirmed to compile the native `stream<>` type (§3.1.4); host-side
+        // The binding is generated so `bindgen!` is confirmed to compile the
+        // native `stream<>` type at the 0.1.0 boundary (§3.1.4); host-side
         // stream production lands in Phase 3.
         Err(Error::Backend("streaming unsupported".to_owned()))
     }
