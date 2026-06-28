@@ -1,3 +1,7 @@
+//! # Runtime macro configuration and expansion
+//!
+//! Parses `runtime!({ ... })` and expands it into a complete runtime module.
+
 use std::collections::BTreeMap;
 
 use proc_macro2::TokenStream;
@@ -23,68 +27,43 @@ pub struct Config {
 }
 
 impl Config {
+    /// All token fragments needed to expand a deployment runtime.
+    pub fn codegen(&self) -> Codegen {
+        let host_trait_impls = self.host_trait_impls();
+        let structural = self.structural(&host_trait_impls);
+
+        Codegen {
+            command: self.command,
+            context_fields: structural.context_fields,
+            backend_idents: structural.backend_idents.clone(),
+            store_ctx_fields: structural.store_ctx_fields,
+            link_hosts: self.link_hosts(&host_trait_impls),
+            connect_backends: self.connect_backends(&structural.backend_idents),
+            servers: self.servers(&host_trait_impls),
+        }
+    }
+
     /// WASI host trait types declared in `hosts`, in declaration order.
     fn host_trait_impls(&self) -> Vec<Path> {
         self.hosts.iter().map(|host| host.type_.clone()).collect()
     }
 
-    /// WASI host linking in `Context::new`. In command mode, long-lived trigger
-    /// hosts ([`Server::IS_SERVER`]) are skipped so only capability hosts link.
-    pub(crate) fn link_hosts(&self) -> TokenStream {
-        let host_trait_impls = self.host_trait_impls();
-        if self.command {
-            quote! {
-                #(
-                    if !<#host_trait_impls as Server<Context>>::IS_SERVER {
-                        compiled.host::<#host_trait_impls>()?;
-                    }
-                )*
-            }
-        } else {
-            quote! {
-                #(compiled.host::<#host_trait_impls>()?;)*
-            }
-        }
-    }
-
-    /// Server futures passed to [`omnia::drive`]: empty in command mode.
-    pub(crate) fn servers(&self) -> TokenStream {
-        let host_trait_impls = self.host_trait_impls();
-        if self.command {
-            quote! { vec![] }
-        } else {
-            quote! { vec![#(Box::pin(#host_trait_impls.run(&run_state)),)*] }
-        }
-    }
-
-    /// Concurrent backend connection for `Context::new`.
-    pub(crate) fn connect_backends(&self) -> TokenStream {
-        if self.backends.is_empty() {
-            return quote! {};
-        }
-
-        let backend_idents: Vec<Ident> = self.backends.iter().map(field_ident).collect();
-        let backend_types = &self.backends;
-        quote! {
-            let (#(#backend_idents,)*) = tokio::try_join!(
-                #(<#backend_types as Backend>::connect(),)*
-            )?;
-        }
-    }
-
-    /// Structural codegen derived from the parsed host/backend wiring.
-    pub fn expanded(&self) -> Expanded {
+    /// Structural `Context` / `StoreCtx` field fragments.
+    fn structural(&self, host_trait_impls: &[Path]) -> Structural {
         let mut store_ctx_fields = Vec::new();
         let mut store_targets: BTreeMap<String, Vec<Ident>> = BTreeMap::new();
 
-        for host in &self.hosts {
-            let host_type = &host.type_;
-
+        for (host, host_type) in self.hosts.iter().zip(host_trait_impls) {
             // A backend-less host contributes no `StoreCtx` backend field or
             // host view; it only links its interface.
             let Some(backend_type) = &host.backend else {
                 continue;
             };
+
+            // In command mode, long-lived triggers are not linked or wired.
+            if self.command && is_trigger_host(host_type) {
+                continue;
+            }
 
             // The host's `StoreCtx` field name and host-crate module path
             // coincide (e.g. `WasiHttp` -> `omnia_wasi_http`), so the
@@ -104,12 +83,19 @@ impl Config {
 
         for backend in &self.backends {
             let field = field_ident(backend);
-            let store_attrs: Vec<TokenStream> = store_targets
-                .get(&field.to_string())
-                .into_iter()
-                .flatten()
-                .map(|target| quote! { #[runtime(store = #target)] })
-                .collect();
+            let Some(targets) = store_targets.get(&field.to_string()) else {
+                if self.command {
+                    continue;
+                }
+                context_fields.push(quote! {
+                    pub #field: #backend
+                });
+                backend_idents.push(field);
+                continue;
+            };
+
+            let store_attrs: Vec<TokenStream> =
+                targets.iter().map(|target| quote! { #[runtime(store = #target)] }).collect();
 
             context_fields.push(quote! {
                 #(#store_attrs)*
@@ -118,19 +104,199 @@ impl Config {
             backend_idents.push(field);
         }
 
-        Expanded {
+        Structural {
             context_fields,
             backend_idents,
             store_ctx_fields,
         }
     }
+
+    /// WASI host linking in `Context::new`. In command mode, long-lived trigger
+    /// hosts ([`Server::IS_SERVER`]) are skipped so only capability hosts link.
+    fn link_hosts(&self, host_trait_impls: &[Path]) -> TokenStream {
+        if self.command {
+            quote! {
+                #(
+                    if !<#host_trait_impls as Server<Context>>::IS_SERVER {
+                        compiled.host::<#host_trait_impls>()?;
+                    }
+                )*
+            }
+        } else {
+            quote! {
+                #(compiled.host::<#host_trait_impls>()?;)*
+            }
+        }
+    }
+
+    /// Server futures passed to [`omnia::drive`]: empty in command mode.
+    fn servers(&self, host_trait_impls: &[Path]) -> TokenStream {
+        if self.command {
+            return quote! { vec![] };
+        }
+
+        let server_hosts: Vec<&Path> =
+            host_trait_impls.iter().filter(|host| is_trigger_host(host)).collect();
+
+        quote! {
+            vec![#(Box::pin(#server_hosts.run(&run_state)),)*]
+        }
+    }
+
+    /// Concurrent backend connection for `Context::new`.
+    fn connect_backends(&self, backend_idents: &[Ident]) -> TokenStream {
+        if backend_idents.is_empty() {
+            return quote! {};
+        }
+
+        let backend_types: Vec<&Path> = backend_idents
+            .iter()
+            .map(|ident| {
+                self.backends
+                    .iter()
+                    .find(|backend| field_ident(backend) == *ident)
+                    .expect("wired backend must be declared in `hosts`")
+            })
+            .collect();
+
+        quote! {
+            let (#(#backend_idents,)*) = tokio::try_join!(
+                #(<#backend_types as Backend>::connect(),)*
+            )?;
+        }
+    }
 }
 
-/// Codegen fragments derived from a [`Config`]'s host/backend wiring.
-pub struct Expanded {
+struct Structural {
+    context_fields: Vec<TokenStream>,
+    backend_idents: Vec<Ident>,
+    store_ctx_fields: Vec<TokenStream>,
+}
+
+/// All token fragments needed to expand a deployment runtime.
+pub struct Codegen {
+    pub command: bool,
     pub context_fields: Vec<TokenStream>,
     pub backend_idents: Vec<Ident>,
     pub store_ctx_fields: Vec<TokenStream>,
+    pub link_hosts: TokenStream,
+    pub connect_backends: TokenStream,
+    pub servers: TokenStream,
+}
+
+/// Generate the runtime module from a parsed [`Config`].
+pub fn expand(config: &Config) -> TokenStream {
+    let Codegen {
+        command,
+        context_fields,
+        backend_idents,
+        store_ctx_fields,
+        link_hosts,
+        connect_backends,
+        servers,
+    } = config.codegen();
+
+    quote! {
+        mod runtime {
+            use std::path::PathBuf;
+            use std::sync::Arc;
+
+            use anyhow::Result;
+            use omnia::anyhow::Context as _;
+            use omnia::tokio;
+            use omnia::{
+                Backend, Compiled, Registry, Runtime, Server, StoreBase, StoreContext,
+                WorkingTreeRegistry,
+            };
+
+            use super::*;
+
+            // Runtime state holding the guest registry and backend connections.
+            #[derive(Clone, Runtime)]
+            #[runtime(store = StoreCtx)]
+            struct Context {
+                #[runtime(registry)]
+                registry: Arc<Registry<StoreCtx>>,
+                // Guest argv threaded into every store (empty for servers; in
+                // command mode `args[0]` is the program name).
+                #[runtime(args)]
+                args: Arc<Vec<String>>,
+                // Working-tree contains startup-validated preopens when the deployment
+                // configures `[[mount]]`s or sets `OMNIA_WORKING_TREE`.
+                #[runtime(preopens)]
+                working_trees: Arc<WorkingTreeRegistry>,
+                #(#context_fields,)*
+            }
+
+            impl Context {
+                /// Creates a new runtime state by linking WASI interfaces and connecting to backends.
+                async fn new(mut compiled: Compiled<StoreCtx>) -> Result<Self> {
+                    let args = Arc::new(compiled.args().to_vec());
+
+                    // link enabled WASI components
+                    #link_hosts
+
+                    // connect to all backends concurrently
+                    #connect_backends
+
+                    // snapshot the startup-validated working-tree
+                    let working_trees = compiled.working_trees();
+
+                    // build the store context
+                    Ok(Self {
+                        registry: Arc::new(compiled.build()?),
+                        args,
+                        working_trees,
+                        #(#backend_idents,)*
+                    })
+                }
+            }
+
+            /// Per-guest instance data shared between the runtime and the guest.
+            ///
+            /// The `StoreContext` derive implements `WasiView`, `WrpcView`, and
+            /// `HasLimits` against `base`, plus one host view per `#[wasi(...)]`
+            /// backend field.
+            #[derive(StoreContext)]
+            pub struct StoreCtx {
+                #[base]
+                pub base: StoreBase,
+                #(#store_ctx_fields,)*
+            }
+
+            /// Build runtime state from the parsed CLI inputs and drive the
+            /// deployment to the guest's exit status (or a host error).
+            async fn run(
+                wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>,
+            ) -> Result<omnia::ExitStatus> {
+                let compiled = omnia::RegistryBuilder::new()
+                    .wasm(wasm)
+                    .config(config)
+                    .args(args)
+                    .command(#command)
+                    .compile::<StoreCtx>()
+                    .await
+                    .context("building runtime")?;
+                let run_state = Context::new(compiled)
+                    .await
+                    .context("preparing runtime state")?;
+
+                omnia::drive(&run_state, #command, #servers)
+                    .await
+                    .context("running deployment")
+            }
+
+            /// Parse the CLI and drive the deployment to a process exit code: the
+            /// guest's status for a one-shot `command`, success for a long-lived
+            /// server's clean shutdown, or failure on a host error.
+            #[tokio::main]
+            pub async fn main() -> ::std::process::ExitCode {
+                omnia::run_main(run).await
+            }
+        }
+
+        use runtime::main;
+    }
 }
 
 impl Parse for Config {
@@ -170,7 +336,6 @@ impl Parse for Config {
 }
 
 mod kw {
-    syn::custom_keyword!(main);
     syn::custom_keyword!(command);
     syn::custom_keyword!(hosts);
 }
@@ -231,6 +396,16 @@ impl Parse for Host {
         };
         Ok(Self { type_, backend })
     }
+}
+
+/// Whether `path` names a long-lived trigger host ([`Server::IS_SERVER`]).
+///
+/// Kept in sync with the host crates that set `IS_SERVER` to `true`. Used only
+/// to omit trigger wiring in command mode at macro-expansion time.
+fn is_trigger_host(path: &Path) -> bool {
+    path.segments
+        .last()
+        .is_some_and(|segment| matches!(segment.ident.to_string().as_str(), "WasiHttp" | "WasiMessaging" | "WasiWebSocket"))
 }
 
 /// Derives a `snake_case` field name from a backend type's final path segment
