@@ -33,8 +33,6 @@ impl From<&Config> for Codegen {
             bundle_fields: structural.bundle_fields,
             store_assignments: structural.store_assignments,
             backend_idents: structural.backend_idents,
-            // `backend_idents` is built positionally from `config.backends`, so the
-            // connected backend types are exactly that (deduplicated) list.
             backend_types: config.backends.clone(),
             host_trait_impls,
         }
@@ -63,8 +61,6 @@ fn structural(config: &Config) -> Structural {
             #[wasi(#host_ident)]
             pub #host_ident: #backend_type
         });
-        // Clone the backend into this host's view field; a backend that backs
-        // several hosts naturally yields one assignment per host.
         store_assignments.push(quote! {
             #host_ident: backends.#field.clone()
         });
