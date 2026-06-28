@@ -49,6 +49,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
 
     Ok(quote! {
         mod runtime {
+            use std::path::PathBuf;
             use std::sync::Arc;
 
             use anyhow::Result;
@@ -69,10 +70,10 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
             struct Context {
                 #[runtime(registry)]
                 registry: Arc<Registry<StoreCtx>>,
-                // Guest args (`args[0]` = program name). Empty for servers.
+                // Guest args. `args[0]` = program name when CLI command.
                 #[runtime(args)]
                 args: Arc<Vec<String>>,
-                // Working-tree contains startup-validated preopens. Empty unless the deployment
+                // Working-tree contains startup-validated preopens when the deployment
                 // configures `[[mount]]`s or sets `OMNIA_WORKING_TREE`.
                 #[runtime(preopens)]
                 working_trees: Arc<WorkingTreeRegistry>,
@@ -121,12 +122,20 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                 #(#store_ctx_fields,)*
             }
 
+            /// Build runtime state from the parsed CLI inputs and drive the
+            /// deployment to the guest's exit status (or a host error).
+            async fn run(
+                wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>,
+            ) -> Result<omnia::ExitStatus> {
+                #body
+            }
+
             /// Parse the CLI and drive the deployment to a process exit code: the
             /// guest's status for a one-shot `command`, success for a long-lived
             /// server's clean shutdown, or failure on a host error.
             #[tokio::main]
             pub async fn main() -> ::std::process::ExitCode {
-                omnia::run_main(|wasm, config, args| async move { #body }).await
+                omnia::run_main(run).await
             }
         }
 
