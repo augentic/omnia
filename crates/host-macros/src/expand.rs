@@ -23,6 +23,7 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
         command_guard,
     } = Expanded::try_from(config)?;
 
+
     let Entrypoint { tokens: entrypoint, exports: entrypoint_export } =
         Entrypoint::from_config(config, &run_body(config.command, &host_trait_impls));
 
