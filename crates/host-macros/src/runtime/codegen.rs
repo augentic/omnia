@@ -1,5 +1,5 @@
 //! # Codegen for the runtime macro.
-//! 
+//!
 //! Generates the token streams fragements required to expand the runtime macro.
 
 use std::collections::BTreeMap;
@@ -17,9 +17,8 @@ pub struct Codegen {
     pub context_fields: Vec<TokenStream>,
     pub backend_idents: Vec<Ident>,
     pub store_ctx_fields: Vec<TokenStream>,
-    pub add_to_linker: TokenStream,
-    pub connect_backends: TokenStream,
-    pub servers: TokenStream,
+    pub host_trait_impls: Vec<Path>,
+    pub backend_types: Vec<Path>,
 }
 
 impl From<&Config> for Codegen {
@@ -28,19 +27,27 @@ impl From<&Config> for Codegen {
             config.hosts.iter().map(|host| host.type_.clone()).collect::<Vec<Path>>();
         let structural = structural(config, &host_trait_impls);
 
-        let add_to_linker = quote! {
-            #( compiled.host::<#host_trait_impls, Context>()?; )*
-        };
+        let backend_types = structural
+            .backend_idents
+            .iter()
+            .map(|ident| {
+                config
+                    .backends
+                    .iter()
+                    .find(|backend| parse::field_ident(backend) == *ident)
+                    .expect("wired backend must be declared in `hosts`")
+            })
+            .cloned()
+            .collect::<Vec<Path>>();
 
         Self {
-            command: config.command,
             command_assert: command_assert(config.command, &host_trait_impls),
-            context_fields: structural.context_fields,
             backend_idents: structural.backend_idents.clone(),
+            host_trait_impls,
+            command: config.command,
+            context_fields: structural.context_fields,
             store_ctx_fields: structural.store_ctx_fields,
-            add_to_linker,
-            connect_backends: connect_backends(&config.backends, &structural.backend_idents),
-            servers: servers(&host_trait_impls),
+            backend_types,
         }
     }
 }
@@ -96,45 +103,6 @@ fn structural(config: &Config, host_trait_impls: &[Path]) -> Structural {
         context_fields,
         backend_idents,
         store_ctx_fields,
-    }
-}
-
-fn connect_backends(backends: &[Path], backend_idents: &[Ident]) -> TokenStream {
-    if backend_idents.is_empty() {
-        return quote! {};
-    }
-
-    let backend_types: Vec<&Path> = backend_idents
-        .iter()
-        .map(|ident| {
-            backends
-                .iter()
-                .find(|backend| parse::field_ident(backend) == *ident)
-                .expect("wired backend must be declared in `hosts`")
-        })
-        .collect();
-
-    quote! {
-        let (#(#backend_idents,)*) = tokio::try_join!(
-            #(<#backend_types as Backend>::connect(),)*
-        )?;
-    }
-}
-
-fn servers(host_trait_impls: &[Path]) -> TokenStream {
-    quote! {
-        |ctx| {
-            let mut servers: Vec<omnia::futures::future::BoxFuture<'_, Result<()>>> = vec![];
-            #(
-                if <#host_trait_impls as Server<Context>>::IS_SERVER {
-                    servers.push(
-                        Box::pin(#host_trait_impls.run(ctx))
-                            as omnia::futures::future::BoxFuture<'_, Result<()>>,
-                    );
-                }
-            )*
-            servers
-        }
     }
 }
 

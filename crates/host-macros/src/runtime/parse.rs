@@ -1,5 +1,5 @@
 //! # Parse
-//! 
+//!
 //! Parses the runtime macro token stream input into structured values.
 
 use quote::format_ident;

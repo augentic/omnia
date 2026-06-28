@@ -50,20 +50,6 @@ pub use self::traits::{Backend, FromEnv, FutureResult, HasLimits, Host, Runtime,
 pub use self::transport::{LinkClient, WrpcState};
 pub use self::working_tree::{ResolvedPreopen, WorkingTreeEntry, WorkingTreeRegistry};
 
-/// Connect several [`Backend`]s concurrently.
-///
-/// ```ignore
-/// let (http, otel) = omnia::connect_backends!(HttpDefault, OtelDefault).await?;
-/// ```
-#[macro_export]
-macro_rules! connect_backends {
-    ($($backend:ty),* $(,)?) => {{
-        $crate::tokio::try_join!(
-            $(<$backend as $crate::Backend>::connect(),)*
-        )
-    }};
-}
-
 /// Command line interface for omnia.
 #[derive(Parser, PartialEq, Eq)]
 pub struct Cli {

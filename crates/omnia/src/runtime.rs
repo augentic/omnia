@@ -92,7 +92,7 @@ where
     R: Runtime,
     N: FnOnce(Compiled<R::StoreCtx>) -> NFut,
     NFut: Future<Output = Result<R>>,
-    S: FnOnce(&R) -> Vec<BoxFuture<'_, Result<()>>>,
+    S: for<'a> FnOnce(&'a R) -> Vec<BoxFuture<'a, Result<()>>>,
 {
     match Cli::parse().command {
         Command::Run { wasm, config, args } => {
@@ -129,7 +129,7 @@ where
     R: Runtime,
     N: FnOnce(Compiled<R::StoreCtx>) -> NFut,
     NFut: Future<Output = Result<R>>,
-    S: FnOnce(&R) -> Vec<BoxFuture<'_, Result<()>>>,
+    S: for<'a> FnOnce(&'a R) -> Vec<BoxFuture<'a, Result<()>>>,
 {
     let compiled = RegistryBuilder::new()
         .wasm(wasm)
