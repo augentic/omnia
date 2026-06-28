@@ -38,7 +38,7 @@ impl Config {
             context_fields: structural.context_fields,
             backend_idents: structural.backend_idents.clone(),
             store_ctx_fields: structural.store_ctx_fields,
-            link_hosts: self.link_hosts(&host_trait_impls),
+            add_to_linker: self.add_to_linker(&host_trait_impls),
             connect_backends: self.connect_backends(&structural.backend_idents),
             servers: self.servers(&host_trait_impls),
         }
@@ -109,7 +109,7 @@ impl Config {
 
     /// WASI host linking in `Context::new`. In command mode, long-lived trigger
     /// hosts ([`Server::IS_SERVER`]) are skipped so only capability hosts link.
-    fn link_hosts(&self, host_trait_impls: &[Path]) -> TokenStream {
+    fn add_to_linker(&self, host_trait_impls: &[Path]) -> TokenStream {
         if self.command {
             quote! {
                 #(
@@ -183,7 +183,7 @@ struct Codegen {
     context_fields: Vec<TokenStream>,
     backend_idents: Vec<Ident>,
     store_ctx_fields: Vec<TokenStream>,
-    link_hosts: TokenStream,
+    add_to_linker: TokenStream,
     connect_backends: TokenStream,
     servers: TokenStream,
 }
@@ -195,10 +195,9 @@ pub fn expand(config: &Config) -> TokenStream {
         context_fields,
         backend_idents,
         store_ctx_fields,
-        link_hosts,
-        connect_backends,
+        add_to_linker: fn_add_to_linker,
+        connect_backends: fn_connect_backends,
         servers,
-        // server_sync_assertions,
     } = config.codegen();
 
     quote! {
@@ -232,11 +231,8 @@ pub fn expand(config: &Config) -> TokenStream {
                 async fn new(mut compiled: Compiled<StoreCtx>) -> Result<Self> {
                     let args = Arc::new(compiled.args().to_vec());
 
-                    // link enabled WASI components
-                    #link_hosts
-
-                    // connect to all backends concurrently
-                    #connect_backends
+                    #fn_add_to_linker
+                    #fn_connect_backends
 
                     // snapshot the startup-validated working-tree
                     let working_trees = compiled.working_trees();
