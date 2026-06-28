@@ -73,6 +73,8 @@ where
     R: Runtime,
     R::StoreCtx: WebSocketView,
 {
+    const IS_SERVER: bool = true;
+
     async fn run(&self, state: &R) -> anyhow::Result<()> {
         server::run(state).await
     }
@@ -145,7 +147,7 @@ macro_rules! omnia_wasi_view {
             fn websocket(&mut self) -> omnia_wasi_websocket::WasiWebSocketCtxView<'_> {
                 omnia_wasi_websocket::WasiWebSocketCtxView {
                     ctx: &mut self.$field_name,
-                    table: &mut self.table,
+                    table: &mut self.base.table,
                 }
             }
         }

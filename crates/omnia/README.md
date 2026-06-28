@@ -6,30 +6,21 @@ It allows you to declaratively assemble a runtime that provides specific capabil
 
 ## Quick Start
 
-Use the `runtime!` macro to configure which WASI interfaces and backends your host runtime needs. This generates a `runtime_run` function that handles the entire lifecycle.
+Use the `runtime!` macro to declare which WASI interfaces (`hosts`) and backends your host runtime needs. It generates the `StoreCtx`, the `Runtime` implementation, the WASI links, the trigger servers, and a `main` that parses the CLI and serves.
 
 ```rust,ignore
-use omnia::runtime;
-use omnia_wasi_http::WasiHttpCtx;
-use omnia_wasi_keyvalue::KeyValueDefault;
-use omnia_wasi_otel::DefaultOtel;
+use omnia_wasi_http::{HttpDefault, WasiHttp};
+use omnia_wasi_otel::{OtelDefault, WasiOtel};
 
-// Define the runtime with required capabilities
 omnia::runtime!({
-    "http": WasiHttpCtx,
-    "keyvalue": KeyValueDefault,
-    "otel": DefaultOtel,
+    hosts: {
+        WasiHttp: HttpDefault,
+        WasiOtel: OtelDefault,
+    }
 });
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // Parse command line arguments (provided by the macro-generated Cli)
-    let cli = Cli::parse();
-
-    // Run the runtime
-    runtime_run(cli).await
-}
 ```
+
+Each `Host: Backend` pair links a WASI interface and binds it to a host backend. The macro always generates the `main` entry point; for a custom entry point, hand-write the runtime instead (derive `Runtime`/`StoreContext` and call `run`).
 
 ## Core Traits
 
@@ -43,6 +34,20 @@ The runtime is built around a set of traits that allow services to be plugged in
 | `Runtime`   | Manages per-request state and provides access to the component instance.            |
 | `FromEnv`   | Configures backend connections from environment variables.                          |
 
+## Public API
+
+`omnia` exposes only what a deployment author, a host-server crate, or a hand-written runtime needs; lifecycle, dispatch, manifest, and transport-carrier internals are crate-private.
+
+- **Macros:** `runtime!`, `#[derive(Runtime)]`, `#[derive(StoreContext)]`
+- **Lifecycle:** `bootstrap_and_run` (compile → bootstrap → [`run`]), `run`, and `command::run` — server and command paths both call `prepare` for epoch interruption, pool-metric sampling, and host-mediated link serving
+- **Runtime + store:** `Runtime`, `StoreBase`, `Host`, `Server`, `Backend`, `FromEnv`, `HasLimits`, `HostDispatch`, `FutureResult`
+- **Registry pipeline:** `RegistryBuilder`, `Compiled`, `Registry`, `Guest`, `GuestId`, `RuntimeOptions`
+- **Trigger routing (host servers):** `HttpRoutes`, `TopicRoutes`, `Routes`, `Resolver`, `TriggerRouter`
+- **Host-mediated linking (advanced):** `serve_links`, `GuestSelector`, `FirstArgSelector`, `LinkClient`, `WrpcState`
+- **Telemetry + CLI:** `Telemetry`, `resource`, `Cli`, `Command`, `Parser`
+
+Most deployments only touch the `runtime!` macro; a hand-written runtime instead derives `Runtime`/`StoreContext` (or implements them) and calls `run`.
+
 ## Features
 
 - **`jit`** (default): Enables Cranelift JIT compilation, allowing you to run `.wasm` files directly. Disable this to only support pre-compiled `.bin` components (useful for faster startup in production).
@@ -52,7 +57,25 @@ The runtime is built around a set of traits that allow services to be plugged in
 The runtime and its included services are configured via environment variables:
 
 - **`RUST_LOG`**: Controls logging verbosity (e.g., `info`, `debug`, `omnia=trace`).
-- **`OTEL_GRPC_URL`**: Endpoint for OpenTelemetry collector (if `omnia-otel` is used).
+- **`OTEL_GRPC_URL`**: Endpoint for the OpenTelemetry collector used to export traces and metrics.
+
+## Telemetry
+
+The runtime reports OpenTelemetry tracing and metrics out-of-the-box. During startup, `omnia` configures `tracing-subscriber`, OTLP span exporters, and metric readers via the `Telemetry` builder, so host runtimes emit telemetry without extra wiring. Most applications never need to call this directly:
+
+```rust,ignore
+use omnia::Telemetry;
+
+// Minimal -- uses RUST_LOG for filtering, no OTLP export
+Telemetry::new("my-service").build()?;
+
+// With OTLP export to a collector
+Telemetry::new("my-service")
+    .endpoint("http://localhost:4317")
+    .build()?;
+```
+
+The `OTEL_GRPC_URL` environment variable is respected if no explicit endpoint is set.
 
 ## Architecture
 

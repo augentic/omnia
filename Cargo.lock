@@ -1020,7 +1020,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "omnia",
- "omnia-sdk",
+ "omnia-guest",
  "omnia-wasi-blobstore",
  "omnia-wasi-config",
  "omnia-wasi-http",
@@ -1028,8 +1028,8 @@ dependencies = [
  "omnia-wasi-jsondb",
  "omnia-wasi-keyvalue",
  "omnia-wasi-messaging",
+ "omnia-wasi-model",
  "omnia-wasi-otel",
- "omnia-wasi-otel-attr",
  "omnia-wasi-sql",
  "omnia-wasi-vault",
  "omnia-wasi-websocket",
@@ -2054,17 +2054,24 @@ version = "0.35.0"
 dependencies = [
  "anyhow",
  "bytes",
+ "cap-fs-ext",
+ "cap-std",
  "cfg-if",
  "clap",
  "fromenv",
  "futures",
- "omnia-otel",
- "omnia-runtime-macro",
+ "http",
+ "omnia-host-macros",
+ "opentelemetry",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
  "serde",
  "tokio",
  "tokio-util",
  "toml",
  "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
  "wasmtime",
  "wasmtime-wasi",
  "wrpc-transport",
@@ -2072,41 +2079,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "omnia-guest-macro"
-version = "0.35.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "omnia-otel"
-version = "0.35.0"
-dependencies = [
- "anyhow",
- "http",
- "opentelemetry",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
- "rand 0.10.1",
- "tower",
- "tracing",
- "tracing-opentelemetry",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "omnia-runtime-macro"
-version = "0.35.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "omnia-sdk"
+name = "omnia-guest"
 version = "0.35.0"
 dependencies = [
  "anyhow",
@@ -2116,7 +2089,7 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
- "omnia-guest-macro",
+ "omnia-guest-macros",
  "omnia-wasi-blobstore",
  "omnia-wasi-config",
  "omnia-wasi-http",
@@ -2136,6 +2109,24 @@ dependencies = [
  "tracing-subscriber",
  "wasip3",
  "wit-bindgen 0.58.0",
+]
+
+[[package]]
+name = "omnia-guest-macros"
+version = "0.35.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "omnia-host-macros"
+version = "0.35.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -2272,6 +2263,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "omnia-wasi-model"
+version = "0.35.0"
+dependencies = [
+ "anyhow",
+ "cap-fs-ext",
+ "cap-std",
+ "futures",
+ "omnia",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "wasmtime",
+ "wasmtime-wasi",
+ "wit-bindgen 0.58.0",
+]
+
+[[package]]
 name = "omnia-wasi-otel"
 version = "0.35.0"
 dependencies = [
@@ -2281,8 +2290,7 @@ dependencies = [
  "hex",
  "num-traits",
  "omnia",
- "omnia-otel",
- "omnia-wasi-otel-attr",
+ "omnia-guest-macros",
  "opentelemetry",
  "opentelemetry-proto",
  "opentelemetry_sdk",
@@ -2293,15 +2301,6 @@ dependencies = [
  "wasmtime",
  "wasmtime-wasi",
  "wit-bindgen 0.58.0",
-]
-
-[[package]]
-name = "omnia-wasi-otel-attr"
-version = "0.35.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

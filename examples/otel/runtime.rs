@@ -6,7 +6,6 @@ cfg_if::cfg_if! {
         use omnia_wasi_otel::{WasiOtel, OtelDefault};
 
         omnia::runtime!({
-            main: true,
             hosts: {
                 WasiHttp: HttpDefault,
                 WasiOtel: OtelDefault,

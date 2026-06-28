@@ -7,7 +7,7 @@
 
 use axum::routing::get;
 use axum::{Json, Router};
-use omnia_sdk::HttpResult;
+use omnia_guest::HttpResult;
 use omnia_wasi_config::store as config;
 use serde_json::{Value, json};
 use wasip3::exports::http::handler::Guest;

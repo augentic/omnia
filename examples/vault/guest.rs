@@ -27,7 +27,7 @@ use anyhow::Context;
 use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
-use omnia_sdk::HttpResult;
+use omnia_guest::HttpResult;
 use omnia_wasi_vault::vault;
 use serde_json::Value;
 use tracing::Level;

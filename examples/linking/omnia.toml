@@ -1,0 +1,31 @@
+# Host-mediated dynamic linking (Phase 2 of rfcs/guest-registry.md).
+#
+# Two guests share one runtime. `router` imports `omnia:link/echo`; the host
+# does not satisfy that import natively, so it is named in the guest's `link`
+# allow-list and the floor polyfills it onto the shared linker. At startup the
+# host wires the serve side of every linked interface, so calling the import
+# dispatches over the in-process wRPC carrier to `responder`, which exports it.
+#
+# The floor stays domain-agnostic: `link` and the selector see only the opaque
+# interface string `omnia:link/echo` and opaque guest ids.
+#
+# Build the guests first (see README.md), then run from the repository root:
+#
+#   cargo run --example linking -- run --config examples/linking/omnia.toml
+
+[[guest]]
+id = "responder"
+source.path = "../../target/wasm32-wasip2/debug/examples/linking_responder_wasm.wasm"
+
+[[guest]]
+id = "router"
+source.path = "../../target/wasm32-wasip2/debug/examples/linking_router_wasm.wasm"
+# The host-mediated imports this guest is allowed to reach. The floor wires each
+# named interface onto the shared linker and dispatches it to whichever guest
+# exports it (here, `responder`).
+link = ["omnia:link/echo"]
+
+# In-process is the default transport; named here for clarity. UDS / NATS / QUIC
+# slot in behind the same seam in Phase 3 with no guest or dispatch change.
+[transport]
+default = "in-process"

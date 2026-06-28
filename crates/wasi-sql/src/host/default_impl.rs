@@ -30,7 +30,7 @@ pub struct ConnectOptions {
     pub database: String,
 }
 
-#[allow(missing_docs)]
+/// Loads connection options from environment variables with error context.
 impl omnia::FromEnv for ConnectOptions {
     fn from_env() -> Result<Self> {
         Self::from_env().finalize().context("issue loading connection options")
@@ -142,8 +142,7 @@ impl Connection for SqliteConnectionImpl {
                 .execute(params_from_iter(rusqlite_params.iter()))
                 .context("failed to execute statement")?;
 
-            #[allow(clippy::cast_possible_truncation)]
-            Ok(rows_affected as u32)
+            Ok(u32::try_from(rows_affected).unwrap_or(u32::MAX))
         }
         .boxed()
     }

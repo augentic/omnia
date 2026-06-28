@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
-use omnia_sdk::HttpResult;
+use omnia_guest::HttpResult;
 use omnia_wasi_blobstore::blobstore;
 use omnia_wasi_blobstore::types::{IncomingValue, OutgoingValue};
 use serde_json::Value;

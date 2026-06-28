@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 #![cfg(not(target_arch = "wasm32"))]
 
+mod command;
 #[cfg(feature = "jit")]
 mod compile;
 mod create;
@@ -12,34 +13,56 @@ mod routing;
 mod runtime;
 mod selector;
 mod source;
+mod store;
+mod telemetry;
 mod traits;
 mod transport;
+mod working_tree;
 
 use std::path::PathBuf;
 
 pub use clap::Parser;
 use clap::Subcommand;
-pub use omnia_runtime_macro::runtime;
-// Re-exported so the `runtime!` macro can generate the per-store
-// `WrpcView` implementation that host-mediated dynamic linking requires.
+pub use omnia_host_macros::{Runtime, StoreContext, runtime};
+#[doc(hidden)]
 pub use wrpc_wasmtime::{WrpcCtxView, WrpcView};
 #[doc(hidden)]
 pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
-// re-export internal modules
 #[cfg(feature = "jit")]
-pub use self::compile::*;
-pub use self::create::*;
-pub use self::dispatch::*;
-pub use self::manifest::*;
-pub use self::options::*;
-pub use self::registry::*;
-pub use self::routing::*;
-pub use self::runtime::*;
-pub use self::selector::*;
-pub use self::source::*;
-pub use self::traits::*;
-pub use self::transport::*;
+pub use self::compile::compile;
+pub use self::create::{Compiled, RegistryBuilder};
+pub use self::dispatch::{HostDispatch, serve_links};
+pub use self::options::RuntimeOptions;
+pub use self::registry::{Guest, GuestId, Registry};
+pub use self::routing::{CliRoutes, HttpRoutes, Resolver, Routes, TopicRoutes, TriggerRouter};
+pub use self::runtime::ExitStatus;
+#[doc(hidden)]
+pub use self::runtime::{main, run};
+pub use self::selector::{FirstArgSelector, GuestSelector};
+#[doc(hidden)]
+pub use self::store::{Set, Unset};
+pub use self::store::{StoreBase, StoreBaseBuilder};
+pub use self::telemetry::{Telemetry, resource};
+#[doc(hidden)]
+pub use self::traits::assert_hosts;
+pub use self::traits::{Backend, FromEnv, FutureResult, HasLimits, Host, Runtime, Server};
+pub use self::transport::{LinkClient, WrpcState};
+pub use self::working_tree::{ResolvedPreopen, WorkingTreeEntry, WorkingTreeRegistry};
+
+/// Connect several [`Backend`]s concurrently.
+///
+/// ```ignore
+/// let (http, otel) = omnia::connect_backends!(HttpDefault, OtelDefault).await?;
+/// ```
+#[macro_export]
+macro_rules! connect_backends {
+    ($($backend:ty),* $(,)?) => {{
+        $crate::tokio::try_join!(
+            $(<$backend as $crate::Backend>::connect(),)*
+        )
+    }};
+}
 
 /// Command line interface for omnia.
 #[derive(Parser, PartialEq, Eq)]
@@ -56,14 +79,21 @@ pub enum Command {
     Run {
         /// The path to the wasm file to run. The file can either be a
         /// serialized (pre-compiled) wasmtime `Component` or standard
-        /// WASI component. Optional when `--config` (or `OMNI_CONFIG`) names a
+        /// WASI component. Optional when `--config` (or `OMNIA_CONFIG`) names a
         /// deployment manifest instead.
         wasm: Option<PathBuf>,
 
-        /// Path to a deployment manifest (`omni.toml`) describing a multi-guest
-        /// deployment. Falls back to the `OMNI_CONFIG` environment variable.
+        /// Path to a deployment manifest (`omnia.toml`) describing a multi-guest
+        /// deployment. Falls back to the `OMNIA_CONFIG` environment variable.
         #[arg(short, long)]
         config: Option<PathBuf>,
+
+        /// Arguments forwarded to the guest as its argv (everything after
+        /// `--`). Empty for a long-lived server; a `wasi:cli` command reads
+        /// them as `wasi:cli/environment`'s `get-arguments`. `args[0]` is the
+        /// program name, which the floor supplies.
+        #[arg(last = true)]
+        args: Vec<String>,
     },
     /// Compile the specified wasm32-wasip2 component.
     #[cfg(feature = "jit")]

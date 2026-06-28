@@ -10,7 +10,7 @@
 
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use omnia_sdk::HttpResult;
+use omnia_guest::HttpResult;
 use serde_json::{Value, json};
 use tracing::Level;
 use wasip3::exports::http::handler::Guest;

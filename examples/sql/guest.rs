@@ -23,10 +23,10 @@ use axum::extract::Path;
 use axum::routing::{delete, get};
 use axum::{Json, Router};
 use chrono::Utc;
-use omnia_sdk::orm::{
+use omnia_guest::orm::{
     DeleteBuilder, Entity, Filter, InsertBuilder, Join, SelectBuilder, UpdateBuilder,
 };
-use omnia_sdk::{HttpResult, TableStore, entity};
+use omnia_guest::{HttpResult, TableStore, entity};
 use omnia_wasi_sql::readwrite;
 use omnia_wasi_sql::types::{Connection, Statement};
 use serde::{Deserialize, Serialize};

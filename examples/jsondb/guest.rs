@@ -21,8 +21,8 @@ use anyhow::{Context, Result, anyhow};
 use axum::extract::{Path, Query};
 use axum::routing::get;
 use axum::{Json, Router};
-use omnia_sdk::document_store::{Document, Filter, QueryOptions, ScalarValue, SortField};
-use omnia_sdk::{DocumentStore, HttpResult};
+use omnia_guest::document_store::{Document, Filter, QueryOptions, ScalarValue, SortField};
+use omnia_guest::{DocumentStore, HttpResult};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tracing::Level;
@@ -269,10 +269,10 @@ async fn list_routes(Query(p): Query<RouteQuery>) -> HttpResult<Json<Value>> {
         filters.push(Filter::eq("agency_id", agency.as_str()));
     }
     if let Some(exclude) = p.exclude_type {
-        filters.push(Filter::not(Filter::eq("route_type", exclude)));
+        filters.push(Filter::negate(Filter::eq("route_type", exclude)));
     }
     if let (Some(agency), Some(rtype)) = (&p.not_agency, p.not_type) {
-        filters.push(Filter::not(Filter::and([
+        filters.push(Filter::negate(Filter::and([
             Filter::eq("agency_id", agency.as_str()),
             Filter::eq("route_type", rtype),
         ])));

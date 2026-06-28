@@ -27,12 +27,6 @@
 //! ([`ValEncoder`]/[`read_value`]) and instance-per-call serve integration
 //! ([`ServeExt::serve_function`]) for the actual carrier round-trip.
 
-// This module declares a few crate-internal helpers (`link_dynamic`, the
-// dispatch-handle constructor) as `pub(crate)`. That is deliberate: `lib.rs`
-// re-exports the module's public items with a glob, so `pub` would leak them
-// into the crate's API. The nursery lint's `pub` suggestion is wrong here.
-#![allow(clippy::redundant_pub_crate)]
-
 use std::collections::{BTreeSet, HashMap};
 use std::iter::zip;
 use std::pin::pin;
@@ -41,7 +35,7 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context as _, Result, bail, ensure};
 use bytes::BytesMut;
-use futures::StreamExt as _;
+use futures::{FutureExt as _, StreamExt as _};
 use tokio_util::codec::Encoder as _;
 use wasmtime::component::{Linker, Type, Val, types};
 use wasmtime::{AsContextMut as _, Engine, StoreContextMut};
@@ -52,7 +46,7 @@ use wrpc_wasmtime::{ServeExt as _, ValEncoder, WrpcView, read_value};
 use crate::registry::GuestId;
 use crate::selector::GuestSelector;
 use crate::source::LoadedGuest;
-use crate::traits::Runtime;
+use crate::traits::{FutureResult, Runtime};
 use crate::transport::{InProcClient, InProcServer, InProcess, LinkTransport as _};
 
 /// wRPC host-resource map shape (empty for the resource-free dynamic path).
@@ -61,6 +55,268 @@ type HostResources = HashMap<
     HashMap<Box<str>, (wasmtime::component::ResourceType, wasmtime::component::ResourceType)>,
 >;
 
+/// Wire the serve side of every host-mediated interface.
+///
+/// Each target guest that exports a linked interface runs a wRPC server whose
+/// handlers instantiate the guest *fresh per call* (instance-per-call); the
+/// bound transport is then installed so polyfilled imports can reach it.
+///
+/// Spawns one detached task per served function to drain its invocation stream.
+/// A no-op when no guest declares any `link` interface.
+///
+/// # Errors
+///
+/// Returns an error if a guest's export cannot be served over the carrier.
+pub async fn serve_links<R>(state: &R) -> Result<()>
+where
+    R: Runtime,
+{
+    let registry = state.registry();
+    let handle = registry.dispatch();
+    if handle.links().is_empty() {
+        return Ok(());
+    }
+    let engine = registry.engine().clone();
+
+    let mut servers: HashMap<GuestId, Arc<InProcServer>> = HashMap::new();
+    for guest in registry.guests() {
+        let component_ty = guest.component().component_type();
+        let mut server: Option<Arc<InProcServer>> = None;
+
+        for (interface, types::ComponentExtern { ty, .. }) in component_ty.exports(&engine) {
+            if !handle.links().contains(interface) {
+                continue;
+            }
+            let types::ComponentItem::ComponentInstance(instance_ty) = ty else {
+                continue;
+            };
+            for (func, types::ComponentExtern { ty, .. }) in instance_ty.exports(&engine) {
+                let types::ComponentItem::ComponentFunc(func_ty) = ty else {
+                    continue;
+                };
+                let server =
+                    Arc::clone(server.get_or_insert_with(|| Arc::new(InProcServer::default())));
+                let runtime = state.clone();
+                let factory = move || runtime.build_store(runtime.store());
+                let stream = server
+                    .serve_function(
+                        factory,
+                        guest.instance_pre().clone(),
+                        Arc::<HostResources>::default(),
+                        func_ty,
+                        interface,
+                        func,
+                    )
+                    .await
+                    .with_context(|| {
+                        format!("serving `{interface}/{func}` from guest `{}`", guest.id())
+                    })?;
+
+                tokio::spawn(async move {
+                    let mut stream = pin!(stream);
+                    while let Some(invocation) = stream.next().await {
+                        match invocation {
+                            Ok((_cx, fut)) => {
+                                tokio::spawn(async move {
+                                    if let Err(error) = fut.await {
+                                        tracing::error!(%error, "link serve invocation failed");
+                                    }
+                                });
+                            }
+                            Err(error) => tracing::error!(%error, "link serve accept failed"),
+                        }
+                    }
+                });
+            }
+        }
+
+        if let Some(server) = server {
+            servers.insert(guest.id().clone(), server);
+        }
+    }
+
+    handle.install(InProcess::new(servers));
+    Ok(())
+}
+
+/// Host-originated dynamic dispatch into a *known* guest export — the host→guest
+/// counterpart of guest→guest `dispatch` (selector-driven).
+///
+/// This reuses the landed machinery rather than adding a parallel one: the same
+/// dispatch-depth bound (`DispatchHandle::enter`) so a `complete`→`resolve`
+/// →adapter chain is depth-counted exactly like a guest→guest hop, and the same
+/// §4.5 resource rejection. The target is instantiated *fresh* on a new store and
+/// the matching export invoked directly (the `wasi-http` `server.rs` pattern), so
+/// the callee can never re-enter its caller (instance-per-call) and needs no
+/// `link` declaration for `interface`.
+///
+/// `args` and the returned values are plain `Val`s; a live resource handle on
+/// either side is rejected.
+///
+/// # Errors
+///
+/// Returns an error if the depth bound is exceeded, an argument or result carries
+/// a resource handle, the target is not registered, the named `interface`/`func`
+/// export is absent or is not a function, or the guest call traps.
+pub async fn dispatch<R>(
+    runtime: &R, target: &GuestId, interface: &str, func: &str, args: Vec<Val>,
+) -> Result<Vec<Val>>
+where
+    R: Runtime,
+{
+    // Depth-count this hop exactly like a guest→guest dispatch (§6.6). The guard
+    // is held here (borrowing `runtime`) across the awaited callee task below.
+    let _guard = runtime.registry().dispatch().enter(target)?;
+
+    // §4.5: plain records cross by value; a live resource handle never crosses.
+    for value in &args {
+        if contains_resource(value) {
+            bail!(
+                "a resource handle cannot cross the link seam \
+                 (host→guest `{interface}/{func}`, target `{target}`)"
+            );
+        }
+    }
+
+    let instance_pre = runtime
+        .registry()
+        .get(target)
+        .with_context(|| format!("dispatch target `{target}` is not registered"))?
+        .instance_pre()
+        .clone();
+
+    // Run the callee on its own task. `resolve` is invoked from *within* the
+    // caller guest's concurrent event loop (the backend's loop awaits it inside
+    // the `complete` host call), and wasmtime forbids a recursive
+    // `StoreContextMut::run_concurrent` on the same thread. Spawning gives the
+    // callee a fresh event loop: when the caller's loop parks awaiting this task,
+    // its ambient store clears, so the callee's call runs unnested. The task owns
+    // the whole store lifecycle (build → instantiate → call → drop), so the
+    // callee is a fresh instance that cannot re-enter its caller
+    // (instance-per-call) and needs no `link` declaration for `interface`.
+    let task_runtime = (*runtime).clone();
+    let target_owned = target.clone();
+    let interface_owned = interface.to_owned();
+    let func_owned = func.to_owned();
+    let results = tokio::spawn(async move {
+        let mut store = task_runtime.build_store(task_runtime.store());
+        let instance = task_runtime
+            .instantiate(&instance_pre, &mut store)
+            .await
+            .with_context(|| format!("instantiating dispatch target `{target_owned}`"))?;
+
+        let interface_idx =
+            instance.get_export_index(&mut store, None, &interface_owned).with_context(|| {
+                format!("guest `{target_owned}` exports no interface `{interface_owned}`")
+            })?;
+        let (item, func_idx) = instance
+            .get_export(&mut store, Some(&interface_idx), &func_owned)
+            .with_context(|| {
+            format!(
+                "interface `{interface_owned}` (guest `{target_owned}`) exports no \
+                     `{func_owned}`"
+            )
+        })?;
+        let types::ComponentItem::ComponentFunc(func_ty) = item else {
+            bail!("`{interface_owned}/{func_owned}` (guest `{target_owned}`) is not a function");
+        };
+        let result_count = func_ty.results().count();
+        let function = instance.get_func(&mut store, func_idx).with_context(|| {
+            format!("resolving `{interface_owned}/{func_owned}` on guest `{target_owned}`")
+        })?;
+
+        let mut results = vec![Val::Bool(false); result_count];
+        function
+            .call_async(&mut store, &args, &mut results)
+            .await
+            .map_err(anyhow::Error::from)
+            .with_context(|| {
+                format!("calling `{interface_owned}/{func_owned}` on guest `{target_owned}`")
+            })?;
+        Ok::<Vec<Val>, anyhow::Error>(results)
+    })
+    .await
+    .with_context(|| format!("joining dispatch target `{target}` task"))?
+    .with_context(|| format!("dispatching `{interface}/{func}` to guest `{target}`"))?;
+
+    // A target must not hand back a resource handle either (§4.5).
+    for value in &results {
+        if contains_resource(value) {
+            bail!(
+                "a resource handle cannot cross the link seam \
+                 (result of `{interface}/{func}`, target `{target}`)"
+            );
+        }
+    }
+
+    Ok(results)
+}
+
+/// A host→guest call capability, type-erased so a host binding (e.g.
+/// `wasi-model`'s `resolve`) can invoke a guest without naming the concrete
+/// [`Runtime`].
+///
+/// This is the type-erased mirror of the `dispatch` free function: the
+/// `runtime!` macro threads an `Arc<dyn HostDispatch>` into each store context
+/// (like the per-store wRPC state) so any host binding gets dynamic host→guest
+/// calls for free. It carries no consumer vocabulary (Law 2) — a consumer owns
+/// its own verb names and return shapes and composes this generic seam.
+pub trait HostDispatch: Send + Sync + 'static {
+    /// Invoke `target`'s `interface`/`func` with `args`, returning the typed
+    /// results. The target is instantiated *fresh* (instance-per-call), the hop
+    /// is depth-bounded like any host-mediated call, and a live resource handle
+    /// on either side is rejected.
+    ///
+    /// A `None` `interface` discovers the unique exported interface carrying a
+    /// function named `func` — a structural component-model query that names no
+    /// consumer scheme.
+    fn invoke(
+        &self, target: GuestId, interface: Option<String>, func: String, args: Vec<Val>,
+    ) -> FutureResult<Vec<Val>>;
+}
+
+impl<R: Runtime> HostDispatch for R {
+    fn invoke(
+        &self, target: GuestId, interface: Option<String>, func: String, args: Vec<Val>,
+    ) -> FutureResult<Vec<Val>> {
+        let runtime = self.clone();
+        async move {
+            let interface: Box<str> = match interface {
+                Some(name) => Box::from(name),
+                None => find_interface(&runtime, &target, &func)?,
+            };
+            dispatch(&runtime, &target, &interface, &func, args).await
+        }
+        .boxed()
+    }
+}
+
+/// Find the exported interface on `target`'s component that carries a function
+/// named `func`, so a host can invoke it without hardcoding a consumer interface
+/// name. "Find the interface exporting function X" is a structural
+/// component-model query and names no consumer scheme (Law 2).
+fn find_interface<R: Runtime>(runtime: &R, target: &GuestId, func: &str) -> Result<Box<str>> {
+    let registry = runtime.registry();
+    let engine = registry.engine();
+    let guest = registry
+        .get(target)
+        .with_context(|| format!("dispatch target `{target}` is not registered"))?;
+    let component_ty = guest.component().component_type();
+    for (interface, types::ComponentExtern { ty, .. }) in component_ty.exports(engine) {
+        let types::ComponentItem::ComponentInstance(instance_ty) = ty else {
+            continue;
+        };
+        let has_func =
+            instance_ty.exports(engine).any(|(name, types::ComponentExtern { ty, .. })| {
+                name == func && matches!(ty, types::ComponentItem::ComponentFunc(_))
+            });
+        if has_func {
+            return Ok(Box::from(interface));
+        }
+    }
+    bail!("dispatch target `{target}` exports no interface with a `{func}` function")
+}
+
 /// The long-lived dispatch state shared by every polyfilled import.
 ///
 /// It carries the selector strategy, the union of host-mediated interfaces, the
@@ -68,7 +324,7 @@ type HostResources = HashMap<
 /// process-wide dispatch-depth counter.
 pub struct DispatchHandle {
     selector: Arc<dyn GuestSelector>,
-    link_interfaces: BTreeSet<Box<str>>,
+    links: BTreeSet<Box<str>>,
     transport: OnceLock<InProcess>,
     depth: AtomicUsize,
     max_depth: usize,
@@ -78,12 +334,12 @@ impl DispatchHandle {
     /// Create a shared dispatch handle. The transport is installed later by
     /// [`serve_links`], once each target's serve side is wired.
     #[must_use]
-    pub(crate) fn new(
-        selector: Arc<dyn GuestSelector>, link_interfaces: BTreeSet<Box<str>>, max_depth: usize,
+    pub fn new(
+        selector: Arc<dyn GuestSelector>, links: BTreeSet<Box<str>>, max_depth: usize,
     ) -> Arc<Self> {
         Arc::new(Self {
             selector,
-            link_interfaces,
+            links,
             transport: OnceLock::new(),
             depth: AtomicUsize::new(0),
             max_depth,
@@ -94,8 +350,8 @@ impl DispatchHandle {
     /// allow-list — the set of interfaces to polyfill (caller side) and serve
     /// (callee side).
     #[must_use]
-    pub(crate) const fn link_interfaces(&self) -> &BTreeSet<Box<str>> {
-        &self.link_interfaces
+    pub const fn links(&self) -> &BTreeSet<Box<str>> {
+        &self.links
     }
 
     /// Install the bound transport carrier (called once by [`serve_links`]).
@@ -160,13 +416,13 @@ impl Drop for DepthGuard<'_> {
 ///
 /// Returns an error if a named link target is not an interface import, or if a
 /// function cannot be defined on the linker.
-pub(crate) fn link_dynamic<T>(
+pub fn link<T>(
     engine: &Engine, linker: &mut Linker<T>, guests: &[LoadedGuest], handle: &Arc<DispatchHandle>,
 ) -> Result<()>
 where
     T: WasiView + WrpcView + 'static,
 {
-    if handle.link_interfaces.is_empty() {
+    if handle.links.is_empty() {
         return Ok(());
     }
 
@@ -174,7 +430,7 @@ where
     for LoadedGuest { id, component } in guests {
         let component_ty = component.component_type();
         for (name, types::ComponentExtern { ty, .. }) in component_ty.imports(engine) {
-            if !handle.link_interfaces.contains(name) || wired.contains(name) {
+            if !handle.links.contains(name) || wired.contains(name) {
                 continue;
             }
             let types::ComponentItem::ComponentInstance(instance_ty) = ty else {
@@ -207,7 +463,7 @@ where
                         let iface_name = Arc::clone(&iface_name);
                         let func_name = Arc::clone(&func_name);
                         Box::new(async move {
-                            dispatch(store, &handle, &iface_name, &func_name, &ty, params, results)
+                            send(store, &handle, &iface_name, &func_name, &ty, params, results)
                                 .await
                                 .map_err(wasmtime::Error::from_anyhow)
                         })
@@ -224,7 +480,7 @@ where
 /// The per-call dispatch: select the target, reject crossing resources, bound
 /// depth, then round-trip the call over the in-process wRPC carrier to a
 /// freshly-instantiated target export.
-async fn dispatch<T>(
+async fn send<T>(
     mut store: StoreContextMut<'_, T>, handle: &DispatchHandle, interface: &str, func: &str,
     ty: &types::ComponentFunc, params: &[Val], results: &mut [Val],
 ) -> Result<()>
@@ -318,91 +574,6 @@ fn contains_resource(value: &Val) -> bool {
     }
 }
 
-/// Wire the serve side of every host-mediated interface.
-///
-/// Each target guest that exports a linked interface runs a wRPC server whose
-/// handlers instantiate the guest *fresh per call* (instance-per-call); the
-/// bound transport is then installed so polyfilled imports can reach it.
-///
-/// Spawns one detached task per served function to drain its invocation stream.
-/// A no-op when no guest declares any `link` interface.
-///
-/// # Errors
-///
-/// Returns an error if a guest's export cannot be served over the carrier.
-pub async fn serve_links<R>(state: &R) -> Result<()>
-where
-    R: Runtime,
-    R::StoreCtx: WasiView + WrpcView + 'static,
-{
-    let registry = state.registry();
-    let handle = registry.dispatch();
-    if handle.link_interfaces().is_empty() {
-        return Ok(());
-    }
-    let engine = registry.engine().clone();
-
-    let mut servers: HashMap<GuestId, Arc<InProcServer>> = HashMap::new();
-    for guest in registry.guests() {
-        let component_ty = guest.component().component_type();
-        let mut server: Option<Arc<InProcServer>> = None;
-
-        for (interface, types::ComponentExtern { ty, .. }) in component_ty.exports(&engine) {
-            if !handle.link_interfaces().contains(interface) {
-                continue;
-            }
-            let types::ComponentItem::ComponentInstance(instance_ty) = ty else {
-                continue;
-            };
-            for (func, types::ComponentExtern { ty, .. }) in instance_ty.exports(&engine) {
-                let types::ComponentItem::ComponentFunc(func_ty) = ty else {
-                    continue;
-                };
-                let server =
-                    Arc::clone(server.get_or_insert_with(|| Arc::new(InProcServer::default())));
-                let runtime = state.clone();
-                let factory = move || runtime.build_store(runtime.store());
-                let stream = server
-                    .serve_function(
-                        factory,
-                        guest.instance_pre().clone(),
-                        Arc::<HostResources>::default(),
-                        func_ty,
-                        interface,
-                        func,
-                    )
-                    .await
-                    .with_context(|| {
-                        format!("serving `{interface}/{func}` from guest `{}`", guest.id())
-                    })?;
-
-                tokio::spawn(async move {
-                    let mut stream = pin!(stream);
-                    while let Some(invocation) = stream.next().await {
-                        match invocation {
-                            Ok((_cx, fut)) => {
-                                tokio::spawn(async move {
-                                    if let Err(error) = fut.await {
-                                        tracing::error!(%error, "link serve invocation failed");
-                                    }
-                                });
-                            }
-                            Err(error) => tracing::error!(%error, "link serve accept failed"),
-                        }
-                    }
-                });
-            }
-        }
-
-        if let Some(server) = server {
-            servers.insert(guest.id().clone(), server);
-        }
-    }
-
-    handle.install(InProcess::new(servers));
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -419,7 +590,7 @@ mod tests {
     }
 
     #[test]
-    fn depth_guard_bounds_nesting() {
+    fn depth_guard() {
         let handle = handle(2);
         let target = GuestId::from("t");
 
@@ -435,7 +606,7 @@ mod tests {
     }
 
     #[test]
-    fn detects_nested_resources() {
+    fn detect_nested() {
         // Plain values never count as resources.
         assert!(!contains_resource(&Val::String("x".to_owned())));
         assert!(!contains_resource(&Val::Record(vec![("f".to_owned(), Val::U32(1),)])));

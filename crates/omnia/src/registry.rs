@@ -9,7 +9,7 @@
 //! The floor treats identities as opaque keys; consumers project their own
 //! scheme onto them. Omnia never parses a [`GuestId`].
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
@@ -117,30 +117,30 @@ impl<T: 'static> Guest<T> {
 pub struct Registry<T: 'static> {
     engine: Engine,
     options: RuntimeOptions,
-    guests: HashMap<GuestId, Guest<T>>,
-    default: GuestId,
+    /// Guests keyed by identity. A [`BTreeMap`] so iteration is identity-sorted
+    /// for free, making per-trigger capability and ambiguity errors stable
+    /// across runs without a per-call sort.
+    guests: BTreeMap<GuestId, Guest<T>>,
     routes: Routes,
     dispatch: Arc<DispatchHandle>,
 }
 
 impl<T: 'static> Registry<T> {
-    /// Assemble a registry from pre-instantiated guests, with `default` naming
-    /// the entry selected when a trigger carries no identity (the CLI / single
-    /// `omnia run <wasm>` entry).
+    /// Assemble a registry from pre-instantiated guests.
+    ///
+    /// Crate-internal: [`Compiled::build`](crate::Compiled::build) is the public
+    /// path to a [`Registry`].
     ///
     /// # Errors
     ///
-    /// Returns an error if `guests` is empty, if `default` is not among the
-    /// registered guests, or if a route targets a guest that is not registered.
-    pub fn new(
-        engine: Engine, options: RuntimeOptions, guests: HashMap<GuestId, Guest<T>>,
-        default: GuestId, routes: Routes, dispatch: Arc<DispatchHandle>,
+    /// Returns an error if `guests` is empty, or if a route targets a guest that
+    /// is not registered.
+    pub(crate) fn new(
+        engine: Engine, options: RuntimeOptions, guests: BTreeMap<GuestId, Guest<T>>,
+        routes: Routes, dispatch: Arc<DispatchHandle>,
     ) -> Result<Self> {
         if guests.is_empty() {
             bail!("cannot build a guest registry with no guests");
-        }
-        if !guests.contains_key(&default) {
-            bail!("default guest `{default}` is not registered");
         }
         for target in routes.targets() {
             if !guests.contains_key(target) {
@@ -151,7 +151,6 @@ impl<T: 'static> Registry<T> {
             engine,
             options,
             guests,
-            default,
             routes,
             dispatch,
         })
@@ -177,10 +176,10 @@ impl<T: 'static> Registry<T> {
 
     /// Iterate every registered guest in a deterministic, identity-sorted order
     /// so per-trigger capability and ambiguity errors are stable across runs.
+    ///
+    /// The order falls out of the [`BTreeMap`] keying; no per-call sort.
     pub fn guests(&self) -> impl Iterator<Item = &Guest<T>> {
-        let mut guests: Vec<&Guest<T>> = self.guests.values().collect();
-        guests.sort_by(|a, b| a.id().cmp(b.id()));
-        guests.into_iter()
+        self.guests.values()
     }
 
     /// Returns the per-trigger inbound route tables built from the manifest's
@@ -193,20 +192,8 @@ impl<T: 'static> Registry<T> {
     /// Returns the shared host-mediated dynamic-linking dispatch handle (the
     /// selector strategy, link allow-list union, and bound transport).
     #[must_use]
-    pub const fn dispatch(&self) -> &Arc<DispatchHandle> {
+    pub(crate) const fn dispatch(&self) -> &Arc<DispatchHandle> {
         &self.dispatch
-    }
-
-    /// Returns the default guest — the entry a trigger resolves to when it
-    /// carries no identity of its own (e.g. the CLI / single-file shorthand).
-    ///
-    /// # Panics
-    ///
-    /// Never in practice: [`Registry::new`] validates the default key is
-    /// present and the map is not mutated after construction.
-    #[must_use]
-    pub fn default_guest(&self) -> &Guest<T> {
-        self.guests.get(&self.default).expect("default guest is validated to exist at construction")
     }
 
     /// Returns the number of registered guests.
@@ -245,17 +232,10 @@ mod tests {
         let options = RuntimeOptions::load().expect("options should load");
         let engine = Engine::new(&Config::from(&options)).expect("engine should build");
         // An empty map never constructs a `Guest`, so `T` is unconstrained here.
-        let guests: HashMap<GuestId, Guest<()>> = HashMap::new();
+        let guests: BTreeMap<GuestId, Guest<()>> = BTreeMap::new();
         let dispatch = DispatchHandle::new(Arc::new(FirstArgSelector), BTreeSet::new(), 8);
 
-        let result = Registry::new(
-            engine,
-            options,
-            guests,
-            GuestId::from("default"),
-            Routes::default(),
-            dispatch,
-        );
+        let result = Registry::new(engine, options, guests, Routes::default(), dispatch);
         assert!(result.is_err(), "an empty registry must be rejected");
     }
 }

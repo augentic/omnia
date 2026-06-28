@@ -99,7 +99,7 @@ macro_rules! omnia_wasi_view {
             fn sql(&mut self) -> omnia_wasi_sql::WasiSqlCtxView<'_> {
                 omnia_wasi_sql::WasiSqlCtxView {
                     ctx: &mut self.$field_name,
-                    table: &mut self.table,
+                    table: &mut self.base.table,
                 }
             }
         }

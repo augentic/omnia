@@ -202,11 +202,12 @@ runtime!({
 
 The macro generates:
 
-- `RuntimeContext`: Holds pre-instantiated components and backend connections
-- `RuntimeStoreCtx`: Per-instance data shared between runtime and host functions
-- `Runtime` trait implementation
-- WASI view trait implementations for each interface
-- `runtime::run()` function to start the runtime
+- `Context`: Holds the guest registry and backend connections
+- `StoreCtx`: Per-instance data shared between runtime and host functions
+- `Runtime` trait implementation (via `#[derive(Runtime)]`)
+- WASI view trait implementations for each interface (via `#[derive(StoreContext)]`)
+- `Context::new` to link hosts, connect backends, and assemble the registry
+- `main` that delegates to `omnia::main` (CLI parse, compile, bootstrap, and `run`)
 
 ## WIT Interface Definitions
 
@@ -225,24 +226,20 @@ Dependencies on standard WASI definitions are managed in `wit/deps/` and version
 
 ## Runtime Execution Flow
 
-1. **CLI Parsing**: The omnia parses command-line arguments (`run` or `compile`)
+1. **CLI parsing**: Generated `main` delegates to `omnia::main`, which parses the `run` subcommand (or `compile` when the `jit` feature is enabled)
 
-2. **Backend Connection**: The `runtime!` macro-generated code connects to all configured backends using environment variables
+2. **Compile**: `RegistryBuilder` loads the manifest or wasm, compiles guests, and returns a `Compiled` registry plan
 
-3. **Component Compilation**: The WebAssembly component is compiled (or loaded if pre-compiled)
+3. **Bootstrap**: `Context::new` links WASI hosts, connects backends, and builds the `Registry`
 
-4. **Linker Setup**: Each WASI interface's `add_to_linker` method is called to register host functions
+4. **Drive**: `run` either invokes `command::run` (one-shot `wasi:cli`) or `prepare`s the runtime and awaits every long-lived trigger server to completion
 
-5. **Instance Pre-instantiation**: The component is pre-instantiated for efficient spawning
-
-6. **Server Start**: Server interfaces (HTTP, messaging, WebSocket) start listening for requests
-
-7. **Request Handling**: Incoming requests spawn new instances, execute guest code, and return responses
+5. **Request handling** (server mode): Trigger hosts (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`) accept requests, instantiate guests per call, and return responses
 
 ```text
-CLI → Backend Connect → Compile → Link → Pre-instantiate → Server Loop
-                                                              ↓
-                                              Request → Instance → Response
+CLI → Compile → Context::new → run
+                                 ├─ command mode → command::run → ExitStatus
+                                 └─ server mode  → prepare → trigger servers
 ```
 
 ## Configuration

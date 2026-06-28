@@ -75,6 +75,8 @@ where
     R: Runtime,
     R::StoreCtx: WasiMessagingView,
 {
+    const IS_SERVER: bool = true;
+
     async fn run(&self, state: &R) -> anyhow::Result<()> {
         server::run(state).await
     }
@@ -102,7 +104,6 @@ pub struct WasiMessagingCtxView<'a> {
 ///
 /// This is implemented by the resource-specific provider of messaging
 /// functionality. For example, a NATS, or a Kafka broker.
-#[allow(unused)]
 pub trait WasiMessagingCtx: Debug + Send + Sync + 'static {
     /// Connect to the messaging system and return a client proxy.
     ///
@@ -193,7 +194,7 @@ macro_rules! omnia_wasi_view {
             fn messaging(&mut self) -> omnia_wasi_messaging::WasiMessagingCtxView<'_> {
                 omnia_wasi_messaging::WasiMessagingCtxView {
                     ctx: &mut self.$field_name,
-                    table: &mut self.table,
+                    table: &mut self.base.table,
                 }
             }
         }

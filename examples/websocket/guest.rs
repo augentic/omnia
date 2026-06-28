@@ -11,7 +11,7 @@
 use anyhow::anyhow;
 use axum::routing::post;
 use axum::{Json, Router};
-use omnia_sdk::HttpResult;
+use omnia_guest::HttpResult;
 use omnia_wasi_websocket::client;
 use omnia_wasi_websocket::types::{Client, Error, Event};
 use serde_json::{Value, json};

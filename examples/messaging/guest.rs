@@ -29,7 +29,7 @@ use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
 use http_body_util::Full;
-use omnia_sdk::HttpResult;
+use omnia_guest::HttpResult;
 use omnia_wasi_messaging::types::{Client, Error, Message};
 use omnia_wasi_messaging::{producer, request_reply};
 use serde_json::{Value, json};
@@ -126,7 +126,7 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
                 let timer = Instant::now();
 
                 for i in 0..1000 {
-                    wit_bindgen::spawn(async move {
+                    wit_bindgen::spawn_local(async move {
                         tracing::debug!("sending message iteration {i}");
                         let Ok(client) = Client::connect("default".to_string()).await else {
                             tracing::error!("failed to connect default client");

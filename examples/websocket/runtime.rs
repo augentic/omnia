@@ -7,7 +7,6 @@ cfg_if::cfg_if! {
         use omnia_wasi_websocket::{WasiWebSocket, WebSocketDefault};
 
         omnia::runtime!({
-            main: true,
             hosts: {
                 WasiHttp: HttpDefault,
                 WasiOtel: OtelDefault,

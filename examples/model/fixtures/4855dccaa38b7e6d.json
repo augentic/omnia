@@ -1,0 +1,36 @@
+{
+  "key_prompt": {
+    "generation": null,
+    "grants": {
+      "references": "shelf",
+      "verify": [],
+      "working_tree_lent": true
+    },
+    "messages": [],
+    "model": null,
+    "response_format": {
+      "json_schema": {
+        "name": "verdict",
+        "schema": "{\"type\":\"object\"}",
+        "strict": null
+      },
+      "kind": "json-schema"
+    },
+    "sections": {
+      "constraints": [],
+      "context": "the diff adds a bounds check",
+      "examples": [],
+      "role": "a terse code reviewer",
+      "task": "decide whether the change is acceptable",
+      "variables": []
+    },
+    "system": null,
+    "tool_choice": null,
+    "tools": []
+  },
+  "answer": {
+    "reason": "the bounds check is correct",
+    "verdict": "pass"
+  },
+  "transcript": null
+}

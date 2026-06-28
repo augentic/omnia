@@ -22,7 +22,7 @@ impl<T> HostWithStore<T> for WasiOtel {
         accessor: &Accessor<T, Self>, mut span_data: Vec<wasi::SpanData>,
     ) -> Result<(), wasi::Error> {
         // return if opentelemetry is not initialized
-        let Some(resource) = omnia_otel::init::resource() else {
+        let Some(resource) = omnia::resource() else {
             tracing::warn!("otel resource not initialized, skipping trace export");
             return Ok(());
         };

@@ -12,6 +12,8 @@ use anyhow::Result;
 use futures::future::BoxFuture;
 use wasmtime::component::{Instance, InstancePre, Linker};
 use wasmtime::{Store, StoreLimits};
+use wasmtime_wasi::WasiView;
+use wrpc_wasmtime::WrpcView;
 
 use crate::RuntimeOptions;
 use crate::registry::Registry;
@@ -34,7 +36,7 @@ pub trait HasLimits {
 /// associated type — not this trait.
 pub trait Runtime: Clone + Send + Sync + 'static {
     /// The store context type.
-    type StoreCtx: Send + HasLimits;
+    type StoreCtx: WasiView + WrpcView + 'static + Send + HasLimits;
 
     /// Returns the store context.
     #[must_use]
@@ -44,7 +46,12 @@ pub trait Runtime: Clone + Send + Sync + 'static {
     fn registry(&self) -> &Registry<Self::StoreCtx>;
 
     /// Returns the environment-derived runtime options.
-    fn options(&self) -> &RuntimeOptions;
+    ///
+    /// Defaults to the registry's options, which every runtime already owns; an
+    /// implementation only overrides this if it sources options elsewhere.
+    fn options(&self) -> &RuntimeOptions {
+        self.registry().options()
+    }
 
     /// Build a fully configured [`Store`] for a single guest invocation.
     ///
@@ -115,6 +122,15 @@ pub trait Host<T>: Debug + Sync + Send {
 /// Implemented by WASI hosts that are servers in order to allow the runtime to
 /// start them.
 pub trait Server<R: Runtime>: Debug + Sync + Send {
+    /// Whether this host is a long-lived trigger server — one whose
+    /// [`run`](Self::run) loops on a transport and returns only on shutdown
+    /// (e.g. `WasiHttp`, `WasiMessaging`, `WasiWebSocket`).
+    ///
+    /// Defaults to `false`: a capability host with the no-op [`run`](Self::run)
+    /// (e.g. `WasiKeyValue`, `WasiBlobstore`, `WasiOtel`). The `runtime!` macro
+    /// reads this flag from the *type system* — to select which hosts to `run`.
+    const IS_SERVER: bool = false;
+
     /// Start the service.
     ///
     /// This is typically implemented by services that instantiate (or run)
@@ -122,6 +138,36 @@ pub trait Server<R: Runtime>: Debug + Sync + Send {
     #[allow(unused_variables)]
     fn run(&self, state: &R) -> impl Future<Output = Result<()>> {
         async { Ok(()) }
+    }
+}
+
+/// Compile-time guard that a `command: true` deployment includes no long-lived
+/// trigger server.
+///
+/// The `runtime!` macro emits
+/// `const _: () = omnia::assert_hosts(&[<Host as Server<_>>::IS_SERVER, …]);`
+/// for a command deployment, so listing a trigger host (`WasiHttp`,
+/// `WasiMessaging`, `WasiWebSocket`) is a build error rather than a silently
+/// dropped host. The values come straight from [`Server::IS_SERVER`], so a newly
+/// added trigger is covered without editing the macro.
+///
+/// # Panics
+///
+/// Panics if any element is `true` (a host is a long-lived trigger server). In
+/// the macro's const context this surfaces as a compile error.
+#[doc(hidden)]
+pub const fn assert_hosts(hosts: &[bool]) {
+    let mut index = 0;
+    while index < hosts.len() {
+        assert!(
+            !hosts[index],
+            "a `command: true` deployment cannot link a long-lived trigger server (`WasiHttp`, \
+             `WasiMessaging`, `WasiWebSocket`): a command runs to completion and exits, but the \
+             server would run forever. Use the default `command: false` for a server deployment, \
+             or drop the trigger host — capability hosts (`WasiKeyValue`, `WasiBlobstore`, ...) \
+             are fine to link."
+        );
+        index += 1;
     }
 }
 
@@ -137,7 +183,7 @@ pub trait Backend: Sized + Sync + Send {
         async { Self::connect_with(Self::ConnectOptions::from_env()?).await }
     }
 
-    /// Connect to the resource with the specified options.
+    /// Connect with the specified options.
     fn connect_with(options: Self::ConnectOptions) -> impl Future<Output = Result<Self>>;
 }
 
@@ -149,4 +195,28 @@ pub trait FromEnv: Sized {
     ///
     /// Returns an error if required environment variables are missing or invalid.
     fn from_env() -> Result<Self>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::assert_hosts;
+
+    #[test]
+    fn capability_only_is_allowed() {
+        // A command deployment with only capability hosts (every `IS_SERVER`
+        // false) is fine.
+        assert_hosts(&[false, false, false]);
+    }
+
+    #[test]
+    fn empty_is_allowed() {
+        assert_hosts(&[]);
+    }
+
+    #[test]
+    #[should_panic(expected = "long-lived trigger server")]
+    fn long_lived_server_is_rejected() {
+        // Any `true` (a long-lived trigger) in a command deployment fails.
+        assert_hosts(&[false, true]);
+    }
 }

@@ -8,7 +8,7 @@ While it can be used standalone, Omnia is primarily designed to be the runtime f
 
 - **Secure by Default**: All guest code runs in a strict WebAssembly sandbox. Capabilities (network, filesystem) are explicitly granted.
 - **Batteries Included**: Comes with built-in support for common WASI interfaces: HTTP, Key-Value, Messaging, SQL, and more.
-- **Developer Friendly**: Provides a rich SDK (`omnia-sdk`) and macros (`guest!`, `runtime!`) to eliminate boilerplate.
+- **Developer Friendly**: Provides a rich guest SDK (`omnia-guest`) and macros (`guest!`, `runtime!`) to eliminate boilerplate.
 - **Pluggable Architecture**: Easily swap out backend implementations (e.g., switch from in-memory to Redis for Key-Value) without changing guest code.
 
 ## Features
@@ -65,11 +65,10 @@ docker build --tag ghcr.io/augentic/omnia .
 
 | Crate                                           | Description                                                                |
 | ----------------------------------------------- | -------------------------------------------------------------------------- |
-| `[omnia](crates/omnia)`                         | Core runtime -- wasmtime wrapper with CLI and pluggable WASI host services |
-| `[omnia-sdk](crates/omnia-sdk)`                 | Guest SDK -- traits, error types, ORM, and macros for WASI component authors |
-| `[omnia-otel](crates/otel)`                     | OpenTelemetry tracing and metrics for the runtime                          |
-| `[omnia-guest-macro](crates/guest-macro)`       | `guest!` proc-macro for guest HTTP/messaging handlers                      |
-| `[omnia-runtime-macro](crates/runtime-macro)`   | `runtime!` proc-macro for host runtime generation                          |
+| `[omnia](crates/omnia)`                         | Core runtime -- wasmtime wrapper with CLI, OpenTelemetry, and pluggable WASI host services |
+| `[omnia-guest](crates/guest)`                   | Guest SDK -- traits, error types, ORM, and macros for WASI component authors |
+| `[omnia-guest-macros](crates/guest-macros)`     | `guest!` and `#[instrument]` proc-macros for guests                      |
+| `[omnia-host-macros](crates/host-macros)`       | `runtime!` proc-macro for host runtime generation                          |
 | `[omnia-wasi-blobstore](crates/wasi-blobstore)` | wasi:blobstore host and guest bindings                                     |
 | `[omnia-wasi-config](crates/wasi-config)`       | wasi:config host and guest bindings                                        |
 | `[omnia-wasi-http](crates/wasi-http)`           | wasi:http host and guest bindings                                          |
@@ -77,7 +76,6 @@ docker build --tag ghcr.io/augentic/omnia .
 | `[omnia-wasi-keyvalue](crates/wasi-keyvalue)`   | wasi:keyvalue host and guest bindings                                      |
 | `[omnia-wasi-messaging](crates/wasi-messaging)` | wasi:messaging host and guest bindings                                     |
 | `[omnia-wasi-otel](crates/wasi-otel)`           | wasi:otel host and guest bindings                                          |
-| `[omnia-wasi-otel-attr](crates/wasi-otel-attr)` | `#[instrument]` attribute macro for WASI otel                              |
 | `[omnia-wasi-sql](crates/wasi-sql)`             | wasi:sql host and guest bindings                                           |
 | `[omnia-wasi-vault](crates/wasi-vault)`         | wasi:vault host and guest bindings                                         |
 | `[omnia-wasi-websocket](crates/wasi-websocket)` | wasi:websocket host and guest bindings                                     |

@@ -171,7 +171,7 @@ macro_rules! omnia_wasi_view {
             fn blobstore(&mut self) -> omnia_wasi_blobstore::WasiBlobstoreCtxView<'_> {
                 omnia_wasi_blobstore::WasiBlobstoreCtxView {
                     ctx: &mut self.$field_name,
-                    table: &mut self.table,
+                    table: &mut self.base.table,
                 }
             }
         }

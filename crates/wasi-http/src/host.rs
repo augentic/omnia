@@ -30,8 +30,10 @@ where
     R: Runtime,
     R::StoreCtx: WasiHttpView,
 {
+    const IS_SERVER: bool = true;
+
     async fn run(&self, state: &R) -> Result<()> {
-        server::serve(state).await
+        server::run(state).await
     }
 }
 
@@ -41,7 +43,7 @@ macro_rules! omnia_wasi_view {
     ($store_ctx:ty, $field_name:ident) => {
         impl omnia_wasi_http::WasiHttpView for $store_ctx {
             fn http(&mut self) -> omnia_wasi_http::WasiHttpCtxView<'_> {
-                self.$field_name.as_view(&mut self.table)
+                self.$field_name.as_view(&mut self.base.table)
             }
         }
     };

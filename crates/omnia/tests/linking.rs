@@ -26,43 +26,16 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
-use omnia::wasmtime::{StoreLimits, StoreLimitsBuilder};
-use omnia::wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
-use omnia::{
-    GuestId, HasLimits, LinkClient, Registry, Runtime, RuntimeOptions, WrpcCtxView, WrpcState,
-    WrpcView, create_from_manifest, serve_links,
-};
+use omnia::{GuestId, Registry, RegistryBuilder, Runtime, StoreBase, serve_links};
 
-/// Per-store context mirroring the macro-generated `StoreCtx`: a WASI view plus
-/// the wRPC view that host-mediated dispatch encodes and serves through.
+/// Per-store context mirroring the macro-generated `StoreCtx`: the fixed [`StoreBase`]
+/// state, with the `WasiView` / `WrpcView` / `HasLimits` impls supplied by the
+/// `StoreContext` derive. No host backend — the link path needs only the WASI
+/// and wRPC views.
+#[derive(omnia::StoreContext)]
 struct TestCtx {
-    table: ResourceTable,
-    wasi: WasiCtx,
-    limits: StoreLimits,
-    wrpc: WrpcState,
-}
-
-impl WasiView for TestCtx {
-    fn ctx(&mut self) -> WasiCtxView<'_> {
-        WasiCtxView {
-            ctx: &mut self.wasi,
-            table: &mut self.table,
-        }
-    }
-}
-
-impl HasLimits for TestCtx {
-    fn limits(&mut self) -> &mut StoreLimits {
-        &mut self.limits
-    }
-}
-
-impl WrpcView for TestCtx {
-    type Invoke = LinkClient;
-
-    fn wrpc(&mut self) -> WrpcCtxView<'_, LinkClient> {
-        self.wrpc.view(&mut self.table)
-    }
+    #[base]
+    base: StoreBase,
 }
 
 /// A minimal [`Runtime`] over the linking registry that counts guest store
@@ -81,21 +54,15 @@ impl Runtime for TestRuntime {
         // from here, so this counter is the instance-per-call witness.
         self.stores_built.fetch_add(1, Ordering::SeqCst);
         TestCtx {
-            table: ResourceTable::new(),
-            wasi: WasiCtxBuilder::new().build(),
-            limits: StoreLimitsBuilder::new()
-                .memory_size(self.registry.options().max_memory_bytes)
+            base: StoreBase::builder()
+                .options(self.options())
+                .dispatch(Arc::new(self.clone()))
                 .build(),
-            wrpc: WrpcState::new(),
         }
     }
 
     fn registry(&self) -> &Registry<Self::StoreCtx> {
         &self.registry
-    }
-
-    fn options(&self) -> &RuntimeOptions {
-        self.registry.options()
     }
 }
 
@@ -153,7 +120,7 @@ async fn router_dispatches_to_responder() -> Result<()> {
         return Ok(());
     };
 
-    // A manifest mirroring examples/linking/omni.toml, with absolute source paths
+    // A manifest mirroring examples/linking/omnia.toml, with absolute source paths
     // so it resolves regardless of the working directory.
     let manifest_path =
         std::env::temp_dir().join(format!("omnia-linking-{}.toml", std::process::id()));
@@ -170,9 +137,12 @@ async fn router_dispatches_to_responder() -> Result<()> {
     );
     std::fs::write(&manifest_path, manifest).context("writing test manifest")?;
 
-    let compiled =
-        create_from_manifest::<TestCtx>(&manifest_path, &[]).await.context("building runtime")?;
-    let registry = compiled.build_registry().context("assembling registry")?;
+    let compiled = RegistryBuilder::new()
+        .config(manifest_path.clone())
+        .compile::<TestCtx>()
+        .await
+        .context("building runtime")?;
+    let registry = compiled.build().context("assembling registry")?;
     let runtime = TestRuntime {
         registry: Arc::new(registry),
         stores_built: Arc::new(AtomicUsize::new(0)),

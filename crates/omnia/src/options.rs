@@ -222,7 +222,7 @@ pub struct RuntimeOptions {
     pub branch_hinting: bool,
 }
 
-/// Build the [`Config`] shared by [`crate::compile`] and [`crate::create`].
+/// Build the [`Config`] shared by [`crate::compile`] and [`crate::RegistryBuilder`].
 ///
 /// Centralising it here guarantees the compile-affecting subset (see the parity
 /// note below) is identical in both paths, so a pre-compiled component remains

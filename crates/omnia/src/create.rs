@@ -1,192 +1,202 @@
 //! # WebAssembly Initiator
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context, Result, bail};
-use omnia_otel::Telemetry;
-use tracing::instrument;
+use anyhow::{Context, Result};
 use wasmtime::component::Linker;
 use wasmtime::{Config, Engine};
 use wasmtime_wasi::WasiView;
 use wrpc_wasmtime::WrpcView;
 
-use crate::dispatch::{DispatchHandle, link_dynamic};
-use crate::manifest::{Manifest, RouteSpec, SourceSpec};
-use crate::registry::{Guest, GuestId, Registry};
-use crate::routing::{HttpRoutes, Routes, TopicRoutes};
-use crate::selector::FirstArgSelector;
-use crate::source::{EmbeddedSource, FileSource, GuestSource, LoadedGuest};
-use crate::{Host, RuntimeOptions};
+use crate::dispatch::{self, DispatchHandle};
+use crate::manifest::Manifest;
+use crate::registry::{Guest, Registry};
+use crate::routing::Routes;
+use crate::selector::{FirstArgSelector, GuestSelector};
+use crate::source::{LoadedGuest, Source};
+use crate::working_tree::{ResolvedPreopen, WorkingTreeRegistry};
+use crate::{Host, RuntimeOptions, Telemetry};
 
-/// Build a [`Compiled`] runtime, choosing single-file or manifest-driven
-/// population.
+/// Selects where a runtime's guests come from, then [`compile`]s them into a
+/// [`Compiled`] runtime ready for host linking.
 ///
-/// Resolution: a `config` path (the `--config` flag or the `OMNI_CONFIG`
-/// environment variable) selects a manifest-driven deployment; otherwise the
-/// positional `wasm` path is the one-guest shorthand. At least one of the two
-/// must be provided.
+/// The single-file shorthand ([`wasm`]) and the manifest-driven deployment
+/// ([`config`]) are both expressed here; [`compile`] resolves whichever is set —
+/// falling back to the `OMNIA_CONFIG` environment variable for the manifest.
 ///
-/// The `embedded` map carries build-time `include_bytes!` blobs (declared in
-/// the `runtime!` macro) that a manifest's `source.embedded = "<name>"` may
-/// activate; the single-file shorthand never consults it.
+/// ```ignore
+/// let compiled = RegistryBuilder::new()
+///     .wasm(wasm)
+///     .config(config)
+///     .args(args)
+///     .command(command)
+///     .compile::<StoreCtx>()
+///     .await?;
+/// ```
 ///
-/// # Errors
-///
-/// Returns an error if neither a config nor a wasm path is available, or if the
-/// selected source cannot be built.
-pub async fn create_runtime<T: WasiView + 'static>(
-    wasm: Option<PathBuf>, config: Option<PathBuf>,
-    embedded: &'static [(&'static str, &'static [u8])],
-) -> Result<Compiled<T>> {
-    let config = config.or_else(|| env::var_os("OMNI_CONFIG").map(PathBuf::from));
+/// [`wasm`]: Self::wasm
+/// [`config`]: Self::config
+/// [`compile`]: Self::compile
+#[derive(Debug, Default)]
+pub struct RegistryBuilder {
+    wasm: Option<PathBuf>,
+    config: Option<PathBuf>,
+    args: Vec<String>,
+    command: bool,
+}
 
-    if let Some(config) = config {
-        return create_from_manifest(&config, embedded).await;
+impl RegistryBuilder {
+    /// Start a new builder with no source selected.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    let wasm = wasm.context(
-        "no guest specified: pass a <wasm> path, or --config <omni.toml> (or set OMNI_CONFIG)",
-    )?;
-    create(&wasm).await
-}
+    /// Set the single-guest `wasm` path — the `omnia run <wasm>` shorthand.
+    #[must_use]
+    pub fn wasm(mut self, wasm: impl Into<Option<PathBuf>>) -> Self {
+        self.wasm = wasm.into();
+        self
+    }
 
-/// Build the Wasmtime `Engine` and `Linker` for a single-guest runtime.
-///
-/// This is the `omnia run <guest>.wasm` shorthand: load one component, derive
-/// its identity from the file stem, and register it as the default guest — a
-/// one-entry registry.
-///
-/// # Errors
-///
-/// Will fail if the provided `wasm` file cannot be compiled/deserialized as a
-/// `Component` or the `Linker` cannot be initialized with WASI support.
-#[instrument]
-pub async fn create<T: WasiView + 'static>(wasm: &Path) -> Result<Compiled<T>> {
-    let name = wasm.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
-    init_env(name)?;
-    tracing::info!("initializing runtime");
+    /// Set the deployment manifest (`omnia.toml`) path for a multi-guest
+    /// deployment.
+    #[must_use]
+    pub fn config(mut self, config: impl Into<Option<PathBuf>>) -> Self {
+        self.config = config.into();
+        self
+    }
 
-    let (engine, linker, options) = engine_and_linker()?;
+    /// Set CLI arguments forwarded to the guest (everything after `--`).
+    #[must_use]
+    pub fn args(mut self, args: impl Into<Vec<String>>) -> Self {
+        self.args = args.into();
+        self
+    }
 
-    let source = FileSource::new(wasm);
-    let default = source.id().clone();
-    let guests = source.load(&engine).await?;
+    /// Select command mode: prepend the deployment name as `argv[0]` for
+    /// `wasi:cli` guests. Long-lived server deployments leave argv empty.
+    #[must_use]
+    pub const fn command(mut self, command: bool) -> Self {
+        self.command = command;
+        self
+    }
 
-    tracing::info!("runtime initialized");
+    /// Resolve the configured source into a [`Compiled`] runtime, choosing
+    /// single-file or manifest-driven population.
+    ///
+    /// Resolution: a `config` path (set via [`config`](Self::config) or the
+    /// `OMNIA_CONFIG` environment variable) selects a manifest-driven deployment;
+    /// otherwise the `wasm` path is the one-guest shorthand. At least one of the
+    /// two must be provided.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if neither a config nor a wasm path is available, or if
+    /// the selected source cannot be built.
+    pub async fn compile<T: WasiView + 'static>(self) -> Result<Compiled<T>> {
+        let manifest = self.config.or_else(|| env::var_os("OMNIA_CONFIG").map(PathBuf::from));
 
-    Ok(Compiled {
-        engine,
-        linker,
-        options,
-        guests,
-        default,
-        // The single-file shorthand carries no routes: its sole guest is the
-        // catch-all for every trigger it can answer.
-        routes: Routes::default(),
-        // ...and no host-mediated links: one guest has nobody to dispatch to.
-        link_interfaces: BTreeSet::new(),
-    })
-}
+        let plan = if let Some(manifest) = manifest {
+            let parsed = Manifest::load(&manifest)?;
+            let base = manifest.parent().unwrap_or_else(|| Path::new("."));
 
-/// Build a runtime from a deployment manifest (`omni.toml`).
-///
-/// Resolves every `[[guest]]` source (file or embedded), builds the shared
-/// engine + linker, records the first guest as the default entry, and assembles
-/// the per-trigger route tables from the `[[route.*]]` sections.
-///
-/// # Errors
-///
-/// Will fail if the manifest cannot be loaded, if a guest names an embedded blob
-/// not declared in `runtime!`, if a guest uses a source kind not yet supported,
-/// or if a guest component cannot be loaded.
-#[instrument(skip(embedded))]
-pub async fn create_from_manifest<T: WasiView + 'static>(
-    manifest: &Path, embedded: &'static [(&'static str, &'static [u8])],
-) -> Result<Compiled<T>> {
-    let parsed = Manifest::load(manifest)?;
-
-    // The default entry doubles as the telemetry/component name for now.
-    let default = parsed
-        .guests
-        .first()
-        .map_or_else(|| GuestId::from("omnia"), |entry| GuestId::from(entry.id.as_str()));
-    init_env(default.as_str())?;
-    tracing::info!("initializing runtime from manifest");
-
-    let (engine, linker, options) = engine_and_linker()?;
-
-    // Sources resolve relative to the manifest's directory.
-    let base = manifest.parent().unwrap_or_else(|| Path::new("."));
-    let mut guests = Vec::with_capacity(parsed.guests.len());
-    for entry in &parsed.guests {
-        let id = GuestId::from(entry.id.as_str());
-        let loaded = match &entry.source {
-            SourceSpec::Path(path) => {
-                let resolved = if path.is_absolute() { path.clone() } else { base.join(path) };
-                FileSource::with_id(id, resolved).load(&engine).await?
+            Plan {
+                name: parsed.name().to_owned(),
+                sources: parsed.sources(base)?,
+                routes: parsed.routes(),
+                links: parsed.links(),
+                preopens: working_tree(parsed.mounts(base)),
+                args: self.args,
+                command: self.command,
             }
-            SourceSpec::Embedded(name) => {
-                let bytes = lookup_embedded(embedded, name).with_context(|| {
-                    format!("guest `{id}`: embedded guest `{name}` is not declared in `runtime!`")
-                })?;
-                EmbeddedSource::new(id, bytes).load(&engine).await?
-            }
-            SourceSpec::Oci(_) => {
-                bail!("guest `{id}`: OCI sources are not yet supported")
+        } else {
+            let wasm = self.wasm.context(
+                "no guest specified: pass a <wasm> path, or --config <omnia.toml> (or set OMNIA_CONFIG)",
+            )?;
+
+            // The single-file shorthand is a one-guest deployment
+            let source = Source::new(wasm);
+
+            Plan {
+                name: source.id().as_str().to_owned(),
+                sources: vec![source],
+                routes: Routes::default(),
+                links: BTreeSet::new(),
+                preopens: working_tree(Vec::new()),
+                args: self.args,
+                command: self.command,
             }
         };
-        guests.extend(loaded);
+
+        init_env(&plan.name)?;
+        tracing::info!("initializing runtime");
+
+        Compiled::from_plan(plan).await
     }
-
-    let routes = route_tables(&parsed.route);
-
-    // Union the per-guest `link` allow-lists: the linker is shared, so an
-    // interface dispatched for one guest is wired once for all (§4.4). The
-    // floor keeps these as opaque interface strings.
-    let link_interfaces: BTreeSet<Box<str>> = parsed
-        .guests
-        .iter()
-        .flat_map(|entry| entry.link.iter())
-        .map(|interface| Box::from(interface.as_str()))
-        .collect();
-
-    tracing::info!("runtime initialized from manifest");
-
-    Ok(Compiled {
-        engine,
-        linker,
-        options,
-        guests,
-        default,
-        routes,
-        link_interfaces,
-    })
 }
 
-/// Resolve an embedded guest's bytes by name from the build-time map declared
-/// in the `runtime!` macro.
-fn lookup_embedded(
-    embedded: &'static [(&'static str, &'static [u8])], name: &str,
-) -> Option<&'static [u8]> {
-    embedded.iter().find(|(declared, _)| *declared == name).map(|(_, bytes)| *bytes)
+// add root preopen if OMNIA_WORKING_TREE is set
+fn working_tree(mut preopens: Vec<ResolvedPreopen>) -> Vec<ResolvedPreopen> {
+    if let Some(path) = env::var_os("OMNIA_WORKING_TREE")
+        && !preopens.iter().any(|po| po.name == ".")
+    {
+        preopens.push(ResolvedPreopen::new(".".to_owned(), PathBuf::from(path), false));
+    }
+    preopens
 }
 
-/// Convert the manifest's parsed routes into the registry's `GuestId`-typed,
-/// per-trigger route tables.
-fn route_tables(spec: &RouteSpec) -> Routes {
-    let http = HttpRoutes::new(
-        spec.http.iter().map(|e| (e.prefix.clone(), GuestId::from(e.guest.as_str()))),
-    );
-    let messaging = TopicRoutes::new(
-        spec.messaging.iter().map(|e| (e.topic.clone(), GuestId::from(e.guest.as_str()))),
-    );
-    let websocket = TopicRoutes::new(
-        spec.websocket.iter().map(|e| (e.topic.clone(), GuestId::from(e.guest.as_str()))),
-    );
-    Routes::new(http, messaging, websocket)
+/// Resolved deployment inputs shared by the manifest and single-file paths.
+struct Plan {
+    name: String,
+    sources: Vec<Source>,
+    routes: Routes,
+    links: BTreeSet<Box<str>>,
+    preopens: Vec<ResolvedPreopen>,
+    args: Vec<String>,
+    command: bool,
+}
+
+impl<T: WasiView + 'static> Compiled<T> {
+    /// Acquire every guest named in `plan` through its [`Source`] and pair them
+    /// with the shared engine and WASI-linked linker.
+    ///
+    /// Acquisition runs through the async [`Source::load`] seam so a future
+    /// source kind (an OCI pull) slots in without a parallel loading path.
+    async fn from_plan(plan: Plan) -> Result<Self> {
+        let (engine, linker, options) = engine_and_linker()?;
+
+        // Open + identity-stamp every preopen once, here, so a misconfigured
+        // mount fails fast at startup rather than per store (RFC-55).
+        let working_trees = Arc::new(WorkingTreeRegistry::open(plan.preopens)?);
+
+        let mut guests = Vec::with_capacity(plan.sources.len());
+        for source in &plan.sources {
+            guests.extend(source.load(&engine).await?);
+        }
+
+        let args = if plan.command {
+            std::iter::once(plan.name.clone()).chain(plan.args).collect()
+        } else {
+            plan.args
+        };
+
+        Ok(Self {
+            engine,
+            linker,
+            options,
+            guests,
+            routes: plan.routes,
+            links: plan.links,
+            selector: Arc::new(FirstArgSelector),
+            working_trees,
+            args: Arc::new(args),
+            command: plan.command,
+        })
+    }
 }
 
 /// Build the shared engine, WASI-linked linker, and runtime options.
@@ -203,68 +213,106 @@ fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, Runt
 }
 
 /// A compiled set of WebAssembly components with their shared Linker, ready to
-/// be assembled into a [`Registry`].
+/// be [`host`]ed against WASI interfaces and [`build`]t into a [`Registry`].
+///
+/// [`host`]: Self::host
+/// [`build`]: Self::build
 pub struct Compiled<T: WasiView + 'static> {
     engine: Engine,
     linker: Linker<T>,
     options: RuntimeOptions,
     guests: Vec<LoadedGuest>,
-    default: GuestId,
     routes: Routes,
-    /// Union of the per-guest `link` allow-lists — the host-mediated interfaces
-    /// to polyfill onto the shared linker (empty for the single-file shorthand).
-    link_interfaces: BTreeSet<Box<str>>,
+    // Guest links — the host-mediated interfaces.
+    links: BTreeSet<Box<str>>,
+    // Host-mediated dispatch selector.
+    selector: Arc<dyn GuestSelector>,
+    // Working-tree registry from resolved preopens in [`from_plan`](Self::from_plan).
+    working_trees: Arc<WorkingTreeRegistry>,
+    // Guest argv threaded into every store. Empty for long-lived servers; in
+    // command mode the deployment name is prepended as `argv[0]`.
+    args: Arc<Vec<String>>,
+    // Whether this deployment runs a one-shot `wasi:cli` command.
+    command: bool,
 }
 
-impl<T: WasiView> Compiled<T> {
-    /// Returns the environment-derived runtime options.
-    #[must_use]
-    pub const fn options(&self) -> &RuntimeOptions {
-        &self.options
-    }
+use crate::{Runtime, Server};
 
+impl<T: WasiView> Compiled<T> {
     /// Link a WASI host's interfaces into the shared Linker.
+    ///
+    /// Chainable: returns `&mut Self` so several hosts can be linked in turn.
     ///
     /// # Errors
     ///
     /// Will fail if the host cannot be added to the Linker.
-    pub fn link<H: Host<T>>(&mut self, _: H) -> Result<()> {
-        H::add_to_linker(&mut self.linker)
+    pub fn host<H, R>(&mut self) -> Result<&mut Self>
+    where
+        H: Host<T> + Server<R>,
+        R: Runtime,
+    {
+        if !self.command || !<H as Server<R>>::IS_SERVER {
+            H::add_to_linker(&mut self.linker)?;
+        }
+        Ok(self)
+    }
+
+    /// Override the host-mediated dispatch [`GuestSelector`].
+    ///
+    /// Defaults to [`FirstArgSelector`] — the floor's "first call argument is the
+    /// identity" strategy. Chainable.
+    pub fn selector(&mut self, selector: impl GuestSelector) -> &mut Self {
+        self.selector = Arc::new(selector);
+        self
+    }
+
+    /// The working-tree registry built from the deployment's preopens.
+    #[must_use]
+    pub fn working_trees(&self) -> Arc<WorkingTreeRegistry> {
+        Arc::clone(&self.working_trees)
+    }
+
+    /// Whether this deployment drives a one-shot `wasi:cli` command.
+    #[must_use]
+    pub const fn command(&self) -> bool {
+        self.command
+    }
+
+    /// Shared guest argv for threading into [`Runtime::store`](crate::Runtime).
+    #[must_use]
+    pub fn args(&self) -> &[String] {
+        &self.args
     }
 
     /// Pre-instantiate every loaded guest against the shared Linker and assemble
     /// the [`Registry`].
     ///
-    /// Pre-instantiation happens once, here, after all hosts are linked; per call
-    /// only a fresh instantiate on a new store remains.
-    ///
-    /// Will fail if a component cannot be pre-instantiated (e.g. an import is
-    /// neither host-satisfied nor allow-listed for host-mediated linking), or if
-    /// the registry cannot be assembled.
+    /// Consumes the builder: pre-instantiation happens once, here, after all
+    /// hosts are linked — so no host can be linked after the guests are frozen.
+    /// Per call only a fresh instantiate on a new store remains.
     ///
     /// # Errors
     ///
     /// Returns an error if host-mediated imports cannot be polyfilled, a
     /// component cannot be pre-instantiated, or the registry cannot be assembled.
-    pub fn build_registry(&self) -> Result<Registry<T>>
+    pub fn build(self) -> Result<Registry<T>>
     where
         T: WrpcView,
     {
-        // The selector strategy is fixed to the floor default; consumers project
-        // their identity scheme onto the opaque `GuestId` it returns.
-        let dispatch = DispatchHandle::new(
-            Arc::new(FirstArgSelector),
-            self.link_interfaces.clone(),
-            self.options.max_dispatch_depth,
-        );
+        // The selector defaults to `FirstArgSelector` but may be overridden via
+        // `selector`; consumers project their identity scheme onto the opaque
+        // `GuestId` it returns.
+        let dispatch =
+            DispatchHandle::new(self.selector, self.links, self.options.max_dispatch_depth);
 
-        // Polyfill host-mediated imports onto a private clone of the shared
-        // linker *before* pre-instantiation: an import that is neither
-        // host-satisfied nor allow-listed then fails fast at `instantiate_pre`.
-        let mut linker = self.linker.clone();
-        link_dynamic(&self.engine, &mut linker, &self.guests, &dispatch)?;
+        // Polyfill host-mediated imports onto the shared linker *before*
+        // pre-instantiation: an import that is neither host-satisfied nor
+        // allow-listed then fails fast at `instantiate_pre`. Consuming `self`
+        // makes the linker ours to mutate — no defensive clone.
+        let mut linker = self.linker;
+        dispatch::link(&self.engine, &mut linker, &self.guests, &dispatch)?;
 
-        let mut guests = HashMap::with_capacity(self.guests.len());
+        let mut guests = BTreeMap::new();
         for loaded in &self.guests {
             let instance_pre = linker
                 .instantiate_pre(&loaded.component)
@@ -273,14 +321,9 @@ impl<T: WasiView> Compiled<T> {
             guests.insert(loaded.id.clone(), Guest::local(loaded.id.clone(), instance_pre));
         }
 
-        Registry::new(
-            self.engine.clone(),
-            self.options.clone(),
-            guests,
-            self.default.clone(),
-            self.routes.clone(),
-            dispatch,
-        )
+        tracing::info!(guests = guests.len(), "runtime initialized");
+
+        Registry::new(self.engine, self.options, guests, self.routes, dispatch)
     }
 }
 
@@ -312,17 +355,6 @@ mod tests {
     use wasmtime::{Config, Engine};
 
     use crate::RuntimeOptions;
-
-    #[test]
-    fn lookup_embedded_by_name() {
-        // Mirrors the `(&str, &[u8])` shape the `runtime!` macro emits.
-        const A: &[u8] = b"component-a";
-        const B: &[u8] = b"component-b";
-        const EMBEDDED: &[(&str, &[u8])] = &[("a", A), ("b", B)];
-
-        assert_eq!(super::lookup_embedded(EMBEDDED, "b"), Some(B));
-        assert_eq!(super::lookup_embedded(EMBEDDED, "missing"), None);
-    }
 
     #[test]
     fn builds_with_defaults() {

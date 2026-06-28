@@ -1,0 +1,20 @@
+#![doc = include_str!("../README.md")]
+
+//! # WASI Model
+//!
+//! This module implements the runtime boundary for `augentic:model/completion`
+//! (see `rfcs/wasi-model.md`): a guest calls `complete` to have a prompt
+//! completed and receives a validated typed answer, or a deterministic replayed
+//! one, without ever seeing which backend produced it.
+
+#![forbid(unsafe_code)]
+
+#[cfg(target_arch = "wasm32")]
+mod guest;
+#[cfg(target_arch = "wasm32")]
+pub use guest::*;
+
+#[cfg(not(target_arch = "wasm32"))]
+mod host;
+#[cfg(not(target_arch = "wasm32"))]
+pub use host::*;
