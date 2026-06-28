@@ -34,78 +34,79 @@ pub fn expand(config: &Config) -> TokenStream {
     };
 
     quote! {
-            mod runtime {
-                use std::sync::Arc;
+        mod runtime {
+            use std::sync::Arc;
 
-                use anyhow::Result;
-                use omnia::tokio;
-                use omnia::{
-                    Backend, Compiled, Registry, Runtime, Server, StoreBase, StoreContext,
-                    WorkingTreeRegistry,
-                };
+            use anyhow::Result;
+            use omnia::tokio;
+            use omnia::{
+                Backend, Compiled, Registry, Runtime, Server, StoreBase, StoreContext,
+                WorkingTreeRegistry,
+            };
 
-                use super::*;
+            use super::*;
 
-                // Runtime state holding the guest registry and backend connections.
-                #[derive(Clone, Runtime)]
-                #[runtime(store = StoreCtx)]
-                struct Context {
-                    #[runtime(registry)]
-                    registry: Arc<Registry<StoreCtx>>,
-                    #[runtime(args)]
-                    args: Arc<Vec<String>>,
-                    #[runtime(preopens)]
-                    working_trees: Arc<WorkingTreeRegistry>,
-                    #(#context_fields,)*
-                }
+            // Runtime state holding the guest registry and backend connections.
+            #[derive(Clone, Runtime)]
+            #[runtime(store = StoreCtx)]
+            struct Context {
+                #[runtime(registry)]
+                registry: Arc<Registry<StoreCtx>>,
+                #[runtime(args)]
+                args: Arc<Vec<String>>,
+                #[runtime(preopens)]
+                working_trees: Arc<WorkingTreeRegistry>,
+                #(#context_fields,)*
+            }
 
-                impl Context {
-                    // Creates a new runtime state by linking WASI interfaces and connecting to backends.
-                    async fn new(mut compiled: Compiled<StoreCtx>) -> Result<Self> {
-                        let args = Arc::new(compiled.args().to_vec());
+            impl Context {
+                // Creates a new runtime state by linking WASI interfaces and connecting to backends.
+                async fn new(mut compiled: Compiled<StoreCtx>) -> Result<Self> {
+                    let args = Arc::new(compiled.args().to_vec());
 
-                        #(compiled.host::<#host_trait_impls, Context>()?;)*
-                        #connect_backends
+                    #(compiled.host::<#host_trait_impls, Context>()?;)*
+                    #connect_backends
 
-                        // snapshot the startup-validated working-tree
-                        let working_trees = compiled.working_trees();
+                    // snapshot the startup-validated working-tree
+                    let working_trees = compiled.working_trees();
 
-                        // build the store context
-                        Ok(Self {
-                            registry: Arc::new(compiled.build()?),
-                            args,
-                            working_trees,
-                            #(#backend_idents,)*
-                        })
-                    }
-                }
-
-                /// Per-guest instance data shared between the runtime and the guest.
-                #[derive(StoreContext)]
-                pub struct StoreCtx {
-                    #[base]
-                    pub base: StoreBase,
-                    #(#store_ctx_fields,)*
-                }
-
-                #command_assert
-
-                #[tokio::main]
-                pub async fn main() -> ::std::process::ExitCode {
-                    omnia::main(#command, Context::new, |ctx| {
-                        let mut servers = Vec::new();
-                        #(
-                            if <#host_trait_impls as Server<Context>>::IS_SERVER {
-                                servers.push(Box::pin(
-                                    <#host_trait_impls as Server<Context>>::run(&#host_trait_impls, ctx),
-                                ));
-                            }
-                        )*
-                        servers
-                    }).await
+                    // build the store context
+                    Ok(Self {
+                        registry: Arc::new(compiled.build()?),
+                        args,
+                        working_trees,
+                        #(#backend_idents,)*
+                    })
                 }
             }
 
-            use runtime::main;
+            /// Per-guest instance data shared between the runtime and the guest.
+            #[derive(StoreContext)]
+            pub struct StoreCtx {
+                #[base]
+                pub base: StoreBase,
+                #(#store_ctx_fields,)*
+            }
+
+            #command_assert
+
+            #[tokio::main]
+            pub async fn main() -> ::std::process::ExitCode {
+                omnia::main(#command, Context::new, |ctx| {
+                    let mut servers: Vec<omnia::futures::future::BoxFuture<'_, Result<()>>> = vec![];
+                    #(
+                        if <#host_trait_impls as Server<Context>>::IS_SERVER {
+                            servers.push(
+                                Box::pin(#host_trait_impls.run(ctx))
+                                    as omnia::futures::future::BoxFuture<'_, Result<()>>,
+                            );
+                        }
+                    )*
+                    servers
+                }).await
+            }
         }
+
+        use runtime::main;
+    }
 }
