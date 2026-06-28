@@ -7,11 +7,11 @@
 //! directly rather than published out of band.
 
 use anyhow::{Result, bail};
-use wasmtime_wasi::p3::bindings::{Command, CommandPre};
 use wasmtime_wasi::I32Exit;
+use wasmtime_wasi::p3::bindings::{Command, CommandPre};
 
 use crate::routing::TriggerRouter;
-use crate::runtime::{ExitStatus, prepare};
+use crate::runtime::{self, ExitStatus};
 use crate::traits::Runtime;
 
 /// Drive the sole `wasi:cli/run` guest once and return its exit status.
@@ -40,7 +40,7 @@ where
     R: Runtime,
 {
     // Identical startup to `serve`: background tasks + host-mediated links.
-    prepare(runtime).await?;
+    runtime::prepare(runtime).await?;
 
     let routing = TriggerRouter::build(
         runtime.registry(),

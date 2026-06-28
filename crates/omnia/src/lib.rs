@@ -23,20 +23,12 @@ use std::path::PathBuf;
 
 pub use clap::Parser;
 use clap::Subcommand;
-// The `Runtime` derive macro and the `Runtime` trait (re-exported below from
-// `traits`) share a name but live in different namespaces, like `Clone`.
 pub use omnia_host_macros::{Runtime, StoreContext, runtime};
-// Macro-support re-exports: named by `runtime!`/`StoreContext`-generated code via
-// `::omnia::…`, not part of the documented public surface.
 #[doc(hidden)]
 pub use wrpc_wasmtime::{WrpcCtxView, WrpcView};
 #[doc(hidden)]
 pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
-// Curated public surface: only what a host server, a hand-written runtime, or the
-// `runtime!` macro needs. Everything else (lifecycle helpers, dispatch, manifest,
-// source, routing strategy, transport carriers) is `pub` inside a private module
-// and simply not re-exported here.
 #[cfg(feature = "jit")]
 pub use self::compile::compile;
 pub use self::create::{Compiled, RegistryBuilder};
@@ -46,21 +38,14 @@ pub use self::registry::{Guest, GuestId, Registry};
 pub use self::routing::{CliRoutes, HttpRoutes, Resolver, Routes, TopicRoutes, TriggerRouter};
 pub use self::runtime::ExitStatus;
 #[doc(hidden)]
-pub use self::runtime::{bootstrap_and_run, run, main};
+pub use self::runtime::{main, run};
 pub use self::selector::{FirstArgSelector, GuestSelector};
-// Type-state markers naming the `StoreBaseBuilder` member states; users chain the
-// setters and never name these directly, so they are hidden from the docs.
 #[doc(hidden)]
 pub use self::store::{Set, Unset};
 pub use self::store::{StoreBase, StoreBaseBuilder};
 pub use self::telemetry::{Telemetry, resource};
 pub use self::traits::{Backend, FromEnv, FutureResult, HasLimits, Host, Runtime, Server};
 pub use self::transport::{LinkClient, WrpcState};
-// The working-tree registry (RFC-55): `WorkingTreeRegistry` is threaded into
-// every store and read by the floor; `WorkingTreeEntry` exposes the two faces
-// (cap-std `Dir` + absolute path) the floor resolves a lent descriptor to.
-// `ResolvedPreopen` is the mount a registry is built from (a manifest `[[mount]]`
-// or an alternate runtime assembling preopens programmatically).
 pub use self::working_tree::{ResolvedPreopen, WorkingTreeEntry, WorkingTreeRegistry};
 
 /// Connect several [`Backend`]s concurrently.

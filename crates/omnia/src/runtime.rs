@@ -14,14 +14,12 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result};
 use clap::Parser as _;
-use futures::future::{BoxFuture, try_join_all};
+use futures::future::{self, BoxFuture};
 use wasmtime::Engine;
 
-use crate::{Compiled, RegistryBuilder};
-use crate::command;
 use crate::dispatch::serve_links;
 use crate::traits::Runtime;
-use crate::{Cli, Command};
+use crate::{Cli, Command, Compiled, RegistryBuilder, command};
 
 /// Spawn a detached background task that drives epoch interruption.
 ///
@@ -79,69 +77,6 @@ pub fn sample_pool(engine: Engine, interval: Duration) {
     });
 }
 
-/// Start a runtime's background tasks and wire host-mediated links — the shared
-/// startup both long-lived server deployments and [`command::run`] perform before
-/// driving any guest.
-///
-/// Spawns [`drive_epoch`] and [`sample_pool`] off the runtime's engine, then
-/// calls [`serve_links`] so a dispatched call always finds its target's wRPC
-/// server (a no-op when no `link`s are declared).
-///
-/// # Errors
-///
-/// Returns an error if wiring the link serve side fails.
-pub async fn prepare<R: Runtime>(runtime: &R) -> Result<()> {
-    // Drive epoch interruption so guest deadlines (and the wall-clock timeouts
-    // wrapped around each invocation) fire even while a guest executes
-    // CPU-bound code.
-    drive_epoch(runtime.registry().engine().clone(), runtime.options().epoch_tick);
-
-    // Periodically sample pool occupancy as metrics so pool sizing can be tuned
-    // from real data.
-    sample_pool(runtime.registry().engine().clone(), runtime.options().pool_metrics_interval);
-
-    // Wire the serve side of any host-mediated links before triggers fire, so a
-    // dispatched call always finds its target's wRPC server.
-    serve_links(runtime).await.context("wiring host-mediated link serve side")?;
-
-    Ok(())
-}
-
-/// Compile from `run` inputs, bootstrap runtime state, and drive the deployment.
-///
-/// Hand-written entry points that skip [`main`] but want the same compile →
-/// `new` → [`run`] pipeline can call this directly with the same callbacks the
-/// `runtime!` macro passes to [`main`].
-///
-/// # Errors
-///
-/// Returns an error if compilation, bootstrap, or [`run`] fails.
-pub async fn bootstrap_and_run<R, N, NFut, S>(
-    wasm: Option<PathBuf>,
-    config: Option<PathBuf>,
-    args: Vec<String>,
-    command_mode: bool,
-    new: N,
-    servers: S,
-) -> Result<ExitStatus>
-where
-    R: Runtime,
-    N: FnOnce(Compiled<R::StoreCtx>) -> NFut,
-    NFut: Future<Output = Result<R>>,
-    S: FnOnce(&R) -> Vec<BoxFuture<'_, Result<()>>>,
-{
-    let compiled = RegistryBuilder::new()
-        .wasm(wasm)
-        .config(config)
-        .args(args)
-        .command(command_mode)
-        .compile::<R::StoreCtx>()
-        .await
-        .context("building runtime")?;
-    let context = new(compiled).await.context("preparing runtime state")?;
-    run(&context, command_mode, servers(&context)).await
-}
-
 /// Parse the CLI `run` subcommand and map the outcome to a process exit code.
 ///
 /// Generated `main` functions delegate here so CLI parsing and error reporting
@@ -161,7 +96,7 @@ where
 {
     match Cli::parse().command {
         Command::Run { wasm, config, args } => {
-            match bootstrap_and_run(wasm, config, args, command_mode, new, servers).await {
+            match run(wasm, config, args, command_mode, new, servers).await {
                 Ok(status) => status.into(),
                 Err(error) => {
                     eprintln!("{error:#}");
@@ -190,20 +125,54 @@ where
 /// # Errors
 ///
 /// Returns an error if preparation, command execution, or any server fails.
-pub async fn run<R>(
-    runtime: &R, command_mode: bool, servers: Vec<BoxFuture<'_, Result<()>>>,
+pub async fn run<R, N, NFut, S>(
+    wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>, command_mode: bool, new: N,
+    servers: S,
 ) -> Result<ExitStatus>
 where
     R: Runtime,
+    N: FnOnce(Compiled<R::StoreCtx>) -> NFut,
+    NFut: Future<Output = Result<R>>,
+    S: FnOnce(&R) -> Vec<BoxFuture<'_, Result<()>>>,
 {
+    let compiled = RegistryBuilder::new()
+        .wasm(wasm)
+        .config(config)
+        .args(args)
+        .command(command_mode)
+        .compile::<R::StoreCtx>()
+        .await
+        .context("building runtime")?;
+
+    let runtime = new(compiled).await.context("preparing runtime state")?;
+    let servers = servers(&runtime);
+
     if command_mode {
-        command::run(runtime).await
+        command::run(&runtime).await
     } else {
-        prepare(runtime).await?;
-        try_join_all(servers).await?;
+        prepare(&runtime).await?;
+        future::try_join_all(servers).await?;
 
         Ok(ExitStatus::SUCCESS)
     }
+}
+
+// Start a runtime's background tasks and wire host-mediated links — the shared
+pub async fn prepare<R: Runtime>(runtime: &R) -> Result<()> {
+    // Drive epoch interruption so guest deadlines (and the wall-clock timeouts
+    // wrapped around each invocation) fire even while a guest executes
+    // CPU-bound code.
+    drive_epoch(runtime.registry().engine().clone(), runtime.options().epoch_tick);
+
+    // Periodically sample pool occupancy as metrics so pool sizing can be tuned
+    // from real data.
+    sample_pool(runtime.registry().engine().clone(), runtime.options().pool_metrics_interval);
+
+    // Wire the serve side of any host-mediated links before triggers fire, so a
+    // dispatched call always finds its target's wRPC server.
+    serve_links(runtime).await.context("wiring host-mediated link serve side")?;
+
+    Ok(())
 }
 
 /// A guest's process exit status.

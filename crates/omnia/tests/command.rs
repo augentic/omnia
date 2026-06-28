@@ -1,4 +1,4 @@
-//! Exit-status integration test for command mode (`command::run` via [`omnia::run`]).
+//! Exit-status integration test for command mode ([`omnia::run`] in command mode).
 //!
 //! Builds a minimal runtime over the `cli-wasm` example guest and drives it
 //! exactly as a one-shot command deployment would, asserting the exit status
@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
-use omnia::{ExitStatus, Registry, RegistryBuilder, Runtime, StoreBase};
+use omnia::{ExitStatus, Registry, Runtime, StoreBase, run};
 
 /// Per-store context: just the fixed [`StoreBase`]. The `wasi:cli` guest needs
 /// only the WASI view, which the `StoreContext` derive supplies from `base`.
@@ -29,9 +29,9 @@ struct TestCtx {
     base: StoreBase,
 }
 
-/// A minimal [`Runtime`] over a single `wasi:cli` guest, threading a fixed argv
-/// into every store (the guest reads it as `wasi:cli/environment`). `args[0]` is
-/// the program name, as command mode prepends.
+/// A minimal [`Runtime`] over a single `wasi:cli` guest, threading guest argv
+/// into every store (the guest reads it as `wasi:cli/environment`). In command
+/// mode the floor prepends the deployment name as `args[0]`.
 #[derive(Clone)]
 struct TestRuntime {
     registry: Arc<Registry<TestCtx>>,
@@ -73,55 +73,48 @@ fn cli_wasm(target: &Path) -> Option<PathBuf> {
         .find(|path| path.exists())
 }
 
-/// Compile and assemble a single-guest registry for `wasm`. Done once per test:
-/// `compile` initializes the process-global telemetry, which can only be set
-/// once, so each subcommand reuses this registry (instance-per-call regardless).
-async fn build_registry(wasm: &Path) -> Result<Arc<Registry<TestCtx>>> {
-    let compiled = RegistryBuilder::new()
-        .wasm(wasm.to_path_buf())
-        .command(true)
-        .compile::<TestCtx>()
-        .await
-        .context("building runtime")?;
-    Ok(Arc::new(compiled.build().context("assembling registry")?))
+/// Drive `wasi:cli/run` once with `tail` guest argv (the program name is
+/// prepended by command mode) and return the guest's exit status.
+async fn run_cli(wasm: &Path, tail: &[&str]) -> Result<ExitStatus> {
+    run(
+        Some(wasm.to_path_buf()),
+        None,
+        tail.iter().map(|arg| (*arg).to_string()).collect(),
+        true,
+        |compiled| async move {
+            let args = compiled.args_arc();
+            Ok(TestRuntime {
+                registry: Arc::new(compiled.build().context("assembling registry")?),
+                args,
+            })
+        },
+        |_| vec![],
+    )
+    .await
+    .context("running command")
 }
 
-/// Drive `wasi:cli/run` once over `registry` with `tail` (the program name is
-/// prepended as `args[0]`) and return the guest's exit status.
-async fn run_cli(registry: &Arc<Registry<TestCtx>>, tail: &[&str]) -> Result<ExitStatus> {
-    let mut argv = vec![String::from("cli_wasm")];
-    argv.extend(tail.iter().map(|arg| (*arg).to_owned()));
-    let runtime = TestRuntime {
-        registry: Arc::clone(registry),
-        args: Arc::new(argv),
+macro_rules! cli_exit_test {
+    ($name:ident, $tail:expr, $code:expr, $msg:expr) => {
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn $name() -> Result<()> {
+            let target = target_dir();
+            let Some(wasm) = cli_wasm(&target) else {
+                eprintln!(
+                    "skipping `{}`: cli guest not built. Run:\n  cargo build -p examples \
+                     --example cli-wasm --target wasm32-wasip2",
+                    stringify!($name)
+                );
+                return Ok(());
+            };
+
+            assert_eq!(run_cli(&wasm, $tail).await?.code(), $code, $msg);
+            Ok(())
+        }
     };
-
-    omnia::run(&runtime, true, vec![]).await.context("running command")
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn cli_exit_status_matches_subcommand() -> Result<()> {
-    let target = target_dir();
-    let Some(wasm) = cli_wasm(&target) else {
-        eprintln!(
-            "skipping `cli_exit_status_matches_subcommand`: cli guest not built. Run:\n  \
-             cargo build -p examples --example cli-wasm --target wasm32-wasip2"
-        );
-        return Ok(());
-    };
-
-    let registry = build_registry(&wasm).await?;
-
-    // A known subcommand returns `Ok(())` -> success (0).
-    assert_eq!(run_cli(&registry, &["greet", "Ada"]).await?.code(), 0, "greet exits 0");
-    assert_eq!(run_cli(&registry, &["add", "2", "40"]).await?.code(), 0, "add exits 0");
-
-    // A specific nonzero code rides `wasi:cli/exit` -> `I32Exit` -> the status,
-    // proving codes survive rather than collapsing to 1.
-    assert_eq!(run_cli(&registry, &["bogus"]).await?.code(), 2, "unknown command exits 2");
-
-    // A plain `Err(())` from `run` (missing subcommand) maps to 1.
-    assert_eq!(run_cli(&registry, &[]).await?.code(), 1, "missing subcommand exits 1");
-
-    Ok(())
-}
+cli_exit_test!(greet_exits_zero, &["greet", "Ada"], 0, "greet exits 0");
+cli_exit_test!(add_exits_zero, &["add", "2", "40"], 0, "add exits 0");
+cli_exit_test!(unknown_command_exits_two, &["bogus"], 2, "unknown command exits 2");
+cli_exit_test!(missing_subcommand_exits_one, &[], 1, "missing subcommand exits 1");
