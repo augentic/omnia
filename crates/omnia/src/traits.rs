@@ -126,9 +126,9 @@ pub trait Server<R: Runtime>: Debug + Sync + Send {
     ///
     /// Defaults to `false`: a capability host with the no-op [`run`](Self::run)
     /// (e.g. `WasiKeyValue`, `WasiBlobstore`, `WasiOtel`). The `runtime!` macro
-    /// reads this flag from the *type system* to reject a long-lived server in a
-    /// `command` deployment (see [`assert_command_hosts`]), so a newly added
-    /// trigger is covered without editing the macro.
+    /// reads this flag from the *type system* to skip linking long-lived triggers
+    /// in a `command` deployment, so a newly added trigger is covered without
+    /// editing the macro.
     const IS_SERVER: bool = false;
 
     /// Start the service.
@@ -141,15 +141,13 @@ pub trait Server<R: Runtime>: Debug + Sync + Send {
     }
 }
 
-/// Compile-time guard that a `command` deployment links no long-lived trigger
-/// server.
+/// Compile-time guard that a hand-written runtime links no long-lived trigger
+/// server in a `command` deployment.
 ///
-/// When a deployment sets `command: true`, the `runtime!` macro emits
-/// `const _: () = assert_command_hosts(&[/* each host's IS_SERVER */]);`. A
-/// long-lived trigger ([`Server::IS_SERVER`] is `true`) cannot share a command
-/// deployment: [`run_command`](crate::run_command) would start the server and
-/// block on it forever, so the command could never exit. This fails the build
-/// instead.
+/// The `runtime!` macro skips [`Server::IS_SERVER`] hosts when linking in command
+/// mode instead of calling this helper. Hand-written runtimes may still call it
+/// to fail the build when a long-lived trigger would block
+/// [`run_command`](crate::run_command) forever.
 ///
 /// Keyed on [`Server::IS_SERVER`], so the set of long-lived triggers is defined
 /// by the types themselves rather than a name list inside the macro.

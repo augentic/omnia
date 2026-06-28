@@ -28,17 +28,22 @@ impl Config {
         self.hosts.iter().map(|host| host.type_.clone()).collect()
     }
 
-    /// Compile-time guardrail: reject long-lived trigger hosts in command mode.
-    pub(crate) fn command_guard(&self) -> TokenStream {
+    /// WASI host linking in `Context::new`. In command mode, long-lived trigger
+    /// hosts ([`Server::IS_SERVER`]) are skipped so only capability hosts link.
+    pub(crate) fn link_hosts(&self) -> TokenStream {
         let host_trait_impls = self.host_trait_impls();
         if self.command {
             quote! {
-                const _: () = omnia::assert_command_hosts(&[
-                    #(<#host_trait_impls as Server<Context>>::IS_SERVER,)*
-                ]);
+                #(
+                    if !<#host_trait_impls as Server<Context>>::IS_SERVER {
+                        compiled.host::<#host_trait_impls>()?;
+                    }
+                )*
             }
         } else {
-            quote! {}
+            quote! {
+                #(compiled.host::<#host_trait_impls>()?;)*
+            }
         }
     }
 
@@ -70,7 +75,6 @@ impl Config {
     /// Structural codegen derived from the parsed host/backend wiring.
     pub fn expanded(&self) -> Expanded {
         let mut store_ctx_fields = Vec::new();
-        let host_trait_impls = self.host_trait_impls();
         let mut store_targets: BTreeMap<String, Vec<Ident>> = BTreeMap::new();
 
         for host in &self.hosts {
@@ -118,7 +122,6 @@ impl Config {
             context_fields,
             backend_idents,
             store_ctx_fields,
-            host_trait_impls,
         }
     }
 }
@@ -128,7 +131,6 @@ pub struct Expanded {
     pub context_fields: Vec<TokenStream>,
     pub backend_idents: Vec<Ident>,
     pub store_ctx_fields: Vec<TokenStream>,
-    pub host_trait_impls: Vec<Path>,
 }
 
 impl Parse for Config {

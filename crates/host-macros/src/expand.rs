@@ -13,10 +13,10 @@ pub fn expand(config: &Config) -> TokenStream {
         context_fields,
         backend_idents,
         store_ctx_fields,
-        host_trait_impls,
     } = config.expanded();
+    
     let command = config.command;
-    let command_guard = config.command_guard();
+    let link_hosts = config.link_hosts();
     let connect_backends = config.connect_backends();
     let servers = config.servers();
 
@@ -34,8 +34,6 @@ pub fn expand(config: &Config) -> TokenStream {
             };
 
             use super::*;
-
-            #command_guard
 
             // Runtime state holding the guest registry and backend connections.
             #[derive(Clone, Runtime)]
@@ -60,7 +58,7 @@ pub fn expand(config: &Config) -> TokenStream {
                     let args = Arc::new(compiled.args().to_vec());
 
                     // link enabled WASI components
-                    #(compiled.host::<#host_trait_impls>()?;)*
+                    #link_hosts
 
                     // connect to all backends concurrently
                     #connect_backends
