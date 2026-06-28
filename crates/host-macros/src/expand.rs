@@ -23,9 +23,10 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
         command_guard,
     } = Expanded::try_from(config)?;
 
-
-    let Entrypoint { tokens: entrypoint, exports: entrypoint_export } =
-        Entrypoint::from_config(config, &run_body(config.command, &host_trait_impls));
+    let Entrypoint {
+        tokens: entrypoint,
+        exports: entrypoint_export,
+    } = Entrypoint::try_from(config)?;
 
     let connect_backends = connect_backends(&backend_idents, &backend_types);
     let tokio_import = if needs_tokio(config, backend_idents.len()) {
@@ -131,25 +132,26 @@ struct Entrypoint {
     exports: TokenStream,
 }
 
-impl Entrypoint {
-    fn from_config(config: &Config, body: &TokenStream) -> Self {
+impl TryFrom<&Config> for Entrypoint {
+    type Error = syn::Error;
+
+    fn try_from(config: &Config) -> Result<Self, Self::Error> {
+        let Expanded { host_trait_impls, .. } = Expanded::try_from(config)?;
+        let body = run_body(config.command, &host_trait_impls);
+
         if config.gen_main {
-            Self {
+            Ok(Self {
                 tokens: quote! {
-                    /// Parse the CLI and drive the deployment to a process exit code: the
-                    /// guest's status for a one-shot `command`, success for a long-lived
-                    /// server's clean shutdown, or failure on a host error.
                     #[tokio::main]
                     pub async fn main() -> ::std::process::ExitCode {
                         omnia::run_main(|wasm, config, args| async move { #body }).await
                     }
                 },
                 exports: quote! { use runtime::main; },
-            }
+            })
         } else {
-            Self {
+            Ok(Self {
                 tokens: quote! {
-                    /// Run a guest (single-file shorthand) or a manifest-driven deployment.
                     pub async fn run(
                         wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>,
                     ) -> Result<omnia::ExitStatus> {
@@ -157,7 +159,7 @@ impl Entrypoint {
                     }
                 },
                 exports: quote! {},
-            }
+            })
         }
     }
 }
