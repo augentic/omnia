@@ -44,6 +44,8 @@ pub use self::selector::{FirstArgSelector, GuestSelector};
 pub use self::store::{Set, Unset};
 pub use self::store::{StoreBase, StoreBaseBuilder};
 pub use self::telemetry::{Telemetry, resource};
+#[doc(hidden)]
+pub use self::traits::assert_hosts;
 pub use self::traits::{Backend, FromEnv, FutureResult, HasLimits, Host, Runtime, Server};
 pub use self::transport::{LinkClient, WrpcState};
 pub use self::working_tree::{ResolvedPreopen, WorkingTreeEntry, WorkingTreeRegistry};

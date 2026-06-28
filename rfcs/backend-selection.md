@@ -184,7 +184,7 @@ Selecting *which hosts* are active is the easy half:
   `WasiWebSocket`) becomes config-driven: the `servers` vector the generated
   `run` builds is populated only for enabled triggers.
 - The command (`command: true`) vs long-lived co-listing rule, today a
-  compile-time `const _: () = assert_command_hosts(...)`
+  compile-time `const _: () = assert_hosts(...)`
   (`crates/omnia/src/traits.rs`), moves to a startup check in dynamic mode — or a
   command deployment stays a separate binary. See §10.
 
@@ -262,7 +262,7 @@ is **not** part of v1.
 - `crates/host-macros/src/{expand,runtime_derive,store_context}.rs` — the macros
   this design extends.
 - `crates/omnia/src/traits.rs` — `Backend`, `FromEnv`, `Host`, `Server`,
-  `assert_command_hosts`.
+  `assert_hosts`.
 - `crates/omnia/src/manifest.rs` — the `omnia.toml` schema gaining `[backends]`.
 - `crates/wasi-keyvalue/src/host.rs` — a representative `WasiXxxCtx` trait + view,
   i.e. the dynamic seam this design leans on.

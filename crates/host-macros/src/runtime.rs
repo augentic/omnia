@@ -39,6 +39,7 @@ impl Config {
 
         Codegen {
             command: self.command,
+            command_assert: Self::command_assert(self.command, &host_trait_impls),
             context_fields: structural.context_fields,
             backend_idents: structural.backend_idents.clone(),
             store_ctx_fields: structural.store_ctx_fields,
@@ -60,10 +61,10 @@ impl Config {
                 continue;
             };
 
-            // In command mode, long-lived triggers are not linked or wired.
-            if self.command && is_trigger_host(host_type) {
-                continue;
-            }
+            // // In command mode, long-lived triggers are not linked or wired.
+            // if self.command && is_trigger_host(host_type) {
+            //     continue;
+            // }
 
             // The host's `StoreCtx` field name and host-crate module path
             // coincide (e.g. `WasiHttp` -> `omnia_wasi_http`), so the
@@ -84,9 +85,6 @@ impl Config {
         for backend in &self.backends {
             let field = field_ident(backend);
             let Some(targets) = store_targets.get(&field.to_string()) else {
-                if self.command {
-                    continue;
-                }
                 context_fields.push(quote! {
                     pub #field: #backend
                 });
@@ -133,6 +131,23 @@ impl Config {
         }
     }
 
+    /// Compile-time guard emitted only for command deployments.
+    ///
+    /// A one-shot `command: true` runtime runs to completion and exits, so it
+    /// must not include a long-lived trigger server. Read straight from
+    /// `Server::IS_SERVER`, so a newly added trigger is covered automatically.
+    fn command_assert(command: bool, host_trait_impls: &[Path]) -> TokenStream {
+        if !command {
+            return quote! {};
+        }
+
+        quote! {
+            const _: () = omnia::assert_hosts(&[
+                #( <#host_trait_impls as Server<Context>>::IS_SERVER, )*
+            ]);
+        }
+    }
+
     /// Concurrent backend connection for `Context::new`.
     fn connect_backends(&self, backend_idents: &[Ident]) -> TokenStream {
         if backend_idents.is_empty() {
@@ -166,6 +181,7 @@ struct Structural {
 // All token fragments needed to expand a deployment runtime.
 struct Codegen {
     command: bool,
+    command_assert: TokenStream,
     context_fields: Vec<TokenStream>,
     backend_idents: Vec<Ident>,
     store_ctx_fields: Vec<TokenStream>,
@@ -178,6 +194,7 @@ struct Codegen {
 pub fn expand(config: &Config) -> TokenStream {
     let Codegen {
         command,
+        command_assert,
         context_fields,
         backend_idents,
         store_ctx_fields,
@@ -240,6 +257,8 @@ pub fn expand(config: &Config) -> TokenStream {
                 pub base: StoreBase,
                 #(#store_ctx_fields,)*
             }
+
+            #command_assert
 
             #[tokio::main]
             pub async fn main() -> ::std::process::ExitCode {
@@ -350,17 +369,12 @@ impl Parse for Host {
     }
 }
 
-/// Whether `path` names a long-lived trigger host ([`Server::IS_SERVER`]).
-///
-/// Used at macro-expansion time to omit trigger [`StoreCtx`] fields in command
-/// mode (struct fields cannot be filtered via `IS_SERVER` in generated code).
-/// Generated code asserts this list stays in sync with each host's
-/// `Server::IS_SERVER` value.
-fn is_trigger_host(path: &Path) -> bool {
-    path.segments.last().is_some_and(|segment| {
-        matches!(segment.ident.to_string().as_str(), "WasiHttp" | "WasiMessaging" | "WasiWebSocket")
-    })
-}
+// /// Whether `path` names a long-lived trigger host ([`Server::IS_SERVER`]).
+// fn is_trigger_host(path: &Path) -> bool {
+//     path.segments.last().is_some_and(|segment| {
+//         matches!(segment.ident.to_string().as_str(), "WasiHttp" | "WasiMessaging" | "WasiWebSocket")
+//     })
+// }
 
 /// Derives a `snake_case` field name from a backend type's final path segment
 /// (e.g. `HttpDefault` -> `http_default`).
