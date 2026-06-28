@@ -17,6 +17,7 @@ use wrpc_wasmtime::WrpcView;
 
 use crate::RuntimeOptions;
 use crate::registry::Registry;
+use crate::store::StoreBase;
 
 /// Result type for asynchronous operations.
 pub type FutureResult<T> = BoxFuture<'static, Result<T>>;
@@ -195,6 +196,46 @@ pub trait FromEnv: Sized {
     ///
     /// Returns an error if required environment variables are missing or invalid.
     fn from_env() -> Result<Self>;
+}
+
+/// A deployment's connected backend bundle, threaded into [`Context`].
+///
+/// The `runtime!` macro generates the concrete bundle (one field per declared
+/// backend) and this impl, whose [`connect`](Self::connect) connects every
+/// backend concurrently — the work the macro previously inlined as a
+/// `tokio::try_join!` in the generated `Context::new`. A deployment that wires
+/// no backends uses the [`()`](unit) bundle below, so [`Context`] needs no
+/// special empty case.
+///
+/// [`Context`]: crate::Context
+pub trait Backends: Clone + Send + Sync + 'static {
+    /// Connect every backend in the bundle.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first backend connection error.
+    fn connect() -> impl Future<Output = Result<Self>>;
+}
+
+/// The zero-backend bundle: a deployment that links only backend-less hosts
+/// (such as a `command: true` `wasi:cli` deployment) connects nothing.
+impl Backends for () {
+    async fn connect() -> Result<Self> {
+        Ok(())
+    }
+}
+
+/// Builds a deployment's per-store [`StoreCtx`](Runtime::StoreCtx) from the
+/// fixed [`StoreBase`] and its connected [`Backends`] bundle.
+///
+/// The `runtime!` macro generates this impl on the concrete `StoreCtx`, cloning
+/// one backend into each host-view field per the `Host: Backend` wiring. It
+/// lives in the deployment crate rather than `omnia` because the host-view
+/// trait impls it feeds are foreign-trait impls bound to that local type.
+pub trait BuildStore<B>: Sized {
+    /// Build the store context, cloning each wired backend into its host view.
+    #[must_use]
+    fn build_store(base: StoreBase, backends: &B) -> Self;
 }
 
 #[cfg(test)]

@@ -36,7 +36,7 @@ pub use self::dispatch::{HostDispatch, serve_links};
 pub use self::options::RuntimeOptions;
 pub use self::registry::{Guest, GuestId, Registry};
 pub use self::routing::{CliRoutes, HttpRoutes, Resolver, Routes, TopicRoutes, TriggerRouter};
-pub use self::runtime::ExitStatus;
+pub use self::runtime::{Context, ExitStatus};
 #[doc(hidden)]
 pub use self::runtime::{main, run};
 pub use self::selector::{FirstArgSelector, GuestSelector};
@@ -46,7 +46,9 @@ pub use self::store::{StoreBase, StoreBaseBuilder};
 pub use self::telemetry::{Telemetry, resource};
 #[doc(hidden)]
 pub use self::traits::assert_hosts;
-pub use self::traits::{Backend, FromEnv, FutureResult, HasLimits, Host, Runtime, Server};
+pub use self::traits::{
+    Backend, Backends, BuildStore, FromEnv, FutureResult, HasLimits, Host, Runtime, Server,
+};
 pub use self::transport::{LinkClient, WrpcState};
 pub use self::working_tree::{ResolvedPreopen, WorkingTreeEntry, WorkingTreeRegistry};
 

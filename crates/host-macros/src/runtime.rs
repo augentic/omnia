@@ -16,67 +16,48 @@ pub fn expand(config: &Config) -> TokenStream {
     let Codegen {
         command,
         command_assert,
-        context_fields,
-        backend_idents,
         store_ctx_fields,
-        host_trait_impls,
+        bundle_fields,
+        store_assignments,
+        backend_idents,
         backend_types,
+        host_trait_impls,
     } = Codegen::from(config);
 
-    let connect_backends = if backend_idents.is_empty() {
-        quote! {}
+    // The connected backend bundle threaded into `omnia::Context`. A deployment
+    // with no backends rides the `()` bundle (`omnia::Backends for ()`), so no
+    // bundle type or `connect` impl is generated.
+    let (bundle_ty, bundle_def) = if backend_idents.is_empty() {
+        (quote! { () }, quote! {})
     } else {
-        quote! {
-            let (#(#backend_idents,)*) = tokio::try_join!(
-                #(<#backend_types as Backend>::connect(),)*
-            )?;
-        }
+        (
+            quote! { Backends },
+            quote! {
+                // One connected backend per declared `Host: Backend` wiring.
+                #[derive(Clone)]
+                struct Backends {
+                    #(#bundle_fields,)*
+                }
+
+                impl omnia::Backends for Backends {
+                    async fn connect() -> Result<Self> {
+                        let (#(#backend_idents,)*) = tokio::try_join!(
+                            #(<#backend_types as Backend>::connect(),)*
+                        )?;
+                        Ok(Self { #(#backend_idents,)* })
+                    }
+                }
+            },
+        )
     };
 
     quote! {
         mod runtime {
-            use std::sync::Arc;
-
             use anyhow::Result;
-            use omnia::{futures,tokio};
-            use omnia::{
-                Backend, Compiled, Registry, Runtime, Server, StoreBase, StoreContext,
-                WorkingTreeRegistry,
-            };
+            use omnia::tokio;
+            use omnia::{Backend, Server, StoreBase, StoreContext};
 
             use super::*;
-
-            // Runtime state holding the guest registry and backend connections.
-            #[derive(Clone, Runtime)]
-            #[runtime(store = StoreCtx)]
-            struct Context {
-                #[runtime(registry)]
-                registry: Arc<Registry<StoreCtx>>,
-                #[runtime(args)]
-                args: Arc<Vec<String>>,
-                #[runtime(preopens)]
-                working_trees: Arc<WorkingTreeRegistry>,
-                #(#context_fields,)*
-            }
-
-            impl Context {
-                // Creates a new runtime state by linking WASI interfaces and connecting to backends.
-                async fn new(mut compiled: Compiled<StoreCtx>) -> Result<Self> {
-                    let args = Arc::new(compiled.args().to_vec());
-
-                    #(compiled.host::<#host_trait_impls, Context>()?;)*
-                    #connect_backends
-                    let working_trees = compiled.working_trees();
-
-                    // build the store context
-                    Ok(Self {
-                        registry: Arc::new(compiled.build()?),
-                        args,
-                        working_trees,
-                        #(#backend_idents,)*
-                    })
-                }
-            }
 
             /// Per-guest instance data shared between the runtime and the guest.
             #[derive(StoreContext)]
@@ -86,22 +67,44 @@ pub fn expand(config: &Config) -> TokenStream {
                 #(#store_ctx_fields,)*
             }
 
+            #bundle_def
+
+            // Clone each connected backend into the host-view field it backs.
+            impl omnia::BuildStore<#bundle_ty> for StoreCtx {
+                fn build_store(base: StoreBase, backends: &#bundle_ty) -> Self {
+                    Self {
+                        base,
+                        #(#store_assignments,)*
+                    }
+                }
+            }
+
+            // The deployment's concrete host runtime.
+            type Ctx = omnia::Context<StoreCtx, #bundle_ty>;
+
             #command_assert
 
             #[tokio::main]
             pub async fn main() -> ::std::process::ExitCode {
-                omnia::main(#command, Context::new, |ctx| {
-                    let mut servers: Vec<futures::future::BoxFuture<'_, Result<()>>> = vec![];
-                    #(
-                        if <#host_trait_impls as Server<Context>>::IS_SERVER {
-                            servers.push(
-                                Box::pin(#host_trait_impls.run(ctx))
-                                    as omnia::futures::future::BoxFuture<'_, Result<()>>,
-                            );
-                        }
-                    )*
-                    servers
-                }).await
+                omnia::main::<Ctx, _, _, _>(
+                    #command,
+                    |compiled| Ctx::new(compiled, |compiled| {
+                        #(compiled.host::<#host_trait_impls, Ctx>()?;)*
+                        Ok(())
+                    }),
+                    |ctx| {
+                        let mut servers: Vec<omnia::futures::future::BoxFuture<'_, Result<()>>> = vec![];
+                        #(
+                            if <#host_trait_impls as Server<Ctx>>::IS_SERVER {
+                                servers.push(
+                                    Box::pin(#host_trait_impls.run(ctx))
+                                        as omnia::futures::future::BoxFuture<'_, Result<()>>,
+                                );
+                            }
+                        )*
+                        servers
+                    },
+                ).await
             }
         }
 

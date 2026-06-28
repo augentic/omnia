@@ -14,11 +14,12 @@ use crate::runtime::parse::{self, Config};
 pub struct Codegen {
     pub command: bool,
     pub command_assert: TokenStream,
-    pub context_fields: Vec<TokenStream>,
-    pub backend_idents: Vec<Ident>,
     pub store_ctx_fields: Vec<TokenStream>,
-    pub host_trait_impls: Vec<Path>,
+    pub bundle_fields: Vec<TokenStream>,
+    pub store_assignments: Vec<TokenStream>,
+    pub backend_idents: Vec<Ident>,
     pub backend_types: Vec<Path>,
+    pub host_trait_impls: Vec<Path>,
 }
 
 impl From<&Config> for Codegen {
@@ -42,20 +43,22 @@ impl From<&Config> for Codegen {
 
         Self {
             command_assert: command_assert(config.command, &host_trait_impls),
-            backend_idents: structural.backend_idents.clone(),
-            host_trait_impls,
             command: config.command,
-            context_fields: structural.context_fields,
             store_ctx_fields: structural.store_ctx_fields,
+            bundle_fields: structural.bundle_fields,
+            store_assignments: structural.store_assignments,
+            backend_idents: structural.backend_idents,
             backend_types,
+            host_trait_impls,
         }
     }
 }
 
 struct Structural {
-    context_fields: Vec<TokenStream>,
-    backend_idents: Vec<Ident>,
     store_ctx_fields: Vec<TokenStream>,
+    bundle_fields: Vec<TokenStream>,
+    store_assignments: Vec<TokenStream>,
+    backend_idents: Vec<Ident>,
 }
 
 fn structural(config: &Config, host_trait_impls: &[Path]) -> Structural {
@@ -76,33 +79,34 @@ fn structural(config: &Config, host_trait_impls: &[Path]) -> Structural {
         store_targets.entry(backend_ident.to_string()).or_default().push(host_ident);
     }
 
-    let mut context_fields = Vec::new();
+    let mut bundle_fields = Vec::new();
+    let mut store_assignments = Vec::new();
     let mut backend_idents = Vec::new();
 
     for backend in &config.backends {
         let field = parse::field_ident(backend);
-        let Some(targets) = store_targets.get(&field.to_string()) else {
-            context_fields.push(quote! {
-                pub #field: #backend
-            });
-            backend_idents.push(field);
-            continue;
-        };
-
-        let store_attrs: Vec<TokenStream> =
-            targets.iter().map(|target| quote! { #[runtime(store = #target)] }).collect();
-
-        context_fields.push(quote! {
-            #(#store_attrs)*
-            pub #field: #backend
+        bundle_fields.push(quote! {
+            #field: #backend
         });
+
+        // Clone this backend into each host-view field it backs (one backend may
+        // back several hosts).
+        if let Some(targets) = store_targets.get(&field.to_string()) {
+            for target in targets {
+                store_assignments.push(quote! {
+                    #target: backends.#field.clone()
+                });
+            }
+        }
+
         backend_idents.push(field);
     }
 
     Structural {
-        context_fields,
-        backend_idents,
         store_ctx_fields,
+        bundle_fields,
+        store_assignments,
+        backend_idents,
     }
 }
 
@@ -113,7 +117,7 @@ fn command_assert(command: bool, host_trait_impls: &[Path]) -> TokenStream {
 
     quote! {
         const _: () = omnia::assert_hosts(&[
-            #( <#host_trait_impls as Server<Context>>::IS_SERVER, )*
+            #( <#host_trait_impls as Server<Ctx>>::IS_SERVER, )*
         ]);
     }
 }

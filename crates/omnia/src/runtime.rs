@@ -10,16 +10,113 @@
 use std::future::Future;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result};
 use clap::Parser as _;
 use futures::future::{self, BoxFuture};
 use wasmtime::Engine;
+use wasmtime_wasi::WasiView;
+use wrpc_wasmtime::WrpcView;
 
 use crate::dispatch::serve_links;
-use crate::traits::Runtime;
-use crate::{Cli, Command, Compiled, RegistryBuilder, command};
+use crate::traits::{Backends, BuildStore, HasLimits, Runtime};
+use crate::working_tree::WorkingTreeRegistry;
+use crate::{Cli, Command, Compiled, Registry, RegistryBuilder, StoreBase, command};
+
+/// The standard host [`Runtime`] the `runtime!` macro builds for a deployment.
+///
+/// It owns the fixed runtime state every deployment shares — the guest
+/// [`Registry`], the guest argv, and the working-tree registry — plus the
+/// deployment's connected [`Backends`] bundle `B`. The per-store context type
+/// `S` (the `StoreCtx`) stays in the deployment crate, because its host-view
+/// impls are foreign-trait impls bound to that local type; `Context` reaches it
+/// only through the [`BuildStore`] seam.
+///
+/// The macro previously emitted this struct, its [`new`](Self::new), and a
+/// derived [`Runtime`] impl inline; hosting it here keeps that boilerplate (and
+/// the backend-connection lifecycle) in the library.
+pub struct Context<S: 'static, B> {
+    registry: Arc<Registry<S>>,
+    args: Arc<Vec<String>>,
+    working_trees: Arc<WorkingTreeRegistry>,
+    backends: B,
+}
+
+// A derived `Clone` would demand `S: Clone`, but the `StoreCtx` is never `Clone`
+// (it owns the WASI table); every field here is either shared behind an `Arc` or
+// comes from the `Clone` bundle, so only `B: Clone` is required.
+impl<S: 'static, B: Clone> Clone for Context<S, B> {
+    fn clone(&self) -> Self {
+        Self {
+            registry: Arc::clone(&self.registry),
+            args: Arc::clone(&self.args),
+            working_trees: Arc::clone(&self.working_trees),
+            backends: self.backends.clone(),
+        }
+    }
+}
+
+impl<S, B> Context<S, B>
+where
+    S: WasiView + WrpcView + HasLimits + BuildStore<B> + Send + 'static,
+    B: Backends,
+{
+    /// Assemble the runtime from a [`Compiled`] deployment: thread the guest
+    /// argv, link the deployment's hosts (via `link`), connect every backend,
+    /// and freeze the guest [`Registry`].
+    ///
+    /// `link` is the one per-deployment step the macro still supplies — a
+    /// closure that calls [`Compiled::host`] once per wired host (the generated
+    /// `servers` closure mirrors it when starting trigger servers).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if host linking, backend connection, or registry
+    /// assembly fails.
+    pub async fn new<L>(mut compiled: Compiled<S>, link: L) -> Result<Self>
+    where
+        L: FnOnce(&mut Compiled<S>) -> Result<()>,
+    {
+        let args = Arc::new(compiled.args().to_vec());
+        link(&mut compiled).context("linking hosts")?;
+        let backends = B::connect().await.context("connecting backends")?;
+        let working_trees = compiled.working_trees();
+
+        Ok(Self {
+            registry: Arc::new(compiled.build().context("assembling registry")?),
+            args,
+            working_trees,
+            backends,
+        })
+    }
+}
+
+impl<S, B> Runtime for Context<S, B>
+where
+    S: WasiView + WrpcView + HasLimits + BuildStore<B> + Send + 'static,
+    B: Backends,
+{
+    type StoreCtx = S;
+
+    fn registry(&self) -> &Registry<Self::StoreCtx> {
+        &self.registry
+    }
+
+    fn store(&self) -> Self::StoreCtx {
+        // `HostDispatch` is blanket-implemented for every `Runtime`, so a fresh
+        // clone backs any host->guest call; the generated `BuildStore` impl then
+        // clones each wired backend into its host-view field.
+        let base = StoreBase::builder()
+            .options(self.options())
+            .dispatch(Arc::new(self.clone()))
+            .args(&self.args)
+            .working_trees(Arc::clone(&self.working_trees))
+            .build();
+        S::build_store(base, &self.backends)
+    }
+}
 
 /// Spawn a detached background task that drives epoch interruption.
 ///
