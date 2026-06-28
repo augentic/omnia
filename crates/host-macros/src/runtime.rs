@@ -38,7 +38,7 @@ pub fn expand(config: &Config) -> TokenStream {
             use std::sync::Arc;
 
             use anyhow::Result;
-            use omnia::tokio;
+            use omnia::{futures,tokio};
             use omnia::{
                 Backend, Compiled, Registry, Runtime, Server, StoreBase, StoreContext,
                 WorkingTreeRegistry,
@@ -66,8 +66,6 @@ pub fn expand(config: &Config) -> TokenStream {
 
                     #(compiled.host::<#host_trait_impls, Context>()?;)*
                     #connect_backends
-
-                    // snapshot the startup-validated working-tree
                     let working_trees = compiled.working_trees();
 
                     // build the store context
@@ -93,7 +91,7 @@ pub fn expand(config: &Config) -> TokenStream {
             #[tokio::main]
             pub async fn main() -> ::std::process::ExitCode {
                 omnia::main(#command, Context::new, |ctx| {
-                    let mut servers: Vec<omnia::futures::future::BoxFuture<'_, Result<()>>> = vec![];
+                    let mut servers: Vec<futures::future::BoxFuture<'_, Result<()>>> = vec![];
                     #(
                         if <#host_trait_impls as Server<Context>>::IS_SERVER {
                             servers.push(
