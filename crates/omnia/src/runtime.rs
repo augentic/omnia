@@ -145,13 +145,12 @@ where
         .context("building runtime")?;
 
     let runtime = new(compiled).await.context("preparing runtime state")?;
-    let servers = servers(&runtime);
 
     if command_mode {
         command::run(&runtime).await
     } else {
         prepare(&runtime).await?;
-        future::try_join_all(servers).await?;
+        future::try_join_all(servers(&runtime)).await?;
 
         Ok(ExitStatus::SUCCESS)
     }

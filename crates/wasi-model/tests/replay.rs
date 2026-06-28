@@ -161,7 +161,7 @@ async fn registry(wasm: &Path) -> Result<Arc<Registry<TestCtx>>> {
         .compile()
         .await
         .context("building runtime")?;
-    compiled.host::<WasiModel>().context("linking WasiModel")?;
+    compiled.host::<WasiModel, TestRuntime>().context("linking WasiModel")?;
     let registry = compiled.build().context("assembling registry")?;
 
     let _ = std::fs::remove_file(&manifest_path);
@@ -408,7 +408,7 @@ async fn build_registry(model: &Path, shelf: &Path) -> Result<Arc<Registry<TestC
         .compile()
         .await
         .context("building runtime")?;
-    compiled.host::<WasiModel>().context("linking WasiModel")?;
+    compiled.host::<WasiModel, TestRuntime>().context("linking WasiModel")?;
     let registry = compiled.build().context("assembling registry")?;
 
     let _ = std::fs::remove_file(&manifest_path);

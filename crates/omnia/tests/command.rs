@@ -82,7 +82,7 @@ async fn run_cli(wasm: &Path, tail: &[&str]) -> Result<ExitStatus> {
         tail.iter().map(|arg| (*arg).to_string()).collect(),
         true,
         |compiled| async move {
-            let args = compiled.args_arc();
+            let args = Arc::new(compiled.args().to_vec());
             Ok(TestRuntime {
                 registry: Arc::new(compiled.build().context("assembling registry")?),
                 args,

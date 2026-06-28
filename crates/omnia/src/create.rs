@@ -236,6 +236,9 @@ pub struct Compiled<T: WasiView + 'static> {
     command: bool,
 }
 
+use crate::Runtime;
+use crate::Server;
+
 impl<T: WasiView> Compiled<T> {
     /// Link a WASI host's interfaces into the shared Linker.
     ///
@@ -244,8 +247,14 @@ impl<T: WasiView> Compiled<T> {
     /// # Errors
     ///
     /// Will fail if the host cannot be added to the Linker.
-    pub fn host<H: Host<T>>(&mut self) -> Result<&mut Self> {
-        H::add_to_linker(&mut self.linker)?;
+    pub fn host<H, R>(&mut self) -> Result<&mut Self>
+    where
+        H: Host<T> + Server<R>,
+        R: Runtime,
+    {
+        if !self.command || !<H as Server<R>>::IS_SERVER {
+            H::add_to_linker(&mut self.linker)?;
+        }
         Ok(self)
     }
 
@@ -270,20 +279,10 @@ impl<T: WasiView> Compiled<T> {
         self.command
     }
 
-    /// Guest argv threaded into every store. Empty for long-lived servers; in
-    /// command mode the deployment's telemetry/`COMPONENT` name is prepended as
-    /// `argv[0]` — the program-name convention a guest reads via
-    /// `wasi:cli/environment` (mirroring `wasmtime`) — followed by the CLI tail
-    /// from [`RegistryBuilder::args`].
+    /// Shared guest argv for threading into [`Runtime::store`](crate::Runtime).
     #[must_use]
     pub fn args(&self) -> &[String] {
         &self.args
-    }
-
-    /// Shared guest argv for threading into [`Runtime::store`](crate::Runtime).
-    #[must_use]
-    pub fn args_arc(&self) -> Arc<Vec<String>> {
-        Arc::clone(&self.args)
     }
 
     /// Pre-instantiate every loaded guest against the shared Linker and assemble

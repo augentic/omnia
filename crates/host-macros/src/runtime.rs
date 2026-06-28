@@ -33,12 +33,16 @@ impl Config {
             self.hosts.iter().map(|host| host.type_.clone()).collect::<Vec<Path>>();
         let structural = self.structural(&host_trait_impls);
 
+        let add_to_linker = quote! {
+            #( compiled.host::<#host_trait_impls, Context>()?; )*
+        };
+
         Codegen {
             command: self.command,
             context_fields: structural.context_fields,
             backend_idents: structural.backend_idents.clone(),
             store_ctx_fields: structural.store_ctx_fields,
-            add_to_linker: self.add_to_linker(&host_trait_impls),
+            add_to_linker,
             connect_backends: self.connect_backends(&structural.backend_idents),
             servers: self.servers(&host_trait_impls),
         }
@@ -104,24 +108,6 @@ impl Config {
             context_fields,
             backend_idents,
             store_ctx_fields,
-        }
-    }
-
-    /// WASI host linking in `Context::new`. In command mode, long-lived trigger
-    /// hosts ([`Server::IS_SERVER`]) are skipped so only capability hosts link.
-    fn add_to_linker(&self, host_trait_impls: &[Path]) -> TokenStream {
-        if self.command {
-            quote! {
-                #(
-                    if !<#host_trait_impls as Server<Context>>::IS_SERVER {
-                        compiled.host::<#host_trait_impls>()?;
-                    }
-                )*
-            }
-        } else {
-            quote! {
-                #(compiled.host::<#host_trait_impls>()?;)*
-            }
         }
     }
 
