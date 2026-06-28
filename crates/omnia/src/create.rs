@@ -236,8 +236,7 @@ pub struct Compiled<T: WasiView + 'static> {
     command: bool,
 }
 
-use crate::Runtime;
-use crate::Server;
+use crate::{Runtime, Server};
 
 impl<T: WasiView> Compiled<T> {
     /// Link a WASI host's interfaces into the shared Linker.

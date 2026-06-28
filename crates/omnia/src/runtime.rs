@@ -118,10 +118,6 @@ where
 /// Drive a deployment after runtime state is built: a one-shot `wasi:cli` command
 /// or every long-lived trigger server to completion.
 ///
-/// When `command_mode` is `true`, `servers` is ignored and [`command::run`] is
-/// invoked. Otherwise `prepare` runs and every server future in `servers` is
-/// awaited concurrently, returning [`ExitStatus::SUCCESS`] on clean shutdown.
-///
 /// # Errors
 ///
 /// Returns an error if preparation, command execution, or any server fails.
@@ -175,11 +171,6 @@ pub async fn prepare<R: Runtime>(runtime: &R) -> Result<()> {
 }
 
 /// A guest's process exit status.
-///
-/// Command mode ([`command::run`]) drives a `wasi:cli/run` guest exactly once
-/// and returns its exit code through this newtype; the generated `main` converts
-/// it to a [`std::process::ExitCode`] at the process boundary. A long-lived
-/// server deployment yields [`SUCCESS`](Self::SUCCESS) on clean shutdown.
 ///
 /// # Truncation
 ///

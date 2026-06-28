@@ -44,7 +44,7 @@ impl Config {
             store_ctx_fields: structural.store_ctx_fields,
             add_to_linker,
             connect_backends: self.connect_backends(&structural.backend_idents),
-            servers: self.servers(&host_trait_impls),
+            servers: Self::servers(&host_trait_impls),
         }
     }
 
@@ -111,12 +111,12 @@ impl Config {
         }
     }
 
-    /// Server futures passed to [`omnia::run`]: empty in command mode.
-    fn servers(&self, host_trait_impls: &[Path]) -> TokenStream {
-        if self.command {
-            return quote! { |_| vec![] };
-        }
-
+    /// Server-future closure passed to [`omnia::run`].
+    ///
+    /// Unconditionally emits the `Server::IS_SERVER`-filtered set: in command
+    /// mode `omnia::run` never invokes this closure, so it needs no special case
+    /// (mirroring `Compiled::host`, which gates linking the same way).
+    fn servers(host_trait_impls: &[Path]) -> TokenStream {
         quote! {
             |ctx| {
                 let mut servers: Vec<omnia::futures::future::BoxFuture<'_, Result<()>>> = vec![];
