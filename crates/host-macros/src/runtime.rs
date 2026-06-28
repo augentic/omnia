@@ -264,34 +264,9 @@ pub fn expand(config: &Config) -> TokenStream {
                 #(#store_ctx_fields,)*
             }
 
-            /// Build runtime state from the parsed CLI inputs and drive the
-            /// deployment to the guest's exit status (or a host error).
-            async fn run(
-                wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>,
-            ) -> Result<omnia::ExitStatus> {
-                let compiled = omnia::RegistryBuilder::new()
-                    .wasm(wasm)
-                    .config(config)
-                    .args(args)
-                    .command(#command)
-                    .compile::<StoreCtx>()
-                    .await
-                    .context("building runtime")?;
-                let run_state = Context::new(compiled)
-                    .await
-                    .context("preparing runtime state")?;
-
-                omnia::run(&run_state, #command, #servers)
-                    .await
-                    .context("running deployment")
-            }
-
-            /// Parse the CLI and drive the deployment to a process exit code: the
-            /// guest's status for a one-shot `command`, success for a long-lived
-            /// server's clean shutdown, or failure on a host error.
             #[tokio::main]
             pub async fn main() -> ::std::process::ExitCode {
-                omnia::run_main(run).await
+                omnia::main(#command, #servers, Context::new).await
             }
         }
 

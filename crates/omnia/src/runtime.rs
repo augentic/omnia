@@ -8,7 +8,6 @@
 //! yields.
 
 use std::future::Future;
-use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -19,6 +18,7 @@ use wasmtime::Engine;
 use wasmtime_wasi::WasiView;
 use wrpc_wasmtime::WrpcView;
 
+use crate::{Compiled, RegistryBuilder};
 use crate::command;
 use crate::dispatch::serve_links;
 use crate::traits::Runtime;
@@ -121,19 +121,49 @@ where
 /// Failures from `run` are printed to stderr and mapped to
 /// [`ExitCode::FAILURE`]; success yields the guest or deployment status.
 #[doc(hidden)]
-pub async fn run_main<F, Fut>(run: F) -> ExitCode
+pub async fn main<R, T, N, NFut>(
+    command: bool, servers: Vec<BoxFuture<'_, Result<()>>>, new: N,
+) -> ExitCode
 where
-    F: FnOnce(Option<PathBuf>, Option<PathBuf>, Vec<String>) -> Fut,
-    Fut: Future<Output = Result<ExitStatus>>,
+    R: Runtime<StoreCtx = T> + Clone,
+    R::StoreCtx: WasiView + WrpcView + 'static,
+    T: WasiView + 'static,
+    N: FnOnce(Compiled<T>) -> NFut,
+    NFut: Future<Output = Result<R>>,
 {
     match Cli::parse().command {
-        Command::Run { wasm, config, args } => match run(wasm, config, args).await {
-            Ok(status) => status.into(),
-            Err(error) => {
-                eprintln!("{error:#}");
-                ExitCode::FAILURE
+        Command::Run { wasm, config, args } => {
+            let compiled = RegistryBuilder::new()
+                .wasm(wasm)
+                .config(config)
+                .args(args)
+                .command(command)
+                .compile::<T>()
+                .await
+                .context("building runtime")
+                .unwrap();
+
+            let context = new(compiled)
+                .await
+                .context("preparing runtime state")
+                .unwrap();
+
+            let exit_status = if command {
+                command::run(&context).await
+            } else {
+                prepare(&context).await.unwrap();
+                try_join_all(servers).await.unwrap();
+                Ok(ExitStatus::SUCCESS)
+            };
+
+            match exit_status {
+                Ok(status) => status.into(),
+                Err(error) => {
+                    eprintln!("{error:#}");
+                    ExitCode::FAILURE
+                }
             }
-        },
+        }
         #[cfg(feature = "jit")]
         Command::Compile { .. } => {
             eprintln!(
@@ -155,11 +185,11 @@ where
 /// # Errors
 ///
 /// Returns an error if preparation, command execution, or any server fails.
-#[doc(hidden)]
-pub async fn run<R: Runtime>(
+pub async fn run<R>(
     runtime: &R, command: bool, servers: Vec<BoxFuture<'_, Result<()>>>,
 ) -> Result<ExitStatus>
 where
+    R: Runtime,
     R::StoreCtx: WasiView + WrpcView + 'static,
 {
     if command {
