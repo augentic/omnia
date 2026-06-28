@@ -69,17 +69,7 @@ enum Opt {
 impl Parse for Opt {
     fn parse(input: ParseStream) -> Result<Self> {
         let l = input.lookahead1();
-        if l.peek(kw::main) {
-            // `main:` was removed: `runtime!` now always generates `main`.
-            // Consume the setting so the error points at the offending keyword.
-            let main = input.parse::<kw::main>()?;
-            input.parse::<Token![:]>()?;
-            input.parse::<LitBool>()?;
-            Err(syn::Error::new(
-                main.span,
-                "`main:` was removed; `runtime!` always generates `main`. Remove this setting.",
-            ))
-        } else if l.peek(kw::command) {
+        if l.peek(kw::command) {
             input.parse::<kw::command>()?;
             input.parse::<Token![:]>()?;
             Ok(Self::Command(input.parse::<LitBool>()?.value))

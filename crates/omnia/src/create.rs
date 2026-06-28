@@ -31,6 +31,8 @@ use crate::{Host, RuntimeOptions, Telemetry};
 /// let compiled = RegistryBuilder::new()
 ///     .wasm(wasm)
 ///     .config(config)
+///     .args(args)
+///     .command(command)
 ///     .compile::<StoreCtx>()
 ///     .await?;
 /// ```
@@ -42,6 +44,8 @@ use crate::{Host, RuntimeOptions, Telemetry};
 pub struct RegistryBuilder {
     wasm: Option<PathBuf>,
     config: Option<PathBuf>,
+    args: Vec<String>,
+    command: bool,
 }
 
 impl RegistryBuilder {
@@ -63,6 +67,21 @@ impl RegistryBuilder {
     #[must_use]
     pub fn config(mut self, config: impl Into<Option<PathBuf>>) -> Self {
         self.config = config.into();
+        self
+    }
+
+    /// Set CLI arguments forwarded to the guest (everything after `--`).
+    #[must_use]
+    pub fn args(mut self, args: impl Into<Vec<String>>) -> Self {
+        self.args = args.into();
+        self
+    }
+
+    /// Select command mode: prepend the deployment name as `argv[0]` for
+    /// `wasi:cli` guests. Long-lived server deployments leave argv empty.
+    #[must_use]
+    pub const fn command(mut self, command: bool) -> Self {
+        self.command = command;
         self
     }
 
@@ -91,6 +110,8 @@ impl RegistryBuilder {
                 routes: parsed.routes(),
                 links: parsed.links(),
                 preopens: working_tree(parsed.mounts(base)),
+                args: self.args,
+                command: self.command,
             }
         } else {
             let wasm = self.wasm.context(
@@ -106,6 +127,8 @@ impl RegistryBuilder {
                 routes: Routes::default(),
                 links: BTreeSet::new(),
                 preopens: working_tree(Vec::new()),
+                args: self.args,
+                command: self.command,
             }
         };
 
@@ -133,6 +156,8 @@ struct Plan {
     routes: Routes,
     links: BTreeSet<Box<str>>,
     preopens: Vec<ResolvedPreopen>,
+    args: Vec<String>,
+    command: bool,
 }
 
 impl<T: WasiView + 'static> Compiled<T> {
@@ -153,8 +178,13 @@ impl<T: WasiView + 'static> Compiled<T> {
             guests.extend(source.load(&engine).await?);
         }
 
+        let args = if plan.command {
+            std::iter::once(plan.name.clone()).chain(plan.args).collect()
+        } else {
+            plan.args
+        };
+
         Ok(Self {
-            name: plan.name,
             engine,
             linker,
             options,
@@ -163,6 +193,7 @@ impl<T: WasiView + 'static> Compiled<T> {
             links: plan.links,
             selector: Arc::new(FirstArgSelector),
             working_trees,
+            args,
         })
     }
 }
@@ -186,9 +217,6 @@ fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, Runt
 /// [`host`]: Self::host
 /// [`build`]: Self::build
 pub struct Compiled<T: WasiView + 'static> {
-    // The deployment's telemetry/`COMPONENT` name — the guest file stem for the
-    // single-file shorthand, or the manifest name for a multi-guest deployment.
-    name: String,
     engine: Engine,
     linker: Linker<T>,
     options: RuntimeOptions,
@@ -200,6 +228,9 @@ pub struct Compiled<T: WasiView + 'static> {
     selector: Arc<dyn GuestSelector>,
     // Working-tree registry from resolved preopens in [`from_plan`](Self::from_plan).
     working_trees: Arc<WorkingTreeRegistry>,
+    // Guest argv threaded into every store. Empty for long-lived servers; in
+    // command mode the deployment name is prepended as `argv[0]`.
+    args: Vec<String>,
 }
 
 impl<T: WasiView> Compiled<T> {
@@ -230,14 +261,14 @@ impl<T: WasiView> Compiled<T> {
         Arc::clone(&self.working_trees)
     }
 
-    /// The guest argv to hand a `wasi:cli` command: the deployment's
-    /// telemetry/`COMPONENT` name as `argv[0]` — the program-name convention a
-    /// guest reads via `wasi:cli/environment` (mirroring `wasmtime`) — followed
-    /// by `args`. Reusing the registry-derived name keeps `argv[0]` and the
-    /// traces in agreement.
+    /// Guest argv threaded into every store. Empty for long-lived servers; in
+    /// command mode the deployment's telemetry/`COMPONENT` name is prepended as
+    /// `argv[0]` — the program-name convention a guest reads via
+    /// `wasi:cli/environment` (mirroring `wasmtime`) — followed by the CLI tail
+    /// from [`RegistryBuilder::args`].
     #[must_use]
-    pub fn argv(&self, args: Vec<String>) -> Vec<String> {
-        std::iter::once(self.name.clone()).chain(args).collect()
+    pub fn args(&self) -> &[String] {
+        &self.args
     }
 
     /// Pre-instantiate every loaded guest against the shared Linker and assemble

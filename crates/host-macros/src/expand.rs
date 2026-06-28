@@ -29,22 +29,6 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
     } else {
         quote! { vec![#(Box::pin(#host_trait_impls.run(&run_state)),)*] }
     };
-
-    let body = quote! {
-        let compiled = omnia::RegistryBuilder::new()
-            .wasm(wasm)
-            .config(config)
-            .compile::<StoreCtx>()
-            .await
-            .context("building runtime")?;
-        let run_state = Context::new(compiled, Arc::new(args), #command)
-            .await
-            .context("preparing runtime state")?;
-        omnia::drive(&run_state, #command, #servers)
-            .await
-            .context("running deployment")
-    };
-
     let connect_backends = connect_backends(&backend_idents, &backend_types);
 
     Ok(quote! {
@@ -70,7 +54,8 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
             struct Context {
                 #[runtime(registry)]
                 registry: Arc<Registry<StoreCtx>>,
-                // Guest args. `args[0]` = program name when CLI command.
+                // Guest argv threaded into every store (empty for servers; in
+                // command mode `args[0]` is the program name).
                 #[runtime(args)]
                 args: Arc<Vec<String>>,
                 // Working-tree contains startup-validated preopens when the deployment
@@ -82,14 +67,8 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
 
             impl Context {
                 /// Creates a new runtime state by linking WASI interfaces and connecting to backends.
-                async fn new(
-                    mut compiled: Compiled<StoreCtx>, args: Arc<Vec<String>>, command: bool,
-                ) -> Result<Self> {
-                    let args = Arc::new(if command {
-                        compiled.argv((*args).clone())
-                    } else {
-                        (*args).clone()
-                    });
+                async fn new(mut compiled: Compiled<StoreCtx>) -> Result<Self> {
+                    let args = Arc::new(compiled.args().to_vec());
 
                     // link enabled WASI components
                     #(compiled.host::<#host_trait_impls>()?;)*
@@ -127,7 +106,21 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
             async fn run(
                 wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>,
             ) -> Result<omnia::ExitStatus> {
-                #body
+                let compiled = omnia::RegistryBuilder::new()
+                    .wasm(wasm)
+                    .config(config)
+                    .args(args)
+                    .command(#command)
+                    .compile::<StoreCtx>()
+                    .await
+                    .context("building runtime")?;
+                let run_state = Context::new(compiled)
+                    .await
+                    .context("preparing runtime state")?;
+
+                omnia::drive(&run_state, #command, #servers)
+                    .await
+                    .context("running deployment")
             }
 
             /// Parse the CLI and drive the deployment to a process exit code: the
