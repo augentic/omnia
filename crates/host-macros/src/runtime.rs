@@ -28,8 +28,9 @@ pub struct Config {
 
 impl Config {
     /// All token fragments needed to expand a deployment runtime.
-    pub fn codegen(&self) -> Codegen {
-        let host_trait_impls = self.host_trait_impls();
+    fn codegen(&self) -> Codegen {
+        let host_trait_impls =
+            self.hosts.iter().map(|host| host.type_.clone()).collect::<Vec<Path>>();
         let structural = self.structural(&host_trait_impls);
 
         Codegen {
@@ -41,11 +42,6 @@ impl Config {
             connect_backends: self.connect_backends(&structural.backend_idents),
             servers: self.servers(&host_trait_impls),
         }
-    }
-
-    /// WASI host trait types declared in `hosts`, in declaration order.
-    fn host_trait_impls(&self) -> Vec<Path> {
-        self.hosts.iter().map(|host| host.type_.clone()).collect()
     }
 
     /// Structural `Context` / `StoreCtx` field fragments.
@@ -129,17 +125,25 @@ impl Config {
         }
     }
 
-    /// Server futures passed to [`omnia::drive`]: empty in command mode.
+    /// Server futures passed to [`omnia::run`]: empty in command mode.
     fn servers(&self, host_trait_impls: &[Path]) -> TokenStream {
         if self.command {
-            return quote! { vec![] };
+            return quote! { |_| vec![] };
         }
 
-        let server_hosts: Vec<&Path> =
-            host_trait_impls.iter().filter(|host| is_trigger_host(host)).collect();
-
         quote! {
-            vec![#(Box::pin(#server_hosts.run(&run_state)),)*]
+            |ctx| {
+                let mut servers: Vec<omnia::futures::future::BoxFuture<'_, Result<()>>> = vec![];
+                #(
+                    if <#host_trait_impls as Server<Context>>::IS_SERVER {
+                        servers.push(
+                            Box::pin(#host_trait_impls.run(ctx))
+                                as omnia::futures::future::BoxFuture<'_, Result<()>>,
+                        );
+                    }
+                )*
+                servers
+            }
         }
     }
 
@@ -173,15 +177,15 @@ struct Structural {
     store_ctx_fields: Vec<TokenStream>,
 }
 
-/// All token fragments needed to expand a deployment runtime.
-pub struct Codegen {
-    pub command: bool,
-    pub context_fields: Vec<TokenStream>,
-    pub backend_idents: Vec<Ident>,
-    pub store_ctx_fields: Vec<TokenStream>,
-    pub link_hosts: TokenStream,
-    pub connect_backends: TokenStream,
-    pub servers: TokenStream,
+// All token fragments needed to expand a deployment runtime.
+struct Codegen {
+    command: bool,
+    context_fields: Vec<TokenStream>,
+    backend_idents: Vec<Ident>,
+    store_ctx_fields: Vec<TokenStream>,
+    link_hosts: TokenStream,
+    connect_backends: TokenStream,
+    servers: TokenStream,
 }
 
 /// Generate the runtime module from a parsed [`Config`].
@@ -194,15 +198,14 @@ pub fn expand(config: &Config) -> TokenStream {
         link_hosts,
         connect_backends,
         servers,
+        // server_sync_assertions,
     } = config.codegen();
 
     quote! {
         mod runtime {
-            use std::path::PathBuf;
             use std::sync::Arc;
 
             use anyhow::Result;
-            use omnia::anyhow::Context as _;
             use omnia::tokio;
             use omnia::{
                 Backend, Compiled, Registry, Runtime, Server, StoreBase, StoreContext,
@@ -217,12 +220,8 @@ pub fn expand(config: &Config) -> TokenStream {
             struct Context {
                 #[runtime(registry)]
                 registry: Arc<Registry<StoreCtx>>,
-                // Guest argv threaded into every store (empty for servers; in
-                // command mode `args[0]` is the program name).
                 #[runtime(args)]
                 args: Arc<Vec<String>>,
-                // Working-tree contains startup-validated preopens when the deployment
-                // configures `[[mount]]`s or sets `OMNIA_WORKING_TREE`.
                 #[runtime(preopens)]
                 working_trees: Arc<WorkingTreeRegistry>,
                 #(#context_fields,)*
@@ -253,10 +252,6 @@ pub fn expand(config: &Config) -> TokenStream {
             }
 
             /// Per-guest instance data shared between the runtime and the guest.
-            ///
-            /// The `StoreContext` derive implements `WasiView`, `WrpcView`, and
-            /// `HasLimits` against `base`, plus one host view per `#[wasi(...)]`
-            /// backend field.
             #[derive(StoreContext)]
             pub struct StoreCtx {
                 #[base]
@@ -266,7 +261,7 @@ pub fn expand(config: &Config) -> TokenStream {
 
             #[tokio::main]
             pub async fn main() -> ::std::process::ExitCode {
-                omnia::main(#command, #servers, Context::new).await
+                omnia::main(#command, Context::new, #servers).await
             }
         }
 
@@ -375,8 +370,10 @@ impl Parse for Host {
 
 /// Whether `path` names a long-lived trigger host ([`Server::IS_SERVER`]).
 ///
-/// Kept in sync with the host crates that set `IS_SERVER` to `true`. Used only
-/// to omit trigger wiring in command mode at macro-expansion time.
+/// Used at macro-expansion time to omit trigger [`StoreCtx`] fields in command
+/// mode (struct fields cannot be filtered via `IS_SERVER` in generated code).
+/// Generated code asserts this list stays in sync with each host's
+/// `Server::IS_SERVER` value.
 fn is_trigger_host(path: &Path) -> bool {
     path.segments.last().is_some_and(|segment| {
         matches!(segment.ident.to_string().as_str(), "WasiHttp" | "WasiMessaging" | "WasiWebSocket")

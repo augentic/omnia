@@ -1,13 +1,14 @@
 //! # Runtime lifecycle
 //!
-//! The startup [`prepare`] every deployment shares and the long-lived [`serve`]
-//! loop, plus the detached background tasks they drive off the Wasmtime
-//! [`Engine`] (epoch interruption so guest deadlines fire while CPU-bound guests
-//! execute, and pooling-allocator occupancy sampling emitted as `OpenTelemetry`
-//! gauges via the `tracing` metrics bridge) and the [`ExitStatus`] a deployment
-//! yields.
+//! The startup [`prepare`] every deployment shares and the long-lived server
+//! loop driven by [`run`], plus the detached background tasks they drive off the
+//! Wasmtime [`Engine`] (epoch interruption so guest deadlines fire while
+//! CPU-bound guests execute, and pooling-allocator occupancy sampling emitted
+//! as `OpenTelemetry` gauges via the `tracing` metrics bridge) and the
+//! [`ExitStatus`] a deployment yields.
 
 use std::future::Future;
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -15,8 +16,6 @@ use anyhow::{Context as _, Result};
 use clap::Parser as _;
 use futures::future::{BoxFuture, try_join_all};
 use wasmtime::Engine;
-use wasmtime_wasi::WasiView;
-use wrpc_wasmtime::WrpcView;
 
 use crate::{Compiled, RegistryBuilder};
 use crate::command;
@@ -81,7 +80,7 @@ pub fn sample_pool(engine: Engine, interval: Duration) {
 }
 
 /// Start a runtime's background tasks and wire host-mediated links — the shared
-/// startup both [`serve`] and [`run_command`](crate::run_command) perform before
+/// startup both long-lived server deployments and [`command::run`] perform before
 /// driving any guest.
 ///
 /// Spawns [`drive_epoch`] and [`sample_pool`] off the runtime's engine, then
@@ -91,10 +90,7 @@ pub fn sample_pool(engine: Engine, interval: Duration) {
 /// # Errors
 ///
 /// Returns an error if wiring the link serve side fails.
-pub async fn prepare<R: Runtime>(runtime: &R) -> Result<()>
-where
-    R::StoreCtx: WasiView + WrpcView + 'static,
-{
+pub async fn prepare<R: Runtime>(runtime: &R) -> Result<()> {
     // Drive epoch interruption so guest deadlines (and the wall-clock timeouts
     // wrapped around each invocation) fire even while a guest executes
     // CPU-bound code.
@@ -111,6 +107,41 @@ where
     Ok(())
 }
 
+/// Compile from `run` inputs, bootstrap runtime state, and drive the deployment.
+///
+/// Hand-written entry points that skip [`main`] but want the same compile →
+/// `new` → [`run`] pipeline can call this directly with the same callbacks the
+/// `runtime!` macro passes to [`main`].
+///
+/// # Errors
+///
+/// Returns an error if compilation, bootstrap, or [`run`] fails.
+pub async fn bootstrap_and_run<R, N, NFut, S>(
+    wasm: Option<PathBuf>,
+    config: Option<PathBuf>,
+    args: Vec<String>,
+    command_mode: bool,
+    new: N,
+    servers: S,
+) -> Result<ExitStatus>
+where
+    R: Runtime,
+    N: FnOnce(Compiled<R::StoreCtx>) -> NFut,
+    NFut: Future<Output = Result<R>>,
+    S: FnOnce(&R) -> Vec<BoxFuture<'_, Result<()>>>,
+{
+    let compiled = RegistryBuilder::new()
+        .wasm(wasm)
+        .config(config)
+        .args(args)
+        .command(command_mode)
+        .compile::<R::StoreCtx>()
+        .await
+        .context("building runtime")?;
+    let context = new(compiled).await.context("preparing runtime state")?;
+    run(&context, command_mode, servers(&context)).await
+}
+
 /// Parse the CLI `run` subcommand and map the outcome to a process exit code.
 ///
 /// Generated `main` functions delegate here so CLI parsing and error reporting
@@ -121,42 +152,16 @@ where
 /// Failures from `run` are printed to stderr and mapped to
 /// [`ExitCode::FAILURE`]; success yields the guest or deployment status.
 #[doc(hidden)]
-pub async fn main<R, T, N, NFut>(
-    command: bool, servers: Vec<BoxFuture<'_, Result<()>>>, new: N,
-) -> ExitCode
+pub async fn main<R, N, NFut, S>(command_mode: bool, new: N, servers: S) -> ExitCode
 where
-    R: Runtime<StoreCtx = T> + Clone,
-    R::StoreCtx: WasiView + WrpcView + 'static,
-    T: WasiView + 'static,
-    N: FnOnce(Compiled<T>) -> NFut,
+    R: Runtime,
+    N: FnOnce(Compiled<R::StoreCtx>) -> NFut,
     NFut: Future<Output = Result<R>>,
+    S: FnOnce(&R) -> Vec<BoxFuture<'_, Result<()>>>,
 {
     match Cli::parse().command {
         Command::Run { wasm, config, args } => {
-            let compiled = RegistryBuilder::new()
-                .wasm(wasm)
-                .config(config)
-                .args(args)
-                .command(command)
-                .compile::<T>()
-                .await
-                .context("building runtime")
-                .unwrap();
-
-            let context = new(compiled)
-                .await
-                .context("preparing runtime state")
-                .unwrap();
-
-            let exit_status = if command {
-                command::run(&context).await
-            } else {
-                prepare(&context).await.unwrap();
-                try_join_all(servers).await.unwrap();
-                Ok(ExitStatus::SUCCESS)
-            };
-
-            match exit_status {
+            match bootstrap_and_run(wasm, config, args, command_mode, new, servers).await {
                 Ok(status) => status.into(),
                 Err(error) => {
                     eprintln!("{error:#}");
@@ -178,21 +183,20 @@ where
 /// Drive a deployment after runtime state is built: a one-shot `wasi:cli` command
 /// or every long-lived trigger server to completion.
 ///
-/// When `command` is `true`, `servers` is ignored and [`run_command`] is invoked.
-/// Otherwise [`serve`] runs every future in `servers` concurrently and returns
-/// [`ExitStatus::SUCCESS`] on clean shutdown.
+/// When `command_mode` is `true`, `servers` is ignored and [`command::run`] is
+/// invoked. Otherwise `prepare` runs and every server future in `servers` is
+/// awaited concurrently, returning [`ExitStatus::SUCCESS`] on clean shutdown.
 ///
 /// # Errors
 ///
 /// Returns an error if preparation, command execution, or any server fails.
 pub async fn run<R>(
-    runtime: &R, command: bool, servers: Vec<BoxFuture<'_, Result<()>>>,
+    runtime: &R, command_mode: bool, servers: Vec<BoxFuture<'_, Result<()>>>,
 ) -> Result<ExitStatus>
 where
     R: Runtime,
-    R::StoreCtx: WasiView + WrpcView + 'static,
 {
-    if command {
+    if command_mode {
         command::run(runtime).await
     } else {
         prepare(runtime).await?;
@@ -204,11 +208,10 @@ where
 
 /// A guest's process exit status.
 ///
-/// Command mode ([`run_command`](crate::run_command)) drives a `wasi:cli/run`
-/// guest exactly once and returns its exit code through this newtype; the
-/// generated `main` converts it to a [`std::process::ExitCode`] at the process
-/// boundary. A long-lived [`serve`] deployment yields
-/// [`SUCCESS`](Self::SUCCESS) on clean shutdown.
+/// Command mode ([`command::run`]) drives a `wasi:cli/run` guest exactly once
+/// and returns its exit code through this newtype; the generated `main` converts
+/// it to a [`std::process::ExitCode`] at the process boundary. A long-lived
+/// server deployment yields [`SUCCESS`](Self::SUCCESS) on clean shutdown.
 ///
 /// # Truncation
 ///

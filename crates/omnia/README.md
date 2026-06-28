@@ -20,7 +20,7 @@ omnia::runtime!({
 });
 ```
 
-Each `Host: Backend` pair links a WASI interface and binds it to a host backend. The macro always generates the `main` entry point; for a custom entry point, hand-write the runtime instead (derive `Runtime`/`StoreContext` and call `omnia::serve`).
+Each `Host: Backend` pair links a WASI interface and binds it to a host backend. The macro always generates the `main` entry point; for a custom entry point, hand-write the runtime instead (derive `Runtime`/`StoreContext` and call `run`).
 
 ## Core Traits
 
@@ -39,14 +39,14 @@ The runtime is built around a set of traits that allow services to be plugged in
 `omnia` exposes only what a deployment author, a host-server crate, or a hand-written runtime needs; lifecycle, dispatch, manifest, and transport-carrier internals are crate-private.
 
 - **Macros:** `runtime!`, `#[derive(Runtime)]`, `#[derive(StoreContext)]`
-- **Lifecycle:** `serve` (long-lived triggers) and `run_command` (one-shot `wasi:cli` command) — both drive epoch interruption, pool-metric sampling, and host-mediated link serving
+- **Lifecycle:** `bootstrap_and_run` (compile → bootstrap → [`run`]), `run`, and `command::run` — server and command paths both call `prepare` for epoch interruption, pool-metric sampling, and host-mediated link serving
 - **Runtime + store:** `Runtime`, `StoreBase`, `Host`, `Server`, `Backend`, `FromEnv`, `HasLimits`, `HostDispatch`, `FutureResult`
 - **Registry pipeline:** `RegistryBuilder`, `Compiled`, `Registry`, `Guest`, `GuestId`, `RuntimeOptions`
 - **Trigger routing (host servers):** `HttpRoutes`, `TopicRoutes`, `Routes`, `Resolver`, `TriggerRouter`
 - **Host-mediated linking (advanced):** `serve_links`, `GuestSelector`, `FirstArgSelector`, `LinkClient`, `WrpcState`
 - **Telemetry + CLI:** `Telemetry`, `resource`, `Cli`, `Command`, `Parser`
 
-Most deployments only touch the `runtime!` macro; a hand-written runtime instead derives `Runtime`/`StoreContext` (or implements them) and calls `serve`.
+Most deployments only touch the `runtime!` macro; a hand-written runtime instead derives `Runtime`/`StoreContext` (or implements them) and calls `run`.
 
 ## Features
 

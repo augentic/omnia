@@ -46,7 +46,7 @@ pub use self::registry::{Guest, GuestId, Registry};
 pub use self::routing::{CliRoutes, HttpRoutes, Resolver, Routes, TopicRoutes, TriggerRouter};
 pub use self::runtime::ExitStatus;
 #[doc(hidden)]
-pub use self::runtime::{run, main};
+pub use self::runtime::{bootstrap_and_run, run, main};
 pub use self::selector::{FirstArgSelector, GuestSelector};
 // Type-state markers naming the `StoreBaseBuilder` member states; users chain the
 // setters and never name these directly, so they are hidden from the docs.

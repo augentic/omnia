@@ -12,7 +12,8 @@ use anyhow::Result;
 use futures::future::BoxFuture;
 use wasmtime::component::{Instance, InstancePre, Linker};
 use wasmtime::{Store, StoreLimits};
-use wasmtime_wasi::{ WasiView};
+use wasmtime_wasi::WasiView;
+use wrpc_wasmtime::WrpcView;
 
 use crate::RuntimeOptions;
 use crate::registry::Registry;
@@ -35,7 +36,7 @@ pub trait HasLimits {
 /// associated type — not this trait.
 pub trait Runtime: Clone + Send + Sync + 'static {
     /// The store context type.
-    type StoreCtx: WasiView + 'static + Send + HasLimits;
+    type StoreCtx: WasiView + WrpcView + 'static + Send + HasLimits;
 
     /// Returns the store context.
     #[must_use]

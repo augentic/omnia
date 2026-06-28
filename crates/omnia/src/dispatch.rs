@@ -70,7 +70,6 @@ type HostResources = HashMap<
 pub async fn serve_links<R>(state: &R) -> Result<()>
 where
     R: Runtime,
-    R::StoreCtx: WasiView + WrpcView + 'static,
 {
     let registry = state.registry();
     let handle = registry.dispatch();

@@ -1,4 +1,4 @@
-//! Exit-status integration test for command mode (`omnia::run_command`).
+//! Exit-status integration test for command mode (`command::run` via [`omnia::run`]).
 //!
 //! Builds a minimal runtime over the `cli-wasm` example guest and drives it
 //! exactly as a one-shot command deployment would, asserting the exit status

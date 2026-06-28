@@ -1,15 +1,14 @@
 //! # One-shot `wasi:cli` command
 //!
-//! Command mode's counterpart to [`serve`](crate::serve): it `prepare`s the
-//! runtime the same way, then drives the `wasi:cli/run` export of the sole
+//! Command mode's counterpart to a long-lived server deployment: it `prepare`s
+//! the runtime the same way, then drives the `wasi:cli/run` export of the sole
 //! command-capable guest exactly once and returns its [`ExitStatus`]. Because a
 //! command yields a value (unlike a long-lived trigger), the status is returned
 //! directly rather than published out of band.
 
 use anyhow::{Result, bail};
 use wasmtime_wasi::p3::bindings::{Command, CommandPre};
-use wasmtime_wasi::{I32Exit, WasiView};
-use wrpc_wasmtime::WrpcView;
+use wasmtime_wasi::I32Exit;
 
 use crate::routing::TriggerRouter;
 use crate::runtime::{ExitStatus, prepare};
@@ -39,7 +38,6 @@ use crate::traits::Runtime;
 pub async fn run<R>(runtime: &R) -> Result<ExitStatus>
 where
     R: Runtime,
-    R::StoreCtx: WasiView + WrpcView + 'static,
 {
     // Identical startup to `serve`: background tasks + host-mediated links.
     prepare(runtime).await?;
