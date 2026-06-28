@@ -1,6 +1,10 @@
+use std::collections::BTreeMap;
+
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::{LitBool, Path, Result, Token};
+use syn::{Ident, LitBool, Path, Result, Token};
 
 /// Configuration for the runtime macro.
 ///
@@ -16,6 +20,115 @@ pub struct Config {
     pub command: bool,
     pub hosts: Vec<Host>,
     pub backends: Vec<Path>,
+}
+
+impl Config {
+    /// WASI host trait types declared in `hosts`, in declaration order.
+    fn host_trait_impls(&self) -> Vec<Path> {
+        self.hosts.iter().map(|host| host.type_.clone()).collect()
+    }
+
+    /// Compile-time guardrail: reject long-lived trigger hosts in command mode.
+    pub(crate) fn command_guard(&self) -> TokenStream {
+        let host_trait_impls = self.host_trait_impls();
+        if self.command {
+            quote! {
+                const _: () = omnia::assert_command_hosts(&[
+                    #(<#host_trait_impls as Server<Context>>::IS_SERVER,)*
+                ]);
+            }
+        } else {
+            quote! {}
+        }
+    }
+
+    /// Server futures passed to [`omnia::drive`]: empty in command mode.
+    pub(crate) fn servers(&self) -> TokenStream {
+        let host_trait_impls = self.host_trait_impls();
+        if self.command {
+            quote! { vec![] }
+        } else {
+            quote! { vec![#(Box::pin(#host_trait_impls.run(&run_state)),)*] }
+        }
+    }
+
+    /// Concurrent backend connection for `Context::new`.
+    pub(crate) fn connect_backends(&self) -> TokenStream {
+        if self.backends.is_empty() {
+            return quote! {};
+        }
+
+        let backend_idents: Vec<Ident> = self.backends.iter().map(field_ident).collect();
+        let backend_types = &self.backends;
+        quote! {
+            let (#(#backend_idents,)*) = tokio::try_join!(
+                #(<#backend_types as Backend>::connect(),)*
+            )?;
+        }
+    }
+
+    /// Structural codegen derived from the parsed host/backend wiring.
+    pub fn expanded(&self) -> Expanded {
+        let mut store_ctx_fields = Vec::new();
+        let host_trait_impls = self.host_trait_impls();
+        let mut store_targets: BTreeMap<String, Vec<Ident>> = BTreeMap::new();
+
+        for host in &self.hosts {
+            let host_type = &host.type_;
+
+            // A backend-less host contributes no `StoreCtx` backend field or
+            // host view; it only links its interface.
+            let Some(backend_type) = &host.backend else {
+                continue;
+            };
+
+            // The host's `StoreCtx` field name and host-crate module path
+            // coincide (e.g. `WasiHttp` -> `omnia_wasi_http`), so the
+            // `StoreContext` derive's `#[wasi(omnia_wasi_http)]` attribute
+            // emits `omnia_wasi_http::omnia_wasi_view!(StoreCtx, …)`.
+            let host_ident = wasi_ident(host_type);
+            let backend_ident = field_ident(backend_type);
+            store_ctx_fields.push(quote! {
+                #[wasi(#host_ident)]
+                pub #host_ident: #backend_type
+            });
+            store_targets.entry(backend_ident.to_string()).or_default().push(host_ident);
+        }
+
+        let mut context_fields = Vec::new();
+        let mut backend_idents = Vec::new();
+
+        for backend in &self.backends {
+            let field = field_ident(backend);
+            let store_attrs: Vec<TokenStream> = store_targets
+                .get(&field.to_string())
+                .into_iter()
+                .flatten()
+                .map(|target| quote! { #[runtime(store = #target)] })
+                .collect();
+
+            context_fields.push(quote! {
+                #(#store_attrs)*
+                pub #field: #backend
+            });
+            backend_idents.push(field);
+        }
+
+        Expanded {
+            context_fields,
+            backend_idents,
+            store_ctx_fields,
+            host_trait_impls,
+        }
+    }
+}
+
+/// Codegen fragments derived from a [`Config`]'s host/backend wiring.
+pub struct Expanded {
+    pub context_fields: Vec<TokenStream>,
+    pub backend_idents: Vec<Ident>,
+    pub store_ctx_fields: Vec<TokenStream>,
+    pub host_trait_impls: Vec<Path>,
 }
 
 impl Parse for Config {
@@ -116,4 +229,38 @@ impl Parse for Host {
         };
         Ok(Self { type_, backend })
     }
+}
+
+/// Derives a `snake_case` field name from a backend type's final path segment
+/// (e.g. `HttpDefault` -> `http_default`).
+fn field_ident(path: &Path) -> Ident {
+    let Some(segment) = path.segments.last() else {
+        return format_ident!("field");
+    };
+
+    let mut snake = String::new();
+    for ch in segment.ident.to_string().chars() {
+        if ch.is_uppercase() {
+            if !snake.is_empty() {
+                snake.push('_');
+            }
+            snake.extend(ch.to_lowercase());
+        } else {
+            snake.push(ch);
+        }
+    }
+
+    format_ident!("{snake}")
+}
+
+/// Derives a host crate's module ident from a host type's final path segment
+/// (e.g. `WasiHttp` -> `omnia_wasi_http`), matching the host-crate naming the
+/// `StoreContext` derive's `#[wasi(...)]` attribute expects.
+fn wasi_ident(path: &Path) -> Ident {
+    let Some(segment) = path.segments.last() else {
+        return format_ident!("wasi");
+    };
+
+    let name = segment.ident.to_string().replace("Wasi", "omnia_wasi_").to_lowercase();
+    format_ident!("{name}")
 }

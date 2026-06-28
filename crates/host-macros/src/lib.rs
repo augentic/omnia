@@ -26,10 +26,7 @@ use syn::{DeriveInput, parse_macro_input};
 #[proc_macro]
 pub fn runtime(input: TokenStream) -> TokenStream {
     let parsed = parse_macro_input!(input as runtime::Config);
-    match expand::expand(&parsed) {
-        Ok(ts) => ts.into(),
-        Err(e) => e.into_compile_error().into(),
-    }
+    expand::expand(&parsed).into()
 }
 
 /// Derives the fixed store-context trait impls for a `StoreCtx`.
