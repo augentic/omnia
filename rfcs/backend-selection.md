@@ -16,7 +16,6 @@ the `runtime!` macro:
 
 ```rust
 omnia::runtime!({
-    main: true,
     hosts: {
         WasiHttp: HttpDefault,
         WasiKeyValue: KeyValueDefault,
@@ -153,7 +152,6 @@ populated registry through:
 
 ```rust
 omnia::runtime!({
-    main: true,
     mode: dynamic,
     hosts: { WasiHttp, WasiKeyValue, WasiSql, WasiOtel },
 });
@@ -249,7 +247,7 @@ is **not** part of v1.
 1. `Arc<dyn _>` + shared (`&`) borrow vs `Box<dyn _>` + a `clone_box` for any
    interface whose context methods require `&mut`. Audit each `WasiXxxCtx`; the
    ones reviewed (`keyvalue`, `otel`) are `&self`.
-2. `main: true` ergonomics in dynamic mode: how the generated `main` receives the
+2. Generated `main` ergonomics in dynamic mode: how the generated `main` receives the
    populated `Backends` — a registration-fn path, a builder closure passed to
    `run`, or `inventory`-style auto-registration.
 3. Registry shape: macro-generated per-interface typed maps (explicit, type-safe)

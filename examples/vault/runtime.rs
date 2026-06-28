@@ -7,7 +7,6 @@ cfg_if::cfg_if! {
         use omnia_wasi_vault::{WasiVault, VaultDefault};
 
         omnia::runtime!({
-            main: true,
             hosts: {
                 WasiHttp: HttpDefault,
                 WasiOtel: OtelDefault,

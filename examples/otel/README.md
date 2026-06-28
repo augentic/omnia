@@ -42,7 +42,6 @@ Modify the runtime.rs file to use the OpenTelemetry Collector backend:
 use omnia::opentelemetry::WasiOtelCtx;
 
 omnia::runtime!({
-    main: true,
     hosts: {
         WasiHttp: HttpDefault,
         WasiOtel: WasiOtelCtx,

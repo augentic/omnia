@@ -30,7 +30,6 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
         quote! { vec![#(Box::pin(#host_trait_impls.run(&run_state)),)*] }
     };
 
-    // let body = run_body(config.command, &host_trait_impls);
     let body = quote! {
         let compiled = omnia::RegistryBuilder::new()
             .wasm(wasm)
@@ -46,49 +45,19 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
             .context("running deployment")
     };
 
-    let (entrypoint, entrypoint_export) = if config.gen_main {
-        (
-            quote! {
-                #[tokio::main]
-                pub async fn main() -> ::std::process::ExitCode {
-                    omnia::run_main(|wasm, config, args| async move { #body }).await
-                }
-            },
-            quote! { use runtime::main; },
-        )
-    } else {
-        (
-            quote! {
-                pub async fn run(
-                    wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>,
-                ) -> Result<omnia::ExitStatus> {
-                    #body
-                }
-            },
-            quote! {},
-        )
-    };
-
     let connect_backends = connect_backends(&backend_idents, &backend_types);
-    let tokio_import = if needs_tokio(config, backend_idents.len()) {
-        quote! { use omnia::tokio; }
-    } else {
-        quote! {}
-    };
 
     Ok(quote! {
         mod runtime {
-            use std::path::PathBuf;
             use std::sync::Arc;
 
             use anyhow::Result;
             use omnia::anyhow::Context as _;
-            use omnia::futures::future::BoxFuture;
+            use omnia::tokio;
             use omnia::{
                 Backend, Compiled, Registry, Runtime, Server, StoreBase, StoreContext,
                 WorkingTreeRegistry,
             };
-            #tokio_import
 
             use super::*;
 
@@ -152,10 +121,16 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
                 #(#store_ctx_fields,)*
             }
 
-            #entrypoint
+            /// Parse the CLI and drive the deployment to a process exit code: the
+            /// guest's status for a one-shot `command`, success for a long-lived
+            /// server's clean shutdown, or failure on a host error.
+            #[tokio::main]
+            pub async fn main() -> ::std::process::ExitCode {
+                omnia::run_main(|wasm, config, args| async move { #body }).await
+            }
         }
 
-        #entrypoint_export
+        use runtime::main;
     })
 }
 
@@ -255,10 +230,6 @@ fn connect_backends(backend_idents: &[Ident], backend_types: &[Path]) -> TokenSt
             )?;
         }
     }
-}
-
-const fn needs_tokio(config: &Config, backend_count: usize) -> bool {
-    config.gen_main || backend_count > 0
 }
 
 /// Derives a `snake_case` field name from a backend type's final path segment

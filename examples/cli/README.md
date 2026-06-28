@@ -19,7 +19,7 @@ host-wiring change.
 
   An unknown subcommand exits `2`; missing usage exits `1`.
 - [`runtime.rs`](runtime.rs) is the whole host: a single
-  `omnia::runtime!({ main: true, command: true })`. Command mode finds the sole
+  `omnia::runtime!({ command: true })`. Command mode finds the sole
   command-capable guest, instantiates it through the registry pipeline, drives
   `wasi:cli/run` once, and hands back the exit status the generated `main` exits
   with.

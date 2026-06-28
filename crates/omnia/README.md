@@ -6,14 +6,13 @@ It allows you to declaratively assemble a runtime that provides specific capabil
 
 ## Quick Start
 
-Use the `runtime!` macro to declare which WASI interfaces (`hosts`) and backends your host runtime needs. It generates the `StoreCtx`, the `Runtime` implementation, the WASI links, the trigger servers, and — with `main: true` — a `main` that parses the CLI and serves.
+Use the `runtime!` macro to declare which WASI interfaces (`hosts`) and backends your host runtime needs. It generates the `StoreCtx`, the `Runtime` implementation, the WASI links, the trigger servers, and a `main` that parses the CLI and serves.
 
 ```rust,ignore
 use omnia_wasi_http::{HttpDefault, WasiHttp};
 use omnia_wasi_otel::{OtelDefault, WasiOtel};
 
 omnia::runtime!({
-    main: true,
     hosts: {
         WasiHttp: HttpDefault,
         WasiOtel: OtelDefault,
@@ -21,7 +20,7 @@ omnia::runtime!({
 });
 ```
 
-Each `Host: Backend` pair links a WASI interface and binds it to a host backend. Set `main: false` to supply your own entry point (drive it with `omnia::Cli` and `omnia::serve`).
+Each `Host: Backend` pair links a WASI interface and binds it to a host backend. The macro always generates the `main` entry point; for a custom entry point, hand-write the runtime instead (derive `Runtime`/`StoreContext` and call `omnia::serve`).
 
 ## Core Traits
 

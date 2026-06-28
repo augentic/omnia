@@ -13,7 +13,6 @@ use syn::{LitBool, Path, Result, Token};
 /// }
 /// ```
 pub struct Config {
-    pub gen_main: bool,
     pub command: bool,
     pub hosts: Vec<Host>,
     pub backends: Vec<Path>,
@@ -21,7 +20,6 @@ pub struct Config {
 
 impl Parse for Config {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let mut main = false;
         let mut command = false;
         let mut hosts = Hosts(Vec::new());
 
@@ -31,7 +29,6 @@ impl Parse for Config {
 
         for setting in settings.into_pairs() {
             match setting.into_value() {
-                Opt::Main(m) => main = m,
                 Opt::Command(c) => command = c,
                 Opt::Host(h) => hosts = h,
             }
@@ -50,7 +47,6 @@ impl Parse for Config {
         }
 
         Ok(Self {
-            gen_main: main,
             command,
             hosts: hosts.0,
             backends,
@@ -66,7 +62,6 @@ mod kw {
 
 #[allow(clippy::large_enum_variant)]
 enum Opt {
-    Main(bool),
     Command(bool),
     Host(Hosts),
 }
@@ -75,9 +70,15 @@ impl Parse for Opt {
     fn parse(input: ParseStream) -> Result<Self> {
         let l = input.lookahead1();
         if l.peek(kw::main) {
-            input.parse::<kw::main>()?;
+            // `main:` was removed: `runtime!` now always generates `main`.
+            // Consume the setting so the error points at the offending keyword.
+            let main = input.parse::<kw::main>()?;
             input.parse::<Token![:]>()?;
-            Ok(Self::Main(input.parse::<LitBool>()?.value))
+            input.parse::<LitBool>()?;
+            Err(syn::Error::new(
+                main.span,
+                "`main:` was removed; `runtime!` always generates `main`. Remove this setting.",
+            ))
         } else if l.peek(kw::command) {
             input.parse::<kw::command>()?;
             input.parse::<Token![:]>()?;

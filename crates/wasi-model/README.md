@@ -33,7 +33,6 @@ use omnia::runtime;
 use omnia_wasi_model::ModelDefault;
 
 omnia::runtime!({
-    main: true,
     hosts: {
         WasiModel: ModelDefault,
     }
