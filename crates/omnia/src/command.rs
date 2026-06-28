@@ -36,7 +36,7 @@ use crate::traits::Runtime;
 /// Panics if the routed guest is absent from the registry — an invariant
 /// [`TriggerRouter`] upholds (the id it returns came from the registry), so a
 /// panic here signals a runtime bug.
-pub async fn run_command<R>(runtime: &R) -> Result<ExitStatus>
+pub async fn run<R>(runtime: &R) -> Result<ExitStatus>
 where
     R: Runtime,
     R::StoreCtx: WasiView + WrpcView + 'static,

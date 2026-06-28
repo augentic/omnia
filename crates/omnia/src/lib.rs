@@ -37,7 +37,6 @@ pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 // `runtime!` macro needs. Everything else (lifecycle helpers, dispatch, manifest,
 // source, routing strategy, transport carriers) is `pub` inside a private module
 // and simply not re-exported here.
-pub use self::command::run_command;
 #[cfg(feature = "jit")]
 pub use self::compile::compile;
 pub use self::create::{Compiled, RegistryBuilder};
@@ -45,9 +44,9 @@ pub use self::dispatch::{HostDispatch, serve_links};
 pub use self::options::RuntimeOptions;
 pub use self::registry::{Guest, GuestId, Registry};
 pub use self::routing::{CliRoutes, HttpRoutes, Resolver, Routes, TopicRoutes, TriggerRouter};
-pub use self::runtime::{ExitStatus, serve};
+pub use self::runtime::ExitStatus;
 #[doc(hidden)]
-pub use self::runtime::{drive, run_main};
+pub use self::runtime::{run, run_main};
 pub use self::selector::{FirstArgSelector, GuestSelector};
 // Type-state markers naming the `StoreBaseBuilder` member states; users chain the
 // setters and never name these directly, so they are hidden from the docs.
@@ -55,10 +54,6 @@ pub use self::selector::{FirstArgSelector, GuestSelector};
 pub use self::store::{Set, Unset};
 pub use self::store::{StoreBase, StoreBaseBuilder};
 pub use self::telemetry::{Telemetry, resource};
-// Macro-support: named by `runtime!`-generated code via `::omnia::…` to guard
-// host co-listing at compile time; not part of the documented public surface.
-#[doc(hidden)]
-pub use self::traits::assert_command_hosts;
 pub use self::traits::{Backend, FromEnv, FutureResult, HasLimits, Host, Runtime, Server};
 pub use self::transport::{LinkClient, WrpcState};
 // The working-tree registry (RFC-55): `WorkingTreeRegistry` is threaded into
@@ -67,6 +62,20 @@ pub use self::transport::{LinkClient, WrpcState};
 // `ResolvedPreopen` is the mount a registry is built from (a manifest `[[mount]]`
 // or an alternate runtime assembling preopens programmatically).
 pub use self::working_tree::{ResolvedPreopen, WorkingTreeEntry, WorkingTreeRegistry};
+
+/// Connect several [`Backend`]s concurrently.
+///
+/// ```ignore
+/// let (http, otel) = omnia::connect_backends!(HttpDefault, OtelDefault).await?;
+/// ```
+#[macro_export]
+macro_rules! connect_backends {
+    ($($backend:ty),* $(,)?) => {{
+        $crate::tokio::try_join!(
+            $(<$backend as $crate::Backend>::connect(),)*
+        )
+    }};
+}
 
 /// Command line interface for omnia.
 #[derive(Parser, PartialEq, Eq)]

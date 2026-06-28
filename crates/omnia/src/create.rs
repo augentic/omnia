@@ -193,7 +193,8 @@ impl<T: WasiView + 'static> Compiled<T> {
             links: plan.links,
             selector: Arc::new(FirstArgSelector),
             working_trees,
-            args,
+            args: Arc::new(args),
+            command: plan.command,
         })
     }
 }
@@ -230,7 +231,9 @@ pub struct Compiled<T: WasiView + 'static> {
     working_trees: Arc<WorkingTreeRegistry>,
     // Guest argv threaded into every store. Empty for long-lived servers; in
     // command mode the deployment name is prepended as `argv[0]`.
-    args: Vec<String>,
+    args: Arc<Vec<String>>,
+    // Whether this deployment runs a one-shot `wasi:cli` command.
+    command: bool,
 }
 
 impl<T: WasiView> Compiled<T> {
@@ -261,6 +264,12 @@ impl<T: WasiView> Compiled<T> {
         Arc::clone(&self.working_trees)
     }
 
+    /// Whether this deployment drives a one-shot `wasi:cli` command.
+    #[must_use]
+    pub const fn command(&self) -> bool {
+        self.command
+    }
+
     /// Guest argv threaded into every store. Empty for long-lived servers; in
     /// command mode the deployment's telemetry/`COMPONENT` name is prepended as
     /// `argv[0]` — the program-name convention a guest reads via
@@ -269,6 +278,12 @@ impl<T: WasiView> Compiled<T> {
     #[must_use]
     pub fn args(&self) -> &[String] {
         &self.args
+    }
+
+    /// Shared guest argv for threading into [`Runtime::store`](crate::Runtime).
+    #[must_use]
+    pub fn args_arc(&self) -> Arc<Vec<String>> {
+        Arc::clone(&self.args)
     }
 
     /// Pre-instantiate every loaded guest against the shared Linker and assemble

@@ -79,6 +79,7 @@ fn cli_wasm(target: &Path) -> Option<PathBuf> {
 async fn build_registry(wasm: &Path) -> Result<Arc<Registry<TestCtx>>> {
     let compiled = RegistryBuilder::new()
         .wasm(wasm.to_path_buf())
+        .command(true)
         .compile::<TestCtx>()
         .await
         .context("building runtime")?;
@@ -95,7 +96,7 @@ async fn run_cli(registry: &Arc<Registry<TestCtx>>, tail: &[&str]) -> Result<Exi
         args: Arc::new(argv),
     };
 
-    omnia::run_command(&runtime).await.context("running command")
+    omnia::run(&runtime, true, vec![]).await.context("running command")
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

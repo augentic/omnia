@@ -281,7 +281,7 @@ pub fn expand(config: &Config) -> TokenStream {
                     .await
                     .context("preparing runtime state")?;
 
-                omnia::drive(&run_state, #command, #servers)
+                omnia::run(&run_state, #command, #servers)
                     .await
                     .context("running deployment")
             }
@@ -403,9 +403,9 @@ impl Parse for Host {
 /// Kept in sync with the host crates that set `IS_SERVER` to `true`. Used only
 /// to omit trigger wiring in command mode at macro-expansion time.
 fn is_trigger_host(path: &Path) -> bool {
-    path.segments
-        .last()
-        .is_some_and(|segment| matches!(segment.ident.to_string().as_str(), "WasiHttp" | "WasiMessaging" | "WasiWebSocket"))
+    path.segments.last().is_some_and(|segment| {
+        matches!(segment.ident.to_string().as_str(), "WasiHttp" | "WasiMessaging" | "WasiWebSocket")
+    })
 }
 
 /// Derives a `snake_case` field name from a backend type's final path segment

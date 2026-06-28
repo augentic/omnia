@@ -19,7 +19,7 @@ use wasmtime::Engine;
 use wasmtime_wasi::WasiView;
 use wrpc_wasmtime::WrpcView;
 
-use crate::command::run_command;
+use crate::command;
 use crate::dispatch::serve_links;
 use crate::traits::Runtime;
 use crate::{Cli, Command};
@@ -111,52 +111,6 @@ where
     Ok(())
 }
 
-/// Drive a long-lived deployment: `prepare` the runtime, then run every trigger
-/// server to completion.
-///
-/// Every server shares the runtime's single [`Registry`](crate::Registry) and
-/// therefore one `Engine`, so per-request instantiation draws from one pool.
-/// This is the fixed orchestration the `runtime!` macro previously inlined; the
-/// only deployment-specific input is the `servers` list.
-///
-/// # Errors
-///
-/// Returns an error if `prepare` fails, or if any server returns an error (the
-/// first error cancels the rest).
-pub async fn serve<R: Runtime>(runtime: &R, servers: Vec<BoxFuture<'_, Result<()>>>) -> Result<()>
-where
-    R::StoreCtx: WasiView + WrpcView + 'static,
-{
-    prepare(runtime).await?;
-    try_join_all(servers).await?;
-    Ok(())
-}
-
-/// Drive a deployment after runtime state is built: a one-shot `wasi:cli` command
-/// or every long-lived trigger server to completion.
-///
-/// When `command` is `true`, `servers` is ignored and [`run_command`] is invoked.
-/// Otherwise [`serve`] runs every future in `servers` concurrently and returns
-/// [`ExitStatus::SUCCESS`] on clean shutdown.
-///
-/// # Errors
-///
-/// Returns an error if preparation, command execution, or any server fails.
-#[doc(hidden)]
-pub async fn drive<R: Runtime>(
-    runtime: &R, command: bool, servers: Vec<BoxFuture<'_, Result<()>>>,
-) -> Result<ExitStatus>
-where
-    R::StoreCtx: WasiView + WrpcView + 'static,
-{
-    if command {
-        run_command(runtime).await
-    } else {
-        serve(runtime, servers).await.context("starting runtime services")?;
-        Ok(ExitStatus::SUCCESS)
-    }
-}
-
 /// Parse the CLI `run` subcommand and map the outcome to a process exit code.
 ///
 /// Generated `main` functions delegate here so CLI parsing and error reporting
@@ -188,6 +142,33 @@ where
             );
             ExitCode::FAILURE
         }
+    }
+}
+
+/// Drive a deployment after runtime state is built: a one-shot `wasi:cli` command
+/// or every long-lived trigger server to completion.
+///
+/// When `command` is `true`, `servers` is ignored and [`run_command`] is invoked.
+/// Otherwise [`serve`] runs every future in `servers` concurrently and returns
+/// [`ExitStatus::SUCCESS`] on clean shutdown.
+///
+/// # Errors
+///
+/// Returns an error if preparation, command execution, or any server fails.
+#[doc(hidden)]
+pub async fn run<R: Runtime>(
+    runtime: &R, command: bool, servers: Vec<BoxFuture<'_, Result<()>>>,
+) -> Result<ExitStatus>
+where
+    R::StoreCtx: WasiView + WrpcView + 'static,
+{
+    if command {
+        command::run(runtime).await
+    } else {
+        prepare(runtime).await?;
+        try_join_all(servers).await?;
+
+        Ok(ExitStatus::SUCCESS)
     }
 }
 

@@ -141,36 +141,6 @@ pub trait Server<R: Runtime>: Debug + Sync + Send {
     }
 }
 
-/// Compile-time guard that a hand-written runtime links no long-lived trigger
-/// server in a `command` deployment.
-///
-/// The `runtime!` macro skips [`Server::IS_SERVER`] hosts when linking in command
-/// mode instead of calling this helper. Hand-written runtimes may still call it
-/// to fail the build when a long-lived trigger would block
-/// [`run_command`](crate::run_command) forever.
-///
-/// Keyed on [`Server::IS_SERVER`], so the set of long-lived triggers is defined
-/// by the types themselves rather than a name list inside the macro.
-///
-/// # Panics
-///
-/// Panics (at compile time, as a `const` evaluation error) when any entry of
-/// `hosts` is `true`.
-pub const fn assert_command_hosts(hosts: &[bool]) {
-    let mut index = 0;
-    while index < hosts.len() {
-        assert!(
-            !hosts[index],
-            "a `command: true` deployment cannot link a long-lived trigger server (`WasiHttp`, \
-             `WasiMessaging`, `WasiWebSocket`): a command runs to completion and exits, but the \
-             server would run forever. Use the default `command: false` for a server deployment, \
-             or drop the trigger host — capability hosts (`WasiKeyValue`, `WasiBlobstore`, ...) \
-             are fine to link."
-        );
-        index += 1;
-    }
-}
-
 /// Implemented by backend resources to allow the backend to be connected to a
 /// WASI component.
 pub trait Backend: Sized + Sync + Send {
@@ -183,7 +153,7 @@ pub trait Backend: Sized + Sync + Send {
         async { Self::connect_with(Self::ConnectOptions::from_env()?).await }
     }
 
-    /// Connect to the resource with the specified options.
+    /// Connect with the specified options.
     fn connect_with(options: Self::ConnectOptions) -> impl Future<Output = Result<Self>>;
 }
 
@@ -199,7 +169,23 @@ pub trait FromEnv: Sized {
 
 #[cfg(test)]
 mod tests {
-    use super::assert_command_hosts;
+    /// Compile-time guard that a runtime links no long-lived trigger server in
+    /// command mode. The `runtime!` macro enforces this by skipping
+    /// [`Server::IS_SERVER`] hosts when linking instead.
+    const fn assert_command_hosts(hosts: &[bool]) {
+        let mut index = 0;
+        while index < hosts.len() {
+            assert!(
+                !hosts[index],
+                "a `command: true` deployment cannot link a long-lived trigger server (`WasiHttp`, \
+                 `WasiMessaging`, `WasiWebSocket`): a command runs to completion and exits, but the \
+                 server would run forever. Use the default `command: false` for a server deployment, \
+                 or drop the trigger host — capability hosts (`WasiKeyValue`, `WasiBlobstore`, ...) \
+                 are fine to link."
+            );
+            index += 1;
+        }
+    }
 
     #[test]
     fn capability_only_is_allowed() {
