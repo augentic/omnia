@@ -2,8 +2,6 @@
 //!
 //! Generates the token streams fragements required to expand the runtime macro.
 
-use std::collections::BTreeMap;
-
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Ident, Path};
@@ -26,20 +24,7 @@ impl From<&Config> for Codegen {
     fn from(config: &Config) -> Self {
         let host_trait_impls =
             config.hosts.iter().map(|host| host.type_.clone()).collect::<Vec<Path>>();
-        let structural = structural(config, &host_trait_impls);
-
-        let backend_types = structural
-            .backend_idents
-            .iter()
-            .map(|ident| {
-                config
-                    .backends
-                    .iter()
-                    .find(|backend| parse::field_ident(backend) == *ident)
-                    .expect("wired backend must be declared in `hosts`")
-            })
-            .cloned()
-            .collect::<Vec<Path>>();
+        let structural = structural(config);
 
         Self {
             command_assert: command_assert(config.command, &host_trait_impls),
@@ -48,7 +33,9 @@ impl From<&Config> for Codegen {
             bundle_fields: structural.bundle_fields,
             store_assignments: structural.store_assignments,
             backend_idents: structural.backend_idents,
-            backend_types,
+            // `backend_idents` is built positionally from `config.backends`, so the
+            // connected backend types are exactly that (deduplicated) list.
+            backend_types: config.backends.clone(),
             host_trait_impls,
         }
     }
@@ -61,26 +48,29 @@ struct Structural {
     backend_idents: Vec<Ident>,
 }
 
-fn structural(config: &Config, host_trait_impls: &[Path]) -> Structural {
+fn structural(config: &Config) -> Structural {
     let mut store_ctx_fields = Vec::new();
-    let mut store_targets: BTreeMap<String, Vec<Ident>> = BTreeMap::new();
+    let mut store_assignments = Vec::new();
 
-    for (host, host_type) in config.hosts.iter().zip(host_trait_impls) {
+    for host in &config.hosts {
         let Some(backend_type) = &host.backend else {
             continue;
         };
 
-        let host_ident = parse::wasi_ident(host_type);
-        let backend_ident = parse::field_ident(backend_type);
+        let host_ident = parse::wasi_ident(&host.type_);
+        let field = parse::field_ident(backend_type);
         store_ctx_fields.push(quote! {
             #[wasi(#host_ident)]
             pub #host_ident: #backend_type
         });
-        store_targets.entry(backend_ident.to_string()).or_default().push(host_ident);
+        // Clone the backend into this host's view field; a backend that backs
+        // several hosts naturally yields one assignment per host.
+        store_assignments.push(quote! {
+            #host_ident: backends.#field.clone()
+        });
     }
 
     let mut bundle_fields = Vec::new();
-    let mut store_assignments = Vec::new();
     let mut backend_idents = Vec::new();
 
     for backend in &config.backends {
@@ -88,17 +78,6 @@ fn structural(config: &Config, host_trait_impls: &[Path]) -> Structural {
         bundle_fields.push(quote! {
             #field: #backend
         });
-
-        // Clone this backend into each host-view field it backs (one backend may
-        // back several hosts).
-        if let Some(targets) = store_targets.get(&field.to_string()) {
-            for target in targets {
-                store_assignments.push(quote! {
-                    #target: backends.#field.clone()
-                });
-            }
-        }
-
         backend_idents.push(field);
     }
 

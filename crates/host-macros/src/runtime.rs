@@ -33,6 +33,8 @@ pub fn expand(config: &Config) -> TokenStream {
         (
             quote! { Backends },
             quote! {
+                use omnia::Backend;
+
                 // One connected backend per declared `Host: Backend` wiring.
                 #[derive(Clone)]
                 struct Backends {
@@ -55,7 +57,7 @@ pub fn expand(config: &Config) -> TokenStream {
         mod runtime {
             use anyhow::Result;
             use omnia::tokio;
-            use omnia::{Backend, Server, StoreBase, StoreContext};
+            use omnia::{Server, StoreBase, StoreContext};
 
             use super::*;
 
@@ -88,8 +90,8 @@ pub fn expand(config: &Config) -> TokenStream {
             pub async fn main() -> ::std::process::ExitCode {
                 omnia::main::<Ctx, _, _, _>(
                     #command,
-                    |compiled| Ctx::new(compiled, |compiled| {
-                        #(compiled.host::<#host_trait_impls, Ctx>()?;)*
+                    |compiled| Ctx::new(compiled, |c| {
+                        #(c.host::<#host_trait_impls, Ctx>()?;)*
                         Ok(())
                     }),
                     |ctx| {
