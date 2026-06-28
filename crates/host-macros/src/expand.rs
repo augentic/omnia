@@ -23,10 +23,51 @@ pub fn expand(config: &Config) -> syn::Result<TokenStream> {
         command_guard,
     } = Expanded::try_from(config)?;
 
-    let Entrypoint {
-        tokens: entrypoint,
-        exports: entrypoint_export,
-    } = Entrypoint::try_from(config)?;
+    let command = config.command;
+    let servers = if command {
+        quote! { vec![] }
+    } else {
+        quote! { vec![#(Box::pin(#host_trait_impls.run(&run_state)),)*] }
+    };
+
+    // let body = run_body(config.command, &host_trait_impls);
+    let body = quote! {
+        let compiled = omnia::RegistryBuilder::new()
+            .wasm(wasm)
+            .config(config)
+            .compile::<StoreCtx>()
+            .await
+            .context("building runtime")?;
+        let run_state = Context::new(compiled, Arc::new(args), #command)
+            .await
+            .context("preparing runtime state")?;
+        omnia::drive(&run_state, #command, #servers)
+            .await
+            .context("running deployment")
+    };
+
+    let (entrypoint, entrypoint_export) = if config.gen_main {
+        (
+            quote! {
+                #[tokio::main]
+                pub async fn main() -> ::std::process::ExitCode {
+                    omnia::run_main(|wasm, config, args| async move { #body }).await
+                }
+            },
+            quote! { use runtime::main; },
+        )
+    } else {
+        (
+            quote! {
+                pub async fn run(
+                    wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>,
+                ) -> Result<omnia::ExitStatus> {
+                    #body
+                }
+            },
+            quote! {},
+        )
+    };
 
     let connect_backends = connect_backends(&backend_idents, &backend_types);
     let tokio_import = if needs_tokio(config, backend_idents.len()) {
@@ -127,43 +168,6 @@ struct Expanded {
     command_guard: TokenStream,
 }
 
-struct Entrypoint {
-    tokens: TokenStream,
-    exports: TokenStream,
-}
-
-impl TryFrom<&Config> for Entrypoint {
-    type Error = syn::Error;
-
-    fn try_from(config: &Config) -> Result<Self, Self::Error> {
-        let Expanded { host_trait_impls, .. } = Expanded::try_from(config)?;
-        let body = run_body(config.command, &host_trait_impls);
-
-        if config.gen_main {
-            Ok(Self {
-                tokens: quote! {
-                    #[tokio::main]
-                    pub async fn main() -> ::std::process::ExitCode {
-                        omnia::run_main(|wasm, config, args| async move { #body }).await
-                    }
-                },
-                exports: quote! { use runtime::main; },
-            })
-        } else {
-            Ok(Self {
-                tokens: quote! {
-                    pub async fn run(
-                        wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>,
-                    ) -> Result<omnia::ExitStatus> {
-                        #body
-                    }
-                },
-                exports: quote! {},
-            })
-        }
-    }
-}
-
 impl TryFrom<&Config> for Expanded {
     type Error = syn::Error;
 
@@ -238,35 +242,6 @@ impl TryFrom<&Config> for Expanded {
             host_trait_impls,
             command_guard,
         })
-    }
-}
-
-/// Shared deployment orchestration for generated `main` and `run`.
-///
-/// Expands to a block that expects `wasm`, `config`, and `args` in scope and
-/// evaluates to `Result<omnia::ExitStatus>`.
-fn run_body(command: bool, hosts: &[Path]) -> TokenStream {
-    let servers = if command {
-        quote! { vec![] }
-    } else {
-        quote! {
-            vec![#(Box::pin(#hosts.run(&run_state)),)*]
-        }
-    };
-
-    quote! {
-        let compiled = omnia::RegistryBuilder::new()
-            .wasm(wasm)
-            .config(config)
-            .compile::<StoreCtx>()
-            .await
-            .context("building runtime")?;
-        let run_state = Context::new(compiled, Arc::new(args), #command)
-            .await
-            .context("preparing runtime state")?;
-        omnia::drive(&run_state, #command, #servers)
-            .await
-            .context("running deployment")
     }
 }
 
