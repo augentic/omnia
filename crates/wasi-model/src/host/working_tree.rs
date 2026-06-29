@@ -47,41 +47,39 @@ impl WorkingTree {
         &self.local_path
     }
 
-    pub fn read(&self, path: String) -> FutureResult<Vec<u8>> {
+    // Off-thread a bounded, blocking cap-std op against the mount, tagging a
+    // task-join failure with `op`.
+    fn run_blocking<R: Send + 'static>(
+        &self, op: &'static str, f: impl FnOnce(&Dir) -> anyhow::Result<R> + Send + 'static,
+    ) -> FutureResult<R> {
         let dir = Arc::clone(&self.dir);
         async move {
-            spawn_blocking(move || read_blocking(&dir, &path))
+            spawn_blocking(move || f(&dir))
                 .await
                 .context("working-tree read task failed")?
         }
         .boxed()
     }
 
+    pub fn read(&self, path: String) -> FutureResult<Vec<u8>> {
+        self.run_blocking("read", move |dir| read_blocking(dir, &path))
+    }
+
     pub fn list(&self, path: String) -> FutureResult<Vec<DirEntry>> {
-        let dir = Arc::clone(&self.dir);
-        async move {
-            spawn_blocking(move || list_blocking(&dir, &path))
-                .await
-                .context("working-tree list task failed")?
-        }
-        .boxed()
+        self.run_blocking("list", move |dir| list_blocking(dir, &path))
     }
 
     pub fn write(&self, path: String, bytes: Vec<u8>) -> FutureResult<()> {
         if !self.writable {
-            return async move {
-                Err(anyhow!("working tree is read-only; write to `{path}` denied"))
-            }
-            .boxed();
+            return ready_err(anyhow!("working tree is read-only; write to `{path}` denied"));
         }
-        let dir = Arc::clone(&self.dir);
-        async move {
-            spawn_blocking(move || write_blocking(&dir, &path, &bytes))
-                .await
-                .context("working-tree write task failed")?
-        }
-        .boxed()
+        self.run_blocking("write", move |dir| write_blocking(dir, &path, &bytes))
     }
+}
+
+// A ready future already resolved to `err`.
+fn ready_err<R: Send + 'static>(err: anyhow::Error) -> FutureResult<R> {
+    async move { Err(err) }.boxed()
 }
 
 // Run `f` against a lent tree, or fail with a grant error.
@@ -89,7 +87,7 @@ pub fn with_tree<R: Send + 'static>(
     tree: Option<&WorkingTree>, tool: &'static str, f: impl FnOnce(&WorkingTree) -> FutureResult<R>,
 ) -> FutureResult<R> {
     tree.map_or_else(
-        || async move { Err(anyhow!("tool `{tool}` missing grants.working-tree")) }.boxed(),
+        || ready_err(anyhow!("tool `{tool}` missing grants.working-tree")),
         |tree| f(tree),
     )
 }
