@@ -38,7 +38,7 @@ pub use self::store::{HasHttp, StoreBase, StoreBaseBuilder, StoreCtx};
 pub use self::store::{Set, Unset};
 pub use self::telemetry::{Telemetry, resource};
 #[doc(hidden)]
-pub use self::traits::assert_hosts;
+pub use self::runtime::assert_hosts;
 pub use self::traits::{Backend, Backends, FromEnv, FutureResult, HasLimits, Host, Server};
 pub use self::working_tree::{ResolvedPreopen, WorkingTreeEntry, WorkingTreeRegistry};
 

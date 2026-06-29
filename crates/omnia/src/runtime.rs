@@ -2,6 +2,36 @@
 
 mod command;
 
+/// Compile-time guard that a `command: true` deployment includes no long-lived
+/// trigger server.
+///
+/// The `runtime!` macro emits
+/// `const _: () = omnia::assert_hosts(&[<Host as Server<_>>::IS_SERVER, …]);`
+/// for a command deployment, so listing a trigger host (`WasiHttp`,
+/// `WasiMessaging`, `WasiWebSocket`) is a build error rather than a silently
+/// dropped host. The values come straight from [`Server::IS_SERVER`](crate::Server::IS_SERVER), so a newly
+/// added trigger is covered without editing the macro.
+///
+/// # Panics
+///
+/// Panics if any element is `true` (a host is a long-lived trigger server). In
+/// the macro's const context this surfaces as a compile error.
+#[doc(hidden)]
+pub const fn assert_hosts(hosts: &[bool]) {
+    let mut index = 0;
+    while index < hosts.len() {
+        assert!(
+            !hosts[index],
+            "a `command: true` deployment cannot link a long-lived trigger server (`WasiHttp`, \
+             `WasiMessaging`, `WasiWebSocket`): a command runs to completion and exits, but the \
+             server would run forever. Use the default `command: false` for a server deployment, \
+             or drop the trigger host — capability hosts (`WasiKeyValue`, `WasiBlobstore`, ...) \
+             are fine to link."
+        );
+        index += 1;
+    }
+}
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -297,7 +327,26 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
 
 #[cfg(test)]
 mod tests {
-    use super::ExitStatus;
+    use super::{ExitStatus, assert_hosts};
+
+    #[test]
+    fn capability_only_is_allowed() {
+        // A command deployment with only capability hosts (every `IS_SERVER`
+        // false) is fine.
+        assert_hosts(&[false, false, false]);
+    }
+
+    #[test]
+    fn empty_is_allowed() {
+        assert_hosts(&[]);
+    }
+
+    #[test]
+    #[should_panic(expected = "long-lived trigger server")]
+    fn long_lived_server_is_rejected() {
+        // Any `true` (a long-lived trigger) in a command deployment fails.
+        assert_hosts(&[false, true]);
+    }
 
     #[test]
     fn success_is_zero() {

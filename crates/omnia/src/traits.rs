@@ -49,6 +49,8 @@ pub trait Server<B>: Debug + Sync + Send {
     /// Defaults to `false`: a capability host with the no-op [`run`](Self::run)
     /// (e.g. `WasiKeyValue`, `WasiBlobstore`, `WasiOtel`). The `runtime!` macro
     /// reads this flag from the *type system* — to select which hosts to `run`.
+    /// For `command: true` deployments, [`assert_hosts`](crate::assert_hosts)
+    /// rejects any host with `IS_SERVER = true`.
     const IS_SERVER: bool = false;
 
     /// Start the service.
@@ -58,36 +60,6 @@ pub trait Server<B>: Debug + Sync + Send {
     #[allow(unused_variables)]
     fn run(&self, state: &Runtime<B>) -> impl Future<Output = Result<()>> {
         async { Ok(()) }
-    }
-}
-
-/// Compile-time guard that a `command: true` deployment includes no long-lived
-/// trigger server.
-///
-/// The `runtime!` macro emits
-/// `const _: () = omnia::assert_hosts(&[<Host as Server<_>>::IS_SERVER, …]);`
-/// for a command deployment, so listing a trigger host (`WasiHttp`,
-/// `WasiMessaging`, `WasiWebSocket`) is a build error rather than a silently
-/// dropped host. The values come straight from [`Server::IS_SERVER`], so a newly
-/// added trigger is covered without editing the macro.
-///
-/// # Panics
-///
-/// Panics if any element is `true` (a host is a long-lived trigger server). In
-/// the macro's const context this surfaces as a compile error.
-#[doc(hidden)]
-pub const fn assert_hosts(hosts: &[bool]) {
-    let mut index = 0;
-    while index < hosts.len() {
-        assert!(
-            !hosts[index],
-            "a `command: true` deployment cannot link a long-lived trigger server (`WasiHttp`, \
-             `WasiMessaging`, `WasiWebSocket`): a command runs to completion and exits, but the \
-             server would run forever. Use the default `command: false` for a server deployment, \
-             or drop the trigger host — capability hosts (`WasiKeyValue`, `WasiBlobstore`, ...) \
-             are fine to link."
-        );
-        index += 1;
     }
 }
 
@@ -141,29 +113,5 @@ pub trait Backends: Clone + Send + Sync + 'static {
 impl Backends for () {
     async fn connect() -> Result<Self> {
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::assert_hosts;
-
-    #[test]
-    fn capability_only_is_allowed() {
-        // A command deployment with only capability hosts (every `IS_SERVER`
-        // false) is fine.
-        assert_hosts(&[false, false, false]);
-    }
-
-    #[test]
-    fn empty_is_allowed() {
-        assert_hosts(&[]);
-    }
-
-    #[test]
-    #[should_panic(expected = "long-lived trigger server")]
-    fn long_lived_server_is_rejected() {
-        // Any `true` (a long-lived trigger) in a command deployment fails.
-        assert_hosts(&[false, true]);
     }
 }
