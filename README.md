@@ -14,17 +14,8 @@ While it can be used standalone, Omnia is primarily designed to be the runtime f
 ## Features
 
 - **WASI 0.2 support**: Full support for the Component Model and WASI Preview 2.
-- **Host Services**:
-  - **HTTP**: Outbound requests and incoming server handling
-  - **Key-Value**: Simple get/set/delete operations (default: in-memory)
-  - **Messaging**: Pub/Sub patterns (default: in-memory broadcast)
-  - **SQL**: Database access via ORM (default: SQLite)
-  - **Observability**: OpenTelemetry tracing and metrics built-in
-  - **Blobstore**: Supports blob storage and retrieval operations 
-  - **Identity**: Basic access token provisioning for guest components
-- **Macros**:
-  - `runtime!`: Declaratively configure your host runtime.
-  - `guest!`: Wire up guest handlers with minimal code.
+- **Host Services**: - **HTTP**: Outbound requests and incoming server handling - **Key-Value**: Simple get/set/delete operations (default: in-memory) - **Messaging**: Pub/Sub patterns (default: in-memory broadcast) - **SQL**: Database access via ORM (default: SQLite) - **Observability**: OpenTelemetry tracing and metrics built-in - **Blobstore**: Supports blob storage and retrieval operations - **Identity**: Basic access token provisioning for guest components
+- **Macros**: - `runtime!`: Declaratively configure your host runtime. - `guest!`: Wire up guest handlers with minimal code.
 
 ## Examples
 

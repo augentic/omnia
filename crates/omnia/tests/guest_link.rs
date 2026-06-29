@@ -1,7 +1,7 @@
 //! Integration test for host-mediated dynamic linking (Phase 2 of
 //! `rfcs/guest-registry.md`).
 //!
-//! Builds the `examples/linking` deployment — `router` imports `omnia:link/echo`,
+//! Builds the `examples/guest-link` deployment — `router` imports `omnia:link/echo`,
 //! `responder` exports it — wires the serve side, and drives `router.run`. It
 //! proves the end-to-end dispatch: the call routes through the floor's selector
 //! to the responder over the in-process wRPC carrier, the responder is
@@ -14,8 +14,8 @@
 //! before running tests:
 //!
 //! ```bash
-//! cargo build -p examples --example linking-responder-wasm \
-//!   --example linking-router-wasm --target wasm32-wasip2
+//! cargo build -p examples --example guest-link-responder-wasm \
+//!   --example guest-link-router-wasm --target wasm32-wasip2
 //! ```
 
 #![cfg(not(target_arch = "wasm32"))]
@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
-use omnia::{DeploymentBuilder, GuestId, Runtime, WorkingTreeRegistry, serve_links};
+use omnia::{DeploymentBuilder, GuestId, MountRegistry, Runtime, serve_links};
 
 /// Per-store context: the library [`omnia::StoreCtx`] over the counting
 /// [`Counter`] bundle. No host backend — the link path needs only the WASI and
@@ -97,21 +97,21 @@ async fn call_run(runtime: &Runtime<Counter>, message: &str) -> Result<String> {
 async fn router_dispatches_to_responder() -> Result<()> {
     let target = target_dir();
     let (Some(responder), Some(router)) = (
-        guest_wasm(&target, "linking_responder_wasm.wasm"),
-        guest_wasm(&target, "linking_router_wasm.wasm"),
+        guest_wasm(&target, "guest_link_responder_wasm.wasm"),
+        guest_wasm(&target, "guest_link_router_wasm.wasm"),
     ) else {
         eprintln!(
-            "skipping `router_dispatches_to_responder`: linking guests not built. Run:\n  \
-             cargo build -p examples --example linking-responder-wasm \
-             --example linking-router-wasm --target wasm32-wasip2"
+            "skipping `router_dispatches_to_responder`: guest-link guests not built. Run:\n  \
+             cargo build -p examples --example guest-link-responder-wasm \
+             --example guest-link-router-wasm --target wasm32-wasip2"
         );
         return Ok(());
     };
 
-    // A manifest mirroring examples/linking/omnia.toml, with absolute source paths
+    // A manifest mirroring examples/guest-link/omnia.toml, with absolute source paths
     // so it resolves regardless of the working directory.
     let manifest_path =
-        std::env::temp_dir().join(format!("omnia-linking-{}.toml", std::process::id()));
+        std::env::temp_dir().join(format!("omnia-guest-link-{}.toml", std::process::id()));
     let manifest = format!(
         "[[guest]]\n\
          id = \"responder\"\n\
@@ -135,7 +135,7 @@ async fn router_dispatches_to_responder() -> Result<()> {
     let runtime = Runtime::<Counter>::from_parts(
         Arc::new(registry),
         Vec::new(),
-        Arc::new(WorkingTreeRegistry::default()),
+        Arc::new(MountRegistry::default()),
         Counter {
             clones: Arc::clone(&clones),
         },

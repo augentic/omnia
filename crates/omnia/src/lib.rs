@@ -4,13 +4,13 @@
 mod cli;
 mod deployment;
 mod dispatch;
+mod mount;
 mod options;
 mod registry;
 mod runtime;
 mod store;
 mod telemetry;
 mod traits;
-mod working_tree;
 
 pub use clap::Parser;
 pub use omnia_host_macros::runtime;
@@ -24,12 +24,15 @@ pub use self::deployment::{Deployment, DeploymentBuilder};
 pub use self::dispatch::{
     FirstArgSelector, GuestSelector, HostDispatch, LinkClient, WrpcState, serve_links,
 };
+pub use self::mount::{Mount, MountRegistry, ResolvedPreopen};
 pub use self::options::RuntimeOptions;
 #[cfg(feature = "jit")]
 pub use self::options::compile;
 pub use self::registry::{
     CliRoutes, Guest, GuestId, HttpRoutes, Registry, Resolver, Routes, TopicRoutes, TriggerRouter,
 };
+#[doc(hidden)]
+pub use self::runtime::assert_hosts;
 pub use self::runtime::{ExitStatus, Runtime, RuntimeHooks};
 #[doc(hidden)]
 pub use self::runtime::{main, run};
@@ -37,10 +40,7 @@ pub use self::store::{HasHttp, StoreBase, StoreBaseBuilder, StoreCtx};
 #[doc(hidden)]
 pub use self::store::{Set, Unset};
 pub use self::telemetry::{Telemetry, resource};
-#[doc(hidden)]
-pub use self::runtime::assert_hosts;
 pub use self::traits::{Backend, Backends, FromEnv, FutureResult, HasLimits, Host, Server};
-pub use self::working_tree::{ResolvedPreopen, WorkingTreeEntry, WorkingTreeRegistry};
 
 /// Generates the linker-facing view scaffold that every `omnia` WASI host crate
 /// repeats verbatim (only the names change):

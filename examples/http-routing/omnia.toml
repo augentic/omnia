@@ -6,15 +6,15 @@
 # Source paths are resolved relative to this file's directory. Build the guests
 # first (see README.md), then run from the repository root:
 #
-#   cargo run --example routing -- run --config examples/routing/omnia.toml
+#   cargo run --example http-routing -- run --config examples/http-routing/omnia.toml
 
 [[guest]]
 id = "a"
-source.path = "../../target/wasm32-wasip2/debug/examples/routing_a_wasm.wasm"
+source.path = "../../target/wasm32-wasip2/debug/examples/http_routing_a_wasm.wasm"
 
 [[guest]]
 id = "b"
-source.path = "../../target/wasm32-wasip2/debug/examples/routing_b_wasm.wasm"
+source.path = "../../target/wasm32-wasip2/debug/examples/http_routing_b_wasm.wasm"
 
 [[route.http]]
 prefix = "/a"

@@ -11,15 +11,15 @@
 #
 # Build the guests first (see README.md), then run from the repository root:
 #
-#   cargo run --example linking -- run --config examples/linking/omnia.toml
+#   cargo run --example guest-link -- run --config examples/guest-link/omnia.toml
 
 [[guest]]
 id = "responder"
-source.path = "../../target/wasm32-wasip2/debug/examples/linking_responder_wasm.wasm"
+source.path = "../../target/wasm32-wasip2/debug/examples/guest_link_responder_wasm.wasm"
 
 [[guest]]
 id = "router"
-source.path = "../../target/wasm32-wasip2/debug/examples/linking_router_wasm.wasm"
+source.path = "../../target/wasm32-wasip2/debug/examples/guest_link_router_wasm.wasm"
 # The host-mediated imports this guest is allowed to reach. The floor wires each
 # named interface onto the shared linker and dispatches it to whichever guest
 # exports it (here, `responder`).

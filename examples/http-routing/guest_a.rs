@@ -21,5 +21,5 @@ impl Guest for GuestA {
 
 /// Respond to any path with this guest's identity.
 async fn respond() -> &'static str {
-    "routing example: guest a\n"
+    "http-routing example: guest a\n"
 }

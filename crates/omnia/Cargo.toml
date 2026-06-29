@@ -68,7 +68,7 @@ wasmtime-wasi-http.workspace = true
 wrpc-transport.workspace = true
 wrpc-wasmtime.workspace = true
 
-# The host-mediated dynamic-linking integration test (`tests/linking.rs`) drives
+# The host-mediated dynamic-linking integration test (`tests/guest_link.rs`) drives
 # a router->responder dispatch on a multi-thread runtime; wasmtime / wasmtime-wasi
 # types come from the crate's own re-exports, so they need no dev-dependency.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]

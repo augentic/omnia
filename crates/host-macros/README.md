@@ -56,32 +56,23 @@ runtime!({
 
 ### Supported Interfaces
 
-- **`http`**: HTTP client and server
-  - Backend: `WasiHttpCtx` (marker type, no backend connection needed)
+- **`http`**: HTTP client and server - Backend: `WasiHttpCtx` (marker type, no backend connection needed)
 
-- **`otel`**: OpenTelemetry observability
-  - Backend: `DefaultOtel` (connects to OTEL collector)
+- **`otel`**: OpenTelemetry observability - Backend: `DefaultOtel` (connects to OTEL collector)
 
-- **`blobstore`**: Object/blob storage
-  - Backends: `MongoDb` or `Nats`
+- **`blobstore`**: Object/blob storage - Backends: `MongoDb` or `Nats`
 
-- **`keyvalue`**: Key-value storage
-  - Backends: `Nats` or `Redis`
+- **`keyvalue`**: Key-value storage - Backends: `Nats` or `Redis`
 
-- **`messaging`**: Pub/sub messaging
-  - Backends: `Nats` or `Kafka`
+- **`messaging`**: Pub/sub messaging - Backends: `Nats` or `Kafka`
 
-- **`vault`**: Secrets management
-  - Backend: `Azure` (Azure Key Vault)
+- **`vault`**: Secrets management - Backend: `Azure` (Azure Key Vault)
 
-- **`sql`**: SQL database
-  - Backend: `Postgres`
+- **`sql`**: SQL database - Backend: `Postgres`
 
-- **`identity`**: Identity and authentication
-  - Backend: `Azure` (Azure Identity)
+- **`identity`**: Identity and authentication - Backend: `Azure` (Azure Identity)
 
-- **`websocket`**: WebSocket connections
-  - Backend: `WebSocketCtxImpl` (default implementation for development use)
+- **`websocket`**: WebSocket connections - Backend: `WebSocketCtxImpl` (default implementation for development use)
 
 ## Generated Code
 

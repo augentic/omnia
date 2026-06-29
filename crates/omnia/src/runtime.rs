@@ -45,8 +45,8 @@ use wasmtime::{Engine, Store};
 
 use crate::cli::{Cli, Command};
 use crate::dispatch::serve_links;
+use crate::mount::MountRegistry;
 use crate::traits::{Backends, HasLimits};
-use crate::working_tree::WorkingTreeRegistry;
 use crate::{Deployment, DeploymentBuilder, Registry, RuntimeOptions, StoreBase, StoreCtx};
 
 /// Host linking and trigger-server startup for a deployment.
@@ -206,11 +206,11 @@ impl From<ExitStatus> for std::process::ExitCode {
     }
 }
 
-/// Connected host runtime: registry, argv, working trees, and backend bundle.
+/// Connected host runtime: registry, argv, mounts, and backend bundle.
 pub struct Runtime<B: 'static> {
     registry: Arc<Registry<StoreCtx<B>>>,
     args: Arc<Vec<String>>,
-    working_trees: Arc<WorkingTreeRegistry>,
+    mounts: Arc<MountRegistry>,
     backends: B,
 }
 
@@ -227,12 +227,12 @@ impl<B: Backends> Runtime<B> {
         let args = Arc::new(deployment.args().to_vec());
         link(&mut deployment).context("linking hosts")?;
         let backends = B::connect().await.context("connecting backends")?;
-        let working_trees = deployment.working_trees();
+        let mounts = deployment.mounts();
 
         Ok(Self {
             registry: Arc::new(deployment.build().context("assembling registry")?),
             args,
-            working_trees,
+            mounts,
             backends,
         })
     }
@@ -244,7 +244,7 @@ impl<B: Clone + Send + Sync + 'static> Clone for Runtime<B> {
         Self {
             registry: Arc::clone(&self.registry),
             args: Arc::clone(&self.args),
-            working_trees: Arc::clone(&self.working_trees),
+            mounts: Arc::clone(&self.mounts),
             backends: self.backends.clone(),
         }
     }
@@ -254,13 +254,13 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// Build a runtime from an already-assembled registry and backend bundle.
     #[must_use]
     pub fn from_parts(
-        registry: Arc<Registry<StoreCtx<B>>>, args: Vec<String>,
-        working_trees: Arc<WorkingTreeRegistry>, backends: B,
+        registry: Arc<Registry<StoreCtx<B>>>, args: Vec<String>, mounts: Arc<MountRegistry>,
+        backends: B,
     ) -> Self {
         Self {
             registry,
             args: Arc::new(args),
-            working_trees,
+            mounts,
             backends,
         }
     }
@@ -284,7 +284,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
             .options(self.options())
             .dispatch(Arc::new(self.clone()))
             .args(&self.args)
-            .working_trees(Arc::clone(&self.working_trees))
+            .mounts(Arc::clone(&self.mounts))
             .build();
         StoreCtx {
             base,

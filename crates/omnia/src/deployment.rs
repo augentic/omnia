@@ -17,8 +17,8 @@ use wasmtime_wasi::WasiView;
 use wrpc_wasmtime::WrpcView;
 
 use crate::dispatch::{DispatchHandle, FirstArgSelector, GuestSelector};
+use crate::mount::{MountRegistry, ResolvedPreopen};
 use crate::registry::{Registry, RegistryBuilder, Routes};
-use crate::working_tree::{ResolvedPreopen, WorkingTreeRegistry};
 use crate::{Host, RuntimeOptions, Telemetry};
 
 /// Selects where a runtime's guests come from, then [`build`]s a [`Deployment`]
@@ -110,7 +110,7 @@ impl DeploymentBuilder {
                 sources: parsed.sources(base)?,
                 routes: parsed.routes(),
                 links: parsed.links(),
-                preopens: working_tree(parsed.mounts(base)),
+                preopens: with_env_mount(parsed.mounts(base)),
                 args: self.args,
                 command: self.command,
             }
@@ -126,7 +126,7 @@ impl DeploymentBuilder {
                 sources: vec![source],
                 routes: Routes::default(),
                 links: BTreeSet::new(),
-                preopens: working_tree(Vec::new()),
+                preopens: with_env_mount(Vec::new()),
                 args: self.args,
                 command: self.command,
             }
@@ -140,7 +140,7 @@ impl DeploymentBuilder {
 }
 
 // add root preopen if OMNIA_WORKING_TREE is set
-fn working_tree(mut preopens: Vec<ResolvedPreopen>) -> Vec<ResolvedPreopen> {
+fn with_env_mount(mut preopens: Vec<ResolvedPreopen>) -> Vec<ResolvedPreopen> {
     if let Some(path) = env::var_os("OMNIA_WORKING_TREE")
         && !preopens.iter().any(|po| po.name == ".")
     {
@@ -171,7 +171,7 @@ impl<T: WasiView + 'static> Deployment<T> {
 
         // Open + identity-stamp every preopen once, here, so a misconfigured
         // mount fails fast at startup rather than per store.
-        let working_trees = Arc::new(WorkingTreeRegistry::open(plan.preopens)?);
+        let mounts = Arc::new(MountRegistry::open(plan.preopens)?);
 
         let mut guests = Vec::with_capacity(plan.sources.len());
         for source in &plan.sources {
@@ -192,7 +192,7 @@ impl<T: WasiView + 'static> Deployment<T> {
             routes: plan.routes,
             links: plan.links,
             selector: Arc::new(FirstArgSelector),
-            working_trees,
+            mounts,
             args: Arc::new(args),
             command: plan.command,
         })
@@ -227,8 +227,8 @@ pub struct Deployment<T: WasiView + 'static> {
     links: BTreeSet<Box<str>>,
     // Host-mediated dispatch selector.
     selector: Arc<dyn GuestSelector>,
-    // Working-tree registry from resolved preopens in [`from_plan`](Self::from_plan).
-    working_trees: Arc<WorkingTreeRegistry>,
+    // Mount registry from resolved preopens in [`from_plan`](Self::from_plan).
+    mounts: Arc<MountRegistry>,
     // Guest argv threaded into every store. Empty for long-lived servers; in
     // command mode the deployment name is prepended as `argv[0]`.
     args: Arc<Vec<String>>,
@@ -269,10 +269,10 @@ impl<T: WasiView> Deployment<T> {
         self
     }
 
-    /// The working-tree registry built from the deployment's preopens.
+    /// The mount registry built from the deployment's preopens.
     #[must_use]
-    pub fn working_trees(&self) -> Arc<WorkingTreeRegistry> {
-        Arc::clone(&self.working_trees)
+    pub fn mounts(&self) -> Arc<MountRegistry> {
+        Arc::clone(&self.mounts)
     }
 
     /// Whether this deployment drives a one-shot `wasi:cli` command.

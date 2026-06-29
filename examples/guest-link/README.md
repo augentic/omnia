@@ -1,4 +1,4 @@
-# Host-mediated dynamic linking
+# Guest link (host-mediated dynamic linking)
 
 Proves **Phase 2** of [`rfcs/guest-registry.md`](../../rfcs/guest-registry.md): one guest reaches another through an interface the *host* satisfies at runtime, carried over in-process [wRPC](https://github.com/bytecodealliance/wrpc).
 
@@ -28,24 +28,24 @@ A whole-workspace `wasm32-wasip2` build fails on the native-only host crates, so
 
 ```bash
 cargo build -p examples \
-  --example linking-responder-wasm \
-  --example linking-router-wasm \
+  --example guest-link-responder-wasm \
+  --example guest-link-router-wasm \
   --target wasm32-wasip2
 ```
 
-This emits `target/wasm32-wasip2/debug/examples/linking_responder_wasm.wasm` and `linking_router_wasm.wasm` (the underscored names the manifest points at).
+This emits `target/wasm32-wasip2/debug/examples/guest_link_responder_wasm.wasm` and `guest_link_router_wasm.wasm` (the underscored names the manifest points at).
 
 ## Run
 
 ```bash
-cargo run --example linking -- run --config examples/linking/omnia.toml
+cargo run --example guest-link -- run --config examples/guest-link/omnia.toml
 ```
 
 The host starts, polyfills the router's import, and wires the responder's serve side. Because the router exports a plain `run` (not an HTTP/messaging trigger), the end-to-end dispatch is exercised by the integration test rather than inbound traffic:
 
 ```bash
 # after building the guests above (do NOT `cargo clean` in between):
-cargo nextest run -p omnia --test linking
+cargo nextest run -p omnia --test guest_link
 ```
 
 The test builds the registry from this manifest, calls `router.run`, and asserts it returns the responder's echo — and that the responder is instantiated exactly once per dispatched call.

@@ -10,7 +10,7 @@
 //!
 //! The router exports a plain `run` rather than an HTTP/messaging trigger, so the
 //! end-to-end dispatch is driven by the integration test
-//! (`crates/omnia/tests/linking.rs`); running this binary starts the host and
+//! (`crates/omnia/tests/guest_link.rs`); running this binary starts the host and
 //! wires the link. See `README.md`.
 
 cfg_if::cfg_if! {

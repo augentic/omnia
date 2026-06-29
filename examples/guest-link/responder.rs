@@ -11,7 +11,7 @@
 
 wit_bindgen::generate!({
     world: "responder",
-    path: "linking/wit",
+    path: "guest-link/wit",
 });
 
 struct Responder;

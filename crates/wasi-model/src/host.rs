@@ -27,12 +27,6 @@ mod generated {
             default: store | tracing | trappable,
         },
         with: {
-            // The working-tree `descriptor` (and its transitive `wasi:clocks`
-            // dep) resolve to the p3 resources the runtime already owns via
-            // `wasmtime_wasi::p3::add_to_linker`. We never add these to our
-            // linker — `wasmtime-wasi` provides them; we only borrow the type.
-            // p3 filesystem reads use native component-model `stream`/`future`,
-            // so the p2 `wasi:io` remap is no longer pulled in.
             "wasi:clocks": wasmtime_wasi::p3::bindings::clocks,
             "wasi:filesystem": wasmtime_wasi::p3::bindings::filesystem,
         },
@@ -46,7 +40,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{Host, HostDispatch, Server, WorkingTreeRegistry};
+use omnia::{Host, HostDispatch, MountRegistry, Server};
 use wasmtime::component::{HasData, Linker, ResourceTable};
 
 pub use self::default_impl::{ConnectOptions, ModelDefault};
@@ -79,14 +73,8 @@ where
 
 impl<B> Server<B> for WasiModel {}
 
-// Hand-written rather than via `omnia::scaffold!`: the model view threads
-// `host_dispatch` and `working_trees` from the store base, beyond the canonical
-// `(ctx, table)` shape the macro generates.
-
-/// A trait which provides internal WASI Model state.
-///
-/// This is implemented by the `T` in `Linker<T>` — a single type shared across
-/// all WASI components for the runtime build.
+/// A trait which provides internal WASI Model state. Implemented by the `T` in
+/// `Linker<T>` during the runtime build.
 pub trait WasiModelView: Send {
     /// Return a [`WasiModelCtxView`] from a mutable reference to self.
     fn model(&mut self) -> WasiModelCtxView<'_>;
@@ -94,22 +82,19 @@ pub trait WasiModelView: Send {
 
 /// View into a [`WasiModelCtx`] implementation and the [`ResourceTable`].
 pub struct WasiModelCtxView<'a> {
-    /// Mutable reference to the WASI Model context (the backend).
+    /// WASI Model context (the backend).
     pub ctx: &'a mut dyn WasiModelCtx,
 
-    /// Mutable reference to the table used to manage resources.
+    /// Resource table for `filter` handles.
     pub table: &'a mut ResourceTable,
 
-    /// Type-erased host→guest dispatcher, used by [`ToolHost::resolve`] to reach
-    /// an adapter's `references` shelf. Threaded in by the `runtime!` macro's
-    /// store context (inert for backends that never resolve).
+    /// Host → guest dispatcher, used by [`ToolHost::resolve`] to reach an 
+    /// adapter's `references`.
     pub host_dispatch: Arc<dyn HostDispatch>,
 
-    /// The host-side working-tree registry. The floor reads it to resolve a lent
-    /// `grants.working-tree` `borrow<descriptor>` to an authorized mount by
-    /// directory identity. Threaded in by `omnia_wasi_view!` from the store base;
-    /// empty unless the deployment configures mounts.
-    pub working_trees: &'a WorkingTreeRegistry,
+    /// The registry of authorized mounts. The backend reads it to resolve
+    /// an authorized mount by directory identity.
+    pub working_trees: &'a MountRegistry,
 }
 
 /// The backend trait — the one place a provider's logic lives.
@@ -187,7 +172,7 @@ impl From<anyhow::Error> for Error {
 ///
 /// The blanket [`WasiModelView`] impl below turns this accessor into the
 /// linker-facing view on `omnia::StoreCtx<B>`, threading in the `host_dispatch`
-/// and working-tree registry from the store base; the `runtime!` macro generates
+/// and the mount registry from the store base; the `runtime!` macro generates
 /// the bundle-side impl via [`omnia_wasi_view!`].
 pub trait HasModel: Send {
     /// Borrow the `wasi-model` backend context.
@@ -200,7 +185,7 @@ impl<B: HasModel + Send + 'static> WasiModelView for omnia::StoreCtx<B> {
             ctx: self.backends.model_ctx(),
             table: &mut self.base.table,
             host_dispatch: Arc::clone(&self.base.host_dispatch),
-            working_trees: &self.base.working_trees,
+            working_trees: &self.base.mounts,
         }
     }
 }

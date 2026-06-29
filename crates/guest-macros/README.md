@@ -136,8 +136,7 @@ guest!({
 
 ## Instrumentation
 
-The `#[instrument]` attribute macro wraps a function so its body runs inside a
-`tracing` span, initializing the guest OpenTelemetry subscriber on entry:
+The `#[instrument]` attribute macro wraps a function so its body runs inside a `tracing` span, initializing the guest OpenTelemetry subscriber on entry:
 
 ```rust,ignore
 use omnia_guest_macros::instrument;

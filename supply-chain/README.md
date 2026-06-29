@@ -10,5 +10,4 @@ cargo vet regenerate unpublished
 
 to update the vetted dependencies based on trusted authors.
 
-See the [Cargo Vet book](https://mozilla.github.io/cargo-vet/commands.html) for
-more information.
+See the [Cargo Vet book](https://mozilla.github.io/cargo-vet/commands.html) for more information.

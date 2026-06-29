@@ -7,6 +7,7 @@
 //! fixture fails loud (`error::backend("no replay fixture")`) — it never falls
 //! through to a live call.
 
+use std::fmt::Debug;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -38,16 +39,16 @@ impl omnia::FromEnv for ConnectOptions {
 }
 
 /// Default (replay) implementation of `wasi-model`.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ModelDefault {
     store: Arc<FixtureStore>,
 }
 
-impl std::fmt::Debug for ModelDefault {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ModelDefault").field("fixtures", &self.store.len()).finish_non_exhaustive()
-    }
-}
+// impl Debug for ModelDefault {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         f.debug_struct("ModelDefault").field("fixtures", &self.store.len()).finish_non_exhaustive()
+//     }
+// }
 
 impl Backend for ModelDefault {
     type ConnectOptions = ConnectOptions;

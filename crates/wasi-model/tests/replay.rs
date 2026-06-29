@@ -30,8 +30,8 @@ use anyhow::{Context as _, Result, bail};
 use futures::FutureExt as _;
 use omnia::wasmtime::component::Val;
 use omnia::{
-    Backend, Deployment, DeploymentBuilder, GuestId, Registry, ResolvedPreopen, Runtime,
-    WorkingTreeRegistry,
+    Backend, Deployment, DeploymentBuilder, GuestId, MountRegistry, Registry, ResolvedPreopen,
+    Runtime,
 };
 use omnia_wasi_model::{
     BackendAnswer, ConnectOptions, FutureResult, HasModel, ModelDefault, Prompt, Recording,
@@ -86,7 +86,7 @@ type TestCtx = omnia::StoreCtx<TestBundle>;
 /// shared `stores_built` counts bundle clones — the instance-creation witness.
 fn model_runtime(
     registry: Arc<Registry<TestCtx>>, backend: BackendFactory, stores_built: Arc<AtomicUsize>,
-    working_trees: Arc<WorkingTreeRegistry>,
+    working_trees: Arc<MountRegistry>,
 ) -> Runtime<TestBundle> {
     let bundle = TestBundle {
         model: backend(),
@@ -102,19 +102,19 @@ fn model_runtime(
 /// so the recorded prompt carries `working_tree_lent = true`. The directory's
 /// identity is irrelevant to the replay key (only the boolean marker lands
 /// there), so any real directory serves.
-fn working_tree_mount() -> (PathBuf, Arc<WorkingTreeRegistry>) {
+fn working_tree_mount() -> (PathBuf, Arc<MountRegistry>) {
     let dir = std::env::temp_dir().join(format!("omnia-model-tree-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("creating the working-tree mount dir");
     let registry =
-        WorkingTreeRegistry::open(vec![ResolvedPreopen::new(".".to_owned(), dir.clone(), false)])
+        MountRegistry::open(vec![ResolvedPreopen::new(".".to_owned(), dir.clone(), false)])
             .expect("opening the working-tree mount");
     (dir, Arc::new(registry))
 }
 
 /// An empty registry — no preopens, the default for paths that don't exercise a
 /// working tree.
-fn no_working_trees() -> Arc<WorkingTreeRegistry> {
-    Arc::new(WorkingTreeRegistry::default())
+fn no_working_trees() -> Arc<MountRegistry> {
+    Arc::new(MountRegistry::default())
 }
 
 /// A backend that always answers `value`, with no network (the record source).
@@ -322,7 +322,7 @@ async fn record_example_fixture() -> Result<()> {
 /// `Recording` wrapper persists the fixture keyed by the guest's real prompt.
 async fn record_phase(
     registry: &Arc<Registry<TestCtx>>, dir: &Path, expected: &Value,
-    working_trees: &Arc<WorkingTreeRegistry>,
+    working_trees: &Arc<MountRegistry>,
 ) -> Result<()> {
     let value = expected.clone();
     let backend_dir = dir.to_path_buf();
@@ -345,7 +345,7 @@ async fn record_phase(
 
 /// Replay the guest with a `ModelDefault` backend loaded from `dir`.
 async fn replay_from(
-    registry: &Arc<Registry<TestCtx>>, dir: &Path, working_trees: &Arc<WorkingTreeRegistry>,
+    registry: &Arc<Registry<TestCtx>>, dir: &Path, working_trees: &Arc<MountRegistry>,
 ) -> Result<String> {
     let backend = ModelDefault::connect_with(ConnectOptions {
         replay_dir: dir.to_path_buf(),

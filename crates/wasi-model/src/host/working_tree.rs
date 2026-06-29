@@ -9,7 +9,7 @@
 //! The proof is identity, not paths. A `wasi:filesystem` descriptor is path-less
 //! by design, and a guest must never be trusted to name its own scope, so the
 //! floor stats the lent directory for its `(device, inode)` identity and matches
-//! it against the host-side [`WorkingTreeRegistry`] (built from the deployment's
+//! it against the host-side [`MountRegistry`] (built from the deployment's
 //! preopens). A miss — a sub-directory of a mount, or a wholly unrelated tree —
 //! is rejected here, at the floor. The resolved [`WorkingTree`] then draws its
 //! cap-std handle and absolute path from the *registry entry*, never from the
@@ -23,7 +23,7 @@ use anyhow::{Context as _, bail};
 use cap_fs_ext::MetadataExt as _;
 use cap_std::fs::Dir;
 use futures::FutureExt as _;
-use omnia::{FutureResult, WorkingTreeRegistry};
+use omnia::{FutureResult, MountRegistry};
 use wasmtime::component::{Resource, ResourceTable};
 use wasmtime_wasi::filesystem::Descriptor;
 
@@ -44,10 +44,11 @@ const MAX_LIST_ENTRIES: usize = 4096;
 /// An owned, `Send + Sync` handle to a resolved working-tree mount.
 ///
 /// Built by [`resolve_working_tree`] once a lent descriptor has identity-matched
-/// an authorized [`WorkingTreeRegistry`] entry. It holds the registry's cap-std
-/// [`Dir`] — so bounded `read`/`list`/`write` ride the same sandbox WASI itself
-/// enforces — plus the mount's absolute host path (the `local-path` face cursor
-/// consumes) and whether writes are permitted.
+/// an authorized [`MountRegistry`] entry. It exposes the mount's two faces:
+/// the registry's cap-std [`Dir`] backing bounded `read`/`list`/`write` (the
+/// `descriptor` face genai consumes, riding the same sandbox WASI itself
+/// enforces) and the mount's absolute host path (the `local-path` face cursor
+/// consumes), plus whether writes are permitted.
 pub struct WorkingTree {
     dir: Arc<Dir>,
     local_path: PathBuf,
@@ -112,7 +113,7 @@ impl WorkingTree {
 ///
 /// `None` grant resolves to `Ok(None)`. A present borrow must (1) resolve in the
 /// resource table, (2) be a *directory* descriptor (a file is rejected), and
-/// (3) identity-match (`(dev, ino)`) an authorized [`WorkingTreeRegistry`] entry.
+/// (3) identity-match (`(dev, ino)`) an authorized [`MountRegistry`] entry.
 /// A miss — an out-of-scope or unauthorized tree — is an error raised here, at
 /// the floor, with no ambient fallback.
 ///
@@ -121,7 +122,7 @@ impl WorkingTree {
 /// Returns an error if the borrow does not resolve, is not a directory, its
 /// metadata cannot be read, or it matches no authorized mount.
 pub fn resolve_working_tree(
-    table: &ResourceTable, registry: &WorkingTreeRegistry, borrow: Option<&Resource<Descriptor>>,
+    table: &ResourceTable, registry: &MountRegistry, borrow: Option<&Resource<Descriptor>>,
 ) -> anyhow::Result<Option<WorkingTree>> {
     let Some(resource) = borrow else {
         return Ok(None);
@@ -204,7 +205,7 @@ mod tests {
 
     use cap_std::ambient_authority;
     use cap_std::fs::Dir as CapDir;
-    use omnia::{ResolvedPreopen, WorkingTreeRegistry};
+    use omnia::{MountRegistry, ResolvedPreopen};
     use wasmtime_wasi::filesystem::{Descriptor, Dir, File, OpenMode};
     use wasmtime_wasi::{DirPerms, FilePerms, ResourceTable};
 
@@ -220,8 +221,8 @@ mod tests {
 
     /// A single-mount registry named `.` over `path`, mirroring how a `[[mount]]`
     /// resolves (read-only unless `writable`).
-    fn registry_for(path: &Path, writable: bool) -> WorkingTreeRegistry {
-        WorkingTreeRegistry::open(vec![ResolvedPreopen::new(
+    fn registry_for(path: &Path, writable: bool) -> MountRegistry {
+        MountRegistry::open(vec![ResolvedPreopen::new(
             ".".to_owned(),
             path.to_path_buf(),
             writable,
@@ -244,7 +245,7 @@ mod tests {
     #[test]
     fn no_grant_resolves_to_none() {
         let table = ResourceTable::new();
-        let registry = WorkingTreeRegistry::default();
+        let registry = MountRegistry::default();
         let resolved = resolve_working_tree(&table, &registry, None).expect("resolve");
         assert!(resolved.is_none(), "an absent grant resolves to None");
     }
