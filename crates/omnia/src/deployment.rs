@@ -3,14 +3,14 @@
 mod manifest;
 mod source;
 
-pub use source::{LoadedGuest, Source};
-
 use std::collections::BTreeSet;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use manifest::Manifest;
+pub use source::{LoadedGuest, Source};
 use wasmtime::component::Linker;
 use wasmtime::{Config, Engine};
 use wasmtime_wasi::WasiView;
@@ -18,8 +18,6 @@ use wrpc_wasmtime::WrpcView;
 
 use crate::dispatch::{DispatchHandle, FirstArgSelector, GuestSelector};
 use crate::registry::{Registry, RegistryBuilder, Routes};
-
-use manifest::Manifest;
 use crate::working_tree::{ResolvedPreopen, WorkingTreeRegistry};
 use crate::{Host, RuntimeOptions, Telemetry};
 

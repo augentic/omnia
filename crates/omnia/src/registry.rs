@@ -11,13 +11,12 @@
 
 mod routing;
 
-pub use routing::{CliRoutes, HttpRoutes, Resolver, Routes, TopicRoutes, TriggerRouter};
-
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
+pub use routing::{CliRoutes, HttpRoutes, Resolver, Routes, TopicRoutes, TriggerRouter};
 use wasmtime::Engine;
 use wasmtime::component::{Component, InstancePre, Linker};
 use wasmtime_wasi::WasiView;

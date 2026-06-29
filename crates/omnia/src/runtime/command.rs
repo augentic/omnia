@@ -8,7 +8,12 @@ use super::{ExitStatus, Runtime};
 use crate::registry::TriggerRouter;
 
 /// Run the routed `wasi:cli/run` guest once. Caller must have called [`prepare`](crate::runtime::prepare).
-pub(crate) async fn drive<B>(runtime: &Runtime<B>) -> Result<ExitStatus>
+///
+/// # Errors
+///
+/// Returns an error if routing is ambiguous, the guest cannot be instantiated,
+/// or the command traps without a guest exit code.
+pub(super) async fn drive<B>(runtime: &Runtime<B>) -> Result<ExitStatus>
 where
     B: Clone + Send + Sync + 'static,
 {

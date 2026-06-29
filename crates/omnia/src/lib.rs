@@ -19,16 +19,17 @@ pub use wrpc_wasmtime::{WrpcCtxView, WrpcView};
 #[doc(hidden)]
 pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
-#[cfg(feature = "jit")]
-pub use self::options::compile;
 pub use self::cli::{Cli, Command};
 pub use self::deployment::{Deployment, DeploymentBuilder};
 pub use self::dispatch::{
     FirstArgSelector, GuestSelector, HostDispatch, LinkClient, WrpcState, serve_links,
 };
 pub use self::options::RuntimeOptions;
-pub use self::registry::{Guest, GuestId, Registry};
-pub use self::registry::{CliRoutes, HttpRoutes, Resolver, Routes, TopicRoutes, TriggerRouter};
+#[cfg(feature = "jit")]
+pub use self::options::compile;
+pub use self::registry::{
+    CliRoutes, Guest, GuestId, HttpRoutes, Registry, Resolver, Routes, TopicRoutes, TriggerRouter,
+};
 pub use self::runtime::{ExitStatus, Runtime, RuntimeHooks};
 #[doc(hidden)]
 pub use self::runtime::{main, run};

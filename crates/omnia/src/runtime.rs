@@ -17,13 +17,15 @@ use crate::cli::{Cli, Command};
 use crate::dispatch::serve_links;
 use crate::traits::{Backends, HasLimits};
 use crate::working_tree::WorkingTreeRegistry;
-use crate::{
-    Deployment, DeploymentBuilder, Registry, RuntimeOptions, StoreBase, StoreCtx,
-};
+use crate::{Deployment, DeploymentBuilder, Registry, RuntimeOptions, StoreBase, StoreCtx};
 
 /// Host linking and trigger-server startup for a deployment.
 pub trait RuntimeHooks<B: Backends> {
     /// Link every declared host into the deployment linker.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a host cannot be added to the linker.
     fn link(deployment: &mut Deployment<StoreCtx<B>>) -> Result<()>;
 
     /// Start every long-lived trigger server ([`Server::IS_SERVER`]).
@@ -57,6 +59,11 @@ where
 }
 
 /// Build runtime state, prepare it, then run command mode or every trigger server.
+///
+/// # Errors
+///
+/// Returns an error if the deployment cannot be built, runtime state cannot be
+/// prepared, link servers cannot be wired, or a trigger server exits with an error.
 pub async fn run<B, H>(
     wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>, cmd: bool,
 ) -> Result<ExitStatus>
@@ -179,6 +186,10 @@ pub struct Runtime<B: 'static> {
 
 impl<B: Backends> Runtime<B> {
     /// Link hosts, connect backends, and assemble the guest registry.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if host linking, backend connection, or registry assembly fails.
     pub async fn new<L>(mut deployment: Deployment<StoreCtx<B>>, link: L) -> Result<Self>
     where
         L: FnOnce(&mut Deployment<StoreCtx<B>>) -> Result<()>,
@@ -260,10 +271,10 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         store.set_epoch_deadline(1);
         store.epoch_deadline_async_yield_and_update(1);
 
-        if options.max_fuel > 0 {
-            if let Err(error) = store.set_fuel(options.max_fuel) {
-                tracing::warn!(%error, "failed to set fuel budget");
-            }
+        if options.max_fuel > 0
+            && let Err(error) = store.set_fuel(options.max_fuel)
+        {
+            tracing::warn!(%error, "failed to set fuel budget");
         }
 
         store.limiter(|ctx| ctx.limits());
@@ -271,6 +282,10 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     }
 
     /// Instantiate a guest component into `store`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the component cannot be instantiated.
     pub async fn instantiate(
         &self, instance_pre: &InstancePre<StoreCtx<B>>, store: &mut Store<StoreCtx<B>>,
     ) -> Result<Instance> {

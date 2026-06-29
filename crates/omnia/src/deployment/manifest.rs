@@ -22,9 +22,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result, bail};
 use serde::Deserialize;
 
-use crate::registry::{CliRoutes, GuestId, HttpRoutes, Routes, TopicRoutes};
-
 use super::source::Source;
+use crate::registry::{CliRoutes, GuestId, HttpRoutes, Routes, TopicRoutes};
 use crate::working_tree::ResolvedPreopen;
 
 /// The deployment manifest: which guests load and how host-mediated calls

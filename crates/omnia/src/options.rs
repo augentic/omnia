@@ -18,12 +18,11 @@
 #[cfg(feature = "jit")]
 mod compile;
 
-#[cfg(feature = "jit")]
-pub use compile::compile;
-
 use std::time::Duration;
 
 use anyhow::{Result, bail};
+#[cfg(feature = "jit")]
+pub use compile::compile;
 use fromenv::{FromEnv, ParseResult};
 use wasmtime::{Config, Enabled, InstanceAllocationStrategy, PoolingAllocationConfig};
 
