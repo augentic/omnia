@@ -46,7 +46,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{Host, HostDispatch, Runtime, Server, WorkingTreeRegistry};
+use omnia::{Host, HostDispatch, Server, WorkingTreeRegistry};
 use wasmtime::component::{HasData, Linker, ResourceTable};
 
 pub use self::default_impl::{ConnectOptions, ModelDefault};
@@ -77,7 +77,7 @@ where
     }
 }
 
-impl<R> Server<R> for WasiModel where R: Runtime {}
+impl<B> Server<B> for WasiModel {}
 
 // Hand-written rather than via `omnia::scaffold!`: the model view threads
 // `host_dispatch` and `working_trees` from the store base, beyond the canonical

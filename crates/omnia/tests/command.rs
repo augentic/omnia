@@ -16,43 +16,9 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
-use omnia::{ExitStatus, Registry, Runtime, StoreBase, run};
-
-/// Per-store context: the library [`omnia::StoreCtx`] over the empty `()` backend
-/// bundle. The `wasi:cli` guest needs only the WASI view, which `StoreCtx`
-/// supplies from its `base`.
-type TestCtx = omnia::StoreCtx<()>;
-
-/// A minimal [`Runtime`] over a single `wasi:cli` guest, threading guest argv
-/// into every store (the guest reads it as `wasi:cli/environment`). In command
-/// mode the floor prepends the deployment name as `args[0]`.
-#[derive(Clone)]
-struct TestRuntime {
-    registry: Arc<Registry<TestCtx>>,
-    args: Arc<Vec<String>>,
-}
-
-impl Runtime for TestRuntime {
-    type StoreCtx = TestCtx;
-
-    fn store(&self) -> TestCtx {
-        TestCtx {
-            base: StoreBase::builder()
-                .options(self.options())
-                .dispatch(Arc::new(self.clone()))
-                .args(&self.args)
-                .build(),
-            backends: (),
-        }
-    }
-
-    fn registry(&self) -> &Registry<Self::StoreCtx> {
-        &self.registry
-    }
-}
+use omnia::{ExitStatus, run};
 
 /// The `target/` directory: the test executable lives at
 /// `<target>/<profile>/deps/<exe>`.
@@ -74,19 +40,15 @@ fn cli_wasm(target: &Path) -> Option<PathBuf> {
 /// Drive `wasi:cli/run` once with `tail` guest argv (the program name is
 /// prepended by command mode) and return the guest's exit status.
 async fn run_cli(wasm: &Path, tail: &[&str]) -> Result<ExitStatus> {
-    run(
+    // The `()` bundle links no hosts; `wasi:cli` is wired by the deployment
+    // builder, and `Runtime::new` threads the guest argv into every store.
+    run::<(), _, _>(
         Some(wasm.to_path_buf()),
         None,
         tail.iter().map(|arg| (*arg).to_string()).collect(),
         true,
-        |deployment| async move {
-            let args = Arc::new(deployment.args().to_vec());
-            Ok(TestRuntime {
-                registry: Arc::new(deployment.build().context("assembling registry")?),
-                args,
-            })
-        },
-        |_| vec![],
+        |_deployment| Ok(()),
+        |_runtime| vec![],
     )
     .await
     .context("running command")

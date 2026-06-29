@@ -7,7 +7,7 @@ mod server;
 
 use anyhow::Result;
 pub use default_impl::HttpDefault;
-use omnia::{Host, Runtime, Server};
+use omnia::{Host, Runtime, Server, StoreCtx};
 use wasmtime::component::Linker;
 pub use wasmtime_wasi_http::WasiHttpCtx;
 pub use wasmtime_wasi_http::p3::{WasiHttpCtxView, WasiHttpView};
@@ -25,14 +25,14 @@ where
     }
 }
 
-impl<R> Server<R> for WasiHttp
+impl<B> Server<B> for WasiHttp
 where
-    R: Runtime,
-    R::StoreCtx: WasiHttpView,
+    B: Clone + Send + Sync + 'static,
+    StoreCtx<B>: WasiHttpView,
 {
     const IS_SERVER: bool = true;
 
-    async fn run(&self, state: &R) -> Result<()> {
+    async fn run(&self, state: &Runtime<B>) -> Result<()> {
         server::run(state).await
     }
 }

@@ -51,7 +51,7 @@ mod generated {
 use std::fmt::Debug;
 
 pub use omnia::FutureResult;
-use omnia::{Host, Runtime, Server};
+use omnia::{Host, Server};
 use wasmtime::component::{HasData, Linker, ResourceTable};
 
 use self::generated::wasi::jsondb::{store, types};
@@ -79,7 +79,7 @@ where
     }
 }
 
-impl<R> Server<R> for WasiJsonDb where R: Runtime {}
+impl<B> Server<B> for WasiJsonDb {}
 
 /// Mutable view into JSON DB state for the linker.
 pub trait WasiJsonDbView: Send {

@@ -37,7 +37,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{Host, Runtime, Server};
+use omnia::{Host, Runtime, Server, StoreCtx};
 use wasmtime::component::{HasData, Linker, ResourceTable, ResourceTableError};
 
 pub use self::default_impl::WebSocketDefault;
@@ -67,14 +67,14 @@ where
     }
 }
 
-impl<R> Server<R> for WasiWebSocket
+impl<B> Server<B> for WasiWebSocket
 where
-    R: Runtime,
-    R::StoreCtx: WasiWebSocketView,
+    B: Clone + Send + Sync + 'static,
+    StoreCtx<B>: WasiWebSocketView,
 {
     const IS_SERVER: bool = true;
 
-    async fn run(&self, state: &R) -> anyhow::Result<()> {
+    async fn run(&self, state: &Runtime<B>) -> anyhow::Result<()> {
         server::run(state).await
     }
 }

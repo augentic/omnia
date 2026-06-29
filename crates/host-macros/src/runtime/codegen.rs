@@ -11,7 +11,6 @@ use crate::runtime::parse::{self, Config};
 // All token fragments needed to expand a deployment runtime.
 pub struct Codegen {
     pub command: bool,
-    pub command_assert: TokenStream,
     pub bundle_fields: Vec<TokenStream>,
     pub accessor_impls: Vec<TokenStream>,
     pub backend_idents: Vec<Ident>,
@@ -26,7 +25,6 @@ impl From<&Config> for Codegen {
         let structural = structural(config);
 
         Self {
-            command_assert: command_assert(config.command, &host_trait_impls),
             command: config.command,
             bundle_fields: structural.bundle_fields,
             accessor_impls: structural.accessor_impls,
@@ -71,17 +69,5 @@ fn structural(config: &Config) -> Structural {
         bundle_fields,
         accessor_impls,
         backend_idents,
-    }
-}
-
-fn command_assert(command: bool, host_trait_impls: &[Path]) -> TokenStream {
-    if !command {
-        return quote! {};
-    }
-
-    quote! {
-        const _: () = omnia::assert_hosts(&[
-            #( <#host_trait_impls as Server<Ctx>>::IS_SERVER, )*
-        ]);
     }
 }

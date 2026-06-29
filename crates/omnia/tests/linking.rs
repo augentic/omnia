@@ -26,39 +26,31 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
-use omnia::{DeploymentBuilder, GuestId, Registry, Runtime, StoreBase, serve_links};
+use omnia::{DeploymentBuilder, GuestId, Runtime, WorkingTreeRegistry, serve_links};
 
-/// Per-store context: the library [`omnia::StoreCtx`] over the empty `()` backend
-/// bundle. No host backend — the link path needs only the WASI and wRPC views,
-/// which `StoreCtx` supplies from its `base`.
-type TestCtx = omnia::StoreCtx<()>;
+/// Per-store context: the library [`omnia::StoreCtx`] over the counting
+/// [`Counter`] bundle. No host backend — the link path needs only the WASI and
+/// wRPC views, which `StoreCtx` supplies from its `base`.
+type TestCtx = omnia::StoreCtx<Counter>;
 
-/// A minimal [`Runtime`] over the linking registry that counts guest store
-/// creations, so the test can assert instance-per-call.
-#[derive(Clone)]
-struct TestRuntime {
-    registry: Arc<Registry<TestCtx>>,
-    stores_built: Arc<AtomicUsize>,
+/// A backend-less bundle whose [`Clone`] bumps a shared counter.
+///
+/// The library [`Runtime::store`] clones the bundle to build each per-guest
+/// store, so a fixed, nonzero amount of bundle cloning happens per store built
+/// (the caller and every freshly dispatched callee). Equal nonzero clone deltas
+/// across calls therefore witness instance-per-call: a cached/reused callee would
+/// build fewer stores — and clone the bundle fewer times — on a later call.
+#[derive(Default)]
+struct Counter {
+    clones: Arc<AtomicUsize>,
 }
 
-impl Runtime for TestRuntime {
-    type StoreCtx = TestCtx;
-
-    fn store(&self) -> TestCtx {
-        // Each fresh guest instance (caller or dispatched callee) draws one store
-        // from here, so this counter is the instance-per-call witness.
-        self.stores_built.fetch_add(1, Ordering::SeqCst);
-        TestCtx {
-            base: StoreBase::builder()
-                .options(self.options())
-                .dispatch(Arc::new(self.clone()))
-                .build(),
-            backends: (),
+impl Clone for Counter {
+    fn clone(&self) -> Self {
+        self.clones.fetch_add(1, Ordering::SeqCst);
+        Self {
+            clones: Arc::clone(&self.clones),
         }
-    }
-
-    fn registry(&self) -> &Registry<Self::StoreCtx> {
-        &self.registry
     }
 }
 
@@ -79,7 +71,7 @@ fn guest_wasm(target: &Path, file: &str) -> Option<PathBuf> {
 
 /// Instantiate the router fresh, call its `run` export with `message`, and return
 /// the echoed string.
-async fn call_run(runtime: &TestRuntime, message: &str) -> Result<String> {
+async fn call_run(runtime: &Runtime<Counter>, message: &str) -> Result<String> {
     let guest =
         runtime.registry().get(&GuestId::from("router")).context("router guest is registered")?;
     let mut store = runtime.build_store(runtime.store());
@@ -139,10 +131,15 @@ async fn router_dispatches_to_responder() -> Result<()> {
         .await
         .context("building runtime")?;
     let registry = deployment.build().context("assembling registry")?;
-    let runtime = TestRuntime {
-        registry: Arc::new(registry),
-        stores_built: Arc::new(AtomicUsize::new(0)),
-    };
+    let clones = Arc::new(AtomicUsize::new(0));
+    let runtime = Runtime::<Counter>::from_parts(
+        Arc::new(registry),
+        Vec::new(),
+        Arc::new(WorkingTreeRegistry::default()),
+        Counter {
+            clones: Arc::clone(&clones),
+        },
+    );
 
     // Wire the serve side of `omnia:link/echo` (responder) and bind the
     // in-process carrier — the work the generated `start()` does for a real
@@ -150,17 +147,25 @@ async fn router_dispatches_to_responder() -> Result<()> {
     serve_links(&runtime).await.context("wiring link serve side")?;
 
     // Two calls prove the multi-use carrier (a fresh frame connection per call)
-    // and instance-per-call: each dispatch instantiates the responder exactly
-    // once on a new store.
+    // and instance-per-call: each dispatch instantiates the responder fresh on a
+    // new store. The bundle clone count rises by a fixed, nonzero amount per call
+    // (router caller store + responder callee store); equal deltas across the two
+    // calls witness that the second call rebuilds the callee rather than reusing
+    // a cached one.
+    let mut per_call: Option<usize> = None;
     for message in ["hello", "world"] {
-        let before = runtime.stores_built.load(Ordering::SeqCst);
+        let before = clones.load(Ordering::SeqCst);
         let echoed = call_run(&runtime, message).await?;
-        let built = runtime.stores_built.load(Ordering::SeqCst) - before;
+        let delta = clones.load(Ordering::SeqCst) - before;
 
         assert_eq!(echoed, format!("responder echoes: {message}"));
-        // One store for the router (caller) and exactly one for the responder
-        // (callee): the callee is instantiated fresh for this single call.
-        assert_eq!(built, 2, "each call builds one caller and one callee store");
+        assert!(delta > 0, "each call builds at least one store");
+        match per_call {
+            None => per_call = Some(delta),
+            Some(expected) => {
+                assert_eq!(delta, expected, "each call does identical work (instance-per-call)");
+            }
+        }
     }
 
     let _ = std::fs::remove_file(&manifest_path);

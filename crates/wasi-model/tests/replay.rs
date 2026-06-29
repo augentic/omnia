@@ -30,7 +30,7 @@ use anyhow::{Context as _, Result, bail};
 use futures::FutureExt as _;
 use omnia::wasmtime::component::Val;
 use omnia::{
-    Backend, Deployment, DeploymentBuilder, GuestId, Registry, ResolvedPreopen, Runtime, StoreBase,
+    Backend, Deployment, DeploymentBuilder, GuestId, Registry, ResolvedPreopen, Runtime,
     WorkingTreeRegistry,
 };
 use omnia_wasi_model::{
@@ -39,14 +39,32 @@ use omnia_wasi_model::{
 };
 use serde_json::{Value, json};
 
-/// A factory the test runtime calls per store to install a fresh backend.
+/// A factory the test bundle calls per clone to mint a fresh backend.
 type BackendFactory = Arc<dyn Fn() -> Box<dyn WasiModelCtx> + Send + Sync>;
 
 /// The deployment's backend bundle for the test: the swappable model backend the
 /// test installs (record vs replay). Its [`HasModel`] impl is what
 /// `omnia::StoreCtx<TestBundle>` reads to serve `wasi-model`.
+///
+/// The library [`Runtime::store`] clones the bundle to build each per-guest
+/// store, so the bundle's [`Clone`] mints a fresh backend (replacing the old
+/// per-store factory call) and bumps `stores_built` — turning bundle cloning
+/// into the instance-creation witness the `resolve` path asserts on.
 struct TestBundle {
+    backend: BackendFactory,
     model: Box<dyn WasiModelCtx>,
+    stores_built: Arc<AtomicUsize>,
+}
+
+impl Clone for TestBundle {
+    fn clone(&self) -> Self {
+        self.stores_built.fetch_add(1, Ordering::SeqCst);
+        Self {
+            backend: Arc::clone(&self.backend),
+            model: (self.backend)(),
+            stores_built: Arc::clone(&self.stores_built),
+        }
+    }
 }
 
 impl HasModel for TestBundle {
@@ -61,42 +79,21 @@ impl HasModel for TestBundle {
 /// `TestBundle`'s [`HasModel`].
 type TestCtx = omnia::StoreCtx<TestBundle>;
 
-/// A minimal [`Runtime`] over the model registry; `store()` installs the backend
-/// the current phase configured and counts store creations so a test can assert
-/// instance-per-call through `resolve`.
-#[derive(Clone)]
-struct TestRuntime {
-    registry: Arc<Registry<TestCtx>>,
-    backend: BackendFactory,
-    stores_built: Arc<AtomicUsize>,
-    /// Working-tree mounts preopened into every store (RFC-55). Empty for the
-    /// `resolve` path; a single `.` mount for the completion path so the guest
-    /// lends a tree and the floor resolves it by identity.
+/// Assemble a model [`Runtime`] over `registry` from already-built parts: a
+/// backend `factory` (cloned fresh into every store) and the `working_trees`
+/// mounts preopened into each store (RFC-55; empty for the `resolve` path, a
+/// single `.` mount for the completion path so the guest lends a tree). The
+/// shared `stores_built` counts bundle clones — the instance-creation witness.
+fn model_runtime(
+    registry: Arc<Registry<TestCtx>>, backend: BackendFactory, stores_built: Arc<AtomicUsize>,
     working_trees: Arc<WorkingTreeRegistry>,
-}
-
-impl Runtime for TestRuntime {
-    type StoreCtx = TestCtx;
-
-    fn store(&self) -> TestCtx {
-        // Each fresh guest instance (the `complete` caller or a dispatched
-        // `resolve` callee) draws one store here — the instance-per-call witness.
-        self.stores_built.fetch_add(1, Ordering::SeqCst);
-        TestCtx {
-            base: StoreBase::builder()
-                .options(self.options())
-                .dispatch(Arc::new(self.clone()))
-                .working_trees(Arc::clone(&self.working_trees))
-                .build(),
-            backends: TestBundle {
-                model: (self.backend)(),
-            },
-        }
-    }
-
-    fn registry(&self) -> &Registry<Self::StoreCtx> {
-        &self.registry
-    }
+) -> Runtime<TestBundle> {
+    let bundle = TestBundle {
+        model: backend(),
+        backend,
+        stores_built,
+    };
+    Runtime::from_parts(registry, Vec::new(), working_trees, bundle)
 }
 
 /// A single read-only working-tree mount named `.` over a fresh temp directory —
@@ -170,7 +167,7 @@ async fn registry(wasm: &Path) -> Result<Arc<Registry<TestCtx>>> {
         .build()
         .await
         .context("building runtime")?;
-    deployment.host::<WasiModel, TestRuntime>().context("linking WasiModel")?;
+    deployment.host::<WasiModel, TestBundle>().context("linking WasiModel")?;
     let registry = deployment.build().context("assembling registry")?;
 
     let _ = std::fs::remove_file(&manifest_path);
@@ -178,7 +175,7 @@ async fn registry(wasm: &Path) -> Result<Arc<Registry<TestCtx>>> {
 }
 
 /// Instantiate the guest fresh and drive its async `run` export.
-async fn call_run(runtime: &TestRuntime) -> Result<String> {
+async fn call_run(runtime: &Runtime<TestBundle>) -> Result<String> {
     let guest =
         runtime.registry().get(&GuestId::from("model")).context("model guest is registered")?;
     let mut store = runtime.build_store(runtime.store());
@@ -308,14 +305,14 @@ async fn record_example_fixture() -> Result<()> {
     // regenerated fixture matches what the guest lends at runtime
     // (`working_tree_lent = true`).
     let (_mount_dir, working_trees) = working_tree_mount();
-    let runtime = TestRuntime {
+    let runtime = model_runtime(
         registry,
-        backend: Arc::new(move || {
+        Arc::new(move || {
             Box::new(Recording::new(StubBackend { value: value.clone() }, backend_dir.clone()))
         }),
-        stores_built: Arc::new(AtomicUsize::new(0)),
+        Arc::new(AtomicUsize::new(0)),
         working_trees,
-    };
+    );
     let answer = call_run(&runtime).await.context("recording example fixture")?;
     eprintln!("recorded example fixture into {}: {answer}", dir.display());
     Ok(())
@@ -329,14 +326,14 @@ async fn record_phase(
 ) -> Result<()> {
     let value = expected.clone();
     let backend_dir = dir.to_path_buf();
-    let runtime = TestRuntime {
-        registry: Arc::clone(registry),
-        backend: Arc::new(move || {
+    let runtime = model_runtime(
+        Arc::clone(registry),
+        Arc::new(move || {
             Box::new(Recording::new(StubBackend { value: value.clone() }, backend_dir.clone()))
         }),
-        stores_built: Arc::new(AtomicUsize::new(0)),
-        working_trees: Arc::clone(working_trees),
-    };
+        Arc::new(AtomicUsize::new(0)),
+        Arc::clone(working_trees),
+    );
     let answer = call_run(&runtime).await.context("record phase")?;
     assert_eq!(
         serde_json::from_str::<Value>(&answer).context("answer is JSON")?,
@@ -355,12 +352,12 @@ async fn replay_from(
     })
     .await
     .context("connecting replay backend")?;
-    let runtime = TestRuntime {
-        registry: Arc::clone(registry),
-        backend: Arc::new(move || Box::new(backend.clone())),
-        stores_built: Arc::new(AtomicUsize::new(0)),
-        working_trees: Arc::clone(working_trees),
-    };
+    let runtime = model_runtime(
+        Arc::clone(registry),
+        Arc::new(move || Box::new(backend.clone())),
+        Arc::new(AtomicUsize::new(0)),
+        Arc::clone(working_trees),
+    );
     call_run(&runtime).await
 }
 
@@ -417,7 +414,7 @@ async fn build_registry(model: &Path, shelf: &Path) -> Result<Arc<Registry<TestC
         .build()
         .await
         .context("building runtime")?;
-    deployment.host::<WasiModel, TestRuntime>().context("linking WasiModel")?;
+    deployment.host::<WasiModel, TestBundle>().context("linking WasiModel")?;
     let registry = deployment.build().context("assembling registry")?;
 
     let _ = std::fs::remove_file(&manifest_path);
@@ -446,32 +443,45 @@ async fn resolve_dispatches() -> Result<()> {
     };
 
     let registry = build_registry(&model, &shelf).await?;
-    let runtime = TestRuntime {
+    let stores_built = Arc::new(AtomicUsize::new(0));
+    let runtime = model_runtime(
         registry,
-        backend: Arc::new(|| Box::new(ResolvingStub)),
-        stores_built: Arc::new(AtomicUsize::new(0)),
+        Arc::new(|| Box::new(ResolvingStub)),
+        Arc::clone(&stores_built),
         // The `resolve` path doesn't exercise a working tree; the model guest's
         // `get-directories()` sees no mount and lends nothing.
-        working_trees: no_working_trees(),
-    };
-
-    let before = runtime.stores_built.load(Ordering::SeqCst);
-    let answer = call_run(&runtime).await.context("driving the resolve guest")?;
-    let built = runtime.stores_built.load(Ordering::SeqCst) - before;
-
-    // Byte round-trip: each reference reached the `shelf` and came back
-    // transformed, so the typed bytes crossed the host→guest seam in both
-    // directions.
-    assert_eq!(
-        serde_json::from_str::<Value>(&answer).context("answer is JSON")?,
-        json!({ "alpha": "shelf:alpha", "beta": "shelf:beta" }),
-        "resolved bytes should round-trip through the host→guest seam"
+        no_working_trees(),
     );
 
-    // Instance-per-call: one store for the `model` guest (the `complete` caller)
-    // plus one fresh `shelf` store per `resolve`. The shelf is never reused
-    // across calls and can never re-enter the caller.
-    assert_eq!(built, 3, "one caller store + one fresh shelf store per resolve (two resolves)");
+    // Two completions, each driving two `resolve` dispatches. The library
+    // `Runtime::store` clones the bundle to build every per-guest store, so a
+    // completion clones the bundle a fixed, nonzero number of times (the `model`
+    // caller plus a fresh `shelf` per `resolve`). Equal deltas across the two
+    // completions witness instance-per-call: a cached/reused `shelf` would build
+    // fewer stores — and clone the bundle fewer times — on the second completion.
+    let mut per_call: Option<usize> = None;
+    for _ in 0..2 {
+        let before = stores_built.load(Ordering::SeqCst);
+        let answer = call_run(&runtime).await.context("driving the resolve guest")?;
+        let built = stores_built.load(Ordering::SeqCst) - before;
+
+        // Byte round-trip: each reference reached the `shelf` and came back
+        // transformed, so the typed bytes crossed the host→guest seam in both
+        // directions.
+        assert_eq!(
+            serde_json::from_str::<Value>(&answer).context("answer is JSON")?,
+            json!({ "alpha": "shelf:alpha", "beta": "shelf:beta" }),
+            "resolved bytes should round-trip through the host→guest seam"
+        );
+
+        assert!(built > 0, "each completion builds at least the caller store");
+        match per_call {
+            None => per_call = Some(built),
+            Some(expected) => {
+                assert_eq!(built, expected, "instance-per-call: identical work per completion");
+            }
+        }
+    }
 
     Ok(())
 }
@@ -521,16 +531,16 @@ async fn working_tree_resolves_to_local_path() -> Result<()> {
     let registry = registry(&wasm).await?;
     let (mount_dir, working_trees) = working_tree_mount();
     let expected = mount_dir.clone();
-    let runtime = TestRuntime {
+    let runtime = model_runtime(
         registry,
-        backend: Arc::new(move || {
+        Arc::new(move || {
             Box::new(LocalPathProbe {
                 expected: expected.clone(),
             })
         }),
-        stores_built: Arc::new(AtomicUsize::new(0)),
+        Arc::new(AtomicUsize::new(0)),
         working_trees,
-    };
+    );
 
     let answer = call_run(&runtime).await.context("driving the local-path probe")?;
     let value: Value = serde_json::from_str(&answer)

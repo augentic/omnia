@@ -37,7 +37,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 pub use omnia::FutureResult;
-use omnia::{Host, Runtime, Server};
+use omnia::{Host, Server};
 pub use resource::*;
 use wasmtime::component::{HasData, Linker, ResourceTable};
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
@@ -125,7 +125,7 @@ where
     }
 }
 
-impl<R> Server<R> for WasiBlobstore where R: Runtime {}
+impl<B> Server<B> for WasiBlobstore {}
 
 /// A trait which provides internal WASI Blobstore state.
 ///

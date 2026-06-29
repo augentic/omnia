@@ -56,9 +56,9 @@ the library `omnia::StoreCtx<B>`, and the per-host `HasXxx` accessor traits)
 generates, per backend:
 
 - a field on the connected `Backends` bundle (`key_value_default: KeyValueDefault`),
-- a `Context` that calls `<KeyValueDefault as Backend>::connect()` at startup,
-- a per-invocation `store()` that **clones** the bundle into each store
-  (`omnia::BuildStore for StoreCtx<B>`),
+- a `Backends::connect()` impl that calls `<KeyValueDefault as Backend>::connect()`
+  at startup (run by the library `Runtime::new`),
+- a per-invocation `Runtime::store()` that **clones** the bundle into each store,
 - a bundle-side `HasXxx` accessor (via the host crate's `omnia_wasi_view!`) that
   the host crate's blanket `WasiXxxView for StoreCtx<B>` reads.
 
@@ -83,7 +83,7 @@ comment literally says "an in-memory store, or a Redis-backed store"). So the
 only pieces fixed at compile time are:
 
 1. the **concrete type** of each `Backends` bundle field,
-2. the **`Backend::connect()` wiring** in the generated `Context`,
+2. the **`Backend::connect()` wiring** in the generated `Backends::connect`,
 3. the per-store **`.clone()`** of that concrete backend.
 
 Connection settings are *already* runtime-resolved: `Backend::connect()` defaults
@@ -149,7 +149,7 @@ backends.keyvalue("redis",  || async { Ok(Arc::new(Redis::connect().await?) as _
 backends.sql("postgres",    || async { Ok(Arc::new(Postgres::connect().await?) as _) });
 ```
 
-At startup, the generated `Context::new` reads the manifest's backend selections,
+At startup, `Runtime::new` reads the manifest's backend selections,
 resolves each interface against the registry, and **fails fast** if a requested
 name was not compiled in (listing the names that *are* available).
 

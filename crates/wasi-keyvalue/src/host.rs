@@ -31,7 +31,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{Host, Runtime, Server};
+use omnia::{Host, Server};
 use wasmtime::component::{HasData, Linker, ResourceTable, ResourceTableError};
 
 pub use self::default_impl::KeyValueDefault;
@@ -61,7 +61,7 @@ where
     }
 }
 
-impl<R> Server<R> for WasiKeyValue where R: Runtime {}
+impl<B> Server<B> for WasiKeyValue {}
 
 /// A trait which provides internal WASI Key-Value state.
 ///

@@ -17,7 +17,7 @@ use hyper::body::{Body, Frame, Incoming, SizeHint};
 use hyper::header::{FORWARDED, HOST};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use omnia::{HttpRoutes, Runtime, TriggerRouter};
+use omnia::{HttpRoutes, Runtime, StoreCtx, TriggerRouter};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
@@ -32,10 +32,10 @@ type OutgoingBody = UnsyncBoxBody<Bytes, anyhow::Error>;
 const HTTP_ADDR: &str = "0.0.0.0:8080";
 
 #[instrument("http-server", skip(state))]
-pub async fn run<R>(state: &R) -> Result<()>
+pub async fn run<B>(state: &Runtime<B>) -> Result<()>
 where
-    R: Runtime,
-    R::StoreCtx: WasiHttpView,
+    B: Clone + Send + Sync + 'static,
+    StoreCtx<B>: WasiHttpView,
 {
     let component = env::var("COMPONENT").unwrap_or_else(|_| "unknown".into());
 
@@ -118,20 +118,20 @@ where
 }
 
 #[derive(Clone)]
-struct Handler<R>
+struct Handler<B>
 where
-    R: Runtime,
-    R::StoreCtx: WasiHttpView,
+    B: Clone + Send + Sync + 'static,
+    StoreCtx<B>: WasiHttpView,
 {
-    state: R,
+    state: Runtime<B>,
     component: Arc<str>,
     routing: Arc<TriggerRouter<ServiceIndices, HttpRoutes>>,
 }
 
-impl<R> Handler<R>
+impl<B> Handler<B>
 where
-    R: Runtime,
-    R::StoreCtx: WasiHttpView,
+    B: Clone + Send + Sync + 'static,
+    StoreCtx<B>: WasiHttpView,
 {
     // Forward request to the wasm Guest.
     async fn handle(

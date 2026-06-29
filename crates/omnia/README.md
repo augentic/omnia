@@ -20,7 +20,7 @@ omnia::runtime!({
 });
 ```
 
-Each `Host: Backend` pair links a WASI interface and binds it to a host backend. The macro always generates the `main` entry point; for a custom entry point, hand-write the runtime instead (implement `Runtime` over `omnia::StoreCtx<B>` and call `run`).
+Each `Host: Backend` pair links a WASI interface and binds it to a host backend. The macro always generates the `main` entry point; for a custom entry point, call `omnia::run` (or build an `omnia::Runtime<B>` directly) instead.
 
 ## Core Traits
 
@@ -29,16 +29,15 @@ The runtime is built around a set of traits that allow services to be plugged in
 | Trait       | Purpose                                                                             |
 | ----------- | ----------------------------------------------------------------------------------- |
 | `Host<T>`   | Links a WASI interface (e.g., `wasi:http`) into the `wasmtime::Linker`.             |
-| `Server<R>` | Starts a server (e.g., HTTP listener, NATS subscriber) to handle incoming requests. |
+| `Server<B>` | Starts a server (e.g., HTTP listener, NATS subscriber) to handle incoming requests. |
 | `Backend`   | Connects to an external service (e.g., Redis, Postgres) during startup.             |
-| `Runtime`   | Manages per-request state and provides access to the component instance.            |
 | `FromEnv`   | Configures backend connections from environment variables.                          |
 
 ## Public API
 
 `omnia` exposes only what a deployment author, a host-server crate, or a hand-written runtime needs; lifecycle, dispatch, manifest, and transport-carrier internals are crate-private.
 
-- **Macros:** `runtime!`, `#[derive(Runtime)]`
+- **Macros:** `runtime!`
 - **Lifecycle:** `bootstrap_and_run` (build → bootstrap → [`run`]), `run`, and `command::run` — server and command paths both call `prepare` for epoch interruption, pool-metric sampling, and host-mediated link serving
 - **Runtime + store:** `Runtime`, `StoreCtx`, `StoreBase`, `Host`, `Server`, `Backend`, `FromEnv`, `HasLimits`, `HostDispatch`, `FutureResult`
 - **Registry pipeline:** `DeploymentBuilder`, `Deployment`, `Registry`, `Guest`, `GuestId`, `RuntimeOptions`

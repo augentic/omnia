@@ -72,7 +72,7 @@ Omnia is organized into three distinct layers:
 The foundation of the runtime. Provides:
 
 - **CLI infrastructure**: Command-line interface for running and compiling WebAssembly components
-- **Core traits**: `Runtime`, `Host`, `Server`, and `Backend` traits that all components implement
+- **Core traits**: `Host`, `Server`, and `Backend` traits that WASI hosts implement, plus the concrete `Runtime` that owns the registry and backend bundle
 - **Wasmtime integration**: Re-exports and wrappers for wasmtime functionality
 
 Key traits:
@@ -84,8 +84,8 @@ pub trait Host<T>: Debug + Sync + Send {
 }
 
 /// Implemented by WASI hosts that are servers
-pub trait Server<R: Runtime>: Debug + Sync + Send {
-    fn run(&self, state: &R) -> impl Future<Output = Result<()>>;
+pub trait Server<B>: Debug + Sync + Send {
+    fn run(&self, state: &Runtime<B>) -> impl Future<Output = Result<()>>;
 }
 
 /// Implemented by backend resources for connection management
@@ -203,9 +203,9 @@ runtime!({
 The macro generates:
 
 - A `Backends` bundle: one connected backend per `Host: Backend` wiring, plus the `HasXxx` accessor impls each host crate's `omnia_wasi_view!` emits
-- `Context`: the library `omnia::Context` over `omnia::StoreCtx<Backends>`, holding the guest registry and backend bundle (the per-store `StoreCtx` and its WASI views are library code, not macro output)
-- `Context::new` to link hosts, connect backends, and assemble the registry
-- `main` that delegates to `omnia::main` (CLI parse, compile, bootstrap, and `run`)
+- `main`, which delegates to `omnia::main` — passing a host-linking closure (which the library `omnia::Runtime::new` runs to link hosts, connect backends, and assemble the registry) and a server-start closure that launches each trigger host's `run`
+
+The host runtime itself is the library `omnia::Runtime<Backends>` over `omnia::StoreCtx<Backends>`, holding the guest registry and backend bundle (the per-store `StoreCtx` and its WASI views are library code, not macro output).
 
 ## WIT Interface Definitions
 
@@ -228,14 +228,14 @@ Dependencies on standard WASI definitions are managed in `wit/deps/` and version
 
 2. **Build**: `DeploymentBuilder` loads the manifest or wasm, compiles guests, and returns a `Deployment` ready for host linking
 
-3. **Bootstrap**: `Context::new` links WASI hosts, connects backends, and builds the `Registry`
+3. **Bootstrap**: `Runtime::new` links WASI hosts, connects backends, and builds the `Registry`
 
 4. **Drive**: `run` either invokes `command::run` (one-shot `wasi:cli`) or `prepare`s the runtime and awaits every long-lived trigger server to completion
 
 5. **Request handling** (server mode): Trigger hosts (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`) accept requests, instantiate guests per call, and return responses
 
 ```text
-CLI → Build → Context::new → run
+CLI → Build → Runtime::new → run
                                  ├─ command mode → command::run → ExitStatus
                                  └─ server mode  → prepare → trigger servers
 ```

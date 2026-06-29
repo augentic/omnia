@@ -235,22 +235,25 @@ pub struct Deployment<T: WasiView + 'static> {
     command: bool,
 }
 
-use crate::{Runtime, Server};
+use crate::Server;
 
 impl<T: WasiView> Deployment<T> {
     /// Link a WASI host's interfaces into the shared Linker.
     ///
     /// Chainable: returns `&mut Self` so several hosts can be linked in turn.
     ///
+    /// `B` is the deployment's backend bundle, naming the [`Server<B>`] impl whose
+    /// [`IS_SERVER`](Server::IS_SERVER) flag decides whether a `command: true`
+    /// deployment skips linking a long-lived trigger server.
+    ///
     /// # Errors
     ///
     /// Will fail if the host cannot be added to the Linker.
-    pub fn host<H, R>(&mut self) -> Result<&mut Self>
+    pub fn host<H, B>(&mut self) -> Result<&mut Self>
     where
-        H: Host<T> + Server<R>,
-        R: Runtime,
+        H: Host<T> + Server<B>,
     {
-        if !self.command || !<H as Server<R>>::IS_SERVER {
+        if !self.command || !<H as Server<B>>::IS_SERVER {
             H::add_to_linker(&mut self.linker)?;
         }
         Ok(self)
@@ -277,7 +280,7 @@ impl<T: WasiView> Deployment<T> {
         self.command
     }
 
-    /// Shared guest argv for threading into [`Runtime::store`](crate::Runtime).
+    /// Shared guest argv for threading into [`Runtime::store`](crate::Runtime::store).
     #[must_use]
     pub fn args(&self) -> &[String] {
         &self.args

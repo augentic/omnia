@@ -38,11 +38,9 @@ runtime!({
 });
 
 // The macro generates:
-// - RuntimeContext struct with backend connections
-// - RuntimeStoreCtx struct with per-instance contexts
-// - Runtime trait implementation
-// - WASI view trait implementations
-// - runtime_run() function
+// - a `Backends` bundle: one connected backend per declared interface
+// - the `HasXxx` accessor impls each host crate's view macro needs
+// - a `main` entry point that delegates to `omnia::main`
 ```
 
 ## Configuration Format
@@ -87,49 +85,31 @@ runtime!({
 
 ## Generated Code
 
-The macro generates the following:
+The macro generates a private `runtime` module containing:
 
-### RuntimeContext
+### `Backends` bundle
 
-A struct holding pre-instantiated components and backend connections:
+A `Clone` struct with one connected backend per declared `Host: Backend` wiring, plus its `omnia::Backends` impl whose `connect()` connects every backend concurrently. A deployment that declares no backends uses the library's `()` bundle, so nothing is generated.
 
 ```rust,ignore
 #[derive(Clone)]
-struct RuntimeContext {
-    instance_pre: InstancePre<RuntimeStoreCtx>,
-    // ... backend fields
+struct Backends {
+    // ... one field per declared backend
+}
+
+impl omnia::Backends for Backends {
+    // connect every backend concurrently
+    async fn connect() -> Result<Self> { /* ... */ }
 }
 ```
 
-### RuntimeStoreCtx
+### WASI view accessor impls
 
-Per-instance data shared between the WebAssembly runtime and host functions:
+For each declared interface, the `HasXxx` accessor impl (emitted by the host crate's view macro) that exposes the bundle's backend to the library's blanket `WasiXxxView for omnia::StoreCtx<Backends>` impl.
 
-```rust,ignore
-pub struct RuntimeStoreCtx {
-    pub table: ResourceTable,
-    pub wasi: WasiCtx,
-    // ... interface context fields
-}
-```
+### `main` entry point
 
-### Runtime Trait Implementation
-
-Implements the `Runtime` trait from the `runtime` crate, providing methods to create new store contexts and access the pre-instantiated component.
-
-### WASI View Implementations
-
-Implements view traits for each configured WASI interface, allowing the WebAssembly guest to call host functions.
-
-### `runtime_run()` Function
-
-A public async function that:
-
-1. Loads runtime configuration
-2. Compiles the WebAssembly component
-3. Links WASI interfaces
-4. Connects to backends
-5. Starts server interfaces (HTTP, messaging, WebSocket)
+A `#[tokio::main]` `main` that delegates to `omnia::main::<Backends, _, _>`, passing a host-linking closure (run by `omnia::Runtime::new` to link hosts, connect backends, and assemble the registry) and a server-start closure that launches each trigger host's `run`. The host runtime is the library `omnia::Runtime<Backends>`; the macro no longer emits a runtime type or trait impl of its own.
 
 ## Example: Custom Initiator Configuration
 

@@ -19,10 +19,7 @@ use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiVie
 use wasmtime_wasi_http::p3::{WasiHttpCtxView, WasiHttpView};
 use wrpc_wasmtime::{WrpcCtxView, WrpcView};
 
-use crate::{
-    Backends, BuildStore, HasLimits, HostDispatch, LinkClient, RuntimeOptions, WorkingTreeRegistry,
-    WrpcState,
-};
+use crate::{HasLimits, HostDispatch, LinkClient, RuntimeOptions, WorkingTreeRegistry, WrpcState};
 
 /// Type-state marker for a [`StoreBaseBuilder`] member that has been supplied,
 /// carrying its value until [`build`](StoreBaseBuilder::build) consumes it.
@@ -164,8 +161,7 @@ impl StoreBaseBuilder<Set<&RuntimeOptions>, Set<Arc<dyn HostDispatch>>> {
 ///
 /// Construction policy (WASI inheritance, argv, the memory limit, and inert wRPC
 /// view state) lives in [`StoreBase::builder`] so it is documented and
-/// unit-testable instead of being inlined in macro-generated `Runtime::store()`
-/// output.
+/// unit-testable instead of being inlined in [`Runtime::store`](crate::Runtime::store).
 pub struct StoreBase {
     /// The store's WASI resource table.
     pub table: ResourceTable,
@@ -255,17 +251,6 @@ impl<B: Send + 'static> WrpcView for StoreCtx<B> {
 impl<B: Send + 'static> HasLimits for StoreCtx<B> {
     fn limits(&mut self) -> &mut StoreLimits {
         &mut self.base.limits
-    }
-}
-
-// Clone the whole `Clone` bundle into the store; the per-field cloning the
-// `runtime!` macro used to inline collapses to this one library impl.
-impl<B: Backends> BuildStore<B> for StoreCtx<B> {
-    fn build_store(base: StoreBase, backends: &B) -> Self {
-        Self {
-            base,
-            backends: backends.clone(),
-        }
     }
 }
 

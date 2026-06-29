@@ -42,9 +42,10 @@ use wrpc_transport::Invoke;
 use wrpc_wasmtime::{ServeExt as _, ValEncoder, WrpcView, read_value};
 
 use crate::registry::GuestId;
+use crate::runtime::Runtime;
 use crate::selector::GuestSelector;
 use crate::source::LoadedGuest;
-use crate::traits::{FutureResult, Runtime};
+use crate::traits::FutureResult;
 use crate::transport::{InProcClient, InProcServer, InProcess, LinkTransport as _};
 
 /// wRPC host-resource map shape (empty for the resource-free dynamic path).
@@ -65,9 +66,9 @@ type HostResources = HashMap<
 /// # Errors
 ///
 /// Returns an error if a guest's export cannot be served over the carrier.
-pub async fn serve_links<R>(state: &R) -> Result<()>
+pub async fn serve_links<B>(state: &Runtime<B>) -> Result<()>
 where
-    R: Runtime,
+    B: Clone + Send + Sync + 'static,
 {
     let registry = state.registry();
     let handle = registry.dispatch();
@@ -153,11 +154,11 @@ where
 /// Returns an error if the depth bound is exceeded, an argument or result carries
 /// a resource handle, the target is not registered, the named `interface`/`func`
 /// export is absent or is not a function, or the guest call traps.
-pub async fn dispatch<R>(
-    runtime: &R, target: &GuestId, interface: &str, func: &str, args: Vec<Val>,
+pub async fn dispatch<B>(
+    runtime: &Runtime<B>, target: &GuestId, interface: &str, func: &str, args: Vec<Val>,
 ) -> Result<Vec<Val>>
 where
-    R: Runtime,
+    B: Clone + Send + Sync + 'static,
 {
     // Depth-count this hop exactly like a guest→guest dispatch. The guard
     // is held here (borrowing `runtime`) across the awaited callee task below.
@@ -269,7 +270,7 @@ pub trait HostDispatch: Send + Sync + 'static {
     ) -> FutureResult<Vec<Val>>;
 }
 
-impl<R: Runtime> HostDispatch for R {
+impl<B: Clone + Send + Sync + 'static> HostDispatch for Runtime<B> {
     fn invoke(
         &self, target: GuestId, interface: Option<String>, func: String, args: Vec<Val>,
     ) -> FutureResult<Vec<Val>> {
@@ -288,7 +289,9 @@ impl<R: Runtime> HostDispatch for R {
 /// Find the exported interface on `target`'s component that carries a function
 /// named `func`, so a host can invoke it without hardcoding a consumer
 /// interface name.
-fn find_interface<R: Runtime>(runtime: &R, target: &GuestId, func: &str) -> Result<Box<str>> {
+fn find_interface<B: Clone + Send + Sync + 'static>(
+    runtime: &Runtime<B>, target: &GuestId, func: &str,
+) -> Result<Box<str>> {
     let registry = runtime.registry();
     let engine = registry.engine();
     let guest = registry

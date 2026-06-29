@@ -11,8 +11,7 @@ use wasmtime_wasi::I32Exit;
 use wasmtime_wasi::p3::bindings::{Command, CommandPre};
 
 use crate::routing::TriggerRouter;
-use crate::runtime::{self, ExitStatus};
-use crate::traits::Runtime;
+use crate::runtime::{self, ExitStatus, Runtime};
 
 /// Drive the sole `wasi:cli/run` guest once and return its exit status.
 ///
@@ -35,9 +34,9 @@ use crate::traits::Runtime;
 /// Panics if the routed guest is absent from the registry — an invariant
 /// [`TriggerRouter`] upholds (the id it returns came from the registry), so a
 /// panic here signals a runtime bug.
-pub async fn run<R>(runtime: &R) -> Result<ExitStatus>
+pub async fn run<B>(runtime: &Runtime<B>) -> Result<ExitStatus>
 where
-    R: Runtime,
+    B: Clone + Send + Sync + 'static,
 {
     // Identical startup to `serve`: background tasks + host-mediated links.
     runtime::prepare(runtime).await?;

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
-use omnia::{Runtime, TopicRoutes, TriggerRouter};
+use omnia::{Runtime, StoreCtx, TopicRoutes, TriggerRouter};
 use tracing::{Instrument, debug_span, instrument};
 
 use crate::host::WasiMessagingView;
@@ -11,10 +11,10 @@ use crate::host::generated::MessagingRequestReplyIndices;
 use crate::host::resource::{MessageProxy, Subscriptions};
 
 #[instrument("messaging-server", skip(state))]
-pub async fn run<R>(state: &R) -> Result<()>
+pub async fn run<B>(state: &Runtime<B>) -> Result<()>
 where
-    R: Runtime,
-    R::StoreCtx: WasiMessagingView,
+    B: Clone + Send + Sync + 'static,
+    StoreCtx<B>: WasiMessagingView,
 {
     let component = env::var("COMPONENT").unwrap_or_else(|_| "unknown".into());
     tracing::info!("starting messaging server for: {component}");
@@ -61,20 +61,20 @@ where
 }
 
 #[derive(Clone)]
-struct Handler<R>
+struct Handler<B>
 where
-    R: Runtime,
-    R::StoreCtx: WasiMessagingView,
+    B: Clone + Send + Sync + 'static,
+    StoreCtx<B>: WasiMessagingView,
 {
-    state: R,
+    state: Runtime<B>,
     component: String,
     routing: Arc<TriggerRouter<MessagingRequestReplyIndices, TopicRoutes>>,
 }
 
-impl<R> Handler<R>
+impl<B> Handler<B>
 where
-    R: Runtime,
-    R::StoreCtx: WasiMessagingView,
+    B: Clone + Send + Sync + 'static,
+    StoreCtx<B>: WasiMessagingView,
 {
     // Forward message to the wasm guest.
     async fn handle(&self, message: MessageProxy) -> Result<()> {

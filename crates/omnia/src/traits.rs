@@ -10,103 +10,19 @@ use std::future::Future;
 
 use anyhow::Result;
 use futures::future::BoxFuture;
-use wasmtime::component::{Instance, InstancePre, Linker};
-use wasmtime::{Store, StoreLimits};
-use wasmtime_wasi::WasiView;
-use wrpc_wasmtime::WrpcView;
+use wasmtime::StoreLimits;
+use wasmtime::component::Linker;
 
-use crate::RuntimeOptions;
-use crate::registry::Registry;
-use crate::store::StoreBase;
+use crate::runtime::Runtime;
 
 /// Result type for asynchronous operations.
 pub type FutureResult<T> = BoxFuture<'static, Result<T>>;
 
 /// Exposes a store context's [`StoreLimits`] so the runtime can install a
-/// per-guest resource limiter on every [`Store`] it creates.
+/// per-guest resource limiter on every [`Store`](wasmtime::Store) it creates.
 pub trait HasLimits {
     /// Returns a mutable reference to the context's resource limits.
     fn limits(&mut self) -> &mut StoreLimits;
-}
-
-/// The long-lived, `Clone` host runtime context every trigger server is handed
-/// to resolve and instantiate a guest.
-///
-/// It owns the [`Registry`], the runtime options, and the per-call
-/// instantiation helpers. The per-store state is its [`Runtime::StoreCtx`]
-/// associated type — not this trait.
-pub trait Runtime: Clone + Send + Sync + 'static {
-    /// The store context type.
-    type StoreCtx: WasiView + WrpcView + 'static + Send + HasLimits;
-
-    /// Returns the store context.
-    #[must_use]
-    fn store(&self) -> Self::StoreCtx;
-
-    /// Returns the multi-guest registry.
-    fn registry(&self) -> &Registry<Self::StoreCtx>;
-
-    /// Returns the environment-derived runtime options.
-    ///
-    /// Defaults to the registry's options, which every runtime already owns; an
-    /// implementation only overrides this if it sources options elsewhere.
-    fn options(&self) -> &RuntimeOptions {
-        self.registry().options()
-    }
-
-    /// Build a fully configured [`Store`] for a single guest invocation.
-    ///
-    /// Installs an epoch deadline (so CPU-bound guests periodically yield to
-    /// the async executor, allowing an enclosing wall-clock timeout to fire),
-    /// an optional fuel budget, and the per-guest memory limiter.
-    #[must_use]
-    fn build_store(&self, data: Self::StoreCtx) -> Store<Self::StoreCtx> {
-        let options = self.options();
-        let mut store = Store::new(self.registry().engine(), data);
-
-        // Yield to the executor every epoch tick; the deadline is bumped on each
-        // yield so execution continues until a surrounding `timeout` cancels it.
-        store.set_epoch_deadline(1);
-        store.epoch_deadline_async_yield_and_update(1);
-
-        if options.max_fuel > 0 {
-            // `consume_fuel` is enabled in `compile_config` whenever a budget is
-            // set, so this only fails on a compile/run configuration mismatch.
-            if let Err(error) = store.set_fuel(options.max_fuel) {
-                tracing::warn!(%error, "failed to set fuel budget");
-            }
-        }
-
-        store.limiter(|ctx| ctx.limits());
-        store
-    }
-
-    /// Instantiate a selected guest's pre-instantiated component into `store`,
-    /// recording instantiation latency (the `instantiation_duration_us`
-    /// histogram) and failures (the `pool_instantiation_errors` counter, a proxy
-    /// for pool exhaustion) as `OpenTelemetry` metrics.
-    ///
-    /// The caller passes the [`InstancePre`] resolved from the registry (the
-    /// default guest, or an identity-selected one) so a dispatched call lands in
-    /// a fresh instance.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the component cannot be instantiated, e.g. when the
-    /// pooling allocator is exhausted.
-    fn instantiate(
-        &self, instance_pre: &InstancePre<Self::StoreCtx>, store: &mut Store<Self::StoreCtx>,
-    ) -> impl Future<Output = Result<Instance>> + Send {
-        async move {
-            match instance_pre.instantiate_async(store).await {
-                Ok(instance) => {
-                    tracing::debug!("component instantiated");
-                    Ok(instance)
-                }
-                Err(error) => Err(error.into()),
-            }
-        }
-    }
 }
 
 /// Implemented by all WASI hosts in order to allow the runtime to link their
@@ -122,7 +38,10 @@ pub trait Host<T>: Debug + Sync + Send {
 
 /// Implemented by WASI hosts that are servers in order to allow the runtime to
 /// start them.
-pub trait Server<R: Runtime>: Debug + Sync + Send {
+///
+/// Parameterized by the deployment's backend bundle `B` so [`run`](Self::run)
+/// receives the concrete [`Runtime<B>`].
+pub trait Server<B>: Debug + Sync + Send {
     /// Whether this host is a long-lived trigger server — one whose
     /// [`run`](Self::run) loops on a transport and returns only on shutdown
     /// (e.g. `WasiHttp`, `WasiMessaging`, `WasiWebSocket`).
@@ -137,7 +56,7 @@ pub trait Server<R: Runtime>: Debug + Sync + Send {
     /// This is typically implemented by services that instantiate (or run)
     /// wasm components.
     #[allow(unused_variables)]
-    fn run(&self, state: &R) -> impl Future<Output = Result<()>> {
+    fn run(&self, state: &Runtime<B>) -> impl Future<Output = Result<()>> {
         async { Ok(()) }
     }
 }
@@ -198,16 +117,16 @@ pub trait FromEnv: Sized {
     fn from_env() -> Result<Self>;
 }
 
-/// A deployment's connected backend bundle, threaded into [`Context`].
+/// A deployment's connected backend bundle, threaded into [`Runtime`].
 ///
 /// The `runtime!` macro generates the concrete bundle (one field per declared
 /// backend) and this impl, whose [`connect`](Self::connect) connects every
 /// backend concurrently — the work the macro previously inlined as a
-/// `tokio::try_join!` in the generated `Context::new`. A deployment that wires
-/// no backends uses the [`()`](unit) bundle below, so [`Context`] needs no
+/// `tokio::try_join!` in the generated `Runtime::new`. A deployment that wires
+/// no backends uses the [`()`](unit) bundle below, so [`Runtime`] needs no
 /// special empty case.
 ///
-/// [`Context`]: crate::Context
+/// [`Runtime`]: crate::Runtime
 pub trait Backends: Clone + Send + Sync + 'static {
     /// Connect every backend in the bundle.
     ///
@@ -223,19 +142,6 @@ impl Backends for () {
     async fn connect() -> Result<Self> {
         Ok(())
     }
-}
-
-/// Builds a deployment's per-store [`StoreCtx`](Runtime::StoreCtx) from the
-/// fixed [`StoreBase`] and its connected [`Backends`] bundle.
-///
-/// The `runtime!` macro generates this impl on the concrete `StoreCtx`, cloning
-/// one backend into each host-view field per the `Host: Backend` wiring. It
-/// lives in the deployment crate rather than `omnia` because the host-view
-/// trait impls it feeds are foreign-trait impls bound to that local type.
-pub trait BuildStore<B>: Sized {
-    /// Build the store context, cloning each wired backend into its host view.
-    #[must_use]
-    fn build_store(base: StoreBase, backends: &B) -> Self;
 }
 
 #[cfg(test)]

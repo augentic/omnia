@@ -6,12 +6,12 @@ mod command;
 mod compile;
 mod deployment;
 mod dispatch;
-mod scaffold;
 mod manifest;
 mod options;
 mod registry;
 mod routing;
 mod runtime;
+mod scaffold;
 mod selector;
 mod source;
 mod store;
@@ -24,7 +24,7 @@ use std::path::PathBuf;
 
 pub use clap::Parser;
 use clap::Subcommand;
-pub use omnia_host_macros::{Runtime, runtime};
+pub use omnia_host_macros::runtime;
 #[doc(hidden)]
 pub use wrpc_wasmtime::{WrpcCtxView, WrpcView};
 #[doc(hidden)]
@@ -37,7 +37,7 @@ pub use self::dispatch::{HostDispatch, serve_links};
 pub use self::options::RuntimeOptions;
 pub use self::registry::{Guest, GuestId, Registry};
 pub use self::routing::{CliRoutes, HttpRoutes, Resolver, Routes, TopicRoutes, TriggerRouter};
-pub use self::runtime::{Context, ExitStatus};
+pub use self::runtime::{ExitStatus, Runtime};
 #[doc(hidden)]
 pub use self::runtime::{main, run};
 pub use self::selector::{FirstArgSelector, GuestSelector};
@@ -47,9 +47,7 @@ pub use self::store::{Set, Unset};
 pub use self::telemetry::{Telemetry, resource};
 #[doc(hidden)]
 pub use self::traits::assert_hosts;
-pub use self::traits::{
-    Backend, Backends, BuildStore, FromEnv, FutureResult, HasLimits, Host, Runtime, Server,
-};
+pub use self::traits::{Backend, Backends, FromEnv, FutureResult, HasLimits, Host, Server};
 pub use self::transport::{LinkClient, WrpcState};
 pub use self::working_tree::{ResolvedPreopen, WorkingTreeEntry, WorkingTreeRegistry};
 

@@ -35,7 +35,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{Host, Runtime, Server};
+use omnia::{Host, Server};
 use wasmtime::component::{HasData, Linker, ResourceTable};
 
 use self::generated::wasi::sql::{readwrite, types};
@@ -61,7 +61,7 @@ where
     }
 }
 
-impl<R> Server<R> for WasiSql where R: Runtime {}
+impl<B> Server<B> for WasiSql {}
 
 /// A trait which provides internal WASI SQL state.
 ///

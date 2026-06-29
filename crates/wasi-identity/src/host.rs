@@ -30,7 +30,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{Host, Runtime, Server};
+use omnia::{Host, Server};
 use wasmtime::component::{HasData, Linker, ResourceTable, ResourceTableError};
 
 pub use self::default_impl::IdentityDefault;
@@ -58,7 +58,7 @@ where
     }
 }
 
-impl<R> Server<R> for WasiIdentity where R: Runtime {}
+impl<B> Server<B> for WasiIdentity {}
 
 /// A trait which provides internal WASI Identity state.
 ///
