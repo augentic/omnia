@@ -19,7 +19,7 @@ use super::generated::augentic::model::completion as genc;
 use super::generated::augentic::model::completion::{Host, HostWithStore};
 use super::types::{PreparedPrompt, Prompt};
 use super::prompt::validate_answer;
-use super::working_tree::{WorkingTree, resolve_working_tree};
+use super::working_tree::{self, WorkingTree, resolve_working_tree, with_tree};
 use super::{Error, FutureResult, ToolHost, WasiModel, WasiModelCtxView};
 use crate::host::types::{DirEntry, Reference, VerifyReport};
 
@@ -82,14 +82,6 @@ struct BoundToolHost {
     working_tree: Option<WorkingTree>,
 }
 
-// A future that fails because a working-tree tool was called without a tree.
-fn no_working_tree<R: Send + 'static>(tool: &'static str) -> FutureResult<R> {
-    async move {
-        Err(anyhow::anyhow!("tool `{tool}` requires grants.working-tree, but none was lent"))
-    }
-    .boxed()
-}
-
 // Export-function name a `references` exposes for host-mediated `resolve`.
 const RESOLVE_FUNC: &str = "resolve";
 
@@ -136,21 +128,19 @@ impl ToolHost for BoundToolHost {
     }
 
     fn read(&self, path: String) -> FutureResult<Vec<u8>> {
-        self.working_tree.as_ref().map_or_else(|| no_working_tree("read"), |tree| tree.read(path))
+        with_tree(&self.working_tree, "read", |tree| tree.read(path))
     }
 
     fn list(&self, path: String) -> FutureResult<Vec<DirEntry>> {
-        self.working_tree.as_ref().map_or_else(|| no_working_tree("list"), |tree| tree.list(path))
+        with_tree(&self.working_tree, "list", |tree| tree.list(path))
     }
 
     fn write(&self, path: String, bytes: Vec<u8>) -> FutureResult<()> {
-        self.working_tree
-            .as_ref()
-            .map_or_else(|| no_working_tree("write"), |tree| tree.write(path, bytes))
+        with_tree(&self.working_tree, "write", |tree| tree.write(path, bytes))
     }
 
     fn local_path(&self) -> Option<&std::path::Path> {
-        self.working_tree.as_ref().map(WorkingTree::local_path)
+        working_tree::local_path(&self.working_tree)
     }
 
     fn verify(&self, check: String) -> FutureResult<VerifyReport> {

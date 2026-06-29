@@ -83,6 +83,28 @@ impl WorkingTree {
     }
 }
 
+// A future that fails because a working-tree tool was called without a tree.
+fn no_working_tree<R: Send + 'static>(tool: &'static str) -> FutureResult<R> {
+    async move {
+        Err(anyhow::anyhow!("tool `{tool}` requires grants.working-tree, but none was lent"))
+    }
+    .boxed()
+}
+
+/// Run `f` against a lent tree, or fail with a grant error.
+pub(crate) fn with_tree<R: Send + 'static>(
+    tree: &Option<WorkingTree>, tool: &'static str, f: impl FnOnce(&WorkingTree) -> FutureResult<R>,
+) -> FutureResult<R> {
+    match tree.as_ref() {
+        Some(tree) => f(tree),
+        None => no_working_tree(tool),
+    }
+}
+
+pub(crate) fn local_path(tree: &Option<WorkingTree>) -> Option<&Path> {
+    tree.as_ref().map(WorkingTree::local_path)
+}
+
 /// Resolve a `grants.working-tree` into a [`WorkingTree`].
 pub fn resolve_working_tree(
     table: &ResourceTable, registry: &MountRegistry, borrow: Option<&Resource<Descriptor>>,
