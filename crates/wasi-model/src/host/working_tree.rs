@@ -50,7 +50,7 @@ impl WorkingTree {
     // Off-thread a bounded, blocking cap-std op against the mount, tagging a
     // task-join failure with `op`.
     fn run_blocking<R: Send + 'static>(
-        &self, op: &'static str, f: impl FnOnce(&Dir) -> anyhow::Result<R> + Send + 'static,
+        &self, f: impl FnOnce(&Dir) -> anyhow::Result<R> + Send + 'static,
     ) -> FutureResult<R> {
         let dir = Arc::clone(&self.dir);
         async move {
@@ -62,18 +62,18 @@ impl WorkingTree {
     }
 
     pub fn read(&self, path: String) -> FutureResult<Vec<u8>> {
-        self.run_blocking("read", move |dir| read_blocking(dir, &path))
+        self.run_blocking(move |dir| read_blocking(dir, &path))
     }
 
     pub fn list(&self, path: String) -> FutureResult<Vec<DirEntry>> {
-        self.run_blocking("list", move |dir| list_blocking(dir, &path))
+        self.run_blocking(move |dir| list_blocking(dir, &path))
     }
 
     pub fn write(&self, path: String, bytes: Vec<u8>) -> FutureResult<()> {
         if !self.writable {
             return ready_err(anyhow!("working tree is read-only; write to `{path}` denied"));
         }
-        self.run_blocking("write", move |dir| write_blocking(dir, &path, &bytes))
+        self.run_blocking(move |dir| write_blocking(dir, &path, &bytes))
     }
 }
 
