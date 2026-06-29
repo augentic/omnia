@@ -139,16 +139,32 @@ impl From<wasmtime::Error> for Error {
     }
 }
 
-/// Implementation of the `WebSocketView` trait for the store context.
+/// A backend bundle that can yield the `omnia:websocket` backend for a store.
+///
+/// The blanket [`WebSocketView`] impl below turns this accessor into the
+/// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
+/// the bundle-side impl via [`omnia_wasi_view!`].
+pub trait HasWebSocket: Send {
+    /// Borrow the `omnia:websocket` backend context.
+    fn websocket_ctx(&mut self) -> &mut dyn WebSocketCtx;
+}
+
+impl<B: HasWebSocket + Send + 'static> WebSocketView for omnia::StoreCtx<B> {
+    fn websocket(&mut self) -> WasiWebSocketCtxView<'_> {
+        WasiWebSocketCtxView {
+            ctx: self.backends.websocket_ctx(),
+            table: &mut self.base.table,
+        }
+    }
+}
+
+/// Generates the bundle's [`HasWebSocket`] impl for a `runtime!` deployment.
 #[macro_export]
 macro_rules! omnia_wasi_view {
-    ($store_ctx:ty, $field_name:ident) => {
-        impl omnia_wasi_websocket::WebSocketView for $store_ctx {
-            fn websocket(&mut self) -> omnia_wasi_websocket::WasiWebSocketCtxView<'_> {
-                omnia_wasi_websocket::WasiWebSocketCtxView {
-                    ctx: &mut self.$field_name,
-                    table: &mut self.base.table,
-                }
+    ($bundle:ty, $field_name:ident) => {
+        impl $crate::HasWebSocket for $bundle {
+            fn websocket_ctx(&mut self) -> &mut dyn $crate::WebSocketCtx {
+                &mut self.$field_name
             }
         }
     };

@@ -102,16 +102,32 @@ impl From<ResourceTableError> for Error {
     }
 }
 
-/// Implementation of the `WasiIdentityView` trait for the store context.
+/// A backend bundle that can yield the `wasi:identity` backend for a store.
+///
+/// The blanket [`WasiIdentityView`] impl below turns this accessor into the
+/// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
+/// the bundle-side impl via [`omnia_wasi_view!`].
+pub trait HasIdentity: Send {
+    /// Borrow the `wasi:identity` backend context.
+    fn identity_ctx(&mut self) -> &mut dyn WasiIdentityCtx;
+}
+
+impl<B: HasIdentity + Send + 'static> WasiIdentityView for omnia::StoreCtx<B> {
+    fn identity(&mut self) -> WasiIdentityCtxView<'_> {
+        WasiIdentityCtxView {
+            ctx: self.backends.identity_ctx(),
+            table: &mut self.base.table,
+        }
+    }
+}
+
+/// Generates the bundle's [`HasIdentity`] impl for a `runtime!` deployment.
 #[macro_export]
 macro_rules! omnia_wasi_view {
-    ($store_ctx:ty, $field_name:ident) => {
-        impl omnia_wasi_identity::WasiIdentityView for $store_ctx {
-            fn identity(&mut self) -> omnia_wasi_identity::WasiIdentityCtxView<'_> {
-                omnia_wasi_identity::WasiIdentityCtxView {
-                    ctx: &mut self.$field_name,
-                    table: &mut self.base.table,
-                }
+    ($bundle:ty, $field_name:ident) => {
+        impl $crate::HasIdentity for $bundle {
+            fn identity_ctx(&mut self) -> &mut dyn $crate::WasiIdentityCtx {
+                &mut self.$field_name
             }
         }
     };

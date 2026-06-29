@@ -132,16 +132,32 @@ pub struct QueryOpts {
     pub continuation: Option<String>,
 }
 
-/// Implementation of [`WasiJsonDbView`] for generated store contexts.
+/// A backend bundle that can yield the `wasi:jsondb` backend for a store.
+///
+/// The blanket [`WasiJsonDbView`] impl below turns this accessor into the
+/// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
+/// the bundle-side impl via [`omnia_wasi_view!`].
+pub trait HasJsonDb: Send {
+    /// Borrow the `wasi:jsondb` backend context.
+    fn jsondb_ctx(&mut self) -> &mut dyn WasiJsonDbCtx;
+}
+
+impl<B: HasJsonDb + Send + 'static> WasiJsonDbView for omnia::StoreCtx<B> {
+    fn jsondb(&mut self) -> WasiJsonDbCtxView<'_> {
+        WasiJsonDbCtxView {
+            ctx: self.backends.jsondb_ctx(),
+            table: &mut self.base.table,
+        }
+    }
+}
+
+/// Generates the bundle's [`HasJsonDb`] impl for a `runtime!` deployment.
 #[macro_export]
 macro_rules! omnia_wasi_view {
-    ($store_ctx:ty, $field_name:ident) => {
-        impl $crate::WasiJsonDbView for $store_ctx {
-            fn jsondb(&mut self) -> $crate::WasiJsonDbCtxView<'_> {
-                $crate::WasiJsonDbCtxView {
-                    ctx: &mut self.$field_name,
-                    table: &mut self.base.table,
-                }
+    ($bundle:ty, $field_name:ident) => {
+        impl $crate::HasJsonDb for $bundle {
+            fn jsondb_ctx(&mut self) -> &mut dyn $crate::WasiJsonDbCtx {
+                &mut self.$field_name
             }
         }
     };

@@ -2074,6 +2074,7 @@ dependencies = [
  "tracing-subscriber",
  "wasmtime",
  "wasmtime-wasi",
+ "wasmtime-wasi-http",
  "wrpc-transport",
  "wrpc-wasmtime",
 ]

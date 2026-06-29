@@ -105,16 +105,32 @@ impl From<ResourceTableError> for Error {
     }
 }
 
-/// Implementation of the `WasiKeyValueView` trait for the store context.
+/// A backend bundle that can yield the `wasi:keyvalue` backend for a store.
+///
+/// The blanket [`WasiKeyValueView`] impl below turns this accessor into the
+/// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
+/// the bundle-side impl via [`omnia_wasi_view!`].
+pub trait HasKeyValue: Send {
+    /// Borrow the `wasi:keyvalue` backend context.
+    fn keyvalue_ctx(&mut self) -> &mut dyn WasiKeyValueCtx;
+}
+
+impl<B: HasKeyValue + Send + 'static> WasiKeyValueView for omnia::StoreCtx<B> {
+    fn keyvalue(&mut self) -> WasiKeyValueCtxView<'_> {
+        WasiKeyValueCtxView {
+            ctx: self.backends.keyvalue_ctx(),
+            table: &mut self.base.table,
+        }
+    }
+}
+
+/// Generates the bundle's [`HasKeyValue`] impl for a `runtime!` deployment.
 #[macro_export]
 macro_rules! omnia_wasi_view {
-    ($store_ctx:ty, $field_name:ident) => {
-        impl omnia_wasi_keyvalue::WasiKeyValueView for $store_ctx {
-            fn keyvalue(&mut self) -> omnia_wasi_keyvalue::WasiKeyValueCtxView<'_> {
-                omnia_wasi_keyvalue::WasiKeyValueCtxView {
-                    ctx: &mut self.$field_name,
-                    table: &mut self.base.table,
-                }
+    ($bundle:ty, $field_name:ident) => {
+        impl $crate::HasKeyValue for $bundle {
+            fn keyvalue_ctx(&mut self) -> &mut dyn $crate::WasiKeyValueCtx {
+                &mut self.$field_name
             }
         }
     };

@@ -132,8 +132,8 @@ pub fn field_ident(path: &Path) -> Ident {
 }
 
 /// Derives a host crate's module ident from a host type's final path segment
-/// (e.g. `WasiHttp` -> `omnia_wasi_http`), matching the host-crate naming the
-/// `StoreContext` derive's `#[wasi(...)]` attribute expects.
+/// (e.g. `WasiHttp` -> `omnia_wasi_http`), naming the host crate whose
+/// `omnia_wasi_view!` the generated bundle accessor invokes.
 pub fn wasi_ident(path: &Path) -> Ident {
     let Some(segment) = path.segments.last() else {
         return format_ident!("wasi");

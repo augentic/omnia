@@ -37,13 +37,19 @@ where
     }
 }
 
-/// Implementation of the `WasiHttpView` trait for the store context.
+/// Generates the bundle's [`omnia::HasHttp`] impl for a `runtime!` deployment.
+///
+/// `wasi:http`'s view trait (`WasiHttpView`) is foreign, so the
+/// `WasiHttpView for omnia::StoreCtx<B>` impl lives in `omnia`; this only wires
+/// the bundle field's [`HttpDefault::as_view`] through `HasHttp`.
 #[macro_export]
 macro_rules! omnia_wasi_view {
-    ($store_ctx:ty, $field_name:ident) => {
-        impl omnia_wasi_http::WasiHttpView for $store_ctx {
-            fn http(&mut self) -> omnia_wasi_http::WasiHttpCtxView<'_> {
-                self.$field_name.as_view(&mut self.base.table)
+    ($bundle:ty, $field_name:ident) => {
+        impl omnia::HasHttp for $bundle {
+            fn http_view<'a>(
+                &'a mut self, table: &'a mut omnia::wasmtime_wasi::ResourceTable,
+            ) -> omnia_wasi_http::WasiHttpCtxView<'a> {
+                self.$field_name.as_view(table)
             }
         }
     };

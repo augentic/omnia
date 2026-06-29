@@ -16,17 +16,17 @@ pub fn expand(config: &Config) -> TokenStream {
     let Codegen {
         command,
         command_assert,
-        store_ctx_fields,
         bundle_fields,
-        store_assignments,
+        accessor_impls,
         backend_idents,
         backend_types,
         host_trait_impls,
     } = Codegen::from(config);
 
-    // The connected backend bundle threaded into `omnia::Context`. A deployment
-    // with no backends rides the `()` bundle (`omnia::Backends for ()`), so no
-    // bundle type or `connect` impl is generated.
+    // The connected backend bundle threaded into `omnia::Context` and
+    // `omnia::StoreCtx`. A deployment with no backends rides the `()` bundle
+    // (`omnia::Backends for ()`), so no bundle type, `connect` impl, or host-view
+    // accessors are generated.
     let (bundle_ty, bundle_def) = if backend_idents.is_empty() {
         (quote! { () }, quote! {})
     } else {
@@ -49,6 +49,11 @@ pub fn expand(config: &Config) -> TokenStream {
                         Ok(Self { #(#backend_idents,)* })
                     }
                 }
+
+                // Bundle-side host-view accessors (one per backend-backed host).
+                // Each host crate's blanket `WasiXxxView for omnia::StoreCtx<B>`
+                // reads these to serve its WASI interface.
+                #(#accessor_impls)*
             },
         )
     };
@@ -57,32 +62,16 @@ pub fn expand(config: &Config) -> TokenStream {
         mod runtime {
             use anyhow::Result;
             use omnia::tokio;
-            use omnia::{Server, StoreBase, StoreContext};
+            use omnia::Server;
 
             use super::*;
 
-            /// Per-guest instance data shared between the runtime and the guest.
-            #[derive(StoreContext)]
-            pub struct StoreCtx {
-                #[base]
-                pub base: StoreBase,
-                #(#store_ctx_fields,)*
-            }
-
             #bundle_def
 
-            // Clone each connected backend into the host-view field it backs.
-            impl omnia::BuildStore<#bundle_ty> for StoreCtx {
-                fn build_store(base: StoreBase, backends: &#bundle_ty) -> Self {
-                    Self {
-                        base,
-                        #(#store_assignments,)*
-                    }
-                }
-            }
-
-            // The deployment's concrete host runtime.
-            type Ctx = omnia::Context<StoreCtx, #bundle_ty>;
+            // The deployment's concrete host runtime over the library
+            // `StoreCtx<B>`; the macro no longer emits a per-deployment store
+            // context — `omnia` owns it, and each host crate blankets its view.
+            type Ctx = omnia::Context<omnia::StoreCtx<#bundle_ty>, #bundle_ty>;
 
             #command_assert
 

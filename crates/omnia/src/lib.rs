@@ -23,7 +23,7 @@ use std::path::PathBuf;
 
 pub use clap::Parser;
 use clap::Subcommand;
-pub use omnia_host_macros::{Runtime, StoreContext, runtime};
+pub use omnia_host_macros::{Runtime, runtime};
 #[doc(hidden)]
 pub use wrpc_wasmtime::{WrpcCtxView, WrpcView};
 #[doc(hidden)]
@@ -40,9 +40,9 @@ pub use self::runtime::{Context, ExitStatus};
 #[doc(hidden)]
 pub use self::runtime::{main, run};
 pub use self::selector::{FirstArgSelector, GuestSelector};
+pub use self::store::{HasHttp, StoreBase, StoreBaseBuilder, StoreCtx};
 #[doc(hidden)]
 pub use self::store::{Set, Unset};
-pub use self::store::{StoreBase, StoreBaseBuilder};
 pub use self::telemetry::{Telemetry, resource};
 #[doc(hidden)]
 pub use self::traits::assert_hosts;

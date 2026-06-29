@@ -21,13 +21,10 @@ use std::sync::Arc;
 use anyhow::{Context as _, Result};
 use omnia::{ExitStatus, Registry, Runtime, StoreBase, run};
 
-/// Per-store context: just the fixed [`StoreBase`]. The `wasi:cli` guest needs
-/// only the WASI view, which the `StoreContext` derive supplies from `base`.
-#[derive(omnia::StoreContext)]
-struct TestCtx {
-    #[base]
-    base: StoreBase,
-}
+/// Per-store context: the library [`omnia::StoreCtx`] over the empty `()` backend
+/// bundle. The `wasi:cli` guest needs only the WASI view, which `StoreCtx`
+/// supplies from its `base`.
+type TestCtx = omnia::StoreCtx<()>;
 
 /// A minimal [`Runtime`] over a single `wasi:cli` guest, threading guest argv
 /// into every store (the guest reads it as `wasi:cli/environment`). In command
@@ -48,6 +45,7 @@ impl Runtime for TestRuntime {
                 .dispatch(Arc::new(self.clone()))
                 .args(&self.args)
                 .build(),
+            backends: (),
         }
     }
 

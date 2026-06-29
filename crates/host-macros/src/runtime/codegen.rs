@@ -12,9 +12,8 @@ use crate::runtime::parse::{self, Config};
 pub struct Codegen {
     pub command: bool,
     pub command_assert: TokenStream,
-    pub store_ctx_fields: Vec<TokenStream>,
     pub bundle_fields: Vec<TokenStream>,
-    pub store_assignments: Vec<TokenStream>,
+    pub accessor_impls: Vec<TokenStream>,
     pub backend_idents: Vec<Ident>,
     pub backend_types: Vec<Path>,
     pub host_trait_impls: Vec<Path>,
@@ -29,9 +28,8 @@ impl From<&Config> for Codegen {
         Self {
             command_assert: command_assert(config.command, &host_trait_impls),
             command: config.command,
-            store_ctx_fields: structural.store_ctx_fields,
             bundle_fields: structural.bundle_fields,
-            store_assignments: structural.store_assignments,
+            accessor_impls: structural.accessor_impls,
             backend_idents: structural.backend_idents,
             backend_types: config.backends.clone(),
             host_trait_impls,
@@ -40,29 +38,27 @@ impl From<&Config> for Codegen {
 }
 
 struct Structural {
-    store_ctx_fields: Vec<TokenStream>,
     bundle_fields: Vec<TokenStream>,
-    store_assignments: Vec<TokenStream>,
+    accessor_impls: Vec<TokenStream>,
     backend_idents: Vec<Ident>,
 }
 
 fn structural(config: &Config) -> Structural {
-    let mut store_ctx_fields = Vec::new();
-    let mut store_assignments = Vec::new();
+    // One bundle-accessor impl per backend-backed host: the host crate's
+    // `omnia_wasi_view!` wires the bundle field that its `HasXxx` accessor
+    // returns, and the host crate's blanket `WasiXxxView for StoreCtx<B>` reads
+    // it. Backend-less hosts contribute no accessor (as before, no view field).
+    let mut accessor_impls = Vec::new();
 
     for host in &config.hosts {
         let Some(backend_type) = &host.backend else {
             continue;
         };
 
-        let host_ident = parse::wasi_ident(&host.type_);
+        let host_crate = parse::wasi_ident(&host.type_);
         let field = parse::field_ident(backend_type);
-        store_ctx_fields.push(quote! {
-            #[wasi(#host_ident)]
-            pub #host_ident: #backend_type
-        });
-        store_assignments.push(quote! {
-            #host_ident: backends.#field.clone()
+        accessor_impls.push(quote! {
+            #host_crate::omnia_wasi_view!(Backends, #field);
         });
     }
 
@@ -78,9 +74,8 @@ fn structural(config: &Config) -> Structural {
     }
 
     Structural {
-        store_ctx_fields,
         bundle_fields,
-        store_assignments,
+        accessor_impls,
         backend_idents,
     }
 }

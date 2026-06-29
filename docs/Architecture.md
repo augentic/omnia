@@ -202,10 +202,8 @@ runtime!({
 
 The macro generates:
 
-- `Context`: Holds the guest registry and backend connections
-- `StoreCtx`: Per-instance data shared between runtime and host functions
-- `Runtime` trait implementation (via `#[derive(Runtime)]`)
-- WASI view trait implementations for each interface (via `#[derive(StoreContext)]`)
+- A `Backends` bundle: one connected backend per `Host: Backend` wiring, plus the `HasXxx` accessor impls each host crate's `omnia_wasi_view!` emits
+- `Context`: the library `omnia::Context` over `omnia::StoreCtx<Backends>`, holding the guest registry and backend bundle (the per-store `StoreCtx` and its WASI views are library code, not macro output)
 - `Context::new` to link hosts, connect backends, and assemble the registry
 - `main` that delegates to `omnia::main` (CLI parse, compile, bootstrap, and `run`)
 

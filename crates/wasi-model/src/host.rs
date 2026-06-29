@@ -127,11 +127,9 @@ pub trait WasiModelCtx: Debug + Send + Sync + 'static {
     -> FutureResult<BackendAnswer>;
 }
 
-/// Forward the backend trait through a boxed trait object so a store context can
-/// hold a swappable `Box<dyn WasiModelCtx>` field and still satisfy the
-/// `omnia_wasi_view!` macro's `&mut self.field` coercion to `&mut dyn
-/// WasiModelCtx` — exactly what `#[wasi(omnia_wasi_model)]` on a boxed field
-/// (e.g. a record-vs-replay test runtime) needs.
+/// Forward the backend trait through a boxed trait object so a backend bundle
+/// can hold a swappable `Box<dyn WasiModelCtx>` field and still implement
+/// [`HasModel`] — exactly what a record-vs-replay test runtime's bundle needs.
 impl WasiModelCtx for Box<dyn WasiModelCtx> {
     fn complete(
         &self, prompt: Prompt, tool_host: Arc<dyn ToolHost>,
@@ -188,18 +186,35 @@ impl From<anyhow::Error> for Error {
     }
 }
 
-/// Implementation of the `WasiModelView` trait for the store context.
+/// A backend bundle that can yield the `wasi-model` backend for a store.
+///
+/// The blanket [`WasiModelView`] impl below turns this accessor into the
+/// linker-facing view on `omnia::StoreCtx<B>`, threading in the `host_dispatch`
+/// and working-tree registry from the store base (§4.2); the `runtime!` macro
+/// generates the bundle-side impl via [`omnia_wasi_view!`].
+pub trait HasModel: Send {
+    /// Borrow the `wasi-model` backend context.
+    fn model_ctx(&mut self) -> &mut dyn WasiModelCtx;
+}
+
+impl<B: HasModel + Send + 'static> WasiModelView for omnia::StoreCtx<B> {
+    fn model(&mut self) -> WasiModelCtxView<'_> {
+        WasiModelCtxView {
+            ctx: self.backends.model_ctx(),
+            table: &mut self.base.table,
+            host_dispatch: Arc::clone(&self.base.host_dispatch),
+            working_trees: &self.base.working_trees,
+        }
+    }
+}
+
+/// Generates the bundle's [`HasModel`] impl for a `runtime!` deployment.
 #[macro_export]
 macro_rules! omnia_wasi_view {
-    ($store_ctx:ty, $field_name:ident) => {
-        impl omnia_wasi_model::WasiModelView for $store_ctx {
-            fn model(&mut self) -> omnia_wasi_model::WasiModelCtxView<'_> {
-                omnia_wasi_model::WasiModelCtxView {
-                    ctx: &mut self.$field_name,
-                    table: &mut self.base.table,
-                    host_dispatch: ::std::sync::Arc::clone(&self.base.host_dispatch),
-                    working_trees: &*self.base.working_trees,
-                }
+    ($bundle:ty, $field_name:ident) => {
+        impl $crate::HasModel for $bundle {
+            fn model_ctx(&mut self) -> &mut dyn $crate::WasiModelCtx {
+                &mut self.$field_name
             }
         }
     };

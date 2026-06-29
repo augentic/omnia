@@ -3,8 +3,9 @@
 > Status: Design proposal — introduces a *dynamic* runtime-composition mode in
 > which one prebuilt binary chooses its WASI backends (and which triggers run)
 > from `omnia.toml`, with no recompile. Complements — does not replace — the
-> compile-time `runtime!` macro. Depends: the landed `runtime!` / `StoreContext`
-> derives, the per-interface `WasiXxxCtx` backend traits, the `omnia.toml`
+> compile-time `runtime!` macro. Depends: the landed `runtime!` macro and the
+> library `omnia::StoreCtx<B>` (with its per-host `HasXxx` accessor traits), the
+> per-interface `WasiXxxCtx` backend traits, the `omnia.toml`
 > manifest. Relates: [backend-router](backend-router.md) (per-call *model*
 > routing — orthogonal), [wrpc-cluster](wrpc-cluster.md) (out-of-process
 > backends — the future extension in §7).
@@ -42,15 +43,24 @@ Backend choice is the same kind of decision.
 
 ## 2. Current state: what is compile-time, what is already dynamic
 
-The `runtime!` / `#[derive(Runtime)]` / `#[derive(StoreContext)]` machinery
-(`crates/host-macros/src/{expand,runtime_derive,store_context}.rs`) generates,
-per backend:
+> Note: since this RFC was written, the per-store `StoreCtx` moved into the
+> `omnia` library as the generic `omnia::StoreCtx<B>` (over the connected backend
+> bundle `B`). The per-interface view is now a blanket `WasiXxxView for
+> StoreCtx<B>` in each host crate, gated on a small `HasXxx` accessor trait the
+> bundle implements; `omnia_wasi_view!` generates that bundle-side accessor. The
+> design below still holds — it just hangs the boxed contexts off the bundle `B`
+> rather than off `StoreCtx` directly.
 
-- a concrete field on `StoreCtx` (`pub omnia_wasi_keyvalue: KeyValueDefault`),
+The `runtime!` machinery (`crates/host-macros/src/runtime/{codegen,parse}.rs`,
+the library `omnia::StoreCtx<B>`, and the per-host `HasXxx` accessor traits)
+generates, per backend:
+
+- a field on the connected `Backends` bundle (`key_value_default: KeyValueDefault`),
 - a `Context` that calls `<KeyValueDefault as Backend>::connect()` at startup,
-- a per-invocation `store()` that **clones** the backend into each store
-  (`runtime_derive.rs`: `#target: self.#field.clone()`),
-- a host *view* delegating to the host crate's `omnia_wasi_view!` macro.
+- a per-invocation `store()` that **clones** the bundle into each store
+  (`omnia::BuildStore for StoreCtx<B>`),
+- a bundle-side `HasXxx` accessor (via the host crate's `omnia_wasi_view!`) that
+  the host crate's blanket `WasiXxxView for StoreCtx<B>` reads.
 
 The decisive observation is that the host *logic* is **already dynamic**. Every
 interface exposes an object-safe context trait, and the generated view hands the
@@ -72,7 +82,7 @@ Both the in-memory default and a real backend implement that one trait (the doc
 comment literally says "an in-memory store, or a Redis-backed store"). So the
 only pieces fixed at compile time are:
 
-1. the **concrete type** of each `StoreCtx` field,
+1. the **concrete type** of each `Backends` bundle field,
 2. the **`Backend::connect()` wiring** in the generated `Context`,
 3. the per-store **`.clone()`** of that concrete backend.
 

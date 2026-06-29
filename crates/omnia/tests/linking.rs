@@ -28,15 +28,10 @@ use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
 use omnia::{GuestId, Registry, RegistryBuilder, Runtime, StoreBase, serve_links};
 
-/// Per-store context mirroring the macro-generated `StoreCtx`: the fixed [`StoreBase`]
-/// state, with the `WasiView` / `WrpcView` / `HasLimits` impls supplied by the
-/// `StoreContext` derive. No host backend — the link path needs only the WASI
-/// and wRPC views.
-#[derive(omnia::StoreContext)]
-struct TestCtx {
-    #[base]
-    base: StoreBase,
-}
+/// Per-store context: the library [`omnia::StoreCtx`] over the empty `()` backend
+/// bundle. No host backend — the link path needs only the WASI and wRPC views,
+/// which `StoreCtx` supplies from its `base`.
+type TestCtx = omnia::StoreCtx<()>;
 
 /// A minimal [`Runtime`] over the linking registry that counts guest store
 /// creations, so the test can assert instance-per-call.
@@ -58,6 +53,7 @@ impl Runtime for TestRuntime {
                 .options(self.options())
                 .dispatch(Arc::new(self.clone()))
                 .build(),
+            backends: (),
         }
     }
 

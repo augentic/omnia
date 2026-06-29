@@ -30,9 +30,10 @@ use crate::{Cli, Command, Compiled, Registry, RegistryBuilder, StoreBase, comman
 /// It owns the fixed runtime state every deployment shares — the guest
 /// [`Registry`], the guest argv, and the working-tree registry — plus the
 /// deployment's connected [`Backends`] bundle `B`. The per-store context type
-/// `S` (the `StoreCtx`) stays in the deployment crate, because its host-view
-/// impls are foreign-trait impls bound to that local type; `Context` reaches it
-/// only through the [`BuildStore`] seam.
+/// `S` is the library's [`StoreCtx<B>`](crate::StoreCtx): its fixed views live
+/// in `omnia`, and each host crate blankets its own view over `StoreCtx<B>`, so
+/// the deployment supplies only the bundle and its `HasXxx` accessor impls.
+/// `Context` reaches the store through the [`BuildStore`] seam.
 ///
 /// The macro previously emitted this struct, its [`new`](Self::new), and a
 /// derived [`Runtime`] impl inline; hosting it here keeps that boilerplate (and

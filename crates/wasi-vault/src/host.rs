@@ -102,16 +102,32 @@ impl From<ResourceTableError> for Error {
     }
 }
 
-/// Implementation of the `WasiVaultView` trait for the store context.
+/// A backend bundle that can yield the `wasi:vault` backend for a store.
+///
+/// The blanket [`WasiVaultView`] impl below turns this accessor into the
+/// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
+/// the bundle-side impl via [`omnia_wasi_view!`].
+pub trait HasVault: Send {
+    /// Borrow the `wasi:vault` backend context.
+    fn vault_ctx(&mut self) -> &mut dyn WasiVaultCtx;
+}
+
+impl<B: HasVault + Send + 'static> WasiVaultView for omnia::StoreCtx<B> {
+    fn vault(&mut self) -> WasiVaultCtxView<'_> {
+        WasiVaultCtxView {
+            ctx: self.backends.vault_ctx(),
+            table: &mut self.base.table,
+        }
+    }
+}
+
+/// Generates the bundle's [`HasVault`] impl for a `runtime!` deployment.
 #[macro_export]
 macro_rules! omnia_wasi_view {
-    ($store_ctx:ty, $field_name:ident) => {
-        impl omnia_wasi_vault::WasiVaultView for $store_ctx {
-            fn vault(&mut self) -> omnia_wasi_vault::WasiVaultCtxView<'_> {
-                omnia_wasi_vault::WasiVaultCtxView {
-                    ctx: &mut self.$field_name,
-                    table: &mut self.base.table,
-                }
+    ($bundle:ty, $field_name:ident) => {
+        impl $crate::HasVault for $bundle {
+            fn vault_ctx(&mut self) -> &mut dyn $crate::WasiVaultCtx {
+                &mut self.$field_name
             }
         }
     };

@@ -18,8 +18,8 @@
 //! ```
 //!
 //! The generated `store()` assumes the `StoreCtx` carries its
-//! `omnia::StoreBase` in a field named `base` (the convention the
-//! `StoreContext` derive and `runtime!` macro establish).
+//! `omnia::StoreBase` in a field named `base` (the convention
+//! `omnia::StoreCtx` and the `runtime!` macro establish).
 
 use proc_macro2::TokenStream;
 use quote::quote;

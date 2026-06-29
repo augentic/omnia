@@ -49,14 +49,30 @@ pub trait WasiConfigCtx: Debug + Send + Sync + 'static {
     fn get_config(&self) -> &WasiConfigVariables;
 }
 
-/// Implementation of the `WasiConfigView` trait for the store context.
+/// A backend bundle that can yield the `wasi:config` backend for a store.
+///
+/// The blanket [`WasiConfigView`] impl below turns this accessor into the
+/// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
+/// the bundle-side impl via [`omnia_wasi_view!`]. The accessor borrows shared
+/// because [`WasiConfigCtx::get_config`] takes `&self`.
+pub trait HasConfig: Send {
+    /// Borrow the `wasi:config` backend context.
+    fn config_ctx(&self) -> &dyn WasiConfigCtx;
+}
+
+impl<B: HasConfig + Send + 'static> WasiConfigView for omnia::StoreCtx<B> {
+    fn config(&mut self) -> wasmtime_wasi_config::WasiConfig<'_> {
+        wasmtime_wasi_config::WasiConfig::from(self.backends.config_ctx().get_config())
+    }
+}
+
+/// Generates the bundle's [`HasConfig`] impl for a `runtime!` deployment.
 #[macro_export]
 macro_rules! omnia_wasi_view {
-    ($store_ctx:ty, $field_name:ident) => {
-        impl omnia_wasi_config::WasiConfigView for $store_ctx {
-            fn config(&mut self) -> omnia_wasi_config::wasmtime_wasi_config::WasiConfig<'_> {
-                let vars = omnia_wasi_config::WasiConfigCtx::get_config(&self.$field_name);
-                omnia_wasi_config::wasmtime_wasi_config::WasiConfig::from(vars)
+    ($bundle:ty, $field_name:ident) => {
+        impl $crate::HasConfig for $bundle {
+            fn config_ctx(&self) -> &dyn $crate::WasiConfigCtx {
+                &self.$field_name
             }
         }
     };

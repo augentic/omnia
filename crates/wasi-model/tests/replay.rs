@@ -34,25 +34,32 @@ use omnia::{
     WorkingTreeRegistry,
 };
 use omnia_wasi_model::{
-    BackendAnswer, ConnectOptions, FutureResult, ModelDefault, Prompt, Recording, Reference,
-    ToolHost, WasiModel, WasiModelCtx,
+    BackendAnswer, ConnectOptions, FutureResult, HasModel, ModelDefault, Prompt, Recording,
+    Reference, ToolHost, WasiModel, WasiModelCtx,
 };
 use serde_json::{Value, json};
 
 /// A factory the test runtime calls per store to install a fresh backend.
 type BackendFactory = Arc<dyn Fn() -> Box<dyn WasiModelCtx> + Send + Sync>;
 
-/// Per-store context: the fixed [`StoreBase`] state the floor needs, plus the
-/// swappable model backend the test installs (record vs replay). The
-/// `StoreContext` derive supplies the `WasiView` / `WrpcView` / `HasLimits`
-/// impls and the `WasiModel` host view against `base`.
-#[derive(omnia::StoreContext)]
-struct TestCtx {
-    #[base]
-    base: StoreBase,
-    #[wasi(omnia_wasi_model)]
+/// The deployment's backend bundle for the test: the swappable model backend the
+/// test installs (record vs replay). Its [`HasModel`] impl is what
+/// `omnia::StoreCtx<TestBundle>` reads to serve `wasi-model`.
+struct TestBundle {
     model: Box<dyn WasiModelCtx>,
 }
+
+impl HasModel for TestBundle {
+    fn model_ctx(&mut self) -> &mut dyn WasiModelCtx {
+        &mut *self.model
+    }
+}
+
+/// Per-store context: the library [`omnia::StoreCtx`] over [`TestBundle`]. The
+/// fixed `WasiView` / `WrpcView` / `HasLimits` views come from `omnia`, and the
+/// `WasiModel` host view is the blanket impl over `StoreCtx<B>` that reads
+/// `TestBundle`'s [`HasModel`].
+type TestCtx = omnia::StoreCtx<TestBundle>;
 
 /// A minimal [`Runtime`] over the model registry; `store()` installs the backend
 /// the current phase configured and counts store creations so a test can assert
@@ -81,7 +88,9 @@ impl Runtime for TestRuntime {
                 .dispatch(Arc::new(self.clone()))
                 .working_trees(Arc::clone(&self.working_trees))
                 .build(),
-            model: (self.backend)(),
+            backends: TestBundle {
+                model: (self.backend)(),
+            },
         }
     }
 

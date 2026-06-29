@@ -163,16 +163,32 @@ pub trait WasiBlobstoreCtx: Debug + Send + Sync + 'static {
     fn container_exists(&self, name: String) -> FutureResult<bool>;
 }
 
-/// Implementation of the `WasiBlobstoreView` trait for the store context.
+/// A backend bundle that can yield the `wasi:blobstore` backend for a store.
+///
+/// The blanket [`WasiBlobstoreView`] impl below turns this accessor into the
+/// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
+/// the bundle-side impl via [`omnia_wasi_view!`].
+pub trait HasBlobstore: Send {
+    /// Borrow the `wasi:blobstore` backend context.
+    fn blobstore_ctx(&mut self) -> &mut dyn WasiBlobstoreCtx;
+}
+
+impl<B: HasBlobstore + Send + 'static> WasiBlobstoreView for omnia::StoreCtx<B> {
+    fn blobstore(&mut self) -> WasiBlobstoreCtxView<'_> {
+        WasiBlobstoreCtxView {
+            ctx: self.backends.blobstore_ctx(),
+            table: &mut self.base.table,
+        }
+    }
+}
+
+/// Generates the bundle's [`HasBlobstore`] impl for a `runtime!` deployment.
 #[macro_export]
 macro_rules! omnia_wasi_view {
-    ($store_ctx:ty, $field_name:ident) => {
-        impl omnia_wasi_blobstore::WasiBlobstoreView for $store_ctx {
-            fn blobstore(&mut self) -> omnia_wasi_blobstore::WasiBlobstoreCtxView<'_> {
-                omnia_wasi_blobstore::WasiBlobstoreCtxView {
-                    ctx: &mut self.$field_name,
-                    table: &mut self.base.table,
-                }
+    ($bundle:ty, $field_name:ident) => {
+        impl $crate::HasBlobstore for $bundle {
+            fn blobstore_ctx(&mut self) -> &mut dyn $crate::WasiBlobstoreCtx {
+                &mut self.$field_name
             }
         }
     };

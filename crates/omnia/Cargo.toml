@@ -56,6 +56,10 @@ tokio-util = { workspace = true, features = ["codec"] }
 omnia-host-macros.workspace = true
 wasmtime = { workspace = true, features = ["runtime"] }
 wasmtime-wasi.workspace = true
+# `wasi:http`'s view trait (`WasiHttpView`) is foreign, so omnia owns the one
+# blanket `WasiHttpView for StoreCtx<B>` impl (every other host owns its view
+# trait and blankets it in its own crate).
+wasmtime-wasi-http.workspace = true
 # Host-mediated dynamic linking (Phase 2): wRPC is the carrier on every leg.
 # The in-process transport rides an in-memory byte pipe; `wrpc-wasmtime`
 # provides the `Val` codec and the instance-per-call serve integration. Pinned
