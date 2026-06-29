@@ -26,6 +26,24 @@ use crate::{
     command,
 };
 
+/// Per-deployment wiring supplied by the `runtime!` macro (or a hand-written
+/// host).
+///
+/// [`link`](Self::link) runs inside [`Runtime::new`] before backends connect;
+/// [`servers`](Self::servers) runs from [`run`] after [`prepare`], starting every
+/// long-lived trigger host.
+pub trait RuntimeHooks<B: Backends> {
+    /// Link every declared host into the deployment linker.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any host cannot be added to the linker.
+    fn link(deployment: &mut Deployment<StoreCtx<B>>) -> Result<()>;
+
+    /// Start every long-lived trigger server ([`Server::IS_SERVER`]).
+    fn servers(runtime: &Runtime<B>) -> Vec<BoxFuture<'_, Result<()>>>;
+}
+
 /// Parse the CLI `run` subcommand and map the outcome to a process exit code.
 ///
 /// Generated `main` functions delegate here so CLI parsing and error reporting
@@ -36,22 +54,19 @@ use crate::{
 /// Failures from `run` are printed to stderr and mapped to
 /// [`ExitCode::FAILURE`]; success yields the guest or deployment status.
 #[doc(hidden)]
-pub async fn main<B, L, S>(command_mode: bool, link: L, servers: S) -> ExitCode
+pub async fn main<B, H>(cmd: bool) -> ExitCode
 where
     B: Backends,
-    L: FnOnce(&mut Deployment<StoreCtx<B>>) -> Result<()>,
-    S: for<'a> FnOnce(&'a Runtime<B>) -> Vec<BoxFuture<'a, Result<()>>>,
+    H: RuntimeHooks<B>,
 {
     match Cli::parse().command {
-        Command::Run { wasm, config, args } => {
-            match run::<B, L, S>(wasm, config, args, command_mode, link, servers).await {
-                Ok(status) => status.into(),
-                Err(error) => {
-                    eprintln!("{error:#}");
-                    ExitCode::FAILURE
-                }
+        Command::Run { wasm, config, args } => match run::<B, H>(wasm, config, args, cmd).await {
+            Ok(status) => status.into(),
+            Err(error) => {
+                eprintln!("{error:#}");
+                ExitCode::FAILURE
             }
-        }
+        },
         #[cfg(feature = "jit")]
         Command::Compile { .. } => {
             eprintln!(
@@ -69,32 +84,30 @@ where
 /// # Errors
 ///
 /// Returns an error if preparation, command execution, or any server fails.
-pub async fn run<B, L, S>(
-    wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>, command_mode: bool, link: L,
-    servers: S,
+pub async fn run<B, H>(
+    wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>, cmd: bool,
 ) -> Result<ExitStatus>
 where
     B: Backends,
-    L: FnOnce(&mut Deployment<StoreCtx<B>>) -> Result<()>,
-    S: for<'a> FnOnce(&'a Runtime<B>) -> Vec<BoxFuture<'a, Result<()>>>,
+    H: RuntimeHooks<B>,
 {
     let deployment = DeploymentBuilder::new()
         .wasm(wasm)
         .config(config)
         .args(args)
-        .command(command_mode)
+        .command(cmd)
         .build::<StoreCtx<B>>()
         .await
         .context("building runtime")?;
 
-    let runtime = Runtime::<B>::new(deployment, link).await.context("preparing runtime state")?;
+    let runtime =
+        Runtime::<B>::new(deployment, H::link).await.context("preparing runtime state")?;
 
-    if command_mode {
+    if cmd {
         command::run(&runtime).await
     } else {
         prepare(&runtime).await?;
-        future::try_join_all(servers(&runtime)).await?;
-
+        future::try_join_all(H::servers(&runtime)).await?;
         Ok(ExitStatus::SUCCESS)
     }
 }
@@ -241,9 +254,9 @@ impl<B: Backends> Runtime<B> {
     /// the deployment's hosts (via `link`), connect every backend, and freeze
     /// the guest [`Registry`].
     ///
-    /// `link` is the one per-deployment step the macro still supplies — a
-    /// closure that calls [`Deployment::host`] once per wired host (the
-    /// generated `servers` closure mirrors it when starting trigger servers).
+    /// `link` is the one per-deployment step the macro still supplies — typically
+    /// [`RuntimeHooks::link`], which calls [`Deployment::host`] once per wired
+    /// host ([`RuntimeHooks::servers`] mirrors it when starting trigger servers).
     ///
     /// # Errors
     ///

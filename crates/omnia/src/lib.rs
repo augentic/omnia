@@ -37,7 +37,7 @@ pub use self::dispatch::{HostDispatch, serve_links};
 pub use self::options::RuntimeOptions;
 pub use self::registry::{Guest, GuestId, Registry};
 pub use self::routing::{CliRoutes, HttpRoutes, Resolver, Routes, TopicRoutes, TriggerRouter};
-pub use self::runtime::{ExitStatus, Runtime};
+pub use self::runtime::{ExitStatus, Runtime, RuntimeHooks};
 #[doc(hidden)]
 pub use self::runtime::{main, run};
 pub use self::selector::{FirstArgSelector, GuestSelector};

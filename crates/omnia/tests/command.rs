@@ -18,7 +18,21 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
-use omnia::{ExitStatus, run};
+use omnia::{ExitStatus, RuntimeHooks, run};
+
+struct EmptyHooks;
+
+impl RuntimeHooks<()> for EmptyHooks {
+    fn link(_deployment: &mut omnia::Deployment<omnia::StoreCtx<()>>) -> Result<()> {
+        Ok(())
+    }
+
+    fn servers(
+        _runtime: &omnia::Runtime<()>,
+    ) -> Vec<omnia::futures::future::BoxFuture<'_, Result<()>>> {
+        vec![]
+    }
+}
 
 /// The `target/` directory: the test executable lives at
 /// `<target>/<profile>/deps/<exe>`.
@@ -42,13 +56,11 @@ fn cli_wasm(target: &Path) -> Option<PathBuf> {
 async fn run_cli(wasm: &Path, tail: &[&str]) -> Result<ExitStatus> {
     // The `()` bundle links no hosts; `wasi:cli` is wired by the deployment
     // builder, and `Runtime::new` threads the guest argv into every store.
-    run::<(), _, _>(
+    run::<(), EmptyHooks>(
         Some(wasm.to_path_buf()),
         None,
         tail.iter().map(|arg| (*arg).to_string()).collect(),
         true,
-        |_deployment| Ok(()),
-        |_runtime| vec![],
     )
     .await
     .context("running command")

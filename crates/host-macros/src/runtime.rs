@@ -74,27 +74,33 @@ pub fn expand(config: &Config) -> TokenStream {
             #bundle_def
             #command_assert
 
+            struct Hooks;
+
+            impl omnia::RuntimeHooks<#bundle_ty> for Hooks {
+                fn link(deployment: &mut omnia::Deployment<omnia::StoreCtx<#bundle_ty>>) -> Result<()> {
+                    #(deployment.host::<#host_trait_impls, #bundle_ty>()?;)*
+                    Ok(())
+                }
+
+                fn servers(
+                    runtime: &omnia::Runtime<#bundle_ty>,
+                ) -> Vec<omnia::futures::future::BoxFuture<'_, Result<()>>> {
+                    let mut servers: Vec<omnia::futures::future::BoxFuture<'_, Result<()>>> = vec![];
+                    #(
+                        if <#host_trait_impls as Server<#bundle_ty>>::IS_SERVER {
+                            servers.push(
+                                Box::pin(#host_trait_impls.run(runtime))
+                                    as omnia::futures::future::BoxFuture<'_, Result<()>>,
+                            );
+                        }
+                    )*
+                    servers
+                }
+            }
+
             #[tokio::main]
             pub async fn main() -> ::std::process::ExitCode {
-                omnia::main::<#bundle_ty, _, _>(
-                    #command,
-                    |deployment| {
-                        #(deployment.host::<#host_trait_impls, #bundle_ty>()?;)*
-                        Ok(())
-                    },
-                    |runtime| {
-                        let mut servers: Vec<omnia::futures::future::BoxFuture<'_, Result<()>>> = vec![];
-                        #(
-                            if <#host_trait_impls as Server<#bundle_ty>>::IS_SERVER {
-                                servers.push(
-                                    Box::pin(#host_trait_impls.run(runtime))
-                                        as omnia::futures::future::BoxFuture<'_, Result<()>>,
-                                );
-                            }
-                        )*
-                        servers
-                    },
-                ).await
+                omnia::main::<#bundle_ty, Hooks>(#command).await
             }
         }
 

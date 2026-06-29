@@ -203,7 +203,7 @@ runtime!({
 The macro generates:
 
 - A `Backends` bundle: one connected backend per `Host: Backend` wiring, plus the `HasXxx` accessor impls each host crate's `omnia_wasi_view!` emits
-- `main`, which delegates to `omnia::main` — passing a host-linking closure (which the library `omnia::Runtime::new` runs to link hosts, connect backends, and assemble the registry) and a server-start closure that launches each trigger host's `run`
+- `main`, which delegates to `omnia::main::<Backends, Hooks>` — `Hooks` is a generated [`RuntimeHooks`] impl whose [`link`](omnia::RuntimeHooks::link) runs inside `omnia::Runtime::new` to link hosts, connect backends, and assemble the registry, and whose [`servers`](omnia::RuntimeHooks::servers) launches each trigger host's `run`
 
 The host runtime itself is the library `omnia::Runtime<Backends>` over `omnia::StoreCtx<Backends>`, holding the guest registry and backend bundle (the per-store `StoreCtx` and its WASI views are library code, not macro output).
 
