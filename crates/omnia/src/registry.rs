@@ -117,9 +117,6 @@ impl<T: 'static> Guest<T> {
 pub struct Registry<T: 'static> {
     engine: Engine,
     options: RuntimeOptions,
-    /// Guests keyed by identity. A [`BTreeMap`] so iteration is identity-sorted
-    /// for free, making per-trigger capability and ambiguity errors stable
-    /// across runs without a per-call sort.
     guests: BTreeMap<GuestId, Guest<T>>,
     routes: Routes,
     dispatch: Arc<DispatchHandle>,
