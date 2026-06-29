@@ -48,11 +48,10 @@ use self::generated::augentic::model::completion;
 pub use self::generated::augentic::model::completion::Error;
 pub use self::replay::{Fixture, FixtureStore, Recording, canonical_key, write_fixture};
 pub use self::types::{
-    BackendAnswer, DirEntry, Example, FunctionTool, GenerationParams, JsonSchemaSpec, Message,
-    MetadataEntry, Prompt, Reference, ResponseFormat, ResponseFormatKind, Sections, ToolChoice,
-    ToolGrants, ToolTurn, Transcript, Variable, VerifyReport,
+    BackendAnswer, CompletionRequest, DirEntry, Example, FunctionTool, GenerationParams,
+    JsonSchemaSpec, Message, MetadataEntry, Prompt, Reference, ResponseFormat, ResponseFormatKind,
+    Sections, ToolChoice, ToolGrants, ToolTurn, Transcript, Variable, VerifyReport,
 };
-pub use self::validate::{Assembled, RESERVED_TOOL_NAMES, assemble, check_prompt, validate_answer};
 
 /// Host-side service for `wasi-model` (a linked-only effect host).
 #[derive(Debug)]
@@ -101,17 +100,19 @@ pub struct WasiModelCtxView<'a> {
 ///
 /// Implemented by [`ModelDefault`] (replay, in-tree) and by the model backends
 /// in the `backends` repo (`omnia_genai::Client`, `omnia_cursor::Client`). It
-/// carries no vendor type. `complete` receives the owned [`Prompt`] and a
+/// carries no vendor type. `complete` receives a host-assembled
+/// [`CompletionRequest`] (the owned [`Prompt`] plus the §3.1.1 channels) and a
 /// host-built [`ToolHost`] — the latter is the only addition over a plain effect
 /// Ctx, and it is just an argument, exactly like `open_bucket`'s `identifier`.
 pub trait WasiModelCtx: Debug + Send + Sync + 'static {
-    /// Produce an answer for `prompt`, optionally lending the per-completion
+    /// Produce an answer for `request`, optionally lending the per-completion
     /// [`ToolHost`] to backends that drive an in-process tool loop. The returned
     /// [`BackendAnswer`] is host-only (its transcript is for record/replay); the
     /// guest sees only the validated `answer` string the `complete` binding
     /// derives from it.
-    fn complete(&self, prompt: Prompt, tool_host: Arc<dyn ToolHost>)
-    -> FutureResult<BackendAnswer>;
+    fn complete(
+        &self, request: CompletionRequest, tool_host: Arc<dyn ToolHost>,
+    ) -> FutureResult<BackendAnswer>;
 }
 
 /// Forward the backend trait through a boxed trait object so a backend bundle
@@ -119,9 +120,9 @@ pub trait WasiModelCtx: Debug + Send + Sync + 'static {
 /// [`HasModel`] — exactly what a record-vs-replay test runtime's bundle needs.
 impl WasiModelCtx for Box<dyn WasiModelCtx> {
     fn complete(
-        &self, prompt: Prompt, tool_host: Arc<dyn ToolHost>,
+        &self, request: CompletionRequest, tool_host: Arc<dyn ToolHost>,
     ) -> FutureResult<BackendAnswer> {
-        (**self).complete(prompt, tool_host)
+        (**self).complete(request, tool_host)
     }
 }
 

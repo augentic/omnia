@@ -29,26 +29,11 @@ use wasmtime_wasi::filesystem::Descriptor;
 
 use super::types::DirEntry;
 
-/// Maximum bytes a single [`WorkingTree::read`] returns; larger files are
-/// rejected rather than truncated, so the model never sees a silently clipped
-/// file.
 const MAX_READ_BYTES: u64 = 4 * 1024 * 1024;
-
-/// Maximum bytes a single [`WorkingTree::write`] accepts.
 const MAX_WRITE_BYTES: usize = 4 * 1024 * 1024;
-
-/// Maximum entries a single [`WorkingTree::list`] returns; a larger directory is
-/// rejected so the caller narrows the path rather than receiving a partial list.
 const MAX_LIST_ENTRIES: usize = 4096;
 
-/// An owned, `Send + Sync` handle to a resolved working-tree mount.
-///
-/// Built by [`resolve_working_tree`] once a lent descriptor has identity-matched
-/// an authorized [`MountRegistry`] entry. It exposes the mount's two faces:
-/// the registry's cap-std [`Dir`] backing bounded `read`/`list`/`write` (the
-/// `descriptor` face genai consumes, riding the same sandbox WASI itself
-/// enforces) and the mount's absolute host path (the `local-path` face cursor
-/// consumes), plus whether writes are permitted.
+// An handle to a resolved working-tree mount. Built by [`resolve_working_tree`].
 pub struct WorkingTree {
     dir: Arc<Dir>,
     local_path: PathBuf,
@@ -56,16 +41,11 @@ pub struct WorkingTree {
 }
 
 impl WorkingTree {
-    /// The mount's absolute host path — the `local-path` face, e.g. cursor's
-    /// `--workspace`.
     #[must_use]
     pub fn local_path(&self) -> &Path {
         &self.local_path
     }
 
-    /// Bounded read of `path` relative to the mount root, capped at
-    /// [`MAX_READ_BYTES`]. cap-std rejects absolute paths and `..` escapes, so
-    /// the read can never leave the mount.
     pub fn read(&self, path: String) -> FutureResult<Vec<u8>> {
         let dir = Arc::clone(&self.dir);
         async move {
@@ -76,9 +56,6 @@ impl WorkingTree {
         .boxed()
     }
 
-    /// Bounded listing of `path` relative to the mount root (an empty path or
-    /// `.` lists the root), capped at [`MAX_LIST_ENTRIES`]. Returns entry names
-    /// only — never OS paths.
     pub fn list(&self, path: String) -> FutureResult<Vec<DirEntry>> {
         let dir = Arc::clone(&self.dir);
         async move {
@@ -89,9 +66,6 @@ impl WorkingTree {
         .boxed()
     }
 
-    /// Write `bytes` to `path` relative to the mount root, capped at
-    /// [`MAX_WRITE_BYTES`]. Denied on a read-only mount; cap-std rejects absolute
-    /// paths and `..` escapes.
     pub fn write(&self, path: String, bytes: Vec<u8>) -> FutureResult<()> {
         if !self.writable {
             return async move {
@@ -109,18 +83,7 @@ impl WorkingTree {
     }
 }
 
-/// Resolve a lent `grants.working-tree` borrow into an owned [`WorkingTree`].
-///
-/// `None` grant resolves to `Ok(None)`. A present borrow must (1) resolve in the
-/// resource table, (2) be a *directory* descriptor (a file is rejected), and
-/// (3) identity-match (`(dev, ino)`) an authorized [`MountRegistry`] entry.
-/// A miss — an out-of-scope or unauthorized tree — is an error raised here, at
-/// the host, with no ambient fallback.
-///
-/// # Errors
-///
-/// Returns an error if the borrow does not resolve, is not a directory, its
-/// metadata cannot be read, or it matches no authorized mount.
+/// Resolve a `grants.working-tree` into a [`WorkingTree`].
 pub fn resolve_working_tree(
     table: &ResourceTable, registry: &MountRegistry, borrow: Option<&Resource<Descriptor>>,
 ) -> anyhow::Result<Option<WorkingTree>> {
@@ -128,18 +91,12 @@ pub fn resolve_working_tree(
         return Ok(None);
     };
 
-    // The lent capability is a `borrow<descriptor>`; resolve it from the table
-    // exactly as the filesystem host does — never trusting a forgeable handle.
     let descriptor = table.get(resource).context("resolving the lent working-tree descriptor")?;
 
-    // A working tree is a directory; a file descriptor is never a tree.
     let Descriptor::Dir(dir) = descriptor else {
         bail!("grants.working-tree must be a directory descriptor, not a file");
     };
 
-    // Identity-stamp the lent directory and match it against the authorized
-    // registry. Only the `(dev, ino)` identity is trusted — never an OS path
-    // read out of the descriptor, which the guest could otherwise forge.
     let meta = dir.dir.dir_metadata().context("reading lent working-tree directory metadata")?;
     let entry = registry
         .match_identity(meta.dev(), meta.ino())
@@ -152,7 +109,6 @@ pub fn resolve_working_tree(
     }))
 }
 
-/// Bounded blocking read, run on the blocking pool.
 fn read_blocking(dir: &Dir, path: &str) -> anyhow::Result<Vec<u8>> {
     let file = dir.open(path).with_context(|| format!("opening `{path}` in working tree"))?;
     // Read one byte past the cap so an over-limit file is detected, not clipped.
@@ -166,7 +122,6 @@ fn read_blocking(dir: &Dir, path: &str) -> anyhow::Result<Vec<u8>> {
     Ok(buf)
 }
 
-/// Bounded blocking directory listing, run on the blocking pool.
 fn list_blocking(dir: &Dir, path: &str) -> anyhow::Result<Vec<DirEntry>> {
     let read_dir = if path.is_empty() || path == "." {
         dir.entries().context("listing working-tree root")?
@@ -180,8 +135,7 @@ fn list_blocking(dir: &Dir, path: &str) -> anyhow::Result<Vec<DirEntry>> {
         if entries.len() >= MAX_LIST_ENTRIES {
             bail!("directory `{path}` exceeds the {MAX_LIST_ENTRIES}-entry listing limit");
         }
-        // A failed `file_type` (e.g. a vanished entry) defaults to non-directory
-        // rather than failing the whole listing.
+
         let is_directory = entry.file_type().is_ok_and(|file_type| file_type.is_dir());
         entries.push(DirEntry {
             name: entry.file_name().to_string_lossy().into_owned(),
@@ -191,7 +145,6 @@ fn list_blocking(dir: &Dir, path: &str) -> anyhow::Result<Vec<DirEntry>> {
     Ok(entries)
 }
 
-/// Bounded blocking write, run on the blocking pool.
 fn write_blocking(dir: &Dir, path: &str, bytes: &[u8]) -> anyhow::Result<()> {
     if bytes.len() > MAX_WRITE_BYTES {
         bail!("write to `{path}` exceeds the {MAX_WRITE_BYTES}-byte working-tree write limit");

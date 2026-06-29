@@ -174,6 +174,21 @@ pub struct Prompt {
     pub grants: ToolGrants,
 }
 
+/// Host-prepared input for one completion: the owned [`Prompt`] plus the provider
+/// chat channels the host assembled from it (§3.1.1).
+///
+/// The host assembles once at the `complete` gate so every backend consumes the
+/// same `system` / `messages`; backends must not re-derive them from `sections`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompletionRequest {
+    /// The owned guest prompt; record / replay keys on this, never the channels.
+    pub prompt: Prompt,
+    /// Assembled system / instructions channel, if any.
+    pub system: Option<String>,
+    /// Assembled chat turns to send to the provider.
+    pub messages: Vec<Message>,
+}
+
 /// A reference an adapter asked the model to resolve (`ToolHost::resolve`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Reference {

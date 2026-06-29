@@ -1,9 +1,10 @@
 //! The `complete` host binding.
 //!
 //! Implements the generated `completion` host trait on [`WasiModel`]. It is the
-//! host validation gate — it applies the pre-checks, hands the owned prompt and a
-//! per-completion [`ToolHost`] to the backend, then *re-validates* the returned
-//! answer before mapping it to the guest-visible `answer` string. A backend that
+//! host validation gate — it assembles the prompt (§3.1.1), hands the resulting
+//! [`CompletionRequest`] and a per-completion [`ToolHost`] to the backend, then
+//! *re-validates* the returned answer before mapping it to the guest-visible
+//! `answer` string. A backend that
 //! runs its own repair loop (genai) consumes validation failures internally and
 //! only returns once it passes; the host re-validates here.
 
@@ -16,8 +17,8 @@ use wasmtime::component::{Accessor, StreamReader, Val};
 
 use super::generated::augentic::model::completion as genc;
 use super::generated::augentic::model::completion::{Host, HostWithStore};
-use super::types::Prompt;
-use super::validate::{check_prompt, validate_answer};
+use super::types::{CompletionRequest, Prompt};
+use super::validate::validate_answer;
 use super::working_tree::{WorkingTree, resolve_working_tree};
 use super::{Error, FutureResult, ToolHost, WasiModel, WasiModelCtxView};
 use crate::host::types::{DirEntry, Reference, VerifyReport};
@@ -30,11 +31,13 @@ impl<T> HostWithStore<T> for WasiModel {
         let mut owned: Prompt = prompt.into();
         owned.grants.working_tree_lent = working_tree_res.is_some();
 
-        check_prompt(&owned)?;
+        // Assemble once at the gate (§3.1.1) so every backend consumes the same
+        // channels; `try_from` also runs the pre-call checks.
+        let request = CompletionRequest::try_from(owned)?;
 
-        let kind = owned.response_format.kind;
-        let references = owned.grants.references.clone();
-        let verify_allowed = owned.grants.verify.clone();
+        let kind = request.prompt.response_format.kind;
+        let references = request.prompt.grants.references.clone();
+        let verify_allowed = request.prompt.grants.verify.clone();
 
         let backend_answer = accessor
             .with(|mut store| {
@@ -50,7 +53,7 @@ impl<T> HostWithStore<T> for WasiModel {
                     verify_allowed,
                     working_tree,
                 });
-                Ok::<_, Error>(view.ctx.complete(owned, tool_host))
+                Ok::<_, Error>(view.ctx.complete(request, tool_host))
             })?
             .await?;
 

@@ -14,7 +14,7 @@ Proves **Phase 1** of [`rfcs/wasi-model.md`](../../rfcs/wasi-model.md) (§6, run
 ```mermaid
 flowchart LR
   guest["guest.run<br/>(imports completion)"] -->|"complete(prompt)"| bind["complete binding<br/>assemble + validate (§3.1.1, §3.1.3)"]
-  bind -->|"owned Prompt + ToolHost"| ctx["WasiModelCtx"]
+  bind -->|"CompletionRequest + ToolHost"| ctx["WasiModelCtx"]
   ctx --> replay["ModelDefault (replay)<br/>fixture lookup by canonical key (§5.4)"]
   replay -->|"validated answer"| guest
 ```

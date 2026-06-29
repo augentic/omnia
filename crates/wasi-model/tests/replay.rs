@@ -34,8 +34,8 @@ use omnia::{
     Runtime,
 };
 use omnia_wasi_model::{
-    BackendAnswer, ConnectOptions, FutureResult, HasModel, ModelDefault, Prompt, Recording,
-    Reference, ToolHost, WasiModel, WasiModelCtx,
+    BackendAnswer, CompletionRequest, ConnectOptions, FutureResult, HasModel, ModelDefault,
+    Recording, Reference, ToolHost, WasiModel, WasiModelCtx,
 };
 use serde_json::{Value, json};
 
@@ -125,7 +125,7 @@ struct StubBackend {
 
 impl WasiModelCtx for StubBackend {
     fn complete(
-        &self, _prompt: Prompt, _tool_host: Arc<dyn ToolHost>,
+        &self, _request: CompletionRequest, _tool_host: Arc<dyn ToolHost>,
     ) -> FutureResult<BackendAnswer> {
         let value = self.value.clone();
         async move {
@@ -370,7 +370,7 @@ struct ResolvingStub;
 
 impl WasiModelCtx for ResolvingStub {
     fn complete(
-        &self, _prompt: Prompt, tool_host: Arc<dyn ToolHost>,
+        &self, _request: CompletionRequest, tool_host: Arc<dyn ToolHost>,
     ) -> FutureResult<BackendAnswer> {
         async move {
             let alpha = tool_host
@@ -495,7 +495,7 @@ struct LocalPathProbe {
 
 impl WasiModelCtx for LocalPathProbe {
     fn complete(
-        &self, _prompt: Prompt, tool_host: Arc<dyn ToolHost>,
+        &self, _request: CompletionRequest, tool_host: Arc<dyn ToolHost>,
     ) -> FutureResult<BackendAnswer> {
         let expected = self.expected.clone();
         async move {

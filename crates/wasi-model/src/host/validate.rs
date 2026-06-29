@@ -3,7 +3,7 @@
 use serde_json::Value;
 
 use super::Error;
-use super::types::{Message, Prompt, ResponseFormatKind};
+use super::types::{CompletionRequest, Message, Prompt, ResponseFormatKind};
 
 /// Host-injected tool names guests must not redeclare in `prompt.tools`.
 pub const RESERVED_TOOL_NAMES: &[&str] = &["resolve", "read", "list", "write", "verify"];
@@ -110,6 +110,22 @@ pub fn assemble(prompt: &Prompt) -> Result<Assembled, Error> {
     }];
 
     Ok(Assembled { system, messages })
+}
+
+impl TryFrom<Prompt> for CompletionRequest {
+    type Error = Error;
+
+    /// Run the pre-call checks and assemble the provider chat channels for
+    /// `value`, the single assembly authority the `complete` gate and tests share.
+    fn try_from(value: Prompt) -> Result<Self, Error> {
+        check_prompt(&value)?;
+        let Assembled { system, messages } = assemble(&value)?;
+        Ok(Self {
+            prompt: value,
+            system,
+            messages,
+        })
+    }
 }
 
 // Substitute `{name}` placeholders with each variable's value.
