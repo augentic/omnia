@@ -385,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn http_longest_prefix_() {
+    fn http_longest_prefix() {
         let routes =
             HttpRoutes::new([("/a".to_owned(), id("short")), ("/a/b".to_owned(), id("long"))]);
         assert_eq!(routes.resolve("/a/b/c"), Some(&id("long")));

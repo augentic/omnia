@@ -68,7 +68,7 @@ pub fn expand(config: &Config) -> TokenStream {
             pub async fn main() -> ::std::process::ExitCode {
                 omnia::main::<Ctx, _, _, _>(
                     #command,
-                    |compiled| Ctx::new(compiled, |c| {
+                    |deployment| Ctx::new(deployment, |c| {
                         #(c.host::<#host_trait_impls, Ctx>()?;)*
                         Ok(())
                     }),

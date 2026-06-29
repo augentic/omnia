@@ -90,38 +90,3 @@ impl<B: Body> Deref for Reply<B> {
         &self.body
     }
 }
-
-// /// Implemented by the `Reply::body` to convert itself into a body compatible with
-// /// `[IntoResponse]`.
-// pub trait IntoBody: Body {
-//     /// Convert into a body + content type.
-//     ///
-//     /// # Errors
-//     ///
-//     /// Returns an error if the body cannot be encoded (for example, if JSON
-//     /// serialization fails).
-//     fn into_body(self) -> anyhow::Result<Vec<u8>>;
-// }
-
-// impl<T> IntoResponse for Reply<T>
-// where
-//     T: IntoBody,
-// {
-//     fn into_response(self) -> Response {
-//         let body = match self.body.into_body() {
-//             Ok(v) => v,
-//             Err(e) => {
-//                 return (StatusCode::INTERNAL_SERVER_ERROR, format!("body encoding error: {e}"))
-//                     .into_response();
-//             }
-//         };
-
-//         let mut hm = self.headers;
-//         if !hm.contains_key(header::CONTENT_TYPE) {
-//             hm.insert(header::CONTENT_TYPE, HeaderValue::from_static("text/plain; charset=utf-8"));
-//         }
-
-//         let status = self.status;
-//         (status, hm, body).into_response()
-//     }
-// }

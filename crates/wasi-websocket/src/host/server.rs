@@ -6,7 +6,7 @@ use futures::StreamExt;
 use omnia::{Runtime, TopicRoutes, TriggerRouter};
 use tracing::{Instrument, debug_span, instrument};
 
-use crate::host::WebSocketView;
+use crate::host::WasiWebSocketView;
 use crate::host::generated::DuplexIndices;
 use crate::host::resource::{EventProxy, Events};
 
@@ -14,7 +14,7 @@ use crate::host::resource::{EventProxy, Events};
 pub async fn run<R>(state: &R) -> Result<()>
 where
     R: Runtime,
-    R::StoreCtx: WebSocketView,
+    R::StoreCtx: WasiWebSocketView,
 {
     let component = env::var("COMPONENT").unwrap_or_else(|_| "unknown".into());
     tracing::info!("starting websocket server for: {component}");
@@ -63,7 +63,7 @@ where
 struct Handler<R>
 where
     R: Runtime,
-    R::StoreCtx: WebSocketView,
+    R::StoreCtx: WasiWebSocketView,
 {
     state: R,
     component: String,
@@ -73,7 +73,7 @@ where
 impl<R> Handler<R>
 where
     R: Runtime,
-    R::StoreCtx: WebSocketView,
+    R::StoreCtx: WasiWebSocketView,
 {
     /// Forward event to the wasm guest.
     async fn handle(&self, event: EventProxy) -> Result<()> {

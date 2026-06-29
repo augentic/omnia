@@ -1,31 +1,29 @@
 //! # Host-mediated dynamic linking
 //!
 //! A caller guest imports an interface (say `omnia:link/echo`) whose
-//! implementation the host satisfies at runtime. The host has, on the shared
-//! `Linker`, polyfilled that import so invoking it:
+//! implementation the host satisfies at runtime. The host polyfills that import
+//! on the shared `Linker` so invoking it:
 //!
-//! 1. extracts a target identity from the call via a [`GuestSelector`] (§4.3),
-//! 2. rejects any resource handle attempting to cross the seam (§4.5),
-//! 3. enforces a dispatch-depth bound (§6.6),
+//! 1. extracts a target identity from the call via a [`GuestSelector`],
+//! 2. rejects any resource handle attempting to cross the seam,
+//! 3. enforces a dispatch-depth bound,
 //! 4. instantiates the target *fresh* on a new store and invokes the matching
-//!    export over the bound wRPC transport (§4.2), and
+//!    export over the bound wRPC transport, and
 //! 5. returns the typed result, discarding the callee instance.
 //!
-//! Because step 4 is always a fresh instance on a new store, a dispatched call
-//! cannot recursively re-enter its caller — the guarantee falls out of the
-//! design (`rfcs/guest-registry.md` §4.1).
-//!
-//! The floor stays generic (Law 2): it links whatever interfaces the manifest
-//! names, by opaque string, and resolves opaque [`GuestId`]s. It never parses
-//! `augentic:specify` or any consumer scheme.
+//! Because step 4 is always a fresh instance, a dispatched call cannot
+//! recursively re-enter its caller. The floor stays generic: it links whatever
+//! interfaces the manifest names, by opaque string, and resolves opaque
+//! [`GuestId`]s — it never parses a consumer scheme. See
+//! `rfcs/guest-registry.md` for the full design.
 //!
 //! ## Where the selector runs
 //!
 //! The selector must see the *typed* parameters, so the polyfill is a
 //! `func_new_async` closure that runs the selector *before* encoding the call
-//! onto wRPC (§4.4 step 3) — then reuses wRPC's own value codec
-//! ([`ValEncoder`]/[`read_value`]) and instance-per-call serve integration
-//! ([`ServeExt::serve_function`]) for the actual carrier round-trip.
+//! onto wRPC — then reuses wRPC's own value codec ([`ValEncoder`]/[`read_value`])
+//! and instance-per-call serve integration ([`ServeExt::serve_function`]) for
+//! the carrier round-trip.
 
 use std::collections::{BTreeSet, HashMap};
 use std::iter::zip;
@@ -140,15 +138,12 @@ where
 }
 
 /// Host-originated dynamic dispatch into a *known* guest export — the host→guest
-/// counterpart of guest→guest `dispatch` (selector-driven).
+/// counterpart of the selector-driven guest→guest `dispatch`.
 ///
-/// This reuses the landed machinery rather than adding a parallel one: the same
-/// dispatch-depth bound (`DispatchHandle::enter`) so a `complete`→`resolve`
-/// →adapter chain is depth-counted exactly like a guest→guest hop, and the same
-/// §4.5 resource rejection. The target is instantiated *fresh* on a new store and
-/// the matching export invoked directly (the `wasi-http` `server.rs` pattern), so
-/// the callee can never re-enter its caller (instance-per-call) and needs no
-/// `link` declaration for `interface`.
+/// Shares the depth bound (`DispatchHandle::enter`) and resource rejection with
+/// guest→guest dispatch. The target is instantiated *fresh* on a new store and
+/// the matching export invoked directly, so the callee can never re-enter its
+/// caller and needs no `link` declaration for `interface`.
 ///
 /// `args` and the returned values are plain `Val`s; a live resource handle on
 /// either side is rejected.
@@ -164,11 +159,11 @@ pub async fn dispatch<R>(
 where
     R: Runtime,
 {
-    // Depth-count this hop exactly like a guest→guest dispatch (§6.6). The guard
+    // Depth-count this hop exactly like a guest→guest dispatch. The guard
     // is held here (borrowing `runtime`) across the awaited callee task below.
     let _guard = runtime.registry().dispatch().enter(target)?;
 
-    // §4.5: plain records cross by value; a live resource handle never crosses.
+    // Plain records cross by value; a live resource handle never crosses.
     for value in &args {
         if contains_resource(value) {
             bail!(
@@ -239,7 +234,7 @@ where
     .with_context(|| format!("joining dispatch target `{target}` task"))?
     .with_context(|| format!("dispatching `{interface}/{func}` to guest `{target}`"))?;
 
-    // A target must not hand back a resource handle either (§4.5).
+    // A target must not hand back a resource handle either.
     for value in &results {
         if contains_resource(value) {
             bail!(
@@ -256,11 +251,10 @@ where
 /// `wasi-model`'s `resolve`) can invoke a guest without naming the concrete
 /// [`Runtime`].
 ///
-/// This is the type-erased mirror of the `dispatch` free function: the
-/// `runtime!` macro threads an `Arc<dyn HostDispatch>` into each store context
-/// (like the per-store wRPC state) so any host binding gets dynamic host→guest
-/// calls for free. It carries no consumer vocabulary (Law 2) — a consumer owns
-/// its own verb names and return shapes and composes this generic seam.
+/// The `runtime!` macro threads an `Arc<dyn HostDispatch>` into each store
+/// context so any host binding gets dynamic host→guest calls for free. It
+/// carries no consumer vocabulary — a consumer owns its own verb names and
+/// return shapes and composes this generic seam.
 pub trait HostDispatch: Send + Sync + 'static {
     /// Invoke `target`'s `interface`/`func` with `args`, returning the typed
     /// results. The target is instantiated *fresh* (instance-per-call), the hop
@@ -292,9 +286,8 @@ impl<R: Runtime> HostDispatch for R {
 }
 
 /// Find the exported interface on `target`'s component that carries a function
-/// named `func`, so a host can invoke it without hardcoding a consumer interface
-/// name. "Find the interface exporting function X" is a structural
-/// component-model query and names no consumer scheme (Law 2).
+/// named `func`, so a host can invoke it without hardcoding a consumer
+/// interface name.
 fn find_interface<R: Runtime>(runtime: &R, target: &GuestId, func: &str) -> Result<Box<str>> {
     let registry = runtime.registry();
     let engine = registry.engine();
@@ -367,13 +360,12 @@ impl DispatchHandle {
             .context("link transport not initialized; `serve_links` must run before dispatch")
     }
 
-    /// Enter a dispatch, bounding nesting depth (§6.6). The returned guard
-    /// decrements the shared counter on drop.
+    /// Enter a dispatch, bounding nesting depth. The returned guard decrements
+    /// the shared counter on drop.
     ///
     /// The counter is process-wide and tracks *synchronous* nesting (A->B->C,
-    /// each awaited to completion before the caller returns), which is the
-    /// unbounded-recursion concern; it is a safety bound, not a precise
-    /// per-chain limit under heavy concurrency.
+    /// each awaited to completion before the caller returns); it is a safety
+    /// bound, not a precise per-chain limit under heavy concurrency.
     fn enter(&self, target: &GuestId) -> Result<DepthGuard<'_>> {
         let depth = self.depth.fetch_add(1, Ordering::SeqCst) + 1;
         if depth > self.max_depth {
@@ -404,13 +396,11 @@ impl Drop for DepthGuard<'_> {
 /// the shared linker, bound to the dispatch handle.
 ///
 /// Each interface is linked exactly once (the linker is shared, so the per-guest
-/// allow-lists are unioned, per §4.4). `wasi:*` imports are never touched here —
-/// they are host-satisfied — so only the manifest-declared interfaces are
-/// dispatched.
+/// allow-lists are unioned). `wasi:*` imports are never touched here — they are
+/// host-satisfied — so only the manifest-declared interfaces are dispatched.
 ///
 /// Runs *before* pre-instantiation, so an import that is neither host-satisfied
-/// nor allow-listed remains unresolved and fails at `instantiate_pre` — the
-/// explicit, fail-fast startup error of §4.4/§6.4.
+/// nor allow-listed remains unresolved and fails fast at `instantiate_pre`.
 ///
 /// # Errors
 ///
@@ -494,7 +484,7 @@ where
         .select(interface, func, params)
         .with_context(|| format!("selecting target for `{interface}/{func}`"))?;
 
-    // §4.5: plain records cross by value; a live resource handle never crosses.
+    // Plain records cross by value; a live resource handle never crosses.
     for value in &forwarded {
         if contains_resource(value) {
             bail!(

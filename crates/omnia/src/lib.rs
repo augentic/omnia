@@ -4,8 +4,9 @@
 mod command;
 #[cfg(feature = "jit")]
 mod compile;
-mod create;
+mod deployment;
 mod dispatch;
+mod host_scaffold;
 mod manifest;
 mod options;
 mod registry;
@@ -31,7 +32,7 @@ pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
 #[cfg(feature = "jit")]
 pub use self::compile::compile;
-pub use self::create::{Compiled, RegistryBuilder};
+pub use self::deployment::{Deployment, DeploymentBuilder};
 pub use self::dispatch::{HostDispatch, serve_links};
 pub use self::options::RuntimeOptions;
 pub use self::registry::{Guest, GuestId, Registry};

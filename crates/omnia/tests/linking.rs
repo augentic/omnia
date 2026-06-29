@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
-use omnia::{GuestId, Registry, RegistryBuilder, Runtime, StoreBase, serve_links};
+use omnia::{DeploymentBuilder, GuestId, Registry, Runtime, StoreBase, serve_links};
 
 /// Per-store context: the library [`omnia::StoreCtx`] over the empty `()` backend
 /// bundle. No host backend — the link path needs only the WASI and wRPC views,
@@ -133,12 +133,12 @@ async fn router_dispatches_to_responder() -> Result<()> {
     );
     std::fs::write(&manifest_path, manifest).context("writing test manifest")?;
 
-    let compiled = RegistryBuilder::new()
+    let deployment = DeploymentBuilder::new()
         .config(manifest_path.clone())
-        .compile::<TestCtx>()
+        .build::<TestCtx>()
         .await
         .context("building runtime")?;
-    let registry = compiled.build().context("assembling registry")?;
+    let registry = deployment.build().context("assembling registry")?;
     let runtime = TestRuntime {
         registry: Arc::new(registry),
         stores_built: Arc::new(AtomicUsize::new(0)),

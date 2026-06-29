@@ -36,8 +36,7 @@ use std::sync::Arc;
 
 pub use omnia::FutureResult;
 use omnia::{Host, Runtime, Server};
-use wasmtime::component::{HasData, Linker};
-use wasmtime_wasi::ResourceTable;
+use wasmtime::component::{HasData, Linker, ResourceTable};
 
 use self::generated::wasi::sql::{readwrite, types};
 pub use crate::host::default_impl::SqlDefault;

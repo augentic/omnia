@@ -1,6 +1,6 @@
-//! #WASI HTTP Host
+//! # WASI Config Host
 //!
-//! This module implements a host-side service for `wasi:http`
+//! This module implements a host-side service for `wasi:config`.
 
 mod default_impl;
 

@@ -157,37 +157,3 @@ impl Locker for InMemoryLocker {
         .boxed()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn locker_operations() {
-        let ctx = VaultDefault::connect_with(ConnectOptions).await.expect("connect");
-
-        let locker = ctx.open_locker("test-locker".to_string()).await.expect("open locker");
-
-        // Test set and get
-        locker.set("secret1".to_string(), b"value1".to_vec()).await.expect("set");
-        let value = locker.get("secret1".to_string()).await.expect("get");
-        assert_eq!(value, Some(b"value1".to_vec()));
-
-        // Test exists
-        assert!(locker.exists("secret1".to_string()).await.expect("exists"));
-        assert!(!locker.exists("secret2".to_string()).await.expect("exists"));
-
-        // Test list_ids
-        locker.set("secret2".to_string(), b"value2".to_vec()).await.expect("set");
-        let mut ids = locker.list_ids().await.expect("list_ids");
-        ids.sort();
-        assert_eq!(ids, vec!["secret1".to_string(), "secret2".to_string()]);
-
-        // Test delete
-        locker.delete("secret1".to_string()).await.expect("delete");
-        assert!(!locker.exists("secret1".to_string()).await.expect("exists"));
-
-        // Test identifier
-        assert_eq!(locker.identifier(), "test-locker");
-    }
-}

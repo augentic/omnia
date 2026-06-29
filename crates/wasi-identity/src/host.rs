@@ -31,8 +31,7 @@ use std::sync::Arc;
 
 pub use omnia::FutureResult;
 use omnia::{Host, Runtime, Server};
-use wasmtime::component::{HasData, Linker, ResourceTableError};
-use wasmtime_wasi::ResourceTable;
+use wasmtime::component::{HasData, Linker, ResourceTable, ResourceTableError};
 
 pub use self::default_impl::IdentityDefault;
 use self::generated::omnia::identity::credentials;

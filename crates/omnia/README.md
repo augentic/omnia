@@ -39,9 +39,9 @@ The runtime is built around a set of traits that allow services to be plugged in
 `omnia` exposes only what a deployment author, a host-server crate, or a hand-written runtime needs; lifecycle, dispatch, manifest, and transport-carrier internals are crate-private.
 
 - **Macros:** `runtime!`, `#[derive(Runtime)]`
-- **Lifecycle:** `bootstrap_and_run` (compile → bootstrap → [`run`]), `run`, and `command::run` — server and command paths both call `prepare` for epoch interruption, pool-metric sampling, and host-mediated link serving
+- **Lifecycle:** `bootstrap_and_run` (build → bootstrap → [`run`]), `run`, and `command::run` — server and command paths both call `prepare` for epoch interruption, pool-metric sampling, and host-mediated link serving
 - **Runtime + store:** `Runtime`, `StoreCtx`, `StoreBase`, `Host`, `Server`, `Backend`, `FromEnv`, `HasLimits`, `HostDispatch`, `FutureResult`
-- **Registry pipeline:** `RegistryBuilder`, `Compiled`, `Registry`, `Guest`, `GuestId`, `RuntimeOptions`
+- **Registry pipeline:** `DeploymentBuilder`, `Deployment`, `Registry`, `Guest`, `GuestId`, `RuntimeOptions`
 - **Trigger routing (host servers):** `HttpRoutes`, `TopicRoutes`, `Routes`, `Resolver`, `TriggerRouter`
 - **Host-mediated linking (advanced):** `serve_links`, `GuestSelector`, `FirstArgSelector`, `LinkClient`, `WrpcState`
 - **Telemetry + CLI:** `Telemetry`, `resource`, `Cli`, `Command`, `Parser`

@@ -4,7 +4,7 @@
 //! every leg; what is pluggable is the wRPC *transport*, not the RPC framework.
 //! [`LinkTransport`] is that seam: the dispatch path only ever asks it to open a
 //! client connection to a target, so "desktop -> cloud" becomes a transport
-//! swap rather than a code change (`rfcs/guest-registry.md` §4.2).
+//! swap rather than a code change.
 //!
 //! Phase 2 ships one implementation, [`InProcess`]: full wRPC encode/decode over
 //! an in-memory [`tokio::io::duplex`] byte pipe, with no network. Unix-domain

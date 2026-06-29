@@ -23,7 +23,7 @@ use wrpc_wasmtime::WrpcView;
 use crate::dispatch::serve_links;
 use crate::traits::{Backends, BuildStore, HasLimits, Runtime};
 use crate::working_tree::WorkingTreeRegistry;
-use crate::{Cli, Command, Compiled, Registry, RegistryBuilder, StoreBase, command};
+use crate::{Cli, Command, Deployment, DeploymentBuilder, Registry, StoreBase, command};
 
 /// The standard host [`Runtime`] the `runtime!` macro builds for a deployment.
 ///
@@ -64,29 +64,29 @@ where
     S: WasiView + WrpcView + HasLimits + BuildStore<B> + Send + 'static,
     B: Backends,
 {
-    /// Assemble the runtime from a [`Compiled`] deployment: thread the guest
-    /// argv, link the deployment's hosts (via `link`), connect every backend,
-    /// and freeze the guest [`Registry`].
+    /// Assemble the runtime from a [`Deployment`]: thread the guest argv, link
+    /// the deployment's hosts (via `link`), connect every backend, and freeze
+    /// the guest [`Registry`].
     ///
     /// `link` is the one per-deployment step the macro still supplies — a
-    /// closure that calls [`Compiled::host`] once per wired host (the generated
-    /// `servers` closure mirrors it when starting trigger servers).
+    /// closure that calls [`Deployment::host`] once per wired host (the
+    /// generated `servers` closure mirrors it when starting trigger servers).
     ///
     /// # Errors
     ///
     /// Returns an error if host linking, backend connection, or registry
     /// assembly fails.
-    pub async fn new<L>(mut compiled: Compiled<S>, link: L) -> Result<Self>
+    pub async fn new<L>(mut deployment: Deployment<S>, link: L) -> Result<Self>
     where
-        L: FnOnce(&mut Compiled<S>) -> Result<()>,
+        L: FnOnce(&mut Deployment<S>) -> Result<()>,
     {
-        let args = Arc::new(compiled.args().to_vec());
-        link(&mut compiled).context("linking hosts")?;
+        let args = Arc::new(deployment.args().to_vec());
+        link(&mut deployment).context("linking hosts")?;
         let backends = B::connect().await.context("connecting backends")?;
-        let working_trees = compiled.working_trees();
+        let working_trees = deployment.working_trees();
 
         Ok(Self {
-            registry: Arc::new(compiled.build().context("assembling registry")?),
+            registry: Arc::new(deployment.build().context("assembling registry")?),
             args,
             working_trees,
             backends,
@@ -107,8 +107,7 @@ where
 
     fn store(&self) -> Self::StoreCtx {
         // `HostDispatch` is blanket-implemented for every `Runtime`, so a fresh
-        // clone backs any host->guest call; the generated `BuildStore` impl then
-        // clones each wired backend into its host-view field.
+        // clone backs any host->guest call.
         let base = StoreBase::builder()
             .options(self.options())
             .dispatch(Arc::new(self.clone()))
@@ -188,7 +187,7 @@ pub fn sample_pool(engine: Engine, interval: Duration) {
 pub async fn main<R, N, NFut, S>(command_mode: bool, new: N, servers: S) -> ExitCode
 where
     R: Runtime,
-    N: FnOnce(Compiled<R::StoreCtx>) -> NFut,
+    N: FnOnce(Deployment<R::StoreCtx>) -> NFut,
     NFut: Future<Output = Result<R>>,
     S: for<'a> FnOnce(&'a R) -> Vec<BoxFuture<'a, Result<()>>>,
 {
@@ -225,20 +224,20 @@ pub async fn run<R, N, NFut, S>(
 ) -> Result<ExitStatus>
 where
     R: Runtime,
-    N: FnOnce(Compiled<R::StoreCtx>) -> NFut,
+    N: FnOnce(Deployment<R::StoreCtx>) -> NFut,
     NFut: Future<Output = Result<R>>,
     S: for<'a> FnOnce(&'a R) -> Vec<BoxFuture<'a, Result<()>>>,
 {
-    let compiled = RegistryBuilder::new()
+    let deployment = DeploymentBuilder::new()
         .wasm(wasm)
         .config(config)
         .args(args)
         .command(command_mode)
-        .compile::<R::StoreCtx>()
+        .build::<R::StoreCtx>()
         .await
         .context("building runtime")?;
 
-    let runtime = new(compiled).await.context("preparing runtime state")?;
+    let runtime = new(deployment).await.context("preparing runtime state")?;
 
     if command_mode {
         command::run(&runtime).await

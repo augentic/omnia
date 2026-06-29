@@ -1,4 +1,4 @@
-//! # WASI Tracing
+//! # WASI Metrics
 
 use anyhow::Result;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;

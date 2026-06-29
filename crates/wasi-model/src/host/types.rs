@@ -1,7 +1,7 @@
 //! Host-only owned types.
 //!
 //! Backends receive an *owned* conversion of the generated `prompt` at the
-//! `WasiModelCtx` boundary, so they never hold wasmtime guest handles (§3.2).
+//! `WasiModelCtx` boundary, so they never hold wasmtime guest handles.
 //! The backend return type ([`BackendAnswer`]) is host-only — a parsed answer
 //! value plus an optional tool-call transcript for record/replay — and never
 //! crosses the WIT boundary; the guest sees only the validated `answer` string.
@@ -65,7 +65,7 @@ pub struct JsonSchemaSpec {
     pub strict: Option<bool>,
 }
 
-/// Selects validation depth for the returned `answer` (§3.1.3).
+/// Selects validation depth for the returned `answer`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ResponseFormatKind {
@@ -136,14 +136,14 @@ pub struct MetadataEntry {
 /// Host capabilities lent for this completion.
 ///
 /// The working-tree `borrow<descriptor>` never survives the boundary as a
-/// handle: the floor records only whether a tree was lent (§5.4), and the
-/// actual filesystem access is mediated by [`ToolHost`](super::ToolHost).
+/// handle: the floor records only whether a tree was lent, and the actual
+/// filesystem access is mediated by [`ToolHost`](super::ToolHost).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolGrants {
     /// Guest id whose `references` export `resolve` targets.
     pub references: Option<String>,
     /// Whether a working tree was lent for this call (the stable marker that
-    /// replaces the non-serializable `borrow<descriptor>` for keying, §5.4).
+    /// replaces the non-serializable `borrow<descriptor>` for keying).
     pub working_tree_lent: bool,
     /// Allowed closed verification profile names for `verify`.
     pub verify: Vec<String>,
@@ -190,7 +190,7 @@ pub struct DirEntry {
     pub is_directory: bool,
 }
 
-/// The outcome of a `verify` profile run (RFC-60 owns the profiles).
+/// The outcome of a `verify` profile run.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VerifyReport {
     /// Whether the check passed.

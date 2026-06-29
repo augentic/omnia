@@ -1,6 +1,6 @@
 //! # WebAssembly Initiator
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -11,44 +11,44 @@ use wasmtime::{Config, Engine};
 use wasmtime_wasi::WasiView;
 use wrpc_wasmtime::WrpcView;
 
-use crate::dispatch::{self, DispatchHandle};
+use crate::dispatch::DispatchHandle;
 use crate::manifest::Manifest;
-use crate::registry::{Guest, Registry};
+use crate::registry::{Registry, RegistryBuilder};
 use crate::routing::Routes;
 use crate::selector::{FirstArgSelector, GuestSelector};
 use crate::source::{LoadedGuest, Source};
 use crate::working_tree::{ResolvedPreopen, WorkingTreeRegistry};
 use crate::{Host, RuntimeOptions, Telemetry};
 
-/// Selects where a runtime's guests come from, then [`compile`]s them into a
-/// [`Compiled`] runtime ready for host linking.
+/// Selects where a runtime's guests come from, then [`build`]s a [`Deployment`]
+/// ready for host linking.
 ///
 /// The single-file shorthand ([`wasm`]) and the manifest-driven deployment
-/// ([`config`]) are both expressed here; [`compile`] resolves whichever is set —
+/// ([`config`]) are both expressed here; [`build`] resolves whichever is set —
 /// falling back to the `OMNIA_CONFIG` environment variable for the manifest.
 ///
 /// ```ignore
-/// let compiled = RegistryBuilder::new()
+/// let deployment = DeploymentBuilder::new()
 ///     .wasm(wasm)
 ///     .config(config)
 ///     .args(args)
 ///     .command(command)
-///     .compile::<StoreCtx>()
+///     .build::<StoreCtx>()
 ///     .await?;
 /// ```
 ///
 /// [`wasm`]: Self::wasm
 /// [`config`]: Self::config
-/// [`compile`]: Self::compile
+/// [`build`]: Self::build
 #[derive(Debug, Default)]
-pub struct RegistryBuilder {
+pub struct DeploymentBuilder {
     wasm: Option<PathBuf>,
     config: Option<PathBuf>,
     args: Vec<String>,
     command: bool,
 }
 
-impl RegistryBuilder {
+impl DeploymentBuilder {
     /// Start a new builder with no source selected.
     #[must_use]
     pub fn new() -> Self {
@@ -85,8 +85,8 @@ impl RegistryBuilder {
         self
     }
 
-    /// Resolve the configured source into a [`Compiled`] runtime, choosing
-    /// single-file or manifest-driven population.
+    /// Resolve the configured source into a [`Deployment`], choosing single-file
+    /// or manifest-driven population.
     ///
     /// Resolution: a `config` path (set via [`config`](Self::config) or the
     /// `OMNIA_CONFIG` environment variable) selects a manifest-driven deployment;
@@ -97,7 +97,7 @@ impl RegistryBuilder {
     ///
     /// Returns an error if neither a config nor a wasm path is available, or if
     /// the selected source cannot be built.
-    pub async fn compile<T: WasiView + 'static>(self) -> Result<Compiled<T>> {
+    pub async fn build<T: WasiView + 'static>(self) -> Result<Deployment<T>> {
         let manifest = self.config.or_else(|| env::var_os("OMNIA_CONFIG").map(PathBuf::from));
 
         let plan = if let Some(manifest) = manifest {
@@ -118,7 +118,6 @@ impl RegistryBuilder {
                 "no guest specified: pass a <wasm> path, or --config <omnia.toml> (or set OMNIA_CONFIG)",
             )?;
 
-            // The single-file shorthand is a one-guest deployment
             let source = Source::new(wasm);
 
             Plan {
@@ -135,7 +134,7 @@ impl RegistryBuilder {
         init_env(&plan.name)?;
         tracing::info!("initializing runtime");
 
-        Compiled::from_plan(plan).await
+        Deployment::from_plan(plan).await
     }
 }
 
@@ -160,7 +159,7 @@ struct Plan {
     command: bool,
 }
 
-impl<T: WasiView + 'static> Compiled<T> {
+impl<T: WasiView + 'static> Deployment<T> {
     /// Acquire every guest named in `plan` through its [`Source`] and pair them
     /// with the shared engine and WASI-linked linker.
     ///
@@ -170,7 +169,7 @@ impl<T: WasiView + 'static> Compiled<T> {
         let (engine, linker, options) = engine_and_linker()?;
 
         // Open + identity-stamp every preopen once, here, so a misconfigured
-        // mount fails fast at startup rather than per store (RFC-55).
+        // mount fails fast at startup rather than per store.
         let working_trees = Arc::new(WorkingTreeRegistry::open(plan.preopens)?);
 
         let mut guests = Vec::with_capacity(plan.sources.len());
@@ -217,7 +216,7 @@ fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, Runt
 ///
 /// [`host`]: Self::host
 /// [`build`]: Self::build
-pub struct Compiled<T: WasiView + 'static> {
+pub struct Deployment<T: WasiView + 'static> {
     engine: Engine,
     linker: Linker<T>,
     options: RuntimeOptions,
@@ -238,7 +237,7 @@ pub struct Compiled<T: WasiView + 'static> {
 
 use crate::{Runtime, Server};
 
-impl<T: WasiView> Compiled<T> {
+impl<T: WasiView> Deployment<T> {
     /// Link a WASI host's interfaces into the shared Linker.
     ///
     /// Chainable: returns `&mut Self` so several hosts can be linked in turn.
@@ -284,10 +283,9 @@ impl<T: WasiView> Compiled<T> {
         &self.args
     }
 
-    /// Pre-instantiate every loaded guest against the shared Linker and assemble
-    /// the [`Registry`].
+    /// Assemble the guest [`Registry`].
     ///
-    /// Consumes the builder: pre-instantiation happens once, here, after all
+    /// Consumes the deployment: pre-instantiation happens once, here, after all
     /// hosts are linked — so no host can be linked after the guests are frozen.
     /// Per call only a fresh instantiate on a new store remains.
     ///
@@ -299,31 +297,18 @@ impl<T: WasiView> Compiled<T> {
     where
         T: WrpcView,
     {
-        // The selector defaults to `FirstArgSelector` but may be overridden via
-        // `selector`; consumers project their identity scheme onto the opaque
-        // `GuestId` it returns.
         let dispatch =
             DispatchHandle::new(self.selector, self.links, self.options.max_dispatch_depth);
 
-        // Polyfill host-mediated imports onto the shared linker *before*
-        // pre-instantiation: an import that is neither host-satisfied nor
-        // allow-listed then fails fast at `instantiate_pre`. Consuming `self`
-        // makes the linker ours to mutate — no defensive clone.
-        let mut linker = self.linker;
-        dispatch::link(&self.engine, &mut linker, &self.guests, &dispatch)?;
-
-        let mut guests = BTreeMap::new();
-        for loaded in &self.guests {
-            let instance_pre = linker
-                .instantiate_pre(&loaded.component)
-                .map_err(anyhow::Error::from)
-                .with_context(|| format!("pre-instantiating guest `{}`", loaded.id))?;
-            guests.insert(loaded.id.clone(), Guest::local(loaded.id.clone(), instance_pre));
-        }
-
-        tracing::info!(guests = guests.len(), "runtime initialized");
-
-        Registry::new(self.engine, self.options, guests, self.routes, dispatch)
+        RegistryBuilder::new(
+            self.engine,
+            self.linker,
+            self.options,
+            self.guests,
+            self.routes,
+            dispatch,
+        )
+        .build()
     }
 }
 

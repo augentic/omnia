@@ -30,7 +30,7 @@ use anyhow::{Context as _, Result, bail};
 use futures::FutureExt as _;
 use omnia::wasmtime::component::Val;
 use omnia::{
-    Backend, Compiled, GuestId, Registry, RegistryBuilder, ResolvedPreopen, Runtime, StoreBase,
+    Backend, Deployment, DeploymentBuilder, GuestId, Registry, ResolvedPreopen, Runtime, StoreBase,
     WorkingTreeRegistry,
 };
 use omnia_wasi_model::{
@@ -165,13 +165,13 @@ async fn registry(wasm: &Path) -> Result<Arc<Registry<TestCtx>>> {
     let manifest = format!("[[guest]]\nid = \"model\"\nsource.path = \"{}\"\n", wasm.display());
     std::fs::write(&manifest_path, manifest).context("writing test manifest")?;
 
-    let mut compiled: Compiled<TestCtx> = RegistryBuilder::new()
+    let mut deployment: Deployment<TestCtx> = DeploymentBuilder::new()
         .config(manifest_path.clone())
-        .compile()
+        .build()
         .await
         .context("building runtime")?;
-    compiled.host::<WasiModel, TestRuntime>().context("linking WasiModel")?;
-    let registry = compiled.build().context("assembling registry")?;
+    deployment.host::<WasiModel, TestRuntime>().context("linking WasiModel")?;
+    let registry = deployment.build().context("assembling registry")?;
 
     let _ = std::fs::remove_file(&manifest_path);
     Ok(Arc::new(registry))
@@ -412,13 +412,13 @@ async fn build_registry(model: &Path, shelf: &Path) -> Result<Arc<Registry<TestC
     );
     std::fs::write(&manifest_path, manifest).context("writing resolve test manifest")?;
 
-    let mut compiled: Compiled<TestCtx> = RegistryBuilder::new()
+    let mut deployment: Deployment<TestCtx> = DeploymentBuilder::new()
         .config(manifest_path.clone())
-        .compile()
+        .build()
         .await
         .context("building runtime")?;
-    compiled.host::<WasiModel, TestRuntime>().context("linking WasiModel")?;
-    let registry = compiled.build().context("assembling registry")?;
+    deployment.host::<WasiModel, TestRuntime>().context("linking WasiModel")?;
+    let registry = deployment.build().context("assembling registry")?;
 
     let _ = std::fs::remove_file(&manifest_path);
     Ok(Arc::new(registry))

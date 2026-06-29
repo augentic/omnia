@@ -1,12 +1,11 @@
-//! The `complete` host binding (§3.4).
+//! The `complete` host binding.
 //!
-//! This is the analogue of `wasi-keyvalue/src/host/store_impl.rs`: it implements
-//! the generated `completion` host trait on [`WasiModel`]. It is the floor's
-//! final gate — it applies the pre-checks (§3.1.1–§3.1.2), hands the owned prompt
-//! and a per-completion [`ToolHost`] to the backend, then *re-validates* the
-//! returned answer (§3.1.3) before mapping it to the guest-visible `answer`
-//! string. A backend that runs its own repair loop (genai) consumes validation
-//! failures internally and only returns once it passes; the floor re-gates here.
+//! Implements the generated `completion` host trait on [`WasiModel`]. It is the
+//! floor's final gate — it applies the pre-checks, hands the owned prompt and a
+//! per-completion [`ToolHost`] to the backend, then *re-validates* the returned
+//! answer before mapping it to the guest-visible `answer` string. A backend that
+//! runs its own repair loop (genai) consumes validation failures internally and
+//! only returns once it passes; the floor re-gates here.
 
 use std::sync::Arc;
 
@@ -31,27 +30,27 @@ impl<T> HostWithStore<T> for WasiModel {
         // consumes the grants — `Resource<Descriptor>` is not `Clone` in
         // wasmtime 46, so it must be taken, not copied. The descriptor is
         // resolved against the registry inside `accessor.with` below; the owned
-        // prompt re-derives its stable `working_tree_lent` marker (§5.4) from
-        // whether a borrow was present (RFC-55).
+        // prompt re-derives its stable `working_tree_lent` marker from whether a
+        // borrow was present.
         let working_tree_res = prompt.grants.working_tree.take();
 
         let mut owned: Prompt = prompt.into();
         owned.grants.working_tree_lent = working_tree_res.is_some();
 
         // Floor pre-checks: reserved tool names and empty prompts never reach a
-        // backend (§3.1.1–§3.1.2).
+        // backend.
         check_prompt(&owned)?;
 
         // `kind` is needed for the final validation gate after the backend
         // returns; capture it before the owned prompt moves into the backend.
         let kind = owned.response_format.kind;
 
-        // Build the per-completion tool host (§4.2) from the prompt's grants.
-        // `resolve` reaches the host→guest dispatcher threaded into the store
-        // ctx; `verify` is routing-only; `read`/`list`/`write` + `local_path`
-        // ride the working tree resolved from the lent descriptor (RFC-55).
-        // `ModelDefault` (replay) ignores it. Capture the grants the host needs
-        // before the owned prompt moves into the backend.
+        // Build the per-completion tool host from the prompt's grants. `resolve`
+        // reaches the host→guest dispatcher threaded into the store ctx; `verify`
+        // is routing-only; `read`/`list`/`write` + `local_path` ride the working
+        // tree resolved from the lent descriptor. `ModelDefault` (replay) ignores
+        // it. Capture the grants the host needs before the prompt moves into the
+        // backend.
         let references = owned.grants.references.clone();
         let verify_allowed = owned.grants.verify.clone();
 
@@ -77,7 +76,7 @@ impl<T> HostWithStore<T> for WasiModel {
             .await?;
 
         // Final validation gate: a backend answer that does not validate is a
-        // backend failure, never a guest-visible answer (§3.1.3).
+        // backend failure, never a guest-visible answer.
         validate_answer(&backend_answer.value, kind)?;
 
         serde_json::to_string(&backend_answer.value)
@@ -88,8 +87,8 @@ impl<T> HostWithStore<T> for WasiModel {
         _accessor: &Accessor<T, Self>, _prompt: genc::Prompt,
     ) -> Result<StreamReader<genc::StreamEvent>, Error> {
         // The binding is generated so `bindgen!` is confirmed to compile the
-        // native `stream<>` type at the 0.1.0 boundary (§3.1.4); host-side
-        // stream production lands in Phase 3.
+        // native `stream<>` type at the 0.1.0 boundary; host-side stream
+        // production lands in Phase 3.
         Err(Error::Backend("streaming unsupported".to_owned()))
     }
 }
@@ -101,11 +100,11 @@ impl Host for WasiModelCtxView<'_> {
 }
 
 /// The floor tool host, built fresh per completion from the prompt's grants.
-/// `resolve` is wired to the host→guest dispatcher (§4.1); `verify` is
-/// routing-only (an allow-list check against `grants.verify` — profiles and
-/// their execution are RFC-60); `read`/`list`/`write` + `local_path` ride the
-/// [`WorkingTree`] resolved from the lent descriptor (RFC-55), and fail loudly
-/// when no tree was lent. `ModelDefault` (replay) ignores the whole host.
+/// `resolve` is wired to the host→guest dispatcher; `verify` is routing-only (an
+/// allow-list check against `grants.verify`); `read`/`list`/`write` +
+/// `local_path` ride the [`WorkingTree`] resolved from the lent descriptor, and
+/// fail loudly when no tree was lent. `ModelDefault` (replay) ignores the whole
+/// host.
 struct BoundToolHost {
     /// Type-erased host→guest dispatcher threaded in via the store ctx.
     dispatch: Arc<dyn HostDispatch>,
@@ -114,9 +113,9 @@ struct BoundToolHost {
     references: Option<String>,
     /// `grants.verify`: the closed verification profiles the model may route to.
     verify_allowed: Vec<String>,
-    /// The working tree resolved from the lent `grants.working-tree` descriptor
-    /// (RFC-55), or `None` when none was lent. Backs `read`/`list`/`write` and
-    /// the `local_path` face.
+    /// The working tree resolved from the lent `grants.working-tree` descriptor,
+    /// or `None` when none was lent. Backs `read`/`list`/`write` and the
+    /// `local_path` face.
     working_tree: Option<WorkingTree>,
 }
 
@@ -200,7 +199,7 @@ impl ToolHost for BoundToolHost {
     fn verify(&self, check: String) -> FutureResult<VerifyReport> {
         // Routing-only: validate the requested profile is in `grants.verify`,
         // then acknowledge the route. Profile definitions, sandboxing, and
-        // execution are owned by RFC-60 and are not implemented here.
+        // execution are not yet implemented.
         let granted = self.verify_allowed.contains(&check);
         async move {
             if !granted {
@@ -210,7 +209,7 @@ impl ToolHost for BoundToolHost {
                 ok: false,
                 detail: format!(
                     "verify profile `{check}` is granted and routed; profile \
-                     execution is RFC-60 (not yet implemented)"
+                     execution is not yet implemented"
                 ),
             })
         }

@@ -226,7 +226,7 @@ Dependencies on standard WASI definitions are managed in `wit/deps/` and version
 
 1. **CLI parsing**: Generated `main` delegates to `omnia::main`, which parses the `run` subcommand (or `compile` when the `jit` feature is enabled)
 
-2. **Compile**: `RegistryBuilder` loads the manifest or wasm, compiles guests, and returns a `Compiled` registry plan
+2. **Build**: `DeploymentBuilder` loads the manifest or wasm, compiles guests, and returns a `Deployment` ready for host linking
 
 3. **Bootstrap**: `Context::new` links WASI hosts, connects backends, and builds the `Registry`
 
@@ -235,7 +235,7 @@ Dependencies on standard WASI definitions are managed in `wit/deps/` and version
 5. **Request handling** (server mode): Trigger hosts (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`) accept requests, instantiate guests per call, and return responses
 
 ```text
-CLI → Compile → Context::new → run
+CLI → Build → Context::new → run
                                  ├─ command mode → command::run → ExitStatus
                                  └─ server mode  → prepare → trigger servers
 ```

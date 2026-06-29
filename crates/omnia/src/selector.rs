@@ -2,15 +2,13 @@
 //!
 //! When a guest calls a host-mediated import, the host must decide *which*
 //! registered guest serves the call. That decision is a consumer-policy detail
-//! the floor must not hardcode (Law 2): "the adapter-id is the first argument"
-//! is a Specify contract, not an Omnia one. So the floor exposes a pluggable
-//! [`GuestSelector`] strategy and ships one default.
+//! the floor must not hardcode, so it exposes a pluggable [`GuestSelector`]
+//! strategy and ships one default.
 //!
 //! The strategy runs on the typed call (interface, function, and the decoded
-//! [`Val`] parameters) *before* the invocation is encoded onto the wRPC carrier
-//! (`rfcs/guest-registry.md` §4.3/§4.4). It returns the chosen [`GuestId`] and
-//! the parameter list to forward — so a strategy may strip the identity argument
-//! or pass it through.
+//! [`Val`] parameters) *before* the invocation is encoded onto the wRPC carrier.
+//! It returns the chosen [`GuestId`] and the parameter list to forward — so a
+//! strategy may strip the identity argument or pass it through.
 
 use anyhow::{Result, bail};
 use wasmtime::component::Val;
@@ -22,7 +20,7 @@ use crate::registry::GuestId;
 ///
 /// The floor stays domain-agnostic: an implementation sees only the opaque
 /// interface/function names and the typed parameters, and returns an opaque
-/// [`GuestId`]. It never parses `augentic:specify` or any other consumer scheme.
+/// [`GuestId`]. It never parses a consumer scheme.
 pub trait GuestSelector: Send + Sync + 'static {
     /// Select the target guest for a call to `func` on `interface`, given its
     /// decoded `params`, returning the chosen identity and the parameters to
@@ -38,12 +36,11 @@ pub trait GuestSelector: Send + Sync + 'static {
 
 /// The default strategy: the first parameter is a string identity.
 ///
-/// This matches `rfcs/guest-registry.md` §4.3's default — the leading argument
-/// names the target and is **forwarded through** (the architecture has the
-/// adapter import and export the same interface, so the target's export expects
-/// the identity argument too). A consumer that wants different behaviour (strip
-/// the id, read it from a later argument, key off the interface) supplies its
-/// own [`GuestSelector`].
+/// The leading argument names the target and is **forwarded through** (the
+/// adapter imports and exports the same interface, so the target's export
+/// expects the identity argument too). A consumer that wants different behaviour
+/// (strip the id, read it from a later argument, key off the interface) supplies
+/// its own [`GuestSelector`].
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FirstArgSelector;
 

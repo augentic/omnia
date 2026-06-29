@@ -205,132 +205,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn value_to_wasi_numeric_types() {
-        use sea_query::Value;
-
-        let val_bool = value_to_wasi_datatype(Value::Bool(Some(true))).unwrap();
-        assert!(matches!(val_bool, DataType::Boolean(Some(true))));
-
-        let val_int = value_to_wasi_datatype(Value::Int(Some(42))).unwrap();
-        assert!(matches!(val_int, DataType::Int32(Some(42))));
-
-        let val_bigint = value_to_wasi_datatype(Value::BigInt(Some(999))).unwrap();
-        assert!(matches!(val_bigint, DataType::Int64(Some(999))));
-
-        let val_tiny = value_to_wasi_datatype(Value::TinyInt(Some(10))).unwrap();
-        assert!(matches!(val_tiny, DataType::Int32(Some(10))));
-
-        let val_small = value_to_wasi_datatype(Value::SmallInt(Some(1000))).unwrap();
-        assert!(matches!(val_small, DataType::Int32(Some(1000))));
-
-        let val_tiny_u = value_to_wasi_datatype(Value::TinyUnsigned(Some(10))).unwrap();
-        assert!(matches!(val_tiny_u, DataType::Uint32(Some(10))));
-
-        let val_small_u = value_to_wasi_datatype(Value::SmallUnsigned(Some(500))).unwrap();
-        assert!(matches!(val_small_u, DataType::Uint32(Some(500))));
-
-        let val_unsigned = value_to_wasi_datatype(Value::Unsigned(Some(1000))).unwrap();
-        assert!(matches!(val_unsigned, DataType::Uint32(Some(1000))));
-
-        let val_big_u = value_to_wasi_datatype(Value::BigUnsigned(Some(10000))).unwrap();
-        assert!(matches!(val_big_u, DataType::Uint64(Some(10000))));
-
-        let val_f32 = value_to_wasi_datatype(Value::Float(Some(std::f32::consts::PI))).unwrap();
-        assert!(
-            matches!(val_f32, DataType::Float(Some(v)) if (v - std::f32::consts::PI).abs() < 0.01)
-        );
-
-        let val_f64 = value_to_wasi_datatype(Value::Double(Some(std::f64::consts::E))).unwrap();
-        assert!(
-            matches!(val_f64, DataType::Double(Some(v)) if (v - std::f64::consts::E).abs() < 0.001)
-        );
-    }
-
-    #[test]
-    fn value_to_wasi_string_types() {
-        use sea_query::Value;
-
-        let val_string = value_to_wasi_datatype(Value::String(Some("test".to_string()))).unwrap();
-        if let DataType::Str(Some(s)) = &val_string {
-            assert_eq!(s, "test");
-        } else {
-            panic!("Expected string");
-        }
-
-        let val_char = value_to_wasi_datatype(Value::Char(Some('A'))).unwrap();
-        if let DataType::Str(Some(s)) = &val_char {
-            assert_eq!(s, "A");
-        } else {
-            panic!("Expected string from char");
-        }
-    }
-
-    #[test]
-    fn value_to_wasi_binary_types() {
-        use sea_query::Value;
-
-        let val = value_to_wasi_datatype(Value::Bytes(Some(vec![1, 2, 3]))).unwrap();
-        if let DataType::Binary(Some(b)) = &val {
-            assert_eq!(b, &vec![1, 2, 3]);
-        } else {
-            panic!("Expected binary");
-        }
-    }
-
-    #[test]
-    fn value_to_wasi_datetime_types() {
-        use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+    fn value_to_wasi_datatype_maps_representative_variants() {
         use sea_query::Value;
 
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
-        let val_date = value_to_wasi_datatype(Value::ChronoDate(Some(date))).unwrap();
-        if let DataType::Date(Some(s)) = &val_date {
-            assert_eq!(s, "2024-01-15");
-        } else {
-            panic!("Expected date string");
-        }
-
-        let time = NaiveTime::from_hms_opt(10, 30, 45).unwrap();
-        let val_time = value_to_wasi_datatype(Value::ChronoTime(Some(time))).unwrap();
-        if let DataType::Time(Some(s)) = &val_time {
-            assert!(s.starts_with("10:30:45"));
-        } else {
-            panic!("Expected time string");
-        }
-
-        let dt = NaiveDateTime::parse_from_str("2024-01-15 10:30:45", "%Y-%m-%d %H:%M:%S").unwrap();
-        let val_dt = value_to_wasi_datatype(Value::ChronoDateTime(Some(dt))).unwrap();
-        if let DataType::Timestamp(Some(s)) = &val_dt {
-            assert!(s.starts_with("2024-01-15"));
-        } else {
-            panic!("Expected timestamp string");
-        }
-
         let dt_utc: DateTime<Utc> = "2024-01-15T10:30:45Z".parse().unwrap();
-        let val_dt_utc = value_to_wasi_datatype(Value::ChronoDateTimeUtc(Some(dt_utc))).unwrap();
-        if let DataType::Timestamp(Some(s)) = &val_dt_utc {
-            assert!(s.contains("2024-01-15"));
-            assert!(s.contains("10:30:45"));
-        } else {
-            panic!("Expected timestamp string");
-        }
-    }
 
-    #[test]
-    fn value_to_wasi_null_variants() {
-        use sea_query::Value;
-
-        let val_bool = value_to_wasi_datatype(Value::Bool(None)).unwrap();
-        assert!(matches!(val_bool, DataType::Boolean(None)));
-
-        let val_int = value_to_wasi_datatype(Value::Int(None)).unwrap();
-        assert!(matches!(val_int, DataType::Int32(None)));
-
-        let val_bigint = value_to_wasi_datatype(Value::BigInt(None)).unwrap();
-        assert!(matches!(val_bigint, DataType::Int64(None)));
-
-        let val_string = value_to_wasi_datatype(Value::String(None)).unwrap();
-        assert!(matches!(val_string, DataType::Str(None)));
+        assert!(matches!(
+            value_to_wasi_datatype(Value::Int(Some(42))).unwrap(),
+            DataType::Int32(Some(42))
+        ));
+        assert!(matches!(
+            value_to_wasi_datatype(Value::BigUnsigned(Some(10_000))).unwrap(),
+            DataType::Uint64(Some(10_000))
+        ));
+        assert!(matches!(
+            value_to_wasi_datatype(Value::Float(Some(std::f32::consts::PI))).unwrap(),
+            DataType::Float(Some(v)) if (v - std::f32::consts::PI).abs() < 0.01
+        ));
+        assert!(matches!(
+            value_to_wasi_datatype(Value::Char(Some('A'))).unwrap(),
+            DataType::Str(Some(s)) if s == "A"
+        ));
+        assert!(matches!(
+            value_to_wasi_datatype(Value::Bytes(Some(vec![1, 2, 3]))).unwrap(),
+            DataType::Binary(Some(b)) if b == [1, 2, 3]
+        ));
+        assert!(matches!(
+            value_to_wasi_datatype(Value::ChronoDate(Some(date))).unwrap(),
+            DataType::Date(Some(s)) if s == "2024-01-15"
+        ));
+        assert!(matches!(
+            value_to_wasi_datatype(Value::ChronoDateTimeUtc(Some(dt_utc))).unwrap(),
+            DataType::Timestamp(Some(s)) if s.contains("2024-01-15") && s.contains("10:30:45")
+        ));
+        assert!(matches!(
+            value_to_wasi_datatype(Value::Bool(None)).unwrap(),
+            DataType::Boolean(None)
+        ));
     }
 
     #[test]

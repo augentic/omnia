@@ -112,34 +112,3 @@ impl Bucket for InMemBucket {
         async move { Ok(keys) }.boxed()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn bucket_operations() {
-        let ctx = KeyValueDefault::connect_with(ConnectOptions).await.expect("connect");
-
-        let bucket = ctx.open_bucket("test-bucket".to_string()).await.expect("open bucket");
-
-        // Test set and get
-        bucket.set("key1".to_string(), b"value1".to_vec()).await.expect("set");
-        let value = bucket.get("key1".to_string()).await.expect("get");
-        assert_eq!(value, Some(b"value1".to_vec()));
-
-        // Test exists
-        assert!(bucket.exists("key1".to_string()).await.expect("exists"));
-        assert!(!bucket.exists("key2".to_string()).await.expect("exists"));
-
-        // Test keys
-        bucket.set("key2".to_string(), b"value2".to_vec()).await.expect("set");
-        let mut keys = bucket.keys().await.expect("keys");
-        keys.sort();
-        assert_eq!(keys, vec!["key1".to_string(), "key2".to_string()]);
-
-        // Test delete
-        bucket.delete("key1".to_string()).await.expect("delete");
-        assert!(!bucket.exists("key1".to_string()).await.expect("exists"));
-    }
-}

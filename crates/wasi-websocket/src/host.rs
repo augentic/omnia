@@ -38,8 +38,7 @@ use std::sync::Arc;
 
 pub use omnia::FutureResult;
 use omnia::{Host, Runtime, Server};
-use wasmtime::component::{HasData, Linker};
-use wasmtime_wasi::ResourceTableError;
+use wasmtime::component::{HasData, Linker, ResourceTable, ResourceTableError};
 
 pub use self::default_impl::WebSocketDefault;
 pub use self::generated::Duplex;

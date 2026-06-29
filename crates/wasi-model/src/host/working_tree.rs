@@ -1,4 +1,4 @@
-//! Working-tree resolution at the floor (RFC-55, Phase 2b).
+//! Working-tree resolution at the floor.
 //!
 //! A guest lends a `wasi:filesystem` working tree through
 //! `grants.working-tree: option<borrow<descriptor>>`. This module turns that
@@ -24,8 +24,7 @@ use cap_fs_ext::MetadataExt as _;
 use cap_std::fs::Dir;
 use futures::FutureExt as _;
 use omnia::{FutureResult, WorkingTreeRegistry};
-use wasmtime::component::Resource;
-use wasmtime_wasi::ResourceTable;
+use wasmtime::component::{Resource, ResourceTable};
 use wasmtime_wasi::filesystem::Descriptor;
 
 use super::types::DirEntry;
@@ -56,8 +55,8 @@ pub struct WorkingTree {
 }
 
 impl WorkingTree {
-    /// The mount's absolute host path — the `local-path` face (RFC-55), e.g.
-    /// cursor's `--workspace`.
+    /// The mount's absolute host path — the `local-path` face, e.g. cursor's
+    /// `--workspace`.
     #[must_use]
     pub fn local_path(&self) -> &Path {
         &self.local_path

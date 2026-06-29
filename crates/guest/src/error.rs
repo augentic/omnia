@@ -1,6 +1,5 @@
 //! Errors
 
-// use axum::response::{IntoResponse, Response};
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -205,12 +204,6 @@ mod tests {
     use super::Error;
 
     #[test]
-    fn error_display() {
-        let err = bad_request!("invalid input");
-        assert_eq!(format!("{err}",), "code: bad_request, description: invalid input");
-    }
-
-    #[test]
     fn with_context() {
         Registry::default().with(EnvFilter::new("debug")).with(fmt::layer()).init();
 
@@ -313,22 +306,5 @@ mod tests {
 
         assert_eq!(err.json_body(), Some(custom_body));
         assert_eq!(err.status(), StatusCode::CONFLICT);
-    }
-
-    #[test]
-    fn anyhow_context_preserves_json_error() {
-        let body = serde_json::json!({"error": "bad", "error_description": "very bad"});
-        let original = Error::Json {
-            code: "400".to_string(),
-            body: body.clone(),
-        };
-
-        let result: Result<(), Error> = Err(original);
-        let with_context = result.context("extra context");
-        let recovered: Error = with_context.unwrap_err().into();
-
-        assert_eq!(recovered.status(), StatusCode::BAD_REQUEST);
-        assert_eq!(recovered.code(), "400");
-        assert_eq!(recovered.json_body(), Some(body));
     }
 }

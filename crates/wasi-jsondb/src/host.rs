@@ -52,8 +52,7 @@ use std::fmt::Debug;
 
 pub use omnia::FutureResult;
 use omnia::{Host, Runtime, Server};
-use wasmtime::component::{HasData, Linker};
-use wasmtime_wasi::ResourceTable;
+use wasmtime::component::{HasData, Linker, ResourceTable};
 
 use self::generated::wasi::jsondb::{store, types};
 pub use crate::host::default_impl::JsonDbDefault;
