@@ -26,26 +26,13 @@ impl<T> HostWithStore<T> for WasiModel {
     async fn complete(
         accessor: &Accessor<T, Self>, mut prompt: genc::Prompt,
     ) -> Result<String, Error> {
-        // Move the lent working-tree borrow out before the owned conversion
-        // consumes the grants — `Resource<Descriptor>` is not `Clone` in
-        // wasmtime 46, so it must be taken, not copied. The descriptor is
-        // resolved against the registry inside `accessor.with` below; the owned
-        // prompt re-derives its stable `working_tree_lent` marker from whether a
-        // borrow was present.
         let working_tree_res = prompt.grants.working_tree.take();
-
         let mut owned: Prompt = prompt.into();
         owned.grants.working_tree_lent = working_tree_res.is_some();
 
-        // Host pre-checks: reserved tool names and empty prompts never reach a
-        // backend.
         check_prompt(&owned)?;
 
-        // `kind` is needed for the final validation gate after the backend
-        // returns; capture it before the owned prompt moves into the backend.
         let kind = owned.response_format.kind;
-
-        // Build the per-completion tool host from the prompt's grants.
         let references = owned.grants.references.clone();
         let verify_allowed = owned.grants.verify.clone();
 
@@ -123,7 +110,6 @@ fn vals_to_bytes(results: Vec<Val>) -> anyhow::Result<Vec<u8>> {
 
 impl ToolHost for BoundToolHost {
     fn resolve(&self, reference: Reference) -> FutureResult<Vec<u8>> {
-        // `resolve` is only valid when the prompt granted a reference target.
         let Some(target) = self.references.clone() else {
             return async move {
                 Err(anyhow::anyhow!(

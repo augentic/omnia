@@ -2,6 +2,8 @@
 
 This document describes the architecture of Omnia (WebAssembly Runtime), a modular WASI component runtime built on [wasmtime](https://github.com/bytecodealliance/wasmtime).
 
+For shared terminology (**runtime core**, **host-injected tools**, Law 2, and when “floor” means something else), see [Glossary](glossary.md).
+
 ## Overview
 
 Omnia provides a thin wrapper around wasmtime for ergonomic integration of host-based services for WASI components. It enables WebAssembly guests to interact with external services (databases, message queues, etc.) through standardized WASI interfaces, while allowing hosts to swap backend implementations without changing guest code.

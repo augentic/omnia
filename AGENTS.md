@@ -6,6 +6,8 @@
 
 Omnia is a Rust monorepo (17 workspace crates + `examples`) providing a lightweight WASM (WASI) component runtime. All WASI interfaces ship with in-memory defaults—no external services (Redis, NATS, Kafka, etc.) are needed for building, testing, or running examples.
 
+Terminology (**runtime core**, **host-side**, **host-injected tools**, etc.) is defined in [docs/glossary.md](docs/glossary.md).
+
 ### Key commands
 
 | Task | Command |
