@@ -71,7 +71,7 @@ pub struct InProcess {
 
 impl InProcess {
     /// Assemble the carrier from per-target servers (each already wired with its
-    /// served exports by [`crate::serve_links`]).
+    /// served exports by [`super::serve_links`]).
     #[must_use]
     pub const fn new(servers: HashMap<GuestId, Arc<InProcServer>>) -> Self {
         Self { servers }

@@ -1,5 +1,7 @@
 //! Deployment lifecycle: [`prepare`], [`run`], background tasks, and [`ExitStatus`].
 
+mod command;
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -11,12 +13,12 @@ use futures::future::{self, BoxFuture};
 use wasmtime::component::{Instance, InstancePre};
 use wasmtime::{Engine, Store};
 
+use crate::cli::{Cli, Command};
 use crate::dispatch::serve_links;
 use crate::traits::{Backends, HasLimits};
 use crate::working_tree::WorkingTreeRegistry;
 use crate::{
-    Cli, Command, Deployment, DeploymentBuilder, Registry, RuntimeOptions, StoreBase, StoreCtx,
-    command,
+    Deployment, DeploymentBuilder, Registry, RuntimeOptions, StoreBase, StoreCtx,
 };
 
 /// Host linking and trigger-server startup for a deployment.

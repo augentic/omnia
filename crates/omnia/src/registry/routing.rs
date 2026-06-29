@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use anyhow::{Result, bail};
 use wasmtime::component::InstancePre;
 
-use crate::registry::{GuestId, Registry};
+use super::{GuestId, Registry};
 
 /// A per-trigger route table resolving a routing key to a target identity.
 pub trait Resolver {

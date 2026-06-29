@@ -9,6 +9,10 @@
 //! The floor treats identities as opaque keys; consumers project their own
 //! scheme onto them. Omnia never parses a [`GuestId`].
 
+mod routing;
+
+pub use routing::{CliRoutes, HttpRoutes, Resolver, Routes, TopicRoutes, TriggerRouter};
+
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
@@ -20,9 +24,8 @@ use wasmtime_wasi::WasiView;
 use wrpc_wasmtime::WrpcView;
 
 use crate::RuntimeOptions;
+use crate::deployment::LoadedGuest;
 use crate::dispatch::{self, DispatchHandle};
-use crate::routing::Routes;
-use crate::source::LoadedGuest;
 
 /// Opaque guest identity.
 ///
@@ -263,7 +266,7 @@ mod tests {
     use wasmtime::{Config, Engine};
 
     use super::*;
-    use crate::selector::FirstArgSelector;
+    use crate::dispatch::FirstArgSelector;
     use crate::store::StoreCtx;
 
     #[test]

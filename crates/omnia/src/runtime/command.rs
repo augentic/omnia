@@ -4,8 +4,8 @@ use anyhow::{Result, bail};
 use wasmtime_wasi::I32Exit;
 use wasmtime_wasi::p3::bindings::{Command, CommandPre};
 
-use crate::routing::TriggerRouter;
-use crate::runtime::{ExitStatus, Runtime};
+use super::{ExitStatus, Runtime};
+use crate::registry::TriggerRouter;
 
 /// Run the routed `wasi:cli/run` guest once. Caller must have called [`prepare`](crate::runtime::prepare).
 pub(crate) async fn drive<B>(runtime: &Runtime<B>) -> Result<ExitStatus>

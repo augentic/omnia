@@ -15,6 +15,12 @@
 // otherwise trip `missing_docs`.
 #![allow(missing_docs)]
 
+#[cfg(feature = "jit")]
+mod compile;
+
+#[cfg(feature = "jit")]
+pub use compile::compile;
+
 use std::time::Duration;
 
 use anyhow::{Result, bail};
