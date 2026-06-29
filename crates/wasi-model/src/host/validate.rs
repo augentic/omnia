@@ -1,41 +1,23 @@
-//! Floor-side validation and message assembly.
-//!
-//! These are *host* concerns the `complete` binding applies at the boundary
-//! (§3.4), never behaviour each backend re-implements:
-//!
-//! - reserved floor-tool-name collisions and empty prompts are rejected before a
-//!   backend is called (§3.1.2, §3.1.1);
-//! - the returned answer is structurally validated before the guest sees it
-//!   (§3.1.3);
-//! - [`assemble`] is the §3.1.1 precedence a backend uses to map the typed
-//!   surface onto a provider chat request (replay does not need it; it is
-//!   exercised by genai in Phase 2a and unit-tested here now).
+//! Floor-side validation and message assembly for the `complete` binding.
 
 use serde_json::Value;
 
 use super::Error;
 use super::types::{Message, Prompt, ResponseFormatKind};
 
-/// Floor tool names that a guest must not redeclare in `prompt.tools` (§3.1.2).
+/// Floor tool names guests must not redeclare in `prompt.tools`.
 pub const RESERVED_TOOL_NAMES: &[&str] = &["resolve", "read", "list", "write", "verify"];
 
-/// The provider chat request assembled from a [`Prompt`] (§3.1.1). `system` is
-/// always a separate channel from the turns.
+/// Provider chat request assembled from a [`Prompt`]; `system` is separate from turns.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Assembled {
-    /// The system / instructions channel (already joined), if any.
+    /// System/instructions channel (already joined), if any.
     pub system: Option<String>,
-    /// The chat turns to send to the provider.
+    /// Chat turns to send to the provider.
     pub messages: Vec<Message>,
 }
 
-/// Floor pre-checks applied to every prompt before a backend is called.
-///
-/// # Errors
-///
-/// Returns `error::backend("reserved tool name")` if a guest-declared tool
-/// collides with a reserved floor name, or `error::backend("empty prompt")` if
-/// there is nothing to send (§3.1.1 rule 4).
+/// Pre-check every prompt before calling a backend.
 pub fn check_prompt(prompt: &Prompt) -> Result<(), Error> {
     if let Some(tool) = prompt.tools.iter().find(|t| RESERVED_TOOL_NAMES.contains(&t.name.as_str()))
     {
@@ -51,14 +33,7 @@ pub fn check_prompt(prompt: &Prompt) -> Result<(), Error> {
     Ok(())
 }
 
-/// Structurally validate a backend answer against `response-format.kind`
-/// (§3.1.3). This is the floor's final gate, re-applied in the `complete`
-/// binding even for backends that self-check.
-///
-/// # Errors
-///
-/// Returns `error::invalid-answer` when the value does not satisfy the gate for
-/// its kind.
+// Validate a backend answer against `response-format.kind`.
 pub fn validate_answer(value: &Value, kind: ResponseFormatKind) -> Result<(), Error> {
     match kind {
         ResponseFormatKind::Text => {
@@ -76,24 +51,14 @@ pub fn validate_answer(value: &Value, kind: ResponseFormatKind) -> Result<(), Er
             }
         }
         ResponseFormatKind::JsonSchema => {
-            // Phase 1 gate is parse-only: the value is already valid JSON. Full
-            // JSON-Schema enforcement is a tracked Phase 3 follow-up (§3.1.3) —
-            // it takes a validator-crate dependency this floor crate does not yet
-            // carry. TODO(phase-3): validate `value` against `json-schema.schema`.
+            // JSON-Schema enforcement (unimplemented)
+            // TODO: validate against `json-schema.schema`.
             Ok(())
         }
     }
 }
 
-/// Assemble a [`Prompt`] into a provider chat request (§3.1.1).
-///
-/// The precedence: explicit turns beat templates, and `system` is always a
-/// separate channel. Callers should run [`check_prompt`] first; this still
-/// rejects an empty input defensively.
-///
-/// # Errors
-///
-/// Returns `error::backend("empty prompt")` if there is nothing to assemble.
+// Assemble a [`Prompt`] into a provider chat request.
 pub fn assemble(prompt: &Prompt) -> Result<Assembled, Error> {
     // 1. `messages` wins over `sections`. 2. `prompt.system` is always applied.
     if !prompt.messages.is_empty() {
@@ -147,7 +112,7 @@ pub fn assemble(prompt: &Prompt) -> Result<Assembled, Error> {
     Ok(Assembled { system, messages })
 }
 
-/// Substitute `{name}` placeholders with each variable's value.
+// Substitute `{name}` placeholders with each variable's value.
 fn substitute(text: &str, sections: &super::types::Sections) -> String {
     let mut out = text.to_owned();
     for variable in &sections.variables {
@@ -156,13 +121,13 @@ fn substitute(text: &str, sections: &super::types::Sections) -> String {
     out
 }
 
-/// Join non-empty parts with blank lines, yielding `None` when all are empty.
+// Join non-empty parts with blank lines; None when all are empty.
 fn join_non_empty(parts: &[String]) -> Option<String> {
     let kept: Vec<&str> = parts.iter().map(|p| p.trim()).filter(|p| !p.is_empty()).collect();
     if kept.is_empty() { None } else { Some(kept.join("\n\n")) }
 }
 
-/// Normalize an optional string to `None` when it is empty or whitespace.
+// Normalize an optional string to None when empty or whitespace.
 fn non_empty(value: Option<String>) -> Option<String> {
     value.filter(|v| !v.trim().is_empty())
 }
@@ -177,7 +142,7 @@ mod tests {
         ToolGrants, Variable,
     };
 
-    /// Build a prompt with the given turns and sections, defaults elsewhere.
+    // Build a prompt with the given turns and sections, defaults elsewhere.
     fn prompt_with(messages: Vec<Message>, sections: Option<Sections>) -> Prompt {
         Prompt {
             model: None,

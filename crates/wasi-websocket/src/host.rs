@@ -117,21 +117,18 @@ pub trait WasiWebSocketCtx: Debug + Send + Sync + 'static {
     fn new_event(&self, data: Vec<u8>) -> anyhow::Result<Arc<dyn Event>>;
 }
 
-/// `anyhow::Error` to `Error` mapping
 impl From<anyhow::Error> for Error {
     fn from(err: anyhow::Error) -> Self {
         Self::Other(err.to_string())
     }
 }
 
-/// `ResourceTableError` to `Error` mapping
 impl From<ResourceTableError> for Error {
     fn from(err: ResourceTableError) -> Self {
         Self::Other(err.to_string())
     }
 }
 
-/// `wasmtime::Error` to `Error` mapping
 impl From<wasmtime::Error> for Error {
     fn from(err: wasmtime::Error) -> Self {
         Self::Other(err.to_string())

@@ -52,10 +52,8 @@ pub fn init() -> Result<Option<ExitGuard>> {
         return Ok(None);
     }
 
-    // get WASI host telemetry resource
     let resource: Resource = resource::resource().into();
 
-    // create subscriber layers
     let filter_layer = EnvFilter::from_default_env()
         .add_directive("hyper=off".parse()?)
         .add_directive("h2=off".parse()?)

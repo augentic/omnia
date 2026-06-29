@@ -88,7 +88,7 @@ pub struct WasiModelCtxView<'a> {
     /// Resource table for `filter` handles.
     pub table: &'a mut ResourceTable,
 
-    /// Host → guest dispatcher, used by [`ToolHost::resolve`] to reach an 
+    /// Host → guest dispatcher, used by [`ToolHost::resolve`] to reach an
     /// adapter's `references`.
     pub host_dispatch: Arc<dyn HostDispatch>,
 
@@ -160,8 +160,7 @@ pub trait ToolHost: Send + Sync {
     }
 }
 
-/// `anyhow::Error` to [`Error`] mapping: an untyped host failure is a
-/// `backend` error at the boundary.
+/// An untyped host failure is a `backend` error at the boundary.
 impl From<anyhow::Error> for Error {
     fn from(err: anyhow::Error) -> Self {
         Self::Backend(err.to_string())

@@ -14,10 +14,8 @@ impl<T> HostWithStore<T> for WasiSql {
         let connection = get_connection(accessor, &c).map_err(wasmtime::Error::from_anyhow)?;
         let statement = get_statement(accessor, &q).map_err(wasmtime::Error::from_anyhow)?;
 
-        // get statement from resource table
         let (query, params) = (statement.query.clone(), statement.params.clone());
 
-        // execute query
         let result = match connection.query(query, params).await {
             Ok(rows) => Ok(rows),
             Err(err) => Err(accessor.with(|mut store| store.get().table.push(err))?),
@@ -32,10 +30,8 @@ impl<T> HostWithStore<T> for WasiSql {
         let connection = get_connection(accessor, &c).map_err(wasmtime::Error::from_anyhow)?;
         let statement = get_statement(accessor, &q).map_err(wasmtime::Error::from_anyhow)?;
 
-        // get statement from resource table
         let (query, params) = (statement.query.clone(), statement.params.clone());
 
-        // execute query
         let result = match connection.exec(query, params).await {
             Ok(rows) => Ok(rows),
             Err(err) => Err(accessor.with(|mut store| store.get().table.push(err))?),

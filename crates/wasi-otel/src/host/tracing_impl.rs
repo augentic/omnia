@@ -70,7 +70,6 @@ pub fn resource_spans(
         },
     );
 
-    // convert into ScopeSpans
     let scope_spans = scope_map
         .into_values()
         .map(|spans| ScopeSpans {
@@ -80,7 +79,6 @@ pub fn resource_spans(
         })
         .collect();
 
-    // create ResourceSpans
     vec![ResourceSpans {
         resource: Some(Resource {
             attributes: resource.iter().map(Into::into).collect(),

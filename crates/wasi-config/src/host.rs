@@ -32,29 +32,19 @@ where
 impl<B> Server<B> for WasiConfig {}
 
 /// A trait which provides internal WASI Config state.
-///
-/// This is implemented by the `T` in `Linker<T>` — a single type shared across
-/// all WASI components for the runtime build.
+/// Implemented by the `T` in `Linker<T>` during the runtime build.
 pub trait WasiConfigView: Send {
     /// Return a [`WasiConfig`] from mutable reference to self.
     fn config(&mut self) -> wasmtime_wasi_config::WasiConfig<'_>;
 }
 
 /// A trait which provides internal WASI Config context.
-///
-/// This is implemented by the resource-specific provider of Config
-/// functionality.
 pub trait WasiConfigCtx: Debug + Send + Sync + 'static {
     /// Get the configuration variables.
     fn get_config(&self) -> &WasiConfigVariables;
 }
 
-/// A backend bundle that can yield the `wasi:config` backend for a store.
-///
-/// The blanket [`WasiConfigView`] impl below turns this accessor into the
-/// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl via [`omnia_wasi_view!`]. The accessor borrows shared
-/// because [`WasiConfigCtx::get_config`] takes `&self`.
+/// A backend bundle that can yield the `wasi:config` backend context.
 pub trait HasConfig: Send {
     /// Borrow the `wasi:config` backend context.
     fn config_ctx(&self) -> &dyn WasiConfigCtx;

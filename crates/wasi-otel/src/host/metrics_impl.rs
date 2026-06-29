@@ -32,7 +32,6 @@ impl<T> HostWithStore<T> for WasiOtel {
             return Ok(());
         }
 
-        // convert and export
         let request = ExportMetricsServiceRequest::from(rm);
         accessor.with(|mut store| store.get().ctx.export_metrics(request)).await?;
 

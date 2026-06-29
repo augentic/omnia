@@ -97,8 +97,6 @@ pub struct WasiJsonDbCtxView<'a> {
 }
 
 /// Backend operations for JSON document storage.
-///
-/// All methods use [`anyhow::Error`] for failures; the host maps those to [`JsonDbError`].
 pub trait WasiJsonDbCtx: Debug + Send + Sync + 'static {
     /// Point read by primary id.
     fn get(&self, collection: String, id: String) -> FutureResult<Option<Document>>;

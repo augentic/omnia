@@ -53,7 +53,6 @@ impl Guest for Http {
     }
 }
 
-/// List all agencies.
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
 async fn list_agencies() -> HttpResult<Json<Value>> {
@@ -79,7 +78,6 @@ async fn list_agencies() -> HttpResult<Json<Value>> {
     Ok(Json(json!(agencies)))
 }
 
-/// Create a new agency.
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
 async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> HttpResult<Json<Value>> {
@@ -127,7 +125,6 @@ async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> HttpResult<Json<
     Ok(Json(json!({ "agency": agency })))
 }
 
-/// Get a specific agency.
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
 async fn get_agency(Path(id): Path<i64>) -> HttpResult<Json<Value>> {
@@ -228,7 +225,6 @@ async fn update_agency(
     Ok(Json(json!({ "agency": agency })))
 }
 
-/// List all feeds for a specific agency.
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
 async fn list_agency_feeds(Path(agency_id): Path<i64>) -> HttpResult<Json<Value>> {
@@ -255,7 +251,6 @@ async fn list_agency_feeds(Path(agency_id): Path<i64>) -> HttpResult<Json<Value>
     Ok(Json(json!({ "feeds": feeds })))
 }
 
-/// Create a new feed for an agency.
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
 async fn create_feed(

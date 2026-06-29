@@ -87,14 +87,12 @@ pub trait WasiIdentityCtx: Debug + Send + Sync + 'static {
     fn get_identity(&self, name: String) -> FutureResult<Arc<dyn Identity>>;
 }
 
-/// `anyhow::Error` to `Error` mapping
 impl From<anyhow::Error> for Error {
     fn from(err: anyhow::Error) -> Self {
         Self::InternalFailure(err.to_string())
     }
 }
 
-/// `ResourceTableError` to `Error` mapping
 impl From<ResourceTableError> for Error {
     fn from(err: ResourceTableError) -> Self {
         Self::InternalFailure(err.to_string())

@@ -39,10 +39,8 @@ where
     let wasi_resp = client::send(wasi_req).await.context("Issue calling proxy")?;
     let http_resp = http_from_wasi_response(wasi_resp).context("Issue converting response")?;
 
-    // convert wasi response to http response
     let (parts, mut body) = http_resp.into_parts();
 
-    // read body
     let bytes: Vec<u8> = if let Some(response) = body.take_unstarted() {
         let (_, body_rx) = wit_future::new(|| Ok(()));
         let (stream, _trailers) = response.consume_body(body_rx);
