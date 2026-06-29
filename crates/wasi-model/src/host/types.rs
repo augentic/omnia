@@ -180,7 +180,7 @@ pub struct Prompt {
 /// The host assembles once at the `complete` gate so every backend consumes the
 /// same `system` / `messages`; backends must not re-derive them from `sections`.
 #[derive(Clone, Debug, PartialEq)]
-pub struct CompletionRequest {
+pub struct PreparedPrompt {
     /// The owned guest prompt; record / replay keys on this, never the channels.
     pub prompt: Prompt,
     /// Assembled system / instructions channel, if any.

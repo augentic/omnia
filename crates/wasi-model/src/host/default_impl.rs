@@ -17,7 +17,7 @@ use omnia::Backend;
 use tracing::instrument;
 
 use super::replay::FixtureStore;
-use super::types::{BackendAnswer, CompletionRequest};
+use super::types::{BackendAnswer, PreparedPrompt};
 use super::{FutureResult, ToolHost, WasiModelCtx};
 
 /// Environment variable naming the directory of replay fixtures.
@@ -69,7 +69,7 @@ impl Backend for ModelDefault {
 
 impl WasiModelCtx for ModelDefault {
     fn complete(
-        &self, request: CompletionRequest, _tool_host: Arc<dyn ToolHost>,
+        &self, request: PreparedPrompt, _tool_host: Arc<dyn ToolHost>,
     ) -> FutureResult<BackendAnswer> {
         // Replay ignores the tool host (no in-process loop); it matches the
         // typed prompt against the recorded fixtures.
@@ -89,7 +89,7 @@ mod tests {
     use super::{ConnectOptions, ModelDefault};
     use crate::host::replay::{Recording, write_fixture};
     use crate::host::types::{
-        BackendAnswer, CompletionRequest, DirEntry, Prompt, Reference, ResponseFormat,
+        BackendAnswer, PreparedPrompt, DirEntry, Prompt, Reference, ResponseFormat,
         ResponseFormatKind, Sections, ToolGrants, VerifyReport,
     };
     use crate::host::{FutureResult, ToolHost, WasiModelCtx};
@@ -168,7 +168,7 @@ mod tests {
         .await
         .expect("connect");
         let replayed = backend
-            .complete(CompletionRequest::try_from(prompt).expect("assemble"), Arc::new(StubToolHost))
+            .complete(PreparedPrompt::try_from(prompt).expect("assemble"), Arc::new(StubToolHost))
             .await
             .expect("replay hits the fixture");
         assert_eq!(replayed.value, json!({ "verdict": "pass" }));
@@ -185,7 +185,7 @@ mod tests {
             ModelDefault::connect_with(ConnectOptions { replay_dir: dir }).await.expect("connect");
         let error = backend
             .complete(
-                CompletionRequest::try_from(sample_prompt()).expect("assemble"),
+                PreparedPrompt::try_from(sample_prompt()).expect("assemble"),
                 Arc::new(StubToolHost),
             )
             .await
@@ -202,7 +202,7 @@ mod tests {
         struct AlwaysOk;
         impl WasiModelCtx for AlwaysOk {
             fn complete(
-                &self, _request: CompletionRequest, _tool_host: Arc<dyn ToolHost>,
+                &self, _request: PreparedPrompt, _tool_host: Arc<dyn ToolHost>,
             ) -> FutureResult<BackendAnswer> {
                 async move {
                     Ok(BackendAnswer {
@@ -221,7 +221,7 @@ mod tests {
         let recording = Recording::new(AlwaysOk, dir.clone());
         let recorded = recording
             .complete(
-                CompletionRequest::try_from(prompt.clone()).expect("assemble"),
+                PreparedPrompt::try_from(prompt.clone()).expect("assemble"),
                 Arc::new(StubToolHost),
             )
             .await
@@ -233,7 +233,7 @@ mod tests {
         .await
         .expect("connect");
         let replayed = backend
-            .complete(CompletionRequest::try_from(prompt).expect("assemble"), Arc::new(StubToolHost))
+            .complete(PreparedPrompt::try_from(prompt).expect("assemble"), Arc::new(StubToolHost))
             .await
             .expect("replay");
 

@@ -2,7 +2,7 @@
 //!
 //! Implements the generated `completion` host trait on [`WasiModel`]. It is the
 //! host validation gate — it assembles the prompt (§3.1.1), hands the resulting
-//! [`CompletionRequest`] and a per-completion [`ToolHost`] to the backend, then
+//! [`PreparedPrompt`] and a per-completion [`ToolHost`] to the backend, then
 //! *re-validates* the returned answer before mapping it to the guest-visible
 //! `answer` string. A backend that
 //! runs its own repair loop (genai) consumes validation failures internally and
@@ -17,8 +17,8 @@ use wasmtime::component::{Accessor, StreamReader, Val};
 
 use super::generated::augentic::model::completion as genc;
 use super::generated::augentic::model::completion::{Host, HostWithStore};
-use super::types::{CompletionRequest, Prompt};
-use super::validate::validate_answer;
+use super::types::{PreparedPrompt, Prompt};
+use super::prompt::validate_answer;
 use super::working_tree::{WorkingTree, resolve_working_tree};
 use super::{Error, FutureResult, ToolHost, WasiModel, WasiModelCtxView};
 use crate::host::types::{DirEntry, Reference, VerifyReport};
@@ -31,9 +31,7 @@ impl<T> HostWithStore<T> for WasiModel {
         let mut owned: Prompt = prompt.into();
         owned.grants.working_tree_lent = working_tree_res.is_some();
 
-        // Assemble once at the gate (§3.1.1) so every backend consumes the same
-        // channels; `try_from` also runs the pre-call checks.
-        let request = CompletionRequest::try_from(owned)?;
+        let request = PreparedPrompt::try_from(owned)?;
 
         let kind = request.prompt.response_format.kind;
         let references = request.prompt.grants.references.clone();

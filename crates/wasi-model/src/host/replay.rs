@@ -34,7 +34,7 @@ use futures::FutureExt as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::types::{BackendAnswer, CompletionRequest, Prompt, Transcript};
+use super::types::{BackendAnswer, PreparedPrompt, Prompt, Transcript};
 use super::{FutureResult, ToolHost, WasiModelCtx};
 
 /// A `(prompt + transcript) -> answer` row, the unit of replay (§5.4).
@@ -197,7 +197,7 @@ impl<C: WasiModelCtx> Recording<C> {
 
 impl<C: WasiModelCtx> WasiModelCtx for Recording<C> {
     fn complete(
-        &self, request: CompletionRequest, tool_host: Arc<dyn ToolHost>,
+        &self, request: PreparedPrompt, tool_host: Arc<dyn ToolHost>,
     ) -> FutureResult<BackendAnswer> {
         // Keep the prompt for the fixture key before the request is consumed.
         let prompt = request.prompt.clone();

@@ -3,7 +3,7 @@
 use serde_json::Value;
 
 use super::Error;
-use super::types::{CompletionRequest, Message, Prompt, ResponseFormatKind};
+use super::types::{PreparedPrompt, Message, Prompt, ResponseFormatKind};
 
 /// Host-injected tool names guests must not redeclare in `prompt.tools`.
 pub const RESERVED_TOOL_NAMES: &[&str] = &["resolve", "read", "list", "write", "verify"];
@@ -112,7 +112,7 @@ pub fn assemble(prompt: &Prompt) -> Result<Assembled, Error> {
     Ok(Assembled { system, messages })
 }
 
-impl TryFrom<Prompt> for CompletionRequest {
+impl TryFrom<Prompt> for PreparedPrompt {
     type Error = Error;
 
     /// Run the pre-call checks and assemble the provider chat channels for
