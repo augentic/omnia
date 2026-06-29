@@ -19,11 +19,12 @@ use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context as _, bail};
+use anyhow::{Context as _, anyhow, bail};
 use cap_fs_ext::MetadataExt as _;
 use cap_std::fs::Dir;
 use futures::FutureExt as _;
 use omnia::{FutureResult, MountRegistry};
+use tokio::task::spawn_blocking;
 use wasmtime::component::{Resource, ResourceTable};
 use wasmtime_wasi::filesystem::Descriptor;
 
@@ -33,7 +34,7 @@ const MAX_READ_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_WRITE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_LIST_ENTRIES: usize = 4096;
 
-// An handle to a resolved working-tree mount. Built by [`resolve_working_tree`].
+// An handle to a resolved working-tree mount. Built by [`resolve`].
 pub struct WorkingTree {
     dir: Arc<Dir>,
     local_path: PathBuf,
@@ -49,7 +50,7 @@ impl WorkingTree {
     pub fn read(&self, path: String) -> FutureResult<Vec<u8>> {
         let dir = Arc::clone(&self.dir);
         async move {
-            tokio::task::spawn_blocking(move || read_blocking(&dir, &path))
+            spawn_blocking(move || read_blocking(&dir, &path))
                 .await
                 .context("working-tree read task failed")?
         }
@@ -59,7 +60,7 @@ impl WorkingTree {
     pub fn list(&self, path: String) -> FutureResult<Vec<DirEntry>> {
         let dir = Arc::clone(&self.dir);
         async move {
-            tokio::task::spawn_blocking(move || list_blocking(&dir, &path))
+            spawn_blocking(move || list_blocking(&dir, &path))
                 .await
                 .context("working-tree list task failed")?
         }
@@ -69,13 +70,13 @@ impl WorkingTree {
     pub fn write(&self, path: String, bytes: Vec<u8>) -> FutureResult<()> {
         if !self.writable {
             return async move {
-                Err(anyhow::anyhow!("working tree is read-only; write to `{path}` denied"))
+                Err(anyhow!("working tree is read-only; write to `{path}` denied"))
             }
             .boxed();
         }
         let dir = Arc::clone(&self.dir);
         async move {
-            tokio::task::spawn_blocking(move || write_blocking(&dir, &path, &bytes))
+            spawn_blocking(move || write_blocking(&dir, &path, &bytes))
                 .await
                 .context("working-tree write task failed")?
         }
@@ -83,30 +84,18 @@ impl WorkingTree {
     }
 }
 
-// A future that fails because a working-tree tool was called without a tree.
-fn no_working_tree<R: Send + 'static>(tool: &'static str) -> FutureResult<R> {
-    async move {
-        Err(anyhow::anyhow!("tool `{tool}` requires grants.working-tree, but none was lent"))
-    }
-    .boxed()
-}
-
-/// Run `f` against a lent tree, or fail with a grant error.
-pub(crate) fn with_tree<R: Send + 'static>(
-    tree: &Option<WorkingTree>, tool: &'static str, f: impl FnOnce(&WorkingTree) -> FutureResult<R>,
+// Run `f` against a lent tree, or fail with a grant error.
+pub fn with_tree<R: Send + 'static>(
+    tree: Option<&WorkingTree>, tool: &'static str, f: impl FnOnce(&WorkingTree) -> FutureResult<R>,
 ) -> FutureResult<R> {
-    match tree.as_ref() {
-        Some(tree) => f(tree),
-        None => no_working_tree(tool),
-    }
+    tree.map_or_else(
+        || async move { Err(anyhow!("tool `{tool}` missing grants.working-tree")) }.boxed(),
+        |tree| f(tree),
+    )
 }
 
-pub(crate) fn local_path(tree: &Option<WorkingTree>) -> Option<&Path> {
-    tree.as_ref().map(WorkingTree::local_path)
-}
-
-/// Resolve a `grants.working-tree` into a [`WorkingTree`].
-pub fn resolve_working_tree(
+// Resolve a `grants.working-tree` into a [`WorkingTree`].
+pub fn resolve(
     table: &ResourceTable, registry: &MountRegistry, borrow: Option<&Resource<Descriptor>>,
 ) -> anyhow::Result<Option<WorkingTree>> {
     let Some(resource) = borrow else {
@@ -184,7 +173,7 @@ mod tests {
     use wasmtime_wasi::filesystem::{Descriptor, Dir, File, OpenMode};
     use wasmtime_wasi::{DirPerms, FilePerms, ResourceTable};
 
-    use super::resolve_working_tree;
+    use super::resolve;
 
     /// A fresh, empty temp directory unique to this process and `label`.
     fn temp_root(label: &str) -> PathBuf {
@@ -218,22 +207,22 @@ mod tests {
     }
 
     #[test]
-    fn no_grant_resolves_to_none() {
+    fn no_grant() {
         let table = ResourceTable::new();
         let registry = MountRegistry::default();
-        let resolved = resolve_working_tree(&table, &registry, None).expect("resolve");
+        let resolved = resolve(&table, &registry, None).expect("resolve");
         assert!(resolved.is_none(), "an absent grant resolves to None");
     }
 
     #[test]
-    fn authorized_directory_identity_matches() {
+    fn authorized_directory() {
         let root = temp_root("match");
         let registry = registry_for(&root, false);
 
         let mut table = ResourceTable::new();
         let resource = table.push(dir_descriptor(&root, false)).expect("pushing descriptor");
 
-        let resolved = resolve_working_tree(&table, &registry, Some(&resource))
+        let resolved = resolve(&table, &registry, Some(&resource))
             .expect("resolve succeeds for an authorized mount")
             .expect("an authorized mount resolves to a working tree");
         assert_eq!(
@@ -244,14 +233,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolved_tree_reads_within_the_mount() {
+    async fn read_tree() {
         let root = temp_root("read");
         std::fs::write(root.join("hello.txt"), b"hi").expect("seeding a file");
         let registry = registry_for(&root, false);
         let mut table = ResourceTable::new();
         let resource = table.push(dir_descriptor(&root, false)).expect("pushing descriptor");
 
-        let tree = resolve_working_tree(&table, &registry, Some(&resource))
+        let tree = resolve(&table, &registry, Some(&resource))
             .expect("resolve")
             .expect("authorized mount");
         let bytes = tree.read("hello.txt".to_owned()).await.expect("reading within the mount");
@@ -259,7 +248,7 @@ mod tests {
     }
 
     #[test]
-    fn out_of_scope_directory_is_rejected() {
+    fn out_of_scope_directory() {
         let authorized = temp_root("scope-ok");
         let other = temp_root("scope-bad");
         let registry = registry_for(&authorized, false);
@@ -268,7 +257,7 @@ mod tests {
         // A directory that is *not* an authorized mount (a sibling tree).
         let resource = table.push(dir_descriptor(&other, false)).expect("pushing descriptor");
 
-        let Err(err) = resolve_working_tree(&table, &registry, Some(&resource)) else {
+        let Err(err) = resolve(&table, &registry, Some(&resource)) else {
             panic!("an unauthorized tree must be rejected in the host");
         };
         assert!(
@@ -278,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn file_descriptor_is_rejected() {
+    fn file_descriptor() {
         let root = temp_root("nondir");
         std::fs::write(root.join("not-a-dir.txt"), b"x").expect("seeding a file");
         let registry = registry_for(&root, false);
@@ -290,7 +279,7 @@ mod tests {
         let mut table = ResourceTable::new();
         let resource = table.push(descriptor).expect("pushing descriptor");
 
-        let Err(err) = resolve_working_tree(&table, &registry, Some(&resource)) else {
+        let Err(err) = resolve(&table, &registry, Some(&resource)) else {
             panic!("a file descriptor must not resolve to a working tree");
         };
         assert!(
@@ -300,13 +289,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn write_to_read_only_mount_is_denied() {
+    async fn write_denied() {
         let root = temp_root("ro");
         let registry = registry_for(&root, false);
         let mut table = ResourceTable::new();
         let resource = table.push(dir_descriptor(&root, false)).expect("pushing descriptor");
 
-        let tree = resolve_working_tree(&table, &registry, Some(&resource))
+        let tree = resolve(&table, &registry, Some(&resource))
             .expect("resolve")
             .expect("authorized mount");
         let err = tree

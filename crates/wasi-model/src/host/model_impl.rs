@@ -17,9 +17,9 @@ use wasmtime::component::{Accessor, StreamReader, Val};
 
 use super::generated::augentic::model::completion as genc;
 use super::generated::augentic::model::completion::{Host, HostWithStore};
-use super::types::{PreparedPrompt, Prompt};
 use super::prompt::validate_answer;
-use super::working_tree::{self, WorkingTree, resolve_working_tree, with_tree};
+use super::types::{PreparedPrompt, Prompt};
+use super::working_tree::{self, WorkingTree};
 use super::{Error, FutureResult, ToolHost, WasiModel, WasiModelCtxView};
 use crate::host::types::{DirEntry, Reference, VerifyReport};
 
@@ -40,7 +40,7 @@ impl<T> HostWithStore<T> for WasiModel {
         let backend_answer = accessor
             .with(|mut store| {
                 let view = store.get();
-                let working_tree = resolve_working_tree(
+                let working_tree = working_tree::resolve(
                     view.table,
                     view.working_trees,
                     working_tree_res.as_ref(),
@@ -128,19 +128,19 @@ impl ToolHost for BoundToolHost {
     }
 
     fn read(&self, path: String) -> FutureResult<Vec<u8>> {
-        with_tree(&self.working_tree, "read", |tree| tree.read(path))
+        working_tree::with_tree(self.working_tree.as_ref(), "read", |tree| tree.read(path))
     }
 
     fn list(&self, path: String) -> FutureResult<Vec<DirEntry>> {
-        with_tree(&self.working_tree, "list", |tree| tree.list(path))
+        working_tree::with_tree(self.working_tree.as_ref(), "list", |tree| tree.list(path))
     }
 
     fn write(&self, path: String, bytes: Vec<u8>) -> FutureResult<()> {
-        with_tree(&self.working_tree, "write", |tree| tree.write(path, bytes))
+        working_tree::with_tree(self.working_tree.as_ref(), "write", |tree| tree.write(path, bytes))
     }
 
     fn local_path(&self) -> Option<&std::path::Path> {
-        working_tree::local_path(&self.working_tree)
+        self.working_tree.as_ref().map(WorkingTree::local_path)
     }
 
     fn verify(&self, check: String) -> FutureResult<VerifyReport> {
