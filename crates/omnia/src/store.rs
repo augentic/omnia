@@ -272,3 +272,33 @@ impl<B: HasHttp + Send + 'static> WasiHttpView for StoreCtx<B> {
         self.backends.http_view(&mut self.base.table)
     }
 }
+
+/// Clone-on-read access to a store's startup-validated mount registry (RFC-55).
+///
+/// Lets a host crate match a lent `wasi:filesystem` descriptor against the
+/// store's authorized mounts without carrying the registry on its own view.
+pub trait HasMounts: Send {
+    /// Clone a handle to the store's mount registry.
+    fn mounts(&self) -> Arc<MountRegistry>;
+}
+
+impl<B: Send + 'static> HasMounts for StoreCtx<B> {
+    fn mounts(&self) -> Arc<MountRegistry> {
+        Arc::clone(&self.base.mounts)
+    }
+}
+
+/// Clone-on-read access to a store's host->guest dispatcher.
+///
+/// Lets a host crate reach the dispatcher for host-mediated dynamic linking
+/// without carrying it on its own view.
+pub trait HasHostDispatch: Send {
+    /// Clone a handle to the store's host->guest dispatcher.
+    fn host_dispatch(&self) -> Arc<dyn HostDispatch>;
+}
+
+impl<B: Send + 'static> HasHostDispatch for StoreCtx<B> {
+    fn host_dispatch(&self) -> Arc<dyn HostDispatch> {
+        Arc::clone(&self.base.host_dispatch)
+    }
+}

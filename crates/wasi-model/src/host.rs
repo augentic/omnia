@@ -6,7 +6,9 @@
 //! (no-op) `Server`, a `WasiModelView` the `Linker<T>` type implements, a
 //! `WasiModelCtxView` carrying the backend + resource table, and a
 //! `WasiModelCtx` trait the *backend* implements. The one addition over a plain
-//! effect host is the per-completion [`ToolHost`] handed to `complete`.
+//! effect host is the per-completion [`ToolHost`] handed to `complete`, which
+//! `complete` assembles from the store's mounts and dispatcher rather than from
+//! the view.
 
 mod default_impl;
 mod model_impl;
@@ -40,7 +42,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{Host, HostDispatch, MountRegistry, Server};
+use omnia::{HasHostDispatch, HasMounts, Host, Server};
 use wasmtime::component::{HasData, Linker, ResourceTable};
 
 pub use self::default_impl::{ConnectOptions, ModelDefault};
@@ -63,7 +65,7 @@ impl HasData for WasiModel {
 
 impl<T> Host<T> for WasiModel
 where
-    T: WasiModelView + 'static,
+    T: WasiModelView + HasMounts + HasHostDispatch + 'static,
 {
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
         Ok(completion::add_to_linker::<_, Self>(linker, T::model)?)
@@ -81,43 +83,23 @@ pub trait WasiModelView: Send {
 
 /// View into a [`WasiModelCtx`] implementation and the [`ResourceTable`].
 pub struct WasiModelCtxView<'a> {
-    /// WASI Model context (the backend).
+    /// WASI Model context.
     pub ctx: &'a mut dyn WasiModelCtx,
 
-    /// Resource table for `filter` handles.
+    /// Resource table.
     pub table: &'a mut ResourceTable,
-
-    /// Host → guest dispatcher, used by [`ToolHost::resolve`] to reach an
-    /// adapter's `references`.
-    pub host_dispatch: Arc<dyn HostDispatch>,
-
-    /// The registry of authorized mounts. The backend reads it to resolve
-    /// an authorized mount by directory identity.
-    pub working_trees: &'a MountRegistry,
 }
 
 /// The backend trait — the one place a provider's logic lives.
-///
-/// Implemented by [`ModelDefault`] (replay, in-tree) and by the model backends
-/// in the `backends` repo (`omnia_genai::Client`, `omnia_cursor::Client`). It
-/// carries no vendor type. `complete` receives a host-assembled
-/// [`PreparedPrompt`] (the owned [`Prompt`] plus the §3.1.1 channels) and a
-/// host-built [`ToolHost`] — the latter is the only addition over a plain effect
-/// Ctx, and it is just an argument, exactly like `open_bucket`'s `identifier`.
 pub trait WasiModelCtx: Debug + Send + Sync + 'static {
     /// Produce an answer for `request`, optionally lending the per-completion
-    /// [`ToolHost`] to backends that drive an in-process tool loop. The returned
-    /// [`BackendAnswer`] is host-only (its transcript is for record/replay); the
-    /// guest sees only the validated `answer` string the `complete` binding
-    /// derives from it.
+    /// [`ToolHost`] to backends that drive an in-process tool loop.
     fn complete(
         &self, request: PreparedPrompt, tool_host: Arc<dyn ToolHost>,
     ) -> FutureResult<BackendAnswer>;
 }
 
-/// Forward the backend trait through a boxed trait object so a backend bundle
-/// can hold a swappable `Box<dyn WasiModelCtx>` field and still implement
-/// [`HasModel`] — exactly what a record-vs-replay test runtime's bundle needs.
+/// Forward the backend trait.
 impl WasiModelCtx for Box<dyn WasiModelCtx> {
     fn complete(
         &self, request: PreparedPrompt, tool_host: Arc<dyn ToolHost>,
@@ -127,14 +109,8 @@ impl WasiModelCtx for Box<dyn WasiModelCtx> {
 }
 
 /// Host-side capabilities for one completion, lent to backends that need them.
-///
-/// Primarily the genai backend uses these: each method is a typed callback, and
-/// genai turns model tool-calls into them. `ModelDefault` (replay) and the
-/// cursor backend ignore it.
 pub trait ToolHost: Send + Sync {
-    /// `resolve` — host-mediated dynamic linking into the adapter's `references`
-    /// export. Always a fresh instance: a resolve cannot recursively re-enter
-    /// the guest that called `complete`.
+    /// Host-mediated dynamic linking into the adapter's `references` export.
     fn resolve(&self, reference: Reference) -> FutureResult<Vec<u8>>;
 
     /// Bounded working-tree read via the lent `wasi:filesystem` capability.
@@ -151,11 +127,6 @@ pub trait ToolHost: Send + Sync {
 
     /// The absolute host path of the lent working tree, when one was lent for
     /// this completion and resolved to an authorized mount.
-    ///
-    /// Backends that spawn a node-local agent (cursor) source their
-    /// `--workspace` from this. The default is `None` — no local tree, e.g.
-    /// replay, or a node that does not carry the mount — which such a backend
-    /// treats as "no local tree on this node".
     fn local_path(&self) -> Option<&std::path::Path> {
         None
     }
@@ -168,12 +139,7 @@ impl From<anyhow::Error> for Error {
     }
 }
 
-/// A backend bundle that can yield the `wasi-model` backend for a store.
-///
-/// The blanket [`WasiModelView`] impl below turns this accessor into the
-/// linker-facing view on `omnia::StoreCtx<B>`, threading in the `host_dispatch`
-/// and the mount registry from the store base; the `runtime!` macro generates
-/// the bundle-side impl via [`omnia_wasi_view!`].
+/// A trait which provides internal WASI Model context.
 pub trait HasModel: Send {
     /// Borrow the `wasi-model` backend context.
     fn model_ctx(&mut self) -> &mut dyn WasiModelCtx;
@@ -184,8 +150,6 @@ impl<B: HasModel + Send + 'static> WasiModelView for omnia::StoreCtx<B> {
         WasiModelCtxView {
             ctx: self.backends.model_ctx(),
             table: &mut self.base.table,
-            host_dispatch: Arc::clone(&self.base.host_dispatch),
-            working_trees: &self.base.mounts,
         }
     }
 }

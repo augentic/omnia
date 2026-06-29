@@ -36,7 +36,9 @@ pub use self::runtime::assert_hosts;
 pub use self::runtime::{ExitStatus, Runtime, RuntimeHooks};
 #[doc(hidden)]
 pub use self::runtime::{main, run};
-pub use self::store::{HasHttp, StoreBase, StoreBaseBuilder, StoreCtx};
+pub use self::store::{
+    HasHostDispatch, HasHttp, HasMounts, StoreBase, StoreBaseBuilder, StoreCtx,
+};
 #[doc(hidden)]
 pub use self::store::{Set, Unset};
 pub use self::telemetry::{Telemetry, resource};

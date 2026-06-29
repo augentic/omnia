@@ -84,12 +84,9 @@ fn ready_err<R: Send + 'static>(err: anyhow::Error) -> FutureResult<R> {
 
 // Run `f` against a lent tree, or fail with a grant error.
 pub fn with_tree<R: Send + 'static>(
-    tree: Option<&WorkingTree>, tool: &'static str, f: impl FnOnce(&WorkingTree) -> FutureResult<R>,
+    tree: Option<&WorkingTree>, f: impl FnOnce(&WorkingTree) -> FutureResult<R>,
 ) -> FutureResult<R> {
-    tree.map_or_else(
-        || ready_err(anyhow!("tool `{tool}` missing grants.working-tree")),
-        |tree| f(tree),
-    )
+    tree.map_or_else(|| ready_err(anyhow!("missing grants.working-tree")), |tree| f(tree))
 }
 
 // Resolve a `grants.working-tree` into a [`WorkingTree`].

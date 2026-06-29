@@ -151,7 +151,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn replays_a_written_fixture() {
+    async fn replay_fixture() {
         let dir = std::env::temp_dir().join(format!("omnia-model-replay-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
 
@@ -177,7 +177,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn missing_fixture_fails_loud() {
+    async fn missing_fixture() {
         let dir = std::env::temp_dir().join(format!("omnia-model-empty-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
 
@@ -194,7 +194,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recording_then_replay_round_trips() {
+    async fn record_then_replay() {
         // A stub backend that always answers, wrapped by `Recording`, writes a
         // fixture that `ModelDefault` then replays for the same prompt — proving
         // recorder and replayer key identically (§3.4, §5.4).

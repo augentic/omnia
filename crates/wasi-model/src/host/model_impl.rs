@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, bail};
 use futures::FutureExt as _;
-use omnia::{GuestId, HostDispatch};
+use omnia::{GuestId, HasHostDispatch, HasMounts, HostDispatch};
 use wasmtime::component::{Accessor, StreamReader, Val};
 
 use super::generated::augentic::model::completion as genc;
@@ -23,7 +23,10 @@ use super::working_tree::{self, WorkingTree};
 use super::{Error, FutureResult, ToolHost, WasiModel, WasiModelCtxView};
 use crate::host::types::{DirEntry, Reference, VerifyReport};
 
-impl<T> HostWithStore<T> for WasiModel {
+impl<T> HostWithStore<T> for WasiModel
+where
+    T: HasMounts + HasHostDispatch,
+{
     async fn complete(
         accessor: &Accessor<T, Self>, mut prompt: genc::Prompt,
     ) -> Result<String, Error> {
@@ -39,14 +42,19 @@ impl<T> HostWithStore<T> for WasiModel {
 
         let backend_answer = accessor
             .with(|mut store| {
+                // Clone the store-level handles out before borrowing the view:
+                // `store.get()` reborrows the store mutably, so the mount
+                // registry and dispatcher cannot be held as references across it.
+                let working_trees = store.data_mut().mounts();
+                let dispatch = store.data_mut().host_dispatch();
                 let view = store.get();
                 let working_tree = working_tree::resolve(
                     view.table,
-                    view.working_trees,
+                    &working_trees,
                     working_tree_res.as_ref(),
                 )?;
                 let tool_host: Arc<dyn ToolHost> = Arc::new(BoundToolHost {
-                    dispatch: Arc::clone(&view.host_dispatch),
+                    dispatch,
                     references,
                     verify_allowed,
                     working_tree,
@@ -128,15 +136,15 @@ impl ToolHost for BoundToolHost {
     }
 
     fn read(&self, path: String) -> FutureResult<Vec<u8>> {
-        working_tree::with_tree(self.working_tree.as_ref(), "read", |tree| tree.read(path))
+        working_tree::with_tree(self.working_tree.as_ref(), |tree| tree.read(path))
     }
 
     fn list(&self, path: String) -> FutureResult<Vec<DirEntry>> {
-        working_tree::with_tree(self.working_tree.as_ref(), "list", |tree| tree.list(path))
+        working_tree::with_tree(self.working_tree.as_ref(), |tree| tree.list(path))
     }
 
     fn write(&self, path: String, bytes: Vec<u8>) -> FutureResult<()> {
-        working_tree::with_tree(self.working_tree.as_ref(), "write", |tree| tree.write(path, bytes))
+        working_tree::with_tree(self.working_tree.as_ref(), |tree| tree.write(path, bytes))
     }
 
     fn local_path(&self) -> Option<&std::path::Path> {
