@@ -79,7 +79,7 @@ where
 
 impl<R> Server<R> for WasiModel where R: Runtime {}
 
-// Hand-written rather than via `omnia::host_scaffold!`: the model view threads
+// Hand-written rather than via `omnia::scaffold!`: the model view threads
 // `host_dispatch` and `working_trees` from the store base, beyond the canonical
 // `(ctx, table)` shape the macro generates.
 

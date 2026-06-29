@@ -6,7 +6,7 @@ mod command;
 mod compile;
 mod deployment;
 mod dispatch;
-mod host_scaffold;
+mod scaffold;
 mod manifest;
 mod options;
 mod registry;

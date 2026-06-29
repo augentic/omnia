@@ -16,7 +16,7 @@
 /// # Example
 ///
 /// ```ignore
-/// omnia::host_scaffold! {
+/// omnia::scaffold! {
 ///     service: "Key-Value",
 ///     view: WasiKeyValueView,
 ///     ctx: WasiKeyValueCtx,
@@ -27,7 +27,7 @@
 /// }
 /// ```
 #[macro_export]
-macro_rules! host_scaffold {
+macro_rules! scaffold {
     (
         service: $label:literal,
         view: $view:ident,

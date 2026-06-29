@@ -25,155 +25,6 @@ use crate::traits::{Backends, BuildStore, HasLimits, Runtime};
 use crate::working_tree::WorkingTreeRegistry;
 use crate::{Cli, Command, Deployment, DeploymentBuilder, Registry, StoreBase, command};
 
-/// The standard host [`Runtime`] the `runtime!` macro builds for a deployment.
-///
-/// It owns the fixed runtime state every deployment shares — the guest
-/// [`Registry`], the guest argv, and the working-tree registry — plus the
-/// deployment's connected [`Backends`] bundle `B`. The per-store context type
-/// `S` is the library's [`StoreCtx<B>`](crate::StoreCtx): its fixed views live
-/// in `omnia`, and each host crate blankets its own view over `StoreCtx<B>`, so
-/// the deployment supplies only the bundle and its `HasXxx` accessor impls.
-/// `Context` reaches the store through the [`BuildStore`] seam.
-///
-/// The macro previously emitted this struct, its [`new`](Self::new), and a
-/// derived [`Runtime`] impl inline; hosting it here keeps that boilerplate (and
-/// the backend-connection lifecycle) in the library.
-pub struct Context<S: 'static, B> {
-    registry: Arc<Registry<S>>,
-    args: Arc<Vec<String>>,
-    working_trees: Arc<WorkingTreeRegistry>,
-    backends: B,
-}
-
-// A derived `Clone` would demand `S: Clone`, but the `StoreCtx` is never `Clone`
-// (it owns the WASI table); every field here is either shared behind an `Arc` or
-// comes from the `Clone` bundle, so only `B: Clone` is required.
-impl<S: 'static, B: Clone> Clone for Context<S, B> {
-    fn clone(&self) -> Self {
-        Self {
-            registry: Arc::clone(&self.registry),
-            args: Arc::clone(&self.args),
-            working_trees: Arc::clone(&self.working_trees),
-            backends: self.backends.clone(),
-        }
-    }
-}
-
-impl<S, B> Context<S, B>
-where
-    S: WasiView + WrpcView + HasLimits + BuildStore<B> + Send + 'static,
-    B: Backends,
-{
-    /// Assemble the runtime from a [`Deployment`]: thread the guest argv, link
-    /// the deployment's hosts (via `link`), connect every backend, and freeze
-    /// the guest [`Registry`].
-    ///
-    /// `link` is the one per-deployment step the macro still supplies — a
-    /// closure that calls [`Deployment::host`] once per wired host (the
-    /// generated `servers` closure mirrors it when starting trigger servers).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if host linking, backend connection, or registry
-    /// assembly fails.
-    pub async fn new<L>(mut deployment: Deployment<S>, link: L) -> Result<Self>
-    where
-        L: FnOnce(&mut Deployment<S>) -> Result<()>,
-    {
-        let args = Arc::new(deployment.args().to_vec());
-        link(&mut deployment).context("linking hosts")?;
-        let backends = B::connect().await.context("connecting backends")?;
-        let working_trees = deployment.working_trees();
-
-        Ok(Self {
-            registry: Arc::new(deployment.build().context("assembling registry")?),
-            args,
-            working_trees,
-            backends,
-        })
-    }
-}
-
-impl<S, B> Runtime for Context<S, B>
-where
-    S: WasiView + WrpcView + HasLimits + BuildStore<B> + Send + 'static,
-    B: Backends,
-{
-    type StoreCtx = S;
-
-    fn registry(&self) -> &Registry<Self::StoreCtx> {
-        &self.registry
-    }
-
-    fn store(&self) -> Self::StoreCtx {
-        // `HostDispatch` is blanket-implemented for every `Runtime`, so a fresh
-        // clone backs any host->guest call.
-        let base = StoreBase::builder()
-            .options(self.options())
-            .dispatch(Arc::new(self.clone()))
-            .args(&self.args)
-            .working_trees(Arc::clone(&self.working_trees))
-            .build();
-        S::build_store(base, &self.backends)
-    }
-}
-
-/// Spawn a detached background task that drives epoch interruption.
-///
-/// Calls [`Engine::increment_epoch`] every `tick`. Together with the per-store
-/// epoch deadline installed in `Runtime::build_store`, this is what lets a
-/// CPU-bound guest periodically yield to the async executor so the wall-clock
-/// timeout wrapped around each invocation can fire.
-///
-/// `tick` must be non-zero: the runtime clamps `EPOCH_TICK_MS` to a 1ms minimum
-/// (see `parse_tick`), and [`tokio::time::interval`] panics on a zero period.
-pub fn drive_epoch(engine: Engine, tick: Duration) {
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(tick);
-        loop {
-            interval.tick().await;
-            engine.increment_epoch();
-        }
-    });
-}
-
-/// Spawn a detached background task that samples pool occupancy as metrics.
-///
-/// Periodically reads `engine`'s pooling-allocator occupancy and emits it as
-/// `OpenTelemetry` gauges (through the `tracing` -> `OpenTelemetry` metrics
-/// layer configured by [`Telemetry`]).
-///
-/// The task is a no-op and is never spawned when `interval` is zero. If the
-/// engine was not configured with the pooling allocator (so there are no pool
-/// metrics to report) the task stops after its first tick.
-pub fn sample_pool(engine: Engine, interval: Duration) {
-    if interval.is_zero() {
-        return;
-    }
-
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(interval);
-        loop {
-            ticker.tick().await;
-
-            let Some(metrics) = engine.pooling_allocator_metrics() else {
-                break;
-            };
-
-            tracing::info!(
-                gauge.pool_core_instances = metrics.core_instances(),
-                gauge.pool_component_instances = metrics.component_instances(),
-                gauge.pool_memories = metrics.memories() as u64,
-                gauge.pool_tables = metrics.tables() as u64,
-                gauge.pool_stacks = metrics.stacks() as u64,
-                gauge.pool_unused_warm_memories = u64::from(metrics.unused_warm_memories()),
-                gauge.pool_unused_memory_bytes_resident =
-                    metrics.unused_memory_bytes_resident() as u64,
-            );
-        }
-    });
-}
-
 /// Parse the CLI `run` subcommand and map the outcome to a process exit code.
 ///
 /// Generated `main` functions delegate here so CLI parsing and error reporting
@@ -267,6 +118,46 @@ pub async fn prepare<R: Runtime>(runtime: &R) -> Result<()> {
     Ok(())
 }
 
+// Spawn a detached background task that drives epoch interruption.
+fn drive_epoch(engine: Engine, tick: Duration) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tick);
+        loop {
+            interval.tick().await;
+            engine.increment_epoch();
+        }
+    });
+}
+
+// Spawn a detached background task that samples pool occupancy as metrics.
+fn sample_pool(engine: Engine, interval: Duration) {
+    if interval.is_zero() {
+        return;
+    }
+
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(interval);
+        loop {
+            ticker.tick().await;
+
+            let Some(metrics) = engine.pooling_allocator_metrics() else {
+                break;
+            };
+
+            tracing::info!(
+                gauge.pool_core_instances = metrics.core_instances(),
+                gauge.pool_component_instances = metrics.component_instances(),
+                gauge.pool_memories = metrics.memories() as u64,
+                gauge.pool_tables = metrics.tables() as u64,
+                gauge.pool_stacks = metrics.stacks() as u64,
+                gauge.pool_unused_warm_memories = u64::from(metrics.unused_warm_memories()),
+                gauge.pool_unused_memory_bytes_resident =
+                    metrics.unused_memory_bytes_resident() as u64,
+            );
+        }
+    });
+}
+
 /// A guest's process exit status.
 ///
 /// # Truncation
@@ -307,6 +198,99 @@ impl From<i32> for ExitStatus {
 impl From<ExitStatus> for std::process::ExitCode {
     fn from(status: ExitStatus) -> Self {
         Self::from(status.code_u8())
+    }
+}
+
+/// The standard host [`Runtime`] the `runtime!` macro builds for a deployment.
+///
+/// It owns the fixed runtime state every deployment shares — the guest
+/// [`Registry`], the guest argv, and the working-tree registry — plus the
+/// deployment's connected [`Backends`] bundle `B`. The per-store context type
+/// `S` is the library's [`StoreCtx<B>`](crate::StoreCtx): its fixed views live
+/// in `omnia`, and each host crate blankets its own view over `StoreCtx<B>`, so
+/// the deployment supplies only the bundle and its `HasXxx` accessor impls.
+/// `Context` reaches the store through the [`BuildStore`] seam.
+///
+/// The macro previously emitted this struct, its [`new`](Self::new), and a
+/// derived [`Runtime`] impl inline; hosting it here keeps that boilerplate (and
+/// the backend-connection lifecycle) in the library.
+pub struct Context<S: 'static, B> {
+    registry: Arc<Registry<S>>,
+    args: Arc<Vec<String>>,
+    working_trees: Arc<WorkingTreeRegistry>,
+    backends: B,
+}
+
+// A derived `Clone` would demand `S: Clone`, but the `StoreCtx` is never `Clone`
+// (it owns the WASI table); every field here is either shared behind an `Arc` or
+// comes from the `Clone` bundle, so only `B: Clone` is required.
+impl<S: 'static, B: Clone> Clone for Context<S, B> {
+    fn clone(&self) -> Self {
+        Self {
+            registry: Arc::clone(&self.registry),
+            args: Arc::clone(&self.args),
+            working_trees: Arc::clone(&self.working_trees),
+            backends: self.backends.clone(),
+        }
+    }
+}
+
+impl<S, B> Context<S, B>
+where
+    S: WasiView + WrpcView + HasLimits + BuildStore<B> + Send + 'static,
+    B: Backends,
+{
+    /// Assemble the runtime from a [`Deployment`]: thread the guest argv, link
+    /// the deployment's hosts (via `link`), connect every backend, and freeze
+    /// the guest [`Registry`].
+    ///
+    /// `link` is the one per-deployment step the macro still supplies — a
+    /// closure that calls [`Deployment::host`] once per wired host (the
+    /// generated `servers` closure mirrors it when starting trigger servers).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if host linking, backend connection, or registry
+    /// assembly fails.
+    pub async fn new<L>(mut deployment: Deployment<S>, link: L) -> Result<Self>
+    where
+        L: FnOnce(&mut Deployment<S>) -> Result<()>,
+    {
+        let args = Arc::new(deployment.args().to_vec());
+        link(&mut deployment).context("linking hosts")?;
+        let backends = B::connect().await.context("connecting backends")?;
+        let working_trees = deployment.working_trees();
+
+        Ok(Self {
+            registry: Arc::new(deployment.build().context("assembling registry")?),
+            args,
+            working_trees,
+            backends,
+        })
+    }
+}
+
+impl<S, B> Runtime for Context<S, B>
+where
+    S: WasiView + WrpcView + HasLimits + BuildStore<B> + Send + 'static,
+    B: Backends,
+{
+    type StoreCtx = S;
+
+    fn registry(&self) -> &Registry<Self::StoreCtx> {
+        &self.registry
+    }
+
+    fn store(&self) -> Self::StoreCtx {
+        // `HostDispatch` is blanket-implemented for every `Runtime`, so a fresh
+        // clone backs any host->guest call.
+        let base = StoreBase::builder()
+            .options(self.options())
+            .dispatch(Arc::new(self.clone()))
+            .args(&self.args)
+            .working_trees(Arc::clone(&self.working_trees))
+            .build();
+        S::build_store(base, &self.backends)
     }
 }
 
