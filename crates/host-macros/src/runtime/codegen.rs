@@ -44,10 +44,6 @@ struct Structural {
 }
 
 fn structural(config: &Config) -> Structural {
-    // One bundle-accessor impl per backend-backed host: the host crate's
-    // `omnia_wasi_view!` wires the bundle field that its `HasXxx` accessor
-    // returns, and the host crate's blanket `WasiXxxView for StoreCtx<B>` reads
-    // it. Backend-less hosts contribute no accessor (as before, no view field).
     let mut accessor_impls = Vec::new();
 
     for host in &config.hosts {
@@ -67,9 +63,7 @@ fn structural(config: &Config) -> Structural {
 
     for backend in &config.backends {
         let field = parse::field_ident(backend);
-        bundle_fields.push(quote! {
-            #field: #backend
-        });
+        bundle_fields.push(quote! { #field: #backend });
         backend_idents.push(field);
     }
 

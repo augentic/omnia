@@ -23,10 +23,7 @@ pub fn expand(config: &Config) -> TokenStream {
         host_trait_impls,
     } = Codegen::from(config);
 
-    // The connected backend bundle threaded into `omnia::Context` and
-    // `omnia::StoreCtx`. A deployment with no backends rides the `()` bundle
-    // (`omnia::Backends for ()`), so no bundle type, `connect` impl, or host-view
-    // accessors are generated.
+    // The connected backend bundle threaded into `omnia::Context`
     let (bundle_ty, bundle_def) = if backend_idents.is_empty() {
         (quote! { () }, quote! {})
     } else {
@@ -50,9 +47,6 @@ pub fn expand(config: &Config) -> TokenStream {
                     }
                 }
 
-                // Bundle-side host-view accessors (one per backend-backed host).
-                // Each host crate's blanket `WasiXxxView for omnia::StoreCtx<B>`
-                // reads these to serve its WASI interface.
                 #(#accessor_impls)*
             },
         )
@@ -67,12 +61,7 @@ pub fn expand(config: &Config) -> TokenStream {
             use super::*;
 
             #bundle_def
-
-            // The deployment's concrete host runtime over the library
-            // `StoreCtx<B>`; the macro no longer emits a per-deployment store
-            // context — `omnia` owns it, and each host crate blankets its view.
             type Ctx = omnia::Context<omnia::StoreCtx<#bundle_ty>, #bundle_ty>;
-
             #command_assert
 
             #[tokio::main]
