@@ -31,7 +31,7 @@ pub enum Command {
         /// Arguments forwarded to the guest as its argv (everything after
         /// `--`). Empty for a long-lived server; a `wasi:cli` command reads
         /// them as `wasi:cli/environment`'s `get-arguments`. `args[0]` is the
-        /// program name, which the floor supplies.
+        /// program name, which the runtime core supplies.
         #[arg(last = true)]
         args: Vec<String>,
     },

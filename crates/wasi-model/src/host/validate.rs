@@ -1,11 +1,11 @@
-//! Floor-side validation and message assembly for the `complete` binding.
+//! Host-side validation and message assembly for the `complete` binding.
 
 use serde_json::Value;
 
 use super::Error;
 use super::types::{Message, Prompt, ResponseFormatKind};
 
-/// Floor tool names guests must not redeclare in `prompt.tools`.
+/// Host-injected tool names guests must not redeclare in `prompt.tools`.
 pub const RESERVED_TOOL_NAMES: &[&str] = &["resolve", "read", "list", "write", "verify"];
 
 /// Provider chat request assembled from a [`Prompt`]; `system` is separate from turns.
@@ -209,7 +209,7 @@ mod tests {
         let mut prompt = prompt_with(vec![message("user", "hi")], None);
         prompt.tools.push(FunctionTool {
             name: "read".to_owned(),
-            description: "shadow a floor tool".to_owned(),
+            description: "shadow a host-injected tool".to_owned(),
             parameters: "{}".to_owned(),
         });
         let err = check_prompt(&prompt).unwrap_err();

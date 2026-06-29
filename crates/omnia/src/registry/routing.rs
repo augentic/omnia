@@ -1,6 +1,6 @@
 //! # Trigger routing
 //!
-//! Maps an inbound trigger to a guest [`GuestId`] generically: the floor routes
+//! Maps an inbound trigger to a guest [`GuestId`] generically: the runtime core routes
 //! on opaque identities and route strings only, never on domain concepts.
 //!
 //! Two table shapes cover the triggers:
@@ -280,7 +280,7 @@ impl<R: Resolver> Router<R> {
 ///
 /// A trigger server builds this once, then resolves a routing key straight to
 /// the indices it needs to instantiate. `I` is the handler-specific generated
-/// index type (e.g. `ServiceIndices` for HTTP); the floor never names it — it
+/// index type (e.g. `ServiceIndices` for HTTP); the runtime core never names it — it
 /// only stores it and hands it back.
 pub struct TriggerRouter<I, R> {
     indices: HashMap<GuestId, I>,

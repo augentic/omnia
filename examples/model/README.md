@@ -19,7 +19,7 @@ flowchart LR
   replay -->|"validated answer"| guest
 ```
 
-The floor stays generic (Law 2): no model id, provider, or schema dialect lives in Omnia. The boundary only ever hands the guest a **validated answer string**. The replay backend short-circuits tool calls, so this binary never emits a `resolve`; the host→guest `resolve` path (a fresh `shelf` instance per call) is exercised deterministically by the integration test, and live by the `omnia-genai` backend in the `backends` repo (Phase 2a).
+The runtime core stays generic (Law 2): no model id, provider, or schema dialect lives in Omnia. The boundary only ever hands the guest a **validated answer string**. The replay backend short-circuits tool calls, so this binary never emits a `resolve`; the host→guest `resolve` path (a fresh `shelf` instance per call) is exercised deterministically by the integration test, and live by the `omnia-genai` backend in the `backends` repo (Phase 2a).
 
 ## Build the guests
 

@@ -6,7 +6,7 @@ Proves **Phase 2** of [`rfcs/guest-registry.md`](../../rfcs/guest-registry.md): 
 
 - `responder` ([`responder.rs`](responder.rs)) **exports** `omnia:link/echo`. It declares no trigger of its own, so it is reachable *only* via dispatch.
 - `router` ([`router.rs`](router.rs)) **imports** `omnia:link/echo` and exposes `run(message)`. Its component does not satisfy the import.
-- [`omnia.toml`](omnia.toml) names `omnia:link/echo` in the router's `link` allow-list. The floor polyfills that import onto the shared linker and, at startup, wires the serve side of every linked interface.
+- [`omnia.toml`](omnia.toml) names `omnia:link/echo` in the router's `link` allow-list. The runtime core polyfills that import onto the shared linker and, at startup, wires the serve side of every linked interface.
 
 When `router.run("hello")` calls the imported `echo("responder", "hello")`:
 
@@ -20,7 +20,7 @@ flowchart LR
 
 The selector reads the leading argument (`"responder"`) to pick the target and forwards it through; the responder is instantiated **fresh per call** (instance-per-call) and discarded.
 
-The floor stays generic (Law 2): `link` and the selector operate on the opaque interface string `omnia:link/echo` and opaque guest ids — Omnia never parses the interface's meaning.
+The runtime core stays generic (Law 2): `link` and the selector operate on the opaque interface string `omnia:link/echo` and opaque guest ids — Omnia never parses the interface's meaning.
 
 ## Build the guests
 

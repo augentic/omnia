@@ -95,7 +95,7 @@ pub struct RuntimeOptions {
     #[env(from = "MAX_FUEL", default = "0")]
     pub max_fuel: u64,
     /// Maximum host-mediated dynamic-linking dispatch depth — how deep a chain
-    /// of guest-to-guest calls (A->B->C) may nest before the floor refuses
+    /// of guest-to-guest calls (A->B->C) may nest before the runtime core refuses
     /// further dispatch, bounding runaway recursion (`MAX_DISPATCH_DEPTH`,
     /// default 8). Runtime-only.
     #[env(from = "MAX_DISPATCH_DEPTH", default = "8")]

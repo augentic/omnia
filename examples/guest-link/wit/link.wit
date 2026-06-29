@@ -2,7 +2,7 @@
 // linking (Phase 2 of rfcs/guest-registry.md).
 //
 // The caller (`router`) *imports* `echo`; the host has polyfilled that import on
-// the shared linker, so invoking it runs the floor's selector, picks the target
+// the shared linker, so invoking it runs the runtime core's selector, picks the target
 // guest, and dispatches the call over the in-process wRPC carrier to whichever
 // guest *exports* `echo` (`responder`). Caller and callee share one interface —
 // the adapter pattern from the RFC — so the leading `target` argument the

@@ -1,11 +1,11 @@
 //! The `complete` host binding.
 //!
 //! Implements the generated `completion` host trait on [`WasiModel`]. It is the
-//! floor's final gate — it applies the pre-checks, hands the owned prompt and a
+//! host validation gate — it applies the pre-checks, hands the owned prompt and a
 //! per-completion [`ToolHost`] to the backend, then *re-validates* the returned
 //! answer before mapping it to the guest-visible `answer` string. A backend that
 //! runs its own repair loop (genai) consumes validation failures internally and
-//! only returns once it passes; the floor re-gates here.
+//! only returns once it passes; the host re-validates here.
 
 use std::sync::Arc;
 
@@ -37,7 +37,7 @@ impl<T> HostWithStore<T> for WasiModel {
         let mut owned: Prompt = prompt.into();
         owned.grants.working_tree_lent = working_tree_res.is_some();
 
-        // Floor pre-checks: reserved tool names and empty prompts never reach a
+        // Host pre-checks: reserved tool names and empty prompts never reach a
         // backend.
         check_prompt(&owned)?;
 
@@ -45,21 +45,13 @@ impl<T> HostWithStore<T> for WasiModel {
         // returns; capture it before the owned prompt moves into the backend.
         let kind = owned.response_format.kind;
 
-        // Build the per-completion tool host from the prompt's grants. `resolve`
-        // reaches the host→guest dispatcher threaded into the store ctx; `verify`
-        // is routing-only; `read`/`list`/`write` + `local_path` ride the working
-        // tree resolved from the lent descriptor. `ModelDefault` (replay) ignores
-        // it. Capture the grants the host needs before the prompt moves into the
-        // backend.
+        // Build the per-completion tool host from the prompt's grants.
         let references = owned.grants.references.clone();
         let verify_allowed = owned.grants.verify.clone();
 
         let backend_answer = accessor
             .with(|mut store| {
                 let view = store.get();
-                // Resolve the lent descriptor to an authorized mount by
-                // directory identity, here at the floor: an out-of-scope or
-                // non-directory tree is rejected before any backend sees it.
                 let working_tree = resolve_working_tree(
                     view.table,
                     view.working_trees,
@@ -75,8 +67,6 @@ impl<T> HostWithStore<T> for WasiModel {
             })?
             .await?;
 
-        // Final validation gate: a backend answer that does not validate is a
-        // backend failure, never a guest-visible answer.
         validate_answer(&backend_answer.value, kind)?;
 
         serde_json::to_string(&backend_answer.value)
@@ -86,9 +76,6 @@ impl<T> HostWithStore<T> for WasiModel {
     async fn complete_stream(
         _accessor: &Accessor<T, Self>, _prompt: genc::Prompt,
     ) -> Result<StreamReader<genc::StreamEvent>, Error> {
-        // The binding is generated so `bindgen!` is confirmed to compile the
-        // native `stream<>` type at the 0.1.0 boundary; host-side stream
-        // production lands in Phase 3.
         Err(Error::Backend("streaming unsupported".to_owned()))
     }
 }
@@ -99,28 +86,15 @@ impl Host for WasiModelCtxView<'_> {
     }
 }
 
-/// The floor tool host, built fresh per completion from the prompt's grants.
-/// `resolve` is wired to the host→guest dispatcher; `verify` is routing-only (an
-/// allow-list check against `grants.verify`); `read`/`list`/`write` +
-/// `local_path` ride the [`WorkingTree`] resolved from the lent descriptor, and
-/// fail loudly when no tree was lent. `ModelDefault` (replay) ignores the whole
-/// host.
+// The bound tool host, built fresh per completion from the prompt's grants.
 struct BoundToolHost {
-    /// Type-erased host→guest dispatcher threaded in via the store ctx.
     dispatch: Arc<dyn HostDispatch>,
-    /// `grants.references`: the guest id whose `references` shelf `resolve`
-    /// targets. `None` keeps `resolve` failing loudly (no reference granted).
     references: Option<String>,
-    /// `grants.verify`: the closed verification profiles the model may route to.
     verify_allowed: Vec<String>,
-    /// The working tree resolved from the lent `grants.working-tree` descriptor,
-    /// or `None` when none was lent. Backs `read`/`list`/`write` and the
-    /// `local_path` face.
     working_tree: Option<WorkingTree>,
 }
 
-/// A future that fails because a working-tree tool was called without a tree
-/// having been lent in `grants.working-tree`.
+// A future that fails because a working-tree tool was called without a tree.
 fn no_working_tree<R: Send + 'static>(tool: &'static str) -> FutureResult<R> {
     async move {
         Err(anyhow::anyhow!("tool `{tool}` requires grants.working-tree, but none was lent"))
@@ -128,14 +102,10 @@ fn no_working_tree<R: Send + 'static>(tool: &'static str) -> FutureResult<R> {
     .boxed()
 }
 
-/// The conventional export-function name a `references` shelf exposes for
-/// host-mediated `resolve` (`examples/model/wit/world.wit` invokes it by
-/// convention, without naming the interface). `wasi-model` owns this verb name
-/// and the bytes shape below; the floor's [`HostDispatch::invoke`] stays generic.
+// Export-function name a `references` exposes for host-mediated `resolve`.
 const RESOLVE_FUNC: &str = "resolve";
 
-/// Convert a `resolve` export's return value into raw bytes. Accepts `list<u8>`
-/// (the canonical shape) or `string` (a convenience for text shelves).
+// Convert a `resolve` export's return value into raw bytes.
 fn vals_to_bytes(results: Vec<Val>) -> anyhow::Result<Vec<u8>> {
     let first = results.into_iter().next().context("resolve export returned no value")?;
     match first {
@@ -197,9 +167,6 @@ impl ToolHost for BoundToolHost {
     }
 
     fn verify(&self, check: String) -> FutureResult<VerifyReport> {
-        // Routing-only: validate the requested profile is in `grants.verify`,
-        // then acknowledge the route. Profile definitions, sandboxing, and
-        // execution are not yet implemented.
         let granted = self.verify_allowed.contains(&check);
         async move {
             if !granted {

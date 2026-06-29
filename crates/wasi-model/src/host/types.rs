@@ -102,7 +102,7 @@ pub struct GenerationParams {
 /// Guest-declared tool advertised to the model.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FunctionTool {
-    /// Tool name. Must not collide with reserved floor names.
+    /// Tool name. Must not collide with reserved host-injected tool names.
     pub name: String,
     /// Natural-language description for the model.
     pub description: String,
@@ -136,7 +136,7 @@ pub struct MetadataEntry {
 /// Host capabilities lent for this completion.
 ///
 /// The working-tree `borrow<descriptor>` never survives the boundary as a
-/// handle: the floor records only whether a tree was lent, and the actual
+/// handle: the host records only whether a tree was lent, and the actual
 /// filesystem access is mediated by [`ToolHost`](super::ToolHost).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolGrants {
@@ -164,7 +164,7 @@ pub struct Prompt {
     pub generation: Option<GenerationParams>,
     /// Required output shape and validation rules.
     pub response_format: ResponseFormat,
-    /// Guest-declared tools merged with floor tools at the backend.
+    /// Guest-declared tools merged with host-injected tools at the backend.
     pub tools: Vec<FunctionTool>,
     /// Tool selection policy.
     pub tool_choice: Option<ToolChoice>,
@@ -209,7 +209,7 @@ pub struct ToolTurn {
     pub tool: String,
     /// The arguments the model supplied.
     pub args: serde_json::Value,
-    /// The result the floor returned.
+    /// The result the host returned.
     pub result: serde_json::Value,
 }
 
@@ -348,7 +348,7 @@ impl From<genc::ToolGrants> for ToolGrants {
         Self {
             references: g.references,
             // The `borrow<descriptor>` is reduced to a stable marker here; the
-            // descriptor itself is resolved against the table by the floor when
+            // descriptor itself is resolved against the table by the host when
             // it builds the `ToolHost` (Phase 2b wires it to a real tree).
             working_tree_lent: g.working_tree.is_some(),
             verify: g.verify,

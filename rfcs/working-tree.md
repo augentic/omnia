@@ -13,7 +13,7 @@ Within one `complete`, `GenaiBackend` already advertises and dispatches `resolve
 - `read` **/** `list` — inspect the working tree through the capability lent in `prompt.grants.working-tree`. The model sees bounded tool results, never an OS path or descriptor.
 - `write` — accumulate an edit against the session's base tree. Pending edits live in host-held state, not guest memory.
 
-These consume the wasi-filesystem working-tree host of [RFC-55](rfc-55-working-tree.md), which is **not yet built**. Wiring them is gated on RFC-55; the floor-side host wiring is tracked in [wasi-model](wasi-model.md) §3, and this RFC owns the genai-side dispatch and transcript capture for them.
+These consume the wasi-filesystem working-tree host of [RFC-55](rfc-55-working-tree.md), which is **not yet built**. Wiring them is gated on RFC-55; the host-side wiring is tracked in [wasi-model](wasi-model.md) §3, and this RFC owns the genai-side dispatch and transcript capture for them.
 
 ## Remaining session state
 
@@ -32,7 +32,7 @@ Today the genai loop's per-call working state lives in the `complete` future onl
 ## Out of scope
 
 - `resolve` and the repair loop — landed.
-- The floor-side host wiring of the working-tree capability; see [wasi-model](wasi-model.md) §3.
+- The host-side wiring of the working-tree capability; see [wasi-model](wasi-model.md) §3.
 - Verify profile definitions and sandboxing; see [RFC-60](rfc-60-verify-profiles.md).
 - Backend catalogue and routing; see [RFC-58](rfc-58-model-router-slm.md).
 

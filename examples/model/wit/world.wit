@@ -15,12 +15,12 @@ world complete {
 }
 
 /// A trivial `references` shelf (§4.1): given an opaque reference, return its
-/// bytes. Reached *only* via host-mediated `resolve` dispatch — the floor
+/// bytes. Reached *only* via host-mediated `resolve` dispatch — the runtime core
 /// instantiates this guest fresh for every call (instance-per-call) and discards
 /// it afterwards, so it declares no trigger and holds no state. Resource-free by
 /// design (§4.5).
 interface references {
-    /// Resolve `reference` to its bytes. The floor invokes this by convention
+    /// Resolve `reference` to its bytes. The runtime core invokes this by convention
     /// (the export named `resolve`), without naming this interface.
     resolve: func(reference: string) -> list<u8>;
 }

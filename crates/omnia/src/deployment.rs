@@ -262,7 +262,7 @@ impl<T: WasiView> Deployment<T> {
 
     /// Override the host-mediated dispatch [`GuestSelector`].
     ///
-    /// Defaults to [`FirstArgSelector`] — the floor's "first call argument is the
+    /// Defaults to [`FirstArgSelector`] — the runtime core's "first call argument is the
     /// identity" strategy. Chainable.
     pub fn selector(&mut self, selector: impl GuestSelector) -> &mut Self {
         self.selector = Arc::new(selector);

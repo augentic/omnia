@@ -214,7 +214,7 @@ async fn replays_completion_with_no_network() -> Result<()> {
 
     // The completion path preopens a working tree the example guest lends
     // (RFC-55), so the recorded prompt carries `working_tree_lent = true` and the
-    // floor resolves the lent descriptor back to this mount by identity.
+    // The host resolves the lent descriptor back to this mount by identity.
     let (mount_dir, working_trees) = working_tree_mount();
 
     // Phase 1 — record: a stub backend answers through `complete`, and the
@@ -486,7 +486,7 @@ async fn resolve_dispatches() -> Result<()> {
     Ok(())
 }
 
-/// A backend that asserts the floor resolved the guest's lent working tree to
+/// A backend that asserts the host resolved the guest's lent working tree to
 /// its mount path — the `local-path` face (RFC-55) the cursor backend consumes.
 #[derive(Debug, Clone)]
 struct LocalPathProbe {
@@ -502,7 +502,7 @@ impl WasiModelCtx for LocalPathProbe {
             let local = tool_host.local_path().map(Path::to_path_buf);
             anyhow::ensure!(
                 local.as_deref() == Some(expected.as_path()),
-                "floor must resolve the lent tree to its mount path: got {local:?}, want {}",
+                "host must resolve the lent tree to its mount path: got {local:?}, want {}",
                 expected.display()
             );
             Ok(BackendAnswer {
@@ -516,7 +516,7 @@ impl WasiModelCtx for LocalPathProbe {
 
 /// The working-tree `local-path` face end-to-end: the host preopens a `.` mount,
 /// the example guest reads it via `preopens.get-directories()` and lends it, and
-/// the floor identity-matches it back to the mount — surfacing its host path on
+/// the host identity-matches it back to the mount — surfacing its host path on
 /// the per-completion [`ToolHost`] (RFC-55, what `omnia-cursor` reads).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn working_tree_resolves_to_local_path() -> Result<()> {
@@ -548,7 +548,7 @@ async fn working_tree_resolves_to_local_path() -> Result<()> {
     assert_eq!(
         value,
         json!({ "verdict": "pass", "reason": "local path resolved" }),
-        "the floor resolves the lent tree and exposes its mount path on the ToolHost"
+        "the host resolves the lent tree and exposes its mount path on the ToolHost"
     );
 
     Ok(())

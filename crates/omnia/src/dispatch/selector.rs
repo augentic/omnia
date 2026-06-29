@@ -2,7 +2,7 @@
 //!
 //! When a guest calls a host-mediated import, the host must decide *which*
 //! registered guest serves the call. That decision is a consumer-policy detail
-//! the floor must not hardcode, so it exposes a pluggable [`GuestSelector`]
+//! the runtime core must not hardcode, so it exposes a pluggable [`GuestSelector`]
 //! strategy and ships one default.
 //!
 //! The strategy runs on the typed call (interface, function, and the decoded
@@ -18,7 +18,7 @@ use crate::registry::GuestId;
 /// Chooses the target guest for a host-mediated call and the parameters to
 /// forward to it.
 ///
-/// The floor stays domain-agnostic: an implementation sees only the opaque
+/// The runtime core stays domain-agnostic: an implementation sees only the opaque
 /// interface/function names and the typed parameters, and returns an opaque
 /// [`GuestId`]. It never parses a consumer scheme.
 pub trait GuestSelector: Send + Sync + 'static {

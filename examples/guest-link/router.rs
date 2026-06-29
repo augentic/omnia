@@ -3,7 +3,7 @@
 //! Imports the host-mediated `omnia:link/echo` and exposes a plain `run(message)`
 //! entry. The import is *not* satisfied by this component: the host has
 //! polyfilled it onto the shared linker, so calling it dispatches — via the
-//! floor's `GuestSelector` and the in-process wRPC carrier — to whichever guest
+//! runtime core's `GuestSelector` and the in-process wRPC carrier — to whichever guest
 //! exports `echo` (here, `responder`).
 //!
 //! The router names its target with the leading argument (`"responder"`), which

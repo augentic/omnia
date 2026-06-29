@@ -11,7 +11,7 @@
 // The host serves the *full* `wasi:filesystem@0.3.0` via
 // `wasmtime_wasi::p3::add_to_linker`; a resource type unifies by package +
 // interface + name + version regardless of the method subset, so the descriptor
-// the guest lends is the same resource the host (and floor) own.
+// the guest lends is the same resource the host platform owns.
 package wasi:filesystem@0.3.0;
 
 interface types {

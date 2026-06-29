@@ -6,7 +6,7 @@
 //! infrastructure: it is what lets one process route an HTTP request, a CLI
 //! command, and a topic message to *different* guests.
 //!
-//! The floor treats identities as opaque keys; consumers project their own
+//! The runtime core treats identities as opaque keys; consumers project their own
 //! scheme onto them. Omnia never parses a [`GuestId`].
 
 mod routing;
@@ -28,7 +28,7 @@ use crate::dispatch::{self, DispatchHandle};
 
 /// Opaque guest identity.
 ///
-/// The floor treats it as an ordered string key; consumers (e.g. Specify)
+/// The runtime core treats it as an ordered string key; consumers (e.g. Specify)
 /// project their own scheme onto it (`source:typescript`, ...). Omnia never
 /// parses it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

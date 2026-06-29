@@ -51,6 +51,6 @@ Two backends already sit behind the one `wasi-model` boundary and are selected b
 
 ## Risks and invariants
 
-- **Vendor coupling stays behind the boundary.** Any one model is one backend detail, never part of the contract or runtime floor.
+- **Vendor coupling stays behind the boundary.** Any one model is one backend detail, never part of the contract or runtime contract.
 - **Router stays abstract.** Its key is difficulty, deployment mode, or operation identity, not a vendor id.
 - **The embedded topology is a non-goal.** Judgment never runs inside the operator's live editor session.

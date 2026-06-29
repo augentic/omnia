@@ -1,4 +1,4 @@
-//! Working-tree resolution at the floor.
+//! Working-tree resolution in the host.
 //!
 //! A guest lends a `wasi:filesystem` working tree through
 //! `grants.working-tree: option<borrow<descriptor>>`. This module turns that
@@ -8,10 +8,10 @@
 //!
 //! The proof is identity, not paths. A `wasi:filesystem` descriptor is path-less
 //! by design, and a guest must never be trusted to name its own scope, so the
-//! floor stats the lent directory for its `(device, inode)` identity and matches
+//! host platform stats the lent directory for its `(device, inode)` identity and matches
 //! it against the host-side [`MountRegistry`] (built from the deployment's
 //! preopens). A miss — a sub-directory of a mount, or a wholly unrelated tree —
-//! is rejected here, at the floor. The resolved [`WorkingTree`] then draws its
+//! is rejected here, in the host. The resolved [`WorkingTree`] then draws its
 //! cap-std handle and absolute path from the *registry entry*, never from the
 //! descriptor.
 
@@ -115,7 +115,7 @@ impl WorkingTree {
 /// resource table, (2) be a *directory* descriptor (a file is rejected), and
 /// (3) identity-match (`(dev, ino)`) an authorized [`MountRegistry`] entry.
 /// A miss — an out-of-scope or unauthorized tree — is an error raised here, at
-/// the floor, with no ambient fallback.
+/// the host, with no ambient fallback.
 ///
 /// # Errors
 ///
@@ -294,7 +294,7 @@ mod tests {
         let resource = table.push(dir_descriptor(&other, false)).expect("pushing descriptor");
 
         let Err(err) = resolve_working_tree(&table, &registry, Some(&resource)) else {
-            panic!("an unauthorized tree must be rejected at the floor");
+            panic!("an unauthorized tree must be rejected in the host");
         };
         assert!(
             format!("{err:#}").contains("out of scope"),

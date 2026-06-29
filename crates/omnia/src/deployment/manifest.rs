@@ -8,7 +8,7 @@
 //!
 //! The manifest is parsed **generically** — Omnia sees opaque [`GuestId`]s and
 //! interface *strings*, never `source:`/`target:`/`mcp`. Consumers write the
-//! concrete file; the floor stays domain-agnostic.
+//! concrete file; the runtime core stays domain-agnostic.
 //!
 //! Phase 1 consumes the `[[guest]]` population (file sources) and parses the
 //! `[transport]` section; Phase 1b adds the `[[route.*]]` tables. `link`
@@ -161,7 +161,7 @@ pub struct MountEntry {
 /// A single registry population entry.
 #[derive(Clone, Debug, Deserialize)]
 pub struct GuestEntry {
-    /// Opaque guest identity (the floor never parses it).
+    /// Opaque guest identity (the runtime core never parses it).
     pub id: String,
     /// Where the guest's component bytes come from.
     pub source: SourceSpec,
@@ -226,7 +226,7 @@ impl RouteSpec {
 pub struct HttpRoute {
     /// The path prefix; the longest matching prefix wins.
     pub prefix: String,
-    /// The target guest identity (opaque to the floor).
+    /// The target guest identity (opaque to the runtime core).
     pub guest: String,
 }
 
@@ -237,7 +237,7 @@ pub struct TopicRoute {
     /// The match pattern (`.`-tokenised, `*` one token, `>` trailing tokens).
     #[serde(alias = "route")]
     pub topic: String,
-    /// The target guest identity (opaque to the floor).
+    /// The target guest identity (opaque to the runtime core).
     pub guest: String,
 }
 

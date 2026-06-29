@@ -1,6 +1,6 @@
 # CLI Command Example
 
-A `wasi:cli/command` guest driven as a **one-shot trigger**: the host invokes its `wasi:cli/run` export exactly once and exits with the guest's status. Unlike the long-lived triggers (HTTP, messaging, …) that loop on a transport, a command runs to completion — but it rides the *same* `runtime!` / `TriggerRouter` floor, so the same guest could be driven by an inbound event tomorrow with only a host-wiring change.
+A `wasi:cli/command` guest driven as a **one-shot trigger**: the host invokes its `wasi:cli/run` export exactly once and exits with the guest's status. Unlike the long-lived triggers (HTTP, messaging, …) that loop on a transport, a command runs to completion — but it rides the *same* `runtime!` / `TriggerRouter` runtime core, so the same guest could be driven by an inbound event tomorrow with only a host-wiring change.
 
 ## What it shows
 

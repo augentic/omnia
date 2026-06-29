@@ -3,7 +3,7 @@
 //! The entire host is one [`omnia::runtime!`] invocation in **command mode**
 //! (`command: true`): it drives the sole `wasi:cli/run` guest exactly once and
 //! the generated `main` exits with the guest's status. Command mode rides the
-//! same `runtime!` / `TriggerRouter` floor every long-lived trigger (HTTP,
+//! same `runtime!` / `TriggerRouter` runtime core every long-lived trigger (HTTP,
 //! messaging, …) uses, so re-triggering this same guest from an inbound event
 //! tomorrow is a host-wiring change, not a rewrite.
 //!

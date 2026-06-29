@@ -12,7 +12,7 @@
 //! 5. returns the typed result, discarding the callee instance.
 //!
 //! Because step 4 is always a fresh instance, a dispatched call cannot
-//! recursively re-enter its caller. The floor stays generic: it links whatever
+//! recursively re-enter its caller. The runtime core stays generic: it links whatever
 //! interfaces the manifest names, by opaque string, and resolves opaque
 //! [`GuestId`]s — it never parses a consumer scheme. See
 //! `rfcs/guest-registry.md` for the full design.

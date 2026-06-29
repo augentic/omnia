@@ -3,7 +3,7 @@
 //!
 //! Builds the `examples/guest-link` deployment — `router` imports `omnia:link/echo`,
 //! `responder` exports it — wires the serve side, and drives `router.run`. It
-//! proves the end-to-end dispatch: the call routes through the floor's selector
+//! proves the end-to-end dispatch: the call routes through the runtime core's selector
 //! to the responder over the in-process wRPC carrier, the responder is
 //! instantiated fresh per call (instance-per-call), and the typed result returns
 //! to the caller. Two calls confirm the multi-use carrier (a fresh frame
