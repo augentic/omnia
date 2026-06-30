@@ -12,7 +12,7 @@ use omnia::Backend;
 use tracing::instrument;
 
 use crate::host::replay::FixtureStore;
-use crate::host::types::{BackendAnswer, PreparedPrompt};
+use crate::host::types::{Answer, PreparedPrompt};
 use crate::host::{FutureResult, ToolHost, WasiModelCtx};
 
 /// Options used to connect the replay backend.
@@ -56,7 +56,7 @@ impl Backend for ModelDefault {
 impl WasiModelCtx for ModelDefault {
     fn complete(
         &self, request: PreparedPrompt, _tool_host: Arc<dyn ToolHost>,
-    ) -> FutureResult<BackendAnswer> {
+    ) -> FutureResult<Answer> {
         let answer = self.store.answer_for(&request);
         async move { answer }.boxed()
     }

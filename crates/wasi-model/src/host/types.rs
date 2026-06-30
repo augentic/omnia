@@ -76,7 +76,7 @@ pub struct Transcript {
 /// Host-only — the guest sees only the validated `answer` string the `complete`
 /// binding derives from `value`.
 #[derive(Clone, Debug, PartialEq)]
-pub struct BackendAnswer {
+pub struct Answer {
     /// The parsed JSON answer the backend produced.
     pub value: serde_json::Value,
     /// Optional tool-call transcript for replay.

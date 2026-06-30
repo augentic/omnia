@@ -53,7 +53,7 @@ pub use self::generated::augentic::model::completion::{
     ResponseFormat, ResponseFormatKind as Format, Sections, ToolChoice, ToolGrants, Variable,
 };
 pub use self::types::{
-    BackendAnswer, DirEntry, PreparedPrompt, Reference, ToolTurn, Transcript, VerifyReport,
+    Answer, DirEntry, PreparedPrompt, Reference, ToolTurn, Transcript, VerifyReport,
 };
 
 /// Host-side service for `wasi-model` (a linked-only effect host).
@@ -97,14 +97,14 @@ pub trait WasiModelCtx: Debug + Send + Sync + 'static {
     /// [`ToolHost`] to backends that drive an in-process tool loop.
     fn complete(
         &self, request: PreparedPrompt, tool_host: Arc<dyn ToolHost>,
-    ) -> FutureResult<BackendAnswer>;
+    ) -> FutureResult<Answer>;
 }
 
 /// Forward the backend trait.
 impl WasiModelCtx for Box<dyn WasiModelCtx> {
     fn complete(
         &self, request: PreparedPrompt, tool_host: Arc<dyn ToolHost>,
-    ) -> FutureResult<BackendAnswer> {
+    ) -> FutureResult<Answer> {
         (**self).complete(request, tool_host)
     }
 }

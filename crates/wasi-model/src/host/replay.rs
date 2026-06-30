@@ -9,12 +9,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::generated::augentic::model::completion::{Prompt, ResponseFormatKind, ToolChoice};
-use super::types::{BackendAnswer, PreparedPrompt, Transcript};
+use super::types::{Answer, PreparedPrompt, Transcript};
 
 /// In-memory replay index keyed by canonical prompt JSON.
 #[derive(Debug, Default)]
 pub struct FixtureStore {
-    answers: HashMap<String, BackendAnswer>,
+    answers: HashMap<String, Answer>,
 }
 
 impl TryFrom<&PathBuf> for FixtureStore {
@@ -51,7 +51,7 @@ impl FixtureStore {
     /// # Errors
     ///
     /// Returns an error when no equivalent fixture is indexed.
-    pub fn answer_for(&self, request: &PreparedPrompt) -> Result<BackendAnswer> {
+    pub fn answer_for(&self, request: &PreparedPrompt) -> Result<Answer> {
         let prompt = &request.prompt;
         let workspace_lent = request.workspace_lent;
         let key_json = &canonicalize(&reduced_value(prompt, workspace_lent));
@@ -72,7 +72,7 @@ impl FixtureStore {
 
         self.answers.insert(
             key,
-            BackendAnswer {
+            Answer {
                 value: fixture.answer,
                 transcript: fixture.transcript,
             },

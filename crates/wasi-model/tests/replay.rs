@@ -32,8 +32,8 @@ use omnia::{
     Runtime,
 };
 use omnia_wasi_model::{
-    BackendAnswer, PreparedPrompt, ConnectOptions, FutureResult, HasModel, ModelDefault,
-    Reference, ToolHost, WasiModel, WasiModelCtx,
+    Answer, ConnectOptions, FutureResult, HasModel, ModelDefault, PreparedPrompt, Reference,
+    ToolHost, WasiModel, WasiModelCtx,
 };
 use serde_json::{Value, json};
 
@@ -266,7 +266,7 @@ struct ResolvingStub;
 impl WasiModelCtx for ResolvingStub {
     fn complete(
         &self, _request: PreparedPrompt, tool_host: Arc<dyn ToolHost>,
-    ) -> FutureResult<BackendAnswer> {
+    ) -> FutureResult<Answer> {
         async move {
             let alpha = tool_host
                 .resolve(Reference {
@@ -278,7 +278,7 @@ impl WasiModelCtx for ResolvingStub {
                     name: "beta".to_owned(),
                 })
                 .await?;
-            Ok(BackendAnswer {
+            Ok(Answer {
                 value: json!({
                     "alpha": String::from_utf8(alpha).context("alpha bytes are utf-8")?,
                     "beta": String::from_utf8(beta).context("beta bytes are utf-8")?,
@@ -391,7 +391,7 @@ struct LocalPathProbe {
 impl WasiModelCtx for LocalPathProbe {
     fn complete(
         &self, _request: PreparedPrompt, tool_host: Arc<dyn ToolHost>,
-    ) -> FutureResult<BackendAnswer> {
+    ) -> FutureResult<Answer> {
         let expected = self.expected.clone();
         async move {
             let local = tool_host.local_path().map(Path::to_path_buf);
@@ -400,7 +400,7 @@ impl WasiModelCtx for LocalPathProbe {
                 "host must resolve the lent workspace to its mount path: got {local:?}, want {}",
                 expected.display()
             );
-            Ok(BackendAnswer {
+            Ok(Answer {
                 value: json!({ "verdict": "pass", "reason": "local path resolved" }),
                 transcript: None,
             })
