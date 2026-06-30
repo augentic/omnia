@@ -41,7 +41,7 @@ impl Backend for ModelDefault {
 
     #[instrument]
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
-        let store = FixtureStore::from_dir(&options.replay_dir)?;
+        let store = FixtureStore::try_from(&options.replay_dir)?;
         tracing::debug!(
             dir = %options.replay_dir.display(),
             fixtures = store.len(),
