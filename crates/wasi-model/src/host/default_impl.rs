@@ -11,9 +11,9 @@ use futures::FutureExt as _;
 use omnia::Backend;
 use tracing::instrument;
 
-use super::replay::FixtureStore;
-use super::types::{BackendAnswer, PreparedPrompt};
-use super::{FutureResult, ToolHost, WasiModelCtx};
+use crate::host::replay::FixtureStore;
+use crate::host::types::{BackendAnswer, PreparedPrompt};
+use crate::host::{FutureResult, ToolHost, WasiModelCtx};
 
 /// Options used to connect the replay backend.
 #[derive(Debug, Clone)]
@@ -64,18 +64,16 @@ impl WasiModelCtx for ModelDefault {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
-    use futures::FutureExt as _;
     use omnia::Backend;
     use serde_json::json;
 
-    use super::{ConnectOptions, ModelDefault, anyhow};
+    use super::*;
     use crate::host::generated::augentic::model::completion::{
         Prompt, ResponseFormat, ResponseFormatKind, Sections, ToolGrants,
     };
     use crate::host::replay::{Recording, replay_key, write_fixture};
-    use crate::host::types::{BackendAnswer, DirEntry, PreparedPrompt, Reference, VerifyReport};
+    use crate::host::types::{DirEntry, Reference, VerifyReport};
     use crate::host::{FutureResult, ToolHost, WasiModelCtx};
 
     /// A tool host stub for tests; replay never calls it.
