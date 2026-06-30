@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::generated::augentic::model::completion as genc;
+use super::generated::augentic::model::completion::{Message, Prompt};
 
 /// Host-prepared input for one completion: the generated guest prompt plus the
 /// provider chat channels the host assembled from it (§3.1.1).
@@ -20,14 +20,14 @@ pub struct PreparedPrompt {
     /// The guest prompt; record / replay keys on this, never the channels. The
     /// host has already taken the lent `grants.workspace` borrow, so it is
     /// always `None` here — `workspace_lent` carries the keying marker instead.
-    pub prompt: genc::Prompt,
+    pub prompt: Prompt,
     /// Whether a workspace was lent for this call: the stable marker that
     /// replaces the non-serializable `borrow<descriptor>` when keying (§5.4).
     pub workspace_lent: bool,
     /// Assembled system / instructions channel, if any.
     pub system: Option<String>,
     /// Assembled chat turns to send to the provider.
-    pub messages: Vec<genc::Message>,
+    pub messages: Vec<Message>,
 }
 
 /// A reference an adapter asked the model to resolve (`ToolHost::resolve`).

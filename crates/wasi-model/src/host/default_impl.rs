@@ -15,9 +15,6 @@ use super::replay::FixtureStore;
 use super::types::{BackendAnswer, PreparedPrompt};
 use super::{FutureResult, ToolHost, WasiModelCtx};
 
-/// Environment variable naming the directory of replay fixtures.
-const REPLAY_DIR_ENV: &str = "OMNIA_REPLAY_DIR";
-
 /// Options used to connect the replay backend.
 #[derive(Debug, Clone)]
 pub struct ConnectOptions {
@@ -27,7 +24,7 @@ pub struct ConnectOptions {
 
 impl omnia::FromEnv for ConnectOptions {
     fn from_env() -> Result<Self> {
-        let replay_dir = std::env::var_os(REPLAY_DIR_ENV)
+        let replay_dir = std::env::var_os("OMNIA_REPLAY_DIR")
             .map_or_else(|| PathBuf::from("fixtures"), PathBuf::from);
         Ok(Self { replay_dir })
     }
@@ -38,12 +35,6 @@ impl omnia::FromEnv for ConnectOptions {
 pub struct ModelDefault {
     store: Arc<FixtureStore>,
 }
-
-// impl Debug for ModelDefault {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         f.debug_struct("ModelDefault").field("fixtures", &self.store.len()).finish_non_exhaustive()
-//     }
-// }
 
 impl Backend for ModelDefault {
     type ConnectOptions = ConnectOptions;

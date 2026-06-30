@@ -36,7 +36,7 @@ use futures::FutureExt as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use super::generated::augentic::model::completion as genc;
+use super::generated::augentic::model::completion::{Prompt, ResponseFormatKind, ToolChoice};
 use super::types::{BackendAnswer, PreparedPrompt, Transcript};
 use super::{FutureResult, ToolHost, WasiModelCtx};
 
@@ -55,7 +55,7 @@ pub struct Fixture {
 /// The canonical replay key for `prompt`: canonical JSON of the prompt reduced
 /// per §5.4 (drop `metadata`; reduce the workspace borrow to `workspace_lent`).
 #[must_use]
-pub fn canonical_key(prompt: &genc::Prompt, workspace_lent: bool) -> String {
+pub fn canonical_key(prompt: &Prompt, workspace_lent: bool) -> String {
     key_from_value(&reduced_value(prompt, workspace_lent))
 }
 
@@ -65,90 +65,63 @@ pub fn canonical_key(prompt: &genc::Prompt, workspace_lent: bool) -> String {
 /// `borrow<descriptor>`). The shape must stay byte-compatible with the committed
 /// fixtures: `snake_case` keys, kebab-case enum tags, `metadata` dropped, and the
 /// workspace borrow replaced by `workspace_lent`.
-fn reduced_value(prompt: &genc::Prompt, workspace_lent: bool) -> Value {
+fn reduced_value(prompt: &Prompt, workspace_lent: bool) -> Value {
     json!({
         "model": prompt.model,
         "system": prompt.system,
-        "messages": prompt.messages.iter().map(message_value).collect::<Vec<_>>(),
-        "sections": prompt.sections.as_ref().map(sections_value),
-        "generation": prompt.generation.as_ref().map(generation_value),
-        "response_format": response_format_value(&prompt.response_format),
-        "tools": prompt.tools.iter().map(tool_value).collect::<Vec<_>>(),
-        "tool_choice": prompt.tool_choice.as_ref().map(tool_choice_value),
+        "messages": prompt.messages.iter().map(|message| json!({
+            "role": message.role,
+            "content": message.content,
+        })).collect::<Vec<_>>(),
+        "sections": prompt.sections.as_ref().map(|sections| json!({
+            "role": sections.role,
+            "task": sections.task,
+            "context": sections.context,
+            "constraints": sections.constraints,
+            "examples": sections.examples.iter().map(|example| json!({
+                "input": example.input,
+                "output": example.output,
+            })).collect::<Vec<_>>(),
+            "variables": sections.variables.iter().map(|variable| json!({
+                "name": variable.name,
+                "value": variable.value,
+            })).collect::<Vec<_>>(),
+        })),
+        "generation": prompt.generation.as_ref().map(|generation| json!({
+            "temperature": generation.temperature,
+            "top_p": generation.top_p,
+            "max_tokens": generation.max_tokens,
+            "stop": generation.stop,
+        })),
+        "response_format": {
+            "kind": match prompt.response_format.kind {
+                ResponseFormatKind::Text => "text",
+                ResponseFormatKind::JsonObject => "json-object",
+                ResponseFormatKind::JsonSchema => "json-schema",
+            },
+            "json_schema": prompt.response_format.json_schema.as_ref().map(|spec| json!({
+                "name": spec.name,
+                "schema": spec.schema,
+                "strict": spec.strict,
+            })),
+        },
+        "tools": prompt.tools.iter().map(|tool| json!({
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.parameters,
+        })).collect::<Vec<_>>(),
+        "tool_choice": prompt.tool_choice.as_ref().map(|choice| match choice {
+            ToolChoice::Auto => json!("auto"),
+            ToolChoice::None => json!("none"),
+            ToolChoice::Required => json!("required"),
+            ToolChoice::Named(name) => json!({ "named": name }),
+        }),
         "grants": {
             "references": prompt.grants.references,
             "workspace_lent": workspace_lent,
             "verify": prompt.grants.verify,
         },
     })
-}
-
-fn message_value(message: &genc::Message) -> Value {
-    json!({ "role": message.role, "content": message.content })
-}
-
-fn sections_value(sections: &genc::Sections) -> Value {
-    json!({
-        "role": sections.role,
-        "task": sections.task,
-        "context": sections.context,
-        "constraints": sections.constraints,
-        "examples": sections
-            .examples
-            .iter()
-            .map(|example| json!({ "input": example.input, "output": example.output }))
-            .collect::<Vec<_>>(),
-        "variables": sections
-            .variables
-            .iter()
-            .map(|variable| json!({ "name": variable.name, "value": variable.value }))
-            .collect::<Vec<_>>(),
-    })
-}
-
-fn generation_value(generation: &genc::GenerationParams) -> Value {
-    json!({
-        "temperature": generation.temperature,
-        "top_p": generation.top_p,
-        "max_tokens": generation.max_tokens,
-        "stop": generation.stop,
-    })
-}
-
-fn response_format_value(format: &genc::ResponseFormat) -> Value {
-    json!({
-        "kind": kind_str(format.kind),
-        "json_schema": format.json_schema.as_ref().map(|spec| json!({
-            "name": spec.name,
-            "schema": spec.schema,
-            "strict": spec.strict,
-        })),
-    })
-}
-
-const fn kind_str(kind: genc::ResponseFormatKind) -> &'static str {
-    match kind {
-        genc::ResponseFormatKind::Text => "text",
-        genc::ResponseFormatKind::JsonObject => "json-object",
-        genc::ResponseFormatKind::JsonSchema => "json-schema",
-    }
-}
-
-fn tool_value(tool: &genc::FunctionTool) -> Value {
-    json!({
-        "name": tool.name,
-        "description": tool.description,
-        "parameters": tool.parameters,
-    })
-}
-
-fn tool_choice_value(choice: &genc::ToolChoice) -> Value {
-    match choice {
-        genc::ToolChoice::Auto => json!("auto"),
-        genc::ToolChoice::None => json!("none"),
-        genc::ToolChoice::Required => json!("required"),
-        genc::ToolChoice::Named(name) => json!({ "named": name }),
-    }
 }
 
 /// The canonical string for an already-reduced value (sorted keys, compact).
@@ -187,7 +160,7 @@ fn fixture_filename(canonical: &str) -> String {
 /// Split out so [`Recording`] can reduce the prompt to its owned key value
 /// before handing the (non-`Clone`) request to the inner backend.
 #[must_use]
-pub fn key_prompt_value(prompt: &genc::Prompt, workspace_lent: bool) -> Value {
+pub fn key_prompt_value(prompt: &Prompt, workspace_lent: bool) -> Value {
     canonicalize(&reduced_value(prompt, workspace_lent))
 }
 
@@ -252,7 +225,7 @@ impl FixtureStore {
 
     /// The replayed answer for an equivalent prompt, if one was recorded.
     #[must_use]
-    pub fn get(&self, prompt: &genc::Prompt, workspace_lent: bool) -> Option<BackendAnswer> {
+    pub fn get(&self, prompt: &Prompt, workspace_lent: bool) -> Option<BackendAnswer> {
         self.answers.get(&canonical_key(prompt, workspace_lent)).cloned()
     }
 
@@ -310,14 +283,17 @@ impl<C: WasiModelCtx> WasiModelCtx for Recording<C> {
 mod tests {
     use serde_json::json;
 
-    use super::{canonical_key, canonicalize, genc};
+    use super::super::generated::augentic::model::completion::{
+        MetadataEntry, ResponseFormat, Sections, ToolGrants,
+    };
+    use super::{canonical_key, canonicalize, Prompt, ResponseFormatKind};
 
-    fn prompt() -> genc::Prompt {
-        genc::Prompt {
+    fn prompt() -> Prompt {
+        Prompt {
             model: Some("any".to_owned()),
             system: None,
             messages: vec![],
-            sections: Some(genc::Sections {
+            sections: Some(Sections {
                 role: None,
                 task: "do it".to_owned(),
                 context: None,
@@ -326,14 +302,14 @@ mod tests {
                 variables: vec![],
             }),
             generation: None,
-            response_format: genc::ResponseFormat {
-                kind: genc::ResponseFormatKind::JsonObject,
+            response_format: ResponseFormat {
+                kind: ResponseFormatKind::JsonObject,
                 json_schema: None,
             },
             tools: vec![],
             tool_choice: None,
             metadata: vec![],
-            grants: genc::ToolGrants {
+            grants: ToolGrants {
                 references: None,
                 workspace: None,
                 verify: vec![],
@@ -355,7 +331,7 @@ mod tests {
     fn key_ignores_metadata_only() {
         let base = prompt();
         let mut with_metadata = prompt();
-        with_metadata.metadata = vec![genc::MetadataEntry {
+        with_metadata.metadata = vec![MetadataEntry {
             key: "trace".to_owned(),
             value: "abc".to_owned(),
         }];
