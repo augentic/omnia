@@ -133,7 +133,7 @@ pub struct QueryOpts {
 ///
 /// The blanket [`WasiJsonDbView`] impl below turns this accessor into the
 /// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl via `omnia_wasi_view!`.
+/// the bundle-side impl.
 pub trait HasJsonDb: Send {
     /// Borrow the `wasi:jsondb` backend context.
     fn jsondb_ctx(&mut self) -> &mut dyn WasiJsonDbCtx;
@@ -146,16 +146,4 @@ impl<B: HasJsonDb + Send + 'static> WasiJsonDbView for omnia::StoreCtx<B> {
             table: &mut self.base.table,
         }
     }
-}
-
-/// Generates the bundle's [`HasJsonDb`] impl for a `runtime!` deployment.
-#[macro_export]
-macro_rules! omnia_wasi_view {
-    ($bundle:ty, $field_name:ident) => {
-        impl $crate::HasJsonDb for $bundle {
-            fn jsondb_ctx(&mut self) -> &mut dyn $crate::WasiJsonDbCtx {
-                &mut self.$field_name
-            }
-        }
-    };
 }

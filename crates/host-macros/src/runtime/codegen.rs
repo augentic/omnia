@@ -49,11 +49,8 @@ fn structural(config: &Config) -> Structural {
             continue;
         };
 
-        let host_crate = parse::wasi_ident(&host.type_);
         let field = parse::field_ident(backend_type);
-        accessor_impls.push(quote! {
-            #host_crate::omnia_wasi_view!(Backends, #field);
-        });
+        accessor_impls.push(accessor_impl(&host.type_, &field));
     }
 
     let mut bundle_fields = Vec::new();
@@ -69,5 +66,68 @@ fn structural(config: &Config) -> Structural {
         bundle_fields,
         accessor_impls,
         backend_idents,
+    }
+}
+
+// The accessor-impl shape a host needs on the generated `Backends` bundle.
+enum AccessorKind {
+    Standard,
+    Http,
+    Config,
+}
+
+impl AccessorKind {
+    fn from_host(host: &Path) -> Self {
+        match host.segments.last().map(|segment| segment.ident.to_string()).as_deref() {
+            // `wasi:http`'s view trait is foreign, so its accessor returns a
+            // `WasiHttpCtxView` threaded with the store table rather than a
+            // borrowed context.
+            Some("WasiHttp") => Self::Http,
+            // `wasi:config` reads its context through a shared borrow.
+            Some("WasiConfig") => Self::Config,
+            _ => Self::Standard,
+        }
+    }
+}
+
+// Emit the `HasXxx for Backends` impl wiring a host's connected backend field.
+fn accessor_impl(host: &Path, field: &Ident) -> TokenStream {
+    match AccessorKind::from_host(host) {
+        AccessorKind::Http => quote! {
+            impl omnia::HasHttp for Backends {
+                fn http_view<'a>(
+                    &'a mut self,
+                    table: &'a mut omnia::wasmtime_wasi::ResourceTable,
+                ) -> omnia_wasi_http::WasiHttpCtxView<'a> {
+                    self.#field.as_view(table)
+                }
+            }
+        },
+        AccessorKind::Config => {
+            let host_crate = parse::wasi_ident(host);
+            let has_trait = parse::has_trait(host);
+            let ctx_trait = parse::ctx_trait(host);
+            let ctx_method = parse::ctx_method(host);
+            quote! {
+                impl #host_crate::#has_trait for Backends {
+                    fn #ctx_method(&self) -> &dyn #host_crate::#ctx_trait {
+                        &self.#field
+                    }
+                }
+            }
+        }
+        AccessorKind::Standard => {
+            let host_crate = parse::wasi_ident(host);
+            let has_trait = parse::has_trait(host);
+            let ctx_trait = parse::ctx_trait(host);
+            let ctx_method = parse::ctx_method(host);
+            quote! {
+                impl #host_crate::#has_trait for Backends {
+                    fn #ctx_method(&mut self) -> &mut dyn #host_crate::#ctx_trait {
+                        &mut self.#field
+                    }
+                }
+            }
+        }
     }
 }

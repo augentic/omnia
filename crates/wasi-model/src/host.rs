@@ -153,15 +153,3 @@ impl<B: HasModel + Send + 'static> WasiModelView for omnia::StoreCtx<B> {
         }
     }
 }
-
-/// Generates the bundle's [`HasModel`] impl for a `runtime!` deployment.
-#[macro_export]
-macro_rules! omnia_wasi_view {
-    ($bundle:ty, $field_name:ident) => {
-        impl $crate::HasModel for $bundle {
-            fn model_ctx(&mut self) -> &mut dyn $crate::WasiModelCtx {
-                &mut self.$field_name
-            }
-        }
-    };
-}

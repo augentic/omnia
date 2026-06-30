@@ -39,7 +39,7 @@ runtime!({
 
 // The macro generates:
 // - a `Backends` bundle: one connected backend per declared interface
-// - the `HasXxx` accessor impls each host crate's view macro needs
+// - the `HasXxx` accessor impls wiring each backend to the library's blanket views
 // - a `main` entry point that delegates to `omnia::main`
 ```
 
@@ -96,7 +96,7 @@ impl omnia::Backends for Backends {
 
 ### WASI view accessor impls
 
-For each declared interface, the `HasXxx` accessor impl (emitted by the host crate's view macro) that exposes the bundle's backend to the library's blanket `WasiXxxView for omnia::StoreCtx<Backends>` impl.
+For each declared interface, the macro emits the `HasXxx` accessor impl that exposes the bundle's backend to the library's blanket `WasiXxxView for omnia::StoreCtx<Backends>` impl. Most interfaces share one accessor shape; `wasi:http` and `wasi:config` use slightly different ones, handled as special cases in codegen.
 
 ### `main` entry point
 

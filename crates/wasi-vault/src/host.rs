@@ -103,7 +103,7 @@ impl From<ResourceTableError> for Error {
 ///
 /// The blanket [`WasiVaultView`] impl below turns this accessor into the
 /// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl via `omnia_wasi_view!`.
+/// the bundle-side impl.
 pub trait HasVault: Send {
     /// Borrow the `wasi:vault` backend context.
     fn vault_ctx(&mut self) -> &mut dyn WasiVaultCtx;
@@ -116,16 +116,4 @@ impl<B: HasVault + Send + 'static> WasiVaultView for omnia::StoreCtx<B> {
             table: &mut self.base.table,
         }
     }
-}
-
-/// Generates the bundle's [`HasVault`] impl for a `runtime!` deployment.
-#[macro_export]
-macro_rules! omnia_wasi_view {
-    ($bundle:ty, $field_name:ident) => {
-        impl $crate::HasVault for $bundle {
-            fn vault_ctx(&mut self) -> &mut dyn $crate::WasiVaultCtx {
-                &mut self.$field_name
-            }
-        }
-    };
 }

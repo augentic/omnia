@@ -132,8 +132,8 @@ pub fn field_ident(path: &Path) -> Ident {
 }
 
 /// Derives a host crate's module ident from a host type's final path segment
-/// (e.g. `WasiHttp` -> `omnia_wasi_http`), naming the host crate whose
-/// `omnia_wasi_view!` the generated bundle accessor invokes.
+/// (e.g. `WasiHttp` -> `omnia_wasi_http`), naming the host crate whose bundle
+/// accessor trait the generated `Backends` impl satisfies.
 pub fn wasi_ident(path: &Path) -> Ident {
     let Some(segment) = path.segments.last() else {
         return format_ident!("wasi");
@@ -141,4 +141,59 @@ pub fn wasi_ident(path: &Path) -> Ident {
 
     let name = segment.ident.to_string().replace("Wasi", "omnia_wasi_").to_lowercase();
     format_ident!("{name}")
+}
+
+/// Recovers a host type's service stem by stripping the `Wasi` prefix from its
+/// final path segment (e.g. `WasiJsonDb` -> `JsonDb`).
+fn service_stem(path: &Path) -> String {
+    let Some(segment) = path.segments.last() else {
+        return String::new();
+    };
+
+    let name = segment.ident.to_string();
+    name.strip_prefix("Wasi").unwrap_or(name.as_str()).to_string()
+}
+
+/// Derives the bundle accessor trait ident (e.g. `WasiJsonDb` -> `HasJsonDb`).
+pub fn has_trait(path: &Path) -> Ident {
+    format_ident!("Has{}", service_stem(path))
+}
+
+/// Derives the backend context trait ident (e.g. `WasiJsonDb` -> `WasiJsonDbCtx`).
+pub fn ctx_trait(path: &Path) -> Ident {
+    format_ident!("Wasi{}Ctx", service_stem(path))
+}
+
+/// Derives the bundle accessor method ident (e.g. `WasiJsonDb` -> `jsondb_ctx`).
+pub fn ctx_method(path: &Path) -> Ident {
+    format_ident!("{}_ctx", service_stem(path).to_lowercase())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn host(name: &str) -> Path {
+        syn::parse_str(name).expect("valid host path")
+    }
+
+    #[test]
+    fn derives_accessor_names() {
+        for (input, has, ctx, method) in [
+            ("WasiJsonDb", "HasJsonDb", "WasiJsonDbCtx", "jsondb_ctx"),
+            ("WasiWebSocket", "HasWebSocket", "WasiWebSocketCtx", "websocket_ctx"),
+            ("WasiKeyValue", "HasKeyValue", "WasiKeyValueCtx", "keyvalue_ctx"),
+        ] {
+            let path = host(input);
+            assert_eq!(has_trait(&path).to_string(), has);
+            assert_eq!(ctx_trait(&path).to_string(), ctx);
+            assert_eq!(ctx_method(&path).to_string(), method);
+        }
+    }
+
+    #[test]
+    fn derives_crate_ident() {
+        assert_eq!(wasi_ident(&host("WasiJsonDb")).to_string(), "omnia_wasi_jsondb");
+        assert_eq!(wasi_ident(&host("WasiWebSocket")).to_string(), "omnia_wasi_websocket");
+    }
 }

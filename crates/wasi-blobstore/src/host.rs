@@ -147,18 +147,6 @@ pub trait WasiBlobstoreCtx: Debug + Send + Sync + 'static {
 
 omnia::wasi_view!(Blobstore);
 
-/// Generates the bundle's [`HasBlobstore`] impl for a `runtime!` deployment.
-#[macro_export]
-macro_rules! omnia_wasi_view {
-    ($bundle:ty, $field_name:ident) => {
-        impl $crate::HasBlobstore for $bundle {
-            fn blobstore_ctx(&mut self) -> &mut dyn $crate::WasiBlobstoreCtx {
-                &mut self.$field_name
-            }
-        }
-    };
-}
-
 #[cfg(test)]
 mod tests {
     use super::OutgoingValue;

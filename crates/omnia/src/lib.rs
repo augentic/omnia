@@ -59,8 +59,8 @@ pub use self::traits::{Backend, Backends, FromEnv, FutureResult, HasLimits, Host
 ///
 /// The service-specific pieces stay hand-written in each crate: the
 /// `Wasi<Service>Ctx` trait, the `bindgen!` block, the `Host`/`Server` wiring,
-/// the error conversions, and the `omnia_wasi_view!` macro (whose `$crate` must
-/// resolve to the host crate, which a macro-generated macro cannot express).
+/// and the error conversions. The matching `Has<Service> for Backends` accessor
+/// impl is emitted directly by the `runtime!` macro per deployment.
 ///
 /// # Example
 ///
@@ -92,7 +92,7 @@ macro_rules! wasi_view {
             ///
             /// The blanket view impl turns this accessor into the linker-facing view
             /// on `omnia::StoreCtx`; `runtime!` deployments generate the bundle-side
-            /// impl via `omnia_wasi_view!`.
+            /// impl directly.
             pub trait [<Has $name>]: Send {
                 #[doc = concat!("Borrow the WASI ", stringify!($name), " backend context.")]
                 fn [<$name:lower _ ctx>](&mut self) -> &mut dyn [<Wasi $name Ctx>];

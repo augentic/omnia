@@ -27,7 +27,7 @@ via the existing `omnia.toml` deployment manifest. This mirrors the manifest's o
 
 ## 2. Current state: what is compile-time, what is already dynamic
 
-> Note: since this RFC was written, the per-store `StoreCtx` moved into the `omnia` library as the generic `omnia::StoreCtx<B>` (over the connected backend bundle `B`). The per-interface view is now a blanket `WasiXxxView for StoreCtx<B>` in each host crate, gated on a small `HasXxx` accessor trait the bundle implements; `omnia_wasi_view!` generates that bundle-side accessor. The design below still holds — it just hangs the boxed contexts off the bundle `B` rather than off `StoreCtx` directly.
+> Note: since this RFC was written, the per-store `StoreCtx` moved into the `omnia` library as the generic `omnia::StoreCtx<B>` (over the connected backend bundle `B`). The per-interface view is now a blanket `WasiXxxView for StoreCtx<B>` in each host crate, gated on a small `HasXxx` accessor trait the bundle implements; the `runtime!` macro generates that bundle-side accessor directly (the per-crate `omnia_wasi_view!` macro it once invoked has been removed). The design below still holds — it just hangs the boxed contexts off the bundle `B` rather than off `StoreCtx` directly.
 
 The `runtime!` machinery (`crates/host-macros/src/runtime/{codegen,parse}.rs`, the library `omnia::StoreCtx<B>`, and the per-host `HasXxx` accessor traits) generates, per backend:
 

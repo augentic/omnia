@@ -106,7 +106,7 @@ impl From<ResourceTableError> for Error {
 ///
 /// The blanket [`WasiKeyValueView`] impl below turns this accessor into the
 /// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl via `omnia_wasi_view!`.
+/// the bundle-side impl.
 pub trait HasKeyValue: Send {
     /// Borrow the `wasi:keyvalue` backend context.
     fn keyvalue_ctx(&mut self) -> &mut dyn WasiKeyValueCtx;
@@ -119,16 +119,4 @@ impl<B: HasKeyValue + Send + 'static> WasiKeyValueView for omnia::StoreCtx<B> {
             table: &mut self.base.table,
         }
     }
-}
-
-/// Generates the bundle's [`HasKeyValue`] impl for a `runtime!` deployment.
-#[macro_export]
-macro_rules! omnia_wasi_view {
-    ($bundle:ty, $field_name:ident) => {
-        impl $crate::HasKeyValue for $bundle {
-            fn keyvalue_ctx(&mut self) -> &mut dyn $crate::WasiKeyValueCtx {
-                &mut self.$field_name
-            }
-        }
-    };
 }

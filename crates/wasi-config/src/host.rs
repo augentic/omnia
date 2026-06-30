@@ -55,15 +55,3 @@ impl<B: HasConfig + Send + 'static> WasiConfigView for omnia::StoreCtx<B> {
         wasmtime_wasi_config::WasiConfig::from(self.backends.config_ctx().get_config())
     }
 }
-
-/// Generates the bundle's [`HasConfig`] impl for a `runtime!` deployment.
-#[macro_export]
-macro_rules! omnia_wasi_view {
-    ($bundle:ty, $field_name:ident) => {
-        impl $crate::HasConfig for $bundle {
-            fn config_ctx(&self) -> &dyn $crate::WasiConfigCtx {
-                &self.$field_name
-            }
-        }
-    };
-}

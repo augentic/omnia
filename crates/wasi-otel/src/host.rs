@@ -96,7 +96,7 @@ pub trait WasiOtelCtx: Debug + Send + Sync + 'static {
 ///
 /// The blanket [`WasiOtelView`] impl below turns this accessor into the
 /// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl via `omnia_wasi_view!`.
+/// the bundle-side impl.
 pub trait HasOtel: Send {
     /// Borrow the `wasi:otel` backend context.
     fn otel_ctx(&mut self) -> &mut dyn WasiOtelCtx;
@@ -109,16 +109,4 @@ impl<B: HasOtel + Send + 'static> WasiOtelView for omnia::StoreCtx<B> {
             table: &mut self.base.table,
         }
     }
-}
-
-/// Generates the bundle's [`HasOtel`] impl for a `runtime!` deployment.
-#[macro_export]
-macro_rules! omnia_wasi_view {
-    ($bundle:ty, $field_name:ident) => {
-        impl $crate::HasOtel for $bundle {
-            fn otel_ctx(&mut self) -> &mut dyn $crate::WasiOtelCtx {
-                &mut self.$field_name
-            }
-        }
-    };
 }

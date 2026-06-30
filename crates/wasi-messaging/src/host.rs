@@ -187,7 +187,7 @@ impl From<wasmtime::Error> for Error {
 ///
 /// The blanket [`WasiMessagingView`] impl below turns this accessor into the
 /// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl via `omnia_wasi_view!`.
+/// the bundle-side impl.
 pub trait HasMessaging: Send {
     /// Borrow the `wasi:messaging` backend context.
     fn messaging_ctx(&mut self) -> &mut dyn WasiMessagingCtx;
@@ -200,16 +200,4 @@ impl<B: HasMessaging + Send + 'static> WasiMessagingView for omnia::StoreCtx<B> 
             table: &mut self.base.table,
         }
     }
-}
-
-/// Generates the bundle's [`HasMessaging`] impl for a `runtime!` deployment.
-#[macro_export]
-macro_rules! omnia_wasi_view {
-    ($bundle:ty, $field_name:ident) => {
-        impl $crate::HasMessaging for $bundle {
-            fn messaging_ctx(&mut self) -> &mut dyn $crate::WasiMessagingCtx {
-                &mut self.$field_name
-            }
-        }
-    };
 }

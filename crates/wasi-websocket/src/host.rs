@@ -139,7 +139,7 @@ impl From<wasmtime::Error> for Error {
 ///
 /// The blanket [`WasiWebSocketView`] impl below turns this accessor into the
 /// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl via `omnia_wasi_view!`.
+/// the bundle-side impl.
 pub trait HasWebSocket: Send {
     /// Borrow the `omnia:websocket` backend context.
     fn websocket_ctx(&mut self) -> &mut dyn WasiWebSocketCtx;
@@ -152,16 +152,4 @@ impl<B: HasWebSocket + Send + 'static> WasiWebSocketView for omnia::StoreCtx<B> 
             table: &mut self.base.table,
         }
     }
-}
-
-/// Generates the bundle's [`HasWebSocket`] impl for a `runtime!` deployment.
-#[macro_export]
-macro_rules! omnia_wasi_view {
-    ($bundle:ty, $field_name:ident) => {
-        impl $crate::HasWebSocket for $bundle {
-            fn websocket_ctx(&mut self) -> &mut dyn $crate::WasiWebSocketCtx {
-                &mut self.$field_name
-            }
-        }
-    };
 }
