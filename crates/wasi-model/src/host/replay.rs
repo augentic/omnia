@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -19,6 +19,7 @@ pub struct FixtureStore {
 
 impl TryFrom<&PathBuf> for FixtureStore {
     type Error = anyhow::Error;
+
     fn try_from(path: &PathBuf) -> Result<Self> {
         let mut store = Self::default();
 
@@ -51,11 +52,12 @@ impl FixtureStore {
     ///
     /// Returns an error when no equivalent fixture is indexed.
     pub fn answer_for(&self, request: &PreparedPrompt) -> Result<BackendAnswer> {
-        let key = lookup_key(request);
-        self.answers
-            .get(&key)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("no replay fixture for prompt"))
+        let prompt = &request.prompt;
+        let workspace_lent = request.workspace_lent;
+        let key_json = &canonicalize(&reduced_value(prompt, workspace_lent));
+        let key = serde_json::to_string(key_json)?;
+
+        self.answers.get(&key).cloned().ok_or_else(|| anyhow!("no replay fixture for prompt"))
     }
 
     /// The number of indexed fixtures.
@@ -65,7 +67,9 @@ impl FixtureStore {
     }
 
     fn insert(&mut self, fixture: Fixture) {
-        let key = lookup_key_from_fixture(&fixture.key_prompt);
+        let key_json = &canonicalize(&fixture.key_prompt);
+        let key = serde_json::to_string(key_json).unwrap_or_default();
+
         self.answers.insert(
             key,
             BackendAnswer {
@@ -85,19 +89,6 @@ struct Fixture {
     transcript: Option<Transcript>,
 }
 
-fn lookup_key(request: &PreparedPrompt) -> String {
-    lookup_key_from_prompt(&request.prompt, request.workspace_lent)
-}
-
-fn lookup_key_from_prompt(prompt: &Prompt, workspace_lent: bool) -> String {
-    canonical_json(&canonicalize(&reduced_value(prompt, workspace_lent)))
-}
-
-fn lookup_key_from_fixture(key_prompt: &Value) -> String {
-    canonical_json(&canonicalize(key_prompt))
-}
-
-// Reduce the generated prompt to its output-determining fields.
 fn reduced_value(prompt: &Prompt, workspace_lent: bool) -> Value {
     json!({
         "model": prompt.model,
@@ -172,8 +163,4 @@ fn canonicalize(value: &Value) -> Value {
         Value::Array(items) => Value::Array(items.iter().map(canonicalize).collect()),
         scalar => scalar.clone(),
     }
-}
-
-fn canonical_json(value: &Value) -> String {
-    serde_json::to_string(value).unwrap_or_default()
 }
