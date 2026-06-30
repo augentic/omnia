@@ -47,13 +47,8 @@ Because the guest exports a plain async `run` (not an HTTP/messaging trigger), t
 cargo nextest run -p omnia-wasi-model --test replay
 ```
 
-The test records the guest's prompt through a stub backend, replays it through `ModelDefault`, and finally replays it from the committed fixture — asserting the validated answer returns with no network. A second test (`resolve` path) drives a stub backend that calls `tool_host.resolve` for the `grants.references = "shelf"` prompt, proving the host→guest dispatch reaches a **fresh `shelf` instance per call** and the bytes round-trip — no network, fully in CI.
+The test replays the guest through `ModelDefault` from the committed fixture — asserting the validated answer returns with no network. A second test (`resolve` path) drives a stub backend that calls `tool_host.resolve` for the `grants.references = "shelf"` prompt, proving the host→guest dispatch reaches a **fresh `shelf` instance per call** and the bytes round-trip — no network, fully in CI.
 
-## Regenerate the fixture
+## Updating the fixture
 
-If you change the guest's prompt, refresh the checked-in fixture from the live guest:
-
-```bash
-cargo build -p examples --example model-wasm --target wasm32-wasip2
-cargo test -p omnia-wasi-model --test replay -- --ignored record_example_fixture
-```
+If you change the guest's prompt, update the checked-in fixture under [`fixtures/`](fixtures) manually so its `key_prompt` matches the guest's reduced, canonical prompt shape.

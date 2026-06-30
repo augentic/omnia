@@ -8,7 +8,7 @@ Omnia is a WASM (WASI) component runtime. Most behaviour spans a guest `.wasm` c
 
 Today, validation falls into two buckets:
 
-1. **Automated integration tests** — only two exist: - `crates/omnia/tests/guest_link.rs` — host-mediated dynamic linking (`examples/guest-link`) - `crates/wasi-model/tests/replay.rs` — record/replay and `resolve` dispatch (`examples/model`)
+1. **Automated integration tests** — only two exist: - `crates/omnia/tests/guest_link.rs` — host-mediated dynamic linking (`examples/guest-link`) - `crates/wasi-model/tests/replay.rs` — replay and `resolve` dispatch (`examples/model`)
 2. **Manual example runs** — everything else (`otel`, `http`, `keyvalue`, `sql`, `blobstore`, …) is exercised by building a guest, starting the example host, and inspecting logs or curling an endpoint.
 
 The `wasi-otel-attr` macro is a concrete example of the gap. The macro lives in `crates/wasi-otel-attr` with **zero** automated tests. To verify that `#[omnia_wasi_otel::instrument]` expands correctly and that instrumented spans reach the host, a developer must manually run `examples/otel`:
@@ -32,7 +32,7 @@ Both `guest_link.rs` and `replay.rs` follow the same shape:
 3. Hand-roll a `TestCtx` / `TestRuntime` implementing the required host views.
 4. Call `create_from_manifest`, link host interfaces, and drive guest exports via `call_async`.
 
-The model test goes further: it swaps in a **recording/stub backend** to assert host-side effects (fixture written, replayed answer matches, `resolve` dispatches to a fresh `shelf` instance per call).
+The model test goes further: it swaps in a **stub backend** to assert host-side effects (replayed answer matches, `resolve` dispatches to a fresh `shelf` instance per call).
 
 When the guest `.wasm` is absent, both tests **skip** (print instructions and return `Ok(())`) rather than fail. That is intentional — `cargo make test` and `cargo make ci` run `clean` before `nextest`, which removes any previously built guests.
 
@@ -112,7 +112,7 @@ pub trait WasiOtelCtx: Debug + Send + Sync + 'static {
 }
 ```
 
-`OtelDefault` logs counts and discards. For tests, implement a **capturing backend** (mirroring the model test's `Recording` / `StubBackend`):
+`OtelDefault` logs counts and discards. For tests, implement a **capturing backend** (mirroring the model test's stub backends):
 
 ```rust
 #[derive(Debug, Clone, Default)]

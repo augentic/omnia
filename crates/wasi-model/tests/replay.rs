@@ -5,12 +5,10 @@
 //! drives the guest's `run` export across the real WIT boundary. It proves the
 //! Layer 1 invariant end-to-end:
 //!
-//! 1. **record** — a stub backend (no network) answers once through `complete`;
-//!    the `Recording` wrapper writes a fixture keyed by the guest's real prompt;
-//! 2. **replay** — `ModelDefault` loaded from that directory serves the recorded,
-//!    validated answer for the same guest with no backend at all;
-//! 3. **checked-in fixture** — `ModelDefault` loaded from `examples/model/fixtures`
-//!    replays the guest, proving the committed fixture still matches the guest.
+//! 1. **replay** — `ModelDefault` loaded from `examples/model/fixtures` serves the
+//!    recorded, validated answer for the guest with no backend at all;
+//! 2. **fixture shape** — the checked-in fixture keys on `workspace_lent = true`
+//!    without leaking the mount's host path.
 //!
 //! The guest component must be built first; the test skips (rather than fails)
 //! when it is absent, because `cargo make ci` cleans the target directory before
@@ -35,7 +33,7 @@ use omnia::{
 };
 use omnia_wasi_model::{
     BackendAnswer, PreparedPrompt, ConnectOptions, FutureResult, HasModel, ModelDefault,
-    Recording, Reference, ToolHost, WasiModel, WasiModelCtx,
+    Reference, ToolHost, WasiModel, WasiModelCtx,
 };
 use serde_json::{Value, json};
 
@@ -43,7 +41,7 @@ use serde_json::{Value, json};
 type BackendFactory = Arc<dyn Fn() -> Box<dyn WasiModelCtx> + Send + Sync>;
 
 /// The deployment's backend bundle for the test: the swappable model backend the
-/// test installs (record vs replay). Its [`HasModel`] impl is what
+/// test installs for replay. Its [`HasModel`] impl is what
 /// `omnia::StoreCtx<TestBundle>` reads to serve `wasi-model`.
 ///
 /// The library [`Runtime::store`] clones the bundle to build each per-guest
@@ -115,27 +113,6 @@ fn workspace_mount() -> (PathBuf, Arc<MountRegistry>) {
 /// workspace.
 fn no_mounts() -> Arc<MountRegistry> {
     Arc::new(MountRegistry::default())
-}
-
-/// A backend that always answers `value`, with no network (the record source).
-#[derive(Debug, Clone)]
-struct StubBackend {
-    value: Value,
-}
-
-impl WasiModelCtx for StubBackend {
-    fn complete(
-        &self, _request: PreparedPrompt, _tool_host: Arc<dyn ToolHost>,
-    ) -> FutureResult<BackendAnswer> {
-        let value = self.value.clone();
-        async move {
-            Ok(BackendAnswer {
-                value,
-                transcript: None,
-            })
-        }
-        .boxed()
-    }
 }
 
 /// The `target/` directory: the test executable lives at
@@ -213,26 +190,20 @@ async fn replays_completion_with_no_network() -> Result<()> {
     let expected = expected_answer();
 
     // The completion path preopens a workspace the example guest lends, so the
-    // recorded prompt carries `workspace_lent = true` and the host resolves the
+    // fixture key carries `workspace_lent = true` and the host resolves the
     // lent descriptor back to this mount by identity.
     let (mount_dir, mounts) = workspace_mount();
 
-    // Phase 1 — record: a stub backend answers through `complete`, and the
-    // `Recording` wrapper persists the fixture keyed by the guest's real prompt.
-    let record_dir =
-        std::env::temp_dir().join(format!("omnia-model-fixtures-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&record_dir);
-    record_phase(&registry, &record_dir, &expected, &mounts).await?;
-    let fixtures: Vec<PathBuf> = std::fs::read_dir(&record_dir)
-        .context("reading record dir")?
+    let fixtures = committed_fixtures();
+    let fixture_files: Vec<PathBuf> = std::fs::read_dir(&fixtures)
+        .context("reading fixture dir")?
         .filter_map(std::result::Result::ok)
         .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("json"))
         .collect();
-    assert_eq!(fixtures.len(), 1, "recording should write exactly one fixture");
+    assert_eq!(fixture_files.len(), 1, "expected exactly one checked-in fixture");
 
-    // The replay key reduces the lent workspace to a single `workspace_lent`
-    // boolean — never the descriptor's identity or the mount's host path.
-    let recorded = std::fs::read_to_string(&fixtures[0]).context("reading recorded fixture")?;
+    let recorded = std::fs::read_to_string(&fixture_files[0]).context("reading fixture")?;
     let fixture: Value = serde_json::from_str(&recorded).context("fixture is JSON")?;
     assert_eq!(
         fixture["key_prompt"]["grants"]["workspace_lent"],
@@ -244,24 +215,11 @@ async fn replays_completion_with_no_network() -> Result<()> {
         "the fixture key must not leak the mount's host path"
     );
 
-    // Phase 2 — replay: `ModelDefault` loaded from the recorded directory serves
-    // the same guest with no backend and no network.
-    let replayed =
-        replay_from(&registry, &record_dir, &mounts).await.context("replay phase")?;
+    let replayed = replay_from(&registry, &fixtures, &mounts)
+        .await
+        .context("replay from committed fixture")?;
     assert_eq!(
         serde_json::from_str::<Value>(&replayed).context("answer is JSON")?,
-        expected,
-        "replayed run should reproduce the recorded answer"
-    );
-    let _ = std::fs::remove_dir_all(&record_dir);
-
-    // Phase 3 — checked-in fixture: the committed example fixture still matches
-    // the guest's prompt (guards against keying drift over time).
-    let from_committed = replay_from(&registry, &committed_fixtures(), &mounts)
-        .await
-        .context("committed fixture")?;
-    assert_eq!(
-        serde_json::from_str::<Value>(&from_committed).context("answer is JSON")?,
         expected,
         "checked-in example fixture should replay the guest"
     );
@@ -269,9 +227,8 @@ async fn replays_completion_with_no_network() -> Result<()> {
     Ok(())
 }
 
-/// The answer the example guest's prompt resolves to — the value the stub
-/// backend records and every replay must reproduce. Shared so the regeneration
-/// helper and the acceptance test cannot drift.
+/// The answer the example guest's prompt resolves to — the value every replay must
+/// reproduce.
 fn expected_answer() -> Value {
     json!({ "verdict": "pass", "reason": "the bounds check is correct" })
 }
@@ -279,68 +236,6 @@ fn expected_answer() -> Value {
 /// The checked-in example fixture directory (`examples/model/fixtures`).
 fn committed_fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/model/fixtures")
-}
-
-/// Regenerate the checked-in example fixture from the live guest.
-///
-/// Ignored by default because it writes into the source tree; run it after the
-/// example guest's prompt changes so `examples/model/fixtures` stays in step:
-///
-/// ```bash
-/// cargo build -p examples --example model-wasm --target wasm32-wasip2
-/// cargo test -p omnia-wasi-model --test replay -- --ignored record_example_fixture
-/// ```
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "writes into the source tree; run manually to regenerate the fixture"]
-async fn record_example_fixture() -> Result<()> {
-    let wasm = guest_wasm(&target_dir(), "model_wasm.wasm")
-        .context("model guest not built; build it before regenerating the fixture")?;
-    let registry = registry(&wasm).await?;
-
-    let dir = committed_fixtures();
-    let _ = std::fs::remove_dir_all(&dir);
-    let value = expected_answer();
-    let backend_dir = dir.clone();
-    // Preopen the same `.` mount the example's `omnia.toml` declares, so the
-    // regenerated fixture matches what the guest lends at runtime
-    // (`workspace_lent = true`).
-    let (_mount_dir, mounts) = workspace_mount();
-    let runtime = model_runtime(
-        registry,
-        Arc::new(move || {
-            Box::new(Recording::new(StubBackend { value: value.clone() }, backend_dir.clone()))
-        }),
-        Arc::new(AtomicUsize::new(0)),
-        mounts,
-    );
-    let answer = call_run(&runtime).await.context("recording example fixture")?;
-    eprintln!("recorded example fixture into {}: {answer}", dir.display());
-    Ok(())
-}
-
-/// Record the guest once: a stub backend answers through `complete`, and the
-/// `Recording` wrapper persists the fixture keyed by the guest's real prompt.
-async fn record_phase(
-    registry: &Arc<Registry<TestCtx>>, dir: &Path, expected: &Value,
-    mounts: &Arc<MountRegistry>,
-) -> Result<()> {
-    let value = expected.clone();
-    let backend_dir = dir.to_path_buf();
-    let runtime = model_runtime(
-        Arc::clone(registry),
-        Arc::new(move || {
-            Box::new(Recording::new(StubBackend { value: value.clone() }, backend_dir.clone()))
-        }),
-        Arc::new(AtomicUsize::new(0)),
-        Arc::clone(mounts),
-    );
-    let answer = call_run(&runtime).await.context("record phase")?;
-    assert_eq!(
-        serde_json::from_str::<Value>(&answer).context("answer is JSON")?,
-        *expected,
-        "recorded run should return the validated answer"
-    );
-    Ok(())
 }
 
 /// Replay the guest with a `ModelDefault` backend loaded from `dir`.

@@ -11,7 +11,7 @@ use super::generated::augentic::model::completion::{Message, Prompt};
 /// same `system` / `messages`; backends must not re-derive them from `sections`.
 #[derive(Debug)]
 pub struct PreparedPrompt {
-    /// The guest prompt; record / replay keys on this, never the channels. The
+    /// The guest prompt; replay keys on this, never the channels. The
     /// host has already taken the lent `grants.workspace` borrow, so it is
     /// always `None` here — `workspace_lent` carries the keying marker instead.
     pub prompt: Prompt,
@@ -63,7 +63,7 @@ pub struct ToolTurn {
     pub result: serde_json::Value,
 }
 
-/// The tool-call transcript a backend may capture for record/replay. Host-only;
+/// The tool-call transcript a backend may capture for replay. Host-only;
 /// it never crosses the WIT boundary. Empty for backends with no tool loop
 /// (replay, cursor) in Phase 1.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -79,6 +79,6 @@ pub struct Transcript {
 pub struct BackendAnswer {
     /// The parsed JSON answer the backend produced.
     pub value: serde_json::Value,
-    /// Optional tool-call transcript for record/replay.
+    /// Optional tool-call transcript for replay.
     pub transcript: Option<Transcript>,
 }

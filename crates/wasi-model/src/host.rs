@@ -52,7 +52,6 @@ pub use self::generated::augentic::model::completion::{
     Example, FunctionTool, GenerationParams, JsonSchemaSpec, Message, MetadataEntry, Prompt,
     ResponseFormat, ResponseFormatKind as Format, Sections, ToolChoice, ToolGrants, Variable,
 };
-pub use self::replay::Recording;
 pub use self::types::{
     BackendAnswer, DirEntry, PreparedPrompt, Reference, ToolTurn, Transcript, VerifyReport,
 };
