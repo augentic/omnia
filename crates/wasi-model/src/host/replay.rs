@@ -166,12 +166,6 @@ impl FixtureStore {
     pub fn len(&self) -> usize {
         self.answers.len()
     }
-
-    /// Whether the store has no fixtures.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.answers.is_empty()
-    }
 }
 
 /// A recording `WasiModelCtx` that wraps another backend.

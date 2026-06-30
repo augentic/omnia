@@ -12,9 +12,9 @@
 
 mod default_impl;
 mod model_impl;
+mod prompt;
 mod replay;
 mod types;
-mod prompt;
 mod working_tree;
 
 mod generated {
@@ -47,12 +47,11 @@ use wasmtime::component::{HasData, Linker, ResourceTable};
 
 pub use self::default_impl::{ConnectOptions, ModelDefault};
 use self::generated::augentic::model::completion;
-pub use self::generated::augentic::model::completion::Error;
-pub use self::replay::{Fixture, FixtureStore, Recording, canonical_key, write_fixture};
+use self::generated::augentic::model::completion::Error;
+pub use self::replay::Recording;
 pub use self::types::{
-    BackendAnswer, PreparedPrompt, DirEntry, Example, FunctionTool, GenerationParams,
-    JsonSchemaSpec, Message, MetadataEntry, Prompt, Reference, ResponseFormat, ResponseFormatKind,
-    Sections, ToolChoice, ToolGrants, ToolTurn, Transcript, Variable, VerifyReport,
+    BackendAnswer, DirEntry, JsonSchemaSpec, PreparedPrompt, Prompt, Reference, ResponseFormat,
+    ResponseFormatKind, Sections, ToolGrants, ToolTurn, Transcript, VerifyReport,
 };
 
 /// Host-side service for `wasi-model` (a linked-only effect host).
