@@ -6,7 +6,7 @@ use std::fmt::Debug;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use futures::FutureExt as _;
 use omnia::Backend;
 use tracing::instrument;
@@ -41,7 +41,7 @@ impl Backend for ModelDefault {
 
     #[instrument]
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
-        let store = FixtureStore::load(&options.replay_dir)?;
+        let store = FixtureStore::from_dir(&options.replay_dir)?;
         tracing::debug!(
             dir = %options.replay_dir.display(),
             fixtures = store.len(),
@@ -57,14 +57,15 @@ impl WasiModelCtx for ModelDefault {
     fn complete(
         &self, request: PreparedPrompt, _tool_host: Arc<dyn ToolHost>,
     ) -> FutureResult<BackendAnswer> {
-        let answer = self.store.get(&request.prompt, request.workspace_lent);
-        async move { answer.ok_or_else(|| anyhow!("no replay fixture")) }.boxed()
+        let answer = self.store.answer_for(&request);
+        async move { answer }.boxed()
     }
 }
 
 #[cfg(test)]
 mod tests {
 
+    use anyhow::anyhow;
     use omnia::Backend;
     use serde_json::json;
 
@@ -72,7 +73,7 @@ mod tests {
     use crate::host::generated::augentic::model::completion::{
         Prompt, ResponseFormat, ResponseFormatKind, Sections, ToolGrants,
     };
-    use crate::host::replay::{Recording, replay_key, write_fixture};
+    use crate::host::replay::{Recording, record_fixture};
     use crate::host::types::{DirEntry, Reference, VerifyReport};
     use crate::host::{FutureResult, ToolHost, WasiModelCtx};
 
@@ -142,8 +143,8 @@ mod tests {
             value: json!({ "verdict": "pass" }),
             transcript: None,
         };
-        let (key_prompt, _) = replay_key(&prompt, false);
-        write_fixture(&dir, key_prompt, &answer).expect("write fixture");
+        let request = PreparedPrompt::assemble(prompt, false).expect("assemble");
+        record_fixture(&dir, &request, &answer).expect("write fixture");
 
         let backend = ModelDefault::connect_with(ConnectOptions {
             replay_dir: dir.clone(),
@@ -151,10 +152,7 @@ mod tests {
         .await
         .expect("connect");
         let replayed = backend
-            .complete(
-                PreparedPrompt::assemble(prompt, false).expect("assemble"),
-                Arc::new(StubToolHost),
-            )
+            .complete(request, Arc::new(StubToolHost))
             .await
             .expect("replay hits the fixture");
         assert_eq!(replayed.value, json!({ "verdict": "pass" }));
