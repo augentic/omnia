@@ -18,7 +18,7 @@ use crate::host::{FutureResult, ToolHost, WasiModelCtx};
 /// Options used to connect the replay backend.
 #[derive(Debug, Clone)]
 pub struct ConnectOptions {
-    /// Directory of `*.json` replay fixtures.
+    /// Replay fixtures directory.
     pub replay_dir: PathBuf,
 }
 
