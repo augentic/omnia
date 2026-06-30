@@ -13,7 +13,6 @@
 mod default_impl;
 mod gate;
 mod model_impl;
-mod replay;
 mod types;
 mod workspace;
 

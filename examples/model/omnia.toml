@@ -2,7 +2,7 @@
 #
 # The `model` guest imports `augentic:model/completion` and calls `complete`.
 # The host serves it with the in-tree `ModelDefault` (replay) backend: with
-# `OMNIA_REPLAY_DIR` pointing at the checked-in fixtures, `complete` returns the
+# `MODEL_REPLAY_DIR` pointing at the checked-in fixtures, `complete` returns the
 # recorded, validated answer with no live model and no network.
 #
 # The `shelf` guest exports a `references` interface and is reached only via
@@ -20,7 +20,7 @@
 #
 # Build both guests first (see README.md), then run from the repository root:
 #
-#   OMNIA_REPLAY_DIR=examples/model/fixtures \
+#   MODEL_REPLAY_DIR=examples/model/fixtures \
 #     cargo run --example model -- run --config examples/model/omnia.toml
 
 [[guest]]
