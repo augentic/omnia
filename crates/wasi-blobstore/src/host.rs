@@ -39,7 +39,7 @@ use bytes::Bytes;
 pub use omnia::FutureResult;
 use omnia::{Host, Server};
 pub use resource::*;
-use wasmtime::component::{HasData, Linker, ResourceTable};
+use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 
 pub use self::default_impl::BlobstoreDefault;
@@ -127,24 +127,6 @@ where
 
 impl<B> Server<B> for WasiBlobstore {}
 
-/// A trait which provides internal WASI Blobstore state.
-///
-/// This is implemented by the `T` in `Linker<T>` — a single type shared across
-/// all WASI components for the runtime build.
-pub trait WasiBlobstoreView: Send {
-    /// Return a [`WasiBlobstoreCtxView`] from mutable reference to self.
-    fn blobstore(&mut self) -> WasiBlobstoreCtxView<'_>;
-}
-
-/// View into [`WasiBlobstoreCtx`] implementation and [`ResourceTable`].
-pub struct WasiBlobstoreCtxView<'a> {
-    /// Mutable reference to the WASI Blobstore context.
-    pub ctx: &'a mut dyn WasiBlobstoreCtx,
-
-    /// Mutable reference to table used to manage resources.
-    pub table: &'a mut ResourceTable,
-}
-
 /// A trait which provides internal WASI Blobstore context.
 ///
 /// This is implemented by the resource-specific provider of Blobstore
@@ -163,24 +145,7 @@ pub trait WasiBlobstoreCtx: Debug + Send + Sync + 'static {
     fn container_exists(&self, name: String) -> FutureResult<bool>;
 }
 
-/// A backend bundle that can yield the `wasi:blobstore` backend for a store.
-///
-/// The blanket [`WasiBlobstoreView`] impl below turns this accessor into the
-/// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl via `omnia_wasi_view!`.
-pub trait HasBlobstore: Send {
-    /// Borrow the `wasi:blobstore` backend context.
-    fn blobstore_ctx(&mut self) -> &mut dyn WasiBlobstoreCtx;
-}
-
-impl<B: HasBlobstore + Send + 'static> WasiBlobstoreView for omnia::StoreCtx<B> {
-    fn blobstore(&mut self) -> WasiBlobstoreCtxView<'_> {
-        WasiBlobstoreCtxView {
-            ctx: self.backends.blobstore_ctx(),
-            table: &mut self.base.table,
-        }
-    }
-}
+omnia::wasi_view!(Blobstore);
 
 /// Generates the bundle's [`HasBlobstore`] impl for a `runtime!` deployment.
 #[macro_export]
@@ -194,45 +159,25 @@ macro_rules! omnia_wasi_view {
     };
 }
 
-// impl<'a, T> CtxView<'a, T> for WasiBlobstore
-// where
-//     T: WasiBlobstoreCtx,
-// {
-//     fn ctx_view(ctx: &'a mut T, table: &'a mut ResourceTable) -> WasiBlobstoreCtxView<'a> {
-//         WasiBlobstoreCtxView { ctx, table }
-//     }
-// }
-
-// #[macro_export]
-// macro_rules! omnia_wasi_view {
-//     ($store_ctx:ty, $field_name:ident) => {
-//         impl View<WasiBlobstore, $store_ctx> for $store_ctx {
-//             fn data(&mut self) -> <WasiBlobstore as HasData>::Data<'_> {
-//                 WasiBlobstore::ctx_view(&mut self.$field_name, &mut self.table)
-//             }
-//         }
-//     };
-// }
-
 #[cfg(test)]
 mod tests {
     use super::OutgoingValue;
 
     #[test]
-    fn outgoing_value_write_body_is_one_shot() {
+    fn write_body_once() {
         let mut outgoing = OutgoingValue::new(16);
         assert_eq!(outgoing.take_write_body(), Ok(()));
         assert_eq!(outgoing.take_write_body(), Err(()));
     }
 
     #[test]
-    fn outgoing_value_finish_requires_write_body() {
+    fn finish_write_body() {
         let mut outgoing = OutgoingValue::new(16);
         assert_eq!(outgoing.finalize(), Err("outgoing value write body was never requested"));
     }
 
     #[test]
-    fn outgoing_value_finish_is_single_use() {
+    fn finish_once() {
         let mut outgoing = OutgoingValue::new(16);
         assert_eq!(outgoing.take_write_body(), Ok(()));
         assert_eq!(outgoing.finalize(), Ok(()));
