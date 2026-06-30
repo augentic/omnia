@@ -5,15 +5,6 @@
 //! borrowed descriptor into an owned, `Send + Sync` [`Workspace`] the backend
 //! can use across `.await` points, *after* proving the lent directory is one the
 //! deployment authorized.
-//!
-//! The proof is identity, not paths. A `wasi:filesystem` descriptor is path-less
-//! by design, and a guest must never be trusted to name its own scope, so the
-//! host platform stats the lent directory for its `(device, inode)` identity and matches
-//! it against the host-side [`MountRegistry`] (built from the deployment's
-//! preopens). A miss — a sub-directory of a mount, or a wholly unrelated tree —
-//! is rejected here, in the host. The resolved [`Workspace`] then draws its
-//! cap-std handle and absolute path from the *registry entry*, never from the
-//! descriptor.
 
 use std::io::Read as _;
 use std::path::{Path, PathBuf};

@@ -6,7 +6,7 @@ use std::fmt::Debug;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use futures::FutureExt as _;
 use omnia::Backend;
 use tracing::instrument;
@@ -57,10 +57,8 @@ impl WasiModelCtx for ModelDefault {
     fn complete(
         &self, request: PreparedPrompt, _tool_host: Arc<dyn ToolHost>,
     ) -> FutureResult<BackendAnswer> {
-        // Replay ignores the tool host (no in-process loop); it matches the
-        // typed prompt against the recorded fixtures.
         let answer = self.store.get(&request.prompt, request.workspace_lent);
-        async move { answer.ok_or_else(|| anyhow::anyhow!("no replay fixture")) }.boxed()
+        async move { answer.ok_or_else(|| anyhow!("no replay fixture")) }.boxed()
     }
 }
 
@@ -72,9 +70,11 @@ mod tests {
     use omnia::Backend;
     use serde_json::json;
 
-    use super::{ConnectOptions, ModelDefault};
-    use crate::host::generated::augentic::model::completion as genc;
-    use crate::host::replay::{Recording, key_prompt_value, write_fixture};
+    use super::{ConnectOptions, ModelDefault, anyhow};
+    use crate::host::generated::augentic::model::completion::{
+        Prompt, ResponseFormat, ResponseFormatKind, Sections, ToolGrants,
+    };
+    use crate::host::replay::{Recording, replay_key, write_fixture};
     use crate::host::types::{BackendAnswer, DirEntry, PreparedPrompt, Reference, VerifyReport};
     use crate::host::{FutureResult, ToolHost, WasiModelCtx};
 
@@ -84,33 +84,33 @@ mod tests {
 
     impl ToolHost for StubToolHost {
         fn resolve(&self, _reference: Reference) -> FutureResult<Vec<u8>> {
-            async { Err(anyhow::anyhow!("stub")) }.boxed()
+            async { Err(anyhow!("stub")) }.boxed()
         }
 
         fn read(&self, _path: String) -> FutureResult<Vec<u8>> {
-            async { Err(anyhow::anyhow!("stub")) }.boxed()
+            async { Err(anyhow!("stub")) }.boxed()
         }
 
         fn list(&self, _path: String) -> FutureResult<Vec<DirEntry>> {
-            async { Err(anyhow::anyhow!("stub")) }.boxed()
+            async { Err(anyhow!("stub")) }.boxed()
         }
 
         fn write(&self, _path: String, _bytes: Vec<u8>) -> FutureResult<()> {
-            async { Err(anyhow::anyhow!("stub")) }.boxed()
+            async { Err(anyhow!("stub")) }.boxed()
         }
 
         fn verify(&self, _check: String) -> FutureResult<VerifyReport> {
-            async { Err(anyhow::anyhow!("stub")) }.boxed()
+            async { Err(anyhow!("stub")) }.boxed()
         }
     }
 
     /// A minimal prompt used across replay tests.
-    fn sample_prompt() -> genc::Prompt {
-        genc::Prompt {
+    fn sample_prompt() -> Prompt {
+        Prompt {
             model: None,
             system: None,
             messages: vec![],
-            sections: Some(genc::Sections {
+            sections: Some(Sections {
                 role: Some("a terse judge".to_owned()),
                 task: "decide pass or fail".to_owned(),
                 context: Some("the candidate looks fine".to_owned()),
@@ -119,14 +119,14 @@ mod tests {
                 variables: vec![],
             }),
             generation: None,
-            response_format: genc::ResponseFormat {
-                kind: genc::ResponseFormatKind::JsonObject,
+            response_format: ResponseFormat {
+                kind: ResponseFormatKind::JsonObject,
                 json_schema: None,
             },
             tools: vec![],
             tool_choice: None,
             metadata: vec![],
-            grants: genc::ToolGrants {
+            grants: ToolGrants {
                 references: None,
                 workspace: None,
                 verify: vec![],
@@ -144,7 +144,8 @@ mod tests {
             value: json!({ "verdict": "pass" }),
             transcript: None,
         };
-        write_fixture(&dir, key_prompt_value(&prompt, false), &answer).expect("write fixture");
+        let (key_prompt, _) = replay_key(&prompt, false);
+        write_fixture(&dir, key_prompt, &answer).expect("write fixture");
 
         let backend = ModelDefault::connect_with(ConnectOptions {
             replay_dir: dir.clone(),
@@ -181,12 +182,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn record_then_replay() {
-        // A stub backend that always answers, wrapped by `Recording`, writes a
-        // fixture that `ModelDefault` then replays for the same prompt — proving
-        // recorder and replayer key identically (§3.4, §5.4).
+    async fn record_replay() {
         #[derive(Debug)]
         struct AlwaysOk;
+
         impl WasiModelCtx for AlwaysOk {
             fn complete(
                 &self, _request: PreparedPrompt, _tool_host: Arc<dyn ToolHost>,

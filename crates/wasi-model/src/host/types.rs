@@ -1,10 +1,4 @@
-//! Host-only types that never cross the WIT boundary.
-//!
-//! The backend consumes the generated `prompt` directly (re-exported from the
-//! crate root), so there are no owned mirrors of the generated records here —
-//! only the host-only additions: the assembled [`PreparedPrompt`], the
-//! per-completion [`ToolHost`](super::ToolHost) value types, and the
-//! record/replay [`BackendAnswer`]/[`Transcript`].
+//! Host-only types used by backends.
 
 use serde::{Deserialize, Serialize};
 
