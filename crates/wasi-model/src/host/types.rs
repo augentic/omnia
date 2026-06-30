@@ -68,7 +68,7 @@ pub struct JsonSchemaSpec {
 /// Selects validation depth for the returned `answer`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum ResponseFormatKind {
+pub enum Format {
     /// Answer must be a JSON string value.
     Text,
     /// Answer must parse as a JSON object.
@@ -81,7 +81,7 @@ pub enum ResponseFormatKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResponseFormat {
     /// Selects validation depth.
-    pub kind: ResponseFormatKind,
+    pub kind: Format,
     /// Required when `kind` is `json-schema`; ignored otherwise.
     pub json_schema: Option<JsonSchemaSpec>,
 }
@@ -298,7 +298,7 @@ impl From<genc::JsonSchemaSpec> for JsonSchemaSpec {
     }
 }
 
-impl From<genc::ResponseFormatKind> for ResponseFormatKind {
+impl From<genc::ResponseFormatKind> for Format {
     fn from(k: genc::ResponseFormatKind) -> Self {
         match k {
             genc::ResponseFormatKind::Text => Self::Text,

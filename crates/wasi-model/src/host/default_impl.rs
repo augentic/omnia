@@ -90,7 +90,7 @@ mod tests {
     use crate::host::replay::{Recording, write_fixture};
     use crate::host::types::{
         BackendAnswer, PreparedPrompt, DirEntry, Prompt, Reference, ResponseFormat,
-        ResponseFormatKind, Sections, ToolGrants, VerifyReport,
+        Format, Sections, ToolGrants, VerifyReport,
     };
     use crate::host::{FutureResult, ToolHost, WasiModelCtx};
 
@@ -136,7 +136,7 @@ mod tests {
             }),
             generation: None,
             response_format: ResponseFormat {
-                kind: ResponseFormatKind::JsonObject,
+                kind: Format::JsonObject,
                 json_schema: None,
             },
             tools: vec![],

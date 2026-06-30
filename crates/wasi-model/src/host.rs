@@ -51,7 +51,7 @@ use self::generated::augentic::model::completion::Error;
 pub use self::replay::Recording;
 pub use self::types::{
     BackendAnswer, DirEntry, JsonSchemaSpec, PreparedPrompt, Prompt, Reference, ResponseFormat,
-    ResponseFormatKind, Sections, ToolGrants, ToolTurn, Transcript, VerifyReport,
+    Format, Sections, ToolGrants, ToolTurn, Transcript, VerifyReport,
 };
 
 /// Host-side service for `wasi-model` (a linked-only effect host).

@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use anyhow::{Context as _, bail};
+use anyhow::{Context as _, anyhow, bail};
 use futures::FutureExt as _;
 use omnia::{Dispatcher, GuestId, HasDispatcher, HasMounts};
 use wasmtime::component::{Accessor, StreamReader, Val};
@@ -42,9 +42,6 @@ where
 
         let backend_answer = accessor
             .with(|mut store| {
-                // Clone the store-level handles out before borrowing the view:
-                // `store.get()` reborrows the store mutably, so the mount
-                // registry and dispatcher cannot be held as references across it.
                 let mounts = store.data_mut().mounts();
                 let dispatcher = store.data_mut().dispatcher();
                 let view = store.get();
@@ -86,9 +83,6 @@ struct BoundToolHost {
     workspace: Option<Workspace>,
 }
 
-// Export-function name a `references` exposes for host-mediated `resolve`.
-const RESOLVE_FUNC: &str = "resolve";
-
 // Convert a `resolve` export's return value into raw bytes.
 fn vals_to_bytes(results: Vec<Val>) -> anyhow::Result<Vec<u8>> {
     let first = results.into_iter().next().context("resolve export returned no value")?;
@@ -109,10 +103,7 @@ impl ToolHost for BoundToolHost {
     fn resolve(&self, reference: Reference) -> FutureResult<Vec<u8>> {
         let Some(target) = self.references.clone() else {
             return async move {
-                Err(anyhow::anyhow!(
-                    "resolve(`{}`) requires grants.references, but none was granted",
-                    reference.name
-                ))
+                Err(anyhow!("resolve(`{}`) requires grants.references", reference.name))
             }
             .boxed();
         };
@@ -122,7 +113,7 @@ impl ToolHost for BoundToolHost {
                 .invoke(
                     GuestId::from(target),
                     None,
-                    RESOLVE_FUNC.to_owned(),
+                    "resolve".to_owned(),
                     vec![Val::String(reference.name)],
                 )
                 .await?;
@@ -132,15 +123,25 @@ impl ToolHost for BoundToolHost {
     }
 
     fn read(&self, path: String) -> FutureResult<Vec<u8>> {
-        workspace::with_workspace(self.workspace.as_ref(), |ws| ws.read(path))
+        let Some(workspace) = self.workspace.as_ref() else {
+            return async move { Err(anyhow!("read(`{path}`) requires grants.workspace")) }.boxed();
+        };
+        workspace.read(path)
     }
 
     fn list(&self, path: String) -> FutureResult<Vec<DirEntry>> {
-        workspace::with_workspace(self.workspace.as_ref(), |ws| ws.list(path))
+        let Some(workspace) = self.workspace.as_ref() else {
+            return async move { Err(anyhow!("list(`{path}`) requires grants.workspace")) }.boxed();
+        };
+        workspace.list(path)
     }
 
     fn write(&self, path: String, bytes: Vec<u8>) -> FutureResult<()> {
-        workspace::with_workspace(self.workspace.as_ref(), |ws| ws.write(path, bytes))
+        let Some(workspace) = self.workspace.as_ref() else {
+            return async move { Err(anyhow!("write(`{path}`) requires grants.workspace")) }
+                .boxed();
+        };
+        workspace.write(path, bytes)
     }
 
     fn local_path(&self) -> Option<&std::path::Path> {
@@ -151,7 +152,7 @@ impl ToolHost for BoundToolHost {
         let granted = self.verify_allowed.contains(&check);
         async move {
             if !granted {
-                return Err(anyhow::anyhow!("verify profile `{check}` is not in grants.verify"));
+                return Err(anyhow!("verify profile `{check}` is not in grants.verify"));
             }
             Ok(VerifyReport {
                 ok: false,

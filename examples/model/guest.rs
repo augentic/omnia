@@ -53,7 +53,7 @@ impl Guest for Example {
             }),
             generation: None,
             response_format: completion::ResponseFormat {
-                kind: completion::ResponseFormatKind::JsonSchema,
+                kind: completion::Format::JsonSchema,
                 json_schema: Some(completion::JsonSchemaSpec {
                     name: "verdict".to_string(),
                     schema: "{\"type\":\"object\"}".to_string(),

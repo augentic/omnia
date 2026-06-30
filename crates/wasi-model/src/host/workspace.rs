@@ -82,14 +82,6 @@ fn ready_err<R: Send + 'static>(err: anyhow::Error) -> FutureResult<R> {
     async move { Err(err) }.boxed()
 }
 
-// Run `f` against a lent workspace, or fail with a grant error.
-pub fn with_workspace<R: Send + 'static>(
-    workspace: Option<&Workspace>, f: impl FnOnce(&Workspace) -> FutureResult<R>,
-) -> FutureResult<R> {
-    workspace
-        .map_or_else(|| ready_err(anyhow!("missing grants.workspace")), |workspace| f(workspace))
-}
-
 // Resolve a `grants.workspace` into a [`Workspace`].
 pub fn resolve(
     table: &ResourceTable, registry: &MountRegistry, borrow: Option<&Resource<Descriptor>>,

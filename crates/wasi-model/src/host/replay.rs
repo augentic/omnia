@@ -215,9 +215,7 @@ mod tests {
     use serde_json::json;
 
     use super::{canonical_key, canonicalize};
-    use crate::host::types::{
-        MetadataEntry, Prompt, ResponseFormat, ResponseFormatKind, Sections, ToolGrants,
-    };
+    use crate::host::types::{Format, MetadataEntry, Prompt, ResponseFormat, Sections, ToolGrants};
 
     fn prompt() -> Prompt {
         Prompt {
@@ -234,7 +232,7 @@ mod tests {
             }),
             generation: None,
             response_format: ResponseFormat {
-                kind: ResponseFormatKind::JsonObject,
+                kind: Format::JsonObject,
                 json_schema: None,
             },
             tools: vec![],
