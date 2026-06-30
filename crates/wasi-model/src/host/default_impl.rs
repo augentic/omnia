@@ -104,7 +104,7 @@ impl FixtureStore {
     fn answer_for(&self, request: &PreparedPrompt) -> Result<Answer> {
         let prompt = &request.prompt;
         let workspace_lent = request.workspace_lent;
-        let key_json = &canonicalize(&reduced_value(prompt, workspace_lent));
+        let key_json = &reduced_value(prompt, workspace_lent);
         let key = serde_json::to_string(key_json)?;
 
         self.answers.get(&key).cloned().ok_or_else(|| anyhow!("no replay fixture for prompt"))
@@ -116,8 +116,7 @@ impl FixtureStore {
     }
 
     fn insert(&mut self, fixture: Fixture) {
-        let key_json = &canonicalize(&fixture.key_prompt);
-        let key = serde_json::to_string(key_json).unwrap_or_default();
+        let key = serde_json::to_string(&fixture.key_prompt).unwrap_or_default();
 
         self.answers.insert(
             key,
@@ -197,19 +196,18 @@ fn reduced_value(prompt: &Prompt, workspace_lent: bool) -> Value {
     })
 }
 
-// Sort object keys so serialization is canonical.
-fn canonicalize(value: &Value) -> Value {
-    match value {
-        Value::Object(map) => {
-            let mut entries: Vec<(&String, &Value)> = map.iter().collect();
-            entries.sort_by(|a, b| a.0.cmp(b.0));
-            let mut sorted = serde_json::Map::with_capacity(entries.len());
-            for (key, val) in entries {
-                sorted.insert(key.clone(), canonicalize(val));
-            }
-            Value::Object(sorted)
-        }
-        Value::Array(items) => Value::Array(items.iter().map(canonicalize).collect()),
-        scalar => scalar.clone(),
-    }
-}
+// fn canonicalize(value: &Value) -> Value {
+//     match value {
+//         Value::Object(map) => {
+//             let mut entries: Vec<(&String, &Value)> = map.iter().collect();
+//             entries.sort_by(|a, b| a.0.cmp(b.0));
+//             let mut sorted = serde_json::Map::with_capacity(entries.len());
+//             for (key, val) in entries {
+//                 sorted.insert(key.clone(), canonicalize(val));
+//             }
+//             Value::Object(sorted)
+//         }
+//         Value::Array(items) => Value::Array(items.iter().map(canonicalize).collect()),
+//         scalar => scalar.clone(),
+//     }
+// }
