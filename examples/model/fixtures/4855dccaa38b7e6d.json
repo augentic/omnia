@@ -3,8 +3,7 @@
     "generation": null,
     "grants": {
       "references": "shelf",
-      "verify": [],
-      "workspace_lent": true
+      "verify": []
     },
     "messages": [],
     "model": null,

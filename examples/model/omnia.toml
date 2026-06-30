@@ -13,10 +13,9 @@
 #
 # The `[[mount]]` preopens the repository root into every guest sandbox as a
 # read-only workspace named `.`. The `model` guest reads it via
-# `wasi:filesystem/preopens` and lends it through `grants.workspace`, so the
-# recorded prompt carries `workspace_lent = true`. The replay backend ignores
-# the workspace (Phase 1 short-circuits tools); the host-side resolution +
-# match are proven by the integration test.
+# `wasi:filesystem/preopens` and lends it through `grants.workspace`. The replay
+# backend ignores the workspace (Phase 1 short-circuits tools); the host-side
+# resolution is proven by the integration test.
 #
 # Build both guests first (see README.md), then run from the repository root:
 #

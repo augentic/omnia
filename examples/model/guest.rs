@@ -13,7 +13,7 @@
 //! It also reads `wasi:filesystem/preopens` and, when the host has mounted a
 //! workspace named `.` (the `[[mount]]` in `omnia.toml`), lends it
 //! through `grants.workspace`. With no mount configured the preopen table is
-//! empty and the guest lends nothing, so `workspace_lent` stays false.
+//! empty and the guest lends nothing.
 
 #![cfg(target_arch = "wasm32")]
 

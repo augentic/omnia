@@ -15,32 +15,28 @@ use futures::FutureExt as _;
 use omnia::{Dispatcher, GuestId, HasDispatcher, HasMounts};
 use wasmtime::component::{Accessor, StreamReader, Val};
 
-use super::gate::check_answer;
-use super::generated::augentic::model::completion as genc;
-use super::generated::augentic::model::completion::{Host, HostWithStore};
-use super::types::PreparedPrompt;
-use super::workspace::{self, Workspace};
-use super::{Error, FutureResult, ToolHost, WasiModel, WasiModelCtxView};
-use crate::host::types::{DirEntry, Reference, VerifyReport};
+use crate::host::generated::augentic::model::completion::{
+    Host, HostWithStore, Prompt, StreamEvent,
+};
+use crate::host::types::{Answer, PreparedPrompt, DirEntry, Reference, VerifyReport};
+use crate::host::workspace::{self, Workspace};
+use crate::host::{Error, FutureResult, ToolHost, WasiModel, WasiModelCtxView};
 
 impl<T> HostWithStore<T> for WasiModel
 where
     T: HasMounts + HasDispatcher,
 {
-    async fn complete(
-        accessor: &Accessor<T, Self>, mut prompt: genc::Prompt,
-    ) -> Result<String, Error> {
+    async fn complete(accessor: &Accessor<T, Self>, mut prompt: Prompt) -> Result<String, Error> {
         // The lent `borrow<descriptor>` cannot survive the backend await, so the
-        // host takes it out here to resolve the workspace and keeps only the
-        // `workspace_lent` marker on the prepared prompt (used for keying).
+        // host takes it out here to resolve the workspace for `ToolHost`.
         let lent = prompt.grants.workspace.take();
-        let request = PreparedPrompt::assemble(prompt, lent.is_some())?;
+        let request = PreparedPrompt::try_from(prompt)?;
 
         let kind = request.prompt.response_format.kind;
         let references = request.prompt.grants.references.clone();
         let verify_allowed = request.prompt.grants.verify.clone();
 
-        let backend_answer = accessor
+        let answer = accessor
             .with(|mut store| {
                 let mounts = store.data_mut().mounts();
                 let dispatcher = store.data_mut().dispatcher();
@@ -56,15 +52,15 @@ where
             })?
             .await?;
 
-        check_answer(&backend_answer.value, kind)?;
+        Answer::check(&answer.value, kind)?;
 
-        serde_json::to_string(&backend_answer.value)
+        serde_json::to_string(&answer.value)
             .map_err(|e| Error::InvalidAnswer(format!("answer is not serializable JSON: {e}")))
     }
 
     async fn complete_stream(
-        _accessor: &Accessor<T, Self>, _prompt: genc::Prompt,
-    ) -> Result<StreamReader<genc::StreamEvent>, Error> {
+        _accessor: &Accessor<T, Self>, _prompt: Prompt,
+    ) -> Result<StreamReader<StreamEvent>, Error> {
         Err(Error::Backend("streaming unsupported".to_owned()))
     }
 }

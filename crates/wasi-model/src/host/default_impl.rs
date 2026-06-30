@@ -61,7 +61,7 @@ impl WasiModelCtx for ModelDefault {
     fn complete(
         &self, request: PreparedPrompt, _tool_host: Arc<dyn ToolHost>,
     ) -> FutureResult<Answer> {
-        let answer = self.store.answer_for(&request);
+        let answer = self.store.answer(&request);
         async move { answer }.boxed()
     }
 }
@@ -101,10 +101,8 @@ impl TryFrom<&PathBuf> for FixtureStore {
 }
 
 impl FixtureStore {
-    fn answer_for(&self, request: &PreparedPrompt) -> Result<Answer> {
-        let prompt = &request.prompt;
-        let workspace_lent = request.workspace_lent;
-        let key_json = &reduced_value(prompt, workspace_lent);
+    fn answer(&self, request: &PreparedPrompt) -> Result<Answer> {
+        let key_json = &reduced_value(&request.prompt);
         let key = serde_json::to_string(key_json)?;
 
         self.answers.get(&key).cloned().ok_or_else(|| anyhow!("no replay fixture for prompt"))
@@ -137,7 +135,7 @@ struct Fixture {
     transcript: Option<Transcript>,
 }
 
-fn reduced_value(prompt: &Prompt, workspace_lent: bool) -> Value {
+fn reduced_value(prompt: &Prompt) -> Value {
     json!({
         "model": prompt.model,
         "system": prompt.system,
@@ -190,24 +188,8 @@ fn reduced_value(prompt: &Prompt, workspace_lent: bool) -> Value {
         }),
         "grants": {
             "references": prompt.grants.references,
-            "workspace_lent": workspace_lent,
             "verify": prompt.grants.verify,
         },
     })
 }
 
-// fn canonicalize(value: &Value) -> Value {
-//     match value {
-//         Value::Object(map) => {
-//             let mut entries: Vec<(&String, &Value)> = map.iter().collect();
-//             entries.sort_by(|a, b| a.0.cmp(b.0));
-//             let mut sorted = serde_json::Map::with_capacity(entries.len());
-//             for (key, val) in entries {
-//                 sorted.insert(key.clone(), canonicalize(val));
-//             }
-//             Value::Object(sorted)
-//         }
-//         Value::Array(items) => Value::Array(items.iter().map(canonicalize).collect()),
-//         scalar => scalar.clone(),
-//     }
-// }

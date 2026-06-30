@@ -11,17 +11,25 @@ use crate::host::generated::augentic::model::completion::{Message, Prompt};
 /// same `system` / `messages`; backends must not re-derive them from `sections`.
 #[derive(Debug)]
 pub struct PreparedPrompt {
-    /// The guest prompt; replay keys on this, never the channels. The
-    /// host has already taken the lent `grants.workspace` borrow, so it is
-    /// always `None` here — `workspace_lent` carries the keying marker instead.
+    /// The guest prompt; replay keys on this, never the channels. The host has
+    /// already taken the lent `grants.workspace` borrow, so it is always `None`
+    /// here.
     pub prompt: Prompt,
-    /// Whether a workspace was lent for this call: the stable marker that
-    /// replaces the non-serializable `borrow<descriptor>` when keying (§5.4).
-    pub workspace_lent: bool,
     /// Assembled system / instructions channel, if any.
     pub system: Option<String>,
     /// Assembled chat turns to send to the provider.
     pub messages: Vec<Message>,
+}
+
+/// A backend's result: the parsed answer value plus an optional transcript.
+/// Host-only — the guest sees only the validated `answer` string the `complete`
+/// binding derives from `value`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Answer {
+    /// The parsed JSON answer the backend produced.
+    pub value: serde_json::Value,
+    /// Optional tool-call transcript for replay.
+    pub transcript: Option<Transcript>,
 }
 
 /// A reference an adapter asked the model to resolve (`ToolHost::resolve`).
@@ -70,15 +78,4 @@ pub struct ToolTurn {
 pub struct Transcript {
     /// Ordered tool turns the backend drove to reach the answer.
     pub turns: Vec<ToolTurn>,
-}
-
-/// A backend's result: the parsed answer value plus an optional transcript.
-/// Host-only — the guest sees only the validated `answer` string the `complete`
-/// binding derives from `value`.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Answer {
-    /// The parsed JSON answer the backend produced.
-    pub value: serde_json::Value,
-    /// Optional tool-call transcript for replay.
-    pub transcript: Option<Transcript>,
 }

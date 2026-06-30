@@ -6,7 +6,7 @@ Proves **Phase 1** of [`rfcs/wasi-model.md`](../../rfcs/wasi-model.md) (§6, run
 
 - `guest` ([`guest.rs`](guest.rs)) **imports** `augentic:model/completion` and exposes an async `run`. It builds a `json-schema` prompt from `sections` (role / task / context), sets `grants.references = "shelf"` as data, reads the preopen table via `wasi:filesystem/preopens` and lends the workspace named `.` through `grants.workspace`, then calls `complete(prompt).await`.
 - [`runtime.rs`](runtime.rs) binds the `WasiModel` host to `ModelDefault`, the replay backend that serves a recorded answer for an equivalent prompt.
-- [`omnia.toml`](omnia.toml)'s `[[mount]]` preopens the repo root as a read-only workspace named `.`. The host resolves the lent descriptor back to that mount by directory identity; the replay backend then ignores it (Phase 1 short-circuits tools), so the only trace in the fixture is the stable `workspace_lent = true` marker.
+- [`omnia.toml`](omnia.toml)'s `[[mount]]` preopens the repo root as a read-only workspace named `.`. The host resolves the lent descriptor back to that mount by directory identity; the replay backend ignores it (Phase 1 short-circuits tools).
 - [`shelf.rs`](shelf.rs) is the `references` shelf (Phase 2a): it exports `resolve` and is reached *only* via host-mediated dispatch when a backend follows `grants.references` (instance-per-call, no trigger). It is inert under the replay backend; the resolve path is proven by the integration test.
 - [`omnia.toml`](omnia.toml) declares the `model` guest and the `shelf` guest.
 - [`fixtures/`](fixtures) holds the checked-in replay fixture: the reduced, canonical prompt (the key) mapped to the validated answer.

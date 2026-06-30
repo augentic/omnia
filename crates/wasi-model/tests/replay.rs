@@ -7,8 +7,8 @@
 //!
 //! 1. **replay** — `ModelDefault` loaded from `examples/model/fixtures` serves the
 //!    recorded, validated answer for the guest with no backend at all;
-//! 2. **fixture shape** — the checked-in fixture keys on `workspace_lent = true`
-//!    without leaking the mount's host path.
+//! 2. **fixture shape** — the checked-in fixture keys on the reduced prompt
+//!    without leaking mount paths or non-serializable workspace handles.
 //!
 //! The guest component must be built first; the test skips (rather than fails)
 //! when it is absent, because `cargo make ci` cleans the target directory before
@@ -96,10 +96,8 @@ fn model_runtime(
 
 /// A single read-only workspace mount named `.` over a fresh temp directory —
 /// the shape `omnia.toml`'s `[[mount]]` resolves to. The example guest reads it
-/// via `preopens.get-directories()` and lends it through `grants.workspace`,
-/// so the recorded prompt carries `workspace_lent = true`. The directory's
-/// identity is irrelevant to the replay key (only the boolean marker lands
-/// there), so any real directory serves.
+/// via `preopens.get-directories()` and lends it through `grants.workspace`.
+/// The replay key ignores the lent descriptor; any real directory serves.
 fn workspace_mount() -> (PathBuf, Arc<MountRegistry>) {
     let dir = std::env::temp_dir().join(format!("omnia-model-ws-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("creating the workspace mount dir");
@@ -189,9 +187,8 @@ async fn replays_completion_with_no_network() -> Result<()> {
     // The answer the recorded run produces and the replay must reproduce.
     let expected = expected_answer();
 
-    // The completion path preopens a workspace the example guest lends, so the
-    // fixture key carries `workspace_lent = true` and the host resolves the
-    // lent descriptor back to this mount by identity.
+    // The completion path preopens a workspace the example guest lends; the host
+    // resolves the lent descriptor back to this mount by identity.
     let (mount_dir, mounts) = workspace_mount();
 
     let fixtures = committed_fixtures();
@@ -204,12 +201,6 @@ async fn replays_completion_with_no_network() -> Result<()> {
     assert_eq!(fixture_files.len(), 1, "expected exactly one checked-in fixture");
 
     let recorded = std::fs::read_to_string(&fixture_files[0]).context("reading fixture")?;
-    let fixture: Value = serde_json::from_str(&recorded).context("fixture is JSON")?;
-    assert_eq!(
-        fixture["key_prompt"]["grants"]["workspace_lent"],
-        json!(true),
-        "a lent workspace keys as `workspace_lent: true`"
-    );
     assert!(
         !recorded.contains(mount_dir.to_string_lossy().as_ref()),
         "the fixture key must not leak the mount's host path"
