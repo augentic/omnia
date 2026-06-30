@@ -15,9 +15,9 @@ use futures::FutureExt as _;
 use omnia::{Dispatcher, GuestId, HasDispatcher, HasMounts};
 use wasmtime::component::{Accessor, StreamReader, Val};
 
+use super::gate::check_answer;
 use super::generated::augentic::model::completion as genc;
 use super::generated::augentic::model::completion::{Host, HostWithStore};
-use super::prompt::validate_answer;
 use super::types::{PreparedPrompt, Prompt};
 use super::workspace::{self, Workspace};
 use super::{Error, FutureResult, ToolHost, WasiModel, WasiModelCtxView};
@@ -59,7 +59,7 @@ where
             })?
             .await?;
 
-        validate_answer(&backend_answer.value, kind)?;
+        check_answer(&backend_answer.value, kind)?;
 
         serde_json::to_string(&backend_answer.value)
             .map_err(|e| Error::InvalidAnswer(format!("answer is not serializable JSON: {e}")))

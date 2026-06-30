@@ -3,7 +3,7 @@
 use serde_json::Value;
 
 use super::Error;
-use super::types::{PreparedPrompt, Message, Prompt, ResponseFormatKind};
+use super::types::{Message, PreparedPrompt, Prompt, ResponseFormatKind};
 
 /// Host-injected tool names guests must not redeclare in `prompt.tools`.
 pub const RESERVED_TOOL_NAMES: &[&str] = &["resolve", "read", "list", "write", "verify"];
@@ -34,7 +34,7 @@ pub fn check_prompt(prompt: &Prompt) -> Result<(), Error> {
 }
 
 // Validate a backend answer against `response-format.kind`.
-pub fn validate_answer(value: &Value, kind: ResponseFormatKind) -> Result<(), Error> {
+pub fn check_answer(value: &Value, kind: ResponseFormatKind) -> Result<(), Error> {
     match kind {
         ResponseFormatKind::Text => {
             if value.is_string() {
@@ -51,7 +51,6 @@ pub fn validate_answer(value: &Value, kind: ResponseFormatKind) -> Result<(), Er
             }
         }
         ResponseFormatKind::JsonSchema => {
-            // JSON-Schema enforcement (unimplemented)
             // TODO: validate against `json-schema.schema`.
             Ok(())
         }
@@ -59,7 +58,7 @@ pub fn validate_answer(value: &Value, kind: ResponseFormatKind) -> Result<(), Er
 }
 
 // Assemble a [`Prompt`] into a provider chat request.
-pub fn assemble(prompt: &Prompt) -> Result<Assembled, Error> {
+fn assemble(prompt: &Prompt) -> Result<Assembled, Error> {
     // 1. `messages` wins over `sections`. 2. `prompt.system` is always applied.
     if !prompt.messages.is_empty() {
         return Ok(Assembled {
@@ -152,7 +151,7 @@ fn non_empty(value: Option<String>) -> Option<String> {
 mod tests {
     use serde_json::json;
 
-    use super::{Error, assemble, check_prompt, validate_answer};
+    use super::{Error, assemble, check_answer, check_prompt};
     use crate::host::types::{
         Example, FunctionTool, Message, Prompt, ResponseFormat, ResponseFormatKind, Sections,
         ToolGrants, Variable,
@@ -201,23 +200,23 @@ mod tests {
 
     #[test]
     fn text_gate_requires_a_json_string() {
-        validate_answer(&json!("hi"), ResponseFormatKind::Text).unwrap();
-        let err = validate_answer(&json!({ "a": 1 }), ResponseFormatKind::Text).unwrap_err();
+        check_answer(&json!("hi"), ResponseFormatKind::Text).unwrap();
+        let err = check_answer(&json!({ "a": 1 }), ResponseFormatKind::Text).unwrap_err();
         assert!(matches!(err, Error::InvalidAnswer(_)));
     }
 
     #[test]
     fn json_object_gate_requires_an_object() {
-        validate_answer(&json!({ "verdict": "pass" }), ResponseFormatKind::JsonObject).unwrap();
-        let err = validate_answer(&json!("nope"), ResponseFormatKind::JsonObject).unwrap_err();
+        check_answer(&json!({ "verdict": "pass" }), ResponseFormatKind::JsonObject).unwrap();
+        let err = check_answer(&json!("nope"), ResponseFormatKind::JsonObject).unwrap_err();
         assert!(matches!(err, Error::InvalidAnswer(_)));
     }
 
     #[test]
     fn json_schema_gate_is_parse_only_in_phase_1() {
         // Any well-formed JSON value passes the Phase 1 (parse-only) schema gate.
-        validate_answer(&json!({ "x": [1, 2, 3] }), ResponseFormatKind::JsonSchema).unwrap();
-        validate_answer(&json!(42), ResponseFormatKind::JsonSchema).unwrap();
+        check_answer(&json!({ "x": [1, 2, 3] }), ResponseFormatKind::JsonSchema).unwrap();
+        check_answer(&json!(42), ResponseFormatKind::JsonSchema).unwrap();
     }
 
     #[test]

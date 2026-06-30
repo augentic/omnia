@@ -12,7 +12,7 @@
 
 mod default_impl;
 mod model_impl;
-mod prompt;
+mod gate;
 mod replay;
 mod types;
 mod workspace;
