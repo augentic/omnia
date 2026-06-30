@@ -75,7 +75,7 @@ moka = { version = "0.12.15", features = ["sync"] }
 opentelemetry = "0.32.0"
 opentelemetry_sdk = "0.32.1"
 parking_lot = "0.12.5"
-paste = "1.0.15"
+pastey = "0.2.3"
 proc-macro2 = "1.0.106"
 quote = "1.0.46"
 rand = "0.10.1"

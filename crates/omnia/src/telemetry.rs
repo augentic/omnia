@@ -3,10 +3,6 @@
 //! Host-side OpenTelemetry initialization and OTLP exporters used to report
 //! runtime telemetry out-of-the-box.
 
-//! # Telemetry
-//!
-//! Initialize the OpenTelemetry collectors and exporters.
-
 use std::env;
 use std::sync::OnceLock;
 
@@ -23,6 +19,8 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry};
 
 static RESOURCE: OnceLock<Resource> = OnceLock::new();
+
+const UNKNOWN: &str = "unknown";
 
 /// Telemetry initializer.
 pub struct Telemetry {
@@ -111,33 +109,31 @@ impl Telemetry {
 }
 
 fn init_traces(endpoint: Option<&str>) -> Result<SdkTracerProvider> {
-    let mut builder = SpanExporter::builder().with_tonic();
-    if let Some(endpoint) = endpoint {
-        builder = builder.with_endpoint(endpoint);
-    }
-    let exporter = builder.build()?;
+    let exporter =
+        with_optional_endpoint(SpanExporter::builder().with_tonic(), endpoint).build()?;
     let resource = RESOURCE.wait().clone();
 
     Ok(SdkTracerProvider::builder().with_resource(resource).with_batch_exporter(exporter).build())
 }
 
 fn init_metrics(endpoint: Option<&str>) -> Result<SdkMeterProvider> {
-    let mut builder = MetricExporter::builder().with_tonic();
-    if let Some(endpoint) = endpoint {
-        builder = builder.with_endpoint(endpoint);
-    }
-    let exporter = builder.build()?;
+    let exporter =
+        with_optional_endpoint(MetricExporter::builder().with_tonic(), endpoint).build()?;
     let resource = RESOURCE.wait().clone();
 
     Ok(SdkMeterProvider::builder().with_resource(resource).with_periodic_exporter(exporter).build())
 }
 
-/// Returns a reference to the OpenTelemetry [`Resource`] used to initialize
-/// telemetry for a service.
-///
-/// # Panics
-/// Panics if the resource has not been set, which indicates that telemetry
-/// has not been initialized
+/// Apply an optional OTLP endpoint override to an exporter builder.
+fn with_optional_endpoint<B: WithExportConfig>(builder: B, endpoint: Option<&str>) -> B {
+    match endpoint {
+        Some(endpoint) => builder.with_endpoint(endpoint),
+        None => builder,
+    }
+}
+
+/// Returns the OpenTelemetry [`Resource`] used to initialize telemetry for a
+/// service, or `None` if telemetry has not been initialized.
 pub fn resource() -> Option<&'static Resource> {
     RESOURCE.get()
 }
@@ -149,13 +145,13 @@ impl From<&Telemetry> for Resource {
             .with_attributes(vec![
                 KeyValue::new(
                     "deployment.environment",
-                    otel.env_name.clone().unwrap_or_else(|| "unknown".to_string()),
+                    otel.env_name.clone().unwrap_or_else(|| UNKNOWN.to_string()),
                 ),
                 KeyValue::new("service.namespace", otel.app_name.clone()),
                 KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
                 KeyValue::new(
                     "service.instance.id",
-                    env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string()),
+                    env::var("HOSTNAME").unwrap_or_else(|_| UNKNOWN.to_string()),
                 ),
                 KeyValue::new("telemetry.sdk.name", "opentelemetry"),
                 KeyValue::new("instrumentation.provider", "opentelemetry"),

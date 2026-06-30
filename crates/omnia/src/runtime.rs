@@ -2,6 +2,23 @@
 
 mod command;
 
+use std::path::PathBuf;
+use std::process::ExitCode;
+use std::sync::Arc;
+use std::time::Duration;
+
+use anyhow::{Context as _, Result};
+use clap::Parser as _;
+use futures::future::{self, BoxFuture};
+use wasmtime::component::{Instance, InstancePre};
+use wasmtime::{Engine, Store};
+
+use crate::cli::{Cli, Command};
+use crate::dispatch::serve_links;
+use crate::mount::MountRegistry;
+use crate::traits::{Backends, HasLimits};
+use crate::{Deployment, DeploymentBuilder, Registry, RuntimeOptions, StoreBase, StoreCtx};
+
 /// Compile-time guard that a `command: true` deployment includes no long-lived
 /// trigger server.
 ///
@@ -32,23 +49,6 @@ pub const fn assert_hosts(hosts: &[bool]) {
     }
 }
 
-use std::path::PathBuf;
-use std::process::ExitCode;
-use std::sync::Arc;
-use std::time::Duration;
-
-use anyhow::{Context as _, Result};
-use clap::Parser as _;
-use futures::future::{self, BoxFuture};
-use wasmtime::component::{Instance, InstancePre};
-use wasmtime::{Engine, Store};
-
-use crate::cli::{Cli, Command};
-use crate::dispatch::serve_links;
-use crate::mount::MountRegistry;
-use crate::traits::{Backends, HasLimits};
-use crate::{Deployment, DeploymentBuilder, Registry, RuntimeOptions, StoreBase, StoreCtx};
-
 /// Host linking and trigger-server startup for a deployment.
 pub trait RuntimeHooks<B: Backends> {
     /// Link every declared host into the deployment linker.
@@ -58,7 +58,7 @@ pub trait RuntimeHooks<B: Backends> {
     /// Returns an error if a host cannot be added to the linker.
     fn link(deployment: &mut Deployment<StoreCtx<B>>) -> Result<()>;
 
-    /// Start every long-lived trigger server ([`Server::IS_SERVER`]).
+    /// Start every long-lived trigger server ([`Server::IS_SERVER`](crate::Server::IS_SERVER)).
     fn servers(runtime: &Runtime<B>) -> Vec<BoxFuture<'_, Result<()>>>;
 }
 

@@ -96,7 +96,7 @@ pub trait WasiOtelCtx: Debug + Send + Sync + 'static {
 ///
 /// The blanket [`WasiOtelView`] impl below turns this accessor into the
 /// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl via [`omnia_wasi_view!`].
+/// the bundle-side impl via `omnia_wasi_view!`.
 pub trait HasOtel: Send {
     /// Borrow the `wasi:otel` backend context.
     fn otel_ctx(&mut self) -> &mut dyn WasiOtelCtx;

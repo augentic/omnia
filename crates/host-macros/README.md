@@ -100,9 +100,7 @@ For each declared interface, the `HasXxx` accessor impl (emitted by the host cra
 
 ### `main` entry point
 
-A `#[tokio::main]` `main` that delegates to `omnia::main::<Backends, Hooks>`, where `Hooks` is a generated [`RuntimeHooks`] impl: [`link`](omnia::RuntimeHooks::link) runs inside `omnia::Runtime::new` to link hosts, connect backends, and assemble the registry; [`servers`](omnia::RuntimeHooks::servers) launches each trigger host's `run`. The host runtime is the library `omnia::Runtime<Backends>`; the macro no longer emits a runtime type or trait impl of its own.
-
-[`RuntimeHooks`]: omnia::RuntimeHooks
+A `#[tokio::main]` `main` that delegates to `omnia::main::<Backends, Hooks>`, where `Hooks` is a generated `RuntimeHooks` impl: `RuntimeHooks::link` runs inside `omnia::Runtime::new` to link hosts, connect backends, and assemble the registry; `RuntimeHooks::servers` launches each trigger host's `run`. The host runtime is the library `omnia::Runtime<Backends>`; the macro no longer emits a runtime type or trait impl of its own.
 
 ## Example: Custom Initiator Configuration
 

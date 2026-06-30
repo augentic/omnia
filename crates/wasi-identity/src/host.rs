@@ -103,7 +103,7 @@ impl From<ResourceTableError> for Error {
 ///
 /// The blanket [`WasiIdentityView`] impl below turns this accessor into the
 /// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl via [`omnia_wasi_view!`].
+/// the bundle-side impl via `omnia_wasi_view!`.
 pub trait HasIdentity: Send {
     /// Borrow the `wasi:identity` backend context.
     fn identity_ctx(&mut self) -> &mut dyn WasiIdentityCtx;

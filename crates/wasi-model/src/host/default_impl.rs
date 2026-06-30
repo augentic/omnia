@@ -192,4 +192,3 @@ fn reduced_value(prompt: &Prompt) -> Value {
         },
     })
 }
-

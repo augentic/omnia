@@ -4,8 +4,7 @@ use serde_json::Value;
 
 use crate::host::Error;
 use crate::host::generated::augentic::model::completion::{Message, Prompt, ResponseFormatKind};
-use crate::host::types::Answer;
-use crate::host::types::PreparedPrompt;
+use crate::host::types::{Answer, PreparedPrompt};
 
 const TOOL_NAMES: &[&str] = &["resolve", "read", "list", "write", "verify"];
 
@@ -102,7 +101,7 @@ impl Answer {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidAnswer`] if the answer is not valid for the given kind.
+    /// Returns an error if the answer is not valid for the given kind.
     pub fn check(value: &Value, kind: ResponseFormatKind) -> Result<(), Error> {
         match kind {
             ResponseFormatKind::Text => {
@@ -127,11 +126,12 @@ impl Answer {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::{Answer, Error, PreparedPrompt, ResponseFormatKind};
     use crate::host::generated::augentic::model::completion::{
         Example, FunctionTool, Message, Prompt, ResponseFormat, Sections, ToolGrants, Variable,
     };
-    use serde_json::json;
 
     #[test]
     fn json_string() {

@@ -88,7 +88,7 @@ pub trait WasiWebSocketView: Send {
     fn websocket(&mut self) -> WasiWebSocketCtxView<'_>;
 }
 
-/// View into [`WebSocketCtx`] implementation and [`ResourceTable`].
+/// View into [`WasiWebSocketCtx`] implementation and [`ResourceTable`].
 pub struct WasiWebSocketCtxView<'a> {
     /// Mutable reference to the WASI WebSocket context.
     pub ctx: &'a mut dyn WasiWebSocketCtx,
@@ -137,9 +137,9 @@ impl From<wasmtime::Error> for Error {
 
 /// A backend bundle that can yield the `omnia:websocket` backend for a store.
 ///
-/// The blanket [`WebSocketView`] impl below turns this accessor into the
+/// The blanket [`WasiWebSocketView`] impl below turns this accessor into the
 /// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl via [`omnia_wasi_view!`].
+/// the bundle-side impl via `omnia_wasi_view!`.
 pub trait HasWebSocket: Send {
     /// Borrow the `omnia:websocket` backend context.
     fn websocket_ctx(&mut self) -> &mut dyn WasiWebSocketCtx;

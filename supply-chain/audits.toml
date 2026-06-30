@@ -459,6 +459,12 @@ user-id = 2915 # Amanieu d'Antras (Amanieu)
 start = "2019-05-04"
 end = "2026-09-11"
 
+[[trusted.paste]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-03-19"
+end = "2027-06-30"
+
 [[trusted.potential_utf]]
 criteria = "safe-to-deploy"
 user-id = 1139 # Manish Goregaokar (Manishearth)

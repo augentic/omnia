@@ -187,7 +187,7 @@ impl From<wasmtime::Error> for Error {
 ///
 /// The blanket [`WasiMessagingView`] impl below turns this accessor into the
 /// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl via [`omnia_wasi_view!`].
+/// the bundle-side impl via `omnia_wasi_view!`.
 pub trait HasMessaging: Send {
     /// Borrow the `wasi:messaging` backend context.
     fn messaging_ctx(&mut self) -> &mut dyn WasiMessagingCtx;

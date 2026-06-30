@@ -44,12 +44,8 @@ impl Workspace {
         &self, f: impl FnOnce(&Dir) -> anyhow::Result<R> + Send + 'static,
     ) -> FutureResult<R> {
         let dir = Arc::clone(&self.dir);
-        async move {
-            spawn_blocking(move || f(&dir))
-                .await
-                .context("workspace read task failed")?
-        }
-        .boxed()
+        async move { spawn_blocking(move || f(&dir)).await.context("workspace read task failed")? }
+            .boxed()
     }
 
     pub fn read(&self, path: String) -> FutureResult<Vec<u8>> {

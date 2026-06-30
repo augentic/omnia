@@ -133,7 +133,7 @@ pub struct QueryOpts {
 ///
 /// The blanket [`WasiJsonDbView`] impl below turns this accessor into the
 /// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl via [`omnia_wasi_view!`].
+/// the bundle-side impl via `omnia_wasi_view!`.
 pub trait HasJsonDb: Send {
     /// Borrow the `wasi:jsondb` backend context.
     fn jsondb_ctx(&mut self) -> &mut dyn WasiJsonDbCtx;

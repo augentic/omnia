@@ -19,7 +19,7 @@ use wrpc_wasmtime::WrpcView;
 use crate::dispatch::{DispatchHandle, FirstArgSelector, GuestSelector};
 use crate::mount::{MountRegistry, ResolvedPreopen};
 use crate::registry::{Registry, RegistryBuilder, Routes};
-use crate::{Host, RuntimeOptions, Telemetry};
+use crate::{Host, RuntimeOptions, Server, Telemetry};
 
 /// Selects where a runtime's guests come from, then [`build`]s a [`Deployment`]
 /// ready for host linking.
@@ -235,8 +235,6 @@ pub struct Deployment<T: WasiView + 'static> {
     // Whether this deployment runs a one-shot `wasi:cli` command.
     command: bool,
 }
-
-use crate::Server;
 
 impl<T: WasiView> Deployment<T> {
     /// Link a WASI host's interfaces into the shared Linker.

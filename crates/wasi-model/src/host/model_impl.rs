@@ -18,7 +18,7 @@ use wasmtime::component::{Accessor, StreamReader, Val};
 use crate::host::generated::augentic::model::completion::{
     Host, HostWithStore, Prompt, StreamEvent,
 };
-use crate::host::types::{Answer, PreparedPrompt, DirEntry, Reference, VerifyReport};
+use crate::host::types::{Answer, DirEntry, PreparedPrompt, Reference, VerifyReport};
 use crate::host::workspace::{self, Workspace};
 use crate::host::{Error, FutureResult, ToolHost, WasiModel, WasiModelCtxView};
 

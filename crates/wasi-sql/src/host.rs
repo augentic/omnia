@@ -94,7 +94,7 @@ pub trait WasiSqlCtx: Debug + Send + Sync + 'static {
 ///
 /// The blanket [`WasiSqlView`] impl below turns this accessor into the
 /// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl via [`omnia_wasi_view!`].
+/// the bundle-side impl via `omnia_wasi_view!`.
 pub trait HasSql: Send {
     /// Borrow the `wasi:sql` backend context.
     fn sql_ctx(&mut self) -> &mut dyn WasiSqlCtx;

@@ -167,7 +167,7 @@ pub trait WasiBlobstoreCtx: Debug + Send + Sync + 'static {
 ///
 /// The blanket [`WasiBlobstoreView`] impl below turns this accessor into the
 /// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl via [`omnia_wasi_view!`].
+/// the bundle-side impl via `omnia_wasi_view!`.
 pub trait HasBlobstore: Send {
     /// Borrow the `wasi:blobstore` backend context.
     fn blobstore_ctx(&mut self) -> &mut dyn WasiBlobstoreCtx;

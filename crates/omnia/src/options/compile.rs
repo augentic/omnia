@@ -2,7 +2,7 @@
 
 use std::fs::{self, File};
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
 use wasmtime::component::Component;
@@ -23,7 +23,7 @@ use crate::RuntimeOptions;
 /// Returns an error if the wasm component cannot be loaded from the specified
 /// path, cannot be compiled, or cannot be serialized to the specified output
 /// directory.
-pub fn compile(wasm: &PathBuf, output: Option<PathBuf>) -> Result<()> {
+pub fn compile(wasm: &Path, output: Option<PathBuf>) -> Result<()> {
     let Some(file_name) = wasm.file_name() else {
         return Err(anyhow!("invalid file name"));
     };
@@ -40,9 +40,8 @@ pub fn compile(wasm: &PathBuf, output: Option<PathBuf>) -> Result<()> {
     if let Some(mut out_path) = output {
         // output to file
         if out_path.is_dir() {
-            let file_name = file_name.to_string_lossy().to_string();
-            let file_name = file_name.replace(".wasm", ".bin");
             out_path.push(file_name);
+            out_path.set_extension("bin");
         }
 
         if let Some(dir) = out_path.parent()
@@ -60,5 +59,3 @@ pub fn compile(wasm: &PathBuf, output: Option<PathBuf>) -> Result<()> {
 
     Ok(())
 }
-
-//

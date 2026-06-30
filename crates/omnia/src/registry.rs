@@ -32,7 +32,7 @@ use crate::dispatch::{self, DispatchHandle};
 /// project their own scheme onto it (`source:typescript`, ...). Omnia never
 /// parses it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct GuestId(pub Arc<str>);
+pub struct GuestId(Arc<str>);
 
 impl GuestId {
     /// Returns the identity as a string slice.
@@ -125,6 +125,8 @@ pub struct RegistryBuilder<T: WasiView + 'static> {
 }
 
 impl<T: WasiView + 'static> RegistryBuilder<T> {
+    /// Begin assembling a [`Registry`] from a linked deployment's parts.
+    #[must_use]
     pub const fn new(
         engine: Engine, linker: Linker<T>, options: RuntimeOptions, loaded: Vec<LoadedGuest>,
         routes: Routes, dispatch: Arc<DispatchHandle>,

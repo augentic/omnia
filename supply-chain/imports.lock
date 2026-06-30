@@ -411,6 +411,13 @@ user-id = 2915
 user-login = "Amanieu"
 user-name = "Amanieu d'Antras"
 
+[[publisher.paste]]
+version = "1.0.15"
+when = "2024-05-07"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
+
 [[publisher.potential_utf]]
 version = "0.1.5"
 when = "2026-04-01"

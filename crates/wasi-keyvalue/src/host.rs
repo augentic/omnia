@@ -106,7 +106,7 @@ impl From<ResourceTableError> for Error {
 ///
 /// The blanket [`WasiKeyValueView`] impl below turns this accessor into the
 /// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl via [`omnia_wasi_view!`].
+/// the bundle-side impl via `omnia_wasi_view!`.
 pub trait HasKeyValue: Send {
     /// Borrow the `wasi:keyvalue` backend context.
     fn keyvalue_ctx(&mut self) -> &mut dyn WasiKeyValueCtx;

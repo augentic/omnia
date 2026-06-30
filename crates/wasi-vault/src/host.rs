@@ -103,7 +103,7 @@ impl From<ResourceTableError> for Error {
 ///
 /// The blanket [`WasiVaultView`] impl below turns this accessor into the
 /// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl via [`omnia_wasi_view!`].
+/// the bundle-side impl via `omnia_wasi_view!`.
 pub trait HasVault: Send {
     /// Borrow the `wasi:vault` backend context.
     fn vault_ctx(&mut self) -> &mut dyn WasiVaultCtx;
