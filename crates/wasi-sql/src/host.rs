@@ -36,7 +36,7 @@ use std::sync::Arc;
 
 pub use omnia::FutureResult;
 use omnia::{Host, Server};
-use wasmtime::component::{HasData, Linker, ResourceTable};
+use wasmtime::component::{HasData, Linker};
 
 use self::generated::wasi::sql::{readwrite, types};
 pub use crate::host::default_impl::SqlDefault;
@@ -63,24 +63,6 @@ where
 
 impl<B> Server<B> for WasiSql {}
 
-/// A trait which provides internal WASI SQL state.
-///
-/// This is implemented by the `T` in `Linker<T>` — a single type shared across
-/// all WASI components for the runtime build.
-pub trait WasiSqlView: Send {
-    /// Return a [`WasiSqlCtxView`] from mutable reference to self.
-    fn sql(&mut self) -> WasiSqlCtxView<'_>;
-}
-
-/// View into [`WasiSqlCtx`] implementation and [`ResourceTable`].
-pub struct WasiSqlCtxView<'a> {
-    /// Mutable reference to the WASI SQL context.
-    pub ctx: &'a mut dyn WasiSqlCtx,
-
-    /// Mutable reference to table used to manage resources.
-    pub table: &'a mut ResourceTable,
-}
-
 /// A trait which provides internal WASI SQL context.
 ///
 /// This is implemented by the resource-specific provider of SQL
@@ -90,21 +72,4 @@ pub trait WasiSqlCtx: Debug + Send + Sync + 'static {
     fn open(&self, name: String) -> FutureResult<Arc<dyn Connection>>;
 }
 
-/// A backend bundle that can yield the `wasi:sql` backend for a store.
-///
-/// The blanket [`WasiSqlView`] impl below turns this accessor into the
-/// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl.
-pub trait HasSql: Send {
-    /// Borrow the `wasi:sql` backend context.
-    fn sql_ctx(&mut self) -> &mut dyn WasiSqlCtx;
-}
-
-impl<B: HasSql + Send + 'static> WasiSqlView for omnia::StoreCtx<B> {
-    fn sql(&mut self) -> WasiSqlCtxView<'_> {
-        WasiSqlCtxView {
-            ctx: self.backends.sql_ctx(),
-            table: &mut self.base.table,
-        }
-    }
-}
+omnia::wasi_view!(Sql);

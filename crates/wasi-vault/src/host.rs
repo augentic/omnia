@@ -31,7 +31,7 @@ use std::sync::Arc;
 
 pub use omnia::FutureResult;
 use omnia::{Host, Server};
-use wasmtime::component::{HasData, Linker, ResourceTable, ResourceTableError};
+use wasmtime::component::{HasData, Linker, ResourceTableError};
 
 use self::generated::omnia::vault::vault;
 pub use crate::host::default_impl::VaultDefault;
@@ -60,24 +60,6 @@ where
 
 impl<B> Server<B> for WasiVault {}
 
-/// A trait which provides internal WASI Vault state.
-///
-/// This is implemented by the `T` in `Linker<T>` — a single type shared across
-/// all WASI components for the runtime build.
-pub trait WasiVaultView: Send {
-    /// Return a [`WasiVaultCtxView`] from mutable reference to self.
-    fn vault(&mut self) -> WasiVaultCtxView<'_>;
-}
-
-/// View into [`WasiVaultCtx`] implementation and [`ResourceTable`].
-pub struct WasiVaultCtxView<'a> {
-    /// Mutable reference to the WASI Vault context.
-    pub ctx: &'a mut dyn WasiVaultCtx,
-
-    /// Mutable reference to table used to manage resources.
-    pub table: &'a mut ResourceTable,
-}
-
 /// A trait which provides internal WASI Vault context.
 ///
 /// This is implemented by the resource-specific provider of Vault
@@ -99,21 +81,4 @@ impl From<ResourceTableError> for Error {
     }
 }
 
-/// A backend bundle that can yield the `wasi:vault` backend for a store.
-///
-/// The blanket [`WasiVaultView`] impl below turns this accessor into the
-/// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl.
-pub trait HasVault: Send {
-    /// Borrow the `wasi:vault` backend context.
-    fn vault_ctx(&mut self) -> &mut dyn WasiVaultCtx;
-}
-
-impl<B: HasVault + Send + 'static> WasiVaultView for omnia::StoreCtx<B> {
-    fn vault(&mut self) -> WasiVaultCtxView<'_> {
-        WasiVaultCtxView {
-            ctx: self.backends.vault_ctx(),
-            table: &mut self.base.table,
-        }
-    }
-}
+omnia::wasi_view!(Vault);

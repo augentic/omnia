@@ -40,7 +40,7 @@ use std::sync::Arc;
 pub use omnia::FutureResult;
 use omnia::{Host, Runtime, Server, StoreCtx};
 use wasmtime::component::{HasData, Linker};
-use wasmtime_wasi::{ResourceTable, ResourceTableError};
+use wasmtime_wasi::ResourceTableError;
 
 pub use self::default_impl::MessagingDefault;
 pub use self::generated::MessagingRequestReply;
@@ -80,24 +80,6 @@ where
     async fn run(&self, state: &Runtime<B>) -> anyhow::Result<()> {
         server::run(state).await
     }
-}
-
-/// A trait which provides internal WASI Messaging state.
-///
-/// This is implemented by the `T` in `Linker<T>` — a single type shared across
-/// all WASI components for the runtime build.
-pub trait WasiMessagingView: Send {
-    /// Return a [`WasiMessagingCtxView`] from mutable reference to self.
-    fn messaging(&mut self) -> WasiMessagingCtxView<'_>;
-}
-
-/// View into [`WasiMessagingCtx`] implementation and [`ResourceTable`].
-pub struct WasiMessagingCtxView<'a> {
-    /// Mutable reference to the WASI Messaging context.
-    pub ctx: &'a mut dyn WasiMessagingCtx,
-
-    /// Mutable reference to table used to manage resources.
-    pub table: &'a mut ResourceTable,
 }
 
 /// A trait which provides internal WASI Messaging context.
@@ -183,21 +165,4 @@ impl From<wasmtime::Error> for Error {
     }
 }
 
-/// A backend bundle that can yield the `wasi:messaging` backend for a store.
-///
-/// The blanket [`WasiMessagingView`] impl below turns this accessor into the
-/// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl.
-pub trait HasMessaging: Send {
-    /// Borrow the `wasi:messaging` backend context.
-    fn messaging_ctx(&mut self) -> &mut dyn WasiMessagingCtx;
-}
-
-impl<B: HasMessaging + Send + 'static> WasiMessagingView for omnia::StoreCtx<B> {
-    fn messaging(&mut self) -> WasiMessagingCtxView<'_> {
-        WasiMessagingCtxView {
-            ctx: self.backends.messaging_ctx(),
-            table: &mut self.base.table,
-        }
-    }
-}
+omnia::wasi_view!(Messaging);

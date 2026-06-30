@@ -52,7 +52,7 @@ use std::fmt::Debug;
 
 pub use omnia::FutureResult;
 use omnia::{Host, Server};
-use wasmtime::component::{HasData, Linker, ResourceTable};
+use wasmtime::component::{HasData, Linker};
 
 use self::generated::wasi::jsondb::{store, types};
 pub use crate::host::default_impl::JsonDbDefault;
@@ -80,21 +80,6 @@ where
 }
 
 impl<B> Server<B> for WasiJsonDb {}
-
-/// Mutable view into JSON DB state for the linker.
-pub trait WasiJsonDbView: Send {
-    /// JSON DB context and resource table.
-    fn jsondb(&mut self) -> WasiJsonDbCtxView<'_>;
-}
-
-/// View combining [`WasiJsonDbCtx`] and the component [`ResourceTable`].
-pub struct WasiJsonDbCtxView<'a> {
-    /// Backend context.
-    pub ctx: &'a mut dyn WasiJsonDbCtx,
-
-    /// Resource table for `filter` handles.
-    pub table: &'a mut ResourceTable,
-}
 
 /// Backend operations for JSON document storage.
 pub trait WasiJsonDbCtx: Debug + Send + Sync + 'static {
@@ -129,21 +114,4 @@ pub struct QueryOpts {
     pub continuation: Option<String>,
 }
 
-/// A backend bundle that can yield the `wasi:jsondb` backend for a store.
-///
-/// The blanket [`WasiJsonDbView`] impl below turns this accessor into the
-/// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl.
-pub trait HasJsonDb: Send {
-    /// Borrow the `wasi:jsondb` backend context.
-    fn jsondb_ctx(&mut self) -> &mut dyn WasiJsonDbCtx;
-}
-
-impl<B: HasJsonDb + Send + 'static> WasiJsonDbView for omnia::StoreCtx<B> {
-    fn jsondb(&mut self) -> WasiJsonDbCtxView<'_> {
-        WasiJsonDbCtxView {
-            ctx: self.backends.jsondb_ctx(),
-            table: &mut self.base.table,
-        }
-    }
-}
+omnia::wasi_view!(JsonDb);

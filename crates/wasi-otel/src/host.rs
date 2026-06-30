@@ -29,7 +29,7 @@ use std::fmt::Debug;
 use omnia::{FutureResult, Host, Server};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
-use wasmtime::component::{HasData, Linker, ResourceTable};
+use wasmtime::component::{HasData, Linker};
 
 pub use self::default_impl::OtelDefault;
 use self::generated::omnia::otel::{metrics, resource, tracing, types};
@@ -56,24 +56,6 @@ where
 
 impl<B> Server<B> for WasiOtel {}
 
-/// A trait which provides internal WASI OpenTelemetry state.
-///
-/// This is implemented by the `T` in `Linker<T>` — a single type shared across
-/// all WASI components for the runtime build.
-pub trait WasiOtelView: Send {
-    /// Return a [`WasiOtelCtxView`] from mutable reference to self.
-    fn otel(&mut self) -> WasiOtelCtxView<'_>;
-}
-
-/// View into [`WasiOtelCtx`] implementation and [`ResourceTable`].
-pub struct WasiOtelCtxView<'a> {
-    /// Mutable reference to the WASI OpenTelemetry context.
-    pub ctx: &'a mut dyn WasiOtelCtx,
-
-    /// Mutable reference to table used to manage resources.
-    pub table: &'a mut ResourceTable,
-}
-
 /// A trait which provides internal WASI OpenTelemetry context.
 ///
 /// This is implemented by the resource-specific provider of OpenTelemetry
@@ -92,21 +74,4 @@ pub trait WasiOtelCtx: Debug + Send + Sync + 'static {
     fn export_metrics(&self, request: ExportMetricsServiceRequest) -> FutureResult<()>;
 }
 
-/// A backend bundle that can yield the `wasi:otel` backend for a store.
-///
-/// The blanket [`WasiOtelView`] impl below turns this accessor into the
-/// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl.
-pub trait HasOtel: Send {
-    /// Borrow the `wasi:otel` backend context.
-    fn otel_ctx(&mut self) -> &mut dyn WasiOtelCtx;
-}
-
-impl<B: HasOtel + Send + 'static> WasiOtelView for omnia::StoreCtx<B> {
-    fn otel(&mut self) -> WasiOtelCtxView<'_> {
-        WasiOtelCtxView {
-            ctx: self.backends.otel_ctx(),
-            table: &mut self.base.table,
-        }
-    }
-}
+omnia::wasi_view!(Otel);

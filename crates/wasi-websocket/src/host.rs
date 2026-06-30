@@ -38,7 +38,7 @@ use std::sync::Arc;
 
 pub use omnia::FutureResult;
 use omnia::{Host, Runtime, Server, StoreCtx};
-use wasmtime::component::{HasData, Linker, ResourceTable, ResourceTableError};
+use wasmtime::component::{HasData, Linker, ResourceTableError};
 
 pub use self::default_impl::WebSocketDefault;
 pub use self::generated::Duplex;
@@ -79,24 +79,6 @@ where
     }
 }
 
-/// A trait which provides internal WASI WebSocket state.
-///
-/// This is implemented by the `T` in `Linker<T>` — a single type shared across
-/// all WASI components for the runtime build.
-pub trait WasiWebSocketView: Send {
-    /// Return a [`WasiWebSocketCtxView`] from mutable reference to self.
-    fn websocket(&mut self) -> WasiWebSocketCtxView<'_>;
-}
-
-/// View into [`WasiWebSocketCtx`] implementation and [`ResourceTable`].
-pub struct WasiWebSocketCtxView<'a> {
-    /// Mutable reference to the WASI WebSocket context.
-    pub ctx: &'a mut dyn WasiWebSocketCtx,
-
-    /// Mutable reference to table used to manage resources.
-    pub table: &'a mut ResourceTable,
-}
-
 /// A trait which provides internal WASI WebSocket context.
 ///
 /// This is implemented by the resource-specific provider of WebSocket
@@ -135,21 +117,4 @@ impl From<wasmtime::Error> for Error {
     }
 }
 
-/// A backend bundle that can yield the `omnia:websocket` backend for a store.
-///
-/// The blanket [`WasiWebSocketView`] impl below turns this accessor into the
-/// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl.
-pub trait HasWebSocket: Send {
-    /// Borrow the `omnia:websocket` backend context.
-    fn websocket_ctx(&mut self) -> &mut dyn WasiWebSocketCtx;
-}
-
-impl<B: HasWebSocket + Send + 'static> WasiWebSocketView for omnia::StoreCtx<B> {
-    fn websocket(&mut self) -> WasiWebSocketCtxView<'_> {
-        WasiWebSocketCtxView {
-            ctx: self.backends.websocket_ctx(),
-            table: &mut self.base.table,
-        }
-    }
-}
+omnia::wasi_view!(WebSocket);

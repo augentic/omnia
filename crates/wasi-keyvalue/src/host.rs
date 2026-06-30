@@ -32,7 +32,7 @@ use std::sync::Arc;
 
 pub use omnia::FutureResult;
 use omnia::{Host, Server};
-use wasmtime::component::{HasData, Linker, ResourceTable, ResourceTableError};
+use wasmtime::component::{HasData, Linker, ResourceTableError};
 
 pub use self::default_impl::KeyValueDefault;
 use self::generated::wasi::keyvalue::store::Error;
@@ -63,24 +63,6 @@ where
 
 impl<B> Server<B> for WasiKeyValue {}
 
-/// A trait which provides internal WASI Key-Value state.
-///
-/// This is implemented by the `T` in `Linker<T>` — a single type shared across
-/// all WASI components for the runtime build.
-pub trait WasiKeyValueView: Send {
-    /// Return a [`WasiKeyValueCtxView`] from mutable reference to self.
-    fn keyvalue(&mut self) -> WasiKeyValueCtxView<'_>;
-}
-
-/// View into [`WasiKeyValueCtx`] implementation and [`ResourceTable`].
-pub struct WasiKeyValueCtxView<'a> {
-    /// Mutable reference to the WASI Key-Value context.
-    pub ctx: &'a mut dyn WasiKeyValueCtx,
-
-    /// Mutable reference to table used to manage resources.
-    pub table: &'a mut ResourceTable,
-}
-
 /// A trait which provides internal WASI Key-Value context.
 ///
 /// This is implemented by the resource-specific provider of Key-Value
@@ -102,21 +84,4 @@ impl From<ResourceTableError> for Error {
     }
 }
 
-/// A backend bundle that can yield the `wasi:keyvalue` backend for a store.
-///
-/// The blanket [`WasiKeyValueView`] impl below turns this accessor into the
-/// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl.
-pub trait HasKeyValue: Send {
-    /// Borrow the `wasi:keyvalue` backend context.
-    fn keyvalue_ctx(&mut self) -> &mut dyn WasiKeyValueCtx;
-}
-
-impl<B: HasKeyValue + Send + 'static> WasiKeyValueView for omnia::StoreCtx<B> {
-    fn keyvalue(&mut self) -> WasiKeyValueCtxView<'_> {
-        WasiKeyValueCtxView {
-            ctx: self.backends.keyvalue_ctx(),
-            table: &mut self.base.table,
-        }
-    }
-}
+omnia::wasi_view!(KeyValue);

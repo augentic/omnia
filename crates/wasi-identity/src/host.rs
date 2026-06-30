@@ -31,7 +31,7 @@ use std::sync::Arc;
 
 pub use omnia::FutureResult;
 use omnia::{Host, Server};
-use wasmtime::component::{HasData, Linker, ResourceTable, ResourceTableError};
+use wasmtime::component::{HasData, Linker, ResourceTableError};
 
 pub use self::default_impl::IdentityDefault;
 use self::generated::omnia::identity::credentials;
@@ -60,24 +60,6 @@ where
 
 impl<B> Server<B> for WasiIdentity {}
 
-/// A trait which provides internal WASI Identity state.
-///
-/// This is implemented by the `T` in `Linker<T>` — a single type shared across
-/// all WASI components for the runtime build.
-pub trait WasiIdentityView: Send {
-    /// Return a [`WasiIdentityCtxView`] from mutable reference to self.
-    fn identity(&mut self) -> WasiIdentityCtxView<'_>;
-}
-
-/// View into [`WasiIdentityCtx`] implementation and [`ResourceTable`].
-pub struct WasiIdentityCtxView<'a> {
-    /// Mutable reference to the WASI Identity context.
-    pub ctx: &'a mut dyn WasiIdentityCtx,
-
-    /// Mutable reference to table used to manage resources.
-    pub table: &'a mut ResourceTable,
-}
-
 /// A trait which provides internal WASI Identity context.
 ///
 /// This is implemented by the resource-specific provider of Identity
@@ -99,21 +81,4 @@ impl From<ResourceTableError> for Error {
     }
 }
 
-/// A backend bundle that can yield the `wasi:identity` backend for a store.
-///
-/// The blanket [`WasiIdentityView`] impl below turns this accessor into the
-/// linker-facing view on `omnia::StoreCtx<B>`; the `runtime!` macro generates
-/// the bundle-side impl.
-pub trait HasIdentity: Send {
-    /// Borrow the `wasi:identity` backend context.
-    fn identity_ctx(&mut self) -> &mut dyn WasiIdentityCtx;
-}
-
-impl<B: HasIdentity + Send + 'static> WasiIdentityView for omnia::StoreCtx<B> {
-    fn identity(&mut self) -> WasiIdentityCtxView<'_> {
-        WasiIdentityCtxView {
-            ctx: self.backends.identity_ctx(),
-            table: &mut self.base.table,
-        }
-    }
-}
+omnia::wasi_view!(Identity);

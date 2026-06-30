@@ -42,7 +42,7 @@ use std::sync::Arc;
 
 pub use omnia::FutureResult;
 use omnia::{HasDispatcher, HasMounts, Host, Server};
-use wasmtime::component::{HasData, Linker, ResourceTable};
+use wasmtime::component::{HasData, Linker};
 
 pub use self::default_impl::{ConnectOptions, ModelDefault};
 use self::generated::augentic::model::completion;
@@ -73,22 +73,6 @@ where
 }
 
 impl<B> Server<B> for WasiModel {}
-
-/// A trait which provides internal WASI Model state. Implemented by the `T` in
-/// `Linker<T>` during the runtime build.
-pub trait WasiModelView: Send {
-    /// Return a [`WasiModelCtxView`] from a mutable reference to self.
-    fn model(&mut self) -> WasiModelCtxView<'_>;
-}
-
-/// View into a [`WasiModelCtx`] implementation and the [`ResourceTable`].
-pub struct WasiModelCtxView<'a> {
-    /// WASI Model context.
-    pub ctx: &'a mut dyn WasiModelCtx,
-
-    /// Resource table.
-    pub table: &'a mut ResourceTable,
-}
 
 /// The backend trait — the one place a provider's logic lives.
 pub trait WasiModelCtx: Debug + Send + Sync + 'static {
@@ -139,17 +123,4 @@ impl From<anyhow::Error> for Error {
     }
 }
 
-/// A trait which provides internal WASI Model context.
-pub trait HasModel: Send {
-    /// Borrow the `wasi-model` backend context.
-    fn model_ctx(&mut self) -> &mut dyn WasiModelCtx;
-}
-
-impl<B: HasModel + Send + 'static> WasiModelView for omnia::StoreCtx<B> {
-    fn model(&mut self) -> WasiModelCtxView<'_> {
-        WasiModelCtxView {
-            ctx: self.backends.model_ctx(),
-            table: &mut self.base.table,
-        }
-    }
-}
+omnia::wasi_view!(Model);
