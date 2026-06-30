@@ -1,11 +1,6 @@
 //! `ModelDefault` — the crate's default, deterministic (replay) backend (§5.4).
 //!
-//! The direct `KeyValueDefault` analogue: with no API key and no spawned
-//! process, it serves the recorded answer for an equivalent prompt from a
-//! directory of JSON fixtures (`OMNIA_REPLAY_DIR`), so one vertical operation runs
-//! deterministically in CI without a live model. A prompt with no matching
-//! fixture fails loud (`error::backend("no replay fixture")`) — it never falls
-//! through to a live call.
+//! It serves a pre-recorded answer for a given prompt.
 
 use std::fmt::Debug;
 use std::path::PathBuf;
