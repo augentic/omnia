@@ -3,12 +3,13 @@
 use serde_json::Value;
 
 use super::Error;
-use super::types::{Format, Message, PreparedPrompt, Prompt};
+use super::generated::augentic::model::completion as genc;
+use super::types::PreparedPrompt;
 
 const TOOL_NAMES: &[&str] = &["resolve", "read", "list", "write", "verify"];
 
 /// Pre-check every prompt before calling a backend.
-pub fn check_prompt(prompt: &Prompt) -> Result<(), Error> {
+pub fn check_prompt(prompt: &genc::Prompt) -> Result<(), Error> {
     if let Some(tool) = prompt.tools.iter().find(|t| TOOL_NAMES.contains(&t.name.as_str())) {
         return Err(Error::Backend(format!("reserved tool name: {}", tool.name)));
     }
@@ -23,32 +24,38 @@ pub fn check_prompt(prompt: &Prompt) -> Result<(), Error> {
 }
 
 // Validate a backend answer against `response-format.kind`.
-pub fn check_answer(value: &Value, kind: Format) -> Result<(), Error> {
+pub fn check_answer(value: &Value, kind: genc::ResponseFormatKind) -> Result<(), Error> {
     match kind {
-        Format::Text => {
+        genc::ResponseFormatKind::Text => {
             if !value.is_string() {
                 return Err(Error::InvalidAnswer("answer is not a JSON string".to_owned()));
             }
             Ok(())
         }
-        Format::JsonObject => {
+        genc::ResponseFormatKind::JsonObject => {
             if !value.is_object() {
                 return Err(Error::InvalidAnswer("answer is not a JSON object".to_owned()));
             }
             Ok(())
         }
-        Format::JsonSchema => {
+        genc::ResponseFormatKind::JsonSchema => {
             // TODO: validate against `json-schema.schema`.
             Ok(())
         }
     }
 }
 
-// Create a PreparedPrompt from a Prompt.
-impl TryFrom<Prompt> for PreparedPrompt {
-    type Error = Error;
-
-    fn try_from(prompt: Prompt) -> Result<Self, Error> {
+impl PreparedPrompt {
+    /// Validate `prompt` and assemble its provider chat channels (§3.1.1).
+    ///
+    /// `workspace_lent` records whether a workspace borrow was lent for this
+    /// call; the host captures it before taking the borrow out of `grants`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Backend`] when the prompt is empty or declares a tool
+    /// whose name collides with a reserved host-injected tool.
+    pub fn assemble(prompt: genc::Prompt, workspace_lent: bool) -> Result<Self, Error> {
         // `messages` wins over `sections`. `prompt.system` is always applied.
         if !prompt.messages.is_empty() {
             let system = prompt.system.clone().filter(|v| !v.is_empty());
@@ -56,6 +63,7 @@ impl TryFrom<Prompt> for PreparedPrompt {
 
             return Ok(Self {
                 prompt,
+                workspace_lent,
                 system,
                 messages,
             });
@@ -106,13 +114,14 @@ impl TryFrom<Prompt> for PreparedPrompt {
         }
 
         let system = join_non_empty(&system_parts);
-        let messages = vec![Message {
+        let messages = vec![genc::Message {
             role: "user".to_owned(),
             content: join_non_empty(&user_parts).unwrap_or_default(),
         }];
 
         Ok(Self {
             prompt,
+            workspace_lent,
             system,
             messages,
         })
@@ -128,37 +137,33 @@ fn join_non_empty(parts: &[String]) -> Option<String> {
 mod tests {
     use serde_json::json;
 
-    use super::{Error, check_answer, check_prompt};
-    use crate::host::types::{
-        Example, Format, FunctionTool, Message, PreparedPrompt, Prompt, ResponseFormat, Sections,
-        ToolGrants, Variable,
-    };
+    use super::{Error, PreparedPrompt, check_answer, check_prompt, genc};
 
     #[test]
     fn json_string() {
-        check_answer(&json!("hi"), Format::Text).unwrap();
-        let err = check_answer(&json!({ "a": 1 }), Format::Text).unwrap_err();
+        check_answer(&json!("hi"), genc::ResponseFormatKind::Text).unwrap();
+        let err = check_answer(&json!({ "a": 1 }), genc::ResponseFormatKind::Text).unwrap_err();
         assert!(matches!(err, Error::InvalidAnswer(_)));
     }
 
     #[test]
     fn json_object() {
-        check_answer(&json!({ "verdict": "pass" }), Format::JsonObject).unwrap();
-        let err = check_answer(&json!("nope"), Format::JsonObject).unwrap_err();
+        check_answer(&json!({ "verdict": "pass" }), genc::ResponseFormatKind::JsonObject).unwrap();
+        let err = check_answer(&json!("nope"), genc::ResponseFormatKind::JsonObject).unwrap_err();
         assert!(matches!(err, Error::InvalidAnswer(_)));
     }
 
     #[test]
     fn json_schema() {
         // Any well-formed JSON value passes the Phase 1 (parse-only) schema gate.
-        check_answer(&json!({ "x": [1, 2, 3] }), Format::JsonSchema).unwrap();
-        check_answer(&json!(42), Format::JsonSchema).unwrap();
+        check_answer(&json!({ "x": [1, 2, 3] }), genc::ResponseFormatKind::JsonSchema).unwrap();
+        check_answer(&json!(42), genc::ResponseFormatKind::JsonSchema).unwrap();
     }
 
     #[test]
     fn reserved_tool_name() {
         let mut prompt = prompt_from(vec![message("user", "hi")], None);
-        prompt.tools.push(FunctionTool {
+        prompt.tools.push(genc::FunctionTool {
             name: "read".to_owned(),
             description: "shadow a host-injected tool".to_owned(),
             parameters: "{}".to_owned(),
@@ -187,8 +192,10 @@ mod tests {
     fn explicit_messages() {
         // Precedence rule 1: when `messages` is non-empty, `sections` is ignored.
         let prompt = prompt_from(vec![message("user", "explicit")], Some(sections("ignored")));
-        let assembled = PreparedPrompt::try_from(prompt).expect("assemble");
-        assert_eq!(assembled.messages, vec![message("user", "explicit")]);
+        let assembled = PreparedPrompt::assemble(prompt, false).expect("assemble");
+        assert_eq!(assembled.messages.len(), 1);
+        assert_eq!(assembled.messages[0].role, "user");
+        assert_eq!(assembled.messages[0].content, "explicit");
     }
 
     #[test]
@@ -196,9 +203,10 @@ mod tests {
         // Precedence rule 2: `prompt.system` applies whether turns or sections.
         let mut prompt = prompt_from(vec![message("user", "hi")], None);
         prompt.system = Some("be terse".to_owned());
-        let assembled = PreparedPrompt::try_from(prompt).expect("assemble");
+        let assembled = PreparedPrompt::assemble(prompt, false).expect("assemble");
         assert_eq!(assembled.system.as_deref(), Some("be terse"));
-        assert_eq!(assembled.messages, vec![message("user", "hi")]);
+        assert_eq!(assembled.messages.len(), 1);
+        assert_eq!(assembled.messages[0].content, "hi");
     }
 
     #[test]
@@ -206,22 +214,22 @@ mod tests {
         // Precedence rule 3: assemble from sections; variables substitute into parts.
         let prompt = prompt_from(
             vec![],
-            Some(Sections {
+            Some(genc::Sections {
                 role: Some("a {language} reviewer".to_owned()),
                 task: "review the {language} code".to_owned(),
                 context: None,
                 constraints: vec!["be {language}-idiomatic".to_owned()],
-                examples: vec![Example {
+                examples: vec![genc::Example {
                     input: "in".to_owned(),
                     output: "out".to_owned(),
                 }],
-                variables: vec![Variable {
+                variables: vec![genc::Variable {
                     name: "language".to_owned(),
                     value: "Rust".to_owned(),
                 }],
             }),
         );
-        let assembled = PreparedPrompt::try_from(prompt).expect("assemble");
+        let assembled = PreparedPrompt::assemble(prompt, false).expect("assemble");
         let system = assembled.system.expect("system channel");
         assert!(system.contains("a Rust reviewer"));
         assert!(system.contains("- be Rust-idiomatic"));
@@ -231,30 +239,30 @@ mod tests {
     }
 
     // Build a prompt with the given turns and sections, defaults elsewhere.
-    fn prompt_from(messages: Vec<Message>, sections: Option<Sections>) -> Prompt {
-        Prompt {
+    fn prompt_from(messages: Vec<genc::Message>, sections: Option<genc::Sections>) -> genc::Prompt {
+        genc::Prompt {
             model: None,
             system: None,
             messages,
             sections,
             generation: None,
-            response_format: ResponseFormat {
-                kind: Format::JsonObject,
+            response_format: genc::ResponseFormat {
+                kind: genc::ResponseFormatKind::JsonObject,
                 json_schema: None,
             },
             tools: vec![],
             tool_choice: None,
             metadata: vec![],
-            grants: ToolGrants {
+            grants: genc::ToolGrants {
                 references: None,
-                workspace_lent: false,
+                workspace: None,
                 verify: vec![],
             },
         }
     }
 
-    fn sections(task: &str) -> Sections {
-        Sections {
+    fn sections(task: &str) -> genc::Sections {
+        genc::Sections {
             role: None,
             task: task.to_owned(),
             context: None,
@@ -264,8 +272,8 @@ mod tests {
         }
     }
 
-    fn message(role: &str, content: &str) -> Message {
-        Message {
+    fn message(role: &str, content: &str) -> genc::Message {
+        genc::Message {
             role: role.to_owned(),
             content: content.to_owned(),
         }

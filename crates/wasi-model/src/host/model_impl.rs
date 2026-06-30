@@ -18,7 +18,7 @@ use wasmtime::component::{Accessor, StreamReader, Val};
 use super::gate::check_answer;
 use super::generated::augentic::model::completion as genc;
 use super::generated::augentic::model::completion::{Host, HostWithStore};
-use super::types::{PreparedPrompt, Prompt};
+use super::types::PreparedPrompt;
 use super::workspace::{self, Workspace};
 use super::{Error, FutureResult, ToolHost, WasiModel, WasiModelCtxView};
 use crate::host::types::{DirEntry, Reference, VerifyReport};
@@ -30,11 +30,11 @@ where
     async fn complete(
         accessor: &Accessor<T, Self>, mut prompt: genc::Prompt,
     ) -> Result<String, Error> {
+        // The lent `borrow<descriptor>` cannot survive the backend await, so the
+        // host takes it out here to resolve the workspace and keeps only the
+        // `workspace_lent` marker on the prepared prompt (used for keying).
         let lent = prompt.grants.workspace.take();
-        let mut owned: Prompt = prompt.into();
-        owned.grants.workspace_lent = lent.is_some();
-
-        let request = PreparedPrompt::try_from(owned)?;
+        let request = PreparedPrompt::assemble(prompt, lent.is_some())?;
 
         let kind = request.prompt.response_format.kind;
         let references = request.prompt.grants.references.clone();

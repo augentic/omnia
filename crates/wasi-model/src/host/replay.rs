@@ -10,9 +10,11 @@
 //! ## Keying (§5.4)
 //!
 //! The key is the *canonical JSON* of the prompt reduced to the fields that
-//! determine the model's output: `metadata` is dropped (tracing only) and the
-//! workspace handle is already a stable `workspace_lent` boolean marker on
-//! the owned [`Prompt`] (never a run-specific `borrow`). Canonical JSON sorts
+//! determine the model's output. The generated `prompt` cannot be serialized
+//! directly — its `grants.workspace` is a run-specific `borrow<descriptor>` — so
+//! [`reduced_value`] is a hand-written projection of the generated record:
+//! `metadata` is dropped (tracing only) and the workspace borrow is replaced by
+//! the stable `workspace_lent` boolean the host captured. Canonical JSON sorts
 //! object keys recursively and emits no insignificant whitespace, so a fixture
 //! recorded against one backend matches under another.
 //!
@@ -32,9 +34,10 @@ use std::sync::Arc;
 use anyhow::{Context as _, Result};
 use futures::FutureExt as _;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 
-use super::types::{BackendAnswer, PreparedPrompt, Prompt, Transcript};
+use super::generated::augentic::model::completion as genc;
+use super::types::{BackendAnswer, PreparedPrompt, Transcript};
 use super::{FutureResult, ToolHost, WasiModelCtx};
 
 /// A `(prompt + transcript) -> answer` row, the unit of replay (§5.4).
@@ -50,19 +53,102 @@ pub struct Fixture {
 }
 
 /// The canonical replay key for `prompt`: canonical JSON of the prompt reduced
-/// per §5.4 (drop `metadata`; the workspace marker is already a boolean).
+/// per §5.4 (drop `metadata`; reduce the workspace borrow to `workspace_lent`).
 #[must_use]
-pub fn canonical_key(prompt: &Prompt) -> String {
-    key_from_value(&reduced_value(prompt))
+pub fn canonical_key(prompt: &genc::Prompt, workspace_lent: bool) -> String {
+    key_from_value(&reduced_value(prompt, workspace_lent))
 }
 
-/// Reduce a prompt to its output-determining fields (drops `metadata`).
-fn reduced_value(prompt: &Prompt) -> Value {
-    let mut value = serde_json::to_value(prompt).unwrap_or(Value::Null);
-    if let Value::Object(map) = &mut value {
-        map.remove("metadata");
+/// Project the generated prompt onto its output-determining fields.
+///
+/// Hand-written because the generated `prompt` is not `Serialize` (it carries a
+/// `borrow<descriptor>`). The shape must stay byte-compatible with the committed
+/// fixtures: `snake_case` keys, kebab-case enum tags, `metadata` dropped, and the
+/// workspace borrow replaced by `workspace_lent`.
+fn reduced_value(prompt: &genc::Prompt, workspace_lent: bool) -> Value {
+    json!({
+        "model": prompt.model,
+        "system": prompt.system,
+        "messages": prompt.messages.iter().map(message_value).collect::<Vec<_>>(),
+        "sections": prompt.sections.as_ref().map(sections_value),
+        "generation": prompt.generation.as_ref().map(generation_value),
+        "response_format": response_format_value(&prompt.response_format),
+        "tools": prompt.tools.iter().map(tool_value).collect::<Vec<_>>(),
+        "tool_choice": prompt.tool_choice.as_ref().map(tool_choice_value),
+        "grants": {
+            "references": prompt.grants.references,
+            "workspace_lent": workspace_lent,
+            "verify": prompt.grants.verify,
+        },
+    })
+}
+
+fn message_value(message: &genc::Message) -> Value {
+    json!({ "role": message.role, "content": message.content })
+}
+
+fn sections_value(sections: &genc::Sections) -> Value {
+    json!({
+        "role": sections.role,
+        "task": sections.task,
+        "context": sections.context,
+        "constraints": sections.constraints,
+        "examples": sections
+            .examples
+            .iter()
+            .map(|example| json!({ "input": example.input, "output": example.output }))
+            .collect::<Vec<_>>(),
+        "variables": sections
+            .variables
+            .iter()
+            .map(|variable| json!({ "name": variable.name, "value": variable.value }))
+            .collect::<Vec<_>>(),
+    })
+}
+
+fn generation_value(generation: &genc::GenerationParams) -> Value {
+    json!({
+        "temperature": generation.temperature,
+        "top_p": generation.top_p,
+        "max_tokens": generation.max_tokens,
+        "stop": generation.stop,
+    })
+}
+
+fn response_format_value(format: &genc::ResponseFormat) -> Value {
+    json!({
+        "kind": kind_str(format.kind),
+        "json_schema": format.json_schema.as_ref().map(|spec| json!({
+            "name": spec.name,
+            "schema": spec.schema,
+            "strict": spec.strict,
+        })),
+    })
+}
+
+const fn kind_str(kind: genc::ResponseFormatKind) -> &'static str {
+    match kind {
+        genc::ResponseFormatKind::Text => "text",
+        genc::ResponseFormatKind::JsonObject => "json-object",
+        genc::ResponseFormatKind::JsonSchema => "json-schema",
     }
-    value
+}
+
+fn tool_value(tool: &genc::FunctionTool) -> Value {
+    json!({
+        "name": tool.name,
+        "description": tool.description,
+        "parameters": tool.parameters,
+    })
+}
+
+fn tool_choice_value(choice: &genc::ToolChoice) -> Value {
+    match choice {
+        genc::ToolChoice::Auto => json!("auto"),
+        genc::ToolChoice::None => json!("none"),
+        genc::ToolChoice::Required => json!("required"),
+        genc::ToolChoice::Named(name) => json!({ "named": name }),
+    }
 }
 
 /// The canonical string for an already-reduced value (sorted keys, compact).
@@ -96,14 +182,23 @@ fn fixture_filename(canonical: &str) -> String {
     format!("{:016x}.json", hasher.finish())
 }
 
-/// Write a fixture for `(prompt, answer)` into `dir`, returning its path.
+/// The canonicalized on-disk `key_prompt` value for `(prompt, workspace_lent)`.
+///
+/// Split out so [`Recording`] can reduce the prompt to its owned key value
+/// before handing the (non-`Clone`) request to the inner backend.
+#[must_use]
+pub fn key_prompt_value(prompt: &genc::Prompt, workspace_lent: bool) -> Value {
+    canonicalize(&reduced_value(prompt, workspace_lent))
+}
+
+/// Write a fixture `(key_prompt, answer)` into `dir`, returning its path. The
+/// `key_prompt` is the reduced, canonicalized value from [`key_prompt_value`].
 ///
 /// # Errors
 ///
 /// Returns an error if the directory cannot be created or the file written.
-pub fn write_fixture(dir: &Path, prompt: &Prompt, answer: &BackendAnswer) -> Result<PathBuf> {
+pub fn write_fixture(dir: &Path, key_prompt: Value, answer: &BackendAnswer) -> Result<PathBuf> {
     fs::create_dir_all(dir).with_context(|| format!("creating replay dir {}", dir.display()))?;
-    let key_prompt = canonicalize(&reduced_value(prompt));
     let canonical = serde_json::to_string(&key_prompt).unwrap_or_default();
     let fixture = Fixture {
         key_prompt,
@@ -157,8 +252,8 @@ impl FixtureStore {
 
     /// The replayed answer for an equivalent prompt, if one was recorded.
     #[must_use]
-    pub fn get(&self, prompt: &Prompt) -> Option<BackendAnswer> {
-        self.answers.get(&canonical_key(prompt)).cloned()
+    pub fn get(&self, prompt: &genc::Prompt, workspace_lent: bool) -> Option<BackendAnswer> {
+        self.answers.get(&canonical_key(prompt, workspace_lent)).cloned()
     }
 
     /// The number of loaded fixtures.
@@ -193,15 +288,16 @@ impl<C: WasiModelCtx> WasiModelCtx for Recording<C> {
     fn complete(
         &self, request: PreparedPrompt, tool_host: Arc<dyn ToolHost>,
     ) -> FutureResult<BackendAnswer> {
-        // Keep the prompt for the fixture key before the request is consumed.
-        let prompt = request.prompt.clone();
+        // The generated prompt is not `Clone`, so reduce it to the on-disk key
+        // value here, before the request is moved into the inner backend.
+        let key_prompt = key_prompt_value(&request.prompt, request.workspace_lent);
         let inner = self.inner.complete(request, tool_host);
         let dir = self.dir.clone();
         async move {
             let answer = inner.await?;
             // Recording is best-effort: a write failure is logged, not fatal —
             // it must never break a live completion.
-            if let Err(error) = write_fixture(&dir, &prompt, &answer) {
+            if let Err(error) = write_fixture(&dir, key_prompt, &answer) {
                 tracing::warn!(%error, "failed to write replay fixture");
             }
             Ok(answer)
@@ -214,15 +310,14 @@ impl<C: WasiModelCtx> WasiModelCtx for Recording<C> {
 mod tests {
     use serde_json::json;
 
-    use super::{canonical_key, canonicalize};
-    use crate::host::types::{Format, MetadataEntry, Prompt, ResponseFormat, Sections, ToolGrants};
+    use super::{canonical_key, canonicalize, genc};
 
-    fn prompt() -> Prompt {
-        Prompt {
+    fn prompt() -> genc::Prompt {
+        genc::Prompt {
             model: Some("any".to_owned()),
             system: None,
             messages: vec![],
-            sections: Some(Sections {
+            sections: Some(genc::Sections {
                 role: None,
                 task: "do it".to_owned(),
                 context: None,
@@ -231,16 +326,16 @@ mod tests {
                 variables: vec![],
             }),
             generation: None,
-            response_format: ResponseFormat {
-                kind: Format::JsonObject,
+            response_format: genc::ResponseFormat {
+                kind: genc::ResponseFormatKind::JsonObject,
                 json_schema: None,
             },
             tools: vec![],
             tool_choice: None,
             metadata: vec![],
-            grants: ToolGrants {
+            grants: genc::ToolGrants {
                 references: None,
-                workspace_lent: false,
+                workspace: None,
                 verify: vec![],
             },
         }
@@ -260,12 +355,12 @@ mod tests {
     fn key_ignores_metadata_only() {
         let base = prompt();
         let mut with_metadata = prompt();
-        with_metadata.metadata = vec![MetadataEntry {
+        with_metadata.metadata = vec![genc::MetadataEntry {
             key: "trace".to_owned(),
             value: "abc".to_owned(),
         }];
         // Tracing metadata must not change the replay key (§5.4).
-        assert_eq!(canonical_key(&base), canonical_key(&with_metadata));
+        assert_eq!(canonical_key(&base, false), canonical_key(&with_metadata, false));
     }
 
     #[test]
@@ -274,11 +369,17 @@ mod tests {
         let mut changed = prompt();
         changed.model = Some("different".to_owned());
         // A field that shapes output must change the key.
-        assert_ne!(canonical_key(&base), canonical_key(&changed));
+        assert_ne!(canonical_key(&base, false), canonical_key(&changed, false));
+    }
+
+    #[test]
+    fn key_tracks_workspace_lent() {
+        // The lent-workspace marker is part of the key (§5.4).
+        assert_ne!(canonical_key(&prompt(), false), canonical_key(&prompt(), true));
     }
 
     #[test]
     fn key_is_deterministic() {
-        assert_eq!(canonical_key(&prompt()), canonical_key(&prompt()));
+        assert_eq!(canonical_key(&prompt(), false), canonical_key(&prompt(), false));
     }
 }

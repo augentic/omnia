@@ -68,7 +68,7 @@ impl WasiModelCtx for ModelDefault {
     ) -> FutureResult<BackendAnswer> {
         // Replay ignores the tool host (no in-process loop); it matches the
         // typed prompt against the recorded fixtures.
-        let answer = self.store.get(&request.prompt);
+        let answer = self.store.get(&request.prompt, request.workspace_lent);
         async move { answer.ok_or_else(|| anyhow::anyhow!("no replay fixture")) }.boxed()
     }
 }
@@ -82,11 +82,9 @@ mod tests {
     use serde_json::json;
 
     use super::{ConnectOptions, ModelDefault};
-    use crate::host::replay::{Recording, write_fixture};
-    use crate::host::types::{
-        BackendAnswer, PreparedPrompt, DirEntry, Prompt, Reference, ResponseFormat,
-        Format, Sections, ToolGrants, VerifyReport,
-    };
+    use crate::host::generated::augentic::model::completion as genc;
+    use crate::host::replay::{Recording, key_prompt_value, write_fixture};
+    use crate::host::types::{BackendAnswer, DirEntry, PreparedPrompt, Reference, VerifyReport};
     use crate::host::{FutureResult, ToolHost, WasiModelCtx};
 
     /// A tool host stub for tests; replay never calls it.
@@ -116,12 +114,12 @@ mod tests {
     }
 
     /// A minimal prompt used across replay tests.
-    fn sample_prompt() -> Prompt {
-        Prompt {
+    fn sample_prompt() -> genc::Prompt {
+        genc::Prompt {
             model: None,
             system: None,
             messages: vec![],
-            sections: Some(Sections {
+            sections: Some(genc::Sections {
                 role: Some("a terse judge".to_owned()),
                 task: "decide pass or fail".to_owned(),
                 context: Some("the candidate looks fine".to_owned()),
@@ -130,16 +128,16 @@ mod tests {
                 variables: vec![],
             }),
             generation: None,
-            response_format: ResponseFormat {
-                kind: Format::JsonObject,
+            response_format: genc::ResponseFormat {
+                kind: genc::ResponseFormatKind::JsonObject,
                 json_schema: None,
             },
             tools: vec![],
             tool_choice: None,
             metadata: vec![],
-            grants: ToolGrants {
+            grants: genc::ToolGrants {
                 references: None,
-                workspace_lent: false,
+                workspace: None,
                 verify: vec![],
             },
         }
@@ -155,7 +153,7 @@ mod tests {
             value: json!({ "verdict": "pass" }),
             transcript: None,
         };
-        write_fixture(&dir, &prompt, &answer).expect("write fixture");
+        write_fixture(&dir, key_prompt_value(&prompt, false), &answer).expect("write fixture");
 
         let backend = ModelDefault::connect_with(ConnectOptions {
             replay_dir: dir.clone(),
@@ -163,7 +161,10 @@ mod tests {
         .await
         .expect("connect");
         let replayed = backend
-            .complete(PreparedPrompt::try_from(prompt).expect("assemble"), Arc::new(StubToolHost))
+            .complete(
+                PreparedPrompt::assemble(prompt, false).expect("assemble"),
+                Arc::new(StubToolHost),
+            )
             .await
             .expect("replay hits the fixture");
         assert_eq!(replayed.value, json!({ "verdict": "pass" }));
@@ -180,7 +181,7 @@ mod tests {
             ModelDefault::connect_with(ConnectOptions { replay_dir: dir }).await.expect("connect");
         let error = backend
             .complete(
-                PreparedPrompt::try_from(sample_prompt()).expect("assemble"),
+                PreparedPrompt::assemble(sample_prompt(), false).expect("assemble"),
                 Arc::new(StubToolHost),
             )
             .await
@@ -212,11 +213,12 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("omnia-model-rt-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
 
-        let prompt = sample_prompt();
+        // The generated prompt is not `Clone`, so build a fresh (equivalent)
+        // prompt for each leg; record and replay key on the same reduced shape.
         let recording = Recording::new(AlwaysOk, dir.clone());
         let recorded = recording
             .complete(
-                PreparedPrompt::try_from(prompt.clone()).expect("assemble"),
+                PreparedPrompt::assemble(sample_prompt(), false).expect("assemble"),
                 Arc::new(StubToolHost),
             )
             .await
@@ -228,7 +230,10 @@ mod tests {
         .await
         .expect("connect");
         let replayed = backend
-            .complete(PreparedPrompt::try_from(prompt).expect("assemble"), Arc::new(StubToolHost))
+            .complete(
+                PreparedPrompt::assemble(sample_prompt(), false).expect("assemble"),
+                Arc::new(StubToolHost),
+            )
             .await
             .expect("replay");
 
