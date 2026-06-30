@@ -135,16 +135,16 @@ pub struct MetadataEntry {
 
 /// Host capabilities lent for this completion.
 ///
-/// The working-tree `borrow<descriptor>` never survives the boundary as a
-/// handle: the host records only whether a tree was lent, and the actual
+/// The workspace `borrow<descriptor>` never survives the boundary as a
+/// handle: the host records only whether a workspace was lent, and the actual
 /// filesystem access is mediated by [`ToolHost`](super::ToolHost).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolGrants {
     /// Guest id whose `references` export `resolve` targets.
     pub references: Option<String>,
-    /// Whether a working tree was lent for this call (the stable marker that
+    /// Whether a workspace was lent for this call (the stable marker that
     /// replaces the non-serializable `borrow<descriptor>` for keying).
-    pub working_tree_lent: bool,
+    pub workspace_lent: bool,
     /// Allowed closed verification profile names for `verify`.
     pub verify: Vec<String>,
 }
@@ -364,8 +364,8 @@ impl From<genc::ToolGrants> for ToolGrants {
             references: g.references,
             // The `borrow<descriptor>` is reduced to a stable marker here; the
             // descriptor itself is resolved against the table by the host when
-            // it builds the `ToolHost` (Phase 2b wires it to a real tree).
-            working_tree_lent: g.working_tree.is_some(),
+            // it builds the `ToolHost` (Phase 2b wires it to a real workspace).
+            workspace_lent: g.workspace.is_some(),
             verify: g.verify,
         }
     }

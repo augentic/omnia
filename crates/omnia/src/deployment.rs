@@ -139,9 +139,9 @@ impl DeploymentBuilder {
     }
 }
 
-// add root preopen if OMNIA_WORKING_TREE is set
+// add root preopen if OMNIA_WORKSPACE is set
 fn with_env_mount(mut preopens: Vec<ResolvedPreopen>) -> Vec<ResolvedPreopen> {
-    if let Some(path) = env::var_os("OMNIA_WORKING_TREE")
+    if let Some(path) = env::var_os("OMNIA_WORKSPACE")
         && !preopens.iter().any(|po| po.name == ".")
     {
         preopens.push(ResolvedPreopen::new(".".to_owned(), PathBuf::from(path), false));

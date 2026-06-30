@@ -15,7 +15,7 @@ mod model_impl;
 mod prompt;
 mod replay;
 mod types;
-mod working_tree;
+mod workspace;
 
 mod generated {
     #![allow(missing_docs)]
@@ -112,10 +112,10 @@ pub trait ToolHost: Send + Sync {
     /// Host-mediated dynamic linking into the adapter's `references` export.
     fn resolve(&self, reference: Reference) -> FutureResult<Vec<u8>>;
 
-    /// Bounded working-tree read via the lent `wasi:filesystem` capability.
+    /// Bounded workspace read via the lent `wasi:filesystem` capability.
     fn read(&self, path: String) -> FutureResult<Vec<u8>>;
 
-    /// Bounded working-tree listing via the lent `wasi:filesystem` capability.
+    /// Bounded workspace listing via the lent `wasi:filesystem` capability.
     fn list(&self, path: String) -> FutureResult<Vec<DirEntry>>;
 
     /// Accumulate an edit against the session's base tree.
@@ -124,7 +124,7 @@ pub trait ToolHost: Send + Sync {
     /// Route a verify request to a closed profile.
     fn verify(&self, check: String) -> FutureResult<VerifyReport>;
 
-    /// The absolute host path of the lent working tree, when one was lent for
+    /// The absolute host path of the lent workspace, when one was lent for
     /// this completion and resolved to an authorized mount.
     fn local_path(&self) -> Option<&std::path::Path> {
         None

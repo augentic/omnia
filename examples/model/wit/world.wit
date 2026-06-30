@@ -4,8 +4,8 @@
 // because `complete` is an async import the guest must `await`.
 //
 // It also imports `wasi:filesystem/preopens` so the guest can read the preopen
-// table (the host's `[[mount]]` config, RFC-55) and lend the named working tree
-// through `grants.working-tree`.
+// table (the host's `[[mount]]` config) and lend the named workspace
+// through `grants.workspace`.
 package augentic:model-example@0.1.0;
 
 world complete {

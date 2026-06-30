@@ -12,7 +12,7 @@
 //     async backend (`WasiModelCtx::complete` returns a future), so it must be
 //     `async func` for the host binding to await it without blocking the
 //     executor.
-//  2. The working-tree handle tracks `wasi:filesystem@0.3.0` (p3) — the version
+//  2. The workspace handle tracks `wasi:filesystem@0.3.0` (p3) — the version
 //     the runtime serves via `wasmtime_wasi::p3::add_to_linker` — so the `with:`
 //     remap onto wasmtime's p3 `Descriptor` resolves to the same resource the
 //     runtime already owns. p3 filesystem reads ride native component-model
@@ -21,8 +21,7 @@ package augentic:model@0.1.0;
 
 /// Models-API-style prompt completion. Guests import `augentic:model/completion`.
 interface completion {
-    /// Working-tree handle lent through `grants.working-tree`. The version tracks
-    /// the wasi-filesystem working-tree host (RFC-55): the host resolves the lent
+    /// Workspace handle lent through `grants.workspace`. The host resolves the lent
     /// descriptor to an authorized mount by directory identity, then exposes it to
     /// backends as bounded `read`/`list`/`write` (genai) and the absolute
     /// `local-path` (cursor's `--workspace`).
@@ -152,7 +151,7 @@ interface completion {
         /// (genai) and the spawned agent's direct access (cursor). A `borrow`, so the
         /// The runtime core never trusts a forgeable integer handle — the host resolves it from
         /// the resource table exactly as other hosts take typed resources.
-        working-tree: option<borrow<descriptor>>,
+        workspace: option<borrow<descriptor>>,
         /// Allowed closed verification profile names for `verify`.
         verify: list<string>,
     }

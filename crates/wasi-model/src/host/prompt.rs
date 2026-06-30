@@ -175,7 +175,7 @@ mod tests {
             metadata: vec![],
             grants: ToolGrants {
                 references: None,
-                working_tree_lent: false,
+                workspace_lent: false,
                 verify: vec![],
             },
         }

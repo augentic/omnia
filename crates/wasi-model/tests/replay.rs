@@ -80,40 +80,40 @@ impl HasModel for TestBundle {
 type TestCtx = omnia::StoreCtx<TestBundle>;
 
 /// Assemble a model [`Runtime`] over `registry` from already-built parts: a
-/// backend `factory` (cloned fresh into every store) and the `working_trees`
-/// mounts preopened into each store (RFC-55; empty for the `resolve` path, a
-/// single `.` mount for the completion path so the guest lends a tree). The
+/// backend `factory` (cloned fresh into every store) and the `mounts`
+/// mounts preopened into each store (empty for the `resolve` path, a single `.`
+/// mount for the completion path so the guest lends a workspace). The shared
 /// shared `stores_built` counts bundle clones — the instance-creation witness.
 fn model_runtime(
     registry: Arc<Registry<TestCtx>>, backend: BackendFactory, stores_built: Arc<AtomicUsize>,
-    working_trees: Arc<MountRegistry>,
+    mounts: Arc<MountRegistry>,
 ) -> Runtime<TestBundle> {
     let bundle = TestBundle {
         model: backend(),
         backend,
         stores_built,
     };
-    Runtime::from_parts(registry, Vec::new(), working_trees, bundle)
+    Runtime::from_parts(registry, Vec::new(), mounts, bundle)
 }
 
-/// A single read-only working-tree mount named `.` over a fresh temp directory —
+/// A single read-only workspace mount named `.` over a fresh temp directory —
 /// the shape `omnia.toml`'s `[[mount]]` resolves to. The example guest reads it
-/// via `preopens.get-directories()` and lends it through `grants.working-tree`,
-/// so the recorded prompt carries `working_tree_lent = true`. The directory's
+/// via `preopens.get-directories()` and lends it through `grants.workspace`,
+/// so the recorded prompt carries `workspace_lent = true`. The directory's
 /// identity is irrelevant to the replay key (only the boolean marker lands
 /// there), so any real directory serves.
-fn working_tree_mount() -> (PathBuf, Arc<MountRegistry>) {
-    let dir = std::env::temp_dir().join(format!("omnia-model-tree-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("creating the working-tree mount dir");
+fn workspace_mount() -> (PathBuf, Arc<MountRegistry>) {
+    let dir = std::env::temp_dir().join(format!("omnia-model-ws-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("creating the workspace mount dir");
     let registry =
         MountRegistry::open(vec![ResolvedPreopen::new(".".to_owned(), dir.clone(), false)])
-            .expect("opening the working-tree mount");
+            .expect("opening the workspace mount");
     (dir, Arc::new(registry))
 }
 
 /// An empty registry — no preopens, the default for paths that don't exercise a
-/// working tree.
-fn no_working_trees() -> Arc<MountRegistry> {
+/// workspace.
+fn no_mounts() -> Arc<MountRegistry> {
     Arc::new(MountRegistry::default())
 }
 
@@ -212,17 +212,17 @@ async fn replays_completion_with_no_network() -> Result<()> {
     // The answer the recorded run produces and the replay must reproduce.
     let expected = expected_answer();
 
-    // The completion path preopens a working tree the example guest lends
-    // (RFC-55), so the recorded prompt carries `working_tree_lent = true` and the
-    // The host resolves the lent descriptor back to this mount by identity.
-    let (mount_dir, working_trees) = working_tree_mount();
+    // The completion path preopens a workspace the example guest lends, so the
+    // recorded prompt carries `workspace_lent = true` and the host resolves the
+    // lent descriptor back to this mount by identity.
+    let (mount_dir, mounts) = workspace_mount();
 
     // Phase 1 — record: a stub backend answers through `complete`, and the
     // `Recording` wrapper persists the fixture keyed by the guest's real prompt.
     let record_dir =
         std::env::temp_dir().join(format!("omnia-model-fixtures-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&record_dir);
-    record_phase(&registry, &record_dir, &expected, &working_trees).await?;
+    record_phase(&registry, &record_dir, &expected, &mounts).await?;
     let fixtures: Vec<PathBuf> = std::fs::read_dir(&record_dir)
         .context("reading record dir")?
         .filter_map(std::result::Result::ok)
@@ -230,14 +230,14 @@ async fn replays_completion_with_no_network() -> Result<()> {
         .collect();
     assert_eq!(fixtures.len(), 1, "recording should write exactly one fixture");
 
-    // The replay key reduces the lent tree to a single `working_tree_lent`
+    // The replay key reduces the lent workspace to a single `workspace_lent`
     // boolean — never the descriptor's identity or the mount's host path.
     let recorded = std::fs::read_to_string(&fixtures[0]).context("reading recorded fixture")?;
     let fixture: Value = serde_json::from_str(&recorded).context("fixture is JSON")?;
     assert_eq!(
-        fixture["key_prompt"]["grants"]["working_tree_lent"],
+        fixture["key_prompt"]["grants"]["workspace_lent"],
         json!(true),
-        "a lent tree keys as `working_tree_lent: true`"
+        "a lent workspace keys as `workspace_lent: true`"
     );
     assert!(
         !recorded.contains(mount_dir.to_string_lossy().as_ref()),
@@ -247,7 +247,7 @@ async fn replays_completion_with_no_network() -> Result<()> {
     // Phase 2 — replay: `ModelDefault` loaded from the recorded directory serves
     // the same guest with no backend and no network.
     let replayed =
-        replay_from(&registry, &record_dir, &working_trees).await.context("replay phase")?;
+        replay_from(&registry, &record_dir, &mounts).await.context("replay phase")?;
     assert_eq!(
         serde_json::from_str::<Value>(&replayed).context("answer is JSON")?,
         expected,
@@ -257,7 +257,7 @@ async fn replays_completion_with_no_network() -> Result<()> {
 
     // Phase 3 — checked-in fixture: the committed example fixture still matches
     // the guest's prompt (guards against keying drift over time).
-    let from_committed = replay_from(&registry, &committed_fixtures(), &working_trees)
+    let from_committed = replay_from(&registry, &committed_fixtures(), &mounts)
         .await
         .context("committed fixture")?;
     assert_eq!(
@@ -303,15 +303,15 @@ async fn record_example_fixture() -> Result<()> {
     let backend_dir = dir.clone();
     // Preopen the same `.` mount the example's `omnia.toml` declares, so the
     // regenerated fixture matches what the guest lends at runtime
-    // (`working_tree_lent = true`).
-    let (_mount_dir, working_trees) = working_tree_mount();
+    // (`workspace_lent = true`).
+    let (_mount_dir, mounts) = workspace_mount();
     let runtime = model_runtime(
         registry,
         Arc::new(move || {
             Box::new(Recording::new(StubBackend { value: value.clone() }, backend_dir.clone()))
         }),
         Arc::new(AtomicUsize::new(0)),
-        working_trees,
+        mounts,
     );
     let answer = call_run(&runtime).await.context("recording example fixture")?;
     eprintln!("recorded example fixture into {}: {answer}", dir.display());
@@ -322,7 +322,7 @@ async fn record_example_fixture() -> Result<()> {
 /// `Recording` wrapper persists the fixture keyed by the guest's real prompt.
 async fn record_phase(
     registry: &Arc<Registry<TestCtx>>, dir: &Path, expected: &Value,
-    working_trees: &Arc<MountRegistry>,
+    mounts: &Arc<MountRegistry>,
 ) -> Result<()> {
     let value = expected.clone();
     let backend_dir = dir.to_path_buf();
@@ -332,7 +332,7 @@ async fn record_phase(
             Box::new(Recording::new(StubBackend { value: value.clone() }, backend_dir.clone()))
         }),
         Arc::new(AtomicUsize::new(0)),
-        Arc::clone(working_trees),
+        Arc::clone(mounts),
     );
     let answer = call_run(&runtime).await.context("record phase")?;
     assert_eq!(
@@ -345,7 +345,7 @@ async fn record_phase(
 
 /// Replay the guest with a `ModelDefault` backend loaded from `dir`.
 async fn replay_from(
-    registry: &Arc<Registry<TestCtx>>, dir: &Path, working_trees: &Arc<MountRegistry>,
+    registry: &Arc<Registry<TestCtx>>, dir: &Path, mounts: &Arc<MountRegistry>,
 ) -> Result<String> {
     let backend = ModelDefault::connect_with(ConnectOptions {
         replay_dir: dir.to_path_buf(),
@@ -356,7 +356,7 @@ async fn replay_from(
         Arc::clone(registry),
         Arc::new(move || Box::new(backend.clone())),
         Arc::new(AtomicUsize::new(0)),
-        Arc::clone(working_trees),
+        Arc::clone(mounts),
     );
     call_run(&runtime).await
 }
@@ -448,9 +448,9 @@ async fn resolve_dispatches() -> Result<()> {
         registry,
         Arc::new(|| Box::new(ResolvingStub)),
         Arc::clone(&stores_built),
-        // The `resolve` path doesn't exercise a working tree; the model guest's
+        // The `resolve` path doesn't exercise a workspace; the model guest's
         // `get-directories()` sees no mount and lends nothing.
-        no_working_trees(),
+        no_mounts(),
     );
 
     // Two completions, each driving two `resolve` dispatches. The library
@@ -486,8 +486,8 @@ async fn resolve_dispatches() -> Result<()> {
     Ok(())
 }
 
-/// A backend that asserts the host resolved the guest's lent working tree to
-/// its mount path — the `local-path` face (RFC-55) the cursor backend consumes.
+/// A backend that asserts the host resolved the guest's lent workspace to
+/// its mount path — the `local-path` face the cursor backend consumes.
 #[derive(Debug, Clone)]
 struct LocalPathProbe {
     expected: PathBuf,
@@ -502,7 +502,7 @@ impl WasiModelCtx for LocalPathProbe {
             let local = tool_host.local_path().map(Path::to_path_buf);
             anyhow::ensure!(
                 local.as_deref() == Some(expected.as_path()),
-                "host must resolve the lent tree to its mount path: got {local:?}, want {}",
+                "host must resolve the lent workspace to its mount path: got {local:?}, want {}",
                 expected.display()
             );
             Ok(BackendAnswer {
@@ -514,22 +514,22 @@ impl WasiModelCtx for LocalPathProbe {
     }
 }
 
-/// The working-tree `local-path` face end-to-end: the host preopens a `.` mount,
+/// The workspace `local-path` face end-to-end: the host preopens a `.` mount,
 /// the example guest reads it via `preopens.get-directories()` and lends it, and
 /// the host identity-matches it back to the mount — surfacing its host path on
-/// the per-completion [`ToolHost`] (RFC-55, what `omnia-cursor` reads).
+/// the per-completion [`ToolHost`] (what `omnia-cursor` reads).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn working_tree_resolves_to_local_path() -> Result<()> {
+async fn workspace_resolves_to_local_path() -> Result<()> {
     let Some(wasm) = guest_wasm(&target_dir(), "model_wasm.wasm") else {
         eprintln!(
-            "skipping `working_tree_resolves_to_local_path`: model guest not built. Run:\n  \
+            "skipping `workspace_resolves_to_local_path`: model guest not built. Run:\n  \
              cargo build -p examples --example model-wasm --target wasm32-wasip2"
         );
         return Ok(());
     };
 
     let registry = registry(&wasm).await?;
-    let (mount_dir, working_trees) = working_tree_mount();
+    let (mount_dir, mounts) = workspace_mount();
     let expected = mount_dir.clone();
     let runtime = model_runtime(
         registry,
@@ -539,7 +539,7 @@ async fn working_tree_resolves_to_local_path() -> Result<()> {
             })
         }),
         Arc::new(AtomicUsize::new(0)),
-        working_trees,
+        mounts,
     );
 
     let answer = call_run(&runtime).await.context("driving the local-path probe")?;
@@ -548,7 +548,7 @@ async fn working_tree_resolves_to_local_path() -> Result<()> {
     assert_eq!(
         value,
         json!({ "verdict": "pass", "reason": "local path resolved" }),
-        "the host resolves the lent tree and exposes its mount path on the ToolHost"
+        "the host resolves the lent workspace and exposes its mount path on the ToolHost"
     );
 
     Ok(())

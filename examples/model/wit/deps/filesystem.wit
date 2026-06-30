@@ -1,7 +1,7 @@
 // wasi:filesystem@0.3.0 — example-guest subset.
 //
 // The Phase 1 example guest only needs to (a) name the `descriptor` resource so
-// it can hold one and lend a `borrow<descriptor>` through `grants.working-tree`,
+// it can hold one and lend a `borrow<descriptor>` through `grants.workspace`,
 // and (b) read the preopen table to pick the mount. It never *calls* a
 // descriptor method, so this vendored subset omits every method — and with them
 // the native `stream`/`future` types a wasm32-wasip2 guest cannot lower, plus

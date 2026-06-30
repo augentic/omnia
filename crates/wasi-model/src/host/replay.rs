@@ -11,7 +11,7 @@
 //!
 //! The key is the *canonical JSON* of the prompt reduced to the fields that
 //! determine the model's output: `metadata` is dropped (tracing only) and the
-//! working-tree handle is already a stable `working_tree_lent` boolean marker on
+//! workspace handle is already a stable `workspace_lent` boolean marker on
 //! the owned [`Prompt`] (never a run-specific `borrow`). Canonical JSON sorts
 //! object keys recursively and emits no insignificant whitespace, so a fixture
 //! recorded against one backend matches under another.
@@ -50,7 +50,7 @@ pub struct Fixture {
 }
 
 /// The canonical replay key for `prompt`: canonical JSON of the prompt reduced
-/// per §5.4 (drop `metadata`; the working-tree marker is already a boolean).
+/// per §5.4 (drop `metadata`; the workspace marker is already a boolean).
 #[must_use]
 pub fn canonical_key(prompt: &Prompt) -> String {
     key_from_value(&reduced_value(prompt))
@@ -242,7 +242,7 @@ mod tests {
             metadata: vec![],
             grants: ToolGrants {
                 references: None,
-                working_tree_lent: false,
+                workspace_lent: false,
                 verify: vec![],
             },
         }

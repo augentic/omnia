@@ -22,7 +22,7 @@ Specify’s invariant that domain-specific knowledge lives in backends, guests, 
 
 ### Host-side
 
-Work done inside Omnia host crates (validation, dispatch, working-tree resolution) as opposed to backend-side logic in the `backends` repo (e.g. genai’s tool loop).
+Work done inside Omnia host crates (validation, dispatch, workspace resolution) as opposed to backend-side logic in the `backends` repo (e.g. genai’s tool loop).
 
 ### Host validation gate
 

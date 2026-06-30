@@ -1,8 +1,8 @@
-//! Working-tree resolution in the host.
+//! Workspace resolution in the host.
 //!
-//! A guest lends a `wasi:filesystem` working tree through
-//! `grants.working-tree: option<borrow<descriptor>>`. This module turns that
-//! borrowed descriptor into an owned, `Send + Sync` [`WorkingTree`] the backend
+//! A guest lends a `wasi:filesystem` workspace through
+//! `grants.workspace: option<borrow<descriptor>>`. This module turns that
+//! borrowed descriptor into an owned, `Send + Sync` [`Workspace`] the backend
 //! can use across `.await` points, *after* proving the lent directory is one the
 //! deployment authorized.
 //!
@@ -11,7 +11,7 @@
 //! host platform stats the lent directory for its `(device, inode)` identity and matches
 //! it against the host-side [`MountRegistry`] (built from the deployment's
 //! preopens). A miss — a sub-directory of a mount, or a wholly unrelated tree —
-//! is rejected here, in the host. The resolved [`WorkingTree`] then draws its
+//! is rejected here, in the host. The resolved [`Workspace`] then draws its
 //! cap-std handle and absolute path from the *registry entry*, never from the
 //! descriptor.
 
@@ -34,14 +34,14 @@ const MAX_READ_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_WRITE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_LIST_ENTRIES: usize = 4096;
 
-// An handle to a resolved working-tree mount. Built by [`resolve`].
-pub struct WorkingTree {
+// An handle to a resolved workspace mount. Built by [`resolve`].
+pub struct Workspace {
     dir: Arc<Dir>,
     local_path: PathBuf,
     writable: bool,
 }
 
-impl WorkingTree {
+impl Workspace {
     #[must_use]
     pub fn local_path(&self) -> &Path {
         &self.local_path
@@ -56,7 +56,7 @@ impl WorkingTree {
         async move {
             spawn_blocking(move || f(&dir))
                 .await
-                .context("working-tree read task failed")?
+                .context("workspace read task failed")?
         }
         .boxed()
     }
@@ -71,7 +71,7 @@ impl WorkingTree {
 
     pub fn write(&self, path: String, bytes: Vec<u8>) -> FutureResult<()> {
         if !self.writable {
-            return ready_err(anyhow!("working tree is read-only; write to `{path}` denied"));
+            return ready_err(anyhow!("workspace is read-only; write to `{path}` denied"));
         }
         self.run_blocking(move |dir| write_blocking(dir, &path, &bytes))
     }
@@ -82,33 +82,34 @@ fn ready_err<R: Send + 'static>(err: anyhow::Error) -> FutureResult<R> {
     async move { Err(err) }.boxed()
 }
 
-// Run `f` against a lent tree, or fail with a grant error.
-pub fn with_tree<R: Send + 'static>(
-    tree: Option<&WorkingTree>, f: impl FnOnce(&WorkingTree) -> FutureResult<R>,
+// Run `f` against a lent workspace, or fail with a grant error.
+pub fn with_workspace<R: Send + 'static>(
+    workspace: Option<&Workspace>, f: impl FnOnce(&Workspace) -> FutureResult<R>,
 ) -> FutureResult<R> {
-    tree.map_or_else(|| ready_err(anyhow!("missing grants.working-tree")), |tree| f(tree))
+    workspace
+        .map_or_else(|| ready_err(anyhow!("missing grants.workspace")), |workspace| f(workspace))
 }
 
-// Resolve a `grants.working-tree` into a [`WorkingTree`].
+// Resolve a `grants.workspace` into a [`Workspace`].
 pub fn resolve(
     table: &ResourceTable, registry: &MountRegistry, borrow: Option<&Resource<Descriptor>>,
-) -> anyhow::Result<Option<WorkingTree>> {
+) -> anyhow::Result<Option<Workspace>> {
     let Some(resource) = borrow else {
         return Ok(None);
     };
 
-    let descriptor = table.get(resource).context("resolving the lent working-tree descriptor")?;
+    let descriptor = table.get(resource).context("resolving the lent workspace descriptor")?;
 
     let Descriptor::Dir(dir) = descriptor else {
-        bail!("grants.working-tree must be a directory descriptor, not a file");
+        bail!("grants.workspace must be a directory descriptor, not a file");
     };
 
-    let meta = dir.dir.dir_metadata().context("reading lent working-tree directory metadata")?;
+    let meta = dir.dir.dir_metadata().context("reading lent workspace directory metadata")?;
     let entry = registry
         .match_identity(meta.dev(), meta.ino())
-        .context("lent working tree is not an authorized mount (out of scope)")?;
+        .context("lent workspace is not an authorized mount (out of scope)")?;
 
-    Ok(Some(WorkingTree {
+    Ok(Some(Workspace {
         dir: Arc::clone(&entry.dir),
         local_path: entry.host_path.clone(),
         writable: entry.writable(),
@@ -116,28 +117,28 @@ pub fn resolve(
 }
 
 fn read_blocking(dir: &Dir, path: &str) -> anyhow::Result<Vec<u8>> {
-    let file = dir.open(path).with_context(|| format!("opening `{path}` in working tree"))?;
+    let file = dir.open(path).with_context(|| format!("opening `{path}` in workspace"))?;
     // Read one byte past the cap so an over-limit file is detected, not clipped.
     let mut buf = Vec::new();
     file.take(MAX_READ_BYTES + 1)
         .read_to_end(&mut buf)
-        .with_context(|| format!("reading `{path}` in working tree"))?;
+        .with_context(|| format!("reading `{path}` in workspace"))?;
     if buf.len() as u64 > MAX_READ_BYTES {
-        bail!("file `{path}` exceeds the {MAX_READ_BYTES}-byte working-tree read limit");
+        bail!("file `{path}` exceeds the {MAX_READ_BYTES}-byte workspace read limit");
     }
     Ok(buf)
 }
 
 fn list_blocking(dir: &Dir, path: &str) -> anyhow::Result<Vec<DirEntry>> {
     let read_dir = if path.is_empty() || path == "." {
-        dir.entries().context("listing working-tree root")?
+        dir.entries().context("listing workspace root")?
     } else {
-        dir.read_dir(path).with_context(|| format!("listing `{path}` in working tree"))?
+        dir.read_dir(path).with_context(|| format!("listing `{path}` in workspace"))?
     };
 
     let mut entries = Vec::new();
     for entry in read_dir {
-        let entry = entry.context("reading working-tree directory entry")?;
+        let entry = entry.context("reading workspace directory entry")?;
         if entries.len() >= MAX_LIST_ENTRIES {
             bail!("directory `{path}` exceeds the {MAX_LIST_ENTRIES}-entry listing limit");
         }
@@ -153,9 +154,9 @@ fn list_blocking(dir: &Dir, path: &str) -> anyhow::Result<Vec<DirEntry>> {
 
 fn write_blocking(dir: &Dir, path: &str, bytes: &[u8]) -> anyhow::Result<()> {
     if bytes.len() > MAX_WRITE_BYTES {
-        bail!("write to `{path}` exceeds the {MAX_WRITE_BYTES}-byte working-tree write limit");
+        bail!("write to `{path}` exceeds the {MAX_WRITE_BYTES}-byte workspace write limit");
     }
-    dir.write(path, bytes).with_context(|| format!("writing `{path}` in working tree"))
+    dir.write(path, bytes).with_context(|| format!("writing `{path}` in workspace"))
 }
 
 #[cfg(test)]
@@ -172,9 +173,9 @@ mod tests {
 
     /// A fresh, empty temp directory unique to this process and `label`.
     fn temp_root(label: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("omnia-wt-{label}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("omnia-ws-{label}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("creating temp working-tree root");
+        std::fs::create_dir_all(&dir).expect("creating temp workspace root");
         dir
     }
 
@@ -186,11 +187,11 @@ mod tests {
             path.to_path_buf(),
             writable,
         )])
-        .expect("opening working-tree registry")
+        .expect("opening workspace registry")
     }
 
     /// A directory `Descriptor` over `path`, the shape a guest lends through
-    /// `grants.working-tree`.
+    /// `grants.workspace`.
     fn dir_descriptor(path: &Path, writable: bool) -> Descriptor {
         let cap = CapDir::open_ambient_dir(path, ambient_authority()).expect("opening ambient dir");
         let (dir_perms, file_perms, mode) = if writable {
@@ -219,7 +220,7 @@ mod tests {
 
         let resolved = resolve(&table, &registry, Some(&resource))
             .expect("resolve succeeds for an authorized mount")
-            .expect("an authorized mount resolves to a working tree");
+            .expect("an authorized mount resolves to a workspace");
         assert_eq!(
             resolved.local_path(),
             root.as_path(),
@@ -228,17 +229,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn read_tree() {
+    async fn read_workspace() {
         let root = temp_root("read");
         std::fs::write(root.join("hello.txt"), b"hi").expect("seeding a file");
         let registry = registry_for(&root, false);
         let mut table = ResourceTable::new();
         let resource = table.push(dir_descriptor(&root, false)).expect("pushing descriptor");
 
-        let tree = resolve(&table, &registry, Some(&resource))
+        let workspace = resolve(&table, &registry, Some(&resource))
             .expect("resolve")
             .expect("authorized mount");
-        let bytes = tree.read("hello.txt".to_owned()).await.expect("reading within the mount");
+        let bytes = workspace.read("hello.txt".to_owned()).await.expect("reading within the mount");
         assert_eq!(bytes, b"hi", "read returns the file's bytes");
     }
 
@@ -275,7 +276,7 @@ mod tests {
         let resource = table.push(descriptor).expect("pushing descriptor");
 
         let Err(err) = resolve(&table, &registry, Some(&resource)) else {
-            panic!("a file descriptor must not resolve to a working tree");
+            panic!("a file descriptor must not resolve to a workspace");
         };
         assert!(
             format!("{err:#}").contains("must be a directory"),
@@ -290,10 +291,10 @@ mod tests {
         let mut table = ResourceTable::new();
         let resource = table.push(dir_descriptor(&root, false)).expect("pushing descriptor");
 
-        let tree = resolve(&table, &registry, Some(&resource))
+        let workspace = resolve(&table, &registry, Some(&resource))
             .expect("resolve")
             .expect("authorized mount");
-        let err = tree
+        let err = workspace
             .write("new.txt".to_owned(), b"data".to_vec())
             .await
             .expect_err("writing a read-only mount is denied");

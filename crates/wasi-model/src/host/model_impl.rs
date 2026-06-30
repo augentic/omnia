@@ -19,7 +19,7 @@ use super::generated::augentic::model::completion as genc;
 use super::generated::augentic::model::completion::{Host, HostWithStore};
 use super::prompt::validate_answer;
 use super::types::{PreparedPrompt, Prompt};
-use super::working_tree::{self, WorkingTree};
+use super::workspace::{self, Workspace};
 use super::{Error, FutureResult, ToolHost, WasiModel, WasiModelCtxView};
 use crate::host::types::{DirEntry, Reference, VerifyReport};
 
@@ -30,9 +30,9 @@ where
     async fn complete(
         accessor: &Accessor<T, Self>, mut prompt: genc::Prompt,
     ) -> Result<String, Error> {
-        let working_tree_res = prompt.grants.working_tree.take();
+        let lent = prompt.grants.workspace.take();
         let mut owned: Prompt = prompt.into();
-        owned.grants.working_tree_lent = working_tree_res.is_some();
+        owned.grants.workspace_lent = lent.is_some();
 
         let request = PreparedPrompt::try_from(owned)?;
 
@@ -45,19 +45,15 @@ where
                 // Clone the store-level handles out before borrowing the view:
                 // `store.get()` reborrows the store mutably, so the mount
                 // registry and dispatcher cannot be held as references across it.
-                let working_trees = store.data_mut().mounts();
+                let mounts = store.data_mut().mounts();
                 let dispatcher = store.data_mut().dispatcher();
                 let view = store.get();
-                let working_tree = working_tree::resolve(
-                    view.table,
-                    &working_trees,
-                    working_tree_res.as_ref(),
-                )?;
+                let workspace = workspace::resolve(view.table, &mounts, lent.as_ref())?;
                 let tool_host: Arc<dyn ToolHost> = Arc::new(BoundToolHost {
                     dispatcher,
                     references,
                     verify_allowed,
-                    working_tree,
+                    workspace,
                 });
                 Ok::<_, Error>(view.ctx.complete(request, tool_host))
             })?
@@ -87,7 +83,7 @@ struct BoundToolHost {
     dispatcher: Arc<dyn Dispatcher>,
     references: Option<String>,
     verify_allowed: Vec<String>,
-    working_tree: Option<WorkingTree>,
+    workspace: Option<Workspace>,
 }
 
 // Export-function name a `references` exposes for host-mediated `resolve`.
@@ -136,19 +132,19 @@ impl ToolHost for BoundToolHost {
     }
 
     fn read(&self, path: String) -> FutureResult<Vec<u8>> {
-        working_tree::with_tree(self.working_tree.as_ref(), |tree| tree.read(path))
+        workspace::with_workspace(self.workspace.as_ref(), |ws| ws.read(path))
     }
 
     fn list(&self, path: String) -> FutureResult<Vec<DirEntry>> {
-        working_tree::with_tree(self.working_tree.as_ref(), |tree| tree.list(path))
+        workspace::with_workspace(self.workspace.as_ref(), |ws| ws.list(path))
     }
 
     fn write(&self, path: String, bytes: Vec<u8>) -> FutureResult<()> {
-        working_tree::with_tree(self.working_tree.as_ref(), |tree| tree.write(path, bytes))
+        workspace::with_workspace(self.workspace.as_ref(), |ws| ws.write(path, bytes))
     }
 
     fn local_path(&self) -> Option<&std::path::Path> {
-        self.working_tree.as_ref().map(WorkingTree::local_path)
+        self.workspace.as_ref().map(Workspace::local_path)
     }
 
     fn verify(&self, check: String) -> FutureResult<VerifyReport> {

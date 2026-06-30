@@ -145,7 +145,7 @@ impl Manifest {
     }
 }
 
-/// A single working-tree mount: a host directory preopened into the guest
+/// A single workspace mount: a host directory preopened into the guest
 /// sandbox under a guest-visible name (RFC-55).
 #[derive(Clone, Debug, Deserialize)]
 pub struct MountEntry {
