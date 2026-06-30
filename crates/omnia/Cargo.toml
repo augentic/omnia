@@ -46,6 +46,7 @@ http.workspace = true
 opentelemetry.workspace = true
 opentelemetry-otlp = { version = "0.32.0", features = ["grpc-tonic"] }
 opentelemetry_sdk = { workspace = true, features = ["rt-tokio"] }
+paste.workspace = true
 serde.workspace = true
 toml.workspace = true
 tracing.workspace = true

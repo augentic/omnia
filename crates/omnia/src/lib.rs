@@ -43,14 +43,21 @@ pub use self::store::{
 pub use self::store::{Set, Unset};
 pub use self::telemetry::{Telemetry, resource};
 pub use self::traits::{Backend, Backends, FromEnv, FutureResult, HasLimits, Host, Server};
+#[doc(hidden)]
+pub use paste;
 
-/// Generates the linker-facing view scaffold that every `omnia` WASI host crate
+/// Generates the linker-facing view traits that every `omnia` WASI host crate
 /// repeats verbatim (only the names change):
 ///
 /// - `Wasi<Service>View`: the per-`Linker<T>` accessor trait,
 /// - `Wasi<Service>CtxView`: the borrowed `(ctx, table)` view,
 /// - `Has<Service>`: the backend-bundle accessor trait,
 /// - the blanket `Wasi<Service>View for omnia::StoreCtx<B>` impl.
+///
+/// Pass the service stem (the part after `Wasi` in the host struct name). All
+/// identifiers and doc labels are derived from it: `KeyValue` yields
+/// `WasiKeyValueView`, `HasKeyValue`, `keyvalue`, `keyvalue_ctx`, and doc text
+/// using `stringify!(KeyValue)`.
 ///
 /// The service-specific pieces stay hand-written in each crate: the
 /// `Wasi<Service>Ctx` trait, the `bindgen!` block, the `Host`/`Server` wiring,
@@ -60,60 +67,45 @@ pub use self::traits::{Backend, Backends, FromEnv, FutureResult, HasLimits, Host
 /// # Example
 ///
 /// ```ignore
-/// omnia::scaffold! {
-///     service: "Key-Value",
-///     view: WasiKeyValueView,
-///     ctx: WasiKeyValueCtx,
-///     ctx_view: WasiKeyValueCtxView,
-///     backend: HasKeyValue,
-///     accessor: keyvalue,
-///     ctx_accessor: keyvalue_ctx,
-/// }
+/// omnia::wasi_view!(KeyValue);
 /// ```
 #[macro_export]
-macro_rules! scaffold {
-    (
-        service: $label:literal,
-        view: $view:ident,
-        ctx: $ctx:ident,
-        ctx_view: $ctx_view:ident,
-        backend: $has:ident,
-        accessor: $accessor:ident,
-        ctx_accessor: $ctx_accessor:ident
-        $(,)?
-    ) => {
-        #[doc = concat!("Provides internal WASI ", $label, " state.")]
-        ///
-        /// Implemented by the `T` in `Linker<T>`: a single type shared across
-        /// every WASI component in a runtime build.
-        pub trait $view: Send {
-            #[doc = concat!("Borrow a `", stringify!($ctx_view), "` from a mutable reference to self.")]
-            fn $accessor(&mut self) -> $ctx_view<'_>;
-        }
+macro_rules! wasi_view {
+    ($name:ident $(,)?) => {
+        $crate::paste::paste! {
+            #[doc = concat!("Provides internal WASI ", stringify!($name), " state.")]
+            ///
+            /// Implemented by the `T` in `Linker<T>`: a single type shared across
+            /// every WASI component in a runtime build.
+            pub trait [<Wasi $name View>]: Send {
+                #[doc = concat!("Borrow a `", stringify!([<Wasi $name CtxView>]), "` from a mutable reference to self.")]
+                fn [<$name:lower>](&mut self) -> [<Wasi $name CtxView>]<'_>;
+            }
 
-        #[doc = concat!("Borrowed view over a `", stringify!($ctx), "` and the store's resource table.")]
-        pub struct $ctx_view<'a> {
-            #[doc = concat!("Mutable reference to the WASI ", $label, " context.")]
-            pub ctx: &'a mut dyn $ctx,
-            /// Mutable reference to the table used to manage resources.
-            pub table: &'a mut $crate::wasmtime_wasi::ResourceTable,
-        }
+            #[doc = concat!("Borrowed view over a `[`", stringify!([<Wasi $name Ctx>]), "`]` and the store's resource table.")]
+            pub struct [<Wasi $name CtxView>]<'a> {
+                #[doc = concat!("Mutable reference to the WASI ", stringify!($name), " context.")]
+                pub ctx: &'a mut dyn [<Wasi $name Ctx>],
+                /// Mutable reference to the table used to manage resources.
+                pub table: &'a mut $crate::wasmtime_wasi::ResourceTable,
+            }
 
-        #[doc = concat!("A backend bundle that yields the WASI ", $label, " context for a store.")]
-        ///
-        /// The blanket view impl turns this accessor into the linker-facing view
-        /// on `omnia::StoreCtx`; `runtime!` deployments generate the bundle-side
-        /// impl via `omnia_wasi_view!`.
-        pub trait $has: Send {
-            #[doc = concat!("Borrow the WASI ", $label, " backend context.")]
-            fn $ctx_accessor(&mut self) -> &mut dyn $ctx;
-        }
+            #[doc = concat!("A backend bundle that yields the WASI ", stringify!($name), " context for a store.")]
+            ///
+            /// The blanket view impl turns this accessor into the linker-facing view
+            /// on `omnia::StoreCtx`; `runtime!` deployments generate the bundle-side
+            /// impl via `omnia_wasi_view!`.
+            pub trait [<Has $name>]: Send {
+                #[doc = concat!("Borrow the WASI ", stringify!($name), " backend context.")]
+                fn [<$name:lower _ ctx>](&mut self) -> &mut dyn [<Wasi $name Ctx>];
+            }
 
-        impl<B: $has + Send + 'static> $view for $crate::StoreCtx<B> {
-            fn $accessor(&mut self) -> $ctx_view<'_> {
-                $ctx_view {
-                    ctx: self.backends.$ctx_accessor(),
-                    table: &mut self.base.table,
+            impl<B: [<Has $name>] + Send + 'static> [<Wasi $name View>] for $crate::StoreCtx<B> {
+                fn [<$name:lower>](&mut self) -> [<Wasi $name CtxView>]<'_> {
+                    [<Wasi $name CtxView>] {
+                        ctx: self.backends.[<$name:lower _ ctx>](),
+                        table: &mut self.base.table,
+                    }
                 }
             }
         }
