@@ -123,11 +123,11 @@ where
 /// `wasi-model`'s `resolve`) can invoke a guest without naming the concrete
 /// [`Runtime`].
 ///
-/// The `runtime!` macro threads an `Arc<dyn HostDispatch>` into each store
+/// The `runtime!` macro threads an `Arc<dyn Dispatcher>` into each store
 /// context so any host binding gets dynamic host→guest calls for free. It
 /// carries no consumer vocabulary — a consumer owns its own verb names and
 /// return shapes and composes this generic seam.
-pub trait HostDispatch: Send + Sync + 'static {
+pub trait Dispatcher: Send + Sync + 'static {
     /// Invoke `target`'s `interface`/`func` with `args`, returning the typed
     /// results. The target is instantiated *fresh* (instance-per-call), the hop
     /// is depth-bounded like any host-mediated call, and a live resource handle
@@ -141,7 +141,7 @@ pub trait HostDispatch: Send + Sync + 'static {
     ) -> FutureResult<Vec<Val>>;
 }
 
-impl<B: Clone + Send + Sync + 'static> HostDispatch for Runtime<B> {
+impl<B: Clone + Send + Sync + 'static> Dispatcher for Runtime<B> {
     fn invoke(
         &self, target: GuestId, interface: Option<String>, func: String, args: Vec<Val>,
     ) -> FutureResult<Vec<Val>> {

@@ -282,7 +282,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     pub fn store(&self) -> StoreCtx<B> {
         let base = StoreBase::builder()
             .options(self.options())
-            .dispatch(Arc::new(self.clone()))
+            .dispatcher(Arc::new(self.clone()))
             .args(&self.args)
             .mounts(Arc::clone(&self.mounts))
             .build();

@@ -19,7 +19,7 @@ use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiVie
 use wasmtime_wasi_http::p3::{WasiHttpCtxView, WasiHttpView};
 use wrpc_wasmtime::{WrpcCtxView, WrpcView};
 
-use crate::{HasLimits, HostDispatch, LinkClient, MountRegistry, RuntimeOptions, WrpcState};
+use crate::{Dispatcher, HasLimits, LinkClient, MountRegistry, RuntimeOptions, WrpcState};
 
 /// Type-state marker for a [`StoreBaseBuilder`] member that has been supplied,
 /// carrying its value until [`build`](StoreBaseBuilder::build) consumes it.
@@ -31,14 +31,14 @@ pub struct Unset;
 /// Type-state builder for [`StoreBase`], created by [`StoreBase::builder`].
 ///
 /// The `O` and `D` type parameters track whether the required
-/// [`options`](Self::options) and [`dispatch`](Self::dispatch) members have been
+/// [`options`](Self::options) and [`dispatcher`](Self::dispatcher) members have been
 /// supplied: each starts as [`Unset`] and becomes `Set<…>` once its setter runs.
 /// [`build`](Self::build) is implemented only when both are `Set`, so omitting
 /// either is a compile error rather than a runtime panic. The optional
 /// [`args`](Self::args) member defaults to empty and may be set in any state.
 pub struct StoreBaseBuilder<O = Unset, D = Unset> {
     options: O,
-    dispatch: D,
+    dispatcher: D,
     args: Vec<String>,
     mounts: Option<Arc<MountRegistry>>,
 }
@@ -75,7 +75,7 @@ impl<D> StoreBaseBuilder<Unset, D> {
     pub fn options(self, options: &RuntimeOptions) -> StoreBaseBuilder<Set<&RuntimeOptions>, D> {
         StoreBaseBuilder {
             options: Set(options),
-            dispatch: self.dispatch,
+            dispatcher: self.dispatcher,
             args: self.args,
             mounts: self.mounts,
         }
@@ -90,19 +90,19 @@ impl<O> StoreBaseBuilder<O, Unset> {
     ///
     /// [`Runtime`]: crate::Runtime
     #[must_use]
-    pub fn dispatch(
-        self, dispatch: Arc<dyn HostDispatch>,
-    ) -> StoreBaseBuilder<O, Set<Arc<dyn HostDispatch>>> {
+    pub fn dispatcher(
+        self, dispatcher: Arc<dyn Dispatcher>,
+    ) -> StoreBaseBuilder<O, Set<Arc<dyn Dispatcher>>> {
         StoreBaseBuilder {
             options: self.options,
-            dispatch: Set(dispatch),
+            dispatcher: Set(dispatcher),
             args: self.args,
             mounts: self.mounts,
         }
     }
 }
 
-impl StoreBaseBuilder<Set<&RuntimeOptions>, Set<Arc<dyn HostDispatch>>> {
+impl StoreBaseBuilder<Set<&RuntimeOptions>, Set<Arc<dyn Dispatcher>>> {
     /// Finish building the fixed per-store state, applying the WASI construction
     /// policy shared by every deployment.
     ///
@@ -112,7 +112,7 @@ impl StoreBaseBuilder<Set<&RuntimeOptions>, Set<Arc<dyn HostDispatch>>> {
     #[must_use]
     pub fn build(self) -> StoreBase {
         let Set(options) = self.options;
-        let Set(host_dispatch) = self.dispatch;
+        let Set(dispatcher) = self.dispatcher;
         let mounts = self.mounts.unwrap_or_default();
 
         let mut wasi_builder = WasiCtxBuilder::new();
@@ -151,7 +151,7 @@ impl StoreBaseBuilder<Set<&RuntimeOptions>, Set<Arc<dyn HostDispatch>>> {
             wasi,
             limits: StoreLimitsBuilder::new().memory_size(options.max_memory_bytes).build(),
             wrpc: WrpcState::new(),
-            host_dispatch,
+            dispatcher,
             mounts,
         }
     }
@@ -177,7 +177,7 @@ pub struct StoreBase {
     /// Type-erased host->guest dispatcher (e.g. `wasi-model`'s `resolve`); a
     /// fresh handle to the owning runtime. Inert unless a host binding reaches
     /// for it.
-    pub host_dispatch: Arc<dyn HostDispatch>,
+    pub dispatcher: Arc<dyn Dispatcher>,
     /// Mount registry (RFC-55): the startup-validated mounts also preopened into
     /// [`wasi`](Self::wasi). A consuming host crate reads it to match a lent
     /// `descriptor` back to its mount by directory identity. Empty unless the
@@ -189,21 +189,21 @@ impl StoreBase {
     /// Begin building the fixed per-store state for a single guest invocation.
     ///
     /// [`options`](StoreBaseBuilder::options) and
-    /// [`dispatch`](StoreBaseBuilder::dispatch) are required (the type-state
+    /// [`dispatcher`](StoreBaseBuilder::dispatcher) are required (the type-state
     /// builder will not expose [`build`](StoreBaseBuilder::build) until both are
     /// set); [`args`](StoreBaseBuilder::args) is optional.
     ///
     /// ```ignore
     /// let base = StoreBase::builder()
     ///     .options(self.options())
-    ///     .dispatch(Arc::new(self.clone()))
+    ///     .dispatcher(Arc::new(self.clone()))
     ///     .build();
     /// ```
     #[must_use]
     pub const fn builder() -> StoreBaseBuilder {
         StoreBaseBuilder {
             options: Unset,
-            dispatch: Unset,
+            dispatcher: Unset,
             args: Vec::new(),
             mounts: None,
         }
@@ -292,13 +292,13 @@ impl<B: Send + 'static> HasMounts for StoreCtx<B> {
 ///
 /// Lets a host crate reach the dispatcher for host-mediated dynamic linking
 /// without carrying it on its own view.
-pub trait HasHostDispatch: Send {
+pub trait HasDispatcher: Send {
     /// Clone a handle to the store's host->guest dispatcher.
-    fn host_dispatch(&self) -> Arc<dyn HostDispatch>;
+    fn dispatcher(&self) -> Arc<dyn Dispatcher>;
 }
 
-impl<B: Send + 'static> HasHostDispatch for StoreCtx<B> {
-    fn host_dispatch(&self) -> Arc<dyn HostDispatch> {
-        Arc::clone(&self.base.host_dispatch)
+impl<B: Send + 'static> HasDispatcher for StoreCtx<B> {
+    fn dispatcher(&self) -> Arc<dyn Dispatcher> {
+        Arc::clone(&self.base.dispatcher)
     }
 }

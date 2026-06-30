@@ -33,7 +33,7 @@ mod serve;
 mod transport;
 
 pub use handle::DispatchHandle;
-pub use host::HostDispatch;
+pub use host::Dispatcher;
 pub use link::link;
 pub use selector::{FirstArgSelector, GuestSelector};
 pub use serve::serve_links;

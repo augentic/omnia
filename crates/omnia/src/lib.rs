@@ -22,7 +22,7 @@ pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 pub use self::cli::{Cli, Command};
 pub use self::deployment::{Deployment, DeploymentBuilder};
 pub use self::dispatch::{
-    FirstArgSelector, GuestSelector, HostDispatch, LinkClient, WrpcState, serve_links,
+    FirstArgSelector, GuestSelector, Dispatcher, LinkClient, WrpcState, serve_links,
 };
 pub use self::mount::{Mount, MountRegistry, ResolvedPreopen};
 pub use self::options::RuntimeOptions;
@@ -37,7 +37,7 @@ pub use self::runtime::{ExitStatus, Runtime, RuntimeHooks};
 #[doc(hidden)]
 pub use self::runtime::{main, run};
 pub use self::store::{
-    HasHostDispatch, HasHttp, HasMounts, StoreBase, StoreBaseBuilder, StoreCtx,
+    HasDispatcher, HasHttp, HasMounts, StoreBase, StoreBaseBuilder, StoreCtx,
 };
 #[doc(hidden)]
 pub use self::store::{Set, Unset};

@@ -42,7 +42,7 @@ The runtime is built around a set of traits that allow services to be plugged in
 
 - **Macros:** `runtime!`
 - **Lifecycle:** `bootstrap_and_run` (build → bootstrap → [`run`]), `run`, and `command::run` — server and command paths both call `prepare` for epoch interruption, pool-metric sampling, and host-mediated link serving
-- **Runtime + store:** `Runtime`, `RuntimeHooks`, `StoreCtx`, `StoreBase`, `Host`, `Server`, `Backend`, `FromEnv`, `HasLimits`, `HostDispatch`, `FutureResult`
+- **Runtime + store:** `Runtime`, `RuntimeHooks`, `StoreCtx`, `StoreBase`, `Host`, `Server`, `Backend`, `FromEnv`, `HasLimits`, `Dispatcher`, `FutureResult`
 - **Registry pipeline:** `DeploymentBuilder`, `Deployment`, `Registry`, `Guest`, `GuestId`, `RuntimeOptions`
 - **Trigger routing (host servers):** `HttpRoutes`, `TopicRoutes`, `Routes`, `Resolver`, `TriggerRouter`
 - **Host-mediated linking (advanced):** `serve_links`, `GuestSelector`, `FirstArgSelector`, `LinkClient`, `WrpcState`

@@ -42,7 +42,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{HasHostDispatch, HasMounts, Host, Server};
+use omnia::{HasDispatcher, HasMounts, Host, Server};
 use wasmtime::component::{HasData, Linker, ResourceTable};
 
 pub use self::default_impl::{ConnectOptions, ModelDefault};
@@ -64,7 +64,7 @@ impl HasData for WasiModel {
 
 impl<T> Host<T> for WasiModel
 where
-    T: WasiModelView + HasMounts + HasHostDispatch + 'static,
+    T: WasiModelView + HasMounts + HasDispatcher + 'static,
 {
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
         Ok(completion::add_to_linker::<_, Self>(linker, T::model)?)

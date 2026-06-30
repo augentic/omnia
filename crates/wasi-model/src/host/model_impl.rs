@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, bail};
 use futures::FutureExt as _;
-use omnia::{GuestId, HasHostDispatch, HasMounts, HostDispatch};
+use omnia::{Dispatcher, GuestId, HasDispatcher, HasMounts};
 use wasmtime::component::{Accessor, StreamReader, Val};
 
 use super::generated::augentic::model::completion as genc;
@@ -25,7 +25,7 @@ use crate::host::types::{DirEntry, Reference, VerifyReport};
 
 impl<T> HostWithStore<T> for WasiModel
 where
-    T: HasMounts + HasHostDispatch,
+    T: HasMounts + HasDispatcher,
 {
     async fn complete(
         accessor: &Accessor<T, Self>, mut prompt: genc::Prompt,
@@ -46,7 +46,7 @@ where
                 // `store.get()` reborrows the store mutably, so the mount
                 // registry and dispatcher cannot be held as references across it.
                 let working_trees = store.data_mut().mounts();
-                let dispatch = store.data_mut().host_dispatch();
+                let dispatcher = store.data_mut().dispatcher();
                 let view = store.get();
                 let working_tree = working_tree::resolve(
                     view.table,
@@ -54,7 +54,7 @@ where
                     working_tree_res.as_ref(),
                 )?;
                 let tool_host: Arc<dyn ToolHost> = Arc::new(BoundToolHost {
-                    dispatch,
+                    dispatcher,
                     references,
                     verify_allowed,
                     working_tree,
@@ -84,7 +84,7 @@ impl Host for WasiModelCtxView<'_> {
 
 // The bound tool host, built fresh per completion from the prompt's grants.
 struct BoundToolHost {
-    dispatch: Arc<dyn HostDispatch>,
+    dispatcher: Arc<dyn Dispatcher>,
     references: Option<String>,
     verify_allowed: Vec<String>,
     working_tree: Option<WorkingTree>,
@@ -120,9 +120,9 @@ impl ToolHost for BoundToolHost {
             }
             .boxed();
         };
-        let dispatch = Arc::clone(&self.dispatch);
+        let dispatcher = Arc::clone(&self.dispatcher);
         async move {
-            let results = dispatch
+            let results = dispatcher
                 .invoke(
                     GuestId::from(target),
                     None,
