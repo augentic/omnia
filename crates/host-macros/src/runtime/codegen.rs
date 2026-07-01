@@ -21,6 +21,7 @@ impl From<&Config> for Codegen {
     fn from(config: &Config) -> Self {
         let host_entries = &config.host_entries;
         let host_types = host_entries.iter().map(|entry| entry.host.clone()).collect();
+
         let (backends_ty, backends_def) = emit_backends(host_entries);
 
         Self {
@@ -238,7 +239,7 @@ mod tests {
             host_entry("WasiHttp", "HttpDefault"),
             host_entry("WasiHttp", "HttpDefault"),
         ];
-        let (ty, def) = emit_backends(&entries, &[]);
+        let (ty, def) = emit_backends(&entries);
         let def = def.to_string();
 
         assert_eq!(ty.to_string(), "Backends");
@@ -255,8 +256,8 @@ mod tests {
     }
 
     #[test]
-    fn empty_host_entries_emit_unit_backends() {
-        let (ty, def) = emit_backends(&[], &[]);
+    fn empty_host_entries() {
+        let (ty, def) = emit_backends(&[]);
         assert_eq!(ty.to_string(), "()");
         assert!(def.is_empty());
     }
