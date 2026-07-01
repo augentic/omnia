@@ -1,0 +1,17 @@
+# MCP documentation server.
+#
+# A single guest serves a stateless MCP endpoint from its `wasi:http` handler.
+# The host runs one HTTP server and routes the `/mcp/docs` prefix to the guest.
+#
+# Source paths are resolved relative to this file's directory. Build the guest
+# first (see README.md), then run from the repository root:
+#
+#   cargo run --example mcp -- run --config examples/mcp/omnia.toml
+
+[[guest]]
+id = "docs"
+source.path = "../../target/wasm32-wasip2/debug/examples/mcp_wasm.wasm"
+
+[[route.http]]
+prefix = "/mcp/docs"
+guest = "docs"

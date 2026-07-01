@@ -134,6 +134,15 @@ name = "model"
 path = "model/runtime.rs"
 
 [[example]]
+name = "mcp-wasm"
+path = "mcp/guest.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "mcp"
+path = "mcp/runtime.rs"
+
+[[example]]
 name = "messaging-wasm"
 path = "messaging/guest.rs"
 crate-type = ["cdylib"]

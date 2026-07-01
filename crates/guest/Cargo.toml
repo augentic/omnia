@@ -44,4 +44,5 @@ wit-bindgen.workspace = true
 [dev-dependencies]
 http-body-util.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
+tower.workspace = true
 tracing-subscriber.workspace = true
