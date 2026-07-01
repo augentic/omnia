@@ -52,7 +52,8 @@ pub fn expand(config: &Config) -> TokenStream {
                             Box::pin(#server_types.run(runtime)),
                         )*
                     ];
-                    Ok(future::try_join_all(servers).await?)
+                    future::try_join_all(servers).await?;
+                    Ok(())
                 }
             }
 
