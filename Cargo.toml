@@ -53,7 +53,7 @@ unneeded_field_pattern = "warn"
 unused_result_ok = "warn"
 
 [workspace.dependencies]
-anyhow = "1.0.102"
+anyhow = "1.0.103"
 axum = { version = "0.8.9", default-features = false, features = ["json"] }
 base64ct = { version = "1.8.3", features = ["std"] }
 bytes = "1.12.0"
@@ -75,6 +75,7 @@ moka = { version = "0.12.15", features = ["sync"] }
 opentelemetry = "0.32.0"
 opentelemetry_sdk = "0.32.1"
 parking_lot = "0.12.5"
+pastey = "0.2.3"
 proc-macro2 = "1.0.106"
 quote = "1.0.46"
 rand = "0.10.1"

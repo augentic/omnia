@@ -95,22 +95,13 @@ world imports {
 
 ### Design rationale
 
-**Documents are `list<u8>` (JSON bytes)** -- WIT cannot express recursive value types.
-The guest serializes with `serde_json`, the host deserializes to whatever the backend
-needs (BSON for MongoDB/PoloDB, entity properties for Azure Table Storage). This is the
-same pattern `wasi-keyvalue` uses for values.
+**Documents are `list<u8>` (JSON bytes)** -- WIT cannot express recursive value types. The guest serializes with `serde_json`, the host deserializes to whatever the backend needs (BSON for MongoDB/PoloDB, entity properties for Azure Table Storage). This is the same pattern `wasi-keyvalue` uses for values.
 
-**Filters are a WIT resource** -- The guest calls static constructors (`Filter::compare`,
-`Filter::and`, etc.) that cross the WASM boundary. Each call creates a node in a recursive
-`FilterTree` enum on the host side. The resource approach is self-documenting, type-safe
-(you cannot construct an invalid filter), and avoids both the recursive-type limitation
-of WIT and the complexity of arena-based representations.
+**Filters are a WIT resource** -- The guest calls static constructors (`Filter::compare`, `Filter::and`, etc.) that cross the WASM boundary. Each call creates a node in a recursive `FilterTree` enum on the host side. The resource approach is self-documenting, type-safe (you cannot construct an invalid filter), and avoids both the recursive-type limitation of WIT and the complexity of arena-based representations.
 
-**Scalar values are flat** -- Filter comparisons only need scalars (you never filter by
-`where field = {nested_object}`). This sidesteps value-type recursion entirely.
+**Scalar values are flat** -- Filter comparisons only need scalars (you never filter by `where field = {nested_object}`). This sidesteps value-type recursion entirely.
 
-**Host-enforced filter limits** -- The host rejects filter trees that exceed fixed
-complexity thresholds, regardless of backend:
+**Host-enforced filter limits** -- The host rejects filter trees that exceed fixed complexity thresholds, regardless of backend:
 
 | Limit | Value | Applies to |
 |-------|-------|------------|
@@ -118,39 +109,19 @@ complexity thresholds, regardless of backend:
 | Max in-list size | 100 | `in-list`, `not-in-list` value lists |
 | Min combinator children | 1 | `and`, `or` (empty lists rejected) |
 
-These limits protect the host from unbounded memory and CPU consumption when
-translating filters to backend-native queries (BSON, OData, SQL). A depth of 5
-covers all practical filter patterns; if a guest needs deeper nesting the query
-design should be reconsidered. Backends may impose additional constraints (e.g. the
-PoloDB default backend rejects `starts-with` and `ends-with`, and caps query results
-at 1000 documents when no explicit limit is set).
+These limits protect the host from unbounded memory and CPU consumption when translating filters to backend-native queries (BSON, OData, SQL). A depth of 5 covers all practical filter patterns; if a guest needs deeper nesting the query design should be reconsidered. Backends may impose additional constraints (e.g. the PoloDB default backend rejects `starts-with` and `ends-with`, and caps query results at 1000 documents when no explicit limit is set).
 
-**No `collection` resource** -- "Opening" a collection is trivial in all three backends
-(MongoDB returns a lightweight handle from its pooled client, Azure just needs the table
-name in a URL, PoloDB resolves a name). The expensive resources (MongoDB connection pool,
-PoloDB database handle) are managed at the backend level via `Backend::connect_with` at
-host startup. A collection resource would add a resource table entry and an extra boundary
-crossing per operation for something that is just a string lookup.
+**No `collection` resource** -- "Opening" a collection is trivial in all three backends (MongoDB returns a lightweight handle from its pooled client, Azure just needs the table name in a URL, PoloDB resolves a name). The expensive resources (MongoDB connection pool, PoloDB database handle) are managed at the backend level via `Backend::connect_with` at host startup. A collection resource would add a resource table entry and an extra boundary crossing per operation for something that is just a string lookup.
 
-**No separate `date` type** -- None of the three backends (Azure Table Storage, MongoDB,
-PoloDB) have a native date-only type; they all use datetime/timestamp. The `timestamp`
-scalar covers datetime filtering, `str` covers date-as-string comparisons, and a
-guest-side `Filter::on_date` convenience method handles the range-expansion pattern.
+**No separate `date` type** -- None of the three backends (Azure Table Storage, MongoDB, PoloDB) have a native date-only type; they all use datetime/timestamp. The `timestamp` scalar covers datetime filtering, `str` covers date-as-string comparisons, and a guest-side `Filter::on_date` convenience method handles the range-expansion pattern.
 
-**Flat `store` interface** -- Five operations: `get` (point read by ID), `insert`
-(create new, fail if exists), `put` (unconditional upsert), `delete` (remove by ID),
-`query` (filtered read with pagination). `insert` vs `put` is a meaningful distinction --
-all three backends support insert-with-conflict natively (Azure returns 409, MongoDB
-returns duplicate key error). `get` returns `document` (not just data) for consistency
-with `query`.
+**Flat `store` interface** -- Five operations: `get` (point read by ID), `insert` (create new, fail if exists), `put` (unconditional upsert), `delete` (remove by ID), `query` (filtered read with pagination). `insert` vs `put` is a meaningful distinction -- all three backends support insert-with-conflict natively (Azure returns 409, MongoDB returns duplicate key error). `get` returns `document` (not just data) for consistency with `query`.
 
 ---
 
 ## 2. SDK Capability -- `DocumentStore`
 
-These types and the trait live in `omnia-guest`. They are platform-agnostic -- no
-`#[cfg(target_arch)]` guards, no dependency on `omnia-wasi-jsondb` guest
-bindings. Domain crates import these and use them in handler bounds.
+These types and the trait live in `omnia-guest`. They are platform-agnostic -- no `#[cfg(target_arch)]` guards, no dependency on `omnia-wasi-jsondb` guest bindings. Domain crates import these and use them in handler bounds.
 
 ### Types
 
@@ -320,9 +291,7 @@ impl Filter {
 
 ### Trait
 
-Follows the same pattern as `TableStore`, `StateStore`, etc. in `capabilities.rs`.
-The `#[cfg(target_arch = "wasm32")]` default impls delegate to the guest module of
-`omnia-wasi-jsondb` (see section 3).
+Follows the same pattern as `TableStore`, `StateStore`, etc. in `capabilities.rs`. The `#[cfg(target_arch = "wasm32")]` default impls delegate to the guest module of `omnia-wasi-jsondb` (see section 3).
 
 ```rust
 // omnia-guest/src/capabilities.rs
@@ -451,13 +420,9 @@ impl DocumentStore for MockProvider {
 
 ## 3. Rust to WIT Conversion (guest module)
 
-The conversion from SDK types to WIT types lives in the **guest module** of
-`omnia-wasi-jsondb`. This follows the same pattern as
-`omnia-wasi-keyvalue/src/guest/cache.rs` -- the guest module wraps raw WIT bindings
-with a higher-level API that accepts SDK types.
+The conversion from SDK types to WIT types lives in the **guest module** of `omnia-wasi-jsondb`. This follows the same pattern as `omnia-wasi-keyvalue/src/guest/cache.rs` -- the guest module wraps raw WIT bindings with a higher-level API that accepts SDK types.
 
-The `capabilities.rs` wasm32 default impls just delegate to this module in one or two
-lines (see section 2 trait definition above).
+The `capabilities.rs` wasm32 default impls just delegate to this module in one or two lines (see section 2 trait definition above).
 
 ### Guest module structure
 
@@ -472,8 +437,7 @@ crates/wasi-jsondb/src/
 
 ### Type zones
 
-There are three copies of each type (ScalarValue, ComparisonOp, SortField, etc.),
-living in three zones:
+There are three copies of each type (ScalarValue, ComparisonOp, SortField, etc.), living in three zones:
 
 | Zone | Generated by | Target |
 |------|-------------|--------|
@@ -481,12 +445,9 @@ living in three zones:
 | Guest WIT types (`omnia_wasi_jsondb::types`) | `wit_bindgen::generate!` | wasm32 only |
 | Host WIT types (`omnia_wasi_jsondb::host::generated`) | `wasmtime::component::bindgen!` | Native only |
 
-Guest and host WIT types are structurally identical (generated from the same WIT file).
-The component model ABI handles serialization between them automatically -- no code
-needed for that boundary.
+Guest and host WIT types are structurally identical (generated from the same WIT file). The component model ABI handles serialization between them automatically -- no code needed for that boundary.
 
-Hand-written conversion code exists at **one** point: SDK types to guest WIT types,
-in `convert.rs`.
+Hand-written conversion code exists at **one** point: SDK types to guest WIT types, in `convert.rs`.
 
 ### store.rs -- public API
 
@@ -663,9 +624,7 @@ to_wit_filter(And([Compare{status,Eq,active}, Compare{age,Gt,18}]))
         -> handle 3
 ```
 
-Three lightweight boundary crossings. The host now has a clean recursive
-`FilterTree` at handle 3. When `store.query` receives this handle inside
-`query-options`, the backend gets the `FilterTree` directly for translation.
+Three lightweight boundary crossings. The host now has a clean recursive `FilterTree` at handle 3. When `store.query` receives this handle inside `query-options`, the backend gets the `FilterTree` directly for translation.
 
 ---
 
@@ -673,10 +632,7 @@ Three lightweight boundary crossings. The host now has a clean recursive
 
 ### Wasmtime bindgen
 
-The host module generates Rust types from the WIT using `wasmtime::component::bindgen!`.
-The `with:` clause maps the WIT `filter` resource to our `FilterProxy` type --
-this is how wasmtime knows what to store in the resource table when the guest calls
-filter constructors.
+The host module generates Rust types from the WIT using `wasmtime::component::bindgen!`. The `with:` clause maps the WIT `filter` resource to our `FilterProxy` type -- this is how wasmtime knows what to store in the resource table when the guest calls filter constructors.
 
 ```rust
 // crates/wasi-jsondb/src/host.rs
@@ -702,27 +658,17 @@ mod generated {
 }
 ```
 
-This generates host-side traits like `HostFilterWithStore` (for the `filter` resource
-static methods) and `HostStoreWithStore` (for the `store` interface functions).
-The `WithStore` suffix comes from the `store` option, which uses the `Accessor`
-pattern instead of `&mut self`. All wasi-\* host crates in the repo use this option.
+This generates host-side traits like `HostFilterWithStore` (for the `filter` resource static methods) and `HostStoreWithStore` (for the `store` interface functions). The `WithStore` suffix comes from the `store` option, which uses the `Accessor` pattern instead of `&mut self`. All wasi-\* host crates in the repo use this option.
 
-The generated traits expect `Resource<FilterProxy>` as the return type for filter
-constructors and accept it as input in `query-options.filter`. Our implementation
-creates `FilterProxy` values and pushes them into the resource table.
+The generated traits expect `Resource<FilterProxy>` as the return type for filter constructors and accept it as input in `query-options.filter`. Our implementation creates `FilterProxy` values and pushes them into the resource table.
 
 ### FilterProxy and FilterTree
 
-`FilterTree` is the internal representation of the `filter` resource -- the same way
-`InMemContainer` is the internal representation of blobstore's `container` resource,
-or `InMemBucket` is the internal representation of keyvalue's `bucket` resource.
+`FilterTree` is the internal representation of the `filter` resource -- the same way `InMemContainer` is the internal representation of blobstore's `container` resource, or `InMemBucket` is the internal representation of keyvalue's `bucket` resource.
 
-`FilterProxy` is the newtype wrapper that goes in the resource table (following the
-`ContainerProxy`, `BucketProxy` pattern in the codebase).
+`FilterProxy` is the newtype wrapper that goes in the resource table (following the `ContainerProxy`, `BucketProxy` pattern in the codebase).
 
-The `FilterTree` uses wasmtime-generated `ComparisonOp` and `ScalarValue` types
-directly -- no conversion needed. They arrive as function parameters in the resource
-constructors and go straight into `FilterTree` variants.
+The `FilterTree` uses wasmtime-generated `ComparisonOp` and `ScalarValue` types directly -- no conversion needed. They arrive as function parameters in the resource constructors and go straight into `FilterTree` variants.
 
 ```rust
 // crates/wasi-jsondb/src/host/resource.rs
@@ -751,9 +697,7 @@ pub struct FilterProxy(pub FilterTree);
 
 ### Host-side resource implementation
 
-When the guest calls the WIT filter resource constructors, the host builds
-`FilterTree` nodes and stores them in the resource table. The wasmtime-generated
-types arrive as parameters and go straight into `FilterTree` -- no conversion.
+When the guest calls the WIT filter resource constructors, the host builds `FilterTree` nodes and stores them in the resource table. The wasmtime-generated types arrive as parameters and go straight into `FilterTree` -- no conversion.
 
 ```rust
 // crates/wasi-jsondb/src/host/types_impl.rs
@@ -814,16 +758,13 @@ impl HostFilterWithStore for WasiJsonDb {
 }
 ```
 
-When `store.query` is called and `query-options.filter` contains a resource handle,
-the host pulls `FilterProxy` from the resource table and passes `FilterTree` to
-the backend translator.
+When `store.query` is called and `query-options.filter` contains a resource handle, the host pulls `FilterProxy` from the resource table and passes `FilterTree` to the backend translator.
 
 ---
 
 ### Azure Table Storage translator
 
-Azure Table Storage speaks OData. The translator walks the `FilterTree` and emits an
-OData `$filter` string.
+Azure Table Storage speaks OData. The translator walks the `FilterTree` and emits an OData `$filter` string.
 
 ```rust
 // crates/wasi-jsondb/src/host/azure/filter.rs
@@ -922,8 +863,7 @@ GET https://myaccount.table.core.windows.net/items
 
 ### MongoDB translator
 
-MongoDB speaks BSON. The translator walks the `FilterTree` and builds a
-`bson::Document`.
+MongoDB speaks BSON. The translator walks the `FilterTree` and builds a `bson::Document`.
 
 ```rust
 // crates/wasi-jsondb/src/host/mongodb/filter.rs
@@ -1035,8 +975,7 @@ MongoDB backend produces:
 
 ### PoloDB (default in-memory backend)
 
-PoloDB uses the same BSON query syntax as MongoDB. The default backend reuses
-the MongoDB filter translator and calls `polodb_core::Collection::find`:
+PoloDB uses the same BSON query syntax as MongoDB. The default backend reuses the MongoDB filter translator and calls `polodb_core::Collection::find`:
 
 ```rust
 // crates/wasi-jsondb/src/host/default_impl.rs
@@ -1086,25 +1025,17 @@ Filter::and([             DocumentStore          store::query()          store.q
 
 All three backends support conditional writes with version tokens:
 
-- **Azure Table Storage**: Native ETags via `ETag` response header and `If-Match`
-  request header. Unconditional upsert uses no `If-Match`; conditional update
-  sends `If-Match: <etag>` and gets `412 Precondition Failed` on conflict.
-- **MongoDB**: No native etags, but a managed `_etag` field in each document can
-  serve the same purpose. Conditional writes filter on `{ _id: id, _etag: etag }`;
-  `matched_count == 0` indicates conflict.
+- **Azure Table Storage**: Native ETags via `ETag` response header and `If-Match` request header. Unconditional upsert uses no `If-Match`; conditional update sends `If-Match: <etag>` and gets `412 Precondition Failed` on conflict.
+- **MongoDB**: No native etags, but a managed `_etag` field in each document can serve the same purpose. Conditional writes filter on `{ _id: id, _etag: etag }`; `matched_count == 0` indicates conflict.
 - **PoloDB**: Same field-based approach as MongoDB.
 
 A future version could add:
 
 - An `etag: option<string>` field to the `document` WIT record.
 - A `conflict` variant to the `error` type.
-- Separate SDK methods (`get_versioned`, `put_if_match`) or an optional etag parameter
-  on `put`, so the simple path (unconditional writes) stays clean and the concurrency-aware
-  path is opt-in.
+- Separate SDK methods (`get_versioned`, `put_if_match`) or an optional etag parameter on `put`, so the simple path (unconditional writes) stays clean and the concurrency-aware path is opt-in.
 
-The key design challenge is ergonomics: the guest must thread the etag from a previous
-read to a subsequent write. Keeping the simple and versioned paths separate in the SDK
-avoids polluting the common case.
+The key design challenge is ergonomics: the guest must thread the etag from a previous read to a subsequent write. Keeping the simple and versioned paths separate in the SDK avoids polluting the common case.
 
 ### Field projection (`select`)
 
@@ -1114,20 +1045,14 @@ All three backends support returning a subset of fields:
 - **MongoDB**: Projection `{ field1: 1, field2: 1 }`.
 - **PoloDB**: Same as MongoDB.
 
-A `select: list<string>` field on `query-options` could be added later. The main
-concern is that partial documents make guest-side deserialization fragile -- the guest
-would need to handle missing fields (`Option` on every field) or use a different
-struct for projected queries. Deferred until there is a concrete need.
+A `select: list<string>` field on `query-options` could be added later. The main concern is that partial documents make guest-side deserialization fragile -- the guest would need to handle missing fields (`Option` on every field) or use a different struct for projected queries. Deferred until there is a concrete need.
 
 ### Continuation token semantics
 
 Continuation tokens are opaque strings whose internal representation is backend-dependent:
 
 - **Azure Table Storage**: Encodes `NextPartitionKey` + `NextRowKey` from response headers.
-- **MongoDB**: Encodes the last document's sort key for keyset pagination (preferred
-  over cursor IDs which have server-side timeouts).
+- **MongoDB**: Encodes the last document's sort key for keyset pagination (preferred over cursor IDs which have server-side timeouts).
 - **PoloDB**: Same keyset approach as MongoDB.
 
-The guest never inspects or constructs tokens -- it passes them through from one
-`query-result` to the next `query-options`. `None` on input starts from the beginning;
-`None` on output means no more pages.
+The guest never inspects or constructs tokens -- it passes them through from one `query-result` to the next `query-options`. `None` on input starts from the beginning; `None` on output means no more pages.

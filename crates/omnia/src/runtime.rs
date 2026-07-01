@@ -1,36 +1,129 @@
-//! # Runtime lifecycle
-//!
-//! The startup [`prepare`] every deployment shares and the long-lived server
-//! loop driven by [`run`], plus the detached background tasks they drive off the
-//! Wasmtime [`Engine`] (epoch interruption so guest deadlines fire while
-//! CPU-bound guests execute, and pooling-allocator occupancy sampling emitted
-//! as `OpenTelemetry` gauges via the `tracing` metrics bridge) and the
-//! [`ExitStatus`] a deployment yields.
+//! Deployment lifecycle: [`bootstrap`], [`run`], background tasks, and [`ExitStatus`].
 
-use std::future::Future;
+mod command;
+
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result};
 use clap::Parser as _;
-use futures::future::{self, BoxFuture};
-use wasmtime::Engine;
+use wasmtime::component::{Instance, InstancePre};
+use wasmtime::{Engine, Store};
 
+use crate::cli::{Cli, Command};
 use crate::dispatch::serve_links;
-use crate::traits::Runtime;
-use crate::{Cli, Command, Compiled, RegistryBuilder, command};
+use crate::mount::MountRegistry;
+use crate::traits::{Backends, HasLimits};
+use crate::{Deployment, DeploymentBuilder, Registry, RuntimeOptions, StoreBase, StoreCtx};
 
-/// Spawn a detached background task that drives epoch interruption.
+/// How a deployment is driven after bootstrap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Mode {
+    /// Await trigger servers until shutdown.
+    #[default]
+    Server,
+    /// Drive `wasi:cli/run` once; trigger servers run in the background.
+    Command,
+}
+
+impl Mode {
+    /// Whether guest argv is shaped for a one-shot `wasi:cli` command.
+    #[must_use]
+    pub const fn is_command(self) -> bool {
+        matches!(self, Self::Command)
+    }
+}
+
+/// Host linking and trigger-server startup for a deployment.
+pub trait RuntimeHooks<B: Backends> {
+    /// Link every declared host into the deployment linker.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a host cannot be added to the linker.
+    fn link(deployment: &mut Deployment<StoreCtx<B>>) -> Result<()>;
+
+    /// Run every declared long-lived trigger server concurrently.
+    fn serve(runtime: &Runtime<B>) -> impl std::future::Future<Output = Result<()>> + Send;
+}
+
+/// CLI entry point for generated `main` functions.
+#[doc(hidden)]
+pub async fn main<B, H>(mode: Mode) -> ExitCode
+where
+    B: Backends,
+    H: RuntimeHooks<B>,
+{
+    match Cli::parse().command {
+        Command::Run { wasm, config, args } => match run::<B, H>(wasm, config, args, mode).await {
+            Ok(status) => status.into(),
+            Err(error) => {
+                eprintln!("{error:#}");
+                ExitCode::FAILURE
+            }
+        },
+        #[cfg(feature = "jit")]
+        Command::Compile { .. } => {
+            eprintln!(
+                "the generated `main` only supports `run`; supply a custom `main` for other \
+                 subcommands"
+            );
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Build runtime state, bootstrap it, then run command mode or every trigger server.
 ///
-/// Calls [`Engine::increment_epoch`] every `tick`. Together with the per-store
-/// epoch deadline installed in `Runtime::build_store`, this is what lets a
-/// CPU-bound guest periodically yield to the async executor so the wall-clock
-/// timeout wrapped around each invocation can fire.
+/// # Errors
 ///
-/// `tick` must be non-zero: the runtime clamps `EPOCH_TICK_MS` to a 1ms minimum
-/// (see `parse_tick`), and [`tokio::time::interval`] panics on a zero period.
-pub fn drive_epoch(engine: Engine, tick: Duration) {
+/// Returns an error if the deployment cannot be built, runtime state cannot be
+/// assembled, bootstrap fails, or a trigger server exits with an error.
+pub async fn run<B, H>(
+    wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>, mode: Mode,
+) -> Result<ExitStatus>
+where
+    B: Backends,
+    H: RuntimeHooks<B>,
+{
+    let deployment = DeploymentBuilder::new()
+        .wasm(wasm)
+        .config(config)
+        .args(args)
+        .mode(mode)
+        .build::<StoreCtx<B>>()
+        .await
+        .context("building runtime")?;
+
+    let runtime = Runtime::<B>::new(deployment, H::link).await.context("assembling runtime")?;
+
+    // start background tasks
+    drive_epoch(runtime.registry().engine().clone(), runtime.options().epoch_tick);
+    sample_pool(runtime.registry().engine().clone(), runtime.options().pool_metrics_interval);
+
+    // wire host-mediated link servers
+    serve_links(&runtime).await.context("wiring host-mediated link serve side")?;
+
+    match mode {
+        Mode::Command => {
+            let servers_runtime = runtime.clone();
+            tokio::spawn(async move {
+                if let Err(error) = H::serve(&servers_runtime).await {
+                    tracing::error!(%error, "trigger server exited with error");
+                }
+            });
+            command::drive(&runtime).await
+        }
+        Mode::Server => {
+            H::serve(&runtime).await?;
+            Ok(ExitStatus::SUCCESS)
+        }
+    }
+}
+
+fn drive_epoch(engine: Engine, tick: Duration) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(tick);
         loop {
@@ -40,16 +133,7 @@ pub fn drive_epoch(engine: Engine, tick: Duration) {
     });
 }
 
-/// Spawn a detached background task that samples pool occupancy as metrics.
-///
-/// Periodically reads `engine`'s pooling-allocator occupancy and emits it as
-/// `OpenTelemetry` gauges (through the `tracing` -> `OpenTelemetry` metrics
-/// layer configured by [`Telemetry`]).
-///
-/// The task is a no-op and is never spawned when `interval` is zero. If the
-/// engine was not configured with the pooling allocator (so there are no pool
-/// metrics to report) the task stops after its first tick.
-pub fn sample_pool(engine: Engine, interval: Duration) {
+fn sample_pool(engine: Engine, interval: Duration) {
     if interval.is_zero() {
         return;
     }
@@ -77,124 +161,22 @@ pub fn sample_pool(engine: Engine, interval: Duration) {
     });
 }
 
-/// Parse the CLI `run` subcommand and map the outcome to a process exit code.
-///
-/// Generated `main` functions delegate here so CLI parsing and error reporting
-/// stay in the library rather than in proc-macro output.
-///
-/// # Errors
-///
-/// Failures from `run` are printed to stderr and mapped to
-/// [`ExitCode::FAILURE`]; success yields the guest or deployment status.
-#[doc(hidden)]
-pub async fn main<R, N, NFut, S>(command_mode: bool, new: N, servers: S) -> ExitCode
-where
-    R: Runtime,
-    N: FnOnce(Compiled<R::StoreCtx>) -> NFut,
-    NFut: Future<Output = Result<R>>,
-    S: FnOnce(&R) -> Vec<BoxFuture<'_, Result<()>>>,
-{
-    match Cli::parse().command {
-        Command::Run { wasm, config, args } => {
-            match run(wasm, config, args, command_mode, new, servers).await {
-                Ok(status) => status.into(),
-                Err(error) => {
-                    eprintln!("{error:#}");
-                    ExitCode::FAILURE
-                }
-            }
-        }
-        #[cfg(feature = "jit")]
-        Command::Compile { .. } => {
-            eprintln!(
-                "the generated `main` only supports `run`; supply a custom `main` for other \
-                 subcommands"
-            );
-            ExitCode::FAILURE
-        }
-    }
-}
-
-/// Drive a deployment after runtime state is built: a one-shot `wasi:cli` command
-/// or every long-lived trigger server to completion.
-///
-/// # Errors
-///
-/// Returns an error if preparation, command execution, or any server fails.
-pub async fn run<R, N, NFut, S>(
-    wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>, command_mode: bool, new: N,
-    servers: S,
-) -> Result<ExitStatus>
-where
-    R: Runtime,
-    N: FnOnce(Compiled<R::StoreCtx>) -> NFut,
-    NFut: Future<Output = Result<R>>,
-    S: FnOnce(&R) -> Vec<BoxFuture<'_, Result<()>>>,
-{
-    let compiled = RegistryBuilder::new()
-        .wasm(wasm)
-        .config(config)
-        .args(args)
-        .command(command_mode)
-        .compile::<R::StoreCtx>()
-        .await
-        .context("building runtime")?;
-
-    let runtime = new(compiled).await.context("preparing runtime state")?;
-
-    if command_mode {
-        command::run(&runtime).await
-    } else {
-        prepare(&runtime).await?;
-        future::try_join_all(servers(&runtime)).await?;
-
-        Ok(ExitStatus::SUCCESS)
-    }
-}
-
-// Start a runtime's background tasks and wire host-mediated links — the shared
-pub async fn prepare<R: Runtime>(runtime: &R) -> Result<()> {
-    // Drive epoch interruption so guest deadlines (and the wall-clock timeouts
-    // wrapped around each invocation) fire even while a guest executes
-    // CPU-bound code.
-    drive_epoch(runtime.registry().engine().clone(), runtime.options().epoch_tick);
-
-    // Periodically sample pool occupancy as metrics so pool sizing can be tuned
-    // from real data.
-    sample_pool(runtime.registry().engine().clone(), runtime.options().pool_metrics_interval);
-
-    // Wire the serve side of any host-mediated links before triggers fire, so a
-    // dispatched call always finds its target's wRPC server.
-    serve_links(runtime).await.context("wiring host-mediated link serve side")?;
-
-    Ok(())
-}
-
-/// A guest's process exit status.
-///
-/// # Truncation
-///
-/// [`code`](Self::code) preserves the full `i32` a guest reports, but a process
-/// exit status is only 8 bits on POSIX. The [`ExitCode`](std::process::ExitCode)
-/// conversion (and [`code_u8`](Self::code_u8)) therefore keeps just the low
-/// byte, matching the `wasmtime` CLI: `256` becomes `0`, `257` becomes `1`, and
-/// `-1` becomes `255`.
+/// Guest exit code. [`code_u8`](Self::code_u8) and [`ExitCode`](std::process::ExitCode)
+/// keep only the low byte (POSIX semantics).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExitStatus(i32);
 
 impl ExitStatus {
-    /// The success status (exit code `0`).
+    /// Exit code `0`.
     pub const SUCCESS: Self = Self(0);
 
-    /// The wrapped exit code, as the guest reported it (full `i32`).
+    /// Full `i32` exit code from the guest.
     #[must_use]
     pub const fn code(self) -> i32 {
         self.0
     }
 
-    /// The exit code truncated to the low 8 bits — the value a process actually
-    /// surfaces on POSIX (and what the [`ExitCode`](std::process::ExitCode)
-    /// conversion uses). See [the truncation note](Self#truncation).
+    /// Low byte of the exit code (POSIX process status).
     #[must_use]
     pub const fn code_u8(self) -> u8 {
         self.0.to_le_bytes()[0]
@@ -213,6 +195,125 @@ impl From<ExitStatus> for std::process::ExitCode {
     }
 }
 
+/// Connected host runtime: registry, argv, mounts, and backend bundle.
+pub struct Runtime<B: 'static> {
+    registry: Arc<Registry<StoreCtx<B>>>,
+    args: Arc<Vec<String>>,
+    mounts: Arc<MountRegistry>,
+    backends: B,
+}
+
+impl<B: Backends> Runtime<B> {
+    /// Link hosts, connect backends, and assemble the guest registry.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if host linking, backend connection, or registry assembly fails.
+    pub async fn new<L>(mut deployment: Deployment<StoreCtx<B>>, link: L) -> Result<Self>
+    where
+        L: FnOnce(&mut Deployment<StoreCtx<B>>) -> Result<()>,
+    {
+        let args = Arc::new(deployment.args().to_vec());
+        link(&mut deployment).context("linking hosts")?;
+        let backends = B::connect().await.context("connecting backends")?;
+        let mounts = deployment.mounts();
+
+        Ok(Self {
+            registry: Arc::new(deployment.into_registry().context("assembling registry")?),
+            args,
+            mounts,
+            backends,
+        })
+    }
+}
+
+// Manual: `StoreCtx<B>` is not `Clone`; fields here are `Arc`-backed or clone the bundle.
+impl<B: Clone + Send + Sync + 'static> Clone for Runtime<B> {
+    fn clone(&self) -> Self {
+        Self {
+            registry: Arc::clone(&self.registry),
+            args: Arc::clone(&self.args),
+            mounts: Arc::clone(&self.mounts),
+            backends: self.backends.clone(),
+        }
+    }
+}
+
+impl<B: Clone + Send + Sync + 'static> Runtime<B> {
+    /// Build a runtime from an already-assembled registry and backend bundle.
+    #[must_use]
+    pub fn from_parts(
+        registry: Arc<Registry<StoreCtx<B>>>, args: Vec<String>, mounts: Arc<MountRegistry>,
+        backends: B,
+    ) -> Self {
+        Self {
+            registry,
+            args: Arc::new(args),
+            mounts,
+            backends,
+        }
+    }
+
+    /// Guest registry.
+    #[must_use]
+    pub fn registry(&self) -> &Registry<StoreCtx<B>> {
+        &self.registry
+    }
+
+    /// Runtime options from the environment.
+    #[must_use]
+    pub fn options(&self) -> &RuntimeOptions {
+        self.registry().options()
+    }
+
+    /// Fresh per-guest store context.
+    #[must_use]
+    pub fn store(&self) -> StoreCtx<B> {
+        let base = StoreBase::builder()
+            .options(self.options())
+            .dispatcher(Arc::new(self.clone()))
+            .args(&self.args)
+            .mounts(Arc::clone(&self.mounts))
+            .build();
+        StoreCtx {
+            base,
+            backends: self.backends.clone(),
+        }
+    }
+
+    /// Store with epoch deadline, optional fuel, and memory limiter installed.
+    #[must_use]
+    pub fn build_store(&self, data: StoreCtx<B>) -> Store<StoreCtx<B>> {
+        let options = self.options();
+        let mut store = Store::new(self.registry().engine(), data);
+
+        store.set_epoch_deadline(1);
+        store.epoch_deadline_async_yield_and_update(1);
+
+        if options.max_fuel > 0
+            && let Err(error) = store.set_fuel(options.max_fuel)
+        {
+            tracing::warn!(%error, "failed to set fuel budget");
+        }
+
+        store.limiter(|ctx| ctx.limits());
+        store
+    }
+
+    /// Instantiate a guest component into `store`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the component cannot be instantiated.
+    pub async fn instantiate(
+        &self, instance_pre: &InstancePre<StoreCtx<B>>, store: &mut Store<StoreCtx<B>>,
+    ) -> Result<Instance> {
+        let instance = instance_pre.instantiate_async(store).await?;
+        tracing::debug!("component instantiated");
+        Ok(instance)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::ExitStatus;
@@ -225,8 +326,6 @@ mod tests {
 
     #[test]
     fn from_i32_preserves_full_code() {
-        // `code()` keeps the whole i32; only the byte view / `ExitCode`
-        // conversion truncates.
         assert_eq!(ExitStatus::from(2).code(), 2);
         assert_eq!(ExitStatus::from(256).code(), 256);
         assert_eq!(ExitStatus::from(-1).code(), -1);
@@ -240,8 +339,6 @@ mod tests {
         assert_eq!(ExitStatus::from(256).code_u8(), 0);
         assert_eq!(ExitStatus::from(257).code_u8(), 1);
         assert_eq!(ExitStatus::from(-1).code_u8(), 255);
-        // The `ExitCode` conversion runs (its value is opaque, so only the
-        // byte rule above is asserted).
         let _ = std::process::ExitCode::from(ExitStatus::from(2));
     }
 

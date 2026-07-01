@@ -1,109 +1,111 @@
 #![doc = include_str!("../README.md")]
 #![cfg(not(target_arch = "wasm32"))]
 
-mod command;
-#[cfg(feature = "jit")]
-mod compile;
-mod create;
+mod cli;
+mod deployment;
 mod dispatch;
-mod manifest;
+mod mount;
 mod options;
 mod registry;
-mod routing;
 mod runtime;
-mod selector;
-mod source;
 mod store;
 mod telemetry;
 mod traits;
-mod transport;
-mod working_tree;
-
-use std::path::PathBuf;
 
 pub use clap::Parser;
-use clap::Subcommand;
-pub use omnia_host_macros::{Runtime, StoreContext, runtime};
+pub use omnia_host_macros::runtime;
+#[doc(hidden)]
+pub use pastey;
 #[doc(hidden)]
 pub use wrpc_wasmtime::{WrpcCtxView, WrpcView};
 #[doc(hidden)]
 pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
-#[cfg(feature = "jit")]
-pub use self::compile::compile;
-pub use self::create::{Compiled, RegistryBuilder};
-pub use self::dispatch::{HostDispatch, serve_links};
+pub use self::cli::{Cli, Command};
+pub use self::deployment::{Deployment, DeploymentBuilder};
+pub use self::dispatch::{
+    Dispatcher, FirstArgSelector, GuestSelector, LinkClient, WrpcState, serve_links,
+};
+pub use self::mount::{Mount, MountRegistry, ResolvedPreopen};
 pub use self::options::RuntimeOptions;
-pub use self::registry::{Guest, GuestId, Registry};
-pub use self::routing::{CliRoutes, HttpRoutes, Resolver, Routes, TopicRoutes, TriggerRouter};
-pub use self::runtime::ExitStatus;
+#[cfg(feature = "jit")]
+pub use self::options::compile;
+pub use self::registry::{
+    CliRoutes, Guest, GuestId, HttpRoutes, Registry, Resolver, Routes, TopicRoutes, TriggerRouter,
+};
+pub use self::runtime::Mode;
+#[doc(hidden)]
+pub use self::runtime::{ExitStatus, Runtime, RuntimeHooks};
 #[doc(hidden)]
 pub use self::runtime::{main, run};
-pub use self::selector::{FirstArgSelector, GuestSelector};
+pub use self::store::{HasDispatcher, HasHttp, HasMounts, StoreBase, StoreBaseBuilder, StoreCtx};
 #[doc(hidden)]
 pub use self::store::{Set, Unset};
-pub use self::store::{StoreBase, StoreBaseBuilder};
 pub use self::telemetry::{Telemetry, resource};
-#[doc(hidden)]
-pub use self::traits::assert_hosts;
-pub use self::traits::{Backend, FromEnv, FutureResult, HasLimits, Host, Runtime, Server};
-pub use self::transport::{LinkClient, WrpcState};
-pub use self::working_tree::{ResolvedPreopen, WorkingTreeEntry, WorkingTreeRegistry};
+pub use self::traits::{Backend, Backends, FromEnv, FutureResult, HasLimits, Host, Server};
 
-/// Connect several [`Backend`]s concurrently.
+/// Generates the linker-facing view traits that every `omnia` WASI host crate
+/// repeats verbatim (only the names change):
+///
+/// - `Wasi<Service>View`: the per-`Linker<T>` accessor trait,
+/// - `Wasi<Service>CtxView`: the borrowed `(ctx, table)` view,
+/// - `Has<Service>`: the backend-bundle accessor trait,
+/// - the blanket `Wasi<Service>View for omnia::StoreCtx<B>` impl.
+///
+/// Pass the service stem (the part after `Wasi` in the host struct name). All
+/// identifiers and doc labels are derived from it: `KeyValue` yields
+/// `WasiKeyValueView`, `HasKeyValue`, `keyvalue`, `keyvalue_ctx`, and doc text
+/// using `stringify!(KeyValue)`.
+///
+/// The service-specific pieces stay hand-written in each crate: the
+/// `Wasi<Service>Ctx` trait, the `bindgen!` block, the `Host`/`Server` wiring,
+/// and the error conversions. The matching `Has<Service> for Backends` accessor
+/// impl is emitted directly by the `runtime!` macro per deployment.
+///
+/// # Example
 ///
 /// ```ignore
-/// let (http, otel) = omnia::connect_backends!(HttpDefault, OtelDefault).await?;
+/// omnia::wasi_view!(KeyValue);
 /// ```
 #[macro_export]
-macro_rules! connect_backends {
-    ($($backend:ty),* $(,)?) => {{
-        $crate::tokio::try_join!(
-            $(<$backend as $crate::Backend>::connect(),)*
-        )
-    }};
-}
+macro_rules! wasi_view {
+    ($name:ident $(,)?) => {
+        $crate::pastey::paste! {
+            #[doc = concat!("Provides internal WASI ", stringify!($name), " state.")]
+            ///
+            /// Implemented by the `T` in `Linker<T>`: a single type shared across
+            /// every WASI component in a runtime build.
+            pub trait [<Wasi $name View>]: Send {
+                #[doc = concat!("Borrow a `", stringify!([<Wasi $name CtxView>]), "` from a mutable reference to self.")]
+                fn [<$name:lower>](&mut self) -> [<Wasi $name CtxView>]<'_>;
+            }
 
-/// Command line interface for omnia.
-#[derive(Parser, PartialEq, Eq)]
-pub struct Cli {
-    /// The command to execute.
-    #[command(subcommand)]
-    pub command: Command,
-}
+            #[doc = concat!("Borrowed view over a [`", stringify!([<Wasi $name Ctx>]), "`] and the store's resource table.")]
+            pub struct [<Wasi $name CtxView>]<'a> {
+                #[doc = concat!("Mutable reference to the WASI ", stringify!($name), " context.")]
+                pub ctx: &'a mut dyn [<Wasi $name Ctx>],
+                /// Mutable reference to the table used to manage resources.
+                pub table: &'a mut $crate::wasmtime_wasi::ResourceTable,
+            }
 
-/// Subcommands for the omnia CLI.
-#[derive(Subcommand, PartialEq, Eq)]
-pub enum Command {
-    /// Run a guest (single-file shorthand) or a manifest-driven deployment.
-    Run {
-        /// The path to the wasm file to run. The file can either be a
-        /// serialized (pre-compiled) wasmtime `Component` or standard
-        /// WASI component. Optional when `--config` (or `OMNIA_CONFIG`) names a
-        /// deployment manifest instead.
-        wasm: Option<PathBuf>,
+            #[doc = concat!("A backend bundle that yields the WASI ", stringify!($name), " context for a store.")]
+            ///
+            /// The blanket view impl turns this accessor into the linker-facing view
+            /// on `omnia::StoreCtx`; `runtime!` deployments generate the bundle-side
+            /// impl directly.
+            pub trait [<Has $name>]: Send {
+                #[doc = concat!("Borrow the WASI ", stringify!($name), " backend context.")]
+                fn [<$name:lower _ ctx>](&mut self) -> &mut dyn [<Wasi $name Ctx>];
+            }
 
-        /// Path to a deployment manifest (`omnia.toml`) describing a multi-guest
-        /// deployment. Falls back to the `OMNIA_CONFIG` environment variable.
-        #[arg(short, long)]
-        config: Option<PathBuf>,
-
-        /// Arguments forwarded to the guest as its argv (everything after
-        /// `--`). Empty for a long-lived server; a `wasi:cli` command reads
-        /// them as `wasi:cli/environment`'s `get-arguments`. `args[0]` is the
-        /// program name, which the floor supplies.
-        #[arg(last = true)]
-        args: Vec<String>,
-    },
-    /// Compile the specified wasm32-wasip2 component.
-    #[cfg(feature = "jit")]
-    Compile {
-        /// The path to the wasm file to compile.
-        wasm: PathBuf,
-
-        /// An optional output directory. If not set, the compiled component
-        /// will be written to the same location as the input file.
-        #[arg(short, long)]
-        output: Option<PathBuf>,
-    },
+            impl<B: [<Has $name>] + Send + 'static> [<Wasi $name View>] for $crate::StoreCtx<B> {
+                fn [<$name:lower>](&mut self) -> [<Wasi $name CtxView>]<'_> {
+                    [<Wasi $name CtxView>] {
+                        ctx: self.backends.[<$name:lower _ ctx>](),
+                        table: &mut self.base.table,
+                    }
+                }
+            }
+        }
+    };
 }

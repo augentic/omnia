@@ -466,6 +466,10 @@ criteria = "safe-to-deploy"
 version = "0.32.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.pastey]]
+version = "0.2.3"
+criteria = "safe-to-deploy"
+
 [[exemptions.pin-project]]
 version = "1.1.13"
 criteria = "safe-to-deploy"

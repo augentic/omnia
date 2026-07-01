@@ -38,9 +38,9 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{Host, Runtime, Server};
+use omnia::{Host, Runtime, Server, StoreCtx};
 use wasmtime::component::{HasData, Linker};
-use wasmtime_wasi::{ResourceTable, ResourceTableError};
+use wasmtime_wasi::ResourceTableError;
 
 pub use self::default_impl::MessagingDefault;
 pub use self::generated::MessagingRequestReply;
@@ -70,34 +70,16 @@ where
     }
 }
 
-impl<R> Server<R> for WasiMessaging
+impl<B> Server<B> for WasiMessaging
 where
-    R: Runtime,
-    R::StoreCtx: WasiMessagingView,
+    B: Clone + Send + Sync + 'static,
+    StoreCtx<B>: WasiMessagingView,
 {
     const IS_SERVER: bool = true;
 
-    async fn run(&self, state: &R) -> anyhow::Result<()> {
+    async fn run(&self, state: &Runtime<B>) -> anyhow::Result<()> {
         server::run(state).await
     }
-}
-
-/// A trait which provides internal WASI Messaging state.
-///
-/// This is implemented by the `T` in `Linker<T>` — a single type shared across
-/// all WASI components for the runtime build.
-pub trait WasiMessagingView: Send {
-    /// Return a [`WasiMessagingCtxView`] from mutable reference to self.
-    fn messaging(&mut self) -> WasiMessagingCtxView<'_>;
-}
-
-/// View into [`WasiMessagingCtx`] implementation and [`ResourceTable`].
-pub struct WasiMessagingCtxView<'a> {
-    /// Mutable reference to the WASI Messaging context.
-    pub ctx: &'a mut dyn WasiMessagingCtx,
-
-    /// Mutable reference to table used to manage resources.
-    pub table: &'a mut ResourceTable,
 }
 
 /// A trait which provides internal WASI Messaging context.
@@ -165,38 +147,22 @@ pub trait WasiMessagingCtx: Debug + Send + Sync + 'static {
     ) -> anyhow::Result<Arc<dyn Message>>;
 }
 
-/// `anyhow::Error` to `Error` mapping
 impl From<anyhow::Error> for Error {
     fn from(err: anyhow::Error) -> Self {
         Self::Other(err.to_string())
     }
 }
 
-/// `ResourceTableError` to `Error` mapping
 impl From<ResourceTableError> for Error {
     fn from(err: ResourceTableError) -> Self {
         Self::Other(err.to_string())
     }
 }
 
-/// `wasmtime::Error` to `Error` mapping
 impl From<wasmtime::Error> for Error {
     fn from(err: wasmtime::Error) -> Self {
         Self::Other(err.to_string())
     }
 }
 
-/// Implementation of the `WasiMessagingView` trait for the store context.
-#[macro_export]
-macro_rules! omnia_wasi_view {
-    ($store_ctx:ty, $field_name:ident) => {
-        impl omnia_wasi_messaging::WasiMessagingView for $store_ctx {
-            fn messaging(&mut self) -> omnia_wasi_messaging::WasiMessagingCtxView<'_> {
-                omnia_wasi_messaging::WasiMessagingCtxView {
-                    ctx: &mut self.$field_name,
-                    table: &mut self.base.table,
-                }
-            }
-        }
-    };
-}
+omnia::wasi_view!(Messaging);

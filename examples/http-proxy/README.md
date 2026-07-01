@@ -34,19 +34,13 @@ curl --header 'Content-Type: application/json' -d '{"text":"hello"}' http://loca
 
 ## Implementing Caching
 
-Use the [Cache-Control] header to influence the use of a pass-through cache. The following
-directives are currently supported:
+Use the [Cache-Control] header to influence the use of a pass-through cache. The following directives are currently supported:
 
-- `no-cache` - make a request to the resource and then cache the result for future requests.
-  Usually used alongside `max-age` for key-value stores that support ttl.
+- `no-cache` - make a request to the resource and then cache the result for future requests. Usually used alongside `max-age` for key-value stores that support ttl.
 
-- `no-store` - make a request to the resource and do not update the cache. This has the same
-  effect as leaving out the `Cache-Control` header altogether. No other directive can be used with
-  this one otherwise an error will be returned.
+- `no-store` - make a request to the resource and do not update the cache. This has the same effect as leaving out the `Cache-Control` header altogether. No other directive can be used with this one otherwise an error will be returned.
 
-- `max-age=n` - try the cache first and return the result if it exists. If the record doesn't
-  exist, go to the resource then cache the result with an expiry of now plus *n* seconds (for
-  key-value stores that support ttl).
+- `max-age=n` - try the cache first and return the result if it exists. If the record doesn't exist, go to the resource then cache the result with an expiry of now plus *n* seconds (for key-value stores that support ttl).
 
 Multiple directives can be combined in a comma-delimited list:
 
@@ -54,13 +48,8 @@ Multiple directives can be combined in a comma-delimited list:
 Cache-Control: max-age=86400,forward=https://example.com/api/v1/records/2934875
 ```
 
-> [!WARNING]
-> Currently, the [Cache-Control] header requires a corresponding [If-None-Match] header with a
-> single `<etag_value>` to use as the cache key.
+> [!WARNING] Currently, the [Cache-Control] header requires a corresponding [If-None-Match] header with a single `<etag_value>` to use as the cache key.
 
-In the example guest an HTTP POST will cause an error: the [If-None-Match] header has been omitted
-to demonstrate that the caching implementation requires the guest to set this header alongside the
-[Cache-Control] header.
+In the example guest an HTTP POST will cause an error: the [If-None-Match] header has been omitted to demonstrate that the caching implementation requires the guest to set this header alongside the [Cache-Control] header.
 
-[Cache-Control]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control
-[If-None-Match]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/If-None-Match
+[Cache-Control]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control [If-None-Match]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/If-None-Match

@@ -4,8 +4,7 @@ Demonstrates OpenTelemetry instrumentation for WebAssembly guests using `wasi-ot
 
 ## Quick Start
 
-The quick start uses the default implementation of the wasi-otel host backend. This is a no-op
-implementation for development use only as it logs telemetry data but doesn't export it anywhere.
+The quick start uses the default implementation of the wasi-otel host backend. This is a no-op implementation for development use only as it logs telemetry data but doesn't export it anywhere.
 
 ```bash
 # build the guest
@@ -24,8 +23,7 @@ curl --header 'Content-Type: application/json' -d '{"text":"hello"}' http://loca
 
 ## Using an OpenTelemetry Collector Backend
 
-To use an OpenTelemetry Collector backend, you need to set the `OTEL_GRPC_URL` environment variable to the
-address of the OpenTelemetry Collector.
+To use an OpenTelemetry Collector backend, you need to set the `OTEL_GRPC_URL` environment variable to the address of the OpenTelemetry Collector.
 
 ## Prerequisites
 
@@ -63,4 +61,3 @@ cargo run --example otel -- run ./target/wasm32-wasip2/debug/examples/otel_wasm.
 ```bash
 docker compose -f docker/otelcol.yaml down -v
 ```
-

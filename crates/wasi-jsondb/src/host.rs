@@ -51,9 +51,8 @@ mod generated {
 use std::fmt::Debug;
 
 pub use omnia::FutureResult;
-use omnia::{Host, Runtime, Server};
+use omnia::{Host, Server};
 use wasmtime::component::{HasData, Linker};
-use wasmtime_wasi::ResourceTable;
 
 use self::generated::wasi::jsondb::{store, types};
 pub use crate::host::default_impl::JsonDbDefault;
@@ -80,26 +79,9 @@ where
     }
 }
 
-impl<R> Server<R> for WasiJsonDb where R: Runtime {}
-
-/// Mutable view into JSON DB state for the linker.
-pub trait WasiJsonDbView: Send {
-    /// JSON DB context and resource table.
-    fn jsondb(&mut self) -> WasiJsonDbCtxView<'_>;
-}
-
-/// View combining [`WasiJsonDbCtx`] and the component [`ResourceTable`].
-pub struct WasiJsonDbCtxView<'a> {
-    /// Backend context.
-    pub ctx: &'a mut dyn WasiJsonDbCtx,
-
-    /// Resource table for `filter` handles.
-    pub table: &'a mut ResourceTable,
-}
+impl<B> Server<B> for WasiJsonDb {}
 
 /// Backend operations for JSON document storage.
-///
-/// All methods use [`anyhow::Error`] for failures; the host maps those to [`JsonDbError`].
 pub trait WasiJsonDbCtx: Debug + Send + Sync + 'static {
     /// Point read by primary id.
     fn get(&self, collection: String, id: String) -> FutureResult<Option<Document>>;
@@ -132,17 +114,4 @@ pub struct QueryOpts {
     pub continuation: Option<String>,
 }
 
-/// Implementation of [`WasiJsonDbView`] for generated store contexts.
-#[macro_export]
-macro_rules! omnia_wasi_view {
-    ($store_ctx:ty, $field_name:ident) => {
-        impl $crate::WasiJsonDbView for $store_ctx {
-            fn jsondb(&mut self) -> $crate::WasiJsonDbCtxView<'_> {
-                $crate::WasiJsonDbCtxView {
-                    ctx: &mut self.$field_name,
-                    table: &mut self.base.table,
-                }
-            }
-        }
-    };
-}
+omnia::wasi_view!(JsonDb);

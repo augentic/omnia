@@ -2,7 +2,7 @@
 #
 # The `model` guest imports `augentic:model/completion` and calls `complete`.
 # The host serves it with the in-tree `ModelDefault` (replay) backend: with
-# `OMNIA_REPLAY_DIR` pointing at the checked-in fixtures, `complete` returns the
+# `MODEL_REPLAY_DIR` pointing at the checked-in fixtures, `complete` returns the
 # recorded, validated answer with no live model and no network.
 #
 # The `shelf` guest exports a `references` interface and is reached only via
@@ -12,15 +12,14 @@
 # short-circuits tools); the resolve path is exercised by the integration test.
 #
 # The `[[mount]]` preopens the repository root into every guest sandbox as a
-# read-only working tree named `.` (RFC-55). The `model` guest reads it via
-# `wasi:filesystem/preopens` and lends it through `grants.working-tree`, so the
-# recorded prompt carries `working_tree_lent = true`. The replay backend ignores
-# the tree (Phase 1 short-circuits tools); the host-side resolution + identity
-# match are proven by the integration test.
+# read-only workspace named `.`. The `model` guest reads it via
+# `wasi:filesystem/preopens` and lends it through `grants.workspace`. The replay
+# backend ignores the workspace (Phase 1 short-circuits tools); the host-side
+# resolution is proven by the integration test.
 #
 # Build both guests first (see README.md), then run from the repository root:
 #
-#   OMNIA_REPLAY_DIR=examples/model/fixtures \
+#   MODEL_REPLAY_DIR=examples/model/fixtures \
 #     cargo run --example model -- run --config examples/model/omnia.toml
 
 [[guest]]
@@ -31,7 +30,7 @@ source.path = "../../target/wasm32-wasip2/debug/examples/model_wasm.wasm"
 id = "shelf"
 source.path = "../../target/wasm32-wasip2/debug/examples/model_shelf_wasm.wasm"
 
-# Read-only working tree the `model` guest lends through `grants.working-tree`.
+# Read-only workspace the `model` guest lends through `grants.workspace`.
 # `path` resolves relative to this manifest's directory, so `../..` is the repo
 # root; `name = "."` is what `preopens.get-directories()` returns and the guest
 # selects on.

@@ -179,9 +179,7 @@ pub struct RequestSet<R: Handler<P>, P: Provider>(R, PhantomData<P>);
 
 /// Request router.
 ///
-/// The router is used to route a request to the appropriate handler with the
-/// owner and headers set.
-/// ```text
+/// Routes a request to the appropriate handler with the owner and headers set.
 #[derive(Debug)]
 pub struct RequestHandler<R, O, P> {
     request: R,

@@ -250,15 +250,12 @@ mod tests {
         let result = test_client().await.handle(request).await;
         assert!(result.is_ok());
 
-        // check response
         let (response, _) = result.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
 
-        // check body
         let body = response.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(body, Bytes::from("Hello, World!"));
 
-        // check received request
         let requests = server.received_requests().await.expect("should have requests");
         assert_eq!(requests.len(), 1);
 
@@ -331,7 +328,6 @@ mod tests {
         let result = test_client().await.handle(request).await;
         assert!(result.is_ok());
 
-        // check response
         let (response, _) = result.unwrap();
         let headers = response.headers();
 

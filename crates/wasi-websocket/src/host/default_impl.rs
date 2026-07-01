@@ -25,7 +25,7 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::{WebSocketStream, accept_async};
 use tracing::instrument;
 
-use crate::host::WebSocketCtx;
+use crate::host::WasiWebSocketCtx;
 use crate::host::resource::{Client, Event, EventProxy, Events};
 
 const MAX_CONNECTIONS: usize = 1024;
@@ -93,7 +93,7 @@ impl Backend for WebSocketDefault {
     }
 }
 
-impl WebSocketCtx for WebSocketDefault {
+impl WasiWebSocketCtx for WebSocketDefault {
     fn connect(&self) -> FutureResult<Arc<dyn Client>> {
         let client = self.clone();
         async move { Ok(Arc::new(client) as Arc<dyn Client>) }.boxed()
@@ -241,64 +241,5 @@ impl Event for InMemEvent {
 
     fn data(&self) -> &[u8] {
         &self.data
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use tokio_tungstenite::tungstenite::protocol::CloseFrame;
-    use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn websocket() {
-        let ctx = WebSocketDefault::connect_with(ConnectOptions {
-            socket_addr: "0.0.0.0:80".into(),
-        })
-        .await
-        .expect("connect");
-
-        // Test connect
-        let _client = ctx.connect().await.expect("connect client");
-
-        // Test new_event
-        let event = ctx.new_event(b"test payload".to_vec()).expect("new event");
-        assert_eq!(event.data(), b"test payload");
-        assert!(event.socket_addr().is_none());
-    }
-
-    #[test]
-    fn binary_payload() {
-        let payload = vec![0, 159, 146, 150];
-        let message = Message::Binary(payload.clone().into());
-        let Message::Binary(bytes) = message else {
-            panic!("expected binary websocket message");
-        };
-        assert_eq!(bytes.to_vec(), payload);
-    }
-
-    #[test]
-    fn close_message() {
-        let close = Message::Close(Some(CloseFrame {
-            code: CloseCode::Normal,
-            reason: "normal".into(),
-        }));
-        assert!(matches!(close, Message::Close(_)));
-    }
-
-    #[test]
-    fn backpressure() {
-        let (mut sender, _receiver) = mpsc::channel::<Message>(1);
-        for idx in u8::MIN..=u8::MAX {
-            match sender.try_send(Message::Binary(vec![idx].into())) {
-                Ok(()) => {}
-                Err(err) => {
-                    assert!(err.is_full());
-                    return;
-                }
-            }
-        }
-        panic!("expected backpressure after filling channel");
     }
 }

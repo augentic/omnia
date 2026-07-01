@@ -35,9 +35,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{Host, Runtime, Server};
+use omnia::{Host, Server};
 use wasmtime::component::{HasData, Linker};
-use wasmtime_wasi::ResourceTable;
 
 use self::generated::wasi::sql::{readwrite, types};
 pub use crate::host::default_impl::SqlDefault;
@@ -62,25 +61,7 @@ where
     }
 }
 
-impl<R> Server<R> for WasiSql where R: Runtime {}
-
-/// A trait which provides internal WASI SQL state.
-///
-/// This is implemented by the `T` in `Linker<T>` — a single type shared across
-/// all WASI components for the runtime build.
-pub trait WasiSqlView: Send {
-    /// Return a [`WasiSqlCtxView`] from mutable reference to self.
-    fn sql(&mut self) -> WasiSqlCtxView<'_>;
-}
-
-/// View into [`WasiSqlCtx`] implementation and [`ResourceTable`].
-pub struct WasiSqlCtxView<'a> {
-    /// Mutable reference to the WASI SQL context.
-    pub ctx: &'a mut dyn WasiSqlCtx,
-
-    /// Mutable reference to table used to manage resources.
-    pub table: &'a mut ResourceTable,
-}
+impl<B> Server<B> for WasiSql {}
 
 /// A trait which provides internal WASI SQL context.
 ///
@@ -91,17 +72,4 @@ pub trait WasiSqlCtx: Debug + Send + Sync + 'static {
     fn open(&self, name: String) -> FutureResult<Arc<dyn Connection>>;
 }
 
-/// Implementation of the `WasiSqlView` trait for the store context.
-#[macro_export]
-macro_rules! omnia_wasi_view {
-    ($store_ctx:ty, $field_name:ident) => {
-        impl omnia_wasi_sql::WasiSqlView for $store_ctx {
-            fn sql(&mut self) -> omnia_wasi_sql::WasiSqlCtxView<'_> {
-                omnia_wasi_sql::WasiSqlCtxView {
-                    ctx: &mut self.$field_name,
-                    table: &mut self.base.table,
-                }
-            }
-        }
-    };
-}
+omnia::wasi_view!(Sql);

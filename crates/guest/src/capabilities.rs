@@ -134,7 +134,7 @@ pub trait StateStore: Send + Sync {
         async move {
             let bucket =
                 omnia_wasi_keyvalue::cache::open("cache").await.context("opening cache")?;
-            bucket.set(key, value, ttl_secs).await.context("reading state from cache")
+            bucket.set(key, value, ttl_secs).await.context("writing state to cache")
         }
     }
 
@@ -177,13 +177,13 @@ pub trait TableStore: Send + Sync {
     /// Executes a query and returns the result rows.
     #[cfg(not(target_arch = "wasm32"))]
     fn query(
-        &self, cnn_name: String, query: String, params: Vec<DataType>,
+        &self, conn_name: String, query: String, params: Vec<DataType>,
     ) -> impl Future<Output = Result<Vec<Row>>> + Send;
 
     /// Executes a statement and returns the number of affected rows.
     #[cfg(not(target_arch = "wasm32"))]
     fn exec(
-        &self, cnn_name: String, query: String, params: Vec<DataType>,
+        &self, conn_name: String, query: String, params: Vec<DataType>,
     ) -> impl Future<Output = Result<u32>> + Send;
 
     /// Executes a query and returns the result rows.
@@ -193,11 +193,11 @@ pub trait TableStore: Send + Sync {
     /// Returns an error if the connection fails, statement preparation fails, or query execution fails.
     #[cfg(target_arch = "wasm32")]
     fn query(
-        &self, cnn_name: String, query: String, params: Vec<DataType>,
+        &self, conn_name: String, query: String, params: Vec<DataType>,
     ) -> impl Future<Output = Result<Vec<Row>>> + Send {
         use omnia_wasi_sql::types::{Connection, Statement};
         async move {
-            let cnn = Connection::open(cnn_name)
+            let conn = Connection::open(conn_name)
                 .await
                 .map_err(|e| anyhow!("failed to open connection: {}", e.trace()))?;
 
@@ -205,7 +205,7 @@ pub trait TableStore: Send + Sync {
                 .await
                 .map_err(|e| anyhow!("failed to prepare statement: {}", e.trace()))?;
 
-            let res = omnia_wasi_sql::readwrite::query(&cnn, &stmt)
+            let res = omnia_wasi_sql::readwrite::query(&conn, &stmt)
                 .await
                 .map_err(|e| anyhow!("query failed: {}", e.trace()))?;
 
@@ -220,11 +220,11 @@ pub trait TableStore: Send + Sync {
     /// Returns an error if the connection fails, statement preparation fails, or execution fails.
     #[cfg(target_arch = "wasm32")]
     fn exec(
-        &self, cnn_name: String, query: String, params: Vec<DataType>,
+        &self, conn_name: String, query: String, params: Vec<DataType>,
     ) -> impl Future<Output = Result<u32>> + Send {
         use omnia_wasi_sql::types::{Connection, Statement};
         async move {
-            let cnn = Connection::open(cnn_name)
+            let conn = Connection::open(conn_name)
                 .await
                 .map_err(|e| anyhow!("failed to open connection: {}", e.trace()))?;
 
@@ -232,7 +232,7 @@ pub trait TableStore: Send + Sync {
                 .await
                 .map_err(|e| anyhow!("failed to prepare statement: {}", e.trace()))?;
 
-            let res = omnia_wasi_sql::readwrite::exec(&cnn, &stmt)
+            let res = omnia_wasi_sql::readwrite::exec(&conn, &stmt)
                 .await
                 .map_err(|e| anyhow!("exec failed: {}", e.trace()))?;
 

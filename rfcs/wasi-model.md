@@ -1,6 +1,6 @@
-# Design: The `wasi-model` Host — Remaining Floor-Side Work
+# Design: The `wasi-model` Host — Remaining Host-Side Work
 
-> Status: Implementation plan — **remaining work only**. The `wasi-model` host core (the `complete` boundary, the `WasiModelCtx` backend trait, the `ToolHost` callbacks, structural answer validation, and composable record/replay) has landed in `crates/wasi-model`, together with the `omnia-genai` (frontier) and `omnia-cursor` (spawned-agent) backends and the in-tree `ModelDefault` (replay) backend in the `backends` repo. The `resolve` callback and its public host→guest dispatch entry point are wired. This document tracks only the floor-side pieces that are **not yet built**.
+> Status: Implementation plan — **remaining work only**. The `wasi-model` host core (the `complete` boundary, the `WasiModelCtx` backend trait, the `ToolHost` callbacks, structural answer validation, and composable record/replay) has landed in `crates/wasi-model`, together with the `omnia-genai` (frontier) and `omnia-cursor` (spawned-agent) backends and the in-tree `ModelDefault` (replay) backend in the `backends` repo. The `resolve` callback and its public host→guest dispatch entry point are wired. This document tracks only the host-side pieces that are **not yet built**.
 
 The authoritative WIT now lives in `crates/wasi-model/wit/model.wit`; the records, `complete` / `complete-stream` signatures, and the `tool-grants` shape are defined at `augentic:model@0.1.0`. Everything below is impl work behind that boundary.
 
@@ -8,7 +8,7 @@ The authoritative WIT now lives in `crates/wasi-model/wit/model.wit`; the record
 
 The `complete` host binding validates every answer before the guest sees it, but only the **structural** gates are live: `json-object` (root is an object) and `text` (root is a string), implemented with `serde_json` alone. The `json-schema` kind is currently **parse-only** — it confirms the answer is valid JSON but does not enforce `response-format.json-schema.schema`.
 
-Remaining: pick and pin a JSON-Schema validator crate, then turn on the `json-schema` gate in the `complete` host binding (`crates/wasi-model/src/host/model_impl.rs`). This is the gate Specify's judgment operations require for typed decisions, so it is the highest-value remaining floor item. Backends that self-check (genai's repair loop) already validate internally; this makes the floor's final gate enforce the schema too.
+Remaining: pick and pin a JSON-Schema validator crate, then turn on the `json-schema` gate in the `complete` host binding (`crates/wasi-model/src/host/model_impl.rs`). This is the gate Specify's judgment operations require for typed decisions, so it is the highest-value remaining host-side item. Backends that self-check (genai's repair loop) already validate internally; this ensures the host validation gate enforces the schema too.
 
 ## 2. `complete-stream` host binding
 
@@ -26,11 +26,11 @@ Remaining, once RFC-55 lands:
 - Back `write` with host-held session state in `wasi:keyvalue`, keyed by the prompt hash, so an edit in one tool turn is visible to a `read` in the next. A leaked in-memory session is a regression.
 - The cursor backend's direct `local-path` access likewise switches from the `OMNIA_WORKSPACE` config stopgap to resolving the lent `descriptor`'s `local-path` face once RFC-55 exposes it.
 
-The dispatch loop for these tools belongs to the genai backend; see [RFC-59](rfc-59-working-tree-tools.md). This section owns only the floor-side host wiring.
+The dispatch loop for these tools belongs to the genai backend; see [RFC-59](rfc-59-working-tree-tools.md). This section owns only the host-side wiring.
 
 ## 4. `verify` — routing only today
 
-The floor routes a `verify(check)` against `prompt.grants.verify` and acknowledges it, but the profile definitions, sandboxing, and severity-tiered report mapping are owned by [RFC-60](rfc-60-verify-profiles.md) and are not implemented. No floor work remains here beyond the routing already in place; the execution side lands in RFC-60.
+The runtime core routes a `verify(check)` against `prompt.grants.verify` and acknowledges it, but the profile definitions, sandboxing, and severity-tiered report mapping are owned by [RFC-60](rfc-60-verify-profiles.md) and are not implemented. No host-side work remains here beyond the routing already in place; the execution side lands in RFC-60.
 
 ## 5. Replay expansion and content-addressed keying
 

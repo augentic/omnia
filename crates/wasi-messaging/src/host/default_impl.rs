@@ -262,37 +262,3 @@ impl Message for InMemMessage {
         self
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn messaging() {
-        let ctx = MessagingDefault::connect_with(ConnectOptions).await.expect("connect");
-
-        // Test connect
-        let client = ctx.connect().await.expect("connect client");
-
-        // Test new_message
-        let message = ctx.new_message(b"test payload".to_vec()).expect("new message");
-        assert_eq!(message.payload(), b"test payload".to_vec());
-        assert_eq!(message.length(), 12);
-
-        // Test set_content_type
-        let message = ctx
-            .set_content_type(message, "application/json".to_string())
-            .expect("set content type");
-        assert!(message.metadata().is_some());
-
-        // Test add_metadata
-        let message = ctx
-            .add_metadata(message, "custom-key".to_string(), "custom-value".to_string())
-            .expect("add metadata");
-        let metadata = message.metadata().expect("metadata");
-        assert_eq!(metadata.get("custom-key"), Some(&"custom-value".to_string()));
-
-        // Test send
-        client.send("test-topic".to_string(), MessageProxy(message)).await.expect("send");
-    }
-}

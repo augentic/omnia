@@ -1,8 +1,5 @@
-//! Default no-op implementation for wasi-otel
-//!
-//! This is a lightweight implementation for development use only.
-//! It logs telemetry data but doesn't export it anywhere.
-//! For production use, use the `be-opentelemetry` backend.
+//! Default implementation for `wasi:config`, sourcing variables from the
+//! process environment.
 
 #![allow(clippy::used_underscore_binding)]
 
@@ -35,7 +32,7 @@ pub struct ConfigDefault {
 
 impl Debug for ConfigDefault {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "WasiConfigCtxImpl")
+        write!(f, "ConfigDefault")
     }
 }
 

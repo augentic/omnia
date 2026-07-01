@@ -26,10 +26,10 @@ mod generated {
 
 use std::fmt::Debug;
 
-use omnia::{FutureResult, Host, Runtime, Server};
+use omnia::{FutureResult, Host, Server};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
-use wasmtime::component::{HasData, Linker, ResourceTable};
+use wasmtime::component::{HasData, Linker};
 
 pub use self::default_impl::OtelDefault;
 use self::generated::omnia::otel::{metrics, resource, tracing, types};
@@ -54,25 +54,7 @@ where
     }
 }
 
-impl<R: Runtime> Server<R> for WasiOtel {}
-
-/// A trait which provides internal WASI OpenTelemetry state.
-///
-/// This is implemented by the `T` in `Linker<T>` — a single type shared across
-/// all WASI components for the runtime build.
-pub trait WasiOtelView: Send {
-    /// Return a [`WasiOtelCtxView`] from mutable reference to self.
-    fn otel(&mut self) -> WasiOtelCtxView<'_>;
-}
-
-/// View into [`WasiOtelCtx`] implementation and [`ResourceTable`].
-pub struct WasiOtelCtxView<'a> {
-    /// Mutable reference to the WASI OpenTelemetry context.
-    pub ctx: &'a mut dyn WasiOtelCtx,
-
-    /// Mutable reference to table used to manage resources.
-    pub table: &'a mut ResourceTable,
-}
+impl<B> Server<B> for WasiOtel {}
 
 /// A trait which provides internal WASI OpenTelemetry context.
 ///
@@ -92,17 +74,4 @@ pub trait WasiOtelCtx: Debug + Send + Sync + 'static {
     fn export_metrics(&self, request: ExportMetricsServiceRequest) -> FutureResult<()>;
 }
 
-/// Implementation of the `WasiOtelView` trait for the store context.
-#[macro_export]
-macro_rules! omnia_wasi_view {
-    ($store_ctx:ty, $field_name:ident) => {
-        impl omnia_wasi_otel::WasiOtelView for $store_ctx {
-            fn otel(&mut self) -> omnia_wasi_otel::WasiOtelCtxView<'_> {
-                omnia_wasi_otel::WasiOtelCtxView {
-                    ctx: &mut self.$field_name,
-                    table: &mut self.base.table,
-                }
-            }
-        }
-    };
-}
+omnia::wasi_view!(Otel);

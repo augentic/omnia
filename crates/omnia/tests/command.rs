@@ -16,43 +16,19 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
-use omnia::{ExitStatus, Registry, Runtime, StoreBase, run};
+use omnia::{ExitStatus, Mode, RuntimeHooks, run};
 
-/// Per-store context: just the fixed [`StoreBase`]. The `wasi:cli` guest needs
-/// only the WASI view, which the `StoreContext` derive supplies from `base`.
-#[derive(omnia::StoreContext)]
-struct TestCtx {
-    #[base]
-    base: StoreBase,
-}
+struct EmptyHooks;
 
-/// A minimal [`Runtime`] over a single `wasi:cli` guest, threading guest argv
-/// into every store (the guest reads it as `wasi:cli/environment`). In command
-/// mode the floor prepends the deployment name as `args[0]`.
-#[derive(Clone)]
-struct TestRuntime {
-    registry: Arc<Registry<TestCtx>>,
-    args: Arc<Vec<String>>,
-}
-
-impl Runtime for TestRuntime {
-    type StoreCtx = TestCtx;
-
-    fn store(&self) -> TestCtx {
-        TestCtx {
-            base: StoreBase::builder()
-                .options(self.options())
-                .dispatch(Arc::new(self.clone()))
-                .args(&self.args)
-                .build(),
-        }
+impl RuntimeHooks<()> for EmptyHooks {
+    fn link(_deployment: &mut omnia::Deployment<omnia::StoreCtx<()>>) -> Result<()> {
+        Ok(())
     }
 
-    fn registry(&self) -> &Registry<Self::StoreCtx> {
-        &self.registry
+    async fn serve(_runtime: &omnia::Runtime<()>) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -76,19 +52,13 @@ fn cli_wasm(target: &Path) -> Option<PathBuf> {
 /// Drive `wasi:cli/run` once with `tail` guest argv (the program name is
 /// prepended by command mode) and return the guest's exit status.
 async fn run_cli(wasm: &Path, tail: &[&str]) -> Result<ExitStatus> {
-    run(
+    // The `()` bundle links no hosts; `wasi:cli` is wired by the deployment
+    // builder, and `Runtime::new` threads the guest argv into every store.
+    run::<(), EmptyHooks>(
         Some(wasm.to_path_buf()),
         None,
         tail.iter().map(|arg| (*arg).to_string()).collect(),
-        true,
-        |compiled| async move {
-            let args = Arc::new(compiled.args().to_vec());
-            Ok(TestRuntime {
-                registry: Arc::new(compiled.build().context("assembling registry")?),
-                args,
-            })
-        },
-        |_| vec![],
+        Mode::Command,
     )
     .await
     .context("running command")

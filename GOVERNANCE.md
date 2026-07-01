@@ -13,8 +13,7 @@ The Augentic community adheres to the following principles:
 
 ## Maintainer Role Expectations
 
-Overall, Maintainers are responsible for the project as a whole and are expected to guide the general project direction as well as be the final reviewer on PRs and perform releases.
-Maintainers may be specifically responsible for one or more components within a project, and are expected to contribute code and documentation, review PRs including ensuring quality of code, triage issues, proactively fix bugs, and perform maintenance tasks for these components.
+Overall, Maintainers are responsible for the project as a whole and are expected to guide the general project direction as well as be the final reviewer on PRs and perform releases. Maintainers may be specifically responsible for one or more components within a project, and are expected to contribute code and documentation, review PRs including ensuring quality of code, triage issues, proactively fix bugs, and perform maintenance tasks for these components.
 
 ## Changes in Maintainership
 

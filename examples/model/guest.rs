@@ -11,9 +11,9 @@
 //! in Phase 2a.
 //!
 //! It also reads `wasi:filesystem/preopens` and, when the host has mounted a
-//! working tree named `.` (the `[[mount]]` in `omnia.toml`, RFC-55), lends it
-//! through `grants.working-tree`. With no mount configured the preopen table is
-//! empty and the guest lends nothing, so `working_tree_lent` stays false.
+//! workspace named `.` (the `[[mount]]` in `omnia.toml`), lends it
+//! through `grants.workspace`. With no mount configured the preopen table is
+//! empty and the guest lends nothing.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -34,10 +34,10 @@ impl Guest for Example {
     async fn run() -> String {
         // Read the preopen table the host populated from `[[mount]]` (RFC-55) and
         // pick the tree named `.` to lend. `directories` must outlive the
-        // `complete` call below — the lent `working-tree` borrows one of its
+        // `complete` call below — the lent `workspace` borrows one of its
         // descriptors.
         let directories = preopens::get_directories();
-        let working_tree = directories.iter().find_map(|(dir, name)| (name == ".").then_some(dir));
+        let workspace = directories.iter().find_map(|(dir, name)| (name == ".").then_some(dir));
 
         let prompt = completion::Prompt {
             model: None,
@@ -65,7 +65,7 @@ impl Guest for Example {
             metadata: vec![],
             grants: completion::ToolGrants {
                 references: Some("shelf".to_string()),
-                working_tree,
+                workspace,
                 verify: vec![],
             },
         };

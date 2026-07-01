@@ -15,9 +15,14 @@
 // otherwise trip `missing_docs`.
 #![allow(missing_docs)]
 
+#[cfg(feature = "jit")]
+mod compile;
+
 use std::time::Duration;
 
 use anyhow::{Result, bail};
+#[cfg(feature = "jit")]
+pub use compile::compile;
 use fromenv::{FromEnv, ParseResult};
 use wasmtime::{Config, Enabled, InstanceAllocationStrategy, PoolingAllocationConfig};
 
@@ -90,7 +95,7 @@ pub struct RuntimeOptions {
     #[env(from = "MAX_FUEL", default = "0")]
     pub max_fuel: u64,
     /// Maximum host-mediated dynamic-linking dispatch depth — how deep a chain
-    /// of guest-to-guest calls (A->B->C) may nest before the floor refuses
+    /// of guest-to-guest calls (A->B->C) may nest before the runtime core refuses
     /// further dispatch, bounding runaway recursion (`MAX_DISPATCH_DEPTH`,
     /// default 8). Runtime-only.
     #[env(from = "MAX_DISPATCH_DEPTH", default = "8")]
@@ -222,24 +227,13 @@ pub struct RuntimeOptions {
     pub branch_hinting: bool,
 }
 
-/// Build the [`Config`] shared by [`crate::compile`] and [`crate::RegistryBuilder`].
+/// Build the [`Config`] shared by [`crate::compile`] and [`crate::DeploymentBuilder`].
 ///
-/// Centralising it here guarantees the compile-affecting subset (see the parity
-/// note below) is identical in both paths, so a pre-compiled component remains
-/// loadable. The runtime-only settings (the pooling allocator, async-stack
-/// zeroing, growth reservation) are applied here too for a single source of
-/// truth and have no effect on the artifact. The component-model-async feature
-/// and WASI 0.3.0 are enabled by default in Wasmtime 46, so they are no longer
-/// set explicitly.
-///
-/// # Compile/run parity
-///
-/// `MAX_FUEL` (which enables fuel metering), `BRANCH_HINTING`,
-/// `MEMORY_RESERVATION`, and `MEMORY_GUARD_SIZE` change the compiled artifact,
-/// as does copy-on-write heap initialisation (pinned on here). They must hold
-/// the same value when a component is pre-compiled with `omnia compile` and when
-/// it is later run, otherwise
-/// [`wasmtime::component::Component::deserialize_file`] will reject the artifact.
+/// Centralising it guarantees the compile-affecting settings (fuel metering,
+/// branch hinting, memory reservation/guard size, and copy-on-write heap init)
+/// are identical in the compile and load paths, so a pre-compiled component
+/// stays loadable by [`wasmtime::component::Component::deserialize_file`].
+/// Runtime-only settings are applied here too for a single source of truth.
 impl From<&RuntimeOptions> for Config {
     fn from(options: &RuntimeOptions) -> Self {
         let mut config = Self::new();
@@ -248,11 +242,10 @@ impl From<&RuntimeOptions> for Config {
         // and per-store deadlines drive cooperative guest timeouts.
         config.epoch_interruption(true);
 
-        // Copy-on-write heap images are what make per-request instantiation
-        // cheap. The default is already `true`, but pin it: it is
-        // compile-affecting (re-checked by `deserialize_file`) so the compiling
-        // and loading engines must agree, and an explicit value guards against a
-        // future default change silently breaking artifact compatibility.
+        // Copy-on-write heap images make per-request instantiation cheap. Pinned
+        // on (the default) because it is compile-affecting: the compiling and
+        // loading engines must agree, and an explicit value guards against a
+        // future default change breaking artifact compatibility.
         config.memory_init_cow(true);
 
         if options.max_fuel > 0 {
@@ -273,11 +266,8 @@ impl From<&RuntimeOptions> for Config {
             config.memory_guard_size(bytes);
         }
 
-        // Runtime-only engine settings: they do not affect the artifact, so
-        // applying them in both the compile and load paths is harmless. Set
-        // before the pooling early-return so they hold whether or not pooling
-        // is enabled. `async_stack_zeroing` is defense-in-depth for untrusted
-        // guests; `memory_reservation_for_growth` tunes dynamic-memory remaps.
+        // Runtime-only engine settings (no artifact effect). Set before the
+        // pooling early-return so they hold whether or not pooling is enabled.
         config.async_stack_zeroing(options.async_stack_zeroing);
         if let Some(bytes) = options.memory_reservation_for_growth {
             config.memory_reservation_for_growth(bytes);
@@ -320,12 +310,9 @@ impl From<&RuntimeOptions> for Config {
             // prior behaviour and `Auto` falls back cleanly where unsupported.
             .pagemap_scan(options.pool_pagemap_scan);
 
-        // GC heaps are only used by guests that adopt the component-model GC /
-        // reference types; current guests compile to linear memory and never
-        // allocate one. GC support is gated behind the opt-in `gc` feature (the
-        // collector and heap-reservation knobs are left at their Wasmtime
-        // defaults), so the pool count is applied only when that feature is
-        // compiled in, ready for when such a guest appears.
+        // GC heaps are only used by guests adopting the component-model GC /
+        // reference types; current guests never allocate one. Gated behind the
+        // opt-in `gc` feature, so the pool count is applied only when compiled in.
         cfg_if::cfg_if! {
             if #[cfg(feature = "gc")] {
                 if let Some(count) = options.pool_total_gc_heaps {
@@ -361,7 +348,6 @@ impl From<&RuntimeOptions> for Config {
             pool.decommit_batch_size(size);
         }
 
-        // apply MPK configuration if the feature is enabled
         cfg_if::cfg_if! {
             if #[cfg(feature = "mpk")] {
                 pool.memory_protection_keys(options.pool_memory_protection_keys);

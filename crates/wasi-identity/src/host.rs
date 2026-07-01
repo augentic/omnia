@@ -30,9 +30,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{Host, Runtime, Server};
+use omnia::{Host, Server};
 use wasmtime::component::{HasData, Linker, ResourceTableError};
-use wasmtime_wasi::ResourceTable;
 
 pub use self::default_impl::IdentityDefault;
 use self::generated::omnia::identity::credentials;
@@ -59,25 +58,7 @@ where
     }
 }
 
-impl<R> Server<R> for WasiIdentity where R: Runtime {}
-
-/// A trait which provides internal WASI Identity state.
-///
-/// This is implemented by the `T` in `Linker<T>` — a single type shared across
-/// all WASI components for the runtime build.
-pub trait WasiIdentityView: Send {
-    /// Return a [`WasiIdentityCtxView`] from mutable reference to self.
-    fn identity(&mut self) -> WasiIdentityCtxView<'_>;
-}
-
-/// View into [`WasiIdentityCtx`] implementation and [`ResourceTable`].
-pub struct WasiIdentityCtxView<'a> {
-    /// Mutable reference to the WASI Identity context.
-    pub ctx: &'a mut dyn WasiIdentityCtx,
-
-    /// Mutable reference to table used to manage resources.
-    pub table: &'a mut ResourceTable,
-}
+impl<B> Server<B> for WasiIdentity {}
 
 /// A trait which provides internal WASI Identity context.
 ///
@@ -88,31 +69,16 @@ pub trait WasiIdentityCtx: Debug + Send + Sync + 'static {
     fn get_identity(&self, name: String) -> FutureResult<Arc<dyn Identity>>;
 }
 
-/// `anyhow::Error` to `Error` mapping
 impl From<anyhow::Error> for Error {
     fn from(err: anyhow::Error) -> Self {
         Self::InternalFailure(err.to_string())
     }
 }
 
-/// `ResourceTableError` to `Error` mapping
 impl From<ResourceTableError> for Error {
     fn from(err: ResourceTableError) -> Self {
         Self::InternalFailure(err.to_string())
     }
 }
 
-/// Implementation of the `WasiIdentityView` trait for the store context.
-#[macro_export]
-macro_rules! omnia_wasi_view {
-    ($store_ctx:ty, $field_name:ident) => {
-        impl omnia_wasi_identity::WasiIdentityView for $store_ctx {
-            fn identity(&mut self) -> omnia_wasi_identity::WasiIdentityCtxView<'_> {
-                omnia_wasi_identity::WasiIdentityCtxView {
-                    ctx: &mut self.$field_name,
-                    table: &mut self.base.table,
-                }
-            }
-        }
-    };
-}
+omnia::wasi_view!(Identity);

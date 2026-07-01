@@ -2,6 +2,8 @@
 
 This document describes the architecture of Omnia (WebAssembly Runtime), a modular WASI component runtime built on [wasmtime](https://github.com/bytecodealliance/wasmtime).
 
+For shared terminology (**runtime core**, **host-injected tools**, Law 2, and when “floor” means something else), see [Glossary](glossary.md).
+
 ## Overview
 
 Omnia provides a thin wrapper around wasmtime for ergonomic integration of host-based services for WASI components. It enables WebAssembly guests to interact with external services (databases, message queues, etc.) through standardized WASI interfaces, while allowing hosts to swap backend implementations without changing guest code.
@@ -72,7 +74,7 @@ Omnia is organized into three distinct layers:
 The foundation of the runtime. Provides:
 
 - **CLI infrastructure**: Command-line interface for running and compiling WebAssembly components
-- **Core traits**: `Runtime`, `Host`, `Server`, and `Backend` traits that all components implement
+- **Core traits**: `Host`, `Server`, and `Backend` traits that WASI hosts implement, plus the concrete `Runtime` that owns the registry and backend bundle
 - **Wasmtime integration**: Re-exports and wrappers for wasmtime functionality
 
 Key traits:
@@ -84,8 +86,8 @@ pub trait Host<T>: Debug + Sync + Send {
 }
 
 /// Implemented by WASI hosts that are servers
-pub trait Server<R: Runtime>: Debug + Sync + Send {
-    fn run(&self, state: &R) -> impl Future<Output = Result<()>>;
+pub trait Server<B>: Debug + Sync + Send {
+    fn run(&self, state: &Runtime<B>) -> impl Future<Output = Result<()>>;
 }
 
 /// Implemented by backend resources for connection management
@@ -202,12 +204,10 @@ runtime!({
 
 The macro generates:
 
-- `Context`: Holds the guest registry and backend connections
-- `StoreCtx`: Per-instance data shared between runtime and host functions
-- `Runtime` trait implementation (via `#[derive(Runtime)]`)
-- WASI view trait implementations for each interface (via `#[derive(StoreContext)]`)
-- `Context::new` to link hosts, connect backends, and assemble the registry
-- `main` that delegates to `omnia::main` (CLI parse, compile, bootstrap, and `run`)
+- A `Backends` bundle: one connected backend per `Host: Backend` wiring, plus the `HasXxx` accessor impls wiring each backend into the library's blanket WASI views
+- `main`, which delegates to `omnia::main::<Backends, Hooks>` — `Hooks` is a generated [`RuntimeHooks`] impl whose [`link`](omnia::RuntimeHooks::link) runs inside `omnia::Runtime::new` to link hosts, connect backends, and assemble the registry, and whose [`servers`](omnia::RuntimeHooks::servers) launches each trigger host's `run`
+
+The host runtime itself is the library `omnia::Runtime<Backends>` over `omnia::StoreCtx<Backends>`, holding the guest registry and backend bundle (the per-store `StoreCtx` and its WASI views are library code, not macro output).
 
 ## WIT Interface Definitions
 
@@ -228,18 +228,20 @@ Dependencies on standard WASI definitions are managed in `wit/deps/` and version
 
 1. **CLI parsing**: Generated `main` delegates to `omnia::main`, which parses the `run` subcommand (or `compile` when the `jit` feature is enabled)
 
-2. **Compile**: `RegistryBuilder` loads the manifest or wasm, compiles guests, and returns a `Compiled` registry plan
+2. **Build**: `DeploymentBuilder` loads the manifest or wasm, compiles guests, and returns a `Deployment` ready for host linking
 
-3. **Bootstrap**: `Context::new` links WASI hosts, connects backends, and builds the `Registry`
+3. **Assemble**: `Runtime::new` links WASI hosts, connects backends, and builds the `Registry`
 
-4. **Drive**: `run` either invokes `command::run` (one-shot `wasi:cli`) or `prepare`s the runtime and awaits every long-lived trigger server to completion
+4. **Bootstrap**: `bootstrap` starts epoch interruption and pool-metric sampling, and wires host-mediated link servers
 
-5. **Request handling** (server mode): Trigger hosts (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`) accept requests, instantiate guests per call, and return responses
+5. **Drive**: `run` either invokes `command::drive` (one-shot `wasi:cli`) or awaits every long-lived trigger server to completion
+
+6. **Request handling** (server mode): Trigger hosts (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`) accept requests, instantiate guests per call, and return responses
 
 ```text
-CLI → Compile → Context::new → run
-                                 ├─ command mode → command::run → ExitStatus
-                                 └─ server mode  → prepare → trigger servers
+CLI → Build → Runtime::new → bootstrap → run
+                                            ├─ command mode → command::drive → ExitStatus
+                                            └─ server mode  → trigger servers
 ```
 
 ## Configuration

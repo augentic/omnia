@@ -37,9 +37,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{Host, Runtime, Server};
-use wasmtime::component::{HasData, Linker};
-use wasmtime_wasi::{ResourceTable, ResourceTableError};
+use omnia::{Host, Runtime, Server, StoreCtx};
+use wasmtime::component::{HasData, Linker, ResourceTableError};
 
 pub use self::default_impl::WebSocketDefault;
 pub use self::generated::Duplex;
@@ -60,7 +59,7 @@ impl HasData for WasiWebSocket {
 
 impl<T> Host<T> for WasiWebSocket
 where
-    T: WebSocketView + 'static,
+    T: WasiWebSocketView + 'static,
 {
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
         client::add_to_linker::<_, Self>(linker, T::websocket)?;
@@ -68,41 +67,23 @@ where
     }
 }
 
-impl<R> Server<R> for WasiWebSocket
+impl<B> Server<B> for WasiWebSocket
 where
-    R: Runtime,
-    R::StoreCtx: WebSocketView,
+    B: Clone + Send + Sync + 'static,
+    StoreCtx<B>: WasiWebSocketView,
 {
     const IS_SERVER: bool = true;
 
-    async fn run(&self, state: &R) -> anyhow::Result<()> {
+    async fn run(&self, state: &Runtime<B>) -> anyhow::Result<()> {
         server::run(state).await
     }
-}
-
-/// A trait which provides internal WASI WebSocket state.
-///
-/// This is implemented by the `T` in `Linker<T>` — a single type shared across
-/// all WASI components for the runtime build.
-pub trait WebSocketView: Send {
-    /// Return a [`WasiWebSocketCtxView`] from mutable reference to self.
-    fn websocket(&mut self) -> WasiWebSocketCtxView<'_>;
-}
-
-/// View into [`WebSocketCtx`] implementation and [`ResourceTable`].
-pub struct WasiWebSocketCtxView<'a> {
-    /// Mutable reference to the WASI WebSocket context.
-    pub ctx: &'a mut dyn WebSocketCtx,
-
-    /// Mutable reference to table used to manage resources.
-    pub table: &'a mut ResourceTable,
 }
 
 /// A trait which provides internal WASI WebSocket context.
 ///
 /// This is implemented by the resource-specific provider of WebSocket
 /// functionality.
-pub trait WebSocketCtx: Debug + Send + Sync + 'static {
+pub trait WasiWebSocketCtx: Debug + Send + Sync + 'static {
     /// Connect to the WebSocket service and return a socket.
     ///
     /// # Errors
@@ -118,38 +99,22 @@ pub trait WebSocketCtx: Debug + Send + Sync + 'static {
     fn new_event(&self, data: Vec<u8>) -> anyhow::Result<Arc<dyn Event>>;
 }
 
-/// `anyhow::Error` to `Error` mapping
 impl From<anyhow::Error> for Error {
     fn from(err: anyhow::Error) -> Self {
         Self::Other(err.to_string())
     }
 }
 
-/// `ResourceTableError` to `Error` mapping
 impl From<ResourceTableError> for Error {
     fn from(err: ResourceTableError) -> Self {
         Self::Other(err.to_string())
     }
 }
 
-/// `wasmtime::Error` to `Error` mapping
 impl From<wasmtime::Error> for Error {
     fn from(err: wasmtime::Error) -> Self {
         Self::Other(err.to_string())
     }
 }
 
-/// Implementation of the `WebSocketView` trait for the store context.
-#[macro_export]
-macro_rules! omnia_wasi_view {
-    ($store_ctx:ty, $field_name:ident) => {
-        impl omnia_wasi_websocket::WebSocketView for $store_ctx {
-            fn websocket(&mut self) -> omnia_wasi_websocket::WasiWebSocketCtxView<'_> {
-                omnia_wasi_websocket::WasiWebSocketCtxView {
-                    ctx: &mut self.$field_name,
-                    table: &mut self.base.table,
-                }
-            }
-        }
-    };
-}
+omnia::wasi_view!(WebSocket);

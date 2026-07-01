@@ -30,9 +30,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{Host, Runtime, Server};
+use omnia::{Host, Server};
 use wasmtime::component::{HasData, Linker, ResourceTableError};
-use wasmtime_wasi::ResourceTable;
 
 use self::generated::omnia::vault::vault;
 pub use crate::host::default_impl::VaultDefault;
@@ -59,25 +58,7 @@ where
     }
 }
 
-impl<R> Server<R> for WasiVault where R: Runtime {}
-
-/// A trait which provides internal WASI Vault state.
-///
-/// This is implemented by the `T` in `Linker<T>` — a single type shared across
-/// all WASI components for the runtime build.
-pub trait WasiVaultView: Send {
-    /// Return a [`WasiVaultCtxView`] from mutable reference to self.
-    fn vault(&mut self) -> WasiVaultCtxView<'_>;
-}
-
-/// View into [`WasiVaultCtx`] implementation and [`ResourceTable`].
-pub struct WasiVaultCtxView<'a> {
-    /// Mutable reference to the WASI Vault context.
-    pub ctx: &'a mut dyn WasiVaultCtx,
-
-    /// Mutable reference to table used to manage resources.
-    pub table: &'a mut ResourceTable,
-}
+impl<B> Server<B> for WasiVault {}
 
 /// A trait which provides internal WASI Vault context.
 ///
@@ -88,31 +69,16 @@ pub trait WasiVaultCtx: Debug + Send + Sync + 'static {
     fn open_locker(&self, identifier: String) -> FutureResult<Arc<dyn Locker>>;
 }
 
-/// `anyhow::Error` to `Error` mapping
 impl From<anyhow::Error> for Error {
     fn from(err: anyhow::Error) -> Self {
         Self::Other(err.to_string())
     }
 }
 
-/// `ResourceTableError` to `Error` mapping
 impl From<ResourceTableError> for Error {
     fn from(err: ResourceTableError) -> Self {
         Self::Other(err.to_string())
     }
 }
 
-/// Implementation of the `WasiVaultView` trait for the store context.
-#[macro_export]
-macro_rules! omnia_wasi_view {
-    ($store_ctx:ty, $field_name:ident) => {
-        impl omnia_wasi_vault::WasiVaultView for $store_ctx {
-            fn vault(&mut self) -> omnia_wasi_vault::WasiVaultCtxView<'_> {
-                omnia_wasi_vault::WasiVaultCtxView {
-                    ctx: &mut self.$field_name,
-                    table: &mut self.base.table,
-                }
-            }
-        }
-    };
-}
+omnia::wasi_view!(Vault);

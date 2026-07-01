@@ -187,16 +187,6 @@ macro_rules! cmp_ctor {
     };
 }
 
-macro_rules! table_cmp_ctor {
-    ($name:ident, $op:ident, $doc:literal) => {
-        #[doc = $doc]
-        #[must_use]
-        pub fn $name(table: &'static str, col: &'static str, val: impl Into<Value>) -> Self {
-            Self(FilterKind::Compare(ColRef::qualified(table, col), CmpOp::$op, val.into()))
-        }
-    };
-}
-
 macro_rules! list_ctor {
     ($name:ident, $negated:literal, $doc:literal) => {
         #[doc = $doc]
@@ -204,23 +194,6 @@ macro_rules! list_ctor {
         pub fn $name(col: &'static str, vals: impl IntoIterator<Item = impl Into<Value>>) -> Self {
             Self(FilterKind::In(
                 ColRef::unqualified(col),
-                vals.into_iter().map(Into::into).collect(),
-                $negated,
-            ))
-        }
-    };
-}
-
-macro_rules! table_list_ctor {
-    ($name:ident, $negated:literal, $doc:literal) => {
-        #[doc = $doc]
-        #[must_use]
-        pub fn $name(
-            table: &'static str, col: &'static str,
-            vals: impl IntoIterator<Item = impl Into<Value>>,
-        ) -> Self {
-            Self(FilterKind::In(
-                ColRef::qualified(table, col),
                 vals.into_iter().map(Into::into).collect(),
                 $negated,
             ))
@@ -244,54 +217,6 @@ impl Filter {
     list_ctor!(r#in, false, "Creates an IN filter (column IN (values)).");
 
     list_ctor!(not_in, true, "Creates a NOT IN filter (column NOT IN (values)).");
-
-    table_cmp_ctor!(
-        table_eq,
-        Eq,
-        "Creates a table-qualified equality filter (table.column = value)."
-    );
-
-    table_cmp_ctor!(
-        table_ne,
-        Ne,
-        "Creates a table-qualified inequality filter (table.column != value)."
-    );
-
-    table_cmp_ctor!(
-        table_gt,
-        Gt,
-        "Creates a table-qualified greater-than filter (table.column > value)."
-    );
-
-    table_cmp_ctor!(
-        table_gte,
-        Gte,
-        "Creates a table-qualified greater-than-or-equal filter (table.column >= value)."
-    );
-
-    table_cmp_ctor!(
-        table_lt,
-        Lt,
-        "Creates a table-qualified less-than filter (table.column < value)."
-    );
-
-    table_cmp_ctor!(
-        table_lte,
-        Lte,
-        "Creates a table-qualified less-than-or-equal filter (table.column <= value)."
-    );
-
-    table_list_ctor!(
-        table_in,
-        false,
-        "Creates a table-qualified IN filter (table.column IN (values))."
-    );
-
-    table_list_ctor!(
-        table_not_in,
-        true,
-        "Creates a table-qualified NOT IN filter (table.column NOT IN (values))."
-    );
 
     /// Creates an IS NULL filter.
     #[must_use]
@@ -339,52 +264,6 @@ impl Filter {
     #[must_use]
     pub fn or(filters: impl IntoIterator<Item = Self>) -> Self {
         Self(FilterKind::Or(filters.into_iter().collect()))
-    }
-
-    /// Logically negates a filter.
-    #[must_use]
-    pub fn negate(filter: Self) -> Self {
-        !filter
-    }
-
-    /// Creates a table-qualified IS NULL filter (table.column IS NULL).
-    #[must_use]
-    pub const fn table_is_null(table: &'static str, col: &'static str) -> Self {
-        Self(FilterKind::Null(ColRef::qualified(table, col), false))
-    }
-
-    /// Creates a table-qualified IS NOT NULL filter (table.column IS NOT NULL).
-    #[must_use]
-    pub const fn table_is_not_null(table: &'static str, col: &'static str) -> Self {
-        Self(FilterKind::Null(ColRef::qualified(table, col), true))
-    }
-
-    /// Creates a table-qualified LIKE filter (table.column LIKE pattern).
-    #[must_use]
-    pub const fn table_like(table: &'static str, col: &'static str, pattern: String) -> Self {
-        Self(FilterKind::Like(ColRef::qualified(table, col), pattern, false))
-    }
-
-    /// Creates a table-qualified NOT LIKE filter (table.column NOT LIKE pattern).
-    #[must_use]
-    pub const fn table_not_like(table: &'static str, col: &'static str, pattern: String) -> Self {
-        Self(FilterKind::Like(ColRef::qualified(table, col), pattern, true))
-    }
-
-    /// Creates a table-qualified BETWEEN filter (table.column BETWEEN low AND high).
-    #[must_use]
-    pub fn table_between(
-        table: &'static str, col: &'static str, low: impl Into<Value>, high: impl Into<Value>,
-    ) -> Self {
-        Self(FilterKind::Between(ColRef::qualified(table, col), low.into(), high.into(), false))
-    }
-
-    /// Creates a table-qualified NOT BETWEEN filter.
-    #[must_use]
-    pub fn table_not_between(
-        table: &'static str, col: &'static str, low: impl Into<Value>, high: impl Into<Value>,
-    ) -> Self {
-        Self(FilterKind::Between(ColRef::qualified(table, col), low.into(), high.into(), true))
     }
 
     /// Compares two columns for equality (`table1.col1 = table2.col2`).

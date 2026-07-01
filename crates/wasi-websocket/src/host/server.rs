@@ -3,18 +3,18 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
-use omnia::{Runtime, TopicRoutes, TriggerRouter};
+use omnia::{Runtime, StoreCtx, TopicRoutes, TriggerRouter};
 use tracing::{Instrument, debug_span, instrument};
 
-use crate::host::WebSocketView;
+use crate::host::WasiWebSocketView;
 use crate::host::generated::DuplexIndices;
 use crate::host::resource::{EventProxy, Events};
 
 #[instrument("websocket-server", skip(state))]
-pub async fn run<R>(state: &R) -> Result<()>
+pub async fn run<B>(state: &Runtime<B>) -> Result<()>
 where
-    R: Runtime,
-    R::StoreCtx: WebSocketView,
+    B: Clone + Send + Sync + 'static,
+    StoreCtx<B>: WasiWebSocketView,
 {
     let component = env::var("COMPONENT").unwrap_or_else(|_| "unknown".into());
     tracing::info!("starting websocket server for: {component}");
@@ -60,20 +60,20 @@ where
 }
 
 #[derive(Clone)]
-struct Handler<R>
+struct Handler<B>
 where
-    R: Runtime,
-    R::StoreCtx: WebSocketView,
+    B: Clone + Send + Sync + 'static,
+    StoreCtx<B>: WasiWebSocketView,
 {
-    state: R,
+    state: Runtime<B>,
     component: String,
     routing: Arc<TriggerRouter<DuplexIndices, TopicRoutes>>,
 }
 
-impl<R> Handler<R>
+impl<B> Handler<B>
 where
-    R: Runtime,
-    R::StoreCtx: WebSocketView,
+    B: Clone + Send + Sync + 'static,
+    StoreCtx<B>: WasiWebSocketView,
 {
     /// Forward event to the wasm guest.
     async fn handle(&self, event: EventProxy) -> Result<()> {

@@ -144,32 +144,32 @@ path = "messaging/runtime.rs"
 
 # Host-mediated dynamic linking proof (Phase 2 of rfcs/guest-registry.md).
 [[example]]
-name = "linking-responder-wasm"
-path = "linking/responder.rs"
+name = "guest-link-responder-wasm"
+path = "guest-link/responder.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "linking-router-wasm"
-path = "linking/router.rs"
+name = "guest-link-router-wasm"
+path = "guest-link/router.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "linking"
-path = "linking/runtime.rs"
+name = "guest-link"
+path = "guest-link/runtime.rs"
 
 [[example]]
-name = "routing-a-wasm"
-path = "routing/guest_a.rs"
+name = "http-routing-a-wasm"
+path = "http-routing/guest_a.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "routing-b-wasm"
-path = "routing/guest_b.rs"
+name = "http-routing-b-wasm"
+path = "http-routing/guest_b.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "routing"
-path = "routing/runtime.rs"
+name = "http-routing"
+path = "http-routing/runtime.rs"
 
 [[example]]
 name = "otel-wasm"

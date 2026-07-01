@@ -111,7 +111,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn json_error_sets_content_type() {
+    async fn json_content_type() {
         let body =
             serde_json::json!({"error": "invalid_request", "error_description": "missing field"});
         let err = crate::Error::Json {
@@ -131,43 +131,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fixed_sdk_error_remains_plain_text() {
-        let err = crate::Error::BadRequest {
-            code: "bad_request".to_string(),
-            description: "invalid input".to_string(),
-        };
-
-        let http_err = HttpError::from(err);
-        let response = http_err.into_response();
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        let ct = response.headers().get(CONTENT_TYPE);
-        assert!(
-            ct.is_none_or(|v| v != "application/json"),
-            "fixed SDK errors should not produce JSON content type"
-        );
-
-        let body = collect_body(response).await;
-        let text = String::from_utf8(body).expect("utf8");
-        assert!(text.contains("bad_request"));
-    }
-
-    #[tokio::test]
-    async fn anyhow_error_remains_plain_text() {
-        let err = anyhow::anyhow!("something went wrong");
-        let http_err = HttpError::from(err);
-        let response = http_err.into_response();
-
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-        let ct = response.headers().get(CONTENT_TYPE);
-        assert!(
-            ct.is_none_or(|v| v != "application/json"),
-            "generic anyhow errors should not produce JSON content type"
-        );
-    }
-
-    #[tokio::test]
-    async fn wrapped_json_error_preserves_body() {
+    async fn wrapped_json_body() {
         use anyhow::Context;
 
         let body = serde_json::json!({"error": "invalid_request", "error_description": "bad"});

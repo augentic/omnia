@@ -12,7 +12,7 @@
 //     async backend (`WasiModelCtx::complete` returns a future), so it must be
 //     `async func` for the host binding to await it without blocking the
 //     executor.
-//  2. The working-tree handle tracks `wasi:filesystem@0.3.0` (p3) — the version
+//  2. The workspace handle tracks `wasi:filesystem@0.3.0` (p3) — the version
 //     the runtime serves via `wasmtime_wasi::p3::add_to_linker` — so the `with:`
 //     remap onto wasmtime's p3 `Descriptor` resolves to the same resource the
 //     runtime already owns. p3 filesystem reads ride native component-model
@@ -21,8 +21,7 @@ package augentic:model@0.1.0;
 
 /// Models-API-style prompt completion. Guests import `augentic:model/completion`.
 interface completion {
-    /// Working-tree handle lent through `grants.working-tree`. The version tracks
-    /// the wasi-filesystem working-tree host (RFC-55): the floor resolves the lent
+    /// Workspace handle lent through `grants.workspace`. The host resolves the lent
     /// descriptor to an authorized mount by directory identity, then exposes it to
     /// backends as bounded `read`/`list`/`write` (genai) and the absolute
     /// `local-path` (cursor's `--workspace`).
@@ -114,9 +113,9 @@ interface completion {
         stop: list<string>,
     }
 
-    /// Guest-declared tool advertised to the model. Floor tools are injected from `grants`.
+    /// Guest-declared tool advertised to the model. Host-injected tools are injected from `grants`.
     record function-tool {
-        /// Tool name. Must not collide with reserved floor names (`resolve`, `read`, …).
+        /// Tool name. Must not collide with reserved host-injected tool names (`resolve`, `read`, …).
         name: string,
         /// Natural-language description for the model.
         description: string,
@@ -144,15 +143,15 @@ interface completion {
         value: string,
     }
 
-    /// Host capabilities lent for this completion; drives floor tool injection.
+    /// Host capabilities lent for this completion; drives host-injected tool injection.
     record tool-grants {
         /// Guest id whose `references` export `resolve` targets.
         references: option<string>,
         /// Typed `wasi:filesystem` capability for bounded `read` / `list` / `write`
         /// (genai) and the spawned agent's direct access (cursor). A `borrow`, so the
-        /// floor never trusts a forgeable integer handle — the host resolves it from
+        /// The runtime core never trusts a forgeable integer handle — the host resolves it from
         /// the resource table exactly as other hosts take typed resources.
-        working-tree: option<borrow<descriptor>>,
+        workspace: option<borrow<descriptor>>,
         /// Allowed closed verification profile names for `verify`.
         verify: list<string>,
     }
@@ -171,7 +170,7 @@ interface completion {
         generation: option<generation-params>,
         /// Required output shape and validation rules.
         response-format: response-format,
-        /// Guest-declared tools merged with floor tools at the backend.
+        /// Guest-declared tools merged with host-injected tools at the backend.
         tools: list<function-tool>,
         /// Tool selection policy. Defaults to provider/backend `auto`.
         tool-choice: option<tool-choice>,

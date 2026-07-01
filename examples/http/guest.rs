@@ -28,7 +28,6 @@ impl Guest for HttpGuest {
     }
 }
 
-/// GET request handler.
 #[omnia_wasi_otel::instrument]
 async fn echo_get(Json(body): Json<Value>) -> HttpResult<Json<Value>> {
     Ok(Json(json!({
@@ -37,7 +36,6 @@ async fn echo_get(Json(body): Json<Value>) -> HttpResult<Json<Value>> {
     })))
 }
 
-/// POST request handler.
 #[omnia_wasi_otel::instrument]
 async fn echo_post(Json(body): Json<Value>) -> HttpResult<Json<Value>> {
     Ok(Json(json!({

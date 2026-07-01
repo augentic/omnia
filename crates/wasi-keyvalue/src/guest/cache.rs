@@ -31,18 +31,15 @@ impl Cache {
     ///
     /// Returns an error if there is an issue getting the value.
     pub async fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
-        // retrieve entry
         let Some(entry) = self.bucket.get(key.to_string()).await.context("reading state")? else {
             return Ok(None);
         };
 
-        // check for ttl envelope
         let Ok(ttl_val) = Cacheable::try_from(&entry) else {
             tracing::debug!("Not serialized using Cacheable");
             return Ok(Some(entry));
         };
 
-        // check expiration
         if ttl_val.is_expired() {
             self.bucket.delete(key.to_string()).await.context("deleting expired state")?;
             return Ok(None);
@@ -60,7 +57,6 @@ impl Cache {
     pub async fn set(
         &self, key: &str, value: &[u8], ttl_secs: Option<u64>,
     ) -> Result<Option<Vec<u8>>> {
-        // if TTL, create envelope
         let value = if let Some(ttl) = ttl_secs.map(|secs| Duration::seconds(secs.cast_signed())) {
             let envelope = Cacheable::new(value, ttl);
             &<Cacheable as TryInto<Vec<u8>>>::try_into(envelope)?
@@ -68,7 +64,6 @@ impl Cache {
             value
         };
 
-        // return previous value
         let previous = self.get(key).await?;
         self.bucket.set(key.to_string(), value.to_vec()).await.context("setting state with ttl")?;
 

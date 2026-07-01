@@ -31,9 +31,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{Host, Runtime, Server};
+use omnia::{Host, Server};
 use wasmtime::component::{HasData, Linker, ResourceTableError};
-use wasmtime_wasi::ResourceTable;
 
 pub use self::default_impl::KeyValueDefault;
 use self::generated::wasi::keyvalue::store::Error;
@@ -62,25 +61,7 @@ where
     }
 }
 
-impl<R> Server<R> for WasiKeyValue where R: Runtime {}
-
-/// A trait which provides internal WASI Key-Value state.
-///
-/// This is implemented by the `T` in `Linker<T>` — a single type shared across
-/// all WASI components for the runtime build.
-pub trait WasiKeyValueView: Send {
-    /// Return a [`WasiKeyValueCtxView`] from mutable reference to self.
-    fn keyvalue(&mut self) -> WasiKeyValueCtxView<'_>;
-}
-
-/// View into [`WasiKeyValueCtx`] implementation and [`ResourceTable`].
-pub struct WasiKeyValueCtxView<'a> {
-    /// Mutable reference to the WASI Key-Value context.
-    pub ctx: &'a mut dyn WasiKeyValueCtx,
-
-    /// Mutable reference to table used to manage resources.
-    pub table: &'a mut ResourceTable,
-}
+impl<B> Server<B> for WasiKeyValue {}
 
 /// A trait which provides internal WASI Key-Value context.
 ///
@@ -91,31 +72,16 @@ pub trait WasiKeyValueCtx: Debug + Send + Sync + 'static {
     fn open_bucket(&self, identifier: String) -> FutureResult<Arc<dyn Bucket>>;
 }
 
-/// `anyhow::Error` to `Error` mapping
 impl From<anyhow::Error> for Error {
     fn from(err: anyhow::Error) -> Self {
         Self::Other(err.to_string())
     }
 }
 
-/// `ResourceTableError` to `Error` mapping
 impl From<ResourceTableError> for Error {
     fn from(err: ResourceTableError) -> Self {
         Self::Other(err.to_string())
     }
 }
 
-/// Implementation of the `WasiKeyValueView` trait for the store context.
-#[macro_export]
-macro_rules! omnia_wasi_view {
-    ($store_ctx:ty, $field_name:ident) => {
-        impl omnia_wasi_keyvalue::WasiKeyValueView for $store_ctx {
-            fn keyvalue(&mut self) -> omnia_wasi_keyvalue::WasiKeyValueCtxView<'_> {
-                omnia_wasi_keyvalue::WasiKeyValueCtxView {
-                    ctx: &mut self.$field_name,
-                    table: &mut self.base.table,
-                }
-            }
-        }
-    };
-}
+omnia::wasi_view!(KeyValue);

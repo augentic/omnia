@@ -6,28 +6,33 @@
 //! infrastructure: it is what lets one process route an HTTP request, a CLI
 //! command, and a topic message to *different* guests.
 //!
-//! The floor treats identities as opaque keys; consumers project their own
+//! The runtime core treats identities as opaque keys; consumers project their own
 //! scheme onto them. Omnia never parses a [`GuestId`].
+
+mod routing;
 
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use anyhow::{Result, bail};
+use anyhow::{Context as _, Result, bail};
+pub use routing::{CliRoutes, HttpRoutes, Resolver, Routes, TopicRoutes, TriggerRouter};
 use wasmtime::Engine;
-use wasmtime::component::{Component, InstancePre};
+use wasmtime::component::{Component, InstancePre, Linker};
+use wasmtime_wasi::WasiView;
+use wrpc_wasmtime::WrpcView;
 
 use crate::RuntimeOptions;
-use crate::dispatch::DispatchHandle;
-use crate::routing::Routes;
+use crate::deployment::LoadedGuest;
+use crate::dispatch::{self, DispatchHandle};
 
 /// Opaque guest identity.
 ///
-/// The floor treats it as an ordered string key; consumers (e.g. Specify)
+/// The runtime core treats it as an ordered string key; consumers (e.g. Specify)
 /// project their own scheme onto it (`source:typescript`, ...). Omnia never
 /// parses it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct GuestId(pub Arc<str>);
+pub struct GuestId(Arc<str>);
 
 impl GuestId {
     /// Returns the identity as a string slice.
@@ -104,6 +109,84 @@ impl<T: 'static> Guest<T> {
     }
 }
 
+/// Assembles a [`Registry`] from loaded guest components and a fully linked
+/// linker.
+///
+/// Pre-instantiation, route validation, and registry construction happen in
+/// [`build`](Self::build). [`Deployment::build`](crate::Deployment::build) is
+/// the usual entry point.
+pub struct RegistryBuilder<T: WasiView + 'static> {
+    engine: Engine,
+    linker: Linker<T>,
+    options: RuntimeOptions,
+    loaded: Vec<LoadedGuest>,
+    routes: Routes,
+    dispatch: Arc<DispatchHandle>,
+}
+
+impl<T: WasiView + 'static> RegistryBuilder<T> {
+    /// Begin assembling a [`Registry`] from a linked deployment's parts.
+    #[must_use]
+    pub const fn new(
+        engine: Engine, linker: Linker<T>, options: RuntimeOptions, loaded: Vec<LoadedGuest>,
+        routes: Routes, dispatch: Arc<DispatchHandle>,
+    ) -> Self {
+        Self {
+            engine,
+            linker,
+            options,
+            loaded,
+            routes,
+            dispatch,
+        }
+    }
+
+    /// Polyfill host-mediated imports, pre-instantiate every loaded guest, and
+    /// freeze the guest [`Registry`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if there are no guests to register, host-mediated
+    /// imports cannot be polyfilled, a component cannot be pre-instantiated, or
+    /// a route targets a guest that is not registered.
+    pub fn build(self) -> Result<Registry<T>>
+    where
+        T: WrpcView,
+    {
+        if self.loaded.is_empty() {
+            bail!("cannot build a guest registry with no guests");
+        }
+
+        let mut linker = self.linker;
+        dispatch::link(&self.engine, &mut linker, &self.loaded, &self.dispatch)?;
+
+        let mut guests = BTreeMap::new();
+        for loaded in &self.loaded {
+            let instance_pre = linker
+                .instantiate_pre(&loaded.component)
+                .map_err(anyhow::Error::from)
+                .with_context(|| format!("pre-instantiating guest `{}`", loaded.id))?;
+            guests.insert(loaded.id.clone(), Guest::local(loaded.id.clone(), instance_pre));
+        }
+
+        for target in self.routes.targets() {
+            if !guests.contains_key(target) {
+                bail!("route targets guest `{target}`, which is not registered");
+            }
+        }
+
+        tracing::info!(guests = guests.len(), "runtime initialized");
+
+        Ok(Registry {
+            engine: self.engine,
+            options: self.options,
+            guests,
+            routes: self.routes,
+            dispatch: self.dispatch,
+        })
+    }
+}
+
 /// One [`Engine`] + one `Linker`; many pre-instantiated guests keyed by
 /// identity.
 ///
@@ -117,45 +200,12 @@ impl<T: 'static> Guest<T> {
 pub struct Registry<T: 'static> {
     engine: Engine,
     options: RuntimeOptions,
-    /// Guests keyed by identity. A [`BTreeMap`] so iteration is identity-sorted
-    /// for free, making per-trigger capability and ambiguity errors stable
-    /// across runs without a per-call sort.
     guests: BTreeMap<GuestId, Guest<T>>,
     routes: Routes,
     dispatch: Arc<DispatchHandle>,
 }
 
 impl<T: 'static> Registry<T> {
-    /// Assemble a registry from pre-instantiated guests.
-    ///
-    /// Crate-internal: [`Compiled::build`](crate::Compiled::build) is the public
-    /// path to a [`Registry`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if `guests` is empty, or if a route targets a guest that
-    /// is not registered.
-    pub(crate) fn new(
-        engine: Engine, options: RuntimeOptions, guests: BTreeMap<GuestId, Guest<T>>,
-        routes: Routes, dispatch: Arc<DispatchHandle>,
-    ) -> Result<Self> {
-        if guests.is_empty() {
-            bail!("cannot build a guest registry with no guests");
-        }
-        for target in routes.targets() {
-            if !guests.contains_key(target) {
-                bail!("route targets guest `{target}`, which is not registered");
-            }
-        }
-        Ok(Self {
-            engine,
-            options,
-            guests,
-            routes,
-            dispatch,
-        })
-    }
-
     /// Returns the shared engine every guest is instantiated against.
     #[must_use]
     pub const fn engine(&self) -> &Engine {
@@ -213,10 +263,12 @@ impl<T: 'static> Registry<T> {
 mod tests {
     use std::collections::BTreeSet;
 
+    use wasmtime::component::Linker;
     use wasmtime::{Config, Engine};
 
     use super::*;
-    use crate::selector::FirstArgSelector;
+    use crate::dispatch::FirstArgSelector;
+    use crate::store::StoreCtx;
 
     #[test]
     fn guest_id() {
@@ -231,11 +283,12 @@ mod tests {
     fn no_guests() {
         let options = RuntimeOptions::load().expect("options should load");
         let engine = Engine::new(&Config::from(&options)).expect("engine should build");
-        // An empty map never constructs a `Guest`, so `T` is unconstrained here.
-        let guests: BTreeMap<GuestId, Guest<()>> = BTreeMap::new();
+        let linker = Linker::<StoreCtx<()>>::new(&engine);
         let dispatch = DispatchHandle::new(Arc::new(FirstArgSelector), BTreeSet::new(), 8);
 
-        let result = Registry::new(engine, options, guests, Routes::default(), dispatch);
+        let result =
+            RegistryBuilder::new(engine, linker, options, Vec::new(), Routes::default(), dispatch)
+                .build();
         assert!(result.is_err(), "an empty registry must be rejected");
     }
 }

@@ -1,19 +1,25 @@
-//! # Fixed per-store state
+//! # Fixed per-store state and the shared store context
 //!
 //! [`StoreBase`] is the slice of a guest store context that is identical for every
 //! deployment: the WASI resource table and context, the per-guest memory
 //! limiter, the wRPC view state backing host-mediated dynamic linking, and the
-//! type-erased host->guest dispatcher. A concrete `StoreCtx` embeds one `StoreBase`
-//! field plus its deployment-specific backend fields; the
-//! [`StoreContext`](omnia_host_macros::StoreContext) derive implements the
-//! three fixed views (`WasiView`, `WrpcView`, `HasLimits`) against it.
+//! type-erased host->guest dispatcher.
+//!
+//! [`StoreCtx`] is the per-guest context every deployment shares: it pairs that
+//! fixed [`StoreBase`] with the deployment's connected backend bundle `B`. The
+//! three fixed views (`WasiView`, `WrpcView`, `HasLimits`) are implemented here
+//! against `base`; each host crate contributes a blanket `WasiXxxView for
+//! StoreCtx<B> where B: HasXxx` so a deployment only supplies the bundle plus
+//! the `HasXxx` accessor impls the `runtime!` macro generates.
 
 use std::sync::Arc;
 
 use wasmtime::{StoreLimits, StoreLimitsBuilder};
-use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder};
+use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+use wasmtime_wasi_http::p3::{WasiHttpCtxView, WasiHttpView};
+use wrpc_wasmtime::{WrpcCtxView, WrpcView};
 
-use crate::{HostDispatch, RuntimeOptions, WorkingTreeRegistry, WrpcState};
+use crate::{Dispatcher, HasLimits, LinkClient, MountRegistry, RuntimeOptions, WrpcState};
 
 /// Type-state marker for a [`StoreBaseBuilder`] member that has been supplied,
 /// carrying its value until [`build`](StoreBaseBuilder::build) consumes it.
@@ -25,16 +31,16 @@ pub struct Unset;
 /// Type-state builder for [`StoreBase`], created by [`StoreBase::builder`].
 ///
 /// The `O` and `D` type parameters track whether the required
-/// [`options`](Self::options) and [`dispatch`](Self::dispatch) members have been
+/// [`options`](Self::options) and [`dispatcher`](Self::dispatcher) members have been
 /// supplied: each starts as [`Unset`] and becomes `Set<…>` once its setter runs.
 /// [`build`](Self::build) is implemented only when both are `Set`, so omitting
 /// either is a compile error rather than a runtime panic. The optional
 /// [`args`](Self::args) member defaults to empty and may be set in any state.
 pub struct StoreBaseBuilder<O = Unset, D = Unset> {
     options: O,
-    dispatch: D,
+    dispatcher: D,
     args: Vec<String>,
-    working_trees: Option<Arc<WorkingTreeRegistry>>,
+    mounts: Option<Arc<MountRegistry>>,
 }
 
 impl<O, D> StoreBaseBuilder<O, D> {
@@ -48,15 +54,15 @@ impl<O, D> StoreBaseBuilder<O, D> {
         self
     }
 
-    /// Set the working-tree registry preopened into the guest sandbox (RFC-55).
+    /// Set the mount registry preopened into the guest sandbox (RFC-55).
     ///
     /// Optional; defaults to an empty registry (no mounts) so reactor
     /// deployments without `[[mount]]`s — and the hand-written test runtimes —
     /// build unchanged. The `runtime!` macro threads the startup-validated
     /// registry here.
     #[must_use]
-    pub fn working_trees(mut self, working_trees: Arc<WorkingTreeRegistry>) -> Self {
-        self.working_trees = Some(working_trees);
+    pub fn mounts(mut self, mounts: Arc<MountRegistry>) -> Self {
+        self.mounts = Some(mounts);
         self
     }
 }
@@ -69,9 +75,9 @@ impl<D> StoreBaseBuilder<Unset, D> {
     pub fn options(self, options: &RuntimeOptions) -> StoreBaseBuilder<Set<&RuntimeOptions>, D> {
         StoreBaseBuilder {
             options: Set(options),
-            dispatch: self.dispatch,
+            dispatcher: self.dispatcher,
             args: self.args,
-            working_trees: self.working_trees,
+            mounts: self.mounts,
         }
     }
 }
@@ -84,19 +90,19 @@ impl<O> StoreBaseBuilder<O, Unset> {
     ///
     /// [`Runtime`]: crate::Runtime
     #[must_use]
-    pub fn dispatch(
-        self, dispatch: Arc<dyn HostDispatch>,
-    ) -> StoreBaseBuilder<O, Set<Arc<dyn HostDispatch>>> {
+    pub fn dispatcher(
+        self, dispatcher: Arc<dyn Dispatcher>,
+    ) -> StoreBaseBuilder<O, Set<Arc<dyn Dispatcher>>> {
         StoreBaseBuilder {
             options: self.options,
-            dispatch: Set(dispatch),
+            dispatcher: Set(dispatcher),
             args: self.args,
-            working_trees: self.working_trees,
+            mounts: self.mounts,
         }
     }
 }
 
-impl StoreBaseBuilder<Set<&RuntimeOptions>, Set<Arc<dyn HostDispatch>>> {
+impl StoreBaseBuilder<Set<&RuntimeOptions>, Set<Arc<dyn Dispatcher>>> {
     /// Finish building the fixed per-store state, applying the WASI construction
     /// policy shared by every deployment.
     ///
@@ -106,8 +112,8 @@ impl StoreBaseBuilder<Set<&RuntimeOptions>, Set<Arc<dyn HostDispatch>>> {
     #[must_use]
     pub fn build(self) -> StoreBase {
         let Set(options) = self.options;
-        let Set(host_dispatch) = self.dispatch;
-        let working_trees = self.working_trees.unwrap_or_default();
+        let Set(dispatcher) = self.dispatcher;
+        let mounts = self.mounts.unwrap_or_default();
 
         let mut wasi_builder = WasiCtxBuilder::new();
         wasi_builder
@@ -117,12 +123,12 @@ impl StoreBaseBuilder<Set<&RuntimeOptions>, Set<Arc<dyn HostDispatch>>> {
             .stderr(tokio::io::stderr())
             .args(&self.args);
 
-        // Preopen each authorized working-tree mount into the guest sandbox
-        // (RFC-55). The registry was opened + validated once at startup, so a
-        // failure here is rare (e.g. a mount removed mid-run); log and skip —
-        // the guest simply can't lend that tree and the floor's identity match
-        // then fails cleanly, with no ambient fallback.
-        for entry in working_trees.entries() {
+        // Preopen each authorized mount into the guest sandbox (RFC-55). The
+        // registry was opened + validated once at startup, so a failure here is
+        // rare (e.g. a mount removed mid-run); log and skip — the guest simply
+        // can't lend that tree and the consuming host's identity match then
+        // fails cleanly, with no ambient fallback.
+        for entry in mounts.entries() {
             if let Err(error) = wasi_builder.preopened_dir(
                 &entry.host_path,
                 &entry.name,
@@ -133,7 +139,7 @@ impl StoreBaseBuilder<Set<&RuntimeOptions>, Set<Arc<dyn HostDispatch>>> {
                     %error,
                     name = %entry.name,
                     path = %entry.host_path.display(),
-                    "failed to preopen working-tree mount; guest will not see it",
+                    "failed to preopen mount; guest will not see it",
                 );
             }
         }
@@ -145,8 +151,8 @@ impl StoreBaseBuilder<Set<&RuntimeOptions>, Set<Arc<dyn HostDispatch>>> {
             wasi,
             limits: StoreLimitsBuilder::new().memory_size(options.max_memory_bytes).build(),
             wrpc: WrpcState::new(),
-            host_dispatch,
-            working_trees,
+            dispatcher,
+            mounts,
         }
     }
 }
@@ -155,8 +161,7 @@ impl StoreBaseBuilder<Set<&RuntimeOptions>, Set<Arc<dyn HostDispatch>>> {
 ///
 /// Construction policy (WASI inheritance, argv, the memory limit, and inert wRPC
 /// view state) lives in [`StoreBase::builder`] so it is documented and
-/// unit-testable instead of being inlined in macro-generated `Runtime::store()`
-/// output.
+/// unit-testable instead of being inlined in [`Runtime::store`](crate::Runtime::store).
 pub struct StoreBase {
     /// The store's WASI resource table.
     pub table: ResourceTable,
@@ -172,35 +177,128 @@ pub struct StoreBase {
     /// Type-erased host->guest dispatcher (e.g. `wasi-model`'s `resolve`); a
     /// fresh handle to the owning runtime. Inert unless a host binding reaches
     /// for it.
-    pub host_dispatch: Arc<dyn HostDispatch>,
-    /// Working-tree registry (RFC-55): the startup-validated mounts also
-    /// preopened into [`wasi`](Self::wasi). The floor reads it to match a lent
+    pub dispatcher: Arc<dyn Dispatcher>,
+    /// Mount registry (RFC-55): the startup-validated mounts also preopened into
+    /// [`wasi`](Self::wasi). A consuming host crate reads it to match a lent
     /// `descriptor` back to its mount by directory identity. Empty unless the
-    /// deployment configures `[[mount]]`s or `OMNIA_WORKING_TREE`.
-    pub working_trees: Arc<WorkingTreeRegistry>,
+    /// deployment configures `[[mount]]`s or `OMNIA_WORKSPACE`.
+    pub mounts: Arc<MountRegistry>,
 }
 
 impl StoreBase {
     /// Begin building the fixed per-store state for a single guest invocation.
     ///
     /// [`options`](StoreBaseBuilder::options) and
-    /// [`dispatch`](StoreBaseBuilder::dispatch) are required (the type-state
+    /// [`dispatcher`](StoreBaseBuilder::dispatcher) are required (the type-state
     /// builder will not expose [`build`](StoreBaseBuilder::build) until both are
     /// set); [`args`](StoreBaseBuilder::args) is optional.
     ///
     /// ```ignore
     /// let base = StoreBase::builder()
     ///     .options(self.options())
-    ///     .dispatch(Arc::new(self.clone()))
+    ///     .dispatcher(Arc::new(self.clone()))
     ///     .build();
     /// ```
     #[must_use]
     pub const fn builder() -> StoreBaseBuilder {
         StoreBaseBuilder {
             options: Unset,
-            dispatch: Unset,
+            dispatcher: Unset,
             args: Vec::new(),
-            working_trees: None,
+            mounts: None,
         }
+    }
+}
+
+/// The per-guest store context every deployment shares.
+///
+/// `StoreCtx<B>` pairs the fixed [`StoreBase`] with the deployment's connected
+/// backend bundle `B` — the `runtime!`-generated `Backends`, or [`()`](unit) for
+/// a backend-less deployment (such as a `mode: command` `wasi:cli` runtime). The
+/// three fixed views (`WasiView`, `WrpcView`, `HasLimits`) are implemented below
+/// against [`base`](Self::base); each host crate adds a blanket
+/// `WasiXxxView for StoreCtx<B> where B: HasXxx`, so a deployment only supplies
+/// the bundle and its `HasXxx` accessor impls (generated by the `runtime!`
+/// macro).
+///
+/// This is the boilerplate the `runtime!` macro and hand-written runtimes
+/// previously reproduced per deployment; hosting it here keeps it library code
+/// reviewed once.
+pub struct StoreCtx<B> {
+    /// The fixed per-store state shared by every deployment.
+    pub base: StoreBase,
+    /// The deployment's connected backend bundle (cloned per store).
+    pub backends: B,
+}
+
+impl<B: Send + 'static> WasiView for StoreCtx<B> {
+    fn ctx(&mut self) -> WasiCtxView<'_> {
+        WasiCtxView {
+            ctx: &mut self.base.wasi,
+            table: &mut self.base.table,
+        }
+    }
+}
+
+impl<B: Send + 'static> WrpcView for StoreCtx<B> {
+    type Invoke = LinkClient;
+
+    fn wrpc(&mut self) -> WrpcCtxView<'_, LinkClient> {
+        self.base.wrpc.view(&mut self.base.table)
+    }
+}
+
+impl<B: Send + 'static> HasLimits for StoreCtx<B> {
+    fn limits(&mut self) -> &mut StoreLimits {
+        &mut self.base.limits
+    }
+}
+
+/// A backend bundle that can yield the `wasi:http` view for a [`StoreCtx`].
+///
+/// `wasi:http`'s view trait (`WasiHttpView`) is foreign — re-exported from
+/// `wasmtime-wasi-http` — so its blanket impl on `StoreCtx<B>` can only live
+/// here, where `StoreCtx` is local. Every other host owns its view trait and
+/// blankets it in its own crate. The `runtime!` macro generates the bundle-side
+/// impl of this trait directly.
+pub trait HasHttp: Send {
+    /// Borrow the `wasi:http` context as the linker-facing view, threading in
+    /// the store's [`ResourceTable`].
+    fn http_view<'a>(&'a mut self, table: &'a mut ResourceTable) -> WasiHttpCtxView<'a>;
+}
+
+impl<B: HasHttp + Send + 'static> WasiHttpView for StoreCtx<B> {
+    fn http(&mut self) -> WasiHttpCtxView<'_> {
+        self.backends.http_view(&mut self.base.table)
+    }
+}
+
+/// Clone-on-read access to a store's startup-validated mount registry (RFC-55).
+///
+/// Lets a host crate match a lent `wasi:filesystem` descriptor against the
+/// store's authorized mounts without carrying the registry on its own view.
+pub trait HasMounts: Send {
+    /// Clone a handle to the store's mount registry.
+    fn mounts(&self) -> Arc<MountRegistry>;
+}
+
+impl<B: Send + 'static> HasMounts for StoreCtx<B> {
+    fn mounts(&self) -> Arc<MountRegistry> {
+        Arc::clone(&self.base.mounts)
+    }
+}
+
+/// Clone-on-read access to a store's host->guest dispatcher.
+///
+/// Lets a host crate reach the dispatcher for host-mediated dynamic linking
+/// without carrying it on its own view.
+pub trait HasDispatcher: Send {
+    /// Clone a handle to the store's host->guest dispatcher.
+    fn dispatcher(&self) -> Arc<dyn Dispatcher>;
+}
+
+impl<B: Send + 'static> HasDispatcher for StoreCtx<B> {
+    fn dispatcher(&self) -> Arc<dyn Dispatcher> {
+        Arc::clone(&self.base.dispatcher)
     }
 }

@@ -7,7 +7,7 @@ mod server;
 
 use anyhow::Result;
 pub use default_impl::HttpDefault;
-use omnia::{Host, Runtime, Server};
+use omnia::{Host, Runtime, Server, StoreCtx};
 use wasmtime::component::Linker;
 pub use wasmtime_wasi_http::WasiHttpCtx;
 pub use wasmtime_wasi_http::p3::{WasiHttpCtxView, WasiHttpView};
@@ -25,26 +25,14 @@ where
     }
 }
 
-impl<R> Server<R> for WasiHttp
+impl<B> Server<B> for WasiHttp
 where
-    R: Runtime,
-    R::StoreCtx: WasiHttpView,
+    B: Clone + Send + Sync + 'static,
+    StoreCtx<B>: WasiHttpView,
 {
     const IS_SERVER: bool = true;
 
-    async fn run(&self, state: &R) -> Result<()> {
+    async fn run(&self, state: &Runtime<B>) -> Result<()> {
         server::run(state).await
     }
-}
-
-/// Implementation of the `WasiHttpView` trait for the store context.
-#[macro_export]
-macro_rules! omnia_wasi_view {
-    ($store_ctx:ty, $field_name:ident) => {
-        impl omnia_wasi_http::WasiHttpView for $store_ctx {
-            fn http(&mut self) -> omnia_wasi_http::WasiHttpCtxView<'_> {
-                self.$field_name.as_view(&mut self.base.table)
-            }
-        }
-    };
 }
