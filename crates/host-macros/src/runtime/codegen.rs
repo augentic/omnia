@@ -7,11 +7,11 @@ use quote::format_ident;
 use quote::{ToTokens, quote};
 use syn::{Ident, Path};
 
-use crate::runtime::parse::{Config, HostEntry};
+use crate::runtime::parse::{Config, HostEntry, Mode};
 
 // Token fragments needed to expand the runtime macro.
 pub struct Codegen {
-    pub command: bool,
+    pub mode: Mode,
     pub host_types: Vec<Path>,
     pub server_types: Vec<Path>,
     pub backends_ty: TokenStream,
@@ -28,7 +28,7 @@ impl From<&Config> for Codegen {
         let (backends_ty, backends_def) = emit_backends(host_entries);
 
         Self {
-            command: config.command,
+            mode: config.mode,
             host_types,
             server_types,
             backends_ty,

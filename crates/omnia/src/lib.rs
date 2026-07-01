@@ -33,6 +33,7 @@ pub use self::options::compile;
 pub use self::registry::{
     CliRoutes, Guest, GuestId, HttpRoutes, Registry, Resolver, Routes, TopicRoutes, TriggerRouter,
 };
+pub use self::runtime::Mode;
 #[doc(hidden)]
 pub use self::runtime::{ExitStatus, Runtime, RuntimeHooks};
 #[doc(hidden)]

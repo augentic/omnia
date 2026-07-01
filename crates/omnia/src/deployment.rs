@@ -19,7 +19,7 @@ use wrpc_wasmtime::WrpcView;
 use crate::dispatch::{DispatchHandle, FirstArgSelector, GuestSelector};
 use crate::mount::{MountRegistry, ResolvedPreopen};
 use crate::registry::{Registry, RegistryBuilder, Routes};
-use crate::{Host, RuntimeOptions, Server, Telemetry};
+use crate::{Host, Mode, RuntimeOptions, Server, Telemetry};
 
 /// Selects where a runtime's guests come from, then [`build`]s a [`Deployment`]
 /// ready for host linking.
@@ -33,7 +33,7 @@ use crate::{Host, RuntimeOptions, Server, Telemetry};
 ///     .wasm(wasm)
 ///     .config(config)
 ///     .args(args)
-///     .command(command)
+///     .mode(mode)
 ///     .build::<StoreCtx>()
 ///     .await?;
 /// ```
@@ -46,7 +46,7 @@ pub struct DeploymentBuilder {
     wasm: Option<PathBuf>,
     config: Option<PathBuf>,
     args: Vec<String>,
-    command: bool,
+    mode: Mode,
 }
 
 impl DeploymentBuilder {
@@ -78,11 +78,10 @@ impl DeploymentBuilder {
         self
     }
 
-    /// Select command mode: prepend the deployment name as `argv[0]` for
-    /// `wasi:cli` guests. Long-lived server deployments leave argv empty.
+    /// Set the deployment drive mode.
     #[must_use]
-    pub const fn command(mut self, command: bool) -> Self {
-        self.command = command;
+    pub const fn mode(mut self, mode: Mode) -> Self {
+        self.mode = mode;
         self
     }
 
@@ -112,7 +111,7 @@ impl DeploymentBuilder {
                 links: parsed.links(),
                 preopens: with_env_mount(parsed.mounts(base)),
                 args: self.args,
-                command: self.command,
+                mode: self.mode,
             }
         } else {
             let wasm = self.wasm.context(
@@ -128,7 +127,7 @@ impl DeploymentBuilder {
                 links: BTreeSet::new(),
                 preopens: with_env_mount(Vec::new()),
                 args: self.args,
-                command: self.command,
+                mode: self.mode,
             }
         };
 
@@ -170,7 +169,7 @@ pub struct Deployment<T: WasiView + 'static> {
     // command mode the deployment name is prepended as `argv[0]`.
     args: Arc<Vec<String>>,
     // Whether this deployment runs a one-shot `wasi:cli` command.
-    command: bool,
+    mode: Mode,
 }
 
 impl<T: WasiView + 'static> Deployment<T> {
@@ -191,7 +190,7 @@ impl<T: WasiView + 'static> Deployment<T> {
             guests.extend(source.load(&engine).await?);
         }
 
-        let args = if plan.command {
+        let args = if plan.mode.is_command() {
             std::iter::once(plan.name.clone()).chain(plan.args).collect()
         } else {
             plan.args
@@ -207,7 +206,7 @@ impl<T: WasiView + 'static> Deployment<T> {
             selector: Arc::new(FirstArgSelector),
             mounts,
             args: Arc::new(args),
-            command: plan.command,
+            mode: plan.mode,
         })
     }
 }
@@ -241,10 +240,10 @@ impl<T: WasiView> Deployment<T> {
         Arc::clone(&self.mounts)
     }
 
-    /// Whether this deployment drives a one-shot `wasi:cli` command.
+    /// Deployment drive mode.
     #[must_use]
-    pub const fn command(&self) -> bool {
-        self.command
+    pub const fn mode(&self) -> Mode {
+        self.mode
     }
 
     /// Shared guest argv for threading into [`Runtime::store`](crate::Runtime::store).
@@ -290,7 +289,7 @@ struct Plan {
     links: BTreeSet<Box<str>>,
     preopens: Vec<ResolvedPreopen>,
     args: Vec<String>,
-    command: bool,
+    mode: Mode,
 }
 
 // Build the shared engine, WASI-linked linker, and runtime options.

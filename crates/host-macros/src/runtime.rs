@@ -9,17 +9,22 @@ use proc_macro2::TokenStream;
 use quote::quote;
 
 use crate::runtime::codegen::Codegen;
-pub use crate::runtime::parse::Config;
+pub use crate::runtime::parse::{Config, Mode};
 
 /// Generate the runtime module from a parsed [`Config`].
 pub fn expand(config: &Config) -> TokenStream {
     let Codegen {
-        command,
+        mode,
         host_types,
         server_types,
         backends_ty,
         backends_def,
     } = Codegen::from(config);
+
+    let mode = match mode {
+        Mode::Server => quote!(omnia::Mode::Server),
+        Mode::Command => quote!(omnia::Mode::Command),
+    };
 
     quote! {
         mod runtime {
@@ -56,7 +61,7 @@ pub fn expand(config: &Config) -> TokenStream {
 
             #[tokio::main]
             pub async fn main() -> ::std::process::ExitCode {
-                omnia::main::<#backends_ty, Hooks>(#command).await
+                omnia::main::<#backends_ty, Hooks>(#mode).await
             }
         }
 

@@ -214,7 +214,7 @@ impl StoreBase {
 ///
 /// `StoreCtx<B>` pairs the fixed [`StoreBase`] with the deployment's connected
 /// backend bundle `B` — the `runtime!`-generated `Backends`, or [`()`](unit) for
-/// a backend-less deployment (such as a `command: true` `wasi:cli` runtime). The
+/// a backend-less deployment (such as a `mode: command` `wasi:cli` runtime). The
 /// three fixed views (`WasiView`, `WrpcView`, `HasLimits`) are implemented below
 /// against [`base`](Self::base); each host crate adds a blanket
 /// `WasiXxxView for StoreCtx<B> where B: HasXxx`, so a deployment only supplies

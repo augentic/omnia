@@ -18,7 +18,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
-use omnia::{ExitStatus, RuntimeHooks, run};
+use omnia::{ExitStatus, Mode, RuntimeHooks, run};
 
 struct EmptyHooks;
 
@@ -60,7 +60,7 @@ async fn run_cli(wasm: &Path, tail: &[&str]) -> Result<ExitStatus> {
         Some(wasm.to_path_buf()),
         None,
         tail.iter().map(|arg| (*arg).to_string()).collect(),
-        true,
+        Mode::Command,
     )
     .await
     .context("running command")

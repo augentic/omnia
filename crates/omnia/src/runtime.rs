@@ -18,6 +18,24 @@ use crate::mount::MountRegistry;
 use crate::traits::{Backends, HasLimits};
 use crate::{Deployment, DeploymentBuilder, Registry, RuntimeOptions, StoreBase, StoreCtx};
 
+/// How a deployment is driven after bootstrap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Mode {
+    /// Await trigger servers until shutdown.
+    #[default]
+    Server,
+    /// Drive `wasi:cli/run` once; trigger servers run in the background.
+    Command,
+}
+
+impl Mode {
+    /// Whether guest argv is shaped for a one-shot `wasi:cli` command.
+    #[must_use]
+    pub const fn is_command(self) -> bool {
+        matches!(self, Self::Command)
+    }
+}
+
 /// Host linking and trigger-server startup for a deployment.
 pub trait RuntimeHooks<B: Backends> {
     /// Link every declared host into the deployment linker.
@@ -35,13 +53,13 @@ pub trait RuntimeHooks<B: Backends> {
 
 /// CLI entry point for generated `main` functions.
 #[doc(hidden)]
-pub async fn main<B, H>(cmd: bool) -> ExitCode
+pub async fn main<B, H>(mode: Mode) -> ExitCode
 where
     B: Backends,
     H: RuntimeHooks<B>,
 {
     match Cli::parse().command {
-        Command::Run { wasm, config, args } => match run::<B, H>(wasm, config, args, cmd).await {
+        Command::Run { wasm, config, args } => match run::<B, H>(wasm, config, args, mode).await {
             Ok(status) => status.into(),
             Err(error) => {
                 eprintln!("{error:#}");
@@ -66,7 +84,7 @@ where
 /// Returns an error if the deployment cannot be built, runtime state cannot be
 /// prepared, link servers cannot be wired, or a trigger server exits with an error.
 pub async fn run<B, H>(
-    wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>, cmd: bool,
+    wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>, mode: Mode,
 ) -> Result<ExitStatus>
 where
     B: Backends,
@@ -76,7 +94,7 @@ where
         .wasm(wasm)
         .config(config)
         .args(args)
-        .command(cmd)
+        .mode(mode)
         .build::<StoreCtx<B>>()
         .await
         .context("building runtime")?;
@@ -86,17 +104,20 @@ where
 
     prepare(&runtime).await?;
 
-    if cmd {
-        let servers_runtime = runtime.clone();
-        tokio::spawn(async move {
-            if let Err(error) = H::serve(&servers_runtime).await {
-                tracing::error!(%error, "trigger server exited with error");
-            }
-        });
-        command::drive(&runtime).await
-    } else {
-        H::serve(&runtime).await?;
-        Ok(ExitStatus::SUCCESS)
+    match mode {
+        Mode::Command => {
+            let servers_runtime = runtime.clone();
+            tokio::spawn(async move {
+                if let Err(error) = H::serve(&servers_runtime).await {
+                    tracing::error!(%error, "trigger server exited with error");
+                }
+            });
+            command::drive(&runtime).await
+        }
+        Mode::Server => {
+            H::serve(&runtime).await?;
+            Ok(ExitStatus::SUCCESS)
+        }
     }
 }
 
