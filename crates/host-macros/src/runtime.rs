@@ -16,38 +16,9 @@ pub fn expand(config: &Config) -> TokenStream {
     let Codegen {
         command,
         host_types,
-        host_impls,
-        backend_idents,
-        backend_types,
+        backends_ty,
+        backends_def,
     } = Codegen::from(config);
-
-    // the connected backend bundle threaded into `omnia::Runtime`.
-    let (backends_ty, backends_def) = if backend_idents.is_empty() {
-        (quote! { () }, quote! {})
-    } else {
-        (
-            quote! { Backends },
-            quote! {
-                use omnia::Backend;
-
-                #[derive(Clone)]
-                struct Backends {#(
-                    #backend_idents: #backend_types,
-                )*}
-
-                impl omnia::Backends for Backends {
-                    async fn connect() -> Result<Self> {
-                        let (#(#backend_idents,)*) = tokio::try_join!(
-                            #(<#backend_types as Backend>::connect(),)*
-                        )?;
-                        Ok(Self { #(#backend_idents,)* })
-                    }
-                }
-
-                #(#host_impls)*
-            },
-        )
-    };
 
     quote! {
         mod runtime {

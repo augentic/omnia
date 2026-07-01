@@ -2,18 +2,15 @@
 //!
 //! Parses the runtime macro token stream input into structured values.
 
-
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::{ LitBool, Path, Result, Token};
+use syn::{LitBool, Path, Result, Token};
 
 /// Configuration for the runtime macro.
 pub struct Config {
     pub command: bool,
     pub host_entries: Vec<HostEntry>,
 }
-
-pub struct HostEntries(pub Vec<HostEntry>);
 
 /// One `Host: Backend` wiring from the `hosts: { ... }` block.
 pub struct HostEntry {
@@ -24,7 +21,7 @@ pub struct HostEntry {
 impl Parse for Config {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut command = false;
-        let mut host_entries = HostEntries(Vec::new());
+        let mut host_entries = Vec::new();
 
         let settings;
         syn::braced!(settings in input);
@@ -33,14 +30,11 @@ impl Parse for Config {
         for setting in settings.into_pairs() {
             match setting.into_value() {
                 Opt::Command(c) => command = c,
-                Opt::Host(h) => host_entries = h,
+                Opt::Hosts(h) => host_entries = h,
             }
         }
 
-        Ok(Self {
-            command,
-            host_entries: host_entries.0,
-        })
+        Ok(Self { command, host_entries })
     }
 }
 
@@ -52,10 +46,9 @@ mod kw {
 #[allow(clippy::large_enum_variant)]
 enum Opt {
     Command(bool),
-    Host(HostEntries),
+    Hosts(Vec<HostEntry>),
 }
 
-// Parse macro body.
 impl Parse for Opt {
     fn parse(input: ParseStream) -> Result<Self> {
         let l = input.lookahead1();
@@ -68,22 +61,13 @@ impl Parse for Opt {
             input.parse::<Token![:]>()?;
             let list;
             syn::braced!(list in input);
-            Ok(Self::Host(list.parse()?))
+            Ok(Self::Hosts(parse_host_entries(&list)?))
         } else {
             Err(l.error())
         }
     }
 }
 
-// Parse a list of `Host: Backend` tuples.
-impl Parse for HostEntries {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let hosts = Punctuated::<HostEntry, Token![,]>::parse_terminated(input)?;
-        Ok(Self(hosts.into_iter().collect()))
-    }
-}
-
-// Parse a single `Host: Backend` tuple.
 impl Parse for HostEntry {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let host = input.parse::<Path>()?;
@@ -93,10 +77,8 @@ impl Parse for HostEntry {
     }
 }
 
-
-
-
-
-
-
-
+fn parse_host_entries(input: ParseStream) -> Result<Vec<HostEntry>> {
+    Ok(Punctuated::<HostEntry, Token![,]>::parse_terminated(input)?
+        .into_iter()
+        .collect())
+}

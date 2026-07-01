@@ -1,78 +1,102 @@
 //! # Codegen for the runtime macro.
 //!
-//! Generates the token streams fragements required to expand the runtime macro.
+//! Generates the token stream fragments required to expand the runtime macro.
 
 use proc_macro2::TokenStream;
 use quote::format_ident;
 use quote::{ToTokens, quote};
 use syn::{Ident, Path};
 
-use crate::runtime::parse::{Config, HostEntry};
+use crate::runtime::parse::Config;
 
 // Token fragments needed to expand the runtime macro.
 pub struct Codegen {
     pub command: bool,
     pub host_types: Vec<Path>,
-    pub host_impls: Vec<TokenStream>,
-    pub backend_idents: Vec<Ident>,
-    pub backend_types: Vec<Path>,
+    pub backends_ty: TokenStream,
+    pub backends_def: TokenStream,
+}
+
+// One connected backend field on the generated [`Backends`] struct.
+struct BackendField {
+    ident: Ident,
+    ty: Path,
 }
 
 impl From<&Config> for Codegen {
     fn from(config: &Config) -> Self {
-        let host_types =
-            config.host_entries.iter().map(|entry| entry.host.clone()).collect::<Vec<Path>>();
-        let structural = Structural::from(config);
+        let host_types = config.host_entries.iter().map(|entry| entry.host.clone()).collect();
+        let backend_fields = config.backend_fields();
+        let host_impls: Vec<TokenStream> = config
+            .host_entries
+            .iter()
+            .map(|entry| host_impl(&entry.host, &field_ident(&entry.backend)))
+            .collect();
+        let (backends_ty, backends_def) = emit_backends(&backend_fields, &host_impls);
 
         Self {
             command: config.command,
             host_types,
-            host_impls: structural.host_impls,
-            backend_idents: structural.backend_idents,
-            backend_types: structural.backend_types,
+            backends_ty,
+            backends_def,
         }
     }
 }
 
-struct Structural {
-    host_impls: Vec<TokenStream>,
-    backend_idents: Vec<Ident>,
-    backend_types: Vec<Path>,
+fn emit_backends(
+    backend_fields: &[BackendField],
+    host_impls: &[TokenStream],
+) -> (TokenStream, TokenStream) {
+    if backend_fields.is_empty() {
+        return (quote! { () }, quote! {});
+    }
+
+    let idents: Vec<_> = backend_fields.iter().map(|field| &field.ident).collect();
+    let types: Vec<_> = backend_fields.iter().map(|field| &field.ty).collect();
+
+    (
+        quote! { Backends },
+        quote! {
+            use omnia::Backend;
+
+            #[derive(Clone)]
+            struct Backends {#(
+                #idents: #types,
+            )*}
+
+            impl omnia::Backends for Backends {
+                async fn connect() -> Result<Self> {
+                    let (#(#idents,)*) = tokio::try_join!(
+                        #(<#types as Backend>::connect(),)*
+                    )?;
+                    Ok(Self { #(#idents,)* })
+                }
+            }
+
+            #(#host_impls)*
+        },
+    )
 }
 
-impl From<&Config> for Structural {
-    fn from(config: &Config) -> Self {
-        let mut host_impls = Vec::new();
-
-        for entry in &config.host_entries {
-            let backend_type = &entry.backend;
-            let field = field_ident(backend_type);
-            host_impls.push(host_impl(&entry.host, &field));
-        }
-
-        let backend_types = unique_backends(&config.host_entries);
-        let backend_idents = backend_types.iter().map(field_ident).collect();
-
-        Self {
-            host_impls,
-            backend_idents,
-            backend_types,
-        }
+impl Config {
+    fn backend_fields(&self) -> Vec<BackendField> {
+        let mut backends: Vec<Path> =
+            self.host_entries.iter().map(|entry| entry.backend.clone()).collect();
+        backends.dedup_by(|a, b| path_key(a) == path_key(b));
+        backends
+            .into_iter()
+            .map(|ty| BackendField {
+                ident: field_ident(&ty),
+                ty,
+            })
+            .collect()
     }
 }
 
-fn unique_backends(host_entries: &[HostEntry]) -> Vec<Path> {
-    let mut backends: Vec<Path> = host_entries.iter().map(|entry| entry.backend.clone()).collect();
-    backends.sort_by_cached_key(to_key);
-    backends.dedup_by(|a, b| to_key(a) == to_key(b));
-    backends
-}
-
-fn to_key(path: &Path) -> String {
+fn path_key(path: &Path) -> String {
     path.to_token_stream().to_string()
 }
 
-// The accessor-impl shape a host needs on the generated `Backends` bundle.
 enum HostType {
     Standard,
     Http,
@@ -82,17 +106,19 @@ enum HostType {
 impl HostType {
     fn from_host(host: &Path) -> Self {
         match host.segments.last().map(|segment| segment.ident.to_string()).as_deref() {
-            // `wasi:http`'s view trait is foreign, so its accessor returns a
-            // `WasiHttpCtxView`
             Some("WasiHttp") => Self::Http,
-            // `wasi:config` reads its context through a shared borrow.
             Some("WasiConfig") => Self::Config,
             _ => Self::Standard,
         }
     }
 }
 
-// Emit the `HasXxx for Backends` impl wiring a host's connected backend field.
+#[derive(Copy, Clone)]
+enum CtxMutability {
+    Shared,
+    Exclusive,
+}
+
 fn host_impl(host: &Path, field: &Ident) -> TokenStream {
     match HostType::from_host(host) {
         HostType::Http => quote! {
@@ -105,37 +131,35 @@ fn host_impl(host: &Path, field: &Ident) -> TokenStream {
                 }
             }
         },
-        HostType::Config => {
-            let host_crate = wasi_ident(host);
-            let has_trait = has_trait(host);
-            let ctx_trait = ctx_trait(host);
-            let ctx_method = ctx_method(host);
-            quote! {
-                impl #host_crate::#has_trait for Backends {
-                    fn #ctx_method(&self) -> &dyn #host_crate::#ctx_trait {
-                        &self.#field
-                    }
-                }
-            }
-        }
-        HostType::Standard => {
-            let host_crate = wasi_ident(host);
-            let has_trait = has_trait(host);
-            let ctx_trait = ctx_trait(host);
-            let ctx_method = ctx_method(host);
-            quote! {
-                impl #host_crate::#has_trait for Backends {
-                    fn #ctx_method(&mut self) -> &mut dyn #host_crate::#ctx_trait {
-                        &mut self.#field
-                    }
-                }
-            }
-        }
+        HostType::Config => ctx_impl(host, field, CtxMutability::Shared),
+        HostType::Standard => ctx_impl(host, field, CtxMutability::Exclusive),
     }
 }
 
-// Recover a host type's service stem by stripping the `Wasi` prefix from its
-// final path segment (e.g. `WasiJsonDb` -> `JsonDb`).
+fn ctx_impl(host: &Path, field: &Ident, mutability: CtxMutability) -> TokenStream {
+    let host_crate = wasi_ident(host);
+    let has_trait = has_trait(host);
+    let ctx_trait = ctx_trait(host);
+    let ctx_method = ctx_method(host);
+
+    match mutability {
+        CtxMutability::Shared => quote! {
+            impl #host_crate::#has_trait for Backends {
+                fn #ctx_method(&self) -> &dyn #host_crate::#ctx_trait {
+                    &self.#field
+                }
+            }
+        },
+        CtxMutability::Exclusive => quote! {
+            impl #host_crate::#has_trait for Backends {
+                fn #ctx_method(&mut self) -> &mut dyn #host_crate::#ctx_trait {
+                    &mut self.#field
+                }
+            }
+        },
+    }
+}
+
 fn service_stem(path: &Path) -> String {
     let Some(segment) = path.segments.last() else {
         return String::new();
@@ -145,23 +169,18 @@ fn service_stem(path: &Path) -> String {
     name.strip_prefix("Wasi").unwrap_or(name.as_str()).to_string()
 }
 
-/// Derives the bundle accessor trait ident (e.g. `WasiJsonDb` -> `HasJsonDb`).
 fn has_trait(path: &Path) -> Ident {
     format_ident!("Has{}", service_stem(path))
 }
 
-// Derive the backend context trait ident (e.g. `WasiJsonDb` -> `WasiJsonDbCtx`).
 fn ctx_trait(path: &Path) -> Ident {
     format_ident!("Wasi{}Ctx", service_stem(path))
 }
 
-// Derive the bundle accessor method ident (e.g. `WasiJsonDb` -> `jsondb_ctx`).
 fn ctx_method(path: &Path) -> Ident {
     format_ident!("{}_ctx", service_stem(path).to_lowercase())
 }
 
-// Derive a `snake_case` field name from a backend type's final path segment
-// (e.g. `HttpDefault` -> `http_default`).
 fn field_ident(path: &Path) -> Ident {
     let Some(segment) = path.segments.last() else {
         return format_ident!("field");
@@ -182,9 +201,6 @@ fn field_ident(path: &Path) -> Ident {
     format_ident!("{snake}")
 }
 
-// Derive a host crate's module ident from a host type's final path segment
-// (e.g. `WasiHttp` -> `omnia_wasi_http`), naming the host crate whose bundle
-// accessor trait the generated `Backends` impl satisfies.
 fn wasi_ident(path: &Path) -> Ident {
     let Some(segment) = path.segments.last() else {
         return format_ident!("wasi");
@@ -197,9 +213,17 @@ fn wasi_ident(path: &Path) -> Ident {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::parse::HostEntry;
 
-    fn host(name: &str) -> Path {
-        syn::parse_str(name).expect("valid host path")
+    fn path(name: &str) -> Path {
+        syn::parse_str(name).expect("valid path")
+    }
+
+    fn host_entry(host: &str, backend: &str) -> HostEntry {
+        HostEntry {
+            host: path(host),
+            backend: path(backend),
+        }
     }
 
     #[test]
@@ -209,16 +233,43 @@ mod tests {
             ("WasiWebSocket", "HasWebSocket", "WasiWebSocketCtx", "websocket_ctx"),
             ("WasiKeyValue", "HasKeyValue", "WasiKeyValueCtx", "keyvalue_ctx"),
         ] {
-            let path = host(input);
-            assert_eq!(has_trait(&path).to_string(), has);
-            assert_eq!(ctx_trait(&path).to_string(), ctx);
-            assert_eq!(ctx_method(&path).to_string(), method);
+            let host = path(input);
+            assert_eq!(has_trait(&host).to_string(), has);
+            assert_eq!(ctx_trait(&host).to_string(), ctx);
+            assert_eq!(ctx_method(&host).to_string(), method);
         }
     }
 
     #[test]
     fn derives_crate_ident() {
-        assert_eq!(wasi_ident(&host("WasiJsonDb")).to_string(), "omnia_wasi_jsondb");
-        assert_eq!(wasi_ident(&host("WasiWebSocket")).to_string(), "omnia_wasi_websocket");
+        assert_eq!(wasi_ident(&path("WasiJsonDb")).to_string(), "omnia_wasi_jsondb");
+        assert_eq!(wasi_ident(&path("WasiWebSocket")).to_string(), "omnia_wasi_websocket");
+    }
+
+    #[test]
+    fn derives_field_ident() {
+        assert_eq!(field_ident(&path("HttpDefault")).to_string(), "http_default");
+        assert_eq!(field_ident(&path("KeyValueDefault")).to_string(), "key_value_default");
+    }
+
+    #[test]
+    fn dedupes_backends() {
+        let config = Config {
+            command: false,
+            host_entries: vec![
+                host_entry("WasiOtel", "OtelDefault"),
+                host_entry("WasiHttp", "HttpDefault"),
+                host_entry("WasiHttp", "HttpDefault"),
+            ],
+        };
+
+        let fields = config.backend_fields();
+
+        let idents: Vec<_> = fields.iter().map(|field| field.ident.to_string()).collect();
+        let types: Vec<_> =
+            fields.iter().map(|field| field.ty.get_ident().unwrap().to_string()).collect();
+
+        assert_eq!(idents, ["otel_default", "http_default"]);
+        assert_eq!(types, ["OtelDefault", "HttpDefault"]);
     }
 }
