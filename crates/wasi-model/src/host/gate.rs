@@ -12,6 +12,10 @@ impl TryFrom<Prompt> for PreparedPrompt {
     type Error = Error;
 
     fn try_from(prompt: Prompt) -> Result<Self, Self::Error> {
+        if let Some(tool) = prompt.tools.iter().find(|t| TOOL_NAMES.contains(&t.name.as_str())) {
+            return Err(Error::Backend(format!("reserved tool name: {}", tool.name)));
+        }
+
         // `messages` wins over `sections`. `prompt.system` is always applied.
         if !prompt.messages.is_empty() {
             let system = prompt.system.clone().filter(|v| !v.is_empty());
@@ -22,11 +26,6 @@ impl TryFrom<Prompt> for PreparedPrompt {
                 system,
                 messages,
             });
-        }
-
-        // check prompt for reserved tool names
-        if let Some(tool) = prompt.tools.iter().find(|t| TOOL_NAMES.contains(&t.name.as_str())) {
-            return Err(Error::Backend(format!("reserved tool name: {}", tool.name)));
         }
 
         if prompt.messages.is_empty()
