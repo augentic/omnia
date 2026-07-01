@@ -46,9 +46,7 @@ pub trait RuntimeHooks<B: Backends> {
     fn link(deployment: &mut Deployment<StoreCtx<B>>) -> Result<()>;
 
     /// Run every declared long-lived trigger server concurrently.
-    fn serve(
-        runtime: &Runtime<B>,
-    ) -> impl std::future::Future<Output = Result<()>> + Send;
+    fn serve(runtime: &Runtime<B>) -> impl std::future::Future<Output = Result<()>> + Send;
 }
 
 /// CLI entry point for generated `main` functions.
@@ -99,10 +97,14 @@ where
         .await
         .context("building runtime")?;
 
-    let runtime =
-        Runtime::<B>::new(deployment, H::link).await.context("assembling runtime")?;
+    let runtime = Runtime::<B>::new(deployment, H::link).await.context("assembling runtime")?;
 
-    bootstrap(&runtime).await?;
+    // start background tasks
+    drive_epoch(runtime.registry().engine().clone(), runtime.options().epoch_tick);
+    sample_pool(runtime.registry().engine().clone(), runtime.options().pool_metrics_interval);
+
+    // wire host-mediated link servers
+    serve_links(&runtime).await.context("wiring host-mediated link serve side")?;
 
     match mode {
         Mode::Command => {
@@ -119,17 +121,6 @@ where
             Ok(ExitStatus::SUCCESS)
         }
     }
-}
-
-// Start background tasks and wire host-mediated link servers.
-async fn bootstrap<B>(runtime: &Runtime<B>) -> Result<()>
-where
-    B: Clone + Send + Sync + 'static,
-{
-    drive_epoch(runtime.registry().engine().clone(), runtime.options().epoch_tick);
-    sample_pool(runtime.registry().engine().clone(), runtime.options().pool_metrics_interval);
-    serve_links(runtime).await.context("wiring host-mediated link serve side")?;
-    Ok(())
 }
 
 fn drive_epoch(engine: Engine, tick: Duration) {
