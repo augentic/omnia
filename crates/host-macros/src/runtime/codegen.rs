@@ -7,7 +7,7 @@ use quote::format_ident;
 use quote::{ToTokens, quote};
 use syn::{Ident, Path};
 
-use crate::runtime::parse::Config;
+use crate::runtime::parse::{Config, HostEntry};
 
 // Token fragments needed to expand the runtime macro.
 pub struct Codegen {
@@ -17,22 +17,16 @@ pub struct Codegen {
     pub backends_def: TokenStream,
 }
 
-// One connected backend field on the generated [`Backends`] struct.
-struct BackendField {
-    ident: Ident,
-    ty: Path,
-}
-
 impl From<&Config> for Codegen {
     fn from(config: &Config) -> Self {
-        let host_types = config.host_entries.iter().map(|entry| entry.host.clone()).collect();
-        let backend_fields = config.backend_fields();
+        let host_entries = &config.host_entries;
+        let host_types = host_entries.iter().map(|entry| entry.host.clone()).collect();
         let host_impls: Vec<TokenStream> = config
             .host_entries
             .iter()
             .map(|entry| host_impl(&entry.host, &field_ident(&entry.backend)))
             .collect();
-        let (backends_ty, backends_def) = emit_backends(&backend_fields, &host_impls);
+        let (backends_ty, backends_def) = emit_backends(host_entries, &host_impls);
 
         Self {
             command: config.command,
@@ -44,15 +38,15 @@ impl From<&Config> for Codegen {
 }
 
 fn emit_backends(
-    backend_fields: &[BackendField],
-    host_impls: &[TokenStream],
+    host_entries: &[HostEntry], host_impls: &[TokenStream],
 ) -> (TokenStream, TokenStream) {
-    if backend_fields.is_empty() {
-        return (quote! { () }, quote! {});
-    }
+    let mut backends: Vec<Path> = host_entries.iter().map(|entry| entry.backend.clone()).collect();
+    backends.dedup_by(|a, b| path_key(a) == path_key(b));
+    let fields =
+        backends.into_iter().map(|ty| (field_ident(&ty), ty)).collect::<Vec<(Ident, Path)>>();
 
-    let idents: Vec<_> = backend_fields.iter().map(|field| &field.ident).collect();
-    let types: Vec<_> = backend_fields.iter().map(|field| &field.ty).collect();
+    let idents: Vec<_> = fields.iter().map(|(ident, _)| ident).collect();
+    let types: Vec<_> = fields.iter().map(|(_, ty)| ty).collect();
 
     (
         quote! { Backends },
@@ -76,21 +70,6 @@ fn emit_backends(
             #(#host_impls)*
         },
     )
-}
-
-impl Config {
-    fn backend_fields(&self) -> Vec<BackendField> {
-        let mut backends: Vec<Path> =
-            self.host_entries.iter().map(|entry| entry.backend.clone()).collect();
-        backends.dedup_by(|a, b| path_key(a) == path_key(b));
-        backends
-            .into_iter()
-            .map(|ty| BackendField {
-                ident: field_ident(&ty),
-                ty,
-            })
-            .collect()
-    }
 }
 
 fn path_key(path: &Path) -> String {
@@ -254,20 +233,15 @@ mod tests {
 
     #[test]
     fn dedupes_backends() {
-        let config = Config {
-            command: false,
-            host_entries: vec![
-                host_entry("WasiOtel", "OtelDefault"),
-                host_entry("WasiHttp", "HttpDefault"),
-                host_entry("WasiHttp", "HttpDefault"),
-            ],
-        };
+        let fields = backend_fields(&[
+            host_entry("WasiOtel", "OtelDefault"),
+            host_entry("WasiHttp", "HttpDefault"),
+            host_entry("WasiHttp", "HttpDefault"),
+        ]);
 
-        let fields = config.backend_fields();
-
-        let idents: Vec<_> = fields.iter().map(|field| field.ident.to_string()).collect();
+        let idents: Vec<_> = fields.iter().map(|(ident, _)| ident.to_string()).collect();
         let types: Vec<_> =
-            fields.iter().map(|field| field.ty.get_ident().unwrap().to_string()).collect();
+            fields.iter().map(|(_, ty)| ty.get_ident().unwrap().to_string()).collect();
 
         assert_eq!(idents, ["otel_default", "http_default"]);
         assert_eq!(types, ["OtelDefault", "HttpDefault"]);
