@@ -222,9 +222,7 @@ impl<T: WasiView> Deployment<T> {
     where
         H: Host<T> + Server<B>,
     {
-        // if !self.command || !<H as Server<B>>::IS_SERVER {
         H::add_to_linker(&mut self.linker)?;
-        // }
         Ok(self)
     }
 

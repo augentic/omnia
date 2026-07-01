@@ -34,7 +34,6 @@ pub use self::registry::{
     CliRoutes, Guest, GuestId, HttpRoutes, Registry, Resolver, Routes, TopicRoutes, TriggerRouter,
 };
 #[doc(hidden)]
-pub use self::runtime::assert_hosts;
 pub use self::runtime::{ExitStatus, Runtime, RuntimeHooks};
 #[doc(hidden)]
 pub use self::runtime::{main, run};

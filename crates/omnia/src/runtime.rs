@@ -19,36 +19,6 @@ use crate::mount::MountRegistry;
 use crate::traits::{Backends, HasLimits};
 use crate::{Deployment, DeploymentBuilder, Registry, RuntimeOptions, StoreBase, StoreCtx};
 
-/// Compile-time guard that a `command: true` deployment includes no long-lived
-/// trigger server.
-///
-/// The `runtime!` macro emits
-/// `const _: () = omnia::assert_hosts(&[<Host as Server<_>>::IS_SERVER, …]);`
-/// for a command deployment, so listing a trigger host (`WasiHttp`,
-/// `WasiMessaging`, `WasiWebSocket`) is a build error rather than a silently
-/// dropped host. The values come straight from [`Server::IS_SERVER`](crate::Server::IS_SERVER), so a newly
-/// added trigger is covered without editing the macro.
-///
-/// # Panics
-///
-/// Panics if any element is `true` (a host is a long-lived trigger server). In
-/// the macro's const context this surfaces as a compile error.
-#[doc(hidden)]
-pub const fn assert_hosts(hosts: &[bool]) {
-    let mut index = 0;
-    while index < hosts.len() {
-        assert!(
-            !hosts[index],
-            "a `command: true` deployment cannot link a long-lived trigger server (`WasiHttp`, \
-             `WasiMessaging`, `WasiWebSocket`): a command runs to completion and exits, but the \
-             server would run forever. Use the default `command: false` for a server deployment, \
-             or drop the trigger host — capability hosts (`WasiKeyValue`, `WasiBlobstore`, ...) \
-             are fine to link."
-        );
-        index += 1;
-    }
-}
-
 /// Host linking and trigger-server startup for a deployment.
 pub trait RuntimeHooks<B: Backends> {
     /// Link every declared host into the deployment linker.
@@ -116,6 +86,12 @@ where
     prepare(&runtime).await?;
 
     if cmd {
+        let servers_runtime = runtime.clone();
+        tokio::spawn(async move {
+            if let Err(error) = future::try_join_all(H::servers(&servers_runtime)).await {
+                tracing::error!(%error, "trigger server exited with error");
+            }
+        });
         command::drive(&runtime).await
     } else {
         future::try_join_all(H::servers(&runtime)).await?;
@@ -327,26 +303,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ExitStatus, assert_hosts};
-
-    #[test]
-    fn capability_only_is_allowed() {
-        // A command deployment with only capability hosts (every `IS_SERVER`
-        // false) is fine.
-        assert_hosts(&[false, false, false]);
-    }
-
-    #[test]
-    fn empty_is_allowed() {
-        assert_hosts(&[]);
-    }
-
-    #[test]
-    #[should_panic(expected = "long-lived trigger server")]
-    fn long_lived_server_is_rejected() {
-        // Any `true` (a long-lived trigger) in a command deployment fails.
-        assert_hosts(&[false, true]);
-    }
+    use super::ExitStatus;
 
     #[test]
     fn success_is_zero() {
