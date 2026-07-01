@@ -21,12 +21,7 @@ impl From<&Config> for Codegen {
     fn from(config: &Config) -> Self {
         let host_entries = &config.host_entries;
         let host_types = host_entries.iter().map(|entry| entry.host.clone()).collect();
-        let host_impls: Vec<TokenStream> = config
-            .host_entries
-            .iter()
-            .map(|entry| host_impl(&entry.host, &field_ident(&entry.backend)))
-            .collect();
-        let (backends_ty, backends_def) = emit_backends(host_entries, &host_impls);
+        let (backends_ty, backends_def) = emit_backends(host_entries);
 
         Self {
             command: config.command,
@@ -37,16 +32,21 @@ impl From<&Config> for Codegen {
     }
 }
 
-fn emit_backends(
-    host_entries: &[HostEntry], host_impls: &[TokenStream],
-) -> (TokenStream, TokenStream) {
-    let mut backends: Vec<Path> = host_entries.iter().map(|entry| entry.backend.clone()).collect();
+fn emit_backends(host_entries: &[HostEntry]) -> (TokenStream, TokenStream) {
+    let mut backends: Vec<Path> = host_entries.iter().map(|e| e.backend.clone()).collect();
     backends.dedup_by(|a, b| path_key(a) == path_key(b));
-    let fields =
-        backends.into_iter().map(|ty| (field_ident(&ty), ty)).collect::<Vec<(Ident, Path)>>();
 
-    let idents: Vec<_> = fields.iter().map(|(ident, _)| ident).collect();
-    let types: Vec<_> = fields.iter().map(|(_, ty)| ty).collect();
+    let (idents, types): (Vec<Ident>, Vec<Path>) =
+        backends.into_iter().map(|ty| (field_ident(&ty), ty)).unzip();
+
+    if idents.is_empty() {
+        return (quote! { () }, quote! {});
+    }
+
+    let host_impls: Vec<TokenStream> = host_entries
+        .iter()
+        .map(|entry| host_impl(&entry.host, &field_ident(&entry.backend)))
+        .collect();
 
     (
         quote! { Backends },
@@ -233,17 +233,31 @@ mod tests {
 
     #[test]
     fn dedupes_backends() {
-        let fields = backend_fields(&[
+        let entries = [
             host_entry("WasiOtel", "OtelDefault"),
             host_entry("WasiHttp", "HttpDefault"),
             host_entry("WasiHttp", "HttpDefault"),
-        ]);
+        ];
+        let (ty, def) = emit_backends(&entries, &[]);
+        let def = def.to_string();
 
-        let idents: Vec<_> = fields.iter().map(|(ident, _)| ident.to_string()).collect();
-        let types: Vec<_> =
-            fields.iter().map(|(_, ty)| ty.get_ident().unwrap().to_string()).collect();
+        assert_eq!(ty.to_string(), "Backends");
 
-        assert_eq!(idents, ["otel_default", "http_default"]);
-        assert_eq!(types, ["OtelDefault", "HttpDefault"]);
+        let struct_start = def.find("struct Backends").expect("Backends struct");
+        let struct_end = def.find("impl omnia").expect("Backends impl");
+        let struct_body = &def[struct_start..struct_end];
+
+        assert_eq!(struct_body.matches("otel_default").count(), 1);
+        assert_eq!(struct_body.matches("http_default").count(), 1);
+        assert!(
+            struct_body.find("otel_default").unwrap() < struct_body.find("http_default").unwrap()
+        );
+    }
+
+    #[test]
+    fn empty_host_entries_emit_unit_backends() {
+        let (ty, def) = emit_backends(&[], &[]);
+        assert_eq!(ty.to_string(), "()");
+        assert!(def.is_empty());
     }
 }
