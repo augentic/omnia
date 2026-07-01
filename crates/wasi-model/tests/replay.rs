@@ -143,7 +143,7 @@ async fn registry(wasm: &Path) -> Result<Arc<Registry<TestCtx>>> {
         .await
         .context("building runtime")?;
     deployment.host::<WasiModel, TestBundle>().context("linking WasiModel")?;
-    let registry = deployment.build().context("assembling registry")?;
+    let registry = deployment.into_registry().context("assembling registry")?;
 
     let _ = std::fs::remove_file(&manifest_path);
     Ok(Arc::new(registry))
@@ -301,7 +301,7 @@ async fn build_registry(model: &Path, shelf: &Path) -> Result<Arc<Registry<TestC
         .await
         .context("building runtime")?;
     deployment.host::<WasiModel, TestBundle>().context("linking WasiModel")?;
-    let registry = deployment.build().context("assembling registry")?;
+    let registry = deployment.into_registry().context("assembling registry")?;
 
     let _ = std::fs::remove_file(&manifest_path);
     Ok(Arc::new(registry))

@@ -149,10 +149,9 @@ fn with_env_mount(mut preopens: Vec<ResolvedPreopen>) -> Vec<ResolvedPreopen> {
 }
 
 /// A compiled set of WebAssembly components with their shared Linker, ready to
-/// be [`host`]ed against WASI interfaces and [`build`]t into a [`Registry`].
+/// be [`host`]ed against WASI interfaces and assembled into a [`Registry`].
 ///
 /// [`host`]: Self::host
-/// [`build`]: Self::build
 pub struct Deployment<T: WasiView + 'static> {
     engine: Engine,
     linker: Linker<T>,

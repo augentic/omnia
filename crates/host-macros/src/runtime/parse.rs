@@ -98,7 +98,5 @@ impl Parse for HostEntry {
 }
 
 fn parse_host_entries(input: ParseStream) -> Result<Vec<HostEntry>> {
-    Ok(Punctuated::<HostEntry, Token![,]>::parse_terminated(input)?
-        .into_iter()
-        .collect())
+    Ok(Punctuated::<HostEntry, Token![,]>::parse_terminated(input)?.into_iter().collect())
 }

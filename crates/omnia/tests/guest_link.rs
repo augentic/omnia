@@ -130,7 +130,7 @@ async fn router_dispatches_to_responder() -> Result<()> {
         .build::<TestCtx>()
         .await
         .context("building runtime")?;
-    let registry = deployment.build().context("assembling registry")?;
+    let registry = deployment.into_registry().context("assembling registry")?;
     let clones = Arc::new(AtomicUsize::new(0));
     let runtime = Runtime::<Counter>::from_parts(
         Arc::new(registry),

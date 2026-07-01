@@ -3,8 +3,7 @@
 //! Generates the token stream fragments required to expand the runtime macro.
 
 use proc_macro2::TokenStream;
-use quote::format_ident;
-use quote::{ToTokens, quote};
+use quote::{ToTokens, format_ident, quote};
 use syn::{Ident, Path};
 
 use crate::runtime::parse::{Config, HostEntry, Mode};
