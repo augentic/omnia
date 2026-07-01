@@ -27,10 +27,10 @@ impl RuntimeHooks<()> for EmptyHooks {
         Ok(())
     }
 
-    fn servers(
+    fn serve(
         _runtime: &omnia::Runtime<()>,
-    ) -> Vec<omnia::futures::future::BoxFuture<'_, Result<()>>> {
-        vec![]
+    ) -> impl std::future::Future<Output = Result<()>> + Send {
+        async { Ok(()) }
     }
 }
 

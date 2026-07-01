@@ -13,6 +13,7 @@ use crate::runtime::parse::{Config, HostEntry};
 pub struct Codegen {
     pub command: bool,
     pub host_types: Vec<Path>,
+    pub server_types: Vec<Path>,
     pub backends_ty: TokenStream,
     pub backends_def: TokenStream,
 }
@@ -20,17 +21,27 @@ pub struct Codegen {
 impl From<&Config> for Codegen {
     fn from(config: &Config) -> Self {
         let host_entries = &config.host_entries;
-        let host_types = host_entries.iter().map(|entry| entry.host.clone()).collect();
+        let host_types: Vec<Path> = host_entries.iter().map(|entry| entry.host.clone()).collect();
+        let server_types: Vec<Path> =
+            host_types.iter().filter(|host| is_server(host)).cloned().collect();
 
         let (backends_ty, backends_def) = emit_backends(host_entries);
 
         Self {
             command: config.command,
             host_types,
+            server_types,
             backends_ty,
             backends_def,
         }
     }
+}
+
+fn is_server(host: &Path) -> bool {
+    matches!(
+        host.segments.last().map(|segment| segment.ident.to_string()).as_deref(),
+        Some("WasiHttp" | "WasiMessaging" | "WasiWebSocket")
+    )
 }
 
 fn emit_backends(host_entries: &[HostEntry]) -> (TokenStream, TokenStream) {

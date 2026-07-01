@@ -49,8 +49,6 @@ pub trait Server<B>: Debug + Sync + Send {
     /// Defaults to `false`: a capability host with the no-op [`run`](Self::run)
     /// (e.g. `WasiKeyValue`, `WasiBlobstore`, `WasiOtel`). The `runtime!` macro
     /// reads this flag from the *type system* — to select which hosts to `run`.
-    /// For `command: true` deployments, [`assert_hosts`](crate::assert_hosts)
-    /// rejects any host with `IS_SERVER = true`.
     const IS_SERVER: bool = false;
 
     /// Start the service.

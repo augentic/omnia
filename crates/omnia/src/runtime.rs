@@ -9,7 +9,6 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result};
 use clap::Parser as _;
-use futures::future::{self, BoxFuture};
 use wasmtime::component::{Instance, InstancePre};
 use wasmtime::{Engine, Store};
 
@@ -28,8 +27,10 @@ pub trait RuntimeHooks<B: Backends> {
     /// Returns an error if a host cannot be added to the linker.
     fn link(deployment: &mut Deployment<StoreCtx<B>>) -> Result<()>;
 
-    /// Start every long-lived trigger server ([`Server::IS_SERVER`](crate::Server::IS_SERVER)).
-    fn servers(runtime: &Runtime<B>) -> Vec<BoxFuture<'_, Result<()>>>;
+    /// Run every declared long-lived trigger server concurrently.
+    fn serve(
+        runtime: &Runtime<B>,
+    ) -> impl std::future::Future<Output = Result<()>> + Send;
 }
 
 /// CLI entry point for generated `main` functions.
@@ -88,13 +89,13 @@ where
     if cmd {
         let servers_runtime = runtime.clone();
         tokio::spawn(async move {
-            if let Err(error) = future::try_join_all(H::servers(&servers_runtime)).await {
+            if let Err(error) = H::serve(&servers_runtime).await {
                 tracing::error!(%error, "trigger server exited with error");
             }
         });
         command::drive(&runtime).await
     } else {
-        future::try_join_all(H::servers(&runtime)).await?;
+        H::serve(&runtime).await?;
         Ok(ExitStatus::SUCCESS)
     }
 }

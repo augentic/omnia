@@ -16,6 +16,7 @@ pub fn expand(config: &Config) -> TokenStream {
     let Codegen {
         command,
         host_types,
+        server_types,
         backends_ty,
         backends_def,
     } = Codegen::from(config);
@@ -23,9 +24,9 @@ pub fn expand(config: &Config) -> TokenStream {
     quote! {
         mod runtime {
             use anyhow::Result;
-            use omnia::tokio;
+            use omnia::futures::future;
             use omnia::Server;
-
+            use omnia::tokio;
             use super::*;
 
             #backends_def
@@ -38,19 +39,18 @@ pub fn expand(config: &Config) -> TokenStream {
                     Ok(())
                 }
 
-                fn servers(
+                fn serve(
                     runtime: &omnia::Runtime<#backends_ty>,
-                ) -> Vec<omnia::futures::future::BoxFuture<'_, Result<()>>> {
-                    let mut servers: Vec<omnia::futures::future::BoxFuture<'_, Result<()>>> = vec![];
-                    #(
-                        if <#host_types as Server<#backends_ty>>::IS_SERVER {
-                            servers.push(
-                                Box::pin(#host_types.run(runtime))
-                                    as omnia::futures::future::BoxFuture<'_, Result<()>>,
-                            );
-                        }
-                    )*
-                    servers
+                ) -> impl ::std::future::Future<Output = Result<()>> + Send {
+                    async {
+                        let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![
+                            #(
+                                Box::pin(#server_types.run(runtime)),
+                            )*
+                        ];
+                        future::try_join_all(servers).await?;
+                        Ok(())
+                    }
                 }
             }
 
