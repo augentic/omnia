@@ -44,18 +44,15 @@ pub fn expand(config: &Config) -> TokenStream {
                     Ok(())
                 }
 
-                fn serve(
+                async fn serve(
                     runtime: &omnia::Runtime<#backends_ty>,
-                ) -> impl ::std::future::Future<Output = Result<()>> + Send {
-                    async {
-                        let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![
-                            #(
-                                Box::pin(#server_types.run(runtime)),
-                            )*
-                        ];
-                        future::try_join_all(servers).await?;
-                        Ok(())
-                    }
+                ) -> Result<()> {
+                    let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![
+                        #(
+                            Box::pin(#server_types.run(runtime)),
+                        )*
+                    ];
+                    Ok(future::try_join_all(servers).await?)
                 }
             }
 

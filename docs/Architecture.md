@@ -230,16 +230,18 @@ Dependencies on standard WASI definitions are managed in `wit/deps/` and version
 
 2. **Build**: `DeploymentBuilder` loads the manifest or wasm, compiles guests, and returns a `Deployment` ready for host linking
 
-3. **Bootstrap**: `Runtime::new` links WASI hosts, connects backends, and builds the `Registry`
+3. **Assemble**: `Runtime::new` links WASI hosts, connects backends, and builds the `Registry`
 
-4. **Drive**: `run` either invokes `command::run` (one-shot `wasi:cli`) or `prepare`s the runtime and awaits every long-lived trigger server to completion
+4. **Bootstrap**: `bootstrap` starts epoch interruption and pool-metric sampling, and wires host-mediated link servers
 
-5. **Request handling** (server mode): Trigger hosts (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`) accept requests, instantiate guests per call, and return responses
+5. **Drive**: `run` either invokes `command::drive` (one-shot `wasi:cli`) or awaits every long-lived trigger server to completion
+
+6. **Request handling** (server mode): Trigger hosts (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`) accept requests, instantiate guests per call, and return responses
 
 ```text
-CLI → Build → Runtime::new → run
-                                 ├─ command mode → command::run → ExitStatus
-                                 └─ server mode  → prepare → trigger servers
+CLI → Build → Runtime::new → bootstrap → run
+                                            ├─ command mode → command::drive → ExitStatus
+                                            └─ server mode  → trigger servers
 ```
 
 ## Configuration

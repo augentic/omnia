@@ -27,10 +27,8 @@ impl RuntimeHooks<()> for EmptyHooks {
         Ok(())
     }
 
-    fn serve(
-        _runtime: &omnia::Runtime<()>,
-    ) -> impl std::future::Future<Output = Result<()>> + Send {
-        async { Ok(()) }
+    async fn serve(_runtime: &omnia::Runtime<()>) -> Result<()> {
+        Ok(())
     }
 }
 

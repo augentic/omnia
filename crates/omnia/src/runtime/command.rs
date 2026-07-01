@@ -7,7 +7,7 @@ use wasmtime_wasi::p3::bindings::{Command, CommandPre};
 use super::{ExitStatus, Runtime};
 use crate::registry::TriggerRouter;
 
-/// Run the routed `wasi:cli/run` guest once. Caller must have called [`prepare`](crate::runtime::prepare).
+/// Run the routed `wasi:cli/run` guest once. Caller must have called [`bootstrap`](crate::runtime::bootstrap).
 ///
 /// # Errors
 ///

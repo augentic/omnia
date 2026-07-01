@@ -1,4 +1,4 @@
-//! Deployment lifecycle: [`prepare`], [`run`], background tasks, and [`ExitStatus`].
+//! Deployment lifecycle: [`bootstrap`], [`run`], background tasks, and [`ExitStatus`].
 
 mod command;
 
@@ -77,12 +77,12 @@ where
     }
 }
 
-/// Build runtime state, prepare it, then run command mode or every trigger server.
+/// Build runtime state, bootstrap it, then run command mode or every trigger server.
 ///
 /// # Errors
 ///
 /// Returns an error if the deployment cannot be built, runtime state cannot be
-/// prepared, link servers cannot be wired, or a trigger server exits with an error.
+/// assembled, bootstrap fails, or a trigger server exits with an error.
 pub async fn run<B, H>(
     wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>, mode: Mode,
 ) -> Result<ExitStatus>
@@ -100,9 +100,9 @@ where
         .context("building runtime")?;
 
     let runtime =
-        Runtime::<B>::new(deployment, H::link).await.context("preparing runtime state")?;
+        Runtime::<B>::new(deployment, H::link).await.context("assembling runtime")?;
 
-    prepare(&runtime).await?;
+    bootstrap(&runtime).await?;
 
     match mode {
         Mode::Command => {
@@ -121,8 +121,8 @@ where
     }
 }
 
-/// Start background tasks and wire host-mediated link servers.
-pub async fn prepare<B>(runtime: &Runtime<B>) -> Result<()>
+// Start background tasks and wire host-mediated link servers.
+async fn bootstrap<B>(runtime: &Runtime<B>) -> Result<()>
 where
     B: Clone + Send + Sync + 'static,
 {
