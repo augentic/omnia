@@ -230,7 +230,7 @@ impl<B: Backends> Runtime<B> {
         let mounts = deployment.mounts();
 
         Ok(Self {
-            registry: Arc::new(deployment.build().context("assembling registry")?),
+            registry: Arc::new(deployment.into_registry().context("assembling registry")?),
             args,
             mounts,
             backends,

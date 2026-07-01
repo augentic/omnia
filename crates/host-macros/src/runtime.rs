@@ -15,15 +15,14 @@ pub use crate::runtime::parse::Config;
 pub fn expand(config: &Config) -> TokenStream {
     let Codegen {
         command,
-        bundle_fields,
-        accessor_impls,
+        host_types,
+        host_impls,
         backend_idents,
         backend_types,
-        host_trait_impls,
     } = Codegen::from(config);
 
-    // The connected backend bundle threaded into `omnia::Runtime`.
-    let (bundle_ty, bundle_def) = if backend_idents.is_empty() {
+    // the connected backend bundle threaded into `omnia::Runtime`.
+    let (backends_ty, backends_def) = if backend_idents.is_empty() {
         (quote! { () }, quote! {})
     } else {
         (
@@ -31,11 +30,10 @@ pub fn expand(config: &Config) -> TokenStream {
             quote! {
                 use omnia::Backend;
 
-                // One connected backend per declared `Host: Backend` wiring.
                 #[derive(Clone)]
-                struct Backends {
-                    #(#bundle_fields,)*
-                }
+                struct Backends {#(
+                    #backend_idents: #backend_types,
+                )*}
 
                 impl omnia::Backends for Backends {
                     async fn connect() -> Result<Self> {
@@ -46,21 +44,9 @@ pub fn expand(config: &Config) -> TokenStream {
                     }
                 }
 
-                #(#accessor_impls)*
+                #(#host_impls)*
             },
         )
-    };
-
-    // A `command: true` deployment must not link a long-lived trigger server;
-    // the host list's `IS_SERVER` flags surface that as a compile error.
-    let command_assert = if command {
-        quote! {
-            const _: () = omnia::assert_hosts(&[
-                #( <#host_trait_impls as Server<#bundle_ty>>::IS_SERVER, )*
-            ]);
-        }
-    } else {
-        quote! {}
     };
 
     quote! {
@@ -71,25 +57,24 @@ pub fn expand(config: &Config) -> TokenStream {
 
             use super::*;
 
-            #bundle_def
-            #command_assert
+            #backends_def
 
             struct Hooks;
 
-            impl omnia::RuntimeHooks<#bundle_ty> for Hooks {
-                fn link(deployment: &mut omnia::Deployment<omnia::StoreCtx<#bundle_ty>>) -> Result<()> {
-                    #(deployment.host::<#host_trait_impls, #bundle_ty>()?;)*
+            impl omnia::RuntimeHooks<#backends_ty> for Hooks {
+                fn link(deployment: &mut omnia::Deployment<omnia::StoreCtx<#backends_ty>>) -> Result<()> {
+                    #(deployment.host::<#host_types, #backends_ty>()?;)*
                     Ok(())
                 }
 
                 fn servers(
-                    runtime: &omnia::Runtime<#bundle_ty>,
+                    runtime: &omnia::Runtime<#backends_ty>,
                 ) -> Vec<omnia::futures::future::BoxFuture<'_, Result<()>>> {
                     let mut servers: Vec<omnia::futures::future::BoxFuture<'_, Result<()>>> = vec![];
                     #(
-                        if <#host_trait_impls as Server<#bundle_ty>>::IS_SERVER {
+                        if <#host_types as Server<#backends_ty>>::IS_SERVER {
                             servers.push(
-                                Box::pin(#host_trait_impls.run(runtime))
+                                Box::pin(#host_types.run(runtime))
                                     as omnia::futures::future::BoxFuture<'_, Result<()>>,
                             );
                         }
@@ -100,7 +85,7 @@ pub fn expand(config: &Config) -> TokenStream {
 
             #[tokio::main]
             pub async fn main() -> ::std::process::ExitCode {
-                omnia::main::<#bundle_ty, Hooks>(#command).await
+                omnia::main::<#backends_ty, Hooks>(#command).await
             }
         }
 

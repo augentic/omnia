@@ -149,14 +149,27 @@ fn with_env_mount(mut preopens: Vec<ResolvedPreopen>) -> Vec<ResolvedPreopen> {
     preopens
 }
 
-/// Resolved deployment inputs shared by the manifest and single-file paths.
-struct Plan {
-    name: String,
-    sources: Vec<Source>,
+/// A compiled set of WebAssembly components with their shared Linker, ready to
+/// be [`host`]ed against WASI interfaces and [`build`]t into a [`Registry`].
+///
+/// [`host`]: Self::host
+/// [`build`]: Self::build
+pub struct Deployment<T: WasiView + 'static> {
+    engine: Engine,
+    linker: Linker<T>,
+    options: RuntimeOptions,
+    guests: Vec<LoadedGuest>,
     routes: Routes,
+    // Guest links — the host-mediated interfaces.
     links: BTreeSet<Box<str>>,
-    preopens: Vec<ResolvedPreopen>,
-    args: Vec<String>,
+    // Host-mediated dispatch selector.
+    selector: Arc<dyn GuestSelector>,
+    // Mount registry from resolved preopens in [`from_plan`](Self::from_plan).
+    mounts: Arc<MountRegistry>,
+    // Guest argv threaded into every store. Empty for long-lived servers; in
+    // command mode the deployment name is prepended as `argv[0]`.
+    args: Arc<Vec<String>>,
+    // Whether this deployment runs a one-shot `wasi:cli` command.
     command: bool,
 }
 
@@ -199,51 +212,8 @@ impl<T: WasiView + 'static> Deployment<T> {
     }
 }
 
-/// Build the shared engine, WASI-linked linker, and runtime options.
-fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, RuntimeOptions)> {
-    let options = RuntimeOptions::load()?;
-    let engine = Engine::new(&Config::from(&options))?;
-
-    // register services with runtime's Linker
-    let mut linker = Linker::new(&engine);
-    wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
-    wasmtime_wasi::p3::add_to_linker(&mut linker)?;
-
-    Ok((engine, linker, options))
-}
-
-/// A compiled set of WebAssembly components with their shared Linker, ready to
-/// be [`host`]ed against WASI interfaces and [`build`]t into a [`Registry`].
-///
-/// [`host`]: Self::host
-/// [`build`]: Self::build
-pub struct Deployment<T: WasiView + 'static> {
-    engine: Engine,
-    linker: Linker<T>,
-    options: RuntimeOptions,
-    guests: Vec<LoadedGuest>,
-    routes: Routes,
-    // Guest links — the host-mediated interfaces.
-    links: BTreeSet<Box<str>>,
-    // Host-mediated dispatch selector.
-    selector: Arc<dyn GuestSelector>,
-    // Mount registry from resolved preopens in [`from_plan`](Self::from_plan).
-    mounts: Arc<MountRegistry>,
-    // Guest argv threaded into every store. Empty for long-lived servers; in
-    // command mode the deployment name is prepended as `argv[0]`.
-    args: Arc<Vec<String>>,
-    // Whether this deployment runs a one-shot `wasi:cli` command.
-    command: bool,
-}
-
 impl<T: WasiView> Deployment<T> {
     /// Link a WASI host's interfaces into the shared Linker.
-    ///
-    /// Chainable: returns `&mut Self` so several hosts can be linked in turn.
-    ///
-    /// `B` is the deployment's backend bundle, naming the [`Server<B>`] impl whose
-    /// [`IS_SERVER`](Server::IS_SERVER) flag decides whether a `command: true`
-    /// deployment skips linking a long-lived trigger server.
     ///
     /// # Errors
     ///
@@ -252,9 +222,9 @@ impl<T: WasiView> Deployment<T> {
     where
         H: Host<T> + Server<B>,
     {
-        if !self.command || !<H as Server<B>>::IS_SERVER {
-            H::add_to_linker(&mut self.linker)?;
-        }
+        // if !self.command || !<H as Server<B>>::IS_SERVER {
+        H::add_to_linker(&mut self.linker)?;
+        // }
         Ok(self)
     }
 
@@ -295,7 +265,7 @@ impl<T: WasiView> Deployment<T> {
     ///
     /// Returns an error if host-mediated imports cannot be polyfilled, a
     /// component cannot be pre-instantiated, or the registry cannot be assembled.
-    pub fn build(self) -> Result<Registry<T>>
+    pub fn into_registry(self) -> Result<Registry<T>>
     where
         T: WrpcView,
     {
@@ -314,11 +284,31 @@ impl<T: WasiView> Deployment<T> {
     }
 }
 
-/// Initialize telemetry and the `COMPONENT` environment variable for the runtime.
-///
-/// # Errors
-///
-/// Will fail if the telemetry cannot be initialized.
+// Resolved deployment inputs shared by the manifest and single-file paths.
+struct Plan {
+    name: String,
+    sources: Vec<Source>,
+    routes: Routes,
+    links: BTreeSet<Box<str>>,
+    preopens: Vec<ResolvedPreopen>,
+    args: Vec<String>,
+    command: bool,
+}
+
+// Build the shared engine, WASI-linked linker, and runtime options.
+fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, RuntimeOptions)> {
+    let options = RuntimeOptions::load()?;
+    let engine = Engine::new(&Config::from(&options))?;
+
+    // register services with runtime's Linker
+    let mut linker = Linker::new(&engine);
+    wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
+    wasmtime_wasi::p3::add_to_linker(&mut linker)?;
+
+    Ok((engine, linker, options))
+}
+
+// Initialize telemetry and the `COMPONENT` environment variable for the runtime.
 fn init_env(name: &str) -> Result<()> {
     if env::var_os("COMPONENT").is_none() {
         // SAFETY: Environment variable modification is safe here because:
