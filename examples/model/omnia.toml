@@ -1,6 +1,6 @@
 # Model completion example (rfcs/wasi-model.md).
 #
-# The `model` guest imports `augentic:model/completion` and calls `complete`.
+# The `model` guest imports `omnia:model/completion` and calls `complete`.
 # The host serves it with the in-tree `ModelDefault` (replay) backend: with
 # `MODEL_REPLAY_DIR` pointing at the checked-in fixtures, `complete` returns the
 # recorded, validated answer with no live model and no network.

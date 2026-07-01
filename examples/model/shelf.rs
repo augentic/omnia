@@ -1,6 +1,6 @@
 //! # Model example — `shelf` guest (Phase 2a)
 //!
-//! Exports `augentic:model-example/references`. It declares no HTTP/messaging
+//! Exports `omnia:model-example/references`. It declares no HTTP/messaging
 //! trigger, so the host never routes inbound traffic to it: it is reached *only*
 //! when a backend's host-mediated `resolve` lands here (a `complete` prompt that
 //! set `grants.references = "shelf"`).
@@ -20,7 +20,7 @@ struct Shelf;
 
 export!(Shelf);
 
-impl exports::augentic::model_example::references::Guest for Shelf {
+impl exports::omnia::model_example::references::Guest for Shelf {
     /// Resolve a reference to its bytes. A deterministic transform so the
     /// acceptance test can prove the bytes round-trip through the host→guest
     /// seam: `"alpha"` resolves to `b"shelf:alpha"`.

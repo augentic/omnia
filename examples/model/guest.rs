@@ -1,6 +1,6 @@
 //! # Model example — `complete` guest
 //!
-//! Imports `augentic:model/completion` and calls `complete` once with a
+//! Imports `omnia:model/completion` and calls `complete` once with a
 //! `json-schema` prompt assembled from `sections`. It declares no HTTP/messaging
 //! trigger, so it is driven by the integration test (`crates/wasi-model/tests`)
 //! rather than a live request — the run-1 (replay) acceptance vehicle (§6).
@@ -23,7 +23,7 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-use augentic::model::completion;
+use omnia::model::completion;
 use wasi::filesystem::preopens;
 
 struct Example;

@@ -15,7 +15,7 @@ use futures::FutureExt as _;
 use omnia::{Dispatcher, GuestId, HasDispatcher, HasMounts};
 use wasmtime::component::{Accessor, StreamReader, Val};
 
-use crate::host::generated::augentic::model::completion::{
+use crate::host::generated::omnia::model::completion::{
     Host, HostWithStore, Prompt, StreamEvent,
 };
 use crate::host::types::{Answer, DirEntry, PreparedPrompt, Reference, VerifyReport};

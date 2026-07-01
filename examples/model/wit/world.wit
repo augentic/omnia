@@ -6,10 +6,10 @@
 // It also imports `wasi:filesystem/preopens` so the guest can read the preopen
 // table (the host's `[[mount]]` config) and lend the named workspace
 // through `grants.workspace`.
-package augentic:model-example@0.1.0;
+package omnia:model-example@0.1.0;
 
 world complete {
-    import augentic:model/completion@0.1.0;
+    import omnia:model/completion@0.1.0;
     import wasi:filesystem/preopens@0.3.0;
     export run: async func() -> string;
 }

@@ -1,6 +1,6 @@
 //! # WASI Model Service
 //!
-//! The host side of the `augentic:model/completion` boundary. Follows the
+//! The host side of the `omnia:model/completion` boundary. Follows the
 //! shared host-crate shape verbatim (`wasi-keyvalue` / `wasi-blobstore` are the
 //! templates): a `WasiModel` host struct implementing `HasData` + `Host` +
 //! (no-op) `Server`, a `WasiModelView` the `Linker<T>` type implements, a
@@ -19,7 +19,7 @@ mod workspace;
 mod generated {
     #![allow(missing_docs)]
 
-    pub use self::augentic::model::completion::Error;
+    pub use self::omnia::model::completion::Error;
 
     wasmtime::component::bindgen!({
         world: "model",
@@ -32,7 +32,7 @@ mod generated {
             "wasi:filesystem": wasmtime_wasi::p3::bindings::filesystem,
         },
         trappable_error_type: {
-            "augentic:model/completion.error" => Error,
+            "omnia:model/completion.error" => Error,
         },
     });
 }
@@ -45,9 +45,9 @@ use omnia::{HasDispatcher, HasMounts, Host, Server};
 use wasmtime::component::{HasData, Linker};
 
 pub use self::default_impl::{ConnectOptions, ModelDefault};
-use self::generated::augentic::model::completion;
-use self::generated::augentic::model::completion::Error;
-pub use self::generated::augentic::model::completion::{
+use self::generated::omnia::model::completion;
+use self::generated::omnia::model::completion::Error;
+pub use self::generated::omnia::model::completion::{
     Example, FunctionTool, GenerationParams, JsonSchemaSpec, Message, MetadataEntry, Prompt,
     ResponseFormat, ResponseFormatKind as Format, Sections, ToolChoice, ToolGrants, Variable,
 };

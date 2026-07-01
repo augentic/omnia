@@ -1,6 +1,6 @@
 # WebAssembly Interface Types (WIT)
 
-`model.wit` is the authoritative definition of the `augentic:model@0.1.0` package (the `completion` interface), per `rfcs/wasi-model.md` §3.1.
+`model.wit` is the authoritative definition of the `omnia:model@0.1.0` package (the `completion` interface), per `rfcs/wasi-model.md` §3.1.
 
 ## Deps
 

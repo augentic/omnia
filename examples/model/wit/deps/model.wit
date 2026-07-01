@@ -1,4 +1,4 @@
-// augentic:model@0.1.0 — example-guest view of the boundary.
+// omnia:model@0.1.0 — example-guest view of the boundary.
 //
 // This is the `crates/wasi-model/wit/model.wit` `completion` interface with the
 // `complete-stream` function (and its `stream-event` variant) omitted: the
@@ -10,7 +10,7 @@
 // serves via `wasmtime_wasi::p3::add_to_linker` — so the lent `workspace`
 // handle is the same resource the host platform owns. See `deps/filesystem.wit`
 // for the trimmed (method-free) subset the wasip2 guest vendors.
-package augentic:model@0.1.0;
+package omnia:model@0.1.0;
 
 interface completion {
     use wasi:filesystem/types@0.3.0.{descriptor};

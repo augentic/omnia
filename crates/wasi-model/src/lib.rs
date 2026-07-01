@@ -2,7 +2,7 @@
 
 //! # WASI Model
 //!
-//! This module implements the runtime boundary for `augentic:model/completion`
+//! This module implements the runtime boundary for `omnia:model/completion`
 //! (see `rfcs/wasi-model.md`): a guest calls `complete` to have a prompt
 //! completed and receives a validated typed answer, or a deterministic replayed
 //! one, without ever seeing which backend produced it.

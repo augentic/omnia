@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::host::generated::augentic::model::completion::{Message, Prompt};
+use crate::host::generated::omnia::model::completion::{Message, Prompt};
 
 /// Host-prepared input for one completion: the generated guest prompt plus the
 /// provider chat channels the host assembled from it (§3.1.1).

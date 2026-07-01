@@ -3,7 +3,7 @@
 use serde_json::Value;
 
 use crate::host::Error;
-use crate::host::generated::augentic::model::completion::{Message, Prompt, ResponseFormatKind};
+use crate::host::generated::omnia::model::completion::{Message, Prompt, ResponseFormatKind};
 use crate::host::types::{Answer, PreparedPrompt};
 
 const TOOL_NAMES: &[&str] = &["resolve", "read", "list", "write", "verify"];
@@ -128,7 +128,7 @@ mod tests {
     use serde_json::json;
 
     use super::{Answer, Error, PreparedPrompt, ResponseFormatKind};
-    use crate::host::generated::augentic::model::completion::{
+    use crate::host::generated::omnia::model::completion::{
         Example, FunctionTool, Message, Prompt, ResponseFormat, Sections, ToolGrants, Variable,
     };
 

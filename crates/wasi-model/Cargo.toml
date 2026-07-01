@@ -1,6 +1,6 @@
 [package]
 name = "omnia-wasi-model"
-description = "WASI model completion interface (the augentic:model boundary) for the Omnia runtime"
+description = "WASI model completion interface (the omnia:model boundary) for the Omnia runtime"
 readme = "README.md"
 authors.workspace = true
 categories.workspace = true

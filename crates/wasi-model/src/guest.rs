@@ -1,7 +1,7 @@
 //! # WASI Model Guest
 //!
-//! Guest-side bindings for the `augentic:model` world. A guest imports
-//! `augentic:model/completion` and calls `complete`.
+//! Guest-side bindings for the `omnia:model` world. A guest imports
+//! `omnia:model/completion` and calls `complete`.
 
 mod generated {
     #![allow(missing_docs)]
@@ -12,4 +12,4 @@ mod generated {
     });
 }
 
-pub use self::generated::augentic::model::*;
+pub use self::generated::omnia::model::*;

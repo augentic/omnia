@@ -2,7 +2,7 @@
 
 > Status: Implementation plan — **remaining work only**. The `wasi-model` host core (the `complete` boundary, the `WasiModelCtx` backend trait, the `ToolHost` callbacks, structural answer validation, and composable record/replay) has landed in `crates/wasi-model`, together with the `omnia-genai` (frontier) and `omnia-cursor` (spawned-agent) backends and the in-tree `ModelDefault` (replay) backend in the `backends` repo. The `resolve` callback and its public host→guest dispatch entry point are wired. This document tracks only the host-side pieces that are **not yet built**.
 
-The authoritative WIT now lives in `crates/wasi-model/wit/model.wit`; the records, `complete` / `complete-stream` signatures, and the `tool-grants` shape are defined at `augentic:model@0.1.0`. Everything below is impl work behind that boundary.
+The authoritative WIT now lives in `crates/wasi-model/wit/model.wit`; the records, `complete` / `complete-stream` signatures, and the `tool-grants` shape are defined at `omnia:model@0.1.0`. Everything below is impl work behind that boundary.
 
 ## 1. `json-schema` validation gate
 

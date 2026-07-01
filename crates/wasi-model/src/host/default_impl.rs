@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tracing::instrument;
 
-use crate::host::generated::augentic::model::completion::{Prompt, ResponseFormatKind, ToolChoice};
+use crate::host::generated::omnia::model::completion::{Prompt, ResponseFormatKind, ToolChoice};
 use crate::host::types::{Answer, PreparedPrompt, Transcript};
 use crate::host::{FutureResult, ToolHost, WasiModelCtx};
 

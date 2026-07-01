@@ -27,9 +27,26 @@ impl Guest for DocsGuest {
 
 /// The compiled-in prose corpus as `(name, title, body)` triples.
 const DOCS: &[(&str, &str, &str)] = &[
-    ("overview", "Widget Service Overview", include_str!("docs/overview.md")),
-    ("api-reference", "Widget Service API Reference", include_str!("docs/api-reference.md")),
-    ("style-guide", "Widget Service Style Guide", include_str!("docs/style-guide.md")),
+    (
+        "overview",
+        "Widget Service Overview",
+        "# Widget Service Overview\n\n\
+         Widgets move through `draft`, `assembled`, and `shipped` in order. They \
+         never move backwards.\n",
+    ),
+    (
+        "api-reference",
+        "Widget Service API Reference",
+        "# Widget Service API Reference\n\n\
+         `POST /widgets` creates a draft widget. `POST /widgets/{id}/assemble` \
+         advances it to `assembled`.\n",
+    ),
+    (
+        "style-guide",
+        "Widget Service Style Guide",
+        "# Widget Service Style Guide\n\n\
+         Labels are kebab-case. IDs are ULIDs.\n",
+    ),
 ];
 
 fn find_doc(name: &str) -> Option<&'static (&'static str, &'static str, &'static str)> {
@@ -47,9 +64,7 @@ impl McpServer for Docs {
         vec![
             Tool::new(
                 "list_docs",
-                "List the name and title of every available document. Call this first to \
-                 discover what documentation exists before answering questions about the \
-                 Widget Service.",
+                "List the name and title of every available document.",
                 json!({ "type": "object", "properties": {} }),
             ),
             Tool::new(
