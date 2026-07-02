@@ -8,7 +8,7 @@ An end-to-end example using `WasiModel` and `cursor-agent` is available in the `
 
 ```bash
 cargo build --example mcp-wasm --target wasm32-wasip2
-cargo run --example mcp -- run --config examples/mcp/omnia.toml
+cargo run --example mcp -- run ./target/wasm32-wasip2/debug/examples/mcp_wasm.wasm
 ```
 
 ## Test
