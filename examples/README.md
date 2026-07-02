@@ -31,3 +31,9 @@ By default, the examples in this repository use **in-memory** implementations fo
 In a production environment, you would swap these default implementations for robust backends. The Omnia architecture allows you to change the host implementation without recompiling the guest.
 
 For example, to use Redis for Key-Value, you would update the runtime configuration to use the Redis provider instead of the default in-memory one.
+
+### External backends
+
+Some examples bind a production backend from the [`backends`](https://github.com/augentic/backends) repo instead of an in-tree default. These require a sibling `backends` checkout (for path dependencies), plus extra setup such as credentials, CLI tools, or network access:
+
+- **`cursor`**: live model completion via `omnia-cursor` and the `cursor-agent` CLI, composed with the `mcp` docs guest.

@@ -27,6 +27,9 @@ omnia.workspace = true
 # target also avoids compiling the crate's guest `complete-stream` (native
 # `stream<>`) binding for wasip2.
 omnia-wasi-model.workspace = true
+# Host-only: the cursor example binds `WasiModel` to the external cursor-agent
+# backend (`omnia-cursor` in the `backends` repo).
+omnia-cursor.workspace = true
 # Used by the `http-bench` load-test harness (anyhow + cfg-if come from the
 # shared `[dependencies]` section above).
 bytes.workspace = true
@@ -77,6 +80,15 @@ crate-type = ["cdylib"]
 [[example]]
 name = "config"
 path = "config/runtime.rs"
+
+[[example]]
+name = "cursor-wasm"
+path = "cursor/guest.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "cursor"
+path = "cursor/runtime.rs"
 
 [[example]]
 name = "http-wasm"

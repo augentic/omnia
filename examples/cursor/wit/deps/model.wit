@@ -1,0 +1,109 @@
+// omnia:model@0.1.0 — example-guest view of the boundary.
+//
+// The `crates/wasi-model/wit/model.wit` `completion` interface with
+// `complete-stream` (and its `stream-event` variant) omitted: this example guest
+// only calls `complete`, and a wasm32-wasip2 guest cannot lower the native
+// `stream<>` type. The host provides the full `completion`; a guest importing
+// this subset is structurally compatible.
+package omnia:model@0.1.0;
+
+interface completion {
+    use wasi:filesystem/types@0.3.0.{descriptor};
+
+    type json = string;
+    type answer = string;
+
+    record message {
+        role: string,
+        content: string,
+    }
+
+    record example {
+        input: string,
+        output: string,
+    }
+
+    record variable {
+        name: string,
+        value: string,
+    }
+
+    record sections {
+        role: option<string>,
+        task: string,
+        context: option<string>,
+        constraints: list<string>,
+        examples: list<example>,
+        variables: list<variable>,
+    }
+
+    record json-schema-spec {
+        name: string,
+        schema: json,
+        strict: option<bool>,
+    }
+
+    enum response-format-kind {
+        text,
+        json-object,
+        json-schema,
+    }
+
+    record response-format {
+        kind: response-format-kind,
+        json-schema: option<json-schema-spec>,
+    }
+
+    record generation-params {
+        temperature: option<f32>,
+        top-p: option<f32>,
+        max-tokens: option<u32>,
+        stop: list<string>,
+    }
+
+    record function-tool {
+        name: string,
+        description: string,
+        parameters: json,
+    }
+
+    variant tool-choice {
+        auto,
+        none,
+        required,
+        named(string),
+    }
+
+    record metadata-entry {
+        key: string,
+        value: string,
+    }
+
+    record tool-grants {
+        references: option<string>,
+        workspace: option<borrow<descriptor>>,
+        verify: list<string>,
+    }
+
+    record prompt {
+        model: option<string>,
+        system: option<string>,
+        messages: list<message>,
+        sections: option<sections>,
+        generation: option<generation-params>,
+        response-format: response-format,
+        tools: list<function-tool>,
+        tool-choice: option<tool-choice>,
+        metadata: list<metadata-entry>,
+        grants: tool-grants,
+    }
+
+    variant error {
+        invalid-answer(string),
+        budget-exhausted(string),
+        tool-failed(string),
+        backend(string),
+    }
+
+    complete: async func(prompt: prompt) -> result<answer, error>;
+}

@@ -119,6 +119,14 @@ omnia-wasi-otel = { path = "crates/wasi-otel", version = "0.35.0" }
 omnia-wasi-sql = { path = "crates/wasi-sql", version = "0.35.0" }
 omnia-wasi-vault = { path = "crates/wasi-vault", version = "0.35.0" }
 omnia-wasi-websocket = { path = "crates/wasi-websocket", version = "0.35.0" }
+omnia-cursor = { path = "../backends/crates/cursor", version = "0.28.0" }
+
+# Path `omnia-cursor` (sibling `backends` checkout) resolves `omnia` from crates.io;
+# patch to the in-tree workspace so the cursor example builds without a published
+# omnia line.
+[patch.crates-io]
+omnia = { path = "crates/omnia" }
+omnia-wasi-model = { path = "crates/wasi-model" }
 
 [profile.release]
 lto = true
