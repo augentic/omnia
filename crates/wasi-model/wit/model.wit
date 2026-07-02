@@ -143,16 +143,16 @@ interface completion {
         parameters: json,
     }
 
-    /// Remote MCP server offered to the model for this completion. The runtime
-    /// core resolves `name` to a deployment-configured endpoint (never a URL from
-    /// the guest — Law 2 keeps topology out of the runtime contract).
+    /// Remote MCP server offered to the model for this completion. The guest
+    /// supplies the endpoint `url` directly — the single source of truth for
+    /// where the server lives.
     record mcp {
-        /// Logical server name the host resolves to a configured endpoint.
+        /// Logical server name identifying the server (e.g. in `.cursor/mcp.json`).
         name: string,
         /// Tool allowlist; empty exposes every tool the server advertises.
         tools: list<string>,
-        // /// MCP server URL.
-        // url: string,
+        /// MCP server endpoint URL. Backends that wire MCP require this.
+        url: option<string>,
     }
 
     /// A tool offered to the model: a guest-declared function or a named MCP server.

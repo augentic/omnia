@@ -58,6 +58,7 @@ impl Tool {
                 "mcp": {
                     "name": mcp.name,
                     "tools": mcp.tools,
+                    "url": mcp.url,
                 },
             }),
         }

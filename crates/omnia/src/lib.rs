@@ -4,13 +4,13 @@
 mod cli;
 mod deployment;
 mod dispatch;
+mod host;
 mod mount;
 mod options;
 mod registry;
 mod runtime;
 mod store;
 mod telemetry;
-mod traits;
 
 pub use clap::Parser;
 pub use omnia_host_macros::runtime;
@@ -34,15 +34,16 @@ pub use self::registry::{
     CliRoutes, Guest, GuestId, HttpRoutes, Registry, Resolver, Routes, TopicRoutes, TriggerRouter,
 };
 pub use self::runtime::Mode;
-#[doc(hidden)]
-pub use self::runtime::{ExitStatus, Runtime, RuntimeHooks};
+pub use self::runtime::{Backends, ExitStatus, Runtime, RuntimeHooks};
 #[doc(hidden)]
 pub use self::runtime::{main, run};
-pub use self::store::{HasDispatcher, HasHttp, HasMounts, StoreBase, StoreBaseBuilder, StoreCtx};
+pub use self::store::{
+    HasDispatcher, HasHttp, HasLimits, HasMounts, StoreBase, StoreBaseBuilder, StoreCtx,
+};
 #[doc(hidden)]
 pub use self::store::{Set, Unset};
 pub use self::telemetry::{Telemetry, resource};
-pub use self::traits::{Backend, Backends, FromEnv, FutureResult, HasLimits, Host, Server};
+pub use self::host::{Backend, FromEnv, FutureResult, Host, Server};
 
 /// Generates the linker-facing view traits that every `omnia` WASI host crate
 /// repeats verbatim (only the names change):

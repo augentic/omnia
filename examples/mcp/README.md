@@ -1,9 +1,8 @@
-# MCP Documentation Server Example
+# MCP Server Example
 
-A wasm guest that serves compiled-in markdown to agent backends as a stateless
-[Model Context Protocol](https://modelcontextprotocol.io) server over
-`wasi:http`. It exposes `list_docs` and `read_doc` tools (and matching `doc://`
-resources).
+A wasm guest that serves markdown to agent backends as a stateless [Model Context Protocol](https://modelcontextprotocol.io) server. It exposes `list_docs` and `read_doc` tools (and matching `doc://` resources).
+
+An end-to-end example using `WasiModel` and `cursor-agent` is available in the `cursor` [example](https://github.com/augentic/backends/tree/main/examples/cursor).
 
 ## Build and run
 
@@ -12,25 +11,21 @@ cargo build --example mcp-wasm --target wasm32-wasip2
 cargo run --example mcp -- run --config examples/mcp/omnia.toml
 ```
 
-Endpoint: `http://localhost:8080/mcp/docs`
-
 ## Test
 
+List tools:
+
 ```bash
-U=http://localhost:8080/mcp/docs
-curl -s -X POST "$U" -H 'content-type: application/json' \
+curl -s -X POST http://localhost:8080/mcp/docs \
+  -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
-curl -s -X POST "$U" -H 'content-type: application/json' \
+```
+
+Tool call:
+
+```bash
+curl -s -X POST http://localhost:8080/mcp/docs \
+-H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"read_doc","arguments":{"name":"overview"}}}'
 ```
 
-With `cursor-agent`, point a scratch workspace at the server via
-`.cursor/mcp.json` (`{"mcpServers":{"omnia-docs":{"url":"http://localhost:8080/mcp/docs"}}}`)
-and ask it to use the tools — for example, to report the allowed widget state
-transitions.
-
-For a full end-to-end demo that binds `WasiModel` to the cursor backend and
-drives `create` through this server, see [`../cursor`](../cursor).
-
-The sample corpus (`overview`, `api-reference`, `style-guide`) lives in
-[`guest.rs`](guest.rs).

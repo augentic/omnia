@@ -34,6 +34,4 @@ For example, to use Redis for Key-Value, you would update the runtime configurat
 
 ### External backends
 
-Some examples bind a production backend from the [`backends`](https://github.com/augentic/backends) repo instead of an in-tree default. These require a sibling `backends` checkout (for path dependencies), plus extra setup such as credentials, CLI tools, or network access:
-
-- **`cursor`**: live model completion via `omnia-cursor` and the `cursor-agent` CLI, composed with the `mcp` docs guest.
+Some examples bind a production backend from the [`backends`](https://github.com/augentic/backends) repo instead of an in-tree default. These require a sibling `backends` checkout (for path dependencies), plus extra setup such as credentials, CLI tools, or network access. The [`cursor`](https://github.com/augentic/backends/tree/main/examples/cursor) end-to-end demo lives in that repo and composes `omnia-cursor` with the in-tree [`mcp`](mcp) docs guest.

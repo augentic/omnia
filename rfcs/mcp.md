@@ -12,10 +12,10 @@ This document does not rethink that shape. It tracks five gaps between the contr
 
 | Layer | Behavior today |
 |-------|----------------|
-| WIT contract | `tool::mcp { name, tools }`; `tools` documented as an allowlist |
+| WIT contract | `tool::mcp { name, tools, url }`; the guest supplies the endpoint `url` directly; `tools` documented as an allowlist |
 | `wasi-model` host | Passes MCP grants through `PreparedRequest` untouched; the gate only checks *function*-name shadowing |
 | `omnia-genai` | Bails loudly on any MCP grant (no MCP client) |
-| `omnia-cursor` | Resolves names against `CURSOR_MCP_SERVERS`, merges entries into `<workspace>/.cursor/mcp.json` under a refcounted guard, passes `--approve-mcps`, prepends a natural-language hint |
+| `omnia-cursor` | Reads each grant's guest-supplied `url`, merges entries into `<workspace>/.cursor/mcp.json` under a refcounted guard, passes `--approve-mcps`, prepends a natural-language hint |
 
 ## 1. Enforce the tool allowlist (contract gap)
 
@@ -28,18 +28,11 @@ Resolution, in preference order:
 
 The proxy is the same component §3 needs, so one piece of work covers both.
 
-## 2. Hoist name→endpoint resolution into the host
+## 2. Name→endpoint resolution (resolved: on the grant)
 
-Resolution is conceptually runtime policy, but it lives in the cursor backend today: `select_mcp_servers`, the JSON config parsing, and the unknown-name error are all keyed by a backend-specific env var (`CURSOR_MCP_SERVERS`), even though nothing about "resolve logical name to configured URL" is cursor-specific. A second spawned-agent backend would re-implement the same resolution under its own env var.
+Resolved by putting the endpoint on the grant itself. `tool::mcp.url` is guest-supplied (optional), making the grant the single source of truth for where a server lives (YAGNI). There is no host/runtime name→endpoint resolution and no per-backend endpoint config: a backend that wires MCP reads the grant's `url` directly and errors when a grant omits it.
 
-Move resolution to the `create` gate in `wasi-model`:
-
-- Runtime-level deployment config (one map, not one per backend) supplies `name → url`.
-- `PreparedRequest` carries already-resolved entries (`name`, `url`, `tools`).
-- An unknown name fails **early and typed** at the gate, instead of surfacing late as `error::backend` from inside a backend.
-- Replay fixtures see one consistent shape regardless of backend.
-
-Backends then own only *delivery*: `.cursor/mcp.json` for cursor, native provider API or the §3 bridge for others. This centralizes the Law-2 policy in the runtime core without putting topology in the guest contract — the guest still names, never addresses.
+Backends own only *delivery*: `.cursor/mcp.json` for cursor, native provider API or the §3 bridge for others.
 
 ## 3. Bridge MCP into the genai tool loop
 
@@ -59,7 +52,7 @@ Mitigations, cheapest first:
 
 ## 5. Contract cleanups
 
-- Delete the commented-out `url` field from the `mcp` record in `model.wit`. A visible dead option invites re-litigating a settled decision.
+- ~~Delete the commented-out `url` field from the `mcp` record in `model.wit`.~~ Reversed: the `url` field is now live (`url: option<string>`), guest-supplied, and is the single source of truth for the endpoint (YAGNI).
 - Consider whether `mcp` belongs in `tools` at all. It is a host-resolved capability grant — exactly what `grants` is documented as — whereas `tools` otherwise carries guest-declared payload. Mirroring the models-API shape (providers put remote MCP under `tools`) is a defensible reason to keep it; but if §2 lands and the host resolves grants, `grants.mcp` becomes the more honest home. Decide alongside §2, not independently.
 
 ## Out of scope

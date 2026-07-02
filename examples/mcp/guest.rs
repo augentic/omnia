@@ -16,14 +16,8 @@ use serde_json::{Value, json};
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
 
-struct DocsGuest;
-wasip3::http::service::export!(DocsGuest);
-
-impl Guest for DocsGuest {
-    async fn handle(request: Request) -> Result<Response, ErrorCode> {
-        omnia_wasi_http::serve(mcp::router(Arc::new(Docs)), request).await
-    }
-}
+struct HttpGuest;
+wasip3::http::service::export!(HttpGuest);
 
 /// The compiled-in prose corpus as `(name, title, body)` triples.
 const DOCS: &[(&str, &str, &str)] = &[
@@ -48,6 +42,12 @@ const DOCS: &[(&str, &str, &str)] = &[
          Labels are kebab-case. IDs are ULIDs.\n",
     ),
 ];
+
+impl Guest for HttpGuest {
+    async fn handle(request: Request) -> Result<Response, ErrorCode> {
+        omnia_wasi_http::serve(mcp::router(Arc::new(Docs)), request).await
+    }
+}
 
 fn find_doc(name: &str) -> Option<&'static (&'static str, &'static str, &'static str)> {
     DOCS.iter().find(|(doc_name, ..)| *doc_name == name)

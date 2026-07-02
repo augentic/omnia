@@ -1,4 +1,4 @@
-//! Deployment lifecycle: [`bootstrap`], [`run`], background tasks, and [`ExitStatus`].
+//! Deployment lifecycle: [`Backends`], [`RuntimeHooks`], [`Runtime`], [`run`], and [`ExitStatus`].
 
 mod command;
 
@@ -12,11 +12,38 @@ use clap::Parser as _;
 use wasmtime::component::{Instance, InstancePre};
 use wasmtime::{Engine, Store};
 
+use std::future::Future;
+
 use crate::cli::{Cli, Command};
 use crate::dispatch::serve_links;
 use crate::mount::MountRegistry;
-use crate::traits::{Backends, HasLimits};
+use crate::store::HasLimits;
 use crate::{Deployment, DeploymentBuilder, Registry, RuntimeOptions, StoreBase, StoreCtx};
+
+/// A deployment's connected backend bundle, threaded into [`Runtime`].
+///
+/// The `runtime!` macro generates the concrete bundle (one field per declared
+/// backend) and this impl, whose [`connect`](Self::connect) connects every
+/// backend concurrently — the work the macro previously inlined as a
+/// `tokio::try_join!` in the generated `Runtime::new`. A deployment that wires
+/// no backends uses the [`()`](unit) bundle below, so [`Runtime`] needs no
+/// special empty case.
+pub trait Backends: Clone + Send + Sync + 'static {
+    /// Connect every backend in the bundle.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first backend connection error.
+    fn connect() -> impl Future<Output = Result<Self>>;
+}
+
+/// The zero-backend bundle: a deployment that links only backend-less hosts
+/// (such as a `mode: command` `wasi:cli` deployment) connects nothing.
+impl Backends for () {
+    async fn connect() -> Result<Self> {
+        Ok(())
+    }
+}
 
 /// How a deployment is driven after bootstrap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

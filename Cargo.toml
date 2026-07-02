@@ -83,7 +83,7 @@ sea-query = { version = "1.0.1", default-features = false, features = ["thread-s
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 syn = { version = "2.0.118", features = ["full"] }
-time = "0.3.51"
+time = "0.3.53"
 tokio = { version = "1.52.3", default-features = false }
 tokio-stream = { version = "0.1.18", features = ["sync"] }
 tokio-util = { version = "0.7.18", features = ["codec"] }
@@ -119,14 +119,6 @@ omnia-wasi-otel = { path = "crates/wasi-otel", version = "0.35.0" }
 omnia-wasi-sql = { path = "crates/wasi-sql", version = "0.35.0" }
 omnia-wasi-vault = { path = "crates/wasi-vault", version = "0.35.0" }
 omnia-wasi-websocket = { path = "crates/wasi-websocket", version = "0.35.0" }
-omnia-cursor = { path = "../backends/crates/cursor", version = "0.28.0" }
-
-# Path `omnia-cursor` (sibling `backends` checkout) resolves `omnia` from crates.io;
-# patch to the in-tree workspace so the cursor example builds without a published
-# omnia line.
-[patch.crates-io]
-omnia = { path = "crates/omnia" }
-omnia-wasi-model = { path = "crates/wasi-model" }
 
 [profile.release]
 lto = true

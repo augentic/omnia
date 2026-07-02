@@ -19,7 +19,14 @@ use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiVie
 use wasmtime_wasi_http::p3::{WasiHttpCtxView, WasiHttpView};
 use wrpc_wasmtime::{WrpcCtxView, WrpcView};
 
-use crate::{Dispatcher, HasLimits, LinkClient, MountRegistry, RuntimeOptions, WrpcState};
+use crate::{Dispatcher, LinkClient, MountRegistry, RuntimeOptions, WrpcState};
+
+/// Exposes a store context's [`StoreLimits`] so the runtime can install a
+/// per-guest resource limiter on every [`Store`](wasmtime::Store) it creates.
+pub trait HasLimits {
+    /// Returns a mutable reference to the context's resource limits.
+    fn limits(&mut self) -> &mut StoreLimits;
+}
 
 /// Type-state marker for a [`StoreBaseBuilder`] member that has been supplied,
 /// carrying its value until [`build`](StoreBaseBuilder::build) consumes it.
