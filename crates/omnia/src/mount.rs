@@ -1,8 +1,8 @@
 //! # Preopen mounts and the mount registry (RFC-55)
 //!
 //! A deployment may mount node-local directories into a guest's WASI sandbox via
-//! `[[mount]]` (or the `OMNIA_WORKSPACE` env var) so a guest can read or edit
-//! a mounted directory tree. Two host-side artefacts back that capability:
+//! `[[mount]]` so a guest can read or edit a mounted directory tree. Two
+//! host-side artefacts back that capability:
 //!
 //! - [`ResolvedPreopen`] — a mount resolved to an absolute host path plus WASI
 //!   permissions, applied per store via [`WasiCtxBuilder::preopened_dir`].

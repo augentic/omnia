@@ -109,7 +109,7 @@ impl DeploymentBuilder {
                 sources: parsed.sources(base)?,
                 routes: parsed.routes(),
                 links: parsed.links(),
-                preopens: with_env_mount(parsed.mounts(base)),
+                preopens: parsed.mounts(base),
                 args: self.args,
                 mode: self.mode,
             }
@@ -125,7 +125,7 @@ impl DeploymentBuilder {
                 sources: vec![source],
                 routes: Routes::default(),
                 links: BTreeSet::new(),
-                preopens: with_env_mount(Vec::new()),
+                preopens: Vec::new(),
                 args: self.args,
                 mode: self.mode,
             }
@@ -136,16 +136,6 @@ impl DeploymentBuilder {
 
         Deployment::from_plan(plan).await
     }
-}
-
-// add root preopen if OMNIA_WORKSPACE is set
-fn with_env_mount(mut preopens: Vec<ResolvedPreopen>) -> Vec<ResolvedPreopen> {
-    if let Some(path) = env::var_os("OMNIA_WORKSPACE")
-        && !preopens.iter().any(|po| po.name == ".")
-    {
-        preopens.push(ResolvedPreopen::new(".".to_owned(), PathBuf::from(path), false));
-    }
-    preopens
 }
 
 /// A compiled set of WebAssembly components with their shared Linker, ready to

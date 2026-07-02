@@ -188,7 +188,7 @@ pub struct StoreBase {
     /// Mount registry (RFC-55): the startup-validated mounts also preopened into
     /// [`wasi`](Self::wasi). A consuming host crate reads it to match a lent
     /// `descriptor` back to its mount by directory identity. Empty unless the
-    /// deployment configures `[[mount]]`s or `OMNIA_WORKSPACE`.
+    /// deployment configures `[[mount]]`s.
     pub mounts: Arc<MountRegistry>,
 }
 

@@ -347,6 +347,41 @@ mod tests {
     }
 
     #[test]
+    fn parse_and_resolve_mounts() {
+        let toml = r#"
+            [[guest]]
+            id = "model"
+            source.path = "./model.wasm"
+
+            [[mount]]
+            name = "."
+            path = "../.."
+
+            [[mount]]
+            name = "shared"
+            path = "/srv/shared"
+            writable = true
+        "#;
+
+        let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
+        assert_eq!(manifest.mounts.len(), 2);
+        assert_eq!(manifest.mounts[0].name, ".");
+        assert!(!manifest.mounts[0].writable, "writable defaults to read-only");
+        assert!(manifest.mounts[1].writable);
+
+        let base = Path::new("/deploy/app");
+        let resolved = manifest.mounts(base);
+        assert_eq!(resolved.len(), 2);
+        // A relative path resolves against the manifest's directory; read-only by default.
+        assert_eq!(resolved[0].name, ".");
+        assert_eq!(resolved[0].host_path, base.join("../.."));
+        assert!(!resolved[0].dir_perms.contains(wasmtime_wasi::DirPerms::MUTATE));
+        // An absolute path passes through unchanged, and `writable` grants mutation.
+        assert_eq!(resolved[1].host_path, PathBuf::from("/srv/shared"));
+        assert!(resolved[1].dir_perms.contains(wasmtime_wasi::DirPerms::MUTATE));
+    }
+
+    #[test]
     fn defaults_to_in_process() {
         let toml = r#"
             [[guest]]

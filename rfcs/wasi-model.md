@@ -34,7 +34,7 @@ Remaining, once RFC-55 lands:
 
 - Resolve the `prompt.grants.workspace` `borrow<descriptor>` against the resource table and back `read` / `list` with bounded reads through it (no OS path or descriptor reaches the model).
 - Back `write` with host-held session state in `wasi:keyvalue`, keyed by the prompt hash, so an edit in one tool turn is visible to a `read` in the next. A leaked in-memory session is a regression.
-- The cursor backend's direct `local-path` access likewise switches from the `OMNIA_WORKSPACE` config stopgap to resolving the lent `descriptor`'s `local-path` face once RFC-55 exposes it.
+- The lent `grants.workspace` descriptor already resolves to its `local-path` through the mount registry (`ToolHost::local_path`), which the cursor backend consumes today; RFC-55 adds only the bounded `read` / `list` / `write` faces above, not this path resolution.
 
 The dispatch loop for these tools belongs to the genai backend; see [RFC-59](rfc-59-working-tree-tools.md). This section owns only the host-side wiring.
 
