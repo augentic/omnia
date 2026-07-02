@@ -30,7 +30,7 @@ and ask it to use the tools — for example, to report the allowed widget state
 transitions.
 
 For a full end-to-end demo that binds `WasiModel` to the cursor backend and
-drives `complete` through this server, see [`../cursor`](../cursor).
+drives `create` through this server, see [`../cursor`](../cursor).
 
 The sample corpus (`overview`, `api-reference`, `style-guide`) lives in
 [`guest.rs`](guest.rs).

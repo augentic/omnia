@@ -1,4 +1,4 @@
-//! The `complete` host binding.
+//! The `create` host binding.
 //!
 //! Implements the generated `completion` host trait on [`WasiModel`]. It is the
 //! host validation gate — it assembles the prompt (§3.1.1), hands the resulting
@@ -15,7 +15,9 @@ use futures::FutureExt as _;
 use omnia::{Dispatcher, GuestId, HasDispatcher, HasMounts};
 use wasmtime::component::{Accessor, StreamReader, Val};
 
-use crate::host::generated::omnia::model::completion::{Host, HostWithStore, Prompt, StreamEvent};
+use crate::host::generated::omnia::model::completion::{
+    Event, Host, HostWithStore, Prompt, Reply, Usage as WitUsage,
+};
 use crate::host::types::{Answer, DirEntry, PreparedPrompt, Reference, VerifyReport};
 use crate::host::workspace::{self, Workspace};
 use crate::host::{Error, FutureResult, ToolHost, WasiModel, WasiModelCtxView};
@@ -24,13 +26,13 @@ impl<T> HostWithStore<T> for WasiModel
 where
     T: HasMounts + HasDispatcher,
 {
-    async fn complete(accessor: &Accessor<T, Self>, mut prompt: Prompt) -> Result<String, Error> {
+    async fn create(accessor: &Accessor<T, Self>, mut prompt: Prompt) -> Result<Reply, Error> {
         // The lent `borrow<descriptor>` cannot survive the backend await, so the
         // host takes it out here to resolve the workspace for `ToolHost`.
         let lent = prompt.grants.workspace.take();
         let request = PreparedPrompt::try_from(prompt)?;
 
-        let kind = request.prompt.response_format.kind;
+        let format = request.prompt.format.clone();
         let references = request.prompt.grants.references.clone();
         let verify_allowed = request.prompt.grants.verify.clone();
 
@@ -50,15 +52,24 @@ where
             })?
             .await?;
 
-        Answer::check(&answer.value, kind)?;
+        Answer::check(&answer.value, &format)?;
 
-        serde_json::to_string(&answer.value)
-            .map_err(|e| Error::InvalidAnswer(format!("answer is not serializable JSON: {e}")))
+        let text = serde_json::to_string(&answer.value)
+            .map_err(|e| Error::InvalidAnswer(format!("answer is not serializable JSON: {e}")))?;
+
+        Ok(Reply {
+            answer: text,
+            usage: answer.usage.map(|u| WitUsage {
+                input_tokens: u.input_tokens,
+                output_tokens: u.output_tokens,
+                reasoning_tokens: u.reasoning_tokens,
+            }),
+        })
     }
 
-    async fn complete_stream(
+    async fn create_stream(
         _accessor: &Accessor<T, Self>, _prompt: Prompt,
-    ) -> Result<StreamReader<StreamEvent>, Error> {
+    ) -> Result<StreamReader<Event>, Error> {
         Err(Error::Backend("streaming unsupported".to_owned()))
     }
 }

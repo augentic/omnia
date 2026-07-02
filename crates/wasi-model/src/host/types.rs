@@ -7,7 +7,7 @@ use crate::host::generated::omnia::model::completion::{Message, Prompt};
 /// Host-prepared input for one completion: the generated guest prompt plus the
 /// provider chat channels the host assembled from it (§3.1.1).
 ///
-/// The host assembles once at the `complete` gate so every backend consumes the
+/// The host assembles once at the `create` gate so every backend consumes the
 /// same `system` / `messages`; backends must not re-derive them from `sections`.
 #[derive(Debug)]
 pub struct PreparedPrompt {
@@ -21,15 +21,30 @@ pub struct PreparedPrompt {
     pub messages: Vec<Message>,
 }
 
-/// A backend's result: the parsed answer value plus an optional transcript.
-/// Host-only — the guest sees only the validated `answer` string the `complete`
-/// binding derives from `value`.
+/// A backend's result: the parsed answer value, optional usage, and transcript.
+///
+/// Host-only — the guest sees a `reply` whose `answer` is the validated string
+/// the `create` binding derives from `value`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Answer {
     /// The parsed JSON answer the backend produced.
     pub value: serde_json::Value,
+    /// Token accounting the backend reported, surfaced to the guest as `reply.usage`.
+    pub usage: Option<Usage>,
     /// Optional tool-call transcript for replay.
     pub transcript: Option<Transcript>,
+}
+
+/// Token accounting for one completion. Mirrors the WIT `usage` record; the
+/// serde derive lets it ride in replay fixtures alongside the transcript.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Usage {
+    /// Prompt tokens consumed.
+    pub input_tokens: u32,
+    /// Completion tokens produced.
+    pub output_tokens: u32,
+    /// Reasoning tokens, for models that bill them separately.
+    pub reasoning_tokens: Option<u32>,
 }
 
 /// A reference an adapter asked the model to resolve (`ToolHost::resolve`).

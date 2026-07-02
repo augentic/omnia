@@ -1,14 +1,14 @@
-//! # Model example — `complete` guest
+//! # Model example — `create` guest
 //!
-//! Imports `omnia:model/completion` and calls `complete` once with a
+//! A `wasi:cli/command` reactor that **imports** `omnia:model/completion` and
+//! calls `create` once when the host drives `wasi:cli/run`. It builds a
 //! `json-schema` prompt assembled from `sections`. It declares no HTTP/messaging
 //! trigger, so it is driven by the integration test (`crates/wasi-model/tests`)
 //! rather than a live request — the run-1 (replay) acceptance vehicle (§6).
 //!
-//! `run` is `async` because `complete` is an async import. The guest sets
+//! `run` is `async` because `create` is an async import. The guest sets
 //! `grants.references = "shelf"` as data, but Phase 1 replay short-circuits tool
-//! calls, so no `resolve` (and no `shelf` guest) is exercised here — that lands
-//! in Phase 2a.
+//! calls, so no `resolve` is exercised here.
 //!
 //! It also reads `wasi:filesystem/preopens` and, when the host has mounted a
 //! workspace named `.` (the `[[mount]]` in `omnia.toml`), lends it
@@ -17,18 +17,19 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_wasi_model::run::{completion, Guest};
+use omnia_wasi_model::completion;
+use wasip3::exports::cli::run::Guest;
 use wasip3::filesystem::preopens;
 
 struct Example;
 
-omnia_wasi_model::run::export!(Example with_types_in omnia_wasi_model::run);
+wasip3::cli::command::export!(Example);
 
 impl Guest for Example {
-    async fn run() -> String {
+    async fn run() -> Result<(), ()> {
         // Read the preopen table the host populated from `[[mount]]` (RFC-55) and
         // pick the tree named `.` to lend. `directories` must outlive the
-        // `complete` call below — the lent `workspace` borrows one of its
+        // `create` call below — the lent `workspace` borrows one of its
         // descriptors.
         let directories = preopens::get_directories();
         let workspace = directories.iter().find_map(|(dir, name)| (name == ".").then_some(dir));
@@ -46,27 +47,27 @@ impl Guest for Example {
                 variables: vec![],
             }),
             generation: None,
-            response_format: completion::ResponseFormat {
-                kind: completion::ResponseFormatKind::JsonSchema,
-                json_schema: Some(completion::JsonSchemaSpec {
-                    name: "verdict".to_string(),
-                    schema: "{\"type\":\"object\"}".to_string(),
-                    strict: None,
-                }),
-            },
+            format: completion::Format::Schema(completion::Schema {
+                name: "verdict".to_string(),
+                schema: "{\"type\":\"object\"}".to_string(),
+                strict: None,
+            }),
             tools: vec![],
             tool_choice: None,
             metadata: vec![],
-            grants: completion::ToolGrants {
+            grants: completion::Grants {
                 references: Some("shelf".to_string()),
                 workspace,
                 verify: vec![],
             },
         };
 
-        match completion::complete(prompt).await {
-            Ok(answer) => answer,
+        let answer = match completion::create(prompt).await {
+            Ok(reply) => reply.answer,
             Err(error) => format!("error: {error:?}"),
-        }
+        };
+
+        println!("{answer}");
+        Ok(())
     }
 }

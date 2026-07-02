@@ -1,9 +1,9 @@
-//! Host-side validation and message assembly for the `complete` binding.
+//! Host-side validation and message assembly for the `create` binding.
 
 use serde_json::Value;
 
 use crate::host::Error;
-use crate::host::generated::omnia::model::completion::{Message, Prompt, ResponseFormatKind};
+use crate::host::generated::omnia::model::completion::{Format, Message, Prompt, Role, Tool};
 use crate::host::types::{Answer, PreparedPrompt};
 
 const TOOL_NAMES: &[&str] = &["resolve", "read", "list", "write", "verify"];
@@ -12,8 +12,13 @@ impl TryFrom<Prompt> for PreparedPrompt {
     type Error = Error;
 
     fn try_from(prompt: Prompt) -> Result<Self, Self::Error> {
-        if let Some(tool) = prompt.tools.iter().find(|t| TOOL_NAMES.contains(&t.name.as_str())) {
-            return Err(Error::Backend(format!("reserved tool name: {}", tool.name)));
+        // Only guest-declared functions carry a name that could shadow a
+        // host-injected tool; MCP grants name a server, not a tool.
+        if let Some(name) = prompt.tools.iter().find_map(|t| match t {
+            Tool::Function(f) if TOOL_NAMES.contains(&f.name.as_str()) => Some(f.name.clone()),
+            _ => None,
+        }) {
+            return Err(Error::Backend(format!("reserved tool name: {name}")));
         }
 
         // `messages` wins over `sections`. `prompt.system` is always applied.
@@ -78,7 +83,7 @@ impl TryFrom<Prompt> for PreparedPrompt {
 
         let system = join_non_empty(&system_parts);
         let messages = vec![Message {
-            role: "user".to_owned(),
+            role: Role::User,
             content: join_non_empty(&user_parts).unwrap_or_default(),
         }];
 
@@ -96,27 +101,27 @@ fn join_non_empty(parts: &[String]) -> Option<String> {
 }
 
 impl Answer {
-    /// Validate an answer against `response-format.kind`.
+    /// Validate an answer against the prompt's `format`.
     ///
     /// # Errors
     ///
-    /// Returns an error if the answer is not valid for the given kind.
-    pub fn check(value: &Value, kind: ResponseFormatKind) -> Result<(), Error> {
-        match kind {
-            ResponseFormatKind::Text => {
+    /// Returns an error if the answer does not match the requested format.
+    pub fn check(value: &Value, format: &Format) -> Result<(), Error> {
+        match format {
+            Format::Text => {
                 if !value.is_string() {
                     return Err(Error::InvalidAnswer("answer is not a JSON string".to_owned()));
                 }
                 Ok(())
             }
-            ResponseFormatKind::JsonObject => {
+            Format::Json => {
                 if !value.is_object() {
                     return Err(Error::InvalidAnswer("answer is not a JSON object".to_owned()));
                 }
                 Ok(())
             }
-            ResponseFormatKind::JsonSchema => {
-                // TODO: validate against `json-schema.schema`.
+            Format::Schema(_) => {
+                // TODO: validate against the schema document.
                 Ok(())
             }
         }
@@ -127,39 +132,47 @@ impl Answer {
 mod tests {
     use serde_json::json;
 
-    use super::{Answer, Error, PreparedPrompt, ResponseFormatKind};
+    use super::{Answer, Error, PreparedPrompt};
     use crate::host::generated::omnia::model::completion::{
-        Example, FunctionTool, Message, Prompt, ResponseFormat, Sections, ToolGrants, Variable,
+        Example, Format, Function, Grants, Message, Prompt, Role, Schema, Sections, Tool, Variable,
     };
+
+    fn schema() -> Schema {
+        Schema {
+            name: "verdict".to_owned(),
+            schema: "{\"type\":\"object\"}".to_owned(),
+            strict: None,
+        }
+    }
 
     #[test]
     fn json_string() {
-        Answer::check(&json!("hi"), ResponseFormatKind::Text).unwrap();
-        let err = Answer::check(&json!({ "a": 1 }), ResponseFormatKind::Text).unwrap_err();
+        Answer::check(&json!("hi"), &Format::Text).unwrap();
+        let err = Answer::check(&json!({ "a": 1 }), &Format::Text).unwrap_err();
         assert!(matches!(err, Error::InvalidAnswer(_)));
     }
 
     #[test]
     fn json_object() {
-        Answer::check(&json!({ "verdict": "pass" }), ResponseFormatKind::JsonObject).unwrap();
-        let err = Answer::check(&json!("nope"), ResponseFormatKind::JsonObject).unwrap_err();
+        Answer::check(&json!({ "verdict": "pass" }), &Format::Json).unwrap();
+        let err = Answer::check(&json!("nope"), &Format::Json).unwrap_err();
         assert!(matches!(err, Error::InvalidAnswer(_)));
     }
 
     #[test]
     fn json_schema() {
-        Answer::check(&json!({ "x": [1, 2, 3] }), ResponseFormatKind::JsonSchema).unwrap();
-        Answer::check(&json!(42), ResponseFormatKind::JsonSchema).unwrap();
+        Answer::check(&json!({ "x": [1, 2, 3] }), &Format::Schema(schema())).unwrap();
+        Answer::check(&json!(42), &Format::Schema(schema())).unwrap();
     }
 
     #[test]
     fn reserved_tool_name() {
-        let mut prompt = prompt_from(vec![message("user", "hi")], None);
-        prompt.tools.push(FunctionTool {
+        let mut prompt = prompt_from(vec![message(Role::User, "hi")], None);
+        prompt.tools.push(Tool::Function(Function {
             name: "read".to_owned(),
             description: "shadow a host-injected tool".to_owned(),
             parameters: "{}".to_owned(),
-        });
+        }));
         let err = PreparedPrompt::try_from(prompt).unwrap_err();
         assert!(matches!(err, Error::Backend(m) if m.contains("reserved tool name")));
     }
@@ -176,24 +189,24 @@ mod tests {
 
     #[test]
     fn non_empty() {
-        PreparedPrompt::try_from(prompt_from(vec![message("user", "hi")], None)).unwrap();
+        PreparedPrompt::try_from(prompt_from(vec![message(Role::User, "hi")], None)).unwrap();
         PreparedPrompt::try_from(prompt_from(vec![], Some(sections("do it")))).unwrap();
     }
 
     #[test]
     fn explicit_messages() {
         // Precedence rule 1: when `messages` is non-empty, `sections` is ignored.
-        let prompt = prompt_from(vec![message("user", "explicit")], Some(sections("ignored")));
+        let prompt = prompt_from(vec![message(Role::User, "explicit")], Some(sections("ignored")));
         let assembled = PreparedPrompt::try_from(prompt).expect("try_from");
         assert_eq!(assembled.messages.len(), 1);
-        assert_eq!(assembled.messages[0].role, "user");
+        assert!(matches!(assembled.messages[0].role, Role::User));
         assert_eq!(assembled.messages[0].content, "explicit");
     }
 
     #[test]
     fn system() {
         // Precedence rule 2: `prompt.system` applies whether turns or sections.
-        let mut prompt = prompt_from(vec![message("user", "hi")], None);
+        let mut prompt = prompt_from(vec![message(Role::User, "hi")], None);
         prompt.system = Some("be terse".to_owned());
         let assembled = PreparedPrompt::try_from(prompt).expect("try_from");
         assert_eq!(assembled.system.as_deref(), Some("be terse"));
@@ -238,14 +251,11 @@ mod tests {
             messages,
             sections,
             generation: None,
-            response_format: ResponseFormat {
-                kind: ResponseFormatKind::JsonObject,
-                json_schema: None,
-            },
+            format: Format::Json,
             tools: vec![],
             tool_choice: None,
             metadata: vec![],
-            grants: ToolGrants {
+            grants: Grants {
                 references: None,
                 workspace: None,
                 verify: vec![],
@@ -264,9 +274,9 @@ mod tests {
         }
     }
 
-    fn message(role: &str, content: &str) -> Message {
+    fn message(role: Role, content: &str) -> Message {
         Message {
-            role: role.to_owned(),
+            role,
             content: content.to_owned(),
         }
     }

@@ -6,13 +6,14 @@
 //! (no-op) `Server`, a `WasiModelView` the `Linker<T>` type implements, a
 //! `WasiModelCtxView` carrying the backend + resource table, and a
 //! `WasiModelCtx` trait the *backend* implements. The one addition over a plain
-//! effect host is the per-completion [`ToolHost`] handed to `complete`, which
-//! `complete` assembles from the store's mounts and dispatcher rather than from
-//! the view.
+//! effect host is the per-completion [`ToolHost`] handed to the backend, which
+//! the `create` binding assembles from the store's mounts and dispatcher rather
+//! than from the view.
 
 mod default_impl;
 mod gate;
 mod model_impl;
+mod replay;
 mod types;
 mod workspace;
 
@@ -48,11 +49,11 @@ pub use self::default_impl::{ConnectOptions, ModelDefault};
 use self::generated::omnia::model::completion;
 use self::generated::omnia::model::completion::Error;
 pub use self::generated::omnia::model::completion::{
-    Example, FunctionTool, GenerationParams, JsonSchemaSpec, Message, MetadataEntry, Prompt,
-    ResponseFormat, ResponseFormatKind as Format, Sections, ToolChoice, ToolGrants, Variable,
+    Effort, Event, Example, Format, Function, Generation, Grants, Mcp, Message, Prompt, Reply,
+    Role, Schema, Sections, Tool, ToolChoice, Variable,
 };
 pub use self::types::{
-    Answer, DirEntry, PreparedPrompt, Reference, ToolTurn, Transcript, VerifyReport,
+    Answer, DirEntry, PreparedPrompt, Reference, ToolTurn, Transcript, Usage, VerifyReport,
 };
 
 /// Host-side service for `wasi-model` (a linked-only effect host).

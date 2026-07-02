@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tracing::instrument;
 
-use crate::host::generated::omnia::model::completion::{Prompt, ResponseFormatKind, ToolChoice};
-use crate::host::types::{Answer, PreparedPrompt, Transcript};
+use crate::host::generated::omnia::model::completion::{Prompt, Tool, ToolChoice};
+use crate::host::types::{Answer, PreparedPrompt, Transcript, Usage};
 use crate::host::{FutureResult, ToolHost, WasiModelCtx};
 
 /// Options used to connect the replay backend.
@@ -120,6 +120,7 @@ impl FixtureStore {
             key,
             Answer {
                 value: fixture.answer,
+                usage: fixture.usage,
                 transcript: fixture.transcript,
             },
         );
@@ -132,6 +133,8 @@ struct Fixture {
     key_prompt: Value,
     answer: Value,
     #[serde(default)]
+    usage: Option<Usage>,
+    #[serde(default)]
     transcript: Option<Transcript>,
 }
 
@@ -140,7 +143,7 @@ fn reduced_value(prompt: &Prompt) -> Value {
         "model": prompt.model,
         "system": prompt.system,
         "messages": prompt.messages.iter().map(|message| json!({
-            "role": message.role,
+            "role": message.role.to_string(),
             "content": message.content,
         })).collect::<Vec<_>>(),
         "sections": prompt.sections.as_ref().map(|sections| json!({
@@ -160,32 +163,15 @@ fn reduced_value(prompt: &Prompt) -> Value {
         "generation": prompt.generation.as_ref().map(|generation| json!({
             "temperature": generation.temperature,
             "top_p": generation.top_p,
+            "top_k": generation.top_k,
             "max_tokens": generation.max_tokens,
             "stop": generation.stop,
+            "seed": generation.seed,
+            "effort": generation.effort.map(|effort| effort.to_string()),
         })),
-        "response_format": {
-            "kind": match prompt.response_format.kind {
-                ResponseFormatKind::Text => "text",
-                ResponseFormatKind::JsonObject => "json-object",
-                ResponseFormatKind::JsonSchema => "json-schema",
-            },
-            "json_schema": prompt.response_format.json_schema.as_ref().map(|spec| json!({
-                "name": spec.name,
-                "schema": spec.schema,
-                "strict": spec.strict,
-            })),
-        },
-        "tools": prompt.tools.iter().map(|tool| json!({
-            "name": tool.name,
-            "description": tool.description,
-            "parameters": tool.parameters,
-        })).collect::<Vec<_>>(),
-        "tool_choice": prompt.tool_choice.as_ref().map(|choice| match choice {
-            ToolChoice::Auto => json!("auto"),
-            ToolChoice::None => json!("none"),
-            ToolChoice::Required => json!("required"),
-            ToolChoice::Named(name) => json!({ "named": name }),
-        }),
+        "format": prompt.format.replay_value(),
+        "tools": prompt.tools.iter().map(Tool::replay_value).collect::<Vec<_>>(),
+        "tool_choice": prompt.tool_choice.as_ref().map(ToolChoice::replay_value),
         "grants": {
             "references": prompt.grants.references,
             "verify": prompt.grants.verify,
