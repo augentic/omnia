@@ -30,7 +30,7 @@ interface completion {
     /// JSON document encoded as UTF-8 text.
     type json = string;
 
-    /// JSON document returned to the guest; validated per `prompt.format`.
+    /// JSON document returned to the guest; validated per `request.format`.
     type answer = string;
 
     /// Chat turn author.
@@ -67,7 +67,7 @@ interface completion {
         value: string,
     }
 
-    /// Structured prompt template; used when `prompt.messages` is empty.
+    /// Structured prompt template; used when `request.messages` is empty.
     record sections {
         /// Persona / actor instruction.
         role: option<string>,
@@ -151,6 +151,8 @@ interface completion {
         name: string,
         /// Tool allowlist; empty exposes every tool the server advertises.
         tools: list<string>,
+        // /// MCP server URL.
+        // url: string,
     }
 
     /// A tool offered to the model: a guest-declared function or a named MCP server.
@@ -187,7 +189,7 @@ interface completion {
     }
 
     /// Complete models-API-style request for one completion.
-    record prompt {
+    record request {
         /// Opaque model id hint; passed through unchanged. Backend may override.
         model: option<string>,
         /// System / instructions channel. Applied per assembly rules (§3.1.1).
@@ -222,7 +224,7 @@ interface completion {
 
     /// One validated completion result.
     record reply {
-        /// The validated JSON answer, per `prompt.format`.
+        /// The validated JSON answer, per `request.format`.
         answer: answer,
         /// Token accounting, when the backend reports it.
         usage: option<usage>,
@@ -251,10 +253,10 @@ interface completion {
     }
 
     /// Single-shot completion — returns one validated `reply`.
-    create: async func(prompt: prompt) -> result<reply, error>;
+    create: async func(request: request) -> result<reply, error>;
 
-    /// Streaming completion over the same `prompt`. Read until `done` or `failed`.
-    create-stream: async func(prompt: prompt) -> result<stream<event>, error>;
+    /// Streaming completion over the same `request`. Read until `done` or `failed`.
+    create-stream: async func(request: request) -> result<stream<event>, error>;
 }
 
 /// Guest world: import and call `completion`.

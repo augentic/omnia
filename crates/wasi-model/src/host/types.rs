@@ -2,19 +2,19 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::host::generated::omnia::model::completion::{Message, Prompt};
+use crate::host::generated::omnia::model::completion::{Message, Request};
 
-/// Host-prepared input for one completion: the generated guest prompt plus the
-/// provider chat channels the host assembled from it (§3.1.1).
+/// Host-prepared input for one completion: the guest request plus the provider
+/// chat channels the host assembled from it (§3.1.1).
 ///
 /// The host assembles once at the `create` gate so every backend consumes the
 /// same `system` / `messages`; backends must not re-derive them from `sections`.
 #[derive(Debug)]
-pub struct PreparedPrompt {
-    /// The guest prompt; replay keys on this, never the channels. The host has
+pub struct PreparedRequest {
+    /// The guest request; replay keys on this, never the channels. The host has
     /// already taken the lent `grants.workspace` borrow, so it is always `None`
     /// here.
-    pub prompt: Prompt,
+    pub request: Request,
     /// Assembled system / instructions channel, if any.
     pub system: Option<String>,
     /// Assembled chat turns to send to the provider.

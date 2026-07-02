@@ -32,7 +32,7 @@ use omnia::{
 };
 use omnia::wasmtime::StoreLimitsBuilder;
 use omnia_wasi_model::{
-    Answer, ConnectOptions, FutureResult, HasModel, ModelDefault, PreparedPrompt, ToolHost,
+    Answer, ConnectOptions, FutureResult, HasModel, ModelDefault, PreparedRequest, ToolHost,
     WasiModel, WasiModelCtx,
 };
 use serde_json::{Value, json};
@@ -288,7 +288,7 @@ struct LocalPathProbe {
 
 impl WasiModelCtx for LocalPathProbe {
     fn complete(
-        &self, _request: PreparedPrompt, tool_host: Arc<dyn ToolHost>,
+        &self, _request: PreparedRequest, tool_host: Arc<dyn ToolHost>,
     ) -> FutureResult<Answer> {
         let expected = self.expected.clone();
         async move {

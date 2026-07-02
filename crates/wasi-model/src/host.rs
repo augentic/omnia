@@ -49,11 +49,11 @@ pub use self::default_impl::{ConnectOptions, ModelDefault};
 use self::generated::omnia::model::completion;
 use self::generated::omnia::model::completion::Error;
 pub use self::generated::omnia::model::completion::{
-    Effort, Event, Example, Format, Function, Generation, Grants, Mcp, Message, Prompt, Reply,
+    Effort, Event, Example, Format, Function, Generation, Grants, Mcp, Message, Reply, Request,
     Role, Schema, Sections, Tool, ToolChoice, Variable,
 };
 pub use self::types::{
-    Answer, DirEntry, PreparedPrompt, Reference, ToolTurn, Transcript, Usage, VerifyReport,
+    Answer, DirEntry, PreparedRequest, Reference, ToolTurn, Transcript, Usage, VerifyReport,
 };
 
 /// Host-side service for `wasi-model` (a linked-only effect host).
@@ -80,14 +80,14 @@ pub trait WasiModelCtx: Debug + Send + Sync + 'static {
     /// Produce an answer for `request`, optionally lending the per-completion
     /// [`ToolHost`] to backends that drive an in-process tool loop.
     fn complete(
-        &self, request: PreparedPrompt, tool_host: Arc<dyn ToolHost>,
+        &self, request: PreparedRequest, tool_host: Arc<dyn ToolHost>,
     ) -> FutureResult<Answer>;
 }
 
 /// Forward the backend trait.
 impl WasiModelCtx for Box<dyn WasiModelCtx> {
     fn complete(
-        &self, request: PreparedPrompt, tool_host: Arc<dyn ToolHost>,
+        &self, request: PreparedRequest, tool_host: Arc<dyn ToolHost>,
     ) -> FutureResult<Answer> {
         (**self).complete(request, tool_host)
     }

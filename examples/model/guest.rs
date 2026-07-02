@@ -6,10 +6,6 @@
 //! trigger, so it is driven by the integration test (`crates/wasi-model/tests`)
 //! rather than a live request — the run-1 (replay) acceptance vehicle (§6).
 //!
-//! `run` is `async` because `create` is an async import. The guest sets
-//! `grants.references = "shelf"` as data, but Phase 1 replay short-circuits tool
-//! calls, so no `resolve` is exercised here.
-//!
 //! It also reads `wasi:filesystem/preopens` and, when the host has mounted a
 //! workspace named `.` (the `[[mount]]` in `omnia.toml`), lends it
 //! through `grants.workspace`. With no mount configured the preopen table is
@@ -21,11 +17,11 @@ use omnia_wasi_model::completion;
 use wasip3::exports::cli::run::Guest;
 use wasip3::filesystem::preopens;
 
-struct Example;
+struct CliGuest;
 
-wasip3::cli::command::export!(Example);
+wasip3::cli::command::export!(CliGuest);
 
-impl Guest for Example {
+impl Guest for CliGuest {
     async fn run() -> Result<(), ()> {
         // Read the preopen table the host populated from `[[mount]]` (RFC-55) and
         // pick the tree named `.` to lend. `directories` must outlive the
@@ -34,7 +30,7 @@ impl Guest for Example {
         let directories = preopens::get_directories();
         let workspace = directories.iter().find_map(|(dir, name)| (name == ".").then_some(dir));
 
-        let prompt = completion::Prompt {
+        let request = completion::Request {
             model: None,
             system: None,
             messages: vec![],
@@ -62,7 +58,7 @@ impl Guest for Example {
             },
         };
 
-        let answer = match completion::create(prompt).await {
+        let answer = match completion::create(request).await {
             Ok(reply) => reply.answer,
             Err(error) => format!("error: {error:?}"),
         };
