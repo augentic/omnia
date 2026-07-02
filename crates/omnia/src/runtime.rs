@@ -1,4 +1,4 @@
-//! Deployment lifecycle: [`Backends`], [`RuntimeHooks`], [`Runtime`], [`run`], and [`ExitStatus`].
+//! Deployment lifecycle: [`Backends`], [`Wiring`], [`Runtime`], [`run`], and [`ExitStatus`].
 
 mod command;
 
@@ -64,7 +64,7 @@ impl Mode {
 }
 
 /// Host linking and trigger-server startup for a deployment.
-pub trait RuntimeHooks<B: Backends> {
+pub trait Wiring<B: Backends> {
     /// Link every declared host into the deployment linker.
     ///
     /// # Errors
@@ -81,7 +81,7 @@ pub trait RuntimeHooks<B: Backends> {
 pub async fn main<B, H>(mode: Mode) -> ExitCode
 where
     B: Backends,
-    H: RuntimeHooks<B>,
+    H: Wiring<B>,
 {
     match Cli::parse().command {
         Command::Run { wasm, config, args } => match run::<B, H>(wasm, config, args, mode).await {
@@ -113,7 +113,7 @@ pub async fn run<B, H>(
 ) -> Result<ExitStatus>
 where
     B: Backends,
-    H: RuntimeHooks<B>,
+    H: Wiring<B>,
 {
     let deployment = DeploymentBuilder::new()
         .wasm(wasm)

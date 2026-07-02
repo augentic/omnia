@@ -18,11 +18,11 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
-use omnia::{ExitStatus, Mode, RuntimeHooks, run};
+use omnia::{ExitStatus, Mode, Wiring, run};
 
-struct EmptyHooks;
+struct EmptyWiring;
 
-impl RuntimeHooks<()> for EmptyHooks {
+impl Wiring<()> for EmptyWiring {
     fn link(_deployment: &mut omnia::Deployment<omnia::StoreCtx<()>>) -> Result<()> {
         Ok(())
     }
@@ -54,7 +54,7 @@ fn cli_wasm(target: &Path) -> Option<PathBuf> {
 async fn run_cli(wasm: &Path, tail: &[&str]) -> Result<ExitStatus> {
     // The `()` bundle links no hosts; `wasi:cli` is wired by the deployment
     // builder, and `Runtime::new` threads the guest argv into every store.
-    run::<(), EmptyHooks>(
+    run::<(), EmptyWiring>(
         Some(wasm.to_path_buf()),
         None,
         tail.iter().map(|arg| (*arg).to_string()).collect(),

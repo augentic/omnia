@@ -34,7 +34,7 @@ pub use self::registry::{
     CliRoutes, Guest, GuestId, HttpRoutes, Registry, Resolver, Routes, TopicRoutes, TriggerRouter,
 };
 pub use self::runtime::Mode;
-pub use self::runtime::{Backends, ExitStatus, Runtime, RuntimeHooks};
+pub use self::runtime::{Backends, ExitStatus, Runtime, Wiring};
 #[doc(hidden)]
 pub use self::runtime::{main, run};
 pub use self::store::{
