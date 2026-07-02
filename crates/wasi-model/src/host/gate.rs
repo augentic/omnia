@@ -141,7 +141,6 @@ mod tests {
         Schema {
             name: "verdict".to_owned(),
             schema: "{\"type\":\"object\"}".to_owned(),
-            strict: None,
         }
     }
 
@@ -254,8 +253,6 @@ mod tests {
             generation: None,
             format: Format::Json,
             tools: vec![],
-            tool_choice: None,
-            metadata: vec![],
             grants: Grants {
                 references: None,
                 workspace: None,

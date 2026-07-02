@@ -50,7 +50,7 @@ use self::generated::omnia::model::completion;
 use self::generated::omnia::model::completion::Error;
 pub use self::generated::omnia::model::completion::{
     Effort, Event, Example, Format, Function, Generation, Grants, Mcp, Message, Reply, Request,
-    Role, Schema, Sections, Tool, ToolChoice, Variable,
+    Role, Schema, Sections, Tool, Variable,
 };
 pub use self::types::{
     Answer, DirEntry, PreparedRequest, Reference, ToolTurn, Transcript, Usage, VerifyReport,

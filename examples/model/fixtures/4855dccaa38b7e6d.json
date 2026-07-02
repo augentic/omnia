@@ -16,12 +16,10 @@
       "kind": "schema",
       "schema": {
         "name": "verdict",
-        "schema": "{\"type\":\"object\"}",
-        "strict": null
+        "schema": "{\"type\":\"object\"}"
       }
     },
     "tools": [],
-    "tool_choice": null,
     "grants": {
       "references": "shelf",
       "verify": []

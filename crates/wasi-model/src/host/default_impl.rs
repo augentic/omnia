@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tracing::instrument;
 
-use crate::host::generated::omnia::model::completion::{Request, Tool, ToolChoice};
+use crate::host::generated::omnia::model::completion::{Request, Tool};
 use crate::host::types::{Answer, PreparedRequest, Transcript, Usage};
 use crate::host::{FutureResult, ToolHost, WasiModelCtx};
 
@@ -163,7 +163,6 @@ fn reduced_value(request: &Request) -> Value {
         "generation": request.generation.as_ref().map(|generation| json!({
             "temperature": generation.temperature,
             "top_p": generation.top_p,
-            "top_k": generation.top_k,
             "max_tokens": generation.max_tokens,
             "stop": generation.stop,
             "seed": generation.seed,
@@ -171,7 +170,6 @@ fn reduced_value(request: &Request) -> Value {
         })),
         "format": request.format.replay_value(),
         "tools": request.tools.iter().map(Tool::replay_value).collect::<Vec<_>>(),
-        "tool_choice": request.tool_choice.as_ref().map(ToolChoice::replay_value),
         "grants": {
             "references": request.grants.references,
             "verify": request.grants.verify,

@@ -46,11 +46,8 @@ impl Guest for CliGuest {
             format: completion::Format::Schema(completion::Schema {
                 name: "verdict".to_string(),
                 schema: "{\"type\":\"object\"}".to_string(),
-                strict: None,
             }),
             tools: vec![],
-            tool_choice: None,
-            metadata: vec![],
             grants: completion::Grants {
                 references: Some("shelf".to_string()),
                 workspace,

@@ -22,6 +22,7 @@ This emits `target/wasm32-wasip2/debug/examples/cli_wasm.wasm`. The `cdylib` cra
 The host *is* the `omnia` CLI, so the guest loads through the `run` subcommand — the same surface every example uses. Everything after `--` is forwarded to the guest as its argv (`argv[0]` is the program name, supplied by the host):
 
 ```bash
+export RUST_LOG=info
 cargo run --example cli -- run ./target/wasm32-wasip2/debug/examples/cli_wasm.wasm -- greet Ada
 cargo run --example cli -- run ./target/wasm32-wasip2/debug/examples/cli_wasm.wasm -- add 2 3 4
 cargo run --example cli -- run ./target/wasm32-wasip2/debug/examples/cli_wasm.wasm -- env

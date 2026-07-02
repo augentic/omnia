@@ -4,7 +4,7 @@ use std::fmt;
 
 use serde_json::{Value, json};
 
-use crate::host::generated::omnia::model::completion::{Effort, Format, Role, Tool, ToolChoice};
+use crate::host::generated::omnia::model::completion::{Effort, Format, Role, Tool};
 
 impl fmt::Display for Role {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -37,7 +37,6 @@ impl Format {
                 "schema": {
                     "name": spec.name,
                     "schema": spec.schema,
-                    "strict": spec.strict,
                 },
             }),
         }
@@ -61,17 +60,6 @@ impl Tool {
                     "url": mcp.url,
                 },
             }),
-        }
-    }
-}
-
-impl ToolChoice {
-    pub(crate) fn replay_value(&self) -> Value {
-        match self {
-            Self::Auto => json!("auto"),
-            Self::None => json!("none"),
-            Self::Required => json!("required"),
-            Self::Named(name) => json!({ "named": name }),
         }
     }
 }

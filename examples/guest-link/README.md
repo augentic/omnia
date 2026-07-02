@@ -38,6 +38,7 @@ This emits `target/wasm32-wasip2/debug/examples/guest_link_responder_wasm.wasm` 
 ## Run
 
 ```bash
+export RUST_LOG=info
 cargo run --example guest-link -- run --config examples/guest-link/omnia.toml
 ```
 

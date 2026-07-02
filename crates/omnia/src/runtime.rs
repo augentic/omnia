@@ -2,6 +2,7 @@
 
 mod command;
 
+use std::env;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -133,6 +134,8 @@ where
     // wire host-mediated link servers
     serve_links(&runtime).await.context("wiring host-mediated link serve side")?;
 
+    log_bootstrap_complete(&runtime, mode);
+
     match mode {
         Mode::Command => {
             let servers_runtime = runtime.clone();
@@ -148,6 +151,18 @@ where
             Ok(ExitStatus::SUCCESS)
         }
     }
+}
+
+fn log_bootstrap_complete<B>(runtime: &Runtime<B>, mode: Mode)
+where
+    B: Clone + Send + Sync + 'static,
+{
+    tracing::info!(
+        mode = if mode.is_command() { "command" } else { "server" },
+        guests = runtime.registry().guests().count(),
+        component = env::var("COMPONENT").unwrap_or_else(|_| "unknown".into()),
+        "omnia ready",
+    );
 }
 
 fn drive_epoch(engine: Engine, tick: Duration) {
@@ -174,7 +189,7 @@ fn sample_pool(engine: Engine, interval: Duration) {
                 break;
             };
 
-            tracing::info!(
+            tracing::debug!(
                 gauge.pool_core_instances = metrics.core_instances(),
                 gauge.pool_component_instances = metrics.component_instances(),
                 gauge.pool_memories = metrics.memories() as u64,

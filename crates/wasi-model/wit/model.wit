@@ -89,8 +89,11 @@ interface completion {
         name: string,
         /// JSON Schema document the answer must conform to.
         schema: json,
-        /// Provider strict-mode hint when supported.
-        strict: option<bool>,
+        // YAGNI (Tier 1): never forwarded to a provider — genai's `JsonSpec`
+        // ignores it and cursor embeds only the schema text. Re-add when a
+        // backend actually honors provider strict mode.
+        // /// Provider strict-mode hint when supported.
+        // strict: option<bool>,
     }
 
     /// Output shape constraint for the completion.
@@ -121,8 +124,10 @@ interface completion {
         temperature: option<f32>,
         /// Nucleus sampling threshold.
         top-p: option<f32>,
-        /// Top-k sampling cutoff.
-        top-k: option<u32>,
+        // YAGNI (Tier 1): not forwardable to any current backend — genai exposes
+        // no top-k control and cursor ignores `generation` entirely.
+        // /// Top-k sampling cutoff.
+        // top-k: option<u32>,
         /// Maximum output tokens.
         max-tokens: option<u32>,
         /// Sequences that halt generation.
@@ -163,17 +168,20 @@ interface completion {
         mcp(mcp),
     }
 
-    /// Tool selection policy (`tool_choice` in provider APIs).
-    variant tool-choice {
-        /// Provider selects whether to call tools.
-        auto,
-        /// Do not call tools.
-        none,
-        /// Must call at least one tool.
-        required,
-        /// Must call the named tool.
-        named(string),
-    }
+    // YAGNI (Tier 1): no backend maps a tool-choice policy onto its provider
+    // (genai and cursor both ignore it), so both the variant and the
+    // `request.tool-choice` field below are commented out until one does.
+    // /// Tool selection policy (`tool_choice` in provider APIs).
+    // variant tool-choice {
+    //     /// Provider selects whether to call tools.
+    //     auto,
+    //     /// Do not call tools.
+    //     none,
+    //     /// Must call at least one tool.
+    //     required,
+    //     /// Must call the named tool.
+    //     named(string),
+    // }
 
     /// Host capabilities lent for this completion; drives host-injected tool injection.
     record grants {
@@ -204,10 +212,12 @@ interface completion {
         format: format,
         /// Guest-declared functions and MCP grants merged with host-injected tools at the backend.
         tools: list<tool>,
-        /// Tool selection policy. Defaults to provider/backend `auto`.
-        tool-choice: option<tool-choice>,
-        /// Tracing and attribution metadata (key/value pairs).
-        metadata: list<tuple<string, string>>,
+        // YAGNI (Tier 1): never honored by a backend; see the `tool-choice` variant above.
+        // /// Tool selection policy. Defaults to provider/backend `auto`.
+        // tool-choice: option<tool-choice>,
+        // YAGNI (Tier 1): never read by any backend and not part of the replay key.
+        // /// Tracing and attribution metadata (key/value pairs).
+        // metadata: list<tuple<string, string>>,
         /// Host capabilities lent for this call.
         grants: grants,
     }
