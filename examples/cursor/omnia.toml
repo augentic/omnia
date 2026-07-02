@@ -1,9 +1,9 @@
 # Cursor end-to-end example.
 #
-# One HTTP server fronts two guests: `/ask` drives a `complete` call and
-# `/mcp/docs` is the MCP documentation server the spawned cursor-agent reads.
-# Source paths resolve relative to this file. Build both guests first (see
-# README.md), then run from the repository root:
+# Command mode drives the `ask` guest's `wasi:cli/run` export once; the HTTP
+# trigger keeps serving `/mcp/docs` in the background for the spawned
+# cursor-agent. Source paths resolve relative to this file. Build both guests
+# first (see README.md), then run from the repository root:
 #
 #   cargo run --example cursor -- run --config examples/cursor/omnia.toml
 

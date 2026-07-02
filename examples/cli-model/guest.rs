@@ -17,18 +17,12 @@
 
 #![cfg(target_arch = "wasm32")]
 
-wit_bindgen::generate!({
-    world: "complete",
-    path: "model/wit",
-    generate_all,
-});
-
-use omnia::model::completion;
-use wasi::filesystem::preopens;
+use omnia_wasi_model::run::{completion, Guest};
+use wasip3::filesystem::preopens;
 
 struct Example;
 
-export!(Example);
+omnia_wasi_model::run::export!(Example with_types_in omnia_wasi_model::run);
 
 impl Guest for Example {
     async fn run() -> String {

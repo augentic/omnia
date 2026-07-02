@@ -15,6 +15,7 @@ omnia-wasi-identity.workspace = true
 omnia-wasi-jsondb.workspace = true
 omnia-wasi-keyvalue.workspace = true
 omnia-wasi-messaging.workspace = true
+omnia-wasi-model.workspace = true
 omnia-wasi-otel.workspace = true
 omnia-wasi-sql.workspace = true
 omnia-wasi-vault.workspace = true
@@ -22,11 +23,6 @@ omnia-wasi-websocket.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 omnia.workspace = true
-# Host-only: the model example guest builds against its own `model/wit`, so the
-# crate is needed only by `runtime.rs` (the host). Keeping it off the wasm32
-# target also avoids compiling the crate's guest `complete-stream` (native
-# `stream<>`) binding for wasip2.
-omnia-wasi-model.workspace = true
 # Host-only: the cursor example binds `WasiModel` to the external cursor-agent
 # backend (`omnia-cursor` in the `backends` repo).
 omnia-cursor.workspace = true

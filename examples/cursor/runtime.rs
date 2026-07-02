@@ -1,8 +1,8 @@
 //! Cursor example runtime.
 //!
-//! Binds `WasiModel` to the spawned-`cursor-agent` backend and serves two wasm
-//! guests over one HTTP trigger: `/ask` (calls `complete`) and `/mcp/docs` (the
-//! read-only MCP documentation server the agent reads). See `README.md`.
+//! Command mode drives the `ask` guest's `wasi:cli/run` export once and exits
+//! with its status while the HTTP trigger keeps serving `/mcp/docs` in the
+//! background for the spawned `cursor-agent`. See `README.md`.
 
 cfg_if::cfg_if! {
     if #[cfg(not(target_arch = "wasm32"))] {
@@ -12,6 +12,7 @@ cfg_if::cfg_if! {
         use omnia_wasi_otel::{OtelDefault, WasiOtel};
 
         omnia::runtime!({
+            mode: command,
             hosts: {
                 WasiHttp: HttpDefault,
                 WasiOtel: OtelDefault,

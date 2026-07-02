@@ -209,6 +209,24 @@ interface completion {
     complete-stream: async func(prompt: prompt) -> result<stream<stream-event>, error>;
 }
 
+/// References shelf reached only via host-mediated `resolve` dispatch (§4.1).
+interface references {
+    /// Resolve `reference` to its bytes. The runtime core invokes this by convention
+    /// (the export named `resolve`), without naming this interface.
+    resolve: func(reference: string) -> list<u8>;
+}
+
+/// Reactor guest: import `completion` and expose async `run` for test/CLI drivers.
+world run {
+    import completion;
+    export run: async func() -> string;
+}
+
+/// Shelf guest: serve `references` only via host-mediated dispatch.
+world shelf {
+    export references;
+}
+
 /// Guest world: import and call `completion`.
 world model {
     import completion;

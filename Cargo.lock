@@ -2293,6 +2293,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "wasip3",
  "wasmtime",
  "wasmtime-wasi",
  "wit-bindgen 0.58.0",
