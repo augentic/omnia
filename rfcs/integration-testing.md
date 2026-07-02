@@ -8,7 +8,7 @@ Omnia is a WASM (WASI) component runtime. Most behaviour spans a guest `.wasm` c
 
 Today, validation falls into two buckets:
 
-1. **Automated integration tests** — only two exist: - `crates/omnia/tests/guest_link.rs` — host-mediated dynamic linking (`examples/guest-link`) - `crates/wasi-model/tests/replay.rs` — replay and `resolve` dispatch (`examples/cli-model`)
+1. **Automated integration tests** — only two exist: - `crates/omnia/tests/guest_link.rs` — host-mediated dynamic linking (`examples/guest-link`) - `crates/wasi-model/tests/replay.rs` — replay and `resolve` dispatch (`examples/model`)
 2. **Manual example runs** — everything else (`otel`, `http`, `keyvalue`, `sql`, `blobstore`, …) is exercised by building a guest, starting the example host, and inspecting logs or curling an endpoint.
 
 The `wasi-otel-attr` macro is a concrete example of the gap. The macro lives in `crates/wasi-otel-attr` with **zero** automated tests. To verify that `#[omnia_wasi_otel::instrument]` expands correctly and that instrumented spans reach the host, a developer must manually run `examples/otel`:

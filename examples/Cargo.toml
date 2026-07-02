@@ -51,6 +51,10 @@ wit-bindgen.workspace = true
 omnia-guest.workspace = true
 
 [[example]]
+name = "http-bench"
+path = "bench/http_bench.rs"
+
+[[example]]
 name = "blobstore-wasm"
 path = "blobstore/guest.rs"
 crate-type = ["cdylib"]
@@ -86,6 +90,21 @@ crate-type = ["cdylib"]
 name = "cursor"
 path = "cursor/runtime.rs"
 
+# Host-mediated dynamic linking proof (Phase 2 of rfcs/guest-registry.md).
+[[example]]
+name = "guest-link-responder-wasm"
+path = "guest-link/responder.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "guest-link-router-wasm"
+path = "guest-link/router.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "guest-link"
+path = "guest-link/runtime.rs"
+
 [[example]]
 name = "http-wasm"
 path = "http/guest.rs"
@@ -94,10 +113,6 @@ crate-type = ["cdylib"]
 [[example]]
 name = "http"
 path = "http/runtime.rs"
-
-[[example]]
-name = "http-bench"
-path = "bench/http_bench.rs"
 
 [[example]]
 name = "http-proxy-wasm"
@@ -109,6 +124,20 @@ name = "http-proxy"
 path = "http-proxy/runtime.rs"
 
 [[example]]
+name = "http-routing-a-wasm"
+path = "http-routing/guest_a.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "http-routing-b-wasm"
+path = "http-routing/guest_b.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "http-routing"
+path = "http-routing/runtime.rs"
+
+[[example]]
 name = "identity-wasm"
 path = "identity/guest.rs"
 crate-type = ["cdylib"]
@@ -118,6 +147,15 @@ name = "identity"
 path = "identity/runtime.rs"
 
 [[example]]
+name = "jsondb-wasm"
+path = "jsondb/guest.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "jsondb"
+path = "jsondb/runtime.rs"
+
+[[example]]
 name = "keyvalue-wasm"
 path = "keyvalue/guest.rs"
 crate-type = ["cdylib"]
@@ -125,15 +163,6 @@ crate-type = ["cdylib"]
 [[example]]
 name = "keyvalue"
 path = "keyvalue/runtime.rs"
-
-[[example]]
-name = "cli-model-wasm"
-path = "cli-model/guest.rs"
-crate-type = ["cdylib"]
-
-[[example]]
-name = "cli-model"
-path = "cli-model/runtime.rs"
 
 [[example]]
 name = "mcp-wasm"
@@ -153,34 +182,14 @@ crate-type = ["cdylib"]
 name = "messaging"
 path = "messaging/runtime.rs"
 
-# Host-mediated dynamic linking proof (Phase 2 of rfcs/guest-registry.md).
 [[example]]
-name = "guest-link-responder-wasm"
-path = "guest-link/responder.rs"
+name = "model-wasm"
+path = "model/guest.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "guest-link-router-wasm"
-path = "guest-link/router.rs"
-crate-type = ["cdylib"]
-
-[[example]]
-name = "guest-link"
-path = "guest-link/runtime.rs"
-
-[[example]]
-name = "http-routing-a-wasm"
-path = "http-routing/guest_a.rs"
-crate-type = ["cdylib"]
-
-[[example]]
-name = "http-routing-b-wasm"
-path = "http-routing/guest_b.rs"
-crate-type = ["cdylib"]
-
-[[example]]
-name = "http-routing"
-path = "http-routing/runtime.rs"
+name = "model"
+path = "model/runtime.rs"
 
 [[example]]
 name = "otel-wasm"
@@ -190,15 +199,6 @@ crate-type = ["cdylib"]
 [[example]]
 name = "otel"
 path = "otel/runtime.rs"
-
-[[example]]
-name = "jsondb-wasm"
-path = "jsondb/guest.rs"
-crate-type = ["cdylib"]
-
-[[example]]
-name = "jsondb"
-path = "jsondb/runtime.rs"
 
 [[example]]
 name = "sql-wasm"

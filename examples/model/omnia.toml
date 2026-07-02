@@ -13,12 +13,12 @@
 #
 # Build the guest first (see README.md), then run from the repository root:
 #
-#   MODEL_REPLAY_DIR=examples/cli-model/fixtures \
-#     cargo run --example cli-model -- run --config examples/cli-model/omnia.toml
+#   MODEL_REPLAY_DIR=examples/model/fixtures \
+#     cargo run --example model -- run --config examples/model/omnia.toml
 
 [[guest]]
 id = "model"
-source.path = "../../target/wasm32-wasip2/debug/examples/cli_model_wasm.wasm"
+source.path = "../../target/wasm32-wasip2/debug/examples/model_wasm.wasm"
 
 # Read-only workspace the `model` guest lends through `grants.workspace`.
 # `path` resolves relative to this manifest's directory, so `../..` is the repo

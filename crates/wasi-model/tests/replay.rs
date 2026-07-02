@@ -1,11 +1,11 @@
 //! Integration test for `wasi-model` Phase 1 — the run-1 (replay) acceptance
 //! gate (`rfcs/wasi-model.md` §6).
 //!
-//! Builds the `examples/cli-model` `create` guest, links the `WasiModel` host,
+//! Builds the `examples/model` `create` guest, links the `WasiModel` host,
 //! and drives the guest's `wasi:cli/run` export across the real WIT boundary. It
 //! proves the Layer 1 invariant end-to-end:
 //!
-//! 1. **replay** — `ModelDefault` loaded from `examples/cli-model/fixtures` serves
+//! 1. **replay** — `ModelDefault` loaded from `examples/model/fixtures` serves
 //!    the recorded, validated answer for the guest with no backend at all;
 //! 2. **fixture shape** — the checked-in fixture keys on the reduced prompt
 //!    without leaking mount paths or non-serializable workspace handles.
@@ -15,7 +15,7 @@
 //! running tests:
 //!
 //! ```bash
-//! cargo build -p examples --example cli-model-wasm --target wasm32-wasip2
+//! cargo build -p examples --example model-wasm --target wasm32-wasip2
 //! ```
 
 #![cfg(not(target_arch = "wasm32"))]
@@ -207,10 +207,10 @@ async fn call_run(runtime: &Runtime<TestBundle>) -> Result<String> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn replays_completion_with_no_network() -> Result<()> {
-    let Some(wasm) = guest_wasm(&target_dir(), "cli_model_wasm.wasm") else {
+    let Some(wasm) = guest_wasm(&target_dir(), "model_wasm.wasm") else {
         eprintln!(
-            "skipping `replays_completion_with_no_network`: cli-model guest not built. Run:\n  \
-             cargo build -p examples --example cli-model-wasm --target wasm32-wasip2"
+            "skipping `replays_completion_with_no_network`: model guest not built. Run:\n  \
+             cargo build -p examples --example model-wasm --target wasm32-wasip2"
         );
         return Ok(());
     };
@@ -255,7 +255,7 @@ fn expected_answer() -> Value {
     json!({ "verdict": "pass", "reason": "the bounds check is correct" })
 }
 
-/// The checked-in example fixture directory (`examples/cli-model/fixtures`).
+/// The checked-in example fixture directory (`examples/model/fixtures`).
 fn committed_fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/model/fixtures")
 }
@@ -313,10 +313,10 @@ impl WasiModelCtx for LocalPathProbe {
 /// the per-completion [`ToolHost`] (what `omnia-cursor` reads).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn workspace_resolves_to_local_path() -> Result<()> {
-    let Some(wasm) = guest_wasm(&target_dir(), "cli_model_wasm.wasm") else {
+    let Some(wasm) = guest_wasm(&target_dir(), "model_wasm.wasm") else {
         eprintln!(
-            "skipping `workspace_resolves_to_local_path`: cli-model guest not built. Run:\n  \
-             cargo build -p examples --example cli-model-wasm --target wasm32-wasip2"
+            "skipping `workspace_resolves_to_local_path`: model guest not built. Run:\n  \
+             cargo build -p examples --example model-wasm --target wasm32-wasip2"
         );
         return Ok(());
     };

@@ -26,18 +26,18 @@ The runtime core stays generic (Law 2): no model id, provider, or schema dialect
 A whole-workspace `wasm32-wasip2` build fails on the native-only host crates, so build the guest components explicitly:
 
 ```bash
-cargo build -p examples --example cli-model-wasm --example cli-model-shelf-wasm --target wasm32-wasip2
+cargo build -p examples --example model-wasm --target wasm32-wasip2
 ```
 
-This emits `target/wasm32-wasip2/debug/examples/cli_model_wasm.wasm` and `cli_model_shelf_wasm.wasm` (the underscored names the manifest points at).
+This emits `target/wasm32-wasip2/debug/examples/model_wasm.wasm` (the underscored name the manifest points at).
 
 ## Run
 
 Point `MODEL_REPLAY_DIR` at the checked-in fixtures and start the host:
 
 ```bash
-MODEL_REPLAY_DIR=examples/cli-model/fixtures \
-  cargo run --example cli-model -- run --config examples/cli-model/omnia.toml
+MODEL_REPLAY_DIR=examples/model/fixtures \
+  cargo run --example model -- run --config examples/model/omnia.toml
 ```
 
 Because the guest exports a plain async `run` (not an HTTP/messaging trigger), the end-to-end completion is exercised by the integration test rather than inbound traffic:
