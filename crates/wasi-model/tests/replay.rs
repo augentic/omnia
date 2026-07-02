@@ -26,20 +26,19 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context as _, Result, bail};
 use futures::FutureExt as _;
+use omnia::wasmtime::StoreLimitsBuilder;
 use omnia::{
     Backend, Deployment, DeploymentBuilder, GuestId, MountRegistry, Registry, ResolvedPreopen,
     Runtime, StoreBase, StoreCtx, WrpcState,
 };
-use omnia::wasmtime::StoreLimitsBuilder;
 use omnia_wasi_model::{
     Answer, ConnectOptions, FutureResult, HasModel, ModelDefault, PreparedRequest, ToolHost,
     WasiModel, WasiModelCtx,
 };
 use serde_json::{Value, json};
-use wasmtime_wasi::ResourceTable;
-use wasmtime_wasi::WasiCtxBuilder;
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 use wasmtime_wasi::p3::bindings::Command;
+use wasmtime_wasi::{ResourceTable, WasiCtxBuilder};
 
 /// A factory the test bundle calls per clone to mint a fresh backend.
 type BackendFactory = Arc<dyn Fn() -> Box<dyn WasiModelCtx> + Send + Sync>;
@@ -258,7 +257,7 @@ fn expected_answer() -> Value {
 
 /// The checked-in example fixture directory (`examples/cli-model/fixtures`).
 fn committed_fixtures() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/cli-model/fixtures")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/model/fixtures")
 }
 
 /// Replay the guest with a `ModelDefault` backend loaded from `dir`.
