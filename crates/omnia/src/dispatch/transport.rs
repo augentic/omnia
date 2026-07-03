@@ -6,9 +6,9 @@
 //! client connection to a target, so "desktop -> cloud" becomes a transport
 //! swap rather than a code change.
 //!
-//! Phase 2 ships one implementation, [`InProcess`]: full wRPC encode/decode over
+//! Today it has one implementation, [`InProcess`]: full wRPC encode/decode over
 //! an in-memory [`tokio::io::duplex`] byte pipe, with no network. Unix-domain
-//! sockets, NATS and QUIC slot in behind the same trait in later phases.
+//! sockets, NATS and QUIC would slot in behind the same trait.
 //!
 //! The serve side is the registry itself: each target guest that exports a
 //! host-mediated interface runs a wRPC [`Server`] whose handlers instantiate the
@@ -48,8 +48,8 @@ pub type LinkClient = InProcClient;
 /// concrete transport — so the same selector-driven dispatch runs co-located or
 /// distributed.
 ///
-/// Phase 2 implements it for [`InProcess`] only; the trait is the seam Phase 3
-/// extends with UDS / NATS / QUIC.
+/// Only [`InProcess`] implements it today; the trait is the seam a distributed
+/// transport (UDS / NATS / QUIC) would extend.
 pub trait LinkTransport: Send + Sync + 'static {
     /// The wRPC client handle this transport hands the dispatch path.
     type Client: wrpc_transport::Invoke<Context = ()>;

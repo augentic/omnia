@@ -57,21 +57,12 @@ tokio-util = { workspace = true, features = ["codec"] }
 omnia-host-macros.workspace = true
 wasmtime = { workspace = true, features = ["runtime"] }
 wasmtime-wasi.workspace = true
-# `wasi:http`'s view trait (`WasiHttpView`) is foreign, so omnia owns the one
-# blanket `WasiHttpView for StoreCtx<B>` impl (every other host owns its view
-# trait and blankets it in its own crate).
 wasmtime-wasi-http.workspace = true
-# Host-mediated dynamic linking (Phase 2): wRPC is the carrier on every leg.
-# The in-process transport rides an in-memory byte pipe; `wrpc-wasmtime`
-# provides the `Val` codec and the instance-per-call serve integration. Pinned
-# to a reviewed git rev in the workspace manifest (the wasmtime-46 line is not
-# yet on crates.io).
 wrpc-transport.workspace = true
 wrpc-wasmtime.workspace = true
+# wrpc-runtime-wasmtime.workspace = true
 
-# The host-mediated dynamic-linking integration test (`tests/guest_link.rs`) drives
-# a router->responder dispatch on a multi-thread runtime; wasmtime / wasmtime-wasi
-# types come from the crate's own re-exports, so they need no dev-dependency.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 anyhow.workspace = true
+omnia-testkit.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

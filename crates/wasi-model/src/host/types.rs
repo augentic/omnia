@@ -2,34 +2,49 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::host::generated::augentic::model::completion::{Message, Prompt};
+use crate::host::generated::omnia::model::completion::{Message, Request};
 
-/// Host-prepared input for one completion: the generated guest prompt plus the
-/// provider chat channels the host assembled from it (§3.1.1).
+/// Host-prepared input for one completion: the guest request plus the provider
+/// chat channels the host assembled from it (§3.1.1).
 ///
-/// The host assembles once at the `complete` gate so every backend consumes the
+/// The host assembles once at the `create` gate so every backend consumes the
 /// same `system` / `messages`; backends must not re-derive them from `sections`.
 #[derive(Debug)]
-pub struct PreparedPrompt {
-    /// The guest prompt; replay keys on this, never the channels. The host has
+pub struct PreparedRequest {
+    /// The guest request; replay keys on this, never the channels. The host has
     /// already taken the lent `grants.workspace` borrow, so it is always `None`
     /// here.
-    pub prompt: Prompt,
+    pub request: Request,
     /// Assembled system / instructions channel, if any.
     pub system: Option<String>,
     /// Assembled chat turns to send to the provider.
     pub messages: Vec<Message>,
 }
 
-/// A backend's result: the parsed answer value plus an optional transcript.
-/// Host-only — the guest sees only the validated `answer` string the `complete`
-/// binding derives from `value`.
-#[derive(Clone, Debug, PartialEq)]
+/// A backend's result: the parsed answer value, optional usage, and transcript.
+///
+/// Host-only — the guest sees a `reply` whose `answer` is the validated string
+/// the `create` binding derives from `value`.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Answer {
     /// The parsed JSON answer the backend produced.
     pub value: serde_json::Value,
+    /// Token accounting the backend reported, surfaced to the guest as `reply.usage`.
+    pub usage: Option<Usage>,
     /// Optional tool-call transcript for replay.
     pub transcript: Option<Transcript>,
+}
+
+/// Token accounting for one completion. Mirrors the WIT `usage` record; the
+/// serde derive lets it ride in replay fixtures alongside the transcript.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Usage {
+    /// Prompt tokens consumed.
+    pub input_tokens: u32,
+    /// Completion tokens produced.
+    pub output_tokens: u32,
+    /// Reasoning tokens, for models that bill them separately.
+    pub reasoning_tokens: Option<u32>,
 }
 
 /// A reference an adapter asked the model to resolve (`ToolHost::resolve`).
@@ -58,10 +73,7 @@ pub struct VerifyReport {
 }
 
 /// One recorded tool interaction within a completion's transcript.
-// `args`/`result` are `serde_json::Value`, which is not `Eq` (it carries f64),
-// so this type can only be `PartialEq`.
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolTurn {
     /// The tool the model called.
     pub tool: String,
@@ -73,8 +85,8 @@ pub struct ToolTurn {
 
 /// The tool-call transcript a backend may capture for replay. Host-only;
 /// it never crosses the WIT boundary. Empty for backends with no tool loop
-/// (replay, cursor) in Phase 1.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+/// (replay, cursor).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Transcript {
     /// Ordered tool turns the backend drove to reach the answer.
     pub turns: Vec<ToolTurn>,

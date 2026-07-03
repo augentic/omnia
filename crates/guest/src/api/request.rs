@@ -1,112 +1,18 @@
-//! # Request Handler API
-//!
-//! This module provides a type-safe API for handling requests using the
-//! [typestate pattern](https://cliffle.com/blog/rust-typestate/).
-//!
-//! ## Core Types
-//!
-//! - [`Handler`]: Trait implemented by request types to process requests and produce [`Reply`]
-//! - [`RequestHandler`]: Type-state builder for configuring and executing requests
-//! - [`Context`]: Request-scoped context passed to handlers
-//!
-//! ## Typestate Pattern
-//!
-//! The type system ensures requests are properly configured at compile time,
-//! preventing execution without required components (owner, provider, request).
-//!
-//! ### Valid Runtime Transitions
+//! Request handling via a [typestate](https://cliffle.com/blog/rust-typestate/)
+//! builder. [`Handler`] is implemented by request types to parse raw input and
+//! produce a [`Reply`]; [`RequestHandler`] threads the required owner, provider,
+//! and request through the type system so `.handle()` only compiles once all
+//! three are set; [`Context`] bundles the per-request owner, provider, and
+//! headers passed to [`Handler::handle`].
 //!
 //! ```text
 //! RequestHandler<NoRequest, NoOwner, NoProvider>
-//!   → .owner("alice")  → RequestHandler<NoRequest, OwnerSet, NoProvider>
-//!   → .provider(p)     → RequestHandler<NoRequest, OwnerSet, ProviderSet<P>>
-//!   → .request(r)      → RequestHandler<RequestSet<R,P>, OwnerSet, ProviderSet<P>>
-//!   → .handle().await  → Result<Reply<R::Output>, R::Error>
+//!   .owner(..) → .provider(..) → .request(..) → .handle().await
 //! ```
 //!
-//! Methods can be called in any order (except `.handle()` which must be last).
-//! The `.headers()` method can be called at any point in the chain.
-//!
-//! ## Usage Examples
-//!
-//! ### Example: From raw input (Recommended)
-//!
-//! The [`Handler::handler()`] method provides a convenient API for a 'oneshot'
-//! builder pattern:
-//!
-//! ```rust,ignore
-//! 
-//! // Simple request - await directly (IntoFuture)
-//! let response = MyRequest::handler(bytes)?
-//!     .owner("alice")
-//!     .provider(my_provider)
-//!     .await?;
-//!
-//! // Or explicitly call `handle()`
-//! let response = Request::handler(body.to_vec())?
-//!        .provider(my_provider)
-//!        .owner("owner")
-//!        .handle()
-//!        .await?;
-//! ```
-//!
-//! ### Example: Using [`RequestHandler`] Directly
-//!
-//! ```rust,ignore
-//! use omnia_guest::api::{RequestHandler, Handler};
-//!
-//! // Manual construction with typestate safety
-//! let response = RequestHandler::new()
-//!     .owner("alice")
-//!     .provider(my_provider)
-//!     .request(my_request)
-//!     .headers(my_headers)  // Optional
-//!     .handle()
-//!     .await?;
-//! ```
-//!
-//! ### Example: Using Client
-//!
-//! The [`Client`] provides a more convenient API that sets owner and provider upfront:
-//! ```rust,ignore
-//! use omnia_guest::Client;
-//!
-//! // Create a client with owner and provider
-//! let client = Client::new("alice").provider(my_provider);
-//!
-//! // Simple request - await directly (IntoFuture)
-//! let response = client.request(my_request).await?;
-//!
-//! // Request with headers
-//! let response = client
-//!     .request(my_request)
-//!     .headers(my_headers)
-//!     .await?;
-//!
-//! // Or explicitly call handle()
-//! let response = client
-//!     .request(my_request)
-//!     .headers(my_headers)
-//!     .handle()
-//!     .await?;
-//! ```
-//!
-//! ## Compile-Time Safety
-//!
-//! The typestate pattern ensures these errors are caught at compile time:
-//! ```rust,compile_fail,ignore
-//! 
-//! // ❌ Cannot handle without all required fields
-//! RequestHandler::new().handle().await?;  // Won't compile!
-//!
-//! // ❌ Cannot handle without provider
-//! RequestHandler::new()
-//!     .owner("alice")
-//!     .request(my_request)
-//!     .handle().await?;  // Won't compile!
-//! ```
-//!
-//! Only when all required fields are set does `.handle()` become available.
+//! Construct one via [`Handler::handler`] or [`Client`]; `.headers()` is
+//! optional, and a fully-configured handler can be awaited directly (it
+//! implements [`IntoFuture`]).
 
 use std::error::Error;
 use std::fmt::Debug;
@@ -199,9 +105,6 @@ impl Default for RequestHandler<NoRequest, NoOwner, NoProvider> {
     }
 }
 
-// ----------------------------------------------
-// New builder
-// ----------------------------------------------
 impl RequestHandler<NoRequest, NoOwner, NoProvider> {
     /// Create a new (default) `RequestHandler`.
     #[must_use]
@@ -226,9 +129,6 @@ impl RequestHandler<NoRequest, NoOwner, NoProvider> {
     }
 }
 
-// ----------------------------------------------
-// Set Owner
-// ----------------------------------------------
 impl<R, P> RequestHandler<R, NoOwner, P> {
     /// Set the owner (transitions typestate).
     #[must_use]
@@ -242,9 +142,6 @@ impl<R, P> RequestHandler<R, NoOwner, P> {
     }
 }
 
-// ----------------------------------------------
-// Set Provider
-// ----------------------------------------------
 impl<R, O> RequestHandler<R, O, NoProvider> {
     /// Set the provider (transitions typestate).
     pub fn provider<P: Provider>(self, provider: &P) -> RequestHandler<R, O, ProviderSet<'_, P>> {
@@ -257,9 +154,6 @@ impl<R, O> RequestHandler<R, O, NoProvider> {
     }
 }
 
-// ----------------------------------------------
-// Set Request
-// ----------------------------------------------
 impl<O, P> RequestHandler<NoRequest, O, P> {
     /// Set the request (transitions typestate).
     pub fn request<R, Pr>(self, request: R) -> RequestHandler<RequestSet<R, Pr>, O, P>
@@ -276,9 +170,6 @@ impl<O, P> RequestHandler<NoRequest, O, P> {
     }
 }
 
-// ----------------------------------------------
-// Headers
-// ----------------------------------------------
 impl<R, O, P> RequestHandler<R, O, P> {
     /// Set request headers.
     #[must_use]
@@ -288,9 +179,6 @@ impl<R, O, P> RequestHandler<R, O, P> {
     }
 }
 
-// ----------------------------------------------
-// Handle the request
-// ----------------------------------------------
 impl<R, P> RequestHandler<RequestSet<R, P>, OwnerSet<'_>, ProviderSet<'_, P>>
 where
     R: Handler<P>,

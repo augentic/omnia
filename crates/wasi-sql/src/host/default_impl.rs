@@ -2,10 +2,8 @@
 //!
 //! This is a lightweight implementation for development use only.
 
-#![allow(clippy::significant_drop_tightening)]
-#![allow(clippy::cast_possible_truncation)]
-#![allow(clippy::cast_possible_wrap)]
-#![allow(clippy::cast_lossless)]
+// `derive(FromEnv)` generates undocumented `from_env`/`requirements` associated
+// functions that would otherwise trip `missing_docs`.
 #![allow(missing_docs)]
 
 use std::sync::Arc;
@@ -80,6 +78,9 @@ struct SqliteConnectionImpl {
 }
 
 impl Connection for SqliteConnectionImpl {
+    // The mutex guard must outlive the prepared statement that borrows the
+    // connection, so the drop cannot be tightened further.
+    #[expect(clippy::significant_drop_tightening)]
     fn query(&self, query: String, params: Vec<DataType>) -> FutureResult<Vec<Row>> {
         tracing::debug!("executing query: {}", query);
         let conn = Arc::clone(&self.conn);
@@ -127,6 +128,8 @@ impl Connection for SqliteConnectionImpl {
         .boxed()
     }
 
+    // See `query`: the guard must outlive the prepared statement.
+    #[expect(clippy::significant_drop_tightening)]
     fn exec(&self, query: String, params: Vec<DataType>) -> FutureResult<u32> {
         tracing::debug!("executing statement: {}", query);
         let conn = Arc::clone(&self.conn);
@@ -148,6 +151,9 @@ impl Connection for SqliteConnectionImpl {
     }
 }
 
+// `u64 as i64` is the standard SQLite convention: store the raw bits and let
+// readers reinterpret, since SQLite integers are always signed 64-bit.
+#[expect(clippy::cast_possible_wrap)]
 fn datatype_to_rusqlite_value(dt: &DataType) -> rusqlite::types::Value {
     match dt {
         DataType::Boolean(Some(b)) => rusqlite::types::Value::Integer(i64::from(*b)),

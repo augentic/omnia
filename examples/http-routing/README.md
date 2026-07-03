@@ -14,6 +14,7 @@ cargo build --example http-routing-b-wasm --target wasm32-wasip2
 ## Run the host
 
 ```sh
+export RUST_LOG="info,omnia_wasi_http=debug"
 cargo run --example http-routing -- run --config examples/http-routing/omnia.toml
 ```
 

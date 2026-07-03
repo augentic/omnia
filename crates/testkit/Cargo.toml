@@ -1,0 +1,32 @@
+[package]
+name = "omnia-testkit"
+description = "Shared integration-test scaffolding for the Omnia workspace (guest location, manifests, and an in-process HTTP driver)"
+publish = false
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+# Native-only: `testkit` drives host runtimes and is consumed solely as a
+# dev-dependency of native integration tests. It never compiles for the guest
+# `wasm32-wasip2` target, so its dependencies (notably `omnia`) live under the
+# same target gate the runtime crate uses.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+anyhow.workspace = true
+bytes.workspace = true
+futures.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+omnia.workspace = true
+tokio = { workspace = true, features = ["rt", "sync"] }
+wasmtime.workspace = true
+wasmtime-wasi.workspace = true
+wasmtime-wasi-http.workspace = true

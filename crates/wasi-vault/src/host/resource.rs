@@ -22,7 +22,7 @@ pub trait Locker: Debug + Send + Sync + 'static {
     /// Check if the entry exists.
     fn exists(&self, secret_id: String) -> FutureResult<bool>;
 
-    /// List all keys in the bucket.
+    /// List all secret IDs in the locker.
     fn list_ids(&self) -> FutureResult<Vec<String>>;
 }
 

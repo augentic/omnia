@@ -1,15 +1,9 @@
 # Model completion example (rfcs/wasi-model.md).
 #
-# The `model` guest imports `augentic:model/completion` and calls `complete`.
+# The `model` guest imports `omnia:model/completion` and calls `create`.
 # The host serves it with the in-tree `ModelDefault` (replay) backend: with
-# `MODEL_REPLAY_DIR` pointing at the checked-in fixtures, `complete` returns the
+# `MODEL_REPLAY_DIR` pointing at the checked-in fixtures, `create` returns the
 # recorded, validated answer with no live model and no network.
-#
-# The `shelf` guest exports a `references` interface and is reached only via
-# host-mediated `resolve` (Phase 2a) — a backend that emits a `resolve` tool call
-# for a prompt with `grants.references = "shelf"` lands a fresh `shelf` instance
-# per call. It declares no trigger and is inert under the replay backend (replay
-# short-circuits tools); the resolve path is exercised by the integration test.
 #
 # The `[[mount]]` preopens the repository root into every guest sandbox as a
 # read-only workspace named `.`. The `model` guest reads it via
@@ -17,7 +11,7 @@
 # backend ignores the workspace (Phase 1 short-circuits tools); the host-side
 # resolution is proven by the integration test.
 #
-# Build both guests first (see README.md), then run from the repository root:
+# Build the guest first (see README.md), then run from the repository root:
 #
 #   MODEL_REPLAY_DIR=examples/model/fixtures \
 #     cargo run --example model -- run --config examples/model/omnia.toml
@@ -25,10 +19,6 @@
 [[guest]]
 id = "model"
 source.path = "../../target/wasm32-wasip2/debug/examples/model_wasm.wasm"
-
-[[guest]]
-id = "shelf"
-source.path = "../../target/wasm32-wasip2/debug/examples/model_shelf_wasm.wasm"
 
 # Read-only workspace the `model` guest lends through `grants.workspace`.
 # `path` resolves relative to this manifest's directory, so `../..` is the repo

@@ -5,9 +5,9 @@ use http::{HeaderValue, StatusCode};
 use crate::api::Body;
 use crate::api::reply::Reply;
 
-/// Result type for HTTP requests.
-#[allow(type_alias_bounds)]
-pub type HttpResult<T: IntoResponse, E: IntoResponse = HttpError> = Result<T, E>;
+/// Result type for HTTP requests; `T` and `E` are expected to implement
+/// [`IntoResponse`].
+pub type HttpResult<T, E = HttpError> = Result<T, E>;
 
 /// Implemented by the `Reply::body` to convert itself into a format compatible
 /// with `[IntoResponse]`.

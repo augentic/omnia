@@ -5,9 +5,9 @@ use futures::FutureExt as _;
 use wasmtime::component::{Val, types};
 
 use super::link::contains_resource;
+use crate::host::FutureResult;
 use crate::registry::GuestId;
 use crate::runtime::Runtime;
-use crate::traits::FutureResult;
 
 /// Host-originated dynamic dispatch into a *known* guest export — the host→guest
 /// counterpart of the selector-driven guest→guest `dispatch`.

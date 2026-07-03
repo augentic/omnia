@@ -3,10 +3,10 @@
 //! Maps an inbound trigger to a guest [`GuestId`] generically: the runtime core routes
 //! on opaque identities and route strings only, never on domain concepts.
 //!
-//! Two table shapes cover the triggers:
-//! - [`HttpRoutes`] — longest-prefix match on a request path.
-//! - [`TopicRoutes`] — NATS-style token match on a messaging topic (also
-//!   used for websocket routes via the manifest's `route` alias).
+//! [`RouteTable`] is one table generic over a [`MatchStrategy`]; the aliases
+//! [`HttpRoutes`] (longest-prefix), [`PatternRoutes`] (NATS-style tokens, also
+//! driving websocket routes), and [`CliRoutes`] (exact subcommand) select the
+//! policy.
 //!
 //! [`Router`] layers the capability-based default routing of the guest-registry
 //! design over a table: with no routes configured a sole handler exporter is the
@@ -14,6 +14,7 @@
 //! require explicit routes to disambiguate.
 
 use std::collections::HashMap;
+use std::marker::PhantomData;
 
 use anyhow::{Result, bail};
 use wasmtime::component::InstancePre;
@@ -32,62 +33,77 @@ pub trait Resolver {
     fn is_empty(&self) -> bool;
 }
 
-/// Longest-prefix HTTP route table: `/target/omnia` wins over `/target`.
-#[derive(Clone, Debug, Default)]
-pub struct HttpRoutes {
-    /// `(prefix, target)` pairs, sorted by prefix length descending so the
-    /// first match is the longest.
-    entries: Vec<(String, GuestId)>,
+/// Match-and-order policy that distinguishes the route tables.
+pub trait MatchStrategy {
+    /// Whether `key` matches route `pattern`.
+    fn matches(key: &str, pattern: &str) -> bool;
+
+    /// Reorder entries at construction so a linear `resolve` scan returns the
+    /// intended winner. Defaults to preserving declaration order.
+    fn order(_entries: &mut [(String, GuestId)]) {}
 }
 
-impl HttpRoutes {
-    /// Build a table from `(prefix, target)` pairs, ordering longest prefix
-    /// first so resolution is a simple find.
+/// Longest-prefix path matching: `/target/omnia` wins over `/target`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PrefixMatch;
+
+/// NATS-style wildcard matching: `.`-tokenised, `*` matches one token, `>`
+/// matches one or more trailing tokens.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PatternMatch;
+
+/// Exact string matching, used for CLI subcommands.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ExactMatch;
+
+impl MatchStrategy for PrefixMatch {
+    fn matches(key: &str, pattern: &str) -> bool {
+        path_has_prefix(key, pattern)
+    }
+
+    fn order(entries: &mut [(String, GuestId)]) {
+        entries.sort_by_key(|(prefix, _)| std::cmp::Reverse(prefix.len()));
+    }
+}
+
+impl MatchStrategy for PatternMatch {
+    fn matches(key: &str, pattern: &str) -> bool {
+        topic_matches(key, pattern)
+    }
+}
+
+impl MatchStrategy for ExactMatch {
+    fn matches(key: &str, pattern: &str) -> bool {
+        pattern == key
+    }
+}
+
+/// A per-trigger route table resolving a routing key to a target identity,
+/// generic over its [`MatchStrategy`].
+#[derive(Clone, Debug, Default)]
+pub struct RouteTable<M> {
+    /// `(pattern, target)` pairs, ordered by the strategy at construction.
+    entries: Vec<(String, GuestId)>,
+    strategy: PhantomData<M>,
+}
+
+impl<M: MatchStrategy> RouteTable<M> {
+    /// Build a table from `(pattern, target)` pairs, applying the strategy's
+    /// construction ordering so `resolve` is a single linear scan.
     #[must_use]
     pub fn new(entries: impl IntoIterator<Item = (String, GuestId)>) -> Self {
         let mut entries: Vec<(String, GuestId)> = entries.into_iter().collect();
-        entries.sort_by_key(|(prefix, _)| std::cmp::Reverse(prefix.len()));
-        Self { entries }
-    }
-}
-
-impl Resolver for HttpRoutes {
-    fn resolve(&self, key: &str) -> Option<&GuestId> {
-        self.entries.iter().find(|(prefix, _)| path_has_prefix(key, prefix)).map(|(_, id)| id)
-    }
-
-    fn targets(&self) -> impl Iterator<Item = &GuestId> {
-        self.entries.iter().map(|(_, id)| id)
-    }
-
-    fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-}
-
-/// NATS-style topic route table: `.`-tokenised, `*` matches exactly one token,
-/// `>` matches one or more trailing tokens. Drives messaging (`topic`) and
-/// websocket (`route`).
-#[derive(Clone, Debug, Default)]
-pub struct TopicRoutes {
-    /// `(pattern, target)` pairs; the first match in declaration order wins.
-    entries: Vec<(String, GuestId)>,
-}
-
-impl TopicRoutes {
-    /// Build a table from `(pattern, target)` pairs, preserving declaration
-    /// order (first match wins).
-    #[must_use]
-    pub fn new(entries: impl IntoIterator<Item = (String, GuestId)>) -> Self {
+        M::order(&mut entries);
         Self {
-            entries: entries.into_iter().collect(),
+            entries,
+            strategy: PhantomData,
         }
     }
 }
 
-impl Resolver for TopicRoutes {
+impl<M: MatchStrategy> Resolver for RouteTable<M> {
     fn resolve(&self, key: &str) -> Option<&GuestId> {
-        self.entries.iter().find(|(pattern, _)| topic_matches(key, pattern)).map(|(_, id)| id)
+        self.entries.iter().find(|(pattern, _)| M::matches(key, pattern)).map(|(_, id)| id)
     }
 
     fn targets(&self) -> impl Iterator<Item = &GuestId> {
@@ -99,51 +115,27 @@ impl Resolver for TopicRoutes {
     }
 }
 
-/// CLI route table: maps a subcommand to a target guest.
+/// Longest-prefix HTTP route table.
+pub type HttpRoutes = RouteTable<PrefixMatch>;
+
+/// NATS-style wildcard route table, driving messaging topics and websocket
+/// routes.
+pub type PatternRoutes = RouteTable<PatternMatch>;
+
+/// Exact-match CLI subcommand route table.
 ///
-/// The subcommand is the guest's first argument. `[[route.cli]]` manifest
-/// parsing is not yet wired, so this table is empty today and a sole
-/// `wasi:cli/run` exporter is the catch-all; the type exists so the `cli`
-/// trigger routes through the same machinery as every other trigger when
-/// multi-command routing lands.
-#[derive(Clone, Debug, Default)]
-pub struct CliRoutes {
-    /// `(subcommand, target)` pairs; the first exact match wins.
-    entries: Vec<(String, GuestId)>,
-}
-
-impl CliRoutes {
-    /// Build a table from `(subcommand, target)` pairs, preserving declaration
-    /// order (first match wins).
-    #[must_use]
-    pub fn new(entries: impl IntoIterator<Item = (String, GuestId)>) -> Self {
-        Self {
-            entries: entries.into_iter().collect(),
-        }
-    }
-}
-
-impl Resolver for CliRoutes {
-    fn resolve(&self, key: &str) -> Option<&GuestId> {
-        self.entries.iter().find(|(subcommand, _)| subcommand == key).map(|(_, id)| id)
-    }
-
-    fn targets(&self) -> impl Iterator<Item = &GuestId> {
-        self.entries.iter().map(|(_, id)| id)
-    }
-
-    fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-}
+/// `[[route.cli]]` manifest parsing is not yet wired, so this table is empty
+/// today and a sole `wasi:cli/run` exporter is the catch-all; the type exists so
+/// the `cli` trigger routes through the same machinery as every other trigger.
+pub type CliRoutes = RouteTable<ExactMatch>;
 
 /// The per-trigger route tables a registry carries, parsed from the manifest's
 /// `[[route.*]]` sections.
 #[derive(Clone, Debug, Default)]
 pub struct Routes {
     http: HttpRoutes,
-    messaging: TopicRoutes,
-    websocket: TopicRoutes,
+    messaging: PatternRoutes,
+    websocket: PatternRoutes,
     cli: CliRoutes,
 }
 
@@ -151,7 +143,7 @@ impl Routes {
     /// Assemble the per-trigger tables.
     #[must_use]
     pub const fn new(
-        http: HttpRoutes, messaging: TopicRoutes, websocket: TopicRoutes, cli: CliRoutes,
+        http: HttpRoutes, messaging: PatternRoutes, websocket: PatternRoutes, cli: CliRoutes,
     ) -> Self {
         Self {
             http,
@@ -169,13 +161,13 @@ impl Routes {
 
     /// The messaging (topic) route table.
     #[must_use]
-    pub const fn messaging(&self) -> &TopicRoutes {
+    pub const fn messaging(&self) -> &PatternRoutes {
         &self.messaging
     }
 
     /// The websocket (route) route table.
     #[must_use]
-    pub const fn websocket(&self) -> &TopicRoutes {
+    pub const fn websocket(&self) -> &PatternRoutes {
         &self.websocket
     }
 
@@ -403,7 +395,7 @@ mod tests {
 
     #[test]
     fn topic_wildcard() {
-        let routes = TopicRoutes::new([
+        let routes = PatternRoutes::new([
             ("specify.build.>".to_owned(), id("workflow")),
             ("events.*.created".to_owned(), id("audit")),
         ]);
@@ -490,20 +482,6 @@ mod tests {
             router,
         };
         assert!(tr.is_inert());
-        assert_eq!(tr.resolve("/anything"), None);
-        assert_eq!(tr.catch_all(), None);
-    }
-
-    #[test]
-    fn trigger_router_missing_index() {
-        // Defensive: the router resolves an identity whose indices entry is
-        // absent (never happens post-build, since both come from the same set).
-        let router = Router::build("http", &[id("a")], HttpRoutes::default())
-            .expect("a sole exporter is the catch-all");
-        let tr: TriggerRouter<u32, HttpRoutes> = TriggerRouter {
-            indices: HashMap::new(),
-            router,
-        };
         assert_eq!(tr.resolve("/anything"), None);
         assert_eq!(tr.catch_all(), None);
     }

@@ -4,6 +4,8 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+use crate::Mount;
+
 /// Command line interface for omnia.
 #[derive(Parser, PartialEq, Eq)]
 pub struct Cli {
@@ -27,6 +29,19 @@ pub enum Command {
         /// deployment. Falls back to the `OMNIA_CONFIG` environment variable.
         #[arg(short, long)]
         config: Option<PathBuf>,
+
+        /// Preopen a host directory into the guest sandbox (repeatable).
+        /// Format: `path=<host-path>[,name=<guest-name>][,writable]`; `name`
+        /// defaults to `.`. Appended to the manifest's mounts when `--config`
+        /// is also given.
+        #[arg(long = "mount")]
+        mounts: Vec<Mount>,
+
+        /// Host-mediated interface to dispatch on the guest's behalf
+        /// (repeatable). Unioned with the manifest's per-guest `link` lists
+        /// when `--config` is also given.
+        #[arg(long = "link")]
+        links: Vec<String>,
 
         /// Arguments forwarded to the guest as its argv (everything after
         /// `--`). Empty for a long-lived server; a `wasi:cli` command reads

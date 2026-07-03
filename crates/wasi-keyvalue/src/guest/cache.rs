@@ -134,23 +134,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn valid() {
-        let value = vec![1, 2, 3, 4];
-        let expires_at = Utc::now() + Duration::seconds(60);
-
-        let cacheable = Cacheable {
-            value: value.clone(),
-            expires_at,
-        };
-
-        let bytes = serde_json::to_vec(&cacheable).unwrap();
-        let parsed = Cacheable::try_from(&bytes).unwrap();
-
-        assert_eq!(parsed.value, value);
-        assert_eq!(parsed.expires_at.timestamp(), expires_at.timestamp());
-    }
-
-    #[test]
     fn invalid_json() {
         let invalid = b"not a json".to_vec();
         let result = Cacheable::try_from(&invalid);

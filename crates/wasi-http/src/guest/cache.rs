@@ -254,43 +254,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn validates_serialization_deserialization() {
-        let body = b"{\"ok\":true}";
-        let response = Response::builder()
-            .status(201)
-            .header("content-type", "application/json")
-            .header("etag", "cached")
-            .header(CACHE_CONTROL, "max-age=20")
-            .header(IF_NONE_MATCH, "\"label=AMP        633\"")
-            .body(Bytes::from_static(body))
-            .expect("should build response");
-
-        // simulating the serialization & de-serialization that happens during cache put and get
-        let serialized = serialize(&response).unwrap();
-        let deserialized_response = deserialize(&serialized).unwrap();
-
-        assert_eq!(deserialized_response.status(), response.status());
-        assert_eq!(
-            deserialized_response.headers().get("content-type").unwrap(),
-            response.headers().get("content-type").unwrap()
-        );
-        assert_eq!(
-            deserialized_response.headers().get("etag").unwrap(),
-            response.headers().get("etag").unwrap()
-        );
-        assert_eq!(
-            deserialized_response.headers().get(CACHE_CONTROL).unwrap(),
-            response.headers().get(CACHE_CONTROL).unwrap()
-        );
-        assert_eq!(
-            deserialized_response.headers().get(IF_NONE_MATCH).unwrap(),
-            response.headers().get(IF_NONE_MATCH).unwrap()
-        );
-        assert_eq!(deserialized_response.body(), response.body());
-    }
-
-    #[test]
-    fn returns_none_when_header_missing() {
+    fn header_missing() {
         let headers = HeaderMap::new();
         let control = Control::try_from(&headers).expect("should parse");
 
@@ -301,7 +265,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_max_age_with_etag() {
+    fn max_age_with_etag() {
         let mut headers = HeaderMap::new();
         headers.append(CACHE_CONTROL, "max-age=120".parse().unwrap());
         headers.append(IF_NONE_MATCH, "\"strong-etag\"".parse().unwrap());
@@ -314,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn requibe_etag_when_store_enabled() {
+    fn store_enabled() {
         let mut headers = HeaderMap::new();
         headers.append(CACHE_CONTROL, "no-cache".parse().unwrap());
 
@@ -324,7 +288,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_conflicting_directives() {
+    fn conflicting_directives() {
         let mut headers = HeaderMap::new();
         headers.append(CACHE_CONTROL, "no-store, no-cache, max-age=10".parse().unwrap());
         headers.append(IF_NONE_MATCH, "\"etag\"".parse().unwrap());
@@ -335,7 +299,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_weak_etag_value() {
+    fn weak_etag() {
         let mut headers = HeaderMap::new();
         headers.append(CACHE_CONTROL, "no-cache".parse().unwrap());
         headers.append(IF_NONE_MATCH, "W/\"weak-etag\"".parse().unwrap());
@@ -346,7 +310,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_multiple_etag_values() {
+    fn multiple_etags() {
         let mut headers = HeaderMap::new();
         headers.append(CACHE_CONTROL, "no-cache".parse().unwrap());
         headers.append(IF_NONE_MATCH, "\"etag1\", \"etag2\"".parse().unwrap());

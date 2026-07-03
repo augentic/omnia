@@ -60,16 +60,6 @@ impl WasiIdentityCtx for IdentityDefault {
     }
 }
 
-#[allow(clippy::derivable_impls)]
-impl Default for AccessToken {
-    fn default() -> Self {
-        Self {
-            token: String::new(),
-            expires_in: 0,
-        }
-    }
-}
-
 impl From<TokenResponse> for AccessToken {
     fn from(token_resp: TokenResponse) -> Self {
         let token = token_resp.access_token().secret().clone();
@@ -120,7 +110,10 @@ impl TokenManager {
         Self {
             options: Arc::new(options),
             cache: Arc::new(Mutex::new(CachedToken {
-                access_token: AccessToken::default(),
+                access_token: AccessToken {
+                    token: String::new(),
+                    expires_in: 0,
+                },
                 expires_at: Instant::now(),
             })),
         }

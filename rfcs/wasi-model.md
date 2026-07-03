@@ -1,20 +1,30 @@
 # Design: The `wasi-model` Host — Remaining Host-Side Work
 
-> Status: Implementation plan — **remaining work only**. The `wasi-model` host core (the `complete` boundary, the `WasiModelCtx` backend trait, the `ToolHost` callbacks, structural answer validation, and composable record/replay) has landed in `crates/wasi-model`, together with the `omnia-genai` (frontier) and `omnia-cursor` (spawned-agent) backends and the in-tree `ModelDefault` (replay) backend in the `backends` repo. The `resolve` callback and its public host→guest dispatch entry point are wired. This document tracks only the host-side pieces that are **not yet built**.
+> Status: Implementation plan — **remaining work only**. The `wasi-model` host core (the guest-visible `create` boundary, the `WasiModelCtx` backend trait, the `ToolHost` callbacks, structural answer validation, and composable record/replay) has landed in `crates/wasi-model`, together with the `omnia-genai` (frontier) and `omnia-cursor` (spawned-agent) backends and the in-tree `ModelDefault` (replay) backend in the `backends` repo. The `resolve` callback and its public host→guest dispatch entry point are wired. This document tracks only the host-side pieces that are **not yet built**.
 
-The authoritative WIT now lives in `crates/wasi-model/wit/model.wit`; the records, `complete` / `complete-stream` signatures, and the `tool-grants` shape are defined at `augentic:model@0.1.0`. Everything below is impl work behind that boundary.
+The authoritative WIT now lives in `crates/wasi-model/wit/model.wit` at **`omnia:model@0.1.0`**. The 0.2.0 boundary defines:
 
-## 1. `json-schema` validation gate
+- **`create` / `create-stream`** — single-shot and streaming completion entry points (guest calls `create`; the host binding delegates to the backend's `WasiModelCtx::complete`).
+- **`format`** — a variant (`text`, `json`, `schema(schema)`) replacing the old `response-format` record + kind enum.
+- **`grants`** — host capabilities lent per call (`references`, `workspace`, `verify`), replacing `tool-grants`.
+- **`tool`** — a variant (`function(function)`, `mcp(mcp)`) for guest-declared functions and named MCP server grants (logical names resolved from deployment config; no URLs in the WIT).
+- **`reply { answer, usage }`** — the validated answer plus optional token accounting returned from `create`.
+- **`event`** — streaming deltas (`delta`, `done(reply)`, `failed(error)`), replacing `stream-event`.
+- Typed **`role`**, **`generation`** (with `effort` / `seed` / `top-k`), and metadata as `list<tuple<string, string>>`.
 
-The `complete` host binding validates every answer before the guest sees it, but only the **structural** gates are live: `json-object` (root is an object) and `text` (root is a string), implemented with `serde_json` alone. The `json-schema` kind is currently **parse-only** — it confirms the answer is valid JSON but does not enforce `response-format.json-schema.schema`.
+Everything below is impl work behind that boundary.
 
-Remaining: pick and pin a JSON-Schema validator crate, then turn on the `json-schema` gate in the `complete` host binding (`crates/wasi-model/src/host/model_impl.rs`). This is the gate Specify's judgment operations require for typed decisions, so it is the highest-value remaining host-side item. Backends that self-check (genai's repair loop) already validate internally; this ensures the host validation gate enforces the schema too.
+## 1. `format::schema` validation gate
 
-## 2. `complete-stream` host binding
+The `create` host binding validates every answer before the guest sees it, but only the **structural** gates are live: `format::json` (root is an object), `format::text` (root is a string), implemented with `serde_json` alone. The `format::schema(_)` arm is currently **parse-only** — it confirms the answer is valid JSON but does not enforce the embedded JSON Schema document.
 
-`complete-stream` and the `stream-event` variant are in the 0.1.0 WIT and the binding is generated, but the host impl returns `error::backend("streaming unsupported")`.
+Remaining: pick and pin a JSON-Schema validator crate, then turn on the schema gate in the `create` host binding (`crates/wasi-model/src/host/model_impl.rs`). This is the gate Specify's judgment operations require for typed decisions, so it is the highest-value remaining host-side item. Backends that self-check (genai's repair loop) already validate internally; this ensures the host validation gate enforces the schema too.
 
-Remaining: wire the host-side production of a native `stream<stream-event>` — the codebase's first native WIT `stream<>` (existing hosts model streams as resources). Streaming does not change validation: only the terminal `done(answer)` is schema-checked and recorded. This is a deliberate one-time exercise of host-side stream production, kept off the critical path until now.
+## 2. `create-stream` host binding
+
+`create-stream` and the `event` variant are in the 0.2.0 WIT and the binding is generated, but the host impl returns `error::backend("streaming unsupported")`.
+
+Remaining: wire the host-side production of a native `stream<event>` — the codebase's first native WIT `stream<>` (existing hosts model streams as resources). Streaming does not change validation: only the terminal `done(reply)` is schema-checked and recorded. This is a deliberate one-time exercise of host-side stream production, kept off the critical path until now.
 
 ## 3. Working-tree tools: `read` / `list` / `write`
 
@@ -22,9 +32,9 @@ The `ToolHost` methods `read` / `list` / `write` are **loud stubs**. They consum
 
 Remaining, once RFC-55 lands:
 
-- Resolve the `prompt.grants.working-tree` `borrow<descriptor>` against the resource table and back `read` / `list` with bounded reads through it (no OS path or descriptor reaches the model).
+- Resolve the `prompt.grants.workspace` `borrow<descriptor>` against the resource table and back `read` / `list` with bounded reads through it (no OS path or descriptor reaches the model).
 - Back `write` with host-held session state in `wasi:keyvalue`, keyed by the prompt hash, so an edit in one tool turn is visible to a `read` in the next. A leaked in-memory session is a regression.
-- The cursor backend's direct `local-path` access likewise switches from the `OMNIA_WORKSPACE` config stopgap to resolving the lent `descriptor`'s `local-path` face once RFC-55 exposes it.
+- The lent `grants.workspace` descriptor already resolves to its `local-path` through the mount registry (`ToolHost::local_path`), which the cursor backend consumes today; RFC-55 adds only the bounded `read` / `list` / `write` faces above, not this path resolution.
 
 The dispatch loop for these tools belongs to the genai backend; see [RFC-59](rfc-59-working-tree-tools.md). This section owns only the host-side wiring.
 

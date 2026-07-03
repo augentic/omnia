@@ -22,7 +22,6 @@ struct Http;
 wasip3::http::service::export!(Http);
 
 impl Guest for Http {
-    /// Routes requests and demonstrates telemetry patterns.
     #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         // tracing-based metrics
@@ -70,7 +69,6 @@ impl Guest for Http {
     }
 }
 
-/// Simple JSON echo handler.
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
 async fn handler(Json(body): Json<Value>) -> HttpResult<Json<Value>> {

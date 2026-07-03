@@ -34,6 +34,22 @@ pub use self::request::*;
 pub trait Provider: Send + Sync {}
 impl<T> Provider for T where T: Send + Sync {}
 
+/// Constructs the provider that generated request handlers build per request.
+///
+/// The `guest!`/`http!`/`messaging!` macros call `Provider::new()`; deriving
+/// `Default` on a [`Provider`] satisfies this via the blanket impl, and the
+/// explicit bound turns a missing constructor into a clear trait error.
+pub trait DefaultProvider: Provider {
+    /// Create the provider used to service a request.
+    fn new() -> Self;
+}
+
+impl<T: Provider + Default> DefaultProvider for T {
+    fn new() -> Self {
+        T::default()
+    }
+}
+
 /// Build an API client to execute the request.
 ///
 /// The client is the main entry point for making API requests. It holds

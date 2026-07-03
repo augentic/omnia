@@ -42,8 +42,8 @@ pub const FORBIDDEN_HEADERS: [HeaderName; 9] = [
 pub struct ConnectOptions {
     #[env(from = "HTTP_ADDR", default = "http://localhost:8080")]
     pub addr: String,
-    #[env(from = "HTTP_CONNECT_TIMEOUT_SECS", default = "10")]
-    pub connect_timeout_secs: u64,
+    #[env(from = "HTTP_CONNECT_TIMEOUT", default = "10")]
+    pub connect_timeout: u64,
 }
 
 impl omnia::FromEnv for ConnectOptions {
@@ -82,8 +82,7 @@ impl Backend for HttpDefault {
 
     #[instrument]
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
-        let connect_timeout = Duration::from_secs(options.connect_timeout_secs);
-
+        let connect_timeout = Duration::from_secs(options.connect_timeout);
         let builder = reqwest::Client::builder().connect_timeout(connect_timeout);
 
         #[cfg(test)]
@@ -228,7 +227,7 @@ mod tests {
     async fn test_client() -> HttpDefault {
         let options = ConnectOptions {
             addr: String::new(),
-            connect_timeout_secs: 10,
+            connect_timeout: 10,
         };
         HttpDefault::connect_with(options).await.unwrap()
     }

@@ -51,7 +51,6 @@ mod kw {
     syn::custom_keyword!(hosts);
 }
 
-#[allow(clippy::large_enum_variant)]
 enum Opt {
     Mode(Mode),
     Hosts(Vec<HostEntry>),

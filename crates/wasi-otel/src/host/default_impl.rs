@@ -4,8 +4,6 @@
 //! It logs telemetry data but doesn't export it anywhere.
 //! For production use, use the `be-opentelemetry` backend.
 
-#![allow(clippy::used_underscore_binding)]
-
 use anyhow::Result;
 use futures::FutureExt;
 use omnia::{Backend, FutureResult};
@@ -15,6 +13,7 @@ use tracing::instrument;
 
 use crate::host::WasiOtelCtx;
 
+/// Options used to connect to the telemetry backend.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions;
 
@@ -31,7 +30,9 @@ pub struct OtelDefault;
 impl Backend for OtelDefault {
     type ConnectOptions = ConnectOptions;
 
-    #[instrument]
+    // `skip_all`: recording the unit `ConnectOptions` would otherwise trip
+    // `clippy::used_underscore_binding` on the expanded `_options`.
+    #[instrument(skip_all)]
     async fn connect_with(_options: Self::ConnectOptions) -> Result<Self> {
         tracing::debug!("Initializing no-op OTel exporter");
         tracing::warn!("Using no-op OTel exporter - will log but not export");

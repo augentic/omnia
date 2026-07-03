@@ -205,7 +205,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn value_to_wasi_datatype_maps_representative_variants() {
+    fn value_to_wasi_datatype_variants() {
         use sea_query::Value;
 
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
@@ -246,7 +246,7 @@ mod tests {
     }
 
     #[test]
-    fn fetch_value_rejects_wrong_types() {
+    fn fetch_wrong_types() {
         use omnia_wasi_sql::Field;
 
         fn one_field_row(value: DataType) -> Row {

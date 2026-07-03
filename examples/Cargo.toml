@@ -10,29 +10,23 @@ anyhow.workspace = true
 cfg-if.workspace = true
 omnia-wasi-blobstore.workspace = true
 omnia-wasi-config.workspace = true
+omnia-wasi-docstore.workspace = true
 omnia-wasi-http.workspace = true
 omnia-wasi-identity.workspace = true
-omnia-wasi-jsondb.workspace = true
 omnia-wasi-keyvalue.workspace = true
 omnia-wasi-messaging.workspace = true
+omnia-wasi-model.workspace = true
 omnia-wasi-otel.workspace = true
 omnia-wasi-sql.workspace = true
 omnia-wasi-vault.workspace = true
 omnia-wasi-websocket.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-omnia.workspace = true
-# Host-only: the model example guest builds against its own `model/wit`, so the
-# crate is needed only by `runtime.rs` (the host). Keeping it off the wasm32
-# target also avoids compiling the crate's guest `complete-stream` (native
-# `stream<>`) binding for wasip2.
-omnia-wasi-model.workspace = true
-# Used by the `http-bench` load-test harness (anyhow + cfg-if come from the
-# shared `[dependencies]` section above).
 bytes.workspace = true
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { workspace = true, features = ["tokio"] }
+omnia.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -50,6 +44,10 @@ tracing.workspace = true
 wasip3.workspace = true
 wit-bindgen.workspace = true
 omnia-guest.workspace = true
+
+[[example]]
+name = "http-bench"
+path = "bench/http_bench.rs"
 
 [[example]]
 name = "blobstore-wasm"
@@ -78,70 +76,6 @@ crate-type = ["cdylib"]
 name = "config"
 path = "config/runtime.rs"
 
-[[example]]
-name = "http-wasm"
-path = "http/guest.rs"
-crate-type = ["cdylib"]
-
-[[example]]
-name = "http"
-path = "http/runtime.rs"
-
-[[example]]
-name = "http-bench"
-path = "bench/http_bench.rs"
-
-[[example]]
-name = "http-proxy-wasm"
-path = "http-proxy/guest.rs"
-crate-type = ["cdylib"]
-
-[[example]]
-name = "http-proxy"
-path = "http-proxy/runtime.rs"
-
-[[example]]
-name = "identity-wasm"
-path = "identity/guest.rs"
-crate-type = ["cdylib"]
-
-[[example]]
-name = "identity"
-path = "identity/runtime.rs"
-
-[[example]]
-name = "keyvalue-wasm"
-path = "keyvalue/guest.rs"
-crate-type = ["cdylib"]
-
-[[example]]
-name = "keyvalue"
-path = "keyvalue/runtime.rs"
-
-[[example]]
-name = "model-wasm"
-path = "model/guest.rs"
-crate-type = ["cdylib"]
-
-# The `references` shelf reached only via host-mediated `resolve` (Phase 2a).
-[[example]]
-name = "model-shelf-wasm"
-path = "model/shelf.rs"
-crate-type = ["cdylib"]
-
-[[example]]
-name = "model"
-path = "model/runtime.rs"
-
-[[example]]
-name = "messaging-wasm"
-path = "messaging/guest.rs"
-crate-type = ["cdylib"]
-
-[[example]]
-name = "messaging"
-path = "messaging/runtime.rs"
-
 # Host-mediated dynamic linking proof (Phase 2 of rfcs/guest-registry.md).
 [[example]]
 name = "guest-link-responder-wasm"
@@ -158,6 +92,24 @@ name = "guest-link"
 path = "guest-link/runtime.rs"
 
 [[example]]
+name = "http-wasm"
+path = "http/guest.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "http"
+path = "http/runtime.rs"
+
+[[example]]
+name = "http-proxy-wasm"
+path = "http-proxy/guest.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "http-proxy"
+path = "http-proxy/runtime.rs"
+
+[[example]]
 name = "http-routing-a-wasm"
 path = "http-routing/guest_a.rs"
 crate-type = ["cdylib"]
@@ -172,6 +124,60 @@ name = "http-routing"
 path = "http-routing/runtime.rs"
 
 [[example]]
+name = "identity-wasm"
+path = "identity/guest.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "identity"
+path = "identity/runtime.rs"
+
+[[example]]
+name = "docstore-wasm"
+path = "docstore/guest.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "docstore"
+path = "docstore/runtime.rs"
+
+[[example]]
+name = "keyvalue-wasm"
+path = "keyvalue/guest.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "keyvalue"
+path = "keyvalue/runtime.rs"
+
+[[example]]
+name = "mcp-wasm"
+path = "mcp/guest.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "mcp"
+path = "mcp/runtime.rs"
+
+[[example]]
+name = "messaging-wasm"
+path = "messaging/guest.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "messaging"
+path = "messaging/runtime.rs"
+
+[[example]]
+name = "model-wasm"
+path = "model/guest.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model"
+path = "model/runtime.rs"
+
+[[example]]
 name = "otel-wasm"
 path = "otel/guest.rs"
 crate-type = ["cdylib"]
@@ -179,15 +185,6 @@ crate-type = ["cdylib"]
 [[example]]
 name = "otel"
 path = "otel/runtime.rs"
-
-[[example]]
-name = "jsondb-wasm"
-path = "jsondb/guest.rs"
-crate-type = ["cdylib"]
-
-[[example]]
-name = "jsondb"
-path = "jsondb/runtime.rs"
 
 [[example]]
 name = "sql-wasm"

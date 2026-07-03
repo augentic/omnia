@@ -1,6 +1,9 @@
 # Design: Integration Testing in Omnia
 
-> Status: Design proposal — no behaviour change; improves test coverage and CI reliability for WASM guest/host flows and proc-macro crates.
+> Status: **Adopted / in progress.** The CI/build fix (§3.1) and the shared
+> test crate (§3.2, shipped as `crates/testkit`) have landed, along with an
+> in-process HTTP driver and per-interface seam tests. The testing policy this
+> RFC implies is codified in §7 and in `AGENTS.md`.
 
 ## 1. The problem
 
@@ -54,7 +57,11 @@ There is **no** task that builds example guests for `wasm32-wasip2` before tests
 
 ## 3. Proposed improvements
 
-### 3.1 Fix the CI/build pipeline (highest leverage)
+### 3.1 Fix the CI/build pipeline (highest leverage) — DONE
+
+`Makefile.toml` now has a `build-guests` task that `test` depends on, and `clean`
+has moved off the default test path into a separate `test-clean` task (resolving
+open question 1). Integration tests execute rather than skip in CI.
 
 Add a `build-guests` task to `Makefile.toml` that builds all `*-wasm` examples for `wasm32-wasip2`:
 
@@ -68,7 +75,15 @@ Make `test` depend on `build-guests` **after** `clean` (or drop `clean` from the
 
 **Outcome:** existing integration tests become meaningful in CI with no new test code.
 
-### 3.2 Extract shared test support
+### 3.2 Extract shared test support — DONE (as `crates/testkit`)
+
+Shipped as `crates/testkit` (package `omnia-testkit`, `publish = false`,
+path-only dev-dependency — resolving open question 2). It provides `find_guest`
+(the "fail in CI, skip locally" locator), `temp_manifest` (a self-cleaning temp
+manifest), and an in-process `http` driver (resolving open question 3 in the
+test crate rather than production — see §3.4). `guest_link.rs` and `replay.rs`
+were ported onto it, dropping the duplicated `common/mod.rs` and the `#[path]`
+hack that `replay.rs` used to share it.
 
 `guest_link.rs` and `replay.rs` duplicate roughly 100 lines each:
 
@@ -141,16 +156,48 @@ Drive a guest that uses `#[instrument]` and assert the captured export contains 
 
 Recommend the tiny guest for macro-focused tests; keep the HTTP path for a broader otel integration test later.
 
-### 3.4 Table-driven examples smoke test
+**Landed (HTTP path):** `crates/wasi-otel/tests/seam.rs` drives the instrumented
+`otel` example guest through `omnia_testkit::http` and swaps `OtelDefault` for a
+`CapturingOtel` that **counts** exported spans and metrics (rather than storing
+whole requests). Metrics flush deterministically when the guest's telemetry guard
+drops at the end of the handler, so they are the reliable assertion; spans ride a
+separate sampled batch flush and are counted only for diagnostics.
 
-Generalize the otel manual workflow: a single integration test (or a small suite) that, per example:
+### 3.4 Per-interface seam tests
 
-1. Builds the guest (or relies on `build-guests`).
-2. Boots the runtime on an ephemeral port.
-3. Issues one request (HTTP curl equivalent, or `call_async` for non-HTTP guests).
-4. Asserts status 200 and expected response body / side effect.
+Realized as one `tests/seam.rs` per WASI crate. Rather than booting a TCP server
+on an ephemeral port (open question 3), `omnia_testkit::http::handle` drives the
+guest's `wasi:http/handler` export **in-process** — it mirrors the runtime's HTTP
+trigger server (`crates/wasi-http/src/host/server.rs`): resolve the guest by
+request path, instantiate fresh, hand it a `wasi:http` request, and collect the
+response — but skips the socket. Each seam test then:
 
-This converts the `examples/*` surface from "run manually" into CI coverage without duplicating the full per-interface test harness for every crate.
+1. Relies on `build-guests` for the pre-built guest (skips locally if absent).
+2. Builds a single-guest runtime with the example's default backends.
+3. Issues one request via `omnia_testkit::http` (or `call_async` for the two
+   `wasi:cli/run` guests, `cli` and `model`).
+4. Asserts the response and, where the effect is host-side, the backend state
+   (e.g. a `wasi:keyvalue` write is read back off the shared backend; `wasi:otel`
+   spans are asserted via a capturing backend).
+
+This converts the `examples/*` surface from "run manually" into CI coverage.
+Landed seam tests: `wasi:keyvalue`, `wasi:blobstore`, `wasi:vault`, `wasi:config`,
+`wasi:docstore` (storage round-trips), `wasi:http` (echo), multi-guest HTTP
+routing (`crates/wasi-http/tests/routing.rs`), `wasi:websocket`, `wasi:messaging`
+(publish observed on a host subscription), `wasi:otel` (capturing backend), and
+the MCP transport (`crates/wasi-http/tests/mcp.rs`, since MCP is a guest-side
+library over `wasi:http`).
+
+Three interfaces have no offline happy path and keep their native unit tests
+instead of a seam test:
+
+- `wasi:identity` — its default performs a real OAuth2 exchange.
+- `wasi:sql` — SQLite with no auto-provisioned schema.
+- `wasi:http` **outbound** (`examples/http-proxy`) — the guest calls real public
+  origins, so its seam is the in-crate `wiremock` suite in
+  `crates/wasi-http/src/host/default_impl.rs`, which already drives a real HTTP
+  boundary against a mock server. It stays in place (it reaches private hooks, so
+  it cannot move to `tests/` without leaking internals).
 
 ## 4. Suggested priority
 
@@ -168,8 +215,45 @@ This converts the `examples/*` surface from "run manually" into CI coverage with
 - Running a real OpenTelemetry Collector in CI (the capturing backend and `OtelDefault` are sufficient for integration tests).
 - Testing guest compilation in CI without the `wasm32-wasip2` target (the `build-guests` task already requires it, which matches `rust-toolchain.toml`).
 
-## 6. Open questions
+## 6. Open questions — resolved
 
-1. Should `clean` remain on the default `test` path, or move to an explicit `test-clean` task? Cleaning before every local test run is slow and is the root cause of the skip behaviour.
-2. Should `test-support` be a published crate or a path-only dev-dependency?
-3. For HTTP-driven tests, should the host expose a programmatic in-process request API (bypassing TCP) to simplify test setup?
+1. **`clean` on the default `test` path?** No. `clean` moved to a dedicated
+   `test-clean` task; `test` depends on `build-guests` instead, so guests are
+   present and the integration tests execute rather than skip.
+2. **`test-support` published or path-only?** Path-only, `publish = false`,
+   shipped as `crates/testkit` (package `omnia-testkit`).
+3. **In-process request API in the host?** Not in production. The in-process
+   HTTP driver lives in `testkit` (`omnia_testkit::http`), mirroring the trigger
+   server without a production surface change.
+
+## 7. Testing policy
+
+The policy this RFC leads to, now in force (see `AGENTS.md`):
+
+- **Unit tests survive only for pure, deterministic logic**: parsers, codecs,
+  filter/type translation, macro token expansion. Anything touching a WASI
+  interface, a host backend, or dispatch is tested at the guest–host seam.
+- **The seam test is the executable spec.** A new interface behaviour is a
+  `tests/seam.rs` case (a behaviour contract like "put then get round-trips
+  through the wasm boundary"), not a transliteration of an implementation detail.
+- **Replace, then delete — never delete first.** A superseded unit-test module is
+  removed in the same change as the seam test that covers it, with `cargo
+  llvm-cov` before/after evidence on the affected host crate: delete only if
+  line/branch coverage holds.
+  - **Measured outcome (first pass).** Auditing the host crates against the new
+    happy-path seams, most default-backend unit tests cover paths the seams do
+    *not* reach — error mapping (`wasi-http` cert/URI/refused cases), isolation
+    and delete (`wasi-vault`), inbound events (`wasi-websocket`), request/reply
+    stubs (`wasi-messaging`) — or pure logic (bson filters, OData, manifest/route
+    parsing, the dispatch selector/depth guard). Those are **retained**. Only two
+    were genuinely superseded and removed: `wasi-docstore`'s `roundtrip_document`
+    and `wasi-messaging`'s `pub_sub_delivers_to_subscriber`, whose exact host
+    paths (`insert`/`get`, `send`/`subscribe`) the seam tests now drive.
+    `cargo llvm-cov` confirmed coverage held — in fact rose, since the seam
+    exercises more of the real path (`producer_impl.rs` 0% → 100%,
+    `docstore/default_impl.rs` 30% → 54% lines).
+- **Guest-side logic keeps native unit tests** where `llvm-cov` cannot instrument
+  the guest `.wasm` (e.g. `crates/guest`).
+- **Names identify, comments explain.** A test name is the scenario
+  (`set_then_get`), not a restated expectation (`set_then_get_round_trips`); nuance
+  goes in a `//` comment, consistent with the repo comment policy.

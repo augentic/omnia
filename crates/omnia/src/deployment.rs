@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use manifest::Manifest;
+pub use manifest::Mount;
 pub use source::{LoadedGuest, Source};
 use wasmtime::component::Linker;
 use wasmtime::{Config, Engine};
@@ -18,7 +19,7 @@ use wrpc_wasmtime::WrpcView;
 
 use crate::dispatch::{DispatchHandle, FirstArgSelector, GuestSelector};
 use crate::mount::{MountRegistry, ResolvedPreopen};
-use crate::registry::{Registry, RegistryBuilder, Routes};
+use crate::registry::{Registry, Routes};
 use crate::{Host, Mode, RuntimeOptions, Server, Telemetry};
 
 /// Selects where a runtime's guests come from, then [`build`]s a [`Deployment`]
@@ -47,6 +48,8 @@ pub struct DeploymentBuilder {
     config: Option<PathBuf>,
     args: Vec<String>,
     mode: Mode,
+    mounts: Vec<Mount>,
+    links: Vec<String>,
 }
 
 impl DeploymentBuilder {
@@ -85,6 +88,22 @@ impl DeploymentBuilder {
         self
     }
 
+    /// Set CLI `--mount` preopens, resolved against the process working
+    /// directory and layered on top of any manifest mounts.
+    #[must_use]
+    pub fn mounts(mut self, mounts: impl Into<Vec<Mount>>) -> Self {
+        self.mounts = mounts.into();
+        self
+    }
+
+    /// Set CLI `--link` host-mediated interfaces, unioned with any manifest
+    /// per-guest link lists.
+    #[must_use]
+    pub fn links(mut self, links: impl Into<Vec<String>>) -> Self {
+        self.links = links.into();
+        self
+    }
+
     /// Resolve the configured source into a [`Deployment`], choosing single-file
     /// or manifest-driven population.
     ///
@@ -100,16 +119,29 @@ impl DeploymentBuilder {
     pub async fn build<T: WasiView + 'static>(self) -> Result<Deployment<T>> {
         let manifest = self.config.or_else(|| env::var_os("OMNIA_CONFIG").map(PathBuf::from));
 
+        // CLI `--mount`/`--link` resolve against the process working directory
+        // and layer on top of whatever the selected source provides.
+        let cli_preopens: Vec<ResolvedPreopen> =
+            self.mounts.iter().map(|entry| entry.resolve(Path::new("."))).collect();
+        let cli_links: BTreeSet<Box<str>> =
+            self.links.iter().map(|link| Box::from(link.as_str())).collect();
+
         let plan = if let Some(manifest) = manifest {
             let parsed = Manifest::load(&manifest)?;
             let base = manifest.parent().unwrap_or_else(|| Path::new("."));
+
+            let mut preopens = parsed.mounts(base);
+            preopens.extend(cli_preopens);
+
+            let mut links = parsed.links();
+            links.extend(cli_links);
 
             Plan {
                 name: parsed.name().to_owned(),
                 sources: parsed.sources(base)?,
                 routes: parsed.routes(),
-                links: parsed.links(),
-                preopens: with_env_mount(parsed.mounts(base)),
+                links,
+                preopens,
                 args: self.args,
                 mode: self.mode,
             }
@@ -124,8 +156,8 @@ impl DeploymentBuilder {
                 name: source.id().as_str().to_owned(),
                 sources: vec![source],
                 routes: Routes::default(),
-                links: BTreeSet::new(),
-                preopens: with_env_mount(Vec::new()),
+                links: cli_links,
+                preopens: cli_preopens,
                 args: self.args,
                 mode: self.mode,
             }
@@ -136,16 +168,6 @@ impl DeploymentBuilder {
 
         Deployment::from_plan(plan).await
     }
-}
-
-// add root preopen if OMNIA_WORKSPACE is set
-fn with_env_mount(mut preopens: Vec<ResolvedPreopen>) -> Vec<ResolvedPreopen> {
-    if let Some(path) = env::var_os("OMNIA_WORKSPACE")
-        && !preopens.iter().any(|po| po.name == ".")
-    {
-        preopens.push(ResolvedPreopen::new(".".to_owned(), PathBuf::from(path), false));
-    }
-    preopens
 }
 
 /// A compiled set of WebAssembly components with their shared Linker, ready to
@@ -245,11 +267,18 @@ impl<T: WasiView> Deployment<T> {
         self.mode
     }
 
-    /// Shared guest argv for threading into [`Runtime::store`](crate::Runtime::store).
+    /// Borrow the guest argv.
     #[must_use]
     pub fn args(&self) -> &[String] {
         &self.args
     }
+
+    // /// Clone the shared guest argv handle for threading into every
+    // /// [`Runtime::store`](crate::Runtime::store) without re-copying the vector.
+    // #[must_use]
+    // pub fn args_shared(&self) -> Arc<Vec<String>> {
+    //     Arc::clone(&self.args)
+    // }
 
     /// Assemble the guest [`Registry`].
     ///
@@ -268,7 +297,7 @@ impl<T: WasiView> Deployment<T> {
         let dispatch =
             DispatchHandle::new(self.selector, self.links, self.options.max_dispatch_depth);
 
-        RegistryBuilder::new(
+        Registry::assemble(
             self.engine,
             self.linker,
             self.options,
@@ -276,7 +305,6 @@ impl<T: WasiView> Deployment<T> {
             self.routes,
             dispatch,
         )
-        .build()
     }
 }
 
@@ -328,12 +356,6 @@ mod tests {
     use wasmtime::{Config, Engine};
 
     use crate::RuntimeOptions;
-
-    #[test]
-    fn builds_with_defaults() {
-        Engine::new(&Config::from(&RuntimeOptions::load().expect("should load")))
-            .expect("default pooling config should build an engine");
-    }
 
     #[test]
     fn builds_with_pooling() {

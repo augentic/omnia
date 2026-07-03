@@ -15,16 +15,12 @@
 //! - **Pub-Sub**: Publish messages to topics, receive via subscription
 //! - **Request-Reply**: Send message and wait for response
 //! - **Fan-out**: Receive one message, produce many
-//!
-//! ## Note
-//!
-//! This example uses the default backend for pub-sub but references "nats"
-//! for request-reply. In production, use consistent client names.
 
 #![cfg(target_arch = "wasm32")]
 
 use std::time::Instant;
 
+use anyhow::{Context, anyhow};
 use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
@@ -36,15 +32,10 @@ use serde_json::{Value, json};
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
 
-// ----------------------------------------------------------------------------
-// HTTP Interface
-// ----------------------------------------------------------------------------
-
 pub struct Http;
 wasip3::http::service::export!(Http);
 
 impl Guest for Http {
-    /// Routes HTTP requests to messaging operations.
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new()
             .route("/pub-sub", post(pub_sub))
@@ -58,34 +49,33 @@ impl Guest for Http {
 async fn pub_sub(Json(body): Json<Value>) -> HttpResult<Json<Value>> {
     tracing::debug!("sending message to topic 'a'");
 
-    let client = Client::connect("default".to_string()).await.expect("should connect");
+    let client =
+        Client::connect("default".to_string()).await.map_err(|e| anyhow!("connect: {e}"))?;
     let message = Message::new(&Bytes::from(body.to_string()));
     message.set_content_type("application/json");
     message.add_metadata("key", "example_key");
 
-    wit_bindgen::block_on(async move {
-        if let Err(e) = producer::send(&client, "a".to_string(), message).await {
-            tracing::error!("error sending message to topic 'a': {e}");
-        }
-        tracing::debug!("handler: message published to topic 'a'");
-    });
+    producer::send(&client, "a".to_string(), message)
+        .await
+        .map_err(|e| anyhow!("publishing to topic 'a': {e}"))?;
 
     Ok(Json(json!({"message": "message published"})))
 }
 
 /// Sends a message and waits for a reply.
-async fn request_reply_handler(body: Bytes) -> Json<Value> {
-    let client = Client::connect("default".to_string()).await.expect("should connect");
+async fn request_reply_handler(body: Bytes) -> HttpResult<Json<Value>> {
+    let client =
+        Client::connect("default".to_string()).await.map_err(|e| anyhow!("connect: {e}"))?;
     let message = Message::new(&body);
-    let reply = wit_bindgen::block_on(async move {
-        request_reply::request(&client, "c".to_string(), &message, None).await
-    })
-    .expect("should reply");
+    let reply = request_reply::request(&client, "c".to_string(), &message, None)
+        .await
+        .map_err(|e| anyhow!("request-reply: {e}"))?;
 
-    let data = reply[0].data();
+    let first = reply.first().context("empty reply")?;
+    let data = first.data();
     let data_str = String::from_utf8_lossy(&data);
 
-    Json(json!({"reply": data_str}))
+    Ok(Json(json!({"reply": data_str})))
 }
 
 /// Simple echo endpoint used as the target for outbound HTTP from the messaging handler.
@@ -93,15 +83,10 @@ async fn upstream_handler(body: Bytes) -> Json<Value> {
     Json(json!({"echo": String::from_utf8_lossy(&body)}))
 }
 
-// ----------------------------------------------------------------------------
-// Messaging Interface
-// ----------------------------------------------------------------------------
-
 pub struct Messaging;
 omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
 
 impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
-    /// Handles incoming messages from subscribed topics.
     async fn handle(message: Message) -> anyhow::Result<(), Error> {
         tracing::debug!("start processing msg");
 
@@ -169,7 +154,7 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
                     .method(http::Method::POST)
                     .uri("http://localhost:8080/upstream")
                     .body(Full::new(Bytes::from(data_str.to_string())))
-                    .expect("failed to build request");
+                    .map_err(|e| Error::Other(format!("building request: {e}")))?;
 
                 println!("calling upstream HTTP from messaging handler");
                 let upstream_body = match omnia_wasi_http::handle(upstream).await {

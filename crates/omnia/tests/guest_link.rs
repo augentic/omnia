@@ -9,24 +9,19 @@
 //! to the caller. Two calls confirm the multi-use carrier (a fresh frame
 //! connection per call).
 //!
-//! The guest components must be built first; the test skips (rather than fails)
-//! when they are absent, because `cargo make ci` cleans the target directory
-//! before running tests:
-//!
-//! ```bash
-//! cargo build -p examples --example guest-link-responder-wasm \
-//!   --example guest-link-router-wasm --target wasm32-wasip2
-//! ```
+//! The guest components are built automatically on first [`find_guest`] call; the test skips
+//! locally when they are absent and fails under CI so the pipeline never passes
+//! vacuously.
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
 use omnia::{DeploymentBuilder, GuestId, MountRegistry, Runtime, serve_links};
+use omnia_testkit::{find_guest, temp_manifest};
 
 /// Per-store context: the library [`omnia::StoreCtx`] over the counting
 /// [`Counter`] bundle. No host backend — the link path needs only the WASI and
@@ -54,21 +49,6 @@ impl Clone for Counter {
     }
 }
 
-/// The `target/` directory: the test executable lives at
-/// `<target>/<profile>/deps/<exe>`.
-fn target_dir() -> PathBuf {
-    let exe = std::env::current_exe().expect("test executable has a path");
-    exe.ancestors().nth(3).expect("test exe sits at <target>/<profile>/deps/<exe>").to_path_buf()
-}
-
-/// Locate a built guest component by file name, preferring the debug profile.
-fn guest_wasm(target: &Path, file: &str) -> Option<PathBuf> {
-    ["debug", "release"]
-        .into_iter()
-        .map(|profile| target.join("wasm32-wasip2").join(profile).join("examples").join(file))
-        .find(|path| path.exists())
-}
-
 /// Instantiate the router fresh, call its `run` export with `message`, and return
 /// the echoed string.
 async fn call_run(runtime: &Runtime<Counter>, message: &str) -> Result<String> {
@@ -93,26 +73,19 @@ async fn call_run(runtime: &Runtime<Counter>, message: &str) -> Result<String> {
     }
 }
 
+// The router guest calls the responder over a host-mediated link, proving
+// dispatch and instance-per-call.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn router_dispatches_to_responder() -> Result<()> {
-    let target = target_dir();
-    let (Some(responder), Some(router)) = (
-        guest_wasm(&target, "guest_link_responder_wasm.wasm"),
-        guest_wasm(&target, "guest_link_router_wasm.wasm"),
-    ) else {
-        eprintln!(
-            "skipping `router_dispatches_to_responder`: guest-link guests not built. Run:\n  \
-             cargo build -p examples --example guest-link-responder-wasm \
-             --example guest-link-router-wasm --target wasm32-wasip2"
-        );
+async fn dispatch() -> Result<()> {
+    let (Some(responder), Some(router)) =
+        (find_guest("guest_link_responder_wasm.wasm"), find_guest("guest_link_router_wasm.wasm"))
+    else {
         return Ok(());
     };
 
     // A manifest mirroring examples/guest-link/omnia.toml, with absolute source paths
     // so it resolves regardless of the working directory.
-    let manifest_path =
-        std::env::temp_dir().join(format!("omnia-guest-link-{}.toml", std::process::id()));
-    let manifest = format!(
+    let manifest = temp_manifest(&format!(
         "[[guest]]\n\
          id = \"responder\"\n\
          source.path = \"{responder}\"\n\n\
@@ -122,11 +95,10 @@ async fn router_dispatches_to_responder() -> Result<()> {
          link = [\"omnia:link/echo\"]\n",
         responder = responder.display(),
         router = router.display(),
-    );
-    std::fs::write(&manifest_path, manifest).context("writing test manifest")?;
+    ))?;
 
     let deployment = DeploymentBuilder::new()
-        .config(manifest_path.clone())
+        .config(manifest.path().to_path_buf())
         .build::<TestCtx>()
         .await
         .context("building runtime")?;
@@ -168,6 +140,5 @@ async fn router_dispatches_to_responder() -> Result<()> {
         }
     }
 
-    let _ = std::fs::remove_file(&manifest_path);
     Ok(())
 }

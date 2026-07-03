@@ -1,22 +1,18 @@
 //! Integration test for `wasi-model` Phase 1 — the run-1 (replay) acceptance
 //! gate (`rfcs/wasi-model.md` §6).
 //!
-//! Builds the `examples/model` `complete` guest, links the `WasiModel` host, and
-//! drives the guest's `run` export across the real WIT boundary. It proves the
-//! Layer 1 invariant end-to-end:
+//! Builds the `examples/model` `create` guest, links the `WasiModel` host,
+//! and drives the guest's `wasi:cli/run` export across the real WIT boundary. It
+//! proves the Layer 1 invariant end-to-end:
 //!
-//! 1. **replay** — `ModelDefault` loaded from `examples/model/fixtures` serves the
-//!    recorded, validated answer for the guest with no backend at all;
+//! 1. **replay** — `ModelDefault` loaded from `examples/model/fixtures` serves
+//!    the recorded, validated answer for the guest with no backend at all;
 //! 2. **fixture shape** — the checked-in fixture keys on the reduced prompt
 //!    without leaking mount paths or non-serializable workspace handles.
 //!
-//! The guest component must be built first; the test skips (rather than fails)
-//! when it is absent, because `cargo make ci` cleans the target directory before
-//! running tests:
-//!
-//! ```bash
-//! cargo build -p examples --example model-wasm --target wasm32-wasip2
-//! ```
+//! The guest component is built automatically on first [`find_guest`] call; the test skips
+//! locally when it is absent and fails under CI so the pipeline never passes
+//! vacuously.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -26,16 +22,20 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context as _, Result, bail};
 use futures::FutureExt as _;
-use omnia::wasmtime::component::Val;
+use omnia::wasmtime::StoreLimitsBuilder;
 use omnia::{
     Backend, Deployment, DeploymentBuilder, GuestId, MountRegistry, Registry, ResolvedPreopen,
-    Runtime,
+    Runtime, StoreBase, StoreCtx, WrpcState,
 };
+use omnia_testkit::{find_guest, temp_manifest};
 use omnia_wasi_model::{
-    Answer, ConnectOptions, FutureResult, HasModel, ModelDefault, PreparedPrompt, Reference,
-    ToolHost, WasiModel, WasiModelCtx,
+    Answer, ConnectOptions, FutureResult, HasModel, ModelDefault, PreparedRequest, ToolHost,
+    WasiModel, WasiModelCtx,
 };
 use serde_json::{Value, json};
+use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
+use wasmtime_wasi::p3::bindings::Command;
+use wasmtime_wasi::{ResourceTable, WasiCtxBuilder};
 
 /// A factory the test bundle calls per clone to mint a fresh backend.
 type BackendFactory = Arc<dyn Fn() -> Box<dyn WasiModelCtx> + Send + Sync>;
@@ -46,8 +46,7 @@ type BackendFactory = Arc<dyn Fn() -> Box<dyn WasiModelCtx> + Send + Sync>;
 ///
 /// The library [`Runtime::store`] clones the bundle to build each per-guest
 /// store, so the bundle's [`Clone`] mints a fresh backend (replacing the old
-/// per-store factory call) and bumps `stores_built` — turning bundle cloning
-/// into the instance-creation witness the `resolve` path asserts on.
+/// per-store factory call) and bumps `stores_built`.
 struct TestBundle {
     backend: BackendFactory,
     model: Box<dyn WasiModelCtx>,
@@ -79,9 +78,8 @@ type TestCtx = omnia::StoreCtx<TestBundle>;
 
 /// Assemble a model [`Runtime`] over `registry` from already-built parts: a
 /// backend `factory` (cloned fresh into every store) and the `mounts`
-/// mounts preopened into each store (empty for the `resolve` path, a single `.`
-/// mount for the completion path so the guest lends a workspace). The shared
-/// shared `stores_built` counts bundle clones — the instance-creation witness.
+/// mounts preopened into each store (empty when no workspace is configured, a
+/// single `.` mount for the completion path so the guest lends a workspace).
 fn model_runtime(
     registry: Arc<Registry<TestCtx>>, backend: BackendFactory, stores_built: Arc<AtomicUsize>,
     mounts: Arc<MountRegistry>,
@@ -107,78 +105,94 @@ fn workspace_mount() -> (PathBuf, Arc<MountRegistry>) {
     (dir, Arc::new(registry))
 }
 
-/// An empty registry — no preopens, the default for paths that don't exercise a
-/// workspace.
-fn no_mounts() -> Arc<MountRegistry> {
-    Arc::new(MountRegistry::default())
-}
-
-/// The `target/` directory: the test executable lives at
-/// `<target>/<profile>/deps/<exe>`.
-fn target_dir() -> PathBuf {
-    let exe = std::env::current_exe().expect("test executable has a path");
-    exe.ancestors().nth(3).expect("test exe sits at <target>/<profile>/deps/<exe>").to_path_buf()
-}
-
-/// Locate a built guest component by file name, preferring the debug profile.
-fn guest_wasm(target: &Path, file: &str) -> Option<PathBuf> {
-    ["debug", "release"]
-        .into_iter()
-        .map(|profile| target.join("wasm32-wasip2").join(profile).join("examples").join(file))
-        .find(|path| path.exists())
-}
-
 /// Build the model runtime for `wasm`, linking `WasiModel`, and return the shared
 /// registry.
 async fn registry(wasm: &Path) -> Result<Arc<Registry<TestCtx>>> {
-    // A one-guest manifest with an absolute source path.
-    let manifest_path =
-        std::env::temp_dir().join(format!("omnia-model-{}.toml", std::process::id()));
-    let manifest = format!("[[guest]]\nid = \"model\"\nsource.path = \"{}\"\n", wasm.display());
-    std::fs::write(&manifest_path, manifest).context("writing test manifest")?;
+    // A one-guest manifest with an absolute source path. The guard removes the
+    // temp file when it drops at the end of this function — after `build` has
+    // read it.
+    let manifest = temp_manifest(&format!(
+        "[[guest]]\nid = \"model\"\nsource.path = \"{}\"\n",
+        wasm.display()
+    ))?;
 
     let mut deployment: Deployment<TestCtx> = DeploymentBuilder::new()
-        .config(manifest_path.clone())
+        .config(manifest.path().to_path_buf())
         .build()
         .await
         .context("building runtime")?;
     deployment.host::<WasiModel, TestBundle>().context("linking WasiModel")?;
     let registry = deployment.into_registry().context("assembling registry")?;
 
-    let _ = std::fs::remove_file(&manifest_path);
     Ok(Arc::new(registry))
 }
 
-/// Instantiate the guest fresh and drive its async `run` export.
+/// Instantiate the guest fresh, drive `wasi:cli/run`, and return stdout.
 async fn call_run(runtime: &Runtime<TestBundle>) -> Result<String> {
     let guest =
         runtime.registry().get(&GuestId::from("model")).context("model guest is registered")?;
-    let mut store = runtime.build_store(runtime.store());
+    let template = runtime.store();
+    let mounts = Arc::clone(&template.base.mounts);
+    let stdout = MemoryOutputPipe::new(65536);
+    let stdout_capture = stdout.clone();
+
+    let mut wasi_builder = WasiCtxBuilder::new();
+    wasi_builder
+        .inherit_env()
+        .inherit_stdin()
+        .stdout(stdout)
+        .stderr(tokio::io::stderr())
+        .args(&["model" as &str]);
+    for entry in mounts.entries() {
+        let _ = wasi_builder.preopened_dir(
+            &entry.host_path,
+            &entry.name,
+            entry.dir_perms,
+            entry.file_perms,
+        );
+    }
+
+    let options = runtime.options();
+    let store_ctx = StoreCtx {
+        base: StoreBase {
+            table: ResourceTable::new(),
+            wasi: wasi_builder.build(),
+            limits: StoreLimitsBuilder::new().memory_size(options.max_memory_bytes).build(),
+            wrpc: WrpcState::new(),
+            dispatcher: Arc::clone(&template.base.dispatcher),
+            mounts,
+        },
+        backends: template.backends.clone(),
+    };
+
+    let mut store = runtime.build_store(store_ctx);
     let instance = runtime
         .instantiate(guest.instance_pre(), &mut store)
         .await
         .context("instantiating guest")?;
-    let run = instance.get_func(&mut store, "run").context("guest exports `run`")?;
+    let command = Command::new(&mut store, &instance).map_err(anyhow::Error::from)?;
 
-    let mut results = vec![Val::String(String::new())];
-    run.call_async(&mut store, &[], &mut results)
+    let outcome = store
+        .run_concurrent(async move |store| command.wasi_cli_run().call_run(store).await)
         .await
         .map_err(anyhow::Error::from)
-        .context("calling model.run")?;
+        .context("calling wasi:cli/run")?;
 
-    match results.into_iter().next() {
-        Some(Val::String(answer)) => Ok(answer),
-        other => bail!("model.run returned a non-string result: {other:?}"),
+    match outcome {
+        Ok(Ok(())) => {}
+        Ok(Err(())) => bail!("model guest returned Err from wasi:cli/run"),
+        Err(error) => return Err(error.into()),
     }
+
+    let output = stdout_capture.contents();
+    String::from_utf8(output.to_vec()).context("guest stdout is utf-8")
 }
 
+// The stub backend replays a canned answer, so the completion round-trips with
+// no network.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn replays_completion_with_no_network() -> Result<()> {
-    let Some(wasm) = guest_wasm(&target_dir(), "model_wasm.wasm") else {
-        eprintln!(
-            "skipping `replays_completion_with_no_network`: model guest not built. Run:\n  \
-             cargo build -p examples --example model-wasm --target wasm32-wasip2"
-        );
+async fn replay() -> Result<()> {
+    let Some(wasm) = find_guest("model_wasm.wasm") else {
         return Ok(());
     };
 
@@ -209,11 +223,9 @@ async fn replays_completion_with_no_network() -> Result<()> {
     let replayed = replay_from(&registry, &fixtures, &mounts)
         .await
         .context("replay from committed fixture")?;
-    assert_eq!(
-        serde_json::from_str::<Value>(&replayed).context("answer is JSON")?,
-        expected,
-        "checked-in example fixture should replay the guest"
-    );
+    let parsed: Value = serde_json::from_str(&replayed)
+        .with_context(|| format!("replayed answer should be JSON, got: {replayed}"))?;
+    assert_eq!(parsed, expected, "checked-in example fixture should replay the guest");
 
     Ok(())
 }
@@ -247,131 +259,6 @@ async fn replay_from(
     call_run(&runtime).await
 }
 
-/// A backend that drives the host→guest `resolve` path with no network: it calls
-/// `tool_host.resolve` for two references and folds the returned bytes into a
-/// JSON-object answer. The prompt's `grants.references` (the guest sets it to
-/// `"shelf"`) routes each call to a fresh `shelf` instance.
-#[derive(Debug)]
-struct ResolvingStub;
-
-impl WasiModelCtx for ResolvingStub {
-    fn complete(
-        &self, _request: PreparedPrompt, tool_host: Arc<dyn ToolHost>,
-    ) -> FutureResult<Answer> {
-        async move {
-            let alpha = tool_host
-                .resolve(Reference {
-                    name: "alpha".to_owned(),
-                })
-                .await?;
-            let beta = tool_host
-                .resolve(Reference {
-                    name: "beta".to_owned(),
-                })
-                .await?;
-            Ok(Answer {
-                value: json!({
-                    "alpha": String::from_utf8(alpha).context("alpha bytes are utf-8")?,
-                    "beta": String::from_utf8(beta).context("beta bytes are utf-8")?,
-                }),
-                transcript: None,
-            })
-        }
-        .boxed()
-    }
-}
-
-/// Build a two-guest registry (`model` + `shelf`) for the resolve path, linking
-/// `WasiModel`. The `shelf` needs no `link` declaration: host→guest `resolve` is
-/// a direct instantiate-and-call.
-async fn build_registry(model: &Path, shelf: &Path) -> Result<Arc<Registry<TestCtx>>> {
-    let manifest_path =
-        std::env::temp_dir().join(format!("omnia-model-resolve-{}.toml", std::process::id()));
-    let manifest = format!(
-        "[[guest]]\nid = \"model\"\nsource.path = \"{model}\"\n\n\
-         [[guest]]\nid = \"shelf\"\nsource.path = \"{shelf}\"\n",
-        model = model.display(),
-        shelf = shelf.display(),
-    );
-    std::fs::write(&manifest_path, manifest).context("writing resolve test manifest")?;
-
-    let mut deployment: Deployment<TestCtx> = DeploymentBuilder::new()
-        .config(manifest_path.clone())
-        .build()
-        .await
-        .context("building runtime")?;
-    deployment.host::<WasiModel, TestBundle>().context("linking WasiModel")?;
-    let registry = deployment.into_registry().context("assembling registry")?;
-
-    let _ = std::fs::remove_file(&manifest_path);
-    Ok(Arc::new(registry))
-}
-
-/// Phase 2a — the CI-runnable `resolve` acceptance gate (no network).
-///
-/// A stub backend drives the host→guest `resolve` path for the guest's
-/// `grants.references = "shelf"` prompt. It proves Task A (the `dispatch`
-/// entry point) + Task B (the `BoundToolHost` wiring) deterministically: every
-/// `resolve` lands a **fresh `shelf` instance** (instance-per-call witness) and
-/// the bytes round-trip through the seam.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn resolve_dispatches() -> Result<()> {
-    let target = target_dir();
-    let (Some(model), Some(shelf)) =
-        (guest_wasm(&target, "model_wasm.wasm"), guest_wasm(&target, "model_shelf_wasm.wasm"))
-    else {
-        eprintln!(
-            "skipping `resolve_dispatches_to_a_fresh_shelf_per_call`: model/shelf guests not \
-             built. Run:\n  cargo build -p examples --example model-wasm \
-             --example model-shelf-wasm --target wasm32-wasip2"
-        );
-        return Ok(());
-    };
-
-    let registry = build_registry(&model, &shelf).await?;
-    let stores_built = Arc::new(AtomicUsize::new(0));
-    let runtime = model_runtime(
-        registry,
-        Arc::new(|| Box::new(ResolvingStub)),
-        Arc::clone(&stores_built),
-        // The `resolve` path doesn't exercise a workspace; the model guest's
-        // `get-directories()` sees no mount and lends nothing.
-        no_mounts(),
-    );
-
-    // Two completions, each driving two `resolve` dispatches. The library
-    // `Runtime::store` clones the bundle to build every per-guest store, so a
-    // completion clones the bundle a fixed, nonzero number of times (the `model`
-    // caller plus a fresh `shelf` per `resolve`). Equal deltas across the two
-    // completions witness instance-per-call: a cached/reused `shelf` would build
-    // fewer stores — and clone the bundle fewer times — on the second completion.
-    let mut per_call: Option<usize> = None;
-    for _ in 0..2 {
-        let before = stores_built.load(Ordering::SeqCst);
-        let answer = call_run(&runtime).await.context("driving the resolve guest")?;
-        let built = stores_built.load(Ordering::SeqCst) - before;
-
-        // Byte round-trip: each reference reached the `shelf` and came back
-        // transformed, so the typed bytes crossed the host→guest seam in both
-        // directions.
-        assert_eq!(
-            serde_json::from_str::<Value>(&answer).context("answer is JSON")?,
-            json!({ "alpha": "shelf:alpha", "beta": "shelf:beta" }),
-            "resolved bytes should round-trip through the host→guest seam"
-        );
-
-        assert!(built > 0, "each completion builds at least the caller store");
-        match per_call {
-            None => per_call = Some(built),
-            Some(expected) => {
-                assert_eq!(built, expected, "instance-per-call: identical work per completion");
-            }
-        }
-    }
-
-    Ok(())
-}
-
 /// A backend that asserts the host resolved the guest's lent workspace to
 /// its mount path — the `local-path` face the cursor backend consumes.
 #[derive(Debug, Clone)]
@@ -381,7 +268,7 @@ struct LocalPathProbe {
 
 impl WasiModelCtx for LocalPathProbe {
     fn complete(
-        &self, _request: PreparedPrompt, tool_host: Arc<dyn ToolHost>,
+        &self, _request: PreparedRequest, tool_host: Arc<dyn ToolHost>,
     ) -> FutureResult<Answer> {
         let expected = self.expected.clone();
         async move {
@@ -393,6 +280,7 @@ impl WasiModelCtx for LocalPathProbe {
             );
             Ok(Answer {
                 value: json!({ "verdict": "pass", "reason": "local path resolved" }),
+                usage: None,
                 transcript: None,
             })
         }
@@ -405,12 +293,8 @@ impl WasiModelCtx for LocalPathProbe {
 /// the host identity-matches it back to the mount — surfacing its host path on
 /// the per-completion [`ToolHost`] (what `omnia-cursor` reads).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn workspace_resolves_to_local_path() -> Result<()> {
-    let Some(wasm) = guest_wasm(&target_dir(), "model_wasm.wasm") else {
-        eprintln!(
-            "skipping `workspace_resolves_to_local_path`: model guest not built. Run:\n  \
-             cargo build -p examples --example model-wasm --target wasm32-wasip2"
-        );
+async fn workspace() -> Result<()> {
+    let Some(wasm) = find_guest("model_wasm.wasm") else {
         return Ok(());
     };
 

@@ -19,7 +19,7 @@ mod update;
 pub use delete::DeleteBuilder;
 pub use entity::{Entity, EntityValues, FetchValue};
 pub use filter::{CmpOp, ColRef, Filter};
-pub use insert::InsertBuilder;
+pub use insert::{ConflictSet, InsertBuilder, NoConflict};
 pub use join::{Join, JoinKind};
 pub use omnia_wasi_sql::{DataType, Field, Row};
 pub use select::SelectBuilder;

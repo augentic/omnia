@@ -38,7 +38,7 @@ pub fn expand(config: &Config) -> TokenStream {
 
             struct Hooks;
 
-            impl omnia::RuntimeHooks<#backends_ty> for Hooks {
+            impl omnia::Wiring<#backends_ty> for Hooks {
                 fn link(deployment: &mut omnia::Deployment<omnia::StoreCtx<#backends_ty>>) -> Result<()> {
                     #(deployment.host::<#host_types, #backends_ty>()?;)*
                     Ok(())

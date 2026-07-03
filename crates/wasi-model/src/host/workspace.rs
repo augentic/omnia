@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context as _, anyhow, bail};
-use cap_fs_ext::MetadataExt as _;
+use cap_primitives::fs::MetadataExt as _;
 use cap_std::fs::Dir;
 use futures::FutureExt as _;
 use omnia::{FutureResult, MountRegistry};

@@ -39,7 +39,6 @@ struct Http;
 wasip3::http::service::export!(Http);
 
 impl Guest for Http {
-    /// Routes HTTP requests to database operations.
     #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         tracing::debug!("received request: {:?}", request);

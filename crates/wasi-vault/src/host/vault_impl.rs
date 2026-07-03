@@ -28,7 +28,7 @@ impl<T> HostLockerWithStore<T> for WasiVault {
     async fn set(
         accessor: &Accessor<T, Self>, self_: Resource<LockerProxy>, secret_id: String,
         value: Vec<u8>,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         let locker = get_locker(accessor, &self_)?;
         locker.set(secret_id, value).await.context("issue setting value")?;
         Ok(())
@@ -46,8 +46,8 @@ impl<T> HostLockerWithStore<T> for WasiVault {
         accessor: &Accessor<T, Self>, self_: Resource<LockerProxy>, secret_id: String,
     ) -> Result<bool> {
         let locker = get_locker(accessor, &self_)?;
-        let value = locker.get(secret_id).await.context("issue getting value")?;
-        Ok(value.is_some())
+        let exists = locker.exists(secret_id).await.context("issue checking existence")?;
+        Ok(exists)
     }
 
     async fn list_ids(

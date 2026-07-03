@@ -7,7 +7,7 @@ use wasmtime_wasi::p3::bindings::{Command, CommandPre};
 use super::{ExitStatus, Runtime};
 use crate::registry::TriggerRouter;
 
-/// Run the routed `wasi:cli/run` guest once. Caller must have called [`bootstrap`](crate::runtime::bootstrap).
+/// Run the routed `wasi:cli/run` guest once, after the [`Runtime`] is assembled.
 ///
 /// # Errors
 ///
@@ -31,7 +31,7 @@ where
         bail!("multiple wasi:cli/run guests but no [[route.cli]] to disambiguate");
     };
     let guest = runtime.registry().get(guest_id).expect("a capable guest is registered");
-    tracing::debug!(guest = %guest_id, "driving wasi:cli/run");
+    tracing::info!(guest = %guest_id, "running wasi:cli/run");
 
     let mut store = runtime.build_store(runtime.store());
     let instance = runtime.instantiate(guest.instance_pre(), &mut store).await?;

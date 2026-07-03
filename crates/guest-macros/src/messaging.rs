@@ -84,7 +84,7 @@ fn expand_topic(topic: &Topic) -> TokenStream {
     let handler = &topic.handler;
 
     quote! {
-        t if t.contains(#pattern) => #handler(message.data()).await,
+        #pattern => #handler(message.data()).await,
     }
 }
 
@@ -98,7 +98,7 @@ fn expand_handler(topic: &Topic, config: &Config) -> TokenStream {
         #[omnia_wasi_otel::instrument]
         async fn #handler_fn(payload: Vec<u8>) -> Result<()> {
              #message::handler(payload)?
-                 .provider(&#provider::new())
+                 .provider(&<#provider as omnia_guest::api::DefaultProvider>::new())
                  .owner(#owner)
                  .await
                  .map(|_| ())

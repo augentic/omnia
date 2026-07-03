@@ -1,8 +1,6 @@
 //! Default implementation for `wasi:config`, sourcing variables from the
 //! process environment.
 
-#![allow(clippy::used_underscore_binding)]
-
 use std::env;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
@@ -14,6 +12,7 @@ use wasmtime_wasi_config::WasiConfigVariables;
 
 use crate::WasiConfigCtx;
 
+/// Options used to connect to the config store.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions;
 

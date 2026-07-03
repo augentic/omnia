@@ -1,35 +1,33 @@
 {
-  "key_prompt": {
+  "key_request": {
+    "model": null,
+    "system": null,
+    "messages": [],
+    "sections": {
+      "role": "a terse code reviewer",
+      "task": "decide whether the change is acceptable",
+      "context": "the diff adds a bounds check",
+      "constraints": [],
+      "examples": [],
+      "variables": []
+    },
     "generation": null,
+    "format": {
+      "kind": "schema",
+      "schema": {
+        "name": "verdict",
+        "schema": "{\"type\":\"object\"}"
+      }
+    },
+    "tools": [],
     "grants": {
       "references": "shelf",
       "verify": []
-    },
-    "messages": [],
-    "model": null,
-    "response_format": {
-      "json_schema": {
-        "name": "verdict",
-        "schema": "{\"type\":\"object\"}",
-        "strict": null
-      },
-      "kind": "json-schema"
-    },
-    "sections": {
-      "constraints": [],
-      "context": "the diff adds a bounds check",
-      "examples": [],
-      "role": "a terse code reviewer",
-      "task": "decide whether the change is acceptable",
-      "variables": []
-    },
-    "system": null,
-    "tool_choice": null,
-    "tools": []
+    }
   },
   "answer": {
-    "reason": "the bounds check is correct",
-    "verdict": "pass"
+    "verdict": "pass",
+    "reason": "the bounds check is correct"
   },
   "transcript": null
 }

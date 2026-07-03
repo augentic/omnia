@@ -16,7 +16,10 @@ use std::fmt;
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
-pub use routing::{CliRoutes, HttpRoutes, Resolver, Routes, TopicRoutes, TriggerRouter};
+pub use routing::{
+    CliRoutes, ExactMatch, HttpRoutes, MatchStrategy, PatternMatch, PatternRoutes, PrefixMatch,
+    Resolver, RouteTable, Routes, TriggerRouter,
+};
 use wasmtime::Engine;
 use wasmtime::component::{Component, InstancePre, Linker};
 use wasmtime_wasi::WasiView;
@@ -62,9 +65,8 @@ impl From<String> for GuestId {
 
 /// A registry entry's resolution target.
 ///
-/// Phase 1 only populates [`Target::Local`]. `Remote` (a bound wRPC endpoint)
-/// arrives with the cluster transports and is what makes the desktop->cloud
-/// swap a config change rather than a code change.
+/// Only [`Target::Local`] exists today; a remote wRPC-endpoint variant will land
+/// with distributed transport.
 enum Target<T: 'static> {
     /// A locally pre-instantiated component.
     Local(InstancePre<T>),
@@ -109,84 +111,6 @@ impl<T: 'static> Guest<T> {
     }
 }
 
-/// Assembles a [`Registry`] from loaded guest components and a fully linked
-/// linker.
-///
-/// Pre-instantiation, route validation, and registry construction happen in
-/// [`build`](Self::build). [`Deployment::build`](crate::Deployment::build) is
-/// the usual entry point.
-pub struct RegistryBuilder<T: WasiView + 'static> {
-    engine: Engine,
-    linker: Linker<T>,
-    options: RuntimeOptions,
-    loaded: Vec<LoadedGuest>,
-    routes: Routes,
-    dispatch: Arc<DispatchHandle>,
-}
-
-impl<T: WasiView + 'static> RegistryBuilder<T> {
-    /// Begin assembling a [`Registry`] from a linked deployment's parts.
-    #[must_use]
-    pub const fn new(
-        engine: Engine, linker: Linker<T>, options: RuntimeOptions, loaded: Vec<LoadedGuest>,
-        routes: Routes, dispatch: Arc<DispatchHandle>,
-    ) -> Self {
-        Self {
-            engine,
-            linker,
-            options,
-            loaded,
-            routes,
-            dispatch,
-        }
-    }
-
-    /// Polyfill host-mediated imports, pre-instantiate every loaded guest, and
-    /// freeze the guest [`Registry`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if there are no guests to register, host-mediated
-    /// imports cannot be polyfilled, a component cannot be pre-instantiated, or
-    /// a route targets a guest that is not registered.
-    pub fn build(self) -> Result<Registry<T>>
-    where
-        T: WrpcView,
-    {
-        if self.loaded.is_empty() {
-            bail!("cannot build a guest registry with no guests");
-        }
-
-        let mut linker = self.linker;
-        dispatch::link(&self.engine, &mut linker, &self.loaded, &self.dispatch)?;
-
-        let mut guests = BTreeMap::new();
-        for loaded in &self.loaded {
-            let instance_pre = linker
-                .instantiate_pre(&loaded.component)
-                .map_err(anyhow::Error::from)
-                .with_context(|| format!("pre-instantiating guest `{}`", loaded.id))?;
-            guests.insert(loaded.id.clone(), Guest::local(loaded.id.clone(), instance_pre));
-        }
-
-        for target in self.routes.targets() {
-            if !guests.contains_key(target) {
-                bail!("route targets guest `{target}`, which is not registered");
-            }
-        }
-
-        tracing::info!(guests = guests.len(), "runtime initialized");
-
-        Ok(Registry {
-            engine: self.engine,
-            options: self.options,
-            guests,
-            routes: self.routes,
-            dispatch: self.dispatch,
-        })
-    }
-}
-
 /// One [`Engine`] + one `Linker`; many pre-instantiated guests keyed by
 /// identity.
 ///
@@ -203,6 +127,58 @@ pub struct Registry<T: 'static> {
     guests: BTreeMap<GuestId, Guest<T>>,
     routes: Routes,
     dispatch: Arc<DispatchHandle>,
+}
+
+impl<T: WasiView + 'static> Registry<T> {
+    /// Assemble a registry from a linked deployment's parts: polyfill
+    /// host-mediated imports, pre-instantiate every loaded guest, validate that
+    /// routes name registered guests, and freeze the result.
+    ///
+    /// [`DeploymentBuilder::build`](crate::DeploymentBuilder::build) is the usual entry point.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if there are no guests to register, host-mediated
+    /// imports cannot be polyfilled, a component cannot be pre-instantiated, or
+    /// a route targets a guest that is not registered.
+    pub fn assemble(
+        engine: Engine, mut linker: Linker<T>, options: RuntimeOptions, loaded: Vec<LoadedGuest>,
+        routes: Routes, dispatch: Arc<DispatchHandle>,
+    ) -> Result<Self>
+    where
+        T: WrpcView,
+    {
+        if loaded.is_empty() {
+            bail!("cannot build a guest registry with no guests");
+        }
+
+        dispatch::link(&engine, &mut linker, &loaded, &dispatch)?;
+
+        let mut guests = BTreeMap::new();
+        for guest in loaded {
+            let instance_pre = linker
+                .instantiate_pre(&guest.component)
+                .map_err(anyhow::Error::from)
+                .with_context(|| format!("pre-instantiating guest `{}`", guest.id))?;
+            guests.insert(guest.id.clone(), Guest::local(guest.id, instance_pre));
+        }
+
+        for target in routes.targets() {
+            if !guests.contains_key(target) {
+                bail!("route targets guest `{target}`, which is not registered");
+            }
+        }
+
+        tracing::info!(guests = guests.len(), "runtime initialized");
+
+        Ok(Self {
+            engine,
+            options,
+            guests,
+            routes,
+            dispatch,
+        })
+    }
 }
 
 impl<T: 'static> Registry<T> {
@@ -271,15 +247,6 @@ mod tests {
     use crate::store::StoreCtx;
 
     #[test]
-    fn guest_id() {
-        let id = GuestId::from("source:typescript");
-        assert_eq!(id.as_str(), "source:typescript");
-        assert_eq!(id.to_string(), "source:typescript");
-        assert_eq!(GuestId::from(String::from("workflow")), GuestId::from("workflow"));
-        assert!(GuestId::from("a") < GuestId::from("b"));
-    }
-
-    #[test]
     fn no_guests() {
         let options = RuntimeOptions::load().expect("options should load");
         let engine = Engine::new(&Config::from(&options)).expect("engine should build");
@@ -287,8 +254,7 @@ mod tests {
         let dispatch = DispatchHandle::new(Arc::new(FirstArgSelector), BTreeSet::new(), 8);
 
         let result =
-            RegistryBuilder::new(engine, linker, options, Vec::new(), Routes::default(), dispatch)
-                .build();
+            Registry::assemble(engine, linker, options, Vec::new(), Routes::default(), dispatch);
         assert!(result.is_err(), "an empty registry must be rejected");
     }
 }

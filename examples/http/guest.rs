@@ -20,7 +20,6 @@ struct HttpGuest;
 wasip3::http::service::export!(HttpGuest);
 
 impl Guest for HttpGuest {
-    /// Routes incoming HTTP requests to handlers.
     #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new().route("/", get(echo_get)).route("/", post(echo_post));

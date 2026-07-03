@@ -1,15 +1,19 @@
 //! # WASI Model Guest
 //!
-//! Guest-side bindings for the `augentic:model` world. A guest imports
-//! `augentic:model/completion` and calls `complete`.
+//! Guest-side bindings for the `omnia:model` world. A guest imports
+//! `omnia:model/completion` and calls `create`.
 
-mod generated {
+mod model {
     #![allow(missing_docs)]
     wit_bindgen::generate!({
         world: "model",
         path: "wit",
-        generate_all,
+        with: {
+            "wasi:filesystem/types@0.3.0": wasip3::filesystem::types,
+            "wasi:clocks/system-clock@0.3.0": wasip3::clocks::system_clock,
+            "wasi:clocks/types@0.3.0": wasip3::clocks::types,
+        },
     });
 }
 
-pub use self::generated::augentic::model::*;
+pub use self::model::omnia::model::*;

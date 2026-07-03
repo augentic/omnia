@@ -1,4 +1,4 @@
-use anyhow::{Context, anyhow};
+use anyhow::Context;
 use wasmtime::component::{Access, Accessor, Resource};
 
 use crate::WasiKeyValueCtxView;
@@ -23,22 +23,17 @@ impl<T> HostWithStore<T> for WasiKeyValue {
     ) -> Result<i64> {
         let bucket = get_bucket(accessor, &bucket)?;
 
-        let Ok(Some(value)) = bucket.get(key.clone()).await else {
-            return Err(anyhow!("no value for {key}").into());
-        };
+        // A missing key starts from zero, so the increment creates it at `delta`.
+        let base =
+            bucket.get(key.clone()).await.context("issue getting value")?.map_or(0, |value| {
+                let mut buf = [0u8; 8];
+                let len = 8.min(value.len());
+                buf[..len].copy_from_slice(&value[..len]);
+                i64::from_be_bytes(buf)
+            });
+        let inc = base + delta;
 
-        // increment value by delta
-        let slice: &[u8] = &value;
-        let mut buf = [0u8; 8];
-        let len = 8.min(slice.len());
-        buf[..len].copy_from_slice(&slice[..len]);
-        let inc = i64::from_be_bytes(buf) + delta;
-
-        // update value in bucket
-        if let Err(e) = bucket.set(key, inc.to_be_bytes().to_vec()).await {
-            return Err(anyhow!("issue saving increment: {e}").into());
-        }
-
+        bucket.set(key, inc.to_be_bytes().to_vec()).await.context("issue saving increment")?;
         Ok(inc)
     }
 
@@ -46,7 +41,7 @@ impl<T> HostWithStore<T> for WasiKeyValue {
     /// returns an error if the CAS operation failed.
     async fn swap(
         _store: &Accessor<T, Self>, _self_: Resource<Cas>, _value: Vec<u8>,
-    ) -> anyhow::Result<Result<(), CasError>, wasmtime::Error> {
+    ) -> anyhow::Result<anyhow::Result<(), CasError>, wasmtime::Error> {
         Err(wasmtime::Error::msg("not implemented"))
     }
 }

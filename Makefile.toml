@@ -56,7 +56,7 @@ script = "cargo +nightly fmt --all"
 # Lint
 [tasks.lint]
 command = "cargo"
-args = ["clippy", "--workspace", "--all-targets", "--all-features", "--", "-D warnings"]
+args = ["clippy", "--workspace", "--all-targets", "--all-features", "--", "-D", "warnings"]
 install_crate = { rustup_component_name = "clippy" }
 
 # Miri
@@ -77,8 +77,11 @@ install_crate = "cargo-outdated"
 [tasks.test]
 command = "cargo"
 args = ["nextest", "run", "--all", "--all-features", "--no-tests=pass"]
-dependencies = ["clean"]
 env = { RUSTFLAGS = "-Dwarnings" }
+
+# Clean build artifacts, then run the full test suite from scratch.
+[tasks.test-clean]
+dependencies = ["clean", "test"]
 
 # Test Doc
 [tasks.test-docs]

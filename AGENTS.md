@@ -31,6 +31,15 @@ cargo run --example <name> -- run ./target/wasm32-wasip2/debug/examples/<name>_w
 
 For the HTTP example, the server listens on `localhost:8080`.
 
+### Testing policy (integration-first)
+
+See [rfcs/integration-testing.md](rfcs/integration-testing.md) §7 for the rationale. In short:
+
+- **Unit tests only for pure, deterministic logic** (parsers, codecs, filter/type translation, macro token expansion). Anything crossing a WASI interface, a host backend, or dispatch is tested at the guest–host seam.
+- **Seam tests are the spec.** Each WASI crate has a `tests/seam.rs` that loads its example guest, links the default backend, drives it through the real WIT boundary, and asserts behaviour (a capturing/shared backend proves host-side effects). Exemplar: [crates/wasi-keyvalue/tests/seam.rs](crates/wasi-keyvalue/tests/seam.rs). Drive HTTP guests with `omnia_testkit::http`; use `omnia_testkit::find_guest`/`temp_manifest` for setup.
+- **Replace, then delete.** Remove a superseded unit-test module in the same change as the seam test that covers it, with `cargo llvm-cov` before/after evidence that coverage holds. Guest-side logic (`crates/guest`) keeps native unit tests since `llvm-cov` can't instrument the guest `.wasm`.
+- **Names identify, comments explain.** A test name is the scenario (`set_then_get`), not a restated expectation (`set_then_get_round_trips`).
+
 ### Gotchas
 
 - `cargo-nextest` must be installed with `--locked` (`cargo install --locked cargo-nextest`); without it the build fails.

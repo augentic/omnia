@@ -1,8 +1,8 @@
 //! # Preopen mounts and the mount registry (RFC-55)
 //!
 //! A deployment may mount node-local directories into a guest's WASI sandbox via
-//! `[[mount]]` (or the `OMNIA_WORKSPACE` env var) so a guest can read or edit
-//! a mounted directory tree. Two host-side artefacts back that capability:
+//! `[[mount]]` so a guest can read or edit a mounted directory tree. Two
+//! host-side artefacts back that capability:
 //!
 //! - [`ResolvedPreopen`] — a mount resolved to an absolute host path plus WASI
 //!   permissions, applied per store via [`WasiCtxBuilder::preopened_dir`].
@@ -15,14 +15,9 @@
 //!
 //! A `wasi:filesystem` `Descriptor` is path-less by design (cap-std exposes no
 //! API to recover a host path from a `Dir`), so the absolute path *must* come
-//! from this registry, keyed by descriptor identity, never extracted from the
-//! descriptor itself.
-//!
-//! This is generic preopen infrastructure: omnia resolves the configured mounts,
-//! preopens them into each store's sandbox, and exposes the registry on the store
-//! context. Resolving a guest-lent `borrow<descriptor>` into an owned, usable
-//! handle is the job of the host crate that defines that grant (for example
-//! `wasi-model`'s workspace tools), not of this crate.
+//! from this registry, keyed by descriptor identity. Resolving a guest-lent
+//! `borrow<descriptor>` into a usable handle is the job of the host crate that
+//! defines that grant (e.g. `wasi-model`'s workspace tools), not of this crate.
 //!
 //! [`WasiCtxBuilder::preopened_dir`]: wasmtime_wasi::WasiCtxBuilder::preopened_dir
 
@@ -211,7 +206,7 @@ mod tests {
     }
 
     #[test]
-    fn match_identity_selects_by_dev_ino() {
+    fn match_identity_by_dev_ino() {
         let root = temp_root("select");
         let registry = registry(".", &root, false);
         let (dev, ino) = identity_of(&root);

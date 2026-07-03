@@ -10,21 +10,22 @@
 //! interface *strings*, never `source:`/`target:`/`mcp`. Consumers write the
 //! concrete file; the runtime core stays domain-agnostic.
 //!
-//! Phase 1 consumes the `[[guest]]` population (file sources) and parses the
-//! `[transport]` section; Phase 1b adds the `[[route.*]]` tables. `link`
-//! allow-lists are accepted (so a richer file still loads) but wired into the
-//! shared linker in a later phase.
+//! The `[[guest]]` population (file sources), the `[[route.*]]` tables, and the
+//! per-guest `link` allow-lists (which drive host-mediated dynamic linking) are
+//! all consumed. Distributed `[transport]` is not yet implemented: only the
+//! in-process default is accepted, and any other value is rejected at load.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use anyhow::{Context as _, Result, bail};
 use serde::Deserialize;
 
 use super::source::Source;
 use crate::mount::ResolvedPreopen;
-use crate::registry::{CliRoutes, GuestId, HttpRoutes, Routes, TopicRoutes};
+use crate::registry::{CliRoutes, GuestId, HttpRoutes, PatternRoutes, Routes};
 
 /// The deployment manifest: which guests load and how host-mediated calls
 /// travel.
@@ -36,7 +37,7 @@ pub struct Manifest {
     pub guests: Vec<GuestEntry>,
     /// Working-tree mounts preopened into the guest sandbox (RFC-55).
     #[serde(rename = "mount")]
-    pub mounts: Vec<MountEntry>,
+    pub mounts: Vec<Mount>,
     /// Inbound route tables, one list per trigger.
     pub route: RouteSpec,
     /// Transport configuration for host-mediated calls.
@@ -64,10 +65,11 @@ impl Manifest {
         if self.guests.is_empty() {
             bail!("manifest defines no [[guest]] entries");
         }
-        for (target, over) in &self.transport.targets {
-            if over.kind == TransportKind::InProcess && over.address.is_some() {
-                bail!("transport target `{target}`: in-process transport takes no address");
-            }
+        if self.transport.default != TransportKind::InProcess {
+            bail!(
+                "transport `{:?}` is not yet implemented; only in-process transport is supported",
+                self.transport.default
+            );
         }
         Ok(())
     }
@@ -131,24 +133,14 @@ impl Manifest {
     /// permissions.
     #[must_use]
     pub fn mounts(&self, base: &Path) -> Vec<ResolvedPreopen> {
-        self.mounts
-            .iter()
-            .map(|entry| {
-                let host_path = if entry.path.is_absolute() {
-                    entry.path.clone()
-                } else {
-                    base.join(&entry.path)
-                };
-                ResolvedPreopen::new(entry.name.clone(), host_path, entry.writable)
-            })
-            .collect()
+        self.mounts.iter().map(|entry| entry.resolve(base)).collect()
     }
 }
 
 /// A single workspace mount: a host directory preopened into the guest
 /// sandbox under a guest-visible name (RFC-55).
-#[derive(Clone, Debug, Deserialize)]
-pub struct MountEntry {
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub struct Mount {
     /// Guest-visible name `preopens.get-directories()` returns (e.g. `.`).
     pub name: String,
     /// Host path (absolute, or relative to the manifest's directory).
@@ -158,6 +150,59 @@ pub struct MountEntry {
     pub writable: bool,
 }
 
+impl Mount {
+    /// Resolve this mount into a [`ResolvedPreopen`], joining a relative host
+    /// path against `base` (an absolute path passes through unchanged).
+    #[must_use]
+    pub fn resolve(&self, base: &Path) -> ResolvedPreopen {
+        let host_path =
+            if self.path.is_absolute() { self.path.clone() } else { base.join(&self.path) };
+        ResolvedPreopen::new(self.name.clone(), host_path, self.writable)
+    }
+}
+
+impl FromStr for Mount {
+    type Err = anyhow::Error;
+
+    /// Parse a CLI `--mount` spec: comma-separated `path=<host-path>`,
+    /// `name=<guest-name>`, and a bare `writable` (or `writable=<bool>`) flag. A
+    /// lone token without `=` is taken as the path, so `workspace` and
+    /// `workspace,writable` are shorthands; `name` defaults to `.` and the mount
+    /// is read-only unless `writable` is present.
+    fn from_str(spec: &str) -> Result<Self> {
+        let mut path: Option<PathBuf> = None;
+        let mut name: Option<String> = None;
+        let mut writable = false;
+
+        for token in spec.split(',').map(str::trim).filter(|token| !token.is_empty()) {
+            match token.split_once('=') {
+                Some(("path", value)) => path = Some(PathBuf::from(value)),
+                Some(("name", value)) => name = Some(value.to_owned()),
+                Some(("writable", value)) => {
+                    writable = value.parse().with_context(|| {
+                        format!("mount `writable` expects a bool, got `{value}`")
+                    })?;
+                }
+                Some((key, _)) => bail!("unknown mount key `{key}` in `--mount {spec}`"),
+                None if token == "writable" => writable = true,
+                None => {
+                    if path.replace(PathBuf::from(token)).is_some() {
+                        bail!("mount `--mount {spec}` sets the path more than once");
+                    }
+                }
+            }
+        }
+
+        let path =
+            path.with_context(|| format!("mount `--mount {spec}` is missing `path=<host-path>`"))?;
+        Ok(Self {
+            name: name.unwrap_or_else(|| ".".to_owned()),
+            path,
+            writable,
+        })
+    }
+}
+
 /// A single registry population entry.
 #[derive(Clone, Debug, Deserialize)]
 pub struct GuestEntry {
@@ -165,8 +210,8 @@ pub struct GuestEntry {
     pub id: String,
     /// Where the guest's component bytes come from.
     pub source: SourceSpec,
-    /// Imports the host should dispatch (host-mediated). Parsed in Phase 1;
-    /// wired into the shared linker in a later phase.
+    /// Interfaces the host dispatches on this guest's behalf (host-mediated
+    /// dynamic linking); the runtime core polyfills each on the shared linker.
     #[serde(default)]
     pub link: Vec<String>,
 }
@@ -208,10 +253,10 @@ impl RouteSpec {
         let http = HttpRoutes::new(
             self.http.iter().map(|e| (e.prefix.clone(), GuestId::from(e.guest.as_str()))),
         );
-        let messaging = TopicRoutes::new(
+        let messaging = PatternRoutes::new(
             self.messaging.iter().map(|e| (e.topic.clone(), GuestId::from(e.guest.as_str()))),
         );
-        let websocket = TopicRoutes::new(
+        let websocket = PatternRoutes::new(
             self.websocket.iter().map(|e| (e.topic.clone(), GuestId::from(e.guest.as_str()))),
         );
         // `[[route.cli]]` is not yet parsed; an empty table makes a sole
@@ -241,32 +286,24 @@ pub struct TopicRoute {
     pub guest: String,
 }
 
-/// Transport configuration. Parsed and validated in Phase 1; the dispatch path
-/// that consumes it lands with host-mediated linking.
-#[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
+/// Transport configuration for host-mediated calls.
+///
+/// Only the in-process default is implemented; [`Manifest::validate`] rejects any
+/// other value, and `#[serde(deny_unknown_fields)]` turns a stale distributed
+/// `[transport.target.*]` section into a loud parse error rather than a silent
+/// no-op.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct Transport {
-    /// The default transport when no per-target override applies.
+    /// The transport used for host-mediated calls.
     pub default: TransportKind,
-    /// Per-target transport overrides (identity -> transport).
-    #[serde(rename = "target")]
-    pub targets: HashMap<String, TransportOverride>,
-}
-
-impl Default for Transport {
-    fn default() -> Self {
-        Self {
-            default: TransportKind::InProcess,
-            targets: HashMap::new(),
-        }
-    }
 }
 
 /// A transport mechanism for host-mediated calls.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum TransportKind {
-    /// In-process byte pipe — the co-located default.
+    /// In-process byte pipe — the co-located default (the only implemented kind).
     #[default]
     InProcess,
     /// Unix-domain socket (same node, separate processes).
@@ -275,18 +312,6 @@ pub enum TransportKind {
     Nats,
     /// QUIC (cross-node).
     Quic,
-}
-
-/// A per-target transport override for distributed nodes. Parsed and validated
-/// in Phase 1; the dispatch path that routes by kind/address lands with
-/// distributed transports.
-#[derive(Clone, Debug, Deserialize)]
-pub struct TransportOverride {
-    /// The transport mechanism.
-    pub kind: TransportKind,
-    /// The transport address, when the mechanism needs one.
-    #[serde(default)]
-    pub address: Option<String>,
 }
 
 #[cfg(test)]
@@ -347,6 +372,84 @@ mod tests {
     }
 
     #[test]
+    fn parse_and_resolve_mounts() {
+        let toml = r#"
+            [[guest]]
+            id = "model"
+            source.path = "./model.wasm"
+
+            [[mount]]
+            name = "."
+            path = "../.."
+
+            [[mount]]
+            name = "shared"
+            path = "/srv/shared"
+            writable = true
+        "#;
+
+        let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
+        assert_eq!(manifest.mounts.len(), 2);
+        assert_eq!(manifest.mounts[0].name, ".");
+        assert!(!manifest.mounts[0].writable, "writable defaults to read-only");
+        assert!(manifest.mounts[1].writable);
+
+        let base = Path::new("/deploy/app");
+        let resolved = manifest.mounts(base);
+        assert_eq!(resolved.len(), 2);
+        // A relative path resolves against the manifest's directory; read-only by default.
+        assert_eq!(resolved[0].name, ".");
+        assert_eq!(resolved[0].host_path, base.join("../.."));
+        assert!(!resolved[0].dir_perms.contains(wasmtime_wasi::DirPerms::MUTATE));
+        // An absolute path passes through unchanged, and `writable` grants mutation.
+        assert_eq!(resolved[1].host_path, PathBuf::from("/srv/shared"));
+        assert!(resolved[1].dir_perms.contains(wasmtime_wasi::DirPerms::MUTATE));
+    }
+
+    #[test]
+    fn parse_mount_full_spec() {
+        let entry: Mount = "path=workspace,name=.,writable".parse().expect("spec parses");
+        assert_eq!(entry.path, PathBuf::from("workspace"));
+        assert_eq!(entry.name, ".");
+        assert!(entry.writable);
+    }
+
+    #[test]
+    fn parse_mount_bare_path_shorthand() {
+        let entry: Mount = "workspace".parse().expect("bare path parses");
+        assert_eq!(entry.path, PathBuf::from("workspace"));
+        assert_eq!(entry.name, ".", "name defaults to `.`");
+        assert!(!entry.writable, "a mount is read-only unless `writable` is given");
+    }
+
+    #[test]
+    fn parse_mount_bare_writable_shorthand() {
+        let entry: Mount = "workspace,writable".parse().expect("shorthand parses");
+        assert_eq!(entry.path, PathBuf::from("workspace"));
+        assert!(entry.writable);
+    }
+
+    #[test]
+    fn parse_mount_requires_path() {
+        assert!("name=.,writable".parse::<Mount>().is_err(), "a mount must name a path");
+    }
+
+    #[test]
+    fn parse_mount_rejects_unknown_key() {
+        assert!("path=x,bogus=1".parse::<Mount>().is_err(), "unknown keys are rejected");
+    }
+
+    #[test]
+    fn cli_mount_resolves_relative_to_base() {
+        let entry: Mount = "path=workspace,writable".parse().expect("spec parses");
+        // CLI mounts resolve against the process working directory, unlike
+        // manifest mounts which resolve against the manifest's directory.
+        let resolved = entry.resolve(Path::new("/cwd"));
+        assert_eq!(resolved.host_path, PathBuf::from("/cwd/workspace"));
+        assert!(resolved.dir_perms.contains(wasmtime_wasi::DirPerms::MUTATE));
+    }
+
+    #[test]
     fn defaults_to_in_process() {
         let toml = r#"
             [[guest]]
@@ -356,45 +459,31 @@ mod tests {
 
         let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
         assert_eq!(manifest.transport.default, TransportKind::InProcess);
-        assert!(manifest.transport.targets.is_empty());
     }
 
     #[test]
-    fn parse_target_override() {
-        let toml = r#"
-            [[guest]]
-            id = "only"
-            source.path = "./only.wasm"
-
-            [transport]
-            default = "in-process"
-
-            [transport.target.remote]
-            kind = "unix"
-            address = "/run/omnia/remote.sock"
-        "#;
-
-        let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
-        let over = &manifest.transport.targets["remote"];
-        assert_eq!(over.kind, TransportKind::Unix);
-        assert_eq!(over.address.as_deref(), Some("/run/omnia/remote.sock"));
-    }
-
-    #[test]
-    fn reject_in_process_address() {
-        let path =
-            std::env::temp_dir().join(format!("omnia_manifest_inproc_{}.toml", std::process::id()));
+    fn reject_non_default_transport() {
+        let path = std::env::temp_dir()
+            .join(format!("omnia_manifest_transport_{}.toml", std::process::id()));
         std::fs::write(
             &path,
             "[[guest]]\nid = \"only\"\nsource.path = \"./only.wasm\"\n\n\
-             [transport.target.x]\nkind = \"in-process\"\naddress = \"nope\"\n",
+             [transport]\ndefault = \"unix\"\n",
         )
         .expect("temp manifest should write");
 
         let result = Manifest::load(&path);
         let _ = std::fs::remove_file(&path);
 
-        assert!(result.is_err(), "in-process transport must not carry an address");
+        assert!(result.is_err(), "distributed transport is not yet implemented");
+    }
+
+    #[test]
+    fn reject_stale_target_section() {
+        // A leftover distributed-transport target must fail loudly, not be ignored.
+        let toml = "[[guest]]\nid = \"only\"\nsource.path = \"./only.wasm\"\n\n\
+             [transport.target.remote]\nkind = \"unix\"\n";
+        toml::from_str::<Manifest>(toml).unwrap_err();
     }
 
     #[test]

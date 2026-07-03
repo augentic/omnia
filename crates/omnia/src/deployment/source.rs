@@ -1,8 +1,8 @@
 //! # Guest acquisition
 //!
 //! Where a guest's component bytes come from. The deployment manifest's
-//! `source` field selects a kind per guest. Phase 1 ships [`Source`] (a local
-//! `.wasm` / pre-compiled `.bin` path); OCI lands later as another source kind.
+//! `source` field selects a kind per guest. Today only [`Source`] (a local
+//! `.wasm` / pre-compiled `.bin` path) exists; OCI would land as another kind.
 
 use std::path::{Path, PathBuf};
 

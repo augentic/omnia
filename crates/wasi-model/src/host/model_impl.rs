@@ -1,8 +1,8 @@
-//! The `complete` host binding.
+//! The `create` host binding.
 //!
 //! Implements the generated `completion` host trait on [`WasiModel`]. It is the
 //! host validation gate — it assembles the prompt (§3.1.1), hands the resulting
-//! [`PreparedPrompt`] and a per-completion [`ToolHost`] to the backend, then
+//! [`PreparedRequest`] and a per-completion [`ToolHost`] to the backend, then
 //! *re-validates* the returned answer before mapping it to the guest-visible
 //! `answer` string. A backend that
 //! runs its own repair loop (genai) consumes validation failures internally and
@@ -15,10 +15,10 @@ use futures::FutureExt as _;
 use omnia::{Dispatcher, GuestId, HasDispatcher, HasMounts};
 use wasmtime::component::{Accessor, StreamReader, Val};
 
-use crate::host::generated::augentic::model::completion::{
-    Host, HostWithStore, Prompt, StreamEvent,
+use crate::host::generated::omnia::model::completion::{
+    Event, Host, HostWithStore, Reply, Request, Usage as WitUsage,
 };
-use crate::host::types::{Answer, DirEntry, PreparedPrompt, Reference, VerifyReport};
+use crate::host::types::{Answer, DirEntry, PreparedRequest, Reference, VerifyReport};
 use crate::host::workspace::{self, Workspace};
 use crate::host::{Error, FutureResult, ToolHost, WasiModel, WasiModelCtxView};
 
@@ -26,15 +26,15 @@ impl<T> HostWithStore<T> for WasiModel
 where
     T: HasMounts + HasDispatcher,
 {
-    async fn complete(accessor: &Accessor<T, Self>, mut prompt: Prompt) -> Result<String, Error> {
+    async fn create(accessor: &Accessor<T, Self>, mut request: Request) -> Result<Reply, Error> {
         // The lent `borrow<descriptor>` cannot survive the backend await, so the
         // host takes it out here to resolve the workspace for `ToolHost`.
-        let lent = prompt.grants.workspace.take();
-        let request = PreparedPrompt::try_from(prompt)?;
+        let lent = request.grants.workspace.take();
+        let prepared = PreparedRequest::try_from(request)?;
 
-        let kind = request.prompt.response_format.kind;
-        let references = request.prompt.grants.references.clone();
-        let verify_allowed = request.prompt.grants.verify.clone();
+        let format = prepared.request.format.clone();
+        let references = prepared.request.grants.references.clone();
+        let verify_allowed = prepared.request.grants.verify.clone();
 
         let answer = accessor
             .with(|mut store| {
@@ -48,19 +48,28 @@ where
                     verify_allowed,
                     workspace,
                 });
-                Ok::<_, Error>(view.ctx.complete(request, tool_host))
+                Ok::<_, Error>(view.ctx.complete(prepared, tool_host))
             })?
             .await?;
 
-        Answer::check(&answer.value, kind)?;
+        Answer::check(&answer.value, &format)?;
 
-        serde_json::to_string(&answer.value)
-            .map_err(|e| Error::InvalidAnswer(format!("answer is not serializable JSON: {e}")))
+        let text = serde_json::to_string(&answer.value)
+            .map_err(|e| Error::InvalidAnswer(format!("answer is not serializable JSON: {e}")))?;
+
+        Ok(Reply {
+            answer: text,
+            usage: answer.usage.map(|u| WitUsage {
+                input_tokens: u.input_tokens,
+                output_tokens: u.output_tokens,
+                reasoning_tokens: u.reasoning_tokens,
+            }),
+        })
     }
 
-    async fn complete_stream(
-        _accessor: &Accessor<T, Self>, _prompt: Prompt,
-    ) -> Result<StreamReader<StreamEvent>, Error> {
+    async fn create_stream(
+        _accessor: &Accessor<T, Self>, _request: Request,
+    ) -> Result<StreamReader<Event>, Error> {
         Err(Error::Backend("streaming unsupported".to_owned()))
     }
 }
@@ -71,7 +80,7 @@ impl Host for WasiModelCtxView<'_> {
     }
 }
 
-// The bound tool host, built fresh per completion from the prompt's grants.
+// The bound tool host, built fresh per completion from the request's grants.
 struct BoundToolHost {
     dispatcher: Arc<dyn Dispatcher>,
     references: Option<String>,

@@ -47,8 +47,8 @@ impl<T> HostBucketWithStore<T> for WasiKeyValue {
         accessor: &Accessor<T, Self>, self_: Resource<BucketProxy>, key: String,
     ) -> Result<bool> {
         let bucket = get_bucket(accessor, &self_)?;
-        let value = bucket.get(key).await.context("issue getting value")?;
-        Ok(value.is_some())
+        let exists = bucket.exists(key).await.context("issue checking existence")?;
+        Ok(exists)
     }
 
     async fn list_keys(

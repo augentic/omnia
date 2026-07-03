@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tracing::instrument;
 
-use crate::host::generated::augentic::model::completion::{Prompt, ResponseFormatKind, ToolChoice};
-use crate::host::types::{Answer, PreparedPrompt, Transcript};
+use crate::host::generated::omnia::model::completion::{Request, Tool};
+use crate::host::types::{Answer, PreparedRequest, Transcript, Usage};
 use crate::host::{FutureResult, ToolHost, WasiModelCtx};
 
 /// Options used to connect the replay backend.
@@ -59,7 +59,7 @@ impl Backend for ModelDefault {
 
 impl WasiModelCtx for ModelDefault {
     fn complete(
-        &self, request: PreparedPrompt, _tool_host: Arc<dyn ToolHost>,
+        &self, request: PreparedRequest, _tool_host: Arc<dyn ToolHost>,
     ) -> FutureResult<Answer> {
         let answer = self.store.answer(&request);
         async move { answer }.boxed()
@@ -101,11 +101,11 @@ impl TryFrom<&PathBuf> for FixtureStore {
 }
 
 impl FixtureStore {
-    fn answer(&self, request: &PreparedPrompt) -> Result<Answer> {
-        let key_json = &reduced_value(&request.prompt);
+    fn answer(&self, prepared: &PreparedRequest) -> Result<Answer> {
+        let key_json = &reduced_value(&prepared.request);
         let key = serde_json::to_string(key_json)?;
 
-        self.answers.get(&key).cloned().ok_or_else(|| anyhow!("no replay fixture for prompt"))
+        self.answers.get(&key).cloned().ok_or_else(|| anyhow!("no replay fixture for request"))
     }
 
     #[must_use]
@@ -114,36 +114,39 @@ impl FixtureStore {
     }
 
     fn insert(&mut self, fixture: Fixture) {
-        let key = serde_json::to_string(&fixture.key_prompt).unwrap_or_default();
+        let key = serde_json::to_string(&fixture.key_request).unwrap_or_default();
 
         self.answers.insert(
             key,
             Answer {
                 value: fixture.answer,
+                usage: fixture.usage,
                 transcript: fixture.transcript,
             },
         );
     }
 }
 
-// A `prompt -> answer` row, the unit of replay (§5.4).
+// A `request -> answer` row, the unit of replay (§5.4).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct Fixture {
-    key_prompt: Value,
+    key_request: Value,
     answer: Value,
+    #[serde(default)]
+    usage: Option<Usage>,
     #[serde(default)]
     transcript: Option<Transcript>,
 }
 
-fn reduced_value(prompt: &Prompt) -> Value {
+fn reduced_value(request: &Request) -> Value {
     json!({
-        "model": prompt.model,
-        "system": prompt.system,
-        "messages": prompt.messages.iter().map(|message| json!({
-            "role": message.role,
+        "model": request.model,
+        "system": request.system,
+        "messages": request.messages.iter().map(|message| json!({
+            "role": message.role.to_string(),
             "content": message.content,
         })).collect::<Vec<_>>(),
-        "sections": prompt.sections.as_ref().map(|sections| json!({
+        "sections": request.sections.as_ref().map(|sections| json!({
             "role": sections.role,
             "task": sections.task,
             "context": sections.context,
@@ -157,38 +160,19 @@ fn reduced_value(prompt: &Prompt) -> Value {
                 "value": variable.value,
             })).collect::<Vec<_>>(),
         })),
-        "generation": prompt.generation.as_ref().map(|generation| json!({
+        "generation": request.generation.as_ref().map(|generation| json!({
             "temperature": generation.temperature,
             "top_p": generation.top_p,
             "max_tokens": generation.max_tokens,
             "stop": generation.stop,
+            "seed": generation.seed,
+            "effort": generation.effort.map(|effort| effort.to_string()),
         })),
-        "response_format": {
-            "kind": match prompt.response_format.kind {
-                ResponseFormatKind::Text => "text",
-                ResponseFormatKind::JsonObject => "json-object",
-                ResponseFormatKind::JsonSchema => "json-schema",
-            },
-            "json_schema": prompt.response_format.json_schema.as_ref().map(|spec| json!({
-                "name": spec.name,
-                "schema": spec.schema,
-                "strict": spec.strict,
-            })),
-        },
-        "tools": prompt.tools.iter().map(|tool| json!({
-            "name": tool.name,
-            "description": tool.description,
-            "parameters": tool.parameters,
-        })).collect::<Vec<_>>(),
-        "tool_choice": prompt.tool_choice.as_ref().map(|choice| match choice {
-            ToolChoice::Auto => json!("auto"),
-            ToolChoice::None => json!("none"),
-            ToolChoice::Required => json!("required"),
-            ToolChoice::Named(name) => json!({ "named": name }),
-        }),
+        "format": request.format.replay_value(),
+        "tools": request.tools.iter().map(Tool::replay_value).collect::<Vec<_>>(),
         "grants": {
-            "references": prompt.grants.references,
-            "verify": prompt.grants.verify,
+            "references": request.grants.references,
+            "verify": request.grants.verify,
         },
     })
 }

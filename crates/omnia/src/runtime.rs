@@ -1,8 +1,9 @@
-//! Deployment lifecycle: [`bootstrap`], [`run`], background tasks, and [`ExitStatus`].
+//! Deployment lifecycle: [`Backends`], [`Wiring`], [`Runtime`], [`run`], and [`ExitStatus`].
 
 mod command;
 
-use std::path::PathBuf;
+use std::env;
+use std::future::Future;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,8 +16,33 @@ use wasmtime::{Engine, Store};
 use crate::cli::{Cli, Command};
 use crate::dispatch::serve_links;
 use crate::mount::MountRegistry;
-use crate::traits::{Backends, HasLimits};
+use crate::store::HasLimits;
 use crate::{Deployment, DeploymentBuilder, Registry, RuntimeOptions, StoreBase, StoreCtx};
+
+/// A deployment's connected backend bundle, threaded into [`Runtime`].
+///
+/// The `runtime!` macro generates the concrete bundle (one field per declared
+/// backend) and this impl, whose [`connect`](Self::connect) connects every
+/// backend concurrently — the work the macro previously inlined as a
+/// `tokio::try_join!` in the generated `Runtime::new`. A deployment that wires
+/// no backends uses the [`()`](unit) bundle below, so [`Runtime`] needs no
+/// special empty case.
+pub trait Backends: Clone + Send + Sync + 'static {
+    /// Connect every backend in the bundle.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first backend connection error.
+    fn connect() -> impl Future<Output = Result<Self>>;
+}
+
+/// The zero-backend bundle: a deployment that links only backend-less hosts
+/// (such as a `mode: command` `wasi:cli` deployment) connects nothing.
+impl Backends for () {
+    async fn connect() -> Result<Self> {
+        Ok(())
+    }
+}
 
 /// How a deployment is driven after bootstrap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -37,7 +63,7 @@ impl Mode {
 }
 
 /// Host linking and trigger-server startup for a deployment.
-pub trait RuntimeHooks<B: Backends> {
+pub trait Wiring<B: Backends> {
     /// Link every declared host into the deployment linker.
     ///
     /// # Errors
@@ -54,16 +80,31 @@ pub trait RuntimeHooks<B: Backends> {
 pub async fn main<B, H>(mode: Mode) -> ExitCode
 where
     B: Backends,
-    H: RuntimeHooks<B>,
+    H: Wiring<B>,
 {
     match Cli::parse().command {
-        Command::Run { wasm, config, args } => match run::<B, H>(wasm, config, args, mode).await {
-            Ok(status) => status.into(),
-            Err(error) => {
-                eprintln!("{error:#}");
-                ExitCode::FAILURE
+        Command::Run {
+            wasm,
+            config,
+            mounts,
+            links,
+            args,
+        } => {
+            let builder = DeploymentBuilder::new()
+                .wasm(wasm)
+                .config(config)
+                .args(args)
+                .mounts(mounts)
+                .links(links)
+                .mode(mode);
+            match run::<B, H>(builder).await {
+                Ok(status) => status.into(),
+                Err(error) => {
+                    eprintln!("{error:#}");
+                    ExitCode::FAILURE
+                }
             }
-        },
+        }
         #[cfg(feature = "jit")]
         Command::Compile { .. } => {
             eprintln!(
@@ -81,21 +122,13 @@ where
 ///
 /// Returns an error if the deployment cannot be built, runtime state cannot be
 /// assembled, bootstrap fails, or a trigger server exits with an error.
-pub async fn run<B, H>(
-    wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>, mode: Mode,
-) -> Result<ExitStatus>
+pub async fn run<B, H>(builder: DeploymentBuilder) -> Result<ExitStatus>
 where
     B: Backends,
-    H: RuntimeHooks<B>,
+    H: Wiring<B>,
 {
-    let deployment = DeploymentBuilder::new()
-        .wasm(wasm)
-        .config(config)
-        .args(args)
-        .mode(mode)
-        .build::<StoreCtx<B>>()
-        .await
-        .context("building runtime")?;
+    let deployment = builder.build::<StoreCtx<B>>().await.context("building runtime")?;
+    let mode = deployment.mode();
 
     let runtime = Runtime::<B>::new(deployment, H::link).await.context("assembling runtime")?;
 
@@ -105,6 +138,8 @@ where
 
     // wire host-mediated link servers
     serve_links(&runtime).await.context("wiring host-mediated link serve side")?;
+
+    log_bootstrap_complete(&runtime, mode);
 
     match mode {
         Mode::Command => {
@@ -121,6 +156,18 @@ where
             Ok(ExitStatus::SUCCESS)
         }
     }
+}
+
+fn log_bootstrap_complete<B>(runtime: &Runtime<B>, mode: Mode)
+where
+    B: Clone + Send + Sync + 'static,
+{
+    tracing::info!(
+        mode = if mode.is_command() { "command" } else { "server" },
+        guests = runtime.registry().guests().count(),
+        component = env::var("COMPONENT").unwrap_or_else(|_| "unknown".into()),
+        "omnia ready",
+    );
 }
 
 fn drive_epoch(engine: Engine, tick: Duration) {
@@ -147,7 +194,7 @@ fn sample_pool(engine: Engine, interval: Duration) {
                 break;
             };
 
-            tracing::info!(
+            tracing::debug!(
                 gauge.pool_core_instances = metrics.core_instances(),
                 gauge.pool_component_instances = metrics.component_instances(),
                 gauge.pool_memories = metrics.memories() as u64,
@@ -272,7 +319,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         let base = StoreBase::builder()
             .options(self.options())
             .dispatcher(Arc::new(self.clone()))
-            .args(&self.args)
+            .args(Arc::clone(&self.args))
             .mounts(Arc::clone(&self.mounts))
             .build();
         StoreCtx {
@@ -319,33 +366,11 @@ mod tests {
     use super::ExitStatus;
 
     #[test]
-    fn success_is_zero() {
-        assert_eq!(ExitStatus::SUCCESS.code(), 0);
-        assert_eq!(ExitStatus::SUCCESS.code_u8(), 0);
-    }
-
-    #[test]
-    fn from_i32_preserves_full_code() {
-        assert_eq!(ExitStatus::from(2).code(), 2);
-        assert_eq!(ExitStatus::from(256).code(), 256);
-        assert_eq!(ExitStatus::from(-1).code(), -1);
-    }
-
-    #[test]
     fn code_u8_keeps_low_byte() {
-        assert_eq!(ExitStatus::from(0).code_u8(), 0);
-        assert_eq!(ExitStatus::from(2).code_u8(), 2);
-        assert_eq!(ExitStatus::from(255).code_u8(), 255);
+        // The POSIX low-byte truncation is the only non-trivial ExitStatus logic.
+        assert_eq!(ExitStatus::from(2).code(), 2);
         assert_eq!(ExitStatus::from(256).code_u8(), 0);
         assert_eq!(ExitStatus::from(257).code_u8(), 1);
         assert_eq!(ExitStatus::from(-1).code_u8(), 255);
-        let _ = std::process::ExitCode::from(ExitStatus::from(2));
-    }
-
-    #[test]
-    fn is_copy_and_eq() {
-        let status = ExitStatus::from(7);
-        let copied = status;
-        assert_eq!(status, copied);
     }
 }

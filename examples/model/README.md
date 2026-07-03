@@ -1,10 +1,10 @@
 # Model completion (replay)
 
-Proves **Phase 1** of [`rfcs/wasi-model.md`](../../rfcs/wasi-model.md) (§6, run 1): a guest calls `complete` across the `augentic:model/completion` boundary and receives a **validated, deterministic** answer from the in-tree `ModelDefault` (replay) backend — no live model, no network.
+Proves **Phase 1** of [`rfcs/wasi-model.md`](../../rfcs/wasi-model.md) (§6, run 1): a guest calls `create` across the `omnia:model/completion` boundary and receives a **validated, deterministic** answer from the in-tree `ModelDefault` (replay) backend — no live model, no network.
 
 ## What it shows
 
-- `guest` ([`guest.rs`](guest.rs)) **imports** `augentic:model/completion` and exposes an async `run`. It builds a `json-schema` prompt from `sections` (role / task / context), sets `grants.references = "shelf"` as data, reads the preopen table via `wasi:filesystem/preopens` and lends the workspace named `.` through `grants.workspace`, then calls `complete(prompt).await`.
+- `guest` ([`guest.rs`](guest.rs)) **imports** `omnia:model/completion` and exposes an async `run`. It builds a `json-schema` prompt from `sections` (role / task / context), sets `grants.references = "shelf"` as data, reads the preopen table via `wasi:filesystem/preopens` and lends the workspace named `.` through `grants.workspace`, then calls `create(prompt).await`.
 - [`runtime.rs`](runtime.rs) binds the `WasiModel` host to `ModelDefault`, the replay backend that serves a recorded answer for an equivalent prompt.
 - [`omnia.toml`](omnia.toml)'s `[[mount]]` preopens the repo root as a read-only workspace named `.`. The host resolves the lent descriptor back to that mount by directory identity; the replay backend ignores it (Phase 1 short-circuits tools).
 - [`shelf.rs`](shelf.rs) is the `references` shelf (Phase 2a): it exports `resolve` and is reached *only* via host-mediated dispatch when a backend follows `grants.references` (instance-per-call, no trigger). It is inert under the replay backend; the resolve path is proven by the integration test.
@@ -13,7 +13,7 @@ Proves **Phase 1** of [`rfcs/wasi-model.md`](../../rfcs/wasi-model.md) (§6, run
 
 ```mermaid
 flowchart LR
-  guest["guest.run<br/>(imports completion)"] -->|"complete(prompt)"| bind["complete binding<br/>assemble + validate (§3.1.1, §3.1.3)"]
+  guest["guest.run<br/>(imports completion)"] -->|"create(prompt)"| bind["create binding<br/>assemble + validate (§3.1.1, §3.1.3)"]
   bind -->|"PreparedPrompt + ToolHost"| ctx["WasiModelCtx"]
   ctx --> replay["ModelDefault (replay)<br/>fixture lookup by canonical key (§5.4)"]
   replay -->|"validated answer"| guest
@@ -26,16 +26,17 @@ The runtime core stays generic (Law 2): no model id, provider, or schema dialect
 A whole-workspace `wasm32-wasip2` build fails on the native-only host crates, so build the guest components explicitly:
 
 ```bash
-cargo build -p examples --example model-wasm --example model-shelf-wasm --target wasm32-wasip2
+cargo build -p examples --example model-wasm --target wasm32-wasip2
 ```
 
-This emits `target/wasm32-wasip2/debug/examples/model_wasm.wasm` and `model_shelf_wasm.wasm` (the underscored names the manifest points at).
+This emits `target/wasm32-wasip2/debug/examples/model_wasm.wasm` (the underscored name the manifest points at).
 
 ## Run
 
 Point `MODEL_REPLAY_DIR` at the checked-in fixtures and start the host:
 
 ```bash
+export RUST_LOG=info
 MODEL_REPLAY_DIR=examples/model/fixtures \
   cargo run --example model -- run --config examples/model/omnia.toml
 ```
