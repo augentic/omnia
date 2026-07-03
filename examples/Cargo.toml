@@ -10,9 +10,9 @@ anyhow.workspace = true
 cfg-if.workspace = true
 omnia-wasi-blobstore.workspace = true
 omnia-wasi-config.workspace = true
+omnia-wasi-docstore.workspace = true
 omnia-wasi-http.workspace = true
 omnia-wasi-identity.workspace = true
-omnia-wasi-docstore.workspace = true
 omnia-wasi-keyvalue.workspace = true
 omnia-wasi-messaging.workspace = true
 omnia-wasi-model.workspace = true
@@ -22,13 +22,11 @@ omnia-wasi-vault.workspace = true
 omnia-wasi-websocket.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-omnia.workspace = true
-# Used by the `http-bench` load-test harness (anyhow + cfg-if come from the
-# shared `[dependencies]` section above).
 bytes.workspace = true
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { workspace = true, features = ["tokio"] }
+omnia.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
