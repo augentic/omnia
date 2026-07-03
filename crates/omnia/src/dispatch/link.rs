@@ -15,7 +15,7 @@ use wrpc_transport::Invoke;
 use wrpc_wasmtime::{ValEncoder, WrpcView, read_value};
 
 use super::handle::DispatchHandle;
-use super::transport::{InProcClient, LinkTransport as _};
+use super::transport::LinkTransport as _;
 use crate::deployment::LoadedGuest;
 
 /// Polyfill every host-mediated import named in the `link` allow-list union onto
@@ -136,8 +136,7 @@ where
     // Encode the forwarded parameters with wRPC's value codec.
     let mut buf = BytesMut::new();
     for (value, ty) in zip(&forwarded, &param_types) {
-        let mut encoder: ValEncoder<'_, T, <InProcClient as Invoke>::Outgoing> =
-            ValEncoder::new(store.as_context_mut(), ty, &[], &[]);
+        let mut encoder = ValEncoder::new(store.as_context_mut(), ty, &[], &[]);
         encoder
             .encode(value, &mut buf)
             .map_err(anyhow::Error::from)

@@ -100,10 +100,11 @@ wasmtime-wasi-http = { version = "46.0.1", features = ["p3"] }
 wasmtime-wasi-io = "46.0.1"
 wit-bindgen = { version = "0.58.0", features = ["async-spawn"] }
 
-wrpc-transport = { git = "https://github.com/bytecodealliance/wrpc", rev = "b00e0f7f6266585e59c8881d138c43e939f2da3c" }
-wrpc-wasmtime = { git = "https://github.com/bytecodealliance/wrpc", rev = "b00e0f7f6266585e59c8881d138c43e939f2da3c" }
-# wrpc-transport = "0.29.0"
-# wrpc-runtime-wasmtime="0.31.0"
+# `wrpc-wasmtime` 0.1.0 is unpublished (the crate was renamed from
+# `wrpc-runtime-wasmtime` upstream); it is supplied by [patch.crates-io] below
+# until the first crates.io release.
+wrpc-transport = "0.29.0"
+wrpc-wasmtime = "0.1.0"
 
 # internally referenced crates
 omnia = { path = "crates/omnia", version = "0.35.0" }
@@ -125,6 +126,10 @@ omnia-wasi-websocket = { path = "crates/wasi-websocket", version = "0.35.0" }
 
 # Test-only scaffolding (path-only dev-dependency; never published).
 omnia-testkit = { path = "crates/testkit" }
+
+[patch.crates-io]
+wrpc-transport = { git = "https://github.com/bytecodealliance/wrpc" }
+wrpc-wasmtime = { git = "https://github.com/bytecodealliance/wrpc" }
 
 [profile.release]
 lto = true
