@@ -134,7 +134,7 @@ impl<T: WasiView + 'static> Registry<T> {
     /// host-mediated imports, pre-instantiate every loaded guest, validate that
     /// routes name registered guests, and freeze the result.
     ///
-    /// [`Deployment::build`](crate::Deployment::build) is the usual entry point.
+    /// [`DeploymentBuilder::build`](crate::DeploymentBuilder::build) is the usual entry point.
     ///
     /// # Errors
     ///
