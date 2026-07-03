@@ -142,8 +142,8 @@ fn write_blocking(dir: &Dir, path: &str, bytes: &[u8]) -> anyhow::Result<()> {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use cap_std_v3::ambient_authority;
-    use cap_std_v3::fs::Dir as CapDir;
+    use cap_std::ambient_authority;
+    use cap_std::fs::Dir as CapDir;
     use omnia::{MountRegistry, ResolvedPreopen};
     use wasmtime_wasi::filesystem::{Descriptor, Dir, File, OpenMode};
     use wasmtime_wasi::{DirPerms, FilePerms, ResourceTable};

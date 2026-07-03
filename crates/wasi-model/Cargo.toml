@@ -39,6 +39,5 @@ wasip3.workspace = true
 wit-bindgen.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-cap-std-v3 = { package = "cap-std", version = "3.4.5" }
 omnia-testkit.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
