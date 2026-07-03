@@ -7,9 +7,9 @@ mod error;
 pub mod mcp;
 pub mod orm;
 
-/// JSON document store types and helpers (from `omnia-wasi-jsondb`).
+/// Document store types and helpers (from `omnia-wasi-docstore`).
 pub mod document_store {
-    pub use omnia_wasi_jsondb::document_store::*;
+    pub use omnia_wasi_docstore::document_store::*;
 }
 
 #[cfg(target_arch = "wasm32")]

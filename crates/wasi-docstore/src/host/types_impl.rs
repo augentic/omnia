@@ -1,18 +1,18 @@
-//! `wasi:jsondb` `types` interface — `filter` resource constructors.
+//! `wasi:docstore` `types` interface — `filter` resource constructors.
 
 use wasmtime::component::{Access, Resource};
 
-use crate::host::generated::wasi::jsondb::types as wit_types;
-use crate::host::generated::wasi::jsondb::types::{
+use crate::host::generated::wasi::docstore::types as wit_types;
+use crate::host::generated::wasi::docstore::types::{
     ComparisonOp, Host as TypesHost, HostFilter, HostFilterWithStore, ScalarValue,
 };
 use crate::host::resource::{FilterProxy, FilterTree};
-use crate::host::{JsonDbError, WasiJsonDb, WasiJsonDbCtxView};
+use crate::host::{DocStoreError, WasiDocStore, WasiDocStoreCtxView};
 
 const MAX_FILTER_DEPTH: usize = 5;
 const MAX_IN_LIST_SIZE: usize = 100;
 
-impl<T> HostFilterWithStore<T> for WasiJsonDb {
+impl<T> HostFilterWithStore<T> for WasiDocStore {
     fn compare(
         mut host: Access<'_, T, Self>, field: String, op: ComparisonOp, value: ScalarValue,
     ) -> wasmtime::Result<Resource<FilterProxy>> {
@@ -121,14 +121,14 @@ impl<T> HostFilterWithStore<T> for WasiJsonDb {
     }
 }
 
-impl HostFilter for WasiJsonDbCtxView<'_> {}
+impl HostFilter for WasiDocStoreCtxView<'_> {}
 
-impl TypesHost for WasiJsonDbCtxView<'_> {
-    fn convert_error(&mut self, err: JsonDbError) -> wasmtime::Result<wit_types::Error> {
+impl TypesHost for WasiDocStoreCtxView<'_> {
+    fn convert_error(&mut self, err: DocStoreError) -> wasmtime::Result<wit_types::Error> {
         Ok(match err {
-            JsonDbError::NoSuchStore => wit_types::Error::NoSuchStore,
-            JsonDbError::AccessDenied => wit_types::Error::AccessDenied,
-            JsonDbError::Other(s) => wit_types::Error::Other(s),
+            DocStoreError::NoSuchStore => wit_types::Error::NoSuchStore,
+            DocStoreError::AccessDenied => wit_types::Error::AccessDenied,
+            DocStoreError::Other(s) => wit_types::Error::Other(s),
         })
     }
 }

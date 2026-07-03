@@ -27,7 +27,7 @@
 use anyhow::{Result, bail};
 use polodb_core::bson::{self, Bson, Document, doc};
 
-use crate::host::generated::wasi::jsondb::types::{ComparisonOp, ScalarValue};
+use crate::host::generated::wasi::docstore::types::{ComparisonOp, ScalarValue};
 use crate::host::resource::FilterTree;
 
 /// Validate a filter tree for `PoloDB` compatibility.

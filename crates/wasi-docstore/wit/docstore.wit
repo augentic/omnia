@@ -1,4 +1,4 @@
-package wasi:jsondb@0.1.0;
+package wasi:docstore@0.1.0;
 
 interface types {
     variant error {

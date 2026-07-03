@@ -1,6 +1,6 @@
 [package]
-name = "omnia-wasi-jsondb"
-description = "WASI JSON document store interface for the Omnia runtime"
+name = "omnia-wasi-docstore"
+description = "WASI document store interface for the Omnia runtime"
 readme = "README.md"
 authors.workspace = true
 categories.workspace = true

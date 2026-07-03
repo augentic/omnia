@@ -6,9 +6,9 @@ use anyhow::Result;
 
 use crate::document_store::{Document, QueryOptions, QueryResult};
 
-/// JSON document storage (WASI JSON DB).
+/// Document storage (`wasi:docstore`).
 ///
-/// Default WASM implementations delegate to `wasi:jsondb` via `omnia-wasi-jsondb`.
+/// Default WASM implementations delegate to `wasi:docstore` via `omnia-wasi-docstore`.
 pub trait DocumentStore: Send + Sync {
     /// Fetch a document by id.
     #[cfg(not(target_arch = "wasm32"))]
@@ -35,25 +35,25 @@ pub trait DocumentStore: Send + Sync {
     /// Fetch a document by id.
     #[cfg(target_arch = "wasm32")]
     fn get(&self, store: &str, id: &str) -> impl Future<Output = Result<Option<Document>>> + Send {
-        async move { omnia_wasi_jsondb::store::get(store, id).await }
+        async move { omnia_wasi_docstore::store::get(store, id).await }
     }
 
     /// Insert a new document (fails if the id already exists).
     #[cfg(target_arch = "wasm32")]
     fn insert(&self, store: &str, doc: &Document) -> impl Future<Output = Result<()>> + Send {
-        async move { omnia_wasi_jsondb::store::insert(store, doc).await }
+        async move { omnia_wasi_docstore::store::insert(store, doc).await }
     }
 
     /// Upsert a document by id.
     #[cfg(target_arch = "wasm32")]
     fn put(&self, store: &str, doc: &Document) -> impl Future<Output = Result<()>> + Send {
-        async move { omnia_wasi_jsondb::store::put(store, doc).await }
+        async move { omnia_wasi_docstore::store::put(store, doc).await }
     }
 
     /// Delete a document by id. Returns whether a document was removed.
     #[cfg(target_arch = "wasm32")]
     fn delete(&self, store: &str, id: &str) -> impl Future<Output = Result<bool>> + Send {
-        async move { omnia_wasi_jsondb::store::delete(store, id).await }
+        async move { omnia_wasi_docstore::store::delete(store, id).await }
     }
 
     /// Query documents in a collection.
@@ -61,6 +61,6 @@ pub trait DocumentStore: Send + Sync {
     fn query(
         &self, store: &str, options: QueryOptions,
     ) -> impl Future<Output = Result<QueryResult>> + Send {
-        async move { omnia_wasi_jsondb::store::query(store, options).await }
+        async move { omnia_wasi_docstore::store::query(store, options).await }
     }
 }

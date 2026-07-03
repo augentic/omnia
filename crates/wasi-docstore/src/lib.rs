@@ -1,7 +1,7 @@
 #![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
 
-//! WASI JSON document store (`wasi:jsondb`).
+//! WASI document store (`wasi:docstore`).
 
 pub mod document_store;
 

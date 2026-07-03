@@ -1,4 +1,4 @@
-//! Host-side `wasi:jsondb` implementation.
+//! Host-side `wasi:docstore` implementation.
 
 mod default_impl;
 mod resource;
@@ -7,7 +7,7 @@ mod types_impl;
 
 /// Errors surfaced through the WIT `error` type.
 #[derive(Debug, Clone)]
-pub enum JsonDbError {
+pub enum DocStoreError {
     /// Store or collection not found.
     NoSuchStore,
     /// Operation not permitted.
@@ -16,7 +16,7 @@ pub enum JsonDbError {
     Other(String),
 }
 
-impl std::fmt::Display for JsonDbError {
+impl std::fmt::Display for DocStoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NoSuchStore => write!(f, "no such store"),
@@ -26,12 +26,12 @@ impl std::fmt::Display for JsonDbError {
     }
 }
 
-impl std::error::Error for JsonDbError {}
+impl std::error::Error for DocStoreError {}
 
 mod generated {
     #![allow(missing_docs)]
 
-    pub use super::{FilterProxy, JsonDbError};
+    pub use super::{FilterProxy, DocStoreError};
 
     wasmtime::component::bindgen!({
         world: "imports",
@@ -40,10 +40,10 @@ mod generated {
             default: store | tracing | trappable,
         },
         with: {
-            "wasi:jsondb/types.filter": FilterProxy,
+            "wasi:docstore/types.filter": FilterProxy,
         },
         trappable_error_type: {
-            "wasi:jsondb/types.error" => JsonDbError,
+            "wasi:docstore/types.error" => DocStoreError,
         },
     });
 }
@@ -54,35 +54,35 @@ pub use omnia::FutureResult;
 use omnia::{Host, Server};
 use wasmtime::component::{HasData, Linker};
 
-use self::generated::wasi::jsondb::{store, types};
-pub use crate::host::default_impl::JsonDbDefault;
-pub use crate::host::generated::wasi::jsondb::types::{
+use self::generated::wasi::docstore::{store, types};
+pub use crate::host::default_impl::DocStoreDefault;
+pub use crate::host::generated::wasi::docstore::types::{
     ComparisonOp, Document, QueryResult, ScalarValue, SortField,
 };
 pub use crate::host::resource::{FilterProxy, FilterTree};
 
-/// Host service for `wasi:jsondb`.
+/// Host service for `wasi:docstore`.
 #[derive(Debug)]
-pub struct WasiJsonDb;
+pub struct WasiDocStore;
 
-impl HasData for WasiJsonDb {
-    type Data<'a> = WasiJsonDbCtxView<'a>;
+impl HasData for WasiDocStore {
+    type Data<'a> = WasiDocStoreCtxView<'a>;
 }
 
-impl<T> Host<T> for WasiJsonDb
+impl<T> Host<T> for WasiDocStore
 where
-    T: WasiJsonDbView + 'static,
+    T: WasiDocStoreView + 'static,
 {
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        types::add_to_linker::<_, Self>(linker, T::jsondb)?;
-        Ok(store::add_to_linker::<_, Self>(linker, T::jsondb)?)
+        types::add_to_linker::<_, Self>(linker, T::docstore)?;
+        Ok(store::add_to_linker::<_, Self>(linker, T::docstore)?)
     }
 }
 
-impl<B> Server<B> for WasiJsonDb {}
+impl<B> Server<B> for WasiDocStore {}
 
 /// Backend operations for JSON document storage.
-pub trait WasiJsonDbCtx: Debug + Send + Sync + 'static {
+pub trait WasiDocStoreCtx: Debug + Send + Sync + 'static {
     /// Point read by primary id.
     fn get(&self, collection: String, id: String) -> FutureResult<Option<Document>>;
 
@@ -105,7 +105,7 @@ pub trait WasiJsonDbCtx: Debug + Send + Sync + 'static {
 #[derive(Debug, Clone, Default)]
 pub struct QueryOpts {
     /// Sort fields.
-    pub order_by: Vec<generated::wasi::jsondb::types::SortField>,
+    pub order_by: Vec<generated::wasi::docstore::types::SortField>,
     /// Max documents.
     pub limit: Option<u32>,
     /// Skip count (when no continuation token).
@@ -114,4 +114,4 @@ pub struct QueryOpts {
     pub continuation: Option<String>,
 }
 
-omnia::wasi_view!(JsonDb);
+omnia::wasi_view!(DocStore);

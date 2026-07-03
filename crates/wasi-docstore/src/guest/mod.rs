@@ -1,4 +1,4 @@
-//! Guest-side `wasi:jsondb` bindings and helpers.
+//! Guest-side `wasi:docstore` bindings and helpers.
 
 pub(crate) mod generated {
     #![allow(missing_docs)]

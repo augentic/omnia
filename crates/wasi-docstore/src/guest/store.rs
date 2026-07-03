@@ -3,7 +3,7 @@
 use anyhow::Result;
 
 use super::convert;
-use super::generated::wasi::jsondb::store as wit_store;
+use super::generated::wasi::docstore::store as wit_store;
 use crate::document_store as sdk;
 
 /// Fetch a document by id, if present.

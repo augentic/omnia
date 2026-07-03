@@ -12,7 +12,7 @@ omnia-wasi-blobstore.workspace = true
 omnia-wasi-config.workspace = true
 omnia-wasi-http.workspace = true
 omnia-wasi-identity.workspace = true
-omnia-wasi-jsondb.workspace = true
+omnia-wasi-docstore.workspace = true
 omnia-wasi-keyvalue.workspace = true
 omnia-wasi-messaging.workspace = true
 omnia-wasi-model.workspace = true
@@ -135,13 +135,13 @@ name = "identity"
 path = "identity/runtime.rs"
 
 [[example]]
-name = "jsondb-wasm"
-path = "jsondb/guest.rs"
+name = "docstore-wasm"
+path = "docstore/guest.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "jsondb"
-path = "jsondb/runtime.rs"
+name = "docstore"
+path = "docstore/runtime.rs"
 
 [[example]]
 name = "keyvalue-wasm"

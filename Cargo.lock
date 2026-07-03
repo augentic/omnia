@@ -1023,9 +1023,9 @@ dependencies = [
  "omnia-guest",
  "omnia-wasi-blobstore",
  "omnia-wasi-config",
+ "omnia-wasi-docstore",
  "omnia-wasi-http",
  "omnia-wasi-identity",
- "omnia-wasi-jsondb",
  "omnia-wasi-keyvalue",
  "omnia-wasi-messaging",
  "omnia-wasi-model",
@@ -2094,9 +2094,9 @@ dependencies = [
  "omnia-guest-macros",
  "omnia-wasi-blobstore",
  "omnia-wasi-config",
+ "omnia-wasi-docstore",
  "omnia-wasi-http",
  "omnia-wasi-identity",
- "omnia-wasi-jsondb",
  "omnia-wasi-keyvalue",
  "omnia-wasi-messaging",
  "omnia-wasi-otel",
@@ -2161,6 +2161,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "omnia-wasi-docstore"
+version = "0.35.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "fromenv",
+ "futures",
+ "omnia",
+ "parking_lot",
+ "polodb_core",
+ "regex",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "wasmtime",
+ "wasmtime-wasi",
+ "wit-bindgen 0.58.0",
+]
+
+[[package]]
 name = "omnia-wasi-http"
 version = "0.35.0"
 dependencies = [
@@ -2201,27 +2222,6 @@ dependencies = [
  "oauth2",
  "omnia",
  "serde",
- "tokio",
- "tracing",
- "wasmtime",
- "wasmtime-wasi",
- "wit-bindgen 0.58.0",
-]
-
-[[package]]
-name = "omnia-wasi-jsondb"
-version = "0.35.0"
-dependencies = [
- "anyhow",
- "chrono",
- "fromenv",
- "futures",
- "omnia",
- "parking_lot",
- "polodb_core",
- "regex",
- "serde",
- "serde_json",
  "tokio",
  "tracing",
  "wasmtime",

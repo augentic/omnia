@@ -1,4 +1,4 @@
-//! Default PoloDB-backed implementation of [`WasiJsonDbCtx`](crate::host::WasiJsonDbCtx).
+//! Default PoloDB-backed implementation of [`WasiDocStoreCtx`](crate::host::WasiDocStoreCtx).
 
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_sign_loss)]
@@ -16,9 +16,9 @@ use polodb_core::bson::{self, doc};
 use polodb_core::{CollectionT, Database};
 use tracing::instrument;
 
-use crate::host::generated::wasi::jsondb::types::{Document, QueryResult, SortField};
+use crate::host::generated::wasi::docstore::types::{Document, QueryResult, SortField};
 use crate::host::resource::FilterTree;
-use crate::host::{FutureResult, QueryOpts, WasiJsonDbCtx};
+use crate::host::{FutureResult, QueryOpts, WasiDocStoreCtx};
 
 const MAX_PAGE_SIZE: u64 = 1000;
 
@@ -31,26 +31,26 @@ pub struct ConnectOptions {
 
 impl FromEnv for ConnectOptions {
     fn from_env() -> Result<Self> {
-        let database = std::env::var("JSONDB_DATABASE").unwrap_or_else(|_| {
-            std::env::temp_dir().join("omnia-jsondb.polodb").to_string_lossy().into_owned()
+        let database = std::env::var("DOCSTORE_DATABASE").unwrap_or_else(|_| {
+            std::env::temp_dir().join("omnia-docstore.polodb").to_string_lossy().into_owned()
         });
         Ok(Self { database })
     }
 }
 
-/// Default [`WasiJsonDbCtx`] using `PoloDB`.
+/// Default [`WasiDocStoreCtx`] using `PoloDB`.
 #[derive(Clone)]
-pub struct JsonDbDefault {
+pub struct DocStoreDefault {
     db: Arc<Database>,
 }
 
-impl std::fmt::Debug for JsonDbDefault {
+impl std::fmt::Debug for DocStoreDefault {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("JsonDbDefault").field("db", &"<polodb Database>").finish()
+        f.debug_struct("DocStoreDefault").field("db", &"<polodb Database>").finish()
     }
 }
 
-impl Backend for JsonDbDefault {
+impl Backend for DocStoreDefault {
     type ConnectOptions = ConnectOptions;
 
     #[instrument]
@@ -61,7 +61,7 @@ impl Backend for JsonDbDefault {
     }
 }
 
-impl WasiJsonDbCtx for JsonDbDefault {
+impl WasiDocStoreCtx for DocStoreDefault {
     fn get(&self, collection: String, id: String) -> FutureResult<Option<Document>> {
         let db = Arc::clone(&self.db);
         async move {
@@ -224,25 +224,25 @@ mod tests {
 
     use super::bson_filter::to_bson;
     use super::*;
-    use crate::host::generated::wasi::jsondb::types::{ComparisonOp, ScalarValue};
+    use crate::host::generated::wasi::docstore::types::{ComparisonOp, ScalarValue};
     use crate::host::resource::FilterTree;
 
-    fn temp_db() -> JsonDbDefault {
+    fn temp_db() -> DocStoreDefault {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
-            "omnia-jsondb-test-{}-{n}.polodb",
+            "omnia-docstore-test-{}-{n}.polodb",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("time")
                 .as_nanos()
         ));
         let db = Database::open_path(path.to_string_lossy().as_ref()).expect("open temp db");
-        JsonDbDefault { db: Arc::new(db) }
+        DocStoreDefault { db: Arc::new(db) }
     }
 
-    fn insert_doc(ctx: &JsonDbDefault, collection: &str, id: &str, val: &serde_json::Value) {
+    fn insert_doc(ctx: &DocStoreDefault, collection: &str, id: &str, val: &serde_json::Value) {
         let col = ctx.db.collection::<bson::Document>(collection);
         let mut bson_doc = bson::to_document(&val).expect("to bson");
         bson_doc.insert("_id", id);
@@ -250,7 +250,7 @@ mod tests {
     }
 
     fn query_with_filter(
-        ctx: &JsonDbDefault, collection: &str, filter: &FilterTree,
+        ctx: &DocStoreDefault, collection: &str, filter: &FilterTree,
     ) -> Vec<bson::Document> {
         bson_filter::validate(filter).expect("filter validation");
         let col = ctx.db.collection::<bson::Document>(collection);
@@ -262,7 +262,7 @@ mod tests {
     #[tokio::test]
     async fn roundtrip_document() {
         let path = std::env::temp_dir().join(format!(
-            "omnia-jsondb-test-{}.polodb",
+            "omnia-docstore-test-{}.polodb",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("time")
@@ -270,7 +270,7 @@ mod tests {
         ));
         let path = path.to_string_lossy().into_owned();
         let ctx =
-            JsonDbDefault::connect_with(ConnectOptions { database: path }).await.expect("connect");
+            DocStoreDefault::connect_with(ConnectOptions { database: path }).await.expect("connect");
 
         let doc = Document {
             id: "a1".to_string(),

@@ -1,4 +1,4 @@
-//! Target-neutral domain types for the `wasi:jsondb` guest SDK.
+//! Target-neutral domain types for the `wasi:docstore` guest SDK.
 //!
 //! The guest builds queries with these ergonomic types, then the guest bindings
 //! bridge them across the WIT boundary. The host keeps its own `FilterTree`

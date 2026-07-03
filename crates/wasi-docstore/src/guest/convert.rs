@@ -1,7 +1,7 @@
 //! Convert between [`crate::document_store`] types and generated WIT types.
 
 use crate::document_store as sdk;
-use crate::guest::generated::wasi::jsondb::types::{
+use crate::guest::generated::wasi::docstore::types::{
     ComparisonOp as WitComparisonOp, Document as WitDocument, Filter as WitFilterHandle,
     QueryOptions as WitQueryOptions, QueryResult as WitQueryResult, ScalarValue as WitScalarValue,
     SortField as WitSortField,

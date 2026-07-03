@@ -219,7 +219,7 @@ mod tests {
     #[test]
     fn derives_accessor_names() {
         for (input, has, ctx, method) in [
-            ("WasiJsonDb", "HasJsonDb", "WasiJsonDbCtx", "jsondb_ctx"),
+            ("WasiDocStore", "HasDocStore", "WasiDocStoreCtx", "docstore_ctx"),
             ("WasiWebSocket", "HasWebSocket", "WasiWebSocketCtx", "websocket_ctx"),
             ("WasiKeyValue", "HasKeyValue", "WasiKeyValueCtx", "keyvalue_ctx"),
         ] {
@@ -232,7 +232,7 @@ mod tests {
 
     #[test]
     fn derives_crate_ident() {
-        assert_eq!(wasi_ident(&path("WasiJsonDb")).to_string(), "omnia_wasi_jsondb");
+        assert_eq!(wasi_ident(&path("WasiDocStore")).to_string(), "omnia_wasi_docstore");
         assert_eq!(wasi_ident(&path("WasiWebSocket")).to_string(), "omnia_wasi_websocket");
     }
 

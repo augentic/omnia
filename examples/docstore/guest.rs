@@ -1,6 +1,6 @@
-//! # JsonDb Wasm Guest (Default Backend)
+//! # DocStore Wasm Guest (Default Backend)
 //!
-//! Demonstrates the `wasi:jsondb` document store interface with GTFS-like data.
+//! Demonstrates the `wasi:docstore` document store interface with GTFS-like data.
 //! Three collections -- stops, routes, stop_times -- exercise all CRUD operations
 //! and most filter types through combined query endpoints.
 //!

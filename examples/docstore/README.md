@@ -1,16 +1,16 @@
-# JsonDb Example
+# DocStore Example
 
-Demonstrates `wasi:jsondb` using the default PoloDB backend with three GTFS-like collections (stops, routes, stop_times). Exercises all CRUD operations and most filter types through combined query endpoints.
+Demonstrates `wasi:docstore` using the default PoloDB backend with three GTFS-like collections (stops, routes, stop_times). Exercises all CRUD operations and most filter types through combined query endpoints.
 
 ## Quick Start
 
 ```bash
 # build the guest
-cargo build --example jsondb-wasm --target wasm32-wasip2
+cargo build --example docstore-wasm --target wasm32-wasip2
 
 # run the host
-export RUST_LOG="info,omnia_wasi_jsondb=debug,omnia_wasi_http=debug"
-cargo run --example jsondb -- run ./target/wasm32-wasip2/debug/examples/jsondb_wasm.wasm
+export RUST_LOG="info,omnia_wasi_docstore=debug,omnia_wasi_http=debug"
+cargo run --example docstore -- run ./target/wasm32-wasip2/debug/examples/docstore_wasm.wasm
 ```
 
 ## API Endpoints

@@ -111,7 +111,7 @@ omnia-wasi-blobstore = { path = "crates/wasi-blobstore", version = "0.35.0" }
 omnia-wasi-config = { path = "crates/wasi-config", version = "0.35.0" }
 omnia-wasi-http = { path = "crates/wasi-http", version = "0.35.0" }
 omnia-wasi-identity = { path = "crates/wasi-identity", version = "0.35.0" }
-omnia-wasi-jsondb = { path = "crates/wasi-jsondb", version = "0.35.0" }
+omnia-wasi-docstore = { path = "crates/wasi-docstore", version = "0.35.0" }
 omnia-wasi-keyvalue = { path = "crates/wasi-keyvalue", version = "0.35.0" }
 omnia-wasi-messaging = { path = "crates/wasi-messaging", version = "0.35.0" }
 omnia-wasi-model = { path = "crates/wasi-model", version = "0.35.0" }
