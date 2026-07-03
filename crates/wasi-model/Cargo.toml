@@ -23,7 +23,8 @@ tracing.workspace = true
 
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-cap-fs-ext.workspace = true
+# Match wasmtime-wasi's cap-std stack (3.x) for `Descriptor` metadata identity.
+cap-primitives = "3.4.5"
 cap-std.workspace = true
 futures.workspace = true
 omnia.workspace = true
@@ -38,5 +39,6 @@ wasip3.workspace = true
 wit-bindgen.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+cap-std-v3 = { package = "cap-std", version = "3.4.5" }
 omnia-testkit.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
