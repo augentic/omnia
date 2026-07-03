@@ -1,16 +1,8 @@
-//! # Fixed per-store state and the shared store context
-//!
-//! [`StoreBase`] is the slice of a guest store context that is identical for every
-//! deployment: the WASI resource table and context, the per-guest memory
-//! limiter, the wRPC view state backing host-mediated dynamic linking, and the
-//! type-erased host->guest dispatcher.
-//!
-//! [`StoreCtx`] is the per-guest context every deployment shares: it pairs that
-//! fixed [`StoreBase`] with the deployment's connected backend bundle `B`. The
-//! three fixed views (`WasiView`, `WrpcView`, `HasLimits`) are implemented here
-//! against `base`; each host crate contributes a blanket `WasiXxxView for
-//! StoreCtx<B> where B: HasXxx` so a deployment only supplies the bundle plus
-//! the `HasXxx` accessor impls the `runtime!` macro generates.
+//! Per-store context. [`StoreBase`] holds the state identical for every
+//! deployment (WASI table/context, memory limiter, wRPC view state, host→guest
+//! dispatcher); [`StoreCtx`] pairs it with the deployment's backend bundle `B`
+//! and implements the fixed `WasiView`/`WrpcView`/`HasLimits` views, while each
+//! host crate blankets its own `WasiXxxView for StoreCtx<B> where B: HasXxx`.
 
 use std::sync::Arc;
 
@@ -46,18 +38,19 @@ pub struct Unset;
 pub struct StoreBaseBuilder<O = Unset, D = Unset> {
     options: O,
     dispatcher: D,
-    args: Vec<String>,
+    args: Option<Arc<Vec<String>>>,
     mounts: Option<Arc<MountRegistry>>,
 }
 
 impl<O, D> StoreBaseBuilder<O, D> {
     /// Set the guest argv (`args[0]` is the program name).
     ///
-    /// Optional; defaults to empty for reactor deployments that do not model a
-    /// CLI invocation.
+    /// Takes the runtime's shared argv handle so each store clones an `Arc`
+    /// rather than the vector. Optional; defaults to empty for reactor
+    /// deployments that do not model a CLI invocation.
     #[must_use]
-    pub fn args(mut self, args: &[String]) -> Self {
-        self.args = args.to_vec();
+    pub fn args(mut self, args: Arc<Vec<String>>) -> Self {
+        self.args = Some(args);
         self
     }
 
@@ -127,8 +120,10 @@ impl StoreBaseBuilder<Set<&RuntimeOptions>, Set<Arc<dyn Dispatcher>>> {
             .inherit_env()
             .inherit_stdin()
             .stdout(tokio::io::stdout())
-            .stderr(tokio::io::stderr())
-            .args(&self.args);
+            .stderr(tokio::io::stderr());
+        if let Some(args) = &self.args {
+            wasi_builder.args(args.as_slice());
+        }
 
         // Preopen each authorized mount into the guest sandbox (RFC-55). The
         // registry was opened + validated once at startup, so a failure here is
@@ -211,7 +206,7 @@ impl StoreBase {
         StoreBaseBuilder {
             options: Unset,
             dispatcher: Unset,
-            args: Vec::new(),
+            args: None,
             mounts: None,
         }
     }

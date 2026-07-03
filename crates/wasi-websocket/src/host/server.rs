@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
-use omnia::{Runtime, StoreCtx, TopicRoutes, TriggerRouter};
+use omnia::{PatternRoutes, Runtime, StoreCtx, TriggerRouter};
 use tracing::{Instrument, debug_span, instrument};
 
 use crate::host::WasiWebSocketView;
@@ -67,7 +67,7 @@ where
 {
     state: Runtime<B>,
     component: String,
-    routing: Arc<TriggerRouter<DuplexIndices, TopicRoutes>>,
+    routing: Arc<TriggerRouter<DuplexIndices, PatternRoutes>>,
 }
 
 impl<B> Handler<B>

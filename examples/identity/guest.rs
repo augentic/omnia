@@ -22,7 +22,6 @@ use serde_json::{Value, json};
 use tracing::Level;
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
-use wit_bindgen::block_on;
 
 const SCOPE: &str = "https://management.azure.com/.default";
 
@@ -30,7 +29,6 @@ struct Http;
 wasip3::http::service::export!(Http);
 
 impl Guest for Http {
-    /// Routes incoming requests to the identity handler.
     #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::INFO)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new().route("/", get(handler));
@@ -41,11 +39,10 @@ impl Guest for Http {
 /// Obtains an access token from the identity provider.
 #[omnia_wasi_otel::instrument]
 async fn handler() -> HttpResult<Json<Value>> {
-    let identity = block_on(get_identity("identity".to_string())).context("getting identity")?;
+    let identity = get_identity("identity".to_string()).await.context("getting identity")?;
 
     let scopes = vec![SCOPE.to_string()];
-    let access_token = block_on(async move { identity.get_token(scopes).await })
-        .context("getting access token")?;
+    let access_token = identity.get_token(scopes).await.context("getting access token")?;
 
     println!("access token: {}", access_token.token);
 

@@ -26,15 +26,16 @@ pub use self::deployment::{Deployment, DeploymentBuilder};
 pub use self::dispatch::{
     Dispatcher, FirstArgSelector, GuestSelector, LinkClient, WrpcState, serve_links,
 };
+pub use self::host::{Backend, FromEnv, FutureResult, Host, Server};
 pub use self::mount::{Mount, MountRegistry, ResolvedPreopen};
 pub use self::options::RuntimeOptions;
 #[cfg(feature = "jit")]
 pub use self::options::compile;
 pub use self::registry::{
-    CliRoutes, Guest, GuestId, HttpRoutes, Registry, Resolver, Routes, TopicRoutes, TriggerRouter,
+    CliRoutes, ExactMatch, Guest, GuestId, HttpRoutes, MatchStrategy, PatternMatch, PatternRoutes,
+    PrefixMatch, Registry, Resolver, RouteTable, Routes, TriggerRouter,
 };
-pub use self::runtime::Mode;
-pub use self::runtime::{Backends, ExitStatus, Runtime, Wiring};
+pub use self::runtime::{Backends, ExitStatus, Mode, Runtime, Wiring};
 #[doc(hidden)]
 pub use self::runtime::{main, run};
 pub use self::store::{
@@ -43,25 +44,17 @@ pub use self::store::{
 #[doc(hidden)]
 pub use self::store::{Set, Unset};
 pub use self::telemetry::{Telemetry, resource};
-pub use self::host::{Backend, FromEnv, FutureResult, Host, Server};
 
-/// Generates the linker-facing view traits that every `omnia` WASI host crate
-/// repeats verbatim (only the names change):
+/// Generates the linker-facing view boilerplate every `omnia` WASI host crate
+/// repeats.
 ///
-/// - `Wasi<Service>View`: the per-`Linker<T>` accessor trait,
-/// - `Wasi<Service>CtxView`: the borrowed `(ctx, table)` view,
-/// - `Has<Service>`: the backend-bundle accessor trait,
-/// - the blanket `Wasi<Service>View for omnia::StoreCtx<B>` impl.
+/// Emits the `Wasi<Service>View` accessor trait, the `Wasi<Service>CtxView`
+/// borrowed `(ctx, table)` view, the `Has<Service>` backend-accessor trait, and
+/// the blanket `Wasi<Service>View for omnia::StoreCtx<B>` impl.
 ///
-/// Pass the service stem (the part after `Wasi` in the host struct name). All
-/// identifiers and doc labels are derived from it: `KeyValue` yields
-/// `WasiKeyValueView`, `HasKeyValue`, `keyvalue`, `keyvalue_ctx`, and doc text
-/// using `stringify!(KeyValue)`.
-///
-/// The service-specific pieces stay hand-written in each crate: the
-/// `Wasi<Service>Ctx` trait, the `bindgen!` block, the `Host`/`Server` wiring,
-/// and the error conversions. The matching `Has<Service> for Backends` accessor
-/// impl is emitted directly by the `runtime!` macro per deployment.
+/// Pass the service stem (the part after `Wasi` in the host struct name); every
+/// identifier is derived from it. The `Wasi<Service>Ctx` trait, `bindgen!`
+/// block, `Host`/`Server` wiring, and error conversions stay hand-written.
 ///
 /// # Example
 ///

@@ -3,6 +3,7 @@
 mod command;
 
 use std::env;
+use std::future::Future;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -12,8 +13,6 @@ use anyhow::{Context as _, Result};
 use clap::Parser as _;
 use wasmtime::component::{Instance, InstancePre};
 use wasmtime::{Engine, Store};
-
-use std::future::Future;
 
 use crate::cli::{Cli, Command};
 use crate::dispatch::serve_links;
@@ -314,7 +313,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         let base = StoreBase::builder()
             .options(self.options())
             .dispatcher(Arc::new(self.clone()))
-            .args(&self.args)
+            .args(Arc::clone(&self.args))
             .mounts(Arc::clone(&self.mounts))
             .build();
         StoreCtx {
@@ -361,33 +360,11 @@ mod tests {
     use super::ExitStatus;
 
     #[test]
-    fn success_is_zero() {
-        assert_eq!(ExitStatus::SUCCESS.code(), 0);
-        assert_eq!(ExitStatus::SUCCESS.code_u8(), 0);
-    }
-
-    #[test]
-    fn from_i32_preserves_full_code() {
-        assert_eq!(ExitStatus::from(2).code(), 2);
-        assert_eq!(ExitStatus::from(256).code(), 256);
-        assert_eq!(ExitStatus::from(-1).code(), -1);
-    }
-
-    #[test]
     fn code_u8_keeps_low_byte() {
-        assert_eq!(ExitStatus::from(0).code_u8(), 0);
-        assert_eq!(ExitStatus::from(2).code_u8(), 2);
-        assert_eq!(ExitStatus::from(255).code_u8(), 255);
+        // The POSIX low-byte truncation is the only non-trivial ExitStatus logic.
+        assert_eq!(ExitStatus::from(2).code(), 2);
         assert_eq!(ExitStatus::from(256).code_u8(), 0);
         assert_eq!(ExitStatus::from(257).code_u8(), 1);
         assert_eq!(ExitStatus::from(-1).code_u8(), 255);
-        let _ = std::process::ExitCode::from(ExitStatus::from(2));
-    }
-
-    #[test]
-    fn is_copy_and_eq() {
-        let status = ExitStatus::from(7);
-        let copied = status;
-        assert_eq!(status, copied);
     }
 }

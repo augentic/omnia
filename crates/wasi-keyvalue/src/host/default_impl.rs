@@ -15,6 +15,7 @@ use crate::host::resource::{Bucket, FutureResult};
 
 type BucketCache = Cache<String, Vec<u8>>;
 
+/// Options used to connect to the key-value store.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions;
 
@@ -76,10 +77,8 @@ impl std::fmt::Debug for InMemBucket {
 }
 
 impl Bucket for InMemBucket {
-    fn name(&self) -> &'static str {
-        // Note: This returns a static str, but we need to leak the string
-        // For a proper implementation, consider changing the trait
-        Box::leak(self.name.clone().into_boxed_str())
+    fn name(&self) -> &str {
+        &self.name
     }
 
     fn get(&self, key: String) -> FutureResult<Option<Vec<u8>>> {

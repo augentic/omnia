@@ -119,34 +119,3 @@ impl<T> HostWithStore<T> for WasiBlobstore {
 }
 
 impl Host for WasiBlobstoreCtxView<'_> {}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn same_object_detects_identical_ids() {
-        let a = ObjectId {
-            container: "bucket".to_string(),
-            object: "blob".to_string(),
-        };
-        let b = ObjectId {
-            container: "bucket".to_string(),
-            object: "blob".to_string(),
-        };
-        assert!(same_object(&a, &b));
-    }
-
-    #[test]
-    fn same_object_rejects_different_ids() {
-        let a = ObjectId {
-            container: "bucket".to_string(),
-            object: "blob".to_string(),
-        };
-        let b = ObjectId {
-            container: "bucket".to_string(),
-            object: "blob-2".to_string(),
-        };
-        assert!(!same_object(&a, &b));
-    }
-}

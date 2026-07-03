@@ -15,6 +15,7 @@ use tracing::instrument;
 
 use crate::host::WasiOtelCtx;
 
+/// Options used to connect to the telemetry backend.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions;
 

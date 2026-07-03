@@ -22,7 +22,6 @@ struct HttpGuest;
 wasip3::http::service::export!(HttpGuest);
 
 impl http::handler::Guest for HttpGuest {
-    /// Routes HTTP requests to WebSocket management endpoints.
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new().route("/", post(send_message));
         omnia_wasi_http::serve(router, request).await

@@ -51,12 +51,17 @@ pub fn instrument(args: TokenStream, item: TokenStream) -> TokenStream {
     parse_macro_input!(args with arg_parser);
 
     let item_fn = parse_macro_input!(item as ItemFn);
-    let signature = &item_fn.sig;
     let body = otel::body(attrs, &item_fn);
 
-    // recreate function with the instrument macro wrapping the body
+    // Re-emit the function's own attributes, visibility, and signature so the
+    // instrumented wrapper keeps its docs, `pub`, and any `#[cfg]`/`#[allow]`.
+    let fn_attrs = &item_fn.attrs;
+    let vis = &item_fn.vis;
+    let signature = &item_fn.sig;
+
     let new_fn = quote! {
-        #signature {
+        #(#fn_attrs)*
+        #vis #signature {
             let _guard = ::omnia_wasi_otel::init();
             #body
         }

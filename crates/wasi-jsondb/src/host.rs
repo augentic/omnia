@@ -1,6 +1,6 @@
 //! Host-side `wasi:jsondb` implementation.
 
-pub mod default_impl;
+mod default_impl;
 mod resource;
 mod store_impl;
 mod types_impl;

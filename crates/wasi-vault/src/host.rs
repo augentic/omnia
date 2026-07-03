@@ -2,7 +2,7 @@
 //!
 //! This module implements the host-side logic for the WASI Vault service.
 
-pub mod default_impl;
+mod default_impl;
 mod resource;
 mod vault_impl;
 
@@ -39,7 +39,7 @@ use crate::host::generated::Error;
 pub use crate::host::resource::*;
 
 /// Result type for  vault operations.
-pub type Result<T, E = Error> = anyhow::Result<T, E>;
+pub type Result<T> = anyhow::Result<T, Error>;
 
 /// Host-side service for `wasi:vault`.
 #[derive(Debug)]

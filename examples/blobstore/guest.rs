@@ -31,7 +31,6 @@ struct Http;
 wasip3::http::service::export!(Http);
 
 impl Guest for Http {
-    /// Routes incoming HTTP requests to the blob storage handler.
     #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new().route("/", post(handler));

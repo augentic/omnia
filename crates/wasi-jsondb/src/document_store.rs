@@ -1,4 +1,9 @@
-//! Domain types for JSON document storage and queries (shared by host and guest).
+//! Target-neutral domain types for the `wasi:jsondb` guest SDK.
+//!
+//! The guest builds queries with these ergonomic types, then the guest bindings
+//! bridge them across the WIT boundary. The host keeps its own `FilterTree`
+//! built from WIT-native leaf types (see `Specification.md`); the two
+//! representations sit on opposite sides of the WASM boundary by design.
 
 use std::ops::Not;
 

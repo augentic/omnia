@@ -5,6 +5,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
+use anyhow::anyhow;
 use axum::routing::get;
 use axum::{Json, Router};
 use omnia_guest::HttpResult;
@@ -23,10 +24,9 @@ impl Guest for HttpGuest {
     }
 }
 
-/// Config request handler.
 #[omnia_wasi_otel::instrument]
 async fn config_get() -> HttpResult<Json<Value>> {
-    let config = config::get_all().expect("should get all");
+    let config = config::get_all().map_err(|e| anyhow!("getting config: {e:?}"))?;
 
     Ok(Json(json!({
         "config": config

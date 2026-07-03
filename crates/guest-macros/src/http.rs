@@ -174,14 +174,18 @@ pub fn expand(http: &Http, config: &Config) -> TokenStream {
             pub struct Http;
             wasip3::http::proxy::export!(Http);
 
+            // Build the route table once; `axum::Router` is cheap to clone
+            // (internally reference-counted) so each request reuses it rather
+            // than rebuilding the whole graph.
+            static ROUTER: std::sync::LazyLock<axum::Router> =
+                std::sync::LazyLock::new(|| axum::Router::new() #(#routes)*);
+
             impl wasip3::exports::http::handler::Guest for Http {
                 #[omnia_wasi_otel::instrument]
                 async fn handle(
                     request: wasip3::http::types::Request,
                 ) -> Result<wasip3::http::types::Response, wasip3::http::types::ErrorCode> {
-                    let router = axum::Router::new()
-                        #(#routes)*;
-                    omnia_wasi_http::serve(router, request).await
+                    omnia_wasi_http::serve(ROUTER.clone(), request).await
                 }
             }
 
@@ -227,7 +231,7 @@ fn expand_handler(route: &Route, config: &Config) -> TokenStream {
         #[omnia_wasi_otel::instrument]
         async fn #function(#args) -> HttpResult<Reply<#reply>> {
             #request::handler(#input)?
-                .provider(&#provider::new())
+                .provider(&<#provider as omnia_guest::api::DefaultProvider>::new())
                 .owner(#owner)
                 .await
                 .map_err(Into::into)

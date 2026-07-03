@@ -6,47 +6,29 @@
 //! `wasi:cli/exit` (surfaced as `I32Exit`, proving codes are *not* collapsed to
 //! `1`) and the `Err(())` -> `1` mapping.
 //!
-//! The guest must be built first; the test skips (rather than fails) when it is
-//! absent, because `cargo make ci` cleans the target directory before tests:
-//!
-//! ```bash
-//! cargo build -p examples --example cli-wasm --target wasm32-wasip2
-//! ```
+//! The guest is built by `cargo make build-guests`; the test skips locally when
+//! it is absent and fails under CI so the pipeline never passes vacuously.
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::path::{Path, PathBuf};
+mod common;
+
+use std::path::Path;
 
 use anyhow::{Context as _, Result};
-use omnia::{ExitStatus, Mode, Wiring, run};
+use common::find_guest;
+use omnia::{Deployment, ExitStatus, Mode, Runtime, StoreCtx, Wiring, run};
 
 struct EmptyWiring;
 
 impl Wiring<()> for EmptyWiring {
-    fn link(_deployment: &mut omnia::Deployment<omnia::StoreCtx<()>>) -> Result<()> {
+    fn link(_deployment: &mut Deployment<StoreCtx<()>>) -> Result<()> {
         Ok(())
     }
 
-    async fn serve(_runtime: &omnia::Runtime<()>) -> Result<()> {
+    async fn serve(_runtime: &Runtime<()>) -> Result<()> {
         Ok(())
     }
-}
-
-/// The `target/` directory: the test executable lives at
-/// `<target>/<profile>/deps/<exe>`.
-fn target_dir() -> PathBuf {
-    let exe = std::env::current_exe().expect("test executable has a path");
-    exe.ancestors().nth(3).expect("test exe sits at <target>/<profile>/deps/<exe>").to_path_buf()
-}
-
-/// Locate the built `cli-wasm` guest, preferring the debug profile.
-fn cli_wasm(target: &Path) -> Option<PathBuf> {
-    ["debug", "release"]
-        .into_iter()
-        .map(|profile| {
-            target.join("wasm32-wasip2").join(profile).join("examples").join("cli_wasm.wasm")
-        })
-        .find(|path| path.exists())
 }
 
 /// Drive `wasi:cli/run` once with `tail` guest argv (the program name is
@@ -68,13 +50,7 @@ macro_rules! cli_exit_test {
     ($name:ident, $tail:expr, $code:expr, $msg:expr) => {
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn $name() -> Result<()> {
-            let target = target_dir();
-            let Some(wasm) = cli_wasm(&target) else {
-                eprintln!(
-                    "skipping `{}`: cli guest not built. Run:\n  cargo build -p examples \
-                     --example cli-wasm --target wasm32-wasip2",
-                    stringify!($name)
-                );
+            let Some(wasm) = find_guest("cli_wasm.wasm", "cargo make build-guests") else {
                 return Ok(());
             };
 

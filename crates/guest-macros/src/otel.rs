@@ -50,3 +50,37 @@ impl Attributes {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Attributes, body};
+
+    #[test]
+    fn async_fn_is_wrapped_in_instrument() {
+        let item_fn: syn::ItemFn = syn::parse_quote! {
+            async fn handler() { do_work().await }
+        };
+        let out = body(Attributes::default(), &item_fn).to_string();
+        assert!(out.contains("Instrument"), "async body must use Instrument: {out}");
+        assert!(out.contains("await"), "async body must be awaited: {out}");
+    }
+
+    #[test]
+    fn sync_fn_uses_in_scope() {
+        let item_fn: syn::ItemFn = syn::parse_quote! {
+            fn handler() { do_work() }
+        };
+        let out = body(Attributes::default(), &item_fn).to_string();
+        assert!(out.contains("in_scope"), "sync body must use in_scope: {out}");
+        assert!(!out.contains("Instrument"), "sync body must not use Instrument: {out}");
+    }
+
+    #[test]
+    fn defaults_span_name_to_fn_ident() {
+        let item_fn: syn::ItemFn = syn::parse_quote! {
+            fn my_handler() {}
+        };
+        let out = body(Attributes::default(), &item_fn).to_string();
+        assert!(out.contains("my_handler"), "span name should default to the fn ident: {out}");
+    }
+}

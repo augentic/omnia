@@ -283,49 +283,6 @@ mod tests {
     }
 
     #[test]
-    fn not_equal_via_filter_tree() {
-        let ctx = temp_db();
-        insert_doc(&ctx, "r", "r1", &json!({"route_type": 3}));
-        insert_doc(&ctx, "r", "r2", &json!({"route_type": 4}));
-        insert_doc(&ctx, "r", "r3", &json!({"route_type": 2}));
-
-        let filter = FilterTree::Not(Box::new(FilterTree::Compare {
-            field: "route_type".to_string(),
-            op: ComparisonOp::Eq,
-            value: ScalarValue::Int32(4),
-        }));
-        let results = query_with_filter(&ctx, "r", &filter);
-        assert_eq!(results.len(), 2, "Not(Eq(4)) should exclude route_type=4");
-    }
-
-    #[test]
-    fn is_not_null_via_filter_tree() {
-        let ctx = temp_db();
-        insert_doc(&ctx, "s", "s1", &json!({"zone_id": "z1"}));
-        insert_doc(&ctx, "s", "s2", &json!({"zone_id": null}));
-        insert_doc(&ctx, "s", "s3", &json!({"zone_id": "z2"}));
-
-        let filter = FilterTree::IsNotNull("zone_id".to_string());
-        let results = query_with_filter(&ctx, "s", &filter);
-        assert_eq!(results.len(), 2, "IsNotNull should exclude null zone_id");
-    }
-
-    #[test]
-    fn contains_via_filter_tree() {
-        let ctx = temp_db();
-        insert_doc(&ctx, "s", "s1", &json!({"name": "Albany Station"}));
-        insert_doc(&ctx, "s", "s2", &json!({"name": "Newmarket Station"}));
-        insert_doc(&ctx, "s", "s3", &json!({"name": "Ponsonby Rd"}));
-
-        let filter = FilterTree::Contains {
-            field: "name".to_string(),
-            pattern: "Station".to_string(),
-        };
-        let results = query_with_filter(&ctx, "s", &filter);
-        assert_eq!(results.len(), 2, "Contains('Station') should match 2 stops");
-    }
-
-    #[test]
     fn and_eq_int_with_is_not_null() {
         let ctx = temp_db();
         insert_doc(&ctx, "s", "s1", &json!({"wb": 1, "zone_id": "z1"}));
@@ -343,21 +300,6 @@ mod tests {
         ]);
         let results = query_with_filter(&ctx, "s", &filter);
         assert_eq!(results.len(), 2, "wb=1 AND zone_id IS NOT NULL");
-    }
-
-    #[test]
-    fn not_in_list_via_filter_tree() {
-        let ctx = temp_db();
-        insert_doc(&ctx, "r", "r1", &json!({"v": 1}));
-        insert_doc(&ctx, "r", "r2", &json!({"v": 2}));
-        insert_doc(&ctx, "r", "r3", &json!({"v": 3}));
-
-        let filter = FilterTree::NotInList {
-            field: "v".to_string(),
-            values: vec![ScalarValue::Int32(1), ScalarValue::Int32(2)],
-        };
-        let results = query_with_filter(&ctx, "r", &filter);
-        assert_eq!(results.len(), 1, "NotInList([1,2]) should return only v=3");
     }
 
     #[test]

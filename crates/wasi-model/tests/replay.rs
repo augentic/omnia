@@ -10,21 +10,22 @@
 //! 2. **fixture shape** — the checked-in fixture keys on the reduced prompt
 //!    without leaking mount paths or non-serializable workspace handles.
 //!
-//! The guest component must be built first; the test skips (rather than fails)
-//! when it is absent, because `cargo make ci` cleans the target directory before
-//! running tests:
-//!
-//! ```bash
-//! cargo build -p examples --example model-wasm --target wasm32-wasip2
-//! ```
+//! The guest component is built by `cargo make build-guests`; the test skips
+//! locally when it is absent and fails under CI so the pipeline never passes
+//! vacuously.
 
 #![cfg(not(target_arch = "wasm32"))]
+
+// Shares `omnia`'s integration-test helper rather than duplicating it.
+#[path = "../../omnia/tests/common/mod.rs"]
+mod common;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context as _, Result, bail};
+use common::find_guest;
 use futures::FutureExt as _;
 use omnia::wasmtime::StoreLimitsBuilder;
 use omnia::{
@@ -106,21 +107,6 @@ fn workspace_mount() -> (PathBuf, Arc<MountRegistry>) {
         MountRegistry::open(vec![ResolvedPreopen::new(".".to_owned(), dir.clone(), false)])
             .expect("opening the workspace mount");
     (dir, Arc::new(registry))
-}
-
-/// The `target/` directory: the test executable lives at
-/// `<target>/<profile>/deps/<exe>`.
-fn target_dir() -> PathBuf {
-    let exe = std::env::current_exe().expect("test executable has a path");
-    exe.ancestors().nth(3).expect("test exe sits at <target>/<profile>/deps/<exe>").to_path_buf()
-}
-
-/// Locate a built guest component by file name, preferring the debug profile.
-fn guest_wasm(target: &Path, file: &str) -> Option<PathBuf> {
-    ["debug", "release"]
-        .into_iter()
-        .map(|profile| target.join("wasm32-wasip2").join(profile).join("examples").join(file))
-        .find(|path| path.exists())
 }
 
 /// Build the model runtime for `wasm`, linking `WasiModel`, and return the shared
@@ -207,11 +193,7 @@ async fn call_run(runtime: &Runtime<TestBundle>) -> Result<String> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn replays_completion_with_no_network() -> Result<()> {
-    let Some(wasm) = guest_wasm(&target_dir(), "model_wasm.wasm") else {
-        eprintln!(
-            "skipping `replays_completion_with_no_network`: model guest not built. Run:\n  \
-             cargo build -p examples --example model-wasm --target wasm32-wasip2"
-        );
+    let Some(wasm) = find_guest("model_wasm.wasm", "cargo make build-guests") else {
         return Ok(());
     };
 
@@ -313,11 +295,7 @@ impl WasiModelCtx for LocalPathProbe {
 /// the per-completion [`ToolHost`] (what `omnia-cursor` reads).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn workspace_resolves_to_local_path() -> Result<()> {
-    let Some(wasm) = guest_wasm(&target_dir(), "model_wasm.wasm") else {
-        eprintln!(
-            "skipping `workspace_resolves_to_local_path`: model guest not built. Run:\n  \
-             cargo build -p examples --example model-wasm --target wasm32-wasip2"
-        );
+    let Some(wasm) = find_guest("model_wasm.wasm", "cargo make build-guests") else {
         return Ok(());
     };
 

@@ -47,7 +47,7 @@ impl Backend for VaultDefault {
 impl WasiVaultCtx for VaultDefault {
     fn open_locker(&self, identifier: String) -> FutureResult<Arc<dyn Locker>> {
         tracing::debug!("opening locker: {}", identifier);
-        let locker = InMemoryLocker {
+        let locker = InMemLocker {
             identifier: identifier.clone(),
             store: Arc::clone(&self.store),
         };
@@ -63,12 +63,12 @@ impl WasiVaultCtx for VaultDefault {
 }
 
 #[derive(Debug, Clone)]
-struct InMemoryLocker {
+struct InMemLocker {
     identifier: String,
     store: Store,
 }
 
-impl Locker for InMemoryLocker {
+impl Locker for InMemLocker {
     fn identifier(&self) -> String {
         self.identifier.clone()
     }
@@ -155,5 +155,35 @@ impl Locker for InMemoryLocker {
             Ok(ids)
         }
         .boxed()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn locker_set_get_delete() {
+        let vault = VaultDefault::connect().await.expect("connect");
+        let locker = vault.open_locker("app".to_string()).await.expect("open");
+
+        locker.set("api-key".to_string(), b"secret".to_vec()).await.expect("set");
+        assert!(locker.exists("api-key".to_string()).await.expect("exists"));
+        assert_eq!(locker.get("api-key".to_string()).await.expect("get"), Some(b"secret".to_vec()));
+        assert_eq!(locker.list_ids().await.expect("list"), vec!["api-key".to_string()]);
+
+        locker.delete("api-key".to_string()).await.expect("delete");
+        assert!(!locker.exists("api-key".to_string()).await.expect("exists"));
+        assert_eq!(locker.get("api-key".to_string()).await.expect("get"), None);
+    }
+
+    #[tokio::test]
+    async fn lockers_are_isolated() {
+        let vault = VaultDefault::connect().await.expect("connect");
+        let a = vault.open_locker("a".to_string()).await.expect("open a");
+        let b = vault.open_locker("b".to_string()).await.expect("open b");
+
+        a.set("k".to_string(), b"a".to_vec()).await.expect("set");
+        assert_eq!(b.get("k".to_string()).await.expect("get"), None);
     }
 }

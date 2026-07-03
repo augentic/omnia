@@ -88,7 +88,7 @@ pub struct ToolTurn {
 
 /// The tool-call transcript a backend may capture for replay. Host-only;
 /// it never crosses the WIT boundary. Empty for backends with no tool loop
-/// (replay, cursor) in Phase 1.
+/// (replay, cursor).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Transcript {
     /// Ordered tool turns the backend drove to reach the answer.

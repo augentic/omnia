@@ -7,25 +7,34 @@ Shared traits, error types, and abstractions for building WASI guest components.
 Use the `guest!` macro to define your component's API surface. This wires up the necessary WASI exports and routing logic.
 
 ```rust,ignore
-use omnia_guest::{guest, Handler, Json};
+use omnia_guest::{bad_request, guest, Context, Error, Handler, IntoBody, Reply};
 use serde::{Deserialize, Serialize};
 
-// Define your data models
+// Request and response models.
 #[derive(Deserialize)]
 struct CreateItem {
     name: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct ItemResponse {
     id: String,
     name: String,
 }
 
-// Define the provider (capabilities your app needs)
+// The response body serializes itself for the HTTP layer.
+impl IntoBody for ItemResponse {
+    fn into_body(self) -> anyhow::Result<Vec<u8>> {
+        Ok(serde_json::to_vec(&self)?)
+    }
+}
+
+// The provider bundles the host capabilities handlers use. It must be `Default`
+// so the generated glue can build one per request.
+#[derive(Default)]
 struct MyProvider;
 
-// Wire up the application
+// Wire up the component: WASI exports plus request routing.
 guest!({
     owner: "my-org",
     provider: MyProvider,
@@ -34,15 +43,21 @@ guest!({
     ],
 });
 
-// Implement the handler for the request
+// Implement the handler: parse the raw input, then produce a `Reply`.
 impl Handler<MyProvider> for CreateItem {
-    type Response = ItemResponse;
+    type Input = Vec<u8>;
+    type Output = ItemResponse;
+    type Error = Error;
 
-    async fn handle(self, _provider: &MyProvider) -> Result<Self::Response, omnia_guest::Error> {
-        Ok(ItemResponse {
+    fn from_input(input: Self::Input) -> Result<Self, Self::Error> {
+        serde_json::from_slice(&input).map_err(|e| bad_request!("{e}"))
+    }
+
+    async fn handle(self, _ctx: Context<MyProvider>) -> Result<Reply<Self::Output>, Self::Error> {
+        Ok(Reply::created(ItemResponse {
             id: "123".to_string(),
             name: self.name,
-        })
+        }))
     }
 }
 ```

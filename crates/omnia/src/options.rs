@@ -5,10 +5,10 @@
 //!
 //! Building the compile-time [`Config`] in one place (the
 //! `From<&RuntimeOptions>` conversion) guarantees that the engine used to
-//! pre-compile a component ([`crate::compile`]) and the engine used to load it
-//! ([`crate::create`]) agree on every code-affecting setting. This parity is
-//! required for [`wasmtime::component::Component::deserialize_file`] to accept a
-//! pre-compiled artifact.
+//! pre-compile a component and the engine used to load it
+//! ([`crate::DeploymentBuilder`]) agree on every code-affecting setting. This
+//! parity is required for [`wasmtime::component::Component::deserialize_file`]
+//! to accept a pre-compiled artifact.
 
 // `derive(FromEnv)` generates undocumented `from_env`/`requirements` associated
 // functions; `RuntimeOptions` is re-exported from the crate root so they would
@@ -47,182 +47,109 @@ use wasmtime::{Config, Enabled, InstanceAllocationStrategy, PoolingAllocationCon
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Debug, FromEnv)]
 pub struct RuntimeOptions {
-    /// Wall-clock cap applied to a single guest invocation
-    /// (`GUEST_TIMEOUT_MS`, default 30s).
+    /// Wall-clock cap on a single guest invocation (`GUEST_TIMEOUT_MS`, default 30s).
     #[env(from = "GUEST_TIMEOUT_MS", default = "30000", with = parse_millis)]
     pub guest_timeout: Duration,
-    /// Interval between [`wasmtime::Engine::increment_epoch`] ticks, and the
-    /// granularity at which CPU-bound guests yield to the async executor
-    /// (`EPOCH_TICK_MS`, default 10ms, clamped to a 1ms minimum).
+    /// Epoch-increment interval, also the CPU-bound guest yield granularity (`EPOCH_TICK_MS`, default 10ms, min 1ms).
     #[env(from = "EPOCH_TICK_MS", default = "10", with = parse_tick)]
     pub epoch_tick: Duration,
-    /// Maximum linear-memory size, in bytes, a guest may grow to
-    /// (`MAX_MEMORY_BYTES`, default 256 `MiB`).
+    /// Maximum linear-memory size a guest may grow to, in bytes (`MAX_MEMORY_BYTES`, default 256 `MiB`).
     #[env(from = "MAX_MEMORY_BYTES", default = "268435456")]
     pub max_memory_bytes: usize,
-    /// Bytes of virtual address space reserved up-front for each linear memory
-    /// (`MEMORY_RESERVATION`). Compile-affecting: a large reservation (e.g. 4
-    /// `GiB` for 32-bit guests) lets Wasmtime elide bounds checks, so this must
-    /// match between `omnia compile` and `omnia run`. Unset leaves the Wasmtime
-    /// default.
+    /// Virtual address space reserved per linear memory, in bytes; compile-affecting (`MEMORY_RESERVATION`, unset: Wasmtime default).
     #[env(from = "MEMORY_RESERVATION")]
     pub memory_reservation: Option<u64>,
-    /// Bytes of unmapped guard region placed after each linear memory
-    /// (`MEMORY_GUARD_SIZE`). Compile-affecting: the guard size lets Wasmtime
-    /// elide and deduplicate bounds checks, so it must match between `omnia
-    /// compile` and `omnia run`. Unset leaves the Wasmtime default.
+    /// Unmapped guard region after each linear memory, in bytes; compile-affecting (`MEMORY_GUARD_SIZE`, unset: Wasmtime default).
     #[env(from = "MEMORY_GUARD_SIZE")]
     pub memory_guard_size: Option<u64>,
-    /// Extra bytes eagerly reserved beyond a linear memory's current size to
-    /// absorb growth without remapping (`MEMORY_RESERVATION_FOR_GROWTH`).
-    /// Runtime-only; unset leaves the Wasmtime default.
+    /// Extra bytes reserved beyond current size to absorb growth without remapping (`MEMORY_RESERVATION_FOR_GROWTH`, unset: Wasmtime default).
     #[env(from = "MEMORY_RESERVATION_FOR_GROWTH")]
     pub memory_reservation_for_growth: Option<u64>,
-    /// Whether to zero async (fiber) stacks before reuse
-    /// (`ASYNC_STACK_ZEROING`, default `false`). Off by default for
-    /// performance; enable as defense-in-depth for untrusted guests, accepting
-    /// the per-instantiation cost. Runtime-only.
+    /// Zero async (fiber) stacks before reuse (`ASYNC_STACK_ZEROING`, default `false`).
     #[env(from = "ASYNC_STACK_ZEROING", default = "false")]
     pub async_stack_zeroing: bool,
-    /// Whether guest WebAssembly backtraces are captured and attached to trap
-    /// errors (`WASM_BACKTRACE`, default `false`). Off by default to skip
-    /// per-trap capture overhead; enable for richer error/`OpenTelemetry`
-    /// diagnostics. Runtime-only: does not affect the compiled artifact.
+    /// Capture guest backtraces and attach them to trap errors (`WASM_BACKTRACE`, default `false`).
     #[env(from = "WASM_BACKTRACE", default = "false")]
     pub wasm_backtrace: bool,
-    /// Per-invocation fuel budget; `0` disables fuel metering
-    /// (`MAX_FUEL`, default disabled).
+    /// Per-invocation fuel budget; `0` disables metering (`MAX_FUEL`, default 0).
     #[env(from = "MAX_FUEL", default = "0")]
     pub max_fuel: u64,
-    /// Maximum host-mediated dynamic-linking dispatch depth — how deep a chain
-    /// of guest-to-guest calls (A->B->C) may nest before the runtime core refuses
-    /// further dispatch, bounding runaway recursion (`MAX_DISPATCH_DEPTH`,
-    /// default 8). Runtime-only.
+    /// Maximum host-mediated guest-to-guest dispatch nesting depth (`MAX_DISPATCH_DEPTH`, default 8).
     #[env(from = "MAX_DISPATCH_DEPTH", default = "8")]
     pub max_dispatch_depth: usize,
-    /// Whether the pooling instance allocator is enabled
-    /// (`POOLING`, default `true`).
+    /// Enable the pooling instance allocator (`POOLING`, default `true`).
     #[env(from = "POOLING", default = "true")]
     pub pooling: bool,
-    /// Maximum number of instances held by the pooling allocator
-    /// (`POOL_MAX_INSTANCES`, default 1000).
+    /// Maximum component instances held by the pooling allocator (`POOL_MAX_INSTANCES`, default 1000).
     #[env(from = "POOL_MAX_INSTANCES", default = "1000")]
     pub pool_max_instances: u32,
-    /// Maximum linear-memory size, in bytes, reserved per pooled memory
-    /// (`POOL_MAX_MEMORY_BYTES`). When unset it inherits
-    /// `max_memory_bytes`.
+    /// Linear-memory size reserved per pooled memory, in bytes (`POOL_MAX_MEMORY_BYTES`, unset: inherits `max_memory_bytes`).
     #[env(from = "POOL_MAX_MEMORY_BYTES")]
     pub pool_max_memory_bytes: Option<usize>,
-    /// Bytes of each pooled linear memory kept resident on slot reuse; a
-    /// non-zero value skips the decommit/zeroing the default (`0`) forces
-    /// (`POOL_MEMORY_KEEP_RESIDENT`, default 0).
+    /// Bytes of each pooled linear memory kept resident on slot reuse (`POOL_MEMORY_KEEP_RESIDENT`, default 0).
     #[env(from = "POOL_MEMORY_KEEP_RESIDENT", default = "0")]
     pub pool_memory_keep_resident: usize,
-    /// Bytes of each pooled table kept resident on slot reuse
-    /// (`POOL_TABLE_KEEP_RESIDENT`, default 0).
+    /// Bytes of each pooled table kept resident on slot reuse (`POOL_TABLE_KEEP_RESIDENT`, default 0).
     #[env(from = "POOL_TABLE_KEEP_RESIDENT", default = "0")]
     pub pool_table_keep_resident: usize,
-    /// Bytes of each pooled async stack kept resident on slot reuse
-    /// (`POOL_ASYNC_STACK_KEEP_RESIDENT`, default 0).
+    /// Bytes of each pooled async stack kept resident on slot reuse (`POOL_ASYNC_STACK_KEEP_RESIDENT`, default 0).
     #[env(from = "POOL_ASYNC_STACK_KEEP_RESIDENT", default = "0")]
     pub pool_async_stack_keep_resident: usize,
-    /// Maximum number of unused warm slots the pooling allocator retains for
-    /// fast reuse (`POOL_MAX_UNUSED_WARM_SLOTS`, default 100, matching the
-    /// Wasmtime default).
+    /// Unused warm slots retained for fast reuse (`POOL_MAX_UNUSED_WARM_SLOTS`, default 100).
     #[env(from = "POOL_MAX_UNUSED_WARM_SLOTS", default = "100")]
     pub pool_max_unused_warm_slots: u32,
-    /// Maximum number of core instances held by the pooling allocator
-    /// (`POOL_TOTAL_CORE_INSTANCES`, default 1000). Kept independent of the
-    /// component-instance total (`POOL_MAX_INSTANCES`) so a guest whose single
-    /// component embeds several core instances cannot exhaust this pool early.
+    /// Maximum core instances held by the pooling allocator (`POOL_TOTAL_CORE_INSTANCES`, default 1000).
     #[env(from = "POOL_TOTAL_CORE_INSTANCES", default = "1000")]
     pub pool_total_core_instances: u32,
-    /// Maximum number of linear memories held by the pooling allocator
-    /// (`POOL_TOTAL_MEMORIES`, default 1000). Independent of the instance
-    /// total; raise this for guests that use more than one memory.
+    /// Maximum linear memories held by the pooling allocator (`POOL_TOTAL_MEMORIES`, default 1000).
     #[env(from = "POOL_TOTAL_MEMORIES", default = "1000")]
     pub pool_total_memories: u32,
-    /// Maximum number of tables held by the pooling allocator
-    /// (`POOL_TOTAL_TABLES`, default 1000). Independent of the instance total;
-    /// raise this for guests that use more than one table.
+    /// Maximum tables held by the pooling allocator (`POOL_TOTAL_TABLES`, default 1000).
     #[env(from = "POOL_TOTAL_TABLES", default = "1000")]
     pub pool_total_tables: u32,
-    /// Maximum number of async stacks held by the pooling allocator
-    /// (`POOL_TOTAL_STACKS`, default 1000). Independent of the instance total.
+    /// Maximum async stacks held by the pooling allocator (`POOL_TOTAL_STACKS`, default 1000).
     #[env(from = "POOL_TOTAL_STACKS", default = "1000")]
     pub pool_total_stacks: u32,
-    /// Maximum number of garbage-collected heaps held by the pooling allocator
-    /// (`POOL_TOTAL_GC_HEAPS`). Unset leaves the Wasmtime default and only takes
-    /// effect when built with the opt-in `gc` feature; setting it without that
-    /// feature is rejected at start-up. Only relevant to guests using the
-    /// component-model GC / reference types, which current guests do not.
+    /// Maximum GC heaps held by the pooling allocator; requires the `gc` feature (`POOL_TOTAL_GC_HEAPS`, unset: Wasmtime default).
     #[env(from = "POOL_TOTAL_GC_HEAPS")]
     pub pool_total_gc_heaps: Option<u32>,
-    /// Upper bound on the number of core instances a single component may
-    /// contain (`POOL_MAX_CORE_INSTANCES_PER_COMPONENT`). Unset leaves the
-    /// Wasmtime default (unlimited).
+    /// Max core instances per component (`POOL_MAX_CORE_INSTANCES_PER_COMPONENT`, unset: Wasmtime default).
     #[env(from = "POOL_MAX_CORE_INSTANCES_PER_COMPONENT")]
     pub pool_max_core_instances_per_component: Option<u32>,
-    /// Upper bound on the number of linear memories a single component may
-    /// contain (`POOL_MAX_MEMORIES_PER_COMPONENT`). Unset leaves the Wasmtime
-    /// default (unlimited).
+    /// Max linear memories per component (`POOL_MAX_MEMORIES_PER_COMPONENT`, unset: Wasmtime default).
     #[env(from = "POOL_MAX_MEMORIES_PER_COMPONENT")]
     pub pool_max_memories_per_component: Option<u32>,
-    /// Upper bound on the number of tables a single component may contain
-    /// (`POOL_MAX_TABLES_PER_COMPONENT`). Unset leaves the Wasmtime default
-    /// (unlimited).
+    /// Max tables per component (`POOL_MAX_TABLES_PER_COMPONENT`, unset: Wasmtime default).
     #[env(from = "POOL_MAX_TABLES_PER_COMPONENT")]
     pub pool_max_tables_per_component: Option<u32>,
-    /// Upper bound on the number of linear memories a single core module may
-    /// define (`POOL_MAX_MEMORIES_PER_MODULE`). Unset leaves the Wasmtime
-    /// default (1).
+    /// Max linear memories per core module (`POOL_MAX_MEMORIES_PER_MODULE`, unset: Wasmtime default 1).
     #[env(from = "POOL_MAX_MEMORIES_PER_MODULE")]
     pub pool_max_memories_per_module: Option<u32>,
-    /// Upper bound on the number of tables a single core module may define
-    /// (`POOL_MAX_TABLES_PER_MODULE`). Unset leaves the Wasmtime default (1).
+    /// Max tables per core module (`POOL_MAX_TABLES_PER_MODULE`, unset: Wasmtime default 1).
     #[env(from = "POOL_MAX_TABLES_PER_MODULE")]
     pub pool_max_tables_per_module: Option<u32>,
-    /// Maximum size, in bytes, of a single core instance's `VMContext`
-    /// metadata (`POOL_MAX_CORE_INSTANCE_SIZE`). Unset leaves the Wasmtime
-    /// default (1 `MiB`).
+    /// Max `VMContext` size per core instance, in bytes (`POOL_MAX_CORE_INSTANCE_SIZE`, unset: Wasmtime default 1 `MiB`).
     #[env(from = "POOL_MAX_CORE_INSTANCE_SIZE")]
     pub pool_max_core_instance_size: Option<usize>,
-    /// Maximum size, in bytes, of a single component instance's metadata
-    /// (`POOL_MAX_COMPONENT_INSTANCE_SIZE`). Unset leaves the Wasmtime default
-    /// (1 `MiB`).
+    /// Max metadata size per component instance, in bytes (`POOL_MAX_COMPONENT_INSTANCE_SIZE`, unset: Wasmtime default 1 `MiB`).
     #[env(from = "POOL_MAX_COMPONENT_INSTANCE_SIZE")]
     pub pool_max_component_instance_size: Option<usize>,
-    /// Number of slots batched together when decommitting pooled memory to
-    /// amortise syscalls (`POOL_DECOMMIT_BATCH_SIZE`). Unset leaves the
-    /// Wasmtime default (1).
+    /// Slots batched per decommit to amortise syscalls (`POOL_DECOMMIT_BATCH_SIZE`, unset: Wasmtime default 1).
     #[env(from = "POOL_DECOMMIT_BATCH_SIZE")]
     pub pool_decommit_batch_size: Option<usize>,
-    /// Whether to use the Linux `PAGEMAP_SCAN` ioctl to reset linear memory
-    /// more cheaply on slot reuse (`POOL_PAGEMAP_SCAN`, one of `auto`/`yes`/
-    /// `no`, default `no`). Requires Linux 6.7+; `auto` falls back to the
-    /// default reset path where unsupported.
+    /// Use the Linux `PAGEMAP_SCAN` ioctl for cheaper memory reset (`POOL_PAGEMAP_SCAN`, `auto`/`yes`/`no`, default `no`).
     #[env(from = "POOL_PAGEMAP_SCAN", default = "no", with = parse_enabled)]
     pub pool_pagemap_scan: Enabled,
-    /// Whether the pooling allocator should use memory protection keys (MPK) to
-    /// pack linear memories more densely (`POOL_MEMORY_PROTECTION_KEYS`, one of
-    /// `auto`/`yes`/`no`, default `no`). Only effective on Linux/`x86_64` and
-    /// only applied when built with the `mpk` feature; `auto` falls back cleanly
-    /// where unsupported, and `yes` without the `mpk` feature is rejected at
-    /// start-up.
+    /// Pack linear memories with memory protection keys; requires the `mpk` feature (`POOL_MEMORY_PROTECTION_KEYS`, `auto`/`yes`/`no`, default `no`).
     #[env(from = "POOL_MEMORY_PROTECTION_KEYS", default = "no", with = parse_enabled)]
     pub pool_memory_protection_keys: Enabled,
-    /// Upper limit on how many memory protection keys the pooling allocator may
-    /// allocate (`POOL_MAX_MEMORY_PROTECTION_KEYS`). Unset leaves the Wasmtime
-    /// default. Only applied when built with the `mpk` feature.
+    /// Upper limit on MPK keys the pool may allocate; requires the `mpk` feature (`POOL_MAX_MEMORY_PROTECTION_KEYS`, unset: Wasmtime default).
     #[env(from = "POOL_MAX_MEMORY_PROTECTION_KEYS")]
     pub pool_max_memory_protection_keys: Option<usize>,
-    /// Interval between background samples of pooling-allocator occupancy,
-    /// emitted as `OpenTelemetry` gauges (`POOL_METRICS_INTERVAL_MS`, default
-    /// 5000ms). `0` disables the sampler.
+    /// Interval between pooling-occupancy metric samples; `0` disables (`POOL_METRICS_INTERVAL_MS`, default 5000ms).
     #[env(from = "POOL_METRICS_INTERVAL_MS", default = "5000", with = parse_millis)]
     pub pool_metrics_interval: Duration,
-    /// Whether to honour WebAssembly branch hints during compilation
-    /// (`BRANCH_HINTING`, default `false`).
+    /// Honour WebAssembly branch hints during compilation; compile-affecting (`BRANCH_HINTING`, default `false`).
     #[env(from = "BRANCH_HINTING", default = "false")]
     pub branch_hinting: bool,
 }

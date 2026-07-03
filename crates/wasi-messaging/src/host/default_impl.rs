@@ -55,6 +55,19 @@ impl Backend for MessagingDefault {
     }
 }
 
+/// Apply `edit` to a clone of the message's inner [`InMemMessage`], returning
+/// the updated message; errors if `message` is not an [`InMemMessage`].
+fn map_inmem(
+    message: &Arc<dyn Message>, edit: impl FnOnce(&mut InMemMessage),
+) -> Result<Arc<dyn Message>> {
+    let Some(inmem) = message.as_any().downcast_ref::<InMemMessage>() else {
+        return Err(wasmtime::Error::msg("invalid message type").into());
+    };
+    let mut updated = inmem.clone();
+    edit(&mut updated);
+    Ok(Arc::new(updated) as Arc<dyn Message>)
+}
+
 impl WasiMessagingCtx for MessagingDefault {
     fn connect(&self) -> FutureResult<Arc<dyn Client>> {
         tracing::debug!("connecting messaging client");
@@ -71,78 +84,40 @@ impl WasiMessagingCtx for MessagingDefault {
     fn set_content_type(
         &self, message: Arc<dyn Message>, content_type: String,
     ) -> Result<Arc<dyn Message>> {
-        tracing::debug!("setting content-type: {}", content_type);
-
-        let Some(inmem) = message.as_any().downcast_ref::<InMemMessage>() else {
-            return Err(wasmtime::Error::msg("invalid message type").into());
-        };
-
-        let mut updated = inmem.clone();
-        let mut metadata = updated.metadata.unwrap_or_default();
-        metadata.insert("content-type".to_string(), content_type);
-        updated.metadata = Some(metadata);
-
-        Ok(Arc::new(updated) as Arc<dyn Message>)
+        tracing::debug!("setting content-type: {content_type}");
+        map_inmem(&message, |m| {
+            m.metadata.get_or_insert_default().insert("content-type".to_string(), content_type);
+        })
     }
 
     fn set_payload(&self, message: Arc<dyn Message>, data: Vec<u8>) -> Result<Arc<dyn Message>> {
         tracing::debug!("setting payload");
-
-        let Some(inmem) = message.as_any().downcast_ref::<InMemMessage>() else {
-            return Err(wasmtime::Error::msg("invalid message type").into());
-        };
-
-        let mut updated = inmem.clone();
-        updated.payload = data;
-
-        Ok(Arc::new(updated) as Arc<dyn Message>)
+        map_inmem(&message, |m| m.payload = data)
     }
 
     fn add_metadata(
         &self, message: Arc<dyn Message>, key: String, value: String,
     ) -> Result<Arc<dyn Message>> {
         tracing::debug!("adding metadata: {key} = {value}");
-
-        let Some(inmem) = message.as_any().downcast_ref::<InMemMessage>() else {
-            return Err(wasmtime::Error::msg("invalid message type").into());
-        };
-
-        let mut updated = inmem.clone();
-        let mut metadata = updated.metadata.unwrap_or_default();
-        metadata.insert(key, value);
-        updated.metadata = Some(metadata);
-
-        Ok(Arc::new(updated) as Arc<dyn Message>)
+        map_inmem(&message, |m| {
+            m.metadata.get_or_insert_default().insert(key, value);
+        })
     }
 
     fn set_metadata(
         &self, message: Arc<dyn Message>, metadata: Metadata,
     ) -> Result<Arc<dyn Message>> {
         tracing::debug!("setting all metadata");
-
-        let Some(inmem) = message.as_any().downcast_ref::<InMemMessage>() else {
-            return Err(wasmtime::Error::msg("invalid message type").into());
-        };
-
-        let mut updated = inmem.clone();
-        updated.metadata = Some(metadata);
-
-        Ok(Arc::new(updated) as Arc<dyn Message>)
+        map_inmem(&message, |m| m.metadata = Some(metadata))
     }
 
     fn remove_metadata(&self, message: Arc<dyn Message>, key: String) -> Result<Arc<dyn Message>> {
-        tracing::debug!("removing metadata: {}", key);
-
-        let Some(inmem) = message.as_any().downcast_ref::<InMemMessage>() else {
-            return Err(wasmtime::Error::msg("invalid message type").into());
-        };
-
-        let mut updated = inmem.clone();
-        if let Some(ref mut metadata) = updated.metadata {
-            metadata.remove(&key);
-        }
-
-        Ok(Arc::new(updated) as Arc<dyn Message>)
+        tracing::debug!("removing metadata: {key}");
+        map_inmem(&message, |m| {
+            if let Some(md) = m.metadata.as_mut() {
+                md.remove(&key);
+            }
+        })
     }
 }
 
@@ -260,5 +235,40 @@ impl Message for InMemMessage {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::StreamExt;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn pub_sub_delivers_to_subscriber() {
+        let backend = <MessagingDefault as Backend>::connect().await.expect("connect");
+        let client = WasiMessagingCtx::connect(&backend).await.expect("client");
+
+        let mut subscription = client.subscribe().await.expect("subscribe");
+        let message = backend.new_message(b"hello".to_vec()).expect("new message");
+        client.send("topic-a".to_string(), MessageProxy(message)).await.expect("send");
+
+        let received = subscription.next().await.expect("a message");
+        assert_eq!(received.topic(), "topic-a");
+        assert_eq!(received.payload(), b"hello");
+    }
+
+    #[tokio::test]
+    async fn request_returns_response() {
+        let backend = <MessagingDefault as Backend>::connect().await.expect("connect");
+        let client = WasiMessagingCtx::connect(&backend).await.expect("client");
+
+        let message = backend.new_message(b"ping".to_vec()).expect("new message");
+        let reply = client
+            .request("topic-c".to_string(), MessageProxy(message), None)
+            .await
+            .expect("request");
+
+        assert_eq!(reply.payload(), b"ACK");
     }
 }

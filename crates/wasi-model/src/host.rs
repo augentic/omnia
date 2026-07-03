@@ -1,14 +1,6 @@
-//! # WASI Model Service
-//!
-//! The host side of the `omnia:model/completion` boundary. Follows the
-//! shared host-crate shape verbatim (`wasi-keyvalue` / `wasi-blobstore` are the
-//! templates): a `WasiModel` host struct implementing `HasData` + `Host` +
-//! (no-op) `Server`, a `WasiModelView` the `Linker<T>` type implements, a
-//! `WasiModelCtxView` carrying the backend + resource table, and a
-//! `WasiModelCtx` trait the *backend* implements. The one addition over a plain
-//! effect host is the per-completion [`ToolHost`] handed to the backend, which
-//! the `create` binding assembles from the store's mounts and dispatcher rather
-//! than from the view.
+//! Host side of the `omnia:model/completion` boundary. Follows the shared
+//! host-crate shape (see `wasi-keyvalue`), adding a per-completion [`ToolHost`]
+//! that the `create` binding assembles from the store's mounts and dispatcher.
 
 mod default_impl;
 mod gate;

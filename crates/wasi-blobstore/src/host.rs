@@ -2,7 +2,7 @@
 
 mod blobstore_impl;
 mod container_impl;
-pub mod default_impl;
+mod default_impl;
 mod resource;
 mod types_impl;
 

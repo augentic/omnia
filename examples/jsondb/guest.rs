@@ -46,10 +46,6 @@ impl Guest for Http {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Stops
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Stop {
     stop_name: String,
@@ -189,10 +185,6 @@ async fn list_stops(Query(p): Query<StopQuery>) -> HttpResult<Json<Value>> {
     Ok(Json(json!({ "stops": stops, "continuation": result.continuation })))
 }
 
-// ---------------------------------------------------------------------------
-// Routes
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Route {
     agency_id: String,
@@ -301,10 +293,6 @@ async fn list_routes(Query(p): Query<RouteQuery>) -> HttpResult<Json<Value>> {
     Ok(Json(json!({ "routes": routes, "continuation": result.continuation })))
 }
 
-// ---------------------------------------------------------------------------
-// Stop times
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StopTime {
     trip_id: String,
@@ -404,10 +392,6 @@ async fn list_stop_times(Query(p): Query<StopTimeQuery>) -> HttpResult<Json<Valu
     let stop_times = deserialize_docs(&result.documents)?;
     Ok(Json(json!({ "stop_times": stop_times, "continuation": result.continuation })))
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 fn deserialize_docs(docs: &[Document]) -> Result<Vec<Value>> {
     docs.iter()

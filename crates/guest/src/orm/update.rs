@@ -61,8 +61,14 @@ impl<M: Entity> UpdateBuilder<M> {
     ///
     /// # Errors
     ///
-    /// Returns an error if query values cannot be converted to WASI data types.
+    /// Returns an error if no `WHERE` filter was set (an unfiltered UPDATE would
+    /// rewrite every row), or if a query value cannot be converted to a WASI data
+    /// type.
     pub fn build(self) -> Result<Query> {
+        if self.filters.is_empty() {
+            anyhow::bail!("refusing to build an unfiltered UPDATE; add a `.where(...)` clause");
+        }
+
         let mut statement = sea_query::Query::update();
         statement.table(Alias::new(M::TABLE));
 

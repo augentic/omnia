@@ -8,7 +8,7 @@ pub use omnia::FutureResult;
 /// interact with different backend buckets (stores).
 pub trait Bucket: Debug + Send + Sync + 'static {
     /// The name of the bucket.
-    fn name(&self) -> &'static str;
+    fn name(&self) -> &str;
 
     /// Get the value associated with the key.
     fn get(&self, key: String) -> FutureResult<Option<Vec<u8>>>;

@@ -10,7 +10,6 @@ pub type Result<T> = anyhow::Result<T, Error>;
 /// Domain level error type returned by the adapter.
 #[derive(Error, Debug, Clone, Serialize, Deserialize)]
 pub enum Error {
-    // --- Client errors ---
     /// Request payload is invalid or missing required fields.
     #[error("code: {code}, description: {description}")]
     BadRequest {
@@ -29,7 +28,6 @@ pub enum Error {
         description: String,
     },
 
-    // --- Server errors ---
     /// A non recoverable internal error occurred.
     #[error("code: {code}, description: {description}")]
     ServerError {
@@ -48,7 +46,6 @@ pub enum Error {
         description: String,
     },
 
-    // --- JSON errors ---
     /// A domain-controlled error carrying a JSON body for the error response.
     #[error("code: {code}")]
     Json {

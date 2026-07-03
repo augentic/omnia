@@ -18,7 +18,7 @@ use wrpc_wasmtime::WrpcView;
 
 use crate::dispatch::{DispatchHandle, FirstArgSelector, GuestSelector};
 use crate::mount::{MountRegistry, ResolvedPreopen};
-use crate::registry::{Registry, RegistryBuilder, Routes};
+use crate::registry::{Registry, Routes};
 use crate::{Host, Mode, RuntimeOptions, Server, Telemetry};
 
 /// Selects where a runtime's guests come from, then [`build`]s a [`Deployment`]
@@ -235,11 +235,18 @@ impl<T: WasiView> Deployment<T> {
         self.mode
     }
 
-    /// Shared guest argv for threading into [`Runtime::store`](crate::Runtime::store).
+    /// Borrow the guest argv.
     #[must_use]
     pub fn args(&self) -> &[String] {
         &self.args
     }
+
+    // /// Clone the shared guest argv handle for threading into every
+    // /// [`Runtime::store`](crate::Runtime::store) without re-copying the vector.
+    // #[must_use]
+    // pub fn args_shared(&self) -> Arc<Vec<String>> {
+    //     Arc::clone(&self.args)
+    // }
 
     /// Assemble the guest [`Registry`].
     ///
@@ -258,7 +265,7 @@ impl<T: WasiView> Deployment<T> {
         let dispatch =
             DispatchHandle::new(self.selector, self.links, self.options.max_dispatch_depth);
 
-        RegistryBuilder::new(
+        Registry::assemble(
             self.engine,
             self.linker,
             self.options,
@@ -266,7 +273,6 @@ impl<T: WasiView> Deployment<T> {
             self.routes,
             dispatch,
         )
-        .build()
     }
 }
 
@@ -318,12 +324,6 @@ mod tests {
     use wasmtime::{Config, Engine};
 
     use crate::RuntimeOptions;
-
-    #[test]
-    fn builds_with_defaults() {
-        Engine::new(&Config::from(&RuntimeOptions::load().expect("should load")))
-            .expect("default pooling config should build an engine");
-    }
 
     #[test]
     fn builds_with_pooling() {

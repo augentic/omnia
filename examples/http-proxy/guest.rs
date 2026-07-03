@@ -2,8 +2,6 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use std::convert::Infallible;
-
 use anyhow::Context;
 use axum::body::Body;
 use axum::response::IntoResponse;
@@ -25,7 +23,6 @@ struct HttpGuest;
 wasip3::http::service::export!(HttpGuest);
 
 impl Guest for HttpGuest {
-    /// Routes incoming requests to appropriate handlers.
     #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new()
@@ -39,7 +36,7 @@ impl Guest for HttpGuest {
 
 /// Fetches data with HTTP caching enabled.
 #[omnia_wasi_otel::instrument]
-async fn cache() -> Result<impl IntoResponse, Infallible> {
+async fn cache() -> HttpResult<impl IntoResponse> {
     let request = http::Request::builder()
         .method(Method::GET)
         .uri("https://jsonplaceholder.cypress.io/posts/1")
@@ -49,31 +46,29 @@ async fn cache() -> Result<impl IntoResponse, Infallible> {
             bucket_name: "example-bucket".to_string(),
         })
         .body(Empty::<Bytes>::new())
-        .expect("failed to build request");
+        .context("building request")?;
 
-    let response = omnia_wasi_http::handle(request).await.unwrap();
+    let response = omnia_wasi_http::handle(request).await?;
     let (parts, body) = response.into_parts();
-    let http_response = http::Response::from_parts(parts, Body::from(body));
 
-    Ok(http_response)
+    Ok(http::Response::from_parts(parts, Body::from(body)))
 }
 
 #[omnia_wasi_otel::instrument]
-async fn origin_sm() -> Result<impl IntoResponse, Infallible> {
+async fn origin_sm() -> HttpResult<impl IntoResponse> {
     tracing::info!("fetching from origin-sm");
 
     let request = http::Request::builder()
         .method(Method::GET)
         .uri("https://jsonplaceholder.cypress.io/posts/1")
         .body(Empty::<Bytes>::new())
-        .expect("failed to build request");
+        .context("building request")?;
 
-    let response = omnia_wasi_http::handle(request).await.unwrap();
+    let response = omnia_wasi_http::handle(request).await?;
     let (parts, body) = response.into_parts();
-    let http_response = http::Response::from_parts(parts, Body::from(body));
 
     tracing::info!("fetched from origin-sm");
-    Ok(http_response)
+    Ok(http::Response::from_parts(parts, Body::from(body)))
 }
 
 /// Fetches from origin and caches the response.
@@ -86,7 +81,7 @@ async fn origin_xl() -> HttpResult<Json<Value>> {
         .uri("https://jsonplaceholder.cypress.io/posts")
         .header(CACHE_CONTROL, "no-cache, max-age=300")
         .body(Empty::<Bytes>::new())
-        .expect("failed to build request");
+        .context("building request")?;
 
     let response = omnia_wasi_http::handle(request).await?;
     let body = response.into_body();
@@ -116,7 +111,7 @@ async fn client_cert() -> HttpResult<Json<Value>> {
             bucket_name: "example-bucket".to_string(),
         })
         .body(Empty::<Bytes>::new())
-        .expect("Failed to build request");
+        .context("building request")?;
 
     let response = omnia_wasi_http::handle(request).await?;
     let body = response.into_body();

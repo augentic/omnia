@@ -14,6 +14,7 @@ use wasmtime_wasi_config::WasiConfigVariables;
 
 use crate::WasiConfigCtx;
 
+/// Options used to connect to the config store.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions;
 

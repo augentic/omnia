@@ -2,7 +2,7 @@
 //!
 //! This module implements the host-side logic for the WASI SQL service.
 
-pub mod default_impl;
+mod default_impl;
 mod readwrite_impl;
 mod resource;
 mod types_impl;
