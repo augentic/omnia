@@ -1,9 +1,5 @@
 //! Default PoloDB-backed implementation of [`WasiDocStoreCtx`](crate::host::WasiDocStoreCtx).
 
-#![allow(clippy::cast_possible_truncation)]
-#![allow(clippy::cast_sign_loss)]
-#![allow(missing_docs)]
-
 mod bson_filter;
 
 use std::sync::Arc;
@@ -127,6 +123,7 @@ impl WasiDocStoreCtx for DocStoreDefault {
 
             let limit = options.limit.map_or(MAX_PAGE_SIZE, u64::from);
             anyhow::ensure!(limit > 0, "query limit must be at least 1");
+            let page_size = usize::try_from(limit).unwrap_or(usize::MAX);
 
             let col = db.collection::<bson::Document>(&collection);
             let bson_filter = filter.as_ref().map_or_else(|| doc! {}, to_bson);
@@ -149,9 +146,9 @@ impl WasiDocStoreCtx for DocStoreDefault {
                 raw.push(item.context("cursor item")?);
             }
 
-            let has_more = raw.len() > limit as usize;
+            let has_more = raw.len() > page_size;
             if has_more {
-                raw.truncate(limit as usize);
+                raw.truncate(page_size);
             }
 
             let mut documents = Vec::with_capacity(raw.len());
@@ -269,8 +266,9 @@ mod tests {
                 .as_nanos()
         ));
         let path = path.to_string_lossy().into_owned();
-        let ctx =
-            DocStoreDefault::connect_with(ConnectOptions { database: path }).await.expect("connect");
+        let ctx = DocStoreDefault::connect_with(ConnectOptions { database: path })
+            .await
+            .expect("connect");
 
         let doc = Document {
             id: "a1".to_string(),

@@ -1,8 +1,6 @@
 //! Default implementation for `wasi:config`, sourcing variables from the
 //! process environment.
 
-#![allow(clippy::used_underscore_binding)]
-
 use std::env;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;

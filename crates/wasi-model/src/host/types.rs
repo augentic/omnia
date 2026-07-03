@@ -25,7 +25,7 @@ pub struct PreparedRequest {
 ///
 /// Host-only — the guest sees a `reply` whose `answer` is the validated string
 /// the `create` binding derives from `value`.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Answer {
     /// The parsed JSON answer the backend produced.
     pub value: serde_json::Value,
@@ -73,10 +73,7 @@ pub struct VerifyReport {
 }
 
 /// One recorded tool interaction within a completion's transcript.
-// `args`/`result` are `serde_json::Value`, which is not `Eq` (it carries f64),
-// so this type can only be `PartialEq`.
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolTurn {
     /// The tool the model called.
     pub tool: String,
@@ -89,7 +86,7 @@ pub struct ToolTurn {
 /// The tool-call transcript a backend may capture for replay. Host-only;
 /// it never crosses the WIT boundary. Empty for backends with no tool loop
 /// (replay, cursor).
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Transcript {
     /// Ordered tool turns the backend drove to reach the answer.
     pub turns: Vec<ToolTurn>,

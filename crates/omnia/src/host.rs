@@ -43,8 +43,7 @@ pub trait Server<B>: Debug + Sync + Send {
     ///
     /// This is typically implemented by services that instantiate (or run)
     /// wasm components.
-    #[allow(unused_variables)]
-    fn run(&self, state: &Runtime<B>) -> impl Future<Output = Result<()>> {
+    fn run(&self, _state: &Runtime<B>) -> impl Future<Output = Result<()>> {
         async { Ok(()) }
     }
 }

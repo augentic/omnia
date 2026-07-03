@@ -31,7 +31,7 @@ impl std::error::Error for DocStoreError {}
 mod generated {
     #![allow(missing_docs)]
 
-    pub use super::{FilterProxy, DocStoreError};
+    pub use super::{DocStoreError, FilterProxy};
 
     wasmtime::component::bindgen!({
         world: "imports",

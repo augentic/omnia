@@ -35,8 +35,7 @@ impl Implementation {
 /// A tool advertised through `tools/list` and invoked through `tools/call`.
 // `input_schema` is a `serde_json::Value`, which is not `Eq` (it carries f64),
 // so this type can only be `PartialEq`.
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Tool {
     /// Unique tool name.

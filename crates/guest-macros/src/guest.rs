@@ -71,7 +71,6 @@ mod kw {
     syn::custom_keyword!(messaging);
 }
 
-#[allow(clippy::large_enum_variant)]
 enum Opt {
     Owner(syn::LitStr),
     Provider(Ident),

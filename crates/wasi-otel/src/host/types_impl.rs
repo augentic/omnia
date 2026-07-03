@@ -111,7 +111,6 @@ impl PartialEq for types::Value {
 }
 
 impl Hash for types::Value {
-    #[expect(clippy::cast_possible_truncation)]
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
             Self::Bool(v) => v.hash(state),
@@ -121,7 +120,12 @@ impl Hash for types::Value {
             Self::BoolArray(items) => items.hash(state),
             Self::S64Array(items) => items.hash(state),
             Self::F64Array(items) => {
-                items.iter().map(|v| *v as i64).collect::<Vec<_>>().hash(state);
+                // Hash like `<[u64]>::hash` (length prefix then elements),
+                // using the same bit representation as the scalar `F64` arm.
+                items.len().hash(state);
+                for v in items {
+                    v.to_bits().hash(state);
+                }
             }
             Self::StringArray(items) => items.hash(state),
         }
