@@ -27,7 +27,7 @@ pub use self::dispatch::{
     Dispatcher, FirstArgSelector, GuestSelector, LinkClient, WrpcState, serve_links,
 };
 pub use self::host::{Backend, FromEnv, FutureResult, Host, Server};
-pub use self::mount::{Mount, MountRegistry, ResolvedPreopen};
+pub use self::mount::{MountRegistry, ResolvedPreopen};
 pub use self::options::RuntimeOptions;
 #[cfg(feature = "jit")]
 pub use self::options::compile;
