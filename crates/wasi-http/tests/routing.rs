@@ -41,10 +41,9 @@ impl HasOtel for Bundle {
 }
 
 async fn runtime() -> Result<Option<Runtime<Bundle>>> {
-    let (Some(guest_a), Some(guest_b)) = (
-        find_guest("http_routing_a_wasm.wasm"),
-        find_guest("http_routing_b_wasm.wasm"),
-    ) else {
+    let (Some(guest_a), Some(guest_b)) =
+        (find_guest("http_routing_a_wasm.wasm"), find_guest("http_routing_b_wasm.wasm"))
+    else {
         return Ok(None);
     };
 

@@ -18,7 +18,8 @@ static GUESTS: OnceLock<()> = OnceLock::new();
 ///
 /// # Panics
 ///
-/// Panics under CI (`CI` set) so the pipeline never passes vacuously.
+/// Panics under CI (`CI` set) or `build_guests()` fails so the pipeline never
+/// passes vacuously.
 #[must_use]
 pub fn find_guest(file: &str) -> Option<PathBuf> {
     if guest_wasm(file).is_none() {
@@ -40,13 +41,7 @@ pub fn find_guest(file: &str) -> Option<PathBuf> {
 
 // Locate a built guest component by file name, preferring the debug profile.
 fn guest_wasm(file: &str) -> Option<PathBuf> {
-    // get target directory from test executable path
-    let test_exe = env::current_exe().expect("test executable has a path");
-    let target = test_exe
-        .ancestors()
-        .nth(3)
-        .expect("test exe sits at <target>/<profile>/deps/<exe>")
-        .to_path_buf();
+    let target = get_target_dir();
 
     // find file in debug or release profiles
     ["debug", "release"]
@@ -63,8 +58,10 @@ fn build_guests() {
             .and_then(|crates| crates.parent())
             .expect("testkit manifest dir is <workspace>/crates/testkit")
             .to_path_buf();
+        let target = get_target_dir();
 
         let status = Command::new("cargo")
+            .env("CARGO_TARGET_DIR", &target)
             .args(["build", "-p", "examples", "--examples", "--target", "wasm32-wasip2"])
             .current_dir(&workspace)
             .status()
@@ -72,4 +69,13 @@ fn build_guests() {
 
         assert!(status.success(), "guest build failed with status {status}");
     });
+}
+
+fn get_target_dir() -> PathBuf {
+    let test_exe = env::current_exe().expect("test executable has a path");
+    test_exe
+        .ancestors()
+        .nth(3)
+        .expect("test exe sits at <target>/<profile>/deps/<exe>")
+        .to_path_buf()
 }

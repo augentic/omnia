@@ -6,6 +6,7 @@
 //!
 //! - [`find_guest`] locates a built example guest (building guests on first use),
 //!   encoding the "fail in CI, skip locally" policy so a missing guest never lets
+//!   CI pass vacuously.
 //! - [`temp_manifest`] writes a deployment manifest to a unique temp file and
 //!   removes it on drop.
 //! - [`http`] drives a guest's `wasi:http/handler` export in-process, without

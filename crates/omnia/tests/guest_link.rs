@@ -77,10 +77,9 @@ async fn call_run(runtime: &Runtime<Counter>, message: &str) -> Result<String> {
 // dispatch and instance-per-call.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn dispatch() -> Result<()> {
-    let (Some(responder), Some(router)) = (
-        find_guest("guest_link_responder_wasm.wasm"),
-        find_guest("guest_link_router_wasm.wasm"),
-    ) else {
+    let (Some(responder), Some(router)) =
+        (find_guest("guest_link_responder_wasm.wasm"), find_guest("guest_link_router_wasm.wasm"))
+    else {
         return Ok(());
     };
 
