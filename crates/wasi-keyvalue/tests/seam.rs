@@ -6,7 +6,7 @@
 //! WIT boundary without trapping, and reading the shared backend afterwards
 //! proves the write actually reached the host store.
 //!
-//! The guest is built by `cargo make build-guests`; the test skips locally when
+//! The guest is built automatically on first [`find_guest`] call; the test skips locally when
 //! it is absent and fails under CI so the pipeline never passes vacuously.
 
 #![cfg(not(target_arch = "wasm32"))]
@@ -53,7 +53,7 @@ impl HasKeyValue for Bundle {
 /// and a handle to the shared key-value backend (its `moka` cache is shared
 /// across clones, so this handle observes the guest's writes).
 async fn runtime() -> Result<Option<(Runtime<Bundle>, KeyValueDefault)>> {
-    let Some(wasm) = find_guest("keyvalue_wasm.wasm", "cargo make build-guests") else {
+    let Some(wasm) = find_guest("keyvalue_wasm.wasm") else {
         return Ok(None);
     };
 

@@ -6,7 +6,7 @@
 //! boundary. `wasi:config`'s view is read-only (`&self`), which the bundle's
 //! `HasConfig` impl reflects.
 //!
-//! The guest is built by `cargo make build-guests`; the test skips locally when
+//! The guest is built automatically on first [`find_guest`] call; the test skips locally when
 //! it is absent and fails under CI so the pipeline never passes vacuously.
 
 #![cfg(not(target_arch = "wasm32"))]
@@ -50,7 +50,7 @@ impl HasConfig for Bundle {
 }
 
 async fn runtime() -> Result<Option<Runtime<Bundle>>> {
-    let Some(wasm) = find_guest("config_wasm.wasm", "cargo make build-guests") else {
+    let Some(wasm) = find_guest("config_wasm.wasm") else {
         return Ok(None);
     };
 

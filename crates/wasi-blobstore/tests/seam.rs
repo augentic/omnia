@@ -6,7 +6,7 @@
 //! round-trip, and echoes the parsed JSON — so a `200` with the same body
 //! proves the create/write/read blob path crossed the WIT boundary intact.
 //!
-//! The guest is built by `cargo make build-guests`; the test skips locally when
+//! The guest is built automatically on first [`find_guest`] call; the test skips locally when
 //! it is absent and fails under CI so the pipeline never passes vacuously.
 
 #![cfg(not(target_arch = "wasm32"))]
@@ -49,7 +49,7 @@ impl HasBlobstore for Bundle {
 }
 
 async fn runtime() -> Result<Option<Runtime<Bundle>>> {
-    let Some(wasm) = find_guest("blobstore_wasm.wasm", "cargo make build-guests") else {
+    let Some(wasm) = find_guest("blobstore_wasm.wasm") else {
         return Ok(None);
     };
 

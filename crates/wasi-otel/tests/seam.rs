@@ -6,7 +6,7 @@
 //! that counts what it receives lets the test assert the effect host-side —
 //! the RFC's "capturing backend" pattern — rather than trusting a `200` alone.
 //!
-//! The guest is built by `cargo make build-guests`; the test skips locally when
+//! The guest is built automatically on first [`find_guest`] call; the test skips locally when
 //! it is absent and fails under CI so the pipeline never passes vacuously.
 
 #![cfg(not(target_arch = "wasm32"))]
@@ -93,7 +93,7 @@ impl HasOtel for Bundle {
 }
 
 async fn runtime() -> Result<Option<(Runtime<Bundle>, CapturingOtel)>> {
-    let Some(wasm) = find_guest("otel_wasm.wasm", "cargo make build-guests") else {
+    let Some(wasm) = find_guest("otel_wasm.wasm") else {
         return Ok(None);
     };
 

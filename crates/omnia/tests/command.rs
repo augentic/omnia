@@ -6,7 +6,7 @@
 //! `wasi:cli/exit` (surfaced as `I32Exit`, proving codes are *not* collapsed to
 //! `1`) and the `Err(())` -> `1` mapping.
 //!
-//! The guest is built by `cargo make build-guests`; the test skips locally when
+//! The guest is built automatically on first [`find_guest`] call; the test skips
 //! it is absent and fails under CI so the pipeline never passes vacuously.
 
 #![cfg(not(target_arch = "wasm32"))]
@@ -45,7 +45,7 @@ macro_rules! cli_exit_test {
     ($name:ident, $tail:expr, $code:expr, $msg:expr) => {
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn $name() -> Result<()> {
-            let Some(wasm) = find_guest("cli_wasm.wasm", "cargo make build-guests") else {
+            let Some(wasm) = find_guest("cli_wasm.wasm") else {
                 return Ok(());
             };
 

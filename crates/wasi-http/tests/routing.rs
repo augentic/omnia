@@ -6,7 +6,7 @@
 //! and that guest's response returns — the `omnia.toml` routing contract, minus
 //! the TCP socket.
 //!
-//! The guests are built by `cargo make build-guests`; the test skips locally
+//! The guests are built automatically on first [`find_guest`] call; the test skips locally
 //! when they are absent and fails under CI so the pipeline never passes
 //! vacuously.
 
@@ -41,10 +41,9 @@ impl HasOtel for Bundle {
 }
 
 async fn runtime() -> Result<Option<Runtime<Bundle>>> {
-    let hint = "cargo make build-guests";
     let (Some(guest_a), Some(guest_b)) = (
-        find_guest("http_routing_a_wasm.wasm", hint),
-        find_guest("http_routing_b_wasm.wasm", hint),
+        find_guest("http_routing_a_wasm.wasm"),
+        find_guest("http_routing_b_wasm.wasm"),
     ) else {
         return Ok(None);
     };

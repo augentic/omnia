@@ -10,7 +10,7 @@
 //! 2. **fixture shape** — the checked-in fixture keys on the reduced prompt
 //!    without leaking mount paths or non-serializable workspace handles.
 //!
-//! The guest component is built by `cargo make build-guests`; the test skips
+//! The guest component is built automatically on first [`find_guest`] call; the test skips
 //! locally when it is absent and fails under CI so the pipeline never passes
 //! vacuously.
 
@@ -192,7 +192,7 @@ async fn call_run(runtime: &Runtime<TestBundle>) -> Result<String> {
 // no network.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn replay() -> Result<()> {
-    let Some(wasm) = find_guest("model_wasm.wasm", "cargo make build-guests") else {
+    let Some(wasm) = find_guest("model_wasm.wasm") else {
         return Ok(());
     };
 
@@ -294,7 +294,7 @@ impl WasiModelCtx for LocalPathProbe {
 /// the per-completion [`ToolHost`] (what `omnia-cursor` reads).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn workspace() -> Result<()> {
-    let Some(wasm) = find_guest("model_wasm.wasm", "cargo make build-guests") else {
+    let Some(wasm) = find_guest("model_wasm.wasm") else {
         return Ok(());
     };
 

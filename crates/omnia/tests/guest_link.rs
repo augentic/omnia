@@ -9,7 +9,7 @@
 //! to the caller. Two calls confirm the multi-use carrier (a fresh frame
 //! connection per call).
 //!
-//! The guest components are built by `cargo make build-guests`; the test skips
+//! The guest components are built automatically on first [`find_guest`] call; the test skips
 //! locally when they are absent and fails under CI so the pipeline never passes
 //! vacuously.
 
@@ -77,10 +77,9 @@ async fn call_run(runtime: &Runtime<Counter>, message: &str) -> Result<String> {
 // dispatch and instance-per-call.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn dispatch() -> Result<()> {
-    let hint = "cargo make build-guests";
     let (Some(responder), Some(router)) = (
-        find_guest("guest_link_responder_wasm.wasm", hint),
-        find_guest("guest_link_router_wasm.wasm", hint),
+        find_guest("guest_link_responder_wasm.wasm"),
+        find_guest("guest_link_router_wasm.wasm"),
     ) else {
         return Ok(());
     };

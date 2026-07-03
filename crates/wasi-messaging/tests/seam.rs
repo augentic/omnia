@@ -7,7 +7,7 @@
 //! request then receives that message — proving the publish crossed the WIT
 //! boundary into the host broker rather than merely returning `200`.
 //!
-//! The guest is built by `cargo make build-guests`; the test skips locally when
+//! The guest is built automatically on first [`find_guest`] call; the test skips locally when
 //! it is absent and fails under CI so the pipeline never passes vacuously.
 
 #![cfg(not(target_arch = "wasm32"))]
@@ -65,7 +65,7 @@ impl HasKeyValue for Bundle {
 /// (its broadcast `sender` is shared across clones, so a subscription on this
 /// handle observes the guest's publishes).
 async fn runtime() -> Result<Option<(Runtime<Bundle>, MessagingDefault)>> {
-    let Some(wasm) = find_guest("messaging_wasm.wasm", "cargo make build-guests") else {
+    let Some(wasm) = find_guest("messaging_wasm.wasm") else {
         return Ok(None);
     };
 

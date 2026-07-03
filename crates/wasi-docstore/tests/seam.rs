@@ -6,7 +6,7 @@
 //! both the insert and get paths cross the WIT boundary and that the write is
 //! durable across instance-per-call invocations.
 //!
-//! The guest is built by `cargo make build-guests`; the test skips locally when
+//! The guest is built automatically on first [`find_guest`] call; the test skips locally when
 //! it is absent and fails under CI so the pipeline never passes vacuously.
 
 #![cfg(not(target_arch = "wasm32"))]
@@ -50,7 +50,7 @@ impl HasDocStore for Bundle {
 }
 
 async fn runtime() -> Result<Option<Runtime<Bundle>>> {
-    let Some(wasm) = find_guest("docstore_wasm.wasm", "cargo make build-guests") else {
+    let Some(wasm) = find_guest("docstore_wasm.wasm") else {
         return Ok(None);
     };
 
