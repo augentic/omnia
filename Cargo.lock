@@ -2062,6 +2062,7 @@ dependencies = [
  "futures",
  "http",
  "omnia-host-macros",
+ "omnia-testkit",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
@@ -2133,6 +2134,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "omnia-testkit"
+version = "0.35.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "futures",
+ "http",
+ "http-body-util",
+ "omnia",
+ "tokio",
+ "wasmtime",
+ "wasmtime-wasi",
+ "wasmtime-wasi-http",
+]
+
+[[package]]
 name = "omnia-wasi-blobstore"
 version = "0.35.0"
 dependencies = [
@@ -2140,7 +2157,11 @@ dependencies = [
  "bytes",
  "futures",
  "omnia",
+ "omnia-testkit",
+ "omnia-wasi-http",
+ "omnia-wasi-otel",
  "parking_lot",
+ "serde_json",
  "tokio",
  "tracing",
  "wasmtime",
@@ -2153,7 +2174,13 @@ name = "omnia-wasi-config"
 version = "0.35.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "omnia",
+ "omnia-testkit",
+ "omnia-wasi-http",
+ "omnia-wasi-otel",
+ "serde_json",
+ "tokio",
  "tracing",
  "wasmtime",
  "wasmtime-wasi-config",
@@ -2165,10 +2192,14 @@ name = "omnia-wasi-docstore"
 version = "0.35.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "chrono",
  "fromenv",
  "futures",
  "omnia",
+ "omnia-testkit",
+ "omnia-wasi-http",
+ "omnia-wasi-otel",
  "parking_lot",
  "polodb_core",
  "regex",
@@ -2196,7 +2227,9 @@ dependencies = [
  "http-body-util",
  "hyper",
  "omnia",
+ "omnia-testkit",
  "omnia-wasi-keyvalue",
+ "omnia-wasi-otel",
  "percent-encoding",
  "reqwest 0.13.4",
  "rkyv",
@@ -2234,10 +2267,14 @@ name = "omnia-wasi-keyvalue"
 version = "0.35.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "chrono",
  "futures",
  "moka",
  "omnia",
+ "omnia-testkit",
+ "omnia-wasi-http",
+ "omnia-wasi-otel",
  "serde",
  "serde_json",
  "tokio",
@@ -2255,7 +2292,12 @@ dependencies = [
  "futures",
  "http",
  "omnia",
+ "omnia-testkit",
+ "omnia-wasi-http",
+ "omnia-wasi-keyvalue",
+ "omnia-wasi-otel",
  "serde",
+ "serde_json",
  "time",
  "tokio",
  "tokio-stream",
@@ -2274,6 +2316,7 @@ dependencies = [
  "cap-std",
  "futures",
  "omnia",
+ "omnia-testkit",
  "serde",
  "serde_json",
  "tokio",
@@ -2295,10 +2338,13 @@ dependencies = [
  "num-traits",
  "omnia",
  "omnia-guest-macros",
+ "omnia-testkit",
+ "omnia-wasi-http",
  "opentelemetry",
  "opentelemetry-proto",
  "opentelemetry_sdk",
  "prost",
+ "tokio",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
@@ -2333,9 +2379,14 @@ name = "omnia-wasi-vault"
 version = "0.35.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "futures",
  "omnia",
+ "omnia-testkit",
+ "omnia-wasi-http",
+ "omnia-wasi-otel",
  "parking_lot",
+ "serde_json",
  "tokio",
  "tracing",
  "wasmtime",
@@ -2354,6 +2405,10 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "omnia",
+ "omnia-testkit",
+ "omnia-wasi-http",
+ "omnia-wasi-otel",
+ "serde_json",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",

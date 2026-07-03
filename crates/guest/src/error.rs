@@ -269,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn json_error_invalid_code_falls_back_to_500() {
+    fn json_error_invalid_code() {
         let err = Error::Json {
             code: "not_a_number".to_string(),
             body: serde_json::json!({"error": "oops"}),
@@ -279,7 +279,7 @@ mod tests {
     }
 
     #[test]
-    fn json_error_body_round_trips() {
+    fn json_error_body() {
         let body = serde_json::json!({"field": "email", "reason": "invalid"});
         let err = Error::Json {
             code: "400".to_string(),

@@ -56,7 +56,7 @@ mod tests {
     use super::{Attributes, body};
 
     #[test]
-    fn async_fn_is_wrapped_in_instrument() {
+    fn async_fn() {
         let item_fn: syn::ItemFn = syn::parse_quote! {
             async fn handler() { do_work().await }
         };
@@ -66,7 +66,7 @@ mod tests {
     }
 
     #[test]
-    fn sync_fn_uses_in_scope() {
+    fn sync_fn() {
         let item_fn: syn::ItemFn = syn::parse_quote! {
             fn handler() { do_work() }
         };
@@ -76,7 +76,7 @@ mod tests {
     }
 
     #[test]
-    fn defaults_span_name_to_fn_ident() {
+    fn default_span_name() {
         let item_fn: syn::ItemFn = syn::parse_quote! {
             fn my_handler() {}
         };

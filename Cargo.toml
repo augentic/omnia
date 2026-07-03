@@ -99,8 +99,11 @@ wasmtime-wasi-config = "46.0.1"
 wasmtime-wasi-http = { version = "46.0.1", features = ["p3"] }
 wasmtime-wasi-io = "46.0.1"
 wit-bindgen = { version = "0.58.0", features = ["async-spawn"] }
+
 wrpc-transport = { git = "https://github.com/bytecodealliance/wrpc", rev = "b00e0f7f6266585e59c8881d138c43e939f2da3c" }
 wrpc-wasmtime = { git = "https://github.com/bytecodealliance/wrpc", rev = "b00e0f7f6266585e59c8881d138c43e939f2da3c" }
+# wrpc-transport = "0.29.0"
+# wrpc-runtime-wasmtime="0.31.0"
 
 # internally referenced crates
 omnia = { path = "crates/omnia", version = "0.35.0" }
@@ -109,9 +112,9 @@ omnia-guest-macros = { path = "crates/guest-macros", version = "0.35.0" }
 omnia-host-macros = { path = "crates/host-macros", version = "0.35.0" }
 omnia-wasi-blobstore = { path = "crates/wasi-blobstore", version = "0.35.0" }
 omnia-wasi-config = { path = "crates/wasi-config", version = "0.35.0" }
+omnia-wasi-docstore = { path = "crates/wasi-docstore", version = "0.35.0" }
 omnia-wasi-http = { path = "crates/wasi-http", version = "0.35.0" }
 omnia-wasi-identity = { path = "crates/wasi-identity", version = "0.35.0" }
-omnia-wasi-docstore = { path = "crates/wasi-docstore", version = "0.35.0" }
 omnia-wasi-keyvalue = { path = "crates/wasi-keyvalue", version = "0.35.0" }
 omnia-wasi-messaging = { path = "crates/wasi-messaging", version = "0.35.0" }
 omnia-wasi-model = { path = "crates/wasi-model", version = "0.35.0" }
@@ -119,6 +122,9 @@ omnia-wasi-otel = { path = "crates/wasi-otel", version = "0.35.0" }
 omnia-wasi-sql = { path = "crates/wasi-sql", version = "0.35.0" }
 omnia-wasi-vault = { path = "crates/wasi-vault", version = "0.35.0" }
 omnia-wasi-websocket = { path = "crates/wasi-websocket", version = "0.35.0" }
+
+# Test-only scaffolding (path-only dev-dependency; never published).
+omnia-testkit = { path = "crates/testkit" }
 
 [profile.release]
 lto = true

@@ -11,13 +11,11 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-mod common;
-
 use std::path::Path;
 
 use anyhow::{Context as _, Result};
-use common::find_guest;
 use omnia::{Deployment, ExitStatus, Mode, Runtime, StoreCtx, Wiring, run};
+use omnia_testkit::find_guest;
 
 struct EmptyWiring;
 
@@ -60,7 +58,7 @@ macro_rules! cli_exit_test {
     };
 }
 
-cli_exit_test!(greet_exits_zero, &["greet", "Ada"], 0, "greet exits 0");
-cli_exit_test!(add_exits_zero, &["add", "2", "40"], 0, "add exits 0");
-cli_exit_test!(unknown_command_exits_two, &["bogus"], 2, "unknown command exits 2");
-cli_exit_test!(missing_subcommand_exits_one, &[], 1, "missing subcommand exits 1");
+cli_exit_test!(greet, &["greet", "Ada"], 0, "greet exits 0");
+cli_exit_test!(add, &["add", "2", "40"], 0, "add exits 0");
+cli_exit_test!(unknown_command, &["bogus"], 2, "unknown command exits 2");
+cli_exit_test!(missing_subcommand, &[], 1, "missing subcommand exits 1");

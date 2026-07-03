@@ -256,30 +256,10 @@ mod tests {
         cursor.collect::<Result<Vec<_>, _>>().expect("collect")
     }
 
-    #[tokio::test]
-    async fn roundtrip_document() {
-        let path = std::env::temp_dir().join(format!(
-            "omnia-docstore-test-{}.polodb",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("time")
-                .as_nanos()
-        ));
-        let path = path.to_string_lossy().into_owned();
-        let ctx = DocStoreDefault::connect_with(ConnectOptions { database: path })
-            .await
-            .expect("connect");
-
-        let doc = Document {
-            id: "a1".to_string(),
-            data: serde_json::to_vec(&json!({ "name": "x" })).expect("json"),
-        };
-
-        ctx.insert("c".to_string(), doc.clone()).await.expect("insert");
-        let got = ctx.get("c".to_string(), "a1".to_string()).await.expect("get");
-        assert_eq!(got.unwrap().data, doc.data);
-    }
-
+    // Insert + get round-trips are covered end-to-end by the seam test
+    // (`tests/seam.rs`), which drives the same `DocStoreDefault::insert`/`get`
+    // through the guest. What remains here is filter translation/validation —
+    // pure logic with no seam equivalent.
     #[test]
     fn and_eq_int_with_is_not_null() {
         let ctx = temp_db();
@@ -300,8 +280,9 @@ mod tests {
         assert_eq!(results.len(), 2, "wb=1 AND zone_id IS NOT NULL");
     }
 
+    // Rejected: the default in-memory store does not support `starts-with`.
     #[test]
-    fn starts_with_rejected() {
+    fn starts_with() {
         let filter = FilterTree::StartsWith {
             field: "name".to_string(),
             pattern: "Northern".to_string(),
@@ -313,8 +294,9 @@ mod tests {
         );
     }
 
+    // Rejected: `$`-prefixed field names are a query-injection vector.
     #[test]
-    fn dollar_prefixed_field_rejected() {
+    fn dollar_prefixed_field() {
         let filter = FilterTree::Compare {
             field: "$where".to_string(),
             op: ComparisonOp::Eq,

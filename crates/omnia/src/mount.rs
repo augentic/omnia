@@ -206,7 +206,7 @@ mod tests {
     }
 
     #[test]
-    fn match_identity_selects_by_dev_ino() {
+    fn match_identity_by_dev_ino() {
         let root = temp_root("select");
         let registry = registry(".", &root, false);
         let (dev, ino) = identity_of(&root);

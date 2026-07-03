@@ -79,7 +79,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn post_dispatches_and_sets_json_content_type() {
+    async fn post_dispatch() {
         let request = json!({
             "jsonrpc": "2.0", "id": 1, "method": "tools/call",
             "params": { "name": "echo", "arguments": { "text": "hi" } }
@@ -91,7 +91,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn notification_is_accepted_with_no_body() {
+    async fn notification() {
         let (status, body) =
             post(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }).to_string())
                 .await;
@@ -100,7 +100,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_is_method_not_allowed() {
+    async fn get_not_allowed() {
         let request = Request::builder()
             .method(Method::GET)
             .uri("/mcp/docs")

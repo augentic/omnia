@@ -240,26 +240,14 @@ impl Message for InMemMessage {
 
 #[cfg(test)]
 mod tests {
-    use futures::StreamExt;
-
     use super::*;
 
+    // Publish/subscribe is covered end-to-end by the seam test
+    // (`tests/seam.rs`), which drives the same `MessagingDefault::send` from the
+    // guest and observes it on a host `subscribe`. Only the default backend's
+    // canned request/reply stub — which no seam exercises — is kept here.
     #[tokio::test]
-    async fn pub_sub_delivers_to_subscriber() {
-        let backend = <MessagingDefault as Backend>::connect().await.expect("connect");
-        let client = WasiMessagingCtx::connect(&backend).await.expect("client");
-
-        let mut subscription = client.subscribe().await.expect("subscribe");
-        let message = backend.new_message(b"hello".to_vec()).expect("new message");
-        client.send("topic-a".to_string(), MessageProxy(message)).await.expect("send");
-
-        let received = subscription.next().await.expect("a message");
-        assert_eq!(received.topic(), "topic-a");
-        assert_eq!(received.payload(), b"hello");
-    }
-
-    #[tokio::test]
-    async fn request_returns_response() {
+    async fn request_reply() {
         let backend = <MessagingDefault as Backend>::connect().await.expect("connect");
         let client = WasiMessagingCtx::connect(&backend).await.expect("client");
 

@@ -4,8 +4,6 @@
 //! `cargo make build-guests` task builds them before tests run. [`find_guest`]
 //! encodes the "fail in CI, skip locally" policy so a missing guest never lets
 //! CI pass vacuously.
-//!
-//! Shared by `omnia`'s integration tests and, via `#[path]`, `wasi-model`'s.
 
 use std::path::PathBuf;
 

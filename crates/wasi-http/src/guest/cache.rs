@@ -254,7 +254,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn returns_none_when_header_missing() {
+    fn header_missing() {
         let headers = HeaderMap::new();
         let control = Control::try_from(&headers).expect("should parse");
 
@@ -265,7 +265,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_max_age_with_etag() {
+    fn max_age_with_etag() {
         let mut headers = HeaderMap::new();
         headers.append(CACHE_CONTROL, "max-age=120".parse().unwrap());
         headers.append(IF_NONE_MATCH, "\"strong-etag\"".parse().unwrap());
@@ -278,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn requibe_etag_when_store_enabled() {
+    fn store_enabled() {
         let mut headers = HeaderMap::new();
         headers.append(CACHE_CONTROL, "no-cache".parse().unwrap());
 
@@ -288,7 +288,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_conflicting_directives() {
+    fn conflicting_directives() {
         let mut headers = HeaderMap::new();
         headers.append(CACHE_CONTROL, "no-store, no-cache, max-age=10".parse().unwrap());
         headers.append(IF_NONE_MATCH, "\"etag\"".parse().unwrap());
@@ -299,7 +299,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_weak_etag_value() {
+    fn weak_etag() {
         let mut headers = HeaderMap::new();
         headers.append(CACHE_CONTROL, "no-cache".parse().unwrap());
         headers.append(IF_NONE_MATCH, "W/\"weak-etag\"".parse().unwrap());
@@ -310,7 +310,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_multiple_etag_values() {
+    fn multiple_etags() {
         let mut headers = HeaderMap::new();
         headers.append(CACHE_CONTROL, "no-cache".parse().unwrap());
         headers.append(IF_NONE_MATCH, "\"etag1\", \"etag2\"".parse().unwrap());

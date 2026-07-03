@@ -388,7 +388,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_per_module_memories_over_total() {
+    fn per_module_memories_over_total() {
         let options = RuntimeOptions {
             pool_total_memories: 8,
             pool_max_memories_per_module: Some(16),
@@ -398,7 +398,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_per_module_tables_over_total() {
+    fn per_module_tables_over_total() {
         let options = RuntimeOptions {
             pool_total_tables: 8,
             pool_max_tables_per_module: Some(16),
@@ -408,7 +408,7 @@ mod tests {
     }
 
     #[test]
-    fn ignores_pool_limits_when_pooling_disabled() {
+    fn pooling_disabled() {
         let options = RuntimeOptions {
             pooling: false,
             pool_total_memories: 8,

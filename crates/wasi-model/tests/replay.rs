@@ -16,22 +16,18 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-// Shares `omnia`'s integration-test helper rather than duplicating it.
-#[path = "../../omnia/tests/common/mod.rs"]
-mod common;
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context as _, Result, bail};
-use common::find_guest;
 use futures::FutureExt as _;
 use omnia::wasmtime::StoreLimitsBuilder;
 use omnia::{
     Backend, Deployment, DeploymentBuilder, GuestId, MountRegistry, Registry, ResolvedPreopen,
     Runtime, StoreBase, StoreCtx, WrpcState,
 };
+use omnia_testkit::{find_guest, temp_manifest};
 use omnia_wasi_model::{
     Answer, ConnectOptions, FutureResult, HasModel, ModelDefault, PreparedRequest, ToolHost,
     WasiModel, WasiModelCtx,
@@ -112,21 +108,22 @@ fn workspace_mount() -> (PathBuf, Arc<MountRegistry>) {
 /// Build the model runtime for `wasm`, linking `WasiModel`, and return the shared
 /// registry.
 async fn registry(wasm: &Path) -> Result<Arc<Registry<TestCtx>>> {
-    // A one-guest manifest with an absolute source path.
-    let manifest_path =
-        std::env::temp_dir().join(format!("omnia-model-{}.toml", std::process::id()));
-    let manifest = format!("[[guest]]\nid = \"model\"\nsource.path = \"{}\"\n", wasm.display());
-    std::fs::write(&manifest_path, manifest).context("writing test manifest")?;
+    // A one-guest manifest with an absolute source path. The guard removes the
+    // temp file when it drops at the end of this function — after `build` has
+    // read it.
+    let manifest = temp_manifest(&format!(
+        "[[guest]]\nid = \"model\"\nsource.path = \"{}\"\n",
+        wasm.display()
+    ))?;
 
     let mut deployment: Deployment<TestCtx> = DeploymentBuilder::new()
-        .config(manifest_path.clone())
+        .config(manifest.path().to_path_buf())
         .build()
         .await
         .context("building runtime")?;
     deployment.host::<WasiModel, TestBundle>().context("linking WasiModel")?;
     let registry = deployment.into_registry().context("assembling registry")?;
 
-    let _ = std::fs::remove_file(&manifest_path);
     Ok(Arc::new(registry))
 }
 
@@ -191,8 +188,10 @@ async fn call_run(runtime: &Runtime<TestBundle>) -> Result<String> {
     String::from_utf8(output.to_vec()).context("guest stdout is utf-8")
 }
 
+// The stub backend replays a canned answer, so the completion round-trips with
+// no network.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn replays_completion_with_no_network() -> Result<()> {
+async fn replay() -> Result<()> {
     let Some(wasm) = find_guest("model_wasm.wasm", "cargo make build-guests") else {
         return Ok(());
     };
@@ -294,7 +293,7 @@ impl WasiModelCtx for LocalPathProbe {
 /// the host identity-matches it back to the mount — surfacing its host path on
 /// the per-completion [`ToolHost`] (what `omnia-cursor` reads).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn workspace_resolves_to_local_path() -> Result<()> {
+async fn workspace() -> Result<()> {
     let Some(wasm) = find_guest("model_wasm.wasm", "cargo make build-guests") else {
         return Ok(());
     };

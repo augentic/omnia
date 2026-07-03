@@ -170,7 +170,7 @@ mod tests {
     }
 
     #[test]
-    fn initialize_echoes_version_and_advertises_capabilities() {
+    fn initialize() {
         let result = result_of(&json!({
             "jsonrpc": "2.0", "id": 1, "method": "initialize",
             "params": { "protocolVersion": "2025-03-26" }
@@ -183,26 +183,26 @@ mod tests {
     }
 
     #[test]
-    fn initialize_defaults_protocol_version() {
+    fn initialize_default_version() {
         let result = result_of(&json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" }));
         assert_eq!(result["protocolVersion"], PROTOCOL_VERSION);
     }
 
     #[test]
-    fn ping_returns_empty_object() {
+    fn ping() {
         let result = result_of(&json!({ "jsonrpc": "2.0", "id": 7, "method": "ping" }));
         assert_eq!(result, json!({}));
     }
 
     #[test]
-    fn tools_list_returns_declared_tools() {
+    fn tools_list() {
         let result = result_of(&json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
         assert_eq!(result["tools"][0]["name"], "read_doc");
         assert_eq!(result["tools"][0]["inputSchema"]["type"], "object");
     }
 
     #[test]
-    fn tools_call_returns_content() {
+    fn tools_call() {
         let result = result_of(&json!({
             "jsonrpc": "2.0", "id": 3, "method": "tools/call",
             "params": { "name": "read_doc", "arguments": { "name": "guide" } }
@@ -213,7 +213,7 @@ mod tests {
     }
 
     #[test]
-    fn tools_call_reports_tool_error_in_result() {
+    fn tools_call_error() {
         // A tool that runs but fails is a result with `isError`, not a JSON-RPC error.
         let result = result_of(&json!({
             "jsonrpc": "2.0", "id": 4, "method": "tools/call",
@@ -223,7 +223,7 @@ mod tests {
     }
 
     #[test]
-    fn resources_read_returns_contents() {
+    fn resources_read() {
         let result = result_of(&json!({
             "jsonrpc": "2.0", "id": 5, "method": "resources/read",
             "params": { "uri": "doc://guide" }
@@ -234,7 +234,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_method_is_method_not_found() {
+    fn unknown_method() {
         let reply = handle_message(
             &Docs,
             &json!({ "jsonrpc": "2.0", "id": 9, "method": "nope" }).to_string(),
@@ -245,14 +245,14 @@ mod tests {
     }
 
     #[test]
-    fn notification_gets_no_reply() {
+    fn notification() {
         let reply =
             handle_message(&Docs, &json!({ "jsonrpc": "2.0", "method": "ping" }).to_string());
         assert!(reply.is_none(), "a message with no id is a notification");
     }
 
     #[test]
-    fn malformed_json_is_parse_error() {
+    fn malformed_json() {
         let reply = handle_message(&Docs, "{ not json").expect("a parse error still replies");
         let value: Value = serde_json::from_str(&reply).expect("reply is JSON");
         assert_eq!(value["error"]["code"], super::PARSE_ERROR);

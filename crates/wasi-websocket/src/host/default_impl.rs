@@ -251,7 +251,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn inbound_event_reaches_subscriber() {
+    async fn inbound_event() {
         // Port 0 lets the OS pick a free port for the (unused-in-test) listener.
         let backend = WebSocketDefault::connect_with(ConnectOptions {
             socket_addr: "127.0.0.1:0".to_string(),

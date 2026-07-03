@@ -46,3 +46,8 @@ num-traits = "0.2.19"
 tracing-subscriber = { workspace = true, features = ["env-filter"], optional = true }
 omnia-guest-macros.workspace = true
 wit-bindgen.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+omnia-testkit.workspace = true
+omnia-wasi-http.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

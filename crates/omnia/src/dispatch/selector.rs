@@ -62,7 +62,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn first_arg_selects_and_forwards() {
+    fn first_arg() {
         let params = vec![Val::String("responder".to_owned()), Val::String("hello".to_owned())];
         let (id, forwarded) =
             FirstArgSelector.select("omnia:link/echo", "echo", &params).expect("should select");
@@ -73,7 +73,7 @@ mod tests {
     }
 
     #[test]
-    fn first_arg_requires_leading_string() {
+    fn first_arg_invalid() {
         // A non-string leading argument is rejected.
         let error = FirstArgSelector
             .select("omnia:link/echo", "echo", &[Val::U32(7)])
