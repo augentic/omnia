@@ -22,7 +22,7 @@ pub use wrpc_wasmtime::{WrpcCtxView, WrpcView};
 pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
 pub use self::cli::{Cli, Command};
-pub use self::deployment::{Deployment, DeploymentBuilder};
+pub use self::deployment::{Deployment, DeploymentBuilder, Mount};
 pub use self::dispatch::{
     Dispatcher, FirstArgSelector, GuestSelector, LinkClient, WrpcState, serve_links,
 };

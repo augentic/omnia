@@ -4,7 +4,6 @@ mod command;
 
 use std::env;
 use std::future::Future;
-use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
@@ -84,13 +83,28 @@ where
     H: Wiring<B>,
 {
     match Cli::parse().command {
-        Command::Run { wasm, config, args } => match run::<B, H>(wasm, config, args, mode).await {
-            Ok(status) => status.into(),
-            Err(error) => {
-                eprintln!("{error:#}");
-                ExitCode::FAILURE
+        Command::Run {
+            wasm,
+            config,
+            mounts,
+            links,
+            args,
+        } => {
+            let builder = DeploymentBuilder::new()
+                .wasm(wasm)
+                .config(config)
+                .args(args)
+                .mounts(mounts)
+                .links(links)
+                .mode(mode);
+            match run::<B, H>(builder).await {
+                Ok(status) => status.into(),
+                Err(error) => {
+                    eprintln!("{error:#}");
+                    ExitCode::FAILURE
+                }
             }
-        },
+        }
         #[cfg(feature = "jit")]
         Command::Compile { .. } => {
             eprintln!(
@@ -108,21 +122,13 @@ where
 ///
 /// Returns an error if the deployment cannot be built, runtime state cannot be
 /// assembled, bootstrap fails, or a trigger server exits with an error.
-pub async fn run<B, H>(
-    wasm: Option<PathBuf>, config: Option<PathBuf>, args: Vec<String>, mode: Mode,
-) -> Result<ExitStatus>
+pub async fn run<B, H>(builder: DeploymentBuilder) -> Result<ExitStatus>
 where
     B: Backends,
     H: Wiring<B>,
 {
-    let deployment = DeploymentBuilder::new()
-        .wasm(wasm)
-        .config(config)
-        .args(args)
-        .mode(mode)
-        .build::<StoreCtx<B>>()
-        .await
-        .context("building runtime")?;
+    let deployment = builder.build::<StoreCtx<B>>().await.context("building runtime")?;
+    let mode = deployment.mode();
 
     let runtime = Runtime::<B>::new(deployment, H::link).await.context("assembling runtime")?;
 

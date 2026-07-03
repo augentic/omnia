@@ -18,6 +18,7 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use anyhow::{Context as _, Result, bail};
 use serde::Deserialize;
@@ -36,7 +37,7 @@ pub struct Manifest {
     pub guests: Vec<GuestEntry>,
     /// Working-tree mounts preopened into the guest sandbox (RFC-55).
     #[serde(rename = "mount")]
-    pub mounts: Vec<MountEntry>,
+    pub mounts: Vec<Mount>,
     /// Inbound route tables, one list per trigger.
     pub route: RouteSpec,
     /// Transport configuration for host-mediated calls.
@@ -132,24 +133,14 @@ impl Manifest {
     /// permissions.
     #[must_use]
     pub fn mounts(&self, base: &Path) -> Vec<ResolvedPreopen> {
-        self.mounts
-            .iter()
-            .map(|entry| {
-                let host_path = if entry.path.is_absolute() {
-                    entry.path.clone()
-                } else {
-                    base.join(&entry.path)
-                };
-                ResolvedPreopen::new(entry.name.clone(), host_path, entry.writable)
-            })
-            .collect()
+        self.mounts.iter().map(|entry| entry.resolve(base)).collect()
     }
 }
 
 /// A single workspace mount: a host directory preopened into the guest
 /// sandbox under a guest-visible name (RFC-55).
-#[derive(Clone, Debug, Deserialize)]
-pub struct MountEntry {
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub struct Mount {
     /// Guest-visible name `preopens.get-directories()` returns (e.g. `.`).
     pub name: String,
     /// Host path (absolute, or relative to the manifest's directory).
@@ -157,6 +148,59 @@ pub struct MountEntry {
     /// Read+write when `true`; read-only (the review-flow default) otherwise.
     #[serde(default)]
     pub writable: bool,
+}
+
+impl Mount {
+    /// Resolve this mount into a [`ResolvedPreopen`], joining a relative host
+    /// path against `base` (an absolute path passes through unchanged).
+    #[must_use]
+    pub fn resolve(&self, base: &Path) -> ResolvedPreopen {
+        let host_path =
+            if self.path.is_absolute() { self.path.clone() } else { base.join(&self.path) };
+        ResolvedPreopen::new(self.name.clone(), host_path, self.writable)
+    }
+}
+
+impl FromStr for Mount {
+    type Err = anyhow::Error;
+
+    /// Parse a CLI `--mount` spec: comma-separated `path=<host-path>`,
+    /// `name=<guest-name>`, and a bare `writable` (or `writable=<bool>`) flag. A
+    /// lone token without `=` is taken as the path, so `workspace` and
+    /// `workspace,writable` are shorthands; `name` defaults to `.` and the mount
+    /// is read-only unless `writable` is present.
+    fn from_str(spec: &str) -> Result<Self> {
+        let mut path: Option<PathBuf> = None;
+        let mut name: Option<String> = None;
+        let mut writable = false;
+
+        for token in spec.split(',').map(str::trim).filter(|token| !token.is_empty()) {
+            match token.split_once('=') {
+                Some(("path", value)) => path = Some(PathBuf::from(value)),
+                Some(("name", value)) => name = Some(value.to_owned()),
+                Some(("writable", value)) => {
+                    writable = value.parse().with_context(|| {
+                        format!("mount `writable` expects a bool, got `{value}`")
+                    })?;
+                }
+                Some((key, _)) => bail!("unknown mount key `{key}` in `--mount {spec}`"),
+                None if token == "writable" => writable = true,
+                None => {
+                    if path.replace(PathBuf::from(token)).is_some() {
+                        bail!("mount `--mount {spec}` sets the path more than once");
+                    }
+                }
+            }
+        }
+
+        let path =
+            path.with_context(|| format!("mount `--mount {spec}` is missing `path=<host-path>`"))?;
+        Ok(Self {
+            name: name.unwrap_or_else(|| ".".to_owned()),
+            path,
+            writable,
+        })
+    }
 }
 
 /// A single registry population entry.
@@ -360,6 +404,49 @@ mod tests {
         // An absolute path passes through unchanged, and `writable` grants mutation.
         assert_eq!(resolved[1].host_path, PathBuf::from("/srv/shared"));
         assert!(resolved[1].dir_perms.contains(wasmtime_wasi::DirPerms::MUTATE));
+    }
+
+    #[test]
+    fn parse_mount_full_spec() {
+        let entry: Mount = "path=workspace,name=.,writable".parse().expect("spec parses");
+        assert_eq!(entry.path, PathBuf::from("workspace"));
+        assert_eq!(entry.name, ".");
+        assert!(entry.writable);
+    }
+
+    #[test]
+    fn parse_mount_bare_path_shorthand() {
+        let entry: Mount = "workspace".parse().expect("bare path parses");
+        assert_eq!(entry.path, PathBuf::from("workspace"));
+        assert_eq!(entry.name, ".", "name defaults to `.`");
+        assert!(!entry.writable, "a mount is read-only unless `writable` is given");
+    }
+
+    #[test]
+    fn parse_mount_bare_writable_shorthand() {
+        let entry: Mount = "workspace,writable".parse().expect("shorthand parses");
+        assert_eq!(entry.path, PathBuf::from("workspace"));
+        assert!(entry.writable);
+    }
+
+    #[test]
+    fn parse_mount_requires_path() {
+        assert!("name=.,writable".parse::<Mount>().is_err(), "a mount must name a path");
+    }
+
+    #[test]
+    fn parse_mount_rejects_unknown_key() {
+        assert!("path=x,bogus=1".parse::<Mount>().is_err(), "unknown keys are rejected");
+    }
+
+    #[test]
+    fn cli_mount_resolves_relative_to_base() {
+        let entry: Mount = "path=workspace,writable".parse().expect("spec parses");
+        // CLI mounts resolve against the process working directory, unlike
+        // manifest mounts which resolve against the manifest's directory.
+        let resolved = entry.resolve(Path::new("/cwd"));
+        assert_eq!(resolved.host_path, PathBuf::from("/cwd/workspace"));
+        assert!(resolved.dir_perms.contains(wasmtime_wasi::DirPerms::MUTATE));
     }
 
     #[test]

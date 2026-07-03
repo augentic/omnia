@@ -14,7 +14,7 @@
 use std::path::Path;
 
 use anyhow::{Context as _, Result};
-use omnia::{Deployment, ExitStatus, Mode, Runtime, StoreCtx, Wiring, run};
+use omnia::{Deployment, DeploymentBuilder, ExitStatus, Mode, Runtime, StoreCtx, Wiring, run};
 use omnia_testkit::find_guest;
 
 struct EmptyWiring;
@@ -34,14 +34,11 @@ impl Wiring<()> for EmptyWiring {
 async fn run_cli(wasm: &Path, tail: &[&str]) -> Result<ExitStatus> {
     // The `()` bundle links no hosts; `wasi:cli` is wired by the deployment
     // builder, and `Runtime::new` threads the guest argv into every store.
-    run::<(), EmptyWiring>(
-        Some(wasm.to_path_buf()),
-        None,
-        tail.iter().map(|arg| (*arg).to_string()).collect(),
-        Mode::Command,
-    )
-    .await
-    .context("running command")
+    let builder = DeploymentBuilder::new()
+        .wasm(wasm.to_path_buf())
+        .args(tail.iter().map(|arg| (*arg).to_string()).collect::<Vec<_>>())
+        .mode(Mode::Command);
+    run::<(), EmptyWiring>(builder).await.context("running command")
 }
 
 macro_rules! cli_exit_test {

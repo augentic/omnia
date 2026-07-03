@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use manifest::Manifest;
+pub use manifest::Mount;
 pub use source::{LoadedGuest, Source};
 use wasmtime::component::Linker;
 use wasmtime::{Config, Engine};
@@ -47,6 +48,8 @@ pub struct DeploymentBuilder {
     config: Option<PathBuf>,
     args: Vec<String>,
     mode: Mode,
+    mounts: Vec<Mount>,
+    links: Vec<String>,
 }
 
 impl DeploymentBuilder {
@@ -85,6 +88,22 @@ impl DeploymentBuilder {
         self
     }
 
+    /// Set CLI `--mount` preopens, resolved against the process working
+    /// directory and layered on top of any manifest mounts.
+    #[must_use]
+    pub fn mounts(mut self, mounts: impl Into<Vec<Mount>>) -> Self {
+        self.mounts = mounts.into();
+        self
+    }
+
+    /// Set CLI `--link` host-mediated interfaces, unioned with any manifest
+    /// per-guest link lists.
+    #[must_use]
+    pub fn links(mut self, links: impl Into<Vec<String>>) -> Self {
+        self.links = links.into();
+        self
+    }
+
     /// Resolve the configured source into a [`Deployment`], choosing single-file
     /// or manifest-driven population.
     ///
@@ -100,16 +119,29 @@ impl DeploymentBuilder {
     pub async fn build<T: WasiView + 'static>(self) -> Result<Deployment<T>> {
         let manifest = self.config.or_else(|| env::var_os("OMNIA_CONFIG").map(PathBuf::from));
 
+        // CLI `--mount`/`--link` resolve against the process working directory
+        // and layer on top of whatever the selected source provides.
+        let cli_preopens: Vec<ResolvedPreopen> =
+            self.mounts.iter().map(|entry| entry.resolve(Path::new("."))).collect();
+        let cli_links: BTreeSet<Box<str>> =
+            self.links.iter().map(|link| Box::from(link.as_str())).collect();
+
         let plan = if let Some(manifest) = manifest {
             let parsed = Manifest::load(&manifest)?;
             let base = manifest.parent().unwrap_or_else(|| Path::new("."));
+
+            let mut preopens = parsed.mounts(base);
+            preopens.extend(cli_preopens);
+
+            let mut links = parsed.links();
+            links.extend(cli_links);
 
             Plan {
                 name: parsed.name().to_owned(),
                 sources: parsed.sources(base)?,
                 routes: parsed.routes(),
-                links: parsed.links(),
-                preopens: parsed.mounts(base),
+                links,
+                preopens,
                 args: self.args,
                 mode: self.mode,
             }
@@ -124,8 +156,8 @@ impl DeploymentBuilder {
                 name: source.id().as_str().to_owned(),
                 sources: vec![source],
                 routes: Routes::default(),
-                links: BTreeSet::new(),
-                preopens: Vec::new(),
+                links: cli_links,
+                preopens: cli_preopens,
                 args: self.args,
                 mode: self.mode,
             }
