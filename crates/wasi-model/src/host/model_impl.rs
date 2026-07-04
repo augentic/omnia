@@ -1,26 +1,25 @@
 //! The `create` host binding.
 //!
 //! Implements the generated `completion` host trait on [`WasiModel`]. It is the
-//! host validation gate — it assembles the prompt (§3.1.1), hands the resulting
-//! [`PreparedRequest`] and a per-completion [`ToolHost`] to the backend, then
-//! *re-validates* the returned answer before mapping it to the guest-visible
-//! `answer` string. A backend that
-//! runs its own repair loop (genai) consumes validation failures internally and
-//! only returns once it passes; the host re-validates here.
+//! host validation gate — it validates the request, hands it and a
+//! per-completion [`ToolHost`] to the backend, then *re-validates* the returned
+//! answer before mapping it to the guest-visible `answer` string. A backend
+//! that runs its own repair loop (genai) consumes validation failures
+//! internally and only returns once it passes; the host re-validates here.
 
 use std::sync::Arc;
 
 use anyhow::{Context as _, anyhow, bail};
 use futures::FutureExt as _;
 use omnia::{Dispatcher, GuestId, HasDispatcher, HasMounts};
-use wasmtime::component::{Accessor, StreamReader, Val};
+use wasmtime::component::{Accessor, Val};
 
 use crate::host::generated::omnia::model::completion::{
-    Event, Host, HostWithStore, Reply, Request, Usage as WitUsage,
+    Format, Host, HostWithStore, Reply, Request, Usage as WitUsage,
 };
-use crate::host::types::{Answer, DirEntry, PreparedRequest, Reference, VerifyReport};
+use crate::host::types::{Answer, DirEntry, Reference, VerifyReport};
 use crate::host::workspace::{self, Workspace};
-use crate::host::{Error, FutureResult, ToolHost, WasiModel, WasiModelCtxView};
+use crate::host::{Error, FutureResult, ToolHost, WasiModel, WasiModelCtxView, gate};
 
 impl<T> HostWithStore<T> for WasiModel
 where
@@ -30,11 +29,11 @@ where
         // The lent `borrow<descriptor>` cannot survive the backend await, so the
         // host takes it out here to resolve the workspace for `ToolHost`.
         let lent = request.grants.workspace.take();
-        let prepared = PreparedRequest::try_from(request)?;
+        gate::validate(&request)?;
 
-        let format = prepared.request.format.clone();
-        let references = prepared.request.grants.references.clone();
-        let verify_allowed = prepared.request.grants.verify.clone();
+        let format = request.format.clone();
+        let references = request.grants.references.clone();
+        let verify_allowed = request.grants.verify.clone();
 
         let answer = accessor
             .with(|mut store| {
@@ -48,14 +47,19 @@ where
                     verify_allowed,
                     workspace,
                 });
-                Ok::<_, Error>(view.ctx.complete(prepared, tool_host))
+                Ok::<_, Error>(view.ctx.complete(request, tool_host))
             })?
             .await?;
 
         Answer::check(&answer.value, &format)?;
 
-        let text = serde_json::to_string(&answer.value)
-            .map_err(|e| Error::InvalidAnswer(format!("answer is not serializable JSON: {e}")))?;
+        // `text` answers are plain text; JSON formats carry a JSON document.
+        let text = match (&format, &answer.value) {
+            (Format::Text, serde_json::Value::String(text)) => text.clone(),
+            _ => serde_json::to_string(&answer.value).map_err(|e| {
+                Error::InvalidAnswer(format!("answer is not serializable JSON: {e}"))
+            })?,
+        };
 
         Ok(Reply {
             answer: text,
@@ -65,12 +69,6 @@ where
                 reasoning_tokens: u.reasoning_tokens,
             }),
         })
-    }
-
-    async fn create_stream(
-        _accessor: &Accessor<T, Self>, _request: Request,
-    ) -> Result<StreamReader<Event>, Error> {
-        Err(Error::Backend("streaming unsupported".to_owned()))
     }
 }
 

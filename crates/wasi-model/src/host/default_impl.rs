@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use tracing::instrument;
 
 use crate::host::generated::omnia::model::completion::{Request, Tool};
-use crate::host::types::{Answer, PreparedRequest, Transcript, Usage};
+use crate::host::types::{Answer, Transcript, Usage};
 use crate::host::{FutureResult, ToolHost, WasiModelCtx};
 
 /// Options used to connect the replay backend.
@@ -58,9 +58,7 @@ impl Backend for ModelDefault {
 }
 
 impl WasiModelCtx for ModelDefault {
-    fn complete(
-        &self, request: PreparedRequest, _tool_host: Arc<dyn ToolHost>,
-    ) -> FutureResult<Answer> {
+    fn complete(&self, request: Request, _tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
         let answer = self.store.answer(&request);
         async move { answer }.boxed()
     }
@@ -101,8 +99,8 @@ impl TryFrom<&PathBuf> for FixtureStore {
 }
 
 impl FixtureStore {
-    fn answer(&self, prepared: &PreparedRequest) -> Result<Answer> {
-        let key_json = &reduced_value(&prepared.request);
+    fn answer(&self, request: &Request) -> Result<Answer> {
+        let key_json = &reduced_value(request);
         let key = serde_json::to_string(key_json)?;
 
         self.answers.get(&key).cloned().ok_or_else(|| anyhow!("no replay fixture for request"))
@@ -146,20 +144,6 @@ fn reduced_value(request: &Request) -> Value {
             "role": message.role.to_string(),
             "content": message.content,
         })).collect::<Vec<_>>(),
-        "sections": request.sections.as_ref().map(|sections| json!({
-            "role": sections.role,
-            "task": sections.task,
-            "context": sections.context,
-            "constraints": sections.constraints,
-            "examples": sections.examples.iter().map(|example| json!({
-                "input": example.input,
-                "output": example.output,
-            })).collect::<Vec<_>>(),
-            "variables": sections.variables.iter().map(|variable| json!({
-                "name": variable.name,
-                "value": variable.value,
-            })).collect::<Vec<_>>(),
-        })),
         "generation": request.generation.as_ref().map(|generation| json!({
             "temperature": generation.temperature,
             "top_p": generation.top_p,

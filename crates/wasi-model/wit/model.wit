@@ -5,7 +5,7 @@
 // RFC, made because the established host-crate patterns win where they differ
 // (RFC §3.2):
 //
-//  1. `create` / `create-stream` are `async func` (not plain `func`). Every
+//  1. `create` is an `async func` (not a plain `func`). Every
 //     backend-touching WASI function in this codebase is an `async func`
 //     implemented in wasmtime's concurrent (`store`) mode — see
 //     `wasi-blobstore`'s `create-container: async func`. `create` calls an
@@ -30,7 +30,8 @@ interface completion {
     /// JSON document encoded as UTF-8 text.
     type json = string;
 
-    /// JSON document returned to the guest; validated per `request.format`.
+    /// Answer returned to the guest, validated per `request.format`: plain text
+    /// for `format::text`, a JSON document for `format::json` / `format::schema`.
     type answer = string;
 
     /// Chat turn author.
@@ -51,38 +52,6 @@ interface completion {
         content: string,
     }
 
-    /// One few-shot pair used when assembling from `sections`.
-    record example {
-        /// Example user input.
-        input: string,
-        /// Example model output.
-        output: string,
-    }
-
-    /// Named substitution slot applied when assembling section text.
-    record variable {
-        /// Placeholder name (e.g. `language`).
-        name: string,
-        /// Value substituted for `name`.
-        value: string,
-    }
-
-    /// Structured prompt template; used when `request.messages` is empty.
-    record sections {
-        /// Persona / actor instruction.
-        role: option<string>,
-        /// What the model should do. Required when assembling from sections.
-        task: string,
-        /// Background documents, prior state, or prior turns.
-        context: option<string>,
-        /// Rules, limits, and things to avoid.
-        constraints: list<string>,
-        /// Few-shot input/output pairs.
-        examples: list<example>,
-        /// Template variables applied during assembly.
-        variables: list<variable>,
-    }
-
     /// JSON Schema constrained output (`response_format.json_schema` in provider APIs).
     record schema {
         /// Schema name passed to the provider (e.g. `review_result`).
@@ -98,11 +67,12 @@ interface completion {
 
     /// Output shape constraint for the completion.
     variant format {
-        /// Answer must be a JSON string value.
+        /// Answer is plain text.
         text,
         /// Answer must parse as a JSON object.
         json,
-        /// Answer must validate against the given JSON Schema.
+        /// Answer must validate against the given JSON Schema; the host enforces
+        /// this at the `create` gate.
         schema(schema),
     }
 
@@ -156,15 +126,16 @@ interface completion {
         name: string,
         /// Tool allowlist; empty exposes every tool the server advertises.
         tools: list<string>,
-        /// MCP server endpoint URL. Backends that wire MCP require this.
-        url: option<string>,
+        /// MCP server endpoint URL.
+        url: string,
     }
 
-    /// A tool offered to the model: a guest-declared function or a named MCP server.
+    /// A tool offered to the model: a guest-declared function or an MCP server
+    /// grant carrying its own endpoint URL.
     variant tool {
         /// Guest-declared function tool.
         function(function),
-        /// Named MCP server grant, resolved to an endpoint by the host.
+        /// MCP server grant.
         mcp(mcp),
     }
 
@@ -196,16 +167,16 @@ interface completion {
         verify: list<string>,
     }
 
-    /// Complete models-API-style request for one completion.
+    /// Complete models-API-style request for one completion. Guests that want a
+    /// structured prompt template assemble it into `system` / `messages` before
+    /// calling (the `Sections` builder in the guest bindings).
     record request {
         /// Opaque model id hint; passed through unchanged. Backend may override.
         model: option<string>,
-        /// System / instructions channel. Applied per assembly rules (§3.1.1).
+        /// System / instructions channel.
         system: option<string>,
-        /// Explicit chat turns. When non-empty, takes precedence over `sections`.
+        /// Chat turns sent to the provider. Must not be empty.
         messages: list<message>,
-        /// Structured template used when `messages` is empty.
-        sections: option<sections>,
         /// Sampling and length controls.
         generation: option<generation>,
         /// Required output shape and validation rules.
@@ -234,24 +205,31 @@ interface completion {
 
     /// One validated completion result.
     record reply {
-        /// The validated JSON answer, per `request.format`.
+        /// The validated answer, per `request.format`.
         answer: answer,
         /// Token accounting, when the backend reports it.
         usage: option<usage>,
     }
 
-    /// Incremental output from `create-stream`.
-    variant event {
-        /// Token or fragment; diagnostic only, not validated until `done`.
-        delta(string),
-        /// Terminal success — the same validated `reply` as `create` would return.
-        done(reply),
-        /// Terminal failure mid-stream.
-        failed(error),
-    }
+    // YAGNI (Tier 1): no backend streams yet, so `create-stream` and its `event`
+    // variant are commented out until one does (the host stub only ever returned
+    // `backend("streaming unsupported")`).
+    // /// Incremental output from `create-stream`.
+    // variant event {
+    //     /// Token or fragment; diagnostic only, not validated until `done`.
+    //     delta(string),
+    //     /// Terminal success — the same validated `reply` as `create` would return.
+    //     done(reply),
+    //     /// Terminal failure mid-stream.
+    //     failed(error),
+    // }
 
     /// Typed completion failure.
     variant error {
+        /// The request itself is malformed (empty `messages`, reserved tool
+        /// name, invalid schema document); retrying without changing it is
+        /// pointless.
+        invalid-request(string),
         /// Backend produced output that never passed validation.
         invalid-answer(string),
         /// Iteration, token, time, or verify budget exhausted.
@@ -265,8 +243,9 @@ interface completion {
     /// Single-shot completion — returns one validated `reply`.
     create: async func(request: request) -> result<reply, error>;
 
-    /// Streaming completion over the same `request`. Read until `done` or `failed`.
-    create-stream: async func(request: request) -> result<stream<event>, error>;
+    // YAGNI (Tier 1): see the `event` variant above.
+    // /// Streaming completion over the same `request`. Read until `done` or `failed`.
+    // create-stream: async func(request: request) -> result<stream<event>, error>;
 }
 
 /// Guest world: import and call `completion`.

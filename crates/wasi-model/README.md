@@ -1,8 +1,8 @@
 # Omnia WASI Model
 
-This crate provides the `omnia:model/completion` boundary for the Omnia runtime: the domain-agnostic *seam* a guest calls to have a prompt completed (`create: func(prompt) -> result<answer, error>`).
+This crate provides the `omnia:model/completion` boundary for the Omnia runtime: the domain-agnostic *seam* a guest calls to have a prompt completed (`create: func(request) -> result<reply, error>`).
 
-It owns only the boundary — the prompt / answer / error envelope, the `WasiModelCtx` backend trait behind `create`, structural answer validation, and the composable record / replay `WasiModelCtx` wrappers. It knows nothing about which model, which provider, or any vendor SDK (Law 2). Real model backends (`omnia-genai`, `omnia-cursor`) live in the `backends` repo behind the same trait; only the deterministic replay backend (`ModelDefault`) ships in-tree.
+It owns only the boundary — the provider-shaped `request` (`system` / `messages` / `format` / `tools` / `grants`) and its `reply` / `error` envelope, the `WasiModelCtx` backend trait behind `create`, answer validation (including the JSON-Schema gate for `format::schema`), the guest-side `Sections` prompt builder, and the composable record / replay `WasiModelCtx` wrappers. It knows nothing about which model, which provider, or any vendor SDK (Law 2). Real model backends (`omnia-genai`, `omnia-cursor`) live in the `backends` repo behind the same trait; only the deterministic replay backend (`ModelDefault`) ships in-tree.
 
 See `rfcs/wasi-model.md` for the full design.
 

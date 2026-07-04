@@ -52,13 +52,13 @@ Mitigations, cheapest first:
 
 ## 5. Contract cleanups
 
-- ~~Delete the commented-out `url` field from the `mcp` record in `model.wit`.~~ Reversed: the `url` field is now live (`url: option<string>`), guest-supplied, and is the single source of truth for the endpoint (YAGNI).
+- ~~Delete the commented-out `url` field from the `mcp` record in `model.wit`.~~ Reversed: the `url` field is now live and required (`url: string`), guest-supplied, and is the single source of truth for the endpoint.
 - Consider whether `mcp` belongs in `tools` at all. It is a host-resolved capability grant — exactly what `grants` is documented as — whereas `tools` otherwise carries guest-declared payload. Mirroring the models-API shape (providers put remote MCP under `tools`) is a defensible reason to keep it; but if §2 lands and the host resolves grants, `grants.mcp` becomes the more honest home. Decide alongside §2, not independently.
 
 ## Out of scope
 
 - The MCP server guest itself (`examples/mcp`) — landed, and the right pattern.
-- Streaming (`create-stream`) — tracked in [wasi-model.md](wasi-model.md) §2.
+- Streaming (`create-stream`) — YAGNI-commented out of the WIT until a backend streams (see `model.wit`).
 - Transcript capture for spawned-agent MCP calls — rides the replay expansion in [RFC-58](rfc-58-backend-router.md).
 
 ## References

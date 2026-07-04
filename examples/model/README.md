@@ -4,7 +4,7 @@ Proves **Phase 1** of [`rfcs/wasi-model.md`](../../rfcs/wasi-model.md) (§6, run
 
 ## What it shows
 
-- `guest` ([`guest.rs`](guest.rs)) **imports** `omnia:model/completion` and exposes an async `run`. It builds a `json-schema` prompt from `sections` (role / task / context), sets `grants.references = "shelf"` as data, reads the preopen table via `wasi:filesystem/preopens` and lends the workspace named `.` through `grants.workspace`, then calls `create(prompt).await`.
+- `guest` ([`guest.rs`](guest.rs)) **imports** `omnia:model/completion` and exposes an async `run`. It builds a `json-schema` prompt, assembling the `system` / `messages` channels with the guest-side `Sections` builder (role / task / context), sets `grants.references = "shelf"` as data, reads the preopen table via `wasi:filesystem/preopens` and lends the workspace named `.` through `grants.workspace`, then calls `create(request).await`.
 - [`runtime.rs`](runtime.rs) binds the `WasiModel` host to `ModelDefault`, the replay backend that serves a recorded answer for an equivalent prompt.
 - [`omnia.toml`](omnia.toml)'s `[[mount]]` preopens the repo root as a read-only workspace named `.`. The host resolves the lent descriptor back to that mount by directory identity; the replay backend ignores it (Phase 1 short-circuits tools).
 - [`shelf.rs`](shelf.rs) is the `references` shelf (Phase 2a): it exports `resolve` and is reached *only* via host-mediated dispatch when a backend follows `grants.references` (instance-per-call, no trigger). It is inert under the replay backend; the resolve path is proven by the integration test.
@@ -13,8 +13,8 @@ Proves **Phase 1** of [`rfcs/wasi-model.md`](../../rfcs/wasi-model.md) (§6, run
 
 ```mermaid
 flowchart LR
-  guest["guest.run<br/>(imports completion)"] -->|"create(prompt)"| bind["create binding<br/>assemble + validate (§3.1.1, §3.1.3)"]
-  bind -->|"PreparedPrompt + ToolHost"| ctx["WasiModelCtx"]
+  guest["guest.run<br/>(imports completion)"] -->|"create(request)"| bind["create binding<br/>validate (§3.1.3)"]
+  bind -->|"Request + ToolHost"| ctx["WasiModelCtx"]
   ctx --> replay["ModelDefault (replay)<br/>fixture lookup by canonical key (§5.4)"]
   replay -->|"validated answer"| guest
 ```
@@ -52,4 +52,4 @@ The test replays the guest through `ModelDefault` from the committed fixture —
 
 ## Updating the fixture
 
-If you change the guest's prompt, update the checked-in fixture under [`fixtures/`](fixtures) manually so its `key_prompt` matches the guest's reduced, canonical prompt shape.
+If you change the guest's prompt, update the checked-in fixture under [`fixtures/`](fixtures) manually so its `key_request` matches the guest's reduced, canonical request (the assembled `system` / `messages` channels, not the pre-assembly template).

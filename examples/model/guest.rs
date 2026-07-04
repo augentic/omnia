@@ -2,7 +2,8 @@
 //!
 //! A `wasi:cli/command` reactor that **imports** `omnia:model/completion` and
 //! calls `create` once when the host drives `wasi:cli/run`. It builds a
-//! `json-schema` prompt assembled from `sections`. It declares no HTTP/messaging
+//! `json-schema` prompt, assembling the `system` / `messages` channels with the
+//! guest-side `Sections` builder. It declares no HTTP/messaging
 //! trigger, so it is driven by the integration test (`crates/wasi-model/tests`)
 //! rather than a live request — the run-1 (replay) acceptance vehicle (§6).
 //!
@@ -14,6 +15,7 @@
 #![cfg(target_arch = "wasm32")]
 
 use omnia_wasi_model::completion;
+use omnia_wasi_model::prompt::Sections;
 use wasip3::exports::cli::run::Guest;
 use wasip3::filesystem::preopens;
 
@@ -30,18 +32,18 @@ impl Guest for CliGuest {
         let directories = preopens::get_directories();
         let workspace = directories.iter().find_map(|(dir, name)| (name == ".").then_some(dir));
 
+        let (system, messages) = Sections {
+            role: Some("a terse code reviewer".to_string()),
+            task: "decide whether the change is acceptable".to_string(),
+            context: Some("the diff adds a bounds check".to_string()),
+            ..Sections::default()
+        }
+        .channels(None);
+
         let request = completion::Request {
             model: None,
-            system: None,
-            messages: vec![],
-            sections: Some(completion::Sections {
-                role: Some("a terse code reviewer".to_string()),
-                task: "decide whether the change is acceptable".to_string(),
-                context: Some("the diff adds a bounds check".to_string()),
-                constraints: vec![],
-                examples: vec![],
-                variables: vec![],
-            }),
+            system,
+            messages,
             generation: None,
             format: completion::Format::Schema(completion::Schema {
                 name: "verdict".to_string(),

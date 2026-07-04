@@ -2,6 +2,7 @@
 //! host-crate shape (see `wasi-keyvalue`), adding a per-completion [`ToolHost`]
 //! that the `create` binding assembles from the store's mounts and dispatcher.
 
+mod answer;
 mod default_impl;
 mod gate;
 mod model_impl;
@@ -37,16 +38,14 @@ pub use omnia::FutureResult;
 use omnia::{HasDispatcher, HasMounts, Host, Server};
 use wasmtime::component::{HasData, Linker};
 
+pub use self::answer::{check_answer, parse_answer, repair_instruction};
 pub use self::default_impl::{ConnectOptions, ModelDefault};
 use self::generated::omnia::model::completion;
 use self::generated::omnia::model::completion::Error;
 pub use self::generated::omnia::model::completion::{
-    Effort, Event, Example, Format, Function, Generation, Grants, Mcp, Message, Reply, Request,
-    Role, Schema, Sections, Tool, Variable,
+    Effort, Format, Function, Generation, Grants, Mcp, Message, Reply, Request, Role, Schema, Tool,
 };
-pub use self::types::{
-    Answer, DirEntry, PreparedRequest, Reference, ToolTurn, Transcript, Usage, VerifyReport,
-};
+pub use self::types::{Answer, DirEntry, Reference, ToolTurn, Transcript, Usage, VerifyReport};
 
 /// Host-side service for `wasi-model` (a linked-only effect host).
 #[derive(Debug)]
@@ -69,18 +68,16 @@ impl<B> Server<B> for WasiModel {}
 
 /// The backend trait — the one place a provider's logic lives.
 pub trait WasiModelCtx: Debug + Send + Sync + 'static {
-    /// Produce an answer for `request`, optionally lending the per-completion
-    /// [`ToolHost`] to backends that drive an in-process tool loop.
-    fn complete(
-        &self, request: PreparedRequest, tool_host: Arc<dyn ToolHost>,
-    ) -> FutureResult<Answer>;
+    /// Produce an answer for the gate-validated `request`, optionally lending
+    /// the per-completion [`ToolHost`] to backends that drive an in-process
+    /// tool loop. The host has already taken the lent `grants.workspace`
+    /// borrow, so it is always `None` here.
+    fn complete(&self, request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer>;
 }
 
 /// Forward the backend trait.
 impl WasiModelCtx for Box<dyn WasiModelCtx> {
-    fn complete(
-        &self, request: PreparedRequest, tool_host: Arc<dyn ToolHost>,
-    ) -> FutureResult<Answer> {
+    fn complete(&self, request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
         (**self).complete(request, tool_host)
     }
 }
