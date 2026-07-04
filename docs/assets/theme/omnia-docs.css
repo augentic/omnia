@@ -151,6 +151,11 @@ html.ayu {
   scroll-margin-top: 72px;
 }
 
+/* Keep anchor targets clear of the sticky menu bar. */
+.content main :is(h1, h2, h3, h4, h5, h6) {
+  scroll-margin-top: 72px;
+}
+
 .content main section > h2 {
   font-family: var(--spec-serif);
   font-size: 28px;
@@ -1331,8 +1336,17 @@ html.ayu {
 .content main p,
 .content main li {
   color: var(--spec-ink-dim);
-  font-size: 1.02em;
   line-height: 1.68;
+}
+
+/* Cap the prose measure; tables, code blocks, and figures keep the full
+ * content width. Sections already cap at 75ch; this covers plain-markdown
+ * chapters that have no <section> wrappers. */
+.content main p,
+.content main ul,
+.content main ol,
+.content main blockquote {
+  max-width: 78ch;
 }
 
 .content main strong {

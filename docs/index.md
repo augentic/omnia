@@ -1,6 +1,6 @@
 <div class="hero">
 <div class="eyebrow">Omnia Developer Guide</div>
-<h1 class="hero-title">Secure WASM components with production-ready hosts</h1>
+<h1 class="hero-title">Sandboxed guests, production hosts</h1>
 
 Omnia is a lightweight runtime for WebAssembly (WASI) components built on [wasmtime](https://github.com/bytecodealliance/wasmtime). Application code compiles to a sandboxed **guest**; a native **host** provides HTTP, storage, messaging, SQL, model completions, and more through standard WASI interfaces. The same guest runs unchanged against in-memory defaults on a laptop or production services in deployment.
 

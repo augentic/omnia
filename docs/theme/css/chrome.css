@@ -835,10 +835,9 @@ body {
     align-items: center;
     min-height: var(--menu-bar-height);
     background:
-        linear-gradient(90deg, rgba(0, 91, 234, 0.08), rgba(0, 198, 251, 0.06)),
+        linear-gradient(90deg, color-mix(in srgb, var(--spec-accent) 7%, transparent), color-mix(in srgb, var(--spec-teal) 5%, transparent)),
         color-mix(in srgb, var(--bg) 96%, transparent);
     border-bottom: 1px solid var(--spec-rule);
-    box-shadow: 0 1px 0 rgba(6, 18, 58, 0.04);
 }
 
 #mdbook-menu-bar.sticky {
