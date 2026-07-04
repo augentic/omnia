@@ -100,8 +100,7 @@ impl Answer {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidAnswer`] when the answer does not match the
-    /// requested format.
+    /// Returns an error when the answer does not match the requested format.
     pub fn check(value: &Value, format: &Format) -> Result<(), Error> {
         check_answer(value, format).map_err(Error::InvalidAnswer)
     }
