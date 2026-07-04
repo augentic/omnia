@@ -1,16 +1,13 @@
 {
   "key_request": {
     "model": null,
-    "system": null,
-    "messages": [],
-    "sections": {
-      "role": "a terse code reviewer",
-      "task": "decide whether the change is acceptable",
-      "context": "the diff adds a bounds check",
-      "constraints": [],
-      "examples": [],
-      "variables": []
-    },
+    "system": "a terse code reviewer",
+    "messages": [
+      {
+        "role": "user",
+        "content": "decide whether the change is acceptable\n\nthe diff adds a bounds check"
+      }
+    ],
     "generation": null,
     "format": {
       "kind": "schema",

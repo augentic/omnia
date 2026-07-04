@@ -25,11 +25,12 @@ The guest module provides query builders for type-safe database operations:
 Add this crate to your `Cargo.toml` and use it in your runtime configuration:
 
 ```rust,ignore
-use omnia::runtime;
-use omnia_wasi_sql::SqlDefault;
+use omnia_wasi_sql::{SqlDefault, WasiSql};
 
 omnia::runtime!({
-    "sql": SqlDefault,
+    hosts: {
+        WasiSql: SqlDefault,
+    }
 });
 ```
 

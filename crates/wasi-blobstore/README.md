@@ -15,11 +15,12 @@ Implements the `wasi:blobstore` WIT interface.
 Add this crate to your `Cargo.toml` and use it in your runtime configuration:
 
 ```rust,ignore
-use omnia::runtime;
-use omnia_wasi_blobstore::BlobstoreDefault;
+use omnia_wasi_blobstore::{BlobstoreDefault, WasiBlobstore};
 
 omnia::runtime!({
-    "blobstore": BlobstoreDefault,
+    hosts: {
+        WasiBlobstore: BlobstoreDefault,
+    }
 });
 ```
 

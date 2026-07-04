@@ -17,11 +17,12 @@ See [Specification.md](Specification.md) for the full WIT definition, SDK types,
 Add this crate to your `Cargo.toml` and use it in your runtime configuration:
 
 ```rust,ignore
-use omnia::runtime;
-use omnia_wasi_docstore::DocStoreDefault;
+use omnia_wasi_docstore::{DocStoreDefault, WasiDocStore};
 
 omnia::runtime!({
-    "docstore": DocStoreDefault,
+    hosts: {
+        WasiDocStore: DocStoreDefault,
+    }
 });
 ```
 

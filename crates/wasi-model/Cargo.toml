@@ -27,6 +27,7 @@ tracing.workspace = true
 cap-primitives = "3.4.5"
 cap-std.workspace = true
 futures.workspace = true
+jsonschema.workspace = true
 omnia.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["rt"] }

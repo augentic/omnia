@@ -5,8 +5,14 @@ use serde_json::{Value, json};
 use super::McpServer;
 use super::types::{INVALID_REQUEST, McpError, PARSE_ERROR};
 
-/// The MCP protocol revision advertised when a client requests none.
+/// The MCP protocol revision advertised when a client requests none — the
+/// newest revision this server implements.
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
+
+// Revisions this stateless server behaves identically across. A request for
+// any other revision negotiates down to `PROTOCOL_VERSION`, per the spec's
+// "respond with the version the server wants to use" rule.
+const SUPPORTED_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26"];
 
 /// Handle one JSON-RPC message, returning the serialized response — or `None`
 /// for a notification (a message with no `id`), which never gets a reply.
@@ -64,25 +70,25 @@ fn dispatch(server: &dyn McpServer, method: &str, params: &Value) -> Result<Valu
     }
 }
 
-// Build the `initialize` result, echoing the client's protocol version when it
-// sends one and advertising only the capabilities the server actually serves.
+// Build the `initialize` result, echoing the client's protocol version when
+// this server supports it. Capabilities advertise feature support, not list
+// contents: the trait always answers `tools/list` and `resources/list`.
 fn initialize_result(server: &dyn McpServer, params: &Value) -> Value {
-    let protocol_version =
-        params.get("protocolVersion").and_then(Value::as_str).unwrap_or(PROTOCOL_VERSION);
+    let protocol_version = params
+        .get("protocolVersion")
+        .and_then(Value::as_str)
+        .filter(|version| SUPPORTED_VERSIONS.contains(version))
+        .unwrap_or(PROTOCOL_VERSION);
 
-    let mut capabilities = serde_json::Map::new();
-    if !server.tools().is_empty() {
-        capabilities.insert("tools".to_owned(), json!({}));
-    }
-    if !server.resources().is_empty() {
-        capabilities.insert("resources".to_owned(), json!({}));
-    }
-
-    json!({
+    let mut result = json!({
         "protocolVersion": protocol_version,
-        "capabilities": capabilities,
+        "capabilities": { "tools": {}, "resources": {} },
         "serverInfo": server.info(),
-    })
+    });
+    if let Some(instructions) = server.instructions() {
+        result["instructions"] = Value::String(instructions);
+    }
+    result
 }
 
 fn tools_call(server: &dyn McpServer, params: &Value) -> Result<Value, McpError> {
@@ -91,7 +97,8 @@ fn tools_call(server: &dyn McpServer, params: &Value) -> Result<Value, McpError>
         .and_then(Value::as_str)
         .ok_or_else(|| McpError::invalid_params("missing tool `name`"))?;
     let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
-    Ok(json!(server.call_tool(name, &arguments)?))
+    let result = server.call_tool(name, &arguments)?;
+    Ok(serde_json::to_value(result).expect("CallToolResult serializes"))
 }
 
 fn resources_read(server: &dyn McpServer, params: &Value) -> Result<Value, McpError> {
@@ -119,7 +126,7 @@ fn error_response(id: &Value, code: i32, message: &str) -> String {
 mod tests {
     use serde_json::{Value, json};
 
-    use super::super::types::METHOD_NOT_FOUND;
+    use super::super::types::{INVALID_PARAMS, METHOD_NOT_FOUND, RESOURCE_NOT_FOUND};
     use super::super::{
         CallToolResult, Implementation, McpError, Resource, ResourceContents, Tool,
     };
@@ -132,13 +139,17 @@ mod tests {
             Implementation::new("docs", "1.2.3")
         }
 
+        fn instructions(&self) -> Option<String> {
+            Some("Read the guide first.".to_owned())
+        }
+
         fn tools(&self) -> Vec<Tool> {
             vec![Tool::new("read_doc", "read a document", json!({ "type": "object" }))]
         }
 
         fn call_tool(&self, name: &str, arguments: &Value) -> Result<CallToolResult, McpError> {
             if name != "read_doc" {
-                return Err(McpError::method_not_found(format!("unknown tool `{name}`")));
+                return Err(McpError::unknown_tool(name));
             }
             match arguments.get("name").and_then(Value::as_str) {
                 Some("guide") => Ok(CallToolResult::text("the guide body")),
@@ -155,7 +166,7 @@ mod tests {
             if uri == "doc://guide" {
                 Ok(ResourceContents::text(uri, "text/markdown", "the guide body"))
             } else {
-                Err(McpError::invalid_params(format!("unknown resource `{uri}`")))
+                Err(McpError::resource_not_found(uri))
             }
         }
     }
@@ -180,11 +191,21 @@ mod tests {
         assert!(result["capabilities"].get("resources").is_some());
         assert_eq!(result["serverInfo"]["name"], "docs");
         assert_eq!(result["serverInfo"]["version"], "1.2.3");
+        assert_eq!(result["instructions"], "Read the guide first.");
     }
 
     #[test]
     fn initialize_default_version() {
         let result = result_of(&json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" }));
+        assert_eq!(result["protocolVersion"], PROTOCOL_VERSION);
+    }
+
+    #[test]
+    fn initialize_unsupported_version() {
+        let result = result_of(&json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": { "protocolVersion": "1999-01-01" }
+        }));
         assert_eq!(result["protocolVersion"], PROTOCOL_VERSION);
     }
 
@@ -223,6 +244,23 @@ mod tests {
     }
 
     #[test]
+    fn tools_call_unknown_tool() {
+        // An unknown tool name is a protocol error (`-32602`), not a tool result.
+        let reply = handle_message(
+            &Docs,
+            &json!({
+                "jsonrpc": "2.0", "id": 4, "method": "tools/call",
+                "params": { "name": "nope" }
+            })
+            .to_string(),
+        )
+        .expect("a request gets a reply");
+        let value: Value = serde_json::from_str(&reply).expect("reply is JSON");
+        assert_eq!(value["error"]["code"], INVALID_PARAMS);
+        assert_eq!(value["error"]["message"], "Unknown tool: nope");
+    }
+
+    #[test]
     fn resources_read() {
         let result = result_of(&json!({
             "jsonrpc": "2.0", "id": 5, "method": "resources/read",
@@ -231,6 +269,21 @@ mod tests {
         assert_eq!(result["contents"][0]["uri"], "doc://guide");
         assert_eq!(result["contents"][0]["mimeType"], "text/markdown");
         assert_eq!(result["contents"][0]["text"], "the guide body");
+    }
+
+    #[test]
+    fn resources_read_not_found() {
+        let reply = handle_message(
+            &Docs,
+            &json!({
+                "jsonrpc": "2.0", "id": 6, "method": "resources/read",
+                "params": { "uri": "doc://nope" }
+            })
+            .to_string(),
+        )
+        .expect("a request gets a reply");
+        let value: Value = serde_json::from_str(&reply).expect("reply is JSON");
+        assert_eq!(value["error"]["code"], RESOURCE_NOT_FOUND);
     }
 
     #[test]

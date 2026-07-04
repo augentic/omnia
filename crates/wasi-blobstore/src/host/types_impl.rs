@@ -9,9 +9,7 @@ use crate::host::generated::wasi::blobstore::types::{
     Host, HostIncomingValue, HostIncomingValueWithStore, HostOutgoingValue,
     HostOutgoingValueWithStore, IncomingValueSyncBody,
 };
-use crate::host::{OutgoingValue, Result, WasiBlobstore, WasiBlobstoreCtxView};
-
-pub type IncomingValue = Bytes;
+use crate::host::{IncomingValue, OutgoingValue, Result, WasiBlobstore, WasiBlobstoreCtxView};
 
 impl<T> HostIncomingValueWithStore<T> for WasiBlobstore {
     fn incoming_value_consume_sync(
@@ -33,7 +31,7 @@ impl<T> HostIncomingValueWithStore<T> for WasiBlobstore {
         let value = accessor
             .with(|mut store| {
                 let incoming = store.get().table.get(&this).context("IncomingValue not found")?;
-                Ok::<bytes::Bytes, wasmtime::Error>(incoming.clone())
+                Ok::<Bytes, wasmtime::Error>(incoming.clone())
             })
             .map_err(|e| e.to_string())?;
         let rs = MemoryInputPipe::new(value);

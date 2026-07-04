@@ -29,8 +29,8 @@ use omnia::{
 };
 use omnia_testkit::{find_guest, temp_manifest};
 use omnia_wasi_model::{
-    Answer, ConnectOptions, FutureResult, HasModel, ModelDefault, PreparedRequest, ToolHost,
-    WasiModel, WasiModelCtx,
+    Answer, ConnectOptions, FutureResult, HasModel, ModelDefault, Request, ToolHost, WasiModel,
+    WasiModelCtx,
 };
 use serde_json::{Value, json};
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
@@ -267,9 +267,7 @@ struct LocalPathProbe {
 }
 
 impl WasiModelCtx for LocalPathProbe {
-    fn complete(
-        &self, _request: PreparedRequest, tool_host: Arc<dyn ToolHost>,
-    ) -> FutureResult<Answer> {
+    fn complete(&self, _request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
         let expected = self.expected.clone();
         async move {
             let local = tool_host.local_path().map(Path::to_path_buf);

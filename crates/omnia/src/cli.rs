@@ -32,8 +32,9 @@ pub enum Command {
 
         /// Preopen a host directory into the guest sandbox (repeatable).
         /// Format: `path=<host-path>[,name=<guest-name>][,writable]`; `name`
-        /// defaults to `.`. Appended to the manifest's mounts when `--config`
-        /// is also given.
+        /// defaults to `.`. Layered on top of the manifest's mounts when
+        /// `--config` is also given; a matching guest-visible name overrides the
+        /// manifest mount (last-wins).
         #[arg(long = "mount")]
         mounts: Vec<Mount>,
 

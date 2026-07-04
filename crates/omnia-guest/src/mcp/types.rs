@@ -1,5 +1,7 @@
 //! Model Context Protocol schema types, mirroring the MCP wire format.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -11,6 +13,10 @@ pub(super) const INVALID_REQUEST: i32 = -32600;
 pub(super) const METHOD_NOT_FOUND: i32 = -32601;
 /// JSON-RPC code for invalid method parameters.
 pub(super) const INVALID_PARAMS: i32 = -32602;
+/// JSON-RPC code for an internal server error.
+pub(super) const INTERNAL_ERROR: i32 = -32603;
+/// MCP code for a `resources/read` of a URI the server does not serve.
+pub(super) const RESOURCE_NOT_FOUND: i32 = -32002;
 
 /// Server identity reported in the `initialize` response (`serverInfo`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -33,8 +39,6 @@ impl Implementation {
 }
 
 /// A tool advertised through `tools/list` and invoked through `tools/call`.
-// `input_schema` is a `serde_json::Value`, which is not `Eq` (it carries f64),
-// so this type can only be `PartialEq`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Tool {
@@ -61,8 +65,11 @@ impl Tool {
 }
 
 /// A single content block in a tool result or resource read.
+// The spec defines further block kinds (image, audio, resource links); the
+// enum is non-exhaustive so adding them later is not a breaking change.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
+#[non_exhaustive]
 pub enum Content {
     /// A UTF-8 text block.
     Text {
@@ -192,4 +199,36 @@ impl McpError {
             message: message.into(),
         }
     }
+
+    /// An internal server error (`-32603`).
+    #[must_use]
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self {
+            code: INTERNAL_ERROR,
+            message: message.into(),
+        }
+    }
+
+    /// The `tools/call` error for a tool this server does not serve (`-32602`).
+    #[must_use]
+    pub fn unknown_tool(name: impl AsRef<str>) -> Self {
+        Self::invalid_params(format!("Unknown tool: {}", name.as_ref()))
+    }
+
+    /// The `resources/read` error for a URI this server does not serve (`-32002`).
+    #[must_use]
+    pub fn resource_not_found(uri: impl AsRef<str>) -> Self {
+        Self {
+            code: RESOURCE_NOT_FOUND,
+            message: format!("Resource not found: {}", uri.as_ref()),
+        }
+    }
 }
+
+impl fmt::Display for McpError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "MCP error {}: {}", self.code, self.message)
+    }
+}
+
+impl std::error::Error for McpError {}

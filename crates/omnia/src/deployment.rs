@@ -89,7 +89,8 @@ impl DeploymentBuilder {
     }
 
     /// Set CLI `--mount` preopens, resolved against the process working
-    /// directory and layered on top of any manifest mounts.
+    /// directory and layered on top of any manifest mounts; a CLI mount whose
+    /// guest-visible name matches a manifest `[[mount]]` overrides it (last-wins).
     #[must_use]
     pub fn mounts(mut self, mounts: impl Into<Vec<Mount>>) -> Self {
         self.mounts = mounts.into();

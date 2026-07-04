@@ -21,6 +21,7 @@
 //!
 //! [`WasiCtxBuilder::preopened_dir`]: wasmtime_wasi::WasiCtxBuilder::preopened_dir
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -112,11 +113,19 @@ impl MountRegistry {
     /// path cannot be opened as a directory (or stat-ed) is a configuration
     /// error surfaced before the registry is built.
     ///
+    /// Preopens are first deduplicated by guest-visible name with last-wins
+    /// semantics, so a CLI `--mount` layered after a manifest `[[mount]]` of the
+    /// same name overrides it rather than being silently shadowed by wasi-libc's
+    /// first-match path resolution. The overriding entry keeps the position of
+    /// the first occurrence; only its value is replaced, and the discarded
+    /// mount's host path is never opened.
+    ///
     /// # Errors
     ///
     /// Returns an error if a mount's host path cannot be opened as a directory
     /// or its metadata cannot be read.
     pub fn open(preopens: Vec<ResolvedPreopen>) -> Result<Self> {
+        let preopens = dedup_last_wins(preopens);
         let mut entries = Vec::with_capacity(preopens.len());
         for preopen in preopens {
             let dir = Dir::open_ambient_dir(&preopen.host_path, ambient_authority()).with_context(
@@ -155,6 +164,25 @@ impl MountRegistry {
     pub fn match_identity(&self, dev: u64, ino: u64) -> Option<&Mount> {
         self.entries.iter().find(|entry| entry.identity == (dev, ino))
     }
+}
+
+/// Collapse preopens sharing a guest-visible name to a single entry, last-wins.
+///
+/// The winning entry keeps the position of the first occurrence of its name so
+/// the overall order is stable; only its value is taken from the last
+/// occurrence.
+fn dedup_last_wins(preopens: Vec<ResolvedPreopen>) -> Vec<ResolvedPreopen> {
+    let mut deduped: Vec<ResolvedPreopen> = Vec::with_capacity(preopens.len());
+    let mut index: HashMap<String, usize> = HashMap::new();
+    for preopen in preopens {
+        if let Some(&position) = index.get(&preopen.name) {
+            deduped[position] = preopen;
+        } else {
+            index.insert(preopen.name.clone(), deduped.len());
+            deduped.push(preopen);
+        }
+    }
+    deduped
 }
 
 #[cfg(test)]
@@ -226,5 +254,37 @@ mod tests {
         let entry = &registry.entries()[0];
         assert!(entry.writable(), "a writable mount permits mutation");
         assert!(entry.dir_perms.contains(DirPerms::MUTATE));
+    }
+
+    #[test]
+    fn duplicate_name_last_wins() {
+        let manifest_root = temp_root("dup-manifest");
+        let cli_root = temp_root("dup-cli");
+        // Same guest-visible name, distinct host paths: the CLI entry is layered
+        // last and must override the manifest entry rather than be shadowed.
+        let registry = MountRegistry::open(vec![
+            ResolvedPreopen::new(".".to_owned(), manifest_root, false),
+            ResolvedPreopen::new(".".to_owned(), cli_root.clone(), true),
+        ])
+        .expect("opening registry");
+
+        assert_eq!(registry.entries().len(), 1, "duplicate names collapse to one entry");
+        let entry = &registry.entries()[0];
+        assert_eq!(entry.host_path, cli_root, "the last entry wins");
+        assert!(entry.writable(), "the winning entry's permissions apply");
+    }
+
+    #[test]
+    fn overridden_mount_path_is_never_opened() {
+        let cli_root = temp_root("override-cli");
+        // The shadowed manifest entry names a nonexistent path; last-wins dedup
+        // discards it before opening, so a stale override does not fail startup.
+        let registry = MountRegistry::open(vec![
+            ResolvedPreopen::new(".".to_owned(), PathBuf::from("/no/such/mount"), false),
+            ResolvedPreopen::new(".".to_owned(), cli_root.clone(), true),
+        ])
+        .expect("the discarded entry's bad path is never opened");
+
+        assert_eq!(registry.entries()[0].host_path, cli_root);
     }
 }

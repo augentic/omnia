@@ -4,7 +4,7 @@ This crate provides the HTTP interface for the Omnia runtime.
 
 ## Interface
 
-Implements the `wasi:http` WIT interface (WASI Preview 2).
+Implements the `wasi:http` WIT interface (WASI Preview 3).
 
 ## Backend
 
@@ -15,11 +15,12 @@ Uses `hyper` and `axum` to handle outgoing requests and incoming server connecti
 Add this crate to your `Cargo.toml` and use it in your runtime configuration:
 
 ```rust,ignore
-use omnia::runtime;
-use omnia_wasi_http::WasiHttpCtx;
+use omnia_wasi_http::{HttpDefault, WasiHttp};
 
 omnia::runtime!({
-    "http": WasiHttpCtx,
+    hosts: {
+        WasiHttp: HttpDefault,
+    }
 });
 ```
 

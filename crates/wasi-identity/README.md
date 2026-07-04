@@ -19,11 +19,12 @@ Requires configuration via environment variables or other sources to set provide
 Add this crate to your `Cargo.toml` and use it in your runtime configuration:
 
 ```rust,ignore
-use omnia::runtime;
-use omnia_wasi_identity::IdentityDefault;
+use omnia_wasi_identity::{IdentityDefault, WasiIdentity};
 
 omnia::runtime!({
-    "identity": IdentityDefault,
+    hosts: {
+        WasiIdentity: IdentityDefault,
+    }
 });
 ```
 
