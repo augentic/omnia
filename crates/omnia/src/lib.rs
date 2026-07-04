@@ -32,8 +32,7 @@ pub use self::options::RuntimeOptions;
 #[cfg(feature = "jit")]
 pub use self::options::compile;
 pub use self::registry::{
-    CliRoutes, ExactMatch, Guest, GuestId, HttpRoutes, MatchStrategy, PatternMatch, PatternRoutes,
-    PrefixMatch, Registry, Resolver, RouteTable, Routes, TriggerRouter,
+    CliRoutes, GuestId, HttpRoutes, PatternRoutes, Registry, Routes, TriggerRouter,
 };
 pub use self::runtime::{Backends, ExitStatus, Mode, Runtime, Wiring};
 #[doc(hidden)]
@@ -41,8 +40,6 @@ pub use self::runtime::{main, run};
 pub use self::store::{
     HasDispatcher, HasHttp, HasLimits, HasMounts, StoreBase, StoreBaseBuilder, StoreCtx,
 };
-#[doc(hidden)]
-pub use self::store::{Set, Unset};
 pub use self::telemetry::{Telemetry, resource};
 
 /// Generates the linker-facing view boilerplate every `omnia` WASI host crate

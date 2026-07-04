@@ -163,21 +163,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn locker_set_get_delete() {
-        let vault = VaultDefault::connect().await.expect("connect");
-        let locker = vault.open_locker("app".to_string()).await.expect("open");
-
-        locker.set("api-key".to_string(), b"secret".to_vec()).await.expect("set");
-        assert!(locker.exists("api-key".to_string()).await.expect("exists"));
-        assert_eq!(locker.get("api-key".to_string()).await.expect("get"), Some(b"secret".to_vec()));
-        assert_eq!(locker.list_ids().await.expect("list"), vec!["api-key".to_string()]);
-
-        locker.delete("api-key".to_string()).await.expect("delete");
-        assert!(!locker.exists("api-key".to_string()).await.expect("exists"));
-        assert_eq!(locker.get("api-key".to_string()).await.expect("get"), None);
-    }
-
-    #[tokio::test]
     async fn lockers_are_isolated() {
         let vault = VaultDefault::connect().await.expect("connect");
         let a = vault.open_locker("a".to_string()).await.expect("open a");

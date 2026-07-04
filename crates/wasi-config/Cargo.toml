@@ -15,8 +15,6 @@ version.workspace = true
 [lints]
 workspace = true
 
-[features]
-
 [dependencies]
 anyhow.workspace = true
 tracing.workspace = true

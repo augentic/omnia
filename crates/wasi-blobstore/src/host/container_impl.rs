@@ -1,5 +1,5 @@
 use anyhow::Context;
-use bytes::{Bytes, BytesMut};
+use bytes::BytesMut;
 use wasmtime::component::{Access, Accessor, Resource};
 
 use crate::host::generated::wasi::blobstore::container::{
@@ -7,9 +7,9 @@ use crate::host::generated::wasi::blobstore::container::{
     HostStreamObjectNamesWithStore, ObjectMetadata,
 };
 use crate::host::resource::ContainerProxy;
-use crate::host::{OutgoingValue, Result, StreamObjectNames, WasiBlobstore, WasiBlobstoreCtxView};
-
-pub type IncomingValue = Bytes;
+use crate::host::{
+    IncomingValue, OutgoingValue, Result, StreamObjectNames, WasiBlobstore, WasiBlobstoreCtxView,
+};
 
 impl<T> HostContainerWithStore<T> for WasiBlobstore {
     fn name(mut host: Access<'_, T, Self>, self_: Resource<ContainerProxy>) -> Result<String> {

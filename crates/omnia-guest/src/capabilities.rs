@@ -11,6 +11,7 @@ mod document;
 mod http;
 mod identity;
 mod messaging;
+pub mod model;
 mod state;
 mod table;
 
@@ -21,5 +22,9 @@ pub use document::DocumentStore;
 pub use http::HttpRequest;
 pub use identity::Identity;
 pub use messaging::{Message, Publish};
+// `model`'s request/reply types stay module-scoped: `Message`, `Request`, and
+// `Reply` would otherwise collide with `messaging` and `api` in the crate's
+// flat re-exports.
+pub use model::Model;
 pub use state::StateStore;
 pub use table::TableStore;

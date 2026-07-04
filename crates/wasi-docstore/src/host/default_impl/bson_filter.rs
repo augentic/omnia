@@ -111,16 +111,13 @@ pub fn to_bson(tree: &FilterTree) -> Document {
 /// Emit a single comparison, routing `Ne` through `$not` to work around the `PoloDB` `$ne` bug.
 fn compare_to_bson(field: &str, op: ComparisonOp, value: &ScalarValue) -> Document {
     let v = to_bson_value(value);
-    if op == ComparisonOp::Ne {
-        return doc! { field: { "$not": { "$eq": v } } };
-    }
     let bson_op = match op {
         ComparisonOp::Eq => "$eq",
         ComparisonOp::Gt => "$gt",
         ComparisonOp::Gte => "$gte",
         ComparisonOp::Lt => "$lt",
         ComparisonOp::Lte => "$lte",
-        ComparisonOp::Ne => unreachable!(),
+        ComparisonOp::Ne => return doc! { field: { "$not": { "$eq": v } } },
     };
     doc! { field: { bson_op: v } }
 }

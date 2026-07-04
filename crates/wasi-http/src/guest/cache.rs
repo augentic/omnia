@@ -5,7 +5,7 @@ use bytes::Bytes;
 use http::header::{CACHE_CONTROL, IF_NONE_MATCH};
 use http::{Request, Response};
 use http_body::Body;
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use serde::{Deserialize, Serialize};
 
 pub const CACHE_BUCKET: &str = "default-cache";
 
@@ -200,18 +200,15 @@ impl TryFrom<&http::HeaderMap> for Control {
 
 fn serialize(response: &Response<Bytes>) -> Result<Vec<u8>> {
     let ser = Serialized::try_from(response)?;
-    rkyv::to_bytes::<rkyv::rancor::Error>(&ser)
-        .map(|bytes| bytes.to_vec())
-        .map_err(|e| anyhow!("serializing response: {e}"))
+    serde_json::to_vec(&ser).context("serializing response")
 }
 
 fn deserialize(data: &[u8]) -> Result<Response<Bytes>> {
-    let ser: Serialized = rkyv::from_bytes::<Serialized, rkyv::rancor::Error>(data)
-        .map_err(|e| anyhow!("deserializing cached response: {e}"))?;
+    let ser: Serialized = serde_json::from_slice(data).context("deserializing cached response")?;
     Response::<Bytes>::try_from(ser)
 }
 
-#[derive(Archive, RkyvDeserialize, RkyvSerialize)]
+#[derive(Deserialize, Serialize)]
 struct Serialized {
     status: u16,
     headers: Vec<(String, String)>,
