@@ -109,7 +109,7 @@ wrpc-wasmtime = "0.1.0"
 # internally referenced crates
 omnia = { path = "crates/omnia", version = "0.35.0" }
 omnia-guest = { path = "crates/omnia-guest", version = "0.35.0" }
-omnia-guest-macros = { path = "crates/omnia-guest-macros", version = "0.35.0" }
+omnia-guest-macros = { path = "crates/guest-macros", version = "0.35.0" }
 omnia-host-macros = { path = "crates/host-macros", version = "0.35.0" }
 omnia-wasi-blobstore = { path = "crates/wasi-blobstore", version = "0.35.0" }
 omnia-wasi-config = { path = "crates/wasi-config", version = "0.35.0" }
