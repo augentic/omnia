@@ -18,37 +18,31 @@ use wasip3::http::types::{ErrorCode, Request, Response};
 struct HttpGuest;
 wasip3::http::service::export!(HttpGuest);
 
-/// The compiled-in prose corpus as `(name, title, body)` triples.
-const DOCS: &[(&str, &str, &str)] = &[
-    (
-        "overview",
-        "Widget Service Overview",
-        "# Widget Service Overview\n\n\
-         Widgets move through `draft`, `assembled`, and `shipped` in order. They \
-         never move backwards.\n",
-    ),
-    (
-        "api-reference",
-        "Widget Service API Reference",
-        "# Widget Service API Reference\n\n\
-         `POST /widgets` creates a draft widget. `POST /widgets/{id}/assemble` \
-         advances it to `assembled`.\n",
-    ),
-    (
-        "style-guide",
-        "Widget Service Style Guide",
-        "# Widget Service Style Guide\n\n\
-         Labels are kebab-case. IDs are ULIDs.\n",
-    ),
-];
-
 impl Guest for HttpGuest {
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         omnia_wasi_http::serve(mcp::router(Docs), request).await
     }
 }
 
+#[derive(Deserialize)]
+struct ReadDocArgs {
+    name: String,
+}
+
 struct Docs;
+
+impl Docs {
+    fn find_doc(name: &str) -> Option<&'static (&'static str, &'static str, &'static str)> {
+        DOCS.iter().find(|(doc_name, ..)| *doc_name == name)
+    }
+
+    fn map_docs<T, F>(f: F) -> Vec<T>
+    where
+        F: Fn(&'static str, &'static str, &'static str) -> T,
+    {
+        DOCS.iter().copied().map(|(name, title, body)| f(name, title, body)).collect()
+    }
+}
 
 impl McpServer for Docs {
     fn info(&self) -> Implementation {
@@ -82,16 +76,13 @@ impl McpServer for Docs {
     fn call_tool(&self, name: &str, arguments: &Value) -> Result<CallToolResult, McpError> {
         match name {
             "list_docs" => {
-                let listing = DOCS
-                    .iter()
-                    .map(|(doc_name, title, _)| format!("- {doc_name}: {title}"))
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                let listing =
+                    Docs::map_docs(|name, title, _| format!("- {name}: {title}")).join("\n");
                 Ok(CallToolResult::text(listing))
             }
             "read_doc" => {
                 let ReadDocArgs { name: doc } = mcp::arguments(arguments)?;
-                find_doc(&doc).map_or_else(
+                Docs::find_doc(&doc).map_or_else(
                     || Ok(CallToolResult::error(format!("no document named `{doc}`"))),
                     |(.., body)| Ok(CallToolResult::text(*body)),
                 )
@@ -101,32 +92,44 @@ impl McpServer for Docs {
     }
 
     fn resources(&self) -> Vec<Resource> {
-        DOCS.iter()
-            .map(|(name, title, _)| {
-                Resource::new(
-                    format!("doc://{name}"),
-                    *title,
-                    format!("The {title} document."),
-                    "text/markdown",
-                )
-            })
-            .collect()
+        Docs::map_docs(|name, title, _| {
+            Resource::new(
+                format!("doc://{name}"),
+                title,
+                format!("The {title} document."),
+                "text/markdown",
+            )
+        })
     }
 
     fn read_resource(&self, uri: &str) -> Result<ResourceContents, McpError> {
         let name = uri.strip_prefix("doc://").unwrap_or(uri);
-        find_doc(name).map_or_else(
+        Docs::find_doc(name).map_or_else(
             || Err(McpError::resource_not_found(uri)),
             |(.., body)| Ok(ResourceContents::text(uri, "text/markdown", *body)),
         )
     }
 }
 
-fn find_doc(name: &str) -> Option<&'static (&'static str, &'static str, &'static str)> {
-    DOCS.iter().find(|(doc_name, ..)| *doc_name == name)
-}
-
-#[derive(Deserialize)]
-struct ReadDocArgs {
-    name: String,
-}
+const DOCS: &[(&str, &str, &str)] = &[
+    (
+        "overview",
+        "Widget Service Overview",
+        "# Widget Service Overview\n\n\
+         Widgets move through `draft`, `assembled`, and `shipped` in order. They \
+         never move backwards.\n",
+    ),
+    (
+        "api-reference",
+        "Widget Service API Reference",
+        "# Widget Service API Reference\n\n\
+         `POST /widgets` creates a draft widget. `POST /widgets/{id}/assemble` \
+         advances it to `assembled`.\n",
+    ),
+    (
+        "style-guide",
+        "Widget Service Style Guide",
+        "# Widget Service Style Guide\n\n\
+         Labels are kebab-case. IDs are ULIDs.\n",
+    ),
+];
