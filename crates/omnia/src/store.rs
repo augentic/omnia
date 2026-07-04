@@ -31,7 +31,7 @@ pub struct Unset;
 ///
 /// The `O` and `D` type parameters track whether the required
 /// [`options`](Self::options) and [`dispatcher`](Self::dispatcher) members have been
-/// supplied: each starts as [`Unset`] and becomes `Set<…>` once its setter runs.
+/// supplied: each starts as `Unset` and becomes `Set<…>` once its setter runs.
 /// [`build`](Self::build) is implemented only when both are `Set`, so omitting
 /// either is a compile error rather than a runtime panic. The optional
 /// [`args`](Self::args) member defaults to empty and may be set in any state.
