@@ -19,11 +19,12 @@ Uses `opentelemetry` and `tracing` crates to export telemetry data.
 Add this crate to your `Cargo.toml` and use it in your runtime configuration:
 
 ```rust,ignore
-use omnia::runtime;
-use omnia_wasi_otel::DefaultOtel;
+use omnia_wasi_otel::{OtelDefault, WasiOtel};
 
 omnia::runtime!({
-    "otel": DefaultOtel,
+    hosts: {
+        WasiOtel: OtelDefault,
+    }
 });
 ```
 

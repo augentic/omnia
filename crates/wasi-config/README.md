@@ -15,11 +15,12 @@ Implements the `wasi:config` WIT interface.
 Add this crate to your `Cargo.toml` and use it in your runtime configuration:
 
 ```rust,ignore
-use omnia::runtime;
-use omnia_wasi_config::ConfigDefault;
+use omnia_wasi_config::{ConfigDefault, WasiConfig};
 
 omnia::runtime!({
-    "config": ConfigDefault,
+    hosts: {
+        WasiConfig: ConfigDefault,
+    }
 });
 ```
 

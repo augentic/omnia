@@ -15,11 +15,12 @@ Implements the `wasi:vault` WIT interface.
 Add this crate to your `Cargo.toml` and use it in your runtime configuration:
 
 ```rust,ignore
-use omnia::runtime;
-use omnia_wasi_vault::VaultDefault;
+use omnia_wasi_vault::{VaultDefault, WasiVault};
 
 omnia::runtime!({
-    "vault": VaultDefault,
+    hosts: {
+        WasiVault: VaultDefault,
+    }
 });
 ```
 

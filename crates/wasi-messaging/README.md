@@ -15,11 +15,12 @@ Implements the `wasi:messaging` WIT interface.
 Add this crate to your `Cargo.toml` and use it in your runtime configuration:
 
 ```rust,ignore
-use omnia::runtime;
-use omnia_wasi_messaging::MessagingDefault;
+use omnia_wasi_messaging::{MessagingDefault, WasiMessaging};
 
 omnia::runtime!({
-    "messaging": MessagingDefault,
+    hosts: {
+        WasiMessaging: MessagingDefault,
+    }
 });
 ```
 

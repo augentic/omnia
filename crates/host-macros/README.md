@@ -4,7 +4,7 @@ Procedural macros for generating host-side WebAssembly Component Runtime infrast
 
 ## Overview
 
-This crate provides the `runtime!` macro that generates the necessary runtime infrastructure for executing WebAssembly components with WASI capabilities. Instead of manually managing feature flags and conditional compilation, you declaratively specify which WASI interfaces and backends your runtime needs.
+This crate provides the `runtime!` macro that generates the necessary runtime infrastructure for executing WebAssembly components with WASI capabilities. Instead of hand-writing the backend bundle, linker wiring, and entry point, you declaratively specify which WASI interfaces and backends your runtime needs.
 
 ## Usage
 
@@ -15,64 +15,39 @@ Add `omnia` to your dependencies (the `runtime!` macro is re-exported from the `
 omnia = { workspace = true }
 ```
 
-Then use the `runtime!` macro to generate your runtime infrastructure:
+Then declare your runtime as a map of `Host: Backend` pairs:
 
 ```rust,ignore
-use omnia::runtime;
+use omnia_wasi_http::{HttpDefault, WasiHttp};
+use omnia_wasi_keyvalue::WasiKeyValue;
+use omnia_wasi_otel::{OtelDefault, WasiOtel};
+use omnia_redis::Client as Redis;
 
-// Import the backend types you want to use
-use omnia_wasi_http::WasiHttpCtx;
-use omnia_wasi_otel::DefaultOtel;
-use be_mongodb::Client as MongoDb;
-use be_nats::Client as Nats;
-use be_azure::Client as Azure;
-
-// Generate runtime infrastructure
-runtime!({
-    "http": WasiHttpCtx,
-    "otel": DefaultOtel,
-    "blobstore": MongoDb,
-    "keyvalue": Nats,
-    "messaging": Nats,
-    "vault": Azure
+omnia::runtime!({
+    hosts: {
+        WasiHttp: HttpDefault,
+        WasiOtel: OtelDefault,
+        WasiKeyValue: Redis,
+    }
 });
-
-// The macro generates:
-// - a `Backends` bundle: one connected backend per declared interface
-// - the `HasXxx` accessor impls wiring each backend to the library's blanket views
-// - a `main` entry point that delegates to `omnia::main`
 ```
+
+Each key is a **host type** from a `omnia-wasi-*` crate (`WasiHttp`, `WasiKeyValue`, ...); each value is a **backend type** implementing that interface's context trait — an in-tree default (`HttpDefault`, `KeyValueDefault`, ...) or a production client from the [`backends`](https://github.com/augentic/backends) repo.
 
 ## Configuration Format
 
-The macro accepts a map-like syntax:
-
 ```rust,ignore
-runtime!({
-    "interface_name": BackendType,
-    // ...
+omnia::runtime!({
+    mode: server,          // optional: `server` (default) or `command`
+    hosts: {
+        HostType: BackendType,
+        // ...
+    }
 });
 ```
 
-### Supported Interfaces
-
-- **`http`**: HTTP client and server - Backend: `WasiHttpCtx` (marker type, no backend connection needed)
-
-- **`otel`**: OpenTelemetry observability - Backend: `DefaultOtel` (connects to OTEL collector)
-
-- **`blobstore`**: Object/blob storage - Backends: `MongoDb` or `Nats`
-
-- **`keyvalue`**: Key-value storage - Backends: `Nats` or `Redis`
-
-- **`messaging`**: Pub/sub messaging - Backends: `Nats` or `Kafka`
-
-- **`vault`**: Secrets management - Backend: `Azure` (Azure Key Vault)
-
-- **`sql`**: SQL database - Backend: `Postgres`
-
-- **`identity`**: Identity and authentication - Backend: `Azure` (Azure Identity)
-
-- **`websocket`**: WebSocket connections - Backend: `WebSocketCtxImpl` (default implementation for development use)
+- **`mode: server`** — trigger hosts (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`) run servers and drive guests per request.
+- **`mode: command`** — the runtime drives the guest's `wasi:cli/run` export once and exits with its status. A backend-less command runtime is valid: `omnia::runtime!({ mode: command });`
 
 ## Generated Code
 
@@ -100,49 +75,41 @@ For each declared interface, the macro emits the `HasXxx` accessor impl that exp
 
 ### `main` entry point
 
-A `#[tokio::main]` `main` that delegates to `omnia::main::<Backends, Hooks>`, where `Hooks` is a generated `Wiring` impl: `Wiring::link` runs inside `omnia::Runtime::new` to link hosts, connect backends, and assemble the registry; `Wiring::serve` launches each trigger host's `run`. The host runtime is the library `omnia::Runtime<Backends>`; the macro no longer emits a runtime type or trait impl of its own.
+A `#[tokio::main]` `main` that delegates to `omnia::main::<Backends, Hooks>`, where `Hooks` is a generated `Wiring` impl: `Wiring::link` runs inside `omnia::Runtime::new` to link hosts, connect backends, and assemble the registry; `Wiring::serve` launches each trigger host's `run`. The host runtime is the library `omnia::Runtime<Backends>`; the macro does not emit a runtime type of its own.
 
-## Example: Custom Initiator Configuration
+The generated `main` handles the `run` subcommand only; to expose `compile`, write a custom `main` that calls `omnia::compile`.
 
-You can create different runtime configurations for different use cases:
+## Example: multiple runtime configurations
+
+Different configurations can coexist as modules in one crate:
 
 ```rust,ignore
 // Minimal HTTP server
 mod http_runtime {
-    use omnia_wasi_http::WasiHttpCtx;
+    use omnia_wasi_http::{HttpDefault, WasiHttp};
 
     omnia::runtime!({
-        "http": WasiHttpCtx
+        hosts: { WasiHttp: HttpDefault }
     });
 }
 
-// Full-featured runtime
+// Full-featured runtime on NATS
 mod full_runtime {
-    use omnia_wasi_http::WasiHttpCtx;
-    use omnia_wasi_otel::DefaultOtel;
-    use be_nats::Client as Nats;
+    use omnia_wasi_http::{HttpDefault, WasiHttp};
+    use omnia_wasi_keyvalue::WasiKeyValue;
+    use omnia_wasi_messaging::WasiMessaging;
+    use omnia_wasi_blobstore::WasiBlobstore;
+    use omnia_wasi_otel::{OtelDefault, WasiOtel};
+    use omnia_nats::Client as Nats;
 
     omnia::runtime!({
-        "http": WasiHttpCtx,
-        "otel": DefaultOtel,
-        "keyvalue": Nats,
-        "messaging": Nats,
-        "blobstore": Nats
-    });
-}
-```
-
-Now you can declaratively specify your configuration:
-
-```rust,ignore
-mod omnia_runtime {
-    omnia::runtime!({
-        "http": WasiHttpCtx,
-        "otel": DefaultOtel,
-        "blobstore": MongoDb,
-        "keyvalue": Nats,
-        "messaging": Nats,
-        "vault": Azure
+        hosts: {
+            WasiHttp: HttpDefault,
+            WasiOtel: OtelDefault,
+            WasiKeyValue: Nats,
+            WasiMessaging: Nats,
+            WasiBlobstore: Nats,
+        }
     });
 }
 ```
@@ -150,8 +117,8 @@ mod omnia_runtime {
 This provides:
 
 - **Better readability**: The configuration is explicit and self-documenting
-- **Less boilerplate**: No need for complex feature flag combinations
-- **Type safety**: Backend types are checked at compile time
+- **Less boilerplate**: No hand-written bundle, accessor impls, or entry point
+- **Type safety**: Backend types are checked against the host's context trait at compile time
 - **Flexibility**: Easy to create multiple runtime configurations in the same binary
 
 ## License

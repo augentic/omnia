@@ -2,7 +2,7 @@
 //!
 //! A guest implements [`McpServer`] over its compiled-in capabilities and serves
 //! it from its `wasi:http` `handle` export via [`router`]. Nothing here holds
-//! state between messages, so the host may instantiate the guest fresh per 
+//! state between messages, so the host may instantiate the guest fresh per
 //! request. Read-only is a property of the implementation: a server exposes
 //! exactly the tools and resources it declares.
 //!

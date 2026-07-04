@@ -7,7 +7,7 @@ A `wasi:cli/command` guest driven as a **one-shot trigger**: the host invokes it
 - [`guest.rs`](guest.rs) is a `cdylib` reactor exporting `wasi:cli/run@0.3.0` via `wasip3::cli::command::export!` — the same shape as every other example guest. It dispatches on argv (read through the `std` bridge Omnia links alongside p3): - `greet [name]` — prints `Hello, <name>!` (default `world`). - `add [n...]` — prints the sum of its integer arguments. - `env` — prints the inherited environment, one `key=value` per line.
 
 An unknown subcommand exits `2`; missing usage exits `1`.
-- [`runtime.rs`](runtime.rs) is the whole host: a single `omnia::runtime!({ command: true })`. Command mode finds the sole command-capable guest, instantiates it through the registry pipeline, drives `wasi:cli/run` once, and hands back the exit status the generated `main` exits with.
+- [`runtime.rs`](runtime.rs) is the whole host: a single `omnia::runtime!({ mode: command })`. Command mode finds the sole command-capable guest, instantiates it through the registry pipeline, drives `wasi:cli/run` once, and hands back the exit status the generated `main` exits with.
 
 ## Build the guest
 

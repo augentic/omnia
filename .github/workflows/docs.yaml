@@ -1,0 +1,60 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs.yaml"
+  workflow_dispatch:
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Publish documentation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install mdbook toolchain
+        uses: taiki-e/install-action@v2
+        with:
+          tool: |
+            mdbook
+            mdbook-linkcheck2
+
+      - name: Build book (HTML + linkcheck)
+        run: mdbook build docs
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ./docs/book/html
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
+
+      # - name: Set release date
+      #   id: date
+      #   if: github.event_name == 'push'
+      #   run: echo "today=$(date +'%Y-%m-%d')" >> ${GITHUB_OUTPUT}
+
+      # - name: Deploy to Cloudflare Pages
+      #   if: github.event_name == 'push'
+      #   uses: cloudflare/wrangler-action@v3
+      #   with:
+      #     apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      #     accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      #     command: deploy --assets ./docs/book/html --name specify-docs --compatibility-date ${{ steps.date.outputs.today }}

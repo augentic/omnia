@@ -45,7 +45,7 @@ See [rfcs/integration-testing.md](rfcs/integration-testing.md) §7 for the ratio
 - `cargo-nextest` must be installed with `--locked` (`cargo install --locked cargo-nextest`); without it the build fails.
 - Formatting uses `cargo +nightly fmt`, not stable rustfmt (the nightly toolchain must be installed).
 - The `rust-toolchain.toml` pins the stable channel and auto-installs the `wasm32-wasip2` target plus `clippy`, `rust-src`, and `rustfmt` components.
-- `edition = "2024"` and `rust-version = "1.93"` are workspace settings; ensure the stable toolchain is at least 1.93.
+- `edition = "2024"` and `rust-version = "1.95"` are workspace settings; ensure the stable toolchain is at least 1.95.
 - Guest WASM examples compile to `wasm32-wasip2`; the binary name uses underscores (e.g., `http_wasm.wasm` not `http-wasm.wasm`).
 
 ### Code comments

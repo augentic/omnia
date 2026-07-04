@@ -15,11 +15,12 @@ Implements the `wasi:keyvalue` WIT interface.
 Add this crate to your `Cargo.toml` and use it in your runtime configuration:
 
 ```rust,ignore
-use omnia::runtime;
-use omnia_wasi_keyvalue::KeyValueDefault;
+use omnia_wasi_keyvalue::{KeyValueDefault, WasiKeyValue};
 
 omnia::runtime!({
-    "keyvalue": KeyValueDefault,
+    hosts: {
+        WasiKeyValue: KeyValueDefault,
+    }
 });
 ```
 
