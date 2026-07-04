@@ -102,12 +102,12 @@ The macro has two distinct concerns, best tested at two tiers.
 
 The interesting logic lives in `body()` and `Attributes` in `crates/wasi-otel-attr/src/lib.rs`, which operate on `proc_macro2` / `syn` tokens (not `proc_macro::TokenStream`). Call `body()` directly from a `#[cfg(test)] mod tests` in the crate:
 
-| Input | Expected expansion |
-|-------|-------------------|
-| Async fn, no args | `Instrument::instrument(async move …, span!(INFO, fn_name)).await` |
-| Sync fn, no args | `span!(INFO, fn_name).in_scope(\|\| { … })` |
-| `name = "custom"` | Span name is `"custom"` |
-| `level = Level::DEBUG` | Level propagates into `span!` |
+| Input                  | Expected expansion                                                 |
+| ---------------------- | ------------------------------------------------------------------ |
+| Async fn, no args      | `Instrument::instrument(async move …, span!(INFO, fn_name)).await` |
+| Sync fn, no args       | `span!(INFO, fn_name).in_scope(\|\| { … })`                        |
+| `name = "custom"`      | Span name is `"custom"`                                            |
+| `level = Level::DEBUG` | Level propagates into `span!`                                      |
 
 For the full macro surface (including the `proc_macro` boundary and compile-time errors), add `trybuild` as a dev-dependency with a `tests/ui/` folder:
 
@@ -149,10 +149,10 @@ Drive a guest that uses `#[instrument]` and assert the captured export contains 
 
 **Driving the guest:** the otel example exports `wasi:http/handler.handle`, not a simple `run` export. Two options:
 
-| Approach | Pros | Cons |
-|----------|------|------|
-| **Tiny non-HTTP guest** with a `run` export that calls an `#[instrument]`'d function | Same `call_async` pattern as `replay.rs`; isolates the macro from HTTP | New example/guest to maintain |
-| **Drive through HTTP in-process** on an ephemeral port (`HTTP_ADDR=127.0.0.1:0`) | Faithful to `examples/otel` | Heavier; server task lifecycle |
+| Approach                                                                             | Pros                                                                   | Cons                           |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- | ------------------------------ |
+| **Tiny non-HTTP guest** with a `run` export that calls an `#[instrument]`'d function | Same `call_async` pattern as `replay.rs`; isolates the macro from HTTP | New example/guest to maintain  |
+| **Drive through HTTP in-process** on an ephemeral port (`HTTP_ADDR=127.0.0.1:0`)     | Faithful to `examples/otel`                                            | Heavier; server task lifecycle |
 
 Recommend the tiny guest for macro-focused tests; keep the HTTP path for a broader otel integration test later.
 
@@ -201,13 +201,13 @@ instead of a seam test:
 
 ## 4. Suggested priority
 
-| Order | Work | Effort | Impact |
-|-------|------|--------|--------|
-| 1 | Verify/fix CI to build guests before `nextest` | Low | Existing tests stop skipping silently |
-| 2 | `body()` unit tests + `trybuild` UI tests for `wasi-otel-attr` | Low | Fast macro regression coverage |
-| 3 | `CapturingOtel` backend + behavioural test with a tiny instrumented guest | Medium | Replaces manual `examples/otel` run for macro validation |
-| 4 | Extract shared test-support crate | Medium | Unblocks tests for all WASI interfaces |
-| 5 | Table-driven examples smoke test | Medium–High | Broad CI coverage across examples |
+| Order | Work                                                                      | Effort      | Impact                                                   |
+| ----- | ------------------------------------------------------------------------- | ----------- | -------------------------------------------------------- |
+| 1     | Verify/fix CI to build guests before `nextest`                            | Low         | Existing tests stop skipping silently                    |
+| 2     | `body()` unit tests + `trybuild` UI tests for `wasi-otel-attr`            | Low         | Fast macro regression coverage                           |
+| 3     | `CapturingOtel` backend + behavioural test with a tiny instrumented guest | Medium      | Replaces manual `examples/otel` run for macro validation |
+| 4     | Extract shared test-support crate                                         | Medium      | Unblocks tests for all WASI interfaces                   |
+| 5     | Table-driven examples smoke test                                          | Medium–High | Broad CI coverage across examples                        |
 
 ## 5. Non-goals
 
@@ -253,7 +253,7 @@ The policy this RFC leads to, now in force (see `AGENTS.md`):
     exercises more of the real path (`producer_impl.rs` 0% → 100%,
     `docstore/default_impl.rs` 30% → 54% lines).
 - **Guest-side logic keeps native unit tests** where `llvm-cov` cannot instrument
-  the guest `.wasm` (e.g. `crates/guest`).
+  the guest `.wasm` (e.g. `crates/omnia-guest`).
 - **Names identify, comments explain.** A test name is the scenario
   (`set_then_get`), not a restated expectation (`set_then_get_round_trips`); nuance
   goes in a `//` comment, consistent with the repo comment policy.

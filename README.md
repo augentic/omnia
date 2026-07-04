@@ -54,22 +54,22 @@ docker build --tag ghcr.io/augentic/omnia .
 
 ## Crates
 
-| Crate                                           | Description                                                                |
-| ----------------------------------------------- | -------------------------------------------------------------------------- |
-| `[omnia](crates/omnia)`                         | Core runtime -- wasmtime wrapper with CLI, OpenTelemetry, and pluggable WASI host services |
-| `[omnia-guest](crates/guest)`                   | Guest SDK -- traits, error types, ORM, and macros for WASI component authors |
-| `[omnia-guest-macros](crates/guest-macros)`     | `guest!` and `#[instrument]` proc-macros for guests                      |
-| `[omnia-host-macros](crates/host-macros)`       | `runtime!` proc-macro for host runtime generation                          |
-| `[omnia-wasi-blobstore](crates/wasi-blobstore)` | wasi:blobstore host and guest bindings                                     |
-| `[omnia-wasi-config](crates/wasi-config)`       | wasi:config host and guest bindings                                        |
-| `[omnia-wasi-http](crates/wasi-http)`           | wasi:http host and guest bindings                                          |
-| `[omnia-wasi-identity](crates/wasi-identity)`   | wasi:identity host and guest bindings                                      |
-| `[omnia-wasi-keyvalue](crates/wasi-keyvalue)`   | wasi:keyvalue host and guest bindings                                      |
-| `[omnia-wasi-messaging](crates/wasi-messaging)` | wasi:messaging host and guest bindings                                     |
-| `[omnia-wasi-otel](crates/wasi-otel)`           | wasi:otel host and guest bindings                                          |
-| `[omnia-wasi-sql](crates/wasi-sql)`             | wasi:sql host and guest bindings                                           |
-| `[omnia-wasi-vault](crates/wasi-vault)`         | wasi:vault host and guest bindings                                         |
-| `[omnia-wasi-websocket](crates/wasi-websocket)` | wasi:websocket host and guest bindings                                     |
+| Crate                                             | Description                                                                                |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `[omnia](crates/omnia)`                           | Core runtime -- wasmtime wrapper with CLI, OpenTelemetry, and pluggable WASI host services |
+| `[omnia-guest](crates/omnia-guest)`               | Guest SDK -- traits, error types, ORM, and macros for WASI component authors               |
+| `[omnia-guest-macros](crates/omnia-guest-macros)` | `guest!` and `#[instrument]` proc-macros for guests                                        |
+| `[omnia-host-macros](crates/host-macros)`         | `runtime!` proc-macro for host runtime generation                                          |
+| `[omnia-wasi-blobstore](crates/wasi-blobstore)`   | wasi:blobstore host and guest bindings                                                     |
+| `[omnia-wasi-config](crates/wasi-config)`         | wasi:config host and guest bindings                                                        |
+| `[omnia-wasi-http](crates/wasi-http)`             | wasi:http host and guest bindings                                                          |
+| `[omnia-wasi-identity](crates/wasi-identity)`     | wasi:identity host and guest bindings                                                      |
+| `[omnia-wasi-keyvalue](crates/wasi-keyvalue)`     | wasi:keyvalue host and guest bindings                                                      |
+| `[omnia-wasi-messaging](crates/wasi-messaging)`   | wasi:messaging host and guest bindings                                                     |
+| `[omnia-wasi-otel](crates/wasi-otel)`             | wasi:otel host and guest bindings                                                          |
+| `[omnia-wasi-sql](crates/wasi-sql)`               | wasi:sql host and guest bindings                                                           |
+| `[omnia-wasi-vault](crates/wasi-vault)`           | wasi:vault host and guest bindings                                                         |
+| `[omnia-wasi-websocket](crates/wasi-websocket)`   | wasi:websocket host and guest bindings                                                     |
 
 
 ## License
