@@ -2,8 +2,8 @@
 //!
 //! Serves a few compiled-in documents to agent backends as a stateless MCP
 //! server: it implements [`omnia_guest::mcp::McpServer`] and calls
-//! [`omnia_guest::mcp::serve`] from its `wasi:http` handler. `omnia.toml` routes
-//! `/mcp/docs` here.
+//! [`omnia_wasi_http::serve`] with [`omnia_guest::mcp::router`] from its
+//! `wasi:http` handler. `omnia.toml` routes `/mcp/docs` here.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -44,17 +44,8 @@ const DOCS: &[(&str, &str, &str)] = &[
 
 impl Guest for HttpGuest {
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
-        mcp::serve(Docs, request).await
+        omnia_wasi_http::serve(mcp::router(Docs), request).await
     }
-}
-
-fn find_doc(name: &str) -> Option<&'static (&'static str, &'static str, &'static str)> {
-    DOCS.iter().find(|(doc_name, ..)| *doc_name == name)
-}
-
-#[derive(Deserialize)]
-struct ReadDocArgs {
-    name: String,
 }
 
 struct Docs;
@@ -129,4 +120,13 @@ impl McpServer for Docs {
             |(.., body)| Ok(ResourceContents::text(uri, "text/markdown", *body)),
         )
     }
+}
+
+fn find_doc(name: &str) -> Option<&'static (&'static str, &'static str, &'static str)> {
+    DOCS.iter().find(|(doc_name, ..)| *doc_name == name)
+}
+
+#[derive(Deserialize)]
+struct ReadDocArgs {
+    name: String,
 }

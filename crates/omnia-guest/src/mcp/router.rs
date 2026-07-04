@@ -22,20 +22,6 @@ pub fn router(server: impl McpServer) -> Router {
     })
 }
 
-/// Serve one `wasi:http` request with `server` as a stateless MCP Streamable
-/// HTTP endpoint — the whole body of a guest's `handle` export.
-///
-/// # Errors
-///
-/// Returns a [`wasip3::http::types::ErrorCode`] when the request cannot be
-/// served.
-#[cfg(target_arch = "wasm32")]
-pub async fn serve(
-    server: impl McpServer, request: wasip3::http::types::Request,
-) -> Result<wasip3::http::types::Response, wasip3::http::types::ErrorCode> {
-    omnia_wasi_http::serve(router(server), request).await
-}
-
 fn respond(server: &dyn McpServer, method: &Method, body: &str) -> Response {
     if *method != Method::POST {
         return (StatusCode::METHOD_NOT_ALLOWED, "MCP endpoint accepts POST only").into_response();

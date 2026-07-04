@@ -1,8 +1,9 @@
 //! A stateless [Model Context Protocol][mcp] server for guests.
 //!
-//! A guest implements [`McpServer`] over its compiled-in capabilities and calls
-//! `serve` (wasm32-only; or mounts [`router`]) from its `wasi:http` `handle`
-//! export; the host's HTTP trigger is the transport. Nothing here holds state between
+//! A guest implements [`McpServer`] over its compiled-in capabilities and serves
+//! it from its `wasi:http` `handle` export via [`router`] and
+//! [`omnia_wasi_http::serve`]; the host's HTTP trigger is the transport. Nothing
+//! here holds state between
 //! messages, so the host may instantiate the guest fresh per request. Read-only
 //! is a property of the implementation: a server exposes exactly the tools and
 //! resources it declares.
@@ -18,8 +19,6 @@ use serde_json::Value;
 
 pub use self::protocol::{PROTOCOL_VERSION, handle_message};
 pub use self::router::router;
-#[cfg(target_arch = "wasm32")]
-pub use self::router::serve;
 pub use self::types::{
     CallToolResult, Content, Implementation, McpError, Resource, ResourceContents, Tool,
 };
