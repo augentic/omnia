@@ -1,0 +1,574 @@
+
+/* Globals */
+
+:root {
+    --sidebar-target-width: 300px;
+    --sidebar-width: min(var(--sidebar-target-width), 80vw);
+    --sidebar-resize-indicator-width: 8px;
+    --sidebar-resize-indicator-space: 2px;
+    --page-padding: 15px;
+    --content-max-width: 750px;
+    --menu-bar-height: 50px;
+    --mono-font: "Source Code Pro", Consolas, "Ubuntu Mono", Menlo, "DejaVu Sans Mono", monospace, monospace;
+    --code-font-size: 0.875em; /* please adjust the ace font size accordingly in editor.js */
+    --searchbar-margin-block-start: 5px;
+}
+
+/* Themes */
+
+.ayu {
+    --bg: hsl(210, 25%, 8%);
+    --fg: #c5c5c5;
+
+    --sidebar-bg: #14191f;
+    --sidebar-fg: #c8c9db;
+    --sidebar-non-existant: #5c6773;
+    --sidebar-active: #ffb454;
+    --sidebar-spacer: #2d334f;
+
+    --scrollbar: var(--sidebar-fg);
+
+    --icons: #737480;
+    --icons-hover: #b7b9cc;
+
+    --links: #0096cf;
+
+    --inline-code-color: #ffb454;
+
+    --theme-popup-bg: #14191f;
+    --theme-popup-border: #5c6773;
+    --theme-hover: #191f26;
+
+    --quote-bg: hsl(226, 15%, 17%);
+    --quote-border: hsl(226, 15%, 22%);
+
+    --warning-border: #ff8e00;
+
+    --table-border-color: hsl(210, 25%, 13%);
+    --table-header-bg: hsl(210, 25%, 28%);
+    --table-alternate-bg: hsl(210, 25%, 11%);
+
+    --searchbar-border-color: #848484;
+    --searchbar-bg: #424242;
+    --searchbar-fg: #fff;
+    --searchbar-shadow-color: #d4c89f;
+    --searchresults-header-fg: #666;
+    --searchresults-border-color: #888;
+    --searchresults-li-bg: #252932;
+    --search-mark-bg: #e3b171;
+
+    --color-scheme: dark;
+
+    /* Same as `--icons` */
+    --copy-button-filter: invert(45%) sepia(6%) saturate(621%) hue-rotate(198deg) brightness(99%) contrast(85%);
+    /* Same as `--sidebar-active` */
+    --copy-button-filter-hover: invert(68%) sepia(55%) saturate(531%) hue-rotate(341deg) brightness(104%) contrast(101%);
+
+    --footnote-highlight: #2668a6;
+
+    --overlay-bg: rgba(33, 40, 48, 0.4);
+
+    --blockquote-note-color: #74b9ff;
+    --blockquote-tip-color: #09ca09;
+    --blockquote-important-color: #d3abff;
+    --blockquote-warning-color: #f0b72f;
+    --blockquote-caution-color: #f21424;
+
+    --sidebar-header-border-color: #c18639;
+}
+
+.coal {
+    --bg: hsl(200, 7%, 8%);
+    --fg: #98a3ad;
+
+    --sidebar-bg: #292c2f;
+    --sidebar-fg: #a1adb8;
+    --sidebar-non-existant: #505254;
+    --sidebar-active: #3473ad;
+    --sidebar-spacer: #393939;
+
+    --scrollbar: var(--sidebar-fg);
+
+    --icons: #43484d;
+    --icons-hover: #b3c0cc;
+
+    --links: #2b79a2;
+
+    --inline-code-color: #c5c8c6;
+
+    --theme-popup-bg: #141617;
+    --theme-popup-border: #43484d;
+    --theme-hover: #1f2124;
+
+    --quote-bg: hsl(234, 21%, 18%);
+    --quote-border: hsl(234, 21%, 23%);
+
+    --warning-border: #ff8e00;
+
+    --table-border-color: hsl(200, 7%, 13%);
+    --table-header-bg: hsl(200, 7%, 28%);
+    --table-alternate-bg: hsl(200, 7%, 11%);
+
+    --searchbar-border-color: #aaa;
+    --searchbar-bg: #b7b7b7;
+    --searchbar-fg: #000;
+    --searchbar-shadow-color: #aaa;
+    --searchresults-header-fg: #666;
+    --searchresults-border-color: #98a3ad;
+    --searchresults-li-bg: #2b2b2f;
+    --search-mark-bg: #355c7d;
+
+    --color-scheme: dark;
+
+    /* Same as `--icons` */
+    --copy-button-filter: invert(26%) sepia(8%) saturate(575%) hue-rotate(169deg) brightness(87%) contrast(82%);
+    /* Same as `--sidebar-active` */
+    --copy-button-filter-hover: invert(36%) sepia(70%) saturate(503%) hue-rotate(167deg) brightness(98%) contrast(89%);
+
+    --footnote-highlight: #4079ae;
+
+    --overlay-bg: rgba(33, 40, 48, 0.4);
+
+    --blockquote-note-color: #4493f8;
+    --blockquote-tip-color: #08ae08;
+    --blockquote-important-color: #ab7df8;
+    --blockquote-warning-color: #d29922;
+    --blockquote-caution-color: #d91b29;
+
+    --sidebar-header-border-color: #3473ad;
+}
+
+.light, html:not(.js) {
+    --bg: hsl(0, 0%, 100%);
+    --fg: hsl(0, 0%, 0%);
+
+    --sidebar-bg: #fafafa;
+    --sidebar-fg: hsl(0, 0%, 0%);
+    --sidebar-non-existant: #aaaaaa;
+    --sidebar-active: #1f1fff;
+    --sidebar-spacer: #f4f4f4;
+
+    --scrollbar: #8F8F8F;
+
+    --icons: #747474;
+    --icons-hover: #000000;
+
+    --links: #20609f;
+
+    --inline-code-color: #301900;
+
+    --theme-popup-bg: #fafafa;
+    --theme-popup-border: #cccccc;
+    --theme-hover: #e6e6e6;
+
+    --quote-bg: hsl(197, 37%, 96%);
+    --quote-border: hsl(197, 37%, 91%);
+
+    --warning-border: #ff8e00;
+
+    --table-border-color: hsl(0, 0%, 95%);
+    --table-header-bg: hsl(0, 0%, 80%);
+    --table-alternate-bg: hsl(0, 0%, 97%);
+
+    --searchbar-border-color: #aaa;
+    --searchbar-bg: #fafafa;
+    --searchbar-fg: #000;
+    --searchbar-shadow-color: #aaa;
+    --searchresults-header-fg: #666;
+    --searchresults-border-color: #888;
+    --searchresults-li-bg: #e4f2fe;
+    --search-mark-bg: #a2cff5;
+
+    --color-scheme: light;
+
+    /* Same as `--icons` */
+    --copy-button-filter: invert(45.49%);
+    /* Same as `--sidebar-active` */
+    --copy-button-filter-hover: invert(14%) sepia(93%) saturate(4250%) hue-rotate(243deg) brightness(99%) contrast(130%);
+
+    --footnote-highlight: #7e7eff;
+
+    --overlay-bg: rgba(200, 200, 205, 0.4);
+
+    --blockquote-note-color: #0969da;
+    --blockquote-tip-color: #008000;
+    --blockquote-important-color: #8250df;
+    --blockquote-warning-color: #9a6700;
+    --blockquote-caution-color: #b52731;
+
+    --sidebar-header-border-color: #6e6edb;
+}
+
+.navy {
+    --bg: hsl(226, 23%, 11%);
+    --fg: #bcbdd0;
+
+    --sidebar-bg: #282d3f;
+    --sidebar-fg: #c8c9db;
+    --sidebar-non-existant: #505274;
+    --sidebar-active: #2b79a2;
+    --sidebar-spacer: #2d334f;
+
+    --scrollbar: var(--sidebar-fg);
+
+    --icons: #737480;
+    --icons-hover: #b7b9cc;
+
+    --links: #2b79a2;
+
+    --inline-code-color: #c5c8c6;
+
+    --theme-popup-bg: #161923;
+    --theme-popup-border: #737480;
+    --theme-hover: #282e40;
+
+    --quote-bg: hsl(226, 15%, 17%);
+    --quote-border: hsl(226, 15%, 22%);
+
+    --warning-border: #ff8e00;
+
+    --table-border-color: hsl(226, 23%, 16%);
+    --table-header-bg: hsl(226, 23%, 31%);
+    --table-alternate-bg: hsl(226, 23%, 14%);
+
+    --searchbar-border-color: #aaa;
+    --searchbar-bg: #aeaec6;
+    --searchbar-fg: #000;
+    --searchbar-shadow-color: #aaa;
+    --searchresults-header-fg: #5f5f71;
+    --searchresults-border-color: #5c5c68;
+    --searchresults-li-bg: #242430;
+    --search-mark-bg: #a2cff5;
+
+    --color-scheme: dark;
+
+    /* Same as `--icons` */
+    --copy-button-filter: invert(51%) sepia(10%) saturate(393%) hue-rotate(198deg) brightness(86%) contrast(87%);
+    /* Same as `--sidebar-active` */
+    --copy-button-filter-hover: invert(46%) sepia(20%) saturate(1537%) hue-rotate(156deg) brightness(85%) contrast(90%);
+
+    --footnote-highlight: #4079ae;
+
+    --overlay-bg: rgba(33, 40, 48, 0.4);
+
+    --blockquote-note-color: #4493f8;
+    --blockquote-tip-color: #09ca09;
+    --blockquote-important-color: #ab7df8;
+    --blockquote-warning-color: #d29922;
+    --blockquote-caution-color: #f21424;
+
+    --sidebar-header-border-color: #2f6ab5;
+}
+
+.rust {
+    --bg: hsl(60, 9%, 87%);
+    --fg: #262625;
+
+    --sidebar-bg: #3b2e2a;
+    --sidebar-fg: #c8c9db;
+    --sidebar-non-existant: #505254;
+    --sidebar-active: #e69f67;
+    --sidebar-spacer: #45373a;
+
+    --scrollbar: var(--sidebar-fg);
+
+    --icons: #737480;
+    --icons-hover: #262625;
+
+    --links: #2b79a2;
+
+    --inline-code-color: #6e6b5e;
+
+    --theme-popup-bg: #e1e1db;
+    --theme-popup-border: #b38f6b;
+    --theme-hover: #99908a;
+
+    --quote-bg: hsl(60, 5%, 75%);
+    --quote-border: hsl(60, 5%, 70%);
+
+    --warning-border: #ff8e00;
+
+    --table-border-color: hsl(60, 9%, 82%);
+    --table-header-bg: #b3a497;
+    --table-alternate-bg: hsl(60, 9%, 84%);
+
+    --searchbar-border-color: #aaa;
+    --searchbar-bg: #fafafa;
+    --searchbar-fg: #000;
+    --searchbar-shadow-color: #aaa;
+    --searchresults-header-fg: #666;
+    --searchresults-border-color: #888;
+    --searchresults-li-bg: #dec2a2;
+    --search-mark-bg: #e69f67;
+
+    /* Same as `--icons` */
+    --copy-button-filter: invert(51%) sepia(10%) saturate(393%) hue-rotate(198deg) brightness(86%) contrast(87%);
+    /* Same as `--sidebar-active` */
+    --copy-button-filter-hover: invert(77%) sepia(16%) saturate(1798%) hue-rotate(328deg) brightness(98%) contrast(83%);
+
+    --footnote-highlight: #d3a17a;
+
+    --overlay-bg: rgba(150, 150, 150, 0.25);
+
+    --blockquote-note-color: #023b95;
+    --blockquote-tip-color: #007700;
+    --blockquote-important-color: #8250df;
+    --blockquote-warning-color: #603700;
+    --blockquote-caution-color: #aa1721;
+
+    --sidebar-header-border-color: #8c391f;
+}
+
+@media (prefers-color-scheme: dark) {
+    html:not(.js) {
+        --bg: hsl(200, 7%, 8%);
+        --fg: #98a3ad;
+
+        --sidebar-bg: #292c2f;
+        --sidebar-fg: #a1adb8;
+        --sidebar-non-existant: #505254;
+        --sidebar-active: #3473ad;
+        --sidebar-spacer: #393939;
+
+        --scrollbar: var(--sidebar-fg);
+
+        --icons: #43484d;
+        --icons-hover: #b3c0cc;
+
+        --links: #2b79a2;
+
+        --inline-code-color: #c5c8c6;
+
+        --theme-popup-bg: #141617;
+        --theme-popup-border: #43484d;
+        --theme-hover: #1f2124;
+
+        --quote-bg: hsl(234, 21%, 18%);
+        --quote-border: hsl(234, 21%, 23%);
+
+        --warning-border: #ff8e00;
+
+        --table-border-color: hsl(200, 7%, 13%);
+        --table-header-bg: hsl(200, 7%, 28%);
+        --table-alternate-bg: hsl(200, 7%, 11%);
+
+        --searchbar-border-color: #aaa;
+        --searchbar-bg: #b7b7b7;
+        --searchbar-fg: #000;
+        --searchbar-shadow-color: #aaa;
+        --searchresults-header-fg: #666;
+        --searchresults-border-color: #98a3ad;
+        --searchresults-li-bg: #2b2b2f;
+        --search-mark-bg: #355c7d;
+
+        --color-scheme: dark;
+
+        /* Same as `--icons` */
+        --copy-button-filter: invert(26%) sepia(8%) saturate(575%) hue-rotate(169deg) brightness(87%) contrast(82%);
+        /* Same as `--sidebar-active` */
+        --copy-button-filter-hover: invert(36%) sepia(70%) saturate(503%) hue-rotate(167deg) brightness(98%) contrast(89%);
+
+        --footnote-highlight: #4079ae;
+
+        --overlay-bg: rgba(33, 40, 48, 0.4);
+
+        --blockquote-note-color: #4493f8;
+        --blockquote-tip-color: #08ae08;
+        --blockquote-important-color: #ab7df8;
+        --blockquote-warning-color: #d29922;
+        --blockquote-caution-color: #d91b29;
+
+        --sidebar-header-border-color: #3473ad;
+    }
+}
+
+/* Augentic-derived documentation palette.
+ *
+ * mdBook still exposes the stock theme names in its picker. We map those
+ * buckets into two intentional docs palettes so every native chrome variable
+ * resolves to the same brand-adjacent visual system.
+ */
+:root {
+    --sidebar-target-width: 292px;
+    --content-max-width: 980px;
+    --menu-bar-height: 60px;
+    --page-padding: 18px;
+    --mono-font: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+
+.light,
+.rust,
+html:not(.js) {
+    --bg: #ffffff;
+    --fg: #06123a;
+
+    --sidebar-bg: #f5f9ff;
+    --sidebar-fg: #17305f;
+    --sidebar-non-existant: #8ca0c4;
+    --sidebar-active: #005bea;
+    --sidebar-spacer: #dbe7ff;
+
+    --scrollbar: #b8c7e6;
+
+    --icons: #4f6694;
+    --icons-hover: #06123a;
+
+    --links: #005bea;
+    --inline-code-color: #0046b8;
+
+    --theme-popup-bg: #ffffff;
+    --theme-popup-border: #d7e2f5;
+    --theme-hover: #eaf2ff;
+
+    --quote-bg: #f5f9ff;
+    --quote-border: #d7e2f5;
+
+    --warning-border: #af6b00;
+
+    --table-border-color: #d7e2f5;
+    --table-header-bg: #f1f6ff;
+    --table-alternate-bg: #f8fbff;
+
+    --searchbar-border-color: #c9d8f2;
+    --searchbar-bg: #ffffff;
+    --searchbar-fg: #06123a;
+    --searchbar-shadow-color: rgba(0, 91, 234, 0.2);
+    --searchresults-header-fg: #5b6f99;
+    --searchresults-border-color: #d7e2f5;
+    --searchresults-li-bg: #f1f6ff;
+    --search-mark-bg: #cfe1ff;
+
+    --color-scheme: light;
+
+    --copy-button-filter: invert(40%) sepia(18%) saturate(709%) hue-rotate(182deg) brightness(91%) contrast(87%);
+    --copy-button-filter-hover: invert(29%) sepia(90%) saturate(3757%) hue-rotate(213deg) brightness(95%) contrast(104%);
+
+    --footnote-highlight: #005bea;
+    --overlay-bg: rgba(6, 18, 58, 0.28);
+
+    --blockquote-note-color: #005bea;
+    --blockquote-tip-color: #28744d;
+    --blockquote-important-color: #5546b8;
+    --blockquote-warning-color: #af6b00;
+    --blockquote-caution-color: #a2463e;
+
+    --sidebar-header-border-color: #bfd2f5;
+}
+
+.navy,
+.coal,
+.ayu {
+    --bg: #0d1218;
+    --fg: #e7ece7;
+
+    --sidebar-bg: #080d12;
+    --sidebar-fg: #cbd6d1;
+    --sidebar-non-existant: #5c6868;
+    --sidebar-active: #f1d58a;
+    --sidebar-spacer: rgba(241, 213, 138, 0.14);
+
+    --scrollbar: #4c5b5b;
+
+    --icons: #91a09c;
+    --icons-hover: #f1d58a;
+
+    --links: #7fd6ce;
+    --inline-code-color: #9ce2dc;
+
+    --theme-popup-bg: #111822;
+    --theme-popup-border: #293742;
+    --theme-hover: #182330;
+
+    --quote-bg: #121b24;
+    --quote-border: #273642;
+
+    --warning-border: #d7a657;
+
+    --table-border-color: #26343f;
+    --table-header-bg: #17222e;
+    --table-alternate-bg: #111922;
+
+    --searchbar-border-color: #30414a;
+    --searchbar-bg: #111822;
+    --searchbar-fg: #e7ece7;
+    --searchbar-shadow-color: rgba(127, 214, 206, 0.28);
+    --searchresults-header-fg: #95a39e;
+    --searchresults-border-color: #293742;
+    --searchresults-li-bg: #17222e;
+    --search-mark-bg: #806b32;
+
+    --color-scheme: dark;
+
+    --copy-button-filter: invert(67%) sepia(9%) saturate(360%) hue-rotate(125deg) brightness(92%) contrast(89%);
+    --copy-button-filter-hover: invert(86%) sepia(42%) saturate(520%) hue-rotate(358deg) brightness(101%) contrast(89%);
+
+    --footnote-highlight: #7fd6ce;
+    --overlay-bg: rgba(4, 8, 12, 0.7);
+
+    --blockquote-note-color: #7fd6ce;
+    --blockquote-tip-color: #73c990;
+    --blockquote-important-color: #f1d58a;
+    --blockquote-warning-color: #d7a657;
+    --blockquote-caution-color: #e58a7d;
+
+    --sidebar-header-border-color: rgba(241, 213, 138, 0.46);
+}
+
+@media (prefers-color-scheme: dark) {
+    html:not(.js) {
+        --bg: #0d1218;
+        --fg: #e7ece7;
+
+        --sidebar-bg: #080d12;
+        --sidebar-fg: #cbd6d1;
+        --sidebar-non-existant: #5c6868;
+        --sidebar-active: #f1d58a;
+        --sidebar-spacer: rgba(241, 213, 138, 0.14);
+
+        --scrollbar: #4c5b5b;
+
+        --icons: #91a09c;
+        --icons-hover: #f1d58a;
+
+        --links: #7fd6ce;
+        --inline-code-color: #9ce2dc;
+
+        --theme-popup-bg: #111822;
+        --theme-popup-border: #293742;
+        --theme-hover: #182330;
+
+        --quote-bg: #121b24;
+        --quote-border: #273642;
+
+        --warning-border: #d7a657;
+
+        --table-border-color: #26343f;
+        --table-header-bg: #17222e;
+        --table-alternate-bg: #111922;
+
+        --searchbar-border-color: #30414a;
+        --searchbar-bg: #111822;
+        --searchbar-fg: #e7ece7;
+        --searchbar-shadow-color: rgba(127, 214, 206, 0.28);
+        --searchresults-header-fg: #95a39e;
+        --searchresults-border-color: #293742;
+        --searchresults-li-bg: #17222e;
+        --search-mark-bg: #806b32;
+
+        --color-scheme: dark;
+
+        --copy-button-filter: invert(67%) sepia(9%) saturate(360%) hue-rotate(125deg) brightness(92%) contrast(89%);
+        --copy-button-filter-hover: invert(86%) sepia(42%) saturate(520%) hue-rotate(358deg) brightness(101%) contrast(89%);
+
+        --footnote-highlight: #7fd6ce;
+        --overlay-bg: rgba(4, 8, 12, 0.7);
+
+        --blockquote-note-color: #7fd6ce;
+        --blockquote-tip-color: #73c990;
+        --blockquote-important-color: #f1d58a;
+        --blockquote-warning-color: #d7a657;
+        --blockquote-caution-color: #e58a7d;
+
+        --sidebar-header-border-color: rgba(241, 213, 138, 0.46);
+    }
+}

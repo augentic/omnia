@@ -1,58 +1,44 @@
-# Omnia Documentation
+# Omnia Developer Guide — Local Development
 
-Omnia is a lightweight, secure runtime for WebAssembly (WASI) components, built on [wasmtime](https://github.com/bytecodealliance/wasmtime). Application code compiles to a sandboxed WebAssembly **guest**; a native **host** runtime provides it with services — HTTP, storage, messaging, SQL, model completions, and more — through standard WASI interfaces. The same guest runs unchanged against in-memory defaults on a laptop or production services (Redis, Kafka, Azure, PostgreSQL) in deployment.
+This directory contains the [mdBook](https://rust-lang.github.io/mdBook/) 0.5 source for the Omnia Developer Guide.
 
-This documentation is organised so you can start small and go deeper as you need to:
+## Prerequisites
 
-## Start here
+Install the mdBook 0.5 toolchain locally:
 
-- **[Getting Started](getting-started.md)** — build and run your first guest in about ten minutes. No external services required.
+```bash
+cargo install --locked mdbook
+cargo install --locked mdbook-linkcheck2
+```
 
-## How-to guides
+## Serve (live reload)
 
-### Core workflow
+```bash
+mdbook serve docs    # from the repo root
+```
 
-| Guide | What it covers |
-| ----- | -------------- |
-| [Writing Guests](guides/writing-guests.md) | HTTP handlers, WASI capabilities, tracing, command-mode guests |
-| [Composing a Runtime](guides/composing-a-runtime.md) | The `runtime!` macro, choosing hosts and backends, server vs command mode |
-| [Multi-Guest Deployments](guides/multi-guest-deployments.md) | The `omnia.toml` manifest, HTTP routing across guests, mounts, guest-to-guest linking |
-| [Testing Guests and Runtimes](guides/testing.md) | Seam tests with `omnia-testkit`, the integration-first policy, live tests |
+Opens at [http://localhost:3000](http://localhost:3000) by default and live-reloads on chapter or theme changes.
 
-### Capabilities in depth
+## Build
 
-| Guide | What it covers |
-| ----- | -------------- |
-| [SQL and the Guest ORM](guides/sql-and-orm.md) | Raw SQL, the `entity!` macro, query builders, joins |
-| [Document Store](guides/document-store.md) | JSON documents, the filter language, sorting and pagination |
-| [Messaging](guides/messaging.md) | Pub/sub, request-reply, fan-out, message handlers, WebSockets |
-| [Model Completions and MCP](guides/model-completions.md) | The `omnia:model` interface, grants and host-injected tools, the `genai` and `cursor` backends, serving MCP tools from a guest |
+```bash
+mdbook build docs   # from the repo root, runs HTML + linkcheck2
+```
 
-### Operating
+Output lands in `docs/book/html/`. Linkcheck2 validates every internal link and fails the build on the first broken reference — see [`book.toml`](book.toml) `[output.linkcheck2]`.
 
-| Guide | What it covers |
-| ----- | -------------- |
-| [Production Backends](guides/production-backends.md) | Swapping in-memory defaults for Redis, Kafka, PostgreSQL, Azure, and others from the [`backends`](https://github.com/augentic/backends) repo |
-| [Deploying Omnia](guides/deployment.md) | Release builds, ahead-of-time compilation, container images, backing services, readiness |
-| [Performance Tuning](guides/performance-tuning.md) | The instance-per-call cost model, pooling knobs, and measuring with the bench harness |
+## Custom theme
 
-## Explanation
+- Forked mdBook theme: [`theme/`](theme/) — re-vendor from stock on mdBook upgrades.
+- Project-owned chrome overrides: [`theme/css/chrome.css`](theme/css/chrome.css), [`theme/head.hbs`](theme/head.hbs).
+- Cross-cutting component CSS: [`assets/theme/omnia-docs.css`](assets/theme/omnia-docs.css).
 
-- **[Architecture](Architecture.md)** — how the runtime is put together: the three-layer design, the guest registry, execution flow, instance pooling, and host-mediated dispatch.
-- **[Security Model](security-model.md)** — what the sandbox guarantees, how capabilities are granted, and what the runtime does not protect against.
-- **[Glossary](glossary.md)** — shared terminology (**runtime core**, **host-injected tools**, **Law 2**, and friends).
+### Re-vendoring the theme after an mdBook upgrade
 
-## Reference
-
-- **[WASI Interfaces](reference/wasi-interfaces.md)** — every interface crate, its default backend, and which production backends implement it.
-- **[Model Interface](reference/model.md)** — `omnia:model/completion` types, validation rules, and the replay fixture format.
-- **[CLI](reference/cli.md)** — the `run` and `compile` subcommands and their flags.
-- **[Configuration](reference/configuration.md)** — runtime environment variables and the deployment manifest format.
-
-## When something goes wrong
-
-- **[Troubleshooting](troubleshooting.md)** — common build, startup, and runtime failures with fixes.
-
-## Working examples
-
-Every feature described here has a runnable example under [`examples/`](../examples/README.md). Each example pairs a guest (`guest.rs`, compiled to `.wasm`) with a host runtime (`runtime.rs`, a native binary), and its README gives exact build and run commands.
+1. In a temp directory: `mdbook init --theme tmp-book` using the target mdBook version.
+2. Copy `tmp-book/theme/*` into [`docs/theme/`](theme/), replacing stock files.
+3. Re-apply project-owned customisations:
+   - Augentic brand + breadcrumb in [`theme/index.hbs`](theme/index.hbs) (`menu-title`, `spec-footer`).
+   - Banner block at the bottom of [`theme/css/chrome.css`](theme/css/chrome.css).
+   - [`theme/head.hbs`](theme/head.hbs) and system-font override in [`theme/fonts/fonts.css`](theme/fonts/fonts.css).
+4. Run `mdbook build docs` and spot-check light + navy themes on [`index.md`](index.md) and [`Architecture.md`](Architecture.md).

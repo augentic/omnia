@@ -1,0 +1,37 @@
+[book]
+title = "Omnia Developer Guide"
+authors = ["Augentic"]
+language = "en"
+src = "."
+
+[output.html]
+git-repository-url = "https://github.com/augentic/omnia"
+additional-css = ["assets/theme/omnia-docs.css"]
+default-theme = "light"
+preferred-dark-theme = "navy"
+sidebar-header-nav = true
+admonitions = true
+
+[output.html.fold]
+enable = true
+level = 1
+
+[output.linkcheck2]
+follow-web-links = false
+warning-policy = "error"
+traverse-parent-directories = true
+exclude = [
+  # Directory-style links (path ends with `/`). mdbook-linkcheck2 cannot
+  # follow directory links to file listings.
+  '/$',
+  # Repo-root README links that resolve outside the book tree.
+  '\.\./examples/README\.md',
+  '\.\./\.\./examples/',
+  '\.\./crates/',
+  '\.\./\.\./crates/',
+  '\.\./rfcs/',
+  '\.\./\.\./rfcs/',
+  '\.\./\.\./specify/',
+  '\.\./\.\./Dockerfile',
+  '\.\./\.\./docker/',
+]

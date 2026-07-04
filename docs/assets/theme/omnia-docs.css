@@ -1,0 +1,1605 @@
+/* Omnia Developer Guide — mdBook theme extensions.
+   Cross-cutting visual system for the rendered guide. */
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Palette — driven by mdbook's theme-picker classes on <html>.
+ *
+ * mdbook ships five themes: light, rust, navy, coal, ayu. We use the
+ * existing buckets:
+ *   light  → light  palette
+ *   rust   → light  palette  (warm light bookish theme, same as light here)
+ *   navy   → dark   palette  (deep blue chrome)
+ *   coal   → dark   palette  (graphite chrome)
+ *   ayu    → dark   palette  (warm dark)
+ *
+ * Each bucket exports a `--spec-*` variable set so the rest of
+ * the stylesheet stays palette-agnostic.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+html.light,
+html.rust {
+  --spec-bg: #fafaf7;
+  --spec-panel: #ffffff;
+  --spec-panel-2: #f2f1ec;
+  --spec-ink: #1c1c1c;
+  --spec-ink-dim: #555;
+  --spec-ink-faint: #888;
+  --spec-rule: #e4e2dc;
+  --spec-rule-strong: #c9c6bc;
+  --spec-accent: #244a72;
+  --spec-accent-soft: #e8f0f8;
+  --spec-behaviour: #6b4dbf;
+  --spec-documentation: #2e5a87;
+  --spec-intent: #b85c00;
+  --spec-ok: #2f7d3e;
+  --spec-ok-soft: #e6f2e8;
+  --spec-warn: #b85c00;
+  --spec-warn-soft: #fbeede;
+  --spec-danger: #b03030;
+  --spec-danger-soft: #fbe6e6;
+}
+
+html.coal,
+html.navy,
+html.ayu {
+  --spec-bg: #14171c;
+  --spec-panel: #1c2026;
+  --spec-panel-2: #232830;
+  --spec-ink: #e7e7e3;
+  --spec-ink-dim: #b0b3b8;
+  --spec-ink-faint: #80858d;
+  --spec-rule: #2c313a;
+  --spec-rule-strong: #3a414c;
+  --spec-accent: #6ea8d8;
+  --spec-accent-soft: #1f2a36;
+  --spec-behaviour: #a489e5;
+  --spec-documentation: #6ea8d8;
+  --spec-intent: #e8a05c;
+  --spec-ok: #67c97a;
+  --spec-ok-soft: #1c2a20;
+  --spec-warn: #e8a05c;
+  --spec-warn-soft: #2d2519;
+  --spec-danger: #e57878;
+  --spec-danger-soft: #2a1c1c;
+}
+
+:root {
+  --spec-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --spec-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
+  --spec-serif: "Iowan Old Style", "Charter", "Palatino", Georgia, serif;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Components — scoped to .content main so we don't perturb mdbook chrome.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+.content main {
+  /* Default body font stays inherited; only headings/structures opt in. */
+}
+
+/* Hero block at the top of a chapter ----------------------------------- */
+.content main .hero {
+  background: var(--spec-panel);
+  border: 1px solid var(--spec-rule);
+  border-radius: 10px;
+  padding: 32px 36px;
+  margin-bottom: 28px;
+}
+
+.content main .hero .eyebrow {
+  font-family: var(--spec-mono);
+  font-size: 12px;
+  color: var(--spec-ink-faint);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.content main .hero h1,
+.content main .hero .hero-title {
+  margin: 6px 0 12px;
+  font-family: var(--spec-serif);
+  font-weight: 600;
+  font-size: 38px;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+
+/* The first paragraph inside .hero (or any element explicitly tagged .lede)
+ * gets the lede typography; subsequent paragraphs stay normal. */
+.content main .hero > p:first-of-type,
+.content main .hero .lede {
+  font-size: 17px;
+  line-height: 1.55;
+  color: var(--spec-ink-dim);
+  max-width: 70ch;
+  margin: 0 0 16px;
+}
+
+.content main .hero .meta-row,
+.content main .meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-family: var(--spec-mono);
+  font-size: 12px;
+  margin-top: 10px;
+}
+
+/* mdbook wraps each chip line in a <p> tag when authored from templates;
+ * unwrap visually so the flex layout still works. */
+.content main .meta-row p {
+  margin: 0;
+  padding: 0;
+}
+
+.content main .meta-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--spec-panel-2);
+  border: 1px solid var(--spec-rule);
+  color: var(--spec-ink-dim);
+}
+
+.content main .meta-chip strong {
+  color: var(--spec-ink);
+  font-weight: 600;
+}
+
+/* Sections + heading numbering ----------------------------------------- */
+.content main section {
+  margin: 36px 0;
+  scroll-margin-top: 72px;
+}
+
+.content main section > h2 {
+  font-family: var(--spec-serif);
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--spec-rule);
+}
+
+.content main section > h2 .num {
+  color: var(--spec-ink-faint);
+  font-family: var(--spec-mono);
+  font-size: 14px;
+  margin-right: 12px;
+  letter-spacing: 0;
+}
+
+.content main section > h3 {
+  font-family: var(--spec-sans);
+  font-size: 19px;
+  font-weight: 600;
+  margin: 28px 0 8px;
+  color: var(--spec-ink);
+}
+
+.content main section > h4 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 18px 0 4px;
+  color: var(--spec-ink);
+  font-family: var(--spec-sans);
+}
+
+.content main section p {
+  max-width: 75ch;
+}
+
+.content main section ul,
+.content main section ol {
+  max-width: 75ch;
+}
+
+/* Pipeline SVG container ----------------------------------------------- */
+.content main .pipeline {
+  margin: 20px 0;
+  padding: 18px;
+  background: var(--spec-panel);
+  border: 1px solid var(--spec-rule);
+  border-radius: 10px;
+  overflow-x: auto;
+}
+
+.content main .pipeline img,
+.content main .pipeline svg {
+  display: block;
+  width: 100%;
+  min-width: 720px;
+  height: auto;
+}
+
+.content main .pipeline-caption {
+  font-size: 12px;
+  color: var(--spec-ink-faint);
+  margin-top: 8px;
+  font-family: var(--spec-mono);
+}
+
+/* Audience cards -------------------------------------------------------- */
+.content main .audience-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.content main .audience {
+  background: var(--spec-panel);
+  border: 1px solid var(--spec-rule);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.content main .audience .who {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+
+.content main .audience .path {
+  font-family: var(--spec-mono);
+  font-size: 12px;
+  color: var(--spec-ink-dim);
+  line-height: 1.7;
+}
+
+.content main .audience .path a {
+  background: var(--spec-accent-soft);
+  color: var(--spec-accent);
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.content main .audience .path a:hover {
+  text-decoration: underline;
+}
+
+/* Decision cards (D1..D8 palette) --------------- */
+.content main .decisions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+  margin: 18px 0;
+}
+
+.content main .decision {
+  background: var(--spec-panel);
+  border: 1px solid var(--spec-rule);
+  border-radius: 10px;
+  padding: 16px 18px;
+  position: relative;
+  transition: border-color 0.15s;
+}
+
+.content main .decision:hover {
+  border-color: var(--spec-rule-strong);
+}
+
+.content main .decision .tag {
+  display: inline-block;
+  font-family: var(--spec-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: white;
+  margin-bottom: 8px;
+}
+
+.content main .decision[data-d="D1"] .tag { background: var(--spec-behaviour); }
+.content main .decision[data-d="D2"] .tag { background: var(--spec-documentation); }
+.content main .decision[data-d="D3"] .tag { background: var(--spec-documentation); }
+.content main .decision[data-d="D4"] .tag { background: var(--spec-ok); }
+.content main .decision[data-d="D5"] .tag { background: var(--spec-ink-dim); }
+.content main .decision[data-d="D6"] .tag { background: var(--spec-ink-dim); }
+.content main .decision[data-d="D7"] .tag { background: var(--spec-intent); }
+.content main .decision[data-d="D8"] .tag { background: var(--spec-ink-dim); }
+
+.content main .decision h4 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.content main .decision p {
+  margin: 0 0 8px;
+  font-size: 13.5px;
+  color: var(--spec-ink-dim);
+  line-height: 1.5;
+}
+
+.content main .decision .consequence {
+  font-size: 12px;
+  color: var(--spec-ink-faint);
+  padding-top: 8px;
+  border-top: 1px dashed var(--spec-rule);
+  font-family: var(--spec-mono);
+  line-height: 1.5;
+}
+
+.content main .decision .consequence strong {
+  color: var(--spec-ink-dim);
+  font-weight: 600;
+}
+
+/* Table restyle -------------------------------------------------------- */
+.content main table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+  font-size: 14px;
+}
+
+.content main thead th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--spec-ink-dim);
+  padding: 8px 10px;
+  border-bottom: 2px solid var(--spec-rule-strong);
+  background: var(--spec-panel-2);
+}
+
+.content main tbody td {
+  padding: 10px;
+  border-bottom: 1px solid var(--spec-rule);
+  vertical-align: top;
+}
+
+.content main tbody tr:hover {
+  background: var(--spec-panel);
+}
+
+.content main td code {
+  font-size: 12.5px;
+}
+
+/* Acceptance matrix ---------------------------------------------------- */
+.content main .matrix {
+  overflow-x: auto;
+  margin: 16px 0;
+  background: var(--spec-panel);
+  border: 1px solid var(--spec-rule);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.content main .matrix table {
+  font-size: 13px;
+}
+
+.content main .matrix .dot {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--spec-accent);
+  color: white;
+  text-align: center;
+  line-height: 18px;
+  font-family: var(--spec-mono);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.content main .matrix .blocker .dot {
+  background: var(--spec-danger);
+}
+
+.content main .matrix .scenario-id {
+  font-family: var(--spec-mono);
+  font-size: 12px;
+  color: var(--spec-accent);
+  font-weight: 600;
+}
+
+.content main .matrix .blocker-flag {
+  font-size: 10px;
+  font-family: var(--spec-mono);
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--spec-danger-soft);
+  color: var(--spec-danger);
+  border: 1px solid var(--spec-danger);
+  margin-left: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Alternatives accordion ---------------------------------------------- */
+.content main details.alt {
+  background: var(--spec-panel);
+  border: 1px solid var(--spec-rule);
+  border-radius: 8px;
+  padding: 0;
+  margin: 8px 0;
+}
+
+.content main details.alt summary {
+  padding: 12px 16px;
+  cursor: pointer;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  list-style: none;
+}
+
+.content main details.alt summary::-webkit-details-marker {
+  display: none;
+}
+
+.content main details.alt summary::before {
+  content: "▸";
+  font-family: var(--spec-mono);
+  color: var(--spec-ink-faint);
+  transition: transform 0.15s;
+}
+
+.content main details.alt[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.content main details.alt .alt-tag {
+  font-family: var(--spec-mono);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--spec-danger-soft);
+  color: var(--spec-danger);
+  margin-left: auto;
+}
+
+.content main details.alt[data-status="partial"] .alt-tag {
+  background: var(--spec-warn-soft);
+  color: var(--spec-warn);
+}
+
+.content main details.alt .body {
+  padding: 0 16px 14px;
+  color: var(--spec-ink-dim);
+  font-size: 14px;
+}
+
+/* Question cards ------------------------------------------------------- */
+.content main .questions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.content main .question {
+  background: var(--spec-panel);
+  border: 1px solid var(--spec-rule);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.content main .question .qnum {
+  font-family: var(--spec-mono);
+  font-size: 11px;
+  color: var(--spec-ink-faint);
+  display: inline-block;
+  margin-bottom: 6px;
+}
+
+.content main .question .q {
+  font-weight: 600;
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.content main .question .answer {
+  font-size: 13px;
+  color: var(--spec-ink-dim);
+  border-top: 1px dashed var(--spec-rule);
+  padding-top: 8px;
+  margin-top: 8px;
+}
+
+.content main .question .answer .prefix {
+  font-family: var(--spec-mono);
+  font-size: 11px;
+  color: var(--spec-ok);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  display: inline-block;
+  margin-right: 6px;
+}
+
+/* Wave timeline wrapper ----------------------------------------------- */
+.content main .waves {
+  background: var(--spec-panel);
+  border: 1px solid var(--spec-rule);
+  border-radius: 10px;
+  padding: 20px;
+  margin: 16px 0;
+  overflow-x: auto;
+}
+
+/* Callouts ------------------------------------------------------------ */
+.content main .callout {
+  background: var(--spec-accent-soft);
+  border-left: 3px solid var(--spec-accent);
+  padding: 12px 16px;
+  margin: 14px 0;
+  border-radius: 0 6px 6px 0;
+  font-size: 14px;
+}
+
+.content main .callout strong {
+  color: var(--spec-accent);
+}
+
+.content main .callout[data-variant="gate"] {
+  background: var(--spec-accent-soft);
+  border-left-color: var(--spec-accent);
+}
+
+.content main .callout[data-variant="gate"] strong {
+  color: var(--spec-accent);
+}
+
+.content main .callout[data-variant="gotcha"] {
+  background: var(--spec-warn-soft);
+  border-left-color: var(--spec-warn);
+}
+
+.content main .callout[data-variant="gotcha"] strong {
+  color: var(--spec-warn);
+}
+
+.content main .callout[data-variant="success"] {
+  background: var(--spec-ok-soft);
+  border-left-color: var(--spec-ok);
+}
+
+.content main .callout[data-variant="success"] strong {
+  color: var(--spec-ok);
+}
+
+.content main .callout[data-variant="unchanged"] {
+  background: var(--spec-panel-2);
+  border-left-color: var(--spec-rule-strong);
+}
+
+.content main .callout[data-variant="unchanged"] strong {
+  color: var(--spec-ink-dim);
+}
+
+.content main .callout[data-variant=""] strong,
+.content main .callout:not([data-variant]) strong {
+  color: var(--spec-accent);
+}
+
+/* Tutorial steps ------------------------------------------------------ */
+.content main .tutorial-step {
+  background: var(--spec-panel);
+  border: 1px solid var(--spec-rule);
+  border-radius: 10px;
+  padding: 20px 24px;
+  margin: 20px 0;
+}
+
+.content main .tutorial-step .step-label {
+  font-family: var(--spec-mono);
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--spec-accent);
+  line-height: 1;
+  margin-bottom: 8px;
+  letter-spacing: -0.02em;
+}
+
+.content main .tutorial-step .step-title {
+  font-family: var(--spec-serif);
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 12px;
+  color: var(--spec-ink);
+}
+
+.content main .tutorial-step > p:first-of-type {
+  margin-top: 0;
+}
+
+/* Prereq / when blocks ------------------------------------------------ */
+.content main .prereq,
+.content main .when {
+  font-size: 14px;
+  line-height: 1.55;
+  margin: 16px 0;
+  color: var(--spec-ink-dim);
+}
+
+.content main .prereq {
+  background: var(--spec-panel-2);
+  border: 1px solid var(--spec-rule);
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+
+.content main .prereq strong,
+.content main .when strong {
+  font-family: var(--spec-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--spec-ink-faint);
+  display: block;
+  margin-bottom: 6px;
+}
+
+.content main .when {
+  border-left: 2px solid var(--spec-rule-strong);
+  padding-left: 14px;
+}
+
+/* Workflow rhythm cards ----------------------------------------------- */
+.content main .rhythm {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin: 20px 0;
+}
+
+.content main .rhythm-step {
+  background: var(--spec-panel);
+  border: 1px solid var(--spec-rule);
+  border-radius: 10px;
+  padding: 16px 18px;
+  transition: border-color 0.15s;
+}
+
+.content main .rhythm-step:hover {
+  border-color: var(--spec-rule-strong);
+}
+
+.content main .rhythm-num {
+  font-family: var(--spec-mono);
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--spec-accent);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.content main .rhythm-label {
+  font-family: var(--spec-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--spec-ink-faint);
+  margin-bottom: 6px;
+}
+
+.content main .rhythm-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--spec-ink);
+}
+
+.content main .rhythm-step p {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--spec-ink-dim);
+  line-height: 1.5;
+}
+
+/* Card grid (section landing pages) ----------------------------------- */
+.content main .card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+  margin: 20px 0;
+}
+
+.content main a.card {
+  display: block;
+  background: var(--spec-panel);
+  border: 1px solid var(--spec-rule);
+  border-radius: 10px;
+  padding: 16px 18px;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.content main a.card:hover {
+  border-color: var(--spec-accent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.content main a.card .card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.content main a.card .card-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--spec-ink);
+}
+
+.content main a.card .card-time {
+  font-family: var(--spec-mono);
+  font-size: 11px;
+  color: var(--spec-ink-faint);
+  white-space: nowrap;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--spec-panel-2);
+  border: 1px solid var(--spec-rule);
+}
+
+.content main a.card .card-body {
+  font-size: 13.5px;
+  color: var(--spec-ink-dim);
+  line-height: 1.5;
+}
+
+.content main a.card .card-body p {
+  margin: 0;
+}
+
+/* Synopsis (reference pages) ------------------------------------------ */
+.content main .synopsis {
+  background: var(--spec-panel-2);
+  border-left: 3px solid var(--spec-accent);
+  padding: 12px 16px;
+  margin: 0 0 20px;
+  border-radius: 0 6px 6px 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--spec-ink-dim);
+}
+
+.content main .synopsis strong {
+  font-family: var(--spec-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--spec-accent);
+  margin-right: 6px;
+}
+
+/* See also footer block ----------------------------------------------- */
+.content main .see-also {
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid var(--spec-rule);
+  font-size: 14px;
+}
+
+.content main .see-also strong {
+  font-family: var(--spec-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--spec-ink-faint);
+  display: block;
+  margin-bottom: 8px;
+}
+
+.content main .see-also ul {
+  margin: 0;
+  padding-left: 1.2em;
+}
+
+.content main .see-also li {
+  margin: 4px 0;
+}
+
+/* Platform stack strip ------------------------------------------------ */
+.content main .platform {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin: 20px 0;
+}
+
+.content main .platform-product {
+  background: var(--spec-panel);
+  border: 1px solid var(--spec-rule);
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+
+.content main .platform-product[data-active="true"] {
+  border-color: var(--spec-accent);
+  box-shadow: inset 0 0 0 1px var(--spec-accent-soft);
+}
+
+.content main .platform-name {
+  font-weight: 600;
+  font-size: 15px;
+  margin-bottom: 2px;
+  color: var(--spec-ink);
+}
+
+.content main .platform-role {
+  font-family: var(--spec-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--spec-ink-faint);
+  margin-bottom: 8px;
+}
+
+.content main .platform-body {
+  font-size: 13.5px;
+  color: var(--spec-ink-dim);
+  line-height: 1.5;
+}
+
+.content main .platform-body p {
+  margin: 0;
+}
+
+/* Status pills inline ------------------------------------------------- */
+.content main .pill {
+  display: inline-block;
+  font-family: var(--spec-mono);
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid;
+  vertical-align: 1px;
+}
+
+.content main .pill.agreed {
+  color: var(--spec-ok);
+  border-color: var(--spec-ok);
+  background: var(--spec-ok-soft);
+}
+
+.content main .pill.divergence {
+  color: var(--spec-warn);
+  border-color: var(--spec-warn);
+  background: var(--spec-warn-soft);
+}
+
+.content main .pill.conflict {
+  color: var(--spec-danger);
+  border-color: var(--spec-danger);
+  background: var(--spec-danger-soft);
+}
+
+/* Authority widget ------------------------------------------- */
+.content main .authority-widget {
+  background: var(--spec-panel);
+  border: 1px solid var(--spec-rule);
+  border-radius: 10px;
+  padding: 20px;
+  margin: 16px 0;
+}
+
+.content main .authority-widget h4 {
+  margin-top: 0;
+}
+
+.content main .auth-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.content main .auth-step {
+  display: grid;
+  grid-template-columns: 36px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid var(--spec-rule);
+  background: var(--spec-panel-2);
+  border-radius: 8px;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.content main .auth-step:hover {
+  border-color: var(--spec-accent);
+}
+
+.content main .auth-step.active {
+  border-color: var(--spec-ok);
+  background: var(--spec-ok-soft);
+}
+
+.content main .auth-step.skipped {
+  opacity: 0.4;
+}
+
+.content main .auth-step .n {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--spec-panel);
+  border: 1px solid var(--spec-rule-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--spec-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--spec-ink);
+}
+
+.content main .auth-step.active .n {
+  background: var(--spec-ok);
+  color: white;
+  border-color: var(--spec-ok);
+}
+
+.content main .auth-step .label {
+  font-size: 14px;
+}
+
+.content main .auth-step .label strong {
+  font-weight: 600;
+}
+
+.content main .auth-step .label .desc {
+  color: var(--spec-ink-dim);
+  font-size: 13px;
+}
+
+.content main .auth-step .verdict {
+  font-family: var(--spec-mono);
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--spec-panel);
+  color: var(--spec-ink-faint);
+  border: 1px solid var(--spec-rule);
+}
+
+.content main .auth-step.active .verdict {
+  background: var(--spec-ok);
+  color: white;
+  border-color: var(--spec-ok);
+}
+
+.content main .auth-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.content main .auth-controls button {
+  font-family: var(--spec-mono);
+  font-size: 12px;
+  background: var(--spec-panel-2);
+  border: 1px solid var(--spec-rule);
+  color: var(--spec-ink);
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.content main .auth-controls button:hover {
+  border-color: var(--spec-accent);
+}
+
+.content main .auth-controls button.on {
+  background: var(--spec-accent);
+  color: white;
+  border-color: var(--spec-accent);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Chrome restyle — mdbook's existing menu-bar is repurposed to host the
+ * project breadcrumb (crumb + title-mini) and a status-pill slot.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+#mdbook-menu-bar.menu-bar {
+  border-bottom: 1px solid var(--spec-rule);
+}
+
+#mdbook-menu-bar .menu-title {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 12px;
+  font-weight: normal;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+#mdbook-menu-bar .menu-title .crumb {
+  font-family: var(--spec-mono);
+  font-size: 12px;
+  color: var(--spec-ink-faint);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+#mdbook-menu-bar .menu-title .title-mini {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--spec-ink);
+}
+
+#mdbook-menu-bar .menu-title .title-mini::before {
+  content: "·";
+  margin-right: 8px;
+  color: var(--spec-ink-faint);
+  font-weight: normal;
+}
+
+/* Status pill chrome slot (authors drop a <span class="status-pill"> into
+ * a hero or top-of-page raw block; this styles it consistently). */
+.content main .status-pill,
+#mdbook-menu-bar .status-pill {
+  display: inline-block;
+  font-family: var(--spec-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--spec-warn-soft);
+  color: var(--spec-warn);
+  border: 1px solid var(--spec-warn);
+  text-transform: uppercase;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Sidebar heading navigation — mdBook 0.5 "On this page" block in the
+ * left sidebar while reading a chapter.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+.sidebar .on-this-page {
+  margin-top: 0.5em;
+}
+
+.sidebar .on-this-page ol {
+  font-family: var(--spec-sans);
+}
+
+.sidebar .on-this-page a {
+  color: var(--spec-ink-dim);
+  font-size: 0.88em;
+  line-height: 1.45;
+}
+
+.sidebar .on-this-page a:hover {
+  color: var(--spec-ink);
+}
+
+.sidebar .on-this-page a.current-header {
+  color: var(--spec-accent);
+  font-weight: 600;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Native admonitions.
+ * mdBook 0.5 renders `> [!KIND]` as blockquote.blockquote-tag-* .
+ * ──────────────────────────────────────────────────────────────────────── */
+
+.content main blockquote.blockquote-tag {
+  margin: 1.25em 0;
+  padding: 12px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--spec-rule);
+  border-inline-start-width: 4px;
+  background: var(--spec-panel);
+  font-family: var(--spec-sans);
+}
+
+.content main blockquote.blockquote-tag p {
+  margin: 0.4em 0;
+}
+
+.content main blockquote.blockquote-tag .blockquote-tag-title {
+  font-family: var(--spec-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-top: 0;
+  margin-bottom: 0.6em;
+}
+
+.content main blockquote.blockquote-tag-note {
+  border-inline-start-color: var(--spec-accent);
+  background: var(--spec-accent-soft);
+}
+
+.content main blockquote.blockquote-tag-tip {
+  border-inline-start-color: var(--spec-ok);
+  background: var(--spec-ok-soft);
+}
+
+.content main blockquote.blockquote-tag-important {
+  border-inline-start-color: var(--spec-warn);
+  background: var(--spec-warn-soft);
+}
+
+.content main blockquote.blockquote-tag-warning,
+.content main blockquote.blockquote-tag-caution {
+  border-inline-start-color: var(--spec-danger);
+  background: var(--spec-danger-soft);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Code / pre restyle — composed with mdbook's highlight.css so we only
+ * touch the chrome (border, padding, font), not the syntax-highlight palette.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+.content main pre {
+  background: var(--spec-panel-2);
+  border: 1px solid var(--spec-rule);
+  border-radius: 6px;
+  padding: 14px 16px;
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 12px 0;
+}
+
+.content main pre > code {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+}
+
+.content main :not(pre) > code {
+  background: var(--spec-panel-2);
+  padding: 0.05em 0.35em;
+  border-radius: 3px;
+  font-size: 0.88em;
+  color: var(--spec-ink);
+}
+
+/* Site footer --------------------------------------------------------- */
+.spec-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 16px;
+  padding: 20px 24px;
+  margin-top: 24px;
+  border-top: 1px solid var(--spec-rule);
+  font-family: var(--spec-mono);
+  font-size: 12px;
+  color: var(--spec-ink-faint);
+  background: var(--spec-bg);
+}
+
+.spec-footer a {
+  color: var(--spec-accent);
+  text-decoration: none;
+}
+
+.spec-footer a:hover {
+  text-decoration: underline;
+}
+
+.spec-footer .sep {
+  color: var(--spec-rule-strong);
+  user-select: none;
+}
+
+#mdbook-menu-bar .menu-title .brand {
+  font-family: var(--spec-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--spec-ink-faint);
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+#mdbook-menu-bar .menu-title .brand:hover {
+  color: var(--spec-accent);
+}
+
+#mdbook-menu-bar .menu-title .brand::after {
+  content: "·";
+  margin-left: 12px;
+  margin-right: 4px;
+  color: var(--spec-ink-faint);
+  font-weight: normal;
+}
+
+/* Augentic-derived component pass -------------------------------------- */
+html.light,
+html.rust {
+  --spec-bg: #ffffff;
+  --spec-surface: #ffffff;
+  --spec-panel: #ffffff;
+  --spec-panel-2: #f1f6ff;
+  --spec-panel-3: #e3eeff;
+  --spec-ink: #06123a;
+  --spec-ink-dim: #30446f;
+  --spec-ink-muted: #5b6f99;
+  --spec-ink-faint: #8ca0c4;
+  --spec-rule: #d7e2f5;
+  --spec-rule-strong: #b9cbee;
+  --spec-accent: #005bea;
+  --spec-accent-soft: #eaf2ff;
+  --spec-teal: #0078ff;
+  --spec-teal-soft: #eaf2ff;
+  --spec-gold: #00a7ff;
+  --spec-gold-soft: #dff3ff;
+  --spec-shadow: rgba(6, 18, 58, 0.1);
+  --spec-focus: rgba(0, 91, 234, 0.18);
+  --spec-behaviour: #5546b8;
+  --spec-documentation: #005bea;
+  --spec-intent: #006db0;
+  --spec-ok: #28744d;
+  --spec-ok-soft: #e6f3ec;
+  --spec-warn: #af6b00;
+  --spec-warn-soft: #fff1d8;
+  --spec-danger: #a2463e;
+  --spec-danger-soft: #f4dfdc;
+}
+
+html.coal,
+html.navy,
+html.ayu {
+  --spec-bg: #0d1218;
+  --spec-surface: #111822;
+  --spec-panel: #121b24;
+  --spec-panel-2: #182330;
+  --spec-panel-3: #202d39;
+  --spec-ink: #e7ece7;
+  --spec-ink-dim: #b8c4bf;
+  --spec-ink-muted: #95a39e;
+  --spec-ink-faint: #74847f;
+  --spec-rule: #26343f;
+  --spec-rule-strong: #384b57;
+  --spec-accent: #7fd6ce;
+  --spec-accent-soft: #162b2d;
+  --spec-teal: #7fd6ce;
+  --spec-teal-soft: #162b2d;
+  --spec-gold: #f1d58a;
+  --spec-gold-soft: #352d18;
+  --spec-shadow: rgba(0, 0, 0, 0.34);
+  --spec-focus: rgba(127, 214, 206, 0.22);
+  --spec-behaviour: #a99bf1;
+  --spec-documentation: #7fd6ce;
+  --spec-intent: #f1d58a;
+  --spec-ok: #73c990;
+  --spec-ok-soft: #172a20;
+  --spec-warn: #d7a657;
+  --spec-warn-soft: #302512;
+  --spec-danger: #e58a7d;
+  --spec-danger-soft: #321d1b;
+}
+
+.content {
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--spec-gold) 12%, transparent), transparent 30rem),
+    radial-gradient(circle at top right, color-mix(in srgb, var(--spec-teal) 10%, transparent), transparent 28rem);
+}
+
+.content main {
+  color: var(--spec-ink);
+  padding-block: 34px 26px;
+}
+
+.content main > h1:first-child,
+.content main .header h1 {
+  color: var(--spec-ink);
+  font-family: var(--spec-sans);
+  font-size: clamp(32px, 5vw, 56px);
+  letter-spacing: -0.045em;
+  line-height: 0.98;
+}
+
+.content main h1,
+.content main h2,
+.content main h3 {
+  color: var(--spec-ink);
+  letter-spacing: -0.03em;
+}
+
+.content main h2 {
+  font-size: clamp(24px, 3vw, 34px);
+  margin-top: 2.4em;
+}
+
+.content main h2::after {
+  content: "";
+  display: block;
+  width: 46px;
+  height: 2px;
+  margin-top: 10px;
+  background: linear-gradient(90deg, var(--spec-gold), var(--spec-teal));
+  border-radius: 999px;
+}
+
+.content main p,
+.content main li {
+  color: var(--spec-ink-dim);
+  font-size: 1.02em;
+  line-height: 1.68;
+}
+
+.content main strong {
+  color: var(--spec-ink);
+}
+
+.content main a {
+  text-underline-offset: 0.18em;
+}
+
+.content main a:hover {
+  color: var(--spec-teal);
+}
+
+.content main .hero {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--spec-rule);
+  border-radius: 28px;
+  padding: clamp(34px, 6vw, 72px);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--spec-panel) 92%, transparent), color-mix(in srgb, var(--spec-panel-2) 72%, transparent)),
+    radial-gradient(circle at top right, color-mix(in srgb, var(--spec-teal) 18%, transparent), transparent 24rem);
+  box-shadow: 0 24px 70px var(--spec-shadow);
+}
+
+.content main .hero::after {
+  content: "";
+  position: absolute;
+  inset: auto 32px 28px auto;
+  width: 90px;
+  height: 90px;
+  border: 1px solid color-mix(in srgb, var(--spec-gold) 55%, transparent);
+  border-radius: 50%;
+  opacity: 0.55;
+}
+
+.content main .hero .eyebrow {
+  color: var(--spec-gold);
+  font-weight: 750;
+  letter-spacing: 0.16em;
+}
+
+.content main .hero h1,
+.content main .hero .hero-title {
+  max-width: 12ch;
+  color: var(--spec-ink);
+  font-family: var(--spec-sans);
+  font-size: clamp(42px, 7vw, 78px);
+  font-weight: 760;
+  line-height: 0.95;
+  letter-spacing: -0.06em;
+}
+
+.content main .hero > p:first-of-type,
+.content main .hero .lede {
+  max-width: 66ch;
+  color: var(--spec-ink-dim);
+  font-size: clamp(17px, 2vw, 20px);
+  line-height: 1.62;
+}
+
+.content main .meta-chip,
+.content main .pill,
+.content main .status-pill {
+  background: color-mix(in srgb, var(--spec-panel-2) 82%, transparent);
+  border-color: var(--spec-rule);
+  color: var(--spec-ink-muted);
+}
+
+.content main .audience,
+.content main .decision,
+.content main .question,
+.content main .tutorial-step,
+.content main .rhythm-step,
+.content main a.card,
+.content main .platform-product,
+.content main .authority-widget {
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--spec-panel) 95%, transparent), color-mix(in srgb, var(--spec-panel-2) 58%, transparent));
+  border: 1px solid var(--spec-rule);
+  box-shadow: 0 12px 34px color-mix(in srgb, var(--spec-shadow) 65%, transparent);
+}
+
+.content main .audience,
+.content main .decision,
+.content main .question,
+.content main .platform-product,
+.content main a.card {
+  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.content main .audience:hover,
+.content main .decision:hover,
+.content main .question:hover,
+.content main .platform-product:hover,
+.content main a.card:hover {
+  border-color: color-mix(in srgb, var(--spec-teal) 58%, var(--spec-rule));
+  box-shadow: 0 18px 46px var(--spec-shadow);
+  transform: translateY(-1px);
+}
+
+.content main .audience .who,
+.content main a.card .card-title,
+.content main .platform-name,
+.content main .rhythm-title {
+  color: var(--spec-ink);
+  font-weight: 720;
+}
+
+.content main .audience .path,
+.content main a.card .card-body,
+.content main .platform-body,
+.content main .rhythm-step p {
+  color: var(--spec-ink-dim);
+}
+
+.content main .rhythm-step {
+  padding: 20px;
+}
+
+.content main .rhythm-num {
+  color: var(--spec-gold);
+  font-size: 34px;
+}
+
+.content main .rhythm-label,
+.content main .platform-role,
+.content main .synopsis strong,
+.content main .see-also strong {
+  color: var(--spec-gold);
+  letter-spacing: 0.12em;
+}
+
+.content main .callout,
+.content main .synopsis,
+.content main blockquote.blockquote-tag {
+  border-radius: 14px;
+  border: 1px solid var(--spec-rule);
+  border-left: 4px solid var(--spec-teal);
+  background: color-mix(in srgb, var(--spec-teal-soft) 82%, var(--spec-panel));
+  color: var(--spec-ink-dim);
+}
+
+.content main table {
+  border: 1px solid var(--spec-rule);
+  border-radius: 16px;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--spec-shadow) 46%, transparent);
+}
+
+.content main thead th {
+  background: var(--spec-panel-2);
+  color: var(--spec-ink);
+}
+
+.content main tbody td {
+  background: color-mix(in srgb, var(--spec-panel) 74%, transparent);
+}
+
+.content main tbody tr:hover td {
+  background: var(--spec-panel-2);
+}
+
+.content main pre {
+  border-radius: 16px;
+  border: 1px solid var(--spec-rule);
+  background:
+    linear-gradient(180deg, var(--spec-panel-2), color-mix(in srgb, var(--spec-panel-2) 72%, #000));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 12px 34px color-mix(in srgb, var(--spec-shadow) 50%, transparent);
+}
+
+.content main :not(pre) > code {
+  border: 1px solid color-mix(in srgb, var(--spec-rule) 80%, transparent);
+}
+
+.content main .proof-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 24px 0;
+}
+
+.content main .proof-item {
+  border: 1px solid var(--spec-rule);
+  border-radius: 18px;
+  padding: 18px 20px;
+  background: var(--spec-panel);
+}
+
+.content main .proof-kicker {
+  color: var(--spec-gold);
+  font-family: var(--spec-mono);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.content main .proof-value {
+  color: var(--spec-ink);
+  font-size: 28px;
+  font-weight: 760;
+  letter-spacing: -0.04em;
+  line-height: 1.1;
+  margin-top: 8px;
+}
+
+.content main .proof-copy {
+  color: var(--spec-ink-dim);
+  font-size: 13.5px;
+  line-height: 1.5;
+  margin-top: 8px;
+}
+
+#mdbook-menu-bar .menu-title .brand {
+  color: var(--spec-ink);
+  letter-spacing: 0.12em;
+}
+
+#mdbook-menu-bar .menu-title .brand::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--spec-gold), var(--spec-teal));
+  box-shadow: 0 0 18px var(--spec-focus);
+}
+
+#mdbook-menu-bar .menu-title .brand::after,
+#mdbook-menu-bar .menu-title .title-mini::before {
+  content: "";
+  display: inline-block;
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  vertical-align: middle;
+  background: var(--spec-rule);
+}
+
+#mdbook-menu-bar .menu-title .crumb {
+  color: var(--spec-ink-muted);
+  letter-spacing: 0.08em;
+}
+
+#mdbook-menu-bar .menu-title .title-mini {
+  color: var(--spec-ink);
+  font-weight: 650;
+}
+
+@media only screen and (max-width: 720px) {
+  .content main {
+    padding-block-start: 22px;
+  }
+
+  .content main .hero {
+    border-radius: 22px;
+    padding: 30px 24px;
+  }
+
+  .content main .hero::after {
+    display: none;
+  }
+}
