@@ -772,15 +772,21 @@ html:not(.js) .sidebar-resize-handle {
 }
 
 body {
-    font-size: 1.75rem;
+    font-size: 1.65rem;
 }
 
-/* Slightly tighter sidebar typography */
-.chapter li.chapter-item {
+/* Slightly tighter sidebar typography. Size the list root, not the items:
+ * nested TOC levels live inside their parent li, so an em size on the item
+ * compounds per nesting level and deep entries shrink. */
+.chapter {
     font-size: 0.94em;
+}
+
+.chapter li.chapter-item {
+    font-size: 1em;
     line-height: 1.4;
     margin: 0;
-    padding-block: 4px;
+    padding-block: 2px;
 }
 
 .chapter li.part-title {
@@ -891,13 +897,13 @@ body {
 
 .chapter li.chapter-item {
     margin: 0;
-    padding-block: 3px;
+    padding-block: 2px;
 }
 
 .chapter li a {
     display: block;
     border-radius: 8px;
-    padding: 7px 10px;
+    padding: 4px 10px;
     color: var(--sidebar-fg);
     transition: background 0.16s ease, color 0.16s ease;
 }
@@ -918,7 +924,7 @@ body {
 .chapter li.part-title {
     color: color-mix(in srgb, var(--sidebar-fg) 72%, var(--sidebar-bg));
     font-family: var(--spec-mono);
-    font-size: 0.72em;
+    font-size: 0.76em;
     font-weight: 700;
     letter-spacing: 0.13em;
     margin: 1.8em 0 0.45em;
