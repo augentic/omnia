@@ -14,11 +14,26 @@ use super::protocol::handle_message;
 /// It matches every path (so it works behind any host route prefix): a `POST`
 /// carries one JSON-RPC message, a notification is answered with `202 Accepted`
 /// and no body, and any other method gets `405 Method Not Allowed`.
-pub fn router(server: Arc<dyn McpServer>) -> Router {
+pub fn router(server: impl McpServer) -> Router {
+    let server: Arc<dyn McpServer> = Arc::new(server);
     Router::new().fallback(move |method: Method, body: String| {
         let server = Arc::clone(&server);
         async move { respond(server.as_ref(), &method, &body) }
     })
+}
+
+/// Serve one `wasi:http` request with `server` as a stateless MCP Streamable
+/// HTTP endpoint — the whole body of a guest's `handle` export.
+///
+/// # Errors
+///
+/// Returns a [`wasip3::http::types::ErrorCode`] when the request cannot be
+/// served.
+#[cfg(target_arch = "wasm32")]
+pub async fn serve(
+    server: impl McpServer, request: wasip3::http::types::Request,
+) -> Result<wasip3::http::types::Response, wasip3::http::types::ErrorCode> {
+    omnia_wasi_http::serve(router(server), request).await
 }
 
 fn respond(server: &dyn McpServer, method: &Method, body: &str) -> Response {
@@ -33,8 +48,6 @@ fn respond(server: &dyn McpServer, method: &Method, body: &str) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use axum::body::{Body, to_bytes};
     use axum::http::{Method, Request, StatusCode, header};
     use serde_json::{Value, json};
@@ -56,7 +69,7 @@ mod tests {
 
         fn call_tool(&self, name: &str, arguments: &Value) -> Result<CallToolResult, McpError> {
             if name != "echo" {
-                return Err(McpError::method_not_found(name));
+                return Err(McpError::unknown_tool(name));
             }
             let text = arguments.get("text").and_then(Value::as_str).unwrap_or_default();
             Ok(CallToolResult::text(text))
@@ -71,8 +84,7 @@ mod tests {
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(body.to_owned()))
             .expect("build request");
-        let response =
-            router(Arc::new(Echo)).oneshot(request).await.expect("router serves the request");
+        let response = router(Echo).oneshot(request).await.expect("router serves the request");
         let status = response.status();
         let bytes = to_bytes(response.into_body(), usize::MAX).await.expect("collect body");
         (status, String::from_utf8(bytes.to_vec()).expect("utf-8 body"))
@@ -106,8 +118,7 @@ mod tests {
             .uri("/mcp/docs")
             .body(Body::empty())
             .expect("build request");
-        let response =
-            router(Arc::new(Echo)).oneshot(request).await.expect("router serves the request");
+        let response = router(Echo).oneshot(request).await.expect("router serves the request");
         assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
     }
 }

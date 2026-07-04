@@ -1,17 +1,16 @@
 //! # MCP example — docs guest
 //!
 //! Serves a few compiled-in documents to agent backends as a stateless MCP
-//! server: it implements [`omnia_guest::mcp::McpServer`] and serves
-//! [`omnia_guest::mcp::router`] from its `wasi:http` handler. `omnia.toml` routes
+//! server: it implements [`omnia_guest::mcp::McpServer`] and calls
+//! [`omnia_guest::mcp::serve`] from its `wasi:http` handler. `omnia.toml` routes
 //! `/mcp/docs` here.
 
 #![cfg(target_arch = "wasm32")]
 
-use std::sync::Arc;
-
 use omnia_guest::mcp::{
     self, CallToolResult, Implementation, McpError, McpServer, Resource, ResourceContents, Tool,
 };
+use serde::Deserialize;
 use serde_json::{Value, json};
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
@@ -45,12 +44,17 @@ const DOCS: &[(&str, &str, &str)] = &[
 
 impl Guest for HttpGuest {
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
-        omnia_wasi_http::serve(mcp::router(Arc::new(Docs)), request).await
+        mcp::serve(Docs, request).await
     }
 }
 
 fn find_doc(name: &str) -> Option<&'static (&'static str, &'static str, &'static str)> {
     DOCS.iter().find(|(doc_name, ..)| *doc_name == name)
+}
+
+#[derive(Deserialize)]
+struct ReadDocArgs {
+    name: String,
 }
 
 struct Docs;
@@ -95,15 +99,13 @@ impl McpServer for Docs {
                 Ok(CallToolResult::text(listing))
             }
             "read_doc" => {
-                let Some(doc) = arguments.get("name").and_then(Value::as_str) else {
-                    return Err(McpError::invalid_params("missing `name`"));
-                };
-                find_doc(doc).map_or_else(
+                let ReadDocArgs { name: doc } = mcp::arguments(arguments)?;
+                find_doc(&doc).map_or_else(
                     || Ok(CallToolResult::error(format!("no document named `{doc}`"))),
                     |(.., body)| Ok(CallToolResult::text(*body)),
                 )
             }
-            other => Err(McpError::method_not_found(format!("unknown tool `{other}`"))),
+            other => Err(McpError::unknown_tool(other)),
         }
     }
 
@@ -123,7 +125,7 @@ impl McpServer for Docs {
     fn read_resource(&self, uri: &str) -> Result<ResourceContents, McpError> {
         let name = uri.strip_prefix("doc://").unwrap_or(uri);
         find_doc(name).map_or_else(
-            || Err(McpError::invalid_params(format!("unknown resource `{uri}`"))),
+            || Err(McpError::resource_not_found(uri)),
             |(.., body)| Ok(ResourceContents::text(uri, "text/markdown", *body)),
         )
     }
