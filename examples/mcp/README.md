@@ -9,7 +9,7 @@ An end-to-end example using `WasiModel` and `cursor-agent` is available in the `
 ```bash
 cargo build --example mcp-wasm --target wasm32-wasip2
 
-export RUST_LOG=info
+export RUST_LOG=info,opentelemetry_sdk=off
 cargo run --example mcp -- run ./target/wasm32-wasip2/debug/examples/mcp_wasm.wasm
 ```
 

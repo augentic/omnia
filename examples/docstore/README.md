@@ -9,7 +9,7 @@ Demonstrates `wasi:docstore` using the default PoloDB backend with three GTFS-li
 cargo build --example docstore-wasm --target wasm32-wasip2
 
 # run the host
-export RUST_LOG="info,omnia_wasi_docstore=debug,omnia_wasi_http=debug"
+export RUST_LOG="info,opentelemetry_sdk=off,omnia_wasi_docstore=debug,omnia_wasi_http=debug"
 cargo run --example docstore -- run ./target/wasm32-wasip2/debug/examples/docstore_wasm.wasm
 ```
 

@@ -36,7 +36,7 @@ This emits `target/wasm32-wasip2/debug/examples/model_wasm.wasm` (the underscore
 Point `MODEL_REPLAY_DIR` at the checked-in fixtures and start the host:
 
 ```bash
-export RUST_LOG=info
+export RUST_LOG=info,opentelemetry_sdk=off
 MODEL_REPLAY_DIR=examples/model/fixtures \
   cargo run --example model -- run --config examples/model/omnia.toml
 ```

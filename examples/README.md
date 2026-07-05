@@ -13,7 +13,7 @@ Each example is comprised of a **Guest** and a **Runtime**:
 
 Navigate to any example directory and follow the instructions in its `README.md`.
 
-Host startup logs (`initializing runtime`, trigger servers listening, and so on) use `tracing` at the `info` level. Set `RUST_LOG=info` (or the value shown in each example's README) before running the host; without it the process stays quiet apart from Cargo's `Running …` line.
+Host startup logs (`initializing runtime`, trigger servers listening, and so on) use `tracing` at the `info` level. Set `RUST_LOG=info,opentelemetry_sdk=off` (or the value shown in each example's README) before running the host; without it the process stays quiet apart from Cargo's `Running …` line.
 
 Common examples include:
 - **`http`**: Basic HTTP server.
