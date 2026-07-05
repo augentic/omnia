@@ -8,7 +8,7 @@ use std::sync::Arc;
 use anyhow::{Context as _, Result, bail, ensure};
 use bytes::BytesMut;
 use tokio_util::codec::Encoder as _;
-use wasmtime::component::{Linker, Type, Val, types};
+use wasmtime::component::{Accessor, Linker, Type, Val, types};
 use wasmtime::{AsContextMut as _, Engine, StoreContextMut};
 use wasmtime_wasi::WasiView;
 use wrpc_transport::Invoke;
@@ -16,6 +16,7 @@ use wrpc_wasmtime::{ValEncoder, WrpcView, read_value};
 
 use super::handle::DispatchHandle;
 use super::transport::LinkTransport as _;
+use super::value::read_plain_value;
 use crate::deployment::LoadedGuest;
 
 /// Polyfill every host-mediated import named in the `link` allow-list union onto
@@ -24,6 +25,11 @@ use crate::deployment::LoadedGuest;
 /// Each interface is linked exactly once (the linker is shared, so the per-guest
 /// allow-lists are unioned). `wasi:*` imports are never touched here — they are
 /// host-satisfied — so only the manifest-declared interfaces are dispatched.
+///
+/// Registration matches the import's type-level asyncness: a plain `func` is
+/// polyfilled with `func_new_async` ([`send`]), an `async func` with
+/// `func_new_concurrent` ([`send_concurrent`]) — the sync-typed registration
+/// would fail the pre-instantiation asyncness typecheck.
 ///
 /// Runs *before* pre-instantiation, so an import that is neither host-satisfied
 /// nor allow-listed remains unresolved and fails fast at `instantiate_pre`.
@@ -53,12 +59,13 @@ where
                 bail!("link target `{name}` (imported by guest `{id}`) is not an interface");
             };
 
-            // Snapshot the interface's function types before mutably borrowing
-            // the linker.
-            let funcs: Vec<Arc<str>> = instance_ty
+            // Snapshot the interface's function names and asyncness before
+            // mutably borrowing the linker.
+            let funcs: Vec<(Arc<str>, bool)> = instance_ty
                 .exports(engine)
-                .filter_map(|(func, types::ComponentExtern { ty, .. })| {
-                    matches!(ty, types::ComponentItem::ComponentFunc(_)).then(|| Arc::from(func))
+                .filter_map(|(func, types::ComponentExtern { ty, .. })| match ty {
+                    types::ComponentItem::ComponentFunc(ty) => Some((Arc::from(func), ty.async_())),
+                    _ => None,
                 })
                 .collect();
 
@@ -69,12 +76,31 @@ where
                 .with_context(|| format!("defining host-mediated interface `{name}`"))?;
             let iface_name: Arc<str> = Arc::from(name);
 
-            for func in &funcs {
+            for (func, is_async) in &funcs {
                 let handle = Arc::clone(handle);
                 let iface_name = Arc::clone(&iface_name);
                 let func_name = Arc::clone(func);
-                interface
-                    .func_new_async(func, move |store, ty, params, results| {
+                let registered = if *is_async {
+                    interface.func_new_concurrent(func, move |accessor, ty, params, results| {
+                        let handle = Arc::clone(&handle);
+                        let iface_name = Arc::clone(&iface_name);
+                        let func_name = Arc::clone(&func_name);
+                        Box::pin(async move {
+                            send_concurrent(
+                                accessor,
+                                &handle,
+                                &iface_name,
+                                &func_name,
+                                &ty,
+                                params,
+                                results,
+                            )
+                            .await
+                            .map_err(wasmtime::Error::from_anyhow)
+                        })
+                    })
+                } else {
+                    interface.func_new_async(func, move |store, ty, params, results| {
                         let handle = Arc::clone(&handle);
                         let iface_name = Arc::clone(&iface_name);
                         let func_name = Arc::clone(&func_name);
@@ -84,6 +110,8 @@ where
                                 .map_err(wasmtime::Error::from_anyhow)
                         })
                     })
+                };
+                registered
                     .map_err(anyhow::Error::from)
                     .with_context(|| format!("polyfilling `{name}` function `{func}`"))?;
             }
@@ -160,6 +188,96 @@ where
         read_value(&mut store, &mut incoming, &[], &[], value, ty, &[index])
             .await
             .map_err(anyhow::Error::from)
+            .with_context(|| format!("decoding result {index} from `{target}`"))?;
+    }
+
+    let elapsed_us = u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX);
+    tracing::debug!(
+        target = %target,
+        interface,
+        func,
+        transport = "in-process",
+        histogram.link_dispatch_duration_us = elapsed_us,
+        monotonic_counter.link_dispatches = 1_u64,
+        "dispatched host-mediated call",
+    );
+    Ok(())
+}
+
+/// The concurrent dual of [`send`], for async-typed imports.
+///
+/// Deliberately parallel rather than shared: the store threading is the whole
+/// difference. A concurrent host task only reaches the store synchronously via
+/// [`Accessor::with`], so parameters are encoded inside a single `with` (the
+/// encoder never awaits) and results are decoded store-free — sound because
+/// resources, the only values `wrpc_wasmtime::read_value` needs the store for,
+/// never cross the link seam.
+async fn send_concurrent<T>(
+    accessor: &Accessor<T>, handle: &DispatchHandle, interface: &str, func: &str,
+    ty: &types::ComponentFunc, params: &[Val], results: &mut [Val],
+) -> Result<()>
+where
+    T: WrpcView + 'static,
+{
+    let start = std::time::Instant::now();
+
+    let (target, forwarded) = handle
+        .selector
+        .select(interface, func, params)
+        .with_context(|| format!("selecting target for `{interface}/{func}`"))?;
+
+    // Plain records cross by value; a live resource handle never crosses.
+    for value in &forwarded {
+        if contains_resource(value) {
+            bail!(
+                "a resource handle cannot cross the link seam (call to `{interface}/{func}`, \
+                 target `{target}`)"
+            );
+        }
+    }
+
+    let _guard = handle.enter(&target)?;
+
+    let param_types: Vec<Type> = ty.params().map(|(_, ty)| ty).collect();
+    let result_types: Vec<Type> = ty.results().collect();
+    ensure!(
+        forwarded.len() == param_types.len(),
+        "selector forwarded {} arguments but `{interface}/{func}` expects {}",
+        forwarded.len(),
+        param_types.len()
+    );
+
+    let client = handle.transport()?.connect(&target)?;
+
+    // Encode the forwarded parameters with wRPC's value codec.
+    let mut buf = BytesMut::new();
+    accessor.with(|mut access| -> Result<()> {
+        for (value, ty) in zip(&forwarded, &param_types) {
+            let mut encoder = ValEncoder::new(access.as_context_mut(), ty, &[], &[]);
+            encoder
+                .encode(value, &mut buf)
+                .map_err(anyhow::Error::from)
+                .with_context(|| format!("encoding parameter for `{interface}/{func}`"))?;
+            ensure!(
+                encoder.deferred.is_none(),
+                "async/stream parameters cannot cross the link seam (`{interface}/{func}`)"
+            );
+        }
+        Ok(())
+    })?;
+
+    // Invoke over the carrier; the request is written and flushed here, the
+    // results stream back on `incoming`. No deferred (async) parameters, so the
+    // outgoing half carries nothing further and is dropped.
+    let (_outgoing, incoming) = client
+        .invoke((), interface, func, buf.freeze(), &[[]; 0])
+        .await
+        .with_context(|| format!("invoking link target `{target}` for `{interface}/{func}`"))?;
+
+    let mut incoming = pin!(incoming);
+    for (index, (value, ty)) in zip(results.iter_mut(), &result_types).enumerate() {
+        read_plain_value(&mut incoming, value, ty)
+            .await
             .with_context(|| format!("decoding result {index} from `{target}`"))?;
     }
 

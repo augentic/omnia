@@ -15,8 +15,11 @@
 //! recursively re-enter its caller. The runtime core stays generic: it links whatever
 //! interfaces the manifest names, by opaque string, and resolves opaque
 //! [`GuestId`]s — it never parses a consumer scheme. The selector runs in the
-//! `func_new_async` polyfill *before* the call is encoded onto wRPC, so it sees
-//! typed parameters. See `rfcs/guest-registry.md` for the full design.
+//! polyfill *before* the call is encoded onto wRPC, so it sees typed
+//! parameters. Sync-typed functions are registered with `func_new_async`;
+//! async-typed (`async func`) ones with `func_new_concurrent`, whose
+//! store-scoped access rules the decode path is built around. See
+//! `rfcs/guest-registry.md` for the full design.
 
 mod handle;
 mod host;
@@ -24,6 +27,7 @@ mod link;
 mod selector;
 mod serve;
 mod transport;
+mod value;
 
 pub use handle::DispatchHandle;
 pub use host::Dispatcher;

@@ -16,17 +16,26 @@ interface echo {
     /// guest that should answer (read by the default selector) and is forwarded
     /// through to the export unchanged.
     echo: func(target: string, message: string) -> string;
+
+    /// The async-typed dual of `echo`. The responder parks on a host timer
+    /// before answering, so the callee is genuinely pending while the dispatch
+    /// round-trip is in flight.
+    echo-slow: async func(target: string, message: string) -> string;
 }
 
 /// The responder guest: serves `echo`. It declares no trigger of its own — it is
-/// reachable *only* through host-mediated dispatch.
+/// reachable *only* through host-mediated dispatch. The clock import backs
+/// `echo-slow`'s pending await.
 world responder {
+    import wasi:clocks/monotonic-clock@0.3.0;
     export echo;
 }
 
-/// The router guest: imports the host-mediated `echo` and exposes a plain `run`
-/// entry that calls it.
+/// The router guest: imports the host-mediated `echo` and exposes plain `run` /
+/// `run-slow` entries that call it. `run-slow` is itself async-lifted — a
+/// sync-lifted export cannot call the async-typed `echo-slow` import.
 world router {
     import echo;
     export run: func(message: string) -> string;
+    export run-slow: async func(message: string) -> string;
 }

@@ -2215,6 +2215,7 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "wasm-tokio",
  "wasmtime",
  "wasmtime-wasi",
  "wasmtime-wasi-http",

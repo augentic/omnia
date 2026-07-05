@@ -9,9 +9,12 @@
 
 #![cfg(target_arch = "wasm32")]
 
+// `generate_all` also generates the `wasi:clocks` import bindings so the
+// `echo-slow` await is driven by this component's own async runtime.
 wit_bindgen::generate!({
     world: "responder",
     path: "guest-link/wit",
+    generate_all,
 });
 
 struct Responder;
@@ -24,5 +27,12 @@ impl exports::omnia::link::echo::Guest for Responder {
     /// the responder simply proves the round-trip by echoing it.
     fn echo(target: String, message: String) -> String {
         format!("{target} echoes: {message}")
+    }
+
+    /// The async-lifted dual: park on a real host timer before answering, so the
+    /// dispatch round-trip completes against a callee that was genuinely pending.
+    async fn echo_slow(target: String, message: String) -> String {
+        wasi::clocks::monotonic_clock::wait_for(5_000_000).await; // 5ms
+        format!("{target} echoes slowly: {message}")
     }
 }
