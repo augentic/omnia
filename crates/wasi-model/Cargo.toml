@@ -23,7 +23,7 @@ tracing.workspace = true
 
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-# Match wasmtime-wasi's cap-std stack (3.x) for `Descriptor` metadata identity;
+# Match wasmtime-wasi's cap-std stack (3.x)
 cap-primitives = "3.4.5"
 cap-std.workspace = true
 futures.workspace = true
