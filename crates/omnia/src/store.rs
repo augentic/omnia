@@ -54,7 +54,7 @@ impl<O, D> StoreBaseBuilder<O, D> {
         self
     }
 
-    /// Set the mount registry preopened into the guest sandbox (RFC-55).
+    /// Set the mount registry preopened into the guest sandbox.
     ///
     /// Optional; defaults to an empty registry (no mounts) so reactor
     /// deployments without `[[mount]]`s — and the hand-written test runtimes —
@@ -125,7 +125,7 @@ impl StoreBaseBuilder<Set<&RuntimeOptions>, Set<Arc<dyn Dispatcher>>> {
             wasi_builder.args(args.as_slice());
         }
 
-        // Preopen each authorized mount into the guest sandbox (RFC-55). The
+        // Preopen each authorized mount into the guest sandbox. The
         // registry was opened + validated once at startup, so a failure here is
         // rare (e.g. a mount removed mid-run); log and skip — the guest simply
         // can't lend that tree and the consuming host's identity match then
@@ -180,7 +180,7 @@ pub struct StoreBase {
     /// fresh handle to the owning runtime. Inert unless a host binding reaches
     /// for it.
     pub dispatcher: Arc<dyn Dispatcher>,
-    /// Mount registry (RFC-55): the startup-validated mounts also preopened into
+    /// Mount registry: the startup-validated mounts also preopened into
     /// [`wasi`](Self::wasi). A consuming host crate reads it to match a lent
     /// `descriptor` back to its mount by directory identity. Empty unless the
     /// deployment configures `[[mount]]`s.
@@ -275,7 +275,7 @@ impl<B: HasHttp + Send + 'static> WasiHttpView for StoreCtx<B> {
     }
 }
 
-/// Clone-on-read access to a store's startup-validated mount registry (RFC-55).
+/// Clone-on-read access to a store's startup-validated mount registry.
 ///
 /// Lets a host crate match a lent `wasi:filesystem` descriptor against the
 /// store's authorized mounts without carrying the registry on its own view.

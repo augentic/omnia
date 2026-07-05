@@ -35,7 +35,7 @@ pub struct Manifest {
     /// Registry population: each entry maps an identity to a source.
     #[serde(rename = "guest")]
     pub guests: Vec<GuestEntry>,
-    /// Working-tree mounts preopened into the guest sandbox (RFC-55).
+    /// Working-tree mounts preopened into the guest sandbox.
     #[serde(rename = "mount")]
     pub mounts: Vec<Mount>,
     /// Inbound route tables, one list per trigger.
@@ -126,7 +126,7 @@ impl Manifest {
         self.route.to_routes()
     }
 
-    /// Resolve every `[[mount]]` into a [`ResolvedPreopen`] (RFC-55).
+    /// Resolve every `[[mount]]` into a [`ResolvedPreopen`].
     ///
     /// Host paths resolve relative to `base` exactly as `[[guest]]` sources do,
     /// and `writable` selects read-only (review) versus read+write (edit) WASI
@@ -138,7 +138,7 @@ impl Manifest {
 }
 
 /// A single workspace mount: a host directory preopened into the guest
-/// sandbox under a guest-visible name (RFC-55).
+/// sandbox under a guest-visible name.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct Mount {
     /// Guest-visible name `preopens.get-directories()` returns (e.g. `.`).

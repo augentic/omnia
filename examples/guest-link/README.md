@@ -1,6 +1,6 @@
 # Guest link (host-mediated dynamic linking)
 
-Proves **Phase 2** of [`rfcs/guest-registry.md`](../../rfcs/guest-registry.md): one guest reaches another through an interface the *host* satisfies at runtime, carried over in-process [wRPC](https://github.com/bytecodealliance/wrpc).
+Proves host-mediated dynamic linking: one guest reaches another through an interface the *host* satisfies at runtime, carried over in-process [wRPC](https://github.com/bytecodealliance/wrpc).
 
 ## What it shows
 

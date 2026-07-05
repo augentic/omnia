@@ -1,4 +1,4 @@
-# Host-mediated dynamic linking (Phase 2 of rfcs/guest-registry.md).
+# Host-mediated dynamic linking.
 #
 # Two guests share one runtime. `router` imports `omnia:link/echo`; the host
 # does not satisfy that import natively, so it is named in the guest's `link`

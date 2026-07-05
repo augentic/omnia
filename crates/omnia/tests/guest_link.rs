@@ -1,5 +1,4 @@
-//! Integration test for host-mediated dynamic linking (Phase 2 of
-//! `rfcs/guest-registry.md`).
+//! Integration test for host-mediated dynamic linking.
 //!
 //! Builds the `examples/guest-link` deployment — `router` imports `omnia:link/echo`,
 //! `responder` exports it — wires the serve side, and drives `router.run`. It

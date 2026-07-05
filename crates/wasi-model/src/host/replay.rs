@@ -1,4 +1,4 @@
-//! Canonical JSON for replay fixture keys (§5.4).
+//! Canonical JSON for replay fixture keys.
 
 use std::fmt;
 

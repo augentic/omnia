@@ -8,7 +8,7 @@ Shared vocabulary for Omnia, Specify, and the `backends` repo. Older docs and co
 
 The domain-agnostic in-tree platform: the `omnia` kernel, WASI host crates (`wasi-*`), WIT contracts, guest registry, and host-mediated dispatch. It routes opaque identities and satisfies typed effects; it does not embed adapter names, workflow policy, vendor model ids, or other consumer-specific knowledge.
 
-Same layer as **Layers 1 + 2 (runtime core + WASI interfaces)** in [Architecture.md](Architecture.md). In Specify RFCs this is also called the **Omnia runtime core**.
+Same layer as **Layers 1 + 2 (runtime core + WASI interfaces)** in [Architecture.md](Architecture.md). In Specify this is also called the **Omnia runtime core**.
 
 ### Runtime contract
 
@@ -38,7 +38,7 @@ These appear elsewhere in Augentic docs and code with a **different** meaning. D
 
 | Term | Meaning | Example |
 |------|---------|---------|
-| **Baseline / floor, not ceiling** | Minimum guaranteed behavior; implementations may do more | Declarative HTTP route table is the baseline; programmatic routing is allowed ([RFC-56](../../specify/rfcs/rfc-56-runtime-move.md)) |
+| **Baseline / floor, not ceiling** | Minimum guaranteed behavior; implementations may do more | Declarative HTTP route table is the baseline; programmatic routing is allowed |
 | **Compatibility floor** | Minimum CLI or tool version required | `project.yaml` `specify_version`, adapter `requires_specify` in `specify-cli` |
 | **Minimum cap / floor** | Hard lower bound on a spec limit, not a target to hit | Skill line caps, ignore-directive rationale length |
 

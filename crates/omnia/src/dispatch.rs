@@ -19,7 +19,7 @@
 //! parameters. Sync-typed functions are registered with `func_new_async`;
 //! async-typed (`async func`) ones with `func_new_concurrent`, whose
 //! store-scoped access rules the decode path is built around. See
-//! `rfcs/guest-registry.md` for the full design.
+//! `docs/Architecture.md` (The Guest Registry) for the full design.
 
 mod handle;
 mod host;

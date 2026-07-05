@@ -1,4 +1,4 @@
-//! `ModelDefault` — the crate's default, deterministic (replay) backend (§5.4).
+//! `ModelDefault` — the crate's default, deterministic (replay) backend.
 //!
 //! It serves a pre-recorded answer for a given prompt.
 
@@ -125,7 +125,7 @@ impl FixtureStore {
     }
 }
 
-// A `request -> answer` row, the unit of replay (§5.4).
+// A `request -> answer` row, the unit of replay.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct Fixture {
     key_request: Value,

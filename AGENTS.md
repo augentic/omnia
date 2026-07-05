@@ -33,7 +33,7 @@ For the HTTP example, the server listens on `localhost:8080`.
 
 ### Testing policy (integration-first)
 
-See [rfcs/integration-testing.md](rfcs/integration-testing.md) §7 for the rationale. In short:
+The practical walk-through is [docs/guides/testing.md](docs/guides/testing.md). In short:
 
 - **Unit tests only for pure, deterministic logic** (parsers, codecs, filter/type translation, macro token expansion). Anything crossing a WASI interface, a host backend, or dispatch is tested at the guest–host seam.
 - **Seam tests are the spec.** Each WASI crate has a `tests/seam.rs` that loads its example guest, links the default backend, drives it through the real WIT boundary, and asserts behaviour (a capturing/shared backend proves host-side effects). Exemplar: [crates/wasi-keyvalue/tests/seam.rs](crates/wasi-keyvalue/tests/seam.rs). Drive HTTP guests with `omnia_testkit::http`; use `omnia_testkit::find_guest`/`temp_manifest` for setup.

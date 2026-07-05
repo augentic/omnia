@@ -1,16 +1,16 @@
 // A trivial host-mediated interface used to prove guest-to-guest dynamic
-// linking (Phase 2 of rfcs/guest-registry.md).
+// linking.
 //
 // The caller (`router`) *imports* `echo`; the host has polyfilled that import on
 // the shared linker, so invoking it runs the runtime core's selector, picks the target
 // guest, and dispatches the call over the in-process wRPC carrier to whichever
 // guest *exports* `echo` (`responder`). Caller and callee share one interface —
-// the adapter pattern from the RFC — so the leading `target` argument the
-// default `FirstArgSelector` reads is forwarded straight through to the export.
+// the adapter pattern — so the leading `target` argument the default
+// `FirstArgSelector` reads is forwarded straight through to the export.
 package omnia:link;
 
-/// The host-mediated interface. Resource-free by design: §4.5 forbids resource
-/// handles crossing the link seam.
+/// The host-mediated interface. Resource-free by design: resource handles
+/// never cross the link seam.
 interface echo {
     /// Echo `message`, tagged with the responder's identity. `target` names the
     /// guest that should answer (read by the default selector) and is forwarded

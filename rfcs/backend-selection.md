@@ -1,6 +1,6 @@
 # Design: Deploy-Time Backend & Host Selection
 
-> Status: Design proposal — introduces a *dynamic* runtime-composition mode in which one prebuilt binary chooses its WASI backends (and which triggers run) from `omnia.toml`, with no recompile. Complements — does not replace — the compile-time `runtime!` macro. Depends: the landed `runtime!` macro and the library `omnia::StoreCtx<B>` (with its per-host `HasXxx` accessor traits), the per-interface `WasiXxxCtx` backend traits, the `omnia.toml` manifest. Relates: [backend-router](backend-router.md) (per-call *model* routing — orthogonal), [wrpc-cluster](wrpc-cluster.md) (out-of-process backends — the future extension in §7).
+> Status: Design proposal — introduces a *dynamic* runtime-composition mode in which one prebuilt binary chooses its WASI backends (and which triggers run) from `omnia.toml`, with no recompile. Complements — does not replace — the compile-time `runtime!` macro. Depends: the `runtime!` macro and the library `omnia::StoreCtx<B>` (with its per-host `HasXxx` accessor traits), the per-interface `WasiXxxCtx` backend traits, the `omnia.toml` manifest. Relates: [rfc-58-backend-router](rfc-58-backend-router.md) (per-call *model* routing — orthogonal), [wrpc-cluster](wrpc-cluster.md) (out-of-process backends — the future extension in §7).
 
 ## 1. Motivation
 
@@ -23,18 +23,16 @@ The goal of this design is to let an Omnia **user** pick, for a single shipped b
 - which capabilities (WASI hosts) are active, and
 - which backend implementation backs each capability,
 
-via the existing `omnia.toml` deployment manifest. This mirrors the manifest's own stated philosophy — registry population, routing, and transport are already *deployment* decisions, not build-time ones (`crates/omnia/src/manifest.rs`). Backend choice is the same kind of decision.
+via the existing `omnia.toml` deployment manifest. This mirrors the manifest's own stated philosophy — registry population, routing, and transport are already *deployment* decisions, not build-time ones (`crates/omnia/src/deployment/manifest.rs`). Backend choice is the same kind of decision.
 
 ## 2. Current state: what is compile-time, what is already dynamic
 
-> Note: since this RFC was written, the per-store `StoreCtx` moved into the `omnia` library as the generic `omnia::StoreCtx<B>` (over the connected backend bundle `B`). The per-interface view is now a blanket `WasiXxxView for StoreCtx<B>` in each host crate, gated on a small `HasXxx` accessor trait the bundle implements; the `runtime!` macro generates that bundle-side accessor directly (the per-crate `omnia_wasi_view!` macro it once invoked has been removed). The design below still holds — it just hangs the boxed contexts off the bundle `B` rather than off `StoreCtx` directly.
-
-The `runtime!` machinery (`crates/host-macros/src/runtime/{codegen,parse}.rs`, the library `omnia::StoreCtx<B>`, and the per-host `HasXxx` accessor traits) generates, per backend:
+The `runtime!` machinery (`crates/host-macros/src/runtime/{codegen,parse}.rs`, the library `omnia::StoreCtx<B>` over the connected backend bundle `B`, and the per-host `HasXxx` accessor traits) generates, per backend:
 
 - a field on the connected `Backends` bundle (`key_value_default: KeyValueDefault`),
 - a `Backends::connect()` impl that calls `<KeyValueDefault as Backend>::connect()` at startup (run by the library `Runtime::new`),
 - a per-invocation `Runtime::store()` that **clones** the bundle into each store,
-- a bundle-side `HasXxx` accessor (via the host crate's `omnia_wasi_view!`) that the host crate's blanket `WasiXxxView for StoreCtx<B>` reads.
+- a bundle-side `HasXxx` accessor (generated directly by `runtime!`) that the host crate's blanket `WasiXxxView for StoreCtx<B>` reads.
 
 The decisive observation is that the host *logic* is **already dynamic**. Every interface exposes an object-safe context trait, and the generated view hands the host a trait object — not the concrete backend:
 
@@ -56,7 +54,7 @@ Both the in-memory default and a real backend implement that one trait (the doc 
 2. the **`Backend::connect()` wiring** in the generated `Backends::connect`,
 3. the per-store **`.clone()`** of that concrete backend.
 
-Connection settings are *already* runtime-resolved: `Backend::connect()` defaults to `Self::ConnectOptions::from_env()` (`crates/omnia/src/traits.rs`). What is missing is selecting the *implementation* at runtime, not configuring it.
+Connection settings are *already* runtime-resolved: `Backend::connect()` defaults to `Self::ConnectOptions::from_env()` (`crates/omnia/src/host.rs`). What is missing is selecting the *implementation* at runtime, not configuring it.
 
 ## 3. The hard constraint
 
@@ -72,18 +70,18 @@ Consequences that shape the whole design:
 
 ### 4.1 Boxed context fields
 
-A *dynamic* `StoreCtx` carries one `Arc<dyn WasiXxxCtx>` per enabled interface instead of a concrete backend:
+A *dynamic* backend bundle carries one `Arc<dyn WasiXxxCtx>` per enabled interface instead of a concrete backend type, and plugs into the library `omnia::StoreCtx<B>` unchanged:
 
 ```rust
-pub struct StoreCtx {
-    base: omnia::StoreBase,
+#[derive(Clone)]
+pub struct DynamicBackends {
     omnia_wasi_keyvalue: Arc<dyn WasiKeyValueCtx>,
     omnia_wasi_sql:      Arc<dyn WasiSqlCtx>,
     // …one per enabled interface
 }
 ```
 
-The per-interface `omnia_wasi_view!` macro changes its view to borrow the trait object **shared** (`&dyn WasiXxxCtx`) rather than `&mut`. This is sound because the context traits are `&self` today (`WasiKeyValueCtx::open_bucket(&self, …)`, `WasiOtelCtx::export_*(&self, …)`, …). `store()` then clones an `Arc` (cheap) instead of cloning a concrete backend. Interfaces whose context methods genuinely need `&mut` are called out in §10.
+The per-interface blanket `WasiXxxView for StoreCtx<B>` changes to borrow the trait object **shared** (`&dyn WasiXxxCtx`) rather than `&mut`. This is sound because the context traits are `&self` today (`WasiKeyValueCtx::open_bucket(&self, …)`, `WasiOtelCtx::export_*(&self, …)`, …). `store()` then clones an `Arc` (cheap) instead of cloning a concrete backend. Interfaces whose context methods genuinely need `&mut` are called out in §10.
 
 ### 4.2 The backend registry
 
@@ -108,7 +106,7 @@ At startup, `Runtime::new` reads the manifest's backend selections, resolves eac
 
 ### 4.3 The macro surface
 
-A dynamic mode of `runtime!` (or a sibling `dynamic_runtime!`) takes *interfaces only* — no backend type — and generates the boxed `StoreCtx`, the `Backends` type with its `register_*` methods, and a `run` that threads the populated registry through:
+A dynamic mode of `runtime!` (or a sibling `dynamic_runtime!`) takes *interfaces only* — no backend type — and generates the boxed bundle, the `Backends` registry type with its `register_*` methods, and a `run` that threads the populated registry through:
 
 ```rust
 omnia::runtime!({
@@ -122,7 +120,7 @@ fn backends() -> Backends { /* register_* calls as in §4.2 */ }
 
 ### 4.4 Manifest `[backends]`
 
-A new optional table in `crates/omnia/src/manifest.rs` maps each interface string to an implementation name. Omitting it (or the whole file) keeps today's zero-config behaviour: every interface falls back to its in-memory `*Default`.
+A new optional table in `crates/omnia/src/deployment/manifest.rs` maps each interface string to an implementation name. Omitting it (or the whole file) keeps today's zero-config behaviour: every interface falls back to its in-memory `*Default`.
 
 ```toml
 [backends]
@@ -137,7 +135,7 @@ Selecting *which hosts* are active is the easy half:
 
 - All listed hosts are linked into the one shared `Linker`. Capability hosts (`WasiKeyValue`, `WasiBlobstore`, `WasiOtel`, `WasiSql`, …) are inert when a guest does not import them, so they can always be linked.
 - Which **trigger servers** actually run (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`) becomes config-driven: the `servers` vector the generated `run` builds is populated only for enabled triggers.
-- The command (`command: true`) vs long-lived co-listing rule, today a compile-time `const _: () = assert_hosts(...)` (`crates/omnia/src/traits.rs`), moves to a startup check in dynamic mode — or a command deployment stays a separate binary. See §10.
+- The command (`mode: command`) vs long-lived co-listing rule, today fixed by the compile-time `mode` argument of `runtime!` (driven by `omnia::Mode` in `crates/omnia/src/runtime.rs`), moves to a startup check in dynamic mode — or a command deployment stays a separate binary. See §10.
 
 ## 6. Where this lives
 
@@ -177,9 +175,9 @@ The recompile constraint of §3 dissolves only when a backend runs **out of proc
 
 ## 11. References
 
-- `crates/host-macros/src/{expand,runtime_derive,store_context}.rs` — the macros this design extends.
-- `crates/omnia/src/traits.rs` — `Backend`, `FromEnv`, `Host`, `Server`, `assert_hosts`.
-- `crates/omnia/src/manifest.rs` — the `omnia.toml` schema gaining `[backends]`.
+- `crates/host-macros/src/runtime/{codegen,parse}.rs` — the macro this design extends.
+- `crates/omnia/src/host.rs` — `Backend`, `FromEnv`, `Host`, `Server`.
+- `crates/omnia/src/deployment/manifest.rs` — the `omnia.toml` schema gaining `[backends]`.
 - `crates/wasi-keyvalue/src/host.rs` — a representative `WasiXxxCtx` trait + view, i.e. the dynamic seam this design leans on.
-- [backend-router](backend-router.md) — per-call *model* backend routing behind `wasi-model`; an orthogonal selection mechanism.
+- [rfc-58-backend-router](rfc-58-backend-router.md) — per-call *model* backend routing behind `wasi-model`; an orthogonal selection mechanism.
 - [wrpc-cluster](wrpc-cluster.md) — the host-mediated transport the §7 extension rides.
