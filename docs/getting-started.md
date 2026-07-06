@@ -21,17 +21,8 @@ This produces `target/wasm32-wasip2/debug/examples/http_wasm.wasm` (note: the fi
 
 The guest itself is ordinary Rust. It exports a WASI HTTP handler and uses [Axum](https://github.com/tokio-rs/axum) for routing, exactly as you would in a native web service:
 
-```19:27:examples/http/guest.rs
-struct HttpGuest;
-wasip3::http::service::export!(HttpGuest);
-
-impl Guest for HttpGuest {
-    #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
-    async fn handle(request: Request) -> Result<Response, ErrorCode> {
-        let router = Router::new().route("/", get(echo_get)).route("/", post(echo_post));
-        omnia_wasi_http::serve(router, request).await
-    }
-}
+```rust
+{{#include ../examples/http/guest.rs:19:27}}
 ```
 
 ## Step 2: Run it in a host
@@ -59,13 +50,8 @@ What just happened: the host linked a WASI HTTP implementation into a wasmtime e
 
 The entire host is one macro invocation. This is the runtime you just ran:
 
-```8:13:examples/http/runtime.rs
-        omnia::runtime!({
-            hosts: {
-                WasiHttp: HttpDefault,
-                WasiOtel: OtelDefault,
-            }
-        });
+```rust
+{{#include ../examples/http/runtime.rs:8:13}}
 ```
 
 Each entry pairs a **WASI host** (the interface guests see, e.g. `WasiKeyValue`) with a **backend** (the implementation behind it, e.g. `KeyValueDefault`, an in-memory cache). The macro generates `main`, connects the backends, links the interfaces, and starts the servers.
@@ -74,14 +60,8 @@ Each entry pairs a **WASI host** (the interface guests see, e.g. `WasiKeyValue`)
 
 The `keyvalue` example adds storage. Its guest opens a bucket and reads/writes keys through the standard `wasi:keyvalue` interface:
 
-```41:47:examples/keyvalue/guest.rs
-async fn handler(body: Bytes) -> HttpResult<Json<Value>> {
-    let bucket = store::open("omnia_bucket".to_string()).await.context("opening bucket")?;
-
-    bucket.set("my_key".to_string(), body.to_vec()).await.context("storing data")?;
-
-    let res = bucket.get("my_key".to_string()).await.context("reading data")?;
-    tracing::debug!("found val: {res:?}");
+```rust
+{{#include ../examples/keyvalue/guest.rs:41:47}}
 ```
 
 Build and run it the same way:
