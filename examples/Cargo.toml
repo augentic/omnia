@@ -76,7 +76,7 @@ crate-type = ["cdylib"]
 name = "config"
 path = "config/runtime.rs"
 
-# Host-mediated dynamic linking proof (Phase 2 of rfcs/guest-registry.md).
+# Host-mediated dynamic linking proof.
 [[example]]
 name = "guest-link-responder-wasm"
 path = "guest-link/responder.rs"

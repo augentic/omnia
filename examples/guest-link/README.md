@@ -1,6 +1,6 @@
 # Guest link (host-mediated dynamic linking)
 
-Proves **Phase 2** of [`rfcs/guest-registry.md`](../../rfcs/guest-registry.md): one guest reaches another through an interface the *host* satisfies at runtime, carried over in-process [wRPC](https://github.com/bytecodealliance/wrpc).
+Proves host-mediated dynamic linking: one guest reaches another through an interface the *host* satisfies at runtime, carried over in-process [wRPC](https://github.com/bytecodealliance/wrpc).
 
 ## What it shows
 
@@ -20,6 +20,8 @@ flowchart LR
 
 The selector reads the leading argument (`"responder"`) to pick the target and forwards it through; the responder is instantiated **fresh per call** (instance-per-call) and discarded.
 
+The interface also carries an async-typed dual, `echo-slow: async func`, called by the router's async-lifted `run-slow`. It rides the same dispatch, registered with `func_new_concurrent` instead of `func_new_async` (an async-typed import fails the sync registration's typecheck), and the responder parks on a `wasi:clocks` timer before answering — proving the round-trip against a callee that is genuinely pending.
+
 The runtime core stays generic (Law 2): `link` and the selector operate on the opaque interface string `omnia:link/echo` and opaque guest ids — Omnia never parses the interface's meaning.
 
 ## Build the guests
@@ -38,7 +40,7 @@ This emits `target/wasm32-wasip2/debug/examples/guest_link_responder_wasm.wasm` 
 ## Run
 
 ```bash
-export RUST_LOG=info
+export RUST_LOG=info,opentelemetry_sdk=off
 cargo run --example guest-link -- run --config examples/guest-link/omnia.toml
 ```
 
@@ -49,4 +51,4 @@ The host starts, polyfills the router's import, and wires the responder's serve 
 cargo nextest run -p omnia --test guest_link
 ```
 
-The test builds the registry from this manifest, calls `router.run`, and asserts it returns the responder's echo — and that the responder is instantiated exactly once per dispatched call.
+The test builds the registry from this manifest, calls `router.run` and `router.run-slow`, and asserts each returns the responder's echo — and that the responder is instantiated exactly once per dispatched call.

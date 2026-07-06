@@ -1,5 +1,4 @@
-//! Integration test for host-mediated dynamic linking (Phase 2 of
-//! `rfcs/guest-registry.md`).
+//! Integration test for host-mediated dynamic linking.
 //!
 //! Builds the `examples/guest-link` deployment — `router` imports `omnia:link/echo`,
 //! `responder` exports it — wires the serve side, and drives `router.run`. It
@@ -49,9 +48,9 @@ impl Clone for Counter {
     }
 }
 
-/// Instantiate the router fresh, call its `run` export with `message`, and return
+/// Instantiate the router fresh, call its `export` with `message`, and return
 /// the echoed string.
-async fn call_run(runtime: &Runtime<Counter>, message: &str) -> Result<String> {
+async fn call_router(runtime: &Runtime<Counter>, export: &str, message: &str) -> Result<String> {
     let guest =
         runtime.registry().get(&GuestId::from("router")).context("router guest is registered")?;
     let mut store = runtime.build_store(runtime.store());
@@ -59,28 +58,29 @@ async fn call_run(runtime: &Runtime<Counter>, message: &str) -> Result<String> {
         .instantiate(guest.instance_pre(), &mut store)
         .await
         .context("instantiating router")?;
-    let run = instance.get_func(&mut store, "run").context("router exports `run`")?;
+    let run = instance
+        .get_func(&mut store, export)
+        .with_context(|| format!("router exports `{export}`"))?;
 
     let mut results = vec![Val::Bool(false)];
     run.call_async(&mut store, &[Val::String(message.to_owned())], &mut results)
         .await
         .map_err(anyhow::Error::from)
-        .context("calling router.run")?;
+        .with_context(|| format!("calling router.{export}"))?;
 
     match results.into_iter().next() {
         Some(Val::String(echoed)) => Ok(echoed),
-        other => bail!("router.run returned a non-string result: {other:?}"),
+        other => bail!("router.{export} returned a non-string result: {other:?}"),
     }
 }
 
-// The router guest calls the responder over a host-mediated link, proving
-// dispatch and instance-per-call.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn dispatch() -> Result<()> {
+/// Build the two-guest deployment and wire the serve side, returning the
+/// runtime plus the shared bundle-clone counter.
+async fn build_runtime() -> Result<Option<(Runtime<Counter>, Arc<AtomicUsize>)>> {
     let (Some(responder), Some(router)) =
         (find_guest("guest_link_responder_wasm.wasm"), find_guest("guest_link_router_wasm.wasm"))
     else {
-        return Ok(());
+        return Ok(None);
     };
 
     // A manifest mirroring examples/guest-link/omnia.toml, with absolute source paths
@@ -117,6 +117,16 @@ async fn dispatch() -> Result<()> {
     // in-process carrier — the work the generated `start()` does for a real
     // deployment.
     serve_links(&runtime).await.context("wiring link serve side")?;
+    Ok(Some((runtime, clones)))
+}
+
+// The router guest calls the responder over a host-mediated link, proving
+// dispatch and instance-per-call.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dispatch() -> Result<()> {
+    let Some((runtime, clones)) = build_runtime().await? else {
+        return Ok(());
+    };
 
     // Two calls prove the multi-use carrier (a fresh frame connection per call)
     // and instance-per-call: each dispatch instantiates the responder fresh on a
@@ -127,7 +137,7 @@ async fn dispatch() -> Result<()> {
     let mut per_call: Option<usize> = None;
     for message in ["hello", "world"] {
         let before = clones.load(Ordering::SeqCst);
-        let echoed = call_run(&runtime, message).await?;
+        let echoed = call_router(&runtime, "run", message).await?;
         let delta = clones.load(Ordering::SeqCst) - before;
 
         assert_eq!(echoed, format!("responder echoes: {message}"));
@@ -138,6 +148,25 @@ async fn dispatch() -> Result<()> {
                 assert_eq!(delta, expected, "each call does identical work (instance-per-call)");
             }
         }
+    }
+
+    Ok(())
+}
+
+// The async-typed leg: `run-slow` is an async-lifted export calling the
+// async-typed `echo-slow` import through the `func_new_concurrent` polyfill,
+// and the responder parks on a host timer before answering — the dispatch
+// round-trip completes against a genuinely pending callee.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dispatch_async() -> Result<()> {
+    let Some((runtime, _clones)) = build_runtime().await? else {
+        return Ok(());
+    };
+
+    // Two calls again prove the multi-use carrier under the concurrent path.
+    for message in ["hello", "world"] {
+        let echoed = call_router(&runtime, "run-slow", message).await?;
+        assert_eq!(echoed, format!("responder echoes slowly: {message}"));
     }
 
     Ok(())

@@ -4,7 +4,7 @@
 //! The guest's handler emits spans and metrics (via both the `tracing` and
 //! native `OTel` APIs). Swapping the default no-op exporter for a `CapturingOtel`
 //! that counts what it receives lets the test assert the effect host-side —
-//! the RFC's "capturing backend" pattern — rather than trusting a `200` alone.
+//! the capturing-backend seam pattern — rather than trusting a `200` alone.
 //!
 //! The guest is built automatically on first [`find_guest`] call; the test skips locally when
 //! it is absent and fails under CI so the pipeline never passes vacuously.

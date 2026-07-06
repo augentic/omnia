@@ -31,7 +31,8 @@ pub struct Telemetry {
     /// The name of the environment, e.g. "production", "staging", "development".
     env_name: Option<String>,
 
-    /// The OpenTelemetry metrics collection endpoint.
+    /// OTLP gRPC endpoint override; unset defers to OpenTelemetry endpoint
+    /// resolution (`OTEL_EXPORTER_OTLP_*` env vars, then `http://localhost:4317`).
     endpoint: Option<String>,
 }
 
@@ -44,13 +45,6 @@ impl Telemetry {
             env_name: None,
             endpoint: None,
         }
-    }
-
-    /// Override the default app name.
-    #[must_use]
-    pub fn name(mut self, name: impl Into<String>) -> Self {
-        self.app_name = name.into();
-        self
     }
 
     /// Set the environment name.
@@ -75,22 +69,23 @@ impl Telemetry {
     /// the OpenTelemetry exporter cannot be created or if setting the global
     /// subscriber fails.
     pub fn build(self) -> Result<()> {
-        let resource = Resource::from(&self);
-        RESOURCE.set(resource).map_err(|r| anyhow!("failed to set resource: {r:?}"))?;
+        let resource = self.resource();
+        RESOURCE.set(resource.clone()).map_err(|r| anyhow!("failed to set resource: {r:?}"))?;
 
         // metrics
-        let meter_provider = init_metrics(self.endpoint.as_deref())?;
+        let meter_provider = self.build_metrics(resource.clone())?;
         global::set_meter_provider(meter_provider.clone());
 
         // tracing
-        let tracer_provider = init_traces(self.endpoint.as_deref())?;
+        let tracer_provider = self.build_traces(resource)?;
         global::set_tracer_provider(tracer_provider.clone());
 
         let filter_layer = EnvFilter::from_default_env()
             .add_directive("hyper=off".parse()?)
             .add_directive("h2=off".parse()?)
             .add_directive("tonic=off".parse()?);
-        // !required for stdout
+
+        // required for stdout
         let fmt_layer = tracing_subscriber::fmt::layer();
         let tracer = tracer_provider.tracer(self.app_name);
         let tracing_layer = tracing_opentelemetry::layer().with_tracer(tracer);
@@ -106,48 +101,40 @@ impl Telemetry {
 
         Ok(())
     }
-}
 
-fn init_traces(endpoint: Option<&str>) -> Result<SdkTracerProvider> {
-    let exporter =
-        with_optional_endpoint(SpanExporter::builder().with_tonic(), endpoint).build()?;
-    let resource = RESOURCE.wait().clone();
+    fn build_traces(&self, resource: Resource) -> Result<SdkTracerProvider> {
+        let mut exporter = SpanExporter::builder().with_tonic();
+        if let Some(endpoint) = &self.endpoint {
+            exporter = exporter.with_endpoint(endpoint);
+        }
 
-    Ok(SdkTracerProvider::builder().with_resource(resource).with_batch_exporter(exporter).build())
-}
-
-fn init_metrics(endpoint: Option<&str>) -> Result<SdkMeterProvider> {
-    let exporter =
-        with_optional_endpoint(MetricExporter::builder().with_tonic(), endpoint).build()?;
-    let resource = RESOURCE.wait().clone();
-
-    Ok(SdkMeterProvider::builder().with_resource(resource).with_periodic_exporter(exporter).build())
-}
-
-/// Apply an optional OTLP endpoint override to an exporter builder.
-fn with_optional_endpoint<B: WithExportConfig>(builder: B, endpoint: Option<&str>) -> B {
-    match endpoint {
-        Some(endpoint) => builder.with_endpoint(endpoint),
-        None => builder,
+        Ok(SdkTracerProvider::builder()
+            .with_resource(resource)
+            .with_batch_exporter(exporter.build()?)
+            .build())
     }
-}
 
-/// Returns the OpenTelemetry [`Resource`] used to initialize telemetry for a
-/// service, or `None` if telemetry has not been initialized.
-pub fn resource() -> Option<&'static Resource> {
-    RESOURCE.get()
-}
+    fn build_metrics(&self, resource: Resource) -> Result<SdkMeterProvider> {
+        let mut exporter = MetricExporter::builder().with_tonic();
+        if let Some(endpoint) = &self.endpoint {
+            exporter = exporter.with_endpoint(endpoint);
+        }
 
-impl From<&Telemetry> for Resource {
-    fn from(otel: &Telemetry) -> Self {
-        Self::builder()
-            .with_service_name(otel.app_name.clone())
+        Ok(SdkMeterProvider::builder()
+            .with_resource(resource)
+            .with_periodic_exporter(exporter.build()?)
+            .build())
+    }
+
+    fn resource(&self) -> Resource {
+        Resource::builder()
+            .with_service_name(self.app_name.clone())
             .with_attributes(vec![
                 KeyValue::new(
                     "deployment.environment",
-                    otel.env_name.clone().unwrap_or_else(|| UNKNOWN.to_string()),
+                    self.env_name.clone().unwrap_or_else(|| UNKNOWN.to_string()),
                 ),
-                KeyValue::new("service.namespace", otel.app_name.clone()),
+                KeyValue::new("service.namespace", self.app_name.clone()),
                 KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
                 KeyValue::new(
                     "service.instance.id",
@@ -158,4 +145,10 @@ impl From<&Telemetry> for Resource {
             ])
             .build()
     }
+}
+
+/// Returns the OpenTelemetry [`Resource`] used to initialize telemetry for a
+/// service, or `None` if telemetry has not been initialized.
+pub fn resource() -> Option<&'static Resource> {
+    RESOURCE.get()
 }

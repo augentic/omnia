@@ -1,5 +1,4 @@
-//! Integration test for `wasi-model` Phase 1 — the run-1 (replay) acceptance
-//! gate (`rfcs/wasi-model.md` §6).
+//! Integration test for the `wasi-model` replay acceptance gate.
 //!
 //! Builds the `examples/model` `create` guest, links the `WasiModel` host,
 //! and drives the guest's `wasi:cli/run` export across the real WIT boundary. It

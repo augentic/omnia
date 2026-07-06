@@ -1,4 +1,4 @@
-//! # Preopen mounts and the mount registry (RFC-55)
+//! # Preopen mounts and the mount registry
 //!
 //! A deployment may mount node-local directories into a guest's WASI sandbox via
 //! `[[mount]]` so a guest can read or edit a mounted directory tree. Two

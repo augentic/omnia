@@ -29,8 +29,6 @@ exclude = [
   '\.\./\.\./examples/',
   '\.\./crates/',
   '\.\./\.\./crates/',
-  '\.\./rfcs/',
-  '\.\./\.\./rfcs/',
   '\.\./\.\./specify/',
   '\.\./\.\./Dockerfile',
   '\.\./\.\./docker/',

@@ -154,7 +154,7 @@ The macro generates a `Backends` bundle (one connected backend per `Host: Backen
 
 ### Test scaffolding (`crates/testkit`)
 
-Dev-only helpers for integration ("seam") tests: `find_guest` locates or builds an example guest `.wasm`, `temp_manifest` writes an ephemeral `omnia.toml`, and an in-process HTTP driver exercises HTTP guests without a network socket. See [rfcs/integration-testing.md](../rfcs/integration-testing.md) for the testing policy.
+Dev-only helpers for integration ("seam") tests: `find_guest` locates or builds an example guest `.wasm`, `temp_manifest` writes an ephemeral `omnia.toml`, and an in-process HTTP driver exercises HTTP guests without a network socket. See [the testing guide](guides/testing.md) for the testing policy.
 
 ## The Guest Registry
 
@@ -218,8 +218,7 @@ omnia/
 │   └── <example>/
 │       ├── guest.rs        # Guest code (→ .wasm)
 │       └── runtime.rs      # Host code (→ native binary)
-├── docs/                   # This documentation
-└── rfcs/                   # Design documents
+└── docs/                   # This documentation
 ```
 
 Production backends live in the sibling [`backends`](https://github.com/augentic/backends) repository, one crate per service, each implementing `Backend` plus the relevant `WasiXxxCtx` traits.

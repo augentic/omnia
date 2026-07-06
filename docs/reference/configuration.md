@@ -9,7 +9,7 @@ Omnia is configured entirely through environment variables (runtime options and 
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
 | `RUST_LOG` | unset | Log filter (e.g. `info`, `debug`, `omnia=trace`). Startup logs, including `omnia ready`, are at `info`. |
-| `OTEL_GRPC_URL` | unset | OTLP gRPC endpoint for exporting host traces and metrics. Unset: no export. |
+| `OTEL_GRPC_URL` | unset (`http://localhost:4317` via OpenTelemetry defaults) | OTLP gRPC endpoint for exporting host traces and metrics. No collector running? Silence export errors with `RUST_LOG=...,opentelemetry_sdk=off`. |
 | `OMNIA_CONFIG` | unset | Path to the deployment manifest; the `--config` flag takes precedence. |
 | `COMPONENT` | derived | Telemetry/component name; defaults to the deployment name (first guest id). |
 

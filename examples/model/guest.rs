@@ -5,7 +5,7 @@
 //! `json-schema` prompt, assembling the `system` / `messages` channels with the
 //! guest-side `Sections` builder. It declares no HTTP/messaging
 //! trigger, so it is driven by the integration test (`crates/wasi-model/tests`)
-//! rather than a live request — the run-1 (replay) acceptance vehicle (§6).
+//! rather than a live request — the replay acceptance vehicle.
 //!
 //! It also reads `wasi:filesystem/preopens` and, when the host has mounted a
 //! workspace named `.` (the `[[mount]]` in `omnia.toml`), lends it
@@ -25,7 +25,7 @@ wasip3::cli::command::export!(CliGuest);
 
 impl Guest for CliGuest {
     async fn run() -> Result<(), ()> {
-        // Read the preopen table the host populated from `[[mount]]` (RFC-55) and
+        // Read the preopen table the host populated from `[[mount]]` and
         // pick the tree named `.` to lend. `directories` must outlive the
         // `create` call below — the lent `workspace` borrows one of its
         // descriptors.

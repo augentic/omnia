@@ -2,7 +2,7 @@
 
 Omnia's testing approach is integration-first: the boundary that matters is the guest–host seam, so tests load a real `.wasm`, link real hosts, and drive requests through the actual WIT boundary. This guide shows how to write those tests for your own guests using the `omnia-testkit` scaffolding, and where unit tests still belong.
 
-The rationale and rules live in [rfcs/integration-testing.md](../../rfcs/integration-testing.md); this is the practical walk-through.
+The rationale and rules are codified in the repository `AGENTS.md` (Testing policy); this is the practical walk-through.
 
 ## The test taxonomy
 

@@ -11,7 +11,7 @@ cargo build --example http
 cargo build --example http-bench
 
 # run the host (listens on 127.0.0.1:8080)
-export RUST_LOG=warn
+export RUST_LOG=warn,opentelemetry_sdk=off
 cargo run --example http -- run ./target/wasm32-wasip2/debug/examples/http_wasm.wasm
 ```
 
@@ -34,10 +34,10 @@ The harness reads these optional environment variables:
 BENCH_CONCURRENCY=64 BENCH_DURATION_SECS=30 cargo run --example http-bench
 ```
 
-Tune the host under test with the `POOL_*` runtime options (see [`crates/omnia/src/options.rs`](../../crates/omnia/src/options.rs)) to compare pooling configurations. For example, keep linear memory resident on slot reuse and set `RUST_LOG=info` to emit the periodic pool-occupancy gauges:
+Tune the host under test with the `POOL_*` runtime options (see [`crates/omnia/src/options.rs`](../../crates/omnia/src/options.rs)) to compare pooling configurations. For example, keep linear memory resident on slot reuse and set `RUST_LOG=info,opentelemetry_sdk=off` to emit the periodic pool-occupancy gauges:
 
 ```bash
-POOL_MEMORY_KEEP_RESIDENT=1048576 POOL_METRICS_INTERVAL_MS=1000 RUST_LOG=info \
+POOL_MEMORY_KEEP_RESIDENT=1048576 POOL_METRICS_INTERVAL_MS=1000 RUST_LOG=info,opentelemetry_sdk=off \
   cargo run --example http -- run ./target/wasm32-wasip2/debug/examples/http_wasm.wasm
 ```
 

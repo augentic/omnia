@@ -78,14 +78,6 @@ criteria = "safe-to-deploy"
 version = "2.15.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.bytecheck]]
-version = "0.8.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.bytecheck_derive]]
-version = "0.8.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.bytecount]]
 version = "0.6.9"
 criteria = "safe-to-deploy"
@@ -99,7 +91,7 @@ version = "0.1.13+1.0.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.cc]]
-version = "1.2.65"
+version = "1.2.66"
 criteria = "safe-to-deploy"
 
 [[exemptions.chacha20]]
@@ -454,20 +446,12 @@ criteria = "safe-to-deploy"
 version = "0.12.15"
 criteria = "safe-to-deploy"
 
-[[exemptions.munge]]
-version = "0.4.7"
-criteria = "safe-to-deploy"
-
-[[exemptions.munge_macro]]
-version = "0.4.7"
-criteria = "safe-to-deploy"
-
 [[exemptions.num]]
 version = "0.4.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.num-bigint]]
-version = "0.4.7"
+version = "0.4.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.num-cmp]]
@@ -574,20 +558,16 @@ criteria = "safe-to-deploy"
 version = "0.14.4"
 criteria = "safe-to-deploy"
 
-[[exemptions.ptr_meta]]
-version = "0.3.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.ptr_meta_derive]]
-version = "0.3.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.quinn]]
 version = "0.11.11"
 criteria = "safe-to-deploy"
 
 [[exemptions.quinn-proto]]
-version = "0.11.15"
+version = "0.11.16"
+criteria = "safe-to-deploy"
+
+[[exemptions.quinn-udp]]
+version = "0.5.15"
 criteria = "safe-to-deploy"
 
 [[exemptions.r-efi]]
@@ -602,16 +582,16 @@ criteria = "safe-to-deploy"
 version = "0.7.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.rancor]]
-version = "0.1.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.rand]]
 version = "0.10.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.rand_core]]
 version = "0.10.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.rand_pcg]]
+version = "0.10.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.rayon]]
@@ -626,20 +606,8 @@ criteria = "safe-to-deploy"
 version = "0.46.9"
 criteria = "safe-to-deploy"
 
-[[exemptions.rend]]
-version = "0.5.4"
-criteria = "safe-to-deploy"
-
 [[exemptions.ring]]
 version = "0.17.14"
-criteria = "safe-to-deploy"
-
-[[exemptions.rkyv]]
-version = "0.8.17"
-criteria = "safe-to-deploy"
-
-[[exemptions.rkyv_derive]]
-version = "0.8.17"
 criteria = "safe-to-deploy"
 
 [[exemptions.rsqlite-vfs]]

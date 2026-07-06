@@ -1,4 +1,4 @@
-# Model completion example (rfcs/wasi-model.md).
+# Model completion example.
 #
 # The `model` guest imports `omnia:model/completion` and calls `create`.
 # The host serves it with the in-tree `ModelDefault` (replay) backend: with
@@ -8,7 +8,7 @@
 # The `[[mount]]` preopens the repository root into every guest sandbox as a
 # read-only workspace named `.`. The `model` guest reads it via
 # `wasi:filesystem/preopens` and lends it through `grants.workspace`. The replay
-# backend ignores the workspace (Phase 1 short-circuits tools); the host-side
+# backend ignores the workspace (replay short-circuits tools); the host-side
 # resolution is proven by the integration test.
 #
 # Build the guest first (see README.md), then run from the repository root:

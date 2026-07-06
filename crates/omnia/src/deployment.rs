@@ -348,6 +348,8 @@ fn init_env(name: &str) -> Result<()> {
     let mut builder = Telemetry::new(name);
     if let Ok(endpoint) = env::var("OTEL_GRPC_URL") {
         builder = builder.endpoint(endpoint);
+    } else {
+        tracing::debug!("OTEL_GRPC_URL unset; using OpenTelemetry defaults");
     }
     builder.build().context("initializing telemetry")
 }
@@ -359,7 +361,7 @@ mod tests {
     use crate::RuntimeOptions;
 
     #[test]
-    fn builds_with_pooling() {
+    fn builds_pooling() {
         // Independent totals plus per-component/per-module limits, sized small
         // (and with a tiny per-memory cap) so the reservation stays cheap.
         let options = RuntimeOptions {
@@ -381,7 +383,7 @@ mod tests {
     }
 
     #[test]
-    fn builds_without_pooling() {
+    fn builds_no_pooling() {
         let options = RuntimeOptions {
             pooling: false,
             ..RuntimeOptions::load().expect("should load")

@@ -27,4 +27,10 @@ impl Guest for Router {
     fn run(message: String) -> String {
         omnia::link::echo::echo("responder", &message)
     }
+
+    /// The async-lifted dual: `echo-slow` is an async-typed import, so only an
+    /// async-lifted export may call it.
+    async fn run_slow(message: String) -> String {
+        omnia::link::echo::echo_slow("responder".to_owned(), message).await
+    }
 }

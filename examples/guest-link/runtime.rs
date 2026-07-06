@@ -1,5 +1,4 @@
-//! Host-mediated dynamic linking example runtime (Phase 2 of
-//! `rfcs/guest-registry.md`).
+//! Host-mediated dynamic linking example runtime.
 //!
 //! Two guests are registered from `omnia.toml`: `responder` (exports
 //! `omnia:link/echo`) and `router` (imports it, exports `run`). The router's

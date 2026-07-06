@@ -1,9 +1,8 @@
 // wit/model.wit — omnia:model@0.1.0
 //
-// This is the authoritative WIT for the `omnia:model/completion` interface
-// (rfcs/wasi-model.md §3.1). Two deliberate deviations from the prose WIT in the
-// RFC, made because the established host-crate patterns win where they differ
-// (RFC §3.2):
+// This is the authoritative WIT for the `omnia:model/completion` interface.
+// Two deliberate deviations from the original design prose, made because the
+// established host-crate patterns win where they differ:
 //
 //  1. `create` is an `async func` (not a plain `func`). Every
 //     backend-touching WASI function in this codebase is an `async func`
@@ -16,7 +15,7 @@
 //     the runtime serves via `wasmtime_wasi::p3::add_to_linker` — so the `with:`
 //     remap onto wasmtime's p3 `Descriptor` resolves to the same resource the
 //     runtime already owns. p3 filesystem reads ride native component-model
-//     `stream`/`future`, so the boundary no longer pulls in `wasi:io` (RFC-55).
+//     `stream`/`future`, so the boundary no longer pulls in `wasi:io`.
 package omnia:model@0.1.0;
 
 /// Models-API-style prompt completion. Guests import `omnia:model/completion`.
