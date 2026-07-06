@@ -84,37 +84,8 @@ From the grants, the host — never the guest or backend — merges these tools 
 
 ### File shape
 
-```1:30:examples/model/fixtures/4855dccaa38b7e6d.json
-{
-  "key_request": {
-    "model": null,
-    "system": "a terse code reviewer",
-    "messages": [
-      {
-        "role": "user",
-        "content": "decide whether the change is acceptable\n\nthe diff adds a bounds check"
-      }
-    ],
-    "generation": null,
-    "format": {
-      "kind": "schema",
-      "schema": {
-        "name": "verdict",
-        "schema": "{\"type\":\"object\"}"
-      }
-    },
-    "tools": [],
-    "grants": {
-      "references": "shelf",
-      "verify": []
-    }
-  },
-  "answer": {
-    "verdict": "pass",
-    "reason": "the bounds check is correct"
-  },
-  "transcript": null
-}
+```json
+{{#include ../../examples/model/fixtures/4855dccaa38b7e6d.json:1:30}}
 ```
 
 | Field | Required | Meaning |

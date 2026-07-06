@@ -20,15 +20,8 @@ impl DocumentStore for Provider {}
 
 A `Document` is an id plus raw JSON bytes — serialize your own types into `data`:
 
-```86:93:examples/docstore/guest.rs
-async fn create_stop(Json(req): Json<CreateStopRequest>) -> HttpResult<Json<Value>> {
-    let doc = Document {
-        id: req.id.clone(),
-        data: serde_json::to_vec(&req.stop).context("serializing stop")?,
-    };
-    Provider.insert("stops", &doc).await.context("inserting stop")?;
-    Ok(Json(json!({ "stop": req.stop, "id": req.id })))
-}
+```rust
+{{#include ../../examples/docstore/guest.rs:86:93}}
 ```
 
 The four operations:
@@ -59,75 +52,14 @@ Filters reference fields *inside* the document JSON and compose into trees. Avai
 
 Building a filter from optional query parameters is the common pattern — collect predicates, then `and` them:
 
-```131:165:examples/docstore/guest.rs
-    let mut filters = Vec::new();
-
-    if let Some(q) = &p.q {
-        filters.push(Filter::contains("stop_name", q));
-    }
-    if let Some(zone) = &p.zone {
-        filters.push(Filter::eq("zone_id", zone.as_str()));
-    }
-    if let Some(zone) = &p.exclude_zone {
-        filters.push(Filter::ne("zone_id", zone.as_str()));
-    }
-    if p.accessible.unwrap_or(false) {
-        filters.push(Filter::eq("wheelchair_boarding", 1));
-        filters.push(Filter::is_not_null("zone_id"));
-    }
-    if p.top_level.unwrap_or(false) {
-        filters.push(Filter::is_null("parent_station"));
-    }
-    if let Some(v) = p.min_lat {
-        filters.push(Filter::gte("stop_lat", v));
-    }
-    if let Some(v) = p.max_lat {
-        filters.push(Filter::lte("stop_lat", v));
-    }
-    if let Some(v) = p.min_lon {
-        filters.push(Filter::gte("stop_lon", v));
-    }
-    if let Some(v) = p.max_lon {
-        filters.push(Filter::lte("stop_lon", v));
-    }
-    if let Some(date) = &p.updated_on {
-        filters.push(Filter::on_date("last_updated", date)?);
-    }
-
-    let filter = if filters.is_empty() { None } else { Some(Filter::and(filters)) };
+```rust
+{{#include ../../examples/docstore/guest.rs:131:165}}
 ```
 
 Nested composition — OR across fields, and negated conjunctions:
 
-```244:271:examples/docstore/guest.rs
-    if let Some(q) = &p.q {
-        filters.push(Filter::or([
-            Filter::contains("route_short_name", q),
-            Filter::contains("route_long_name", q),
-        ]));
-    }
-    if let Some(types_str) = &p.types {
-        let type_vals: Vec<ScalarValue> = types_str
-            .split(',')
-            .filter_map(|s| s.trim().parse::<i32>().ok())
-            .map(ScalarValue::from)
-            .collect();
-        if !type_vals.is_empty() {
-            filters.push(Filter::in_list("route_type", type_vals));
-        }
-    }
-    if let Some(agency) = &p.agency {
-        filters.push(Filter::eq("agency_id", agency.as_str()));
-    }
-    if let Some(exclude) = p.exclude_type {
-        filters.push(Filter::negate(Filter::eq("route_type", exclude)));
-    }
-    if let (Some(agency), Some(rtype)) = (&p.not_agency, p.not_type) {
-        filters.push(Filter::negate(Filter::and([
-            Filter::eq("agency_id", agency.as_str()),
-            Filter::eq("route_type", rtype),
-        ])));
-    }
+```rust
+{{#include ../../examples/docstore/guest.rs:244:271}}
 ```
 
 The backend translates the tree to its native query language (PoloDB queries, OData `$filter` for Azure Table), so a filter that works locally works in production.
@@ -136,26 +68,8 @@ The backend translates the tree to its native query language (PoloDB queries, OD
 
 `query(collection, QueryOptions)` combines the filter with sorting and cursor pagination:
 
-```167:185:examples/docstore/guest.rs
-    let result = Provider
-        .query(
-            "stops",
-            QueryOptions {
-                filter,
-                order_by: vec![SortField {
-                    field: "stop_name".into(),
-                    descending: false,
-                }],
-                limit: p.limit,
-                continuation: p.continuation,
-                ..Default::default()
-            },
-        )
-        .await
-        .context("querying stops")?;
-
-    let stops = deserialize_docs(&result.documents)?;
-    Ok(Json(json!({ "stops": stops, "continuation": result.continuation })))
+```rust
+{{#include ../../examples/docstore/guest.rs:167:185}}
 ```
 
 The result carries `documents` plus an opaque `continuation` token when more pages exist; hand the token back in the next query's `continuation` to resume. Treat it as opaque — its format is backend-specific.

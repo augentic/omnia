@@ -27,17 +27,8 @@ cargo build --example <name>-wasm --target wasm32-wasip2
 
 Export the WASI HTTP handler and hand routing to [Axum](https://github.com/tokio-rs/axum) via `omnia_wasi_http::serve`:
 
-```19:27:examples/http/guest.rs
-struct HttpGuest;
-wasip3::http::service::export!(HttpGuest);
-
-impl Guest for HttpGuest {
-    #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
-    async fn handle(request: Request) -> Result<Response, ErrorCode> {
-        let router = Router::new().route("/", get(echo_get)).route("/", post(echo_post));
-        omnia_wasi_http::serve(router, request).await
-    }
-}
+```rust
+{{#include ../../examples/http/guest.rs:19:27}}
 ```
 
 Handlers are ordinary Axum handlers. Return `omnia_guest::HttpResult<T>` to map errors to HTTP responses; `anyhow::Context` works as usual.
@@ -50,12 +41,8 @@ Each capability is a module in its `omnia-wasi-*` crate. The guest never names a
 
 Key-value (`wasi:keyvalue`):
 
-```42:46:examples/keyvalue/guest.rs
-    let bucket = store::open("omnia_bucket".to_string()).await.context("opening bucket")?;
-
-    bucket.set("my_key".to_string(), body.to_vec()).await.context("storing data")?;
-
-    let res = bucket.get("my_key".to_string()).await.context("reading data")?;
+```rust
+{{#include ../../examples/keyvalue/guest.rs:42:46}}
 ```
 
 Publishing a message (`wasi:messaging`):
@@ -85,18 +72,8 @@ The other capabilities follow the same shape; each has a full example:
 
 A guest can export a messaging handler alongside (or instead of) an HTTP handler. The host's messaging trigger delivers each subscribed message to it:
 
-```86:96:examples/messaging/guest.rs
-pub struct Messaging;
-omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
-
-impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
-    async fn handle(message: Message) -> anyhow::Result<(), Error> {
-        tracing::debug!("start processing msg");
-
-        let topic = message.topic().unwrap_or_default();
-        tracing::debug!("message received for: {topic}");
-
-        match topic.as_str() {
+```rust
+{{#include ../../examples/messaging/guest.rs:86:96}}
 ```
 
 `examples/messaging` demonstrates pub-sub, request-reply, and fan-out with the in-memory default backend; the same guest works against Kafka or NATS.
@@ -105,17 +82,8 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
 
 For run-once workloads (jobs, CLIs, agent tasks), export `wasi:cli/run` instead of an HTTP handler. The host drives `run` exactly once and exits with its status:
 
-```28:37:examples/cli/guest.rs
-use wasip3::exports::cli::run::Guest;
-
-struct Cli;
-wasip3::cli::command::export!(Cli);
-
-impl Guest for Cli {
-    /// The `wasi:cli/run` export: dispatch on argv, then signal success or a
-    /// process exit code.
-    async fn run() -> Result<(), ()> {
-        let args: Vec<String> = std::env::args().collect();
+```rust
+{{#include ../../examples/cli/guest.rs:28:37}}
 ```
 
 - Arguments after `--` on the host command line arrive as the guest's argv (`args[0]` is the program name, supplied by the runtime).
