@@ -1030,6 +1030,7 @@ dependencies = [
  "bytes",
  "cfg-if",
  "chrono",
+ "clap",
  "http",
  "http-body-util",
  "hyper",

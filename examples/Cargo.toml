@@ -34,6 +34,9 @@ axum = { workspace = true, features = ["macros"] }
 base64ct.workspace = true
 bytes.workspace = true
 chrono.workspace = true
+# Trimmed feature set: `color` (anstream/anstyle) and `suggestions` (strsim)
+# are dropped to keep the guest .wasm small; see examples/cli/README.md.
+clap = { version = "4.5.60", default-features = false, features = ["derive", "error-context", "help", "std", "usage"] }
 http.workspace = true
 http-body-util.workspace = true
 opentelemetry.workspace = true

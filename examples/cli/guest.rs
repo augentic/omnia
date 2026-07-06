@@ -1,68 +1,82 @@
 //! # CLI Command Wasm Guest
 //!
 //! A `wasi:cli/command` reactor: a `cdylib` exporting `wasi:cli/run@0.3.0` via
-//! [`wasip3::cli::command::export!`], in the same shape as every other Omnia
-//! example (a `cdylib` whose exported handler the host drives). The host drives
-//! `run` exactly **once** and exits with its status.
+//! [`wasip3::cli::command::export!`]. The host drives `run` exactly **once**
+//! and exits with its status.
 //!
-//! It dispatches a small set of subcommands on the argv the host injects (read
-//! through the p2 `std` bridge, which Omnia links alongside p3), writes to
-//! stdout/stderr, and returns:
+//! The CLI is ordinary [`clap`] (derive API, trimmed features): argv and
+//! stdout/stderr arrive through the p2 `std` bridge Omnia links alongside p3,
+//! so `--help`, `--version`, and usage errors need no hand-rolling. Exit codes
+//! are the one seam nuance: `Args::parse()` would exit through the p2
+//! `wasi:cli/exit`, which carries only success/failure and collapses clap's
+//! usage-error `2` to `1` — so `run` uses `try_parse()` and forwards
+//! [`clap::Error::exit_code`] through the p3
+//! [`wasip3::cli::exit::exit_with_code`], which the host observes as
+//! wasmtime's `I32Exit`.
 //!
-//! - `greet [name]` — prints `Hello, <name>!` (default `world`).
-//! - `add [n...]`   — prints the sum of its integer arguments.
-//! - `env`          — prints the inherited environment, one `key=value` per line.
-//!
-//! An unknown subcommand exits with a specific code via
-//! [`wasip3::cli::exit::exit_with_code`] (which the host observes as the exit
-//! status through `wasmtime`'s `I32Exit`); missing usage returns `Err(())`,
-//! which the host maps to `1`. (`run` alone only distinguishes success from
-//! failure, so a specific code needs `wasi:cli/exit`.)
-//!
-//! Because `cargo build`/`cargo test` also compile examples for the host triple
-//! — where the wasm-only `wasip3` crate is unavailable — the whole module is
-//! guarded with `#[cfg(target_arch = "wasm32")]` (a `cdylib` needs no `main`).
+//! The module is `#[cfg(target_arch = "wasm32")]`-guarded because examples
+//! also compile for the host triple, where `wasip3` is unavailable.
 
 #![cfg(target_arch = "wasm32")]
 
+use clap::{Parser, Subcommand};
 use wasip3::exports::cli::run::Guest;
+
+#[derive(Parser)]
+#[command(name = "cli", version, about = "Omnia wasi:cli/command example")]
+struct Args {
+    #[command(subcommand)]
+    command: Cmd,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    /// Print a greeting
+    Greet {
+        /// Who to greet
+        #[arg(default_value = "world")]
+        name: String,
+    },
+    /// Print the sum of the integer arguments
+    Add {
+        /// Integers to sum
+        numbers: Vec<i64>,
+    },
+    /// Print the inherited environment, one key=value per line
+    Env,
+    /// Exit with CODE via wasi:cli/exit, or fail plainly (exit 1) without it
+    Fail {
+        /// Specific exit code to carry through wasi:cli/exit
+        code: Option<u8>,
+    },
+}
 
 struct Cli;
 wasip3::cli::command::export!(Cli);
 
 impl Guest for Cli {
-    /// The `wasi:cli/run` export: dispatch on argv, then signal success or a
-    /// process exit code.
     async fn run() -> Result<(), ()> {
-        let args: Vec<String> = std::env::args().collect();
+        // Not `parse()`: see the module docs on p2 vs p3 exit fidelity.
+        let args = match Args::try_parse() {
+            Ok(args) => args,
+            Err(error) => {
+                let _ = error.print();
+                wasip3::cli::exit::exit_with_code(u8::try_from(error.exit_code()).unwrap_or(1));
+                unreachable!("exit_with_code does not return");
+            }
+        };
 
-        // args[0] is the program name (supplied by the host); args[1] is the
-        // subcommand.
-        match args.get(1).map(String::as_str) {
-            Some("greet") => {
-                let who = args.get(2).map(String::as_str).unwrap_or("world");
-                println!("Hello, {who}!");
-            }
-            Some("add") => {
-                let sum: i64 = args[2..].iter().filter_map(|a| a.parse::<i64>().ok()).sum();
-                println!("{sum}");
-            }
-            Some("env") => {
+        match args.command {
+            Cmd::Greet { name } => println!("Hello, {name}!"),
+            Cmd::Add { numbers } => println!("{}", numbers.iter().sum::<i64>()),
+            Cmd::Env => {
                 for (key, value) in std::env::vars() {
                     println!("{key}={value}");
                 }
             }
-            Some(other) => {
-                eprintln!("unknown command: {other}");
-                // A specific nonzero code: `wasi:cli/exit`'s exit-with-code
-                // surfaces host-side as wasmtime's `I32Exit`, which command mode
-                // maps to the process exit status — fidelity beyond the plain
-                // success/failure `run` returns.
-                wasip3::cli::exit::exit_with_code(2);
-            }
-            None => {
-                eprintln!("usage: <greet|add|env> [args...]");
-                // A plain failure: `run` returning `Err(())` maps to exit 1.
+            Cmd::Fail { code: Some(code) } => wasip3::cli::exit::exit_with_code(code),
+            Cmd::Fail { code: None } => {
+                eprintln!("failing plainly");
                 return Err(());
             }
         }
