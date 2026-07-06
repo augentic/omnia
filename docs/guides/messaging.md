@@ -26,8 +26,18 @@ Metadata and content type travel with the message; on Kafka, `add_metadata("key"
 
 Messaging is a **trigger**: the host (`WasiMessaging`) subscribes to topics and delivers each message to the guest's exported handler, instantiating a fresh guest instance per message:
 
-```rust
-{{#include ../../examples/messaging/guest.rs:86:96}}
+```rust,noplayground
+pub struct Messaging;
+omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
+
+impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
+    async fn handle(message: Message) -> anyhow::Result<(), Error> {
+        tracing::debug!("start processing msg");
+
+        let topic = message.topic().unwrap_or_default();
+        tracing::debug!("message received for: {topic}");
+
+        match topic.as_str() {
 ```
 
 Dispatch on `message.topic()`. Which topics the host subscribes to is backend configuration (`KAFKA_TOPICS`, `NATS_TOPICS`; the in-memory default delivers everything published in-process). In multi-guest deployments, `[[route.messaging]]` entries select the target guest by NATS-style topic pattern — see [Multi-Guest Deployments](multi-guest-deployments.md#routing-inbound-traffic).

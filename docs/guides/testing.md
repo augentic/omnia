@@ -35,20 +35,85 @@ The `wasi:keyvalue` seam test is the exemplar. It assembles the same runtime the
 
 **1. A backend bundle with accessor impls** (mirroring the macro's generated `Backends`):
 
-```rust
-{{#include ../../crates/wasi-keyvalue/tests/seam.rs:27:50}}
+```rust,noplayground
+#[derive(Clone)]
+struct Bundle {
+    http: HttpDefault,
+    otel: OtelDefault,
+    keyvalue: KeyValueDefault,
+}
+
+impl HasHttp for Bundle {
+    fn http_view<'a>(&'a mut self, table: &'a mut ResourceTable) -> WasiHttpCtxView<'a> {
+        self.http.as_view(table)
+    }
+}
+
+impl HasOtel for Bundle {
+    fn otel_ctx(&mut self) -> &mut dyn WasiOtelCtx {
+        &mut self.otel
+    }
+}
+
+impl HasKeyValue for Bundle {
+    fn keyvalue_ctx(&mut self) -> &mut dyn WasiKeyValueCtx {
+        &mut self.keyvalue
+    }
+}
 ```
 
 **2. Build the runtime over the guest**, keeping a clone of the backend as a probe (the in-memory defaults share state across clones):
 
-```rust
-{{#include ../../crates/wasi-keyvalue/tests/seam.rs:55:80}}
+```rust,noplayground
+async fn runtime() -> Result<Option<(Runtime<Bundle>, KeyValueDefault)>> {
+    let Some(wasm) = find_guest("keyvalue_wasm.wasm") else {
+        return Ok(None);
+    };
+
+    let bundle = Bundle {
+        http: HttpDefault::connect().await.context("connecting http")?,
+        otel: OtelDefault::connect().await.context("connecting otel")?,
+        keyvalue: KeyValueDefault::connect().await.context("connecting keyvalue")?,
+    };
+    let store_probe = bundle.keyvalue.clone();
+
+    let mut deployment =
+        DeploymentBuilder::new().wasm(wasm).build::<StoreCtx<Bundle>>().await.context("build")?;
+    deployment.host::<WasiHttp, Bundle>().context("link http")?;
+    deployment.host::<WasiOtel, Bundle>().context("link otel")?;
+    deployment.host::<WasiKeyValue, Bundle>().context("link keyvalue")?;
+    let registry = deployment.into_registry().context("assemble registry")?;
+
+    let runtime = Runtime::from_parts(
+        Arc::new(registry),
+        Vec::new(),
+        Arc::new(MountRegistry::default()),
+        bundle,
+    );
+    Ok(Some((runtime, store_probe)))
+}
 ```
 
 **3. Drive the guest and assert both sides of the seam** — the guest's response *and* the effect that landed in the host backend:
 
-```rust
-{{#include ../../crates/wasi-keyvalue/tests/seam.rs:83:99}}
+```rust,noplayground
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn set_then_get() -> Result<()> {
+    let Some((runtime, store)) = runtime().await? else {
+        return Ok(());
+    };
+
+    let response = http::post(&runtime, "/", "payload-value").await?;
+    assert!(response.status().is_success(), "guest completes the keyvalue round-trip");
+
+    // The guest stored the request body under `my_key` in `omnia_bucket`; the
+    // shared backend must now hold that write.
+    let bucket = store.open_bucket("omnia_bucket".to_owned()).await.context("open bucket")?;
+    let stored = bucket.get("my_key".to_owned()).await.context("read my_key")?;
+    assert_eq!(stored.as_deref(), Some(b"payload-value".as_slice()), "the write reached the host");
+
+    Ok(())
+}
 ```
 
 That second assertion is the point: a `200` proves the call crossed the WIT boundary without trapping; reading the shared backend proves the write actually happened host-side rather than being swallowed.
