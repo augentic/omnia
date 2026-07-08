@@ -26,5 +26,7 @@ pub use messaging::{Message, Publish};
 // `Reply` would otherwise collide with `messaging` and `api` in the crate's
 // flat re-exports.
 pub use model::Model;
+#[cfg(target_arch = "wasm32")]
+pub use model::WasiModel;
 pub use state::StateStore;
 pub use table::TableStore;
