@@ -97,3 +97,23 @@ async fn set_then_get() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cas_swap() -> Result<()> {
+    let Some((runtime, store)) = runtime().await? else {
+        return Ok(());
+    };
+
+    // The guest exercises both CAS legs against `cas_key`: a clean swap, then
+    // a stale swap whose `cas-failed` handle is retried. A success response
+    // means every leg behaved per the WIT contract.
+    let response = http::post(&runtime, "/", "cas-seed").await?;
+    assert!(response.status().is_success(), "guest completes the CAS round-trip");
+
+    // The retry with the refreshed handle is the last write to land host-side.
+    let bucket = store.open_bucket("omnia_bucket".to_owned()).await.context("open bucket")?;
+    let stored = bucket.get("cas_key".to_owned()).await.context("read cas_key")?;
+    assert_eq!(stored.as_deref(), Some(b"retried".as_slice()), "the retried swap reached the host");
+
+    Ok(())
+}

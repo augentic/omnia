@@ -19,6 +19,7 @@ use axum::routing::post;
 use axum::{Json, Router};
 use bytes::Bytes;
 use omnia_guest::HttpResult;
+use omnia_wasi_keyvalue::atomics::{self, Cas, CasError};
 use omnia_wasi_keyvalue::store;
 use serde_json::{Value, json};
 use tracing::Level;
@@ -36,7 +37,8 @@ impl Guest for Http {
     }
 }
 
-/// Stores and retrieves data from the key-value store.
+/// Stores and retrieves data from the key-value store, then exercises the
+/// atomics compare-and-swap flow.
 #[omnia_wasi_otel::instrument]
 async fn handler(body: Bytes) -> HttpResult<Json<Value>> {
     let bucket = store::open("omnia_bucket".to_string()).await.context("opening bucket")?;
@@ -45,6 +47,27 @@ async fn handler(body: Bytes) -> HttpResult<Json<Value>> {
 
     let res = bucket.get("my_key".to_string()).await.context("reading data")?;
     tracing::debug!("found val: {res:?}");
+
+    // CAS happy path: swap against an unchanged snapshot succeeds.
+    bucket.set("cas_key".to_string(), body.to_vec()).await.context("seeding cas_key")?;
+    let cas = Cas::new(&bucket, "cas_key".to_string()).await.context("creating cas")?;
+    atomics::swap(cas, b"swapped".to_vec())
+        .await
+        .map_err(|e| anyhow::anyhow!("swap on a fresh snapshot failed: {e:?}"))?;
+
+    // CAS stale path: invalidate the snapshot, then retry with the fresh
+    // handle the failure carries.
+    let cas = Cas::new(&bucket, "cas_key".to_string()).await.context("creating stale cas")?;
+    bucket.set("cas_key".to_string(), b"interfering".to_vec()).await.context("interfering")?;
+    match atomics::swap(cas, b"lost-race".to_vec()).await {
+        Err(CasError::CasFailed(fresh)) => {
+            atomics::swap(fresh, b"retried".to_vec())
+                .await
+                .map_err(|e| anyhow::anyhow!("retry with the fresh handle failed: {e:?}"))?;
+        }
+        Ok(()) => Err(anyhow::anyhow!("stale swap unexpectedly succeeded"))?,
+        Err(other) => Err(anyhow::anyhow!("stale swap failed unexpectedly: {other:?}"))?,
+    }
 
     Ok(Json(json!({
         "message": "Hello, World!"
