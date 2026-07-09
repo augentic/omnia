@@ -1,6 +1,6 @@
 //! One-shot `wasi:cli/run` command mode.
 
-use anyhow::{Result, bail};
+use anyhow::{Context as _, Result, bail};
 use wasmtime_wasi::I32Exit;
 use wasmtime_wasi::p3::bindings::{Command, CommandPre};
 
@@ -12,7 +12,8 @@ use crate::registry::TriggerRouter;
 /// # Errors
 ///
 /// Returns an error if routing is ambiguous, the guest cannot be instantiated,
-/// or the command traps without a guest exit code.
+/// the run exceeds `guest_timeout`, or the command traps without a guest exit
+/// code.
 pub(super) async fn drive<B>(runtime: &Runtime<B>) -> Result<ExitStatus>
 where
     B: Clone + Send + Sync + 'static,
@@ -30,15 +31,23 @@ where
     let Some((guest_id, ())) = routing.catch_all() else {
         bail!("multiple wasi:cli/run guests but no [[route.cli]] to disambiguate");
     };
-    let guest = runtime.registry().get(guest_id).expect("a capable guest is registered");
+    let guest = runtime
+        .registry()
+        .get(guest_id)
+        .with_context(|| format!("routed guest `{guest_id}` is not registered"))?;
     tracing::info!(guest = %guest_id, "running wasi:cli/run");
 
     let mut store = runtime.build_store(runtime.store());
     let instance = runtime.instantiate(guest.instance_pre(), &mut store).await?;
     let command = Command::new(&mut store, &instance)?;
 
-    let outcome =
-        store.run_concurrent(async move |store| command.wasi_cli_run().call_run(store).await).await;
+    // The same wall-clock bound every other trigger applies to guest work;
+    // long-running commands raise GUEST_TIMEOUT_MS.
+    let timeout = runtime.options().guest_timeout;
+    let run = store.run_concurrent(async move |store| command.wasi_cli_run().call_run(store).await);
+    let outcome = tokio::time::timeout(timeout, run)
+        .await
+        .map_err(|_elapsed| anyhow::anyhow!("wasi:cli/run timed out after {timeout:?}"))?;
 
     let status = match outcome {
         Ok(Ok(Ok(()))) => ExitStatus::SUCCESS,

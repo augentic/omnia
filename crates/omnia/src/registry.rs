@@ -248,7 +248,12 @@ mod tests {
         let options = RuntimeOptions::load().expect("options should load");
         let engine = Engine::new(&Config::from(&options)).expect("engine should build");
         let linker = Linker::<StoreCtx<()>>::new(&engine);
-        let dispatch = DispatchHandle::new(Arc::new(FirstArgSelector), BTreeSet::new(), 8);
+        let dispatch = DispatchHandle::new(
+            Arc::new(FirstArgSelector),
+            BTreeSet::new(),
+            8,
+            std::time::Duration::from_secs(30),
+        );
 
         let result =
             Registry::assemble(engine, linker, options, Vec::new(), Routes::default(), dispatch);

@@ -295,8 +295,12 @@ impl<T: WasiView> Deployment<T> {
     where
         T: WrpcView,
     {
-        let dispatch =
-            DispatchHandle::new(self.selector, self.links, self.options.max_dispatch_depth);
+        let dispatch = DispatchHandle::new(
+            self.selector,
+            self.links,
+            self.options.max_dispatch_depth,
+            self.options.guest_timeout,
+        );
 
         Registry::assemble(
             self.engine,

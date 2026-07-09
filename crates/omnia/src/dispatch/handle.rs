@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
 
@@ -13,14 +14,15 @@ use crate::registry::GuestId;
 /// The long-lived dispatch state shared by every polyfilled import.
 ///
 /// It carries the selector strategy, the union of host-mediated interfaces, the
-/// bound transport (installed once the serve side is wired), and the
-/// process-wide dispatch-depth counter.
+/// bound transport (installed once the serve side is wired), the per-dispatch
+/// wall-clock bound, and the process-wide dispatch-depth counter.
 pub struct DispatchHandle {
     pub(super) selector: Arc<dyn GuestSelector>,
     links: BTreeSet<Box<str>>,
     transport: OnceLock<InProcess>,
     depth: AtomicUsize,
     max_depth: usize,
+    timeout: Duration,
 }
 
 impl DispatchHandle {
@@ -29,6 +31,7 @@ impl DispatchHandle {
     #[must_use]
     pub fn new(
         selector: Arc<dyn GuestSelector>, links: BTreeSet<Box<str>>, max_depth: usize,
+        timeout: Duration,
     ) -> Arc<Self> {
         Arc::new(Self {
             selector,
@@ -36,7 +39,15 @@ impl DispatchHandle {
             transport: OnceLock::new(),
             depth: AtomicUsize::new(0),
             max_depth,
+            timeout,
         })
+    }
+
+    /// Wall-clock bound applied to each host-mediated dispatch (the
+    /// deployment's `guest_timeout`).
+    #[must_use]
+    pub(super) const fn timeout(&self) -> Duration {
+        self.timeout
     }
 
     /// The union of host-mediated interface names across every guest's `link`
@@ -102,7 +113,12 @@ mod tests {
     use crate::registry::GuestId;
 
     fn handle(max_depth: usize) -> Arc<DispatchHandle> {
-        DispatchHandle::new(Arc::new(FirstArgSelector), std::iter::empty().collect(), max_depth)
+        DispatchHandle::new(
+            Arc::new(FirstArgSelector),
+            std::iter::empty().collect(),
+            max_depth,
+            std::time::Duration::from_secs(30),
+        )
     }
 
     #[test]

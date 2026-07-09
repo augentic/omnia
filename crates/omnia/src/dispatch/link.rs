@@ -177,19 +177,30 @@ where
 
     // Invoke over the carrier; the request is written and flushed here, the
     // results stream back on `incoming`. No deferred (async) parameters, so the
-    // outgoing half carries nothing further and is dropped.
-    let (_outgoing, incoming) = client
-        .invoke((), interface, func, buf.freeze(), &[[]; 0])
-        .await
-        .with_context(|| format!("invoking link target `{target}` for `{interface}/{func}`"))?;
-
-    let mut incoming = pin!(incoming);
-    for (index, (value, ty)) in zip(results.iter_mut(), &result_types).enumerate() {
-        read_value(&mut store, &mut incoming, &[], &[], value, ty, &[index])
+    // outgoing half carries nothing further and is dropped. The round-trip is
+    // bounded by `guest_timeout` so a hung target cannot stall the caller.
+    tokio::time::timeout(handle.timeout(), async {
+        let (_outgoing, incoming) = client
+            .invoke((), interface, func, buf.freeze(), &[[]; 0])
             .await
-            .map_err(anyhow::Error::from)
-            .with_context(|| format!("decoding result {index} from `{target}`"))?;
-    }
+            .with_context(|| format!("invoking link target `{target}` for `{interface}/{func}`"))?;
+
+        let mut incoming = pin!(incoming);
+        for (index, (value, ty)) in zip(results.iter_mut(), &result_types).enumerate() {
+            read_value(&mut store, &mut incoming, &[], &[], value, ty, &[index])
+                .await
+                .map_err(anyhow::Error::from)
+                .with_context(|| format!("decoding result {index} from `{target}`"))?;
+        }
+        anyhow::Ok(())
+    })
+    .await
+    .map_err(|_elapsed| {
+        anyhow::anyhow!(
+            "link dispatch to `{target}` for `{interface}/{func}` timed out after {:?}",
+            handle.timeout()
+        )
+    })??;
 
     let elapsed_us = u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX);
     tracing::debug!(
@@ -268,18 +279,29 @@ where
 
     // Invoke over the carrier; the request is written and flushed here, the
     // results stream back on `incoming`. No deferred (async) parameters, so the
-    // outgoing half carries nothing further and is dropped.
-    let (_outgoing, incoming) = client
-        .invoke((), interface, func, buf.freeze(), &[[]; 0])
-        .await
-        .with_context(|| format!("invoking link target `{target}` for `{interface}/{func}`"))?;
-
-    let mut incoming = pin!(incoming);
-    for (index, (value, ty)) in zip(results.iter_mut(), &result_types).enumerate() {
-        read_plain_value(&mut incoming, value, ty)
+    // outgoing half carries nothing further and is dropped. The round-trip is
+    // bounded by `guest_timeout` so a hung target cannot stall the caller.
+    tokio::time::timeout(handle.timeout(), async {
+        let (_outgoing, incoming) = client
+            .invoke((), interface, func, buf.freeze(), &[[]; 0])
             .await
-            .with_context(|| format!("decoding result {index} from `{target}`"))?;
-    }
+            .with_context(|| format!("invoking link target `{target}` for `{interface}/{func}`"))?;
+
+        let mut incoming = pin!(incoming);
+        for (index, (value, ty)) in zip(results.iter_mut(), &result_types).enumerate() {
+            read_plain_value(&mut incoming, value, ty)
+                .await
+                .with_context(|| format!("decoding result {index} from `{target}`"))?;
+        }
+        anyhow::Ok(())
+    })
+    .await
+    .map_err(|_elapsed| {
+        anyhow::anyhow!(
+            "link dispatch to `{target}` for `{interface}/{func}` timed out after {:?}",
+            handle.timeout()
+        )
+    })??;
 
     let elapsed_us = u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX);
     tracing::debug!(
