@@ -65,6 +65,12 @@ impl Manifest {
         if self.guests.is_empty() {
             bail!("manifest defines no [[guest]] entries");
         }
+        let mut ids = BTreeSet::new();
+        for entry in &self.guests {
+            if !ids.insert(entry.id.as_str()) {
+                bail!("duplicate [[guest]] id `{}`: guest identities must be unique", entry.id);
+            }
+        }
         if self.transport.default != TransportKind::InProcess {
             bail!(
                 "transport `{:?}` is not yet implemented; only in-process transport is supported",
@@ -498,6 +504,24 @@ mod tests {
 
         assert_eq!(manifest.guests.len(), 1);
         assert_eq!(manifest.guests[0].id, "only");
+    }
+
+    #[test]
+    fn reject_duplicate_guest_ids() {
+        let path =
+            std::env::temp_dir().join(format!("omnia_manifest_dup_{}.toml", std::process::id()));
+        std::fs::write(
+            &path,
+            "[[guest]]\nid = \"same\"\nsource.path = \"./a.wasm\"\n\n\
+             [[guest]]\nid = \"same\"\nsource.path = \"./b.wasm\"\n",
+        )
+        .expect("temp manifest should write");
+
+        let result = Manifest::load(&path);
+        let _ = std::fs::remove_file(&path);
+
+        let error = result.expect_err("duplicate guest ids must be rejected");
+        assert!(error.to_string().contains("duplicate [[guest]] id `same`"), "{error}");
     }
 
     #[test]

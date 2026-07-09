@@ -157,7 +157,10 @@ impl<T: WasiView + 'static> Registry<T> {
                 .instantiate_pre(&guest.component)
                 .map_err(anyhow::Error::from)
                 .with_context(|| format!("pre-instantiating guest `{}`", guest.id))?;
-            guests.insert(guest.id.clone(), Guest::local(guest.id, instance_pre));
+            let id = guest.id.clone();
+            if guests.insert(guest.id.clone(), Guest::local(guest.id, instance_pre)).is_some() {
+                bail!("duplicate guest id `{id}`: guest identities must be unique");
+            }
         }
 
         for target in routes.targets() {
