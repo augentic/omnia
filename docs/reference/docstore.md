@@ -1,4 +1,6 @@
-# wasi-docstore
+# DocStore Interface Reference
+
+Reference for the `wasi:docstore` interface (version `0.1.0`): the WIT definition, the guest SDK types and their WIT conversion, and the host-side filter resurrection each backend translator consumes. The conceptual walk-through is in [Document Store](../guides/document-store.md); the authoritative WIT is [`crates/wasi-docstore/wit/docstore.wit`](../../crates/wasi-docstore/wit/docstore.wit).
 
 ## 1. WIT Definition
 

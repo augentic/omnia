@@ -46,6 +46,7 @@
 
 - [WASI Interfaces](reference/wasi-interfaces.md)
 - [Model Interface](reference/model.md)
+- [DocStore Interface](reference/docstore.md)
 - [CLI](reference/cli.md)
 - [Configuration](reference/configuration.md)
 
