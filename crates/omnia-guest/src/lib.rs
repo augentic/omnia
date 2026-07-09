@@ -27,27 +27,3 @@ pub use crate::api::*;
 pub use crate::capabilities::*;
 pub use crate::error::*;
 
-/// Checks required environment variables are set, panicking if any are
-/// missing.
-///
-/// # Example
-/// ```rust,ignore
-/// omnia_guest::ensure_env!("API_KEY", "SOME_URL");
-/// ```
-#[macro_export]
-macro_rules! ensure_env {
-    ($($var:literal),+ $(,)?) => {
-        {
-            let mut missing = Vec::new();
-            $(
-                if std::env::var($var).is_err() {
-                    missing.push($var);
-                }
-            )+
-
-            if !missing.is_empty() {
-                panic!("Missing required environment variables: {}", missing.join(", "));
-            }
-        }
-    };
-}
