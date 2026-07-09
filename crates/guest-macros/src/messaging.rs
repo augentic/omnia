@@ -31,7 +31,7 @@ impl Parse for Topic {
         input.parse::<Token![:]>()?;
 
         let message: Path = input.parse()?;
-        let handler = handler_name(&pattern);
+        let handler = handler_name(&pattern)?;
 
         Ok(Self {
             pattern,
@@ -42,6 +42,7 @@ impl Parse for Topic {
 }
 
 pub fn expand(messaging: &Messaging, config: &Config) -> TokenStream {
+    let provider = &config.provider;
     let topic_arms = messaging.topics.iter().map(expand_topic);
     let processors = messaging.topics.iter().map(|t| expand_handler(t, config));
 
@@ -57,6 +58,11 @@ pub fn expand(messaging: &Messaging, config: &Config) -> TokenStream {
             pub struct Messaging;
             omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
 
+            // One provider for the component's lifetime; handlers borrow it
+            // rather than constructing a fresh provider per message.
+            static PROVIDER: std::sync::LazyLock<#provider> =
+                std::sync::LazyLock::new(<#provider as omnia_guest::api::DefaultProvider>::new);
+
             // Message handler
             impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
                 #[omnia_wasi_otel::instrument]
@@ -70,7 +76,9 @@ pub fn expand(messaging: &Messaging, config: &Config) -> TokenStream {
                         _ => return Err(Error::Other(format!("unhandled topic: {topic}"))),
                     };
 
-                    result.map_err(|e| Error::Other(e.to_string()))
+                    // `{e:#}` renders the whole anyhow context chain, not just
+                    // the outermost message.
+                    result.map_err(|e| Error::Other(format!("{e:#}")))
                 }
             }
 
@@ -93,13 +101,12 @@ fn expand_handler(topic: &Topic, config: &Config) -> TokenStream {
     let handler_fn = &topic.handler;
     let message = &topic.message;
     let owner = &config.owner;
-    let provider = &config.provider;
 
     quote! {
         #[omnia_wasi_otel::instrument]
         async fn #handler_fn(payload: Vec<u8>) -> Result<()> {
              #message::handler(payload)?
-                 .provider(&<#provider as omnia_guest::api::DefaultProvider>::new())
+                 .provider(&*PROVIDER)
                  .owner(#owner)
                  .await
                  .map(|_| ())

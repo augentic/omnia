@@ -110,14 +110,10 @@ The macro generates the following modules under `#[cfg(target_arch = "wasm32")]`
 ```rust,ignore
 use omnia_guest_macros::guest;
 
-// Define your provider
+// Define your provider. It must implement `Default` so the generated glue
+// can construct the shared instance.
+#[derive(Default)]
 struct MyProvider;
-
-impl MyProvider {
-    fn new() -> Self {
-        Self
-    }
-}
 
 // Generate guest infrastructure
 guest!({

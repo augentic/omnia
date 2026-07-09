@@ -13,6 +13,7 @@
 
 use axum::extract::{RawPathParams, RawQuery, State};
 use axum::routing::{self, MethodRouter};
+use http::HeaderMap;
 use serde::de::DeserializeOwned;
 
 use crate::api::reply::Reply;
@@ -29,9 +30,12 @@ where
     P: Provider + 'static,
 {
     routing::get(
-        |State(client): State<Client<P>>, params: RawPathParams, RawQuery(query): RawQuery| async move {
+        |State(client): State<Client<P>>,
+         params: RawPathParams,
+         RawQuery(query): RawQuery,
+         headers: HeaderMap| async move {
             let input = query_input::<R::Input>(&params, query.as_deref())?;
-            run::<R, P>(&client, input).await
+            run::<R, P>(&client, headers, input).await
         },
     )
 }
@@ -47,23 +51,29 @@ where
     P: Provider + 'static,
 {
     routing::post(
-        |State(client): State<Client<P>>, params: RawPathParams, body: axum::body::Bytes| async move {
+        |State(client): State<Client<P>>,
+         params: RawPathParams,
+         headers: HeaderMap,
+         body: axum::body::Bytes| async move {
             let input = body_input::<R::Input>(&params, &body)?;
-            run::<R, P>(&client, input).await
+            run::<R, P>(&client, headers, input).await
         },
     )
 }
 
-// Drive one parsed input through the handler with the client's owner and
-// provider, projecting the handler error onto the HTTP error surface.
-async fn run<R, P>(client: &Client<P>, input: R::Input) -> HttpResult<Reply<R::Output>>
+// Drive one parsed input through the handler with the client's owner,
+// provider, and the inbound request headers, projecting the handler error
+// onto the HTTP error surface.
+async fn run<R, P>(
+    client: &Client<P>, headers: HeaderMap, input: R::Input,
+) -> HttpResult<Reply<R::Output>>
 where
     R: Handler<P>,
     R::Error: Into<HttpError>,
     P: Provider,
 {
     let request = R::from_input(input).map_err(Into::into)?;
-    client.request(request).handle().await.map_err(Into::into)
+    client.request(request).headers(headers).handle().await.map_err(Into::into)
 }
 
 fn invalid(description: String) -> HttpError {

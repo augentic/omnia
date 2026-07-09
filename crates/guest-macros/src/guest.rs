@@ -1,5 +1,5 @@
-use proc_macro2::{Span, TokenStream};
-use quote::{format_ident, quote};
+use proc_macro2::TokenStream;
+use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{Error, Ident, LitStr, Result, Token};
@@ -25,7 +25,7 @@ impl Parse for Config {
         let mut command: Option<Command> = None;
 
         let settings;
-        syn::braced!(settings in input);
+        let brace = syn::braced!(settings in input);
         let settings = Punctuated::<Opt, Token![,]>::parse_terminated(&settings)?;
 
         for setting in settings.into_pairs() {
@@ -54,11 +54,12 @@ impl Parse for Config {
             }
         }
 
+        // Point missing-field errors at the config braces, not the macro name.
         let Some(owner) = owner else {
-            return Err(Error::new(Span::call_site(), "missing `owner`"));
+            return Err(Error::new(brace.span.join(), "missing `owner`"));
         };
         let Some(provider) = provider else {
-            return Err(Error::new(Span::call_site(), "missing `provider`"));
+            return Err(Error::new(brace.span.join(), "missing `provider`"));
         };
 
         Ok(Self {
@@ -148,20 +149,30 @@ pub fn expand(config: &Config) -> TokenStream {
     }
 }
 
-// Derive a handler method name from an HTTP path or messaging topic.
-pub fn handler_name(path: &LitStr) -> Ident {
+// Derive a handler method name from an HTTP path or messaging topic,
+// pointing at the offending literal when the result is not a valid
+// identifier (e.g. a topic starting with a digit).
+pub fn handler_name(path: &LitStr) -> Result<Ident> {
     let path_str = path.value();
     let name = path_str
         .trim_start_matches('/')
         .replace(['/', '-', '.'], "_")
         .replace(['{', '}'], "")
         .to_lowercase();
-    format_ident!("{name}")
+    syn::parse_str::<Ident>(&name).map_err(|_parse_err| {
+        Error::new(
+            path.span(),
+            format!(
+                "cannot derive a handler name from `{path_str}`: `{name}` is not a valid identifier"
+            ),
+        )
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use quote::quote;
+    use proc_macro2::Span;
+    use quote::{format_ident, quote};
 
     use super::*;
 
@@ -169,18 +180,25 @@ mod tests {
     fn method_from_path() {
         // simple path
         let path = LitStr::new("/inbound/xml", Span::call_site());
-        let name = handler_name(&path);
+        let name = handler_name(&path).expect("valid identifier");
         assert_eq!(name, format_ident!("inbound_xml"));
 
         // path parameters
         let path = LitStr::new("/set-trip/{vehicle_id}/{trip_id}", Span::call_site());
-        let name = handler_name(&path);
+        let name = handler_name(&path).expect("valid identifier");
         assert_eq!(name, format_ident!("set_trip_vehicle_id_trip_id"));
 
         // path with dots
         let path = LitStr::new("/some/path/data.json", Span::call_site());
-        let name = handler_name(&path);
+        let name = handler_name(&path).expect("valid identifier");
         assert_eq!(name, format_ident!("some_path_data_json"));
+    }
+
+    #[test]
+    fn method_from_invalid_path() {
+        let path = LitStr::new("9-lives.v1", Span::call_site());
+        let err = handler_name(&path).expect_err("digit-leading name is rejected");
+        assert!(err.to_string().contains("not a valid identifier"));
     }
 
     #[test]

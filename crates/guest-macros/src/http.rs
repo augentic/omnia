@@ -13,9 +13,27 @@ pub struct Http {
 impl Parse for Http {
     fn parse(input: ParseStream) -> Result<Self> {
         let routes = Punctuated::<Route, Token![,]>::parse_terminated(input)?;
-        Ok(Self {
-            routes: routes.into_iter().collect(),
-        })
+        let routes: Vec<Route> = routes.into_iter().collect();
+
+        // Reject duplicate `(method, path)` pairs here, where the span points
+        // at the offending route, rather than letting axum panic at runtime.
+        for (i, route) in routes.iter().enumerate() {
+            if routes[..i].iter().any(|prior| {
+                prior.path.value() == route.path.value()
+                    && prior.handler.method == route.handler.method
+            }) {
+                return Err(Error::new(
+                    route.path.span(),
+                    format!(
+                        "duplicate route: `{} {}` is already registered",
+                        route.handler.method,
+                        route.path.value()
+                    ),
+                ));
+            }
+        }
+
+        Ok(Self { routes })
     }
 }
 
@@ -29,27 +47,11 @@ impl Parse for Route {
         let path: LitStr = input.parse()?;
         input.parse::<Token![:]>()?;
 
-        let mut handler: Option<Handler> = None;
-
-        let fields = Punctuated::<Opt, Token![|]>::parse_separated_nonempty(input)?;
-        for field in fields.into_pairs() {
-            match field.into_value() {
-                Opt::Handler(h) => {
-                    if handler.is_some() {
-                        return Err(Error::new(h.method.span(), "cannot specify second handler"));
-                    }
-                    handler = Some(h);
-                }
-            }
+        let l = input.lookahead1();
+        if !(l.peek(kw::get) || l.peek(kw::post)) {
+            return Err(l.error());
         }
-
-        // validate required fields
-        let Some(handler) = handler else {
-            return Err(Error::new(
-                path.span(),
-                "route is missing handler (e.g., `get(Request, Response)` or `post(Request, Response)`)",
-            ));
-        };
+        let handler: Handler = input.parse()?;
 
         Ok(Self { path, handler })
     }
@@ -120,21 +122,6 @@ mod kw {
     syn::custom_keyword!(with_body);
 }
 
-enum Opt {
-    Handler(Handler),
-}
-
-impl Parse for Opt {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let l = input.lookahead1();
-        if l.peek(kw::get) || l.peek(kw::post) {
-            Ok(Self::Handler(input.parse::<Handler>()?))
-        } else {
-            Err(l.error())
-        }
-    }
-}
-
 pub fn expand(http: &Http, config: &Config) -> TokenStream {
     let provider = &config.provider;
     let owner = &config.owner;
@@ -166,7 +153,7 @@ pub fn expand(http: &Http, config: &Config) -> TokenStream {
                 use super::*;
 
                 pub struct Http;
-                wasip3::http::proxy::export!(Http);
+                wasip3::http::service::export!(Http);
 
                 // Build the route table once; `axum::Router` is cheap to
                 // clone (internally reference-counted) so each request
