@@ -4,6 +4,7 @@
 
 #![forbid(unsafe_code)]
 
+mod command;
 mod guest;
 mod http;
 mod messaging;
@@ -14,6 +15,14 @@ use quote::quote;
 use syn::{ItemFn, meta, parse_macro_input};
 
 /// Generates the guest infrastructure based on the specified configuration.
+///
+/// The `http:` table expands to a target-neutral `http_router(client)`
+/// function over [`omnia_guest::api::route`] constructors (path, query,
+/// and JSON-body inputs deserialize into each request's `Handler::Input`),
+/// plus a wasm-gated `wasi:http` export serving it. The `command:` arm
+/// wires an app-supplied async dispatch function
+/// (`async fn(Vec<String>) -> u8`) to a generated `wasi:cli/run` export
+/// with argv fetch and exit-code passthrough.
 ///
 /// # Example
 ///
@@ -30,7 +39,8 @@ use syn::{ItemFn, meta, parse_macro_input};
 ///     messaging: [
 ///         "topic-name.v1": TopicMessage,
 ///         "other-topic.v2": OtherTopicMessage,
-///     ]
+///     ],
+///     command: dispatch,
 /// });
 /// ```
 #[proc_macro]

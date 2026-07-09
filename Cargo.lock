@@ -2278,6 +2278,7 @@ dependencies = [
  "sea-query",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "thiserror 2.0.18",
  "tokio",
  "tower",
@@ -2291,9 +2292,17 @@ dependencies = [
 name = "omnia-guest-macros"
 version = "0.35.0"
 dependencies = [
+ "anyhow",
+ "axum",
+ "http",
+ "omnia-guest",
  "proc-macro2",
  "quote",
+ "serde",
+ "serde_json",
  "syn",
+ "tokio",
+ "tower",
 ]
 
 [[package]]

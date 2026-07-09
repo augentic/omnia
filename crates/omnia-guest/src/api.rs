@@ -22,6 +22,7 @@
 mod into_http;
 mod reply;
 mod request;
+pub mod route;
 
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -55,13 +56,24 @@ impl<T: Provider + Default> DefaultProvider for T {
 /// The client is the main entry point for making API requests. It holds
 /// the provider configuration and provides methods to create the request
 /// router.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Client<P> {
     /// The owning tenant/namespace.
     owner: Arc<str>,
 
     /// The provider to use while handling of the request.
     provider: Arc<P>,
+}
+
+// Manual impl: both fields are `Arc`s, so `Client<P>` is `Clone` for every
+// `P` (the derive would demand `P: Clone`, which router state must not).
+impl<P> Clone for Client<P> {
+    fn clone(&self) -> Self {
+        Self {
+            owner: Arc::clone(&self.owner),
+            provider: Arc::clone(&self.provider),
+        }
+    }
 }
 
 impl Client<NoProvider> {

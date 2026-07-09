@@ -1,10 +1,10 @@
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
+use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{Error, Ident, LitStr, Path, Result, Token};
 
-use crate::guest::{Config, handler_name};
+use crate::guest::Config;
 
 pub struct Http {
     pub routes: Vec<Route>,
@@ -21,9 +21,7 @@ impl Parse for Http {
 
 pub struct Route {
     pub path: LitStr,
-    pub params: Vec<Ident>,
     pub handler: Handler,
-    pub function: Ident,
 }
 
 impl Parse for Route {
@@ -53,26 +51,18 @@ impl Parse for Route {
             ));
         };
 
-        // derived values
-        let params = extract_params(&path);
-        let function = handler_name(&path);
-
-        Ok(Self {
-            path,
-            params,
-            handler,
-            function,
-        })
+        Ok(Self { path, handler })
     }
 }
 
-// Contains the HTTP method and the request and reply types.
+// Contains the HTTP method and the request type. The reply type and the
+// legacy `with_body` / `with_query` markers still parse (grammar
+// compatibility) but extraction is uniformly typed: path parameters, query
+// pairs, and the JSON body merge into `Handler::Input` via serde, so the
+// route constructor needs only the request type.
 pub struct Handler {
     method: Ident,
     request: Path,
-    reply: Path,
-    with_body: bool,
-    with_query: bool,
 }
 
 // Parse the handler method in the form of `method(request, reply)`.
@@ -101,9 +91,10 @@ impl Parse for Handler {
             with_query = true;
         }
 
-        // ..reply
+        // ..reply (parsed for grammar compatibility; the route constructor
+        // derives the reply type from the Handler impl)
         list.parse::<Token![,]>()?;
-        let reply: Path = list.parse()?;
+        let _reply: Path = list.parse()?;
 
         // verify
         if method == "get" && with_body {
@@ -118,13 +109,7 @@ impl Parse for Handler {
             ));
         }
 
-        Ok(Self {
-            method,
-            request,
-            reply,
-            with_body,
-            with_query,
-        })
+        Ok(Self { method, request })
     }
 }
 
@@ -150,154 +135,71 @@ impl Parse for Opt {
     }
 }
 
-fn extract_params(path: &LitStr) -> Vec<Ident> {
-    path.value()
-        .split('/')
-        .filter(|s| s.starts_with('{') && s.ends_with('}'))
-        .map(|s| &s[1..s.len() - 1])
-        .map(|p| format_ident!("{p}"))
-        .collect()
-}
-
 pub fn expand(http: &Http, config: &Config) -> TokenStream {
-    let routes = http.routes.iter().map(expand_route);
-    let handlers = http.routes.iter().map(|r| expand_handler(r, config));
+    let provider = &config.provider;
+    let owner = &config.owner;
+    let routes = http.routes.iter().map(|r| expand_route(r, config));
 
     quote! {
-        mod http {
-            use omnia_guest::api::{HttpResult, Reply};
-            use omnia_guest::{axum, omnia_wasi_http, omnia_wasi_otel, wasip3};
-            use omnia_guest::Handler;
-
+        // `pub` so the parent module's `http_router` re-export can name it;
+        // `__buildgen_guest` itself stays private, so nothing escapes the
+        // invoking module.
+        pub mod http {
             use super::*;
 
-            pub struct Http;
-            wasip3::http::proxy::export!(Http);
-
-            // Build the route table once; `axum::Router` is cheap to clone
-            // (internally reference-counted) so each request reuses it rather
-            // than rebuilding the whole graph.
-            static ROUTER: std::sync::LazyLock<axum::Router> =
-                std::sync::LazyLock::new(|| axum::Router::new() #(#routes)*);
-
-            impl wasip3::exports::http::handler::Guest for Http {
-                #[omnia_wasi_otel::instrument]
-                async fn handle(
-                    request: wasip3::http::types::Request,
-                ) -> Result<wasip3::http::types::Response, wasip3::http::types::ErrorCode> {
-                    omnia_wasi_http::serve(ROUTER.clone(), request).await
-                }
+            /// Target-neutral router over the declared route table. The
+            /// owner and provider arrive as router state via the
+            /// [`omnia_guest::api::Client`], so the same router serves the
+            /// wasm guest export and a native listener.
+            pub fn router(
+                client: omnia_guest::api::Client<#provider>,
+            ) -> omnia_guest::axum::Router {
+                omnia_guest::axum::Router::new()
+                    #(#routes)*
+                    .with_state(client)
             }
 
-            #(#handlers)*
+            #[cfg(target_arch = "wasm32")]
+            mod wasm {
+                use omnia_guest::{omnia_wasi_http, omnia_wasi_otel, wasip3};
+
+                use super::*;
+
+                pub struct Http;
+                wasip3::http::proxy::export!(Http);
+
+                // Build the route table once; `axum::Router` is cheap to
+                // clone (internally reference-counted) so each request
+                // reuses it rather than rebuilding the whole graph.
+                static ROUTER: std::sync::LazyLock<omnia_guest::axum::Router> =
+                    std::sync::LazyLock::new(|| {
+                        router(
+                            omnia_guest::api::Client::new(#owner).provider(
+                                <#provider as omnia_guest::api::DefaultProvider>::new(),
+                            ),
+                        )
+                    });
+
+                impl wasip3::exports::http::handler::Guest for Http {
+                    #[omnia_wasi_otel::instrument]
+                    async fn handle(
+                        request: wasip3::http::types::Request,
+                    ) -> Result<wasip3::http::types::Response, wasip3::http::types::ErrorCode> {
+                        omnia_wasi_http::serve(ROUTER.clone(), request).await
+                    }
+                }
+            }
         }
     }
 }
 
-fn expand_route(route: &Route) -> TokenStream {
+fn expand_route(route: &Route, config: &Config) -> TokenStream {
     let path = &route.path;
     let method = &route.handler.method;
-    let function = &route.function;
-
-    quote! {
-        .route(#path, axum::routing::#method(#function))
-    }
-}
-
-fn expand_handler(route: &Route, config: &Config) -> TokenStream {
-    let handler = &route.handler;
-    let params = &route.params;
-    let function = &route.function;
-    let request = &handler.request;
-    let reply = &handler.reply;
-    let owner = &config.owner;
+    let request = &route.handler.request;
     let provider = &config.provider;
 
-    let is_get = handler.method == "get";
-
-    let args = if is_get {
-        expand_get_args(params, handler.with_query)
-    } else {
-        expand_post_args(handler.with_body)
-    };
-
-    let input = if is_get {
-        expand_get_input(params, handler.with_query)
-    } else {
-        expand_post_input(handler.with_body)
-    };
-
     quote! {
-        #[omnia_wasi_otel::instrument]
-        async fn #function(#args) -> HttpResult<Reply<#reply>> {
-            #request::handler(#input)?
-                .provider(&<#provider as omnia_guest::api::DefaultProvider>::new())
-                .owner(#owner)
-                .await
-                .map_err(Into::into)
-        }
-    }
-}
-
-/// Builds the function arguments for a GET handler based on path parameters and query settings.
-fn expand_get_args(params: &[Ident], with_query: bool) -> TokenStream {
-    if params.is_empty() {
-        if with_query {
-            quote! { axum::extract::RawQuery(query): axum::extract::RawQuery }
-        } else {
-            quote! {}
-        }
-    } else if params.len() == 1 {
-        quote! { axum::extract::Path(#(#params),*): axum::extract::Path<String> }
-    } else {
-        let param_types = vec![format_ident!("String"); params.len()];
-        quote! { axum::extract::Path((#(#params),*)): axum::extract::Path<(#(#param_types),*)> }
-    }
-}
-
-/// Builds the function arguments for a POST handler based on body settings.
-fn expand_post_args(with_body: bool) -> TokenStream {
-    if with_body {
-        quote! { body: bytes::Bytes }
-    } else {
-        quote! {}
-    }
-}
-
-/// Builds the input expression passed to the request handler for GET requests.
-fn expand_get_input(params: &[Ident], with_query: bool) -> TokenStream {
-    if params.is_empty() {
-        if with_query {
-            quote! { query }
-        } else {
-            quote! { () }
-        }
-    } else if params.len() == 1 {
-        quote! { #(#params),* }
-    } else {
-        quote! { (#(#params),*) }
-    }
-}
-
-/// Builds the input expression passed to the request handler for POST requests.
-fn expand_post_input(with_body: bool) -> TokenStream {
-    if with_body {
-        quote! { body.to_vec() }
-    } else {
-        quote! { () }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use proc_macro2::Span;
-
-    use super::*;
-
-    #[test]
-    fn test_parse_params() {
-        let path = LitStr::new("{vehicle_id}/{trip_id}", Span::call_site());
-        let params = extract_params(&path);
-        assert_eq!(params, vec![format_ident!("vehicle_id"), format_ident!("trip_id")]);
+        .route(#path, omnia_guest::api::route::#method::<#request, #provider>())
     }
 }

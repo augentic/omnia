@@ -4,6 +4,7 @@ use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{Error, Ident, LitStr, Result, Token};
 
+use crate::command::{self, Command};
 use crate::http::{self, Http};
 use crate::messaging::{self, Messaging};
 
@@ -12,6 +13,7 @@ pub struct Config {
     pub provider: Ident,
     pub http: Option<Http>,
     pub messaging: Option<Messaging>,
+    pub command: Option<Command>,
 }
 
 impl Parse for Config {
@@ -20,6 +22,7 @@ impl Parse for Config {
         let mut provider: Option<Ident> = None;
         let mut http: Option<Http> = None;
         let mut messaging: Option<Messaging> = None;
+        let mut command: Option<Command> = None;
 
         let settings;
         syn::braced!(settings in input);
@@ -45,6 +48,9 @@ impl Parse for Config {
                 Opt::Messaging(m) => {
                     messaging = Some(m);
                 }
+                Opt::Command(c) => {
+                    command = Some(c);
+                }
             }
         }
 
@@ -60,6 +66,7 @@ impl Parse for Config {
             provider,
             http,
             messaging,
+            command,
         })
     }
 }
@@ -69,6 +76,7 @@ mod kw {
     syn::custom_keyword!(provider);
     syn::custom_keyword!(http);
     syn::custom_keyword!(messaging);
+    syn::custom_keyword!(command);
 }
 
 enum Opt {
@@ -76,6 +84,7 @@ enum Opt {
     Provider(Ident),
     Http(Http),
     Messaging(Messaging),
+    Command(Command),
 }
 
 impl Parse for Opt {
@@ -101,6 +110,10 @@ impl Parse for Opt {
             let list;
             syn::bracketed!(list in input);
             Ok(Self::Messaging(list.parse()?))
+        } else if l.peek(kw::command) {
+            input.parse::<kw::command>()?;
+            input.parse::<Token![:]>()?;
+            Ok(Self::Command(input.parse()?))
         } else {
             Err(l.error())
         }
@@ -109,19 +122,29 @@ impl Parse for Opt {
 
 pub fn expand(config: &Config) -> TokenStream {
     let http_mod = config.http.as_ref().map(|h| http::expand(h, config));
-    let messaging_mod = config.messaging.as_ref().map(|m| messaging::expand(m, config));
+    let messaging_mod = config
+        .messaging
+        .as_ref()
+        .map(|m| messaging::expand(m, config))
+        .map(|body| quote! { #[cfg(target_arch = "wasm32")] #body });
+    let command_mod = config.command.as_ref().map(command::expand);
+    let http_export = config.http.as_ref().map(|_| {
+        quote! {
+            #[doc(hidden)]
+            pub use __buildgen_guest::http::router as http_router;
+        }
+    });
 
     quote! {
-        #[cfg(target_arch = "wasm32")]
         mod __buildgen_guest {
-            use omnia_guest::anyhow::{Context, Result};
-            use omnia_guest::api::Client;
-
+            #[allow(unused_imports, reason = "generated glob for user-declared types")]
             use super::*;
 
             #http_mod
             #messaging_mod
+            #command_mod
         }
+        #http_export
     }
 }
 
@@ -178,7 +201,6 @@ mod tests {
         let http = parsed.http.expect("should have http");
         assert_eq!(http.routes.len(), 1);
         assert_eq!(http.routes[0].path.value(), "/jobs/detector");
-        assert!(http.routes[0].params.is_empty());
 
         let messaging = parsed.messaging.expect("should have messaging");
         assert_eq!(messaging.topics.len(), 1);
@@ -199,8 +221,20 @@ mod tests {
         let http = parsed.http.expect("should have http");
 
         assert_eq!(http.routes.len(), 1);
-        assert_eq!(http.routes[0].params.len(), 2);
-        assert_eq!(http.routes[0].params[0].to_string(), "vehicle_id");
-        assert_eq!(http.routes[0].params[1].to_string(), "trip_id");
+        assert_eq!(http.routes[0].path.value(), "/path/params/{vehicle_id}/{trip_id}");
+    }
+
+    #[test]
+    fn parse_command() {
+        let input = quote!({
+            owner: "at",
+            provider: MyProvider,
+            command: dispatch,
+        });
+
+        let parsed: Config = syn::parse2(input).expect("should parse");
+        let command = parsed.command.expect("should have command");
+        let dispatch = &command.dispatch;
+        assert_eq!(quote!(#dispatch).to_string(), "dispatch");
     }
 }
