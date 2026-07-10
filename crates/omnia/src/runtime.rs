@@ -340,6 +340,14 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         &self.inner.registry
     }
 
+    /// The cached host→guest dispatch capability — the same handle
+    /// every store context carries, for host-side callers (tests,
+    /// embedders) that invoke a guest export directly.
+    #[must_use]
+    pub fn dispatcher(&self) -> Arc<dyn Dispatcher> {
+        Arc::clone(&self.dispatcher)
+    }
+
     /// Runtime options from the environment.
     #[must_use]
     pub fn options(&self) -> &RuntimeOptions {

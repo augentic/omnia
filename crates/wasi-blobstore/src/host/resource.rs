@@ -2,6 +2,7 @@ use std::fmt::Debug;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use bytes::Bytes;
 pub use omnia::FutureResult;
 
 use crate::host::generated::wasi::blobstore::container::{ContainerMetadata, ObjectMetadata};
@@ -24,10 +25,10 @@ pub trait Container: Debug + Send + Sync + 'static {
     fn info(&self) -> anyhow::Result<ContainerMetadata>;
 
     /// Get the value associated with the key.
-    fn get_data(&self, name: String, _start: u64, _end: u64) -> FutureResult<Option<Vec<u8>>>;
+    fn get_data(&self, name: String, _start: u64, _end: u64) -> FutureResult<Option<Bytes>>;
 
     /// Set the value associated with the key.
-    fn write_data(&self, name: String, data: Vec<u8>) -> FutureResult<()>;
+    fn write_data(&self, name: String, data: Bytes) -> FutureResult<()>;
 
     /// List all objects in the container.
     fn list_objects(&self) -> FutureResult<Vec<String>>;

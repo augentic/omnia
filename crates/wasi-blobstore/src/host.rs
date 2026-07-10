@@ -33,7 +33,7 @@ mod generated {
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use bytes::Bytes;
+pub use bytes::Bytes;
 pub use omnia::FutureResult;
 use omnia::{Host, Server};
 pub use resource::*;

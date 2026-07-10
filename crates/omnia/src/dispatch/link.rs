@@ -139,7 +139,7 @@ where
         .with_context(|| format!("selecting target for `{interface}/{func}`"))?;
 
     // Plain records cross by value; a live resource handle never crosses.
-    for value in &forwarded {
+    for value in &*forwarded {
         if contains_resource(value) {
             bail!(
                 "a resource handle cannot cross the link seam (call to `{interface}/{func}`, \
@@ -163,7 +163,7 @@ where
 
     // Encode the forwarded parameters with wRPC's value codec.
     let mut buf = BytesMut::new();
-    for (value, ty) in zip(&forwarded, &param_types) {
+    for (value, ty) in zip(&*forwarded, &param_types) {
         let mut encoder = ValEncoder::new(store.as_context_mut(), ty, &[], &[]);
         encoder
             .encode(value, &mut buf)
@@ -238,7 +238,7 @@ where
         .with_context(|| format!("selecting target for `{interface}/{func}`"))?;
 
     // Plain records cross by value; a live resource handle never crosses.
-    for value in &forwarded {
+    for value in &*forwarded {
         if contains_resource(value) {
             bail!(
                 "a resource handle cannot cross the link seam (call to `{interface}/{func}`, \
@@ -263,7 +263,7 @@ where
     // Encode the forwarded parameters with wRPC's value codec.
     let mut buf = BytesMut::new();
     accessor.with(|mut access| -> Result<()> {
-        for (value, ty) in zip(&forwarded, &param_types) {
+        for (value, ty) in zip(&*forwarded, &param_types) {
             let mut encoder = ValEncoder::new(access.as_context_mut(), ty, &[], &[]);
             encoder
                 .encode(value, &mut buf)

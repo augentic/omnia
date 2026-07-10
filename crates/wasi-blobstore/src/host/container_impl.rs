@@ -1,5 +1,5 @@
 use anyhow::Context;
-use bytes::BytesMut;
+use bytes::Bytes;
 use wasmtime::component::{Access, Accessor, Resource};
 
 use crate::host::generated::wasi::blobstore::container::{
@@ -37,9 +37,8 @@ impl<T> HostContainerWithStore<T> for WasiBlobstore {
         let Some(data) = data_opt else {
             return Err(Error::NotFound(format!("object not found: {name}")));
         };
-        let buf = BytesMut::from(&*data);
 
-        Ok(accessor.with(|mut store| store.get().table.push(buf.into()))?)
+        Ok(accessor.with(|mut store| store.get().table.push(data))?)
     }
 
     async fn write_data(
@@ -48,7 +47,7 @@ impl<T> HostContainerWithStore<T> for WasiBlobstore {
     ) -> Result<()> {
         let bytes = accessor.with(|mut store| {
             let value = store.get().table.get(&data)?;
-            Ok::<Vec<u8>, Error>(value.pipe.contents().to_vec())
+            Ok::<Bytes, Error>(value.pipe.contents())
         })?;
 
         let container = get_container(accessor, &self_)?;

@@ -88,7 +88,11 @@ async fn write_then_read() -> Result<()> {
         .await
         .context("probe object")?
         .context("object `request` missing from the host store")?;
-    assert_eq!(data, br#"{"blob":"payload"}"#, "the guest's blob reached the host store intact");
+    assert_eq!(
+        data,
+        br#"{"blob":"payload"}"#.as_slice(),
+        "the guest's blob reached the host store intact"
+    );
 
     Ok(())
 }

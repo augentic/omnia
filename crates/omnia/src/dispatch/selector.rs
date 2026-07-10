@@ -10,6 +10,8 @@
 //! It returns the chosen [`GuestId`] and the parameter list to forward — so a
 //! strategy may strip the identity argument or pass it through.
 
+use std::borrow::Cow;
+
 use anyhow::{Result, bail};
 use wasmtime::component::Val;
 
@@ -26,12 +28,17 @@ pub trait GuestSelector: Send + Sync + 'static {
     /// decoded `params`, returning the chosen identity and the parameters to
     /// forward to the target's matching export.
     ///
+    /// A strategy that forwards the parameters unchanged returns
+    /// `Cow::Borrowed(params)`; only one that reshapes them pays for a copy.
+    ///
     /// # Errors
     ///
     /// Returns an error if no target identity can be derived from the call
     /// (e.g. the strategy expects a leading identity argument that is missing or
     /// not a string).
-    fn select(&self, interface: &str, func: &str, params: &[Val]) -> Result<(GuestId, Vec<Val>)>;
+    fn select<'a>(
+        &self, interface: &str, func: &str, params: &'a [Val],
+    ) -> Result<(GuestId, Cow<'a, [Val]>)>;
 }
 
 /// The default strategy: the first parameter is a string identity.
@@ -45,7 +52,9 @@ pub trait GuestSelector: Send + Sync + 'static {
 pub struct FirstArgSelector;
 
 impl GuestSelector for FirstArgSelector {
-    fn select(&self, interface: &str, func: &str, params: &[Val]) -> Result<(GuestId, Vec<Val>)> {
+    fn select<'a>(
+        &self, interface: &str, func: &str, params: &'a [Val],
+    ) -> Result<(GuestId, Cow<'a, [Val]>)> {
         let Some(Val::String(id)) = params.first() else {
             bail!(
                 "selector: call to `{interface}/{func}` must carry a leading string identity \
@@ -53,7 +62,7 @@ impl GuestSelector for FirstArgSelector {
                 params.first()
             );
         };
-        Ok((GuestId::from(id.as_str()), params.to_vec()))
+        Ok((GuestId::from(id.as_str()), Cow::Borrowed(params)))
     }
 }
 
@@ -68,8 +77,10 @@ mod tests {
             FirstArgSelector.select("omnia:link/echo", "echo", &params).expect("should select");
 
         assert_eq!(id, GuestId::from("responder"));
-        // The default forwards every parameter (including the identity) through.
-        assert_eq!(forwarded, params);
+        // The default forwards every parameter (including the identity) through,
+        // without copying.
+        assert!(matches!(forwarded, Cow::Borrowed(_)));
+        assert_eq!(&*forwarded, params.as_slice());
     }
 
     #[test]
