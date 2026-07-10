@@ -1,0 +1,5 @@
+error: GET requests should not have a body; consider using query parameters
+ --> tests/compile_fail/get_with_body.rs:9:19
+  |
+9 |         "/greet": get(Req with_body, Reply),
+  |                   ^^^

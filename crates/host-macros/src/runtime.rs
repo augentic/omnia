@@ -76,3 +76,39 @@ pub fn expand(config: &Config) -> TokenStream {
         pub use runtime::{drive, main};
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use quote::quote;
+
+    use super::*;
+
+    // Expand a `runtime!` config and pretty-print the output so snapshots are
+    // readable and diffs are line-oriented.
+    fn expand_pretty(input: proc_macro2::TokenStream) -> String {
+        let config: Config = syn::parse2(input).expect("config parses");
+        let file = syn::parse2::<syn::File>(expand(&config)).expect("expansion parses as a file");
+        prettyplease::unparse(&file)
+    }
+
+    #[test]
+    fn expand_server() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            hosts: {
+                WasiHttp: HttpDefault,
+                WasiOtel: OtelDefault,
+                WasiKeyValue: KeyValueDefault,
+            },
+        })));
+    }
+
+    #[test]
+    fn expand_command() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            mode: command,
+            hosts: {
+                WasiOtel: OtelDefault,
+            },
+        })));
+    }
+}

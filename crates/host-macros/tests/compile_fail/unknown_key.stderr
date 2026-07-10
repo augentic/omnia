@@ -1,0 +1,5 @@
+error: expected `mode` or `hosts`
+ --> tests/compile_fail/unknown_key.rs:2:5
+  |
+2 |     guests: {},
+  |     ^^^^^^

@@ -1,0 +1,8 @@
+error: missing `provider`
+ --> tests/compile_fail/missing_provider.rs:1:28
+  |
+1 |   omnia_guest_macros::guest!({
+  |  ____________________________^
+2 | |     owner: "examples",
+3 | | });
+  | |_^

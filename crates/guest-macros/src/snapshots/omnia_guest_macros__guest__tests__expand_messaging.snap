@@ -1,0 +1,45 @@
+---
+source: crates/guest-macros/src/guest.rs
+expression: "expand_pretty(quote!({\n    owner: \"examples\", provider: Provider, messaging:\n    [\"realtime-r9k.v1\": R9kMessage,],\n}))"
+---
+mod __buildgen_guest {
+    #[allow(unused_imports, reason = "generated glob for user-declared types")]
+    use super::*;
+    #[cfg(target_arch = "wasm32")]
+    mod messaging {
+        use omnia_guest::anyhow::Result;
+        use omnia_guest::omnia_wasi_messaging::types::{Error, Message};
+        use omnia_guest::{omnia_wasi_messaging, omnia_wasi_otel};
+        use omnia_guest::Handler;
+        use super::*;
+        pub struct Messaging;
+        omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
+        static PROVIDER: std::sync::LazyLock<Provider> = std::sync::LazyLock::new(
+            <Provider as omnia_guest::api::DefaultProvider>::new,
+        );
+        impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
+            #[omnia_wasi_otel::instrument]
+            async fn handle(message: Message) -> Result<(), Error> {
+                let topic = message
+                    .topic()
+                    .ok_or_else(|| Error::Other(
+                        "message is missing topic".to_string(),
+                    ))?;
+                let result = match topic.as_str() {
+                    "realtime-r9k.v1" => realtime_r9k_v1(message.data()).await,
+                    _ => return Err(Error::Other(format!("unhandled topic: {topic}"))),
+                };
+                result.map_err(|e| Error::Other(format!("{e:#}")))
+            }
+        }
+        #[omnia_wasi_otel::instrument]
+        async fn realtime_r9k_v1(payload: Vec<u8>) -> Result<()> {
+            R9kMessage::handler(payload)?
+                .provider(&*PROVIDER)
+                .owner("examples")
+                .await
+                .map(|_| ())
+                .map_err(Into::into)
+        }
+    }
+}

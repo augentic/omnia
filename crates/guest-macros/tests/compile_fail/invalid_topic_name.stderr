@@ -1,0 +1,5 @@
+error: cannot derive a handler name from `9-lives.v1`: `9_lives_v1` is not a valid identifier
+ --> tests/compile_fail/invalid_topic_name.rs:8:9
+  |
+8 |         "9-lives.v1": Message,
+  |         ^^^^^^^^^^^^

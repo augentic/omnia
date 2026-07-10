@@ -1,0 +1,81 @@
+---
+source: crates/host-macros/src/runtime.rs
+expression: "expand_pretty(quote!({\n    hosts:\n    {\n        WasiHttp: HttpDefault, WasiOtel: OtelDefault, WasiKeyValue:\n        KeyValueDefault,\n    },\n}))"
+---
+mod runtime {
+    use anyhow::Result;
+    use omnia::futures::future;
+    use omnia::Server;
+    use omnia::tokio;
+    use super::*;
+    use omnia::Backend;
+    #[derive(Clone)]
+    struct Backends {
+        http_default: HttpDefault,
+        otel_default: OtelDefault,
+        key_value_default: KeyValueDefault,
+    }
+    impl omnia::Backends for Backends {
+        async fn connect() -> Result<Self> {
+            let (http_default, otel_default, key_value_default) = tokio::try_join!(
+                < HttpDefault as Backend > ::connect(), < OtelDefault as Backend >
+                ::connect(), < KeyValueDefault as Backend > ::connect(),
+            )?;
+            Ok(Self {
+                http_default,
+                otel_default,
+                key_value_default,
+            })
+        }
+    }
+    impl omnia::HasHttp for Backends {
+        fn http_view<'a>(
+            &'a mut self,
+            table: &'a mut omnia::wasmtime_wasi::ResourceTable,
+        ) -> omnia_wasi_http::WasiHttpCtxView<'a> {
+            self.http_default.as_view(table)
+        }
+    }
+    impl omnia_wasi_otel::HasOtel for Backends {
+        fn otel_ctx(&mut self) -> &mut dyn omnia_wasi_otel::WasiOtelCtx {
+            &mut self.otel_default
+        }
+    }
+    impl omnia_wasi_keyvalue::HasKeyValue for Backends {
+        fn keyvalue_ctx(&mut self) -> &mut dyn omnia_wasi_keyvalue::WasiKeyValueCtx {
+            &mut self.key_value_default
+        }
+    }
+    struct Hooks;
+    impl omnia::Wiring<Backends> for Hooks {
+        fn link(
+            deployment: &mut omnia::Deployment<omnia::StoreCtx<Backends>>,
+        ) -> Result<()> {
+            deployment.host::<WasiHttp, Backends>()?;
+            deployment.host::<WasiOtel, Backends>()?;
+            deployment.host::<WasiKeyValue, Backends>()?;
+            Ok(())
+        }
+        async fn serve(runtime: &omnia::Runtime<Backends>) -> Result<()> {
+            let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![
+                Box::pin(WasiHttp.run(runtime)),
+            ];
+            future::try_join_all(servers).await?;
+            Ok(())
+        }
+    }
+    /// CLI entry point: parse the `run` grammar, then drive the
+    /// deployment through this runtime's hosts and backends.
+    #[tokio::main]
+    pub async fn main() -> ::std::process::ExitCode {
+        omnia::main::<Backends, Hooks>(omnia::Mode::Server).await
+    }
+    /// Drive one deployment through this runtime's hosts and backends,
+    /// blocking until the guest completes.
+    #[tokio::main]
+    pub async fn drive(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
+        omnia::run::<Backends, Hooks>(builder.mode(omnia::Mode::Server)).await
+    }
+}
+#[allow(unused_imports)]
+pub use runtime::{drive, main};

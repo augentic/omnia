@@ -176,6 +176,46 @@ mod tests {
 
     use super::*;
 
+    // Expand a `guest!` config and pretty-print the output so snapshots are
+    // readable and diffs are line-oriented.
+    fn expand_pretty(input: TokenStream) -> String {
+        let config: Config = syn::parse2(input).expect("config parses");
+        let file = syn::parse2::<syn::File>(expand(&config)).expect("expansion parses as a file");
+        prettyplease::unparse(&file)
+    }
+
+    #[test]
+    fn expand_http() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            owner: "examples",
+            provider: Provider,
+            http: [
+                "/greet/{name}": get(Greet, Greeting),
+                "/greet": post(Greet, Greeting),
+            ],
+        })));
+    }
+
+    #[test]
+    fn expand_messaging() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            owner: "examples",
+            provider: Provider,
+            messaging: [
+                "realtime-r9k.v1": R9kMessage,
+            ],
+        })));
+    }
+
+    #[test]
+    fn expand_command() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            owner: "examples",
+            provider: Provider,
+            command: dispatch,
+        })));
+    }
+
     #[test]
     fn method_from_path() {
         // simple path
