@@ -5,6 +5,7 @@
 mod credentials_impl;
 mod default_impl;
 mod resource;
+mod stub_impl;
 mod types_impl;
 
 mod generated {
@@ -36,6 +37,7 @@ use wasmtime::component::{HasData, Linker, ResourceTableError};
 pub use self::default_impl::IdentityDefault;
 use self::generated::omnia::identity::credentials;
 pub use self::resource::*;
+pub use self::stub_impl::IdentityStub;
 use crate::host::generated::Error;
 
 /// Result type for identity operations.
