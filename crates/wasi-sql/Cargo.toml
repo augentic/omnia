@@ -22,6 +22,7 @@ futures.workspace = true
 omnia.workspace = true
 parking_lot.workspace = true
 rusqlite = { version = "0.40.1", features = ["bundled"] }
+tokio = { workspace = true, features = ["rt"] }
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true
 
