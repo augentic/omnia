@@ -207,10 +207,11 @@ impl<T: WasiView + 'static> Deployment<T> {
         // mount fails fast at startup rather than per store.
         let mounts = Arc::new(MountRegistry::open(plan.preopens)?);
 
-        let mut guests = Vec::with_capacity(plan.sources.len());
-        for source in &plan.sources {
-            guests.extend(source.load(&engine).await?);
-        }
+        // Guests load (and compile) in parallel; order still follows the plan.
+        let loaded =
+            futures::future::try_join_all(plan.sources.iter().map(|source| source.load(&engine)))
+                .await?;
+        let guests = loaded.into_iter().flatten().collect();
 
         let args = if plan.mode.is_command() {
             std::iter::once(plan.name.clone()).chain(plan.args).collect()

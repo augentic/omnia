@@ -56,16 +56,22 @@ impl Source {
 
     /// Load the component(s) this source registers.
     ///
-    /// Async so a future source kind (an OCI pull) fits the same signature; a
-    /// local file is read synchronously today.
+    /// Async so a future source kind (an OCI pull) fits the same signature.
+    /// Compilation is CPU-bound, so it runs on a blocking thread — loading
+    /// several guests concurrently compiles them in parallel.
     ///
     /// # Errors
     ///
     /// Returns an error if the component cannot be loaded from the path.
-    #[allow(clippy::unused_async)]
     pub async fn load(&self, engine: &Engine) -> Result<Vec<LoadedGuest>> {
-        let component = load_component(engine, &self.path)
-            .with_context(|| format!("loading guest from {}", self.path.display()))?;
+        let engine = engine.clone();
+        let path = self.path.clone();
+        let component = tokio::task::spawn_blocking(move || {
+            load_component(&engine, &path)
+                .with_context(|| format!("loading guest from {}", path.display()))
+        })
+        .await
+        .context("guest load task panicked")??;
         Ok(vec![LoadedGuest {
             id: self.id.clone(),
             component,
