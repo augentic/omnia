@@ -115,9 +115,9 @@ async fn pub_sub() -> Result<()> {
         .context("timed out waiting for the published message")?
         .context("subscription closed without a message")?;
 
-    assert_eq!(message.topic(), "a", "guest published to topic `a`");
+    assert_eq!(message.topic, "a", "guest published to topic `a`");
     assert_eq!(
-        message.payload().as_slice(),
+        message.payload(),
         br#"{"hello":"world"}"#,
         "the published payload reached the host broker intact"
     );

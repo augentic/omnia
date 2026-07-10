@@ -8,7 +8,7 @@ use tracing::{Instrument, debug_span, instrument};
 
 use crate::host::WasiWebSocketView;
 use crate::host::generated::DuplexIndices;
-use crate::host::resource::{EventProxy, Events};
+use crate::host::resource::{Event, Events};
 
 #[instrument("websocket-server", skip(state))]
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
@@ -46,7 +46,7 @@ where
         tokio::spawn(async move {
             tracing::info!(monotonic_counter.event_counter = 1, service = %handler.component);
 
-            if let Err(e) = handler.handle(event.clone()).await {
+            if let Err(e) = handler.handle(event).await {
                 tracing::error!(
                     monotonic_counter.processing_errors = 1,
                     service = %handler.component,
@@ -76,11 +76,12 @@ where
     StoreCtx<B>: WasiWebSocketView,
 {
     /// Forward event to the wasm guest.
-    async fn handle(&self, event: EventProxy) -> Result<()> {
+    async fn handle(&self, event: Event) -> Result<()> {
         // Resolve the guest by the event's route; an event with no route falls
         // into the catch-all (sole exporter). A miss is dropped, not an error.
         let routed = event
-            .route()
+            .route
+            .as_deref()
             .map_or_else(|| self.routing.catch_all(), |route| self.routing.resolve(route));
         let Some((guest_id, indices)) = routed else {
             tracing::debug!("no route for websocket event; dropping");

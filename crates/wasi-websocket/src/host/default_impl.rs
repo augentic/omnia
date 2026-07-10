@@ -25,7 +25,7 @@ use tokio_tungstenite::{WebSocketStream, accept_async};
 use tracing::instrument;
 
 use crate::host::WasiWebSocketCtx;
-use crate::host::resource::{Client, Event, EventProxy, Events};
+use crate::host::resource::{Client, Event, Events};
 
 const MAX_CONNECTIONS: usize = 1024;
 const BROADCAST_CHANNEL_CAPACITY: usize = 256;
@@ -51,8 +51,8 @@ impl omnia::FromEnv for ConnectOptions {
 /// Default implementation for `wasi:websocket`.
 #[derive(Debug)]
 pub struct WebSocketDefault {
-    event_tx: Sender<EventProxy>,
-    event_rx: Receiver<EventProxy>,
+    event_tx: Sender<Event>,
+    event_rx: Receiver<Event>,
     connections: ConnectionMap,
 }
 
@@ -73,7 +73,7 @@ impl Backend for WebSocketDefault {
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
         tracing::debug!("using default WebSocket backend");
 
-        let (event_tx, event_rx) = broadcast::channel::<EventProxy>(BROADCAST_CHANNEL_CAPACITY);
+        let (event_tx, event_rx) = broadcast::channel::<Event>(BROADCAST_CHANNEL_CAPACITY);
         let connections: ConnectionMap = Arc::new(DashMap::new());
 
         let websocket = Self {
@@ -98,13 +98,6 @@ impl WasiWebSocketCtx for WebSocketDefault {
         let client = self.clone();
         async move { Ok(Arc::new(client) as Arc<dyn Client>) }.boxed()
     }
-
-    fn new_event(&self, data: Vec<u8>) -> Result<Arc<dyn Event>> {
-        Ok(Arc::new(InMemEvent {
-            socket_addr: String::new(),
-            data,
-        }) as Arc<dyn Event>)
-    }
 }
 
 impl Client for WebSocketDefault {
@@ -127,12 +120,12 @@ impl Client for WebSocketDefault {
     }
 
     /// Send event to WebSocket clients, optionally filtered by group.
-    fn send(&self, event: EventProxy, sockets: Option<Vec<String>>) -> FutureResult<()> {
+    fn send(&self, event: Event, sockets: Option<Vec<String>>) -> FutureResult<()> {
         tracing::debug!("sending event to WebSocket clients, sockets: {:?}", sockets);
 
         self.connections.retain(|_, sender| !sender.is_closed());
 
-        let msg = Message::Binary(event.data().to_vec().into());
+        let msg = Message::Binary(event.data.into());
         for mut entry in self.connections.iter_mut() {
             if sockets.as_ref().is_some_and(|s| !s.contains(entry.key())) {
                 continue;
@@ -221,26 +214,14 @@ impl WebSocketDefault {
 
     /// Send event to the wasm guest's websocket event handler.
     fn send_to_guest(&self, socket_addr: String, data: Vec<u8>) {
-        let event = InMemEvent { socket_addr, data };
-        if let Err(e) = self.event_tx.send(EventProxy(Arc::new(event))) {
+        let event = Event {
+            socket_addr: Some(socket_addr),
+            data,
+            route: None,
+        };
+        if let Err(e) = self.event_tx.send(event) {
             tracing::warn!("issue sending WebSocket event: {e}");
         }
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-struct InMemEvent {
-    socket_addr: String,
-    data: Vec<u8>,
-}
-
-impl Event for InMemEvent {
-    fn socket_addr(&self) -> Option<&str> {
-        if self.socket_addr.is_empty() { None } else { Some(&self.socket_addr) }
-    }
-
-    fn data(&self) -> &[u8] {
-        &self.data
     }
 }
 
@@ -264,7 +245,7 @@ mod tests {
         backend.send_to_guest("peer-1".to_string(), b"hello".to_vec());
 
         let event = events.next().await.expect("an event");
-        assert_eq!(event.data(), b"hello");
-        assert_eq!(event.socket_addr(), Some("peer-1"));
+        assert_eq!(event.data, b"hello");
+        assert_eq!(event.socket_addr.as_deref(), Some("peer-1"));
     }
 }

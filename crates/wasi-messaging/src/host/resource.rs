@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
@@ -10,8 +9,8 @@ pub use omnia::FutureResult;
 use serde::{Deserialize, Serialize};
 
 use crate::host::generated::wasi::messaging::types;
-/// Stream of message proxies.
-pub type Subscriptions = Pin<Box<dyn Stream<Item = MessageProxy> + Send>>;
+/// Stream of messages.
+pub type Subscriptions = Pin<Box<dyn Stream<Item = Message> + Send>>;
 
 /// Messaging client trait.
 pub trait Client: Debug + Send + Sync + 'static {
@@ -19,12 +18,12 @@ pub trait Client: Debug + Send + Sync + 'static {
     fn subscribe(&self) -> FutureResult<Subscriptions>;
 
     /// Send a message to a topic.
-    fn send(&self, topic: String, message: MessageProxy) -> FutureResult<()>;
+    fn send(&self, topic: String, message: Message) -> FutureResult<()>;
 
     /// Request a response from a topic.
     fn request(
-        &self, topic: String, message: MessageProxy, options: Option<RequestOptions>,
-    ) -> FutureResult<MessageProxy>;
+        &self, topic: String, message: Message, options: Option<RequestOptions>,
+    ) -> FutureResult<Message>;
 }
 
 /// Proxy for a messaging client.
@@ -39,46 +38,38 @@ impl Deref for ClientProxy {
     }
 }
 
-/// Providers implement the [`Message`] trait to allow the host to interact with
-/// different backend messaging systems.
-pub trait Message: Debug + Send + Sync + 'static {
-    /// Topic the message is published to.
-    fn topic(&self) -> String;
+/// A message crossing the messaging boundary.
+///
+/// The host owns message state; backends translate to and from their wire
+/// representation at the `Client` seam.
+#[derive(Clone, Debug, Default)]
+pub struct Message {
+    /// Topic the message is (or was) published to.
+    pub topic: String,
+    /// Message content.
+    pub payload: Vec<u8>,
+    /// Headers or metadata associated with the message.
+    pub metadata: Option<Metadata>,
+    /// Optional message description.
+    pub description: Option<String>,
+    /// Optional reply topic to which a response can be published.
+    pub reply: Option<Reply>,
+}
+
+impl Message {
+    /// Create a message with the given payload.
+    #[must_use]
+    pub fn new(payload: Vec<u8>) -> Self {
+        Self {
+            payload,
+            ..Self::default()
+        }
+    }
 
     /// Message content.
-    fn payload(&self) -> Vec<u8>;
-
-    /// Headers or metadata associated with the message.
-    fn metadata(&self) -> Option<Metadata>;
-
-    /// Optional message description.
-    fn description(&self) -> Option<String>;
-
-    /// Number of bytes in the payload.
-    fn length(&self) -> usize;
-
-    /// Optional reply topic to which a response can be published.
-    fn reply(&self) -> Option<Reply>;
-
-    /// For downcasting support.
-    fn as_any(&self) -> &dyn Any;
-}
-
-/// Proxy for a message.
-#[derive(Clone, Debug)]
-pub struct MessageProxy(pub Arc<dyn Message>);
-
-impl Deref for MessageProxy {
-    type Target = Arc<dyn Message>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for MessageProxy {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+    #[must_use]
+    pub fn payload(&self) -> &[u8] {
+        &self.payload
     }
 }
 
