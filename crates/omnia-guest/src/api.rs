@@ -7,7 +7,8 @@
 //! ## Example Usage
 //!
 //! ```rust,ignore
-//! use omnia_guest::{Body, Client, Headers};
+//! use http::HeaderMap;
+//! use omnia_guest::Client;
 //!
 //! // Create a client (typestate builder)
 //! let client = Client::new("alice").provider(provider);

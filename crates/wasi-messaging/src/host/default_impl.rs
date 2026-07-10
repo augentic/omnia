@@ -1,6 +1,9 @@
 //! Default in-memory implementation for wasi-messaging
 //!
-//! This is a lightweight implementation for development use only.
+//! This is a lightweight implementation for development use only. Messages
+//! fan out over a 32-slot [`tokio::sync::broadcast`] channel: a subscriber
+//! that falls more than 32 messages behind silently loses the overwritten
+//! messages (the lag error is filtered out of the subscription stream).
 
 use std::sync::Arc;
 

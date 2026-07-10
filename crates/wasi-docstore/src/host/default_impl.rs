@@ -34,6 +34,11 @@ impl FromEnv for ConnectOptions {
 }
 
 /// Default [`WasiDocStoreCtx`] using `PoloDB`.
+///
+/// Unlike the other in-memory defaults, this one is file-backed: documents
+/// persist across runs in `omnia-docstore.polodb` under the system temp
+/// directory (override with `DOCSTORE_DATABASE`). Delete the file for a clean
+/// slate.
 #[derive(Clone)]
 pub struct DocStoreDefault {
     db: Arc<Database>,
