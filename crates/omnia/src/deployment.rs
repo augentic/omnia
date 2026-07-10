@@ -274,13 +274,6 @@ impl<T: WasiView> Deployment<T> {
         &self.args
     }
 
-    // /// Clone the shared guest argv handle for threading into every
-    // /// [`Runtime::store`](crate::Runtime::store) without re-copying the vector.
-    // #[must_use]
-    // pub fn args_shared(&self) -> Arc<Vec<String>> {
-    //     Arc::clone(&self.args)
-    // }
-
     /// Assemble the guest [`Registry`].
     ///
     /// Consumes the deployment: pre-instantiation happens once, here, after all
