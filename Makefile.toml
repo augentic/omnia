@@ -18,7 +18,7 @@ skip_rust_env_info = true
 dependencies = ["audit", "fmt", "lint", "outdated", "deps"]
 
 [tasks.ci]
-dependencies = ["lint", "test", "test-docs", "vet", "outdated", "deny", "fmt"]
+dependencies = ["fmt-check", "lint", "test", "test-docs", "vet", "outdated", "deny"]
 
 # -------------------------------------
 # Individual Actions
@@ -49,9 +49,13 @@ install_crate = "cargo-udeps"
 # args = ["machete", "--skip-target-dir"]
 # install_crate = "cargo-machete"
 
-# Fmt
+# Fmt (fix in place)
 [tasks.fmt]
 script = "cargo +nightly fmt --all"
+
+# Fmt (verify only — CI must never rewrite the tree)
+[tasks.fmt-check]
+script = "cargo +nightly fmt --all --check"
 
 # Lint
 [tasks.lint]
@@ -79,7 +83,7 @@ install_crate = "cargo-outdated"
 # Test
 [tasks.test]
 command = "cargo"
-args = ["nextest", "run", "--all", "--all-features", "--no-tests=pass"]
+args = ["nextest", "run", "--locked", "--all", "--all-features", "--no-tests=pass"]
 env = { RUSTFLAGS = "-Dwarnings" }
 
 # Clean build artifacts, then run the full test suite from scratch.
