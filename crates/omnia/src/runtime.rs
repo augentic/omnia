@@ -17,7 +17,9 @@ use crate::cli::{Cli, Command};
 use crate::dispatch::serve_links;
 use crate::mount::MountRegistry;
 use crate::store::HasLimits;
-use crate::{Deployment, DeploymentBuilder, Registry, RuntimeOptions, StoreBase, StoreCtx};
+use crate::{
+    Deployment, DeploymentBuilder, Dispatcher, Registry, RuntimeOptions, StoreBase, StoreCtx,
+};
 
 /// A deployment's connected backend bundle, threaded into [`Runtime`].
 ///
@@ -243,11 +245,37 @@ impl From<ExitStatus> for std::process::ExitCode {
 }
 
 /// Connected host runtime: registry, argv, mounts, and backend bundle.
+///
+/// A thin handle over shared state: `clone()` bumps two reference counts, so
+/// the per-request and per-message handler clones never copy the backend
+/// bundle.
 pub struct Runtime<B: 'static> {
+    inner: Arc<RuntimeInner<B>>,
+    // Cached host→guest dispatch capability, built once per runtime so
+    // `store()` hands out clones instead of allocating one per store.
+    dispatcher: Arc<dyn Dispatcher>,
+}
+
+struct RuntimeInner<B: 'static> {
     registry: Arc<Registry<StoreCtx<B>>>,
     args: Arc<Vec<String>>,
     mounts: Arc<MountRegistry>,
     backends: B,
+}
+
+/// [`Dispatcher`] over the runtime's shared state.
+///
+/// A separate type (rather than `Runtime` itself) so the cached
+/// `Arc<dyn Dispatcher>` inside [`Runtime`] does not create a reference cycle.
+pub struct RuntimeDispatcher<B: 'static> {
+    inner: Arc<RuntimeInner<B>>,
+}
+
+impl<B: Clone + Send + Sync + 'static> RuntimeDispatcher<B> {
+    /// Rehydrate a full runtime handle for a dispatched call.
+    pub fn runtime(&self) -> Runtime<B> {
+        Runtime::with_inner(Arc::clone(&self.inner))
+    }
 }
 
 impl<B: Backends> Runtime<B> {
@@ -265,46 +293,51 @@ impl<B: Backends> Runtime<B> {
         let backends = B::connect().await.context("connecting backends")?;
         let mounts = deployment.mounts();
 
-        Ok(Self {
+        Ok(Self::with_inner(Arc::new(RuntimeInner {
             registry: Arc::new(deployment.into_registry().context("assembling registry")?),
             args,
             mounts,
             backends,
-        })
+        })))
     }
 }
 
-// Manual: `StoreCtx<B>` is not `Clone`; fields here are `Arc`-backed or clone the bundle.
+// Manual: `StoreCtx<B>` is not `Clone`; both fields are `Arc`-backed.
 impl<B: Clone + Send + Sync + 'static> Clone for Runtime<B> {
     fn clone(&self) -> Self {
         Self {
-            registry: Arc::clone(&self.registry),
-            args: Arc::clone(&self.args),
-            mounts: Arc::clone(&self.mounts),
-            backends: self.backends.clone(),
+            inner: Arc::clone(&self.inner),
+            dispatcher: Arc::clone(&self.dispatcher),
         }
     }
 }
 
 impl<B: Clone + Send + Sync + 'static> Runtime<B> {
+    fn with_inner(inner: Arc<RuntimeInner<B>>) -> Self {
+        let dispatcher = Arc::new(RuntimeDispatcher {
+            inner: Arc::clone(&inner),
+        });
+        Self { inner, dispatcher }
+    }
+
     /// Build a runtime from an already-assembled registry and backend bundle.
     #[must_use]
     pub fn from_parts(
         registry: Arc<Registry<StoreCtx<B>>>, args: Vec<String>, mounts: Arc<MountRegistry>,
         backends: B,
     ) -> Self {
-        Self {
+        Self::with_inner(Arc::new(RuntimeInner {
             registry,
             args: Arc::new(args),
             mounts,
             backends,
-        }
+        }))
     }
 
     /// Guest registry.
     #[must_use]
     pub fn registry(&self) -> &Registry<StoreCtx<B>> {
-        &self.registry
+        &self.inner.registry
     }
 
     /// Runtime options from the environment.
@@ -318,13 +351,13 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     pub fn store(&self) -> StoreCtx<B> {
         let base = StoreBase::builder()
             .options(self.options())
-            .dispatcher(Arc::new(self.clone()))
-            .args(Arc::clone(&self.args))
-            .mounts(Arc::clone(&self.mounts))
+            .dispatcher(Arc::clone(&self.dispatcher))
+            .args(Arc::clone(&self.inner.args))
+            .mounts(Arc::clone(&self.inner.mounts))
             .build();
         StoreCtx {
             base,
-            backends: self.backends.clone(),
+            backends: self.inner.backends.clone(),
         }
     }
 
