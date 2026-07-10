@@ -12,12 +12,10 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::sync::Arc;
-
 use anyhow::{Context as _, Result};
 use omnia::wasmtime_wasi::ResourceTable;
-use omnia::{Backend as _, DeploymentBuilder, HasHttp, MountRegistry, Runtime, StoreCtx};
-use omnia_testkit::{find_guest, http};
+use omnia::{Backend as _, HasHttp, Runtime};
+use omnia_testkit::{http, single_guest};
 use omnia_wasi_blobstore::{BlobstoreDefault, HasBlobstore, WasiBlobstore, WasiBlobstoreCtx};
 use omnia_wasi_http::{HttpDefault, WasiHttp, WasiHttpCtxView};
 use omnia_wasi_otel::{HasOtel, OtelDefault, WasiOtel, WasiOtelCtx};
@@ -53,10 +51,6 @@ impl HasBlobstore for Bundle {
 /// blobstore backend (clones share the store `Arc`, so this handle observes
 /// the guest's writes).
 async fn runtime() -> Result<Option<(Runtime<Bundle>, BlobstoreDefault)>> {
-    let Some(wasm) = find_guest("blobstore_wasm.wasm") else {
-        return Ok(None);
-    };
-
     let bundle = Bundle {
         http: HttpDefault::connect().await.context("connecting http")?,
         otel: OtelDefault::connect().await.context("connecting otel")?,
@@ -64,19 +58,11 @@ async fn runtime() -> Result<Option<(Runtime<Bundle>, BlobstoreDefault)>> {
     };
     let store_probe = bundle.blobstore.clone();
 
-    let mut deployment =
-        DeploymentBuilder::new().wasm(wasm).build::<StoreCtx<Bundle>>().await.context("build")?;
-    deployment.host::<WasiHttp, Bundle>().context("link http")?;
-    deployment.host::<WasiOtel, Bundle>().context("link otel")?;
-    deployment.host::<WasiBlobstore, Bundle>().context("link blobstore")?;
-    let registry = deployment.into_registry().context("assemble registry")?;
-
-    let runtime = Runtime::from_parts(
-        Arc::new(registry),
-        Vec::new(),
-        Arc::new(MountRegistry::default()),
-        bundle,
-    );
+    let Some(guest) = single_guest("blobstore_wasm.wasm", bundle).await? else {
+        return Ok(None);
+    };
+    let runtime =
+        guest.host::<WasiHttp>()?.host::<WasiOtel>()?.host::<WasiBlobstore>()?.into_runtime()?;
     Ok(Some((runtime, store_probe)))
 }
 

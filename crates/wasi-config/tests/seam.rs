@@ -11,12 +11,10 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::sync::Arc;
-
 use anyhow::{Context as _, Result};
 use omnia::wasmtime_wasi::ResourceTable;
-use omnia::{Backend as _, DeploymentBuilder, HasHttp, MountRegistry, Runtime, StoreCtx};
-use omnia_testkit::{find_guest, http};
+use omnia::{Backend as _, HasHttp, Runtime};
+use omnia_testkit::{http, single_guest};
 use omnia_wasi_config::{ConfigDefault, HasConfig, WasiConfig, WasiConfigCtx};
 use omnia_wasi_http::{HttpDefault, WasiHttp, WasiHttpCtxView};
 use omnia_wasi_otel::{HasOtel, OtelDefault, WasiOtel, WasiOtelCtx};
@@ -50,29 +48,16 @@ impl HasConfig for Bundle {
 }
 
 async fn runtime() -> Result<Option<Runtime<Bundle>>> {
-    let Some(wasm) = find_guest("config_wasm.wasm") else {
-        return Ok(None);
-    };
-
     let bundle = Bundle {
         http: HttpDefault::connect().await.context("connecting http")?,
         otel: OtelDefault::connect().await.context("connecting otel")?,
         config: ConfigDefault::connect().await.context("connecting config")?,
     };
 
-    let mut deployment =
-        DeploymentBuilder::new().wasm(wasm).build::<StoreCtx<Bundle>>().await.context("build")?;
-    deployment.host::<WasiHttp, Bundle>().context("link http")?;
-    deployment.host::<WasiOtel, Bundle>().context("link otel")?;
-    deployment.host::<WasiConfig, Bundle>().context("link config")?;
-    let registry = deployment.into_registry().context("assemble registry")?;
-
-    Ok(Some(Runtime::from_parts(
-        Arc::new(registry),
-        Vec::new(),
-        Arc::new(MountRegistry::default()),
-        bundle,
-    )))
+    let Some(guest) = single_guest("config_wasm.wasm", bundle).await? else {
+        return Ok(None);
+    };
+    Ok(Some(guest.host::<WasiHttp>()?.host::<WasiOtel>()?.host::<WasiConfig>()?.into_runtime()?))
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

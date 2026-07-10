@@ -11,13 +11,12 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context as _, Result};
 use omnia::wasmtime_wasi::ResourceTable;
-use omnia::{Backend as _, DeploymentBuilder, HasHttp, MountRegistry, Runtime, StoreCtx};
-use omnia_testkit::{find_guest, http};
+use omnia::{Backend as _, HasHttp, Runtime};
+use omnia_testkit::{http, single_guest};
 use omnia_wasi_docstore::{DocStoreDefault, HasDocStore, WasiDocStore, WasiDocStoreCtx};
 use omnia_wasi_http::{HttpDefault, WasiHttp, WasiHttpCtxView};
 use omnia_wasi_otel::{HasOtel, OtelDefault, WasiOtel, WasiOtelCtx};
@@ -50,29 +49,16 @@ impl HasDocStore for Bundle {
 }
 
 async fn runtime() -> Result<Option<Runtime<Bundle>>> {
-    let Some(wasm) = find_guest("docstore_wasm.wasm") else {
-        return Ok(None);
-    };
-
     let bundle = Bundle {
         http: HttpDefault::connect().await.context("connecting http")?,
         otel: OtelDefault::connect().await.context("connecting otel")?,
         docstore: DocStoreDefault::connect().await.context("connecting docstore")?,
     };
 
-    let mut deployment =
-        DeploymentBuilder::new().wasm(wasm).build::<StoreCtx<Bundle>>().await.context("build")?;
-    deployment.host::<WasiHttp, Bundle>().context("link http")?;
-    deployment.host::<WasiOtel, Bundle>().context("link otel")?;
-    deployment.host::<WasiDocStore, Bundle>().context("link docstore")?;
-    let registry = deployment.into_registry().context("assemble registry")?;
-
-    Ok(Some(Runtime::from_parts(
-        Arc::new(registry),
-        Vec::new(),
-        Arc::new(MountRegistry::default()),
-        bundle,
-    )))
+    let Some(guest) = single_guest("docstore_wasm.wasm", bundle).await? else {
+        return Ok(None);
+    };
+    Ok(Some(guest.host::<WasiHttp>()?.host::<WasiOtel>()?.host::<WasiDocStore>()?.into_runtime()?))
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

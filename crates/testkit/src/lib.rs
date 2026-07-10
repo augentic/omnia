@@ -9,6 +9,8 @@
 //!   CI pass vacuously.
 //! - [`temp_manifest`] writes a deployment manifest to a unique temp file and
 //!   removes it on drop.
+//! - [`single_guest`] assembles a single-guest [`omnia::Runtime`] over a
+//!   backend bundle, absorbing the deployment/link/registry boilerplate.
 //! - [`http`] drives a guest's `wasi:http/handler` export in-process, without
 //!   binding a TCP socket.
 //!
@@ -20,6 +22,8 @@ pub mod http;
 
 mod guest;
 mod manifest;
+mod runtime;
 
 pub use self::guest::find_guest;
 pub use self::manifest::{TempManifest, temp_manifest};
+pub use self::runtime::{SingleGuest, single_guest};

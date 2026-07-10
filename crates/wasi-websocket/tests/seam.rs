@@ -14,14 +14,13 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::net::TcpListener;
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result};
 use futures_util::StreamExt as _;
 use omnia::wasmtime_wasi::ResourceTable;
-use omnia::{Backend, DeploymentBuilder, HasHttp, MountRegistry, Runtime, StoreCtx};
-use omnia_testkit::{find_guest, http};
+use omnia::{Backend, HasHttp, Runtime};
+use omnia_testkit::{http, single_guest};
 use omnia_wasi_http::{HttpDefault, WasiHttp, WasiHttpCtxView};
 use omnia_wasi_otel::{HasOtel, OtelDefault, WasiOtel, WasiOtelCtx};
 use omnia_wasi_websocket::{
@@ -64,10 +63,6 @@ fn free_port() -> Result<u16> {
 
 /// Build the runtime with the backend's server bound to `socket_addr`.
 async fn runtime(socket_addr: String) -> Result<Option<Runtime<Bundle>>> {
-    let Some(wasm) = find_guest("websocket_wasm.wasm") else {
-        return Ok(None);
-    };
-
     let bundle = Bundle {
         http: HttpDefault::connect().await.context("connecting http")?,
         otel: OtelDefault::connect().await.context("connecting otel")?,
@@ -76,19 +71,10 @@ async fn runtime(socket_addr: String) -> Result<Option<Runtime<Bundle>>> {
             .context("connecting websocket")?,
     };
 
-    let mut deployment =
-        DeploymentBuilder::new().wasm(wasm).build::<StoreCtx<Bundle>>().await.context("build")?;
-    deployment.host::<WasiHttp, Bundle>().context("link http")?;
-    deployment.host::<WasiOtel, Bundle>().context("link otel")?;
-    deployment.host::<WasiWebSocket, Bundle>().context("link websocket")?;
-    let registry = deployment.into_registry().context("assemble registry")?;
-
-    Ok(Some(Runtime::from_parts(
-        Arc::new(registry),
-        Vec::new(),
-        Arc::new(MountRegistry::default()),
-        bundle,
-    )))
+    let Some(guest) = single_guest("websocket_wasm.wasm", bundle).await? else {
+        return Ok(None);
+    };
+    Ok(Some(guest.host::<WasiHttp>()?.host::<WasiOtel>()?.host::<WasiWebSocket>()?.into_runtime()?))
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
