@@ -24,6 +24,11 @@ use syn::{ItemFn, meta, parse_macro_input};
 /// (`async fn(Vec<String>) -> u8`) to a generated `wasi:cli/run` export
 /// with argv fetch and exit-code passthrough.
 ///
+/// The provider is constructed once and held in a `static` for the
+/// component's lifetime, so it must be `Sync` (trivially satisfied on the
+/// single-threaded wasm target unless it holds `!Sync` interior mutability
+/// such as `RefCell` — wrap such state in a `Mutex` instead).
+///
 /// # Example
 ///
 /// ```rust,ignore

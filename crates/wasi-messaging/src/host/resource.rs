@@ -41,8 +41,10 @@ impl Deref for ClientProxy {
 /// A message crossing the messaging boundary.
 ///
 /// The host owns message state; backends translate to and from their wire
-/// representation at the `Client` seam.
+/// representation at the `Client` seam. Non-exhaustive so a new field is not
+/// a breaking change: construct via [`Message::new`] and set fields directly.
 #[derive(Clone, Debug, Default)]
+#[non_exhaustive]
 pub struct Message {
     /// Topic the message is (or was) published to.
     pub topic: String,
@@ -64,12 +66,6 @@ impl Message {
             payload,
             ..Self::default()
         }
-    }
-
-    /// Message content.
-    #[must_use]
-    pub fn payload(&self) -> &[u8] {
-        &self.payload
     }
 }
 

@@ -129,6 +129,6 @@ mod tests {
             .await
             .expect("request");
 
-        assert_eq!(reply.payload(), b"ACK");
+        assert_eq!(reply.payload, b"ACK");
     }
 }

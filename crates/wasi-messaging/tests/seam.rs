@@ -107,8 +107,7 @@ async fn pub_sub() -> Result<()> {
 
     assert_eq!(message.topic, "a", "guest published to topic `a`");
     assert_eq!(
-        message.payload(),
-        br#"{"hello":"world"}"#,
+        message.payload, br#"{"hello":"world"}"#,
         "the published payload reached the host broker intact"
     );
 

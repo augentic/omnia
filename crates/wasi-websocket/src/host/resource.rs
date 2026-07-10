@@ -34,8 +34,11 @@ impl Deref for ClientProxy {
 /// A WebSocket event crossing the boundary.
 ///
 /// The host owns event state; backends translate to and from their wire
-/// representation at the [`Client`] seam.
+/// representation at the [`Client`] seam. Non-exhaustive so a new field is
+/// not a breaking change: construct via [`Event::new`] and set fields
+/// directly.
 #[derive(Clone, Debug, Default)]
+#[non_exhaustive]
 pub struct Event {
     /// The socket address this event was received from, when known.
     pub socket_addr: Option<String>,
