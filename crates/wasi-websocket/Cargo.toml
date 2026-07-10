@@ -19,7 +19,6 @@ workspace = true
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
 dashmap.workspace = true
-fromenv.workspace = true
 futures.workspace = true
 futures-channel.workspace = true
 futures-util.workspace = true
@@ -37,8 +36,10 @@ wasmtime-wasi.workspace = true
 wit-bindgen.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+futures-util.workspace = true
 omnia-testkit.workspace = true
 omnia-wasi-http.workspace = true
 omnia-wasi-otel.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio-tungstenite = "0.29.0"

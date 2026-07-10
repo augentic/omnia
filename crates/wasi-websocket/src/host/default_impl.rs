@@ -10,9 +10,8 @@
 
 use std::sync::Arc;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use dashmap::DashMap;
-use fromenv::FromEnv;
 use futures::FutureExt;
 use futures_channel::mpsc;
 use futures_util::stream::TryStreamExt;
@@ -35,16 +34,17 @@ const PER_CLIENT_CHANNEL_CAPACITY: usize = 256;
 type ConnectionMap = Arc<DashMap<String, mpsc::Sender<Message>>>;
 
 /// Options used to connect to the WebSocket service.
-#[derive(Debug, Clone, FromEnv)]
+#[derive(Debug, Clone)]
 pub struct ConnectOptions {
     /// The address to bind the WebSocket server to.
-    #[env(from = "WEBSOCKET_ADDR", default = "0.0.0.0:80")]
     pub socket_addr: String,
 }
 
 impl omnia::FromEnv for ConnectOptions {
     fn from_env() -> Result<Self> {
-        Self::from_env().finalize().context("issue loading connection options")
+        let socket_addr =
+            std::env::var("WEBSOCKET_ADDR").unwrap_or_else(|_| "0.0.0.0:80".to_string());
+        Ok(Self { socket_addr })
     }
 }
 

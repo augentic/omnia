@@ -40,7 +40,7 @@ pub use omnia::FutureResult;
 use omnia::{Host, Runtime, Server, StoreCtx};
 use wasmtime::component::{HasData, Linker, ResourceTableError};
 
-pub use self::default_impl::WebSocketDefault;
+pub use self::default_impl::{ConnectOptions, WebSocketDefault};
 pub use self::generated::Duplex;
 pub use self::generated::omnia::websocket::types::Error;
 use self::generated::omnia::websocket::{client, types as generated_types};

@@ -2584,7 +2584,6 @@ version = "0.35.0"
 dependencies = [
  "anyhow",
  "dashmap",
- "fromenv",
  "futures",
  "futures-channel",
  "futures-util",
