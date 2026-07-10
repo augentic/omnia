@@ -106,11 +106,6 @@ pub trait ToolHost: Send + Sync {
     }
 }
 
-/// An untyped host failure is a `backend` error at the boundary.
-impl From<anyhow::Error> for Error {
-    fn from(err: anyhow::Error) -> Self {
-        Self::Backend(err.to_string())
-    }
-}
-
+// An untyped host failure is a `backend` error at the boundary.
+omnia::host_error!(Error, Backend);
 omnia::wasi_view!(Model);

@@ -38,7 +38,7 @@ use std::sync::Arc;
 
 pub use omnia::FutureResult;
 use omnia::{Host, Runtime, Server, StoreCtx};
-use wasmtime::component::{HasData, Linker, ResourceTableError};
+use wasmtime::component::{HasData, Linker};
 
 pub use self::default_impl::{ConnectOptions, WebSocketDefault};
 pub use self::generated::Duplex;
@@ -99,22 +99,5 @@ pub trait WasiWebSocketCtx: Debug + Send + Sync + 'static {
     fn new_event(&self, data: Vec<u8>) -> anyhow::Result<Arc<dyn Event>>;
 }
 
-impl From<anyhow::Error> for Error {
-    fn from(err: anyhow::Error) -> Self {
-        Self::Other(err.to_string())
-    }
-}
-
-impl From<ResourceTableError> for Error {
-    fn from(err: ResourceTableError) -> Self {
-        Self::Other(err.to_string())
-    }
-}
-
-impl From<wasmtime::Error> for Error {
-    fn from(err: wasmtime::Error) -> Self {
-        Self::Other(err.to_string())
-    }
-}
-
+omnia::host_error!(Error, Other);
 omnia::wasi_view!(WebSocket);

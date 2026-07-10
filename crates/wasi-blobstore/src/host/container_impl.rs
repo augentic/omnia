@@ -8,32 +8,21 @@ use crate::host::generated::wasi::blobstore::container::{
 };
 use crate::host::resource::ContainerProxy;
 use crate::host::{
-    IncomingValue, OutgoingValue, Result, StreamObjectNames, WasiBlobstore, WasiBlobstoreCtxView,
+    Error, IncomingValue, OutgoingValue, Result, StreamObjectNames, WasiBlobstore,
+    WasiBlobstoreCtxView,
 };
 
 impl<T> HostContainerWithStore<T> for WasiBlobstore {
     fn name(mut host: Access<'_, T, Self>, self_: Resource<ContainerProxy>) -> Result<String> {
-        let container = host
-            .get()
-            .table
-            .get(&self_)
-            .context("Container not found")
-            .map_err(|e| e.to_string())?;
-
-        container.name().context("getting name").map_err(|e| e.to_string())
+        let container = host.get().table.get(&self_).context("Container not found")?;
+        Ok(container.name().context("getting name")?)
     }
 
     fn info(
         mut host: Access<'_, T, Self>, self_: Resource<ContainerProxy>,
     ) -> Result<ContainerMetadata> {
-        let container = host
-            .get()
-            .table
-            .get(&self_)
-            .context("Container not found")
-            .map_err(|e| e.to_string())?;
-
-        container.info().context("getting info").map_err(|e| e.to_string())
+        let container = host.get().table.get(&self_).context("Container not found")?;
+        Ok(container.info().context("getting info")?)
     }
 
     async fn get_data(
@@ -42,37 +31,28 @@ impl<T> HostContainerWithStore<T> for WasiBlobstore {
     ) -> Result<Resource<IncomingValue>> {
         let container = get_container(accessor, &self_)?;
 
-        let data_opt = container
-            .get_data(name, start, end)
-            .await
-            .context("getting data")
-            .map_err(|e| e.to_string())?;
+        let data_opt =
+            container.get_data(name.clone(), start, end).await.context("getting data")?;
 
         let Some(data) = data_opt else {
-            return Err("object not found".to_string());
+            return Err(Error::NotFound(format!("object not found: {name}")));
         };
         let buf = BytesMut::from(&*data);
 
-        accessor.with(|mut store| store.get().table.push(buf.into())).map_err(|e| e.to_string())
+        Ok(accessor.with(|mut store| store.get().table.push(buf.into()))?)
     }
 
     async fn write_data(
         accessor: &Accessor<T, Self>, self_: Resource<ContainerProxy>, name: String,
         data: Resource<OutgoingValue>,
     ) -> Result<()> {
-        let bytes = accessor
-            .with(|mut store| {
-                let value = store.get().table.get(&data)?;
-                Ok::<Vec<u8>, wasmtime::Error>(value.pipe.contents().to_vec())
-            })
-            .map_err(|e| e.to_string())?;
+        let bytes = accessor.with(|mut store| {
+            let value = store.get().table.get(&data)?;
+            Ok::<Vec<u8>, Error>(value.pipe.contents().to_vec())
+        })?;
 
         let container = get_container(accessor, &self_)?;
-        container
-            .write_data(name, bytes)
-            .await
-            .context("writing data")
-            .map_err(|e| e.to_string())?;
+        container.write_data(name, bytes).await.context("writing data")?;
 
         Ok(())
     }
@@ -81,17 +61,17 @@ impl<T> HostContainerWithStore<T> for WasiBlobstore {
         accessor: &Accessor<T, Self>, self_: Resource<ContainerProxy>,
     ) -> Result<Resource<StreamObjectNames>> {
         let container = get_container(accessor, &self_)?;
-        let names =
-            container.list_objects().await.context("listing objects").map_err(|e| e.to_string())?;
+        let names = container.list_objects().await.context("listing objects")?;
         let stream = StreamObjectNames::new(names);
-        accessor.with(|mut store| store.get().table.push(stream)).map_err(|e| e.to_string())
+        Ok(accessor.with(|mut store| store.get().table.push(stream))?)
     }
 
     async fn delete_object(
         accessor: &Accessor<T, Self>, self_: Resource<ContainerProxy>, name: String,
     ) -> Result<()> {
         let container = get_container(accessor, &self_)?;
-        container.delete_object(name).await.context("deleting object").map_err(|e| e.to_string())
+        container.delete_object(name).await.context("deleting object")?;
+        Ok(())
     }
 
     async fn delete_objects(
@@ -99,11 +79,7 @@ impl<T> HostContainerWithStore<T> for WasiBlobstore {
     ) -> Result<()> {
         let container = get_container(accessor, &self_)?;
         for name in names {
-            container
-                .delete_object(name)
-                .await
-                .context("deleting object")
-                .map_err(|e| e.to_string())?;
+            container.delete_object(name).await.context("deleting object")?;
         }
 
         Ok(())
@@ -113,32 +89,23 @@ impl<T> HostContainerWithStore<T> for WasiBlobstore {
         accessor: &Accessor<T, Self>, self_: Resource<ContainerProxy>, name: String,
     ) -> Result<bool> {
         let container = get_container(accessor, &self_)?;
-        container
-            .has_object(name)
-            .await
-            .context("checking object exists")
-            .map_err(|e| e.to_string())
+        Ok(container.has_object(name).await.context("checking object exists")?)
     }
 
     async fn object_info(
         accessor: &Accessor<T, Self>, self_: Resource<ContainerProxy>, name: String,
     ) -> Result<ObjectMetadata> {
         let container = get_container(accessor, &self_)?;
-        container.object_info(name).await.context("getting object info").map_err(|e| e.to_string())
+        Ok(container.object_info(name).await.context("getting object info")?)
     }
 
     async fn clear(accessor: &Accessor<T, Self>, self_: Resource<ContainerProxy>) -> Result<()> {
         let container = get_container(accessor, &self_)?;
 
-        let all_objects =
-            container.list_objects().await.context("listing objects").map_err(|e| e.to_string())?;
+        let all_objects = container.list_objects().await.context("listing objects")?;
 
         for name in all_objects {
-            container
-                .delete_object(name)
-                .await
-                .context("deleting object")
-                .map_err(|e| e.to_string())?;
+            container.delete_object(name).await.context("deleting object")?;
         }
 
         Ok(())
@@ -156,12 +123,8 @@ impl<T> HostStreamObjectNamesWithStore<T> for WasiBlobstore {
         accessor: &Accessor<T, Self>, self_: Resource<StreamObjectNames>, len: u64,
     ) -> Result<(Vec<String>, bool)> {
         accessor.with(|mut store| {
-            let stream = store
-                .get()
-                .table
-                .get_mut(&self_)
-                .context("StreamObjectNames not found")
-                .map_err(|e| e.to_string())?;
+            let stream =
+                store.get().table.get_mut(&self_).context("StreamObjectNames not found")?;
 
             let remaining = &stream.names[stream.offset..];
             let take = usize::try_from(len).unwrap_or(usize::MAX).min(remaining.len());
@@ -176,12 +139,8 @@ impl<T> HostStreamObjectNamesWithStore<T> for WasiBlobstore {
         accessor: &Accessor<T, Self>, self_: Resource<StreamObjectNames>, num: u64,
     ) -> Result<(u64, bool)> {
         accessor.with(|mut store| {
-            let stream = store
-                .get()
-                .table
-                .get_mut(&self_)
-                .context("StreamObjectNames not found")
-                .map_err(|e| e.to_string())?;
+            let stream =
+                store.get().table.get_mut(&self_).context("StreamObjectNames not found")?;
 
             let remaining = stream.names.len() - stream.offset;
             let skip = usize::try_from(num).unwrap_or(usize::MAX).min(remaining);
@@ -206,12 +165,7 @@ pub fn get_container<T>(
     accessor: &Accessor<T, WasiBlobstore>, self_: &Resource<ContainerProxy>,
 ) -> Result<ContainerProxy> {
     accessor.with(|mut store| {
-        let container = store
-            .get()
-            .table
-            .get(self_)
-            .context("Container not found")
-            .map_err(|e| e.to_string())?;
+        let container = store.get().table.get(self_).context("Container not found")?;
         Ok(container.clone())
     })
 }

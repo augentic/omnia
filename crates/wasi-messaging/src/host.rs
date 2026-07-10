@@ -40,7 +40,6 @@ use std::sync::Arc;
 pub use omnia::FutureResult;
 use omnia::{Host, Runtime, Server, StoreCtx};
 use wasmtime::component::{HasData, Linker};
-use wasmtime_wasi::ResourceTableError;
 
 pub use self::default_impl::MessagingDefault;
 pub use self::generated::MessagingRequestReply;
@@ -147,22 +146,5 @@ pub trait WasiMessagingCtx: Debug + Send + Sync + 'static {
     ) -> anyhow::Result<Arc<dyn Message>>;
 }
 
-impl From<anyhow::Error> for Error {
-    fn from(err: anyhow::Error) -> Self {
-        Self::Other(err.to_string())
-    }
-}
-
-impl From<ResourceTableError> for Error {
-    fn from(err: ResourceTableError) -> Self {
-        Self::Other(err.to_string())
-    }
-}
-
-impl From<wasmtime::Error> for Error {
-    fn from(err: wasmtime::Error) -> Self {
-        Self::Other(err.to_string())
-    }
-}
-
+omnia::host_error!(Error, Other);
 omnia::wasi_view!(Messaging);

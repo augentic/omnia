@@ -30,7 +30,7 @@ use std::fmt::Debug;
 
 pub use omnia::FutureResult;
 use omnia::{Host, Server};
-use wasmtime::component::{HasData, Linker, ResourceTableError};
+use wasmtime::component::{HasData, Linker};
 
 pub use self::default_impl::DocStoreDefault;
 pub use self::generated::wasi::docstore::types::{
@@ -99,17 +99,5 @@ pub struct QueryOpts {
     pub continuation: Option<String>,
 }
 
-impl From<anyhow::Error> for Error {
-    fn from(err: anyhow::Error) -> Self {
-        // `:#` keeps the full context chain from backend errors.
-        Self::Other(format!("{err:#}"))
-    }
-}
-
-impl From<ResourceTableError> for Error {
-    fn from(err: ResourceTableError) -> Self {
-        Self::Other(err.to_string())
-    }
-}
-
+omnia::host_error!(Error, Other);
 omnia::wasi_view!(DocStore);

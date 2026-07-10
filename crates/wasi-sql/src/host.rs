@@ -10,9 +10,7 @@ mod types_impl;
 mod generated {
     #![allow(missing_docs)]
 
-    pub use anyhow::Error;
-
-    pub use super::{ConnectionProxy, Statement};
+    pub use super::{ConnectionProxy, Error, Statement};
 
     wasmtime::component::bindgen!({
         world: "imports",
@@ -42,6 +40,24 @@ use self::generated::wasi::sql::{readwrite, types};
 pub use crate::host::default_impl::SqlDefault;
 pub use crate::host::generated::wasi::sql::types::{DataType, Field, Row};
 pub use crate::host::resource::*;
+
+/// Host error backing the `wasi:sql` error resource.
+#[derive(Debug)]
+pub enum Error {
+    /// Untyped host failure; the message preserves the backend context chain.
+    Other(String),
+}
+
+impl Error {
+    /// The failure trace exposed to guests via the WIT `error` resource.
+    #[must_use]
+    pub fn trace(&self) -> &str {
+        let Self::Other(msg) = self;
+        msg
+    }
+}
+
+omnia::host_error!(Error, Other);
 
 /// Host-side service for `wasi:sql`.
 #[derive(Debug)]

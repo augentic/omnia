@@ -32,7 +32,7 @@ use std::sync::Arc;
 
 pub use omnia::FutureResult;
 use omnia::{Host, Server};
-use wasmtime::component::{HasData, Linker, ResourceTableError};
+use wasmtime::component::{HasData, Linker};
 
 pub use self::default_impl::IdentityDefault;
 use self::generated::omnia::identity::credentials;
@@ -71,16 +71,5 @@ pub trait WasiIdentityCtx: Debug + Send + Sync + 'static {
     fn get_identity(&self, name: String) -> FutureResult<Arc<dyn Identity>>;
 }
 
-impl From<anyhow::Error> for Error {
-    fn from(err: anyhow::Error) -> Self {
-        Self::InternalFailure(err.to_string())
-    }
-}
-
-impl From<ResourceTableError> for Error {
-    fn from(err: ResourceTableError) -> Self {
-        Self::InternalFailure(err.to_string())
-    }
-}
-
+omnia::host_error!(Error, InternalFailure);
 omnia::wasi_view!(Identity);
