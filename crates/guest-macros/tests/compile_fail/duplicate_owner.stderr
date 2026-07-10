@@ -1,5 +1,0 @@
-error: cannot specify second owner
- --> tests/compile_fail/duplicate_owner.rs:5:12
-  |
-5 |     owner: "again",
-  |            ^^^^^^^

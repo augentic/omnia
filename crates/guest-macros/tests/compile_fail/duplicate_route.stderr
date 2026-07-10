@@ -1,5 +1,0 @@
-error: duplicate route: `get /greet` is already registered
-  --> tests/compile_fail/duplicate_route.rs:10:9
-   |
-10 |         "/greet": get(Req, Reply),
-   |         ^^^^^^^^

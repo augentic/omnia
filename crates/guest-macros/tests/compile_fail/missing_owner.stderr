@@ -1,8 +1,0 @@
-error: missing `owner`
- --> tests/compile_fail/missing_owner.rs:3:28
-  |
-3 |   omnia_guest_macros::guest!({
-  |  ____________________________^
-4 | |     provider: Provider,
-5 | | });
-  | |_^

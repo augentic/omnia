@@ -133,7 +133,7 @@ Each crate's `wit/` directory holds the [WIT](https://component-model.bytecodeal
 
 ### Guest SDK (`crates/omnia-guest`, `crates/guest-macros`)
 
-`omnia-guest` is the guest-side toolkit: HTTP-aware error types (`HttpResult`), ORM query builders, and the MCP server module (`mcp::McpServer`, `mcp::router`). `guest-macros` provides the optional `guest!` route-table macro and the `#[instrument]` tracing attribute.
+`omnia-guest` defines transport-neutral `Operation`, `Invocation`, and provider-owning `Invoker` primitives plus explicit command, HTTP, and exact-topic messaging routers under `omnia_guest::api`. Applications own their WASI exports and call the matching transport adapter. The command router provides typed nested grammars, Clap-compatible help and completions, and exact output/exit projection. HTTP-aware errors (`HttpResult`), ORM query builders, and the MCP server module (`mcp::McpServer`, `mcp::router`) remain in `omnia-guest`; `guest-macros` provides only the independent `#[instrument]` tracing attribute.
 
 ### Host macro (`crates/host-macros`)
 
@@ -205,8 +205,8 @@ The consolidated list is in [Configuration](reference/configuration.md); individ
 omnia/
 ├── crates/
 │   ├── omnia/              # Runtime core (engine, CLI, deployment, registry, dispatch)
-│   ├── omnia-guest/        # Guest SDK (errors, ORM, MCP)
-│   ├── guest-macros/       # guest! and #[instrument] proc-macros
+│   ├── omnia-guest/        # Guest SDK (typed transport routers, errors, ORM, MCP)
+│   ├── guest-macros/       # #[instrument] proc macro
 │   ├── host-macros/        # runtime! proc-macro
 │   ├── testkit/            # Integration-test scaffolding (dev-only)
 │   └── wasi-*/             # WASI interface implementations

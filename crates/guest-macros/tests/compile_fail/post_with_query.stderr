@@ -1,5 +1,0 @@
-error: POST requests should not have query parameters; consider using body
- --> tests/compile_fail/post_with_query.rs:9:19
-  |
-9 |         "/greet": post(Req with_query, Reply),
-  |                   ^^^^

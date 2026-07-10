@@ -39,7 +39,7 @@ bytes.workspace = true
 cap-fs-ext.workspace = true
 cap-std.workspace = true
 cfg-if.workspace = true
-clap = { version = "4.6.1", features = ["derive"] }
+clap.workspace = true
 fromenv.workspace = true
 futures.workspace = true
 http.workspace = true

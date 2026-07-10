@@ -19,6 +19,8 @@ axum = { workspace = true, features = ["json", "macros", "query"] }
 bon.workspace = true
 bytes.workspace = true
 chrono.workspace = true
+clap.workspace = true
+clap_complete.workspace = true
 http.workspace = true
 http-body.workspace = true
 omnia-guest-macros.workspace = true

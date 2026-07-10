@@ -1,16 +1,16 @@
 # CLI Command Example
 
-A `wasi:cli/command` guest driven as a **one-shot trigger**: the host invokes its `wasi:cli/run` export exactly once and exits with the guest's status. Unlike the long-lived triggers (HTTP, messaging, …) that loop on a transport, a command runs to completion — but it rides the *same* `runtime!` / `TriggerRouter` runtime core, so the same guest could be driven by an inbound event tomorrow with only a host-wiring change.
+A `wasi:cli/command` guest driven as a **one-shot trigger**: the host invokes its `wasi:cli/run` export exactly once and exits with the guest's status. The guest uses `omnia_guest::api::command` to bind typed `Operation` implementations to a nested command grammar while keeping the WASI export explicit.
 
 ## What it shows
 
-- [`guest.rs`](guest.rs) is a `cdylib` reactor exporting `wasi:cli/run@0.3.0` via `wasip3::cli::command::export!` — the same shape as every other example guest. Its CLI is ordinary [`clap`](https://docs.rs/clap) (derive API): argv and stdout/stderr arrive through the p2 `std` bridge Omnia links alongside p3, so clap works unmodified — `--help`, `--version`, and usage errors need no hand-rolling. Subcommands:
+- [`guest.rs`](guest.rs) defines operations over a small shared provider, registers their Clap-derived argument types with `omnia_guest::api::command::Router`, and explicitly exports `wasi:cli/run@0.3.0` via `wasip3::cli::command::export!`. Typed `Args` convert into transport-neutral operation inputs before the `Invoker` calls each operation. The export delegates once to `omnia_guest::api::command::execute_wasi`, which preserves buffered stdout, stderr, and exact exit status. Subcommands:
   - `greet [NAME]` — prints `Hello, <NAME>!` (default `world`).
   - `add [N...]` — prints the sum of its integer arguments.
   - `env` — prints the inherited environment, one `key=value` per line.
   - `fail [CODE]` — exits with `CODE` via the p3 `wasi:cli/exit`, or returns `Err(())` without it (which the host maps to `1`).
 
-  One seam nuance: the guest uses `try_parse()` rather than `parse()`, forwarding clap's `exit_code()` through the p3 `wasi:cli/exit`. `parse()`'s internal `std::process::exit` lands on the *p2* `wasi:cli/exit`, which carries only success/failure and would collapse clap's usage-error code `2` to `1`. Either way the host observes the exit as wasmtime's `I32Exit`.
+- The router generates `--help`, `--version`, usage errors, and a `completions <SHELL>` route from the same grammar. Each route decodes arguments into an operation input and projects typed output or failure into `CommandResponse`.
 - [`runtime.rs`](runtime.rs) is the whole host: a single `omnia::runtime!({ mode: command })`. Command mode finds the sole command-capable guest, instantiates it through the registry pipeline, drives `wasi:cli/run` once, and hands back the exit status the generated `main` exits with.
 
 ## Build the guest
@@ -45,11 +45,11 @@ Hello, Ada!
 Nonzero exits flow back through command mode to `main`, demonstrating the one-shot exit-code seam:
 
 ```bash
-# clap usage error, via std::process::exit -> p2 wasi:cli/exit
+# clap usage error, projected by the command router
 cargo run --example cli -- run ./target/wasm32-wasip2/debug/examples/cli_wasm.wasm -- bogus
 echo $?   # 2
 
-# explicit code, via p3 wasi:cli/exit
+# operation failure projected to an explicit code
 cargo run --example cli -- run ./target/wasm32-wasip2/debug/examples/cli_wasm.wasm -- fail 42
 echo $?   # 42
 
@@ -60,7 +60,4 @@ echo $?   # 1
 
 ## Guest binary size
 
-clap is the heaviest of the common Rust argument parsers. This example already trims it — `default-features = false` drops `color` (anstream/anstyle) and `suggestions` (strsim), keeping only `derive`, `error-context`, `help`, `std`, and `usage` — but per the [argparse-rosetta-rs](https://github.com/rosetta-rs/argparse-rosetta-rs) benchmarks that still leaves roughly 380 KiB of parser in the binary (~600 KiB untrimmed). If guest `.wasm` size matters (distribution, cold start), two further steps down:
-
-- **clap builder API** instead of `derive`: same runtime machinery, but drops the proc-macro build cost and the generated derive glue.
-- **[`lexopt`](https://docs.rs/lexopt)** (~37 KiB) or [`pico-args`](https://docs.rs/pico-args) (~24 KiB): an order of magnitude smaller. You hand-write the `--help` text and dispatch loop, but both handle `--opt=value` and combined short flags, and both compile cleanly to `wasm32-wasip2` — nothing about the WASI seam is clap-specific.
+`omnia_guest::api::command` uses Clap with a trimmed workspace feature set that omits color and suggestions. The router owns the command grammar and operation dispatch; the guest still owns its explicit WASI export and application-local decoding and projection policy.

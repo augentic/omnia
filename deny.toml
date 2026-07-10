@@ -32,7 +32,7 @@ allow = [
 ignore = true
 
 [sources]
-allow-git = ["https://github.com/bytecodealliance/wasmtime"]
+allow-git = ["https://github.com/bytecodealliance/wrpc"]
 
 [bans]
 deny = [

@@ -22,6 +22,5 @@ pub use {
     omnia_wasi_messaging, omnia_wasi_otel, wasip3, wit_bindgen,
 };
 
-pub use crate::api::*;
 pub use crate::capabilities::*;
 pub use crate::error::*;

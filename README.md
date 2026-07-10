@@ -8,7 +8,7 @@ While it can be used standalone, Omnia is primarily designed to be the runtime f
 
 - **Secure by Default**: All guest code runs in a strict WebAssembly sandbox. Capabilities (network, filesystem, model access) are explicitly granted.
 - **Batteries Included**: Built-in support for common WASI interfaces — HTTP, key-value, messaging, SQL, blob and document storage, secrets, identity, WebSockets, observability, and model completions — each with a zero-config default backend.
-- **Developer Friendly**: A rich guest SDK (`omnia-guest`) and macros (`runtime!`, `guest!`) eliminate boilerplate.
+- **Developer Friendly**: Typed explicit guest APIs and the `runtime!` host macro keep boundaries visible without repetitive transport glue.
 - **Pluggable Architecture**: Swap backend implementations (e.g. in-memory to Redis) without changing or recompiling guest code. Production backends live in the sibling [`backends`](https://github.com/augentic/backends) repository.
 - **Multi-Guest Deployments**: One runtime can host many guests with declarative routing, workspace mounts, and host-mediated guest-to-guest linking, all driven by a TOML manifest.
 
@@ -54,8 +54,8 @@ The [`examples/`](examples/README.md) directory contains a complete working gues
 | Crate                                           | Description                                                                                |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | [`omnia`](crates/omnia)                         | Core runtime — wasmtime wrapper with CLI, deployment registry, dispatch, and telemetry    |
-| [`omnia-guest`](crates/omnia-guest)             | Guest SDK — traits, error types, ORM, and MCP support for WASI component authors          |
-| [`omnia-guest-macros`](crates/guest-macros)     | `guest!` and `#[instrument]` proc-macros for guests                                        |
+| [`omnia-guest`](crates/omnia-guest)             | Guest SDK — operations, explicit command/HTTP/messaging routers, errors, ORM, and MCP support |
+| [`omnia-guest-macros`](crates/guest-macros)     | `#[instrument]` observability attribute for guests                                         |
 | [`omnia-host-macros`](crates/host-macros)       | `runtime!` proc-macro for host runtime generation                                          |
 | [`omnia-testkit`](crates/testkit)               | Integration-test scaffolding (dev-only)                                                    |
 | [`omnia-wasi-blobstore`](crates/wasi-blobstore) | wasi:blobstore host and guest bindings                                                     |

@@ -1,38 +1,22 @@
 //! # Typed Guest API Wasm Guest
 //!
-//! This module demonstrates the `guest!` macro and the typed `Handler` API.
-//! Instead of hand-writing the WASI export and an axum router, the macro
-//! generates both from a declarative route table; each request type
-//! implements [`Handler`] to parse its input and produce a [`Reply`].
+//! This module demonstrates the explicit operation and HTTP router API.
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_guest::{Context, Error, Handler, IntoBody, Reply, guest};
+use omnia_guest::api::http::{Router, get, post, serve};
+use omnia_guest::api::{CallContext, Invoker, Operation};
+use omnia_guest::{Error, wasip3};
 use serde::{Deserialize, Serialize};
 
-#[derive(Default)]
 struct Provider;
 
-guest!({
-    owner: "examples",
-    provider: Provider,
-    http: [
-        "/greet/{name}": get(Greet, Greeting),
-        "/greet": post(Greet, Greeting),
-    ],
-});
-
-/// Path parameters, query pairs, and the JSON body merge into this flat
-/// input before `from_input` runs.
 #[derive(Debug, Deserialize)]
 struct GreetArgs {
     name: String,
 }
 
-#[derive(Debug)]
-struct Greet {
-    args: GreetArgs,
-}
+struct Greet;
 
 #[derive(Debug, Serialize)]
 struct Greeting {
@@ -41,33 +25,35 @@ struct Greeting {
     request_id: String,
 }
 
-impl IntoBody for Greeting {
-    fn into_body(self) -> anyhow::Result<Vec<u8>> {
-        Ok(serde_json::to_vec(&self)?)
-    }
-}
-
-impl Handler<Provider> for Greet {
+impl Operation<Provider> for Greet {
     type Error = Error;
     type Input = GreetArgs;
     type Output = Greeting;
 
-    fn from_input(input: GreetArgs) -> Result<Self, Error> {
-        Ok(Self { args: input })
+    async fn call(
+        input: Self::Input, context: CallContext<'_, Provider>,
+    ) -> Result<Self::Output, Self::Error> {
+        Ok(Greeting {
+            message: format!("Hello, {}!", input.name),
+            owner: context.owner.to_string(),
+            request_id: context.metadata.correlation_id.as_deref().unwrap_or("none").to_string(),
+        })
     }
+}
 
-    async fn handle(self, ctx: Context<'_, Provider>) -> Result<Reply<Greeting>, Error> {
-        let request_id = ctx
-            .headers
-            .get("x-request-id")
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or("none")
-            .to_string();
+fn router() -> Router<Provider> {
+    Router::new(Invoker::new("examples", Provider))
+        .route("/greet/{name}", get::<Greet, Provider>())
+        .route("/greet", post::<Greet, Provider>())
+}
 
-        Ok(Reply::ok(Greeting {
-            message: format!("Hello, {}!", self.args.name),
-            owner: ctx.owner.to_string(),
-            request_id,
-        }))
+struct Http;
+wasip3::http::service::export!(Http);
+
+impl wasip3::exports::http::handler::Guest for Http {
+    async fn handle(
+        request: wasip3::http::types::Request,
+    ) -> Result<wasip3::http::types::Response, wasip3::http::types::ErrorCode> {
+        serve(router(), request).await
     }
 }

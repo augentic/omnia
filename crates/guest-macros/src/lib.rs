@@ -1,58 +1,14 @@
 #![doc = include_str!("../README.md")]
 
-//! Procedural macros for the omnia guest.
+//! Procedural attributes for Omnia guests.
 
 #![forbid(unsafe_code)]
 
-mod command;
-mod guest;
-mod http;
-mod messaging;
 mod otel;
 
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{ItemFn, meta, parse_macro_input};
-
-/// Generates the guest infrastructure based on the specified configuration.
-///
-/// The `http:` table expands to a target-neutral `http_router(client)`
-/// function over [`omnia_guest::api::route`] constructors (path, query,
-/// and JSON-body inputs deserialize into each request's `Handler::Input`),
-/// plus a wasm-gated `wasi:http` export serving it. The `command:` arm
-/// wires an app-supplied async dispatch function
-/// (`async fn(Vec<String>) -> u8`) to a generated `wasi:cli/run` export
-/// with argv fetch and exit-code passthrough.
-///
-/// The provider is constructed once and held in a `static` for the
-/// component's lifetime, so it must be `Sync` (trivially satisfied on the
-/// single-threaded wasm target unless it holds `!Sync` interior mutability
-/// such as `RefCell` — wrap such state in a `Mutex` instead).
-///
-/// # Example
-///
-/// ```rust,ignore
-/// omnia_guest_macros::guest!({
-///     owner: "at",
-///     provider: MyProvider,
-///     http: [
-///         "/some/get/path": get(SomeRequest, SomeResponse),
-///         "/some/other-get/path": get(SomeRequest with_query, SomeResponse),
-///         "/some/post/path": post(SomeRequest, SomeResponse),
-///         "/some/post-body/path": post(SomeRequest with_body, SomeResponse),
-///     ],
-///     messaging: [
-///         "topic-name.v1": TopicMessage,
-///         "other-topic.v2": OtherTopicMessage,
-///     ],
-///     command: dispatch,
-/// });
-/// ```
-#[proc_macro]
-pub fn guest(input: TokenStream) -> TokenStream {
-    let config = parse_macro_input!(input as guest::Config);
-    guest::expand(&config).into()
-}
 
 /// Instruments a function using the `[wasi_otel::instrument]` function.
 ///
