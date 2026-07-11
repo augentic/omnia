@@ -24,7 +24,7 @@ tracing.workspace = true
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # Match wasmtime-wasi's cap-std stack (3.x)
-cap-primitives = "4.0.2"
+cap-primitives = "3.4.5"
 cap-std.workspace = true
 futures.workspace = true
 jsonschema.workspace = true
