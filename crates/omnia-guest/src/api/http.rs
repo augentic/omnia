@@ -14,6 +14,9 @@ use serde::de::DeserializeOwned;
 
 use crate::api::{Invocation, Invoker, Metadata, Operation, Provider};
 
+/// Result type for HTTP handlers.
+pub type HttpResult<T, E = HttpError> = Result<T, E>;
+
 /// Projects one operation's result onto an HTTP response.
 pub trait Projector<O, P>: Clone + Send + Sync + 'static
 where

@@ -12,6 +12,7 @@ pub mod messaging;
 /// Stateless application operations.
 pub mod operation;
 
+pub use http::{HttpError, HttpResult};
 pub use invocation::{Invocation, Metadata};
 pub use invoke::{CallContext, Invoker};
 pub use operation::Operation;
