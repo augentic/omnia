@@ -14,10 +14,8 @@ use futures::FutureExt as _;
 use omnia::{Dispatcher, GuestId, HasDispatcher, HasMounts};
 use wasmtime::component::{Accessor, Val};
 
-use crate::host::generated::omnia::model::completion::{
-    Format, Host, HostWithStore, Reply, Request, Usage as WitUsage,
-};
-use crate::host::types::{Answer, DirEntry, Reference, VerifyReport};
+use crate::host::generated::omnia::model::completion::{Host, HostWithStore, Reply, Request};
+use crate::host::types::{DirEntry, Reference, VerifyReport};
 use crate::host::workspace::{self, Workspace};
 use crate::host::{Error, FutureResult, ToolHost, WasiModel, WasiModelCtxView, gate};
 
@@ -51,24 +49,7 @@ where
             })?
             .await?;
 
-        Answer::check(&answer.value, &format)?;
-
-        // `text` answers are plain text; JSON formats carry a JSON document.
-        let text = match (&format, &answer.value) {
-            (Format::Text, serde_json::Value::String(text)) => text.clone(),
-            _ => serde_json::to_string(&answer.value).map_err(|e| {
-                Error::InvalidAnswer(format!("answer is not serializable JSON: {e}"))
-            })?,
-        };
-
-        Ok(Reply {
-            answer: text,
-            usage: answer.usage.map(|u| WitUsage {
-                input_tokens: u.input_tokens,
-                output_tokens: u.output_tokens,
-                reasoning_tokens: u.reasoning_tokens,
-            }),
-        })
+        answer.project(&format)
     }
 }
 

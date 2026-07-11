@@ -40,13 +40,44 @@ cargo make build-test-guests
 
 ## The testkit
 
-`omnia-testkit` is a dev-only, unpublished crate with these helpers:
+`omnia-testkit` is a dev-only, unpublished crate with three feature levels:
+
+- **`model`** — native model doubles over `omnia_guest::model::Model`, without constructing a runtime.
+- **`replay`** — adds fixture-backed replay through `omnia_wasi_model::ModelDefault` and includes `model`.
+- **`runtime`** — guest artifact, manifest, runtime, and HTTP helpers. This is the default for compatibility.
+
+The runtime helpers are:
 
 - **`find_guest("name_wasm.wasm")`** — locates the built guest artifact (serialized `.bin` preferred), panicking with build instructions when missing. No lazy builds, no silent skips.
 - **`single_guest(file, bundle)`** — assembles a single-guest deployment over a backend bundle: `single_guest("x_wasm.wasm", bundle).await?.host::<WasiHttp>()?...into_runtime()?`.
 - **`temp_manifest(toml)`** — writes a deployment manifest to a unique temp file, removed on drop, for tests that need multi-guest deployments, routes, or mounts.
 - **`http`** — drives a guest's `wasi:http/handler` export in-process, with no TCP socket, e.g. `http::post(&runtime, "/", body)`.
 - **`serialize-guests`** (binary) — precompiles built `.wasm` guests into `.bin` components via Omnia's compile path; invoked by `build-test-guests`.
+
+### Testing model-consuming core logic
+
+Depend on only the model helpers when a native test calls a generic `Model` directly:
+
+```toml
+[dev-dependencies]
+omnia-testkit = { workspace = true, default-features = false, features = ["model"] }
+```
+
+`model::Scripted` returns FIFO successes or typed errors, while `model::Harness<B>` records a complete snapshot of each request before delegating:
+
+```rust,noplayground
+use omnia_guest::model::{Model, Request};
+use omnia_testkit::model::{Harness, Scripted};
+
+let model = Harness::new(Scripted::answers(["first", "second"]));
+let first = model.create(Request::default()).await?;
+assert_eq!(first.answer, "first");
+assert_eq!(model.requests().len(), 1);
+```
+
+Call `Scripted::assert_exhausted` at the end of a test when every scripted turn must be consumed. An unexpected extra call returns a deterministic `Error::Backend`; it does not panic. `model::mcp_grants` filters a recorded request's tools to its MCP grants.
+
+For checked-in replay fixtures, enable `replay` and construct `model::Replay::from_dir`. Replay adapts the guest request to the WASI wire shape and delegates fixture loading, canonical matching, and row ownership to `ModelDefault`; it then applies the same answer validation and guest-visible projection as the host boundary. Wrap replay in `Harness` when request recording is also needed.
 
 ## Anatomy of a seam test
 

@@ -154,7 +154,7 @@ The macro generates a `Backends` bundle (one connected backend per `Host: Backen
 
 ### Test scaffolding (`crates/testkit`)
 
-Dev-only helpers for integration ("seam") tests: `find_guest` locates or builds an example guest `.wasm`, `temp_manifest` writes an ephemeral `omnia.toml`, and an in-process HTTP driver exercises HTTP guests without a network socket. See [the testing guide](guides/testing.md) for the testing policy.
+Dev-only helpers at three feature levels: lightweight `Model` scripting and request capture (`model`), fixture replay through `ModelDefault` (`replay`), and integration ("seam") runtime scaffolding (`runtime`, enabled by default). Runtime helpers include `find_guest`, ephemeral manifests, single-guest assembly, and an in-process HTTP driver. See [the testing guide](guides/testing.md) for usage and policy.
 
 ## The Guest Registry
 

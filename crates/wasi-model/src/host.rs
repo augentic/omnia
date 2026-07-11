@@ -38,12 +38,12 @@ pub use omnia::FutureResult;
 use omnia::{HasDispatcher, HasMounts, Host, Server};
 use wasmtime::component::{HasData, Linker};
 
-pub use self::answer::{check_answer, parse_answer, repair_instruction};
 pub use self::default_impl::{ConnectOptions, ModelDefault};
+pub use self::gate::validate as validate_request;
 use self::generated::omnia::model::completion;
-use self::generated::omnia::model::completion::Error;
 pub use self::generated::omnia::model::completion::{
-    Effort, Format, Function, Generation, Grants, Mcp, Message, Reply, Request, Role, Schema, Tool,
+    Effort, Error, Format, Function, Generation, Grants, Mcp, Message, Reply, Request, Role,
+    Schema, Tool,
 };
 pub use self::types::{Answer, DirEntry, Reference, ToolTurn, Transcript, Usage, VerifyReport};
 
