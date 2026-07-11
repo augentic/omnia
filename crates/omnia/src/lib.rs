@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 #![cfg(not(target_arch = "wasm32"))]
+#![allow(unsafe_code)] // wasmtime component deserialization and deployment hooks
 
 mod cli;
 mod deployment;

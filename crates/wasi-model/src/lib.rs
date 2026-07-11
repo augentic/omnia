@@ -7,8 +7,6 @@
 //! completed and receives a validated typed answer, or a deterministic replayed
 //! one, without ever seeing which backend produced it.
 
-#![forbid(unsafe_code)]
-
 pub mod prompt;
 
 #[cfg(target_arch = "wasm32")]

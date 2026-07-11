@@ -2,8 +2,6 @@
 
 //! Procedural macros for the omnia host runtime.
 
-#![forbid(unsafe_code)]
-
 mod runtime;
 
 use proc_macro::TokenStream;
