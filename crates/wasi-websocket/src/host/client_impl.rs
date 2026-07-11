@@ -2,13 +2,13 @@ use wasmtime::component::{Accessor, Resource};
 
 use crate::host::generated::omnia::websocket::client::{Host, HostWithStore};
 use crate::host::generated::omnia::websocket::types::SocketAddr;
-use crate::host::resource::{ClientProxy, EventProxy};
+use crate::host::resource::{ClientProxy, Event};
 use crate::host::types_impl::{get_client, get_event};
 use crate::host::{Result, WasiWebSocket, WasiWebSocketCtxView};
 
 impl<T> HostWithStore<T> for WasiWebSocket {
     async fn send(
-        accessor: &Accessor<T, Self>, s: Resource<ClientProxy>, event: Resource<EventProxy>,
+        accessor: &Accessor<T, Self>, s: Resource<ClientProxy>, event: Resource<Event>,
         sockets: Option<Vec<SocketAddr>>,
     ) -> Result<()> {
         let client = get_client(accessor, &s)?;

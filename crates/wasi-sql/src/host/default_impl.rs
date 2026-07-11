@@ -86,44 +86,48 @@ impl Connection for SqliteConnectionImpl {
         let conn = Arc::clone(&self.conn);
 
         async move {
-            let conn = conn.lock();
-            let mut stmt = conn.prepare(&query).context("failed to prepare statement")?;
+            // Blocking rusqlite work (and the mutex held around it) runs on a
+            // blocking thread so it never pins an executor thread.
+            tokio::task::spawn_blocking(move || {
+                let rusqlite_params: Vec<_> =
+                    params.iter().map(datatype_to_rusqlite_value).collect();
 
-            // Convert DataType to rusqlite values
-            let rusqlite_params: Vec<_> = params.iter().map(datatype_to_rusqlite_value).collect();
+                let conn = conn.lock();
+                let mut stmt = conn.prepare(&query).context("failed to prepare statement")?;
 
-            // Get column names
-            let column_names: Vec<String> =
-                stmt.column_names().iter().map(ToString::to_string).collect();
+                let column_names: Vec<String> =
+                    stmt.column_names().iter().map(ToString::to_string).collect();
 
-            // Execute query and collect rows
-            let mut rows = stmt
-                .query(params_from_iter(rusqlite_params.iter()))
-                .context("failed to execute query")?;
+                let mut rows = stmt
+                    .query(params_from_iter(rusqlite_params.iter()))
+                    .context("failed to execute query")?;
 
-            let mut result_rows = Vec::new();
-            let mut index = 0;
-            while let Some(row) = rows.next().context("failed to fetch row")? {
-                let mut fields = Vec::new();
+                let mut result_rows = Vec::new();
+                let mut index = 0;
+                while let Some(row) = rows.next().context("failed to fetch row")? {
+                    let mut fields = Vec::new();
 
-                for (i, name) in column_names.iter().enumerate() {
-                    let value = row.get_ref(i).context("failed to get column value")?;
-                    let data_type = rusqlite_value_to_datatype(value)?;
+                    for (i, name) in column_names.iter().enumerate() {
+                        let value = row.get_ref(i).context("failed to get column value")?;
+                        let data_type = rusqlite_value_to_datatype(value)?;
 
-                    fields.push(Field {
-                        name: name.clone(),
-                        value: data_type,
+                        fields.push(Field {
+                            name: name.clone(),
+                            value: data_type,
+                        });
+                    }
+
+                    result_rows.push(Row {
+                        index: index.to_string(),
+                        fields,
                     });
+                    index += 1;
                 }
 
-                result_rows.push(Row {
-                    index: index.to_string(),
-                    fields,
-                });
-                index += 1;
-            }
-
-            Ok(result_rows)
+                Ok(result_rows)
+            })
+            .await
+            .context("query task panicked")?
         }
         .boxed()
     }
@@ -135,17 +139,22 @@ impl Connection for SqliteConnectionImpl {
         let conn = Arc::clone(&self.conn);
 
         async move {
-            let conn = conn.lock();
-            let mut stmt = conn.prepare(&query).context("failed to prepare statement")?;
+            // See `query`: keep the blocking work off the executor.
+            tokio::task::spawn_blocking(move || {
+                let rusqlite_params: Vec<_> =
+                    params.iter().map(datatype_to_rusqlite_value).collect();
 
-            // Convert DataType to rusqlite values
-            let rusqlite_params: Vec<_> = params.iter().map(datatype_to_rusqlite_value).collect();
+                let conn = conn.lock();
+                let mut stmt = conn.prepare(&query).context("failed to prepare statement")?;
 
-            let rows_affected = stmt
-                .execute(params_from_iter(rusqlite_params.iter()))
-                .context("failed to execute statement")?;
+                let rows_affected = stmt
+                    .execute(params_from_iter(rusqlite_params.iter()))
+                    .context("failed to execute statement")?;
 
-            Ok(u32::try_from(rows_affected).unwrap_or(u32::MAX))
+                Ok(u32::try_from(rows_affected).unwrap_or(u32::MAX))
+            })
+            .await
+            .context("exec task panicked")?
         }
         .boxed()
     }

@@ -6,15 +6,15 @@ use crate::host::generated::wasi::messaging::request_reply::{
     Error, Host, HostRequestOptions, HostRequestOptionsWithStore, HostWithStore,
 };
 use crate::host::generated::wasi::messaging::types::Topic;
-use crate::host::resource::{ClientProxy, MessageProxy, RequestOptions};
+use crate::host::resource::{ClientProxy, Message, RequestOptions};
 use crate::host::types_impl::{get_client, get_message};
 use crate::host::{Result, WasiMessaging, WasiMessagingCtxView};
 
 impl<T> HostWithStore<T> for WasiMessaging {
     async fn request(
         accessor: &Accessor<T, Self>, c: Resource<ClientProxy>, topic: Topic,
-        message: Resource<MessageProxy>, options: Option<Resource<RequestOptions>>,
-    ) -> Result<Vec<Resource<MessageProxy>>> {
+        message: Resource<Message>, options: Option<Resource<RequestOptions>>,
+    ) -> Result<Vec<Resource<Message>>> {
         let client = get_client(accessor, &c)?;
         let request = get_message(accessor, &message)?;
         let options = accessor.with(|mut access| {
@@ -35,11 +35,10 @@ impl<T> HostWithStore<T> for WasiMessaging {
 
     /// Replies to the given message with the given response message.
     async fn reply(
-        accessor: &Accessor<T, Self>, reply_to: Resource<MessageProxy>,
-        message: Resource<MessageProxy>,
+        accessor: &Accessor<T, Self>, reply_to: Resource<Message>, message: Resource<Message>,
     ) -> Result<()> {
         let reply_to = get_message(accessor, &reply_to)?;
-        let Some(reply) = &reply_to.reply() else { return Ok(()) };
+        let Some(reply) = &reply_to.reply else { return Ok(()) };
 
         let client = accessor.with(|mut store| store.get().ctx.connect()).await?;
         let message = get_message(accessor, &message)?;

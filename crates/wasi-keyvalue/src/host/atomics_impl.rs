@@ -39,10 +39,36 @@ impl<T> HostWithStore<T> for WasiKeyValue {
 
     /// Perform the swap on a CAS operation. This consumes the CAS handle and
     /// returns an error if the CAS operation failed.
+    ///
+    /// The default is read-compare-set on the [`crate::Bucket`] trait; backends
+    /// with a native compare-and-swap primitive can tighten the race window by
+    /// versioning inside their `Bucket` implementation.
     async fn swap(
-        _store: &Accessor<T, Self>, _self_: Resource<Cas>, _value: Vec<u8>,
+        accessor: &Accessor<T, Self>, cas: Resource<Cas>, value: Vec<u8>,
     ) -> anyhow::Result<anyhow::Result<(), CasError>, wasmtime::Error> {
-        Err(wasmtime::Error::msg("not implemented"))
+        // The WIT consumes the handle, so remove it from the table up front.
+        let cas = accessor.with(|mut store| store.get().table.delete(cas))?;
+
+        let observed = match cas.bucket.get(cas.key.clone()).await {
+            Ok(observed) => observed,
+            Err(error) => return Ok(Err(CasError::StoreError(Error::from(error)))),
+        };
+        if observed != cas.current {
+            // Stale snapshot: hand back a fresh handle at the latest value so
+            // the guest can retry, as the WIT contract requires.
+            let fresh = Cas {
+                bucket: cas.bucket,
+                key: cas.key,
+                current: observed,
+            };
+            let resource = accessor.with(|mut store| store.get().table.push(fresh))?;
+            return Ok(Err(CasError::CasFailed(resource)));
+        }
+
+        match cas.bucket.set(cas.key, value).await {
+            Ok(()) => Ok(Ok(())),
+            Err(error) => Ok(Err(CasError::StoreError(Error::from(error)))),
+        }
     }
 }
 
@@ -54,7 +80,11 @@ impl<T> HostCasWithStore<T> for WasiKeyValue {
     ) -> Result<Resource<Cas>> {
         let bucket = get_bucket(accessor, &bucket)?;
         let current = bucket.get(key.clone()).await.context("issue getting key")?;
-        let cas = Cas { key, current };
+        let cas = Cas {
+            bucket: bucket.0,
+            key,
+            current,
+        };
         Ok(accessor.with(|mut store| store.get().table.push(cas))?)
     }
 

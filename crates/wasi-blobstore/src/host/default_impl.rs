@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
+use bytes::Bytes;
 use futures::FutureExt;
 use omnia::Backend;
 use parking_lot::RwLock;
@@ -106,7 +107,7 @@ impl WasiBlobstoreCtx for BlobstoreDefault {
 #[derive(Debug, Clone)]
 struct InMemContainer {
     name: String,
-    objects: Arc<RwLock<HashMap<String, Vec<u8>>>>,
+    objects: Arc<RwLock<HashMap<String, Bytes>>>,
     created_at: SystemTime,
 }
 
@@ -135,7 +136,7 @@ impl Container for InMemContainer {
         })
     }
 
-    fn get_data(&self, name: String, _start: u64, _end: u64) -> FutureResult<Option<Vec<u8>>> {
+    fn get_data(&self, name: String, _start: u64, _end: u64) -> FutureResult<Option<Bytes>> {
         tracing::debug!("getting object: {name} from container: {}", self.name);
         let objects = Arc::clone(&self.objects);
 
@@ -151,7 +152,7 @@ impl Container for InMemContainer {
         .boxed()
     }
 
-    fn write_data(&self, name: String, data: Vec<u8>) -> FutureResult<()> {
+    fn write_data(&self, name: String, data: Bytes) -> FutureResult<()> {
         tracing::debug!("writing object: {name} to container: {}", self.name);
         let objects = Arc::clone(&self.objects);
 

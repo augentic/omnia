@@ -12,9 +12,8 @@ use polodb_core::bson::{self, doc};
 use polodb_core::{CollectionT, Database};
 use tracing::instrument;
 
-use crate::host::generated::wasi::docstore::types::{Document, QueryResult, SortField};
 use crate::host::resource::FilterTree;
-use crate::host::{FutureResult, QueryOpts, WasiDocStoreCtx};
+use crate::host::{Document, FutureResult, QueryOpts, QueryResult, SortField, WasiDocStoreCtx};
 
 const MAX_PAGE_SIZE: u64 = 1000;
 
@@ -35,6 +34,11 @@ impl FromEnv for ConnectOptions {
 }
 
 /// Default [`WasiDocStoreCtx`] using `PoloDB`.
+///
+/// Unlike the other in-memory defaults, this one is file-backed: documents
+/// persist across runs in `omnia-docstore.polodb` under the system temp
+/// directory (override with `DOCSTORE_DATABASE`). Delete the file for a clean
+/// slate.
 #[derive(Clone)]
 pub struct DocStoreDefault {
     db: Arc<Database>,
@@ -221,8 +225,8 @@ mod tests {
 
     use super::bson_filter::to_bson;
     use super::*;
-    use crate::host::generated::wasi::docstore::types::{ComparisonOp, ScalarValue};
     use crate::host::resource::FilterTree;
+    use crate::host::{ComparisonOp, ScalarValue};
 
     fn temp_db() -> DocStoreDefault {
         use std::sync::atomic::{AtomicU64, Ordering};

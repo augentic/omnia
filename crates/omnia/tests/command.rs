@@ -1,10 +1,9 @@
-//! Exit-status integration test for command mode ([`omnia::run`] in command mode).
+//! Composed WASI parity tests for the guest command router.
 //!
 //! Builds a minimal runtime over the `cli-wasm` example guest and drives it
-//! exactly as a one-shot command deployment would, asserting the exit status
-//! for each subcommand — including the nonzero paths: a specific code carried by
-//! `wasi:cli/exit` (surfaced as `I32Exit`, proving codes are *not* collapsed to
-//! `1`) and the `Err(())` -> `1` mapping.
+//! exactly as a one-shot command deployment would. The cases cover every
+//! operation route plus router-generated help, version, and usage behavior,
+//! including arbitrary nonzero codes carried by p3 `wasi:cli/exit`.
 //!
 //! The guest is built automatically on first [`find_guest`] call; the test skips
 //! it is absent and fails under CI so the pipeline never passes vacuously.
@@ -56,6 +55,12 @@ macro_rules! cli_exit_test {
 }
 
 cli_exit_test!(greet, &["greet", "Ada"], 0, "greet exits 0");
+cli_exit_test!(greet_default, &["greet"], 0, "default greeting exits 0");
 cli_exit_test!(add, &["add", "2", "40"], 0, "add exits 0");
-cli_exit_test!(unknown_command, &["bogus"], 2, "unknown command exits 2");
-cli_exit_test!(missing_subcommand, &[], 1, "missing subcommand exits 1");
+cli_exit_test!(env, &["env"], 0, "env exits 0");
+cli_exit_test!(help, &["--help"], 0, "clap-generated --help exits 0");
+cli_exit_test!(version, &["--version"], 0, "clap-generated --version exits 0");
+cli_exit_test!(unknown_command, &["bogus"], 2, "clap usage error exits 2");
+cli_exit_test!(missing_subcommand, &[], 2, "clap usage error exits 2");
+cli_exit_test!(fail_with_code, &["fail", "42"], 42, "wasi:cli/exit carries a specific code");
+cli_exit_test!(fail_plainly, &["fail"], 1, "Err(()) from run maps to 1");

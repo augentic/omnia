@@ -47,7 +47,7 @@ wasi-keyvalue/
 | Crate | Purpose |
 | ----- | ------- |
 | `omnia` | Runtime core: engine, CLI, deployment, registry, dispatch, telemetry |
-| `omnia-guest` | Guest SDK: `HttpResult`, ORM builders, MCP server support |
-| `omnia-guest-macros` | `guest!` route-table macro, `#[instrument]` attribute |
+| `omnia-guest` | Guest SDK: `Operation`, `Invocation`, `Invoker`, explicit command/HTTP/messaging routers, errors, ORM, and MCP |
+| `omnia-guest-macros` | `#[instrument]` attribute |
 | `omnia-host-macros` | `runtime!` macro (use via `omnia::runtime!`) |
 | `omnia-testkit` | Dev-only integration-test helpers (`find_guest`, `temp_manifest`, HTTP driver) |

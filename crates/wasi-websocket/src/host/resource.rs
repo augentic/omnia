@@ -6,8 +6,8 @@ use std::sync::Arc;
 use futures::Stream;
 use omnia::FutureResult;
 
-/// Stream of event proxies.
-pub type Events = Pin<Box<dyn Stream<Item = EventProxy> + Send>>;
+/// Stream of events.
+pub type Events = Pin<Box<dyn Stream<Item = Event> + Send>>;
 
 /// Providers implement the [`Client`] trait to allow the host to interact with
 /// backend WebSocket resources.
@@ -16,7 +16,7 @@ pub trait Client: Debug + Send + Sync + 'static {
     fn events(&self) -> FutureResult<Events>;
 
     /// Send an event to connected WebSocket clients, optionally filtered by sockets.
-    fn send(&self, event: EventProxy, sockets: Option<Vec<String>>) -> FutureResult<()>;
+    fn send(&self, event: Event, sockets: Option<Vec<String>>) -> FutureResult<()>;
 }
 
 /// Proxy for a WebSocket server client.
@@ -31,31 +31,33 @@ impl Deref for ClientProxy {
     }
 }
 
-/// Providers implement the [`Event`] trait to represent WebSocket events.
-pub trait Event: Debug + Send + Sync + 'static {
-    /// The socket address this event was received from.
-    fn socket_addr(&self) -> Option<&str>;
-
+/// A WebSocket event crossing the boundary.
+///
+/// The host owns event state; backends translate to and from their wire
+/// representation at the [`Client`] seam. Non-exhaustive so a new field is
+/// not a breaking change: construct via [`Event::new`] and set fields
+/// directly.
+#[derive(Clone, Debug, Default)]
+#[non_exhaustive]
+pub struct Event {
+    /// The socket address this event was received from, when known.
+    pub socket_addr: Option<String>,
     /// The event data.
-    fn data(&self) -> &[u8];
-
+    pub data: Vec<u8>,
     /// The route key used to select a guest, when the event carries one.
     ///
-    /// Defaults to `None`: the event fans into the trigger's catch-all guest
-    /// (the sole websocket exporter), preserving single-guest behaviour.
-    fn route(&self) -> Option<&str> {
-        None
-    }
+    /// `None` fans the event into the trigger's catch-all guest (the sole
+    /// websocket exporter), preserving single-guest behaviour.
+    pub route: Option<String>,
 }
 
-/// Proxy for a WebSocket event.
-#[derive(Clone, Debug)]
-pub struct EventProxy(pub Arc<dyn Event>);
-
-impl Deref for EventProxy {
-    type Target = Arc<dyn Event>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+impl Event {
+    /// Create an event with the given payload.
+    #[must_use]
+    pub fn new(data: Vec<u8>) -> Self {
+        Self {
+            data,
+            ..Self::default()
+        }
     }
 }

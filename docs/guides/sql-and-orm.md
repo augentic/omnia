@@ -8,8 +8,28 @@ The [`sql`](../../examples/sql/) example is a complete CRUD service (agencies an
 
 Open a connection by pool name, prepare a statement, and execute it. Use this level for DDL and anything the builders don't cover:
 
-```rust
-{{#include ../../examples/sql/guest.rs:376:395}}
+```rust,noplayground
+async fn ensure_schema() -> Result<()> {
+    let pool = Connection::open("db".to_string())
+        .await
+        .map_err(|e| anyhow!("failed to open connection: {}", e.trace()))?;
+
+    // Create agency table
+    let create_agency = "CREATE TABLE IF NOT EXISTS agency (
+        agency_id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        url TEXT,
+        timezone TEXT,
+        created_at TEXT NOT NULL
+    )";
+
+    let stmt = Statement::prepare(create_agency.to_string(), vec![])
+        .await
+        .map_err(|e| anyhow!("failed to prepare agency table creation: {}", e.trace()))?;
+
+    readwrite::exec(&pool, &stmt)
+        .await
+        .map_err(|e| anyhow!("agency table creation failed: {}", e.trace()))?;
 ```
 
 Statements are always parameterized (`$1`, `$2`, ...) — string interpolation into SQL is never necessary and never safe.
@@ -22,8 +42,18 @@ The pool name (`"db"` here) is what the backend resolves: the SQLite default ign
 
 The `entity!` macro maps a struct to a table and generates column metadata plus a `from_row` constructor:
 
-```rust
-{{#include ../../examples/sql/guest.rs:419:429}}
+```rust,noplayground
+entity!(
+    table = "agency",
+    #[derive(Debug, Clone, Serialize)]
+    pub struct Agency {
+        pub agency_id: i64,
+        pub name: String,
+        pub url: Option<String>,
+        pub timezone: Option<String>,
+        pub created_at: String,
+    }
+);
 ```
 
 `Option<T>` fields map to nullable columns. The struct is otherwise a normal struct — derive whatever you need.
@@ -59,22 +89,68 @@ Provider.exec("db".to_string(), query.sql, query.params).await?;
 
 Update only the fields that changed, guarded by a filter:
 
-```rust
-{{#include ../../examples/sql/guest.rs:183:198}}
+```rust,noplayground
+// Build update query - conditionally set only provided fields
+let mut update = UpdateBuilder::<Agency>::new();
+
+if let Some(name) = req.name {
+    update = update.set("name", name);
+}
+if let Some(url) = req.url {
+    update = update.set("url", url);
+}
+if let Some(timezone) = req.timezone {
+    update = update.set("timezone", timezone);
+}
+
+let query = update
+    .r#where(Filter::eq("agency_id", id))
+    .build()
+    .context("failed to build update query")?;
 ```
 
 Delete, checking the affected-row count for a not-found result:
 
-```rust
-{{#include ../../examples/sql/guest.rs:356:368}}
+```rust,noplayground
+let query = DeleteBuilder::<Feed>::new()
+    .r#where(Filter::eq("feed_id", id))
+    .build()
+    .context("failed to build delete query")?;
+
+let rows_affected = Provider
+    .exec("db".to_string(), query.sql, query.params)
+    .await
+    .context("failed to delete feed")?;
+
+if rows_affected == 0 {
+    return Err(anyhow!("feed not found").into());
+}
 ```
 
 ## Joins
 
 An entity can span a JOIN. Fields not listed in `columns` resolve against the main table; listed ones pull from the joined table under an alias:
 
-```rust
-{{#include ../../examples/sql/guest.rs:445:463}}
+```rust,noplayground
+entity!(
+    table = "feed",
+    columns = [
+        ("agency", "name", "agency_name"),
+        ("agency", "url", "agency_url"),
+        ("agency", "timezone", "agency_timezone"),
+    ],
+    joins = [Join::left("agency", Filter::col_eq("feed", "agency_id", "agency", "agency_id")),],
+    #[derive(Debug, Clone, Serialize)]
+    pub struct FeedWithAgency {
+        pub feed_id: i64,                    // Auto: feed.feed_id
+        pub agency_id: i64,                  // Auto: feed.agency_id
+        pub description: String,             // Auto: feed.description
+        pub created_at: String,              // Auto: feed.created_at
+        pub agency_name: String,             // Manual: agency.name AS agency_name
+        pub agency_url: Option<String>,      // Manual: agency.url AS agency_url
+        pub agency_timezone: Option<String>, // Manual: agency.timezone AS agency_timezone
+    }
+);
 ```
 
 Selecting `FeedWithAgency` then works exactly like a single-table entity — `order_by_desc(Some("feed"), "created_at")` qualifies the table when the column name is ambiguous.

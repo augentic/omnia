@@ -1,18 +1,18 @@
 #![doc = include_str!("../README.md")]
-#![forbid(unsafe_code)]
 
-//! WASI document store (`wasi:docstore`).
+//! # WASI `DocStore`
+//!
+//! This module implements a runtime service for `wasi:docstore`: a JSON
+//! document store with a backend-portable filter language.
+
+#![forbid(unsafe_code)]
 
 pub mod document_store;
 
 #[cfg(target_arch = "wasm32")]
 mod guest;
 #[cfg(target_arch = "wasm32")]
-pub mod store {
-    //! Store operations for WASM guests (mirrors `omnia_wasi_sql` top-level modules).
-
-    pub use crate::guest::store::*;
-}
+pub use guest::*;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod host;

@@ -27,8 +27,17 @@ cargo build --example <name>-wasm --target wasm32-wasip2
 
 Export the WASI HTTP handler and hand routing to [Axum](https://github.com/tokio-rs/axum) via `omnia_wasi_http::serve`:
 
-```rust
-{{#include ../../examples/http/guest.rs:19:27}}
+```rust,noplayground
+struct HttpGuest;
+wasip3::http::service::export!(HttpGuest);
+
+impl Guest for HttpGuest {
+    #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
+    async fn handle(request: Request) -> Result<Response, ErrorCode> {
+        let router = Router::new().route("/", get(echo_get)).route("/", post(echo_post));
+        omnia_wasi_http::serve(router, request).await
+    }
+}
 ```
 
 Handlers are ordinary Axum handlers. Return `omnia_guest::HttpResult<T>` to map errors to HTTP responses; `anyhow::Context` works as usual.
@@ -41,8 +50,12 @@ Each capability is a module in its `omnia-wasi-*` crate. The guest never names a
 
 Key-value (`wasi:keyvalue`):
 
-```rust
-{{#include ../../examples/keyvalue/guest.rs:42:46}}
+```rust,noplayground
+let bucket = store::open("omnia_bucket".to_string()).await.context("opening bucket")?;
+
+bucket.set("my_key".to_string(), body.to_vec()).await.context("storing data")?;
+
+let res = bucket.get("my_key".to_string()).await.context("reading data")?;
 ```
 
 Publishing a message (`wasi:messaging`):
@@ -72,22 +85,54 @@ The other capabilities follow the same shape; each has a full example:
 
 A guest can export a messaging handler alongside (or instead of) an HTTP handler. The host's messaging trigger delivers each subscribed message to it:
 
-```rust
-{{#include ../../examples/messaging/guest.rs:86:96}}
+```rust,noplayground
+pub struct Messaging;
+omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
+
+impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
+    async fn handle(message: Message) -> anyhow::Result<(), Error> {
+        omnia_guest::api::messaging::handle(&router(), message).await
+    }
+}
 ```
 
 `examples/messaging` demonstrates pub-sub, request-reply, and fan-out with the in-memory default backend; the same guest works against Kafka or NATS.
 
 ## Command-mode guests
 
-For run-once workloads (jobs, CLIs, agent tasks), export `wasi:cli/run` instead of an HTTP handler. The host drives `run` exactly once and exits with its status:
+For run-once workloads (jobs, CLIs, agent tasks), use `omnia_guest::api::command` to bind Clap argument types to the same transport-neutral `Operation` contract. The guest still owns the explicit `wasi:cli/run` export; the adapter writes buffered output and preserves the router's exact exit status:
 
-```rust
-{{#include ../../examples/cli/guest.rs:28:37}}
+```rust,noplayground
+use clap::Command;
+use omnia_guest::api::command::{self, Router, RouterBuilder};
+use omnia_guest::api::invoke::Invoker;
+use wasip3::exports::cli::run::Guest;
+
+fn router() -> Router<MyProvider> {
+    RouterBuilder::new(Command::new("jobs"), Invoker::new("acme", MyProvider))
+        .route(
+            ["sync"],
+            command::run::<SyncArgs, Sync>()
+                .about("Synchronize records")
+                .project_with(Text),
+        )
+        .build()
+        .expect("command routes are valid")
+}
+
+struct Cli;
+wasip3::cli::command::export!(Cli);
+
+impl Guest for Cli {
+    async fn run() -> Result<(), ()> {
+        command::execute_wasi(&router()).await
+    }
+}
 ```
 
 - Arguments after `--` on the host command line arrive as the guest's argv (`args[0]` is the program name, supplied by the runtime).
-- Returning `Err(())` exits with status 1; for a specific code, call `wasip3::cli::exit::exit_with_code(n)`.
+- Each route explicitly decodes arguments into an operation input and projects output, operation failures, and decode failures into `CommandResponse`.
+- The router supplies nested help, version and usage handling, shell completions, and a read-only route inventory.
 - The host runtime must be built with `mode: command` — see [Composing a Runtime](composing-a-runtime.md).
 
 ## Tracing
@@ -99,25 +144,24 @@ Annotate functions with `#[omnia_wasi_otel::instrument]` to wrap them in an Open
 async fn handle(request: Request) -> Result<Response, ErrorCode> { /* ... */ }
 ```
 
-## The `guest!` macro (optional)
+## Typed operation routers
 
-For request/response-typed services, the `guest!` macro from `omnia-guest` generates the HTTP export, Axum router, and messaging handler from a declarative table, so you write only typed provider methods:
+`omnia-guest` keeps application operations independent of their transports. Register operation types explicitly in HTTP or exact-topic messaging routers, then call the small adapter from the WASI export you own:
 
 ```rust
-guest!({
-    owner: "acme-corp",
-    provider: MyProvider,
-    http: [
-        "/health": get(HealthRequest, HealthResponse),
-        "/api/items": post(CreateItemRequest with_body, CreateItemResponse),
-    ],
-    messaging: [
-        "item-events.v1": ItemEventMessage,
-    ]
-});
+fn router() -> omnia_guest::api::http::Router<MyProvider> {
+    Router::new(Invoker::new("acme-corp", MyProvider))
+        .route("/api/items", post::<CreateItem, MyProvider>())
+}
+
+impl Guest for Http {
+    async fn handle(request: Request) -> Result<Response, ErrorCode> {
+        omnia_guest::api::http::serve(router(), request).await
+    }
+}
 ```
 
-The examples in this repository use the explicit `export!` pattern shown above, which offers full control of routing. Use `guest!` when your service fits its typed route table; see [`crates/guest-macros/README.md`](../../crates/guest-macros/README.md) for the full syntax.
+Messaging uses `api::messaging::Router` and `consume::<Operation>()`; topic matching is exact, and each route can replace its payload decoder and output/error projector. The export remains visible application code and calls `api::messaging::handle`.
 
 ## Serving MCP tools
 

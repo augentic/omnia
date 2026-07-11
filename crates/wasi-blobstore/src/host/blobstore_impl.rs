@@ -1,8 +1,9 @@
+use anyhow::Context;
 use wasmtime::component::{Accessor, Resource};
 
 use crate::host::generated::wasi::blobstore::blobstore::{Host, HostWithStore, ObjectId};
 use crate::host::resource::ContainerProxy;
-use crate::host::{Result, WasiBlobstore, WasiBlobstoreCtxView};
+use crate::host::{Error, Result, WasiBlobstore, WasiBlobstoreCtxView};
 
 fn same_object(src: &ObjectId, dest: &ObjectId) -> bool {
     src.container == dest.container && src.object == dest.object
@@ -16,9 +17,9 @@ impl<T> HostWithStore<T> for WasiBlobstore {
         let container = accessor
             .with(|mut store| store.get().ctx.create_container(name))
             .await
-            .map_err(|e| e.to_string())?;
+            .context("creating container")?;
         let proxy = ContainerProxy(container);
-        accessor.with(|mut store| store.get().table.push(proxy)).map_err(|e| e.to_string())
+        Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
     }
 
     async fn get_container(
@@ -28,9 +29,9 @@ impl<T> HostWithStore<T> for WasiBlobstore {
         let container = accessor
             .with(|mut store| store.get().ctx.get_container(name))
             .await
-            .map_err(|e| e.to_string())?;
+            .context("getting container")?;
         let proxy = ContainerProxy(container);
-        accessor.with(|mut store| store.get().table.push(proxy)).map_err(|e| e.to_string())
+        Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
     }
 
     async fn delete_container(accessor: &Accessor<T, Self>, name: String) -> Result<()> {
@@ -38,15 +39,16 @@ impl<T> HostWithStore<T> for WasiBlobstore {
         accessor
             .with(|mut store| store.get().ctx.delete_container(name))
             .await
-            .map_err(|e| e.to_string())
+            .context("deleting container")?;
+        Ok(())
     }
 
     async fn container_exists(accessor: &Accessor<T, Self>, name: String) -> Result<bool> {
         tracing::trace!("container_exists: {name}");
-        accessor
+        Ok(accessor
             .with(|mut store| store.get().ctx.container_exists(name))
             .await
-            .map_err(|e| e.to_string())
+            .context("checking container exists")?)
     }
 
     async fn copy_object(
@@ -63,20 +65,26 @@ impl<T> HostWithStore<T> for WasiBlobstore {
         let src_container = accessor
             .with(|mut store| store.get().ctx.get_container(src.container.clone()))
             .await
-            .map_err(|e| e.to_string())?;
+            .context("getting source container")?;
 
         let data = src_container
             .get_data(src.object.clone(), 0, u64::MAX)
             .await
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("source object not found: {}/{}", src.container, src.object))?;
+            .context("reading source object")?
+            .ok_or_else(|| {
+                Error::NotFound(format!(
+                    "source object not found: {}/{}",
+                    src.container, src.object
+                ))
+            })?;
 
         let dest_container = accessor
             .with(|mut store| store.get().ctx.get_container(dest.container.clone()))
             .await
-            .map_err(|e| e.to_string())?;
+            .context("getting destination container")?;
 
-        dest_container.write_data(dest.object, data).await.map_err(|e| e.to_string())
+        dest_container.write_data(dest.object, data).await.context("writing object")?;
+        Ok(())
     }
 
     async fn move_object(
@@ -98,23 +106,29 @@ impl<T> HostWithStore<T> for WasiBlobstore {
         let src_container = accessor
             .with(|mut store| store.get().ctx.get_container(src.container.clone()))
             .await
-            .map_err(|e| e.to_string())?;
+            .context("getting source container")?;
 
         let src_object_name = src.object.clone();
         let data = src_container
             .get_data(src.object.clone(), 0, u64::MAX)
             .await
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("source object not found: {}/{}", src.container, src.object))?;
+            .context("reading source object")?
+            .ok_or_else(|| {
+                Error::NotFound(format!(
+                    "source object not found: {}/{}",
+                    src.container, src.object
+                ))
+            })?;
 
         let dest_container = accessor
             .with(|mut store| store.get().ctx.get_container(dest.container.clone()))
             .await
-            .map_err(|e| e.to_string())?;
+            .context("getting destination container")?;
 
-        dest_container.write_data(dest.object, data).await.map_err(|e| e.to_string())?;
+        dest_container.write_data(dest.object, data).await.context("writing object")?;
 
-        src_container.delete_object(src_object_name).await.map_err(|e| e.to_string())
+        src_container.delete_object(src_object_name).await.context("deleting source object")?;
+        Ok(())
     }
 }
 

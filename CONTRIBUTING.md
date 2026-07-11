@@ -1,43 +1,68 @@
 # Contribution Guide
 
-Augentic welcomes community contributions to the `omnia` library.
+Augentic welcomes community contributions to `omnia`.
 
-Since the project is still unstable, there are specific priorities for development. Pull requests that do not address these priorities will not be accepted until Omnia is production ready.
+Since the project is still evolving quickly, we **strongly** recommend opening
+a GitHub issue to discuss any non-trivial change with the core team before you
+start, so your work stays consistent with the project's direction and
+architecture. There are many ways to help besides contributing code:
 
-Please familiarize yourself with the Contribution Guidelines and Project Roadmap before contributing.
-
-There are many ways to help Omnia besides contributing code:
-
-- Fix bugs or file issues
+- File bugs or fix open issues
 - Improve the documentation
 
-## Table of Contents
+## Getting started
 
-- [Contributing Code](#contributing-code)
-- [Code Style](#code-style)
-- [Developer's Certificate of Origin](#developers-certificate-of-origin)
-- [Pull request procedure](#pull-request-procedure)
-- [Conduct](#conduct)
+- [AGENTS.md](AGENTS.md) — repository overview, key commands, and gotchas
+  (toolchain pins, `wasm32-wasip2` target, nightly rustfmt).
+- [docs/getting-started.md](docs/getting-started.md) — building and running
+  your first guest.
+- [docs/guides/testing.md](docs/guides/testing.md) — the integration-first
+  testing policy; seam tests are the spec.
+- [docs/glossary.md](docs/glossary.md) — project terminology.
 
-## Contributing Code
+## Before you open a pull request
 
-Unless you are fixing a known bug, we **strongly** recommend discussing it with the core team via a GitHub issue before getting started to ensure your work is consistent with Omnia's roadmap and architecture.
+Run the full CI check locally and make sure it passes:
 
-All contributions are made via pull request. Note that **all patches from all contributors get reviewed**. After a pull request is made other contributors will offer feedback, and if the patch passes review a maintainer will accept it with a comment. When pull requests fail testing, authors are expected to update their pull requests to address the failures until the tests pass and the pull request merges successfully.
+```shell
+cargo make ci
+```
 
-At least one review from a maintainer is required for all patches (even patches from maintainers).
+This runs clippy (warnings deny), the test suite (`cargo nextest`), doc tests,
+a formatting check (`cargo +nightly fmt --all --check`), and the dependency
+audits. Individual tasks are listed in [Makefile.toml](Makefile.toml).
 
-Reviewers should leave a "LGTM" comment once they are satisfied with the patch. If the patch was submitted by a maintainer with write access, the pull request should be merged by the submitter after review.
+Checklist:
 
-## Code Style
+1. Create a feature branch off `main`.
+1. [Rebase](https://git-scm.com/book/en/v2/Git-Branching-Rebasing) your branch
+   against `main` before submitting.
+1. Include tests for your change, following the testing policy above. If a
+   change is genuinely hard to test, say why in the commit message.
+1. Accept the Developer's Certificate of Origin on every commit (see below).
+1. Give each commit a conventional prefix describing the change
+   (`fix:`, `feat:`, `perf:`, `docs:`, ...).
 
-Please follow these guidelines when formatting source code:
+## Review
 
-- Rust code should match the output of `cargo +nightly fmt`
+All contributions are made via pull request against `main`, and **all patches
+from all contributors get reviewed**. At least one approval from a maintainer
+is required (including for patches submitted by maintainers). When CI fails,
+authors are expected to update the pull request until it passes. A maintainer
+with write access merges their own pull request after approval.
+
+## Code style
+
+- Rust code must match the output of `cargo +nightly fmt --all`.
+- Workspace lints are strict (`missing_docs`, clippy `pedantic`, warnings
+  denied); `cargo make lint` must pass clean.
+- See the code-comment guidance in [AGENTS.md](AGENTS.md): document intent,
+  not mechanics.
 
 ## Developer's Certificate of Origin
 
-All contributions must include acceptance of the DCO:
+All contributions must include acceptance of the
+[DCO](https://developercertificate.org/):
 
 ```text
 Developer Certificate of Origin
@@ -78,37 +103,36 @@ By making a contribution to this project, I certify that:
     this project or the open source license(s) involved.
 ```
 
-To accept the DCO, simply add this line to each commit message with your name and email address (`git commit -s` will do this for you):
+To accept the DCO, add this line to each commit message with your name and
+email address (`git commit -s` does this for you):
 
 ```text
 Signed-off-by: Jane Example <jane@example.com>
 ```
 
-For legal reasons, no anonymous or pseudonymous contributions are accepted ([contact us](mailto:aeneas@ory.am) if this is an issue).
-
-## Pull request procedure
-
-To make a pull request, you will need a GitHub account; if you are unclear on this process, see GitHub's documentation on [forking](https://help.github.com/articles/fork-a-repo) and [pull requests](https://help.github.com/articles/using-pull-requests). Pull requests should be targeted at the `master` branch. Before creating a pull request, go through this checklist:
-
-1. Create a feature branch off of `master` so that changes do not get mixed up.
-1. [Rebase](https://git-scm.com/book/en/Git-Branching-Rebasing) your local changes against the `master` branch.
-1. Run the full project test suite and confirm that it passes.
-1. Accept the Developer's Certificate of Origin on all commits (see above).
-1. Ensure that each commit has a subsystem prefix (ex: `controller:`).
-
-Pull requests will be treated as "review requests," and maintainers will give feedback on the style and substance of the patch.
-
-Normally, all pull requests must include tests that test your change. Occasionally, a change will be very difficult to test for. In those cases, please include a note in your commit message explaining why.
+For legal reasons, no anonymous or pseudonymous contributions are accepted;
+open a GitHub issue if this is a problem for you.
 
 ## Conduct
 
-Whether you are a regular contributor or a newcomer, we care about making this community a safe place for you and we've got your back.
+Whether you are a regular contributor or a newcomer, we care about making this
+community a safe place for you and we've got your back.
 
-- We are committed to providing a friendly, safe and welcoming environment for all, regardless of gender, sexual orientation, disability, ethnicity, religion, or similar personal characteristic.
-- Please avoid using nicknames that might detract from a friendly, safe and welcoming environment for all.
+- We are committed to providing a friendly, safe and welcoming environment for
+  all, regardless of gender, sexual orientation, disability, ethnicity,
+  religion, or similar personal characteristic.
+- Please avoid using nicknames that might detract from a friendly, safe and
+  welcoming environment for all.
 - Be kind and courteous. There is no need to be mean or rude.
-- We will exclude you from interaction if you insult, demean or harass anyone. In particular, we do not tolerate behavior that excludes people in socially marginalized groups.
-- Private harassment is also unacceptable. No matter who you are, if you feel you have been or are being harassed or made uncomfortable by a community member, please contact one of the channel ops or a member of the Omnia core team immediately.
-- Likewise any spamming, trolling, flaming, baiting or other attention-stealing behaviour is not welcome.
+- We will exclude you from interaction if you insult, demean or harass anyone.
+  In particular, we do not tolerate behavior that excludes people in socially
+  marginalized groups.
+- Private harassment is also unacceptable. No matter who you are, if you feel
+  you have been or are being harassed or made uncomfortable by a community
+  member, please contact a member of the Omnia core team immediately.
+- Likewise any spamming, trolling, flaming, baiting or other
+  attention-stealing behaviour is not welcome.
 
-We welcome discussion about creating a welcoming, safe, and productive environment for the community. If you have any questions, feedback, or concerns please let us know with a GitHub issue.
+We welcome discussion about creating a welcoming, safe, and productive
+environment for the community. If you have any questions, feedback, or
+concerns please let us know with a GitHub issue.

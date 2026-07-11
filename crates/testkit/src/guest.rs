@@ -72,6 +72,11 @@ fn build_guests() {
 }
 
 fn get_target_dir() -> PathBuf {
+    if let Some(dir) = env::var_os("CARGO_TARGET_DIR") {
+        return PathBuf::from(dir);
+    }
+    // Fallback: derive from the test executable's location
+    // (<target>/<profile>/deps/<exe>).
     let test_exe = env::current_exe().expect("test executable has a path");
     test_exe
         .ancestors()

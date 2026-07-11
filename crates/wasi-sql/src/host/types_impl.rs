@@ -19,7 +19,7 @@ impl<T> HostConnectionWithStore<T> for WasiSql {
                 let proxy = ConnectionProxy(conn);
                 Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
             }
-            Err(err) => Err(accessor.with(|mut store| store.get().table.push(err))?),
+            Err(err) => Err(accessor.with(|mut store| store.get().table.push(Error::from(err)))?),
         };
 
         Ok(result)
@@ -48,8 +48,7 @@ impl<T> HostStatementWithStore<T> for WasiSql {
 impl<T> HostErrorWithStore<T> for WasiSql {
     fn trace(mut host: Access<'_, T, Self>, self_: Resource<Error>) -> wasmtime::Result<String> {
         let err = host.get().table.get(&self_)?;
-        let msgs: Vec<String> = err.chain().map(std::string::ToString::to_string).collect();
-        Ok(msgs.join(" -> "))
+        Ok(err.trace().to_string())
     }
 
     fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<Error>) -> wasmtime::Result<()> {

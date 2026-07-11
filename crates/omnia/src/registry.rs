@@ -157,7 +157,10 @@ impl<T: WasiView + 'static> Registry<T> {
                 .instantiate_pre(&guest.component)
                 .map_err(anyhow::Error::from)
                 .with_context(|| format!("pre-instantiating guest `{}`", guest.id))?;
-            guests.insert(guest.id.clone(), Guest::local(guest.id, instance_pre));
+            let id = guest.id.clone();
+            if guests.insert(guest.id.clone(), Guest::local(guest.id, instance_pre)).is_some() {
+                bail!("duplicate guest id `{id}`: guest identities must be unique");
+            }
         }
 
         for target in routes.targets() {
@@ -248,7 +251,12 @@ mod tests {
         let options = RuntimeOptions::load().expect("options should load");
         let engine = Engine::new(&Config::from(&options)).expect("engine should build");
         let linker = Linker::<StoreCtx<()>>::new(&engine);
-        let dispatch = DispatchHandle::new(Arc::new(FirstArgSelector), BTreeSet::new(), 8);
+        let dispatch = DispatchHandle::new(
+            Arc::new(FirstArgSelector),
+            BTreeSet::new(),
+            8,
+            std::time::Duration::from_secs(30),
+        );
 
         let result =
             Registry::assemble(engine, linker, options, Vec::new(), Routes::default(), dispatch);

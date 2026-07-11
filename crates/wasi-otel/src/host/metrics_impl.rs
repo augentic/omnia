@@ -51,11 +51,7 @@ impl From<OTelSdkError> for wasi::Error {
     }
 }
 
-impl From<anyhow::Error> for wasi::Error {
-    fn from(err: anyhow::Error) -> Self {
-        Self::InternalFailure(err.to_string())
-    }
-}
+omnia::host_error!(wasi::Error, InternalFailure);
 
 impl From<wasi::ResourceMetrics> for ExportMetricsServiceRequest {
     fn from(rm: wasi::ResourceMetrics) -> Self {

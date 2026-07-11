@@ -18,7 +18,7 @@ impl<T> HostWithStore<T> for WasiSql {
 
         let result = match connection.query(query, params).await {
             Ok(rows) => Ok(rows),
-            Err(err) => Err(accessor.with(|mut store| store.get().table.push(err))?),
+            Err(err) => Err(accessor.with(|mut store| store.get().table.push(Error::from(err)))?),
         };
 
         Ok(result)
@@ -34,7 +34,7 @@ impl<T> HostWithStore<T> for WasiSql {
 
         let result = match connection.exec(query, params).await {
             Ok(rows) => Ok(rows),
-            Err(err) => Err(accessor.with(|mut store| store.get().table.push(err))?),
+            Err(err) => Err(accessor.with(|mut store| store.get().table.push(Error::from(err)))?),
         };
 
         Ok(result)
@@ -48,7 +48,7 @@ pub fn get_connection<T>(
 ) -> Result<ConnectionProxy> {
     accessor.with(|mut store| {
         let connection = store.get().table.get(self_)?;
-        Ok::<_, Error>(connection.clone())
+        Ok::<_, anyhow::Error>(connection.clone())
     })
 }
 
@@ -57,6 +57,6 @@ pub fn get_statement<T>(
 ) -> Result<Statement> {
     accessor.with(|mut store| {
         let statement = store.get().table.get(self_)?;
-        Ok::<_, Error>(statement.clone())
+        Ok::<_, anyhow::Error>(statement.clone())
     })
 }

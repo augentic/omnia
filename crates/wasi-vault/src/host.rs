@@ -31,7 +31,7 @@ use std::sync::Arc;
 
 pub use omnia::FutureResult;
 use omnia::{Host, Server};
-use wasmtime::component::{HasData, Linker, ResourceTableError};
+use wasmtime::component::{HasData, Linker};
 
 use self::generated::omnia::vault::vault;
 pub use crate::host::default_impl::VaultDefault;
@@ -69,16 +69,5 @@ pub trait WasiVaultCtx: Debug + Send + Sync + 'static {
     fn open_locker(&self, identifier: String) -> FutureResult<Arc<dyn Locker>>;
 }
 
-impl From<anyhow::Error> for Error {
-    fn from(err: anyhow::Error) -> Self {
-        Self::Other(err.to_string())
-    }
-}
-
-impl From<ResourceTableError> for Error {
-    fn from(err: ResourceTableError) -> Self {
-        Self::Other(err.to_string())
-    }
-}
-
+omnia::host_error!(Error, Other);
 omnia::wasi_view!(Vault);

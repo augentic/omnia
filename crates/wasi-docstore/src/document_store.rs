@@ -2,7 +2,7 @@
 //!
 //! The guest builds queries with these ergonomic types, then the guest bindings
 //! bridge them across the WIT boundary. The host keeps its own `FilterTree`
-//! built from WIT-native leaf types (see `Specification.md`); the two
+//! built from WIT-native leaf types (see `docs/reference/docstore.md`); the two
 //! representations sit on opposite sides of the WASM boundary by design.
 
 use std::ops::Not;

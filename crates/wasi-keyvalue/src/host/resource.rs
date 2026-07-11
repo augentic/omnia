@@ -41,6 +41,9 @@ impl Deref for BucketProxy {
 /// CAS (Compare-And-Swap) operation handle.
 #[derive(Clone, Debug)]
 pub struct Cas {
+    /// The bucket the operation reads from and swaps into.
+    pub bucket: Arc<dyn Bucket>,
+
     /// The key associated with the CAS operation.
     pub key: String,
 

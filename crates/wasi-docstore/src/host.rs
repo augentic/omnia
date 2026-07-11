@@ -1,37 +1,15 @@
-//! Host-side `wasi:docstore` implementation.
+//! # WASI `DocStore` Service
 
 mod default_impl;
 mod resource;
 mod store_impl;
 mod types_impl;
 
-/// Errors surfaced through the WIT `error` type.
-#[derive(Debug, Clone)]
-pub enum DocStoreError {
-    /// Store or collection not found.
-    NoSuchStore,
-    /// Operation not permitted.
-    AccessDenied,
-    /// Other failure with message.
-    Other(String),
-}
-
-impl std::fmt::Display for DocStoreError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NoSuchStore => write!(f, "no such store"),
-            Self::AccessDenied => write!(f, "access denied"),
-            Self::Other(s) => write!(f, "{s}"),
-        }
-    }
-}
-
-impl std::error::Error for DocStoreError {}
-
 mod generated {
     #![allow(missing_docs)]
 
-    pub use super::{DocStoreError, FilterProxy};
+    pub use self::wasi::docstore::types::Error;
+    pub use super::FilterProxy;
 
     wasmtime::component::bindgen!({
         world: "imports",
@@ -43,7 +21,7 @@ mod generated {
             "wasi:docstore/types.filter": FilterProxy,
         },
         trappable_error_type: {
-            "wasi:docstore/types.error" => DocStoreError,
+            "wasi:docstore/types.error" => Error,
         },
     });
 }
@@ -54,14 +32,17 @@ pub use omnia::FutureResult;
 use omnia::{Host, Server};
 use wasmtime::component::{HasData, Linker};
 
-use self::generated::wasi::docstore::{store, types};
-pub use crate::host::default_impl::DocStoreDefault;
-pub use crate::host::generated::wasi::docstore::types::{
-    ComparisonOp, Document, QueryResult, ScalarValue, SortField,
+pub use self::default_impl::DocStoreDefault;
+pub use self::generated::wasi::docstore::types::{
+    ComparisonOp, Document, Error, QueryResult, ScalarValue, SortField,
 };
-pub use crate::host::resource::{FilterProxy, FilterTree};
+use self::generated::wasi::docstore::{store, types};
+pub use self::resource::*;
 
-/// Host service for `wasi:docstore`.
+/// Result type for docstore operations.
+pub type Result<T> = anyhow::Result<T, Error>;
+
+/// Host-side service for `wasi:docstore`.
 #[derive(Debug)]
 pub struct WasiDocStore;
 
@@ -81,7 +62,11 @@ where
 
 impl<B> Server<B> for WasiDocStore {}
 
-/// Backend operations for JSON document storage.
+/// A trait which provides internal WASI `DocStore` context.
+///
+/// This is implemented by the resource-specific provider of `DocStore`
+/// functionality. For example, an embedded `PoloDB` file, or Azure Table
+/// Storage.
 pub trait WasiDocStoreCtx: Debug + Send + Sync + 'static {
     /// Point read by primary id.
     fn get(&self, collection: String, id: String) -> FutureResult<Option<Document>>;
@@ -105,7 +90,7 @@ pub trait WasiDocStoreCtx: Debug + Send + Sync + 'static {
 #[derive(Debug, Clone, Default)]
 pub struct QueryOpts {
     /// Sort fields.
-    pub order_by: Vec<generated::wasi::docstore::types::SortField>,
+    pub order_by: Vec<SortField>,
     /// Max documents.
     pub limit: Option<u32>,
     /// Skip count (when no continuation token).
@@ -114,4 +99,5 @@ pub struct QueryOpts {
     pub continuation: Option<String>,
 }
 
+omnia::host_error!(Error, Other);
 omnia::wasi_view!(DocStore);

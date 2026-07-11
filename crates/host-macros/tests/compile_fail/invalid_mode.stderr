@@ -1,0 +1,5 @@
+error: expected `server` or `command`, got `banana`
+ --> tests/compile_fail/invalid_mode.rs:2:11
+  |
+2 |     mode: banana,
+  |           ^^^^^^

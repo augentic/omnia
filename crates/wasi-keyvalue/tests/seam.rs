@@ -11,12 +11,10 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::sync::Arc;
-
 use anyhow::{Context as _, Result};
 use omnia::wasmtime_wasi::ResourceTable;
-use omnia::{Backend as _, DeploymentBuilder, HasHttp, MountRegistry, Runtime, StoreCtx};
-use omnia_testkit::{find_guest, http};
+use omnia::{Backend as _, HasHttp, Runtime};
+use omnia_testkit::{http, single_guest};
 use omnia_wasi_http::{HttpDefault, WasiHttp, WasiHttpCtxView};
 use omnia_wasi_keyvalue::{HasKeyValue, KeyValueDefault, WasiKeyValue, WasiKeyValueCtx};
 use omnia_wasi_otel::{HasOtel, OtelDefault, WasiOtel, WasiOtelCtx};
@@ -53,10 +51,6 @@ impl HasKeyValue for Bundle {
 /// and a handle to the shared key-value backend (its `moka` cache is shared
 /// across clones, so this handle observes the guest's writes).
 async fn runtime() -> Result<Option<(Runtime<Bundle>, KeyValueDefault)>> {
-    let Some(wasm) = find_guest("keyvalue_wasm.wasm") else {
-        return Ok(None);
-    };
-
     let bundle = Bundle {
         http: HttpDefault::connect().await.context("connecting http")?,
         otel: OtelDefault::connect().await.context("connecting otel")?,
@@ -64,19 +58,11 @@ async fn runtime() -> Result<Option<(Runtime<Bundle>, KeyValueDefault)>> {
     };
     let store_probe = bundle.keyvalue.clone();
 
-    let mut deployment =
-        DeploymentBuilder::new().wasm(wasm).build::<StoreCtx<Bundle>>().await.context("build")?;
-    deployment.host::<WasiHttp, Bundle>().context("link http")?;
-    deployment.host::<WasiOtel, Bundle>().context("link otel")?;
-    deployment.host::<WasiKeyValue, Bundle>().context("link keyvalue")?;
-    let registry = deployment.into_registry().context("assemble registry")?;
-
-    let runtime = Runtime::from_parts(
-        Arc::new(registry),
-        Vec::new(),
-        Arc::new(MountRegistry::default()),
-        bundle,
-    );
+    let Some(guest) = single_guest("keyvalue_wasm.wasm", bundle).await? else {
+        return Ok(None);
+    };
+    let runtime =
+        guest.host::<WasiHttp>()?.host::<WasiOtel>()?.host::<WasiKeyValue>()?.into_runtime()?;
     Ok(Some((runtime, store_probe)))
 }
 
@@ -94,6 +80,26 @@ async fn set_then_get() -> Result<()> {
     let bucket = store.open_bucket("omnia_bucket".to_owned()).await.context("open bucket")?;
     let stored = bucket.get("my_key".to_owned()).await.context("read my_key")?;
     assert_eq!(stored.as_deref(), Some(b"payload-value".as_slice()), "the write reached the host");
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cas_swap() -> Result<()> {
+    let Some((runtime, store)) = runtime().await? else {
+        return Ok(());
+    };
+
+    // The guest exercises both CAS legs against `cas_key`: a clean swap, then
+    // a stale swap whose `cas-failed` handle is retried. A success response
+    // means every leg behaved per the WIT contract.
+    let response = http::post(&runtime, "/", "cas-seed").await?;
+    assert!(response.status().is_success(), "guest completes the CAS round-trip");
+
+    // The retry with the refreshed handle is the last write to land host-side.
+    let bucket = store.open_bucket("omnia_bucket".to_owned()).await.context("open bucket")?;
+    let stored = bucket.get("cas_key".to_owned()).await.context("read cas_key")?;
+    assert_eq!(stored.as_deref(), Some(b"retried".as_slice()), "the retried swap reached the host");
 
     Ok(())
 }

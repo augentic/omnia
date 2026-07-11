@@ -26,11 +26,27 @@ Metadata and content type travel with the message; on Kafka, `add_metadata("key"
 
 Messaging is a **trigger**: the host (`WasiMessaging`) subscribes to topics and delivers each message to the guest's exported handler, instantiating a fresh guest instance per message:
 
-```rust
-{{#include ../../examples/messaging/guest.rs:86:96}}
+```rust,noplayground
+use omnia_guest::api::invoke::Invoker;
+use omnia_guest::api::messaging::{Router, consume};
+use omnia_wasi_messaging::types::{Error, Message};
+
+pub struct Messaging;
+omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
+
+fn router() -> Router<MyProvider> {
+    Router::new(Invoker::new("acme", MyProvider))
+        .route("orders.created", consume::<CreateOrder>())
+}
+
+impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
+    async fn handle(message: Message) -> anyhow::Result<(), Error> {
+        omnia_guest::api::messaging::handle(&router(), message).await
+    }
+}
 ```
 
-Dispatch on `message.topic()`. Which topics the host subscribes to is backend configuration (`KAFKA_TOPICS`, `NATS_TOPICS`; the in-memory default delivers everything published in-process). In multi-guest deployments, `[[route.messaging]]` entries select the target guest by NATS-style topic pattern — see [Multi-Guest Deployments](multi-guest-deployments.md#routing-inbound-traffic).
+The guest router matches registered topics exactly; broker subscription patterns remain host configuration (`KAFKA_TOPICS`, `NATS_TOPICS`). `consume` decodes JSON by default and acknowledges successful operation output. Routes can use `decode_with` and `project_with` for application-specific payload and delivery policy. The current WIT handler returns only `result<_, error>`: `Ok(())` acknowledges, while projected failures return `error.other` for host-defined retry or rejection behavior. In multi-guest deployments, `[[route.messaging]]` entries select the target guest by NATS-style topic pattern — see [Multi-Guest Deployments](multi-guest-deployments.md#routing-inbound-traffic).
 
 ## Request-reply
 

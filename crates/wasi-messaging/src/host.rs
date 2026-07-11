@@ -10,7 +10,7 @@ mod generated {
 
     pub use wasi::messaging::types::Error;
 
-    pub use crate::host::resource::{ClientProxy, MessageProxy, RequestOptions};
+    pub use crate::host::resource::{ClientProxy, Message, RequestOptions};
 
     wasmtime::component::bindgen!({
         world: "messaging-request-reply",
@@ -25,7 +25,7 @@ mod generated {
         with: {
             "wasi:messaging/request-reply.request-options": RequestOptions,
             "wasi:messaging/types.client": ClientProxy,
-            "wasi:messaging/types.message": MessageProxy,
+            "wasi:messaging/types.message": Message,
         },
         trappable_error_type: {
             "wasi:messaging/types.error" => Error,
@@ -40,7 +40,6 @@ use std::sync::Arc;
 pub use omnia::FutureResult;
 use omnia::{Host, Runtime, Server, StoreCtx};
 use wasmtime::component::{HasData, Linker};
-use wasmtime_wasi::ResourceTableError;
 
 pub use self::default_impl::MessagingDefault;
 pub use self::generated::MessagingRequestReply;
@@ -86,6 +85,9 @@ where
 ///
 /// This is implemented by the resource-specific provider of messaging
 /// functionality. For example, a NATS, or a Kafka broker.
+///
+/// Message construction and mutation live on the host's [`Message`] struct;
+/// backends only translate at the [`Client`] seam.
 pub trait WasiMessagingCtx: Debug + Send + Sync + 'static {
     /// Connect to the messaging system and return a client proxy.
     ///
@@ -93,76 +95,7 @@ pub trait WasiMessagingCtx: Debug + Send + Sync + 'static {
     ///
     /// Returns an error if the connection fails.
     fn connect(&self) -> FutureResult<Arc<dyn Client>>;
-
-    /// Create a new message with the given payload.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if message creation fails.
-    fn new_message(&self, data: Vec<u8>) -> anyhow::Result<Arc<dyn Message>>;
-
-    /// Set the content-type on a message.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the content-type setting fails.
-    fn set_content_type(
-        &self, message: Arc<dyn Message>, content_type: String,
-    ) -> anyhow::Result<Arc<dyn Message>>;
-
-    /// Set the payload on a message.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the payload setting fails.
-    fn set_payload(
-        &self, message: Arc<dyn Message>, data: Vec<u8>,
-    ) -> anyhow::Result<Arc<dyn Message>>;
-
-    /// Append a key-value pair to the metadata of a message.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the metadata addition fails.
-    fn add_metadata(
-        &self, message: Arc<dyn Message>, key: String, value: String,
-    ) -> anyhow::Result<Arc<dyn Message>>;
-
-    /// Set all the metadata on a message.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the metadata setting fails.
-    fn set_metadata(
-        &self, message: Arc<dyn Message>, metadata: Metadata,
-    ) -> anyhow::Result<Arc<dyn Message>>;
-
-    /// Remove a key-value pair from the metadata of a message.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the metadata removal fails.
-    fn remove_metadata(
-        &self, message: Arc<dyn Message>, key: String,
-    ) -> anyhow::Result<Arc<dyn Message>>;
 }
 
-impl From<anyhow::Error> for Error {
-    fn from(err: anyhow::Error) -> Self {
-        Self::Other(err.to_string())
-    }
-}
-
-impl From<ResourceTableError> for Error {
-    fn from(err: ResourceTableError) -> Self {
-        Self::Other(err.to_string())
-    }
-}
-
-impl From<wasmtime::Error> for Error {
-    fn from(err: wasmtime::Error) -> Self {
-        Self::Other(err.to_string())
-    }
-}
-
+omnia::host_error!(Error, Other);
 omnia::wasi_view!(Messaging);

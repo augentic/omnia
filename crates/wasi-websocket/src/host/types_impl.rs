@@ -3,7 +3,7 @@ use wasmtime::component::{Access, Accessor, Resource};
 pub use crate::host::generated::omnia::websocket::types::{
     Error, Host, HostClient, HostClientWithStore, HostEvent, HostEventWithStore, SocketAddr,
 };
-use crate::host::resource::{ClientProxy, EventProxy};
+use crate::host::resource::{ClientProxy, Event};
 use crate::host::{Result, WasiWebSocket, WasiWebSocketCtxView};
 
 impl<T> HostClientWithStore<T> for WasiWebSocket {
@@ -24,29 +24,25 @@ impl<T> HostClientWithStore<T> for WasiWebSocket {
 
 impl<T> HostEventWithStore<T> for WasiWebSocket {
     /// Create a new event with the given payload.
-    fn new(mut host: Access<'_, T, Self>, data: Vec<u8>) -> wasmtime::Result<Resource<EventProxy>> {
-        let event = host.get().ctx.new_event(data).map_err(wasmtime::Error::from_anyhow)?;
-        let proxy = EventProxy(event);
-        Ok(host.get().table.push(proxy)?)
+    fn new(mut host: Access<'_, T, Self>, data: Vec<u8>) -> wasmtime::Result<Resource<Event>> {
+        Ok(host.get().table.push(Event::new(data))?)
     }
 
     /// The socket address this event was received from.
     fn socket_addr(
-        mut host: Access<'_, T, Self>, self_: Resource<EventProxy>,
+        mut host: Access<'_, T, Self>, self_: Resource<Event>,
     ) -> wasmtime::Result<Option<SocketAddr>> {
         let event = host.get().table.get(&self_)?;
-        Ok(event.socket_addr().map(String::from))
+        Ok(event.socket_addr.clone())
     }
 
     /// The event data.
-    fn data(
-        mut host: Access<'_, T, Self>, self_: Resource<EventProxy>,
-    ) -> wasmtime::Result<Vec<u8>> {
+    fn data(mut host: Access<'_, T, Self>, self_: Resource<Event>) -> wasmtime::Result<Vec<u8>> {
         let event = host.get().table.get(&self_)?;
-        Ok(event.data().to_vec())
+        Ok(event.data.clone())
     }
 
-    fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<EventProxy>) -> wasmtime::Result<()> {
+    fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<Event>) -> wasmtime::Result<()> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
@@ -69,8 +65,8 @@ pub fn get_client<T>(
 }
 
 pub fn get_event<T>(
-    accessor: &Accessor<T, WasiWebSocket>, self_: &Resource<EventProxy>,
-) -> Result<EventProxy> {
+    accessor: &Accessor<T, WasiWebSocket>, self_: &Resource<Event>,
+) -> Result<Event> {
     accessor.with(|mut store| {
         let event = store.get().table.get(self_)?;
         Ok::<_, Error>(event.clone())

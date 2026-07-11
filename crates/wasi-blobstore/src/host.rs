@@ -9,9 +9,7 @@ mod types_impl;
 mod generated {
     #![allow(missing_docs)]
 
-    pub type Error = String;
-
-    pub use super::{ContainerProxy, IncomingValue, OutgoingValue, StreamObjectNames};
+    pub use super::{ContainerProxy, Error, IncomingValue, OutgoingValue, StreamObjectNames};
 
     wasmtime::component::bindgen!({
         world: "imports",
@@ -35,7 +33,7 @@ mod generated {
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use bytes::Bytes;
+pub use bytes::Bytes;
 pub use omnia::FutureResult;
 use omnia::{Host, Server};
 pub use resource::*;
@@ -44,8 +42,26 @@ use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 
 pub use self::default_impl::BlobstoreDefault;
 pub use self::generated::wasi::blobstore::container::{ContainerMetadata, ObjectMetadata};
-pub use self::generated::wasi::blobstore::types::Error;
 use self::generated::wasi::blobstore::{blobstore, container, types};
+
+/// Typed host error for `wasi:blobstore`, lowered to the WIT `error` string.
+#[derive(Debug)]
+pub enum Error {
+    /// A requested container or object does not exist.
+    NotFound(String),
+    /// Any other host failure; the message preserves the backend context chain.
+    Other(String),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotFound(msg) | Self::Other(msg) => f.write_str(msg),
+        }
+    }
+}
+
+omnia::host_error!(Error, Other);
 
 /// Incoming value for a blobstore operation.
 pub type IncomingValue = Bytes;

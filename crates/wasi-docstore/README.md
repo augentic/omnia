@@ -6,11 +6,11 @@ This crate provides the JSON document store interface for the Omnia runtime.
 
 Implements the `wasi:docstore` WIT interface. Documents are stored as JSON bytes with a string primary key. Queries support filtering via a host-managed filter resource, sorting, pagination, and continuation tokens.
 
-See [Specification.md](Specification.md) for the full WIT definition, SDK types, backend translator details, and host-enforced limits.
+See the [`DocStore` Interface Reference](../../docs/reference/docstore.md) for the full WIT definition, SDK types, backend translator details, and host-enforced limits.
 
 ## Backend
 
-- **Default**: Uses `PoloDB` (MongoDB-compatible embedded database). Configure the database path with the `DOCSTORE_DATABASE` environment variable (default: `omnia-docstore.polodb` in the system temp directory).
+- **Default**: Uses `PoloDB` (MongoDB-compatible embedded database). Configure the database path with the `DOCSTORE_DATABASE` environment variable (default: `omnia-docstore.polodb` in the system temp directory). Note that unlike the other in-memory defaults this one is file-backed: documents persist across runs until the file is deleted.
 
 ## Usage
 

@@ -1,6 +1,7 @@
-//! Guest-side `wasi:docstore` bindings and helpers.
+//! # WASI `DocStore` Guest
 
-pub(crate) mod generated {
+// Bindings for the `wasi:docstore` world.
+mod generated {
     #![allow(missing_docs)]
 
     wit_bindgen::generate!({

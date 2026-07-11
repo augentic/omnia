@@ -15,31 +15,24 @@ version.workspace = true
 [lints]
 workspace = true
 
-# host dependencies
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-anyhow.workspace = true
-fromenv.workspace = true
-futures.workspace = true
-omnia.workspace = true
-parking_lot.workspace = true
-polodb_core = { version = "5.1.4", default-features = false }
-regex = "1.12.4"
-serde_json.workspace = true
-serde.workspace = true
-tracing.workspace = true
-wasmtime.workspace = true
-wasmtime-wasi.workspace = true
-
-# shared dependencies
+# dependencies shared across host and guest
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
 
+# host dependencies
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+futures.workspace = true
+omnia.workspace = true
+polodb_core = { version = "5.1.4", default-features = false }
+regex.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+wasmtime.workspace = true
+wasmtime-wasi.workspace = true
+
 # guest dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-anyhow.workspace = true
-futures.workspace = true
-serde.workspace = true
 wit-bindgen.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]

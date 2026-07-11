@@ -8,7 +8,7 @@ use tracing::{Instrument, debug_span, instrument};
 
 use crate::host::WasiMessagingView;
 use crate::host::generated::MessagingRequestReplyIndices;
-use crate::host::resource::{MessageProxy, Subscriptions};
+use crate::host::resource::{Message, Subscriptions};
 
 #[instrument("messaging-server", skip(state))]
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
@@ -45,12 +45,13 @@ where
         tokio::spawn(async move {
             tracing::info!(monotonic_counter.message_counter = 1, service = %handler.component);
 
-            if let Err(e) = handler.handle(message.clone()).await {
+            let topic = message.topic.clone();
+            if let Err(e) = handler.handle(message).await {
                 tracing::error!("issue processing message: {e}");
                 tracing::error!(
                     monotonic_counter.processing_errors = 1,
                     service = %handler.component,
-                    topic = %message.topic(),
+                    topic = %topic,
                     error = %e,
                 );
             }
@@ -77,10 +78,10 @@ where
     StoreCtx<B>: WasiMessagingView,
 {
     // Forward message to the wasm guest.
-    async fn handle(&self, message: MessageProxy) -> Result<()> {
+    async fn handle(&self, message: Message) -> Result<()> {
         // Resolve the guest by topic; an unmatched topic is dropped, not an
         // error (the message simply has no handler in this deployment).
-        let topic = message.topic();
+        let topic = message.topic.clone();
         let Some((guest_id, indices)) = self.routing.resolve(&topic) else {
             tracing::debug!(%topic, "no route for topic; dropping message");
             return Ok(());

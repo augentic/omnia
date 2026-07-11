@@ -12,14 +12,13 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result};
 use futures::StreamExt as _;
 use omnia::wasmtime_wasi::ResourceTable;
-use omnia::{Backend, DeploymentBuilder, HasHttp, MountRegistry, Runtime, StoreCtx};
-use omnia_testkit::{find_guest, http};
+use omnia::{Backend, HasHttp, Runtime};
+use omnia_testkit::{http, single_guest};
 use omnia_wasi_http::{HttpDefault, WasiHttp, WasiHttpCtxView};
 use omnia_wasi_keyvalue::{HasKeyValue, KeyValueDefault, WasiKeyValue, WasiKeyValueCtx};
 use omnia_wasi_messaging::{HasMessaging, MessagingDefault, WasiMessaging, WasiMessagingCtx};
@@ -65,10 +64,6 @@ impl HasKeyValue for Bundle {
 /// (its broadcast `sender` is shared across clones, so a subscription on this
 /// handle observes the guest's publishes).
 async fn runtime() -> Result<Option<(Runtime<Bundle>, MessagingDefault)>> {
-    let Some(wasm) = find_guest("messaging_wasm.wasm") else {
-        return Ok(None);
-    };
-
     let bundle = Bundle {
         http: HttpDefault::connect().await.context("connecting http")?,
         otel: OtelDefault::connect().await.context("connecting otel")?,
@@ -79,20 +74,15 @@ async fn runtime() -> Result<Option<(Runtime<Bundle>, MessagingDefault)>> {
     };
     let broker = bundle.messaging.clone();
 
-    let mut deployment =
-        DeploymentBuilder::new().wasm(wasm).build::<StoreCtx<Bundle>>().await.context("build")?;
-    deployment.host::<WasiHttp, Bundle>().context("link http")?;
-    deployment.host::<WasiOtel, Bundle>().context("link otel")?;
-    deployment.host::<WasiMessaging, Bundle>().context("link messaging")?;
-    deployment.host::<WasiKeyValue, Bundle>().context("link keyvalue")?;
-    let registry = deployment.into_registry().context("assemble registry")?;
-
-    let runtime = Runtime::from_parts(
-        Arc::new(registry),
-        Vec::new(),
-        Arc::new(MountRegistry::default()),
-        bundle,
-    );
+    let Some(guest) = single_guest("messaging_wasm.wasm", bundle).await? else {
+        return Ok(None);
+    };
+    let runtime = guest
+        .host::<WasiHttp>()?
+        .host::<WasiOtel>()?
+        .host::<WasiMessaging>()?
+        .host::<WasiKeyValue>()?
+        .into_runtime()?;
     Ok(Some((runtime, broker)))
 }
 
@@ -115,10 +105,9 @@ async fn pub_sub() -> Result<()> {
         .context("timed out waiting for the published message")?
         .context("subscription closed without a message")?;
 
-    assert_eq!(message.topic(), "a", "guest published to topic `a`");
+    assert_eq!(message.topic, "a", "guest published to topic `a`");
     assert_eq!(
-        message.payload().as_slice(),
-        br#"{"hello":"world"}"#,
+        message.payload, br#"{"hello":"world"}"#,
         "the published payload reached the host broker intact"
     );
 

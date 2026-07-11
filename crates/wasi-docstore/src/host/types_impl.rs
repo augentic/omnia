@@ -2,12 +2,11 @@
 
 use wasmtime::component::{Access, Resource};
 
-use crate::host::generated::wasi::docstore::types as wit_types;
 use crate::host::generated::wasi::docstore::types::{
-    ComparisonOp, Host as TypesHost, HostFilter, HostFilterWithStore, ScalarValue,
+    ComparisonOp, Error, Host as TypesHost, HostFilter, HostFilterWithStore, ScalarValue,
 };
 use crate::host::resource::{FilterProxy, FilterTree};
-use crate::host::{DocStoreError, WasiDocStore, WasiDocStoreCtxView};
+use crate::host::{WasiDocStore, WasiDocStoreCtxView};
 
 const MAX_FILTER_DEPTH: usize = 5;
 const MAX_IN_LIST_SIZE: usize = 100;
@@ -124,12 +123,8 @@ impl<T> HostFilterWithStore<T> for WasiDocStore {
 impl HostFilter for WasiDocStoreCtxView<'_> {}
 
 impl TypesHost for WasiDocStoreCtxView<'_> {
-    fn convert_error(&mut self, err: DocStoreError) -> wasmtime::Result<wit_types::Error> {
-        Ok(match err {
-            DocStoreError::NoSuchStore => wit_types::Error::NoSuchStore,
-            DocStoreError::AccessDenied => wit_types::Error::AccessDenied,
-            DocStoreError::Other(s) => wit_types::Error::Other(s),
-        })
+    fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
+        Ok(err)
     }
 }
 

@@ -22,9 +22,9 @@ pub use document::DocumentStore;
 pub use http::HttpRequest;
 pub use identity::Identity;
 pub use messaging::{Message, Publish};
-// `model`'s request/reply types stay module-scoped: `Message`, `Request`, and
-// `Reply` would otherwise collide with `messaging` and `api` in the crate's
-// flat re-exports.
+// Generic model wire names stay scoped to the model capability.
 pub use model::Model;
+#[cfg(target_arch = "wasm32")]
+pub use model::WasiModel;
 pub use state::StateStore;
 pub use table::TableStore;

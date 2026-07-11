@@ -141,11 +141,11 @@ pub trait Dispatcher: Send + Sync + 'static {
     ) -> FutureResult<Vec<Val>>;
 }
 
-impl<B: Clone + Send + Sync + 'static> Dispatcher for Runtime<B> {
+impl<B: Clone + Send + Sync + 'static> Dispatcher for crate::runtime::RuntimeDispatcher<B> {
     fn invoke(
         &self, target: GuestId, interface: Option<String>, func: String, args: Vec<Val>,
     ) -> FutureResult<Vec<Val>> {
-        let runtime = self.clone();
+        let runtime = self.runtime();
         async move {
             let interface: Box<str> = match interface {
                 Some(name) => Box::from(name),

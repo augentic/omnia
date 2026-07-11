@@ -8,8 +8,36 @@ This page covers the guest API, the grants model, the available backends, and ho
 
 A model guest is typically a command-mode guest (see [Writing Guests](writing-guests.md#command-mode-guests)). It builds a `Request` and calls `completion::create`:
 
-```rust
-{{#include ../../examples/model/guest.rs:35:63}}
+```rust,noplayground
+let (system, messages) = Sections {
+    role: Some("a terse code reviewer".to_string()),
+    task: "decide whether the change is acceptable".to_string(),
+    context: Some("the diff adds a bounds check".to_string()),
+    ..Sections::default()
+}
+.channels(None);
+
+let request = completion::Request {
+    model: None,
+    system,
+    messages,
+    generation: None,
+    format: completion::Format::Schema(completion::Schema {
+        name: "verdict".to_string(),
+        schema: "{\"type\":\"object\"}".to_string(),
+    }),
+    tools: vec![],
+    grants: completion::Grants {
+        references: Some("shelf".to_string()),
+        workspace,
+        verify: vec![],
+    },
+};
+
+let answer = match completion::create(request).await {
+    Ok(reply) => reply.answer,
+    Err(error) => format!("error: {error:?}"),
+};
 ```
 
 The pieces:
@@ -77,8 +105,15 @@ The end-to-end demo lives at [`backends/examples/cursor`](https://github.com/aug
 
 Guests can also sit on the other side of the protocol: exposing tools and resources to model backends as a stateless MCP server over HTTP. Implement `omnia_guest::mcp::McpServer` and serve `mcp::router` from the guest's HTTP handler:
 
-```rust
-{{#include ../../examples/mcp/guest.rs:18:25}}
+```rust,noplayground
+struct HttpGuest;
+wasip3::http::service::export!(HttpGuest);
+
+impl Guest for HttpGuest {
+    async fn handle(request: Request) -> Result<Response, ErrorCode> {
+        omnia_wasi_http::serve(mcp::router(Docs), request).await
+    }
+}
 ```
 
 The `McpServer` trait has five methods: `info` (server identity), `tools` (tool declarations with JSON Schema inputs), `call_tool`, and optionally `resources`/`read_resource`. The router handles the JSON-RPC and Streamable HTTP transport details.

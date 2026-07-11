@@ -167,6 +167,17 @@ macro_rules! bad_request {
     };
 }
 
+/// Create a new `NotFound` error.
+#[macro_export]
+macro_rules! not_found {
+    ($fmt:expr, $($arg:tt)*) => {
+        $crate::Error::NotFound { code: "not_found".to_string(), description: format!($fmt, $($arg)*) }
+    };
+    ($desc:expr $(,)?) => {
+        $crate::Error::NotFound { code: "not_found".to_string(), description: format!($desc) }
+    };
+}
+
 /// Create a new `ServerError` error.
 #[macro_export]
 macro_rules! server_error {

@@ -42,6 +42,43 @@ pub use self::store::{
 };
 pub use self::telemetry::{Telemetry, resource};
 
+/// Generates the standard host-error conversions every `omnia` WASI host
+/// crate repeats.
+///
+/// Emits `From` impls for [`anyhow::Error`], [`wasmtime::Error`], and
+/// [`wasmtime::component::ResourceTableError`] into the given string-carrying
+/// variant of the WIT-generated error type, preserving the full context chain
+/// (`{err:#}`) from backend errors.
+///
+/// # Example
+///
+/// ```ignore
+/// omnia::host_error!(Error, Other);
+/// ```
+#[macro_export]
+macro_rules! host_error {
+    ($error:ty, $variant:ident $(,)?) => {
+        impl ::core::convert::From<$crate::anyhow::Error> for $error {
+            fn from(err: $crate::anyhow::Error) -> Self {
+                // `:#` keeps the full context chain from backend errors.
+                Self::$variant(format!("{err:#}"))
+            }
+        }
+
+        impl ::core::convert::From<$crate::wasmtime::Error> for $error {
+            fn from(err: $crate::wasmtime::Error) -> Self {
+                Self::$variant(format!("{err:#}"))
+            }
+        }
+
+        impl ::core::convert::From<$crate::wasmtime::component::ResourceTableError> for $error {
+            fn from(err: $crate::wasmtime::component::ResourceTableError) -> Self {
+                Self::$variant(err.to_string())
+            }
+        }
+    };
+}
+
 /// Generates the linker-facing view boilerplate every `omnia` WASI host crate
 /// repeats.
 ///
@@ -51,7 +88,8 @@ pub use self::telemetry::{Telemetry, resource};
 ///
 /// Pass the service stem (the part after `Wasi` in the host struct name); every
 /// identifier is derived from it. The `Wasi<Service>Ctx` trait, `bindgen!`
-/// block, `Host`/`Server` wiring, and error conversions stay hand-written.
+/// block, and `Host`/`Server` wiring stay hand-written; error conversions come
+/// from [`host_error!`].
 ///
 /// # Example
 ///

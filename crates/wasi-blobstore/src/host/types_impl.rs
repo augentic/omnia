@@ -4,39 +4,32 @@ use wasmtime::error::Context;
 use wasmtime_wasi::p2::bindings::io::streams::{InputStream, OutputStream};
 use wasmtime_wasi::p2::pipe::MemoryInputPipe;
 
-use crate::host::generated::Error;
 use crate::host::generated::wasi::blobstore::types::{
     Host, HostIncomingValue, HostIncomingValueWithStore, HostOutgoingValue,
     HostOutgoingValueWithStore, IncomingValueSyncBody,
 };
-use crate::host::{IncomingValue, OutgoingValue, Result, WasiBlobstore, WasiBlobstoreCtxView};
+use crate::host::{
+    Error, IncomingValue, OutgoingValue, Result, WasiBlobstore, WasiBlobstoreCtxView,
+};
 
 impl<T> HostIncomingValueWithStore<T> for WasiBlobstore {
     fn incoming_value_consume_sync(
         mut host: Access<'_, T, Self>, this: Resource<IncomingValue>,
     ) -> Result<IncomingValueSyncBody> {
-        let value = host
-            .get()
-            .table
-            .get(&this)
-            .context("IncomingValue not found")
-            .map_err(|e| e.to_string())?
-            .to_vec();
+        let value = host.get().table.get(&this).context("IncomingValue not found")?.to_vec();
         Ok(value)
     }
 
     async fn incoming_value_consume_async(
         accessor: &Accessor<T, Self>, this: Resource<IncomingValue>,
     ) -> Result<Resource<InputStream>> {
-        let value = accessor
-            .with(|mut store| {
-                let incoming = store.get().table.get(&this).context("IncomingValue not found")?;
-                Ok::<Bytes, wasmtime::Error>(incoming.clone())
-            })
-            .map_err(|e| e.to_string())?;
+        let value = accessor.with(|mut store| {
+            let incoming = store.get().table.get(&this).context("IncomingValue not found")?;
+            Ok::<Bytes, Error>(incoming.clone())
+        })?;
         let rs = MemoryInputPipe::new(value);
         let stream: InputStream = Box::new(rs);
-        accessor.with(|mut store| store.get().table.push(stream)).map_err(|e| e.to_string())
+        Ok(accessor.with(|mut store| store.get().table.push(stream))?)
     }
 
     fn size(
@@ -81,14 +74,9 @@ impl<T> HostOutgoingValueWithStore<T> for WasiBlobstore {
     }
 
     fn finish(mut host: Access<'_, T, Self>, this: Resource<OutgoingValue>) -> Result<()> {
-        let outgoing = host
-            .get()
-            .table
-            .get_mut(&this)
-            .context("OutgoingValue not found")
-            .map_err(|e| e.to_string())?;
+        let outgoing = host.get().table.get_mut(&this).context("OutgoingValue not found")?;
 
-        outgoing.finalize().map_err(ToString::to_string)
+        outgoing.finalize().map_err(|msg| Error::Other(msg.to_string()))
     }
 
     fn drop(
@@ -99,8 +87,8 @@ impl<T> HostOutgoingValueWithStore<T> for WasiBlobstore {
 }
 
 impl Host for WasiBlobstoreCtxView<'_> {
-    fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
-        Ok(err)
+    fn convert_error(&mut self, err: Error) -> wasmtime::Result<String> {
+        Ok(err.to_string())
     }
 }
 impl HostIncomingValue for WasiBlobstoreCtxView<'_> {}
