@@ -157,18 +157,3 @@ impl Locker for InMemLocker {
         .boxed()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn lockers_are_isolated() {
-        let vault = VaultDefault::connect().await.expect("connect");
-        let a = vault.open_locker("a".to_string()).await.expect("open a");
-        let b = vault.open_locker("b".to_string()).await.expect("open b");
-
-        a.set("k".to_string(), b"a".to_vec()).await.expect("set");
-        assert_eq!(b.get("k".to_string()).await.expect("get"), None);
-    }
-}

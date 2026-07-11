@@ -28,12 +28,3 @@ wasmtime-wasi-config.workspace = true
 # guest dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wit-bindgen.workspace = true
-
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-anyhow.workspace = true
-bytes.workspace = true
-omnia-testkit.workspace = true
-omnia-wasi-http.workspace = true
-omnia-wasi-otel.workspace = true
-serde_json.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

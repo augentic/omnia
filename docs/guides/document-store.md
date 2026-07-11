@@ -1,6 +1,6 @@
 # Document Store
 
-The `wasi:docstore` interface is a JSON document store: named collections of `{ id, data }` documents with a rich, backend-portable filter language and cursor-based pagination. The default backend is an embedded PoloDB file; production deployments swap in Azure Table Storage (`omnia-azure-table`) without guest changes.
+The `wasi:docstore` interface is a JSON document store: named collections of `{ id, data }` documents with a rich, backend-portable filter language and cursor-based pagination. The default backend is in-memory; production deployments swap in Azure Table Storage (`omnia-azure-table`) without guest changes.
 
 The [`docstore`](../../examples/docstore/) example is a GTFS-flavoured service (stops, routes, stop-times) that exercises every filter type; the snippets below come from it.
 
@@ -130,7 +130,7 @@ if let (Some(agency), Some(rtype)) = (&p.not_agency, p.not_type) {
 }
 ```
 
-The backend translates the tree to its native query language (PoloDB queries, OData `$filter` for Azure Table), so a filter that works locally works in production.
+The backend translates the tree to its native query language (direct JSON evaluation in the default, OData `$filter` for Azure Table), so a filter that works locally works in production.
 
 ## Queries, sorting, and pagination
 
@@ -164,7 +164,7 @@ The result carries `documents` plus an opaque `continuation` token when more pag
 
 | Backend | Notes |
 | ------- | ----- |
-| `DocStoreDefault` (in-tree) | Embedded PoloDB file; `DOCSTORE_DATABASE` selects the path (default: temp dir) |
+| `DocStoreDefault` (in-tree) | In-memory; state is process-local and lost on exit |
 | `omnia-azure-table` | Azure Table Storage over REST; `AZURE_STORAGE_ACCOUNT`, `AZURE_STORAGE_KEY`, optional `AZURE_TABLE_ENDPOINT` (points at Azurite for local emulation) |
 
 ## Choosing docstore vs SQL vs keyvalue

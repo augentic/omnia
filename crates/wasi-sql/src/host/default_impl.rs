@@ -197,57 +197,58 @@ fn rusqlite_value_to_datatype(value: ValueRef) -> Result<DataType> {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn sqlite_operations() {
-        let ctx = SqlDefault::connect_with(ConnectOptions {
-            database: ":memory:".to_string(),
-        })
-        .await
-        .expect("connect");
+    #[test]
+    fn datatype_to_sqlite_values() {
+        use rusqlite::types::Value;
 
-        let conn = ctx.open("test".to_string()).await.expect("open connection");
+        assert_eq!(datatype_to_rusqlite_value(&DataType::Boolean(Some(true))), Value::Integer(1));
+        assert_eq!(datatype_to_rusqlite_value(&DataType::Int32(Some(-7))), Value::Integer(-7));
+        assert_eq!(datatype_to_rusqlite_value(&DataType::Int64(Some(9))), Value::Integer(9));
+        assert_eq!(datatype_to_rusqlite_value(&DataType::Uint32(Some(4))), Value::Integer(4));
+        assert_eq!(
+            datatype_to_rusqlite_value(&DataType::Uint64(Some(u64::MAX))),
+            Value::Integer(-1),
+            "u64 stores its raw bits"
+        );
+        assert_eq!(datatype_to_rusqlite_value(&DataType::Float(Some(1.5))), Value::Real(1.5));
+        assert_eq!(datatype_to_rusqlite_value(&DataType::Double(Some(2.5))), Value::Real(2.5));
+        assert_eq!(
+            datatype_to_rusqlite_value(&DataType::Str(Some("s".to_string()))),
+            Value::Text("s".to_string())
+        );
+        assert_eq!(
+            datatype_to_rusqlite_value(&DataType::Binary(Some(vec![1, 2]))),
+            Value::Blob(vec![1, 2])
+        );
+        assert_eq!(
+            datatype_to_rusqlite_value(&DataType::Timestamp(Some("2026-01-01".to_string()))),
+            Value::Text("2026-01-01".to_string())
+        );
+        assert_eq!(datatype_to_rusqlite_value(&DataType::Str(None)), Value::Null);
+    }
 
-        // Create a test table
-        let rows_affected = conn
-            .exec(
-                "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)".to_string(),
-                vec![],
-            )
-            .await
-            .expect("create table");
-        assert_eq!(rows_affected, 0);
-
-        // Insert some data
-        let rows_affected = conn
-            .exec(
-                "INSERT INTO users (name, age) VALUES (?, ?)".to_string(),
-                vec![DataType::Str(Some("Alice".to_string())), DataType::Int32(Some(30))],
-            )
-            .await
-            .expect("insert");
-        assert_eq!(rows_affected, 1);
-
-        let rows_affected = conn
-            .exec(
-                "INSERT INTO users (name, age) VALUES (?, ?)".to_string(),
-                vec![DataType::Str(Some("Bob".to_string())), DataType::Int32(Some(25))],
-            )
-            .await
-            .expect("insert");
-        assert_eq!(rows_affected, 1);
-
-        // Query the data
-        let rows = conn
-            .query("SELECT id, name, age FROM users ORDER BY name".to_string(), vec![])
-            .await
-            .expect("query");
-
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].fields[1].name, "name");
-        if let DataType::Str(Some(ref name)) = rows[0].fields[1].value {
-            assert_eq!(name, "Alice");
-        } else {
-            panic!("Expected string value");
-        }
+    #[test]
+    fn sqlite_value_to_datatypes() {
+        assert!(matches!(
+            rusqlite_value_to_datatype(ValueRef::Null).expect("null"),
+            DataType::Str(None)
+        ));
+        assert!(matches!(
+            rusqlite_value_to_datatype(ValueRef::Integer(3)).expect("integer"),
+            DataType::Int64(Some(3))
+        ));
+        assert!(matches!(
+            rusqlite_value_to_datatype(ValueRef::Real(0.5)).expect("real"),
+            DataType::Double(Some(v)) if (v - 0.5).abs() < f64::EPSILON
+        ));
+        assert!(matches!(
+            rusqlite_value_to_datatype(ValueRef::Text(b"t")).expect("text"),
+            DataType::Str(Some(s)) if s == "t"
+        ));
+        assert!(matches!(
+            rusqlite_value_to_datatype(ValueRef::Blob(&[7])).expect("blob"),
+            DataType::Binary(Some(b)) if b == vec![7]
+        ));
+        assert!(rusqlite_value_to_datatype(ValueRef::Text(&[0xff])).is_err(), "invalid UTF-8");
     }
 }

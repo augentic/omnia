@@ -1,6 +1,6 @@
 //! # DocStore Runtime (Default Backend)
 //!
-//! Host binary for the `wasi:docstore` example. Uses PoloDB as the default backend.
+//! Host binary for the `wasi:docstore` example. Uses the in-memory default backend.
 
 cfg_if::cfg_if! {
     if #[cfg(not(target_arch = "wasm32"))] {

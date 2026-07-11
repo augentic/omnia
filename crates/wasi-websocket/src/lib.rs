@@ -5,8 +5,6 @@
 //! This module implements a runtime service for `wasi:websocket`
 //! (<https://github.com/augentic/wasi-websocket>).
 
-#![forbid(unsafe_code)]
-
 #[cfg(target_arch = "wasm32")]
 mod guest;
 #[cfg(target_arch = "wasm32")]

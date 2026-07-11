@@ -11,7 +11,7 @@ Every capability Omnia exposes to guests, its interface crate, the zero-config d
 | Pub/sub messaging | `wasi-messaging` | `WasiMessaging` † | `MessagingDefault` — in-process broadcast | `omnia-kafka`, `omnia-nats` |
 | Blob storage | `wasi-blobstore` | `WasiBlobstore` | `BlobstoreDefault` — in-memory | `omnia-azure-blob`, `omnia-mongodb`, `omnia-nats` |
 | SQL + ORM | `wasi-sql` | `WasiSql` | `SqlDefault` — SQLite (`SQL_DATABASE`, default shared in-memory) | `omnia-postgres` |
-| Document store | `wasi-docstore` | `WasiDocStore` | `DocStoreDefault` — embedded PoloDB file (`DOCSTORE_DATABASE`, default temp dir) | `omnia-azure-table` |
+| Document store | `wasi-docstore` | `WasiDocStore` | `DocStoreDefault` — in-memory | `omnia-azure-table` |
 | Configuration | `wasi-config` | `WasiConfig` | `ConfigDefault` — host process environment snapshot | — |
 | Secrets vault | `wasi-vault` | `WasiVault` | `VaultDefault` — in-memory lockers | `omnia-azure-vault` |
 | Identity/OAuth | `wasi-identity` | `WasiIdentity` | `IdentityDefault` — OAuth2 client flow (`IDENTITY_CLIENT_ID`, `IDENTITY_CLIENT_SECRET`, `IDENTITY_TOKEN_URL`) | `omnia-azure-id` |

@@ -2,8 +2,6 @@
 
 //! Procedural attributes for Omnia guests.
 
-#![forbid(unsafe_code)]
-
 mod otel;
 
 use proc_macro::TokenStream;

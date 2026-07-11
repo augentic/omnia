@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, anyhow};
@@ -45,9 +45,28 @@ impl Backend for ModelDefault {
 
     #[instrument]
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
-        let store = FixtureStore::try_from(&options.replay_dir)?;
+        Self::from_dir(options.replay_dir)
+    }
+}
+
+impl WasiModelCtx for ModelDefault {
+    fn complete(&self, request: Request, _tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
+        let answer = self.replay(&request);
+        async move { answer }.boxed()
+    }
+}
+
+impl ModelDefault {
+    /// Load replay fixtures from `path`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the directory cannot be read or a fixture is malformed.
+    pub fn from_dir(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        let store = FixtureStore::try_from(path)?;
         tracing::debug!(
-            dir = %options.replay_dir.display(),
+            dir = %path.display(),
             fixtures = store.len(),
             "initialized replay backend"
         );
@@ -55,12 +74,14 @@ impl Backend for ModelDefault {
             store: Arc::new(store),
         })
     }
-}
 
-impl WasiModelCtx for ModelDefault {
-    fn complete(&self, request: Request, _tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
-        let answer = self.store.answer(&request);
-        async move { answer }.boxed()
+    /// Look up the recorded answer for `request`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when canonicalization fails or no fixture matches.
+    pub fn replay(&self, request: &Request) -> Result<Answer> {
+        self.store.answer(request)
     }
 }
 
@@ -70,10 +91,10 @@ struct FixtureStore {
     answers: HashMap<String, Answer>,
 }
 
-impl TryFrom<&PathBuf> for FixtureStore {
+impl TryFrom<&Path> for FixtureStore {
     type Error = anyhow::Error;
 
-    fn try_from(path: &PathBuf) -> Result<Self> {
+    fn try_from(path: &Path) -> Result<Self> {
         let mut store = Self::default();
 
         if !path.exists() {
@@ -91,7 +112,7 @@ impl TryFrom<&PathBuf> for FixtureStore {
                 fs::read(&path).with_context(|| format!("reading fixture {}", path.display()))?;
             let fixture: Fixture = serde_json::from_slice(&bytes)
                 .with_context(|| format!("parsing fixture {}", path.display()))?;
-            store.insert(fixture);
+            store.insert(fixture)?;
         }
 
         Ok(store)
@@ -111,8 +132,8 @@ impl FixtureStore {
         self.answers.len()
     }
 
-    fn insert(&mut self, fixture: Fixture) {
-        let key = serde_json::to_string(&fixture.key_request).unwrap_or_default();
+    fn insert(&mut self, fixture: Fixture) -> Result<()> {
+        let key = serde_json::to_string(&fixture.key_request)?;
 
         self.answers.insert(
             key,
@@ -122,6 +143,7 @@ impl FixtureStore {
                 transcript: fixture.transcript,
             },
         );
+        Ok(())
     }
 }
 

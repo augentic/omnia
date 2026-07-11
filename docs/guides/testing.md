@@ -1,58 +1,97 @@
 # Testing Guests and Runtimes
 
-Omnia's testing approach is integration-first: the boundary that matters is the guest–host seam, so tests load a real `.wasm`, link real hosts, and drive requests through the actual WIT boundary. This guide shows how to write those tests for your own guests using the `omnia-testkit` scaffolding, and where unit tests still belong.
+Omnia's testing approach is integration-first: the boundary that matters is the guest–host seam, so tests load a real `.wasm`, link real hosts, and drive requests through the actual WIT boundary. This guide shows how the two test tiers fit together and how to write seam tests using the `omnia-testkit` scaffolding.
 
 The rationale and rules are codified in the repository `AGENTS.md` (Testing policy); this is the practical walk-through.
 
 ## The test taxonomy
 
-| Kind | What it covers | Where it runs |
-| ---- | -------------- | ------------- |
-| **Unit tests** | Pure, deterministic logic only: parsers, codecs, filter/type translation, macro expansion | CI |
-| **Seam tests** | A guest driven through the real runtime against a default (in-memory) backend | CI |
+| Kind | What it covers | How it runs |
+| ---- | -------------- | ----------- |
+| **Pure tier** | Deterministic, service-free logic: parsers, codecs, filter/type translation, macro expansion, guest-native logic | `cargo make test` (Nextest, process-per-test, parallel) |
+| **Seam tier** | Guests driven through the real runtime against the default (in-memory) backends | `cargo make test-seam` (one process, shared fixtures) |
 | **Live tests** | A production backend's `WasiXxxCtx` against the real service (`#[ignore]`-gated, in the `backends` repo) | Local only |
 
 Anything that crosses a WASI interface belongs at the seam, not in a unit test with mocks. Guest-side logic that can't be instrumented as `.wasm` (coverage tooling limitation) keeps native unit tests.
 
+## The seam suite
+
+All seam tests live in one unpublished package, `crates/seam-suite`, compiled into a single integration-test binary (`tests/seam/main.rs` plus one module per scenario). Running them in one process lets every scenario share:
+
+- one tokio runtime (`fixture::RT`),
+- one conformance runtime — component, linker, and `InstancePre` built once (`fixture::conformance()`),
+- probe handles onto every shared in-memory backend, so tests assert host-side effects.
+
+The conformance guest (`examples/conformance/guest.rs`) exposes one HTTP route per WASI interface and imports the real guest APIs. Scenarios that need their own deployment shape (CLI, model replay/workspace, HTTP routing, MCP, typed guest API, guest-to-guest linking) build their own runtime from their own guest but still share the suite process.
+
+Tests sharing the conformance backends take their keys/ids from `fixture::unique(..)` so concurrent scenarios never collide.
+
+## Guest artifacts are explicit
+
+Tests never invoke Cargo. `find_guest` is locate-only and fail-fast: it looks for a serialized `.bin` (preferred, loaded via deserialization instead of JIT compilation) or a `.wasm` under the example target directory and panics with build instructions when neither exists.
+
+Build (and serialize) exactly the guests the seam suite drives with:
+
+```bash
+cargo make build-test-guests
+```
+
+`cargo make test-seam` depends on that task, so the one-command path is just `test-seam`. The full example set (including guests without seam coverage) still builds with `cargo make build-examples` for main/scheduled validation.
+
 ## The testkit
 
-`omnia-testkit` is a dev-only, unpublished crate with three helpers:
+`omnia-testkit` is a dev-only, unpublished crate with three feature levels:
 
-- **`find_guest("name_wasm.wasm")`** — locates the built guest, building example guests on first use. It encodes a "fail in CI, skip locally" policy: locally a missing guest skips the test; under CI it fails, so the pipeline never passes vacuously.
+- **`model`** — native model doubles over `omnia_guest::model::Model`, without constructing a runtime.
+- **`replay`** — adds fixture-backed replay through `omnia_wasi_model::ModelDefault` and includes `model`.
+- **`runtime`** — guest artifact, manifest, runtime, and HTTP helpers. This is the default for compatibility.
+
+The runtime helpers are:
+
+- **`find_guest("name_wasm.wasm")`** — locates the built guest artifact (serialized `.bin` preferred), panicking with build instructions when missing. No lazy builds, no silent skips.
+- **`single_guest(file, bundle)`** — assembles a single-guest deployment over a backend bundle: `single_guest("x_wasm.wasm", bundle).await?.host::<WasiHttp>()?...into_runtime()?`.
 - **`temp_manifest(toml)`** — writes a deployment manifest to a unique temp file, removed on drop, for tests that need multi-guest deployments, routes, or mounts.
 - **`http`** — drives a guest's `wasi:http/handler` export in-process, with no TCP socket, e.g. `http::post(&runtime, "/", body)`.
+- **`serialize-guests`** (binary) — precompiles built `.wasm` guests into `.bin` components via Omnia's compile path; invoked by `build-test-guests`.
 
-Add it as a dev-dependency (path-only; it is not published):
+### Testing model-consuming core logic
+
+Depend on only the model helpers when a native test calls a generic `Model` directly:
 
 ```toml
 [dev-dependencies]
-omnia-testkit = { path = "../testkit" }
+omnia-testkit = { workspace = true, default-features = false, features = ["model"] }
 ```
+
+`model::Scripted` returns FIFO successes or typed errors, while `model::Harness<B>` records a complete snapshot of each request before delegating:
+
+```rust,noplayground
+use omnia_guest::model::{Model, Request};
+use omnia_testkit::model::{Harness, Scripted};
+
+let model = Harness::new(Scripted::answers(["first", "second"]));
+let first = model.create(Request::default()).await?;
+assert_eq!(first.answer, "first");
+assert_eq!(model.requests().len(), 1);
+```
+
+Call `Scripted::assert_exhausted` at the end of a test when every scripted turn must be consumed. An unexpected extra call returns a deterministic `Error::Backend`; it does not panic. `model::mcp_grants` filters a recorded request's tools to its MCP grants.
+
+For checked-in replay fixtures, enable `replay` and construct `model::Replay::from_dir`. Replay adapts the guest request to the WASI wire shape and delegates fixture loading, canonical matching, and row ownership to `ModelDefault`; it then applies the same answer validation and guest-visible projection as the host boundary. Wrap replay in `Harness` when request recording is also needed.
 
 ## Anatomy of a seam test
 
-The `wasi:keyvalue` seam test is the exemplar. It assembles the same runtime the `runtime!` macro would generate — but by hand, so the test can keep a probe handle into the shared backend and assert host-side effects.
+The suite's shared fixture (`crates/seam-suite/tests/seam/fixture.rs`) is the exemplar. The pattern:
 
-**1. A backend bundle with accessor impls** (mirroring the macro's generated `Backends`):
+**1. A backend bundle with accessor impls** (mirroring the `runtime!` macro's generated `Backends`), keeping clones of the shared in-memory backends as probes:
 
 ```rust,noplayground
 #[derive(Clone)]
-struct Bundle {
+pub struct Bundle {
     http: HttpDefault,
-    otel: OtelDefault,
+    otel: CapturingOtel,
     keyvalue: KeyValueDefault,
-}
-
-impl HasHttp for Bundle {
-    fn http_view<'a>(&'a mut self, table: &'a mut ResourceTable) -> WasiHttpCtxView<'a> {
-        self.http.as_view(table)
-    }
-}
-
-impl HasOtel for Bundle {
-    fn otel_ctx(&mut self) -> &mut dyn WasiOtelCtx {
-        &mut self.otel
-    }
+    // ... every interface the conformance guest imports
 }
 
 impl HasKeyValue for Bundle {
@@ -62,57 +101,37 @@ impl HasKeyValue for Bundle {
 }
 ```
 
-**2. Build the runtime over the guest**, keeping a clone of the backend as a probe (the in-memory defaults share state across clones):
+**2. Build the runtime once for the suite** and expose it through a lazily initialized fixture:
 
 ```rust,noplayground
-async fn runtime() -> Result<Option<(Runtime<Bundle>, KeyValueDefault)>> {
-    let Some(wasm) = find_guest("keyvalue_wasm.wasm") else {
-        return Ok(None);
-    };
-
-    let bundle = Bundle {
-        http: HttpDefault::connect().await.context("connecting http")?,
-        otel: OtelDefault::connect().await.context("connecting otel")?,
-        keyvalue: KeyValueDefault::connect().await.context("connecting keyvalue")?,
-    };
-    let store_probe = bundle.keyvalue.clone();
-
-    let mut deployment =
-        DeploymentBuilder::new().wasm(wasm).build::<StoreCtx<Bundle>>().await.context("build")?;
-    deployment.host::<WasiHttp, Bundle>().context("link http")?;
-    deployment.host::<WasiOtel, Bundle>().context("link otel")?;
-    deployment.host::<WasiKeyValue, Bundle>().context("link keyvalue")?;
-    let registry = deployment.into_registry().context("assemble registry")?;
-
-    let runtime = Runtime::from_parts(
-        Arc::new(registry),
-        Vec::new(),
-        Arc::new(MountRegistry::default()),
-        bundle,
-    );
-    Ok(Some((runtime, store_probe)))
-}
+let runtime = single_guest("conformance_wasm.wasm", bundle)
+    .await?
+    .host::<WasiHttp>()?
+    .host::<WasiKeyValue>()?
+    // ... remaining hosts
+    .into_runtime()?;
 ```
 
 **3. Drive the guest and assert both sides of the seam** — the guest's response *and* the effect that landed in the host backend:
 
 ```rust,noplayground
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn set_then_get() -> Result<()> {
-    let Some((runtime, store)) = runtime().await? else {
-        return Ok(());
-    };
+#[test]
+fn set_then_get() -> Result<()> {
+    fixture::RT.block_on(async {
+        let fx = fixture::conformance().await?;
+        let key = unique("kv-set");
 
-    let response = http::post(&runtime, "/", "payload-value").await?;
-    assert!(response.status().is_success(), "guest completes the keyvalue round-trip");
+        let response = http::post(&fx.runtime, &format!("/keyvalue?key={key}"), "payload").await?;
+        assert!(response.status().is_success(), "guest completes the keyvalue round-trip");
 
-    // The guest stored the request body under `my_key` in `omnia_bucket`; the
-    // shared backend must now hold that write.
-    let bucket = store.open_bucket("omnia_bucket".to_owned()).await.context("open bucket")?;
-    let stored = bucket.get("my_key".to_owned()).await.context("read my_key")?;
-    assert_eq!(stored.as_deref(), Some(b"payload-value".as_slice()), "the write reached the host");
+        // The guest stored the body under `key`; the shared backend must now
+        // hold that write.
+        let bucket = fx.keyvalue.open_bucket("omnia_bucket".to_owned()).await?;
+        let stored = bucket.get(key).await?;
+        assert_eq!(stored.as_deref(), Some(b"payload".as_slice()), "the write reached the host");
 
-    Ok(())
+        Ok(())
+    })
 }
 ```
 
@@ -120,7 +139,7 @@ That second assertion is the point: a `200` proves the call crossed the WIT boun
 
 ## Multi-guest and manifest-driven tests
 
-For deployments with routes, mounts, or linking, generate the manifest with `temp_manifest` and pass it to the builder:
+For deployments with routes, mounts, or linking, generate the manifest with `temp_manifest` and pass it to the builder (see the `routing` and `guest_link` scenarios in the suite):
 
 ```rust
 let manifest = temp_manifest(r#"
@@ -141,11 +160,12 @@ let deployment = DeploymentBuilder::new()
 ## Running the tests
 
 ```bash
-cargo nextest run --all --all-features --no-tests=pass   # workspace tests, incl. seam tests
-cargo test --doc --all-features --workspace              # doc tests
+cargo make test        # pure tier: Nextest, excludes the seam suite
+cargo make test-seam   # seam tier: builds + serializes guests, then one-process suite
+cargo test --doc --all-features --workspace   # doc tests
 ```
 
-`cargo-nextest` must be installed with `--locked` (`cargo install --locked cargo-nextest`). Seam tests build their guest on first run, so the first invocation is slower.
+`cargo-nextest` must be installed with `--locked` (`cargo install --locked cargo-nextest`). The Nextest default filter (`.config/nextest.toml`) excludes `omnia-seam-suite`, so `cargo nextest run --all` never accidentally runs seam tests process-per-test — and never silently skips a missing guest either: a seam run with missing artifacts fails with build instructions.
 
 ## Testing against real services
 

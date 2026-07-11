@@ -332,7 +332,13 @@ fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, Runt
 }
 
 // Initialize telemetry and the `COMPONENT` environment variable for the runtime.
+//
+// Telemetry (a process-global tracing subscriber) initializes once; later
+// deployments in the same process — embedders or a multi-deployment test
+// suite — reuse the first initialization.
 fn init_env(name: &str) -> Result<()> {
+    static TELEMETRY: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+
     if env::var_os("COMPONENT").is_none() {
         // SAFETY: Environment variable modification is safe here because:
         // 1. This runs during single-threaded initialization
@@ -342,7 +348,10 @@ fn init_env(name: &str) -> Result<()> {
         };
     }
 
-    // telemetry
+    if TELEMETRY.set(()).is_err() {
+        return Ok(());
+    }
+
     let mut builder = Telemetry::new(name);
     if let Ok(endpoint) = env::var("OTEL_GRPC_URL") {
         builder = builder.endpoint(endpoint);

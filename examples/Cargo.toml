@@ -73,6 +73,14 @@ name = "config-wasm"
 path = "config/guest.rs"
 crate-type = ["cdylib"]
 
+# Purpose-built guest for the omnia-seam-suite integration tests: one route per
+# HTTP-driven WASI interface. No host runtime — the suite supplies the backend
+# bundle.
+[[example]]
+name = "conformance-wasm"
+path = "conformance/guest.rs"
+crate-type = ["cdylib"]
+
 [[example]]
 name = "config"
 path = "config/runtime.rs"

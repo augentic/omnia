@@ -224,28 +224,3 @@ impl WebSocketDefault {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use futures::StreamExt;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn inbound_event() {
-        // Port 0 lets the OS pick a free port for the (unused-in-test) listener.
-        let backend = WebSocketDefault::connect_with(ConnectOptions {
-            socket_addr: "127.0.0.1:0".to_string(),
-        })
-        .await
-        .expect("connect");
-        let client = WasiWebSocketCtx::connect(&backend).await.expect("client");
-
-        let mut events = client.events().await.expect("events");
-        backend.send_to_guest("peer-1".to_string(), b"hello".to_vec());
-
-        let event = events.next().await.expect("an event");
-        assert_eq!(event.data, b"hello");
-        assert_eq!(event.socket_addr.as_deref(), Some("peer-1"));
-    }
-}

@@ -119,6 +119,23 @@ where
     handle(runtime, request).await
 }
 
+/// Drive a `DELETE {path}` request through the runtime's HTTP guest.
+///
+/// # Errors
+///
+/// Propagates any error from [`handle`], plus a request-construction error.
+pub async fn delete<B>(runtime: &Runtime<B>, path: &str) -> Result<http::Response<Bytes>>
+where
+    B: Clone + Send + Sync + 'static,
+    StoreCtx<B>: WasiHttpView,
+{
+    let request = http::Request::delete(format!("http://localhost{path}"))
+        .header(http::header::HOST, "localhost")
+        .body(Bytes::new())
+        .context("building DELETE request")?;
+    handle(runtime, request).await
+}
+
 /// Drive a `POST {path}` request carrying a JSON `body`, tagged
 /// `Content-Type: application/json` so axum's `Json` extractor accepts it.
 ///

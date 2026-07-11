@@ -1,6 +1,6 @@
 # DocStore Example
 
-Demonstrates `wasi:docstore` using the default PoloDB backend with three GTFS-like collections (stops, routes, stop_times). Exercises all CRUD operations and most filter types through combined query endpoints.
+Demonstrates `wasi:docstore` using the default in-memory backend with three GTFS-like collections (stops, routes, stop_times). Exercises all CRUD operations and most filter types through combined query endpoints.
 
 ## Quick Start
 

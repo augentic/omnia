@@ -5,7 +5,6 @@
 //! `omnia-wasi-sql` to assist in query building and mapping return values to business structures.
 //!
 //! It re-exports `Row` and `DataType` from `omnia-wasi-sql` for convenience.
-#![forbid(unsafe_code)]
 
 mod delete;
 mod entity;

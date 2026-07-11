@@ -97,7 +97,7 @@ world imports {
 
 ### Design rationale
 
-**Documents are `list<u8>` (JSON bytes)** -- WIT cannot express recursive value types. The guest serializes with `serde_json`, the host deserializes to whatever the backend needs (BSON for MongoDB/PoloDB, entity properties for Azure Table Storage). This is the same pattern `wasi-keyvalue` uses for values.
+**Documents are `list<u8>` (JSON bytes)** -- WIT cannot express recursive value types. The guest serializes with `serde_json`, the host deserializes to whatever the backend needs (BSON for MongoDB, entity properties for Azure Table Storage, parsed JSON for the in-memory default). This is the same pattern `wasi-keyvalue` uses for values.
 
 **Filters are a WIT resource** -- The guest calls static constructors (`Filter::compare`, `Filter::and`, etc.) that cross the WASM boundary. Each call creates a node in a recursive `FilterTree` enum on the host side. The resource approach is self-documenting, type-safe (you cannot construct an invalid filter), and avoids both the recursive-type limitation of WIT and the complexity of arena-based representations.
 
@@ -111,11 +111,11 @@ world imports {
 | Max in-list size | 100 | `in-list`, `not-in-list` value lists |
 | Min combinator children | 1 | `and`, `or` (empty lists rejected) |
 
-These limits protect the host from unbounded memory and CPU consumption when translating filters to backend-native queries (BSON, OData, SQL). A depth of 5 covers all practical filter patterns; if a guest needs deeper nesting the query design should be reconsidered. Backends may impose additional constraints (e.g. the PoloDB default backend rejects `starts-with` and `ends-with`, and caps query results at 1000 documents when no explicit limit is set).
+These limits protect the host from unbounded memory and CPU consumption when translating filters to backend-native queries (BSON, OData, SQL). A depth of 5 covers all practical filter patterns; if a guest needs deeper nesting the query design should be reconsidered. Backends may impose additional constraints (e.g. the in-memory default caps query results at 1000 documents when no explicit limit is set).
 
-**No `collection` resource** -- "Opening" a collection is trivial in all three backends (MongoDB returns a lightweight handle from its pooled client, Azure just needs the table name in a URL, PoloDB resolves a name). The expensive resources (MongoDB connection pool, PoloDB database handle) are managed at the backend level via `Backend::connect_with` at host startup. A collection resource would add a resource table entry and an extra boundary crossing per operation for something that is just a string lookup.
+**No `collection` resource** -- "Opening" a collection is trivial in all backends (MongoDB returns a lightweight handle from its pooled client, Azure just needs the table name in a URL, the in-memory default resolves a map entry). The expensive resources (e.g. the MongoDB connection pool) are managed at the backend level via `Backend::connect_with` at host startup. A collection resource would add a resource table entry and an extra boundary crossing per operation for something that is just a string lookup.
 
-**No separate `date` type** -- None of the three backends (Azure Table Storage, MongoDB, PoloDB) have a native date-only type; they all use datetime/timestamp. The `timestamp` scalar covers datetime filtering, `str` covers date-as-string comparisons, and a guest-side `Filter::on_date` convenience method handles the range-expansion pattern.
+**No separate `date` type** -- None of the backends (Azure Table Storage, MongoDB) have a native date-only type; they all use datetime/timestamp. The `timestamp` scalar covers datetime filtering, `str` covers date-as-string comparisons, and a guest-side `Filter::on_date` convenience method handles the range-expansion pattern.
 
 **Flat `store` interface** -- Five operations: `get` (point read by ID), `insert` (create new, fail if exists), `put` (unconditional upsert), `delete` (remove by ID), `query` (filtered read with pagination). `insert` vs `put` is a meaningful distinction -- all three backends support insert-with-conflict natively (Azure returns 409, MongoDB returns duplicate key error). `get` returns `document` (not just data) for consistency with `query`.
 
@@ -975,29 +975,9 @@ MongoDB backend produces:
 }
 ```
 
-### PoloDB (default in-memory backend)
+### In-memory (default backend)
 
-PoloDB uses the same BSON query syntax as MongoDB. The default backend reuses the MongoDB filter translator and calls `polodb_core::Collection::find`:
-
-```rust
-// crates/wasi-docstore/src/host/default_impl.rs
-
-impl WasiDocStoreCtx for DocStoreDefault {
-    fn query_collection(
-        &self, name: &str, filter: Option<&FilterTree>, options: &QueryOpts,
-    ) -> FutureResult<QueryResult> {
-        let db = self.db.clone();
-        async move {
-            let collection = db.collection::<bson::Document>(name);
-            let bson_filter = filter
-                .map(mongodb_filter::to_bson)
-                .unwrap_or_else(|| doc! {});
-            let results: Vec<_> = collection.find(bson_filter)?.collect();
-            Ok(to_query_result(results, options))
-        }.boxed()
-    }
-}
-```
+The default backend needs no translation: it evaluates the `FilterTree` directly over the stored JSON documents (`crates/wasi-docstore/src/host/default_impl/filter.rs`). Dotted field paths descend into nested objects, a missing field reads as JSON `null`, and ordering comparisons only match when the stored value and the target are of comparable types. Sorting uses a total order over JSON values (type rank, then value) with the document id as a tiebreaker, so pagination is deterministic.
 
 ---
 
@@ -1005,7 +985,7 @@ impl WasiDocStoreCtx for DocStoreDefault {
 
 ```
 Domain crate              SDK trait              Guest module            WIT boundary         Host backend
-(platform-agnostic)       (omnia-guest)          (wasi-docstore)    (component ABI)      (PoloDB/Azure/Mongo)
+(platform-agnostic)       (omnia-guest)          (wasi-docstore)    (component ABI)      (in-memory/Azure/Mongo)
 
 Filter::and([             DocumentStore          store::query()          store.query           WasiDocStoreCtx
   Filter::eq("a","b"),      ::query(provider,      convert::              filter resource        ::query_collection()
@@ -1029,7 +1009,7 @@ All three backends support conditional writes with version tokens:
 
 - **Azure Table Storage**: Native ETags via `ETag` response header and `If-Match` request header. Unconditional upsert uses no `If-Match`; conditional update sends `If-Match: <etag>` and gets `412 Precondition Failed` on conflict.
 - **MongoDB**: No native etags, but a managed `_etag` field in each document can serve the same purpose. Conditional writes filter on `{ _id: id, _etag: etag }`; `matched_count == 0` indicates conflict.
-- **PoloDB**: Same field-based approach as MongoDB.
+- **In-memory default**: Same field-based approach as MongoDB.
 
 A future version could add:
 
@@ -1045,7 +1025,7 @@ All three backends support returning a subset of fields:
 
 - **Azure Table Storage**: `$select=field1,field2` query parameter.
 - **MongoDB**: Projection `{ field1: 1, field2: 1 }`.
-- **PoloDB**: Same as MongoDB.
+- **In-memory default**: Trims the JSON body before serializing.
 
 A `select: list<string>` field on `query-options` could be added later. The main concern is that partial documents make guest-side deserialization fragile -- the guest would need to handle missing fields (`Option` on every field) or use a different struct for projected queries. Deferred until there is a concrete need.
 
@@ -1055,6 +1035,6 @@ Continuation tokens are opaque strings whose internal representation is backend-
 
 - **Azure Table Storage**: Encodes `NextPartitionKey` + `NextRowKey` from response headers.
 - **MongoDB**: Encodes the last document's sort key for keyset pagination (preferred over cursor IDs which have server-side timeouts).
-- **PoloDB**: Same keyset approach as MongoDB.
+- **In-memory default**: Encodes the absolute index of the next row.
 
 The guest never inspects or constructs tokens -- it passes them through from one `query-result` to the next `query-options`. `None` on input starts from the beginning; `None` on output means no more pages.

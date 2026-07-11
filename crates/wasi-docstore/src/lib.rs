@@ -5,8 +5,6 @@
 //! This module implements a runtime service for `wasi:docstore`: a JSON
 //! document store with a backend-portable filter language.
 
-#![forbid(unsafe_code)]
-
 pub mod document_store;
 
 #[cfg(target_arch = "wasm32")]

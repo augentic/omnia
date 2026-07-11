@@ -1,0 +1,179 @@
+# Reusable CI workflow for Rust
+# https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows
+
+name: CI
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: "Repo-root-relative directory holding the Cargo workspace (default: the repo root, for repos whose workspace is not in a subdirectory)."
+        type: string
+        default: "."
+      seam:
+        description: "Run the two-tier Omnia pipeline: build and serialize the seam guests, run the single-process seam suite, and build every WASM example on the default branch."
+        type: boolean
+        default: false
+    secrets:
+      CARGO_REGISTRY_TOKEN:
+        required: false
+
+# Cancel superseded runs on branches; let default-branch pushes run to completion.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }}
+
+permissions:
+  contents: read
+
+env:
+  RUSTFLAGS: -Dwarnings
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # One cache restore, then clippy -> tests -> doc tests -> docs sequentially,
+  # so later steps reuse the artifacts of earlier ones instead of relying on
+  # parallel jobs to warm each other's cache.
+  native:
+    name: Native
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      # dtolnay/rust-toolchain overrides rust-toolchain.toml, so the
+      # darwin target pinned there for developers is never installed on Linux.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.working-directory }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+      - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+        working-directory: ${{ inputs.working-directory }}
+      # `--all`, not `--tests`: library unit tests must run. A repo's Nextest
+      # default filter (.config/nextest.toml) may exclude its seam suite.
+      - run: cargo nextest run --locked --all --all-features --no-tests=pass
+        working-directory: ${{ inputs.working-directory }}
+      - id: lib
+        working-directory: ${{ inputs.working-directory }}
+        # Detect a library target via cargo metadata so we don't depend on
+        # cargo's stderr wording or pay for a throwaway compile.
+        run: |
+          has_lib=$(cargo metadata --format-version 1 --no-deps \
+            | jq '[.packages[].targets[].kind[]
+                   | select(IN("lib","rlib","cdylib","dylib","staticlib","proc-macro"))]
+                   | length > 0')
+          echo "exists=$has_lib" >> "$GITHUB_OUTPUT"
+      - if: steps.lib.outputs.exists == 'true'
+        working-directory: ${{ inputs.working-directory }}
+        run: cargo test --doc --locked --all-features --workspace
+      - run: cargo doc --no-deps --workspace --all-features --locked
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RUSTDOCFLAGS: -Dwarnings
+
+  guests:
+    name: Seam guests
+    if: inputs.seam
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.working-directory }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-make
+      - run: cargo make build-test-guests
+        working-directory: ${{ inputs.working-directory }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: seam-guests
+          path: |
+            ${{ inputs.working-directory }}/target/wasm32-wasip2/debug/examples/*.wasm
+            ${{ inputs.working-directory }}/target/wasm32-wasip2/debug/examples/*.bin
+          retention-days: 1
+
+  seam:
+    name: Seam suite
+    if: inputs.seam
+    needs: guests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.working-directory }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: seam-guests
+          path: ${{ inputs.working-directory }}/target/wasm32-wasip2/debug/examples
+      # Plain cargo test, one process: the suite shares its runtime fixture.
+      - run: cargo test --locked -p omnia-seam-suite --test seam
+        working-directory: ${{ inputs.working-directory }}
+
+  examples:
+    name: Full WASM example build
+    if: inputs.seam && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || github.event_name == 'schedule')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.working-directory }}
+      - run: cargo build --locked -p examples --examples --target wasm32-wasip2
+        working-directory: ${{ inputs.working-directory }}
+
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+      - run: cargo +nightly fmt --all --check
+        working-directory: ${{ inputs.working-directory }}
+
+  vet:
+    name: Vet
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.working-directory }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-vet@0.10.2
+      - run: cargo vet --locked
+        working-directory: ${{ inputs.working-directory }}
+
+  deny:
+    name: Deny
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: ${{ inputs.working-directory }}/Cargo.toml
+          arguments: --workspace --locked
