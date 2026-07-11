@@ -1,0 +1,51 @@
+[package]
+name = "omnia-seam-suite"
+description = "Consolidated guest–host seam tests for the Omnia workspace"
+publish = false
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+# One integration-test binary: every scenario shares the process, so the
+# conformance runtime (component, linker, InstancePre) is built once. Run with
+# `cargo make test-seam` (or `cargo test -p omnia-seam-suite --test seam`);
+# the Nextest default filter excludes this package so the pure tier stays
+# process-per-test.
+[[test]]
+name = "seam"
+path = "tests/seam/main.rs"
+
+[dev-dependencies]
+anyhow.workspace = true
+bytes.workspace = true
+futures.workspace = true
+http.workspace = true
+omnia.workspace = true
+omnia-testkit.workspace = true
+omnia-wasi-blobstore.workspace = true
+omnia-wasi-config.workspace = true
+omnia-wasi-docstore.workspace = true
+omnia-wasi-http.workspace = true
+omnia-wasi-identity.workspace = true
+omnia-wasi-keyvalue.workspace = true
+omnia-wasi-messaging.workspace = true
+omnia-wasi-model.workspace = true
+omnia-wasi-otel.workspace = true
+omnia-wasi-sql.workspace = true
+omnia-wasi-vault.workspace = true
+omnia-wasi-websocket.workspace = true
+opentelemetry-proto.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio-tungstenite.workspace = true
+wasmtime.workspace = true
+wasmtime-wasi.workspace = true

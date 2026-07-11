@@ -33,7 +33,7 @@ tracing-opentelemetry = { workspace = true, optional = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 futures.workspace = true
 hex = "0.4.3"
-opentelemetry-proto = "0.32.0"
+opentelemetry-proto.workspace = true
 prost = "0.14.4"
 omnia.workspace = true
 wasmtime.workspace = true
@@ -46,8 +46,3 @@ num-traits = "0.2.19"
 tracing-subscriber = { workspace = true, features = ["env-filter"], optional = true }
 omnia-guest-macros.workspace = true
 wit-bindgen.workspace = true
-
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-omnia-testkit.workspace = true
-omnia-wasi-http.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

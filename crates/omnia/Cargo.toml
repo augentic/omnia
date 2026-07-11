@@ -62,8 +62,3 @@ wasmtime-wasi-http.workspace = true
 wrpc-transport.workspace = true
 wrpc-wasmtime.workspace = true
 # wrpc-runtime-wasmtime.workspace = true
-
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-anyhow.workspace = true
-omnia-testkit.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

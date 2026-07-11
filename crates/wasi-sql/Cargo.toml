@@ -40,10 +40,3 @@ futures.workspace = true
 sea-query.workspace = true
 serde_json.workspace = true
 wit-bindgen.workspace = true
-
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-omnia-testkit.workspace = true
-omnia-wasi-http.workspace = true
-omnia-wasi-otel.workspace = true
-serde_json.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

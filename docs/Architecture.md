@@ -112,7 +112,7 @@ Each interface crate provides guest bindings, a host implementation, and a defau
 | `wasi-messaging` | `wasi:messaging` | Pub/sub messaging (trigger) | `MessagingDefault` — in-process broadcast |
 | `wasi-blobstore` | `wasi:blobstore` | Object/blob storage | `BlobstoreDefault` — in-memory |
 | `wasi-sql` | `wasi:sql` | SQL access + guest ORM | `SqlDefault` — SQLite |
-| `wasi-docstore` | Custom | JSON document store with filters | `DocStoreDefault` — embedded PoloDB |
+| `wasi-docstore` | Custom | JSON document store with filters | `DocStoreDefault` — in-memory |
 | `wasi-config` | `wasi:config` | Runtime configuration | `ConfigDefault` — process environment |
 | `wasi-vault` | Custom | Secrets management | `VaultDefault` — in-memory |
 | `wasi-identity` | Custom | Identity/OAuth tokens | `IdentityDefault` — OAuth2 client flow |

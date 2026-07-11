@@ -65,7 +65,7 @@ impl<B> Server<B> for WasiDocStore {}
 /// A trait which provides internal WASI `DocStore` context.
 ///
 /// This is implemented by the resource-specific provider of `DocStore`
-/// functionality. For example, an embedded `PoloDB` file, or Azure Table
+/// functionality. For example, the in-memory default, or Azure Table
 /// Storage.
 pub trait WasiDocStoreCtx: Debug + Send + Sync + 'static {
     /// Point read by primary id.

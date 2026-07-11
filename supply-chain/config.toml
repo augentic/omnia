@@ -554,14 +554,6 @@ criteria = "safe-to-deploy"
 version = "0.3.33"
 criteria = "safe-to-deploy"
 
-[[exemptions.polodb-librocksdb-sys]]
-version = "9.0.0-alpha.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.polodb_core]]
-version = "5.1.4"
-criteria = "safe-to-deploy"
-
 [[exemptions.portable-atomic]]
 version = "1.13.1"
 criteria = "safe-to-deploy"

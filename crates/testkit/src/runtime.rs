@@ -29,26 +29,25 @@ where
 /// Start assembling a runtime over the example guest `file` backed by
 /// `bundle`.
 ///
-/// Returns `Ok(None)` when the guest is not built, mirroring [`find_guest`]'s
-/// skip-locally / fail-in-CI policy.
-///
 /// # Errors
 ///
 /// Returns an error if the deployment cannot be built from the guest wasm.
-pub async fn single_guest<B>(file: &str, bundle: B) -> Result<Option<SingleGuest<B>>>
+///
+/// # Panics
+///
+/// Panics when the guest artifact is missing (see [`find_guest`]).
+pub async fn single_guest<B>(file: &str, bundle: B) -> Result<SingleGuest<B>>
 where
     B: Clone + Send + Sync + 'static,
     StoreCtx<B>: WasiView,
 {
-    let Some(wasm) = find_guest(file) else {
-        return Ok(None);
-    };
+    let wasm = find_guest(file);
     let deployment = DeploymentBuilder::new()
         .wasm(wasm)
         .build::<StoreCtx<B>>()
         .await
         .context("building deployment")?;
-    Ok(Some(SingleGuest { deployment, bundle }))
+    Ok(SingleGuest { deployment, bundle })
 }
 
 impl<B> SingleGuest<B>

@@ -15,6 +15,12 @@ version.workspace = true
 [lints]
 workspace = true
 
+# `cargo make build-test-guests` runs this to serialize built guests so tests
+# deserialize pre-compiled components instead of JIT-compiling per process.
+[[bin]]
+name = "serialize-guests"
+path = "src/bin/serialize_guests.rs"
+
 # Native-only: `testkit` drives host runtimes and is consumed solely as a
 # dev-dependency of native integration tests. It never compiles for the guest
 # `wasm32-wasip2` target, so its dependencies (notably `omnia`) live under the

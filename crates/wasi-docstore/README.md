@@ -10,7 +10,7 @@ See the [`DocStore` Interface Reference](../../docs/reference/docstore.md) for t
 
 ## Backend
 
-- **Default**: Uses `PoloDB` (MongoDB-compatible embedded database). Configure the database path with the `DOCSTORE_DATABASE` environment variable (default: `omnia-docstore.polodb` in the system temp directory). Note that unlike the other in-memory defaults this one is file-backed: documents persist across runs until the file is deleted.
+- **Default**: In-memory document store. Filters, sorting, and pagination are evaluated directly over the stored JSON; state is process-local and lost on exit, like the other in-memory defaults.
 
 ## Usage
 

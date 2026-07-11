@@ -1,0 +1,6 @@
+# The default filter covers the pure tier: every library and native
+# integration test, process-per-test. The consolidated seam suite
+# (omnia-seam-suite) is excluded — it shares fixtures across scenarios and
+# runs single-process via `cargo make test-seam`.
+[profile.default]
+default-filter = "not package(omnia-seam-suite)"

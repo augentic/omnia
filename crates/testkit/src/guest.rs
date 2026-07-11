@@ -1,74 +1,47 @@
 //! Locating pre-built guest components in integration tests.
 //!
-//! [`find_guest`] encodes the "fail in CI, skip locally" policy so a missing
-//! guest never lets CI pass vacuously.
+//! [`find_guest`] is locate-only: tests never invoke Cargo. Guests are built
+//! (and serialized) up front by `cargo make build-test-guests`; a missing
+//! artifact fails fast with that instruction, locally and in CI alike.
 
 use std::env;
 use std::path::PathBuf;
-use std::process::Command;
-use std::sync::OnceLock;
 
-static GUESTS: OnceLock<()> = OnceLock::new();
-
-/// Locate a built guest, or signal that the caller should skip.
-///
-/// Builds example guests on first use, then returns the path when present. When
-/// still absent it panics under CI (`CI` set) so the pipeline never passes
-/// vacuously, and otherwise returns `None` so local runs skip gracefully.
+/// Locate a pre-built guest component by file name (e.g. `http_wasm.wasm`),
+/// preferring a serialized `.bin` (loaded via `Component::deserialize_file`,
+/// skipping JIT compilation) over the raw `.wasm`.
 ///
 /// # Panics
 ///
-/// Panics under CI (`CI` set) or `build_guests()` fails so the pipeline never
-/// passes vacuously.
+/// Panics when no artifact exists, so a test run never passes vacuously and
+/// never falls back to compiling guests itself.
 #[must_use]
-pub fn find_guest(file: &str) -> Option<PathBuf> {
-    if guest_wasm(file).is_none() {
-        build_guests();
-    }
-
-    if let Some(path) = guest_wasm(file) {
-        return Some(path);
-    }
-
-    assert!(
-        env::var_os("CI").is_none(),
-        "guest `{file}` not built under CI; run:\n  cargo build -p examples --examples --target wasm32-wasip2"
-    );
-    eprintln!("skipping: guest `{file}` not built.");
-
-    None
-}
-
-// Locate a built guest component by file name, preferring the debug profile.
-fn guest_wasm(file: &str) -> Option<PathBuf> {
+pub fn find_guest(file: &str) -> PathBuf {
     let target = get_target_dir();
 
-    // find file in debug or release profiles
-    ["debug", "release"]
-        .into_iter()
-        .map(|profile| target.join("wasm32-wasip2").join(profile).join("examples").join(file))
-        .find(|path| path.exists())
+    // A serialized artifact sits next to the raw wasm with a `.bin` extension
+    // (the layout `omnia compile --output <dir>` produces).
+    let serialized = PathBuf::from(file).with_extension("bin");
+    for profile in ["debug", "release"] {
+        let dir = target.join("wasm32-wasip2").join(profile).join("examples");
+        let bin = dir.join(&serialized);
+        let wasm = dir.join(file);
+
+        // A `.bin` older than its `.wasm` is a stale serialization of a
+        // rebuilt guest; using it would silently test old guest code.
+        match (mtime(&bin), mtime(&wasm)) {
+            (Some(bin_at), Some(wasm_at)) if bin_at >= wasm_at => return bin,
+            (_, Some(_)) => return wasm,
+            (Some(_), None) => return bin,
+            (None, None) => {}
+        }
+    }
+
+    panic!("guest `{file}` not built; run:\n  cargo make build-test-guests");
 }
 
-// Build wasm32-wasip2 example guests.
-fn build_guests() {
-    GUESTS.get_or_init(|| {
-        let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .and_then(|crates| crates.parent())
-            .expect("testkit manifest dir is <workspace>/crates/testkit")
-            .to_path_buf();
-        let target = get_target_dir();
-
-        let status = Command::new("cargo")
-            .env("CARGO_TARGET_DIR", &target)
-            .args(["build", "-p", "examples", "--examples", "--target", "wasm32-wasip2"])
-            .current_dir(&workspace)
-            .status()
-            .expect("spawning guest build");
-
-        assert!(status.success(), "guest build failed with status {status}");
-    });
+fn mtime(path: &std::path::Path) -> Option<std::time::SystemTime> {
+    path.metadata().and_then(|m| m.modified()).ok()
 }
 
 fn get_target_dir() -> PathBuf {

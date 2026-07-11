@@ -84,6 +84,7 @@ insta = "1.48.0"
 jsonschema = { version = "0.46.9", default-features = false }
 moka = { version = "0.12.15", features = ["sync"] }
 opentelemetry = "0.32.0"
+opentelemetry-proto = "0.32.0"
 opentelemetry_sdk = "0.32.1"
 parking_lot = "0.12.5"
 pastey = "0.2.3"
