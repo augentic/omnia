@@ -103,12 +103,13 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
 For run-once workloads (jobs, CLIs, agent tasks), use `omnia_guest::api::command` to bind Clap argument types to the same transport-neutral `Operation` contract. The guest still owns the explicit `wasi:cli/run` export; the adapter writes buffered output and preserves the router's exact exit status:
 
 ```rust,noplayground
-use omnia_guest::api::command::{self, App, Router};
+use clap::Command;
+use omnia_guest::api::command::{self, Router, RouterBuilder};
 use omnia_guest::api::invoke::Invoker;
 use wasip3::exports::cli::run::Guest;
 
 fn router() -> Router<MyProvider> {
-    Router::new(App::new("jobs"), Invoker::new("acme", MyProvider))
+    RouterBuilder::new(Command::new("jobs"), Invoker::new("acme", MyProvider))
         .route(
             ["sync"],
             command::run::<SyncArgs, Sync>()

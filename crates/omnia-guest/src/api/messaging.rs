@@ -69,16 +69,7 @@ where
     }
 }
 
-/// The typed outcome supplied to a delivery projector.
-#[derive(Debug)]
-pub enum Outcome<T, O, D> {
-    /// The operation completed successfully.
-    Output(T),
-    /// The operation returned its typed failure.
-    Operation(O),
-    /// The payload could not be converted to operation input.
-    Decode(D),
-}
+pub use crate::api::Outcome;
 
 /// A delivery failure projected onto the current WIT error result.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -192,9 +183,6 @@ impl<P, O, D, Q> ErasedRoute<P> for Route<P, O, D, Q>
 where
     P: Provider,
     O: Operation<P>,
-    O::Input: Send + 'static,
-    O::Output: Send + 'static,
-    O::Error: Send + Sync + 'static,
     D: Decoder<O::Input>,
     Q: Projector<O::Output, O::Error, D::Error>,
 {
@@ -210,20 +198,13 @@ where
                 Ok(input) => input,
                 Err(error) => return self.projector.project(Outcome::Decode(error)),
             };
-            let value = |name: &str| {
+            let metadata = Metadata::from_lookup(|name| {
                 delivery
                     .metadata
                     .iter()
                     .find(|(key, _)| key.eq_ignore_ascii_case(name))
                     .map(|(_, value)| value.clone())
-            };
-            let request_id = value("request-id");
-            let metadata = Metadata {
-                correlation_id: value("correlation-id").or_else(|| request_id.clone()),
-                request_id,
-                causation_id: value("causation-id"),
-                deadline: None,
-            };
+            });
             let outcome = match invoker.invoke::<O>(Invocation::new(input).metadata(metadata)).await
             {
                 Ok(output) => Outcome::Output(output),
@@ -282,9 +263,6 @@ impl<P: Provider> Router<P> {
     pub fn route<O, D, Q>(mut self, topic: impl Into<String>, binding: Consume<O, D, Q>) -> Self
     where
         O: Operation<P>,
-        O::Input: Send + 'static,
-        O::Output: Send + 'static,
-        O::Error: Send + Sync + 'static,
         D: Decoder<O::Input>,
         Q: Projector<O::Output, O::Error, D::Error>,
     {

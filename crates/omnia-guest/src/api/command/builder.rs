@@ -44,16 +44,7 @@ where
     }
 }
 
-/// The typed outcome supplied to a route projector.
-#[derive(Debug)]
-pub enum Outcome<T, O, D> {
-    /// The operation completed successfully.
-    Output(T),
-    /// The operation returned its typed failure.
-    Operation(O),
-    /// Command arguments could not be converted to operation input.
-    Decode(D),
-}
+pub use crate::api::Outcome;
 
 /// Maps one typed route outcome onto command output.
 pub trait Projector<T, O, D, G>: Clone + Send + Sync + 'static {

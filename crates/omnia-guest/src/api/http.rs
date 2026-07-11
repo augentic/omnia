@@ -1,21 +1,18 @@
 //! Typed HTTP routing over application operations.
 
 use std::any::TypeId;
+use std::fmt;
 
 use axum::Router as AxumRouter;
 use axum::extract::{RawPathParams, RawQuery, State};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{self, MethodRouter};
-use http::header::{CONTENT_TYPE, HeaderName};
+use http::header::CONTENT_TYPE;
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::api::{Invocation, Invoker, Metadata, Operation, Provider};
-
-const REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
-const CORRELATION_ID: HeaderName = HeaderName::from_static("x-correlation-id");
-const CAUSATION_ID: HeaderName = HeaderName::from_static("x-causation-id");
 
 /// Projects one operation's result onto an HTTP response.
 pub trait Projector<O, P>: Clone + Send + Sync + 'static
@@ -28,6 +25,45 @@ where
 
     /// Project an operation error.
     fn error(&self, error: O::Error) -> Response;
+
+    /// Project a transport input-decoding failure.
+    ///
+    /// The default renders the standard bad-request [`HttpError`].
+    fn decode(&self, error: DecodeError) -> Response {
+        HttpError::from(error).into_response()
+    }
+}
+
+/// A request that could not be converted to operation input.
+#[derive(Debug)]
+pub struct DecodeError {
+    description: String,
+}
+
+impl DecodeError {
+    /// Describe why the request could not be decoded.
+    #[must_use]
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+}
+
+impl fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.description)
+    }
+}
+
+impl std::error::Error for DecodeError {}
+
+impl From<DecodeError> for HttpError {
+    fn from(error: DecodeError) -> Self {
+        crate::Error::BadRequest {
+            code: "invalid_request".to_string(),
+            description: error.description,
+        }
+        .into()
+    }
 }
 
 /// Projects successful outputs as JSON and errors through [`HttpError`].
@@ -49,10 +85,16 @@ where
                 body,
             )
                 .into_response(),
-            Err(error) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, format!("body encoding error: {error}"))
-                    .into_response()
-            }
+            Err(error) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [(CONTENT_TYPE, HeaderValue::from_static("application/json"))],
+                serde_json::json!({
+                    "error": "encoding",
+                    "message": format!("body encoding error: {error}"),
+                })
+                .to_string(),
+            )
+                .into_response(),
         }
     }
 
@@ -242,10 +284,7 @@ where
              params: RawPathParams,
              RawQuery(query): RawQuery,
              headers: HeaderMap| async move {
-                let input = match query_input::<O::Input>(&params, query.as_deref()) {
-                    Ok(input) => input,
-                    Err(error) => return error.into_response(),
-                };
+                let input = query_input::<O::Input>(&params, query.as_deref());
                 invoke::<O, P, J>(&invoker, headers, input, projector).await
             },
         ),
@@ -281,10 +320,7 @@ where
              params: RawPathParams,
              headers: HeaderMap,
              body: axum::body::Bytes| async move {
-                let input = match body_input::<O::Input>(&params, &body) {
-                    Ok(input) => input,
-                    Err(error) => return error.into_response(),
-                };
+                let input = body_input::<O::Input>(&params, &body);
                 invoke::<O, P, J>(&invoker, headers, input, projector).await
             },
         ),
@@ -292,41 +328,33 @@ where
 }
 
 async fn invoke<O, P, J>(
-    invoker: &Invoker<P>, headers: HeaderMap, input: O::Input, projector: J,
+    invoker: &Invoker<P>, headers: HeaderMap, input: Result<O::Input, DecodeError>, projector: J,
 ) -> Response
 where
     O: Operation<P>,
     P: Provider,
     J: Projector<O, P>,
 {
-    let request_id = header(&headers, REQUEST_ID);
-    let metadata = Metadata {
-        correlation_id: header(&headers, CORRELATION_ID).or_else(|| request_id.clone()),
-        request_id,
-        causation_id: header(&headers, CAUSATION_ID),
-        deadline: None,
+    let input = match input {
+        Ok(input) => input,
+        Err(error) => return projector.decode(error),
     };
+    let metadata = Metadata::from_lookup(|name| {
+        headers.get(format!("x-{name}")).and_then(|value| value.to_str().ok()).map(str::to_owned)
+    });
     match invoker.invoke::<O>(Invocation::new(input).metadata(metadata)).await {
         Ok(output) => projector.output(output),
         Err(error) => projector.error(error),
     }
 }
 
-fn header(headers: &HeaderMap, name: HeaderName) -> Option<String> {
-    headers.get(name).and_then(|value| value.to_str().ok()).map(str::to_owned)
-}
-
-fn invalid(description: String) -> HttpError {
-    crate::Error::BadRequest {
-        code: "invalid_request".to_string(),
-        description,
-    }
-    .into()
+const fn invalid(description: String) -> DecodeError {
+    DecodeError { description }
 }
 
 fn query_input<T: DeserializeOwned>(
     params: &RawPathParams, query: Option<&str>,
-) -> Result<T, HttpError> {
+) -> Result<T, DecodeError> {
     let mut pairs: Vec<(String, String)> =
         params.iter().map(|(key, value)| (key.to_owned(), value.to_owned())).collect();
     if let Some(query) = query {
@@ -340,7 +368,7 @@ fn query_input<T: DeserializeOwned>(
         .map_err(|error| invalid(format!("invalid request parameters: {error}")))
 }
 
-fn body_input<T: DeserializeOwned>(params: &RawPathParams, body: &[u8]) -> Result<T, HttpError> {
+fn body_input<T: DeserializeOwned>(params: &RawPathParams, body: &[u8]) -> Result<T, DecodeError> {
     let mut value = if body.is_empty() {
         serde_json::Value::Object(serde_json::Map::new())
     } else {

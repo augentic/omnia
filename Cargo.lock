@@ -2263,6 +2263,7 @@ dependencies = [
  "omnia-wasi-otel",
  "omnia-wasi-sql",
  "omnia-wasi-websocket",
+ "rand 0.10.2",
  "sea-query",
  "serde",
  "serde_json",

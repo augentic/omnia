@@ -5,7 +5,7 @@ use crate::api::Provider;
 use crate::api::invoke::CallContext;
 
 /// A stateless application operation.
-pub trait Operation<P: Provider>: Sized + Send + 'static {
+pub trait Operation<P: Provider>: 'static {
     /// The typed operation input.
     type Input: Send + 'static;
 

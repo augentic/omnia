@@ -13,77 +13,11 @@ use clap_complete::Shell;
 use super::builder::{Binding, Decoder, Outcome, Projector};
 use super::response::CommandResponse;
 use crate::api::Provider;
-use crate::api::invocation::Invocation;
+use crate::api::invocation::{Invocation, Metadata};
 use crate::api::invoke::Invoker;
 use crate::api::operation::Operation;
 
 const COMPLETIONS: &str = "completions";
-
-/// Top-level command metadata.
-#[derive(Clone, Debug)]
-pub struct App {
-    name: &'static str,
-    version: Option<&'static str>,
-    about: Option<&'static str>,
-    long_about: Option<&'static str>,
-    completions: Completions,
-}
-
-impl App {
-    /// Create application metadata.
-    #[must_use]
-    pub const fn new(name: &'static str) -> Self {
-        Self {
-            name,
-            version: None,
-            about: None,
-            long_about: None,
-            completions: Completions::new(),
-        }
-    }
-
-    /// Set the application version.
-    #[must_use]
-    pub const fn version(mut self, version: &'static str) -> Self {
-        self.version = Some(version);
-        self
-    }
-
-    /// Set short application help.
-    #[must_use]
-    pub const fn about(mut self, about: &'static str) -> Self {
-        self.about = Some(about);
-        self
-    }
-
-    /// Set detailed application help.
-    #[must_use]
-    pub const fn long_about(mut self, long_about: &'static str) -> Self {
-        self.long_about = Some(long_about);
-        self
-    }
-
-    /// Configure the synthetic completions command.
-    #[must_use]
-    pub const fn completions(mut self, completions: Completions) -> Self {
-        self.completions = completions;
-        self
-    }
-
-    fn command(&self) -> Command {
-        let mut command = Command::new(self.name);
-        if let Some(version) = self.version {
-            command = command.version(version);
-        }
-        if let Some(about) = self.about {
-            command = command.about(about);
-        }
-        if let Some(long_about) = self.long_about {
-            command = command.long_about(long_about);
-        }
-        command
-    }
-}
 
 /// Help metadata for an intermediate command namespace.
 #[derive(Clone, Copy, Debug, Default)]
@@ -156,38 +90,12 @@ impl Default for Completions {
 }
 
 /// No application-wide command arguments.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct NoGlobals;
-
-impl Args for NoGlobals {
-    fn augment_args(cmd: Command) -> Command {
-        cmd
-    }
-
-    fn augment_args_for_update(cmd: Command) -> Command {
-        cmd
-    }
-}
-
-impl FromArgMatches for NoGlobals {
-    fn from_arg_matches(_matches: &ArgMatches) -> Result<Self, clap::Error> {
-        Ok(Self)
-    }
-
-    fn from_arg_matches_mut(_matches: &mut ArgMatches) -> Result<Self, clap::Error> {
-        Ok(Self)
-    }
-
-    fn update_from_arg_matches(&mut self, _matches: &ArgMatches) -> Result<(), clap::Error> {
-        Ok(())
-    }
-
-    fn update_from_arg_matches_mut(
-        &mut self, _matches: &mut ArgMatches,
-    ) -> Result<(), clap::Error> {
-        Ok(())
-    }
-}
+#[derive(Args, Clone, Copy, Debug, Default)]
+#[expect(
+    clippy::empty_structs_with_brackets,
+    reason = "clap's `Args` derive requires a braced struct"
+)]
+pub struct NoGlobals {}
 
 /// A command route selector.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -331,6 +239,7 @@ trait ErasedRoute<P: Provider, G>: Send + Sync {
     fn command(&self, name: &'static str) -> Command;
     fn dispatch<'a>(
         &'a self, matches: &'a ArgMatches, globals: &'a G, invoker: &'a Invoker<P>,
+        metadata: &'a Metadata,
     ) -> DispatchFuture<'a>;
 }
 
@@ -345,9 +254,6 @@ where
     G: Send + Sync + 'static,
     A: Args + FromArgMatches + Send + 'static,
     O: Operation<P>,
-    O::Input: Send + 'static,
-    O::Output: Send + 'static,
-    O::Error: Send + Sync + 'static,
     D: Decoder<A, O::Input, G>,
     Q: Projector<O::Output, O::Error, D::Error, G>,
 {
@@ -392,6 +298,7 @@ where
 
     fn dispatch<'a>(
         &'a self, matches: &'a ArgMatches, globals: &'a G, invoker: &'a Invoker<P>,
+        metadata: &'a Metadata,
     ) -> DispatchFuture<'a> {
         Box::pin(async move {
             let args = match A::from_arg_matches(matches) {
@@ -404,7 +311,8 @@ where
                     return project(&self.binding.projector, Outcome::Decode(error), globals);
                 }
             };
-            let outcome = match invoker.invoke::<O>(Invocation::new(input)).await {
+            let invocation = Invocation::new(input).metadata(metadata.clone());
+            let outcome = match invoker.invoke::<O>(invocation).await {
                 Ok(output) => Outcome::Output(output),
                 Err(error) => Outcome::Operation(error),
             };
@@ -449,58 +357,49 @@ impl<P: Provider, G> Default for Node<P, G> {
     }
 }
 
-/// A typed command router with application-wide arguments.
-pub struct Router<P: Provider, G = NoGlobals> {
-    app: App,
+/// Registers typed operation routes ahead of grammar assembly.
+///
+/// [`build`](Self::build) validates the registrations and produces the
+/// executable [`Router`], following the `ClientBuilder` → `Client`
+/// convention.
+pub struct RouterBuilder<P: Provider, G = NoGlobals> {
+    command: Command,
+    completions: Completions,
     invoker: Invoker<P>,
     before_dispatch: Option<BeforeDispatch<G>>,
     registrations: Vec<Registration<P, G>>,
     namespaces: Vec<NamespaceRegistration>,
-    command: Option<Command>,
-    routes: BTreeMap<Vec<String>, Arc<dyn ErasedRoute<P, G>>>,
-    inventory: Vec<RouteInfo>,
 }
 
-impl<P: Provider> Router<P, NoGlobals> {
-    /// Create an empty command router.
-    #[must_use]
-    pub fn new(app: App, invoker: Invoker<P>) -> Self {
-        Self {
-            app,
-            invoker,
-            before_dispatch: None,
-            registrations: Vec::new(),
-            namespaces: Vec::new(),
-            command: None,
-            routes: BTreeMap::new(),
-            inventory: Vec::new(),
-        }
-    }
-
-    /// Set the application-wide clap argument type.
-    #[must_use]
-    pub fn globals<G>(self) -> Router<P, G>
-    where
-        G: Args + FromArgMatches + Send + Sync + 'static,
-    {
-        Router {
-            app: self.app,
-            invoker: self.invoker,
-            before_dispatch: None,
-            registrations: Vec::new(),
-            namespaces: Vec::new(),
-            command: None,
-            routes: BTreeMap::new(),
-            inventory: Vec::new(),
-        }
-    }
-}
-
-impl<P, G> Router<P, G>
+impl<P, G> RouterBuilder<P, G>
 where
     P: Provider,
     G: Args + FromArgMatches + Send + Sync + 'static,
 {
+    /// Create an empty router builder over a clap root command.
+    ///
+    /// `command` carries the application name, version, and help text;
+    /// the builder appends the route grammar and the synthetic
+    /// completions command to it.
+    #[must_use]
+    pub fn new(command: Command, invoker: Invoker<P>) -> Self {
+        Self {
+            command,
+            completions: Completions::new(),
+            invoker,
+            before_dispatch: None,
+            registrations: Vec::new(),
+            namespaces: Vec::new(),
+        }
+    }
+
+    /// Configure the synthetic completions command.
+    #[must_use]
+    pub const fn completions(mut self, completions: Completions) -> Self {
+        self.completions = completions;
+        self
+    }
+
     /// Run application policy after globals parse and before route dispatch.
     ///
     /// Returning a response stops dispatch and preserves its output channels
@@ -519,9 +418,6 @@ where
     where
         I: IntoIterator<Item = &'static str>,
     {
-        self.command = None;
-        self.routes.clear();
-        self.inventory.clear();
         self.namespaces.push(NamespaceRegistration {
             path: path.into_iter().collect(),
             metadata,
@@ -536,15 +432,9 @@ where
         I: IntoIterator<Item = &'static str>,
         A: Args + FromArgMatches + Send + 'static,
         O: Operation<P>,
-        O::Input: Send + 'static,
-        O::Output: Send + 'static,
-        O::Error: Send + Sync + 'static,
         D: Decoder<A, O::Input, G>,
         Q: Projector<O::Output, O::Error, D::Error, G>,
     {
-        self.command = None;
-        self.routes.clear();
-        self.inventory.clear();
         self.registrations.push(Registration {
             path: path.into_iter().collect(),
             route: Arc::new(Route {
@@ -555,12 +445,12 @@ where
         self
     }
 
-    /// Validate and assemble the final clap grammar.
+    /// Validate the registrations and assemble the executable router.
     ///
     /// # Errors
     ///
     /// Returns a deterministic route or argument conflict.
-    pub fn build(mut self) -> Result<Self, BuildError> {
+    pub fn build(self) -> Result<Router<P, G>, BuildError> {
         let mut root = Node::default();
         for registration in &self.registrations {
             insert(&mut root, registration)?;
@@ -570,18 +460,18 @@ where
         }
         validate_aliases(&root, &[])?;
 
-        let mut command = global_command::<G>(self.app.command());
+        let mut command = global_command::<G>(self.command);
         let global_keys = argument_keys(&command);
         validate_global_arguments(&root, &global_keys, &mut Vec::new())?;
         for (name, node) in &root.children {
             command = command.subcommand(node_command(name, node));
         }
         command = command
-            .subcommand(completions_command(self.app.completions))
+            .subcommand(completions_command(self.completions))
             .subcommand_required(true)
             .arg_required_else_help(true);
 
-        self.routes = self
+        let routes = self
             .registrations
             .iter()
             .map(|registration| {
@@ -591,26 +481,49 @@ where
                 )
             })
             .collect();
-        self.inventory = inventory(&self.registrations);
-        self.inventory.push(RouteInfo {
+        let mut route_infos = inventory(&self.registrations);
+        route_infos.push(RouteInfo {
             selector: Selector {
                 path: vec![COMPLETIONS.to_owned()],
             },
             operation_type_id: None,
-            about: Some(self.app.completions.about),
-            long_about: self.app.completions.long_about,
+            about: Some(self.completions.about),
+            long_about: self.completions.long_about,
             aliases: Vec::new(),
             hidden: false,
         });
-        self.inventory.sort_by(|left, right| left.selector.cmp(&right.selector));
-        self.command = Some(command);
-        Ok(self)
+        route_infos.sort_by(|left, right| left.selector.cmp(&right.selector));
+        Ok(Router {
+            command,
+            invoker: self.invoker,
+            before_dispatch: self.before_dispatch,
+            routes,
+            inventory: route_infos,
+        })
     }
+}
 
+/// A typed command router with application-wide arguments.
+///
+/// Constructed by [`RouterBuilder::build`]; always holds a validated
+/// grammar, so execution has no unbuilt state.
+pub struct Router<P: Provider, G = NoGlobals> {
+    command: Command,
+    invoker: Invoker<P>,
+    before_dispatch: Option<BeforeDispatch<G>>,
+    routes: BTreeMap<Vec<String>, Arc<dyn ErasedRoute<P, G>>>,
+    inventory: Vec<RouteInfo>,
+}
+
+impl<P, G> Router<P, G>
+where
+    P: Provider,
+    G: Args + FromArgMatches + Send + Sync + 'static,
+{
     /// Return the assembled clap grammar.
     #[must_use]
-    pub const fn command(&self) -> Option<&Command> {
-        self.command.as_ref()
+    pub const fn command(&self) -> &Command {
+        &self.command
     }
 
     /// Return the deterministic route inventory.
@@ -625,22 +538,20 @@ where
         I: IntoIterator<Item = T>,
         T: Into<std::ffi::OsString>,
     {
-        let Some(command) = &self.command else {
-            return CommandResponse::failure("command router has not been built\n", 1);
-        };
         let mut argv: Vec<std::ffi::OsString> = argv.into_iter().map(Into::into).collect();
+        let name: std::ffi::OsString = self.command.get_name().into();
         if argv.is_empty() {
-            argv.push(self.app.name.into());
+            argv.push(name);
         } else {
-            argv[0] = self.app.name.into();
+            argv[0] = name;
         }
-        let matches = match command.clone().try_get_matches_from(argv) {
+        let matches = match self.command.clone().try_get_matches_from(argv) {
             Ok(matches) => matches,
             Err(error) => return clap_error(&error),
         };
         let (path, leaf_matches) = selected(&matches);
         if path == [COMPLETIONS] {
-            return completion(command, leaf_matches);
+            return completion(&self.command, leaf_matches);
         }
         let globals = match G::from_arg_matches(&matches) {
             Ok(globals) => globals,
@@ -650,7 +561,12 @@ where
             return response;
         }
         match self.routes.get(&path) {
-            Some(route) => route.dispatch(leaf_matches, &globals, &self.invoker).await,
+            Some(route) => {
+                // Uniform with HTTP and messaging: the transport mints the
+                // invocation's request id, which doubles as correlation id.
+                let metadata = Metadata::minted(format!("{:032x}", rand::random::<u128>()));
+                route.dispatch(leaf_matches, &globals, &self.invoker, &metadata).await
+            }
             None => CommandResponse::failure("command route was not registered\n", 1),
         }
     }
@@ -678,12 +594,12 @@ where
     {
         return Err(());
     }
-    if response.exit == 0 {
-        Ok(())
-    } else {
+    if response.exit != 0 {
+        // `exit-with-code` does not return (analogous to a trap), so the
+        // failure is signalled exactly once, through the exit status.
         wasip3::cli::exit::exit_with_code(response.exit);
-        Err(())
     }
+    Ok(())
 }
 
 fn global_command<G: Args>(command: Command) -> Command {
@@ -774,14 +690,12 @@ fn apply_namespace<P: Provider, G>(
 }
 
 fn validate_aliases<P: Provider, G>(node: &Node<P, G>, path: &[String]) -> Result<(), BuildError> {
-    let mut names = BTreeSet::new();
-    for (name, child) in &node.children {
-        if !names.insert(*name) {
-            return Err(BuildError::AliasConflict(path.to_vec(), (*name).to_owned()));
-        }
+    // Child names are unique by map key; only aliases can collide.
+    let mut names: BTreeSet<&str> = node.children.keys().copied().collect();
+    for child in node.children.values() {
         if let Some(route) = &child.leaf {
             for alias in route.aliases() {
-                if !names.insert(*alias) || node.children.contains_key(alias) {
+                if !names.insert(alias) {
                     return Err(BuildError::AliasConflict(path.to_vec(), (*alias).to_owned()));
                 }
             }

@@ -4,10 +4,11 @@ use std::any::TypeId;
 use std::error::Error;
 use std::{fmt, io};
 
-use clap::Args;
+use clap::{Args, Command};
 use omnia_guest::api::Provider;
 use omnia_guest::api::command::{
-    self, App, BuildError, CommandResponse, Completions, Namespace, Outcome, Projector, Router,
+    self, BuildError, CommandResponse, Completions, Namespace, Outcome, Projector, Router,
+    RouterBuilder,
 };
 use omnia_guest::api::invoke::{CallContext, Invoker};
 use omnia_guest::api::operation::Operation;
@@ -115,15 +116,15 @@ where
 }
 
 fn router() -> Router<(), Globals> {
-    Router::new(
-        App::new("demo").version("1.2.3").about("Demo commands").completions(
-            Completions::new()
-                .about("Print completion code")
-                .long_about("Print completion code from the final grammar."),
-        ),
+    RouterBuilder::new(
+        Command::new("demo").version("1.2.3").about("Demo commands"),
         Invoker::new("tenant", ()),
     )
-    .globals::<Globals>()
+    .completions(
+        Completions::new()
+            .about("Print completion code")
+            .long_about("Print completion code from the final grammar."),
+    )
     .namespace(
         ["source"],
         Namespace::new().about("Source commands").long_about("Commands for configured sources."),
@@ -328,8 +329,8 @@ fn conflicts() {
     assert_eq!(duplicate, BuildError::DuplicateNamespace(vec!["source".to_owned()]));
 }
 
-fn base() -> Router<(), Globals> {
-    Router::new(App::new("demo"), Invoker::new("tenant", ())).globals::<Globals>()
+fn base() -> RouterBuilder<(), Globals> {
+    RouterBuilder::new(Command::new("demo"), Invoker::new("tenant", ()))
 }
 
 fn route() -> command::Binding<GreetArgs, Greet, command::TryIntoDecoder, Text> {

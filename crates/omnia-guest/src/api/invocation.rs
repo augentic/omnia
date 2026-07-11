@@ -16,6 +16,35 @@ pub struct Metadata {
     pub deadline: Option<SystemTime>,
 }
 
+impl Metadata {
+    /// Build metadata from a transport's named-value lookup.
+    ///
+    /// Names are the transport-neutral `request-id` / `correlation-id` /
+    /// `causation-id`; the correlation id falls back to the request id.
+    pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Self {
+        let request_id = lookup("request-id");
+        Self {
+            correlation_id: lookup("correlation-id").or_else(|| request_id.clone()),
+            request_id,
+            causation_id: lookup("causation-id"),
+            deadline: None,
+        }
+    }
+
+    /// Mint metadata for a transport-initiated invocation.
+    ///
+    /// The freshly minted request id doubles as the correlation id.
+    #[must_use]
+    pub fn minted(request_id: String) -> Self {
+        Self {
+            correlation_id: Some(request_id.clone()),
+            request_id: Some(request_id),
+            causation_id: None,
+            deadline: None,
+        }
+    }
+}
+
 /// One typed operation invocation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Invocation<I> {

@@ -14,9 +14,9 @@ use std::convert::Infallible;
 use std::error::Error;
 use std::fmt;
 
-use clap::Args;
+use clap::{Args, Command};
 use omnia_guest::api::command::{
-    self, App, CommandResponse, NoGlobals, Outcome, Projector, Router,
+    self, CommandResponse, NoGlobals, Outcome, Projector, Router, RouterBuilder,
 };
 use omnia_guest::api::invoke::{CallContext, Invoker};
 use omnia_guest::api::operation::Operation;
@@ -194,8 +194,10 @@ impl Projector<String, CommandError, Infallible, NoGlobals> for Text {
 }
 
 fn router() -> Router<Provider> {
-    Router::new(
-        App::new("cli").version(env!("CARGO_PKG_VERSION")).about("Omnia wasi:cli/command example"),
+    RouterBuilder::new(
+        Command::new("cli")
+            .version(env!("CARGO_PKG_VERSION"))
+            .about("Omnia wasi:cli/command example"),
         Invoker::new("examples", Provider { greeting: "Hello" }),
     )
     .route(
