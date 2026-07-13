@@ -1,7 +1,5 @@
 //! Public model test-double behavior.
 
-#![cfg(feature = "model")]
-
 use futures::executor::block_on;
 use omnia_guest::model::{
     Effort, Error, Format, Function, Generation, McpGrant, Message, Model, Reply, Request, Role,

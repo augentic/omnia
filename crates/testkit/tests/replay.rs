@@ -1,13 +1,11 @@
 //! Public fixture-replay behavior.
 
-#![cfg(feature = "replay")]
-
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use futures::executor::block_on;
 use omnia_guest::model::{Error, Format, Message, Model, Request, Role, SchemaFormat, Usage};
-use omnia_testkit::model::Replay;
+use omnia_testkit::model::{Recorder, Replay, Scripted};
 use serde_json::{Value, json};
 
 #[test]
@@ -95,15 +93,21 @@ fn malformed_schema() {
 }
 
 #[test]
-fn model_default_parity() {
+fn recorder_roundtrip() {
     let fixtures = Fixtures::new();
-    fixtures.write("shared.json", &fixture(&text_key("same"), &json!("shared"), None));
+    let dir = fixtures.path().join("recorded");
 
-    let replay = Replay::from_dir(fixtures.path()).unwrap();
-    let default = omnia_wasi_model::ModelDefault::from_dir(fixtures.path()).unwrap();
+    // Record a scripted completion, then replay the same request from the
+    // rows the recorder wrote — pins the record and replay key derivations
+    // to each other.
+    let recorder = Recorder::new(Scripted::reply("world"), &dir);
+    let live_reply = complete(&recorder, text_request("hello")).unwrap();
+    assert_eq!(live_reply.answer, "world");
 
-    assert_eq!(complete(&replay, text_request("same")).unwrap().answer, "shared");
-    assert_eq!(default.replay(&wire_text_request("same")).unwrap().value, json!("shared"));
+    let replay = Replay::from_dir(&dir).unwrap();
+    assert_eq!(complete(&replay, text_request("hello")).unwrap().answer, "world");
+    let error = complete(&replay, text_request("other")).unwrap_err();
+    assert!(matches!(error, Error::Backend(detail) if detail == "no replay fixture for request"));
 }
 
 fn complete(model: &impl Model, request: Request) -> Result<omnia_guest::model::Reply, Error> {
@@ -127,25 +131,6 @@ fn schema_request(content: &str, schema: &str) -> Request {
             schema: schema.to_owned(),
         }),
         ..text_request(content)
-    }
-}
-
-fn wire_text_request(content: &str) -> omnia_wasi_model::Request {
-    omnia_wasi_model::Request {
-        model: None,
-        system: None,
-        messages: vec![omnia_wasi_model::Message {
-            role: omnia_wasi_model::Role::User,
-            content: content.to_owned(),
-        }],
-        generation: None,
-        format: omnia_wasi_model::Format::Text,
-        tools: vec![],
-        grants: omnia_wasi_model::Grants {
-            references: None,
-            workspace: None,
-            verify: vec![],
-        },
     }
 }
 

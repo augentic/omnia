@@ -478,10 +478,6 @@ criteria = "safe-to-deploy"
 version = "0.4.6"
 criteria = "safe-to-deploy"
 
-[[exemptions.num-conv]]
-version = "0.2.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.num-iter]]
 version = "0.1.46"
 criteria = "safe-to-deploy"
@@ -742,10 +738,6 @@ criteria = "safe-to-deploy"
 version = "0.3.53"
 criteria = "safe-to-deploy"
 
-[[exemptions.time-core]]
-version = "0.1.9"
-criteria = "safe-to-deploy"
-
 [[exemptions.tinystr]]
 version = "0.8.3"
 criteria = "safe-to-deploy"
@@ -815,7 +807,7 @@ version = "0.3.23"
 criteria = "safe-to-deploy"
 
 [[exemptions.trybuild]]
-version = "1.0.117"
+version = "1.0.118"
 criteria = "safe-to-run"
 
 [[exemptions.tungstenite]]

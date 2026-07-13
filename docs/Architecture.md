@@ -154,7 +154,7 @@ The macro generates a `Backends` bundle (one connected backend per `Host: Backen
 
 ### Test scaffolding (`crates/testkit`)
 
-Dev-only helpers at three feature levels: lightweight `Model` scripting and request capture (`model`), fixture replay through `ModelDefault` (`replay`), and integration ("seam") runtime scaffolding (`runtime`, enabled by default). Runtime helpers include `find_guest`, ephemeral manifests, single-guest assembly, and an in-process HTTP driver. See [the testing guide](guides/testing.md) for usage and policy.
+Dev-only helpers: `Model` scripting and request capture, fixture replay through `ModelDefault`, and integration ("seam") runtime scaffolding (`find_guest`, ephemeral manifests, single-guest assembly, in-process HTTP driver). See [the testing guide](guides/testing.md) for usage and policy.
 
 ## The Guest Registry
 

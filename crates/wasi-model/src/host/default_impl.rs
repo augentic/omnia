@@ -121,8 +121,7 @@ impl TryFrom<&Path> for FixtureStore {
 
 impl FixtureStore {
     fn answer(&self, request: &Request) -> Result<Answer> {
-        let key_json = &reduced_value(request);
-        let key = serde_json::to_string(key_json)?;
+        let key = serde_json::to_string(&key_request(request))?;
 
         self.answers.get(&key).cloned().ok_or_else(|| anyhow!("no replay fixture for request"))
     }
@@ -147,18 +146,44 @@ impl FixtureStore {
     }
 }
 
-// A `request -> answer` row, the unit of replay.
+/// A `request -> answer` row, the unit of replay.
+///
+/// Serialized one-per-file as `<name>.json` inside a fixture directory;
+/// [`ModelDefault::from_dir`] loads every `.json` in the directory. Public
+/// so recording harnesses write rows through the same [`key_request`]
+/// derivation the store replays against.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct Fixture {
-    key_request: Value,
-    answer: Value,
+pub struct Fixture {
+    /// The canonical request key ([`key_request`]) this row answers.
+    pub key_request: Value,
+    /// The recorded answer value.
+    pub answer: Value,
+    /// Token accounting to replay alongside the answer.
     #[serde(default)]
-    usage: Option<Usage>,
+    pub usage: Option<Usage>,
+    /// Tool-call transcript to replay alongside the answer.
     #[serde(default)]
-    transcript: Option<Transcript>,
+    pub transcript: Option<Transcript>,
 }
 
-fn reduced_value(request: &Request) -> Value {
+impl Fixture {
+    /// A fixture row answering `request` with `answer`.
+    #[must_use]
+    pub fn new(request: &Request, answer: Value) -> Self {
+        Self {
+            key_request: key_request(request),
+            answer,
+            usage: None,
+            transcript: None,
+        }
+    }
+}
+
+/// The canonical JSON a request reduces to for fixture keying — the
+/// prompt-affecting fields only (the lent workspace descriptor and any
+/// backend-side concerns are excluded).
+#[must_use]
+pub fn key_request(request: &Request) -> Value {
     json!({
         "model": request.model,
         "system": request.system,

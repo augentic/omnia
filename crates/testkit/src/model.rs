@@ -3,7 +3,6 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-#[cfg(feature = "replay")]
 use omnia_guest::model::{Effort, Format, Message, Role, Usage};
 use omnia_guest::model::{Error, McpGrant, Model, Reply, Request, Tool};
 
@@ -142,13 +141,11 @@ pub fn mcp_grants(request: &Request) -> Vec<&McpGrant> {
 }
 
 /// Fixture-backed model using `omnia-wasi-model` replay semantics.
-#[cfg(feature = "replay")]
 #[derive(Clone, Debug)]
 pub struct Replay {
     backend: omnia_wasi_model::ModelDefault,
 }
 
-#[cfg(feature = "replay")]
 impl Replay {
     /// Load replay fixtures from `path`.
     ///
@@ -162,7 +159,6 @@ impl Replay {
     }
 }
 
-#[cfg(feature = "replay")]
 impl Model for Replay {
     fn create(&self, request: Request) -> impl Future<Output = Result<Reply, Error>> + Send {
         let result = replay(&self.backend, request);
@@ -170,7 +166,69 @@ impl Model for Replay {
     }
 }
 
-#[cfg(feature = "replay")]
+/// A model decorator that records every completion as a replay fixture
+/// row before returning it, so a scripted or live run regenerates the
+/// fixture directory a [`Replay`] later serves.
+///
+/// Rows are written as `NNN.json` in call order; the caller owns the
+/// directory's lifecycle (clearing stale rows before a regeneration run).
+/// Clones share the sequence counter, so a cloned recorder keeps
+/// appending rather than overwriting earlier rows.
+#[derive(Clone, Debug)]
+pub struct Recorder<B> {
+    backend: B,
+    dir: std::path::PathBuf,
+    sequence: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl<B> Recorder<B> {
+    /// Wrap `backend`, recording each completion into `dir`.
+    pub fn new(backend: B, dir: impl Into<std::path::PathBuf>) -> Self {
+        Self {
+            backend,
+            dir: dir.into(),
+            sequence: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        }
+    }
+}
+
+impl<B> Model for Recorder<B>
+where
+    B: Model,
+{
+    async fn create(&self, request: Request) -> Result<Reply, Error> {
+        let reply = self.backend.create(request.clone()).await?;
+        let index = self.sequence.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        record(&self.dir, index, request, &reply)
+            .map_err(|error| Error::Backend(format!("recording replay fixture: {error}")))?;
+        Ok(reply)
+    }
+}
+
+/// Write one `request -> reply` fixture row as `<dir>/NNN.json`.
+fn record(
+    dir: &std::path::Path, index: usize, request: Request, reply: &Reply,
+) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+
+    let wire = wire_request(request);
+    let value = wire
+        .format
+        .parse(&reply.answer)
+        .map_err(|reason| anyhow::anyhow!("answer does not match the request format: {reason}"))?;
+    let mut fixture = omnia_wasi_model::Fixture::new(&wire, value);
+    fixture.usage = reply.usage.map(|usage| omnia_wasi_model::Usage {
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        reasoning_tokens: usage.reasoning_tokens,
+    });
+    std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    let path = dir.join(format!("{index:03}.json"));
+    std::fs::write(&path, serde_json::to_vec_pretty(&fixture)?)
+        .with_context(|| format!("writing {}", path.display()))?;
+    Ok(())
+}
+
 fn replay(backend: &omnia_wasi_model::ModelDefault, request: Request) -> Result<Reply, Error> {
     let wire = wire_request(request);
     omnia_wasi_model::validate_request(&wire).map_err(wire_error)?;
@@ -186,7 +244,6 @@ fn replay(backend: &omnia_wasi_model::ModelDefault, request: Request) -> Result<
     })
 }
 
-#[cfg(feature = "replay")]
 fn wire_request(request: Request) -> omnia_wasi_model::Request {
     omnia_wasi_model::Request {
         model: request.model,
@@ -234,7 +291,6 @@ fn wire_request(request: Request) -> omnia_wasi_model::Request {
     }
 }
 
-#[cfg(feature = "replay")]
 fn wire_message(message: Message) -> omnia_wasi_model::Message {
     omnia_wasi_model::Message {
         role: match message.role {
@@ -246,7 +302,6 @@ fn wire_message(message: Message) -> omnia_wasi_model::Message {
     }
 }
 
-#[cfg(feature = "replay")]
 const fn wire_effort(effort: Effort) -> omnia_wasi_model::Effort {
     match effort {
         Effort::Minimal => omnia_wasi_model::Effort::Minimal,
@@ -256,7 +311,6 @@ const fn wire_effort(effort: Effort) -> omnia_wasi_model::Effort {
     }
 }
 
-#[cfg(feature = "replay")]
 fn wire_error(error: omnia_wasi_model::Error) -> Error {
     match error {
         omnia_wasi_model::Error::InvalidRequest(detail) => Error::InvalidRequest(detail),
