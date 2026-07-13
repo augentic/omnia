@@ -57,9 +57,13 @@ name="${1}"
 module="$(printf '%s' "$name" | tr '-' '_')"
 ws="$(cargo locate-project --workspace --message-format=plain)"
 ws="${ws%/Cargo.toml}"
+shift
 
 export RUST_LOG="${RUST_LOG:-info,opentelemetry_sdk=off,omnia_wasi_http=debug,${module}=debug}"
 
+# cargo run -p examples --example "$name" -- \
+#   run "${CARGO_TARGET_DIR:-$ws/target}/wasm32-wasip2/debug/examples/${module}_wasm.wasm"
+
 cargo run -p examples --example "$name" -- \
-  run "${CARGO_TARGET_DIR:-$ws/target}/wasm32-wasip2/debug/examples/${module}_wasm.wasm"
+  run "${CARGO_TARGET_DIR:-$ws/target}/wasm32-wasip2/debug/examples/${module}_wasm.wasm" -- "$@"
 '''
