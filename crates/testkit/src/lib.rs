@@ -6,7 +6,7 @@
 //!
 //! - [`find_guest`] locates a pre-built example guest artifact and fails fast
 //!   when it is missing. Tests never invoke Cargo: build guests up front with
-//!   `cargo make build-test-guests`.
+//!   `cargo make test-guests`.
 //! - [`temp_manifest`] writes a deployment manifest to a unique temp file and
 //!   removes it on drop.
 //! - [`single_guest`] assembles a single-guest [`omnia::Runtime`] over a

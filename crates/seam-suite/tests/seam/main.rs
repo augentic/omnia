@@ -10,7 +10,7 @@
 //! in their modules.
 //!
 //! Guests are never compiled from tests: build them first with
-//! `cargo make build-test-guests` (a missing artifact fails fast with that
+//! `cargo make test-guests` (a missing artifact fails fast with that
 //! instruction).
 
 #![cfg(not(target_arch = "wasm32"))]

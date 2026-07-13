@@ -6,11 +6,11 @@ The rationale and rules are codified in the repository `AGENTS.md` (Testing poli
 
 ## The test taxonomy
 
-| Kind | What it covers | How it runs |
-| ---- | -------------- | ----------- |
-| **Pure tier** | Deterministic, service-free logic: parsers, codecs, filter/type translation, macro expansion, guest-native logic | `cargo make test` (Nextest, process-per-test, parallel) |
-| **Seam tier** | Guests driven through the real runtime against the default (in-memory) backends | `cargo make test-seam` (one process, shared fixtures) |
-| **Live tests** | A production backend's `WasiXxxCtx` against the real service (`#[ignore]`-gated, in the `backends` repo) | Local only |
+| Kind           | What it covers                                                                                                   | How it runs                                             |
+| -------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| **Pure tier**  | Deterministic, service-free logic: parsers, codecs, filter/type translation, macro expansion, guest-native logic | `cargo make test` (Nextest, process-per-test, parallel) |
+| **Seam tier**  | Guests driven through the real runtime against the default (in-memory) backends                                  | `cargo make test-seam` (one process, shared fixtures)   |
+| **Live tests** | A production backend's `WasiXxxCtx` against the real service (`#[ignore]`-gated, in the `backends` repo)         | Local only                                              |
 
 Anything that crosses a WASI interface belongs at the seam, not in a unit test with mocks. Guest-side logic that can't be instrumented as `.wasm` (coverage tooling limitation) keeps native unit tests.
 
@@ -33,10 +33,10 @@ Tests never invoke Cargo. `find_guest` is locate-only and fail-fast: it looks fo
 Build (and serialize) exactly the guests the seam suite drives with:
 
 ```bash
-cargo make build-test-guests
+cargo make test-guests
 ```
 
-`cargo make test-seam` depends on that task, so the one-command path is just `test-seam`. The full example set (including guests without seam coverage) still builds with `cargo make build-examples` for main/scheduled validation.
+`cargo make test-seam` depends on that task, so the one-command path is just `test-seam`. The full example set (including guests without seam coverage) still builds with `cargo make examples` for main/scheduled validation.
 
 ## The testkit
 
@@ -52,7 +52,7 @@ The runtime helpers are:
 - **`single_guest(file, bundle)`** — assembles a single-guest deployment over a backend bundle: `single_guest("x_wasm.wasm", bundle).await?.host::<WasiHttp>()?...into_runtime()?`.
 - **`temp_manifest(toml)`** — writes a deployment manifest to a unique temp file, removed on drop, for tests that need multi-guest deployments, routes, or mounts.
 - **`http`** — drives a guest's `wasi:http/handler` export in-process, with no TCP socket, e.g. `http::post(&runtime, "/", body)`.
-- **`serialize-guests`** (binary) — precompiles built `.wasm` guests into `.bin` components via Omnia's compile path; invoked by `build-test-guests`.
+- **`guests`** (binary) — precompiles built `.wasm` guests into `.bin` components via Omnia's compile path; invoked by `test-guests`.
 
 ### Testing model-consuming core logic
 

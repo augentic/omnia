@@ -1,7 +1,7 @@
 //! Locating pre-built guest components in integration tests.
 //!
 //! [`find_guest`] is locate-only: tests never invoke Cargo. Guests are built
-//! (and serialized) up front by `cargo make build-test-guests`; a missing
+//! (and serialized) up front by `cargo make test-guests`; a missing
 //! artifact fails fast with that instruction, locally and in CI alike.
 
 use std::env;
@@ -37,7 +37,7 @@ pub fn find_guest(file: &str) -> PathBuf {
         }
     }
 
-    panic!("guest `{file}` not built; run:\n  cargo make build-test-guests");
+    panic!("guest `{file}` not built; run:\n  cargo make test-guests");
 }
 
 fn mtime(path: &std::path::Path) -> Option<std::time::SystemTime> {

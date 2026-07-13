@@ -15,11 +15,11 @@ version.workspace = true
 [lints]
 workspace = true
 
-# `cargo make build-test-guests` runs this to serialize built guests so tests
+# `cargo make test-guests` runs this to serialize built guests so tests
 # deserialize pre-compiled components instead of JIT-compiling per process.
 [[bin]]
-name = "serialize-guests"
-path = "src/bin/serialize_guests.rs"
+name = "guests"
+path = "src/bin/guests.rs"
 required-features = ["runtime"]
 
 [features]
