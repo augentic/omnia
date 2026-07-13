@@ -21,11 +21,16 @@ flowchart LR
 
 The runtime core stays generic (Law 2): no model id, provider, or schema dialect lives in Omnia. The boundary only ever hands the guest a **validated answer string**. The replay backend short-circuits tool calls, so this binary never emits a `resolve`; the host→guest `resolve` path (a fresh `shelf` instance per call) is exercised deterministically by the integration test, and live by the `omnia-genai` backend in the `backends` repo.
 
-## Build the guests
-
-A whole-workspace `wasm32-wasip2` build fails on the native-only host crates, so build the guest components explicitly:
+## Quick Start
 
 ```bash
+make build model
+```
+
+Or, more manually, for debugging:
+
+```bash
+# build the guest
 cargo build -p examples --example model-wasm --target wasm32-wasip2
 ```
 

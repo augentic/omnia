@@ -5,6 +5,13 @@ Demonstrates `wasi-websocket` for real-time bidirectional communication.
 ## Quick Start
 
 ```bash
+make build websocket
+make run websocket
+```
+
+Or, more manually, for debugging:
+
+```bash
 # build the guest
 cargo build --example websocket-wasm --target wasm32-wasip2
 

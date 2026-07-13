@@ -11,9 +11,23 @@ Each example is comprised of a **Guest** and a **Runtime**:
 
 ## Quick Start
 
-Navigate to any example directory and follow the instructions in its `README.md`.
+From the repo root, build and run any single-guest example with:
 
-Host startup logs (`initializing runtime`, trigger servers listening, and so on) use `tracing` at the `info` level. Set `RUST_LOG=info,opentelemetry_sdk=off` (or the value shown in each example's README) before running the host; without it the process stays quiet apart from Cargo's `Running …` line.
+```bash
+make build <name>
+make run <name>
+```
+
+For example:
+
+```bash
+make build http
+make run http
+```
+
+Navigate to any example directory and follow the instructions in its `README.md` for test commands and example-specific setup.
+
+Host startup logs (`initializing runtime`, trigger servers listening, and so on) use `tracing` at the `info` level. `make run` sets a sensible default `RUST_LOG`; override it when you need more detail. Without logging configured, the process stays quiet apart from Cargo's `Running …` line.
 
 Common examples include:
 - **`http`**: Basic HTTP server.

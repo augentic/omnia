@@ -7,6 +7,13 @@ Demonstrates OpenTelemetry instrumentation for WebAssembly guests using `wasi-ot
 The quick start uses the default implementation of the wasi-otel host backend. This is a no-op implementation for development use only as it logs telemetry data but doesn't export it anywhere.
 
 ```bash
+make build otel
+make run otel
+```
+
+Or, more manually, for debugging:
+
+```bash
 # build the guest
 cargo build --example otel-wasm --target wasm32-wasip2
 

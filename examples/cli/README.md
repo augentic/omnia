@@ -13,9 +13,16 @@ A `wasi:cli/command` guest driven as a **one-shot trigger**: the host invokes it
 - The router generates `--help`, `--version`, usage errors, and a `completions <SHELL>` route from the same grammar. Each route decodes arguments into an operation input and projects typed output or failure into `CommandResponse`.
 - [`runtime.rs`](runtime.rs) is the whole host: a single `omnia::runtime!({ mode: command })`. Command mode finds the sole command-capable guest, instantiates it through the registry pipeline, drives `wasi:cli/run` once, and hands back the exit status the generated `main` exits with.
 
-## Build the guest
+## Quick Start
 
 ```bash
+make build cli
+```
+
+Or, more manually, for debugging:
+
+```bash
+# build the guest
 cargo build --example cli-wasm --target wasm32-wasip2
 ```
 

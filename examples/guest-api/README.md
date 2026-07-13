@@ -6,10 +6,18 @@ HTTP route registration, and a small regular-Rust WASI HTTP export adapter.
 ## Quick Start
 
 ```bash
+make build guest-api
+make run guest-api
+```
+
+Or, more manually, for debugging:
+
+```bash
 # build the guest
 cargo build --example guest-api-wasm --target wasm32-wasip2
 
 # run the host
+export RUST_LOG="info,opentelemetry_sdk=off,omnia_wasi_http=debug,guest_api=debug"
 cargo run --example guest-api -- run ./target/wasm32-wasip2/debug/examples/guest_api_wasm.wasm
 ```
 

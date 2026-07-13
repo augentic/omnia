@@ -11,6 +11,13 @@ This example shows how to:
 ## Quick Start
 
 ```bash
+make build http-proxy
+make run http-proxy
+```
+
+Or, more manually, for debugging:
+
+```bash
 # build the guest
 cargo build --example http-proxy-wasm --target wasm32-wasip2
 

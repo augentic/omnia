@@ -4,16 +4,16 @@ Two HTTP guests (`a` and `b`) behind path prefixes, wired through a deployment m
 
 Because two guests export `wasi:http/incoming-handler`, the routes are **required** — without them startup fails with an ambiguity error. With a single guest (as in the other examples) routing falls back to a catch-all and no manifest is needed.
 
-## Build the guests
+## Quick Start
 
-```sh
+This example deploys two guests from a manifest, so build and run stay manual:
+
+```bash
+# build the guests
 cargo build --example http-routing-a-wasm --target wasm32-wasip2
 cargo build --example http-routing-b-wasm --target wasm32-wasip2
-```
 
-## Run the host
-
-```sh
+# run the host
 export RUST_LOG="info,opentelemetry_sdk=off,omnia_wasi_http=debug"
 cargo run --example http-routing -- run --config examples/http-routing/omnia.toml
 ```

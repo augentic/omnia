@@ -4,12 +4,21 @@ A wasm guest that serves markdown to agent backends as a stateless [Model Contex
 
 An end-to-end example using `WasiModel` and `cursor-agent` is available in the `cursor` [example](https://github.com/augentic/backends/tree/main/examples/cursor).
 
-## Build and run
+## Quick Start
 
 ```bash
+make build mcp
+make run mcp
+```
+
+Or, more manually, for debugging:
+
+```bash
+# build the guest
 cargo build --example mcp-wasm --target wasm32-wasip2
 
-export RUST_LOG=info,opentelemetry_sdk=off
+# run the host
+export RUST_LOG="info,opentelemetry_sdk=off,omnia_wasi_http=debug,mcp=debug"
 cargo run --example mcp -- run ./target/wasm32-wasip2/debug/examples/mcp_wasm.wasm
 ```
 

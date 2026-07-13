@@ -5,6 +5,13 @@ Demonstrates `wasi-blobstore` using the default (in-memory) implementation.
 ## Quick Start
 
 ```bash
+make build blobstore
+make run blobstore
+```
+
+Or, more manually, for debugging:
+
+```bash
 # build the guest
 cargo build --example blobstore-wasm --target wasm32-wasip2
 
