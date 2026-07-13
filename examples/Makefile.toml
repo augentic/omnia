@@ -1,0 +1,45 @@
+# Install: `cargo install cargo-make`
+# Help: https://sagiegurari.github.io/cargo-make/
+
+[config]
+skip_core_tasks = true
+skip_crate_env_info = true
+skip_git_env_info = true
+skip_rust_env_info = true
+
+# Build (and serialize) only the guests the seam suite drives.
+[tasks.test-guests]
+script = '''
+set -e
+cargo build -p examples --target wasm32-wasip2 \
+  --example conformance-wasm \
+  --example cli-wasm \
+  --example model-wasm \
+  --example mcp-wasm \
+  --example guest-api-wasm \
+  --example http-routing-a-wasm \
+  --example http-routing-b-wasm \
+  --example guest-link-responder-wasm \
+  --example guest-link-router-wasm
+ws="$(cargo locate-project --workspace --message-format=plain)"
+ws="${ws%/Cargo.toml}"
+out="${CARGO_TARGET_DIR:-$ws/target}/wasm32-wasip2/debug/examples"
+cargo run -p omnia-testkit --bin guests -- \
+  "$out/conformance_wasm.wasm" \
+  "$out/cli_wasm.wasm" \
+  "$out/model_wasm.wasm" \
+  "$out/mcp_wasm.wasm" \
+  "$out/guest_api_wasm.wasm" \
+  "$out/http_routing_a_wasm.wasm" \
+  "$out/http_routing_b_wasm.wasm" \
+  "$out/guest_link_responder_wasm.wasm" \
+  "$out/guest_link_router_wasm.wasm"
+'''
+
+# Full WASM example build (every guest, including those without seam
+# coverage) for main/scheduled validation.
+[tasks.examples]
+command = "cargo"
+args = ["build", "-p", "examples", "--examples", "--target", "wasm32-wasip2"]
+
+[tasks.blobstore]
