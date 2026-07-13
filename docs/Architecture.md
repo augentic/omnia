@@ -118,7 +118,7 @@ Each interface crate provides guest bindings, a host implementation, and a defau
 | `wasi-identity` | Custom | Identity/OAuth tokens | `IdentityDefault` — OAuth2 client flow |
 | `wasi-otel` | Custom | Guest OpenTelemetry export | `OtelDefault` — log-only |
 | `wasi-websocket` | Custom | WebSocket connections (trigger) | `WebSocketDefault` — tungstenite server |
-| `wasi-model` | `omnia:model` | Model completions with grants | `ModelDefault` — fixture replay |
+| `wasi-model` | `omnia:model` | Model completions with grants | `ModelDefault` — deterministic echo |
 
 Conditional compilation lets one crate serve both sides — guests get bindings on `wasm32`, hosts get the implementation on native:
 
@@ -154,7 +154,7 @@ The macro generates a `Backends` bundle (one connected backend per `Host: Backen
 
 ### Test scaffolding (`crates/testkit`)
 
-Dev-only helpers: `Model` scripting and request capture, fixture replay through `ModelDefault`, and integration ("seam") runtime scaffolding (`find_guest`, ephemeral manifests, single-guest assembly, in-process HTTP driver). See [the testing guide](guides/testing.md) for usage and policy.
+Dev-only helpers: `Model` scripting and request capture, fixture replay and recording on both faces of the model boundary (guest-side `Replay`/`Recorder`, host-side `ReplayBackend`/`RecorderBackend`), and integration ("seam") runtime scaffolding (`find_guest`, ephemeral manifests, single-guest assembly, in-process HTTP driver). See [the testing guide](guides/testing.md) for usage and policy.
 
 ## The Guest Registry
 

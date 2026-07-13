@@ -6,7 +6,6 @@ mod answer;
 mod default_impl;
 mod gate;
 mod model_impl;
-mod replay;
 mod types;
 mod workspace;
 
@@ -38,7 +37,7 @@ pub use omnia::FutureResult;
 use omnia::{HasDispatcher, HasMounts, Host, Server};
 use wasmtime::component::{HasData, Linker};
 
-pub use self::default_impl::{ConnectOptions, Fixture, ModelDefault, key_request};
+pub use self::default_impl::{ConnectOptions, ModelDefault};
 pub use self::gate::validate as validate_request;
 use self::generated::omnia::model::completion;
 pub use self::generated::omnia::model::completion::{

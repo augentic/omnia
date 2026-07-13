@@ -80,7 +80,7 @@ From the grants, the host — never the guest or backend — merges these tools 
 
 ## Replay fixture format
 
-`ModelDefault` (the in-tree backend) replays recorded answers from a directory of JSON files — one fixture per file, any file name, `.json` extension required. `MODEL_REPLAY_DIR` selects the directory (default: `./fixtures`); a missing directory yields an empty store, and every `create` then fails with `no replay fixture for request`.
+`omnia_testkit::model::ReplayBackend` (the test replay backend) replays recorded answers from a directory of JSON files — one fixture per file, any file name, `.json` extension required — or from in-memory fixture rows (`ReplayBackend::new`). A missing directory, malformed row, or duplicate canonical key fails at construction; a request with no matching fixture fails with `no replay fixture for request`.
 
 ### File shape
 
@@ -145,6 +145,7 @@ Notes for fixture authors:
 
 | Backend | Location | Notes |
 | ------- | -------- | ----- |
-| `ModelDefault` | in-tree (`wasi-model`) | Deterministic replay; `MODEL_REPLAY_DIR` |
+| `ModelDefault` | in-tree (`wasi-model`) | Deterministic echo: text/json answer with the prompt; `format::schema` errors |
+| `ReplayBackend` | in-tree (`omnia-testkit`) | Deterministic fixture replay for tests and examples |
 | `omnia-genai` | backends repo | Provider APIs in-process; function tools + injected `resolve`; no MCP |
 | `omnia-cursor` | backends repo | Spawned `cursor-agent`; requires workspace grant; MCP via `.cursor/mcp.json`; 120s default timeout |

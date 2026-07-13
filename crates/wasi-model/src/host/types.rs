@@ -1,6 +1,31 @@
 //! Host-only types used by backends.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
+
+use crate::host::generated::omnia::model::completion::{Effort, Role};
+
+impl fmt::Display for Role {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::System => "system",
+            Self::User => "user",
+            Self::Assistant => "assistant",
+        })
+    }
+}
+
+impl fmt::Display for Effort {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Minimal => "minimal",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        })
+    }
+}
 
 /// A backend's result: the parsed answer value, optional usage, and transcript.
 ///

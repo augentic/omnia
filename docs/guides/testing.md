@@ -70,7 +70,7 @@ assert_eq!(model.requests().len(), 1);
 
 Call `Scripted::assert_exhausted` at the end of a test when every scripted turn must be consumed. An unexpected extra call returns a deterministic `Error::Backend`; it does not panic. `model::mcp_grants` filters a recorded request's tools to its MCP grants.
 
-For checked-in replay fixtures, construct `model::Replay::from_dir`. Replay adapts the guest request to the WASI wire shape and delegates fixture loading, canonical matching, and row ownership to `ModelDefault`; it then applies the same answer validation and guest-visible projection as the host boundary. Wrap a live or scripted backend in `model::Recorder` to regenerate fixture rows, or wrap either in `Harness` when request recording is also needed.
+For checked-in replay fixtures, construct `model::Replay::from_dir` (or `model::Replay::new` over in-memory fixture rows). Replay adapts the guest request to the WASI wire shape, matches on the canonical key, then applies the same answer validation and guest-visible projection as the host boundary. Wrap a live or scripted backend in `model::Recorder` to regenerate fixture rows, or wrap either in `Harness` when request recording is also needed. On the host side of the boundary, `model::ReplayBackend` is a `WasiModelCtx` for seam tests and example runtimes, and `model::RecorderBackend` records fixture rows keyed on the request the backend actually received across WIT.
 
 ## Anatomy of a seam test
 

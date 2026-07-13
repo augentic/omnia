@@ -4,13 +4,17 @@
 //! the guest's `wasi:cli/run` export across the real WIT boundary. It proves
 //! the Layer 1 invariant end-to-end:
 //!
-//! 1. **replay** — `ModelDefault` loaded from `examples/model/fixtures` serves
-//!    the recorded, validated answer for the guest with no backend at all;
+//! 1. **replay** — the testkit `ReplayBackend` loaded from
+//!    `examples/model/fixtures` serves the recorded, validated answer for the
+//!    guest with no live model at all;
 //! 2. **fixture shape** — the checked-in fixture keys on the reduced prompt
-//!    without leaking mount paths or non-serializable workspace handles.
+//!    without leaking mount paths or non-serializable workspace handles;
+//! 3. **echo default** — `ModelDefault` connects with zero configuration and
+//!    echoes text/json prompts, but rejects `format::schema` (the example
+//!    guest's format) since no echo can conform to a guest schema.
 //!
 //! The registry (component + linker + `InstancePre`) is built once and shared
-//! by both tests; each test assembles its own runtime over it.
+//! by all tests; each test assembles its own runtime over it.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -23,10 +27,10 @@ use omnia::{
     Backend, Deployment, DeploymentBuilder, GuestId, MountRegistry, Registry, ResolvedPreopen,
     Runtime, StoreBase, StoreCtx, WrpcState,
 };
+use omnia_testkit::model::ReplayBackend;
 use omnia_testkit::{find_guest, temp_manifest};
 use omnia_wasi_model::{
-    Answer, ConnectOptions, FutureResult, HasModel, ModelDefault, Request, ToolHost, WasiModel,
-    WasiModelCtx,
+    Answer, FutureResult, HasModel, ModelDefault, Request, ToolHost, WasiModel, WasiModelCtx,
 };
 use serde_json::{Value, json};
 use tokio::sync::OnceCell;
@@ -245,15 +249,11 @@ fn committed_fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/model/fixtures")
 }
 
-/// Replay the guest with a `ModelDefault` backend loaded from `dir`.
+/// Replay the guest with a testkit `ReplayBackend` loaded from `dir`.
 async fn replay_from(
     registry: &Arc<Registry<TestCtx>>, dir: &Path, mounts: &Arc<MountRegistry>,
 ) -> Result<String> {
-    let backend = ModelDefault::connect_with(ConnectOptions {
-        replay_dir: dir.to_path_buf(),
-    })
-    .await
-    .context("connecting replay backend")?;
+    let backend = ReplayBackend::from_dir(dir).context("loading replay fixtures")?;
     let runtime = model_runtime(
         Arc::clone(registry),
         Arc::new(move || Box::new(backend.clone())),
@@ -261,6 +261,33 @@ async fn replay_from(
         Arc::clone(mounts),
     );
     call_run(&runtime).await
+}
+
+// The echo default under a schema-format guest: `ModelDefault` connects with
+// zero configuration, but the example guest asks for `format::schema`, which
+// an echo cannot satisfy — the completion fails with a backend error naming
+// the gap.
+#[test]
+fn default_backend_rejects_schema_format() -> Result<()> {
+    fixture::RT.block_on(async {
+        let registry = registry().await?;
+        let (_mount_dir, mounts) = workspace_mount();
+        let backend = ModelDefault::connect().await.context("connecting the default backend")?;
+        let runtime = model_runtime(
+            Arc::clone(registry),
+            Arc::new(move || Box::new(backend)),
+            Arc::new(AtomicUsize::new(0)),
+            mounts,
+        );
+
+        let output = call_run(&runtime).await.context("driving the default backend")?;
+        assert!(
+            output.contains("cannot satisfy format::schema"),
+            "the echo default must reject schema formats, got: {output}"
+        );
+
+        Ok(())
+    })
 }
 
 /// A backend that asserts the host resolved the guest's lent workspace to

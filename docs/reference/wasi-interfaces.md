@@ -17,14 +17,14 @@ Every capability Omnia exposes to guests, its interface crate, the zero-config d
 | Identity/OAuth | `wasi-identity` | `WasiIdentity` | `IdentityDefault` — OAuth2 client flow (`IDENTITY_CLIENT_ID`, `IDENTITY_CLIENT_SECRET`, `IDENTITY_TOKEN_URL`) | `omnia-azure-id` |
 | Observability | `wasi-otel` | `WasiOtel` | `OtelDefault` — log-only, no export | `omnia-opentelemetry` |
 | WebSockets | `wasi-websocket` | `WasiWebSocket` † | `WebSocketDefault` — tungstenite server (`WEBSOCKET_ADDR`, default `0.0.0.0:80`) | — |
-| Model completions | `wasi-model` | `WasiModel` | `ModelDefault` — deterministic fixture replay (`MODEL_REPLAY_DIR`) | `omnia-genai`, `omnia-cursor` |
+| Model completions | `wasi-model` | `WasiModel` | `ModelDefault` — deterministic echo (text/json echo the prompt; schema formats error) | `omnia-genai`, `omnia-cursor` |
 
 † Trigger host: runs a server and drives guest instances per inbound request. All other hosts only serve guest-initiated calls.
 
 Notes:
 
 - Package names on crates.io carry the `omnia-` prefix (`omnia-wasi-keyvalue`, and so on); directory names in `crates/` drop it.
-- Most defaults are genuinely zero-config and in-memory. The exceptions: `HttpDefault` and `WebSocketDefault` bind real TCP ports, `IdentityDefault` needs OAuth credentials, and `ModelDefault` needs a fixture directory.
+- Most defaults are genuinely zero-config and in-memory. The exceptions: `HttpDefault` and `WebSocketDefault` bind real TCP ports, and `IdentityDefault` needs OAuth credentials. `ModelDefault` is a zero-config echo — it answers text/json completions with the prompt itself but rejects `format::schema`, so deployments bind a real backend and tests inject `omnia_testkit::model::ReplayBackend`.
 - Each interface crate compiles to guest bindings on `wasm32` and the host implementation on native targets, so guests and hosts depend on the same crate name.
 
 ## Crate anatomy

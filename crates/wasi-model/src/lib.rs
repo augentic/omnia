@@ -3,9 +3,8 @@
 //! # WASI Model
 //!
 //! This module implements the runtime boundary for `omnia:model/completion`:
-//! a guest calls `create` to have a prompt
-//! completed and receives a validated typed answer, or a deterministic replayed
-//! one, without ever seeing which backend produced it.
+//! a guest calls `create` to have a prompt completed and receives a validated
+//! typed answer, without ever seeing which backend produced it.
 
 pub mod prompt;
 

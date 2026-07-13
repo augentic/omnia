@@ -1,11 +1,16 @@
-//! Public fixture-replay behavior.
+//! Public fixture-replay behavior, on both faces: the guest-side `Replay` /
+//! `Recorder` (`Model`) and the host-side `ReplayBackend` / `RecorderBackend`
+//! (`WasiModelCtx`).
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use futures::FutureExt as _;
 use futures::executor::block_on;
 use omnia_guest::model::{Error, Format, Message, Model, Request, Role, SchemaFormat, Usage};
-use omnia_testkit::model::{Recorder, Replay, Scripted};
+use omnia_testkit::model::{Fixture, Recorder, RecorderBackend, Replay, ReplayBackend, Scripted};
+use omnia_wasi_model::{Answer, FutureResult, ToolHost, WasiModelCtx};
 use serde_json::{Value, json};
 
 #[test]
@@ -38,6 +43,15 @@ fn success_and_usage() {
 }
 
 #[test]
+fn in_memory_fixtures() {
+    let replay = Replay::new([Fixture::new(&wire_text_request("hello"), json!("world"))]).unwrap();
+
+    assert_eq!(complete(&replay, text_request("hello")).unwrap().answer, "world");
+    let error = complete(&replay, text_request("other")).unwrap_err();
+    assert!(matches!(error, Error::Backend(detail) if detail == "no replay fixture for request"));
+}
+
+#[test]
 fn miss() {
     let fixtures = Fixtures::new();
     fixtures.write("known.json", &fixture(&text_key("known"), &json!("answer"), None));
@@ -57,12 +71,21 @@ fn malformed_fixture() {
 }
 
 #[test]
-fn missing_directory_is_empty() {
+fn missing_directory() {
     let fixtures = Fixtures::new();
-    let replay = Replay::from_dir(fixtures.path().join("absent")).unwrap();
 
-    let error = complete(&replay, text_request("unknown")).unwrap_err();
-    assert!(matches!(error, Error::Backend(detail) if detail == "no replay fixture for request"));
+    let error = Replay::from_dir(fixtures.path().join("absent")).unwrap_err();
+    assert!(format!("{error:#}").contains("reading replay dir"));
+}
+
+#[test]
+fn duplicate_key() {
+    let fixtures = Fixtures::new();
+    fixtures.write("one.json", &fixture(&text_key("hello"), &json!("one"), None));
+    fixtures.write("two.json", &fixture(&text_key("hello"), &json!("two"), None));
+
+    let error = Replay::from_dir(fixtures.path()).unwrap_err();
+    assert!(format!("{error:#}").contains("duplicate replay fixture"));
 }
 
 #[test]
@@ -110,6 +133,86 @@ fn recorder_roundtrip() {
     assert!(matches!(error, Error::Backend(detail) if detail == "no replay fixture for request"));
 }
 
+#[test]
+fn host_recorder_roundtrip() {
+    let fixtures = Fixtures::new();
+    let dir = fixtures.path().join("recorded");
+
+    // Record at the WasiModelCtx boundary — the request the recorder keys on
+    // is the wire request the backend actually received — then replay it.
+    let recorder = RecorderBackend::new(Canned, &dir);
+    let live = block_on(recorder.complete(wire_text_request("hello"), no_tools())).unwrap();
+    assert_eq!(live.value, json!("world"));
+
+    let replay = ReplayBackend::from_dir(&dir).unwrap();
+    let replayed = block_on(replay.complete(wire_text_request("hello"), no_tools())).unwrap();
+    assert_eq!(replayed.value, json!("world"));
+    assert_eq!(
+        replayed.usage,
+        Some(omnia_wasi_model::Usage {
+            input_tokens: 4,
+            output_tokens: 2,
+            reasoning_tokens: None,
+        })
+    );
+
+    let error = block_on(replay.complete(wire_text_request("other"), no_tools())).unwrap_err();
+    assert!(error.to_string().contains("no replay fixture for request"));
+}
+
+// A canned host backend for recording: one fixed answer with usage.
+#[derive(Debug)]
+struct Canned;
+
+impl WasiModelCtx for Canned {
+    fn complete(
+        &self, _request: omnia_wasi_model::Request, _tool_host: Arc<dyn ToolHost>,
+    ) -> FutureResult<Answer> {
+        async {
+            Ok(Answer {
+                value: json!("world"),
+                usage: Some(omnia_wasi_model::Usage {
+                    input_tokens: 4,
+                    output_tokens: 2,
+                    reasoning_tokens: None,
+                }),
+                transcript: None,
+            })
+        }
+        .boxed()
+    }
+}
+
+// A tool host that fails every call — replay and the canned backend never run tools.
+#[derive(Debug)]
+struct NoTools;
+
+impl ToolHost for NoTools {
+    fn resolve(&self, _reference: omnia_wasi_model::Reference) -> FutureResult<Vec<u8>> {
+        async { Err(anyhow::anyhow!("no tools in replay tests")) }.boxed()
+    }
+
+    fn read(&self, _path: String) -> FutureResult<Vec<u8>> {
+        async { Err(anyhow::anyhow!("no tools in replay tests")) }.boxed()
+    }
+
+    fn list(&self, _path: String) -> FutureResult<Vec<omnia_wasi_model::DirEntry>> {
+        async { Err(anyhow::anyhow!("no tools in replay tests")) }.boxed()
+    }
+
+    fn write(&self, _path: String, _bytes: Vec<u8>) -> FutureResult<()> {
+        async { Err(anyhow::anyhow!("no tools in replay tests")) }.boxed()
+    }
+
+    fn verify(&self, _check: String) -> FutureResult<omnia_wasi_model::VerifyReport> {
+        async { Err(anyhow::anyhow!("no tools in replay tests")) }.boxed()
+    }
+}
+
+fn no_tools() -> Arc<dyn ToolHost> {
+    Arc::new(NoTools)
+}
+
 fn complete(model: &impl Model, request: Request) -> Result<omnia_guest::model::Reply, Error> {
     block_on(model.create(request))
 }
@@ -121,6 +224,25 @@ fn text_request(content: &str) -> Request {
             content: content.to_owned(),
         }],
         ..Request::default()
+    }
+}
+
+fn wire_text_request(content: &str) -> omnia_wasi_model::Request {
+    omnia_wasi_model::Request {
+        model: None,
+        system: None,
+        messages: vec![omnia_wasi_model::Message {
+            role: omnia_wasi_model::Role::User,
+            content: content.to_owned(),
+        }],
+        generation: None,
+        format: omnia_wasi_model::Format::Text,
+        tools: vec![],
+        grants: omnia_wasi_model::Grants {
+            references: None,
+            workspace: None,
+            verify: vec![],
+        },
     }
 }
 

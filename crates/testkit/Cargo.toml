@@ -30,6 +30,7 @@ http-body-util.workspace = true
 omnia.workspace = true
 omnia-guest.workspace = true
 omnia-wasi-model.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["rt", "sync"] }
 wasmtime.workspace = true

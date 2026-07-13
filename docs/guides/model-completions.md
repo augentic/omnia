@@ -60,17 +60,16 @@ From these grants the **host** — not the guest, not the backend — merges the
 
 ## Backends
 
-### `ModelDefault` — deterministic replay (in-tree)
+### `ModelDefault` — deterministic echo (in-tree)
 
-The default backend replays recorded answers from JSON fixtures — no network, no credentials, fully deterministic. Point `MODEL_REPLAY_DIR` at a fixture directory:
+The default backend connects with zero configuration and answers every completion with its own prompt: the last message echoed as a string for `format::text`, wrapped as `{"echo": ...}` for `format::json`. That makes guest wiring and prompt assembly smoke-testable with no live model. `format::schema` requests fail with a `backend` error — no echo can conform to an arbitrary guest schema — so bind a real backend for typed answers.
+
+For tests, CI, and local development of model guests, inject `omnia_testkit::model::ReplayBackend`: it replays recorded answers from JSON fixtures — no network, no credentials, fully deterministic. The [`model` example](../../examples/model/) embeds its checked-in fixture and serves it through `ReplayBackend`:
 
 ```bash
 cargo build --example model-wasm --target wasm32-wasip2
-MODEL_REPLAY_DIR=examples/model/fixtures \
-  cargo run --example model -- run --config examples/model/omnia.toml
+cargo run --example model -- run --config examples/model/omnia.toml
 ```
-
-Use it for tests, CI, and local development of model guests.
 
 ### `omnia-genai` — provider APIs (backends repo)
 
