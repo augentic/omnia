@@ -56,8 +56,8 @@ unused_result_ok = "warn"
 [workspace.dependencies]
 anyhow = "1.0.103"
 axum = { version = "0.8.9", default-features = false, features = ["json"] }
-bon = "3.9.3"
 base64ct = { version = "1.8.3", features = ["std"] }
+bon = "3.9.3"
 bytes = "1.12.1"
 # The cap-* stack is held at 3.x to match wasmtime-wasi's cap-std types
 # (`Descriptor` wraps `cap_std::fs::Dir`); ignored by the `outdated` task.
@@ -132,6 +132,7 @@ omnia = { path = "crates/omnia", version = "0.35.0" }
 omnia-guest = { path = "crates/omnia-guest", version = "0.35.0" }
 omnia-guest-macros = { path = "crates/guest-macros", version = "0.35.0" }
 omnia-host-macros = { path = "crates/host-macros", version = "0.35.0" }
+omnia-testkit = { path = "crates/testkit" }
 omnia-wasi-blobstore = { path = "crates/wasi-blobstore", version = "0.35.0" }
 omnia-wasi-config = { path = "crates/wasi-config", version = "0.35.0" }
 omnia-wasi-docstore = { path = "crates/wasi-docstore", version = "0.35.0" }
@@ -144,9 +145,6 @@ omnia-wasi-otel = { path = "crates/wasi-otel", version = "0.35.0" }
 omnia-wasi-sql = { path = "crates/wasi-sql", version = "0.35.0" }
 omnia-wasi-vault = { path = "crates/wasi-vault", version = "0.35.0" }
 omnia-wasi-websocket = { path = "crates/wasi-websocket", version = "0.35.0" }
-
-# Test-only scaffolding (path-only dev-dependency; never published).
-omnia-testkit = { path = "crates/testkit" }
 
 [patch.crates-io]
 wrpc-transport = { git = "https://github.com/bytecodealliance/wrpc" }
