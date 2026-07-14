@@ -6,11 +6,11 @@ The rationale and rules are codified in the repository `AGENTS.md` (Testing poli
 
 ## The test taxonomy
 
-| Kind | What it covers | How it runs |
-| ---- | -------------- | ----------- |
-| **Pure tier** | Deterministic, service-free logic: parsers, codecs, filter/type translation, macro expansion, guest-native logic | `cargo make test` (Nextest, process-per-test, parallel) |
-| **Seam tier** | Guests driven through the real runtime against the default (in-memory) backends | `cargo make test-seam` (one process, shared fixtures) |
-| **Live tests** | A production backend's `WasiXxxCtx` against the real service (`#[ignore]`-gated, in the `backends` repo) | Local only |
+| Kind           | What it covers                                                                                                   | How it runs                                             |
+| -------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| **Pure tier**  | Deterministic, service-free logic: parsers, codecs, filter/type translation, macro expansion, guest-native logic | `cargo make test` (Nextest, process-per-test, parallel) |
+| **Seam tier**  | Guests driven through the real runtime against the default (in-memory) backends                                  | `cargo make test-seam` (one process, shared fixtures)   |
+| **Live tests** | A production backend's `WasiXxxCtx` against the real service (`#[ignore]`-gated, in the `backends` repo)         | Local only                                              |
 
 Anything that crosses a WASI interface belongs at the seam, not in a unit test with mocks. Guest-side logic that can't be instrumented as `.wasm` (coverage tooling limitation) keeps native unit tests.
 
@@ -22,7 +22,7 @@ All seam tests live in one unpublished package, `crates/seam-suite`, compiled in
 - one conformance runtime — component, linker, and `InstancePre` built once (`fixture::conformance()`),
 - probe handles onto every shared in-memory backend, so tests assert host-side effects.
 
-The conformance guest (`examples/conformance/guest.rs`) exposes one HTTP route per WASI interface and imports the real guest APIs. Scenarios that need their own deployment shape (CLI, model replay/workspace, HTTP routing, MCP, typed guest API, guest-to-guest linking) build their own runtime from their own guest but still share the suite process.
+The conformance guest (`examples/conformance/guest.rs`) exposes one HTTP route per WASI interface and imports the real guest APIs. Scenarios that need their own deployment shape (CLI, model completion/workspace, HTTP routing, MCP, typed guest API, guest-to-guest linking) build their own runtime from their own guest but still share the suite process.
 
 Tests sharing the conformance backends take their keys/ids from `fixture::unique(..)` so concurrent scenarios never collide.
 
@@ -33,51 +33,43 @@ Tests never invoke Cargo. `find_guest` is locate-only and fail-fast: it looks fo
 Build (and serialize) exactly the guests the seam suite drives with:
 
 ```bash
-cargo make build-test-guests
+cargo make test-guests
 ```
 
-`cargo make test-seam` depends on that task, so the one-command path is just `test-seam`. The full example set (including guests without seam coverage) still builds with `cargo make build-examples` for main/scheduled validation.
+`cargo make test-seam` depends on that task, so the one-command path is just `test-seam`. The full example set (including guests without seam coverage) still builds with `cargo make examples` for main/scheduled validation.
 
 ## The testkit
 
-`omnia-testkit` is a dev-only, unpublished crate with three feature levels:
-
-- **`model`** — native model doubles over `omnia_guest::model::Model`, without constructing a runtime.
-- **`replay`** — adds fixture-backed replay through `omnia_wasi_model::ModelDefault` and includes `model`.
-- **`runtime`** — guest artifact, manifest, runtime, and HTTP helpers. This is the default for compatibility.
-
-The runtime helpers are:
+`omnia-testkit` is a dev-only, unpublished crate. Helpers:
 
 - **`find_guest("name_wasm.wasm")`** — locates the built guest artifact (serialized `.bin` preferred), panicking with build instructions when missing. No lazy builds, no silent skips.
 - **`single_guest(file, bundle)`** — assembles a single-guest deployment over a backend bundle: `single_guest("x_wasm.wasm", bundle).await?.host::<WasiHttp>()?...into_runtime()?`.
 - **`temp_manifest(toml)`** — writes a deployment manifest to a unique temp file, removed on drop, for tests that need multi-guest deployments, routes, or mounts.
 - **`http`** — drives a guest's `wasi:http/handler` export in-process, with no TCP socket, e.g. `http::post(&runtime, "/", body)`.
-- **`serialize-guests`** (binary) — precompiles built `.wasm` guests into `.bin` components via Omnia's compile path; invoked by `build-test-guests`.
+- **`guests`** (binary) — precompiles built `.wasm` guests into `.bin` components via Omnia's compile path; invoked by `test-guests`.
+- **`model`** — model doubles serving both faces of the `wasi-model` boundary.
 
 ### Testing model-consuming core logic
 
-Depend on only the model helpers when a native test calls a generic `Model` directly:
-
 ```toml
 [dev-dependencies]
-omnia-testkit = { workspace = true, default-features = false, features = ["model"] }
+omnia-testkit.workspace = true
 ```
 
-`model::Scripted` returns FIFO successes or typed errors, while `model::Harness<B>` records a complete snapshot of each request before delegating:
+`model::Scripted` returns FIFO successes or typed errors:
 
 ```rust,noplayground
 use omnia_guest::model::{Model, Request};
-use omnia_testkit::model::{Harness, Scripted};
+use omnia_testkit::model::Scripted;
 
-let model = Harness::new(Scripted::answers(["first", "second"]));
+let model = Scripted::answers(["first", "second"]);
 let first = model.create(Request::default()).await?;
 assert_eq!(first.answer, "first");
-assert_eq!(model.requests().len(), 1);
 ```
 
-Call `Scripted::assert_exhausted` at the end of a test when every scripted turn must be consumed. An unexpected extra call returns a deterministic `Error::Backend`; it does not panic. `model::mcp_grants` filters a recorded request's tools to its MCP grants.
+Call `Scripted::assert_exhausted` at the end of a test when every scripted turn must be consumed. An unexpected extra call returns a deterministic `Error::Backend`; it does not panic.
 
-For checked-in replay fixtures, enable `replay` and construct `model::Replay::from_dir`. Replay adapts the guest request to the WASI wire shape and delegates fixture loading, canonical matching, and row ownership to `ModelDefault`; it then applies the same answer validation and guest-visible projection as the host boundary. Wrap replay in `Harness` when request recording is also needed.
+`Scripted` also implements the host-side `WasiModelCtx`, so the same double serves seam tests and example runtimes: script host answers with `Scripted::json` (one JSON value) or `Scripted::values` (ordered `Answer` rows) and install the clone as the deployment's model backend. The double never runs tools; a request with no scripted result remaining fails with `model script exhausted`.
 
 ## Anatomy of a seam test
 

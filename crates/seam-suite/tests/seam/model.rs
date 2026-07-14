@@ -1,16 +1,17 @@
-//! `wasi-model` replay acceptance gate.
+//! `wasi-model` acceptance gate.
 //!
 //! Builds the `examples/model` guest, links the `WasiModel` host, and drives
 //! the guest's `wasi:cli/run` export across the real WIT boundary. It proves
 //! the Layer 1 invariant end-to-end:
 //!
-//! 1. **replay** — `ModelDefault` loaded from `examples/model/fixtures` serves
-//!    the recorded, validated answer for the guest with no backend at all;
-//! 2. **fixture shape** — the checked-in fixture keys on the reduced prompt
-//!    without leaking mount paths or non-serializable workspace handles.
+//! 1. **scripted** — the testkit `Scripted` double serves a canned, validated
+//!    answer for the guest with no live model at all;
+//! 2. **echo default** — `ModelDefault` connects with zero configuration and
+//!    echoes text/json prompts, but rejects `format::schema` (the example
+//!    guest's format) since no echo can conform to a guest schema.
 //!
 //! The registry (component + linker + `InstancePre`) is built once and shared
-//! by both tests; each test assembles its own runtime over it.
+//! by all tests; each test assembles its own runtime over it.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -23,10 +24,10 @@ use omnia::{
     Backend, Deployment, DeploymentBuilder, GuestId, MountRegistry, Registry, ResolvedPreopen,
     Runtime, StoreBase, StoreCtx, WrpcState,
 };
+use omnia_testkit::model::Scripted;
 use omnia_testkit::{find_guest, temp_manifest};
 use omnia_wasi_model::{
-    Answer, ConnectOptions, FutureResult, HasModel, ModelDefault, Request, ToolHost, WasiModel,
-    WasiModelCtx,
+    Answer, FutureResult, HasModel, ModelDefault, Request, ToolHost, WasiModel, WasiModelCtx,
 };
 use serde_json::{Value, json};
 use tokio::sync::OnceCell;
@@ -39,8 +40,8 @@ use crate::fixture;
 /// A factory the test bundle calls per clone to mint a fresh backend.
 type BackendFactory = Arc<dyn Fn() -> Box<dyn WasiModelCtx> + Send + Sync>;
 
-/// The deployment's backend bundle for the test: the swappable model backend the
-/// test installs for replay. Its [`HasModel`] impl is what
+/// The deployment's backend bundle for the test: the swappable model backend
+/// each test installs. Its [`HasModel`] impl is what
 /// `omnia::StoreCtx<TestBundle>` reads to serve `wasi-model`.
 ///
 /// The library [`Runtime::store`] clones the bundle to build each per-guest
@@ -94,7 +95,7 @@ fn model_runtime(
 /// A single read-only workspace mount named `.` over a fresh temp directory —
 /// the shape `omnia.toml`'s `[[mount]]` resolves to. The example guest reads it
 /// via `preopens.get-directories()` and lends it through `grants.workspace`.
-/// The replay key ignores the lent descriptor; any real directory serves.
+/// The scripted double ignores the request; any real directory serves.
 fn workspace_mount() -> (PathBuf, Arc<MountRegistry>) {
     let dir = std::env::temp_dir().join(format!("omnia-model-ws-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("creating the workspace mount dir");
@@ -194,83 +195,77 @@ async fn call_run(runtime: &Runtime<TestBundle>) -> Result<String> {
     String::from_utf8(output.to_vec()).context("guest stdout is utf-8")
 }
 
-// The stub backend replays a canned answer, so the completion round-trips with
-// no network.
+// The scripted double serves a canned answer, so the completion round-trips
+// with no network.
 #[test]
-fn replay() -> Result<()> {
+fn scripted() -> Result<()> {
     fixture::RT.block_on(async {
         let registry = registry().await?;
 
-        // The answer the recorded run produces and the replay must reproduce.
-        let expected = expected_answer();
+        // The answer the guest must print after the host validates it.
+        let expected = answer();
 
         // The completion path preopens a workspace the example guest lends; the host
         // resolves the lent descriptor back to this mount by identity.
-        let (mount_dir, mounts) = workspace_mount();
+        let (_mount_dir, mounts) = workspace_mount();
 
-        let fixtures = committed_fixtures();
-        let fixture_files: Vec<PathBuf> = std::fs::read_dir(&fixtures)
-            .context("reading fixture dir")?
-            .filter_map(std::result::Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("json"))
-            .collect();
-        assert_eq!(fixture_files.len(), 1, "expected exactly one checked-in fixture");
-
-        let recorded = std::fs::read_to_string(&fixture_files[0]).context("reading fixture")?;
-        assert!(
-            !recorded.contains(mount_dir.to_string_lossy().as_ref()),
-            "the fixture key must not leak the mount's host path"
+        let backend = Scripted::json(expected.clone());
+        let runtime = model_runtime(
+            Arc::clone(registry),
+            Arc::new(move || Box::new(backend.clone())),
+            Arc::new(AtomicUsize::new(0)),
+            mounts,
         );
 
-        let replayed = replay_from(registry, &fixtures, &mounts)
-            .await
-            .context("replay from committed fixture")?;
-        let parsed: Value = serde_json::from_str(&replayed)
-            .with_context(|| format!("replayed answer should be JSON, got: {replayed}"))?;
-        assert_eq!(parsed, expected, "checked-in example fixture should replay the guest");
+        let answer = call_run(&runtime).await.context("driving the scripted backend")?;
+        let parsed: Value = serde_json::from_str(&answer)
+            .with_context(|| format!("answer should be JSON, got: {answer}"))?;
+        assert_eq!(parsed, expected, "the scripted answer round-trips to the guest");
 
         Ok(())
     })
 }
 
-/// The answer the example guest's prompt resolves to — the value every replay must
-/// reproduce.
-fn expected_answer() -> Value {
+/// The answer the scripted backend serves — the value the guest must print.
+fn answer() -> Value {
     json!({ "verdict": "pass", "reason": "the bounds check is correct" })
 }
 
-/// The checked-in example fixture directory (`examples/model/fixtures`).
-fn committed_fixtures() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/model/fixtures")
-}
+// The echo default under a schema-format guest: `ModelDefault` connects with
+// zero configuration, but the example guest asks for `format::schema`, which
+// an echo cannot satisfy — the completion fails with a backend error naming
+// the gap.
+#[test]
+fn rejects_schema() -> Result<()> {
+    fixture::RT.block_on(async {
+        let registry = registry().await?;
+        let (_mount_dir, mounts) = workspace_mount();
+        let backend = ModelDefault::connect().await.context("connecting the default backend")?;
+        let runtime = model_runtime(
+            Arc::clone(registry),
+            Arc::new(move || Box::new(backend)),
+            Arc::new(AtomicUsize::new(0)),
+            mounts,
+        );
 
-/// Replay the guest with a `ModelDefault` backend loaded from `dir`.
-async fn replay_from(
-    registry: &Arc<Registry<TestCtx>>, dir: &Path, mounts: &Arc<MountRegistry>,
-) -> Result<String> {
-    let backend = ModelDefault::connect_with(ConnectOptions {
-        replay_dir: dir.to_path_buf(),
+        let output = call_run(&runtime).await.context("driving the default backend")?;
+        assert!(
+            output.contains("cannot satisfy format::schema"),
+            "the echo default must reject schema formats, got: {output}"
+        );
+
+        Ok(())
     })
-    .await
-    .context("connecting replay backend")?;
-    let runtime = model_runtime(
-        Arc::clone(registry),
-        Arc::new(move || Box::new(backend.clone())),
-        Arc::new(AtomicUsize::new(0)),
-        Arc::clone(mounts),
-    );
-    call_run(&runtime).await
 }
 
 /// A backend that asserts the host resolved the guest's lent workspace to
 /// its mount path — the `local-path` face the cursor backend consumes.
 #[derive(Debug, Clone)]
-struct LocalPathProbe {
+struct PathProbe {
     expected: PathBuf,
 }
 
-impl WasiModelCtx for LocalPathProbe {
+impl WasiModelCtx for PathProbe {
     fn complete(&self, _request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
         let expected = self.expected.clone();
         async move {
@@ -303,7 +298,7 @@ fn workspace() -> Result<()> {
         let runtime = model_runtime(
             Arc::clone(registry),
             Arc::new(move || {
-                Box::new(LocalPathProbe {
+                Box::new(PathProbe {
                     expected: expected.clone(),
                 })
             }),

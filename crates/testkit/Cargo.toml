@@ -1,6 +1,6 @@
 [package]
 name = "omnia-testkit"
-description = "Model doubles, fixture replay, and runtime scaffolding for Omnia tests"
+description = "Model doubles and runtime scaffolding for Omnia tests"
 publish = false
 authors.workspace = true
 categories.workspace = true
@@ -15,43 +15,27 @@ version.workspace = true
 [lints]
 workspace = true
 
-# `cargo make build-test-guests` runs this to serialize built guests so tests
+# `cargo make test-guests` runs this to serialize built guests so tests
 # deserialize pre-compiled components instead of JIT-compiling per process.
 [[bin]]
-name = "serialize-guests"
-path = "src/bin/serialize_guests.rs"
-required-features = ["runtime"]
-
-[features]
-default = ["runtime"]
-model = ["dep:omnia-guest"]
-replay = ["model", "dep:anyhow", "dep:omnia-wasi-model"]
-runtime = [
-    "dep:anyhow",
-    "dep:bytes",
-    "dep:futures",
-    "dep:http",
-    "dep:http-body-util",
-    "dep:omnia",
-    "dep:tokio",
-    "dep:wasmtime",
-    "dep:wasmtime-wasi",
-    "dep:wasmtime-wasi-http",
-]
+name = "guests"
+path = "src/bin/guests.rs"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-anyhow = { workspace = true, optional = true }
-bytes = { workspace = true, optional = true }
-futures = { workspace = true, optional = true }
-http = { workspace = true, optional = true }
-http-body-util = { workspace = true, optional = true }
-omnia = { workspace = true, optional = true }
-omnia-guest = { workspace = true, optional = true }
-omnia-wasi-model = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["rt", "sync"], optional = true }
-wasmtime = { workspace = true, optional = true }
-wasmtime-wasi = { workspace = true, optional = true }
-wasmtime-wasi-http = { workspace = true, optional = true }
+anyhow.workspace = true
+bytes.workspace = true
+futures.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+omnia.workspace = true
+omnia-guest.workspace = true
+omnia-wasi-model.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["rt", "sync"] }
+wasmtime.workspace = true
+wasmtime-wasi.workspace = true
+wasmtime-wasi-http.workspace = true
 
 [dev-dependencies]
 futures.workspace = true

@@ -5,6 +5,13 @@ Demonstrates `wasi:docstore` using the default in-memory backend with three GTFS
 ## Quick Start
 
 ```bash
+make build docstore
+make run docstore
+```
+
+Or, more manually, for debugging:
+
+```bash
 # build the guest
 cargo build --example docstore-wasm --target wasm32-wasip2
 

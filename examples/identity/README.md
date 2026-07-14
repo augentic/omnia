@@ -5,6 +5,13 @@ Demonstrates `wasi-identity` using the default implementation.
 ## Quick Start
 
 ```bash
+make build identity
+make run identity
+```
+
+Or, more manually, for debugging:
+
+```bash
 # build the guest
 cargo build --example identity-wasm --target wasm32-wasip2
 

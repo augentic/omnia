@@ -5,6 +5,13 @@ Demonstrates a basic Config using `wasi-config`.
 ## Quick Start
 
 ```bash
+make build config
+make run config
+```
+
+Or, more manually, for debugging:
+
+```bash
 # build the guest
 cargo build --example config-wasm --target wasm32-wasip2
 

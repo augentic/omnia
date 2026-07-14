@@ -1,20 +1,20 @@
 # Model completion example.
 #
 # The `model` guest imports `omnia:model/completion` and calls `create`.
-# The host serves it with the in-tree `ModelDefault` (replay) backend: with
-# `MODEL_REPLAY_DIR` pointing at the checked-in fixtures, `create` returns the
-# recorded, validated answer with no live model and no network.
+# The host serves it with an example-local backend (runtime.rs scripts a fixed
+# schema answer through the testkit `Scripted` double), so `create` returns a
+# deterministic, validated answer with no live model, no network, and no
+# configuration.
 #
 # The `[[mount]]` preopens the repository root into every guest sandbox as a
 # read-only workspace named `.`. The `model` guest reads it via
-# `wasi:filesystem/preopens` and lends it through `grants.workspace`. The replay
-# backend ignores the workspace (replay short-circuits tools); the host-side
-# resolution is proven by the integration test.
+# `wasi:filesystem/preopens` and lends it through `grants.workspace`. The
+# scripted double ignores the workspace (it never runs tools); the host-side
+# resolution is proven by the seam suite.
 #
 # Build the guest first (see README.md), then run from the repository root:
 #
-#   MODEL_REPLAY_DIR=examples/model/fixtures \
-#     cargo run --example model -- run --config examples/model/omnia.toml
+#   cargo run --example model -- run --config examples/model/omnia.toml
 
 [[guest]]
 id = "model"

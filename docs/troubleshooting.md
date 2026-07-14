@@ -98,9 +98,13 @@ Host-mediated guest-to-guest calls are nested more than 8 deep — usually accid
 
 ## Model completions
 
-### `no replay fixture for request`
+### `the default echo backend cannot satisfy format::schema`
 
-`ModelDefault` found no fixture whose `key_request` matches the incoming request. The match is exact on the reduced request (model, system, messages, generation, format, tools, references/verify grants — see the [fixture format](reference/model.md#replay-fixture-format)); any prompt drift misses. Check `MODEL_REPLAY_DIR` points at the right directory (default: `./fixtures`) and that the fixture's content matches the request byte-for-byte in those fields.
+The runtime is serving `wasi-model` with the echo `ModelDefault`, which answers text/json completions with the prompt itself but cannot fabricate a value conforming to a guest-supplied JSON Schema. Bind a real backend (`omnia-genai`, `omnia-cursor`) in `runtime!`, or inject `omnia_testkit::model::Scripted` in tests.
+
+### `model script exhausted`
+
+The testkit `Scripted` double received more completions than it has scripted results. Script one result per expected `create` call (`Scripted::json`, `Scripted::answers`, ...), and remember clones share the same FIFO.
 
 ### `invalid-request` errors
 

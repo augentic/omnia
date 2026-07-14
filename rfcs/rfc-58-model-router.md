@@ -4,13 +4,13 @@
 
 ## Abstract
 
-Two backends sit behind the one `wasi-model` boundary and are selected by config: **frontier / hosted** (`omnia-genai`, with its in-process tool loop) and the **spawned agent** (`omnia-cursor`), plus the in-tree **replay** backend (`ModelDefault`). This RFC owns the per-call **router**, the **local SLM** backend, and the **replay expansion** beyond the minimal seam.
+Two backends sit behind the one `wasi-model` boundary and are selected by config: **frontier / hosted** (`omnia-genai`, with its in-process tool loop) and the **spawned agent** (`omnia-cursor`), plus the test-only **scripted** double (`omnia-testkit`'s `Scripted`). This RFC owns the per-call **router**, the **local SLM** backend, and the **replay** backend — a production record/replay backend (the testkit double serves scripted answers only; it has no fixture store).
 
 ## Proposed backends
 
 - **Router** — selects a backend per call by brief path, difficulty, deployment mode, or an abstract cost / quality hint. It **never** routes on a vendor model id supplied by a guest. Today a deployment binds a single backend in `runtime!`; the router adds per-call selection among the bound backends.
 - **Local SLM** — narrow, high-volume transformations via a local model and constrained decoding. It is a further in-process-loop variant behind the same `WasiModelCtx` trait.
-- **Replay expansion** — expands the minimal replay seam (a directory of canonical-JSON-keyed fixtures) into a production backend: content-addressed `sha256` keying, fixture management, matching policy, and cross-backend diagnostics.
+- **Replay** — a production record/replay backend: content-addressed `sha256` keying, fixture management, matching policy, and cross-backend diagnostics.
 
 
 
@@ -18,7 +18,7 @@ Two backends sit behind the one `wasi-model` boundary and are selected by config
 
 - Router decision keys and deployment-mode selection.
 - Local SLM integration, including the constrained-decoding hook that keeps typed reports schema-valid.
-- Replay fixture management beyond the minimal seam (matching policy, diagnostics, `stream-json` transcript capture).
+- Replay fixture management (matching policy, diagnostics, `stream-json` transcript capture).
 
 
 
@@ -35,7 +35,7 @@ Two backends sit behind the one `wasi-model` boundary and are selected by config
 
 - The routing key: brief path, difficulty, deployment mode, or a combination.
 - The constrained-decoding hook a non-agent SLM backend uses to keep typed reports schema-valid.
-- The matching policy for replay expansion (exact hash vs. tolerant matching) and its diagnostics across backend families.
+- The matching policy for the replay backend (exact hash vs. tolerant matching) and its diagnostics across backend families.
 
 
 
@@ -43,7 +43,7 @@ Two backends sit behind the one `wasi-model` boundary and are selected by config
 
 1. The router keys on abstract operation information, never a vendor model id exposed to guests, and selects among the bound backends per call.
 2. A local SLM backend runs a narrow transformation behind the same boundary with schema-valid output.
-3. CI replays through the expanded replay backend with content-addressed keying and useful diagnostics on a miss.
+3. CI replays through the replay backend with content-addressed keying and useful diagnostics on a miss.
 4. Every backend's run remains recordable and replayable through the `wasi-model` boundary.
 5. `make lint` and `cargo make ci` stay green.
 

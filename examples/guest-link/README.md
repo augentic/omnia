@@ -24,27 +24,25 @@ The interface also carries an async-typed dual, `echo-slow: async func`, called 
 
 The runtime core stays generic (Law 2): `link` and the selector operate on the opaque interface string `omnia:link/echo` and opaque guest ids — Omnia never parses the interface's meaning.
 
-## Build the guests
+## Quick Start
 
-A whole-workspace `wasm32-wasip2` build fails on the native-only host crates, so build the two guest components explicitly:
+This example deploys two guests from a manifest, so build and run stay manual:
 
 ```bash
+# build the guests
 cargo build -p examples \
   --example guest-link-responder-wasm \
   --example guest-link-router-wasm \
   --target wasm32-wasip2
-```
 
-This emits `target/wasm32-wasip2/debug/examples/guest_link_responder_wasm.wasm` and `guest_link_router_wasm.wasm` (the underscored names the manifest points at).
-
-## Run
-
-```bash
+# run the host
 export RUST_LOG=info,opentelemetry_sdk=off
 cargo run --example guest-link -- run --config examples/guest-link/omnia.toml
 ```
 
-The host starts, polyfills the router's import, and wires the responder's serve side. Because the router exports a plain `run` (not an HTTP/messaging trigger), the end-to-end dispatch is exercised by the integration test rather than inbound traffic:
+This emits `target/wasm32-wasip2/debug/examples/guest_link_responder_wasm.wasm` and `guest_link_router_wasm.wasm` (the underscored names the manifest points at).
+
+## Integration test
 
 ```bash
 # after building the guests above (do NOT `cargo clean` in between):

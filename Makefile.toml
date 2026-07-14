@@ -1,6 +1,8 @@
 # Install: `cargo install cargo-make`
 # Help: https://sagiegurari.github.io/cargo-make/
 
+extend = [{ path = "examples/Makefile.toml" }]
+
 [env]
 CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
 
@@ -80,60 +82,19 @@ cargo outdated --workspace --exit-code 1 --depth 1 \
 '''
 install_crate = "cargo-outdated"
 
-# Test (pure tier: library and native integration tests, process-per-test via
-# Nextest; the seam suite is excluded by the default filter in
-# .config/nextest.toml and runs via `test-seam`)
+# Test
 [tasks.test]
 command = "cargo"
 args = ["nextest", "run", "--locked", "--all", "--all-features", "--no-tests=pass"]
 env = { RUSTFLAGS = "-Dwarnings" }
 
-# Build (and serialize) only the guests the seam suite drives. Tests never
-# invoke Cargo themselves; they locate these artifacts and fail fast when a
-# guest is missing. Serialization (`omnia compile`) lets tests load
-# pre-compiled components instead of JIT-compiling in every process.
-[tasks.build-test-guests]
-script = '''
-set -e
-cargo build -p examples --target wasm32-wasip2 \
-  --example conformance-wasm \
-  --example cli-wasm \
-  --example model-wasm \
-  --example mcp-wasm \
-  --example guest-api-wasm \
-  --example http-routing-a-wasm \
-  --example http-routing-b-wasm \
-  --example guest-link-responder-wasm \
-  --example guest-link-router-wasm
-out="${CARGO_TARGET_DIR:-target}/wasm32-wasip2/debug/examples"
-cargo run -p omnia-testkit --bin serialize-guests -- \
-  "$out/conformance_wasm.wasm" \
-  "$out/cli_wasm.wasm" \
-  "$out/model_wasm.wasm" \
-  "$out/mcp_wasm.wasm" \
-  "$out/guest_api_wasm.wasm" \
-  "$out/http_routing_a_wasm.wasm" \
-  "$out/http_routing_b_wasm.wasm" \
-  "$out/guest_link_responder_wasm.wasm" \
-  "$out/guest_link_router_wasm.wasm"
-'''
-
 # Seam tier: the consolidated guest–host suite, one process so the runtime
 # fixtures (component, linker, InstancePre) are built once.
+# `test-guests` lives in examples/Makefile.toml (extended above).
 [tasks.test-seam]
-dependencies = ["build-test-guests"]
+dependencies = ["test-guests"]
 command = "cargo"
 args = ["test", "-p", "omnia-seam-suite", "--test", "seam"]
-
-# Full WASM example build (every guest, including those without seam
-# coverage) for main/scheduled validation.
-[tasks.build-examples]
-command = "cargo"
-args = ["build", "-p", "examples", "--examples", "--target", "wasm32-wasip2"]
-
-# Clean build artifacts, then run the full test suite from scratch.
-[tasks.test-clean]
-dependencies = ["clean", "test"]
 
 # Test Doc
 [tasks.test-docs]

@@ -49,7 +49,6 @@ Further tunables mirror wasmtime's pooling configuration one-to-one: `POOL_TOTAL
 | `HTTP_ADDR` | `0.0.0.0:8080` | `HttpDefault` inbound server |
 | `WEBSOCKET_ADDR` | `0.0.0.0:80` | `WebSocketDefault` server |
 | `SQL_DATABASE` | shared in-memory SQLite | `SqlDefault` |
-| `MODEL_REPLAY_DIR` | unset | `ModelDefault` fixture directory |
 | `IDENTITY_CLIENT_ID`, `IDENTITY_CLIENT_SECRET`, `IDENTITY_TOKEN_URL` | unset | `IdentityDefault` OAuth flow |
 
 Production backend variables (Redis, Kafka, Azure, ...) are listed in [Production Backends](../guides/production-backends.md#configuration) and each backend crate's README.

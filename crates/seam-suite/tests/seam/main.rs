@@ -5,12 +5,12 @@
 //! purpose-built guest (`examples/conformance`) with a route per HTTP-driven
 //! interface, over one all-interface backend bundle, so the component, linker,
 //! and `InstancePre` are created once per suite run. Scenarios that need a
-//! different shape (CLI command mode, model replay, multi-guest routing,
+//! different shape (CLI command mode, model completion, multi-guest routing,
 //! guest-to-guest linking, MCP, the typed guest API) keep specialized fixtures
 //! in their modules.
 //!
 //! Guests are never compiled from tests: build them first with
-//! `cargo make build-test-guests` (a missing artifact fails fast with that
+//! `cargo make test-guests` (a missing artifact fails fast with that
 //! instruction).
 
 #![cfg(not(target_arch = "wasm32"))]

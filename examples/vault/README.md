@@ -5,6 +5,13 @@ Demonstrates `wasi-vault` using the default (in-memory) implementation for secur
 ## Quick Start
 
 ```bash
+make build vault
+make run vault
+```
+
+Or, more manually, for debugging:
+
+```bash
 # build the guest
 cargo build --example vault-wasm --target wasm32-wasip2
 

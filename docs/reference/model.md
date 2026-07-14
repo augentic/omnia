@@ -1,6 +1,6 @@
 # Model Interface Reference
 
-Reference for the `omnia:model/completion` interface (version `0.1.0`): the request/reply types guests use, the validation the host enforces, and the replay fixture format the default backend consumes. The conceptual walk-through is in [Model Completions and MCP](../guides/model-completions.md); the authoritative WIT is [`crates/wasi-model/wit/model.wit`](../../crates/wasi-model/wit/model.wit).
+Reference for the `omnia:model/completion` interface (version `0.1.0`): the request/reply types guests use and the validation the host enforces. The conceptual walk-through is in [Model Completions and MCP](../guides/model-completions.md); the authoritative WIT is [`crates/wasi-model/wit/model.wit`](../../crates/wasi-model/wit/model.wit).
 
 ## The function
 
@@ -78,73 +78,11 @@ From the grants, the host — never the guest or backend — merges these tools 
 | `tool-failed(string)` | A tool call failed non-repairably. | Depends on the tool. |
 | `backend(string)` | Transport, process, or provider failure. | Usually transient. |
 
-## Replay fixture format
-
-`ModelDefault` (the in-tree backend) replays recorded answers from a directory of JSON files — one fixture per file, any file name, `.json` extension required. `MODEL_REPLAY_DIR` selects the directory (default: `./fixtures`); a missing directory yields an empty store, and every `create` then fails with `no replay fixture for request`.
-
-### File shape
-
-```json,noplayground
-{
-  "key_request": {
-    "model": null,
-    "system": "a terse code reviewer",
-    "messages": [
-      {
-        "role": "user",
-        "content": "decide whether the change is acceptable\n\nthe diff adds a bounds check"
-      }
-    ],
-    "generation": null,
-    "format": {
-      "kind": "schema",
-      "schema": {
-        "name": "verdict",
-        "schema": "{\"type\":\"object\"}"
-      }
-    },
-    "tools": [],
-    "grants": {
-      "references": "shelf",
-      "verify": []
-    }
-  },
-  "answer": {
-    "verdict": "pass",
-    "reason": "the bounds check is correct"
-  },
-  "transcript": null
-}
-```
-
-| Field | Required | Meaning |
-| ----- | -------- | ------- |
-| `key_request` | yes | The reduced request this fixture answers (see below). |
-| `answer` | yes | The reply's answer value. Still subject to host validation against the request's `format`. |
-| `usage` | no | Token accounting to report. |
-| `transcript` | no | Recorded tool-call transcript. |
-
-### Matching semantics
-
-The incoming request is reduced to a canonical JSON value and compared to `key_request` by serialized equality. The reduction includes:
-
-- `model`, `system`
-- `messages` as `{ "role": "system"|"user"|"assistant", "content": ... }`
-- `generation` as `{ "temperature", "top_p", "max_tokens", "stop", "seed", "effort" }` (or `null`)
-- `format` as `{ "kind": "text" }`, `{ "kind": "json" }`, or `{ "kind": "schema", "schema": { "name", "schema" } }`
-- `tools` as `{ "function": { "name", "description", "parameters" } }` or `{ "mcp": { "name", "tools", "url" } }`
-- `grants` as `{ "references", "verify" }` only
-
-Notes for fixture authors:
-
-- **The workspace grant is not part of the key** — the same fixture matches with or without a lent workspace.
-- JSON **key order doesn't matter** (both sides normalize through the same serializer), but content must match exactly: a one-character prompt difference misses.
-- The replay backend never runs tools; it short-circuits straight to the recorded answer.
-
 ## Backends implementing this interface
 
 | Backend | Location | Notes |
 | ------- | -------- | ----- |
-| `ModelDefault` | in-tree (`wasi-model`) | Deterministic replay; `MODEL_REPLAY_DIR` |
+| `ModelDefault` | in-tree (`wasi-model`) | Deterministic echo: text/json answer with the prompt; `format::schema` errors |
+| `Scripted` | in-tree (`omnia-testkit`) | FIFO of scripted answers for tests and examples; never runs tools |
 | `omnia-genai` | backends repo | Provider APIs in-process; function tools + injected `resolve`; no MCP |
 | `omnia-cursor` | backends repo | Spawned `cursor-agent`; requires workspace grant; MCP via `.cursor/mcp.json`; 120s default timeout |

@@ -5,6 +5,13 @@ Demonstrates a basic HTTP server using `wasi-http` with GET and POST endpoints.
 ## Quick Start
 
 ```bash
+make build http
+make run http
+```
+
+Or, more manually, for debugging:
+
+```bash
 # build the guest
 cargo build --example http-wasm --target wasm32-wasip2
 

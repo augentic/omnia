@@ -5,6 +5,13 @@ Demonstrates `wasi-sql` using the default (in-memory) implementation with a two-
 ## Quick Start
 
 ```bash
+make build sql
+make run sql
+```
+
+Or, more manually, for debugging:
+
+```bash
 # build the guest
 cargo build --example sql-wasm --target wasm32-wasip2
 

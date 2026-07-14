@@ -4,8 +4,9 @@
 //! calls `create` once when the host drives `wasi:cli/run`. It builds a
 //! `json-schema` prompt, assembling the `system` / `messages` channels with the
 //! guest-side `Sections` builder. It declares no HTTP/messaging
-//! trigger, so it is driven by the integration test (`crates/wasi-model/tests`)
-//! rather than a live request — the replay acceptance vehicle.
+//! trigger, so it is driven by the seam suite
+//! (`crates/seam-suite/tests/seam/model.rs`) rather than a live request — the
+//! model acceptance vehicle.
 //!
 //! It also reads `wasi:filesystem/preopens` and, when the host has mounted a
 //! workspace named `.` (the `[[mount]]` in `omnia.toml`), lends it

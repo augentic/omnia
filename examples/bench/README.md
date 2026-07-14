@@ -6,6 +6,17 @@ A self-contained load-test harness for the [`http`](../http) example. It drives 
 
 ```bash
 # build the guest, host, and harness
+make build http
+cargo build --example http-bench
+
+# run the host (listens on 127.0.0.1:8080)
+make run http
+```
+
+Or, more manually, for debugging:
+
+```bash
+# build the guest, host, and harness
 cargo build --example http-wasm --target wasm32-wasip2
 cargo build --example http
 cargo build --example http-bench
