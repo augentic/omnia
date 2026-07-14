@@ -5,11 +5,8 @@ use std::sync::Arc;
 
 use futures::FutureExt as _;
 use futures::executor::block_on;
-use omnia_guest::model::{
-    Effort, Error, Format, Function, Generation, McpGrant, Message, Model, Reply, Request, Role,
-    SchemaFormat, Tool, Usage,
-};
-use omnia_testkit::model::{Harness, Scripted, mcp_grants};
+use omnia_guest::model::{Error, Message, Model, Reply, Request, Role, Usage};
+use omnia_testkit::model::Scripted;
 use omnia_wasi_model::{
     Answer, DirEntry, FutureResult, Reference, ToolHost, VerifyReport, WasiModelCtx,
 };
@@ -54,47 +51,6 @@ fn exhaustion() {
         Error::Backend("model script exhausted".to_owned())
     );
     model.assert_exhausted();
-}
-
-#[test]
-fn recording() {
-    let scripted = Scripted::reply("ok");
-    let harness = Harness::new(scripted);
-    let request = sample();
-
-    assert_eq!(complete(&harness, request.clone()).unwrap().answer, "ok");
-    assert_eq!(harness.requests(), vec![request.clone()]);
-
-    let requests = harness.requests();
-    let grants = mcp_grants(&requests[0]);
-    assert_eq!(
-        grants,
-        vec![match &request.tools[1] {
-            Tool::Mcp(grant) => grant,
-            Tool::Function(_) => unreachable!(),
-        }]
-    );
-}
-
-#[test]
-fn sharing() {
-    let harness = Harness::new(Scripted::answers(["one", "two"]));
-    let other = harness.clone();
-
-    let thread = std::thread::spawn(move || complete(&other, request("thread")));
-    let main_answer = complete(&harness, request("main")).unwrap().answer;
-    let thread_answer = thread.join().unwrap().unwrap().answer;
-    let mut answers = [main_answer, thread_answer];
-    answers.sort();
-    assert_eq!(answers, ["one", "two"]);
-
-    let mut messages = harness
-        .requests()
-        .into_iter()
-        .map(|request| request.messages[0].content.clone())
-        .collect::<Vec<_>>();
-    messages.sort();
-    assert_eq!(messages, ["main", "thread"]);
 }
 
 #[test]
@@ -203,53 +159,5 @@ fn request(content: &str) -> Request {
             content: content.to_owned(),
         }],
         ..Request::default()
-    }
-}
-
-fn sample() -> Request {
-    Request {
-        model: Some("test-model".to_owned()),
-        system: Some("system".to_owned()),
-        messages: vec![
-            Message {
-                role: Role::System,
-                content: "context".to_owned(),
-            },
-            Message {
-                role: Role::User,
-                content: "question".to_owned(),
-            },
-            Message {
-                role: Role::Assistant,
-                content: "prior".to_owned(),
-            },
-        ],
-        generation: Some(Generation {
-            temperature: Some(0.2),
-            top_p: Some(0.9),
-            max_tokens: Some(64),
-            stop: vec!["done".to_owned()],
-            seed: Some(7),
-            effort: Some(Effort::High),
-        }),
-        format: Format::Schema(SchemaFormat {
-            name: "result".to_owned(),
-            schema: r#"{"type":"object"}"#.to_owned(),
-        }),
-        tools: vec![
-            Tool::Function(Function {
-                name: "lookup".to_owned(),
-                description: "Look up a value".to_owned(),
-                parameters: r#"{"type":"object"}"#.to_owned(),
-            }),
-            Tool::Mcp(McpGrant {
-                name: "docs".to_owned(),
-                tools: vec!["search".to_owned()],
-                url: "https://mcp.example.test".to_owned(),
-            }),
-        ],
-        references: Some("reference-guest".to_owned()),
-        verify: vec!["cargo-check".to_owned()],
-        lend_workspace: true,
     }
 }

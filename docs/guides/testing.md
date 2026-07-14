@@ -56,19 +56,18 @@ cargo make test-guests
 omnia-testkit.workspace = true
 ```
 
-`model::Scripted` returns FIFO successes or typed errors, while `model::Harness<B>` records a complete snapshot of each request before delegating:
+`model::Scripted` returns FIFO successes or typed errors:
 
 ```rust,noplayground
 use omnia_guest::model::{Model, Request};
-use omnia_testkit::model::{Harness, Scripted};
+use omnia_testkit::model::Scripted;
 
-let model = Harness::new(Scripted::answers(["first", "second"]));
+let model = Scripted::answers(["first", "second"]);
 let first = model.create(Request::default()).await?;
 assert_eq!(first.answer, "first");
-assert_eq!(model.requests().len(), 1);
 ```
 
-Call `Scripted::assert_exhausted` at the end of a test when every scripted turn must be consumed. An unexpected extra call returns a deterministic `Error::Backend`; it does not panic. `model::mcp_grants` filters a recorded request's tools to its MCP grants.
+Call `Scripted::assert_exhausted` at the end of a test when every scripted turn must be consumed. An unexpected extra call returns a deterministic `Error::Backend`; it does not panic.
 
 `Scripted` also implements the host-side `WasiModelCtx`, so the same double serves seam tests and example runtimes: script host answers with `Scripted::json` (one JSON value) or `Scripted::values` (ordered `Answer` rows) and install the clone as the deployment's model backend. The double never runs tools; a request with no scripted result remaining fails with `model script exhausted`.
 
