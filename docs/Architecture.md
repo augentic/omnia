@@ -154,7 +154,7 @@ The macro generates a `Backends` bundle (one connected backend per `Host: Backen
 
 ### Test scaffolding (`crates/testkit`)
 
-Dev-only helpers: `Model` scripting and request capture, fixture replay and recording on both faces of the model boundary (guest-side `Replay`/`Recorder`, host-side `ReplayBackend`/`RecorderBackend`), and integration ("seam") runtime scaffolding (`find_guest`, ephemeral manifests, single-guest assembly, in-process HTTP driver). See [the testing guide](guides/testing.md) for usage and policy.
+Dev-only helpers: model scripting and request capture on both faces of the model boundary (`Scripted` implements the guest-side `Model` and the host-side `WasiModelCtx`; `Harness` records requests), and integration ("seam") runtime scaffolding (`find_guest`, ephemeral manifests, single-guest assembly, in-process HTTP driver). See [the testing guide](guides/testing.md) for usage and policy.
 
 ## The Guest Registry
 

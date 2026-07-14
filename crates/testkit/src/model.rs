@@ -1,13 +1,14 @@
-//! Lightweight model doubles and fixture replay for testing model consumers.
-
-mod replay;
+//! Lightweight model doubles for testing model consumers on both faces of
+//! the `wasi-model` boundary.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use omnia_guest::model::{Error, McpGrant, Model, Reply, Request, Tool};
-
-pub use self::replay::{Fixture, Recorder, RecorderBackend, Replay, ReplayBackend, key_request};
+use anyhow::anyhow;
+use futures::FutureExt as _;
+use omnia_guest::model::{Error, McpGrant, Model, Reply, Request, Tool, Usage};
+use omnia_wasi_model::{Answer, FutureResult, ToolHost, WasiModelCtx};
+use serde_json::Value;
 
 /// A model decorator that records requests before delegating them.
 #[derive(Clone, Debug)]
@@ -69,19 +70,37 @@ where
     }
 }
 
-/// A FIFO model script containing successes and typed failures.
+/// A FIFO model script of successes and typed failures.
+///
+/// One queue serves both faces of the boundary: the guest-side [`Model`] for
+/// native tests of model-consuming logic, and the host-side [`WasiModelCtx`]
+/// for seam tests and example runtimes.
 #[derive(Clone, Debug)]
 pub struct Scripted {
-    responses: Arc<Mutex<VecDeque<Result<Reply, Error>>>>,
+    responses: Arc<Mutex<VecDeque<Result<Answer, Error>>>>,
 }
 
 impl Scripted {
     /// Build a script from ordered completion results.
     #[must_use]
     pub fn new(responses: impl IntoIterator<Item = Result<Reply, Error>>) -> Self {
-        Self {
-            responses: Arc::new(Mutex::new(responses.into_iter().collect())),
-        }
+        Self::results(responses.into_iter().map(|result| result.map(reply_answer)))
+    }
+
+    /// Build a script from ordered host answers.
+    #[must_use]
+    pub fn answering_with(answers: impl IntoIterator<Item = Answer>) -> Self {
+        Self::results(answers.into_iter().map(Ok))
+    }
+
+    /// Build a one-answer script answering with a JSON value.
+    #[must_use]
+    pub fn json(value: Value) -> Self {
+        Self::answering_with([Answer {
+            value,
+            usage: None,
+            transcript: None,
+        }])
     }
 
     /// Build a one-answer success script.
@@ -119,14 +138,66 @@ impl Scripted {
         let remaining = lock(&self.responses).len();
         assert_eq!(remaining, 0, "script has {remaining} unconsumed result(s)");
     }
+
+    fn results(results: impl IntoIterator<Item = Result<Answer, Error>>) -> Self {
+        Self {
+            responses: Arc::new(Mutex::new(results.into_iter().collect())),
+        }
+    }
+
+    fn pop(&self) -> Option<Result<Answer, Error>> {
+        lock(&self.responses).pop_front()
+    }
 }
 
 impl Model for Scripted {
     fn create(&self, _request: Request) -> impl Future<Output = Result<Reply, Error>> + Send {
-        let response = lock(&self.responses)
-            .pop_front()
-            .unwrap_or_else(|| Err(Error::Backend("model script exhausted".to_owned())));
+        let response = self.pop().map_or_else(
+            || Err(Error::Backend("model script exhausted".to_owned())),
+            |result| result.map(answer_reply),
+        );
         std::future::ready(response)
+    }
+}
+
+impl WasiModelCtx for Scripted {
+    fn complete(
+        &self, _request: omnia_wasi_model::Request, _tool_host: Arc<dyn ToolHost>,
+    ) -> FutureResult<Answer> {
+        let response = self.pop().map_or_else(
+            || Err(anyhow!("model script exhausted")),
+            |result| result.map_err(anyhow::Error::new),
+        );
+        async move { response }.boxed()
+    }
+}
+
+// Lift a guest reply into the host answer the shared queue stores.
+fn reply_answer(reply: Reply) -> Answer {
+    Answer {
+        value: Value::String(reply.answer),
+        usage: reply.usage.map(|usage| omnia_wasi_model::Usage {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            reasoning_tokens: usage.reasoning_tokens,
+        }),
+        transcript: None,
+    }
+}
+
+// Project a host answer to the guest-visible reply: strings pass through,
+// any other JSON value is serialized.
+fn answer_reply(answer: Answer) -> Reply {
+    Reply {
+        answer: match answer.value {
+            Value::String(text) => text,
+            value => value.to_string(),
+        },
+        usage: answer.usage.map(|usage| Usage {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            reasoning_tokens: usage.reasoning_tokens,
+        }),
     }
 }
 

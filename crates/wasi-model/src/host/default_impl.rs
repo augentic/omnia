@@ -6,7 +6,7 @@
 //! cannot be satisfied by an echo (no fabricated value can conform to an
 //! arbitrary guest schema), so those completions fail loud. Deployments bind
 //! a real backend (`omnia-genai`, `omnia-cursor`); tests inject
-//! `omnia-testkit`'s fixture replay backend.
+//! `omnia-testkit`'s scripted double.
 
 use std::fmt::Debug;
 use std::sync::Arc;

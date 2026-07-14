@@ -6,7 +6,7 @@
 //! guest-side `Sections` builder. It declares no HTTP/messaging
 //! trigger, so it is driven by the seam suite
 //! (`crates/seam-suite/tests/seam/model.rs`) rather than a live request — the
-//! replay acceptance vehicle.
+//! model acceptance vehicle.
 //!
 //! It also reads `wasi:filesystem/preopens` and, when the host has mounted a
 //! workspace named `.` (the `[[mount]]` in `omnia.toml`), lends it

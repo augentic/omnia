@@ -5,7 +5,7 @@
 //! purpose-built guest (`examples/conformance`) with a route per HTTP-driven
 //! interface, over one all-interface backend bundle, so the component, linker,
 //! and `InstancePre` are created once per suite run. Scenarios that need a
-//! different shape (CLI command mode, model replay, multi-guest routing,
+//! different shape (CLI command mode, model completion, multi-guest routing,
 //! guest-to-guest linking, MCP, the typed guest API) keep specialized fixtures
 //! in their modules.
 //!

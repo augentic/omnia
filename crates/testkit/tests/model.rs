@@ -1,11 +1,19 @@
-//! Public model test-double behavior.
+//! Public model test-double behavior, on both faces: the guest-side `Model`
+//! and the host-side `WasiModelCtx` served by the same `Scripted` queue.
 
+use std::sync::Arc;
+
+use futures::FutureExt as _;
 use futures::executor::block_on;
 use omnia_guest::model::{
     Effort, Error, Format, Function, Generation, McpGrant, Message, Model, Reply, Request, Role,
     SchemaFormat, Tool, Usage,
 };
 use omnia_testkit::model::{Harness, Scripted, mcp_grants};
+use omnia_wasi_model::{
+    Answer, DirEntry, FutureResult, Reference, ToolHost, VerifyReport, WasiModelCtx,
+};
+use serde_json::json;
 
 #[test]
 fn scripting_order() {
@@ -89,8 +97,103 @@ fn snapshot_sharing() {
     assert_eq!(messages, ["main", "thread"]);
 }
 
+#[test]
+fn host_scripting_order() {
+    let backend = Scripted::answers(["first", "second"]);
+
+    assert_eq!(host_complete(&backend).unwrap().value, json!("first"));
+    assert_eq!(host_complete(&backend).unwrap().value, json!("second"));
+    backend.assert_exhausted();
+}
+
+#[test]
+fn host_exhaustion() {
+    let backend = Scripted::json(json!({ "verdict": "pass" }));
+
+    assert_eq!(host_complete(&backend).unwrap().value, json!({ "verdict": "pass" }));
+    let error = host_complete(&backend).unwrap_err();
+    assert_eq!(error.to_string(), "model script exhausted");
+}
+
+#[test]
+fn host_error_injection() {
+    let backend = Scripted::new([Err(Error::ToolFailed("resolver unavailable".to_owned()))]);
+
+    let error = host_complete(&backend).unwrap_err();
+    assert_eq!(error.to_string(), "tool failed: resolver unavailable");
+    backend.assert_exhausted();
+}
+
+// The same queue serves both faces: a JSON answer reaches the host face as
+// the value and the guest face as its serialization.
+#[test]
+fn shared_queue_across_faces() {
+    let value = json!({ "verdict": "pass" });
+    let scripted = Scripted::json(value.clone());
+
+    assert_eq!(host_complete(&scripted.clone()).unwrap().value, value);
+    scripted.assert_exhausted();
+
+    let scripted = Scripted::json(value.clone());
+    let reply = complete(&scripted, request("review")).unwrap();
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&reply.answer).unwrap(), value);
+    scripted.assert_exhausted();
+}
+
 fn complete(model: &impl Model, request: Request) -> Result<Reply, Error> {
     block_on(model.create(request))
+}
+
+fn host_complete(backend: &Scripted) -> anyhow::Result<Answer> {
+    block_on(backend.complete(wire_request(), Arc::new(NoTools)))
+}
+
+fn wire_request() -> omnia_wasi_model::Request {
+    omnia_wasi_model::Request {
+        model: None,
+        system: None,
+        messages: vec![omnia_wasi_model::Message {
+            role: omnia_wasi_model::Role::User,
+            content: "question".to_owned(),
+        }],
+        generation: None,
+        format: omnia_wasi_model::Format::Text,
+        tools: vec![],
+        grants: omnia_wasi_model::Grants {
+            references: None,
+            workspace: None,
+            verify: vec![],
+        },
+    }
+}
+
+// The doubles never call tools; every method fails loud if one does.
+struct NoTools;
+
+impl ToolHost for NoTools {
+    fn resolve(&self, _reference: Reference) -> FutureResult<Vec<u8>> {
+        no_tools()
+    }
+
+    fn read(&self, _path: String) -> FutureResult<Vec<u8>> {
+        no_tools()
+    }
+
+    fn list(&self, _path: String) -> FutureResult<Vec<DirEntry>> {
+        no_tools()
+    }
+
+    fn write(&self, _path: String, _bytes: Vec<u8>) -> FutureResult<()> {
+        no_tools()
+    }
+
+    fn verify(&self, _check: String) -> FutureResult<VerifyReport> {
+        no_tools()
+    }
+}
+
+fn no_tools<T>() -> FutureResult<T> {
+    async { Err(anyhow::anyhow!("the scripted double never calls tools")) }.boxed()
 }
 
 fn request(content: &str) -> Request {

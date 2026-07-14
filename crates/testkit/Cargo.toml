@@ -1,6 +1,6 @@
 [package]
 name = "omnia-testkit"
-description = "Model doubles, fixture replay, and runtime scaffolding for Omnia tests"
+description = "Model doubles and runtime scaffolding for Omnia tests"
 publish = false
 authors.workspace = true
 categories.workspace = true

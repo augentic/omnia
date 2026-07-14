@@ -64,7 +64,7 @@ From these grants the **host** — not the guest, not the backend — merges the
 
 The default backend connects with zero configuration and answers every completion with its own prompt: the last message echoed as a string for `format::text`, wrapped as `{"echo": ...}` for `format::json`. That makes guest wiring and prompt assembly smoke-testable with no live model. `format::schema` requests fail with a `backend` error — no echo can conform to an arbitrary guest schema — so bind a real backend for typed answers.
 
-For tests, CI, and local development of model guests, inject `omnia_testkit::model::ReplayBackend`: it replays recorded answers from JSON fixtures — no network, no credentials, fully deterministic. The [`model` example](../../examples/model/) embeds its checked-in fixture and serves it through `ReplayBackend`:
+For tests, CI, and local development of model guests, inject `omnia_testkit::model::Scripted`: it answers each completion with the next scripted result — no network, no credentials, fully deterministic. The [`model` example](../../examples/model/) scripts its fixed schema answer through `Scripted`:
 
 ```bash
 cargo build --example model-wasm --target wasm32-wasip2

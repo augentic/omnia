@@ -37,12 +37,12 @@ pub struct Answer {
     pub value: serde_json::Value,
     /// Token accounting the backend reported, surfaced to the guest as `reply.usage`.
     pub usage: Option<Usage>,
-    /// Optional tool-call transcript for replay.
+    /// Optional tool-call transcript the backend captured.
     pub transcript: Option<Transcript>,
 }
 
 /// Token accounting for one completion. Mirrors the WIT `usage` record; the
-/// serde derive lets it ride in replay fixtures alongside the transcript.
+/// serde derive lets backends record it alongside the transcript.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Usage {
     /// Prompt tokens consumed.
@@ -89,9 +89,9 @@ pub struct ToolTurn {
     pub result: serde_json::Value,
 }
 
-/// The tool-call transcript a backend may capture for replay. Host-only;
-/// it never crosses the WIT boundary. Empty for backends with no tool loop
-/// (replay, cursor).
+/// The tool-call transcript a backend may capture for diagnostics or future
+/// replay. Host-only; it never crosses the WIT boundary. Empty for backends
+/// with no tool loop (cursor).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Transcript {
     /// Ordered tool turns the backend drove to reach the answer.
