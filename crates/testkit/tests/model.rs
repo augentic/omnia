@@ -131,7 +131,7 @@ fn shared_queue_across_faces() {
     let value = json!({ "verdict": "pass" });
     let scripted = Scripted::json(value.clone());
 
-    assert_eq!(host_complete(&scripted.clone()).unwrap().value, value);
+    assert_eq!(host_complete(&scripted).unwrap().value, value);
     scripted.assert_exhausted();
 
     let scripted = Scripted::json(value.clone());
