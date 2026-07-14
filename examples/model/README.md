@@ -49,4 +49,4 @@ Because the guest exports a plain async `run` (not an HTTP/messaging trigger), t
 cargo test -p omnia-seam-suite --test seam model
 ```
 
-The `scripted_schema_round_trip` scenario drives the guest through the testkit `Scripted` double — asserting the validated answer returns with no network. The `workspace` scenario drives a stub backend proving the host resolves the guest's lent workspace to its mount path, and `default_backend_rejects_schema_format` proves the in-tree echo `ModelDefault` starts with zero configuration but rejects this guest's `format::schema` request — no network, fully in CI.
+The `scripted` scenario drives the guest through the testkit `Scripted` double — asserting the validated answer returns with no network. The `workspace` scenario drives a stub backend proving the host resolves the guest's lent workspace to its mount path, and `rejects_schema` proves the in-tree echo `ModelDefault` starts with zero configuration but rejects this guest's `format::schema` request — no network, fully in CI.

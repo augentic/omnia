@@ -43,7 +43,7 @@ impl Harness<Scripted> {
 
     /// Build a recorded harness from ordered answer strings.
     #[must_use]
-    pub fn answering<S>(answers: impl IntoIterator<Item = S>) -> Self
+    pub fn answers<S>(answers: impl IntoIterator<Item = S>) -> Self
     where
         S: Into<String>,
     {
@@ -89,14 +89,14 @@ impl Scripted {
 
     /// Build a script from ordered host answers.
     #[must_use]
-    pub fn answering_with(answers: impl IntoIterator<Item = Answer>) -> Self {
+    pub fn values(answers: impl IntoIterator<Item = Answer>) -> Self {
         Self::results(answers.into_iter().map(Ok))
     }
 
     /// Build a one-answer script answering with a JSON value.
     #[must_use]
     pub fn json(value: Value) -> Self {
-        Self::answering_with([Answer {
+        Self::values([Answer {
             value,
             usage: None,
             transcript: None,

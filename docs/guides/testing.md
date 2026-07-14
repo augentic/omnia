@@ -70,7 +70,7 @@ assert_eq!(model.requests().len(), 1);
 
 Call `Scripted::assert_exhausted` at the end of a test when every scripted turn must be consumed. An unexpected extra call returns a deterministic `Error::Backend`; it does not panic. `model::mcp_grants` filters a recorded request's tools to its MCP grants.
 
-`Scripted` also implements the host-side `WasiModelCtx`, so the same double serves seam tests and example runtimes: script host answers with `Scripted::json` (one JSON value) or `Scripted::answering_with` (ordered `Answer` rows) and install the clone as the deployment's model backend. The double never runs tools; a request with no scripted result remaining fails with `model script exhausted`.
+`Scripted` also implements the host-side `WasiModelCtx`, so the same double serves seam tests and example runtimes: script host answers with `Scripted::json` (one JSON value) or `Scripted::values` (ordered `Answer` rows) and install the clone as the deployment's model backend. The double never runs tools; a request with no scripted result remaining fails with `model script exhausted`.
 
 ## Anatomy of a seam test
 

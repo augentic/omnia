@@ -16,7 +16,7 @@ use omnia_wasi_model::{
 use serde_json::json;
 
 #[test]
-fn scripting_order() {
+fn order() {
     let model = Scripted::answers(["first", "second"]);
 
     assert_eq!(complete(&model, request("one")).unwrap().answer, "first");
@@ -25,7 +25,7 @@ fn scripting_order() {
 }
 
 #[test]
-fn error_injection() {
+fn error() {
     let expected = Error::ToolFailed("resolver unavailable".to_owned());
     let model = Scripted::new([
         Err(expected.clone()),
@@ -57,10 +57,10 @@ fn exhaustion() {
 }
 
 #[test]
-fn request_recording() {
+fn recording() {
     let scripted = Scripted::reply("ok");
     let harness = Harness::new(scripted);
-    let request = complete_request();
+    let request = sample();
 
     assert_eq!(complete(&harness, request.clone()).unwrap().answer, "ok");
     assert_eq!(harness.requests(), vec![request.clone()]);
@@ -77,7 +77,7 @@ fn request_recording() {
 }
 
 #[test]
-fn snapshot_sharing() {
+fn sharing() {
     let harness = Harness::new(Scripted::answers(["one", "two"]));
     let other = harness.clone();
 
@@ -98,7 +98,7 @@ fn snapshot_sharing() {
 }
 
 #[test]
-fn host_scripting_order() {
+fn host_order() {
     let backend = Scripted::answers(["first", "second"]);
 
     assert_eq!(host_complete(&backend).unwrap().value, json!("first"));
@@ -116,7 +116,7 @@ fn host_exhaustion() {
 }
 
 #[test]
-fn host_error_injection() {
+fn host_error() {
     let backend = Scripted::new([Err(Error::ToolFailed("resolver unavailable".to_owned()))]);
 
     let error = host_complete(&backend).unwrap_err();
@@ -127,7 +127,7 @@ fn host_error_injection() {
 // The same queue serves both faces: a JSON answer reaches the host face as
 // the value and the guest face as its serialization.
 #[test]
-fn shared_queue_across_faces() {
+fn queue() {
     let value = json!({ "verdict": "pass" });
     let scripted = Scripted::json(value.clone());
 
@@ -206,7 +206,7 @@ fn request(content: &str) -> Request {
     }
 }
 
-fn complete_request() -> Request {
+fn sample() -> Request {
     Request {
         model: Some("test-model".to_owned()),
         system: Some("system".to_owned()),

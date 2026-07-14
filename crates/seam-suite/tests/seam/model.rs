@@ -198,12 +198,12 @@ async fn call_run(runtime: &Runtime<TestBundle>) -> Result<String> {
 // The scripted double serves a canned answer, so the completion round-trips
 // with no network.
 #[test]
-fn scripted_schema_round_trip() -> Result<()> {
+fn scripted() -> Result<()> {
     fixture::RT.block_on(async {
         let registry = registry().await?;
 
         // The answer the guest must print after the host validates it.
-        let expected = expected_answer();
+        let expected = answer();
 
         // The completion path preopens a workspace the example guest lends; the host
         // resolves the lent descriptor back to this mount by identity.
@@ -227,7 +227,7 @@ fn scripted_schema_round_trip() -> Result<()> {
 }
 
 /// The answer the scripted backend serves — the value the guest must print.
-fn expected_answer() -> Value {
+fn answer() -> Value {
     json!({ "verdict": "pass", "reason": "the bounds check is correct" })
 }
 
@@ -236,7 +236,7 @@ fn expected_answer() -> Value {
 // an echo cannot satisfy — the completion fails with a backend error naming
 // the gap.
 #[test]
-fn default_backend_rejects_schema_format() -> Result<()> {
+fn rejects_schema() -> Result<()> {
     fixture::RT.block_on(async {
         let registry = registry().await?;
         let (_mount_dir, mounts) = workspace_mount();
@@ -261,11 +261,11 @@ fn default_backend_rejects_schema_format() -> Result<()> {
 /// A backend that asserts the host resolved the guest's lent workspace to
 /// its mount path — the `local-path` face the cursor backend consumes.
 #[derive(Debug, Clone)]
-struct LocalPathProbe {
+struct PathProbe {
     expected: PathBuf,
 }
 
-impl WasiModelCtx for LocalPathProbe {
+impl WasiModelCtx for PathProbe {
     fn complete(&self, _request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
         let expected = self.expected.clone();
         async move {
@@ -298,7 +298,7 @@ fn workspace() -> Result<()> {
         let runtime = model_runtime(
             Arc::clone(registry),
             Arc::new(move || {
-                Box::new(LocalPathProbe {
+                Box::new(PathProbe {
                     expected: expected.clone(),
                 })
             }),
