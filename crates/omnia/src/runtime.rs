@@ -78,8 +78,12 @@ pub trait Wiring<B: Backends> {
 }
 
 /// CLI entry point for generated `main` functions.
+///
+/// `default_config` is the runtime's compiled-in manifest fallback (the
+/// `runtime!` macro's `config:` field), used only when the CLI supplies no
+/// source.
 #[doc(hidden)]
-pub async fn main<B, H>(mode: Mode) -> ExitCode
+pub async fn main<B, H>(mode: Mode, default_config: Option<std::path::PathBuf>) -> ExitCode
 where
     B: Backends,
     H: Wiring<B>,
@@ -95,6 +99,7 @@ where
             let builder = DeploymentBuilder::new()
                 .wasm(wasm)
                 .config(config)
+                .default_config(default_config)
                 .args(args)
                 .mounts(mounts)
                 .links(links)

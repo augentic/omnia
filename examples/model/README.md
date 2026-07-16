@@ -39,6 +39,9 @@ The answer is scripted in the runtime binary, so no configuration is needed:
 
 ```bash
 export RUST_LOG=info,opentelemetry_sdk=off
+cargo run --example model -- run
+
+# or with an explicit manifest (the default is compiled in via runtime! `config:`)
 cargo run --example model -- run --config examples/model/omnia.toml
 ```
 

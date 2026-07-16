@@ -39,6 +39,7 @@ Each key is a **host type** from a `omnia-wasi-*` crate (`WasiHttp`, `WasiKeyVal
 ```rust,ignore
 omnia::runtime!({
     mode: server,          // optional: `server` (default) or `command`
+    config: concat!(env!("CARGO_MANIFEST_DIR"), "/omnia.toml"),  // optional default manifest
     hosts: {
         HostType: BackendType,
         // ...
@@ -48,6 +49,7 @@ omnia::runtime!({
 
 - **`mode: server`** — trigger hosts (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`) run servers and drive guests per request.
 - **`mode: command`** — the runtime drives the guest's `wasi:cli/run` export once and exits with its status. A backend-less command runtime is valid: `omnia::runtime!({ mode: command });`
+- **`config:`** — a path expression compiled into the generated `main` as the default manifest, used only when the command line supplies no positional wasm, `--config`, or `OMNIA_CONFIG`. Anchor it with `env!("CARGO_MANIFEST_DIR")` to make it absolute at compile time.
 
 ## Generated Code
 

@@ -48,6 +48,7 @@ cfg_if::cfg_if! {
 
         omnia::runtime!({
             mode: command,
+            config: concat!(env!("CARGO_MANIFEST_DIR"), "/model/omnia.toml"),
             hosts: {
                 WasiOtel: OtelDefault,
                 WasiModel: CannedVerdict,

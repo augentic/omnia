@@ -27,7 +27,8 @@ use crate::{Host, Mode, RuntimeOptions, Server, Telemetry};
 ///
 /// The single-file shorthand ([`wasm`]) and the manifest-driven deployment
 /// ([`config`]) are both expressed here; [`build`] resolves whichever is set —
-/// falling back to the `OMNIA_CONFIG` environment variable for the manifest.
+/// falling back to the `OMNIA_CONFIG` environment variable, then to the
+/// compiled-in [`default_config`](Self::default_config) manifest.
 ///
 /// ```ignore
 /// let deployment = DeploymentBuilder::new()
@@ -46,6 +47,7 @@ use crate::{Host, Mode, RuntimeOptions, Server, Telemetry};
 pub struct DeploymentBuilder {
     wasm: Option<PathBuf>,
     config: Option<PathBuf>,
+    default_config: Option<PathBuf>,
     args: Vec<String>,
     mode: Mode,
     mounts: Vec<Mount>,
@@ -71,6 +73,15 @@ impl DeploymentBuilder {
     #[must_use]
     pub fn config(mut self, config: impl Into<Option<PathBuf>>) -> Self {
         self.config = config.into();
+        self
+    }
+
+    /// Set a fallback manifest path — typically compiled in via the `runtime!`
+    /// macro's `config:` field — used only when no explicit `config`,
+    /// `OMNIA_CONFIG`, or `wasm` source is given.
+    #[must_use]
+    pub fn default_config(mut self, config: impl Into<Option<PathBuf>>) -> Self {
+        self.default_config = config.into();
         self
     }
 
@@ -108,17 +119,20 @@ impl DeploymentBuilder {
     /// Resolve the configured source into a [`Deployment`], choosing single-file
     /// or manifest-driven population.
     ///
-    /// Resolution: a `config` path (set via [`config`](Self::config) or the
-    /// `OMNIA_CONFIG` environment variable) selects a manifest-driven deployment;
-    /// otherwise the `wasm` path is the one-guest shorthand. At least one of the
-    /// two must be provided.
+    /// Resolution order: a `config` path (set via [`config`](Self::config)),
+    /// the `OMNIA_CONFIG` environment variable, the `wasm` one-guest shorthand,
+    /// then the [`default_config`](Self::default_config) fallback. At least one
+    /// must be provided.
     ///
     /// # Errors
     ///
-    /// Returns an error if neither a config nor a wasm path is available, or if
-    /// the selected source cannot be built.
+    /// Returns an error if no source resolves, or if the selected source cannot
+    /// be built.
     pub async fn build<T: WasiView + 'static>(self) -> Result<Deployment<T>> {
-        let manifest = self.config.or_else(|| env::var_os("OMNIA_CONFIG").map(PathBuf::from));
+        let manifest = self
+            .config
+            .or_else(|| env::var_os("OMNIA_CONFIG").map(PathBuf::from))
+            .or_else(|| if self.wasm.is_some() { None } else { self.default_config });
 
         // CLI `--mount`/`--link` resolve against the process working directory
         // and layer on top of whatever the selected source provides.

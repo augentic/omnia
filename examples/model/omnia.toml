@@ -12,9 +12,10 @@
 # scripted double ignores the workspace (it never runs tools); the host-side
 # resolution is proven by the seam suite.
 #
-# Build the guest first (see README.md), then run from the repository root:
+# Build the guest first (see README.md), then run (this path is the runtime's
+# compiled-in default, so `--config` is optional):
 #
-#   cargo run --example model -- run --config examples/model/omnia.toml
+#   cargo run --example model -- run
 
 [[guest]]
 id = "model"

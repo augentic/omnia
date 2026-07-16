@@ -4,7 +4,7 @@
 
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::{Ident, Path, Result, Token};
+use syn::{Expr, Ident, Path, Result, Token};
 
 /// Deployment drive mode parsed from `runtime!({ ... })`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -18,6 +18,8 @@ pub enum Mode {
 pub struct Config {
     pub mode: Mode,
     pub host_entries: Vec<HostEntry>,
+    #[allow(clippy::struct_field_names)]
+    pub config_file: Option<Expr>,
 }
 
 /// One `Host: Backend` wiring from the `hosts: { ... }` block.
@@ -30,6 +32,7 @@ impl Parse for Config {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut mode = Mode::default();
         let mut host_entries = Vec::new();
+        let mut config_file = None;
 
         let settings;
         syn::braced!(settings in input);
@@ -39,21 +42,28 @@ impl Parse for Config {
             match setting.into_value() {
                 Opt::Mode(m) => mode = m,
                 Opt::Hosts(h) => host_entries = h,
+                Opt::Config(c) => config_file = Some(c),
             }
         }
 
-        Ok(Self { mode, host_entries })
+        Ok(Self {
+            mode,
+            host_entries,
+            config_file,
+        })
     }
 }
 
 mod kw {
     syn::custom_keyword!(mode);
     syn::custom_keyword!(hosts);
+    syn::custom_keyword!(config);
 }
 
 enum Opt {
     Mode(Mode),
     Hosts(Vec<HostEntry>),
+    Config(Expr),
 }
 
 impl Parse for Opt {
@@ -69,6 +79,10 @@ impl Parse for Opt {
             let list;
             syn::braced!(list in input);
             Ok(Self::Hosts(parse_host_entries(&list)?))
+        } else if l.peek(kw::config) {
+            input.parse::<kw::config>()?;
+            input.parse::<Token![:]>()?;
+            Ok(Self::Config(input.parse()?))
         } else {
             Err(l.error())
         }

@@ -9,6 +9,7 @@ cfg_if::cfg_if! {
         use omnia_wasi_otel::{WasiOtel, OtelDefault};
 
         omnia::runtime!({
+            config: concat!(env!("CARGO_MANIFEST_DIR"), "/http-routing/omnia.toml"),
             hosts: {
                 WasiHttp: HttpDefault,
                 WasiOtel: OtelDefault,

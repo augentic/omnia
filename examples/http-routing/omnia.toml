@@ -4,9 +4,10 @@
 # and selects the guest per request by longest-prefix match.
 #
 # Source paths are resolved relative to this file's directory. Build the guests
-# first (see README.md), then run from the repository root:
+# first (see README.md), then run (this path is the runtime's compiled-in
+# default, so `--config` is optional):
 #
-#   cargo run --example http-routing -- run --config examples/http-routing/omnia.toml
+#   cargo run --example http-routing -- run
 
 [[guest]]
 id = "a"

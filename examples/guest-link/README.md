@@ -35,8 +35,12 @@ cargo build -p examples \
   --example guest-link-router-wasm \
   --target wasm32-wasip2
 
-# run the host
+# run the host — the manifest path is compiled in (runtime! `config:`),
+# so a bare `run` works from any directory
 export RUST_LOG=info,opentelemetry_sdk=off
+cargo run --example guest-link -- run
+
+# or with an explicit manifest
 cargo run --example guest-link -- run --config examples/guest-link/omnia.toml
 ```
 

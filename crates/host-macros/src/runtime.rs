@@ -19,6 +19,7 @@ pub fn expand(config: &Config) -> TokenStream {
         server_types,
         backends_ty,
         backends_def,
+        config_file,
     } = Codegen::from(config);
 
     let mode = match mode {
@@ -61,7 +62,7 @@ pub fn expand(config: &Config) -> TokenStream {
             /// deployment through this runtime's hosts and backends.
             #[tokio::main]
             pub async fn main() -> ::std::process::ExitCode {
-                omnia::main::<#backends_ty, Hooks>(#mode).await
+                omnia::main::<#backends_ty, Hooks>(#mode, #config_file).await
             }
 
             /// Drive one deployment through this runtime's hosts and backends,
@@ -106,6 +107,16 @@ mod tests {
     fn expand_command() {
         insta::assert_snapshot!(expand_pretty(quote!({
             mode: command,
+            hosts: {
+                WasiOtel: OtelDefault,
+            },
+        })));
+    }
+
+    #[test]
+    fn expand_config_file() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            config: concat!(env!("CARGO_MANIFEST_DIR"), "/omnia.toml"),
             hosts: {
                 WasiOtel: OtelDefault,
             },

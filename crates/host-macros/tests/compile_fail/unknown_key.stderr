@@ -1,4 +1,4 @@
-error: expected `mode` or `hosts`
+error: expected one of: `mode`, `hosts`, `config`
  --> tests/compile_fail/unknown_key.rs:2:5
   |
 2 |     guests: {},

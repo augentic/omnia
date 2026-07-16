@@ -55,7 +55,7 @@ Production backend variables (Redis, Kafka, Azure, ...) are listed in [Productio
 
 ## Deployment manifest (`omnia.toml`)
 
-Selected by `--config <path>` or `OMNIA_CONFIG`. The manifest is sparse: every section is optional except at least one `[[guest]]`, and omitted fields fall back to defaults. All relative paths resolve against the manifest's directory.
+Selected by `--config <path>` or `OMNIA_CONFIG`, or compiled in as a default via the `runtime!` macro's `config:` field (see [Composing a Runtime](../guides/composing-a-runtime.md#default-manifest-config)). The manifest is sparse: every section is optional except at least one `[[guest]]`, and omitted fields fall back to defaults. All relative paths resolve against the manifest's directory.
 
 ```toml
 # --- Guests (required, repeatable) -----------------------------------

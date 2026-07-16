@@ -9,9 +9,10 @@
 # The runtime core stays domain-agnostic: `link` and the selector see only the opaque
 # interface string `omnia:link/echo` and opaque guest ids.
 #
-# Build the guests first (see README.md), then run from the repository root:
+# Build the guests first (see README.md), then run (this path is the runtime's
+# compiled-in default, so `--config` is optional):
 #
-#   cargo run --example guest-link -- run --config examples/guest-link/omnia.toml
+#   cargo run --example guest-link -- run
 
 [[guest]]
 id = "responder"

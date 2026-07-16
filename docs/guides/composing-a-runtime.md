@@ -62,6 +62,27 @@ cargo run --example cli -- run ./target/wasm32-wasip2/debug/examples/cli_wasm.wa
 
 A backend-less command runtime is valid too: `omnia::runtime!({ mode: command });`.
 
+## Default manifest (`config:`)
+
+The optional `config` key compiles a default manifest path into the generated `main`, used only when the command line supplies no source — no positional wasm, no `--config`, no `OMNIA_CONFIG`:
+
+```rust
+omnia::runtime!({
+    config: concat!(env!("CARGO_MANIFEST_DIR"), "/deploy/omnia.toml"),
+    hosts: {
+        WasiHttp: HttpDefault,
+    }
+});
+```
+
+The value is any expression evaluating to a path. Anchoring it with `env!("CARGO_MANIFEST_DIR")` makes it absolute at compile time, so a bare `run` works from any working directory:
+
+```bash
+cargo run -- run
+```
+
+Explicit sources always win; the compiled-in default is the lowest-precedence fallback.
+
 ## Choosing backends
 
 Every WASI interface ships with a default backend that needs no external service, so a development runtime works out of the box. Swapping to production is a one-line change per interface — the guest `.wasm` is untouched:
