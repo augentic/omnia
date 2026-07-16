@@ -105,20 +105,20 @@ pub trait Backend: Sized + Sync + Send {
 
 Each interface crate provides guest bindings, a host implementation, and a default backend:
 
-| Crate | Interface | Purpose | Default backend |
-| ----- | --------- | ------- | --------------- |
-| `wasi-http` | `wasi:http` | HTTP client/server (trigger) | `HttpDefault` — hyper client, axum server |
-| `wasi-keyvalue` | `wasi:keyvalue` | Key-value storage | `KeyValueDefault` — in-memory cache |
-| `wasi-messaging` | `wasi:messaging` | Pub/sub messaging (trigger) | `MessagingDefault` — in-process broadcast |
-| `wasi-blobstore` | `wasi:blobstore` | Object/blob storage | `BlobstoreDefault` — in-memory |
-| `wasi-sql` | `wasi:sql` | SQL access + guest ORM | `SqlDefault` — SQLite |
-| `wasi-docstore` | Custom | JSON document store with filters | `DocStoreDefault` — in-memory |
-| `wasi-config` | `wasi:config` | Runtime configuration | `ConfigDefault` — process environment |
-| `wasi-vault` | Custom | Secrets management | `VaultDefault` — in-memory |
-| `wasi-identity` | Custom | Identity/OAuth tokens | `IdentityDefault` — OAuth2 client flow |
-| `wasi-otel` | Custom | Guest OpenTelemetry export | `OtelDefault` — log-only |
-| `wasi-websocket` | Custom | WebSocket connections (trigger) | `WebSocketDefault` — tungstenite server |
-| `wasi-model` | `omnia:model` | Model completions with grants | `ModelDefault` — deterministic echo |
+| Crate            | Interface        | Purpose                          | Default backend                           |
+| ---------------- | ---------------- | -------------------------------- | ----------------------------------------- |
+| `wasi-http`      | `wasi:http`      | HTTP client/server (trigger)     | `HttpDefault` — hyper client, axum server |
+| `wasi-keyvalue`  | `wasi:keyvalue`  | Key-value storage                | `KeyValueDefault` — in-memory cache       |
+| `wasi-messaging` | `wasi:messaging` | Pub/sub messaging (trigger)      | `MessagingDefault` — in-process broadcast |
+| `wasi-blobstore` | `wasi:blobstore` | Object/blob storage              | `BlobstoreDefault` — in-memory            |
+| `wasi-sql`       | `wasi:sql`       | SQL access + guest ORM           | `SqlDefault` — SQLite                     |
+| `wasi-docstore`  | Custom           | JSON document store with filters | `DocStoreDefault` — in-memory             |
+| `wasi-config`    | `wasi:config`    | Runtime configuration            | `ConfigDefault` — process environment     |
+| `wasi-vault`     | Custom           | Secrets management               | `VaultDefault` — in-memory                |
+| `wasi-identity`  | Custom           | Identity/OAuth tokens            | `IdentityDefault` — OAuth2 client flow    |
+| `wasi-otel`      | Custom           | Guest OpenTelemetry export       | `OtelDefault` — log-only                  |
+| `wasi-websocket` | Custom           | WebSocket connections (trigger)  | `WebSocketDefault` — tungstenite server   |
+| `wasi-model`     | `omnia:model`    | Model completions with grants    | `ModelDefault` — deterministic echo       |
 
 Conditional compilation lets one crate serve both sides — guests get bindings on `wasm32`, hosts get the implementation on native:
 

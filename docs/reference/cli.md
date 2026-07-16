@@ -10,13 +10,13 @@ Run a single guest, or a manifest-driven deployment.
 <runtime> run [WASM] [--config <omnia.toml>] [--mount <spec>]... [--link <interface>]... [-- <guest args>...]
 ```
 
-| Argument / flag | Meaning |
-| --------------- | ------- |
-| `WASM` | Path to a guest — a standard WASI component (`.wasm`) or a pre-compiled component (`.bin`). Optional when `--config` names a manifest. |
-| `-c, --config <path>` | Deployment manifest (`omnia.toml`) for multi-guest deployments. Falls back to the `OMNIA_CONFIG` environment variable. |
-| `--mount <spec>` | Preopen a host directory into the guest sandbox (repeatable). Layered over the manifest's `[[mount]]` entries; a matching guest-visible name overrides the manifest (last wins). |
-| `--link <interface>` | Host-mediated interface to dispatch on a guest's behalf (repeatable). Unioned with the manifest's per-guest `link` lists. |
-| `-- <args>...` | Everything after `--` is forwarded to the guest as its argv (command mode). `args[0]` is the program name, supplied by the runtime. |
+| Argument / flag       | Meaning                                                                                                                                                                          |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WASM`                | Path to a guest — a standard WASI component (`.wasm`) or a pre-compiled component (`.bin`). Optional when `--config` names a manifest.                                           |
+| `-c, --config <path>` | Deployment manifest (`omnia.toml`) for multi-guest deployments. Falls back to the `OMNIA_CONFIG` environment variable.                                                           |
+| `--mount <spec>`      | Preopen a host directory into the guest sandbox (repeatable). Layered over the manifest's `[[mount]]` entries; a matching guest-visible name overrides the manifest (last wins). |
+| `--link <interface>`  | Host-mediated interface to dispatch on a guest's behalf (repeatable). Unioned with the manifest's per-guest `link` lists.                                                        |
+| `-- <args>...`        | Everything after `--` is forwarded to the guest as its argv (command mode). `args[0]` is the program name, supplied by the runtime.                                              |
 
 ### Mount spec format
 
@@ -65,8 +65,8 @@ The generated `runtime!` `main` does not dispatch `compile`; call `omnia::compil
 
 ## Cargo features (`omnia` crate)
 
-| Feature | Default | Effect |
-| ------- | ------- | ------ |
-| `jit` | yes | Cranelift JIT; run raw `.wasm` directly and enable `compile`. Disable to run only pre-compiled `.bin` components. |
-| `mpk` | no | Memory protection keys in the pooling allocator (Linux x86-64). |
-| `gc` | no | WebAssembly GC support and pooling GC-heap limits. |
+| Feature | Default | Effect                                                                                                            |
+| ------- | ------- | ----------------------------------------------------------------------------------------------------------------- |
+| `jit`   | yes     | Cranelift JIT; run raw `.wasm` directly and enable `compile`. Disable to run only pre-compiled `.bin` components. |
+| `mpk`   | no      | Memory protection keys in the pooling allocator (Linux x86-64).                                                   |
+| `gc`    | no      | WebAssembly GC support and pooling GC-heap limits.                                                                |

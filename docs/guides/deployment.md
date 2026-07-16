@@ -73,14 +73,14 @@ docker run -v ./guest.wasm:/app.wasm -p 8080:8080 my-runtime
 
 The [`docker/`](../../docker/) directory ships a compose file per service so production backends can be exercised locally:
 
-| File | Service | Matches backend |
-| ---- | ------- | --------------- |
-| `docker/redis.yaml` | Redis | `omnia-redis` |
-| `docker/kafka.yaml` | Apache Kafka | `omnia-kafka` |
-| `docker/nats.yaml` | NATS / JetStream | `omnia-nats` |
-| `docker/postgres.yaml` | PostgreSQL (+ `init.sql`) | `omnia-postgres` |
-| `docker/mongodb.yaml` | MongoDB | `omnia-mongodb` |
-| `docker/otelcol.yaml` | OpenTelemetry Collector | `omnia-opentelemetry` / `OTEL_GRPC_URL` |
+| File                   | Service                   | Matches backend                         |
+| ---------------------- | ------------------------- | --------------------------------------- |
+| `docker/redis.yaml`    | Redis                     | `omnia-redis`                           |
+| `docker/kafka.yaml`    | Apache Kafka              | `omnia-kafka`                           |
+| `docker/nats.yaml`     | NATS / JetStream          | `omnia-nats`                            |
+| `docker/postgres.yaml` | PostgreSQL (+ `init.sql`) | `omnia-postgres`                        |
+| `docker/mongodb.yaml`  | MongoDB                   | `omnia-mongodb`                         |
+| `docker/otelcol.yaml`  | OpenTelemetry Collector   | `omnia-opentelemetry` / `OTEL_GRPC_URL` |
 
 ```bash
 docker compose -f docker/redis.yaml up -d
