@@ -13,8 +13,12 @@ This example deploys two guests from a manifest, so build and run stay manual:
 cargo build --example http-routing-a-wasm --target wasm32-wasip2
 cargo build --example http-routing-b-wasm --target wasm32-wasip2
 
-# run the host
+# run the host — the manifest path is compiled in (runtime! `config:`),
+# so a bare `run` works from any directory
 export RUST_LOG="info,opentelemetry_sdk=off,omnia_wasi_http=debug"
+cargo run --example http-routing -- run
+
+# or with an explicit manifest
 cargo run --example http-routing -- run --config examples/http-routing/omnia.toml
 ```
 

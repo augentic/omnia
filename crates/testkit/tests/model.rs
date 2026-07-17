@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use futures::FutureExt as _;
 use futures::executor::block_on;
-use omnia_guest::model::{Error, Message, Model, Reply, Request, Role, Usage};
-use omnia_testkit::model::Scripted;
+use omnia_guest::model::{Error, McpGrant, Message, Model, Reply, Request, Role, Tool, Usage};
+use omnia_testkit::model::{Harness, Scripted, mcp_grants};
 use omnia_wasi_model::{
     Answer, DirEntry, FutureResult, Reference, ToolHost, VerifyReport, WasiModelCtx,
 };
@@ -94,6 +94,29 @@ fn queue() {
     let reply = complete(&scripted, request("review")).unwrap();
     assert_eq!(serde_json::from_str::<serde_json::Value>(&reply.answer).unwrap(), value);
     scripted.assert_exhausted();
+}
+
+// The recording decorator snapshots every request in call order while
+// delegating to its backend, and surfaces MCP grants for assertion.
+#[test]
+fn harness_records() {
+    let model = Harness::answering(["first"]);
+    let mut granted = request("one");
+    granted.tools.push(Tool::Mcp(McpGrant {
+        name: "probe-references".to_owned(),
+        tools: vec![],
+        url: "http://127.0.0.1:7737/mcp/probe".to_owned(),
+    }));
+
+    assert_eq!(complete(&model, granted).unwrap().answer, "first");
+    model.assert_exhausted();
+
+    let requests = model.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].messages[0].content, "one");
+    let grants = mcp_grants(&requests[0]);
+    assert_eq!(grants.len(), 1);
+    assert_eq!(grants[0].name, "probe-references");
 }
 
 fn complete(model: &impl Model, request: Request) -> Result<Reply, Error> {

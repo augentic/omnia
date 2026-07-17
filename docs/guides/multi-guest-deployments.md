@@ -12,6 +12,8 @@ Point the runtime at a manifest with `--config` (or the `OMNIA_CONFIG` environme
 cargo run --example http-routing -- run --config examples/http-routing/omnia.toml
 ```
 
+A runtime can also compile in a default manifest path with the `runtime!` macro's `config:` field — used only when the command line supplies no source (see [Composing a Runtime](composing-a-runtime.md#default-manifest-config)).
+
 A manifest declares guests, mounts, routes, and (eventually) transports. Every field is optional except at least one `[[guest]]`. Paths resolve relative to the manifest's own directory.
 
 ```toml

@@ -15,6 +15,7 @@ pub struct Codegen {
     pub server_types: Vec<Path>,
     pub backends_ty: TokenStream,
     pub backends_def: TokenStream,
+    pub config_file: TokenStream,
 }
 
 impl From<&Config> for Codegen {
@@ -26,12 +27,18 @@ impl From<&Config> for Codegen {
 
         let (backends_ty, backends_def) = emit_backends(host_entries);
 
+        let config_file = config.config_file.as_ref().map_or_else(
+            || quote! { ::std::option::Option::None },
+            |expr| quote! { ::std::option::Option::Some(::std::path::PathBuf::from(#expr)) },
+        );
+
         Self {
             mode: config.mode,
             host_types,
             server_types,
             backends_ty,
             backends_def,
+            config_file,
         }
     }
 }

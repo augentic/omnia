@@ -44,7 +44,8 @@ mod runtime {
     /// deployment through this runtime's hosts and backends.
     #[tokio::main]
     pub async fn main() -> ::std::process::ExitCode {
-        omnia::main::<Backends, Hooks>(omnia::Mode::Command).await
+        omnia::main::<Backends, Hooks>(omnia::Mode::Command, ::std::option::Option::None)
+            .await
     }
     /// Drive one deployment through this runtime's hosts and backends,
     /// blocking until the guest completes.
