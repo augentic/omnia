@@ -198,7 +198,7 @@ where
         param_types.len()
     );
 
-    let client = handle.transport()?.connect(&target)?;
+    let client = handle.transport().connect(&target)?;
 
     // Encode the forwarded parameters with wRPC's value codec.
     let mut buf = BytesMut::new();
@@ -297,7 +297,7 @@ where
         param_types.len()
     );
 
-    let client = handle.transport()?.connect(&target)?;
+    let client = handle.transport().connect(&target)?;
 
     // Encode the forwarded parameters with wRPC's value codec.
     let mut buf = BytesMut::new();

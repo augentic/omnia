@@ -38,7 +38,7 @@ What is missing — three structures freeze at bootstrap:
 - **Fail closed.** The runtime registers exactly what it is handed and nothing else: no directory scan, no network probe, no fallback acquisition. An unregistered id is a dispatch error on the caller, same as today.
 - **Static entries win.** `register` refuses an id that already names a static `[[guest]]` entry; `deregister` refuses a static entry. Only dynamically registered guests can be replaced or removed.
 - **Registration cannot widen the allow-list.** The shared linker's host set and the deployment's `link` union are fixed at bootstrap. A registered guest may only import host interfaces already linked and only participate in link interfaces already in the `link` union. The allow-list stays a deployment declaration, not something a registered component can widen.
-- **Serve before publish.** A registration is observable (present in the map, single-flight waiters released in §4.5) only after its link serve side is wired, so no caller can resolve the entry and then miss the wRPC endpoint.
+- **Serve before publish.** A registration is observable (present in the map, single-flight waiters released in §4.5) only after its link serve side is wired, so no caller can resolve the entry and then miss the wRPC endpoint. As implemented, entry and endpoint are published as one atomic lifecycle transition (a shared lifecycle gate over the registry map and the transport's endpoint map), which also makes concurrent register/deregister linearizable.
 - **Instance-per-call is unchanged.** Registered guests are pre-instantiated once and instantiated fresh per call like every static guest — which is also what makes replace/remove safe: an in-flight call holds its own clone of the old `InstancePre` and completes on it.
 
 ## 4. Proposed design
@@ -61,14 +61,25 @@ impl<B> Runtime<B> {
 }
 
 /// Component bytes the embedder has already verified (Law 2: verification is
-/// deployment policy and happens before the runtime sees the bytes).
-pub enum GuestArtifact {
-    /// A settings-matched pre-compiled artifact (`omnia compile` output);
-    /// loaded via deserialization, no runtime codegen.
-    Precompiled(Vec<u8>),
+/// deployment policy and happens before the runtime sees the bytes). Opaque,
+/// with two constructors carrying different trust.
+pub struct GuestArtifact(/* private */);
+
+impl GuestArtifact {
     /// Raw component wasm, JIT-compiled at registration. Requires the `jit`
     /// feature; compilation runs on a blocking thread like `Source::load`.
-    Wasm(Vec<u8>),
+    /// Safe: the bytes are validated and compiled inside the sandbox.
+    pub const fn wasm(bytes: Vec<u8>) -> Self;
+
+    /// A settings-matched pre-compiled artifact (`omnia compile` output);
+    /// loaded via deserialization, no runtime codegen.
+    ///
+    /// # Safety
+    /// A pre-compiled artifact is native code. Wasmtime's compatibility check
+    /// (rejecting mismatched compile-affecting settings) is *not* an
+    /// authenticity check — the caller attests the bytes are the unmodified
+    /// output of a trusted build pipeline.
+    pub const unsafe fn precompiled(bytes: Vec<u8>) -> Self;
 }
 ```
 
@@ -94,9 +105,9 @@ Without this, a dispatch to a registered guest that exports a linked interface f
 The recommended shape for a dynamic deployment is a two-step install, mirroring [embedded-guest](embedded-guest.md)'s build-time split but per component and per install:
 
 1. The install step (plugin manager, OCI puller, directory watcher) fetches the raw `.wasm` and verifies it — digest, signature, provenance, whatever the deployment's policy demands.
-2. It runs `omnia compile` to produce a settings-matched pre-compiled artifact, then calls `register` with `GuestArtifact::Precompiled`.
+2. It runs `omnia compile` to produce a settings-matched pre-compiled artifact, then calls `register` with the `unsafe` `GuestArtifact::precompiled` — the call site's attestation that the bytes came unmodified from its own trusted tooling.
 
-The runtime then only deserializes: no Cranelift in the shipped binary (the `jit` feature stays optional), registration latency in milliseconds rather than seconds, and the compile-affecting-settings lockstep is contained to the install tooling. The trust story is the same as today's `.bin` path: the artifact is produced locally by trusted tooling from bytes the installer already verified. `GuestArtifact::Wasm` remains for `jit`-enabled deployments that prefer one fewer moving part.
+The runtime then only deserializes: no Cranelift in the shipped binary (the `jit` feature stays optional), registration latency in milliseconds rather than seconds, and the compile-affecting-settings lockstep is contained to the install tooling. The trust story is the same as the static `.bin` path (which requires the same attestation via `DeploymentBuilder::precompiled()`'s unsafe `build`): the artifact is produced locally by trusted tooling from bytes the installer already verified. The safe `GuestArtifact::wasm` remains for `jit`-enabled deployments that prefer one fewer moving part.
 
 One capacity note: the pooling allocator's totals (`pool_total_core_instances`, memories, tables) are fixed at engine build. A deployment that registers guests owns sizing that budget for its expected dynamic population.
 
@@ -118,7 +129,7 @@ Both pieces are additive; nothing in §4.1–4.4 anticipates them beyond the sin
 
 The embedder owns everything domain-shaped: filesystem layout, filename ↔ id mapping, digest sidecar formats, registry clients, trust policy, id namespacing and versioning conventions. Two install-pipeline sketches that fit the same primitive:
 
-- a **directory-store watcher**: new file under configured path globs → verify against the digest sidecar, fail closed → `omnia compile` → `register(id, Precompiled)` — the plugin-host shape;
+- a **directory-store watcher**: new file under configured path globs → verify against the digest sidecar, fail closed → `omnia compile` → `register(id, precompiled)` — the plugin-host shape;
 - an **OCI installer**: digest-pinned reference → pull, verify manifest digest → compile → `register` — the wasmCloud/Spin shape.
 
 If a change to this design requires the core to parse an id, read a manifest convention, or know a directory layout, the change is wrong.

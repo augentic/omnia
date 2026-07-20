@@ -13,8 +13,9 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
-use anyhow::{Context as _, Result, bail};
+use anyhow::{Context as _, Result, bail, ensure};
 use omnia::wasmtime::component::Val;
 use omnia::{
     DeploymentBuilder, GuestArtifact, GuestEntry, GuestId, Manifest, MountRegistry, Runtime,
@@ -76,9 +77,10 @@ async fn call_router(runtime: &Runtime<Counter>, export: &str, message: &str) ->
     }
 }
 
-/// Instantiate the router fresh and call `run-to(target, message)` — the
-/// arbitrary-target leg that reaches dynamically registered guests.
-async fn call_router_to(runtime: &Runtime<Counter>, target: &str, message: &str) -> Result<String> {
+/// Instantiate the router fresh and call `export(target, message)`.
+async fn call_router_export_to(
+    runtime: &Runtime<Counter>, export: &str, target: &str, message: &str,
+) -> Result<String> {
     let guest =
         runtime.registry().get(&GuestId::from("router")).context("router guest is registered")?;
     let mut store = runtime.build_store(runtime.store());
@@ -86,7 +88,9 @@ async fn call_router_to(runtime: &Runtime<Counter>, target: &str, message: &str)
         .instantiate(guest.instance_pre(), &mut store)
         .await
         .context("instantiating router")?;
-    let run_to = instance.get_func(&mut store, "run-to").context("router exports `run-to`")?;
+    let run_to = instance
+        .get_func(&mut store, export)
+        .with_context(|| format!("router exports `{export}`"))?;
 
     let mut results = vec![Val::Bool(false)];
     run_to
@@ -97,33 +101,53 @@ async fn call_router_to(runtime: &Runtime<Counter>, target: &str, message: &str)
         )
         .await
         .map_err(anyhow::Error::from)
-        .context("calling router.run-to")?;
+        .with_context(|| format!("calling router.{export}"))?;
 
     match results.into_iter().next() {
         Some(Val::String(echoed)) => Ok(echoed),
-        other => bail!("router.run-to returned a non-string result: {other:?}"),
+        other => bail!("router.{export} returned a non-string result: {other:?}"),
     }
 }
 
-/// Locate a pre-built guest and wrap it as a registration artifact:
-/// `Precompiled` for a serialized `.bin`, `Wasm` for raw wasm.
-fn artifact(file: &str) -> Result<GuestArtifact> {
-    let path = find_guest(file);
-    let bytes =
-        std::fs::read(&path).with_context(|| format!("reading guest {}", path.display()))?;
-    Ok(if path.extension().is_some_and(|ext| ext == "bin") {
-        GuestArtifact::Precompiled(bytes)
-    } else {
-        GuestArtifact::Wasm(bytes)
-    })
+/// Call `run-to(target, message)` — the arbitrary-target leg that reaches
+/// dynamically registered guests.
+async fn call_router_to(runtime: &Runtime<Counter>, target: &str, message: &str) -> Result<String> {
+    call_router_export_to(runtime, "run-to", target, message).await
 }
 
-/// The raw-wasm dual of [`artifact`], exercising `GuestArtifact::Wasm`.
+/// Call `run-to-slow(target, message)` — the async-lifted arbitrary-target
+/// leg whose callee parks on a timer before answering.
+async fn call_router_to_slow(
+    runtime: &Runtime<Counter>, target: &str, message: &str,
+) -> Result<String> {
+    call_router_export_to(runtime, "run-to-slow", target, message).await
+}
+
+/// Locate the serialized `.bin` for `file` and wrap it as a pre-compiled
+/// registration artifact. Fails fast (rather than substituting raw wasm) when
+/// the `.bin` is missing, so the pre-compiled path is genuinely exercised.
+fn precompiled(file: &str) -> Result<GuestArtifact> {
+    let path = find_guest(file);
+    ensure!(
+        path.extension().is_some_and(|ext| ext == "bin"),
+        "{} has no serialized .bin sibling; run `cargo make test-guests`",
+        path.display()
+    );
+    let bytes =
+        std::fs::read(&path).with_context(|| format!("reading guest {}", path.display()))?;
+    // SAFETY: the artifact was built and serialized by this workspace's own
+    // `cargo make test-guests` pipeline (omnia's compile path).
+    Ok(unsafe { GuestArtifact::precompiled(bytes) })
+}
+
+/// The raw-wasm dual of [`precompiled`], exercising the safe JIT constructor.
+/// Names the `.wasm` sibling explicitly so the pre-compiled `.bin` can never
+/// silently substitute.
 fn raw_wasm(file: &str) -> Result<GuestArtifact> {
     let path = find_guest(file).with_extension("wasm");
     let bytes =
         std::fs::read(&path).with_context(|| format!("reading guest {}", path.display()))?;
-    Ok(GuestArtifact::Wasm(bytes))
+    Ok(GuestArtifact::wasm(bytes))
 }
 
 /// Build the two-guest deployment and wire the serve side, returning the
@@ -136,11 +160,10 @@ async fn build_runtime() -> Result<(Runtime<Counter>, Arc<AtomicUsize>)> {
         .guest(GuestEntry::new("responder", responder))
         .guest(GuestEntry::new("router", router).link("omnia:link/echo"));
 
-    let deployment = DeploymentBuilder::new()
-        .manifest(manifest)
-        .build::<TestCtx>()
-        .await
-        .context("building runtime")?;
+    let builder = DeploymentBuilder::new().manifest(manifest).precompiled();
+    // SAFETY: `find_guest` only returns artifacts this workspace built and
+    // serialized itself (`cargo make test-guests`).
+    let deployment = unsafe { builder.build::<TestCtx>() }.await.context("building runtime")?;
     let registry = deployment.into_registry().context("assembling registry")?;
     let clones = Arc::new(AtomicUsize::new(0));
     let runtime = Runtime::<Counter>::from_parts(
@@ -153,8 +176,8 @@ async fn build_runtime() -> Result<(Runtime<Counter>, Arc<AtomicUsize>)> {
     );
 
     // Wire the serve side of `omnia:link/echo` (responder) and bind the
-    // in-process carrier — the work the generated `start()` does for a real
-    // deployment.
+    // in-process carrier — the work `Runtime::new` does for a real deployment
+    // (`from_parts` is the low-level constructor and leaves it to the caller).
     serve_links(&runtime).await.context("wiring link serve side")?;
     Ok((runtime, clones))
 }
@@ -217,12 +240,12 @@ fn dispatch_async() -> Result<()> {
 // A guest registered after startup (absent from the manifest) is reachable via
 // host-mediated link dispatch — serve-at-register — and via host→guest
 // dispatch, while static dispatch is undisturbed. Registration loads the
-// serialized artifact (the `Precompiled` path).
+// serialized artifact (the unsafe `precompiled` constructor).
 #[test]
 fn register_then_dispatch() -> Result<()> {
     fixture::RT.block_on(async {
         let (runtime, _clones) = build_runtime().await?;
-        runtime.register("extra", artifact("guest_link_extra_wasm.wasm")?).await?;
+        runtime.register("extra", precompiled("guest_link_extra_wasm.wasm")?).await?;
 
         // Guest→guest: the static router names the registered guest.
         let echoed = call_router_to(&runtime, "extra", "hello").await?;
@@ -254,7 +277,7 @@ fn register_then_dispatch() -> Result<()> {
 fn deregister_then_dispatch() -> Result<()> {
     fixture::RT.block_on(async {
         let (runtime, _clones) = build_runtime().await?;
-        runtime.register("extra", artifact("guest_link_extra_wasm.wasm")?).await?;
+        runtime.register("extra", precompiled("guest_link_extra_wasm.wasm")?).await?;
         call_router_to(&runtime, "extra", "hello").await?;
 
         runtime.deregister(&GuestId::from("extra"))?;
@@ -277,7 +300,7 @@ fn deregister_then_dispatch() -> Result<()> {
 
 // Deregister + re-register with different bytes swaps the guest's behavior —
 // the upgrade story. The first leg registers the responder's bytes under the
-// dynamic id (raw wasm, the `Wasm` artifact path); the second swaps in the
+// dynamic id (raw wasm, the safe `wasm` constructor); the second swaps in the
 // extra guest's bytes.
 #[test]
 fn upgrade_swap() -> Result<()> {
@@ -289,7 +312,7 @@ fn upgrade_swap() -> Result<()> {
         assert_eq!(echoed, "extra echoes: hello", "first registration answers");
 
         runtime.deregister(&GuestId::from("extra"))?;
-        runtime.register("extra", artifact("guest_link_extra_wasm.wasm")?).await?;
+        runtime.register("extra", precompiled("guest_link_extra_wasm.wasm")?).await?;
         let echoed = call_router_to(&runtime, "extra", "hello").await?;
         assert_eq!(echoed, "extra echoes from extra: hello", "swapped bytes answer");
 
@@ -305,7 +328,7 @@ fn static_ids_protected() -> Result<()> {
         let (runtime, _clones) = build_runtime().await?;
 
         let error = runtime
-            .register("router", artifact("guest_link_extra_wasm.wasm")?)
+            .register("router", precompiled("guest_link_extra_wasm.wasm")?)
             .await
             .expect_err("registering over a static id must fail");
         assert!(error.to_string().contains("already registered"), "{error}");
@@ -333,7 +356,7 @@ fn register_failure_no_partial_state() -> Result<()> {
         // The conformance guest imports host interfaces (keyvalue, blobstore,
         // ...) this deployment never linked, so pre-instantiation fails.
         runtime
-            .register("extra", artifact("conformance_wasm.wasm")?)
+            .register("extra", precompiled("conformance_wasm.wasm")?)
             .await
             .expect_err("a guest with unsatisfied imports must fail registration");
         assert!(
@@ -342,9 +365,180 @@ fn register_failure_no_partial_state() -> Result<()> {
         );
 
         // The id is fully reusable: a valid registration under it succeeds.
-        runtime.register("extra", artifact("guest_link_extra_wasm.wasm")?).await?;
+        runtime.register("extra", precompiled("guest_link_extra_wasm.wasm")?).await?;
         let echoed = call_router_to(&runtime, "extra", "hello").await?;
         assert_eq!(echoed, "extra echoes from extra: hello");
+
+        Ok(())
+    })
+}
+
+// Two concurrent registrations of one id: publication is transactional, so
+// exactly one wins, the winner is callable, and the loser leaves no partial
+// state behind (the id deregisters cleanly exactly once).
+#[test]
+fn register_concurrent_same_id() -> Result<()> {
+    fixture::RT.block_on(async {
+        let (runtime, _clones) = build_runtime().await?;
+
+        let first = {
+            let runtime = runtime.clone();
+            let artifact = precompiled("guest_link_extra_wasm.wasm")?;
+            tokio::spawn(async move { runtime.register("extra", artifact).await })
+        };
+        let second = {
+            let runtime = runtime.clone();
+            let artifact = precompiled("guest_link_extra_wasm.wasm")?;
+            tokio::spawn(async move { runtime.register("extra", artifact).await })
+        };
+        let outcomes = [first.await.expect("register task"), second.await.expect("register task")];
+        let wins = outcomes.iter().filter(|outcome| outcome.is_ok()).count();
+        assert_eq!(wins, 1, "exactly one concurrent registration wins: {outcomes:?}");
+
+        // The winner is fully published: reachable via link dispatch, and its
+        // registry entry deregisters exactly once.
+        let echoed = call_router_to(&runtime, "extra", "hello").await?;
+        assert_eq!(echoed, "extra echoes from extra: hello");
+        runtime.deregister(&GuestId::from("extra"))?;
+        runtime
+            .deregister(&GuestId::from("extra"))
+            .expect_err("the loser must not have left a second entry behind");
+
+        Ok(())
+    })
+}
+
+// Concurrent register/deregister churn on two ids: after every successful
+// registration the registry and link dispatch agree the guest is reachable,
+// and after every deregistration they agree it is gone, while static dispatch
+// stays undisturbed throughout.
+#[test]
+fn lifecycle_churn_agrees() -> Result<()> {
+    fixture::RT.block_on(async {
+        let (runtime, _clones) = build_runtime().await?;
+
+        let mut churners = Vec::new();
+        for id in ["extra-a", "extra-b"] {
+            let runtime = runtime.clone();
+            churners.push(tokio::spawn(async move {
+                for _ in 0..5 {
+                    runtime.register(id, precompiled("guest_link_extra_wasm.wasm")?).await?;
+                    ensure!(
+                        runtime.registry().get(&GuestId::from(id)).is_some(),
+                        "`{id}` is in the registry after registration"
+                    );
+                    let echoed = call_router_to(&runtime, id, "hello").await?;
+                    ensure!(
+                        echoed == format!("{id} echoes from extra: hello"),
+                        "`{id}` is link-dispatchable after registration: {echoed}"
+                    );
+
+                    runtime.deregister(&GuestId::from(id))?;
+                    ensure!(
+                        runtime.registry().get(&GuestId::from(id)).is_none(),
+                        "`{id}` left the registry after deregistration"
+                    );
+                    ensure!(
+                        call_router_to(&runtime, id, "hello").await.is_err(),
+                        "`{id}` is unreachable after deregistration"
+                    );
+                }
+                anyhow::Ok(())
+            }));
+        }
+        let hammer = {
+            let runtime = runtime.clone();
+            tokio::spawn(async move {
+                for _ in 0..10 {
+                    let echoed = call_router_to(&runtime, "responder", "hello").await?;
+                    ensure!(echoed == "responder echoes: hello", "static dispatch is stable");
+                }
+                anyhow::Ok(())
+            })
+        };
+
+        for churner in churners {
+            churner.await.expect("churn task")?;
+        }
+        hammer.await.expect("static dispatch task")?;
+
+        Ok(())
+    })
+}
+
+// A slow invocation that starts before deregistration completes afterward:
+// in-flight calls hold their own instance and server handles, so removal only
+// stops *new* dispatches.
+#[test]
+fn deregister_in_flight_completes() -> Result<()> {
+    fixture::RT.block_on(async {
+        let (runtime, clones) = build_runtime().await?;
+        runtime.register("extra", precompiled("guest_link_extra_wasm.wasm")?).await?;
+
+        // Measure the bundle-clone cost of one complete call (caller store +
+        // callee store): once a later call's delta reaches it, the callee's
+        // store exists, so the invocation was accepted by the serve side.
+        let before = clones.load(Ordering::SeqCst);
+        call_router_to(&runtime, "extra", "probe").await?;
+        let per_call = clones.load(Ordering::SeqCst) - before;
+        assert!(per_call > 0, "a call clones the bundle");
+
+        // Start the slow call, then wait until it is genuinely inside the
+        // callee (its clone delta reached a full call's) before deregistering.
+        let baseline = clones.load(Ordering::SeqCst);
+        let in_flight = {
+            let runtime = runtime.clone();
+            tokio::spawn(async move { call_router_to_slow(&runtime, "extra", "hello").await })
+        };
+        while clones.load(Ordering::SeqCst) < baseline + per_call {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+
+        runtime.deregister(&GuestId::from("extra"))?;
+
+        // New dispatches fail immediately...
+        call_router_to(&runtime, "extra", "again")
+            .await
+            .expect_err("a new dispatch after deregistration must fail");
+        // ...while the pending invocation completes on the handles it holds.
+        let echoed = in_flight.await.expect("in-flight call task")?;
+        assert_eq!(echoed, "extra echoes slowly from extra: hello");
+
+        Ok(())
+    })
+}
+
+// Bootstrap wires no import polyfill here (the only static guest, the
+// responder, *exports* `echo` but imports nothing), so a dynamically
+// registered router proves `polyfill_late` wires the host-mediated import
+// from the late component's own types — both the sync- and async-typed legs.
+#[test]
+fn late_import_polyfilled() -> Result<()> {
+    fixture::RT.block_on(async {
+        let responder = find_guest("guest_link_responder_wasm.wasm");
+        let manifest =
+            Manifest::new().guest(GuestEntry::new("responder", responder).link("omnia:link/echo"));
+
+        let builder = DeploymentBuilder::new().manifest(manifest).precompiled();
+        // SAFETY: `find_guest` only returns artifacts this workspace built and
+        // serialized itself (`cargo make test-guests`).
+        let deployment = unsafe { builder.build::<TestCtx>() }.await.context("building runtime")?;
+        let registry = deployment.into_registry().context("assembling registry")?;
+        let runtime = Runtime::<Counter>::from_parts(
+            Arc::new(registry),
+            Vec::new(),
+            Arc::new(MountRegistry::default()),
+            Counter::default(),
+        );
+        serve_links(&runtime).await.context("wiring link serve side")?;
+
+        // The only guest importing `omnia:link/echo` arrives after bootstrap.
+        runtime.register("router", precompiled("guest_link_router_wasm.wasm")?).await?;
+
+        let echoed = call_router(&runtime, "run", "hello").await?;
+        assert_eq!(echoed, "responder echoes: hello", "late sync-typed import dispatches");
+        let echoed = call_router(&runtime, "run-slow", "hello").await?;
+        assert_eq!(echoed, "responder echoes slowly: hello", "late async-typed import dispatches");
 
         Ok(())
     })
@@ -371,7 +565,7 @@ fn dynamic_empty_deployment() -> Result<()> {
 
         // No `link` union is declared, so there is no serve side to wire;
         // host→guest dispatch needs no transport.
-        runtime.register("extra", artifact("guest_link_extra_wasm.wasm")?).await?;
+        runtime.register("extra", precompiled("guest_link_extra_wasm.wasm")?).await?;
         let results = runtime
             .dispatcher()
             .invoke(

@@ -52,7 +52,7 @@ cargo run --example guest-link-dynamic
 cargo run --example guest-link-register
 ```
 
-This emits `target/wasm32-wasip2/debug/examples/guest_link_responder_wasm.wasm` and `guest_link_router_wasm.wasm` (the underscored names the manifest points at).
+This emits `target/wasm32-wasip2/debug/examples/guest_link_responder_wasm.wasm`, `guest_link_router_wasm.wasm`, and `guest_link_extra_wasm.wasm` (the underscored names the manifest and `register.rs` point at).
 
 The dynamic host uses the same generated runtime wiring, but supplies the
 deployment at runtime:
@@ -76,8 +76,13 @@ in-flight calls complete (instance-per-call).
 
 ```rust
 let bytes = std::fs::read(extra_wasm)?; // verified by the install pipeline
-runtime.register("extra", GuestArtifact::Wasm(bytes)).await?;
+runtime.register("extra", GuestArtifact::wasm(bytes)).await?;
 ```
+
+`GuestArtifact::wasm` is the safe constructor: raw component wasm is validated
+and compiled inside the sandbox. Its dual, `GuestArtifact::precompiled`, is
+`unsafe` — a serialized `omnia compile` artifact is native code, so the call
+site must attest the bytes came unmodified from a trusted build pipeline.
 
 ## Integration test
 

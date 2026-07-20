@@ -138,9 +138,10 @@ impl Manifest {
     }
 
     /// Validate manifest-level invariants surfaced before the registry is
-    /// built. A `dynamic` deployment may define no `[[guest]]` entries.
-    pub(super) fn validate(&self, dynamic: bool) -> Result<()> {
-        if self.guests.is_empty() && !dynamic {
+    /// built. An `allow_empty` (dynamic) deployment may define no `[[guest]]`
+    /// entries.
+    pub(super) fn validate(&self, allow_empty: bool) -> Result<()> {
+        if self.guests.is_empty() && !allow_empty {
             bail!("manifest defines no [[guest]] entries");
         }
         let mut ids = BTreeSet::new();

@@ -14,6 +14,9 @@
 //! instruction).
 
 #![cfg(not(target_arch = "wasm32"))]
+// The serialized `.bin` guests are workspace-built (`cargo make test-guests`),
+// satisfying the unsafe pre-compiled build/registration contracts.
+#![allow(unsafe_code)]
 
 mod fixture;
 

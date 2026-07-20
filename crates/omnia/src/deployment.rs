@@ -5,6 +5,7 @@ mod source;
 
 use std::collections::BTreeSet;
 use std::env;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -12,6 +13,7 @@ pub use manifest::{
     GuestEntry, HttpRoute, Manifest, Mount, RouteSpec, SourceSpec, TopicRoute, Transport,
     TransportKind,
 };
+use source::ArtifactPolicy;
 pub use source::{GuestArtifact, LoadedGuest, Source};
 use wasmtime::component::Linker;
 use wasmtime::{Config, Engine};
@@ -23,10 +25,27 @@ use crate::mount::{MountRegistry, ResolvedPreopen};
 use crate::registry::{Registry, Routes};
 use crate::{Host, Mode, RuntimeOptions, Server, Telemetry};
 
+/// Typestate for [`DeploymentBuilder`]: only raw `.wasm` sources load (the
+/// safe default).
+#[derive(Debug)]
+pub struct WasmOnly;
+
+/// Typestate for [`DeploymentBuilder`]: pre-compiled `.bin` sources are
+/// admitted, so [`build`](DeploymentBuilder::build) is `unsafe` — the call
+/// site attests every pre-compiled artifact is trusted.
+#[derive(Debug)]
+pub struct Precompiled;
+
 /// Builds a [`Deployment`] from an optional programmatic [`Manifest`].
 ///
 /// When no manifest is set, [`build`](Self::build) loads the path in
 /// `OMNIA_CONFIG`.
+///
+/// The `P` typestate selects the artifact policy: the default
+/// ([`WasmOnly`]) exposes a safe `build` that rejects pre-compiled (native)
+/// artifacts; [`precompiled`](Self::precompiled) transitions to
+/// [`Precompiled`], whose same-named `build` is `unsafe` because a
+/// pre-compiled artifact is native code the caller must trust.
 ///
 /// ```ignore
 /// let deployment = DeploymentBuilder::new()
@@ -36,21 +55,28 @@ use crate::{Host, Mode, RuntimeOptions, Server, Telemetry};
 ///     .build::<StoreCtx>()
 ///     .await?;
 /// ```
-#[derive(Debug, Default)]
-pub struct DeploymentBuilder {
+#[derive(Debug)]
+pub struct DeploymentBuilder<P = WasmOnly> {
     manifest: Option<Manifest>,
     args: Vec<String>,
     mode: Mode,
-    dynamic: bool,
+    allow_empty: bool,
+    policy: PhantomData<fn() -> P>,
 }
 
-impl DeploymentBuilder {
-    /// Start a new builder with no source selected.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
+impl Default for DeploymentBuilder<WasmOnly> {
+    fn default() -> Self {
+        Self {
+            manifest: None,
+            args: Vec::new(),
+            mode: Mode::default(),
+            allow_empty: false,
+            policy: PhantomData,
+        }
     }
+}
 
+impl<P> DeploymentBuilder<P> {
     /// Set the deployment manifest.
     #[must_use]
     pub fn manifest(mut self, manifest: impl Into<Option<Manifest>>) -> Self {
@@ -74,24 +100,24 @@ impl DeploymentBuilder {
 
     /// Mark the deployment as dynamically populated: the guest set may start
     /// empty and grow at run time via [`Runtime::register`](crate::Runtime::register).
+    ///
+    /// This only relaxes the "at least one guest" check — trigger routing
+    /// (HTTP/messaging/websocket/CLI) stays frozen at boot; registered guests
+    /// are reachable via host-mediated link dispatch and host→guest
+    /// [`Dispatcher::invoke`](crate::Dispatcher::invoke).
     #[must_use]
     pub const fn dynamic(mut self) -> Self {
-        self.dynamic = true;
+        self.allow_empty = true;
         self
     }
 
-    /// Resolve the manifest into a [`Deployment`].
-    ///
-    /// If no manifest was supplied, the path in `OMNIA_CONFIG` is loaded.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if no manifest resolves, the manifest is invalid, or
-    /// the deployment cannot be built.
-    pub async fn build<T: WasiView + 'static>(self) -> Result<Deployment<T>> {
+    /// Resolve the manifest and build the deployment under `policy`.
+    async fn build_inner<T: WasiView + 'static>(
+        self, policy: ArtifactPolicy,
+    ) -> Result<Deployment<T>> {
         let manifest = if let Some(manifest) = self.manifest {
             manifest
-        } else if self.dynamic {
+        } else if self.allow_empty {
             // A dynamic deployment may start empty and register guests later.
             Manifest::new()
         } else {
@@ -99,7 +125,7 @@ impl DeploymentBuilder {
                 .context("no deployment manifest supplied and OMNIA_CONFIG is unset")?;
             Manifest::from_config(config)?
         };
-        manifest.validate(self.dynamic)?;
+        manifest.validate(self.allow_empty)?;
 
         let plan = Plan {
             name: manifest.name().to_owned(),
@@ -109,13 +135,75 @@ impl DeploymentBuilder {
             preopens: manifest.preopens(),
             args: self.args,
             mode: self.mode,
-            dynamic: self.dynamic,
+            allow_empty: self.allow_empty,
+            policy,
         };
 
         init_env(&plan.name)?;
         tracing::info!("initializing runtime");
 
         Deployment::from_plan(plan).await
+    }
+}
+
+impl DeploymentBuilder<WasmOnly> {
+    /// Start a new builder with no source selected.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Admit pre-compiled (native) artifacts, making `build` `unsafe`.
+    ///
+    /// Only changes typestate; the trust attestation happens at the
+    /// [`Precompiled`] `build` call site.
+    #[must_use]
+    pub fn precompiled(self) -> DeploymentBuilder<Precompiled> {
+        DeploymentBuilder {
+            manifest: self.manifest,
+            args: self.args,
+            mode: self.mode,
+            allow_empty: self.allow_empty,
+            policy: PhantomData,
+        }
+    }
+
+    /// Resolve the manifest into a [`Deployment`].
+    ///
+    /// If no manifest was supplied, the path in `OMNIA_CONFIG` is loaded.
+    /// Every guest must be raw component wasm; a pre-compiled (native)
+    /// artifact is rejected — see [`precompiled`](Self::precompiled).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no manifest resolves, the manifest is invalid, a
+    /// guest names a pre-compiled artifact, or the deployment cannot be built.
+    pub async fn build<T: WasiView + 'static>(self) -> Result<Deployment<T>> {
+        self.build_inner(ArtifactPolicy::Reject).await
+    }
+}
+
+impl DeploymentBuilder<Precompiled> {
+    /// Resolve the manifest into a [`Deployment`], admitting pre-compiled
+    /// artifacts.
+    ///
+    /// If no manifest was supplied, the path in `OMNIA_CONFIG` is loaded.
+    ///
+    /// # Safety
+    ///
+    /// Every pre-compiled path this builder's manifest names must identify
+    /// trusted, immutable wasmtime output (`omnia compile` /
+    /// [`wasmtime::component::Component::serialize`]). A pre-compiled
+    /// artifact is native code: wasmtime's compatibility check is not an
+    /// authenticity check, and tampered bytes can execute arbitrary code
+    /// with host privileges.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no manifest resolves, the manifest is invalid, or
+    /// the deployment cannot be built.
+    pub async unsafe fn build<T: WasiView + 'static>(self) -> Result<Deployment<T>> {
+        self.build_inner(ArtifactPolicy::Trust).await
     }
 }
 
@@ -141,7 +229,7 @@ pub struct Deployment<T: WasiView + 'static> {
     // Whether this deployment runs a one-shot `wasi:cli` command.
     mode: Mode,
     // Whether the guest set may start empty and grow at run time.
-    dynamic: bool,
+    allow_empty: bool,
 }
 
 impl<T: WasiView + 'static> Deployment<T> {
@@ -158,9 +246,10 @@ impl<T: WasiView + 'static> Deployment<T> {
         let mounts = Arc::new(MountRegistry::open(plan.preopens)?);
 
         // Guests load (and compile) in parallel; order still follows the plan.
-        let loaded =
-            futures::future::try_join_all(plan.sources.iter().map(|source| source.load(&engine)))
-                .await?;
+        let loaded = futures::future::try_join_all(
+            plan.sources.iter().map(|source| source.load(&engine, plan.policy)),
+        )
+        .await?;
         let guests = loaded.into_iter().flatten().collect();
 
         let args = if plan.mode.is_command() {
@@ -180,7 +269,7 @@ impl<T: WasiView + 'static> Deployment<T> {
             mounts,
             args: Arc::new(args),
             mode: plan.mode,
-            dynamic: plan.dynamic,
+            allow_empty: plan.allow_empty,
         })
     }
 }
@@ -254,7 +343,7 @@ impl<T: WasiView> Deployment<T> {
             self.guests,
             self.routes,
             dispatch,
-            self.dynamic,
+            self.allow_empty,
         )
     }
 }
@@ -268,7 +357,8 @@ struct Plan {
     preopens: Vec<ResolvedPreopen>,
     args: Vec<String>,
     mode: Mode,
-    dynamic: bool,
+    allow_empty: bool,
+    policy: ArtifactPolicy,
 }
 
 // Build the shared engine, WASI-linked linker, and runtime options.

@@ -24,7 +24,7 @@ use wrpc_wasmtime::WrpcView;
 
 use crate::RuntimeOptions;
 use crate::deployment::LoadedGuest;
-use crate::dispatch::{self, DispatchHandle};
+use crate::dispatch::{self, DispatchHandle, InProcServer};
 
 /// Opaque guest identity.
 ///
@@ -146,17 +146,18 @@ impl<T: WasiView + 'static> Registry<T> {
     ///
     /// # Errors
     ///
-    /// Returns an error if there are no guests to register (unless `dynamic`),
-    /// host-mediated imports cannot be polyfilled, a component cannot be
-    /// pre-instantiated, or a route targets a guest that is not registered.
+    /// Returns an error if there are no guests to register (unless
+    /// `allow_empty`), host-mediated imports cannot be polyfilled, a component
+    /// cannot be pre-instantiated, or a route targets a guest that is not
+    /// registered.
     pub fn assemble(
         engine: Engine, mut linker: Linker<T>, options: RuntimeOptions, loaded: Vec<LoadedGuest>,
-        routes: Routes, dispatch: Arc<DispatchHandle>, dynamic: bool,
+        routes: Routes, dispatch: Arc<DispatchHandle>, allow_empty: bool,
     ) -> Result<Self>
     where
         T: WrpcView,
     {
-        if loaded.is_empty() && !dynamic {
+        if loaded.is_empty() && !allow_empty {
             bail!("cannot build a guest registry with no guests");
         }
 
@@ -244,6 +245,7 @@ impl<T: 'static> Registry<T> {
     /// Look up a guest by identity.
     #[must_use]
     pub fn get(&self, id: &GuestId) -> Option<Arc<Guest<T>>> {
+        let _lifecycle = self.dispatch.lifecycle_read();
         self.guests.read().unwrap_or_else(PoisonError::into_inner).get(id).cloned()
     }
 
@@ -252,38 +254,54 @@ impl<T: 'static> Registry<T> {
     /// runs.
     ///
     /// The order falls out of the [`BTreeMap`] keying; no per-call sort.
-    #[must_use]
-    pub fn guests(&self) -> Vec<Arc<Guest<T>>> {
-        self.guests.read().unwrap_or_else(PoisonError::into_inner).values().cloned().collect()
+    pub fn guests(&self) -> impl ExactSizeIterator<Item = Arc<Guest<T>>> {
+        let snapshot: Vec<Arc<Guest<T>>> = {
+            let _lifecycle = self.dispatch.lifecycle_read();
+            self.guests.read().unwrap_or_else(PoisonError::into_inner).values().cloned().collect()
+        };
+        snapshot.into_iter()
     }
 
-    /// Publish a late guest. Refuses an identity that is already registered
-    /// (static entries can never be shadowed; a dynamic upgrade is
-    /// deregister + register).
-    pub(crate) fn insert(&self, guest: Guest<T>) -> Result<()> {
+    /// Publish a late guest and its link endpoint as one lifecycle
+    /// transition. Refuses an identity that is already registered (static
+    /// entries can never be shadowed; a dynamic upgrade is
+    /// deregister + register); on refusal neither map is touched, so a failed
+    /// registration leaves no partial state.
+    pub(crate) fn publish(&self, guest: Guest<T>, server: Option<Arc<InProcServer>>) -> Result<()> {
         let id = guest.id().clone();
-        let inserted = {
-            let mut guests = self.guests.write().unwrap_or_else(PoisonError::into_inner);
-            match guests.entry(id.clone()) {
-                btree_map::Entry::Occupied(_) => false,
-                btree_map::Entry::Vacant(slot) => {
-                    slot.insert(Arc::new(guest));
-                    true
+        let transport = self.dispatch.transport();
+
+        // Lifecycle write first, then the inner maps (the crate-wide order).
+        let _lifecycle = self.dispatch.lifecycle_write();
+        let mut guests = self.guests.write().unwrap_or_else(PoisonError::into_inner);
+        match guests.entry(id.clone()) {
+            btree_map::Entry::Occupied(_) => bail!("guest `{id}` is already registered"),
+            btree_map::Entry::Vacant(slot) => {
+                // Endpoint before entry: `insert` refuses an occupied slot, and
+                // failing here leaves the registry map untouched.
+                if let Some(server) = server {
+                    transport.insert(&id, server)?;
                 }
+                slot.insert(Arc::new(guest));
             }
-        };
-        ensure!(inserted, "guest `{id}` is already registered");
+        }
+        drop(guests);
         Ok(())
     }
 
-    /// Remove a dynamically registered guest. Refuses static (assemble-time)
-    /// entries and unregistered identities.
+    /// Remove a dynamically registered guest and its link endpoint as one
+    /// lifecycle transition. Refuses static (assemble-time) entries and
+    /// unregistered identities.
     pub(crate) fn remove(&self, id: &GuestId) -> Result<()> {
         if self.static_ids.contains(id) {
             bail!("guest `{id}` is a static deployment entry and cannot be deregistered");
         }
+        let transport = self.dispatch.transport();
+
+        let _lifecycle = self.dispatch.lifecycle_write();
         let removed = self.guests.write().unwrap_or_else(PoisonError::into_inner).remove(id);
         ensure!(removed.is_some(), "guest `{id}` is not registered");
+        transport.remove(id);
         Ok(())
     }
 
@@ -304,12 +322,14 @@ impl<T: 'static> Registry<T> {
     /// Returns the number of registered guests.
     #[must_use]
     pub fn len(&self) -> usize {
+        let _lifecycle = self.dispatch.lifecycle_read();
         self.guests.read().unwrap_or_else(PoisonError::into_inner).len()
     }
 
     /// Returns `true` if the registry has no guests.
     #[must_use]
     pub fn is_empty(&self) -> bool {
+        let _lifecycle = self.dispatch.lifecycle_read();
         self.guests.read().unwrap_or_else(PoisonError::into_inner).is_empty()
     }
 }
@@ -325,7 +345,7 @@ mod tests {
     use crate::dispatch::FirstArgSelector;
     use crate::store::StoreCtx;
 
-    fn assemble_empty(dynamic: bool) -> Result<Registry<StoreCtx<()>>, anyhow::Error> {
+    fn assemble_empty(allow_empty: bool) -> Result<Registry<StoreCtx<()>>, anyhow::Error> {
         let options = RuntimeOptions::load().expect("options should load");
         let engine = Engine::new(&Config::from(&options)).expect("engine should build");
         let linker = Linker::<StoreCtx<()>>::new(&engine);
@@ -343,7 +363,7 @@ mod tests {
             Vec::new(),
             Routes::default(),
             dispatch,
-            dynamic,
+            allow_empty,
         )
     }
 

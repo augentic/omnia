@@ -123,11 +123,12 @@ async fn build_registry() -> Result<Arc<Registry<TestCtx>>> {
         wasm.display()
     ))?;
 
-    let mut deployment: Deployment<TestCtx> = DeploymentBuilder::new()
-        .manifest(Manifest::from_config(manifest.path())?)
-        .build()
-        .await
-        .context("building runtime")?;
+    let builder =
+        DeploymentBuilder::new().manifest(Manifest::from_config(manifest.path())?).precompiled();
+    // SAFETY: `find_guest` only returns artifacts this workspace built and
+    // serialized itself (`cargo make test-guests`).
+    let mut deployment: Deployment<TestCtx> =
+        unsafe { builder.build() }.await.context("building runtime")?;
     deployment.host::<WasiModel, TestBundle>().context("linking WasiModel")?;
     let registry = deployment.into_registry().context("assembling registry")?;
 

@@ -59,11 +59,11 @@ async fn runtime() -> Result<Runtime<Bundle>> {
         otel: OtelDefault::connect().await.context("connecting otel")?,
     };
 
-    let mut deployment = DeploymentBuilder::new()
-        .manifest(Manifest::from_config(manifest.path())?)
-        .build::<StoreCtx<Bundle>>()
-        .await
-        .context("build")?;
+    let builder =
+        DeploymentBuilder::new().manifest(Manifest::from_config(manifest.path())?).precompiled();
+    // SAFETY: `find_guest` only returns artifacts this workspace built and
+    // serialized itself (`cargo make test-guests`).
+    let mut deployment = unsafe { builder.build::<StoreCtx<Bundle>>() }.await.context("build")?;
     deployment.host::<WasiHttp, Bundle>().context("link http")?;
     deployment.host::<WasiOtel, Bundle>().context("link otel")?;
     let registry = deployment.into_registry().context("assemble registry")?;

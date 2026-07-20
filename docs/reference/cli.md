@@ -56,7 +56,7 @@ Ahead-of-time compile a `wasm32-wasip2` component to a serialized wasmtime compo
 <runtime> compile <wasm> [-o <output>]
 ```
 
-Without `-o`, the output is written next to the input with a `.bin` extension. Compile-affecting runtime options (fuel metering, memory reservation, branch hinting) must match between compile time and run time.
+Without `-o`, the output is written next to the input with a `.bin` extension. Compile-affecting runtime options (fuel metering, memory reservation, branch hinting) must match between compile time and run time. That settings match is a compatibility check, not an authenticity check: a `.bin` is native code, and every path the CLI loads one from is a trusted operator input (see the [security model](../security-model.md)).
 
 The generated `runtime!` `main` does not dispatch `compile`; call `omnia::compile` from a custom `main` to expose it.
 

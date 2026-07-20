@@ -37,17 +37,21 @@ where
 /// # Panics
 ///
 /// Panics when the guest artifact is missing (see [`find_guest`]).
+// The unsafe pre-compiled build is satisfied here: `find_guest` artifacts are
+// workspace-built (`cargo make test-guests`).
+#[allow(unsafe_code)]
 pub async fn single_guest<B>(file: &str, bundle: B) -> Result<SingleGuest<B>>
 where
     B: Clone + Send + Sync + 'static,
     StoreCtx<B>: WasiView,
 {
     let wasm = find_guest(file);
-    let deployment = DeploymentBuilder::new()
-        .manifest(Manifest::from_wasm(wasm))
-        .build::<StoreCtx<B>>()
-        .await
-        .context("building deployment")?;
+    let builder = DeploymentBuilder::new().manifest(Manifest::from_wasm(wasm)).precompiled();
+    // SAFETY: `find_guest` only returns artifacts this workspace built itself
+    // (`cargo make test-guests` compiles the example guests and serializes the
+    // `.bin` files through omnia's own compile path).
+    let deployment =
+        unsafe { builder.build::<StoreCtx<B>>() }.await.context("building deployment")?;
     Ok(SingleGuest { deployment, bundle })
 }
 

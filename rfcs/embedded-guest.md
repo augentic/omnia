@@ -30,7 +30,7 @@ and `cargo build` emits a single binary that runs its guest with plain `./mybina
 The two halves of the pipeline already exist:
 
 - **Producing cwasm** — `compile()` (`crates/omnia/src/options/compile.rs`) is the whole compiler: `Engine::new(&Config::from(&RuntimeOptions::load()?))`, `Component::from_file`, `Component::serialize`.
-- **Loading cwasm** — `load_component()` (`crates/omnia/src/deployment/source.rs`) already prefers `Component::deserialize_file` and treats raw wasm as the `jit`-gated fallback.
+- **Loading cwasm** — `load_component()` (`crates/omnia/src/deployment/source.rs`) already classifies the artifact by content (wasmtime-serialized ELF vs raw wasm) and deserializes the former; admission of pre-compiled artifacts is gated by the `DeploymentBuilder::precompiled()` typestate's unsafe `build`, since wasmtime's settings-compatibility check is not an authenticity check. An embedded artifact is trusted by construction (baked into the binary at build time), so the embedded path makes that attestation internally.
 
 What is missing is the middle:
 

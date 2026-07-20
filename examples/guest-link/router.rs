@@ -39,4 +39,11 @@ impl Guest for Router {
     fn run_to(target: String, message: String) -> String {
         omnia::link::echo::echo(&target, &message)
     }
+
+    /// The arbitrary-target dual of `run-slow`: an async-lifted call whose
+    /// callee parks on a timer, so a dispatch can be genuinely in flight when
+    /// the target is deregistered.
+    async fn run_to_slow(target: String, message: String) -> String {
+        omnia::link::echo::echo_slow(target, message).await
+    }
 }

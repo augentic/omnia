@@ -9,7 +9,7 @@ use futures::StreamExt as _;
 use wasmtime::component::types;
 use wrpc_wasmtime::ServeExt as _;
 
-use super::transport::{InProcServer, InProcess};
+use super::transport::InProcServer;
 use crate::registry::{Guest, GuestId};
 use crate::runtime::Runtime;
 use crate::store::StoreCtx;
@@ -23,15 +23,19 @@ type HostResources = HashMap<
 /// Wire the serve side of every host-mediated interface.
 ///
 /// Each target guest that exports a linked interface runs a wRPC server whose
-/// handlers instantiate the guest *fresh per call* (instance-per-call); the
-/// bound transport is then installed so polyfilled imports can reach it.
+/// handlers instantiate the guest *fresh per call* (instance-per-call); each
+/// server is then added to the bound transport carrier so polyfilled imports
+/// can reach it. [`Runtime::new`](crate::Runtime::new) calls this during
+/// bootstrap; only a runtime assembled through
+/// [`Runtime::from_parts`](crate::Runtime::from_parts) wires it explicitly.
 ///
 /// Spawns one detached task per served function to drain its invocation stream.
 /// A no-op when no guest declares any `link` interface.
 ///
 /// # Errors
 ///
-/// Returns an error if a guest's export cannot be served over the carrier.
+/// Returns an error if a guest's export cannot be served over the carrier, or
+/// if a served guest already has an endpoint (`serve_links` ran twice).
 pub async fn serve_links<B>(state: &Runtime<B>) -> Result<()>
 where
     B: Clone + Send + Sync + 'static,
@@ -49,7 +53,12 @@ where
         }
     }
 
-    handle.install(InProcess::new(servers));
+    // Publish every bootstrap endpoint as one lifecycle transition.
+    let transport = handle.transport();
+    let _lifecycle = handle.lifecycle_write();
+    for (id, server) in servers {
+        transport.insert(&id, server)?;
+    }
     Ok(())
 }
 
@@ -57,8 +66,8 @@ where
 /// wRPC server — `None` when the guest exports no linked interface.
 ///
 /// Shared by the bootstrap walk above and by dynamic registration
-/// (serve-at-register), which inserts the returned server into the carrier's
-/// map before publishing the registry entry.
+/// (serve-at-register), which hands the returned server to the registry's
+/// transactional publish so endpoint and registry entry appear as one step.
 ///
 /// # Errors
 ///

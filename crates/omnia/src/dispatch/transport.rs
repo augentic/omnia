@@ -68,31 +68,42 @@ pub trait LinkTransport: Send + Sync + 'static {
 ///
 /// The server map is `Arc`-shared behind interior mutability so a guest
 /// registered after bootstrap gains an endpoint on every clone of the carrier
-/// (serve-at-register).
-#[derive(Clone, Default)]
+/// (serve-at-register). Reads additionally pass through the shared lifecycle
+/// gate, so a lookup never observes a half-applied register or deregister;
+/// mutations run with the lifecycle write guard already held by the caller
+/// (the registry's transactional publish/remove).
+#[derive(Clone)]
 pub struct InProcess {
     servers: Arc<RwLock<HashMap<GuestId, Arc<InProcServer>>>>,
+    // The dispatch handle's lifecycle gate (see `DispatchHandle::lifecycle`).
+    // Lock order: lifecycle first, then `servers` — never the reverse.
+    lifecycle: Arc<RwLock<()>>,
 }
 
 impl InProcess {
-    /// Assemble the carrier from per-target servers (each already wired with its
-    /// served exports by [`super::serve_links`]).
+    /// Create an empty carrier sharing the dispatch handle's lifecycle gate;
+    /// [`super::serve_links`] and dynamic registration populate it.
     #[must_use]
-    pub fn new(servers: HashMap<GuestId, Arc<InProcServer>>) -> Self {
+    pub(crate) fn new(lifecycle: Arc<RwLock<()>>) -> Self {
         Self {
-            servers: Arc::new(RwLock::new(servers)),
+            servers: Arc::new(RwLock::new(HashMap::new())),
+            lifecycle,
         }
     }
 
     /// Returns the wRPC server serving `target`'s host-mediated exports, if any.
     #[must_use]
     pub fn server(&self, target: &GuestId) -> Option<Arc<InProcServer>> {
+        let _lifecycle = self.lifecycle.read().unwrap_or_else(PoisonError::into_inner);
         self.servers.read().unwrap_or_else(PoisonError::into_inner).get(target).cloned()
     }
 
     /// Add the endpoint serving `target`'s host-mediated exports, refusing an
-    /// occupied slot so a failed registration can never clobber (and later
-    /// roll back) an existing guest's endpoint.
+    /// occupied slot so a registration can never clobber an existing guest's
+    /// endpoint.
+    ///
+    /// The caller must hold the lifecycle write guard (this method takes only
+    /// the inner map lock, so taking the gate here would deadlock).
     pub(crate) fn insert(&self, target: &GuestId, server: Arc<InProcServer>) -> Result<()> {
         let inserted = {
             let mut servers = self.servers.write().unwrap_or_else(PoisonError::into_inner);
@@ -110,6 +121,8 @@ impl InProcess {
 
     /// Remove `target`'s endpoint; in-flight invocations hold their own
     /// server [`Arc`] and complete.
+    ///
+    /// The caller must hold the lifecycle write guard.
     pub(crate) fn remove(&self, target: &GuestId) {
         self.servers.write().unwrap_or_else(PoisonError::into_inner).remove(target);
     }

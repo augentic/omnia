@@ -25,7 +25,7 @@ pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 pub use self::cli::{Cli, Command};
 pub use self::deployment::{
     Deployment, DeploymentBuilder, GuestArtifact, GuestEntry, HttpRoute, Manifest, Mount,
-    RouteSpec, SourceSpec, TopicRoute, Transport, TransportKind,
+    Precompiled, RouteSpec, SourceSpec, TopicRoute, Transport, TransportKind, WasmOnly,
 };
 pub use self::dispatch::{
     Dispatcher, FirstArgSelector, GuestSelector, LinkClient, WrpcState, serve_links,
@@ -40,7 +40,7 @@ pub use self::registry::{
 };
 pub use self::runtime::{Backends, ExitStatus, Mode, Runtime, Wiring};
 #[doc(hidden)]
-pub use self::runtime::{main, run};
+pub use self::runtime::{main, run, run_precompiled};
 pub use self::store::{
     HasDispatcher, HasHttp, HasLimits, HasMounts, StoreBase, StoreBaseBuilder, StoreCtx,
 };
