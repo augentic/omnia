@@ -21,8 +21,8 @@ use anyhow::{Context as _, Result, bail};
 use futures::FutureExt as _;
 use omnia::wasmtime::StoreLimitsBuilder;
 use omnia::{
-    Backend, Deployment, DeploymentBuilder, GuestId, MountRegistry, Registry, ResolvedPreopen,
-    Runtime, StoreBase, StoreCtx, WrpcState,
+    Backend, Deployment, DeploymentBuilder, GuestId, Manifest, MountRegistry, Registry,
+    ResolvedPreopen, Runtime, StoreBase, StoreCtx, WrpcState,
 };
 use omnia_testkit::model::Scripted;
 use omnia_testkit::{find_guest, temp_manifest};
@@ -123,11 +123,12 @@ async fn build_registry() -> Result<Arc<Registry<TestCtx>>> {
         wasm.display()
     ))?;
 
-    let mut deployment: Deployment<TestCtx> = DeploymentBuilder::new()
-        .config(manifest.path().to_path_buf())
-        .build()
-        .await
-        .context("building runtime")?;
+    let builder =
+        DeploymentBuilder::new().manifest(Manifest::from_config(manifest.path())?).precompiled();
+    // SAFETY: `find_guest` only returns artifacts this workspace built and
+    // serialized itself (`cargo make test-guests`).
+    let mut deployment: Deployment<TestCtx> =
+        unsafe { builder.build() }.await.context("building runtime")?;
     deployment.host::<WasiModel, TestBundle>().context("linking WasiModel")?;
     let registry = deployment.into_registry().context("assembling registry")?;
 

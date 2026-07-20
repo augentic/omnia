@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
 use omnia::wasmtime_wasi::ResourceTable;
-use omnia::{Backend as _, DeploymentBuilder, HasHttp, MountRegistry, Runtime, StoreCtx};
+use omnia::{Backend as _, DeploymentBuilder, HasHttp, Manifest, MountRegistry, Runtime, StoreCtx};
 use omnia_testkit::{find_guest, http, temp_manifest};
 use omnia_wasi_http::{HttpDefault, WasiHttp, WasiHttpCtxView};
 use omnia_wasi_otel::{HasOtel, OtelDefault, WasiOtel, WasiOtelCtx};
@@ -59,11 +59,11 @@ async fn runtime() -> Result<Runtime<Bundle>> {
         otel: OtelDefault::connect().await.context("connecting otel")?,
     };
 
-    let mut deployment = DeploymentBuilder::new()
-        .config(manifest.path().to_path_buf())
-        .build::<StoreCtx<Bundle>>()
-        .await
-        .context("build")?;
+    let builder =
+        DeploymentBuilder::new().manifest(Manifest::from_config(manifest.path())?).precompiled();
+    // SAFETY: `find_guest` only returns artifacts this workspace built and
+    // serialized itself (`cargo make test-guests`).
+    let mut deployment = unsafe { builder.build::<StoreCtx<Bundle>>() }.await.context("build")?;
     deployment.host::<WasiHttp, Bundle>().context("link http")?;
     deployment.host::<WasiOtel, Bundle>().context("link otel")?;
     let registry = deployment.into_registry().context("assemble registry")?;

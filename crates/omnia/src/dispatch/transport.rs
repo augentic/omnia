@@ -17,9 +17,10 @@
 //! [`Oneshot`](wrpc_transport::frame::Oneshot).
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::hash_map::Entry;
+use std::sync::{Arc, PoisonError, RwLock};
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, ensure};
 use tokio::io::{DuplexStream, ReadHalf, WriteHalf, split};
 use wasmtime::component::ResourceTable;
 use wrpc_transport::frame::{Oneshot, Server};
@@ -64,23 +65,66 @@ pub trait LinkTransport: Send + Sync + 'static {
 
 /// The co-located fast transport: every target's exports are served over a wRPC
 /// [`Server`] reachable through an in-memory byte pipe.
-#[derive(Clone, Default)]
+///
+/// The server map is `Arc`-shared behind interior mutability so a guest
+/// registered after bootstrap gains an endpoint on every clone of the carrier
+/// (serve-at-register). Reads additionally pass through the shared lifecycle
+/// gate, so a lookup never observes a half-applied register or deregister;
+/// mutations run with the lifecycle write guard already held by the caller
+/// (the registry's transactional publish/remove).
+#[derive(Clone)]
 pub struct InProcess {
-    servers: HashMap<GuestId, Arc<InProcServer>>,
+    servers: Arc<RwLock<HashMap<GuestId, Arc<InProcServer>>>>,
+    // The dispatch handle's lifecycle gate (see `DispatchHandle::lifecycle`).
+    // Lock order: lifecycle first, then `servers` — never the reverse.
+    lifecycle: Arc<RwLock<()>>,
 }
 
 impl InProcess {
-    /// Assemble the carrier from per-target servers (each already wired with its
-    /// served exports by [`super::serve_links`]).
+    /// Create an empty carrier sharing the dispatch handle's lifecycle gate;
+    /// [`super::serve_links`] and dynamic registration populate it.
     #[must_use]
-    pub const fn new(servers: HashMap<GuestId, Arc<InProcServer>>) -> Self {
-        Self { servers }
+    pub(crate) fn new(lifecycle: Arc<RwLock<()>>) -> Self {
+        Self {
+            servers: Arc::new(RwLock::new(HashMap::new())),
+            lifecycle,
+        }
     }
 
     /// Returns the wRPC server serving `target`'s host-mediated exports, if any.
     #[must_use]
-    pub fn server(&self, target: &GuestId) -> Option<&Arc<InProcServer>> {
-        self.servers.get(target)
+    pub fn server(&self, target: &GuestId) -> Option<Arc<InProcServer>> {
+        let _lifecycle = self.lifecycle.read().unwrap_or_else(PoisonError::into_inner);
+        self.servers.read().unwrap_or_else(PoisonError::into_inner).get(target).cloned()
+    }
+
+    /// Add the endpoint serving `target`'s host-mediated exports, refusing an
+    /// occupied slot so a registration can never clobber an existing guest's
+    /// endpoint.
+    ///
+    /// The caller must hold the lifecycle write guard (this method takes only
+    /// the inner map lock, so taking the gate here would deadlock).
+    pub(crate) fn insert(&self, target: &GuestId, server: Arc<InProcServer>) -> Result<()> {
+        let inserted = {
+            let mut servers = self.servers.write().unwrap_or_else(PoisonError::into_inner);
+            match servers.entry(target.clone()) {
+                Entry::Occupied(_) => false,
+                Entry::Vacant(slot) => {
+                    slot.insert(server);
+                    true
+                }
+            }
+        };
+        ensure!(inserted, "guest `{target}` already has an in-process endpoint");
+        Ok(())
+    }
+
+    /// Remove `target`'s endpoint; in-flight invocations hold their own
+    /// server [`Arc`] and complete.
+    ///
+    /// The caller must hold the lifecycle write guard.
+    pub(crate) fn remove(&self, target: &GuestId) {
+        self.servers.write().unwrap_or_else(PoisonError::into_inner).remove(target);
     }
 }
 
@@ -138,12 +182,12 @@ impl LinkTransport for InProcess {
     type Client = InProcClient;
 
     fn connect(&self, target: &GuestId) -> Result<Self::Client> {
-        let server = Arc::clone(self.server(target).with_context(|| {
+        let server = self.server(target).with_context(|| {
             format!(
                 "no in-process endpoint serves guest `{target}` (is it registered and does it \
                      export the linked interface?)"
             )
-        })?);
+        })?;
 
         // A fresh pipe per call: the client half drives this invocation; the
         // server half is accepted onto the target's wRPC server, which

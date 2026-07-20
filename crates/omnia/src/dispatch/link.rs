@@ -18,18 +18,15 @@ use super::handle::DispatchHandle;
 use super::transport::LinkTransport as _;
 use super::value::read_plain_value;
 use crate::deployment::LoadedGuest;
+use crate::registry::GuestId;
 
 /// Polyfill every host-mediated import named in the `link` allow-list union onto
-/// the shared linker, bound to the dispatch handle.
+/// the shared linker, bound to the dispatch handle, returning the set of
+/// interfaces wired.
 ///
 /// Each interface is linked exactly once (the linker is shared, so the per-guest
 /// allow-lists are unioned). `wasi:*` imports are never touched here — they are
 /// host-satisfied — so only the manifest-declared interfaces are dispatched.
-///
-/// Registration matches the import's type-level asyncness: a plain `func` is
-/// polyfilled with `func_new_async` ([`send`]), an `async func` with
-/// `func_new_concurrent` ([`send_concurrent`]) — the sync-typed registration
-/// would fail the pre-instantiation asyncness typecheck.
 ///
 /// Runs *before* pre-instantiation, so an import that is neither host-satisfied
 /// nor allow-listed remains unresolved and fails fast at `instantiate_pre`.
@@ -40,6 +37,34 @@ use crate::deployment::LoadedGuest;
 /// function cannot be defined on the linker.
 pub fn link<T>(
     engine: &Engine, linker: &mut Linker<T>, guests: &[LoadedGuest], handle: &Arc<DispatchHandle>,
+) -> Result<BTreeSet<Box<str>>>
+where
+    T: WasiView + WrpcView + 'static,
+{
+    let mut wired: BTreeSet<Box<str>> = BTreeSet::new();
+    if handle.links().is_empty() {
+        return Ok(wired);
+    }
+
+    for LoadedGuest { id, component } in guests {
+        polyfill_component(engine, linker, id, component, handle, &mut wired)?;
+    }
+    Ok(wired)
+}
+
+/// Polyfill a late (dynamically registered) component's allow-listed imports
+/// onto `linker` — a clone of the shared linker, so the interfaces the
+/// bootstrap already `wired` are skipped and the shared linker is never
+/// mutated after assembly.
+///
+/// # Errors
+///
+/// Returns an error if a named link target is not an interface import, or if a
+/// function cannot be defined on the linker.
+pub fn polyfill_late<T>(
+    engine: &Engine, linker: &mut Linker<T>, id: &GuestId,
+    component: &wasmtime::component::Component, handle: &Arc<DispatchHandle>,
+    bootstrap_wired: &BTreeSet<Box<str>>,
 ) -> Result<()>
 where
     T: WasiView + WrpcView + 'static,
@@ -47,76 +72,90 @@ where
     if handle.links().is_empty() {
         return Ok(());
     }
+    let mut wired = bootstrap_wired.clone();
+    polyfill_component(engine, linker, id, component, handle, &mut wired)
+}
 
-    let mut wired: BTreeSet<Box<str>> = BTreeSet::new();
-    for LoadedGuest { id, component } in guests {
-        let component_ty = component.component_type();
-        for (name, types::ComponentExtern { ty, .. }) in component_ty.imports(engine) {
-            if !handle.links().contains(name) || wired.contains(name) {
-                continue;
-            }
-            let types::ComponentItem::ComponentInstance(instance_ty) = ty else {
-                bail!("link target `{name}` (imported by guest `{id}`) is not an interface");
-            };
+/// Polyfill one component's link-union imports not already in `wired`.
+///
+/// Registration matches the import's type-level asyncness: a plain `func` is
+/// polyfilled with `func_new_async` ([`send`]), an `async func` with
+/// `func_new_concurrent` ([`send_concurrent`]) — the sync-typed registration
+/// would fail the pre-instantiation asyncness typecheck.
+fn polyfill_component<T>(
+    engine: &Engine, linker: &mut Linker<T>, id: &GuestId,
+    component: &wasmtime::component::Component, handle: &Arc<DispatchHandle>,
+    wired: &mut BTreeSet<Box<str>>,
+) -> Result<()>
+where
+    T: WasiView + WrpcView + 'static,
+{
+    let component_ty = component.component_type();
+    for (name, types::ComponentExtern { ty, .. }) in component_ty.imports(engine) {
+        if !handle.links().contains(name) || wired.contains(name) {
+            continue;
+        }
+        let types::ComponentItem::ComponentInstance(instance_ty) = ty else {
+            bail!("link target `{name}` (imported by guest `{id}`) is not an interface");
+        };
 
-            // Snapshot the interface's function names and asyncness before
-            // mutably borrowing the linker.
-            let funcs: Vec<(Arc<str>, bool)> = instance_ty
-                .exports(engine)
-                .filter_map(|(func, types::ComponentExtern { ty, .. })| match ty {
-                    types::ComponentItem::ComponentFunc(ty) => Some((Arc::from(func), ty.async_())),
-                    _ => None,
+        // Snapshot the interface's function names and asyncness before
+        // mutably borrowing the linker.
+        let funcs: Vec<(Arc<str>, bool)> = instance_ty
+            .exports(engine)
+            .filter_map(|(func, types::ComponentExtern { ty, .. })| match ty {
+                types::ComponentItem::ComponentFunc(ty) => Some((Arc::from(func), ty.async_())),
+                _ => None,
+            })
+            .collect();
+
+        let mut root = linker.root();
+        let mut interface = root
+            .instance(name)
+            .map_err(anyhow::Error::from)
+            .with_context(|| format!("defining host-mediated interface `{name}`"))?;
+        let iface_name: Arc<str> = Arc::from(name);
+
+        for (func, is_async) in &funcs {
+            let handle = Arc::clone(handle);
+            let iface_name = Arc::clone(&iface_name);
+            let func_name = Arc::clone(func);
+            let registered = if *is_async {
+                interface.func_new_concurrent(func, move |accessor, ty, params, results| {
+                    let handle = Arc::clone(&handle);
+                    let iface_name = Arc::clone(&iface_name);
+                    let func_name = Arc::clone(&func_name);
+                    Box::pin(async move {
+                        send_concurrent(
+                            accessor,
+                            &handle,
+                            &iface_name,
+                            &func_name,
+                            &ty,
+                            params,
+                            results,
+                        )
+                        .await
+                        .map_err(wasmtime::Error::from_anyhow)
+                    })
                 })
-                .collect();
-
-            let mut root = linker.root();
-            let mut interface = root
-                .instance(name)
-                .map_err(anyhow::Error::from)
-                .with_context(|| format!("defining host-mediated interface `{name}`"))?;
-            let iface_name: Arc<str> = Arc::from(name);
-
-            for (func, is_async) in &funcs {
-                let handle = Arc::clone(handle);
-                let iface_name = Arc::clone(&iface_name);
-                let func_name = Arc::clone(func);
-                let registered = if *is_async {
-                    interface.func_new_concurrent(func, move |accessor, ty, params, results| {
-                        let handle = Arc::clone(&handle);
-                        let iface_name = Arc::clone(&iface_name);
-                        let func_name = Arc::clone(&func_name);
-                        Box::pin(async move {
-                            send_concurrent(
-                                accessor,
-                                &handle,
-                                &iface_name,
-                                &func_name,
-                                &ty,
-                                params,
-                                results,
-                            )
+            } else {
+                interface.func_new_async(func, move |store, ty, params, results| {
+                    let handle = Arc::clone(&handle);
+                    let iface_name = Arc::clone(&iface_name);
+                    let func_name = Arc::clone(&func_name);
+                    Box::new(async move {
+                        send(store, &handle, &iface_name, &func_name, &ty, params, results)
                             .await
                             .map_err(wasmtime::Error::from_anyhow)
-                        })
                     })
-                } else {
-                    interface.func_new_async(func, move |store, ty, params, results| {
-                        let handle = Arc::clone(&handle);
-                        let iface_name = Arc::clone(&iface_name);
-                        let func_name = Arc::clone(&func_name);
-                        Box::new(async move {
-                            send(store, &handle, &iface_name, &func_name, &ty, params, results)
-                                .await
-                                .map_err(wasmtime::Error::from_anyhow)
-                        })
-                    })
-                };
-                registered
-                    .map_err(anyhow::Error::from)
-                    .with_context(|| format!("polyfilling `{name}` function `{func}`"))?;
-            }
-            wired.insert(Box::from(name));
+                })
+            };
+            registered
+                .map_err(anyhow::Error::from)
+                .with_context(|| format!("polyfilling `{name}` function `{func}`"))?;
         }
+        wired.insert(Box::from(name));
     }
     Ok(())
 }
@@ -159,7 +198,7 @@ where
         param_types.len()
     );
 
-    let client = handle.transport()?.connect(&target)?;
+    let client = handle.transport().connect(&target)?;
 
     // Encode the forwarded parameters with wRPC's value codec.
     let mut buf = BytesMut::new();
@@ -258,7 +297,7 @@ where
         param_types.len()
     );
 
-    let client = handle.transport()?.connect(&target)?;
+    let client = handle.transport().connect(&target)?;
 
     // Encode the forwarded parameters with wRPC's value codec.
     let mut buf = BytesMut::new();

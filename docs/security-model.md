@@ -13,6 +13,24 @@ The boundary sits between the **guest** (WebAssembly, untrusted) and the **host*
 
 Capability granting is therefore the host author's main security decision: the `hosts:` map in `runtime!` *is* the guest's permission set. A guest that only needs key-value storage should run in a host that links only `WasiKeyValue` (plus a trigger).
 
+## Deployment inputs are trusted
+
+The manifest sits on the *host* side of the trust boundary. Whether it arrives as an `omnia.toml` file or is assembled programmatically as an `omnia::Manifest`, it chooses which guest artifacts load, which host directories mount (including `writable`), and which interfaces the host dispatches between guests. Manifest validation is structural (at least one guest, unique ids, in-process transport) — it is **not** authorization. Never build a manifest from untrusted data.
+
+Guest artifacts split into two trust classes:
+
+- **Raw `.wasm`** is validated and compiled by wasmtime and runs inside the sandbox described above. It is the format to accept from less-trusted sources — the artifact can use every host capability the runtime compiled in and its imports allow, but it cannot escape the sandbox.
+- **Pre-compiled `.bin`** is native code, loaded via wasmtime's `unsafe` deserialization. Wasmtime's compatibility check (rejecting artifacts built with mismatched compile-affecting settings) is *not* an authenticity check: a malicious `.bin` is arbitrary native code running with host privileges. Load `.bin` only from trusted, immutable storage — signed or digest-pinned artifacts your build pipeline produced.
+
+The API enforces this split. The default `DeploymentBuilder` build and `GuestArtifact::wasm` are safe and accept only raw wasm; admitting a pre-compiled artifact requires an explicit `unsafe` attestation at the call site — `DeploymentBuilder::precompiled()` followed by its `unsafe build`, or `unsafe GuestArtifact::precompiled` for dynamic registration. The CLI (`omnia run`) makes that attestation itself, because everything an operator passes it is by definition an operator-privilege input.
+
+Two further consequences of dynamic loading:
+
+- **Artifacts are read at startup.** A guest path can be substituted between manifest construction and load; prefer immutable or content-addressed artifact locations, especially for `.bin`.
+- **Startup cost is unbounded by the runtime.** Nothing caps the manifest's guest count or artifact sizes; compilation cost at startup is bounded only by what the manifest names — another reason the manifest is an operator-privilege input.
+
+Note also that `link` allow-lists flatten onto the one shared linker: an interface linked for *any* guest is wired for the *whole* deployment. Treat `link` (per-guest, top-level, or CLI `--link`) as a deployment-level grant, not a per-guest ACL.
+
 ## Isolation between requests and guests
 
 Every invocation runs in a **fresh instance in its own store**, torn down afterwards. Consequences:
@@ -70,6 +88,8 @@ Honest limits, so you can layer the right controls on top:
 
 ## Defence-in-depth checklist
 
+- [ ] Treat manifests and pre-compiled `.bin` artifacts as trusted operator inputs; never build either from untrusted data
+- [ ] Accept only raw `.wasm` from less-trusted sources, and run it with minimal hosts and read-only mounts
 - [ ] Link only the interfaces each deployment's guests need
 - [ ] Mount the minimum directory set, read-only unless writes are required
 - [ ] Keep resource ceilings meaningful for the workload (don't blanket-raise timeouts and memory)

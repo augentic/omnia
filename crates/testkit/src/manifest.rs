@@ -16,7 +16,7 @@ pub struct TempManifest {
 }
 
 impl TempManifest {
-    /// The manifest path, to pass to [`omnia::DeploymentBuilder::config`].
+    /// The manifest path, to pass to [`omnia::Manifest::from_config`].
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path

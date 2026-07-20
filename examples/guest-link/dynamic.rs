@@ -1,0 +1,32 @@
+//! Host-mediated linking with a programmatically assembled deployment manifest.
+
+use std::path::Path;
+
+use omnia::{DeploymentBuilder, GuestEntry, Manifest};
+use omnia_wasi_http::{HttpDefault, WasiHttp};
+use omnia_wasi_otel::{OtelDefault, WasiOtel};
+
+mod host {
+    use super::*;
+
+    omnia::runtime!({
+        hosts: {
+            WasiHttp: HttpDefault,
+            WasiOtel: OtelDefault,
+        }
+    });
+}
+
+fn main() -> anyhow::Result<()> {
+    let artifacts =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/wasm32-wasip2/debug/examples");
+    let manifest = Manifest::new()
+        .guest(GuestEntry::new("responder", artifacts.join("guest_link_responder_wasm.wasm")))
+        .guest(
+            GuestEntry::new("router", artifacts.join("guest_link_router_wasm.wasm"))
+                .link("omnia:link/echo"),
+        );
+
+    host::run(DeploymentBuilder::new().manifest(manifest))?;
+    Ok(())
+}

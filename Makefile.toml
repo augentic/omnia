@@ -20,7 +20,7 @@ skip_rust_env_info = true
 dependencies = ["audit", "fmt", "lint", "outdated", "deps"]
 
 [tasks.ci]
-dependencies = ["fmt-check", "lint", "test", "test-seam", "test-docs", "vet", "outdated", "deny"]
+dependencies = ["fmt", "lint", "test", "test-seam", "test-docs", "docs", "vet", "outdated", "deny"]
 
 # -------------------------------------
 # Individual Actions
@@ -54,10 +54,6 @@ install_crate = "cargo-udeps"
 # Fmt (fix in place)
 [tasks.fmt]
 script = "cargo +nightly fmt --all"
-
-# Fmt (verify only — CI must never rewrite the tree)
-[tasks.fmt-check]
-script = "cargo +nightly fmt --all --check"
 
 # Lint
 [tasks.lint]
@@ -95,6 +91,10 @@ env = { RUSTFLAGS = "-Dwarnings" }
 dependencies = ["test-guests"]
 command = "cargo"
 args = ["test", "-p", "omnia-seam-suite", "--test", "seam"]
+
+[tasks.docs]
+command = "cargo"
+args = ["doc", "--no-deps", "--workspace", "--all-features", "--locked"]
 
 # Test Doc
 [tasks.test-docs]

@@ -50,6 +50,8 @@ It's probably running fine — startup logs are at `info` and off by default. Se
 
 The `run` subcommand needs either a positional `.wasm`/`.bin` path or a manifest via `--config`/`OMNIA_CONFIG`. Also check argument order: flags for the *host* go before `--`, guest argv after it.
 
+The embedder-path variant — `no deployment manifest supplied and OMNIA_CONFIG is unset` — means a `DeploymentBuilder` was built without `.manifest(...)` and no `OMNIA_CONFIG` fallback was available.
+
 ### `Address already in use` on startup
 
 Another process holds the trigger port. `HTTP_ADDR` (default `0.0.0.0:8080`) and `WEBSOCKET_ADDR` (default `0.0.0.0:80` — a privileged port; set it explicitly on dev machines) control the bindings.
@@ -68,7 +70,7 @@ Only `in-process` is a valid `[transport] default`. Remove `unix`/`nats`/`quic` 
 
 ### The manifest loads but paths don't resolve
 
-Manifest-relative resolution: `source.path` and `[[mount]] path` resolve against the **manifest's directory**, not the working directory. CLI `--mount` paths resolve against the working directory. Mixing the two is the usual cause of "file not found" after a `cd`.
+Manifest-relative resolution: `source.path` and `[[mount]] path` in a manifest *file* resolve against the **manifest's directory**, not the working directory. CLI `--mount` paths and relative paths in a programmatically built `Manifest` resolve against the working directory. Mixing the two is the usual cause of "file not found" after a `cd`.
 
 ## Running guests
 

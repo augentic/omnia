@@ -57,7 +57,12 @@ Production backend variables (Redis, Kafka, Azure, ...) are listed in [Productio
 
 Selected by `--config <path>` or `OMNIA_CONFIG`, or compiled in as a default via the `runtime!` macro's `config:` field (see [Composing a Runtime](../guides/composing-a-runtime.md#default-manifest-config)). The manifest is sparse: every section is optional except at least one `[[guest]]`, and omitted fields fall back to defaults. All relative paths resolve against the manifest's directory.
 
+The same schema is constructible programmatically as an `omnia::Manifest` value (`Manifest::new()` with the fluent `guest`/`mounts`/`links`/`route_*` setters, or `Manifest::from_wasm` for the one-guest shorthand) and passed to `DeploymentBuilder::new().manifest(...)` — see [Multi-Guest Deployments](../guides/multi-guest-deployments.md#programmatic-manifests). Either way, the invariants (at least one guest, unique ids, in-process transport) are validated when the deployment is built.
+
 ```toml
+# --- Deployment-wide links (optional) ---------------------------------
+link = ["omnia:shared/log"]         # host-mediated imports any guest may call
+
 # --- Guests (required, repeatable) -----------------------------------
 [[guest]]
 id = "router"                       # opaque identity; never parsed by the runtime
@@ -96,7 +101,8 @@ Field notes:
 
 - **`guest.id`** — opaque to the runtime core; routing and linking refer to it.
 - **`guest.source`** — `source.path` is implemented; `source.oci` parses but is rejected with "not yet supported".
-- **`guest.link`** — interfaces the host polyfills onto the shared linker and dispatches to whichever guest exports them. Unioned with CLI `--link` values.
+- **`link`** (top-level) — deployment-wide host-mediated interfaces, unioned with the per-guest lists and CLI `--link` values.
+- **`guest.link`** — interfaces the host polyfills onto the shared linker and dispatches to whichever guest exports them. The linker is shared, so an interface linked for one guest is wired for the whole deployment.
 - **`mount`** — preopened into *every* guest sandbox. CLI `--mount` entries layer on top; a duplicate guest-visible name wins over the manifest.
 - **`route.*`** — if a trigger has no routes and exactly one guest exports its handler, that guest is the catch-all. `[[route.cli]]` is not yet parsed; a sole `wasi:cli/run` exporter receives command-mode invocations.
 - **`transport`** — `unix`, `nats`, and `quic` are reserved for distributed dispatch and rejected at load today.

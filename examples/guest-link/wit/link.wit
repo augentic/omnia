@@ -34,8 +34,12 @@ world responder {
 /// The router guest: imports the host-mediated `echo` and exposes plain `run` /
 /// `run-slow` entries that call it. `run-slow` is itself async-lifted — a
 /// sync-lifted export cannot call the async-typed `echo-slow` import.
+/// `run-to` / `run-to-slow` forward an arbitrary target, reaching guests
+/// registered after startup (dynamic registration).
 world router {
     import echo;
     export run: func(message: string) -> string;
     export run-slow: async func(message: string) -> string;
+    export run-to: func(target: string, message: string) -> string;
+    export run-to-slow: async func(target: string, message: string) -> string;
 }

@@ -14,11 +14,14 @@ use wasmtime::component::{Instance, InstancePre};
 use wasmtime::{Engine, Store};
 
 use crate::cli::{Cli, Command};
-use crate::dispatch::serve_links;
+use crate::deployment::GuestArtifact;
+use crate::dispatch::{serve_guest, serve_links};
 use crate::mount::MountRegistry;
+use crate::registry::{Guest, GuestId};
 use crate::store::HasLimits;
 use crate::{
-    Deployment, DeploymentBuilder, Dispatcher, Registry, RuntimeOptions, StoreBase, StoreCtx,
+    Deployment, DeploymentBuilder, Dispatcher, Manifest, Registry, RuntimeOptions, StoreBase,
+    StoreCtx,
 };
 
 /// A deployment's connected backend bundle, threaded into [`Runtime`].
@@ -96,15 +99,44 @@ where
             links,
             args,
         } => {
-            let builder = DeploymentBuilder::new()
-                .wasm(wasm)
-                .config(config)
-                .default_config(default_config)
-                .args(args)
-                .mounts(mounts)
-                .links(links)
-                .mode(mode);
-            match run::<B, H>(builder).await {
+            let config = config.or_else(|| env::var_os("OMNIA_CONFIG").map(Into::into));
+            let manifest = config
+                .map_or_else(
+                    || {
+                        wasm.map_or_else(
+                            || {
+                                default_config
+                                    .context(
+                                        "no guest specified: pass a <wasm> path, or --config \
+                                         <omnia.toml> (or set OMNIA_CONFIG)",
+                                    )
+                                    .and_then(Manifest::from_config)
+                            },
+                            |wasm| Ok(Manifest::from_wasm(wasm)),
+                        )
+                    },
+                    Manifest::from_config,
+                )
+                .map(|manifest| manifest.mounts(mounts).links(links));
+
+            let result = match manifest {
+                Ok(manifest) => {
+                    // The CLI path admits pre-compiled artifacts: manifests and
+                    // `.bin` paths given to the binary are trusted operator
+                    // inputs (docs/security-model.md).
+                    let builder = DeploymentBuilder::new()
+                        .manifest(manifest)
+                        .args(args)
+                        .mode(mode)
+                        .precompiled();
+                    // SAFETY: the operator running this binary chose the
+                    // manifest and artifact paths; pre-compiled artifacts are
+                    // documented trusted inputs produced by `omnia compile`.
+                    unsafe { run_precompiled::<B, H>(builder) }.await
+                }
+                Err(error) => Err(error),
+            };
+            match result {
                 Ok(status) => status.into(),
                 Err(error) => {
                     eprintln!("{error:#}");
@@ -125,6 +157,11 @@ where
 
 /// Build runtime state, bootstrap it, then run command mode or every trigger server.
 ///
+/// The default ([`WasmOnly`](crate::WasmOnly)) builder only loads raw wasm; a
+/// deployment of trusted pre-compiled artifacts builds its [`Deployment`]
+/// through the [`Precompiled`](crate::Precompiled) typestate's unsafe `build`
+/// (as the generated CLI `main` does).
+///
 /// # Errors
 ///
 /// Returns an error if the deployment cannot be built, runtime state cannot be
@@ -135,6 +172,47 @@ where
     H: Wiring<B>,
 {
     let deployment = builder.build::<StoreCtx<B>>().await.context("building runtime")?;
+    drive::<B, H>(deployment).await
+}
+
+/// [`run`] for a deployment of trusted pre-compiled artifacts.
+///
+/// The [`Precompiled`](crate::Precompiled) parameter means a raw/default
+/// builder cannot select this path by accident — the caller must transition
+/// through [`DeploymentBuilder::precompiled`](crate::DeploymentBuilder::precompiled)
+/// first.
+///
+/// # Safety
+///
+/// Every pre-compiled path the builder's manifest names must identify
+/// trusted, immutable wasmtime output (`omnia compile`); see
+/// [`DeploymentBuilder::build`](crate::DeploymentBuilder) in the
+/// `Precompiled` typestate.
+///
+/// # Errors
+///
+/// Returns an error if the deployment cannot be built, runtime state cannot be
+/// assembled, bootstrap fails, or a trigger server exits with an error.
+pub async unsafe fn run_precompiled<B, H>(
+    builder: DeploymentBuilder<crate::Precompiled>,
+) -> Result<ExitStatus>
+where
+    B: Backends,
+    H: Wiring<B>,
+{
+    // SAFETY: forwarded — this function's own contract is exactly the
+    // typestate build's contract.
+    let deployment = unsafe { builder.build::<StoreCtx<B>>() }.await.context("building runtime")?;
+    drive::<B, H>(deployment).await
+}
+
+/// Drive an already-built deployment: assemble the runtime, start background
+/// tasks, then run command mode or every trigger server.
+async fn drive<B, H>(deployment: Deployment<StoreCtx<B>>) -> Result<ExitStatus>
+where
+    B: Backends,
+    H: Wiring<B>,
+{
     let mode = deployment.mode();
 
     let runtime = Runtime::<B>::new(deployment, H::link).await.context("assembling runtime")?;
@@ -142,9 +220,6 @@ where
     // start background tasks
     drive_epoch(runtime.registry().engine().clone(), runtime.options().epoch_tick);
     sample_pool(runtime.registry().engine().clone(), runtime.options().pool_metrics_interval);
-
-    // wire host-mediated link servers
-    serve_links(&runtime).await.context("wiring host-mediated link serve side")?;
 
     log_bootstrap_complete(&runtime, mode);
 
@@ -171,7 +246,7 @@ where
 {
     tracing::info!(
         mode = if mode.is_command() { "command" } else { "server" },
-        guests = runtime.registry().guests().count(),
+        guests = runtime.registry().len(),
         component = env::var("COMPONENT").unwrap_or_else(|_| "unknown".into()),
         "omnia ready",
     );
@@ -284,11 +359,13 @@ impl<B: Clone + Send + Sync + 'static> RuntimeDispatcher<B> {
 }
 
 impl<B: Backends> Runtime<B> {
-    /// Link hosts, connect backends, and assemble the guest registry.
+    /// Link hosts, connect backends, assemble the guest registry, and wire
+    /// the host-mediated link serve side.
     ///
     /// # Errors
     ///
-    /// Returns an error if host linking, backend connection, or registry assembly fails.
+    /// Returns an error if host linking, backend connection, registry
+    /// assembly, or link serve wiring fails.
     pub async fn new<L>(mut deployment: Deployment<StoreCtx<B>>, link: L) -> Result<Self>
     where
         L: FnOnce(&mut Deployment<StoreCtx<B>>) -> Result<()>,
@@ -298,12 +375,14 @@ impl<B: Backends> Runtime<B> {
         let backends = B::connect().await.context("connecting backends")?;
         let mounts = deployment.mounts();
 
-        Ok(Self::with_inner(Arc::new(RuntimeInner {
+        let runtime = Self::with_inner(Arc::new(RuntimeInner {
             registry: Arc::new(deployment.into_registry().context("assembling registry")?),
             args,
             mounts,
             backends,
-        })))
+        }));
+        serve_links(&runtime).await.context("wiring host-mediated link serve side")?;
+        Ok(runtime)
     }
 }
 
@@ -326,6 +405,10 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     }
 
     /// Build a runtime from an already-assembled registry and backend bundle.
+    ///
+    /// Low-level constructor: unlike [`Runtime::new`] it does not wire the
+    /// host-mediated link serve side — a caller whose deployment declares
+    /// `link` interfaces must run [`serve_links`] itself before dispatching.
     #[must_use]
     pub fn from_parts(
         registry: Arc<Registry<StoreCtx<B>>>, args: Vec<String>, mounts: Arc<MountRegistry>,
@@ -404,6 +487,63 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         let instance = instance_pre.instantiate_async(store).await?;
         tracing::debug!("component instantiated");
         Ok(instance)
+    }
+
+    /// Register a guest at run time: load `artifact`, pre-instantiate it
+    /// against the shared host set, wire its host-mediated link serve side,
+    /// then publish entry and endpoint as one atomic lifecycle transition —
+    /// no dispatch can ever resolve the entry and miss the endpoint, or vice
+    /// versa.
+    ///
+    /// The identity is opaque and must not already be registered; an upgrade
+    /// is [`deregister`](Self::deregister) + `register` (or a new id). A
+    /// failed registration leaves no partial state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `id` is already registered, the artifact cannot be
+    /// loaded, the component's imports exceed the deployment's linked host set
+    /// and `link` union, or its linked exports cannot be served.
+    pub async fn register(&self, id: impl Into<GuestId>, artifact: GuestArtifact) -> Result<()> {
+        let id = id.into();
+        let registry = self.registry();
+
+        // Early occupancy check to skip the load/serve work; the publish below
+        // re-checks transactionally, so a racing registration cannot slip in.
+        anyhow::ensure!(registry.get(&id).is_none(), "guest `{id}` is already registered");
+
+        let component = artifact
+            .load(registry.engine())
+            .await
+            .with_context(|| format!("loading guest `{id}`"))?;
+        let instance_pre = registry.instantiate_late(&id, &component)?;
+        let guest = Guest::local(id.clone(), instance_pre);
+
+        // Wire the guest's linked exports (if any); publish then makes the
+        // endpoint and the registry entry observable in one atomic step. If
+        // publish refuses (a racing registration won), dropping the unused
+        // server winds its drain tasks down.
+        let server = serve_guest(self, &guest)
+            .await
+            .with_context(|| format!("serving guest `{id}` link exports"))?;
+        registry.publish(guest, server)?;
+
+        tracing::info!(guest = %id, "guest registered");
+        Ok(())
+    }
+
+    /// Remove a dynamically registered guest. New dispatches to `id` fail as
+    /// unregistered; in-flight calls complete on the instance they hold
+    /// (instance-per-call). Static deployment entries are refused.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `id` names a static `[[guest]]` entry or is not
+    /// registered.
+    pub fn deregister(&self, id: &GuestId) -> Result<()> {
+        self.registry().remove(id)?;
+        tracing::info!(guest = %id, "guest deregistered");
+        Ok(())
     }
 }
 

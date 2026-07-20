@@ -15,7 +15,7 @@ Run a single guest, or a manifest-driven deployment.
 | `WASM`                | Path to a guest — a standard WASI component (`.wasm`) or a pre-compiled component (`.bin`). Optional when a manifest is available via `--config`, `OMNIA_CONFIG`, or the binary's compiled-in default. |
 | `-c, --config <path>` | Deployment manifest (`omnia.toml`) for multi-guest deployments. Falls back to the `OMNIA_CONFIG` environment variable, then to a default manifest compiled in via the `runtime!` macro's `config:` field (if declared). |
 | `--mount <spec>`      | Preopen a host directory into the guest sandbox (repeatable). Layered over the manifest's `[[mount]]` entries; a matching guest-visible name overrides the manifest (last wins). |
-| `--link <interface>`  | Host-mediated interface to dispatch on a guest's behalf (repeatable). Unioned with the manifest's per-guest `link` lists.                                                        |
+| `--link <interface>`  | Host-mediated interface to dispatch on a guest's behalf (repeatable). Unioned with the manifest's top-level `link` list and per-guest `link` lists.                              |
 | `-- <args>...`        | Everything after `--` is forwarded to the guest as its argv (command mode). `args[0]` is the program name, supplied by the runtime.                                              |
 
 ### Mount spec format
@@ -56,7 +56,7 @@ Ahead-of-time compile a `wasm32-wasip2` component to a serialized wasmtime compo
 <runtime> compile <wasm> [-o <output>]
 ```
 
-Without `-o`, the output is written next to the input with a `.bin` extension. Compile-affecting runtime options (fuel metering, memory reservation, branch hinting) must match between compile time and run time.
+Without `-o`, the output is written next to the input with a `.bin` extension. Compile-affecting runtime options (fuel metering, memory reservation, branch hinting) must match between compile time and run time. That settings match is a compatibility check, not an authenticity check: a `.bin` is native code, and every path the CLI loads one from is a trusted operator input (see the [security model](../security-model.md)).
 
 The generated `runtime!` `main` does not dispatch `compile`; call `omnia::compile` from a custom `main` to expose it.
 

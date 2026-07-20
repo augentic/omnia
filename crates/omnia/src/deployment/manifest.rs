@@ -1,19 +1,18 @@
 //! # Deployment manifest (`omnia.toml`)
 //!
 //! Registry population, routing, linking, and transport are *deployment*
-//! decisions, not build-time ones. They live in a startup manifest loaded
-//! before the registry is built. The manifest is optional and sparse: any field
-//! left out falls back to a synthesized default, and with no file at all Omnia
-//! runs the single-guest zero-config default.
+//! decisions, not build-time ones. A manifest may be loaded from a startup
+//! configuration file or assembled programmatically before the registry is
+//! built.
 //!
 //! The manifest is parsed **generically** — Omnia sees opaque [`GuestId`]s and
 //! interface *strings*, never `source:`/`target:`/`mcp`. Consumers write the
 //! concrete file; the runtime core stays domain-agnostic.
 //!
-//! The `[[guest]]` population (file sources), the `[[route.*]]` tables, and the
-//! per-guest `link` allow-lists (which drive host-mediated dynamic linking) are
-//! all consumed. Distributed `[transport]` is not yet implemented: only the
-//! in-process default is accepted, and any other value is rejected at load.
+//! The `[[guest]]` population (file sources), the `[[route.*]]` tables, and
+//! deployment-wide and per-guest `link` allow-lists (which drive host-mediated
+//! dynamic linking) are all consumed. Distributed `[transport]` is not yet
+//! implemented: only the in-process default is accepted.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -38,6 +37,8 @@ pub struct Manifest {
     /// Working-tree mounts preopened into the guest sandbox.
     #[serde(rename = "mount")]
     pub mounts: Vec<Mount>,
+    /// Deployment-wide host-mediated interfaces.
+    pub link: Vec<String>,
     /// Inbound route tables, one list per trigger.
     pub route: RouteSpec,
     /// Transport configuration for host-mediated calls.
@@ -45,24 +46,102 @@ pub struct Manifest {
 }
 
 impl Manifest {
-    /// Load and parse a manifest from `path`.
+    /// Start an empty programmatic manifest.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Load a manifest and resolve its relative paths against the config directory.
     ///
     /// # Errors
     ///
-    /// Returns an error if the file cannot be read, cannot be parsed as TOML, or
-    /// defines no `[[guest]]` entries.
-    pub fn load(path: &Path) -> Result<Self> {
-        let text = fs::read_to_string(path)
+    /// Returns an error if the current directory cannot be read, or the file
+    /// cannot be read or parsed as TOML.
+    pub fn from_config(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        let path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir()?.join(path)
+        };
+        let text = fs::read_to_string(&path)
             .with_context(|| format!("reading manifest {}", path.display()))?;
-        let manifest: Self = toml::from_str(&text)
+        let mut manifest: Self = toml::from_str(&text)
             .with_context(|| format!("parsing manifest {}", path.display()))?;
-        manifest.validate()?;
+        let base = path.parent().unwrap_or_else(|| Path::new("."));
+        manifest.resolve_paths(base);
         Ok(manifest)
     }
 
-    /// Validate manifest-level invariants surfaced before the registry is built.
-    fn validate(&self) -> Result<()> {
-        if self.guests.is_empty() {
+    /// Create a single-guest manifest from a component path.
+    #[must_use]
+    pub fn from_wasm(path: impl Into<PathBuf>) -> Self {
+        let path = path.into();
+        let id = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("default").to_owned();
+        Self::new().guest(GuestEntry::new(id, path))
+    }
+
+    /// Append a guest.
+    #[must_use]
+    pub fn guest(mut self, guest: GuestEntry) -> Self {
+        self.guests.push(guest);
+        self
+    }
+
+    /// Append workspace mounts.
+    #[must_use]
+    pub fn mounts(mut self, mounts: impl IntoIterator<Item = Mount>) -> Self {
+        self.mounts.extend(mounts);
+        self
+    }
+
+    /// Append deployment-wide host-mediated interfaces.
+    #[must_use]
+    pub fn links<I, S>(mut self, links: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.link.extend(links.into_iter().map(Into::into));
+        self
+    }
+
+    /// Append an HTTP prefix route.
+    #[must_use]
+    pub fn route_http(mut self, prefix: impl Into<String>, guest: impl Into<String>) -> Self {
+        self.route.http.push(HttpRoute {
+            prefix: prefix.into(),
+            guest: guest.into(),
+        });
+        self
+    }
+
+    /// Append a messaging topic route.
+    #[must_use]
+    pub fn route_messaging(mut self, topic: impl Into<String>, guest: impl Into<String>) -> Self {
+        self.route.messaging.push(TopicRoute {
+            topic: topic.into(),
+            guest: guest.into(),
+        });
+        self
+    }
+
+    /// Append a WebSocket route.
+    #[must_use]
+    pub fn route_websocket(mut self, route: impl Into<String>, guest: impl Into<String>) -> Self {
+        self.route.websocket.push(TopicRoute {
+            topic: route.into(),
+            guest: guest.into(),
+        });
+        self
+    }
+
+    /// Validate manifest-level invariants surfaced before the registry is
+    /// built. An `allow_empty` (dynamic) deployment may define no `[[guest]]`
+    /// entries.
+    pub(super) fn validate(&self, allow_empty: bool) -> Result<()> {
+        if self.guests.is_empty() && !allow_empty {
             bail!("manifest defines no [[guest]] entries");
         }
         let mut ids = BTreeSet::new();
@@ -80,6 +159,21 @@ impl Manifest {
         Ok(())
     }
 
+    fn resolve_paths(&mut self, base: &Path) {
+        for guest in &mut self.guests {
+            if let SourceSpec::Path(path) = &mut guest.source
+                && path.is_relative()
+            {
+                *path = base.join(&*path);
+            }
+        }
+        for mount in &mut self.mounts {
+            if mount.path.is_relative() {
+                mount.path = base.join(&mount.path);
+            }
+        }
+    }
+
     /// Telemetry/component name for this deployment.
     ///
     /// The first `[[guest]]` entry doubles as the name for now.
@@ -88,23 +182,17 @@ impl Manifest {
         self.guests.first().map_or("omnia", |entry| entry.id.as_str())
     }
 
-    /// Resolve every `[[guest]]` source into a loadable [`Source`].
-    ///
-    /// Paths in the manifest are resolved relative to `base` (typically the
-    /// manifest's parent directory).
+    /// Resolve every `[[guest]]` source into a loadable source.
     ///
     /// # Errors
     ///
     /// Returns an error if a guest uses a source kind not yet supported.
-    pub fn sources(&self, base: &Path) -> Result<Vec<Source>> {
+    pub fn sources(&self) -> Result<Vec<Source>> {
         let mut sources = Vec::with_capacity(self.guests.len());
         for entry in &self.guests {
             let id = GuestId::from(entry.id.as_str());
             match &entry.source {
-                SourceSpec::Path(path) => {
-                    let resolved = if path.is_absolute() { path.clone() } else { base.join(path) };
-                    sources.push(Source::with_id(id, resolved));
-                }
+                SourceSpec::Path(path) => sources.push(Source::with_id(id, path)),
                 SourceSpec::Oci(reference) => {
                     bail!("guest `{id}`: OCI source `{reference}` is not yet supported")
                 }
@@ -113,15 +201,15 @@ impl Manifest {
         Ok(sources)
     }
 
-    /// Union of the per-guest `link` allow-lists — the host-mediated interfaces.
+    /// Union of deployment-wide and per-guest host-mediated interfaces.
     ///
     /// The linker is shared, so an interface dispatched for one guest is wired
     /// once for all.
     #[must_use]
-    pub fn links(&self) -> BTreeSet<Box<str>> {
-        self.guests
+    pub fn link_interfaces(&self) -> BTreeSet<Box<str>> {
+        self.link
             .iter()
-            .flat_map(|entry| entry.link.iter())
+            .chain(self.guests.iter().flat_map(|entry| entry.link.iter()))
             .map(|interface| Box::from(interface.as_str()))
             .collect()
     }
@@ -133,13 +221,9 @@ impl Manifest {
     }
 
     /// Resolve every `[[mount]]` into a [`ResolvedPreopen`].
-    ///
-    /// Host paths resolve relative to `base` exactly as `[[guest]]` sources do,
-    /// and `writable` selects read-only (review) versus read+write (edit) WASI
-    /// permissions.
     #[must_use]
-    pub fn mounts(&self, base: &Path) -> Vec<ResolvedPreopen> {
-        self.mounts.iter().map(|entry| entry.resolve(base)).collect()
+    pub fn preopens(&self) -> Vec<ResolvedPreopen> {
+        self.mounts.iter().map(|entry| entry.resolve(Path::new("."))).collect()
     }
 }
 
@@ -149,7 +233,9 @@ impl Manifest {
 pub struct Mount {
     /// Guest-visible name `preopens.get-directories()` returns (e.g. `.`).
     pub name: String,
-    /// Host path (absolute, or relative to the manifest's directory).
+    /// Host path. [`Manifest::from_config`] resolves relative paths against the
+    /// config file's directory; a relative path set programmatically resolves
+    /// against the process working directory.
     pub path: PathBuf,
     /// Read+write when `true`; read-only (the review-flow default) otherwise.
     #[serde(default)]
@@ -222,6 +308,25 @@ pub struct GuestEntry {
     pub link: Vec<String>,
 }
 
+impl GuestEntry {
+    /// Create a guest backed by a local component path.
+    #[must_use]
+    pub fn new(id: impl Into<String>, path: impl Into<PathBuf>) -> Self {
+        Self {
+            id: id.into(),
+            source: SourceSpec::Path(path.into()),
+            link: Vec::new(),
+        }
+    }
+
+    /// Append a host-mediated interface allowed for this guest.
+    #[must_use]
+    pub fn link(mut self, interface: impl Into<String>) -> Self {
+        self.link.push(interface.into());
+        self
+    }
+}
+
 /// Where a guest's component bytes come from.
 ///
 /// Modelled as an externally tagged enum so TOML's `source.path = "..."` and
@@ -229,8 +334,9 @@ pub struct GuestEntry {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SourceSpec {
-    /// A local `.wasm` / pre-compiled `.bin` path (resolved relative to the
-    /// manifest's directory).
+    /// A local `.wasm` / pre-compiled `.bin` path. [`Manifest::from_config`]
+    /// resolves relative paths against the config file's directory; a relative
+    /// path set programmatically resolves against the process working directory.
     Path(PathBuf),
     /// A digest-pinned OCI reference. Accepted by the parser and surfaced in the
     /// "not yet supported" error; the puller that consumes it lands as a
@@ -294,7 +400,7 @@ pub struct TopicRoute {
 
 /// Transport configuration for host-mediated calls.
 ///
-/// Only the in-process default is implemented; [`Manifest::validate`] rejects any
+/// Only the in-process default is implemented; manifest validation rejects any
 /// other value, and `#[serde(deny_unknown_fields)]` turns a stale distributed
 /// `[transport.target.*]` section into a loud parse error rather than a silent
 /// no-op.
@@ -327,6 +433,8 @@ mod tests {
     #[test]
     fn parse_multi_guest() {
         let toml = r#"
+            link = ["omnia:shared/log"]
+
             [[guest]]
             id = "workflow"
             source.path = "./guests/workflow.wasm"
@@ -346,6 +454,8 @@ mod tests {
         assert_eq!(manifest.guests[0].link.len(), 2);
         assert!(matches!(manifest.guests[1].source, SourceSpec::Path(_)));
         assert_eq!(manifest.transport.default, TransportKind::InProcess);
+        assert!(manifest.link_interfaces().contains("omnia:shared/log"));
+        assert!(manifest.link_interfaces().contains("augentic:specify/source"));
     }
 
     #[test]
@@ -394,14 +504,15 @@ mod tests {
             writable = true
         "#;
 
-        let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
+        let mut manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
         assert_eq!(manifest.mounts.len(), 2);
         assert_eq!(manifest.mounts[0].name, ".");
         assert!(!manifest.mounts[0].writable, "writable defaults to read-only");
         assert!(manifest.mounts[1].writable);
 
         let base = Path::new("/deploy/app");
-        let resolved = manifest.mounts(base);
+        manifest.resolve_paths(base);
+        let resolved = manifest.preopens();
         assert_eq!(resolved.len(), 2);
         // A relative path resolves against the manifest's directory; read-only by default.
         assert_eq!(resolved[0].name, ".");
@@ -478,10 +589,10 @@ mod tests {
         )
         .expect("temp manifest should write");
 
-        let result = Manifest::load(&path);
+        let manifest = Manifest::from_config(&path).expect("manifest should load");
         let _ = std::fs::remove_file(&path);
 
-        assert!(result.is_err(), "distributed transport is not yet implemented");
+        assert!(manifest.validate(false).is_err(), "distributed transport is not yet implemented");
     }
 
     #[test]
@@ -499,11 +610,15 @@ mod tests {
         std::fs::write(&path, "[[guest]]\nid = \"only\"\nsource.path = \"./only.wasm\"\n")
             .expect("temp manifest should write");
 
-        let manifest = Manifest::load(&path).expect("manifest should load");
+        let manifest = Manifest::from_config(&path).expect("manifest should load");
         let _ = std::fs::remove_file(&path);
 
         assert_eq!(manifest.guests.len(), 1);
         assert_eq!(manifest.guests[0].id, "only");
+        let SourceSpec::Path(source) = &manifest.guests[0].source else {
+            panic!("expected path source");
+        };
+        assert!(source.is_absolute());
     }
 
     #[test]
@@ -517,10 +632,10 @@ mod tests {
         )
         .expect("temp manifest should write");
 
-        let result = Manifest::load(&path);
+        let manifest = Manifest::from_config(&path).expect("manifest should load");
         let _ = std::fs::remove_file(&path);
 
-        let error = result.expect_err("duplicate guest ids must be rejected");
+        let error = manifest.validate(false).expect_err("duplicate guest ids must be rejected");
         assert!(error.to_string().contains("duplicate [[guest]] id `same`"), "{error}");
     }
 
@@ -531,9 +646,37 @@ mod tests {
         std::fs::write(&path, "[transport]\ndefault = \"unix\"\n")
             .expect("temp manifest should write");
 
-        let result = Manifest::load(&path);
+        let manifest = Manifest::from_config(&path).expect("manifest should load");
         let _ = std::fs::remove_file(&path);
 
-        assert!(result.is_err(), "a manifest with no guests must be rejected");
+        assert!(
+            manifest.validate(false).is_err(),
+            "a static manifest with no guests must be rejected"
+        );
+        assert!(
+            Manifest::new().validate(true).is_ok(),
+            "a dynamic deployment may start with no guests"
+        );
+    }
+
+    #[test]
+    fn build_programmatically() {
+        let manifest = Manifest::new()
+            .guest(GuestEntry::new("router", "router.wasm").link("omnia:link/echo"))
+            .guest(GuestEntry::new("responder", "responder.wasm"))
+            .mounts(["workspace,writable".parse().expect("mount should parse")])
+            .links(["omnia:shared/log"])
+            .route_http("/router", "router")
+            .route_messaging("jobs.>", "router")
+            .route_websocket("events.*", "responder");
+
+        manifest.validate(false).expect("manifest should validate");
+        assert_eq!(manifest.guests.len(), 2);
+        assert_eq!(manifest.mounts.len(), 1);
+        assert_eq!(manifest.route.http.len(), 1);
+        assert_eq!(manifest.route.messaging.len(), 1);
+        assert_eq!(manifest.route.websocket.len(), 1);
+        assert!(manifest.link_interfaces().contains("omnia:link/echo"));
+        assert!(manifest.link_interfaces().contains("omnia:shared/log"));
     }
 }

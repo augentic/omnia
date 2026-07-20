@@ -118,6 +118,16 @@ Runtime-wide settings (guest timeout, memory limits, instance pooling) are envir
 
 ## Hand-written runtimes (advanced)
 
-The macro covers most deployments. If you need a custom entry point — extra CLI flags, non-standard startup order, embedding the runtime in a larger process — implement the `omnia::Wiring` trait yourself and call `omnia::run`, or assemble an `omnia::Runtime<B>` directly from a `DeploymentBuilder`. The [`crates/omnia` README](../../crates/omnia/README.md) lists the public API surface; [Architecture](../Architecture.md) explains how the pieces fit together.
+The macro covers most deployments. If you need a custom entry point — extra CLI flags, non-standard startup order, embedding the runtime in a larger process — supply the deployment yourself through the macro-generated `run(builder)`: build an `omnia::Manifest` (`Manifest::from_config(path)?` for a TOML file, `Manifest::from_wasm(path)` for the one-guest shorthand, or `Manifest::new()` with the fluent `guest`/`mounts`/`links`/`route_*` setters) and pass it via `omnia::DeploymentBuilder::new().manifest(manifest)`:
+
+```rust,ignore
+let manifest = Manifest::new()
+    .guest(GuestEntry::new("responder", responder_wasm))
+    .guest(GuestEntry::new("router", router_wasm).link("omnia:link/echo"));
+
+host::run(DeploymentBuilder::new().manifest(manifest))?;
+```
+
+The [`guest-link-dynamic`](../../examples/guest-link/dynamic.rs) example is a complete host built this way. For still deeper control, implement the `omnia::Wiring` trait yourself and call `omnia::run`, or assemble an `omnia::Runtime<B>` directly from a `DeploymentBuilder`. The [`crates/omnia` README](../../crates/omnia/README.md) lists the public API surface; [Architecture](../Architecture.md) explains how the pieces fit together.
 
 One case that requires this today: the generated `main` handles only the `run` subcommand. To expose ahead-of-time compilation (`compile`, available with the default `jit` feature), call `omnia::compile` from your own `main`.
