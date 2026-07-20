@@ -182,7 +182,7 @@ impl Manifest {
         self.guests.first().map_or("omnia", |entry| entry.id.as_str())
     }
 
-    /// Resolve every `[[guest]]` source into a loadable [`Source`].
+    /// Resolve every `[[guest]]` source into a loadable source.
     ///
     /// # Errors
     ///
@@ -400,7 +400,7 @@ pub struct TopicRoute {
 
 /// Transport configuration for host-mediated calls.
 ///
-/// Only the in-process default is implemented; [`Manifest::validate`] rejects any
+/// Only the in-process default is implemented; manifest validation rejects any
 /// other value, and `#[serde(deny_unknown_fields)]` turns a stale distributed
 /// `[transport.target.*]` section into a loud parse error rather than a silent
 /// no-op.
