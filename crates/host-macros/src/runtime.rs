@@ -58,23 +58,23 @@ pub fn expand(config: &Config) -> TokenStream {
                 }
             }
 
-            /// CLI entry point: parse the `run` grammar, then drive the
+            /// CLI entry point: parse the `run` grammar, then run the
             /// deployment through this runtime's hosts and backends.
             #[tokio::main]
             pub async fn main() -> ::std::process::ExitCode {
                 omnia::main::<#backends_ty, Hooks>(#mode, #config_file).await
             }
 
-            /// Drive one deployment through this runtime's hosts and backends,
+            /// Run one deployment through this runtime's hosts and backends,
             /// blocking until the guest completes.
             #[tokio::main]
-            pub async fn drive(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
+            pub async fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
                 omnia::run::<#backends_ty, Hooks>(builder.mode(#mode)).await
             }
         }
 
         #[allow(unused_imports)]
-        pub use runtime::{drive, main};
+        pub use runtime::{run, main};
     }
 }
 

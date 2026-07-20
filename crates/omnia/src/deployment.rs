@@ -61,6 +61,12 @@ impl DeploymentBuilder {
         Self::default()
     }
 
+    /// Start a builder for the manifest-driven deployment at `config`.
+    #[must_use]
+    pub fn from_config(config: impl Into<PathBuf>) -> Self {
+        Self::new().config(config.into())
+    }
+
     /// Set the single-guest `wasm` path — the `omnia run <wasm>` shorthand.
     #[must_use]
     pub fn wasm(mut self, wasm: impl Into<Option<PathBuf>>) -> Self {

@@ -1,6 +1,5 @@
 ---
 source: crates/host-macros/src/runtime.rs
-assertion_line: 118
 expression: "expand_pretty(quote!({\n    config: concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/omnia.toml\"), hosts:\n    { WasiOtel: OtelDefault, },\n}))"
 ---
 mod runtime {
@@ -41,7 +40,7 @@ mod runtime {
             Ok(())
         }
     }
-    /// CLI entry point: parse the `run` grammar, then drive the
+    /// CLI entry point: parse the `run` grammar, then run the
     /// deployment through this runtime's hosts and backends.
     #[tokio::main]
     pub async fn main() -> ::std::process::ExitCode {
@@ -58,12 +57,12 @@ mod runtime {
             )
             .await
     }
-    /// Drive one deployment through this runtime's hosts and backends,
+    /// Run one deployment through this runtime's hosts and backends,
     /// blocking until the guest completes.
     #[tokio::main]
-    pub async fn drive(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
+    pub async fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
         omnia::run::<Backends, Hooks>(builder.mode(omnia::Mode::Server)).await
     }
 }
 #[allow(unused_imports)]
-pub use runtime::{drive, main};
+pub use runtime::{run, main};
