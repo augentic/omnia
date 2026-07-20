@@ -74,7 +74,7 @@ Layers 1 and 2 form the **runtime core** — domain-agnostic infrastructure that
 The foundation of the runtime. Provides:
 
 - **CLI infrastructure**: the `run` subcommand (and `compile`, with the `jit` feature)
-- **Deployment pipeline**: `DeploymentBuilder` loads a single `.wasm` or a manifest, `Registry` holds pre-instantiated guests
+- **Deployment pipeline**: `DeploymentBuilder` builds a deployment from a `Manifest` (loaded from `omnia.toml`, synthesized from a single `.wasm`, or constructed programmatically), `Registry` holds pre-instantiated guests
 - **Core traits**: `Host`, `Server`, `Backend`, `Wiring`, plus the concrete `Runtime<B>` over `StoreCtx<B>`
 - **Host-mediated dispatch**: guest-to-guest linking over an in-process wRPC carrier
 - **Telemetry**: `tracing` + OpenTelemetry bootstrap
@@ -164,12 +164,12 @@ A deployment can hold many guests. All of them share one wasmtime `Engine` and o
 - **Mounts** — `[[mount]]` entries preopen host directories into every guest sandbox (read-only unless marked writable).
 - **Dispatch** — per-guest `link` allow-lists name interfaces the host polyfills onto the shared linker; calls dispatch to whichever guest exports the interface, over an in-process carrier, with nesting bounded by `MAX_DISPATCH_DEPTH`.
 
-All of this is declared in the `omnia.toml` manifest ([reference](reference/configuration.md#deployment-manifest-omniatoml)); a bare `.wasm` path on the command line remains the zero-config single-guest case.
+All of this is declared in the `omnia.toml` manifest ([reference](reference/configuration.md#deployment-manifest-omniatoml)) or assembled programmatically with the `omnia::Manifest` fluent API; a bare `.wasm` path on the command line remains the zero-config single-guest case.
 
 ## Runtime Execution Flow
 
-1. **CLI parsing** — the generated `main` delegates to `omnia::main`, which parses the `run` subcommand.
-2. **Build** — `DeploymentBuilder` loads the manifest or wasm, resolves mounts, compiles guests, and returns a `Deployment` ready for host linking.
+1. **CLI parsing** — the generated `main` delegates to `omnia::main`, which parses the `run` subcommand, resolves the deployment source into a `Manifest` (`--config`, then `OMNIA_CONFIG`, then a positional `<wasm>` via `Manifest::from_wasm`, then the compiled-in default), and appends CLI `--mount`/`--link` entries onto it.
+2. **Build** — `DeploymentBuilder` validates the manifest, resolves mounts, compiles guests, and returns a `Deployment` ready for host linking.
 3. **Assemble** — `Runtime::new` runs `Wiring::link` (each host's `add_to_linker`), connects backends (`Backends::connect`), and builds the `Registry` (pre-instantiating every guest).
 4. **Bootstrap** — starts epoch interruption and pool-metric sampling, wires host-mediated link servers, then logs **`omnia ready`**.
 5. **Drive** — command mode invokes the guest's `wasi:cli/run` once and exits with its status; server mode awaits every trigger server.

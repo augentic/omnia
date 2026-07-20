@@ -231,7 +231,9 @@ impl Manifest {
 pub struct Mount {
     /// Guest-visible name `preopens.get-directories()` returns (e.g. `.`).
     pub name: String,
-    /// Host path (absolute, or relative to the manifest's directory).
+    /// Host path. [`Manifest::from_config`] resolves relative paths against the
+    /// config file's directory; a relative path set programmatically resolves
+    /// against the process working directory.
     pub path: PathBuf,
     /// Read+write when `true`; read-only (the review-flow default) otherwise.
     #[serde(default)]
@@ -330,8 +332,9 @@ impl GuestEntry {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SourceSpec {
-    /// A local `.wasm` / pre-compiled `.bin` path (resolved relative to the
-    /// manifest's directory).
+    /// A local `.wasm` / pre-compiled `.bin` path. [`Manifest::from_config`]
+    /// resolves relative paths against the config file's directory; a relative
+    /// path set programmatically resolves against the process working directory.
     Path(PathBuf),
     /// A digest-pinned OCI reference. Accepted by the parser and surfaced in the
     /// "not yet supported" error; the puller that consumes it lands as a

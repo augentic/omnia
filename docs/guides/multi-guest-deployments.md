@@ -36,6 +36,24 @@ guest = "api"
 
 The full field reference lives in [Configuration](../reference/configuration.md#deployment-manifest-omniatoml).
 
+## Programmatic manifests
+
+Everything the TOML expresses can also be assembled in Rust: `omnia::Manifest` is the same schema as a value, with fluent setters for guests, mounts, links, and routes. Pass it to the deployment builder (or the `runtime!`-generated `run(builder)`) instead of a file path:
+
+```rust,ignore
+use omnia::{DeploymentBuilder, GuestEntry, Manifest};
+
+let manifest = Manifest::new()
+    .guest(GuestEntry::new("api", "./guests/api.wasm"))
+    .guest(GuestEntry::new("admin", "./guests/admin.wasm").link("omnia:link/audit"))
+    .route_http("/admin", "admin")
+    .route_http("/", "api");
+
+host::run(DeploymentBuilder::new().manifest(manifest))?;
+```
+
+`Manifest::from_config(path)?` loads a TOML file into the same value (resolving its relative paths against the file's directory), and `Manifest::from_wasm(path)` synthesizes the one-guest shorthand. Relative paths in a programmatic manifest resolve against the process working directory. The [`guest-link-dynamic`](../../examples/guest-link/dynamic.rs) example is a complete host built this way.
+
 ## Routing inbound traffic
 
 Each trigger has its own route table, independent of which guests are loaded:
@@ -93,7 +111,7 @@ At startup, the runtime polyfills each linked interface onto the shared linker a
 
 Notes:
 
-- `--link <interface>` on the command line unions with the manifest's per-guest lists.
+- A top-level `link = [...]` in the manifest declares deployment-wide interfaces; `--link <interface>` on the command line unions with both it and the per-guest lists. The linker is shared, so an interface linked for one guest is wired for the whole deployment.
 - Nested dispatch depth is bounded by `MAX_DISPATCH_DEPTH` (default 8) to catch accidental recursion.
 - Only the in-process transport is implemented; declaring `unix`, `nats`, or `quic` under `[transport]` is rejected at load.
 

@@ -1,5 +1,7 @@
 # Design: Embedded Guest — Single-Binary Runtime + Guest
 
+> Note: the `DeploymentBuilder` baseline described here (path-based `config`/`wasm` resolution in `build()`) predates the manifest-first builder, which now takes an `omnia::Manifest` value; the integration points in §5/§9 would target `Manifest`/`omnia::main` instead.
+
 > Status: Design proposal — lets `runtime!` optionally embed a guest component, pre-compiled to a cwasm artifact at build time, so a deployment ships as one self-contained native binary (runtime core + guest) with no filesystem dependency and no JIT in the shipped artifact. Complements — does not replace — the `omnia run <wasm>` / `--config` deployment paths. Depends: the `runtime!` macro, `Source` guest acquisition, `omnia compile` (`crates/omnia/src/options/compile.rs`). Relates: [backend-selection](backend-selection.md) (the opposite trade: one binary, *dynamic* composition; this design is one binary, *fully static* composition).
 
 ## 1. Motivation
