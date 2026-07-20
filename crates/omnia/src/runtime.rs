@@ -80,13 +80,37 @@ pub trait Wiring<B: Backends> {
     fn serve(runtime: &Runtime<B>) -> impl std::future::Future<Output = Result<()>> + Send;
 }
 
+/// A runtime's compiled-in deployment fallback, used only when the CLI
+/// supplies no source.
+///
+/// The `runtime!` macro emits [`Path`](Self::Path) for its `config:` field and
+/// [`Inline`](Self::Inline) for its inline manifest keys (`guests`, `mounts`,
+/// `link`, `routes`).
+#[derive(Clone, Debug)]
+pub enum DefaultManifest {
+    /// A default manifest path, loaded only when the fallback is reached.
+    Path(std::path::PathBuf),
+    /// A manifest value assembled at compile time.
+    Inline(Manifest),
+}
+
+impl DefaultManifest {
+    /// Resolve the fallback into a manifest, loading the file for the path kind.
+    fn into_manifest(self) -> Result<Manifest> {
+        match self {
+            Self::Path(path) => Manifest::from_config(path),
+            Self::Inline(manifest) => Ok(manifest),
+        }
+    }
+}
+
 /// CLI entry point for generated `main` functions.
 ///
-/// `default_config` is the runtime's compiled-in manifest fallback (the
-/// `runtime!` macro's `config:` field), used only when the CLI supplies no
-/// source.
+/// `default_manifest` is the runtime's compiled-in deployment fallback (the
+/// `runtime!` macro's `config:` field or inline manifest keys), used only when
+/// the CLI supplies no source.
 #[doc(hidden)]
-pub async fn main<B, H>(mode: Mode, default_config: Option<std::path::PathBuf>) -> ExitCode
+pub async fn main<B, H>(mode: Mode, default_manifest: Option<DefaultManifest>) -> ExitCode
 where
     B: Backends,
     H: Wiring<B>,
@@ -105,12 +129,12 @@ where
                     || {
                         wasm.map_or_else(
                             || {
-                                default_config
+                                default_manifest
                                     .context(
                                         "no guest specified: pass a <wasm> path, or --config \
                                          <omnia.toml> (or set OMNIA_CONFIG)",
                                     )
-                                    .and_then(Manifest::from_config)
+                                    .and_then(DefaultManifest::into_manifest)
                             },
                             |wasm| Ok(Manifest::from_wasm(wasm)),
                         )

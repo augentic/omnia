@@ -50,8 +50,10 @@ mod runtime {
         >(
                 omnia::Mode::Server,
                 ::std::option::Option::Some(
-                    ::std::path::PathBuf::from(
-                        concat!(env!("CARGO_MANIFEST_DIR"), "/omnia.toml"),
+                    omnia::DefaultManifest::Path(
+                        ::std::path::PathBuf::from(
+                            concat!(env!("CARGO_MANIFEST_DIR"), "/omnia.toml"),
+                        ),
                     ),
                 ),
             )

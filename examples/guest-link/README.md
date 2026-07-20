@@ -6,7 +6,7 @@ Proves host-mediated dynamic linking: one guest reaches another through an inter
 
 - `responder` ([`responder.rs`](responder.rs)) **exports** `omnia:link/echo`. It declares no trigger of its own, so it is reachable *only* via dispatch.
 - `router` ([`router.rs`](router.rs)) **imports** `omnia:link/echo` and exposes `run(message)`. Its component does not satisfy the import.
-- [`omnia.toml`](omnia.toml), or the equivalent programmatic [`Manifest`](dynamic.rs), names `omnia:link/echo` in the router's `link` allow-list. The runtime core polyfills that import onto the shared linker and, at startup, wires the serve side of every linked interface.
+- The [`runtime!` inline manifest](runtime.rs) — equivalently [`omnia.toml`](omnia.toml) for `--config`, or the programmatic [`Manifest`](dynamic.rs) — names `omnia:link/echo` in the router's `link` allow-list. The runtime core polyfills that import onto the shared linker and, at startup, wires the serve side of every linked interface.
 
 When `router.run("hello")` calls the imported `echo("responder", "hello")`:
 
@@ -36,8 +36,8 @@ cargo build -p examples \
   --example guest-link-extra-wasm \
   --target wasm32-wasip2
 
-# run the host — the manifest path is compiled in (runtime! `config:`),
-# so a bare `run` works from any directory
+# run the host — the deployment is compiled in (runtime! inline manifest
+# keys), so a bare `run` works from any directory
 export RUST_LOG=info,opentelemetry_sdk=off
 cargo run --example guest-link -- run
 

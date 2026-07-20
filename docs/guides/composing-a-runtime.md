@@ -83,6 +83,44 @@ cargo run -- run
 
 Explicit sources always win; the compiled-in default is the lowest-precedence fallback.
 
+## Inline manifest (`guests:`, `mounts:`, `link:`, `routes:`)
+
+Everything `omnia.toml` expresses can also be written directly in the macro, mirroring the `omnia::Manifest` schema. The macro expands the keys to a `Manifest` value compiled into the generated `main` as the same lowest-precedence fallback as `config:` — used only when the command line supplies no source:
+
+```rust
+omnia::runtime!({
+    guests: [
+        {
+            id: "responder",
+            source: concat!(env!("CARGO_MANIFEST_DIR"), "/guests/responder.wasm"),
+        },
+        {
+            id: "router",
+            source: concat!(env!("CARGO_MANIFEST_DIR"), "/guests/router.wasm"),
+            link: ["omnia:link/echo"],       // per-guest host-mediated imports
+        },
+    ],
+    link: ["omnia:shared/log"],              // optional deployment-wide links
+    mounts: [
+        { name: ".", path: concat!(env!("CARGO_MANIFEST_DIR"), "/workspace"), writable: true },
+    ],
+    routes: {
+        http: [{ prefix: "/", guest: "router" }],
+        messaging: [{ topic: "orders.>", guest: "worker" }],
+        websocket: [{ route: "chat.*", guest: "ws" }],
+    },
+    hosts: {
+        WasiHttp: HttpDefault,
+    }
+});
+```
+
+- Each value is any Rust expression evaluating to the field's type (strings for ids, interfaces, and route keys; paths for `source` and mount `path`; a bool for `writable`, which defaults to `false`).
+- Relative paths resolve against the process working directory at run time, so anchor them with `env!("CARGO_MANIFEST_DIR")` as with `config:`.
+- `config:` and the inline keys are mutually exclusive — a runtime compiles in a manifest path or a manifest value, not both.
+
+The [`guest-link`](../../examples/guest-link/runtime.rs) example is built this way; its [`omnia.toml`](../../examples/guest-link/Omnia.toml) expresses the same deployment as a file for `--config`.
+
 ## Choosing backends
 
 Every WASI interface ships with a default backend that needs no external service, so a development runtime works out of the box. Swapping to production is a one-line change per interface — the guest `.wasm` is untouched:
