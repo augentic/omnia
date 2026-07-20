@@ -109,6 +109,10 @@ name = "guest-link"
 path = "guest-link/runtime.rs"
 
 [[example]]
+name = "guest-link-dynamic"
+path = "guest-link/dynamic.rs"
+
+[[example]]
 name = "http-wasm"
 path = "http/guest.rs"
 crate-type = ["cdylib"]

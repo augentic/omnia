@@ -21,8 +21,8 @@ use anyhow::{Context as _, Result, bail};
 use futures::FutureExt as _;
 use omnia::wasmtime::StoreLimitsBuilder;
 use omnia::{
-    Backend, Deployment, DeploymentBuilder, GuestId, MountRegistry, Registry, ResolvedPreopen,
-    Runtime, StoreBase, StoreCtx, WrpcState,
+    Backend, Deployment, DeploymentBuilder, GuestId, Manifest, MountRegistry, Registry,
+    ResolvedPreopen, Runtime, StoreBase, StoreCtx, WrpcState,
 };
 use omnia_testkit::model::Scripted;
 use omnia_testkit::{find_guest, temp_manifest};
@@ -124,7 +124,7 @@ async fn build_registry() -> Result<Arc<Registry<TestCtx>>> {
     ))?;
 
     let mut deployment: Deployment<TestCtx> = DeploymentBuilder::new()
-        .config(manifest.path().to_path_buf())
+        .manifest(Manifest::from_config(manifest.path())?)
         .build()
         .await
         .context("building runtime")?;

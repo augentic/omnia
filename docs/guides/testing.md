@@ -131,7 +131,7 @@ That second assertion is the point: a `200` proves the call crossed the WIT boun
 
 ## Multi-guest and manifest-driven tests
 
-For deployments with routes, mounts, or linking, generate the manifest with `temp_manifest` and pass it to the builder (see the `routing` and `guest_link` scenarios in the suite):
+For deployments with routes, mounts, or linking, either build a [`Manifest`](../../crates/omnia/src/deployment/manifest.rs) programmatically or generate one with `temp_manifest` and load it (see the `routing` and `guest_link` scenarios in the suite):
 
 ```rust
 let manifest = temp_manifest(r#"
@@ -144,7 +144,7 @@ let manifest = temp_manifest(r#"
     guest = "api"
 "#)?;
 let deployment = DeploymentBuilder::new()
-    .config(manifest.path().to_path_buf())
+    .manifest(Manifest::from_config(manifest.path())?)
     .build::<StoreCtx<Bundle>>()
     .await?;
 ```

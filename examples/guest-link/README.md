@@ -6,7 +6,7 @@ Proves host-mediated dynamic linking: one guest reaches another through an inter
 
 - `responder` ([`responder.rs`](responder.rs)) **exports** `omnia:link/echo`. It declares no trigger of its own, so it is reachable *only* via dispatch.
 - `router` ([`router.rs`](router.rs)) **imports** `omnia:link/echo` and exposes `run(message)`. Its component does not satisfy the import.
-- [`omnia.toml`](omnia.toml) names `omnia:link/echo` in the router's `link` allow-list. The runtime core polyfills that import onto the shared linker and, at startup, wires the serve side of every linked interface.
+- [`omnia.toml`](omnia.toml), or the equivalent programmatic [`Manifest`](dynamic.rs), names `omnia:link/echo` in the router's `link` allow-list. The runtime core polyfills that import onto the shared linker and, at startup, wires the serve side of every linked interface.
 
 When `router.run("hello")` calls the imported `echo("responder", "hello")`:
 
@@ -26,7 +26,7 @@ The runtime core stays generic (Law 2): `link` and the selector operate on the o
 
 ## Quick Start
 
-This example deploys two guests from a manifest, so build and run stay manual:
+This example deploys two guests from either a TOML or programmatic manifest, so build and run stay manual:
 
 ```bash
 # build the guests
@@ -42,15 +42,29 @@ cargo run --example guest-link -- run
 
 # or with an explicit manifest
 cargo run --example guest-link -- run --config examples/guest-link/omnia.toml
+
+# or construct the same manifest dynamically in Rust
+cargo run --example guest-link-dynamic
 ```
 
 This emits `target/wasm32-wasip2/debug/examples/guest_link_responder_wasm.wasm` and `guest_link_router_wasm.wasm` (the underscored names the manifest points at).
+
+The dynamic host uses the same generated runtime wiring, but supplies the
+deployment at runtime:
+
+```rust
+let manifest = Manifest::new()
+    .guest(GuestEntry::new("responder", responder_wasm))
+    .guest(GuestEntry::new("router", router_wasm).link("omnia:link/echo"));
+
+host::run(DeploymentBuilder::new().manifest(manifest))?;
+```
 
 ## Integration test
 
 ```bash
 # after building the guests above (do NOT `cargo clean` in between):
-cargo nextest run -p omnia --test guest_link
+cargo make test-seam
 ```
 
-The test builds the registry from this manifest, calls `router.run` and `router.run-slow`, and asserts each returns the responder's echo — and that the responder is instantiated exactly once per dispatched call.
+The test builds the registry from a programmatic manifest, calls `router.run` and `router.run-slow`, and asserts each returns the responder's echo — and that the responder is instantiated exactly once per dispatched call.

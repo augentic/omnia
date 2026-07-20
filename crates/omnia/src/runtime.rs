@@ -18,7 +18,8 @@ use crate::dispatch::serve_links;
 use crate::mount::MountRegistry;
 use crate::store::HasLimits;
 use crate::{
-    Deployment, DeploymentBuilder, Dispatcher, Registry, RuntimeOptions, StoreBase, StoreCtx,
+    Deployment, DeploymentBuilder, Dispatcher, Manifest, Registry, RuntimeOptions, StoreBase,
+    StoreCtx,
 };
 
 /// A deployment's connected backend bundle, threaded into [`Runtime`].
@@ -96,15 +97,34 @@ where
             links,
             args,
         } => {
-            let builder = DeploymentBuilder::new()
-                .wasm(wasm)
-                .config(config)
-                .default_config(default_config)
-                .args(args)
-                .mounts(mounts)
-                .links(links)
-                .mode(mode);
-            match run::<B, H>(builder).await {
+            let config = config.or_else(|| env::var_os("OMNIA_CONFIG").map(Into::into));
+            let manifest = config
+                .map_or_else(
+                    || {
+                        wasm.map_or_else(
+                            || {
+                                default_config
+                                    .context(
+                                        "no guest specified: pass a <wasm> path, or --config \
+                                         <omnia.toml> (or set OMNIA_CONFIG)",
+                                    )
+                                    .and_then(Manifest::from_config)
+                            },
+                            |wasm| Ok(Manifest::from_wasm(wasm)),
+                        )
+                    },
+                    Manifest::from_config,
+                )
+                .map(|manifest| manifest.mounts(mounts).links(links));
+
+            let result = match manifest {
+                Ok(manifest) => {
+                    let builder = DeploymentBuilder::new().manifest(manifest).args(args).mode(mode);
+                    run::<B, H>(builder).await
+                }
+                Err(error) => Err(error),
+            };
+            match result {
                 Ok(status) => status.into(),
                 Err(error) => {
                     eprintln!("{error:#}");

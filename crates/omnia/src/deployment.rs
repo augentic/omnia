@@ -5,12 +5,13 @@ mod source;
 
 use std::collections::BTreeSet;
 use std::env;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use manifest::Manifest;
-pub use manifest::Mount;
+pub use manifest::{
+    GuestEntry, HttpRoute, Manifest, Mount, RouteSpec, SourceSpec, TopicRoute, Transport,
+    TransportKind,
+};
 pub use source::{LoadedGuest, Source};
 use wasmtime::component::Linker;
 use wasmtime::{Config, Engine};
@@ -22,36 +23,24 @@ use crate::mount::{MountRegistry, ResolvedPreopen};
 use crate::registry::{Registry, Routes};
 use crate::{Host, Mode, RuntimeOptions, Server, Telemetry};
 
-/// Selects where a runtime's guests come from, then [`build`]s a [`Deployment`]
-/// ready for host linking.
+/// Builds a [`Deployment`] from an optional programmatic [`Manifest`].
 ///
-/// The single-file shorthand ([`wasm`]) and the manifest-driven deployment
-/// ([`config`]) are both expressed here; [`build`] resolves whichever is set —
-/// falling back to the `OMNIA_CONFIG` environment variable, then to the
-/// compiled-in [`default_config`](Self::default_config) manifest.
+/// When no manifest is set, [`build`](Self::build) loads the path in
+/// `OMNIA_CONFIG`.
 ///
 /// ```ignore
 /// let deployment = DeploymentBuilder::new()
-///     .wasm(wasm)
-///     .config(config)
+///     .manifest(Manifest::from_wasm(wasm))
 ///     .args(args)
 ///     .mode(mode)
 ///     .build::<StoreCtx>()
 ///     .await?;
 /// ```
-///
-/// [`wasm`]: Self::wasm
-/// [`config`]: Self::config
-/// [`build`]: Self::build
 #[derive(Debug, Default)]
 pub struct DeploymentBuilder {
-    wasm: Option<PathBuf>,
-    config: Option<PathBuf>,
-    default_config: Option<PathBuf>,
+    manifest: Option<Manifest>,
     args: Vec<String>,
     mode: Mode,
-    mounts: Vec<Mount>,
-    links: Vec<String>,
 }
 
 impl DeploymentBuilder {
@@ -61,33 +50,10 @@ impl DeploymentBuilder {
         Self::default()
     }
 
-    /// Start a builder for the manifest-driven deployment at `config`.
+    /// Set the deployment manifest.
     #[must_use]
-    pub fn from_config(config: impl Into<PathBuf>) -> Self {
-        Self::new().config(config.into())
-    }
-
-    /// Set the single-guest `wasm` path — the `omnia run <wasm>` shorthand.
-    #[must_use]
-    pub fn wasm(mut self, wasm: impl Into<Option<PathBuf>>) -> Self {
-        self.wasm = wasm.into();
-        self
-    }
-
-    /// Set the deployment manifest (`omnia.toml`) path for a multi-guest
-    /// deployment.
-    #[must_use]
-    pub fn config(mut self, config: impl Into<Option<PathBuf>>) -> Self {
-        self.config = config.into();
-        self
-    }
-
-    /// Set a fallback manifest path — typically compiled in via the `runtime!`
-    /// macro's `config:` field — used only when no explicit `config`,
-    /// `OMNIA_CONFIG`, or `wasm` source is given.
-    #[must_use]
-    pub fn default_config(mut self, config: impl Into<Option<PathBuf>>) -> Self {
-        self.default_config = config.into();
+    pub fn manifest(mut self, manifest: impl Into<Option<Manifest>>) -> Self {
+        self.manifest = manifest.into();
         self
     }
 
@@ -105,83 +71,32 @@ impl DeploymentBuilder {
         self
     }
 
-    /// Set CLI `--mount` preopens, resolved against the process working
-    /// directory and layered on top of any manifest mounts; a CLI mount whose
-    /// guest-visible name matches a manifest `[[mount]]` overrides it (last-wins).
-    #[must_use]
-    pub fn mounts(mut self, mounts: impl Into<Vec<Mount>>) -> Self {
-        self.mounts = mounts.into();
-        self
-    }
-
-    /// Set CLI `--link` host-mediated interfaces, unioned with any manifest
-    /// per-guest link lists.
-    #[must_use]
-    pub fn links(mut self, links: impl Into<Vec<String>>) -> Self {
-        self.links = links.into();
-        self
-    }
-
-    /// Resolve the configured source into a [`Deployment`], choosing single-file
-    /// or manifest-driven population.
+    /// Resolve the manifest into a [`Deployment`].
     ///
-    /// Resolution order: a `config` path (set via [`config`](Self::config)),
-    /// the `OMNIA_CONFIG` environment variable, the `wasm` one-guest shorthand,
-    /// then the [`default_config`](Self::default_config) fallback. At least one
-    /// must be provided.
+    /// If no manifest was supplied, the path in `OMNIA_CONFIG` is loaded.
     ///
     /// # Errors
     ///
-    /// Returns an error if no source resolves, or if the selected source cannot
-    /// be built.
+    /// Returns an error if no manifest resolves, the manifest is invalid, or
+    /// the deployment cannot be built.
     pub async fn build<T: WasiView + 'static>(self) -> Result<Deployment<T>> {
-        let manifest = self
-            .config
-            .or_else(|| env::var_os("OMNIA_CONFIG").map(PathBuf::from))
-            .or_else(|| if self.wasm.is_some() { None } else { self.default_config });
-
-        // CLI `--mount`/`--link` resolve against the process working directory
-        // and layer on top of whatever the selected source provides.
-        let cli_preopens: Vec<ResolvedPreopen> =
-            self.mounts.iter().map(|entry| entry.resolve(Path::new("."))).collect();
-        let cli_links: BTreeSet<Box<str>> =
-            self.links.iter().map(|link| Box::from(link.as_str())).collect();
-
-        let plan = if let Some(manifest) = manifest {
-            let parsed = Manifest::load(&manifest)?;
-            let base = manifest.parent().unwrap_or_else(|| Path::new("."));
-
-            let mut preopens = parsed.mounts(base);
-            preopens.extend(cli_preopens);
-
-            let mut links = parsed.links();
-            links.extend(cli_links);
-
-            Plan {
-                name: parsed.name().to_owned(),
-                sources: parsed.sources(base)?,
-                routes: parsed.routes(),
-                links,
-                preopens,
-                args: self.args,
-                mode: self.mode,
-            }
+        let manifest = if let Some(manifest) = self.manifest {
+            manifest
         } else {
-            let wasm = self.wasm.context(
-                "no guest specified: pass a <wasm> path, or --config <omnia.toml> (or set OMNIA_CONFIG)",
-            )?;
+            let config = env::var_os("OMNIA_CONFIG")
+                .context("no deployment manifest supplied and OMNIA_CONFIG is unset")?;
+            Manifest::from_config(config)?
+        };
+        manifest.validate()?;
 
-            let source = Source::new(wasm);
-
-            Plan {
-                name: source.id().as_str().to_owned(),
-                sources: vec![source],
-                routes: Routes::default(),
-                links: cli_links,
-                preopens: cli_preopens,
-                args: self.args,
-                mode: self.mode,
-            }
+        let plan = Plan {
+            name: manifest.name().to_owned(),
+            sources: manifest.sources()?,
+            routes: manifest.routes(),
+            links: manifest.link_interfaces(),
+            preopens: manifest.preopens(),
+            args: self.args,
+            mode: self.mode,
         };
 
         init_env(&plan.name)?;

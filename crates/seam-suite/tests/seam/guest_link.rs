@@ -16,8 +16,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
-use omnia::{DeploymentBuilder, GuestId, MountRegistry, Runtime, serve_links};
-use omnia_testkit::{find_guest, temp_manifest};
+use omnia::{
+    DeploymentBuilder, GuestEntry, GuestId, Manifest, MountRegistry, Runtime, serve_links,
+};
+use omnia_testkit::find_guest;
 
 use crate::fixture;
 
@@ -79,22 +81,12 @@ async fn build_runtime() -> Result<(Runtime<Counter>, Arc<AtomicUsize>)> {
     let responder = find_guest("guest_link_responder_wasm.wasm");
     let router = find_guest("guest_link_router_wasm.wasm");
 
-    // A manifest mirroring examples/guest-link/omnia.toml, with absolute source paths
-    // so it resolves regardless of the working directory.
-    let manifest = temp_manifest(&format!(
-        "[[guest]]\n\
-         id = \"responder\"\n\
-         source.path = \"{responder}\"\n\n\
-         [[guest]]\n\
-         id = \"router\"\n\
-         source.path = \"{router}\"\n\
-         link = [\"omnia:link/echo\"]\n",
-        responder = responder.display(),
-        router = router.display(),
-    ))?;
+    let manifest = Manifest::new()
+        .guest(GuestEntry::new("responder", responder))
+        .guest(GuestEntry::new("router", router).link("omnia:link/echo"));
 
     let deployment = DeploymentBuilder::new()
-        .config(manifest.path().to_path_buf())
+        .manifest(manifest)
         .build::<TestCtx>()
         .await
         .context("building runtime")?;

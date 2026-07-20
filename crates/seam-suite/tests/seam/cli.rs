@@ -10,7 +10,9 @@
 use std::path::Path;
 
 use anyhow::{Context as _, Result};
-use omnia::{Deployment, DeploymentBuilder, ExitStatus, Mode, Runtime, StoreCtx, Wiring, run};
+use omnia::{
+    Deployment, DeploymentBuilder, ExitStatus, Manifest, Mode, Runtime, StoreCtx, Wiring, run,
+};
 use omnia_testkit::find_guest;
 
 use crate::fixture;
@@ -33,7 +35,7 @@ async fn run_cli(wasm: &Path, tail: &[&str]) -> Result<ExitStatus> {
     // The `()` bundle links no hosts; `wasi:cli` is wired by the deployment
     // builder, and `Runtime::new` threads the guest argv into every store.
     let builder = DeploymentBuilder::new()
-        .wasm(wasm.to_path_buf())
+        .manifest(Manifest::from_wasm(wasm))
         .args(tail.iter().map(|arg| (*arg).to_string()).collect::<Vec<_>>())
         .mode(Mode::Command);
     run::<(), EmptyWiring>(builder).await.context("running command")

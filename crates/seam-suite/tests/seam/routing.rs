@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
 use omnia::wasmtime_wasi::ResourceTable;
-use omnia::{Backend as _, DeploymentBuilder, HasHttp, MountRegistry, Runtime, StoreCtx};
+use omnia::{Backend as _, DeploymentBuilder, HasHttp, Manifest, MountRegistry, Runtime, StoreCtx};
 use omnia_testkit::{find_guest, http, temp_manifest};
 use omnia_wasi_http::{HttpDefault, WasiHttp, WasiHttpCtxView};
 use omnia_wasi_otel::{HasOtel, OtelDefault, WasiOtel, WasiOtelCtx};
@@ -60,7 +60,7 @@ async fn runtime() -> Result<Runtime<Bundle>> {
     };
 
     let mut deployment = DeploymentBuilder::new()
-        .config(manifest.path().to_path_buf())
+        .manifest(Manifest::from_config(manifest.path())?)
         .build::<StoreCtx<Bundle>>()
         .await
         .context("build")?;

@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
 use omnia::{
-    Deployment, DeploymentBuilder, Host, MountRegistry, Runtime, Server, StoreCtx, WrpcView,
+    Deployment, DeploymentBuilder, Host, Manifest, MountRegistry, Runtime, Server, StoreCtx,
+    WrpcView,
 };
 use wasmtime_wasi::WasiView;
 
@@ -43,7 +44,7 @@ where
 {
     let wasm = find_guest(file);
     let deployment = DeploymentBuilder::new()
-        .wasm(wasm)
+        .manifest(Manifest::from_wasm(wasm))
         .build::<StoreCtx<B>>()
         .await
         .context("building deployment")?;
