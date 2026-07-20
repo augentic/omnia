@@ -84,6 +84,15 @@ impl<P> DeploymentBuilder<P> {
         self
     }
 
+    /// Set a fallback manifest path — typically compiled in via the `runtime!`
+    /// macro's `config:` field — used only when no explicit `config`,
+    /// `OMNIA_CONFIG`, or `wasm` source is given.
+    #[must_use]
+    pub fn default_config(mut self, config: impl Into<Option<PathBuf>>) -> Self {
+        self.default_config = config.into();
+        self
+    }
+
     /// Set CLI arguments forwarded to the guest (everything after `--`).
     #[must_use]
     pub fn args(mut self, args: impl Into<Vec<String>>) -> Self {
