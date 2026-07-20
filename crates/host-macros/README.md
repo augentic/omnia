@@ -51,6 +51,35 @@ omnia::runtime!({
 - **`mode: command`** — the runtime drives the guest's `wasi:cli/run` export once and exits with its status. A backend-less command runtime is valid: `omnia::runtime!({ mode: command });`
 - **`config:`** — a path expression compiled into the generated `main` as the default manifest, used only when the command line supplies no positional wasm, `--config`, or `OMNIA_CONFIG`. Anchor it with `env!("CARGO_MANIFEST_DIR")` to make it absolute at compile time.
 
+### Inline manifest keys
+
+Instead of a `config:` path, the deployment can be written inline — the keys mirror the `omnia::Manifest` schema (`omnia.toml` as Rust) and expand to a `Manifest` value compiled in as the same lowest-precedence fallback:
+
+```rust,ignore
+omnia::runtime!({
+    guests: [
+        { id: "responder", source: concat!(env!("CARGO_MANIFEST_DIR"), "/responder.wasm") },
+        {
+            id: "router",
+            source: concat!(env!("CARGO_MANIFEST_DIR"), "/router.wasm"),
+            link: ["omnia:link/echo"],   // per-guest host-mediated imports
+        },
+    ],
+    link: ["omnia:shared/log"],          // optional deployment-wide links
+    mounts: [
+        { name: ".", path: concat!(env!("CARGO_MANIFEST_DIR"), "/workspace"), writable: true },
+    ],
+    routes: {
+        http: [{ prefix: "/", guest: "router" }],
+        messaging: [{ topic: "orders.>", guest: "worker" }],
+        websocket: [{ route: "chat.*", guest: "ws" }],
+    },
+    hosts: { /* ... */ }
+});
+```
+
+Every value is a Rust expression; anchor paths with `env!("CARGO_MANIFEST_DIR")` (relative paths resolve against the run-time working directory). `config:` and the inline keys are mutually exclusive.
+
 ## Generated Code
 
 The macro generates a private `runtime` module containing:

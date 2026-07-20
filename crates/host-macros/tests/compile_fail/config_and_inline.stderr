@@ -1,0 +1,5 @@
+error: `config:` and inline manifest keys (`guests`, `mounts`, `link`, `routes`) are mutually exclusive
+ --> tests/compile_fail/config_and_inline.rs:3:5
+  |
+3 |     guests: [
+  |     ^^^^^^

@@ -19,7 +19,7 @@ pub fn expand(config: &Config) -> TokenStream {
         server_types,
         backends_ty,
         backends_def,
-        config_file,
+        default_manifest,
     } = Codegen::from(config);
 
     let mode = match mode {
@@ -62,7 +62,7 @@ pub fn expand(config: &Config) -> TokenStream {
             /// deployment through this runtime's hosts and backends.
             #[tokio::main]
             pub async fn main() -> ::std::process::ExitCode {
-                omnia::main::<#backends_ty, Hooks>(#mode, #config_file).await
+                omnia::main::<#backends_ty, Hooks>(#mode, #default_manifest).await
             }
 
             /// Run one deployment through this runtime's hosts and backends,
@@ -117,6 +117,35 @@ mod tests {
     fn expand_config_file() {
         insta::assert_snapshot!(expand_pretty(quote!({
             config: concat!(env!("CARGO_MANIFEST_DIR"), "/omnia.toml"),
+            hosts: {
+                WasiOtel: OtelDefault,
+            },
+        })));
+    }
+
+    #[test]
+    fn expand_inline_manifest() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            guests: [
+                {
+                    id: "responder",
+                    source: concat!(env!("CARGO_MANIFEST_DIR"), "/responder.wasm"),
+                },
+                {
+                    id: "router",
+                    source: concat!(env!("CARGO_MANIFEST_DIR"), "/router.wasm"),
+                    link: ["omnia:link/echo"],
+                },
+            ],
+            link: ["omnia:link/other"],
+            mounts: [
+                { name: ".", path: concat!(env!("CARGO_MANIFEST_DIR"), "/workspace"), writable: true },
+            ],
+            routes: {
+                http: [{ prefix: "/", guest: "router" }],
+                messaging: [{ topic: "orders.>", guest: "worker" }],
+                websocket: [{ route: "chat.*", guest: "ws" }],
+            },
             hosts: {
                 WasiOtel: OtelDefault,
             },

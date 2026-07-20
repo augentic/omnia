@@ -1,0 +1,94 @@
+---
+source: crates/host-macros/src/runtime.rs
+expression: "expand_pretty(quote!({\n    guests:\n    [{\n        id: \"responder\", source:\n        concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/responder.wasm\"),\n    },\n    {\n        id: \"router\", source:\n        concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/router.wasm\"), link:\n        [\"omnia:link/echo\"],\n    },], link: [\"omnia:link/other\"], mounts:\n    [{\n        name: \".\", path: concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/workspace\"),\n        writable: true\n    },], routes:\n    {\n        http: [{ prefix: \"/\", guest: \"router\" }], messaging:\n        [{ topic: \"orders.>\", guest: \"worker\" }], websocket:\n        [{ route: \"chat.*\", guest: \"ws\" }],\n    }, hosts: { WasiOtel: OtelDefault, },\n}))"
+---
+mod runtime {
+    use anyhow::Result;
+    use omnia::futures::future;
+    use omnia::Server;
+    use omnia::tokio;
+    use super::*;
+    use omnia::Backend;
+    #[derive(Clone)]
+    struct Backends {
+        otel_default: OtelDefault,
+    }
+    impl omnia::Backends for Backends {
+        async fn connect() -> Result<Self> {
+            let (otel_default,) = tokio::try_join!(
+                < OtelDefault as Backend > ::connect(),
+            )?;
+            Ok(Self { otel_default })
+        }
+    }
+    impl omnia_wasi_otel::HasOtel for Backends {
+        fn otel_ctx(&mut self) -> &mut dyn omnia_wasi_otel::WasiOtelCtx {
+            &mut self.otel_default
+        }
+    }
+    struct Hooks;
+    impl omnia::Wiring<Backends> for Hooks {
+        fn link(
+            deployment: &mut omnia::Deployment<omnia::StoreCtx<Backends>>,
+        ) -> Result<()> {
+            deployment.host::<WasiOtel, Backends>()?;
+            Ok(())
+        }
+        async fn serve(runtime: &omnia::Runtime<Backends>) -> Result<()> {
+            let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![];
+            future::try_join_all(servers).await?;
+            Ok(())
+        }
+    }
+    /// CLI entry point: parse the `run` grammar, then run the
+    /// deployment through this runtime's hosts and backends.
+    #[tokio::main]
+    pub async fn main() -> ::std::process::ExitCode {
+        omnia::main::<
+            Backends,
+            Hooks,
+        >(
+                omnia::Mode::Server,
+                ::std::option::Option::Some(
+                    omnia::DefaultManifest::Inline(
+                        omnia::Manifest::new()
+                            .guest(
+                                omnia::GuestEntry::new(
+                                    "responder",
+                                    concat!(env!("CARGO_MANIFEST_DIR"), "/responder.wasm"),
+                                ),
+                            )
+                            .guest(
+                                omnia::GuestEntry::new(
+                                        "router",
+                                        concat!(env!("CARGO_MANIFEST_DIR"), "/router.wasm"),
+                                    )
+                                    .link("omnia:link/echo"),
+                            )
+                            .mounts([
+                                omnia::Mount {
+                                    name: ::std::string::String::from("."),
+                                    path: ::std::path::PathBuf::from(
+                                        concat!(env!("CARGO_MANIFEST_DIR"), "/workspace"),
+                                    ),
+                                    writable: true,
+                                },
+                            ])
+                            .links(["omnia:link/other"])
+                            .route_http("/", "router")
+                            .route_messaging("orders.>", "worker")
+                            .route_websocket("chat.*", "ws"),
+                    ),
+                ),
+            )
+            .await
+    }
+    /// Run one deployment through this runtime's hosts and backends,
+    /// blocking until the guest completes.
+    #[tokio::main]
+    pub async fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
+        omnia::run::<Backends, Hooks>(builder.mode(omnia::Mode::Server)).await
+    }
+}
+#[allow(unused_imports)]
+pub use runtime::{run, main};

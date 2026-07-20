@@ -6,7 +6,7 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote};
 use syn::{Ident, Path};
 
-use crate::runtime::parse::{Config, HostEntry, Mode};
+use crate::runtime::parse::{Config, HostEntry, ManifestSpec, Mode};
 
 // Token fragments needed to expand the runtime macro.
 pub struct Codegen {
@@ -15,7 +15,7 @@ pub struct Codegen {
     pub server_types: Vec<Path>,
     pub backends_ty: TokenStream,
     pub backends_def: TokenStream,
-    pub config_file: TokenStream,
+    pub default_manifest: TokenStream,
 }
 
 impl From<&Config> for Codegen {
@@ -27,10 +27,7 @@ impl From<&Config> for Codegen {
 
         let (backends_ty, backends_def) = emit_backends(host_entries);
 
-        let config_file = config.config_file.as_ref().map_or_else(
-            || quote! { ::std::option::Option::None },
-            |expr| quote! { ::std::option::Option::Some(::std::path::PathBuf::from(#expr)) },
-        );
+        let default_manifest = emit_default_manifest(config);
 
         Self {
             mode: config.mode,
@@ -38,8 +35,82 @@ impl From<&Config> for Codegen {
             server_types,
             backends_ty,
             backends_def,
-            config_file,
+            default_manifest,
         }
+    }
+}
+
+/// Emit the `Option<omnia::DefaultManifest>` fallback passed to `omnia::main`:
+/// `Path` for a `config:` expression, `Inline` for the inline manifest keys,
+/// `None` when neither is declared.
+fn emit_default_manifest(config: &Config) -> TokenStream {
+    if let Some(expr) = &config.config_file {
+        return quote! {
+            ::std::option::Option::Some(
+                omnia::DefaultManifest::Path(::std::path::PathBuf::from(#expr)),
+            )
+        };
+    }
+    if config.manifest.is_empty() {
+        return quote! { ::std::option::Option::None };
+    }
+
+    let builder = emit_manifest_builder(&config.manifest);
+    quote! {
+        ::std::option::Option::Some(omnia::DefaultManifest::Inline(#builder))
+    }
+}
+
+/// Emit the fluent `omnia::Manifest` builder chain for the inline keys.
+fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
+    let guests = manifest.guests.iter().map(|guest| {
+        let id = &guest.id;
+        let source = &guest.source;
+        let links = &guest.link;
+        quote! {
+            .guest(omnia::GuestEntry::new(#id, #source)#(.link(#links))*)
+        }
+    });
+
+    let mounts = manifest.mounts.iter().map(|mount| {
+        let name = &mount.name;
+        let path = &mount.path;
+        let writable =
+            mount.writable.as_ref().map_or_else(|| quote!(false), ToTokens::to_token_stream);
+        quote! {
+            .mounts([omnia::Mount {
+                name: ::std::string::String::from(#name),
+                path: ::std::path::PathBuf::from(#path),
+                writable: #writable,
+            }])
+        }
+    });
+
+    let links = &manifest.link;
+    let link = (!links.is_empty()).then(|| quote! { .links([#(#links),*]) });
+
+    let routes = &manifest.routes;
+    let http = routes.http.iter().map(|route| {
+        let (key, guest) = (&route.key, &route.guest);
+        quote! { .route_http(#key, #guest) }
+    });
+    let messaging = routes.messaging.iter().map(|route| {
+        let (key, guest) = (&route.key, &route.guest);
+        quote! { .route_messaging(#key, #guest) }
+    });
+    let websocket = routes.websocket.iter().map(|route| {
+        let (key, guest) = (&route.key, &route.guest);
+        quote! { .route_websocket(#key, #guest) }
+    });
+
+    quote! {
+        omnia::Manifest::new()
+            #(#guests)*
+            #(#mounts)*
+            #link
+            #(#http)*
+            #(#messaging)*
+            #(#websocket)*
     }
 }
 

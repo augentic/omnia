@@ -1,6 +1,7 @@
 //! Host-mediated dynamic linking example runtime.
 //!
-//! Two guests are registered from `omnia.toml`: `responder` (exports
+//! Two guests are compiled in via the `runtime!` macro's inline manifest keys
+//! (the Rust equivalent of `omnia.toml`): `responder` (exports
 //! `omnia:link/echo`) and `router` (imports it, exports `run`). The router's
 //! import is unsatisfied by its own component — the host polyfills it on the
 //! shared linker and, at bootstrap, wires the serve side of every linked
@@ -18,7 +19,23 @@ cfg_if::cfg_if! {
         use omnia_wasi_otel::{WasiOtel, OtelDefault};
 
         omnia::runtime!({
-            config: concat!(env!("CARGO_MANIFEST_DIR"), "/guest-link/omnia.toml"),
+            guests: [
+                {
+                    id: "responder",
+                    source: concat!(
+                        env!("CARGO_MANIFEST_DIR"),
+                        "/../target/wasm32-wasip2/debug/examples/guest_link_responder_wasm.wasm",
+                    ),
+                },
+                {
+                    id: "router",
+                    source: concat!(
+                        env!("CARGO_MANIFEST_DIR"),
+                        "/../target/wasm32-wasip2/debug/examples/guest_link_router_wasm.wasm",
+                    ),
+                    link: ["omnia:link/echo"],
+                },
+            ],
             hosts: {
                 WasiHttp: HttpDefault,
                 WasiOtel: OtelDefault,

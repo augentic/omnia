@@ -1,5 +1,5 @@
 omnia_host_macros::runtime!({
-    guests: {},
+    backends: {},
 });
 
 fn main() {}
