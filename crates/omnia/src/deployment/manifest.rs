@@ -137,9 +137,10 @@ impl Manifest {
         self
     }
 
-    /// Validate manifest-level invariants surfaced before the registry is built.
-    pub(super) fn validate(&self) -> Result<()> {
-        if self.guests.is_empty() {
+    /// Validate manifest-level invariants surfaced before the registry is
+    /// built. A `dynamic` deployment may define no `[[guest]]` entries.
+    pub(super) fn validate(&self, dynamic: bool) -> Result<()> {
+        if self.guests.is_empty() && !dynamic {
             bail!("manifest defines no [[guest]] entries");
         }
         let mut ids = BTreeSet::new();
@@ -590,7 +591,7 @@ mod tests {
         let manifest = Manifest::from_config(&path).expect("manifest should load");
         let _ = std::fs::remove_file(&path);
 
-        assert!(manifest.validate().is_err(), "distributed transport is not yet implemented");
+        assert!(manifest.validate(false).is_err(), "distributed transport is not yet implemented");
     }
 
     #[test]
@@ -633,7 +634,7 @@ mod tests {
         let manifest = Manifest::from_config(&path).expect("manifest should load");
         let _ = std::fs::remove_file(&path);
 
-        let error = manifest.validate().expect_err("duplicate guest ids must be rejected");
+        let error = manifest.validate(false).expect_err("duplicate guest ids must be rejected");
         assert!(error.to_string().contains("duplicate [[guest]] id `same`"), "{error}");
     }
 
@@ -647,7 +648,14 @@ mod tests {
         let manifest = Manifest::from_config(&path).expect("manifest should load");
         let _ = std::fs::remove_file(&path);
 
-        assert!(manifest.validate().is_err(), "a manifest with no guests must be rejected");
+        assert!(
+            manifest.validate(false).is_err(),
+            "a static manifest with no guests must be rejected"
+        );
+        assert!(
+            Manifest::new().validate(true).is_ok(),
+            "a dynamic deployment may start with no guests"
+        );
     }
 
     #[test]
@@ -661,7 +669,7 @@ mod tests {
             .route_messaging("jobs.>", "router")
             .route_websocket("events.*", "responder");
 
-        manifest.validate().expect("manifest should validate");
+        manifest.validate(false).expect("manifest should validate");
         assert_eq!(manifest.guests.len(), 2);
         assert_eq!(manifest.mounts.len(), 1);
         assert_eq!(manifest.route.http.len(), 1);

@@ -79,6 +79,58 @@ impl Source {
     }
 }
 
+/// Verified component bytes for dynamic registration
+/// ([`Runtime::register`](crate::Runtime::register)).
+///
+/// Verification (digest, signature, provenance) is deployment policy and
+/// happens before the runtime sees the bytes; the runtime loads exactly what
+/// it is handed.
+pub enum GuestArtifact {
+    /// A settings-matched pre-compiled artifact (`omnia compile` output),
+    /// loaded via deserialization with no runtime codegen.
+    Precompiled(Vec<u8>),
+    /// Raw component wasm, JIT-compiled at registration (requires the `jit`
+    /// feature).
+    Wasm(Vec<u8>),
+}
+
+impl GuestArtifact {
+    /// Load the artifact into a [`Component`] on a blocking thread
+    /// (deserialization and compilation are CPU-bound).
+    pub(crate) async fn load(self, engine: &Engine) -> Result<Component> {
+        let engine = engine.clone();
+        tokio::task::spawn_blocking(move || {
+            let component = match self {
+                // SAFETY: a pre-compiled artifact is rejected (not executed)
+                // unless the loading engine matches the compile-affecting
+                // settings it was built with.
+                Self::Precompiled(bytes) => unsafe { Component::deserialize(&engine, &bytes) }
+                    .map_err(anyhow::Error::from)
+                    .context(
+                        "deserializing pre-compiled guest: the artifact must be built with the \
+                         same compile-affecting settings used by `omnia compile` (MAX_FUEL, \
+                         BRANCH_HINTING, MEMORY_RESERVATION, MEMORY_GUARD_SIZE)",
+                    )?,
+                #[cfg(feature = "jit")]
+                Self::Wasm(bytes) => Component::new(&engine, &bytes)
+                    .map_err(anyhow::Error::from)
+                    .context("compiling guest component")?,
+                #[cfg(not(feature = "jit"))]
+                Self::Wasm(_) => anyhow::bail!(
+                    "registering raw wasm requires the `jit` feature; pre-compile with `omnia \
+                     compile` and register the artifact instead"
+                ),
+            };
+            // Build the copy-on-write heap image now rather than lazily on the
+            // first instantiation, moving that one-time cost off the first call.
+            component.initialize_copy_on_write_image()?;
+            Ok(component)
+        })
+        .await
+        .context("guest load task panicked")?
+    }
+}
+
 /// Derive an opaque identity from a file path's stem, falling back to `default`
 /// when the path has no usable stem.
 fn id_from_path(path: &Path) -> GuestId {

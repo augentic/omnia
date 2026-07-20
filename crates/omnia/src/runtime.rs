@@ -14,8 +14,10 @@ use wasmtime::component::{Instance, InstancePre};
 use wasmtime::{Engine, Store};
 
 use crate::cli::{Cli, Command};
-use crate::dispatch::serve_links;
+use crate::deployment::GuestArtifact;
+use crate::dispatch::{serve_guest, serve_links};
 use crate::mount::MountRegistry;
+use crate::registry::{Guest, GuestId};
 use crate::store::HasLimits;
 use crate::{
     Deployment, DeploymentBuilder, Dispatcher, Manifest, Registry, RuntimeOptions, StoreBase,
@@ -191,7 +193,7 @@ where
 {
     tracing::info!(
         mode = if mode.is_command() { "command" } else { "server" },
-        guests = runtime.registry().guests().count(),
+        guests = runtime.registry().len(),
         component = env::var("COMPONENT").unwrap_or_else(|_| "unknown".into()),
         "omnia ready",
     );
@@ -424,6 +426,72 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         let instance = instance_pre.instantiate_async(store).await?;
         tracing::debug!("component instantiated");
         Ok(instance)
+    }
+
+    /// Register a guest at run time: load the verified `artifact`,
+    /// pre-instantiate it against the shared host set, wire its host-mediated
+    /// link serve side, then publish it in the registry (serve-before-publish,
+    /// so a dispatch can never resolve the entry and miss the endpoint).
+    ///
+    /// The identity is opaque and must not already be registered; an upgrade
+    /// is [`deregister`](Self::deregister) + `register` (or a new id). A
+    /// failed registration leaves no partial state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `id` is already registered, the artifact cannot be
+    /// loaded, the component's imports exceed the deployment's linked host set
+    /// and `link` union, or its linked exports cannot be served.
+    pub async fn register(&self, id: impl Into<GuestId>, artifact: GuestArtifact) -> Result<()> {
+        let id = id.into();
+        let registry = self.registry();
+
+        let component = artifact
+            .load(registry.engine())
+            .await
+            .with_context(|| format!("loading guest `{id}`"))?;
+        let instance_pre = registry.instantiate_late(&id, &component)?;
+        let guest = Guest::local(id.clone(), instance_pre);
+
+        // Serve-before-publish: wire the guest's linked exports (if any) into
+        // the carrier before the registry entry becomes observable.
+        let server = serve_guest(self, &guest)
+            .await
+            .with_context(|| format!("serving guest `{id}` link exports"))?;
+        if let Some(server) = &server {
+            registry.dispatch().transport()?.insert(&id, Arc::clone(server))?;
+        }
+
+        if let Err(error) = registry.insert(guest) {
+            // Roll back the endpoint so the failed call leaves no partial state.
+            if server.is_some()
+                && let Ok(transport) = registry.dispatch().transport()
+            {
+                transport.remove(&id);
+            }
+            return Err(error);
+        }
+
+        tracing::info!(guest = %id, "guest registered");
+        Ok(())
+    }
+
+    /// Remove a dynamically registered guest. New dispatches to `id` fail as
+    /// unregistered; in-flight calls complete on the instance they hold
+    /// (instance-per-call). Static deployment entries are refused.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `id` names a static `[[guest]]` entry or is not
+    /// registered.
+    pub fn deregister(&self, id: &GuestId) -> Result<()> {
+        let registry = self.registry();
+        registry.remove(id)?;
+        if let Ok(transport) = registry.dispatch().transport() {
+            transport.remove(id);
+        }
+        tracing::info!(guest = %id, "guest deregistered");
+        Ok(())
     }
 }
 

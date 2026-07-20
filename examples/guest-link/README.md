@@ -33,6 +33,7 @@ This example deploys two guests from either a TOML or programmatic manifest, so 
 cargo build -p examples \
   --example guest-link-responder-wasm \
   --example guest-link-router-wasm \
+  --example guest-link-extra-wasm \
   --target wasm32-wasip2
 
 # run the host — the manifest path is compiled in (runtime! `config:`),
@@ -45,6 +46,10 @@ cargo run --example guest-link -- run --config examples/guest-link/omnia.toml
 
 # or construct the same manifest dynamically in Rust
 cargo run --example guest-link-dynamic
+
+# or grow the deployment after startup: register a third guest (`extra`,
+# absent from the manifest) at run time and dispatch to it via the router
+cargo run --example guest-link-register
 ```
 
 This emits `target/wasm32-wasip2/debug/examples/guest_link_responder_wasm.wasm` and `guest_link_router_wasm.wasm` (the underscored names the manifest points at).
@@ -58,6 +63,20 @@ let manifest = Manifest::new()
     .guest(GuestEntry::new("router", router_wasm).link("omnia:link/echo"));
 
 host::run(DeploymentBuilder::new().manifest(manifest))?;
+```
+
+## Dynamic registration
+
+`extra` ([`extra.rs`](extra.rs)) also exports `omnia:link/echo` but is absent
+from the manifest: [`register.rs`](register.rs) admits it after startup with
+`Runtime::register` (verify → load → pre-instantiate → serve → publish), and the
+router reaches it through `run-to("extra", ...)` — the same host-mediated
+dispatch as any static target. `Runtime::deregister` removes it again;
+in-flight calls complete (instance-per-call).
+
+```rust
+let bytes = std::fs::read(extra_wasm)?; // verified by the install pipeline
+runtime.register("extra", GuestArtifact::Wasm(bytes)).await?;
 ```
 
 ## Integration test

@@ -24,8 +24,8 @@ pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
 pub use self::cli::{Cli, Command};
 pub use self::deployment::{
-    Deployment, DeploymentBuilder, GuestEntry, HttpRoute, Manifest, Mount, RouteSpec, SourceSpec,
-    TopicRoute, Transport, TransportKind,
+    Deployment, DeploymentBuilder, GuestArtifact, GuestEntry, HttpRoute, Manifest, Mount,
+    RouteSpec, SourceSpec, TopicRoute, Transport, TransportKind,
 };
 pub use self::dispatch::{
     Dispatcher, FirstArgSelector, GuestSelector, LinkClient, WrpcState, serve_links,
@@ -36,7 +36,7 @@ pub use self::options::RuntimeOptions;
 #[cfg(feature = "jit")]
 pub use self::options::compile;
 pub use self::registry::{
-    CliRoutes, GuestId, HttpRoutes, PatternRoutes, Registry, Routes, TriggerRouter,
+    CliRoutes, Guest, GuestId, HttpRoutes, PatternRoutes, Registry, Routes, TriggerRouter,
 };
 pub use self::runtime::{Backends, ExitStatus, Mode, Runtime, Wiring};
 #[doc(hidden)]

@@ -31,7 +31,7 @@ mod value;
 
 pub use handle::DispatchHandle;
 pub use host::Dispatcher;
-pub use link::link;
+pub use link::{link, polyfill_late};
 pub use selector::{FirstArgSelector, GuestSelector};
-pub use serve::serve_links;
+pub use serve::{serve_guest, serve_links};
 pub use transport::{LinkClient, WrpcState};

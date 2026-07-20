@@ -12,7 +12,7 @@ pub use manifest::{
     GuestEntry, HttpRoute, Manifest, Mount, RouteSpec, SourceSpec, TopicRoute, Transport,
     TransportKind,
 };
-pub use source::{LoadedGuest, Source};
+pub use source::{GuestArtifact, LoadedGuest, Source};
 use wasmtime::component::Linker;
 use wasmtime::{Config, Engine};
 use wasmtime_wasi::WasiView;
@@ -41,6 +41,7 @@ pub struct DeploymentBuilder {
     manifest: Option<Manifest>,
     args: Vec<String>,
     mode: Mode,
+    dynamic: bool,
 }
 
 impl DeploymentBuilder {
@@ -71,6 +72,14 @@ impl DeploymentBuilder {
         self
     }
 
+    /// Mark the deployment as dynamically populated: the guest set may start
+    /// empty and grow at run time via [`Runtime::register`](crate::Runtime::register).
+    #[must_use]
+    pub const fn dynamic(mut self) -> Self {
+        self.dynamic = true;
+        self
+    }
+
     /// Resolve the manifest into a [`Deployment`].
     ///
     /// If no manifest was supplied, the path in `OMNIA_CONFIG` is loaded.
@@ -82,12 +91,15 @@ impl DeploymentBuilder {
     pub async fn build<T: WasiView + 'static>(self) -> Result<Deployment<T>> {
         let manifest = if let Some(manifest) = self.manifest {
             manifest
+        } else if self.dynamic {
+            // A dynamic deployment may start empty and register guests later.
+            Manifest::new()
         } else {
             let config = env::var_os("OMNIA_CONFIG")
                 .context("no deployment manifest supplied and OMNIA_CONFIG is unset")?;
             Manifest::from_config(config)?
         };
-        manifest.validate()?;
+        manifest.validate(self.dynamic)?;
 
         let plan = Plan {
             name: manifest.name().to_owned(),
@@ -97,6 +109,7 @@ impl DeploymentBuilder {
             preopens: manifest.preopens(),
             args: self.args,
             mode: self.mode,
+            dynamic: self.dynamic,
         };
 
         init_env(&plan.name)?;
@@ -127,6 +140,8 @@ pub struct Deployment<T: WasiView + 'static> {
     args: Arc<Vec<String>>,
     // Whether this deployment runs a one-shot `wasi:cli` command.
     mode: Mode,
+    // Whether the guest set may start empty and grow at run time.
+    dynamic: bool,
 }
 
 impl<T: WasiView + 'static> Deployment<T> {
@@ -165,6 +180,7 @@ impl<T: WasiView + 'static> Deployment<T> {
             mounts,
             args: Arc::new(args),
             mode: plan.mode,
+            dynamic: plan.dynamic,
         })
     }
 }
@@ -238,6 +254,7 @@ impl<T: WasiView> Deployment<T> {
             self.guests,
             self.routes,
             dispatch,
+            self.dynamic,
         )
     }
 }
@@ -251,6 +268,7 @@ struct Plan {
     preopens: Vec<ResolvedPreopen>,
     args: Vec<String>,
     mode: Mode,
+    dynamic: bool,
 }
 
 // Build the shared engine, WASI-linked linker, and runtime options.

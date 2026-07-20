@@ -65,7 +65,7 @@ impl DispatchHandle {
     }
 
     /// The bound transport carrier.
-    pub(super) fn transport(&self) -> Result<&InProcess> {
+    pub(crate) fn transport(&self) -> Result<&InProcess> {
         self.transport
             .get()
             .context("link transport not initialized; `serve_links` must run before dispatch")

@@ -33,4 +33,10 @@ impl Guest for Router {
     async fn run_slow(message: String) -> String {
         omnia::link::echo::echo_slow("responder".to_owned(), message).await
     }
+
+    /// Call the host-mediated `echo` naming an arbitrary target — the path that
+    /// reaches guests registered after startup (dynamic registration).
+    fn run_to(target: String, message: String) -> String {
+        omnia::link::echo::echo(&target, &message)
+    }
 }

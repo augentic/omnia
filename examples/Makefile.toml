@@ -20,7 +20,8 @@ cargo build -p examples --target wasm32-wasip2 \
   --example http-routing-a-wasm \
   --example http-routing-b-wasm \
   --example guest-link-responder-wasm \
-  --example guest-link-router-wasm
+  --example guest-link-router-wasm \
+  --example guest-link-extra-wasm
 ws="$(cargo locate-project --workspace --message-format=plain)"
 ws="${ws%/Cargo.toml}"
 out="${CARGO_TARGET_DIR:-$ws/target}/wasm32-wasip2/debug/examples"
@@ -33,7 +34,8 @@ cargo run -p omnia-testkit --bin guests -- \
   "$out/http_routing_a_wasm.wasm" \
   "$out/http_routing_b_wasm.wasm" \
   "$out/guest_link_responder_wasm.wasm" \
-  "$out/guest_link_router_wasm.wasm"
+  "$out/guest_link_router_wasm.wasm" \
+  "$out/guest_link_extra_wasm.wasm"
 '''
 
 # Full WASM example build (every guest, including those without seam

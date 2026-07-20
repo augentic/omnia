@@ -17,7 +17,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
 use omnia::{
-    DeploymentBuilder, GuestEntry, GuestId, Manifest, MountRegistry, Runtime, serve_links,
+    DeploymentBuilder, GuestArtifact, GuestEntry, GuestId, Manifest, MountRegistry, Runtime,
+    serve_links,
 };
 use omnia_testkit::find_guest;
 
@@ -73,6 +74,56 @@ async fn call_router(runtime: &Runtime<Counter>, export: &str, message: &str) ->
         Some(Val::String(echoed)) => Ok(echoed),
         other => bail!("router.{export} returned a non-string result: {other:?}"),
     }
+}
+
+/// Instantiate the router fresh and call `run-to(target, message)` — the
+/// arbitrary-target leg that reaches dynamically registered guests.
+async fn call_router_to(runtime: &Runtime<Counter>, target: &str, message: &str) -> Result<String> {
+    let guest =
+        runtime.registry().get(&GuestId::from("router")).context("router guest is registered")?;
+    let mut store = runtime.build_store(runtime.store());
+    let instance = runtime
+        .instantiate(guest.instance_pre(), &mut store)
+        .await
+        .context("instantiating router")?;
+    let run_to = instance.get_func(&mut store, "run-to").context("router exports `run-to`")?;
+
+    let mut results = vec![Val::Bool(false)];
+    run_to
+        .call_async(
+            &mut store,
+            &[Val::String(target.to_owned()), Val::String(message.to_owned())],
+            &mut results,
+        )
+        .await
+        .map_err(anyhow::Error::from)
+        .context("calling router.run-to")?;
+
+    match results.into_iter().next() {
+        Some(Val::String(echoed)) => Ok(echoed),
+        other => bail!("router.run-to returned a non-string result: {other:?}"),
+    }
+}
+
+/// Locate a pre-built guest and wrap it as a registration artifact:
+/// `Precompiled` for a serialized `.bin`, `Wasm` for raw wasm.
+fn artifact(file: &str) -> Result<GuestArtifact> {
+    let path = find_guest(file);
+    let bytes =
+        std::fs::read(&path).with_context(|| format!("reading guest {}", path.display()))?;
+    Ok(if path.extension().is_some_and(|ext| ext == "bin") {
+        GuestArtifact::Precompiled(bytes)
+    } else {
+        GuestArtifact::Wasm(bytes)
+    })
+}
+
+/// The raw-wasm dual of [`artifact`], exercising `GuestArtifact::Wasm`.
+fn raw_wasm(file: &str) -> Result<GuestArtifact> {
+    let path = find_guest(file).with_extension("wasm");
+    let bytes =
+        std::fs::read(&path).with_context(|| format!("reading guest {}", path.display()))?;
+    Ok(GuestArtifact::Wasm(bytes))
 }
 
 /// Build the two-guest deployment and wire the serve side, returning the
@@ -158,6 +209,179 @@ fn dispatch_async() -> Result<()> {
             let echoed = call_router(&runtime, "run-slow", message).await?;
             assert_eq!(echoed, format!("responder echoes slowly: {message}"));
         }
+
+        Ok(())
+    })
+}
+
+// A guest registered after startup (absent from the manifest) is reachable via
+// host-mediated link dispatch — serve-at-register — and via host→guest
+// dispatch, while static dispatch is undisturbed. Registration loads the
+// serialized artifact (the `Precompiled` path).
+#[test]
+fn register_then_dispatch() -> Result<()> {
+    fixture::RT.block_on(async {
+        let (runtime, _clones) = build_runtime().await?;
+        runtime.register("extra", artifact("guest_link_extra_wasm.wasm")?).await?;
+
+        // Guest→guest: the static router names the registered guest.
+        let echoed = call_router_to(&runtime, "extra", "hello").await?;
+        assert_eq!(echoed, "extra echoes from extra: hello");
+
+        // Host→guest: the dispatcher reaches it like any static guest.
+        let results = runtime
+            .dispatcher()
+            .invoke(
+                GuestId::from("extra"),
+                None,
+                "echo".to_owned(),
+                vec![Val::String("extra".to_owned()), Val::String("hi".to_owned())],
+            )
+            .await?;
+        assert_eq!(results, vec![Val::String("extra echoes from extra: hi".to_owned())]);
+
+        // Static dispatch is undisturbed.
+        let echoed = call_router_to(&runtime, "responder", "hello").await?;
+        assert_eq!(echoed, "responder echoes: hello");
+
+        Ok(())
+    })
+}
+
+// Deregistration makes new dispatches fail as unregistered on both dispatch
+// paths; the static guests are unaffected.
+#[test]
+fn deregister_then_dispatch() -> Result<()> {
+    fixture::RT.block_on(async {
+        let (runtime, _clones) = build_runtime().await?;
+        runtime.register("extra", artifact("guest_link_extra_wasm.wasm")?).await?;
+        call_router_to(&runtime, "extra", "hello").await?;
+
+        runtime.deregister(&GuestId::from("extra"))?;
+
+        call_router_to(&runtime, "extra", "hello")
+            .await
+            .expect_err("link dispatch to a deregistered guest must fail");
+        runtime
+            .dispatcher()
+            .invoke(GuestId::from("extra"), None, "echo".to_owned(), Vec::new())
+            .await
+            .expect_err("host dispatch to a deregistered guest must fail");
+
+        let echoed = call_router_to(&runtime, "responder", "hello").await?;
+        assert_eq!(echoed, "responder echoes: hello");
+
+        Ok(())
+    })
+}
+
+// Deregister + re-register with different bytes swaps the guest's behavior —
+// the upgrade story. The first leg registers the responder's bytes under the
+// dynamic id (raw wasm, the `Wasm` artifact path); the second swaps in the
+// extra guest's bytes.
+#[test]
+fn upgrade_swap() -> Result<()> {
+    fixture::RT.block_on(async {
+        let (runtime, _clones) = build_runtime().await?;
+
+        runtime.register("extra", raw_wasm("guest_link_responder_wasm.wasm")?).await?;
+        let echoed = call_router_to(&runtime, "extra", "hello").await?;
+        assert_eq!(echoed, "extra echoes: hello", "first registration answers");
+
+        runtime.deregister(&GuestId::from("extra"))?;
+        runtime.register("extra", artifact("guest_link_extra_wasm.wasm")?).await?;
+        let echoed = call_router_to(&runtime, "extra", "hello").await?;
+        assert_eq!(echoed, "extra echoes from extra: hello", "swapped bytes answer");
+
+        Ok(())
+    })
+}
+
+// Static entries win: a static id can be neither shadowed by registration nor
+// deregistered; an unknown id cannot be deregistered.
+#[test]
+fn static_ids_protected() -> Result<()> {
+    fixture::RT.block_on(async {
+        let (runtime, _clones) = build_runtime().await?;
+
+        let error = runtime
+            .register("router", artifact("guest_link_extra_wasm.wasm")?)
+            .await
+            .expect_err("registering over a static id must fail");
+        assert!(error.to_string().contains("already registered"), "{error}");
+
+        let error = runtime
+            .deregister(&GuestId::from("router"))
+            .expect_err("deregistering a static entry must fail");
+        assert!(error.to_string().contains("static"), "{error}");
+
+        runtime
+            .deregister(&GuestId::from("ghost"))
+            .expect_err("deregistering an unknown id must fail");
+
+        Ok(())
+    })
+}
+
+// A failed registration (imports outside the linked host set) leaves no
+// partial state: the id stays unregistered and remains usable.
+#[test]
+fn register_failure_no_partial_state() -> Result<()> {
+    fixture::RT.block_on(async {
+        let (runtime, _clones) = build_runtime().await?;
+
+        // The conformance guest imports host interfaces (keyvalue, blobstore,
+        // ...) this deployment never linked, so pre-instantiation fails.
+        runtime
+            .register("extra", artifact("conformance_wasm.wasm")?)
+            .await
+            .expect_err("a guest with unsatisfied imports must fail registration");
+        assert!(
+            runtime.registry().get(&GuestId::from("extra")).is_none(),
+            "a failed registration must not publish the guest"
+        );
+
+        // The id is fully reusable: a valid registration under it succeeds.
+        runtime.register("extra", artifact("guest_link_extra_wasm.wasm")?).await?;
+        let echoed = call_router_to(&runtime, "extra", "hello").await?;
+        assert_eq!(echoed, "extra echoes from extra: hello");
+
+        Ok(())
+    })
+}
+
+// A `dynamic()` deployment starts with zero static guests and is populated
+// entirely at run time; host→guest dispatch reaches the registered guest.
+#[test]
+fn dynamic_empty_deployment() -> Result<()> {
+    fixture::RT.block_on(async {
+        let deployment = DeploymentBuilder::new()
+            .dynamic()
+            .build::<TestCtx>()
+            .await
+            .context("building empty dynamic deployment")?;
+        let registry = deployment.into_registry().context("assembling registry")?;
+        let runtime = Runtime::<Counter>::from_parts(
+            Arc::new(registry),
+            Vec::new(),
+            Arc::new(MountRegistry::default()),
+            Counter::default(),
+        );
+        assert!(runtime.registry().is_empty(), "a dynamic deployment starts empty");
+
+        // No `link` union is declared, so there is no serve side to wire;
+        // host→guest dispatch needs no transport.
+        runtime.register("extra", artifact("guest_link_extra_wasm.wasm")?).await?;
+        let results = runtime
+            .dispatcher()
+            .invoke(
+                GuestId::from("extra"),
+                None,
+                "echo".to_owned(),
+                vec![Val::String("extra".to_owned()), Val::String("hi".to_owned())],
+            )
+            .await?;
+        assert_eq!(results, vec![Val::String("extra echoes from extra: hi".to_owned())]);
 
         Ok(())
     })
