@@ -28,7 +28,8 @@ pub use self::deployment::{
     Precompiled, RouteSpec, SourceSpec, TopicRoute, Transport, TransportKind, WasmOnly,
 };
 pub use self::dispatch::{
-    Dispatcher, FirstArgSelector, GuestSelector, LinkClient, WrpcState, serve_links,
+    Dispatcher, EnsureError, FirstArgSelector, GuestResolver, GuestSelector, HttpFallback,
+    LinkClient, WrpcState, serve_links,
 };
 pub use self::host::{Backend, FromEnv, FutureResult, Host, Server};
 pub use self::mount::{MountRegistry, ResolvedPreopen};

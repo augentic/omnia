@@ -2,20 +2,27 @@
 
 mod command;
 
+use std::collections::HashMap;
 use std::env;
 use std::future::Future;
 use std::process::ExitCode;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result};
 use clap::Parser as _;
-use wasmtime::component::{Instance, InstancePre};
+use futures::FutureExt as _;
+use futures::future::{BoxFuture, Shared};
+use wasmtime::component::types::ComponentItem;
+use wasmtime::component::{Component, Instance, InstancePre};
 use wasmtime::{Engine, Store};
 
 use crate::cli::{Cli, Command};
 use crate::deployment::GuestArtifact;
-use crate::dispatch::{serve_guest, serve_links};
+use crate::dispatch::{
+    EnsureError, GuestResolver, HttpFallback, ResolveHook, serve_guest, serve_links,
+};
+use crate::host::FutureResult;
 use crate::mount::MountRegistry;
 use crate::registry::{Guest, GuestId};
 use crate::store::HasLimits;
@@ -360,11 +367,42 @@ pub struct Runtime<B: 'static> {
     dispatcher: Arc<dyn Dispatcher>,
 }
 
+/// One resolve-on-miss flight: a shared future every concurrent waiter for
+/// the same missing identity awaits, so the resolver runs once per miss and
+/// all waiters share the outcome — negatives included.
+type Flight<B> = Shared<BoxFuture<'static, Result<Arc<Guest<StoreCtx<B>>>, EnsureError>>>;
+
 struct RuntimeInner<B: 'static> {
     registry: Arc<Registry<StoreCtx<B>>>,
     args: Arc<Vec<String>>,
     mounts: Arc<MountRegistry>,
     backends: B,
+    // Resolve-on-miss seam (RFC guest-resolution §4.5). Install-once: hooks
+    // ride the deployment builder (or the `from_parts` chainable setters) and
+    // never change for the life of the runtime.
+    resolver: OnceLock<Arc<dyn GuestResolver>>,
+    http_fallback: OnceLock<HttpFallback>,
+    // In-flight resolutions by identity. An entry lives exactly as long as
+    // its flight: inserted when the flight starts, removed when its outcome
+    // is computed — nothing is cached across flights.
+    flights: Mutex<HashMap<GuestId, Flight<B>>>,
+}
+
+impl<B: 'static> RuntimeInner<B> {
+    fn new(
+        registry: Arc<Registry<StoreCtx<B>>>, args: Arc<Vec<String>>, mounts: Arc<MountRegistry>,
+        backends: B,
+    ) -> Self {
+        Self {
+            registry,
+            args,
+            mounts,
+            backends,
+            resolver: OnceLock::new(),
+            http_fallback: OnceLock::new(),
+            flights: Mutex::new(HashMap::new()),
+        }
+    }
 }
 
 /// [`Dispatcher`] over the runtime's shared state.
@@ -398,13 +436,20 @@ impl<B: Backends> Runtime<B> {
         link(&mut deployment).context("linking hosts")?;
         let backends = B::connect().await.context("connecting backends")?;
         let mounts = deployment.mounts();
+        let (resolver, http_fallback) = deployment.resolve_hooks();
 
-        let runtime = Self::with_inner(Arc::new(RuntimeInner {
-            registry: Arc::new(deployment.into_registry().context("assembling registry")?),
+        let runtime = Self::with_inner(Arc::new(RuntimeInner::new(
+            Arc::new(deployment.into_registry().context("assembling registry")?),
             args,
             mounts,
             backends,
-        }));
+        )));
+        if let Some(resolver) = resolver {
+            runtime.install_resolver(resolver);
+        }
+        if let Some(fallback) = http_fallback {
+            runtime.install_http_fallback(fallback);
+        }
         serve_links(&runtime).await.context("wiring host-mediated link serve side")?;
         Ok(runtime)
     }
@@ -438,12 +483,59 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         registry: Arc<Registry<StoreCtx<B>>>, args: Vec<String>, mounts: Arc<MountRegistry>,
         backends: B,
     ) -> Self {
-        Self::with_inner(Arc::new(RuntimeInner {
-            registry,
-            args: Arc::new(args),
-            mounts,
-            backends,
-        }))
+        Self::with_inner(Arc::new(RuntimeInner::new(registry, Arc::new(args), mounts, backends)))
+    }
+
+    /// Install a [`GuestResolver`] consulted on dispatch-path registry misses
+    /// (resolve-on-miss), chainable after [`from_parts`](Self::from_parts).
+    ///
+    /// Deployments built through [`DeploymentBuilder`] supply the resolver via
+    /// [`DeploymentBuilder::resolver`] instead. Install-once: a second
+    /// resolver is ignored with a warning.
+    #[must_use]
+    pub fn with_resolver(self, resolver: Arc<dyn GuestResolver>) -> Self {
+        self.install_resolver(resolver);
+        self
+    }
+
+    /// Install an [`HttpFallback`] mapping unrouted request paths to guest
+    /// identities, chainable after [`from_parts`](Self::from_parts).
+    ///
+    /// Deployments built through [`DeploymentBuilder`] supply the fallback via
+    /// [`DeploymentBuilder::http_fallback`] instead. Install-once: a second
+    /// fallback is ignored with a warning.
+    #[must_use]
+    pub fn with_http_fallback<F>(self, fallback: F) -> Self
+    where
+        F: Fn(&str) -> Option<GuestId> + Send + Sync + 'static,
+    {
+        self.install_http_fallback(Arc::new(fallback));
+        self
+    }
+
+    /// The installed HTTP trigger fallback, if any.
+    #[must_use]
+    pub fn http_fallback(&self) -> Option<HttpFallback> {
+        self.inner.http_fallback.get().cloned()
+    }
+
+    fn install_resolver(&self, resolver: Arc<dyn GuestResolver>) {
+        if self.inner.resolver.set(resolver).is_err() {
+            tracing::warn!("guest resolver already installed; ignoring");
+            return;
+        }
+        // The erased link-path hook holds a weak back-reference: the strong
+        // chain RuntimeInner -> Registry -> DispatchHandle -> hook would
+        // otherwise cycle.
+        self.registry().dispatch().install_resolve_hook(Box::new(RuntimeResolveHook {
+            inner: Arc::downgrade(&self.inner),
+        }));
+    }
+
+    fn install_http_fallback(&self, fallback: HttpFallback) {
+        if self.inner.http_fallback.set(fallback).is_err() {
+            tracing::warn!("http fallback already installed; ignoring");
+        }
     }
 
     /// Guest registry.
@@ -529,7 +621,18 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// loaded, the component's imports exceed the deployment's linked host set
     /// and `link` union, or its linked exports cannot be served.
     pub async fn register(&self, id: impl Into<GuestId>, artifact: GuestArtifact) -> Result<()> {
-        let id = id.into();
+        self.register_inner(id.into(), artifact, None).await
+    }
+
+    /// [`register`](Self::register) internals, with an optional expected
+    /// export the loaded component must satisfy — the resolve-on-miss path
+    /// sets it because a resolver's answer is not trusted to be well-shaped
+    /// (an unvalidated publish of a link target would create an entry whose
+    /// endpoint the retry misses forever). Validation failure happens before
+    /// serve/publish, so it leaves no partial state.
+    async fn register_inner(
+        &self, id: GuestId, artifact: GuestArtifact, expected_export: Option<&str>,
+    ) -> Result<()> {
         let registry = self.registry();
 
         // Early occupancy check to skip the load/serve work; the publish below
@@ -540,6 +643,12 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
             .load(registry.engine())
             .await
             .with_context(|| format!("loading guest `{id}`"))?;
+        if let Some(export) = expected_export {
+            anyhow::ensure!(
+                exports_instance(&component, registry.engine(), export),
+                "guest `{id}` does not export interface `{export}`"
+            );
+        }
         let instance_pre = registry.instantiate_late(&id, &component)?;
         let guest = Guest::local(id.clone(), instance_pre);
 
@@ -556,6 +665,63 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         Ok(())
     }
 
+    /// Return the registered guest for `id`, faulting it in through the
+    /// installed [`GuestResolver`] on a miss (resolve-on-miss).
+    ///
+    /// A hit returns the entry directly. On a miss with a resolver installed,
+    /// the call joins (or starts) the per-identity single flight: resolve →
+    /// validate `expected_export` → register through the ordinary internals →
+    /// return the entry. Every concurrent waiter shares the flight's outcome
+    /// — negatives included — and no negative outcome is cached across
+    /// flights.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EnsureError::Unresolved`] when nothing supplies the guest
+    /// (no resolver, or the resolver answered `Ok(None)`),
+    /// [`EnsureError::ResolveFailed`] when resolution or the subsequent
+    /// registration failed, and [`EnsureError::ExportMismatch`] when a
+    /// concurrently registered component lacks `expected_export`.
+    pub async fn ensure_guest(
+        &self, id: &GuestId, expected_export: &str,
+    ) -> Result<Arc<Guest<StoreCtx<B>>>, EnsureError> {
+        if let Some(guest) = self.registry().get(id) {
+            return Ok(guest);
+        }
+        let Some(resolver) = self.inner.resolver.get() else {
+            return Err(EnsureError::Unresolved(id.clone()));
+        };
+        self.join_or_start_flight(id, expected_export, Arc::clone(resolver)).await
+    }
+
+    /// Join the in-flight resolution for `id`, or start one. The flight
+    /// future removes its own map entry once the outcome is computed, so a
+    /// later miss starts a fresh flight (negatives are never cached).
+    fn join_or_start_flight(
+        &self, id: &GuestId, expected_export: &str, resolver: Arc<dyn GuestResolver>,
+    ) -> Flight<B> {
+        let mut flights = self.inner.flights.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(flight) = flights.get(id) {
+            return flight.clone();
+        }
+
+        let runtime = self.clone();
+        let flight_id = id.clone();
+        let export = expected_export.to_owned();
+        let flight: Flight<B> = async move {
+            let outcome = run_flight(&runtime, resolver.as_ref(), &flight_id, &export).await;
+            // The entry is still ours (a new flight for this id cannot start
+            // while it is present), so removal here both ends the flight and
+            // opens the door for the next miss.
+            runtime.inner.flights.lock().unwrap_or_else(PoisonError::into_inner).remove(&flight_id);
+            outcome
+        }
+        .boxed()
+        .shared();
+        flights.insert(id.clone(), flight.clone());
+        flight
+    }
+
     /// Remove a dynamically registered guest. New dispatches to `id` fail as
     /// unregistered; in-flight calls complete on the instance they hold
     /// (instance-per-call). Static deployment entries are refused.
@@ -568,6 +734,84 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         self.registry().remove(id)?;
         tracing::info!(guest = %id, "guest deregistered");
         Ok(())
+    }
+}
+
+/// One resolve-on-miss flight: consult the resolver, validate and register
+/// its artifact, and return the registered entry.
+async fn run_flight<B: Clone + Send + Sync + 'static>(
+    runtime: &Runtime<B>, resolver: &dyn GuestResolver, id: &GuestId, expected_export: &str,
+) -> Result<Arc<Guest<StoreCtx<B>>>, EnsureError> {
+    let answer =
+        resolver.resolve(id.clone(), expected_export.to_owned()).await.map_err(|error| {
+            let error = error.context(format!("resolving guest `{id}`"));
+            tracing::error!(guest = %id, "guest resolution failed: {error:#}");
+            EnsureError::ResolveFailed(Arc::new(error))
+        })?;
+    let Some(artifact) = answer else {
+        tracing::debug!(guest = %id, "resolver has no component for guest");
+        return Err(EnsureError::Unresolved(id.clone()));
+    };
+
+    let raced = match runtime.register_inner(id.clone(), artifact, Some(expected_export)).await {
+        Ok(()) => false,
+        // Losing the publish race to a concurrent direct `register(id)` is
+        // success — an entry exists; any other failure with no entry is real.
+        Err(_) if runtime.registry().get(id).is_some() => true,
+        Err(error) => {
+            let error = error.context(format!("registering resolved guest `{id}`"));
+            tracing::error!(guest = %id, "guest resolution failed: {error:#}");
+            return Err(EnsureError::ResolveFailed(Arc::new(error)));
+        }
+    };
+
+    let guest = runtime.registry().get(id).ok_or_else(|| {
+        // Deregistered between publish and this lookup; the next miss starts
+        // a fresh flight.
+        EnsureError::Unresolved(id.clone())
+    })?;
+    // Our own registration was validated pre-publish; a race winner's
+    // component is unvetted, so check it satisfies the dispatch site.
+    if raced && !exports_instance(guest.component(), runtime.registry().engine(), expected_export) {
+        return Err(EnsureError::ExportMismatch {
+            guest: id.clone(),
+            export: expected_export.to_owned(),
+        });
+    }
+    Ok(guest)
+}
+
+/// Whether `component` exports an instance (interface) named `export`,
+/// tolerating a versioned export name (`wasi:http/incoming-handler@0.3.0`
+/// satisfies `wasi:http/incoming-handler`).
+fn exports_instance(component: &Component, engine: &Engine, export: &str) -> bool {
+    component.component_type().exports(engine).any(|(name, item)| {
+        matches!(item.ty, ComponentItem::ComponentInstance(_))
+            && (name == export
+                || name.strip_prefix(export).is_some_and(|rest| rest.starts_with('@')))
+    })
+}
+
+/// The erased link-path resolve hook: rehydrates a [`Runtime`] from a weak
+/// back-reference and delegates to [`Runtime::ensure_guest`].
+struct RuntimeResolveHook<B: 'static> {
+    inner: Weak<RuntimeInner<B>>,
+}
+
+impl<B: Clone + Send + Sync + 'static> ResolveHook for RuntimeResolveHook<B> {
+    fn ensure(&self, guest: &GuestId, expected_export: &str) -> FutureResult<()> {
+        let inner = Weak::clone(&self.inner);
+        let guest = guest.clone();
+        let expected_export = expected_export.to_owned();
+        async move {
+            let inner = inner.upgrade().context("runtime dropped during resolve")?;
+            Runtime::with_inner(inner)
+                .ensure_guest(&guest, &expected_export)
+                .await
+                .map(|_| ())
+                .map_err(anyhow::Error::from)
+        }
+        .boxed()
     }
 }
 

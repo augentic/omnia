@@ -24,6 +24,7 @@
 mod handle;
 mod host;
 mod link;
+mod resolve;
 mod selector;
 mod serve;
 mod transport;
@@ -31,9 +32,10 @@ mod value;
 
 pub use handle::DispatchHandle;
 pub use host::Dispatcher;
-// `polyfill_late`, `serve_guest`, and `InProcServer` are crate-internal: this
-// module is private, and `lib.rs` does not re-export them.
+// `polyfill_late`, `serve_guest`, `InProcServer`, and `ResolveHook` are
+// crate-internal: this module is private, and `lib.rs` does not re-export them.
 pub use link::{link, polyfill_late};
+pub use resolve::{EnsureError, GuestResolver, HttpFallback, ResolveHook};
 pub use selector::{FirstArgSelector, GuestSelector};
 pub use serve::{serve_guest, serve_links};
 pub use transport::{InProcServer, LinkClient, WrpcState};

@@ -2,11 +2,12 @@
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, OnceLock, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 
 use anyhow::{Result, bail};
 
+use super::resolve::ResolveHook;
 use super::selector::GuestSelector;
 use super::transport::InProcess;
 use crate::registry::GuestId;
@@ -26,6 +27,10 @@ pub struct DispatchHandle {
     // first, then a single inner map — never the other way around, and never
     // across an await.
     lifecycle: Arc<RwLock<()>>,
+    // Resolve-on-miss hook: lets the link path fault a missing target in
+    // through the runtime's resolver (RFC guest-resolution §4.5). Installed
+    // once, when the deployment carries a resolver.
+    resolve_hook: OnceLock<Box<dyn ResolveHook>>,
     depth: AtomicUsize,
     max_depth: usize,
     timeout: Duration,
@@ -46,6 +51,7 @@ impl DispatchHandle {
             links,
             transport: InProcess::new(Arc::clone(&lifecycle)),
             lifecycle,
+            resolve_hook: OnceLock::new(),
             depth: AtomicUsize::new(0),
             max_depth,
             timeout,
@@ -70,6 +76,19 @@ impl DispatchHandle {
     /// The bound transport carrier.
     pub(crate) const fn transport(&self) -> &InProcess {
         &self.transport
+    }
+
+    /// Install the resolve-on-miss hook; a second install is ignored (the
+    /// hook is deployment-scoped, set once during runtime assembly).
+    pub(crate) fn install_resolve_hook(&self, hook: Box<dyn ResolveHook>) {
+        if self.resolve_hook.set(hook).is_err() {
+            tracing::warn!("resolve hook already installed; ignoring");
+        }
+    }
+
+    /// The resolve-on-miss hook, if a resolver is installed.
+    pub(crate) fn resolve_hook(&self) -> Option<&dyn ResolveHook> {
+        self.resolve_hook.get().map(Box::as_ref)
     }
 
     /// Enter a lifecycle read section: registry/transport lookups taken under

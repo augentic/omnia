@@ -20,9 +20,11 @@ use wasmtime::{Config, Engine};
 use wasmtime_wasi::WasiView;
 use wrpc_wasmtime::WrpcView;
 
-use crate::dispatch::{DispatchHandle, FirstArgSelector, GuestSelector};
+use crate::dispatch::{
+    DispatchHandle, FirstArgSelector, GuestResolver, GuestSelector, HttpFallback,
+};
 use crate::mount::{MountRegistry, ResolvedPreopen};
-use crate::registry::{Registry, Routes};
+use crate::registry::{GuestId, Registry, Routes};
 use crate::{Host, Mode, RuntimeOptions, Server, Telemetry};
 
 /// Typestate for [`DeploymentBuilder`]: only raw `.wasm` sources load (the
@@ -55,13 +57,28 @@ pub struct Precompiled;
 ///     .build::<StoreCtx>()
 ///     .await?;
 /// ```
-#[derive(Debug)]
 pub struct DeploymentBuilder<P = WasmOnly> {
     manifest: Option<Manifest>,
     args: Vec<String>,
     mode: Mode,
     allow_empty: bool,
+    resolver: Option<Arc<dyn GuestResolver>>,
+    http_fallback: Option<HttpFallback>,
     policy: PhantomData<fn() -> P>,
+}
+
+// Manual: the resolver and fallback are non-Debug trait objects.
+impl<P> std::fmt::Debug for DeploymentBuilder<P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeploymentBuilder")
+            .field("manifest", &self.manifest)
+            .field("args", &self.args)
+            .field("mode", &self.mode)
+            .field("allow_empty", &self.allow_empty)
+            .field("resolver", &self.resolver.is_some())
+            .field("http_fallback", &self.http_fallback.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl Default for DeploymentBuilder<WasmOnly> {
@@ -71,6 +88,8 @@ impl Default for DeploymentBuilder<WasmOnly> {
             args: Vec::new(),
             mode: Mode::default(),
             allow_empty: false,
+            resolver: None,
+            http_fallback: None,
             policy: PhantomData,
         }
     }
@@ -99,15 +118,38 @@ impl<P> DeploymentBuilder<P> {
     }
 
     /// Mark the deployment as dynamically populated: the guest set may start
-    /// empty and grow at run time via [`Runtime::register`](crate::Runtime::register).
+    /// empty and grow at run time via [`Runtime::register`](crate::Runtime::register)
+    /// or resolve-on-miss (see [`resolver`](Self::resolver)).
     ///
-    /// This only relaxes the "at least one guest" check — trigger routing
-    /// (HTTP/messaging/websocket/CLI) stays frozen at boot; registered guests
-    /// are reachable via host-mediated link dispatch and host→guest
-    /// [`Dispatcher::invoke`](crate::Dispatcher::invoke).
+    /// This only relaxes the "at least one guest" check — static trigger
+    /// routing (HTTP/messaging/websocket/CLI) is built at boot; registered
+    /// guests are reachable via host-mediated link dispatch, host→guest
+    /// [`Dispatcher::invoke`](crate::Dispatcher::invoke), and — when an
+    /// [`http_fallback`](Self::http_fallback) is installed — HTTP requests no
+    /// static route matches.
     #[must_use]
     pub const fn dynamic(mut self) -> Self {
         self.allow_empty = true;
+        self
+    }
+
+    /// Install a [`GuestResolver`] consulted on dispatch-path registry misses
+    /// (resolve-on-miss).
+    #[must_use]
+    pub fn resolver(mut self, resolver: Arc<dyn GuestResolver>) -> Self {
+        self.resolver = Some(resolver);
+        self
+    }
+
+    /// Install the HTTP trigger fallback: maps a request path no static route
+    /// matches to a guest identity, which then goes through the ordinary
+    /// lookup (and hence resolve-on-miss).
+    #[must_use]
+    pub fn http_fallback<F>(mut self, fallback: F) -> Self
+    where
+        F: Fn(&str) -> Option<GuestId> + Send + Sync + 'static,
+    {
+        self.http_fallback = Some(Arc::new(fallback));
         self
     }
 
@@ -142,7 +184,10 @@ impl<P> DeploymentBuilder<P> {
         init_env(&plan.name)?;
         tracing::info!("initializing runtime");
 
-        Deployment::from_plan(plan).await
+        let mut deployment = Deployment::from_plan(plan).await?;
+        deployment.resolver = self.resolver;
+        deployment.http_fallback = self.http_fallback;
+        Ok(deployment)
     }
 }
 
@@ -164,6 +209,8 @@ impl DeploymentBuilder<WasmOnly> {
             args: self.args,
             mode: self.mode,
             allow_empty: self.allow_empty,
+            resolver: self.resolver,
+            http_fallback: self.http_fallback,
             policy: PhantomData,
         }
     }
@@ -230,6 +277,9 @@ pub struct Deployment<T: WasiView + 'static> {
     mode: Mode,
     // Whether the guest set may start empty and grow at run time.
     allow_empty: bool,
+    // Resolve-on-miss hooks carried from the builder into `Runtime::new`.
+    resolver: Option<Arc<dyn GuestResolver>>,
+    http_fallback: Option<HttpFallback>,
 }
 
 impl<T: WasiView + 'static> Deployment<T> {
@@ -270,6 +320,8 @@ impl<T: WasiView + 'static> Deployment<T> {
             args: Arc::new(args),
             mode: plan.mode,
             allow_empty: plan.allow_empty,
+            resolver: None,
+            http_fallback: None,
         })
     }
 }
@@ -313,6 +365,12 @@ impl<T: WasiView> Deployment<T> {
     #[must_use]
     pub fn args(&self) -> &[String] {
         &self.args
+    }
+
+    /// The builder-carried resolve-on-miss hooks, for `Runtime::new` to
+    /// install before the deployment is consumed into a registry.
+    pub(crate) fn resolve_hooks(&self) -> (Option<Arc<dyn GuestResolver>>, Option<HttpFallback>) {
+        (self.resolver.clone(), self.http_fallback.clone())
     }
 
     /// Assemble the guest [`Registry`].

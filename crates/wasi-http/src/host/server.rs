@@ -17,7 +17,7 @@ use hyper::body::{Body, Frame, Incoming, SizeHint};
 use hyper::header::{FORWARDED, HOST};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use omnia::{HttpRoutes, Runtime, StoreCtx, TriggerRouter};
+use omnia::{EnsureError, Guest, HttpRoutes, Runtime, StoreCtx, TriggerRouter};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
@@ -48,7 +48,9 @@ where
         state.registry().routes().http().clone(),
         ServiceIndices::new,
     )?;
-    if routing.is_inert() {
+    // A fallback-equipped deployment may start inert and fault guests in per
+    // request; only a deployment with neither routes nor fallback stays quiet.
+    if routing.is_inert() && state.http_fallback().is_none() {
         tracing::info!("no guest exports the http handler; http trigger inert");
         return Ok(());
     }
@@ -133,6 +135,45 @@ where
     B: Clone + Send + Sync + 'static,
     StoreCtx<B>: WasiHttpView,
 {
+    // Resolve an unrouted path through the deployment's fallback: identity →
+    // `ensure_guest` (resolve-on-miss) → request-local handler indices. An
+    // `Err` carries the ready 404/500 response: no fallback, a `None`
+    // fallback, or the resolver's definitive miss is a 404; a resolution
+    // failure — or a fallback guest lacking the handler — is a 500.
+    async fn fallback(
+        &self, path: &str,
+    ) -> std::result::Result<(Arc<Guest<StoreCtx<B>>>, ServiceIndices), hyper::Response<OutgoingBody>>
+    {
+        let Some(target) = self.state.http_fallback().and_then(|fallback| fallback(path)) else {
+            tracing::debug!(path, "no route or fallback target matched; returning 404");
+            return Err(not_found());
+        };
+        let guest = match self.state.ensure_guest(&target, "wasi:http/handler").await {
+            Ok(guest) => guest,
+            Err(error @ EnsureError::Unresolved(_)) => {
+                tracing::debug!(path, %error, "fallback target unresolved; returning 404");
+                return Err(not_found());
+            }
+            Err(error) => {
+                let error = anyhow::Error::from(error);
+                tracing::error!(path, "fallback guest resolution failed: {error:#}");
+                return Err(internal_error());
+            }
+        };
+        let indices = match ServiceIndices::new(guest.instance_pre()) {
+            Ok(indices) => indices,
+            Err(error) => {
+                tracing::error!(
+                    path,
+                    guest = %target,
+                    "fallback guest lacks the http handler: {error:#}"
+                );
+                return Err(internal_error());
+            }
+        };
+        Ok((guest, indices))
+    }
+
     // Forward request to the wasm Guest.
     async fn handle(
         &self, request: hyper::Request<Incoming>,
@@ -149,15 +190,29 @@ where
             }
         };
 
-        // Resolve the guest by request path; an unmatched path is a 404, not a
-        // guest invocation.
-        let Some((guest_id, indices)) = self.routing.resolve(request.uri().path()) else {
-            tracing::debug!(path = request.uri().path(), "no route matched; returning 404");
-            return Ok(not_found());
-        };
-        // Resolution only yields identities drawn from the registry, so the
-        // lookup is total.
-        let guest = self.state.registry().get(guest_id).expect("a capable guest is registered");
+        // Resolve the guest by request path: a static route hit dispatches
+        // through the boot-built router; a miss consults the deployment's
+        // fallback, whose identity goes through `ensure_guest` (and hence
+        // resolve-on-miss) with request-local handler indices probed against
+        // the exact `InstancePre` this request instantiates.
+        let guest;
+        let late_indices;
+        let indices: &ServiceIndices =
+            if let Some((guest_id, indices)) = self.routing.resolve(request.uri().path()) {
+                // Static resolution only yields identities drawn from the
+                // registry, so the lookup is total.
+                guest = self.state.registry().get(guest_id).expect("a capable guest is registered");
+                indices
+            } else {
+                match self.fallback(request.uri().path()).await {
+                    Ok((fallback_guest, indices)) => {
+                        guest = fallback_guest;
+                        late_indices = indices;
+                        &late_indices
+                    }
+                    Err(response) => return Ok(response),
+                }
+            };
 
         // instantiate the selected guest fresh (instance-per-call)
         let store_data = self.state.store();
