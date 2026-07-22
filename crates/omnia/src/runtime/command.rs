@@ -1,23 +1,42 @@
 //! One-shot `wasi:cli/run` command mode.
 
+use std::sync::Arc;
+
 use anyhow::{Context as _, Result, bail};
 use wasmtime_wasi::I32Exit;
 use wasmtime_wasi::p3::bindings::{Command, CommandPre};
 
 use super::{ExitStatus, Runtime};
-use crate::registry::TriggerRouter;
+use crate::registry::{Guest, GuestId, TriggerRouter};
+use crate::store::StoreCtx;
 
-/// Run the routed `wasi:cli/run` guest once, after the [`Runtime`] is assembled.
+/// Run the command guest once, after the [`Runtime`] is assembled.
+///
+/// An explicit command guest (see
+/// [`DeploymentBuilder::command_guest`](crate::DeploymentBuilder::command_guest))
+/// goes through the ordinary [`ensure_guest`](Runtime::ensure_guest) lookup —
+/// and hence resolve-on-miss — and fails the run if nothing supplies it.
+/// Without one, the sole static `wasi:cli/run` exporter is the catch-all; a
+/// deployment with no exporter is inert and exits `0`.
 ///
 /// # Errors
 ///
-/// Returns an error if routing is ambiguous, the guest cannot be instantiated,
-/// the run exceeds `guest_timeout`, or the command traps without a guest exit
-/// code.
+/// Returns an error if the explicit command guest cannot be ensured, routing
+/// is ambiguous, the guest cannot be instantiated, the run exceeds
+/// `guest_timeout`, or the command traps without a guest exit code.
 pub(super) async fn drive<B>(runtime: &Runtime<B>) -> Result<ExitStatus>
 where
     B: Clone + Send + Sync + 'static,
 {
+    if let Some(id) = runtime.command_guest() {
+        let id = id.clone();
+        let guest = runtime
+            .ensure_guest(&id, "wasi:cli/run")
+            .await
+            .with_context(|| format!("ensuring command guest `{id}`"))?;
+        return run_guest(runtime, &id, &guest).await;
+    }
+
     let routing = TriggerRouter::build(
         runtime.registry(),
         "cli",
@@ -35,6 +54,16 @@ where
         .registry()
         .get(guest_id)
         .with_context(|| format!("routed guest `{guest_id}` is not registered"))?;
+    run_guest(runtime, guest_id, &guest).await
+}
+
+/// Instantiate `guest` and drive its `wasi:cli/run` once.
+async fn run_guest<B>(
+    runtime: &Runtime<B>, guest_id: &GuestId, guest: &Arc<Guest<StoreCtx<B>>>,
+) -> Result<ExitStatus>
+where
+    B: Clone + Send + Sync + 'static,
+{
     tracing::info!(guest = %guest_id, "running wasi:cli/run");
 
     let mut store = runtime.build_store(runtime.store());

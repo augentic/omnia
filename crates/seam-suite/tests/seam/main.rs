@@ -24,6 +24,7 @@ mod blobstore;
 mod cli;
 mod config;
 mod docstore;
+mod fallback;
 mod guest_api;
 mod guest_link;
 mod http;

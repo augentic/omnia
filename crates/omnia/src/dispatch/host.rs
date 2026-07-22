@@ -31,10 +31,6 @@ pub async fn dispatch<B>(
 where
     B: Clone + Send + Sync + 'static,
 {
-    // Depth-count this hop exactly like a guest→guest dispatch. The guard
-    // is held here (borrowing `runtime`) across the awaited callee task below.
-    let _guard = runtime.registry().dispatch().enter(target)?;
-
     // Plain records cross by value; a live resource handle never crosses.
     for value in &args {
         if contains_resource(value) {
@@ -45,12 +41,21 @@ where
         }
     }
 
+    // Resolve-on-miss: a registry miss may fault the target in through the
+    // installed resolver, with `interface` as the export the component must
+    // satisfy. Runs before `enter` so a slow fetch/compile never pins a
+    // process-wide depth slot.
     let instance_pre = runtime
-        .registry()
-        .get(target)
-        .with_context(|| format!("dispatch target `{target}` is not registered"))?
+        .ensure_guest(target, interface)
+        .await
+        .map_err(anyhow::Error::from)
+        .with_context(|| format!("dispatching `{interface}/{func}` to guest `{target}`"))?
         .instance_pre()
         .clone();
+
+    // Depth-count this hop exactly like a guest→guest dispatch. The guard
+    // is held here (borrowing `runtime`) across the awaited callee task below.
+    let _guard = runtime.registry().dispatch().enter(target)?;
 
     // Run the callee on its own task. `resolve` is invoked from *within* the
     // caller guest's concurrent event loop (the backend's loop awaits it inside

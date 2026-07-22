@@ -160,6 +160,33 @@ where
     Ok(())
 }
 
+/// Fault a missing link target in before the dispatch takes a depth slot.
+///
+/// The miss probe is typed — the transport's endpoint map, never the connect
+/// error string (which would break on reword and misfire on a future
+/// distributed transport's remote errors). A connect miss is not the same as
+/// "unregistered": a registered guest serving nothing in the link union has an
+/// entry but no endpoint, so when the hook succeeds yet the endpoint is still
+/// missing, the component genuinely lacks the interface. Without a hook the
+/// dispatch proceeds and `connect` reports the miss exactly as before.
+async fn ensure_endpoint(handle: &DispatchHandle, target: &GuestId, interface: &str) -> Result<()> {
+    if handle.transport().server(target).is_some() {
+        return Ok(());
+    }
+    let Some(hook) = handle.resolve_hook() else {
+        return Ok(());
+    };
+    hook.ensure(target, interface)
+        .await
+        .with_context(|| format!("resolving link target `{target}` for `{interface}`"))?;
+    ensure!(
+        handle.transport().server(target).is_some(),
+        "guest `{target}` is registered but serves no `{interface}` endpoint (the component does \
+         not export it)"
+    );
+    Ok(())
+}
+
 /// The per-call dispatch: select the target, reject crossing resources, bound
 /// depth, then round-trip the call over the in-process wRPC carrier to a
 /// freshly-instantiated target export.
@@ -186,6 +213,10 @@ where
             );
         }
     }
+
+    // Resolve-on-miss runs before `enter`: a slow fetch/compile must not pin
+    // a process-wide depth slot for the duration of resolution.
+    ensure_endpoint(handle, &target, interface).await?;
 
     let _guard = handle.enter(&target)?;
 
@@ -285,6 +316,10 @@ where
             );
         }
     }
+
+    // Resolve-on-miss runs before `enter`: a slow fetch/compile must not pin
+    // a process-wide depth slot for the duration of resolution.
+    ensure_endpoint(handle, &target, interface).await?;
 
     let _guard = handle.enter(&target)?;
 

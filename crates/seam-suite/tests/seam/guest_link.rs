@@ -16,12 +16,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail, ensure};
+use futures::FutureExt as _;
 use omnia::wasmtime::component::Val;
 use omnia::{
-    DeploymentBuilder, GuestArtifact, GuestEntry, GuestId, Manifest, MountRegistry, Runtime,
-    serve_links,
+    DeploymentBuilder, FutureResult, GuestArtifact, GuestEntry, GuestId, GuestResolver, Manifest,
+    MountRegistry, Runtime, serve_links,
 };
 use omnia_testkit::find_guest;
+use tokio::sync::Notify;
 
 use crate::fixture;
 
@@ -153,6 +155,13 @@ fn raw_wasm(file: &str) -> Result<GuestArtifact> {
 /// Build the two-guest deployment and wire the serve side, returning the
 /// runtime plus the shared bundle-clone counter.
 async fn build_runtime() -> Result<(Runtime<Counter>, Arc<AtomicUsize>)> {
+    build_runtime_with(None).await
+}
+
+/// [`build_runtime`] with an optional resolve-on-miss resolver installed.
+async fn build_runtime_with(
+    resolver: Option<Arc<dyn GuestResolver>>,
+) -> Result<(Runtime<Counter>, Arc<AtomicUsize>)> {
     let responder = find_guest("guest_link_responder_wasm.wasm");
     let router = find_guest("guest_link_router_wasm.wasm");
 
@@ -166,7 +175,7 @@ async fn build_runtime() -> Result<(Runtime<Counter>, Arc<AtomicUsize>)> {
     let deployment = unsafe { builder.build::<TestCtx>() }.await.context("building runtime")?;
     let registry = deployment.into_registry().context("assembling registry")?;
     let clones = Arc::new(AtomicUsize::new(0));
-    let runtime = Runtime::<Counter>::from_parts(
+    let mut runtime = Runtime::<Counter>::from_parts(
         Arc::new(registry),
         Vec::new(),
         Arc::new(MountRegistry::default()),
@@ -174,12 +183,75 @@ async fn build_runtime() -> Result<(Runtime<Counter>, Arc<AtomicUsize>)> {
             clones: Arc::clone(&clones),
         },
     );
+    if let Some(resolver) = resolver {
+        runtime = runtime.with_resolver(resolver);
+    }
 
     // Wire the serve side of `omnia:link/echo` (responder) and bind the
     // in-process carrier — the work `Runtime::new` does for a real deployment
     // (`from_parts` is the low-level constructor and leaves it to the caller).
     serve_links(&runtime).await.context("wiring link serve side")?;
     Ok((runtime, clones))
+}
+
+/// A counting test resolver: each call runs `answer(call_index)` after
+/// awaiting `gate` (when set), so tests control both the per-call outcome and
+/// when a flight completes.
+struct TestResolver<F> {
+    calls: Arc<AtomicUsize>,
+    gate: Option<Arc<Notify>>,
+    answer: F,
+}
+
+impl<F> TestResolver<F>
+where
+    F: Fn(usize) -> Result<Option<GuestArtifact>> + Send + Sync + 'static,
+{
+    fn new(answer: F) -> (Arc<Self>, Arc<AtomicUsize>) {
+        let calls = Arc::new(AtomicUsize::new(0));
+        (
+            Arc::new(Self {
+                calls: Arc::clone(&calls),
+                gate: None,
+                answer,
+            }),
+            calls,
+        )
+    }
+
+    fn gated(answer: F) -> (Arc<Self>, Arc<AtomicUsize>, Arc<Notify>) {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let gate = Arc::new(Notify::new());
+        (
+            Arc::new(Self {
+                calls: Arc::clone(&calls),
+                gate: Some(Arc::clone(&gate)),
+                answer,
+            }),
+            calls,
+            gate,
+        )
+    }
+}
+
+impl<F> GuestResolver for TestResolver<F>
+where
+    F: Fn(usize) -> Result<Option<GuestArtifact>> + Send + Sync + 'static,
+{
+    fn resolve(
+        &self, _guest: GuestId, _expected_export: String,
+    ) -> FutureResult<Option<GuestArtifact>> {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst);
+        let outcome = (self.answer)(call);
+        let gate = self.gate.clone();
+        async move {
+            if let Some(gate) = gate {
+                gate.notified().await;
+            }
+            outcome
+        }
+        .boxed()
+    }
 }
 
 // The router guest calls the responder over a host-mediated link, proving
@@ -539,6 +611,221 @@ fn late_import_polyfilled() -> Result<()> {
         assert_eq!(echoed, "responder echoes: hello", "late sync-typed import dispatches");
         let echoed = call_router(&runtime, "run-slow", "hello").await?;
         assert_eq!(echoed, "responder echoes slowly: hello", "late async-typed import dispatches");
+
+        Ok(())
+    })
+}
+
+/// Await `calls` reaching `target`, failing rather than hanging.
+async fn wait_for_calls(calls: &AtomicUsize, target: usize) -> Result<()> {
+    for _ in 0..2000 {
+        if calls.load(Ordering::SeqCst) >= target {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    bail!("resolver never reached {target} call(s)");
+}
+
+/// Host→guest dispatch to a resolver-supplied guest.
+async fn invoke_extra(runtime: &Runtime<Counter>, message: &str) -> Result<Vec<Val>> {
+    runtime
+        .dispatcher()
+        .invoke(
+            GuestId::from("extra"),
+            Some("omnia:link/echo".to_owned()),
+            "echo".to_owned(),
+            vec![Val::String("extra".to_owned()), Val::String(message.to_owned())],
+        )
+        .await
+}
+
+// A guest→guest link miss faults the target in through the resolver: the
+// router dispatches to `extra` before anything registered it — the load-bearing
+// link-path plumbing (the link seam never touches `Registry::get`).
+#[test]
+fn resolve_on_link_miss() -> Result<()> {
+    fixture::RT.block_on(async {
+        let (resolver, calls) =
+            TestResolver::new(|_| Ok(Some(precompiled("guest_link_extra_wasm.wasm")?)));
+        let (runtime, _clones) = build_runtime_with(Some(resolver)).await?;
+
+        let echoed = call_router_to(&runtime, "extra", "hello").await?;
+        assert_eq!(echoed, "extra echoes from extra: hello", "resolved guest answers");
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "the miss consulted the resolver once");
+
+        // The second dispatch hits the registry; no re-resolution.
+        let echoed = call_router_to(&runtime, "extra", "again").await?;
+        assert_eq!(echoed, "extra echoes from extra: again");
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "a registry hit never resolves");
+
+        Ok(())
+    })
+}
+
+// A host→guest dispatch miss faults the target in through the resolver.
+#[test]
+fn resolve_on_host_dispatch() -> Result<()> {
+    fixture::RT.block_on(async {
+        let (resolver, calls) =
+            TestResolver::new(|_| Ok(Some(precompiled("guest_link_extra_wasm.wasm")?)));
+        let (runtime, _clones) = build_runtime_with(Some(resolver)).await?;
+
+        let results = invoke_extra(&runtime, "hi").await?;
+        assert_eq!(results, vec![Val::String("extra echoes from extra: hi".to_owned())]);
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "the miss consulted the resolver once");
+
+        Ok(())
+    })
+}
+
+// N concurrent dispatches to one missing id start one flight: the resolver
+// runs once and every waiter shares the successful outcome.
+#[test]
+fn single_flight_shares_success() -> Result<()> {
+    fixture::RT.block_on(async {
+        let (resolver, calls, gate) =
+            TestResolver::gated(|_| Ok(Some(precompiled("guest_link_extra_wasm.wasm")?)));
+        let (runtime, _clones) = build_runtime_with(Some(resolver)).await?;
+
+        let tasks: Vec<_> = (0..8)
+            .map(|n| {
+                let runtime = runtime.clone();
+                tokio::spawn(async move { invoke_extra(&runtime, &format!("m{n}")).await })
+            })
+            .collect();
+
+        // The leader is inside the resolver; give the rest time to join its
+        // flight, then release it.
+        wait_for_calls(&calls, 1).await?;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        gate.notify_one();
+
+        for (n, task) in tasks.into_iter().enumerate() {
+            let results = task.await.expect("dispatch task")?;
+            assert_eq!(results, vec![Val::String(format!("extra echoes from extra: m{n}"))]);
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "one flight served every waiter");
+
+        Ok(())
+    })
+}
+
+// The negative dual: every waiter of a declining flight shares the `Ok(None)`
+// outcome — no serial re-resolves under fan-out.
+#[test]
+fn single_flight_shares_decline() -> Result<()> {
+    fixture::RT.block_on(async {
+        let (resolver, calls, gate) = TestResolver::gated(|_| Ok(None));
+        let (runtime, _clones) = build_runtime_with(Some(resolver)).await?;
+
+        let tasks: Vec<_> = (0..8)
+            .map(|_| {
+                let runtime = runtime.clone();
+                tokio::spawn(async move { invoke_extra(&runtime, "hi").await })
+            })
+            .collect();
+
+        wait_for_calls(&calls, 1).await?;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        gate.notify_one();
+
+        for task in tasks {
+            let error = task.await.expect("dispatch task").expect_err("a declined miss fails");
+            assert!(
+                format!("{error:#}").contains("is not registered"),
+                "the shared decline fails as unregistered: {error:#}"
+            );
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "one flight served every waiter");
+
+        Ok(())
+    })
+}
+
+// Negative outcomes are not cached across flights: a decline fails only its
+// own dispatch, a resolver error likewise, and once the resolver supplies the
+// artifact the next dispatch succeeds — no restart needed.
+#[test]
+fn negative_outcomes_not_cached() -> Result<()> {
+    fixture::RT.block_on(async {
+        let (resolver, calls) = TestResolver::new(|call| match call {
+            0 => Ok(None),
+            1 => Err(anyhow::anyhow!("store outage")),
+            _ => Ok(Some(precompiled("guest_link_extra_wasm.wasm")?)),
+        });
+        let (runtime, _clones) = build_runtime_with(Some(resolver)).await?;
+
+        let error = invoke_extra(&runtime, "hi").await.expect_err("a decline fails the dispatch");
+        assert!(format!("{error:#}").contains("is not registered"), "{error:#}");
+
+        let error = invoke_extra(&runtime, "hi").await.expect_err("an error fails the dispatch");
+        assert!(format!("{error:#}").contains("store outage"), "{error:#}");
+
+        let results = invoke_extra(&runtime, "hi").await?;
+        assert_eq!(results, vec![Val::String("extra echoes from extra: hi".to_owned())]);
+        assert_eq!(calls.load(Ordering::SeqCst), 3, "every miss consulted the resolver afresh");
+
+        Ok(())
+    })
+}
+
+// A resolved component lacking the expected export is refused after load:
+// the dispatch fails, the id stays unregistered, and no partial state remains.
+#[test]
+fn wrong_export_refused() -> Result<()> {
+    fixture::RT.block_on(async {
+        // The router exports no `omnia:link/echo` instance (it *imports* it).
+        let (resolver, _calls) =
+            TestResolver::new(|_| Ok(Some(precompiled("guest_link_router_wasm.wasm")?)));
+        let (runtime, _clones) = build_runtime_with(Some(resolver)).await?;
+
+        let error =
+            invoke_extra(&runtime, "hi").await.expect_err("a wrong-export artifact is refused");
+        assert!(
+            format!("{error:#}").contains("does not export interface `omnia:link/echo`"),
+            "{error:#}"
+        );
+        assert!(
+            runtime.registry().get(&GuestId::from("extra")).is_none(),
+            "a refused artifact must not publish the guest"
+        );
+
+        Ok(())
+    })
+}
+
+// A direct `register(id)` racing a resolver flight for the same id: the
+// flight treats losing the publish race as success, so the dispatch that
+// triggered it succeeds against whichever registration won.
+#[test]
+fn register_races_resolver_flight() -> Result<()> {
+    fixture::RT.block_on(async {
+        let (resolver, calls, gate) =
+            TestResolver::gated(|_| Ok(Some(precompiled("guest_link_extra_wasm.wasm")?)));
+        let (runtime, _clones) = build_runtime_with(Some(resolver)).await?;
+
+        let dispatch = {
+            let runtime = runtime.clone();
+            tokio::spawn(async move { invoke_extra(&runtime, "hi").await })
+        };
+
+        // With the flight parked inside the resolver, a direct registration
+        // wins the publish deterministically; then release the flight.
+        wait_for_calls(&calls, 1).await?;
+        runtime.register("extra", precompiled("guest_link_extra_wasm.wasm")?).await?;
+        gate.notify_one();
+
+        let results = dispatch.await.expect("dispatch task")?;
+        assert_eq!(results, vec![Val::String("extra echoes from extra: hi".to_owned())]);
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "the race consumed a single flight");
+
+        // Direct-register semantics are unchanged: the id is registered and
+        // deregisters exactly once.
+        runtime.deregister(&GuestId::from("extra"))?;
+        runtime
+            .deregister(&GuestId::from("extra"))
+            .expect_err("the losing flight must not leave a second entry");
 
         Ok(())
     })
