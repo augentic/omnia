@@ -1,0 +1,77 @@
+---
+source: crates/host-macros/src/runtime.rs
+expression: "expand_pretty(quote!({\n    guests:\n    [{\n        id: \"specify\", source:\n        include_bytes!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/specify.wasm\")),\n    },], hosts: { WasiOtel: OtelDefault, },\n}))"
+---
+mod runtime {
+    use anyhow::Result;
+    use omnia::futures::future;
+    use omnia::Server;
+    use omnia::tokio;
+    use super::*;
+    use omnia::Backend;
+    #[derive(Clone)]
+    struct Backends {
+        otel_default: OtelDefault,
+    }
+    impl omnia::Backends for Backends {
+        async fn connect() -> Result<Self> {
+            let (otel_default,) = tokio::try_join!(
+                < OtelDefault as Backend > ::connect(),
+            )?;
+            Ok(Self { otel_default })
+        }
+    }
+    impl omnia_wasi_otel::HasOtel for Backends {
+        fn otel_ctx(&mut self) -> &mut dyn omnia_wasi_otel::WasiOtelCtx {
+            &mut self.otel_default
+        }
+    }
+    struct Hooks;
+    impl omnia::Wiring<Backends> for Hooks {
+        fn link(
+            deployment: &mut omnia::Deployment<omnia::StoreCtx<Backends>>,
+        ) -> Result<()> {
+            deployment.host::<WasiOtel, Backends>()?;
+            Ok(())
+        }
+        async fn serve(runtime: &omnia::Runtime<Backends>) -> Result<()> {
+            let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![];
+            future::try_join_all(servers).await?;
+            Ok(())
+        }
+    }
+    /// Entry point: run the compiled-in deployment through this
+    /// runtime's hosts and backends (the standard `run` grammar, or
+    /// raw argv passthrough under the `program:` key).
+    #[tokio::main]
+    pub async fn main() -> ::std::process::ExitCode {
+        omnia::main::<
+            Backends,
+            Hooks,
+        >(
+                omnia::MainOptions::new(omnia::Mode::Server)
+                    .manifest(
+                        omnia::ManifestSource::Inline(
+                            omnia::Manifest::new()
+                                .guest(
+                                    omnia::GuestEntry::new(
+                                        "specify",
+                                        include_bytes!(
+                                            concat!(env!("CARGO_MANIFEST_DIR"), "/specify.wasm")
+                                        ),
+                                    ),
+                                ),
+                        ),
+                    ),
+            )
+            .await
+    }
+    /// Run one deployment through this runtime's hosts and backends,
+    /// blocking until the guest completes.
+    #[tokio::main]
+    pub async fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
+        omnia::run::<Backends, Hooks>(builder.mode(omnia::Mode::Server)).await
+    }
+}
+#[allow(unused_imports)]
+pub use runtime::{run, main};
