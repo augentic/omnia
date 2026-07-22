@@ -6,13 +6,21 @@
 //! carried by p3 `wasi:cli/exit`. Each case runs the full public `run()` path
 //! (deployment build, command routing, exit mapping); the serialized guest
 //! artifact keeps the per-case build cheap.
+//!
+//! The `command_guest_*` tests cover the explicit command guest: an empty
+//! dynamic registry resolving the command guest on the first miss, resolver
+//! absence/failure, wrong-export refusal, `argv[0]` via `program_name`, and
+//! exit-code passthrough — plus static-deployment compatibility.
 
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, ensure};
+use futures::FutureExt as _;
 use omnia::{
-    Deployment, DeploymentBuilder, ExitStatus, Manifest, Mode, Runtime, StoreCtx, Wiring,
-    run_precompiled,
+    Deployment, DeploymentBuilder, ExitStatus, FutureResult, GuestArtifact, GuestId,
+    GuestResolver, Manifest, Mode, Runtime, StoreCtx, Wiring, run, run_precompiled,
 };
 use omnia_testkit::find_guest;
 

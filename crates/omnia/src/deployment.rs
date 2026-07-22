@@ -64,6 +64,8 @@ pub struct DeploymentBuilder<P = WasmOnly> {
     allow_empty: bool,
     resolver: Option<Arc<dyn GuestResolver>>,
     http_fallback: Option<HttpFallback>,
+    command_guest: Option<GuestId>,
+    program_name: Option<String>,
     policy: PhantomData<fn() -> P>,
 }
 
@@ -77,6 +79,8 @@ impl<P> std::fmt::Debug for DeploymentBuilder<P> {
             .field("allow_empty", &self.allow_empty)
             .field("resolver", &self.resolver.is_some())
             .field("http_fallback", &self.http_fallback.is_some())
+            .field("command_guest", &self.command_guest)
+            .field("program_name", &self.program_name)
             .finish_non_exhaustive()
     }
 }
@@ -90,6 +94,8 @@ impl Default for DeploymentBuilder<WasmOnly> {
             allow_empty: false,
             resolver: None,
             http_fallback: None,
+            command_guest: None,
+            program_name: None,
             policy: PhantomData,
         }
     }
@@ -153,6 +159,31 @@ impl<P> DeploymentBuilder<P> {
         self
     }
 
+    /// Route command mode to an explicit guest identity instead of the
+    /// sole-static-exporter catch-all.
+    ///
+    /// The identity goes through the ordinary registry lookup — and hence
+    /// resolve-on-miss when a [`resolver`](Self::resolver) is installed — so a
+    /// dynamic deployment may name a command guest that nothing has registered
+    /// yet. An identity that stays unresolved fails the run rather than
+    /// exiting inert.
+    #[must_use]
+    pub fn command_guest(mut self, id: impl Into<GuestId>) -> Self {
+        self.command_guest = Some(id.into());
+        self
+    }
+
+    /// Override the deployment name used for telemetry and — in command mode
+    /// — prepended to guest argv as `argv[0]`.
+    ///
+    /// Defaults to the manifest name (the first `[[guest]]` id, or `omnia`
+    /// for an empty dynamic manifest).
+    #[must_use]
+    pub fn program_name(mut self, name: impl Into<String>) -> Self {
+        self.program_name = Some(name.into());
+        self
+    }
+
     /// Resolve the manifest and build the deployment under `policy`.
     async fn build_inner<T: WasiView + 'static>(
         self, policy: ArtifactPolicy,
@@ -170,7 +201,7 @@ impl<P> DeploymentBuilder<P> {
         manifest.validate(self.allow_empty)?;
 
         let plan = Plan {
-            name: manifest.name().to_owned(),
+            name: self.program_name.unwrap_or_else(|| manifest.name().to_owned()),
             sources: manifest.sources()?,
             routes: manifest.routes(),
             links: manifest.link_interfaces(),
@@ -187,6 +218,7 @@ impl<P> DeploymentBuilder<P> {
         let mut deployment = Deployment::from_plan(plan).await?;
         deployment.resolver = self.resolver;
         deployment.http_fallback = self.http_fallback;
+        deployment.command_guest = self.command_guest;
         Ok(deployment)
     }
 }
@@ -211,6 +243,8 @@ impl DeploymentBuilder<WasmOnly> {
             allow_empty: self.allow_empty,
             resolver: self.resolver,
             http_fallback: self.http_fallback,
+            command_guest: self.command_guest,
+            program_name: self.program_name,
             policy: PhantomData,
         }
     }
@@ -280,6 +314,8 @@ pub struct Deployment<T: WasiView + 'static> {
     // Resolve-on-miss hooks carried from the builder into `Runtime::new`.
     resolver: Option<Arc<dyn GuestResolver>>,
     http_fallback: Option<HttpFallback>,
+    // Explicit command-mode guest identity carried from the builder.
+    command_guest: Option<GuestId>,
 }
 
 impl<T: WasiView + 'static> Deployment<T> {
@@ -322,6 +358,7 @@ impl<T: WasiView + 'static> Deployment<T> {
             allow_empty: plan.allow_empty,
             resolver: None,
             http_fallback: None,
+            command_guest: None,
         })
     }
 }
@@ -371,6 +408,11 @@ impl<T: WasiView> Deployment<T> {
     /// install before the deployment is consumed into a registry.
     pub(crate) fn resolve_hooks(&self) -> (Option<Arc<dyn GuestResolver>>, Option<HttpFallback>) {
         (self.resolver.clone(), self.http_fallback.clone())
+    }
+
+    /// The builder-carried explicit command guest identity, if any.
+    pub(crate) fn command_guest(&self) -> Option<GuestId> {
+        self.command_guest.clone()
     }
 
     /// Assemble the guest [`Registry`].

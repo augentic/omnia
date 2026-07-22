@@ -382,6 +382,9 @@ struct RuntimeInner<B: 'static> {
     // never change for the life of the runtime.
     resolver: OnceLock<Arc<dyn GuestResolver>>,
     http_fallback: OnceLock<HttpFallback>,
+    // Explicit command-mode guest identity; absent, command mode routes to
+    // the sole static `wasi:cli/run` exporter.
+    command_guest: OnceLock<GuestId>,
     // In-flight resolutions by identity. An entry lives exactly as long as
     // its flight: inserted when the flight starts, removed when its outcome
     // is computed — nothing is cached across flights.
@@ -400,6 +403,7 @@ impl<B: 'static> RuntimeInner<B> {
             backends,
             resolver: OnceLock::new(),
             http_fallback: OnceLock::new(),
+            command_guest: OnceLock::new(),
             flights: Mutex::new(HashMap::new()),
         }
     }
@@ -437,6 +441,7 @@ impl<B: Backends> Runtime<B> {
         let backends = B::connect().await.context("connecting backends")?;
         let mounts = deployment.mounts();
         let (resolver, http_fallback) = deployment.resolve_hooks();
+        let command_guest = deployment.command_guest();
 
         let runtime = Self::with_inner(Arc::new(RuntimeInner::new(
             Arc::new(deployment.into_registry().context("assembling registry")?),
@@ -449,6 +454,9 @@ impl<B: Backends> Runtime<B> {
         }
         if let Some(fallback) = http_fallback {
             runtime.install_http_fallback(fallback);
+        }
+        if let Some(id) = command_guest {
+            runtime.install_command_guest(id);
         }
         serve_links(&runtime).await.context("wiring host-mediated link serve side")?;
         Ok(runtime)
@@ -519,6 +527,24 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         self.inner.http_fallback.get().cloned()
     }
 
+    /// Route command mode to an explicit guest identity, chainable after
+    /// [`from_parts`](Self::from_parts).
+    ///
+    /// Deployments built through [`DeploymentBuilder`] supply the identity via
+    /// [`DeploymentBuilder::command_guest`] instead. Install-once: a second
+    /// identity is ignored with a warning.
+    #[must_use]
+    pub fn with_command_guest(self, id: impl Into<GuestId>) -> Self {
+        self.install_command_guest(id.into());
+        self
+    }
+
+    /// The explicit command-mode guest identity, if any.
+    #[must_use]
+    pub fn command_guest(&self) -> Option<&GuestId> {
+        self.inner.command_guest.get()
+    }
+
     fn install_resolver(&self, resolver: Arc<dyn GuestResolver>) {
         if self.inner.resolver.set(resolver).is_err() {
             tracing::warn!("guest resolver already installed; ignoring");
@@ -535,6 +561,12 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     fn install_http_fallback(&self, fallback: HttpFallback) {
         if self.inner.http_fallback.set(fallback).is_err() {
             tracing::warn!("http fallback already installed; ignoring");
+        }
+    }
+
+    fn install_command_guest(&self, id: GuestId) {
+        if self.inner.command_guest.set(id).is_err() {
+            tracing::warn!("command guest already installed; ignoring");
         }
     }
 
