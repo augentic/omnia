@@ -71,6 +71,10 @@ name = "cli"
 path = "cli/runtime.rs"
 
 [[example]]
+name = "command-resolver"
+path = "command-resolver/runtime.rs"
+
+[[example]]
 name = "config-wasm"
 path = "config/guest.rs"
 crate-type = ["cdylib"]

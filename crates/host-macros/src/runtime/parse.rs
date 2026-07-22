@@ -22,6 +22,9 @@ pub struct Config {
     #[allow(clippy::struct_field_names)]
     pub config_file: Option<Expr>,
     pub manifest: ManifestSpec,
+    pub resolver: Option<Expr>,
+    pub program: Option<Expr>,
+    pub command_guest: Option<Expr>,
 }
 
 /// One `Host: Backend` wiring from the `hosts: { ... }` block.
@@ -89,8 +92,13 @@ impl Parse for Config {
         let mut host_entries = Vec::new();
         let mut config_file = None;
         let mut manifest = ManifestSpec::default();
+        let mut resolver = None;
+        let mut program = None;
+        let mut command_guest = None;
         let mut config_span: Option<Span> = None;
         let mut inline_span: Option<Span> = None;
+        let mut program_span: Option<Span> = None;
+        let mut command_guest_span: Option<Span> = None;
 
         let settings;
         syn::braced!(settings in input);
@@ -120,6 +128,15 @@ impl Parse for Config {
                     manifest.routes = r;
                     inline_span.get_or_insert(span);
                 }
+                Opt::Resolver(r) => resolver = Some(r),
+                Opt::Program(p, span) => {
+                    program = Some(p);
+                    program_span = Some(span);
+                }
+                Opt::CommandGuest(c, span) => {
+                    command_guest = Some(c);
+                    command_guest_span = Some(span);
+                }
             }
         }
 
@@ -131,11 +148,40 @@ impl Parse for Config {
             ));
         }
 
+        if let Some(span) = command_guest_span
+            && mode != Mode::Command
+        {
+            return Err(syn::Error::new(
+                span,
+                "`command_guest:` requires `mode: command` (it only routes command mode)",
+            ));
+        }
+
+        if let Some(span) = program_span {
+            if mode != Mode::Command {
+                return Err(syn::Error::new(span, "`program:` requires `mode: command`"));
+            }
+            let has_manifest = config_file.is_some() || !manifest.is_empty();
+            let fully_dynamic = resolver.is_some() && command_guest.is_some();
+            if !has_manifest && !fully_dynamic {
+                return Err(syn::Error::new(
+                    span,
+                    "`program:` requires a compiled-in manifest (`config:` or inline manifest \
+                     keys) or `resolver:` plus `command_guest:` — a direct command has no \
+                     `--config`/positional-wasm override, so the deployment must be expressed \
+                     here",
+                ));
+            }
+        }
+
         Ok(Self {
             mode,
             host_entries,
             config_file,
             manifest,
+            resolver,
+            program,
+            command_guest,
         })
     }
 }
@@ -148,6 +194,9 @@ mod kw {
     syn::custom_keyword!(mounts);
     syn::custom_keyword!(link);
     syn::custom_keyword!(routes);
+    syn::custom_keyword!(resolver);
+    syn::custom_keyword!(program);
+    syn::custom_keyword!(command_guest);
 }
 
 enum Opt {
@@ -158,6 +207,9 @@ enum Opt {
     Mounts(Vec<MountSpec>, Span),
     Link(Vec<Expr>, Span),
     Routes(RoutesSpec, Span),
+    Resolver(Expr),
+    Program(Expr, Span),
+    CommandGuest(Expr, Span),
 }
 
 impl Parse for Opt {
@@ -193,6 +245,18 @@ impl Parse for Opt {
             let key = input.parse::<kw::routes>()?;
             input.parse::<Token![:]>()?;
             Ok(Self::Routes(input.parse()?, key.span))
+        } else if l.peek(kw::resolver) {
+            input.parse::<kw::resolver>()?;
+            input.parse::<Token![:]>()?;
+            Ok(Self::Resolver(input.parse()?))
+        } else if l.peek(kw::program) {
+            let key = input.parse::<kw::program>()?;
+            input.parse::<Token![:]>()?;
+            Ok(Self::Program(input.parse()?, key.span))
+        } else if l.peek(kw::command_guest) {
+            let key = input.parse::<kw::command_guest>()?;
+            input.parse::<Token![:]>()?;
+            Ok(Self::CommandGuest(input.parse()?, key.span))
         } else {
             Err(l.error())
         }

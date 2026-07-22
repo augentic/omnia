@@ -1,6 +1,7 @@
 //! Deployment lifecycle: [`Backends`], [`Wiring`], [`Runtime`], [`run`], and [`ExitStatus`].
 
 mod command;
+mod entry;
 
 use std::collections::HashMap;
 use std::env;
@@ -10,14 +11,13 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result};
-use clap::Parser as _;
+pub use entry::{MainOptions, ManifestSource};
 use futures::FutureExt as _;
 use futures::future::{BoxFuture, Shared};
 use wasmtime::component::types::ComponentItem;
 use wasmtime::component::{Component, Instance, InstancePre};
 use wasmtime::{Engine, Store};
 
-use crate::cli::{Cli, Command};
 use crate::deployment::GuestArtifact;
 use crate::dispatch::{
     EnsureError, GuestResolver, HttpFallback, ResolveHook, serve_guest, serve_links,
@@ -27,8 +27,7 @@ use crate::mount::MountRegistry;
 use crate::registry::{Guest, GuestId};
 use crate::store::HasLimits;
 use crate::{
-    Deployment, DeploymentBuilder, Dispatcher, Manifest, Registry, RuntimeOptions, StoreBase,
-    StoreCtx,
+    Deployment, DeploymentBuilder, Dispatcher, Registry, RuntimeOptions, StoreBase, StoreCtx,
 };
 
 /// A deployment's connected backend bundle, threaded into [`Runtime`].
@@ -87,100 +86,38 @@ pub trait Wiring<B: Backends> {
     fn serve(runtime: &Runtime<B>) -> impl std::future::Future<Output = Result<()>> + Send;
 }
 
-/// A runtime's compiled-in deployment fallback, used only when the CLI
-/// supplies no source.
+/// Entry point for generated `main` functions.
 ///
-/// The `runtime!` macro emits [`Path`](Self::Path) for its `config:` field and
-/// [`Inline`](Self::Inline) for its inline manifest keys (`guests`, `mounts`,
-/// `link`, `routes`).
-#[derive(Clone, Debug)]
-pub enum DefaultManifest {
-    /// A default manifest path, loaded only when the fallback is reached.
-    Path(std::path::PathBuf),
-    /// A manifest value assembled at compile time.
-    Inline(Manifest),
-}
-
-impl DefaultManifest {
-    /// Resolve the fallback into a manifest, loading the file for the path kind.
-    fn into_manifest(self) -> Result<Manifest> {
-        match self {
-            Self::Path(path) => Manifest::from_config(path),
-            Self::Inline(manifest) => Ok(manifest),
-        }
-    }
-}
-
-/// CLI entry point for generated `main` functions.
-///
-/// `default_manifest` is the runtime's compiled-in deployment fallback (the
-/// `runtime!` macro's `config:` field or inline manifest keys), used only when
-/// the CLI supplies no source.
+/// `options` carries the deployment the `runtime!` macro compiled in: mode,
+/// manifest source, resolver, invocation shape, and command guest. Without
+/// the macro's `program:` key this parses the standard
+/// `run [wasm] [--config] -- args…` grammar; with it, argv passes to the
+/// guest verbatim.
 #[doc(hidden)]
-pub async fn main<B, H>(mode: Mode, default_manifest: Option<DefaultManifest>) -> ExitCode
+pub async fn main<B, H>(options: MainOptions) -> ExitCode
 where
     B: Backends,
     H: Wiring<B>,
 {
-    match Cli::parse().command {
-        Command::Run {
-            wasm,
-            config,
-            mounts,
-            links,
-            args,
-        } => {
-            let config = config.or_else(|| env::var_os("OMNIA_CONFIG").map(Into::into));
-            let manifest = config
-                .map_or_else(
-                    || {
-                        wasm.map_or_else(
-                            || {
-                                default_manifest
-                                    .context(
-                                        "no guest specified: pass a <wasm> path, or --config \
-                                         <omnia.toml> (or set OMNIA_CONFIG)",
-                                    )
-                                    .and_then(DefaultManifest::into_manifest)
-                            },
-                            |wasm| Ok(Manifest::from_wasm(wasm)),
-                        )
-                    },
-                    Manifest::from_config,
-                )
-                .map(|manifest| manifest.mounts(mounts).links(links));
-
-            let result = match manifest {
-                Ok(manifest) => {
-                    // The CLI path admits pre-compiled artifacts: manifests and
-                    // `.bin` paths given to the binary are trusted operator
-                    // inputs (docs/security-model.md).
-                    let builder = DeploymentBuilder::new()
-                        .manifest(manifest)
-                        .args(args)
-                        .mode(mode)
-                        .precompiled();
-                    // SAFETY: the operator running this binary chose the
-                    // manifest and artifact paths; pre-compiled artifacts are
-                    // documented trusted inputs produced by `omnia compile`.
-                    unsafe { run_precompiled::<B, H>(builder) }.await
-                }
-                Err(error) => Err(error),
-            };
-            match result {
-                Ok(status) => status.into(),
-                Err(error) => {
-                    eprintln!("{error:#}");
-                    ExitCode::FAILURE
-                }
-            }
+    let plan = match entry::plan(options, env::args_os(), env::var_os("OMNIA_CONFIG")) {
+        Ok(plan) => plan,
+        Err(entry::PlanError::Usage(error)) => error.exit(),
+        Err(entry::PlanError::Fatal(error)) => {
+            eprintln!("{error:#}");
+            return ExitCode::FAILURE;
         }
-        #[cfg(feature = "jit")]
-        Command::Compile { .. } => {
-            eprintln!(
-                "the generated `main` only supports `run`; supply a custom `main` for other \
-                 subcommands"
-            );
+    };
+    // The generated entry point admits pre-compiled artifacts: manifests and
+    // `.bin` paths given to (or compiled into) the binary are trusted
+    // operator inputs (docs/security-model.md).
+    let builder = plan.into_builder().precompiled();
+    // SAFETY: the operator running this binary chose the manifest and
+    // artifact paths; pre-compiled artifacts are documented trusted inputs
+    // produced by `omnia compile`.
+    match unsafe { run_precompiled::<B, H>(builder) }.await {
+        Ok(status) => status.into(),
+        Err(error) => {
+            eprintln!("{error:#}");
             ExitCode::FAILURE
         }
     }

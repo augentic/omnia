@@ -1,4 +1,4 @@
-error: expected one of: `mode`, `hosts`, `config`, `guests`, `mounts`, `link`, `routes`
+error: expected one of: `mode`, `hosts`, `config`, `guests`, `mounts`, `link`, `routes`, `resolver`, `program`, `command_guest`
  --> tests/compile_fail/unknown_key.rs:2:5
   |
 2 |     backends: {},

@@ -1,0 +1,5 @@
+error: `program:` requires a compiled-in manifest (`config:` or inline manifest keys) or `resolver:` plus `command_guest:` — a direct command has no `--config`/positional-wasm override, so the deployment must be expressed here
+ --> tests/compile_fail/program_without_deployment.rs:3:5
+  |
+3 |     program: "mytool",
+  |     ^^^^^^^

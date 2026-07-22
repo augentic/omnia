@@ -1,0 +1,5 @@
+error: `program:` requires `mode: command`
+ --> tests/compile_fail/program_without_command_mode.rs:2:5
+  |
+2 |     program: "mytool",
+  |     ^^^^^^^

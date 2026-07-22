@@ -1,0 +1,5 @@
+error: `command_guest:` requires `mode: command` (it only routes command mode)
+ --> tests/compile_fail/command_guest_in_server_mode.rs:5:5
+  |
+5 |     command_guest: "app",
+  |     ^^^^^^^^^^^^^
