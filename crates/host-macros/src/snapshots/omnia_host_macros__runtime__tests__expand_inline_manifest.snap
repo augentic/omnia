@@ -40,46 +40,47 @@ mod runtime {
             Ok(())
         }
     }
-    /// CLI entry point: parse the `run` grammar, then run the
-    /// deployment through this runtime's hosts and backends.
+    /// Entry point: run the compiled-in deployment through this
+    /// runtime's hosts and backends (the standard `run` grammar, or
+    /// raw argv passthrough under the `program:` key).
     #[tokio::main]
     pub async fn main() -> ::std::process::ExitCode {
         omnia::main::<
             Backends,
             Hooks,
         >(
-                omnia::Mode::Server,
-                ::std::option::Option::Some(
-                    omnia::DefaultManifest::Inline(
-                        omnia::Manifest::new()
-                            .guest(
-                                omnia::GuestEntry::new(
-                                    "responder",
-                                    concat!(env!("CARGO_MANIFEST_DIR"), "/responder.wasm"),
-                                ),
-                            )
-                            .guest(
-                                omnia::GuestEntry::new(
-                                        "router",
-                                        concat!(env!("CARGO_MANIFEST_DIR"), "/router.wasm"),
-                                    )
-                                    .link("omnia:link/echo"),
-                            )
-                            .mounts([
-                                omnia::Mount {
-                                    name: ::std::string::String::from("."),
-                                    path: ::std::path::PathBuf::from(
-                                        concat!(env!("CARGO_MANIFEST_DIR"), "/workspace"),
+                omnia::MainOptions::new(omnia::Mode::Server)
+                    .manifest(
+                        omnia::ManifestSource::Inline(
+                            omnia::Manifest::new()
+                                .guest(
+                                    omnia::GuestEntry::new(
+                                        "responder",
+                                        concat!(env!("CARGO_MANIFEST_DIR"), "/responder.wasm"),
                                     ),
-                                    writable: true,
-                                },
-                            ])
-                            .links(["omnia:link/other"])
-                            .route_http("/", "router")
-                            .route_messaging("orders.>", "worker")
-                            .route_websocket("chat.*", "ws"),
+                                )
+                                .guest(
+                                    omnia::GuestEntry::new(
+                                            "router",
+                                            concat!(env!("CARGO_MANIFEST_DIR"), "/router.wasm"),
+                                        )
+                                        .link("omnia:link/echo"),
+                                )
+                                .mounts([
+                                    omnia::Mount {
+                                        name: ::std::string::String::from("."),
+                                        path: ::std::path::PathBuf::from(
+                                            concat!(env!("CARGO_MANIFEST_DIR"), "/workspace"),
+                                        ),
+                                        writable: true,
+                                    },
+                                ])
+                                .links(["omnia:link/other"])
+                                .route_http("/", "router")
+                                .route_messaging("orders.>", "worker")
+                                .route_websocket("chat.*", "ws"),
+                        ),
                     ),
-                ),
             )
             .await
     }

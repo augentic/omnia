@@ -1,6 +1,6 @@
 ---
 source: crates/host-macros/src/runtime.rs
-expression: "expand_pretty(quote!({ mode: command, hosts: { WasiOtel: OtelDefault, }, }))"
+expression: "expand_pretty(quote!({\n    guests: [{ id: \"api\", source: \"api.wasm\" },], resolver:\n    CacheResolver::new(), hosts: { WasiOtel: OtelDefault, },\n}))"
 ---
 mod runtime {
     use anyhow::Result;
@@ -45,14 +45,26 @@ mod runtime {
     /// raw argv passthrough under the `program:` key).
     #[tokio::main]
     pub async fn main() -> ::std::process::ExitCode {
-        omnia::main::<Backends, Hooks>(omnia::MainOptions::new(omnia::Mode::Command))
+        omnia::main::<
+            Backends,
+            Hooks,
+        >(
+                omnia::MainOptions::new(omnia::Mode::Server)
+                    .manifest(
+                        omnia::ManifestSource::Inline(
+                            omnia::Manifest::new()
+                                .guest(omnia::GuestEntry::new("api", "api.wasm")),
+                        ),
+                    )
+                    .resolver(CacheResolver::new()),
+            )
             .await
     }
     /// Run one deployment through this runtime's hosts and backends,
     /// blocking until the guest completes.
     #[tokio::main]
     pub async fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
-        omnia::run::<Backends, Hooks>(builder.mode(omnia::Mode::Command)).await
+        omnia::run::<Backends, Hooks>(builder.mode(omnia::Mode::Server)).await
     }
 }
 #[allow(unused_imports)]

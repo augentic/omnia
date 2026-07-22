@@ -19,7 +19,7 @@ pub fn expand(config: &Config) -> TokenStream {
         server_types,
         backends_ty,
         backends_def,
-        default_manifest,
+        main_options,
     } = Codegen::from(config);
 
     let mode = match mode {
@@ -58,11 +58,12 @@ pub fn expand(config: &Config) -> TokenStream {
                 }
             }
 
-            /// CLI entry point: parse the `run` grammar, then run the
-            /// deployment through this runtime's hosts and backends.
+            /// Entry point: run the compiled-in deployment through this
+            /// runtime's hosts and backends (the standard `run` grammar, or
+            /// raw argv passthrough under the `program:` key).
             #[tokio::main]
             pub async fn main() -> ::std::process::ExitCode {
-                omnia::main::<#backends_ty, Hooks>(#mode, #default_manifest).await
+                omnia::main::<#backends_ty, Hooks>(#main_options).await
             }
 
             /// Run one deployment through this runtime's hosts and backends,
@@ -120,6 +121,64 @@ mod tests {
             hosts: {
                 WasiOtel: OtelDefault,
             },
+        })));
+    }
+
+    #[test]
+    fn expand_resolver() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            guests: [
+                { id: "api", source: "api.wasm" },
+            ],
+            resolver: CacheResolver::new(),
+            hosts: {
+                WasiOtel: OtelDefault,
+            },
+        })));
+    }
+
+    #[test]
+    fn expand_command_guest() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            mode: command,
+            guests: [
+                { id: "app", source: "app.wasm" },
+                { id: "helper", source: "helper.wasm" },
+            ],
+            command_guest: "app",
+        })));
+    }
+
+    #[test]
+    fn expand_program() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            mode: command,
+            program: "mytool",
+            config: concat!(env!("CARGO_MANIFEST_DIR"), "/omnia.toml"),
+        })));
+    }
+
+    // The composed shape from the guest-resolution design: static guests plus
+    // resolve-on-miss, explicit command routing, and raw argv passthrough.
+    #[test]
+    fn expand_deployment_keys() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            mode: command,
+            program: "specify-example",
+            guests: [
+                { id: "specify", source: engine_component_path() },
+                { id: "target:mock", source: mock_target_path() },
+            ],
+            mounts: [
+                { name: "project", path: project_root(), writable: true },
+                { name: "store", path: store_root(), writable: true },
+            ],
+            resolver: CacheResolver::new(),
+            command_guest: "specify",
+            hosts: {
+                WasiHttp: HttpDefault,
+                WasiOtel: OtelDefault,
+            }
         })));
     }
 

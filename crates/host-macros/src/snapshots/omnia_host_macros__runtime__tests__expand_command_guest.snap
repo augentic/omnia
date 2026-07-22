@@ -1,0 +1,51 @@
+---
+source: crates/host-macros/src/runtime.rs
+expression: "expand_pretty(quote!({\n    mode: command, guests:\n    [{ id: \"app\", source: \"app.wasm\" },\n    { id: \"helper\", source: \"helper.wasm\" },], command_guest: \"app\",\n}))"
+---
+mod runtime {
+    use anyhow::Result;
+    use omnia::futures::future;
+    use omnia::Server;
+    use omnia::tokio;
+    use super::*;
+    struct Hooks;
+    impl omnia::Wiring<()> for Hooks {
+        fn link(deployment: &mut omnia::Deployment<omnia::StoreCtx<()>>) -> Result<()> {
+            Ok(())
+        }
+        async fn serve(runtime: &omnia::Runtime<()>) -> Result<()> {
+            let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![];
+            future::try_join_all(servers).await?;
+            Ok(())
+        }
+    }
+    /// Entry point: run the compiled-in deployment through this
+    /// runtime's hosts and backends (the standard `run` grammar, or
+    /// raw argv passthrough under the `program:` key).
+    #[tokio::main]
+    pub async fn main() -> ::std::process::ExitCode {
+        omnia::main::<
+            (),
+            Hooks,
+        >(
+                omnia::MainOptions::new(omnia::Mode::Command)
+                    .manifest(
+                        omnia::ManifestSource::Inline(
+                            omnia::Manifest::new()
+                                .guest(omnia::GuestEntry::new("app", "app.wasm"))
+                                .guest(omnia::GuestEntry::new("helper", "helper.wasm")),
+                        ),
+                    )
+                    .command_guest("app"),
+            )
+            .await
+    }
+    /// Run one deployment through this runtime's hosts and backends,
+    /// blocking until the guest completes.
+    #[tokio::main]
+    pub async fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
+        omnia::run::<(), Hooks>(builder.mode(omnia::Mode::Command)).await
+    }
+}
+#[allow(unused_imports)]
+pub use runtime::{run, main};

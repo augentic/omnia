@@ -15,7 +15,7 @@ pub struct Codegen {
     pub server_types: Vec<Path>,
     pub backends_ty: TokenStream,
     pub backends_def: TokenStream,
-    pub default_manifest: TokenStream,
+    pub main_options: TokenStream,
 }
 
 impl From<&Config> for Codegen {
@@ -27,7 +27,7 @@ impl From<&Config> for Codegen {
 
         let (backends_ty, backends_def) = emit_backends(host_entries);
 
-        let default_manifest = emit_default_manifest(config);
+        let main_options = emit_main_options(config);
 
         Self {
             mode: config.mode,
@@ -35,30 +35,49 @@ impl From<&Config> for Codegen {
             server_types,
             backends_ty,
             backends_def,
-            default_manifest,
+            main_options,
         }
     }
 }
 
-/// Emit the `Option<omnia::DefaultManifest>` fallback passed to `omnia::main`:
-/// `Path` for a `config:` expression, `Inline` for the inline manifest keys,
-/// `None` when neither is declared.
-fn emit_default_manifest(config: &Config) -> TokenStream {
+/// Emit the `omnia::MainOptions` method chain passed to `omnia::main`; keys
+/// the invocation omits contribute no calls.
+fn emit_main_options(config: &Config) -> TokenStream {
+    let mode = match config.mode {
+        Mode::Server => quote!(omnia::Mode::Server),
+        Mode::Command => quote!(omnia::Mode::Command),
+    };
+    let manifest = emit_manifest_source(config);
+    let resolver = config.resolver.as_ref().map(|expr| quote! { .resolver(#expr) });
+    let program = config.program.as_ref().map(|expr| quote! { .direct_command(#expr) });
+    let command_guest = config.command_guest.as_ref().map(|expr| quote! { .command_guest(#expr) });
+
+    quote! {
+        omnia::MainOptions::new(#mode)
+            #manifest
+            #resolver
+            #program
+            #command_guest
+    }
+}
+
+/// Emit the `.manifest(omnia::ManifestSource::…)` call for the compiled-in
+/// deployment manifest: `Path` for a `config:` expression, `Inline` for the
+/// inline manifest keys, nothing when neither is declared.
+fn emit_manifest_source(config: &Config) -> Option<TokenStream> {
     if let Some(expr) = &config.config_file {
-        return quote! {
-            ::std::option::Option::Some(
-                omnia::DefaultManifest::Path(::std::path::PathBuf::from(#expr)),
-            )
-        };
+        return Some(quote! {
+            .manifest(omnia::ManifestSource::Path(::std::path::PathBuf::from(#expr)))
+        });
     }
     if config.manifest.is_empty() {
-        return quote! { ::std::option::Option::None };
+        return None;
     }
 
     let builder = emit_manifest_builder(&config.manifest);
-    quote! {
-        ::std::option::Option::Some(omnia::DefaultManifest::Inline(#builder))
-    }
+    Some(quote! {
+        .manifest(omnia::ManifestSource::Inline(#builder))
+    })
 }
 
 /// Emit the fluent `omnia::Manifest` builder chain for the inline keys.

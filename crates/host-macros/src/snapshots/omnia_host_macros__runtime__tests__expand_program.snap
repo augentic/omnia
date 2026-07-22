@@ -1,6 +1,6 @@
 ---
 source: crates/host-macros/src/runtime.rs
-expression: "expand_pretty(quote!({\n    config: concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/omnia.toml\"), hosts:\n    { WasiOtel: OtelDefault, },\n}))"
+expression: "expand_pretty(quote!({\n    mode: command, program: \"mytool\", config:\n    concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/omnia.toml\"),\n}))"
 ---
 mod runtime {
     use anyhow::Result;
@@ -8,33 +8,12 @@ mod runtime {
     use omnia::Server;
     use omnia::tokio;
     use super::*;
-    use omnia::Backend;
-    #[derive(Clone)]
-    struct Backends {
-        otel_default: OtelDefault,
-    }
-    impl omnia::Backends for Backends {
-        async fn connect() -> Result<Self> {
-            let (otel_default,) = tokio::try_join!(
-                < OtelDefault as Backend > ::connect(),
-            )?;
-            Ok(Self { otel_default })
-        }
-    }
-    impl omnia_wasi_otel::HasOtel for Backends {
-        fn otel_ctx(&mut self) -> &mut dyn omnia_wasi_otel::WasiOtelCtx {
-            &mut self.otel_default
-        }
-    }
     struct Hooks;
-    impl omnia::Wiring<Backends> for Hooks {
-        fn link(
-            deployment: &mut omnia::Deployment<omnia::StoreCtx<Backends>>,
-        ) -> Result<()> {
-            deployment.host::<WasiOtel, Backends>()?;
+    impl omnia::Wiring<()> for Hooks {
+        fn link(deployment: &mut omnia::Deployment<omnia::StoreCtx<()>>) -> Result<()> {
             Ok(())
         }
-        async fn serve(runtime: &omnia::Runtime<Backends>) -> Result<()> {
+        async fn serve(runtime: &omnia::Runtime<()>) -> Result<()> {
             let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![];
             future::try_join_all(servers).await?;
             Ok(())
@@ -46,17 +25,18 @@ mod runtime {
     #[tokio::main]
     pub async fn main() -> ::std::process::ExitCode {
         omnia::main::<
-            Backends,
+            (),
             Hooks,
         >(
-                omnia::MainOptions::new(omnia::Mode::Server)
+                omnia::MainOptions::new(omnia::Mode::Command)
                     .manifest(
                         omnia::ManifestSource::Path(
                             ::std::path::PathBuf::from(
                                 concat!(env!("CARGO_MANIFEST_DIR"), "/omnia.toml"),
                             ),
                         ),
-                    ),
+                    )
+                    .direct_command("mytool"),
             )
             .await
     }
@@ -64,7 +44,7 @@ mod runtime {
     /// blocking until the guest completes.
     #[tokio::main]
     pub async fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
-        omnia::run::<Backends, Hooks>(builder.mode(omnia::Mode::Server)).await
+        omnia::run::<(), Hooks>(builder.mode(omnia::Mode::Command)).await
     }
 }
 #[allow(unused_imports)]

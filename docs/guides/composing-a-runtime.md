@@ -60,11 +60,13 @@ In command mode, arguments after `--` on the command line are forwarded to the g
 cargo run --example cli -- run ./target/wasm32-wasip2/debug/examples/cli_wasm.wasm -- greet omnia
 ```
 
+(This `run … -- …` grammar applies to every generated binary *except* one built with the [`program:` key](#deployment-keys-resolver-program-command_guest), which disables the host CLI entirely and forwards raw argv to the guest.)
+
 A backend-less command runtime is valid too: `omnia::runtime!({ mode: command });`.
 
 ### Explicit command guests and resolve-on-miss
 
-By default, command mode routes to the sole static guest exporting `wasi:cli/run`; a deployment with no exporter is inert and exits `0`. A programmatic deployment can instead name the command guest explicitly:
+By default, command mode routes to the sole static guest exporting `wasi:cli/run`; a deployment with no exporter is inert and exits `0`. A deployment can instead name the command guest explicitly — via the macro's [`command_guest:` key](#deployment-keys-resolver-program-command_guest) or programmatically:
 
 ```rust
 let builder = omnia::DeploymentBuilder::new()
@@ -136,6 +138,48 @@ omnia::runtime!({
 - `config:` and the inline keys are mutually exclusive — a runtime compiles in a manifest path or a manifest value, not both.
 
 The [`guest-link`](../../examples/guest-link/runtime.rs) example is built this way; its [`omnia.toml`](../../examples/guest-link/Omnia.toml) expresses the same deployment as a file for `--config`.
+
+## Deployment keys (`resolver:`, `program:`, `command_guest:`)
+
+Three keys let the macro express a complete resolver-backed command deployment — static guests plus resolve-on-miss for everything else — with no handwritten `main`:
+
+```rust
+omnia::runtime!({
+    mode: command,
+    program: "specify-example",
+    guests: [
+        { id: "specify", source: engine_component_path() },
+        { id: "target:mock", source: mock_target_path() },
+    ],
+    mounts: [
+        { name: "project", path: project_root(), writable: true },
+        { name: "store", path: store_root(), writable: true },
+    ],
+    resolver: CacheResolver::new(),
+    command_guest: "specify",
+    hosts: {
+        WasiHttp: HttpDefault,
+        WasiOtel: OtelDefault,
+        WasiModel: Cursor,
+    }
+});
+```
+
+### `program:` — raw argv passthrough
+
+**`program:` disables the host `run` grammar entirely: the binary's argv belongs to the guest.** There is no `run` subcommand and no `--config`/`OMNIA_CONFIG`/positional-wasm override — the deployment compiled into the binary (or supplied by the resolver) is the only source, by design. The key's value (any expression evaluating to a string) becomes the program name used for telemetry and prepended to guest argv as `argv[0]`. This is pure opt-in: a binary without `program:` keeps the `run` grammar byte-for-byte.
+
+`program:` requires `mode: command` and either a compiled-in manifest (`config:` or inline keys) or `resolver:` plus `command_guest:` (the fully dynamic shape) — anything else is a compile-time error, since a direct command with nothing to run could never work.
+
+### `resolver:` — resolve-on-miss
+
+The value is any expression evaluating to a type implementing `omnia::GuestResolver`; it is consulted on dispatch-path registry misses (see [dynamic guest registration](../../rfcs/guest-resolution.md)). A resolver implies a *dynamic* deployment: the guest set may start empty (an invocation with a resolver and no `guests:` is the fully dynamic deployment), and with one or more static guests the mark is a no-op. The compiled-in resolver is part of the *binary*, not the manifest — a TOML supplied via `--config` still runs with it, and resolution policy (id grammar, artifact layout, verification) stays code the deployment owns. The other resolve-on-miss hook, `http_fallback`, remains builder-only for now.
+
+### `command_guest:` — explicit command routing
+
+The value (any expression evaluating to a guest identity) routes command mode explicitly instead of the sole-static-exporter catch-all, with the fail-closed semantics described [above](#explicit-command-guests-and-resolve-on-miss). It requires `mode: command`. Optional when a single static guest exports `wasi:cli/run`, but with several static guests — or a command guest that arrives through the resolver — explicit routing is the safer form: a future guest accidentally exporting `wasi:cli/run` cannot flip the routing.
+
+The [`command-resolver`](../../examples/command-resolver/runtime.rs) example composes all three keys.
 
 ## Choosing backends
 

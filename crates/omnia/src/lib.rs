@@ -41,7 +41,7 @@ pub use self::registry::{
 };
 pub use self::runtime::{Backends, ExitStatus, Mode, Runtime, Wiring};
 #[doc(hidden)]
-pub use self::runtime::{DefaultManifest, main, run, run_precompiled};
+pub use self::runtime::{MainOptions, ManifestSource, main, run, run_precompiled};
 pub use self::store::{
     HasDispatcher, HasHttp, HasLimits, HasMounts, StoreBase, StoreBaseBuilder, StoreCtx,
 };
