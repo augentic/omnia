@@ -1,9 +1,11 @@
 //! # Guest acquisition
 //!
 //! Where a guest's component bytes come from. The deployment manifest's
-//! `source` field selects a kind per guest. Today only [`Source`] (a local
-//! `.wasm` / pre-compiled `.bin` path) exists; OCI would land as another kind.
+//! `source` field selects a kind per guest: a local `.wasm` / pre-compiled
+//! `.bin` path, or component bytes embedded in the host binary. OCI would
+//! land as another kind.
 
+use std::borrow::Cow;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
@@ -41,13 +43,20 @@ pub struct LoadedGuest {
     pub component: Component,
 }
 
-/// A guest loaded from a local `.wasm` (or pre-compiled `.bin`) file.
+/// A guest loaded from a local `.wasm` (or pre-compiled `.bin`) file, or from
+/// component bytes embedded in the host binary.
 ///
 /// `omnia run <guest>.wasm` is the one-guest shorthand: load it, derive its
 /// identity from the file stem, and register it as the default guest.
 pub struct Source {
     id: GuestId,
-    path: PathBuf,
+    kind: SourceKind,
+}
+
+/// Where the component bytes live.
+enum SourceKind {
+    Path(PathBuf),
+    Bytes(Cow<'static, [u8]>),
 }
 
 impl Source {
@@ -57,7 +66,10 @@ impl Source {
     pub fn new(path: impl Into<PathBuf>) -> Self {
         let path = path.into();
         let id = id_from_path(&path);
-        Self { id, path }
+        Self {
+            id,
+            kind: SourceKind::Path(path),
+        }
     }
 
     /// Create a file source registering under an explicit identity.
@@ -65,7 +77,17 @@ impl Source {
     pub fn with_id(id: GuestId, path: impl Into<PathBuf>) -> Self {
         Self {
             id,
-            path: path.into(),
+            kind: SourceKind::Path(path.into()),
+        }
+    }
+
+    /// Create an embedded source registering `bytes` under an explicit
+    /// identity (typically an `include_bytes!` blob).
+    #[must_use]
+    pub fn embedded(id: GuestId, bytes: impl Into<Cow<'static, [u8]>>) -> Self {
+        Self {
+            id,
+            kind: SourceKind::Bytes(bytes.into()),
         }
     }
 
@@ -85,17 +107,27 @@ impl Source {
         &self, engine: &Engine, policy: ArtifactPolicy,
     ) -> Result<Vec<LoadedGuest>> {
         let engine = engine.clone();
-        let path = self.path.clone();
-        let component = tokio::task::spawn_blocking(move || {
-            load_component(&engine, &path, policy)
-                .with_context(|| format!("loading guest from {}", path.display()))
-        })
+        let id = self.id.clone();
+        let component = match &self.kind {
+            SourceKind::Path(path) => {
+                let path = path.clone();
+                tokio::task::spawn_blocking(move || {
+                    load_component(&engine, &path, policy)
+                        .with_context(|| format!("loading guest from {}", path.display()))
+                })
+            }
+            SourceKind::Bytes(bytes) => {
+                let bytes = bytes.clone();
+                let context_id = id.clone();
+                tokio::task::spawn_blocking(move || {
+                    load_component_bytes(&engine, &bytes, policy)
+                        .with_context(|| format!("loading embedded guest `{context_id}`"))
+                })
+            }
+        }
         .await
         .context("guest load task panicked")??;
-        Ok(vec![LoadedGuest {
-            id: self.id.clone(),
-            component,
-        }])
+        Ok(vec![LoadedGuest { id, component }])
     }
 }
 
@@ -226,6 +258,37 @@ fn load_component(engine: &Engine, wasm: &Path, policy: ArtifactPolicy) -> Resul
     Ok(component)
 }
 
+/// Load a component from embedded bytes: raw wasm compiles (under `jit`); a
+/// pre-compiled artifact deserializes only when `policy` trusts it.
+fn load_component_bytes(
+    engine: &Engine, bytes: &[u8], policy: ArtifactPolicy,
+) -> Result<Component> {
+    let component = if bytes.get(..ELF_MAGIC.len()) == Some(&ELF_MAGIC) {
+        ensure!(
+            policy == ArtifactPolicy::Trust,
+            "the embedded bytes are a pre-compiled (native) artifact, which this build rejects; \
+             load trusted pre-compiled artifacts through the `DeploymentBuilder::precompiled()` \
+             typestate's unsafe `build`"
+        );
+        // SAFETY: `policy == Trust` is only reachable through an `unsafe`
+        // build call whose caller attested every pre-compiled artifact is
+        // unmodified trusted wasmtime output — the contract
+        // `Component::deserialize` requires.
+        unsafe { Component::deserialize(engine, bytes) }.map_err(anyhow::Error::from).context(
+            "deserializing embedded pre-compiled component: the artifact must be built with the \
+             same compile-affecting settings used by `omnia compile` (MAX_FUEL, BRANCH_HINTING, \
+             MEMORY_RESERVATION, MEMORY_GUARD_SIZE)",
+        )?
+    } else {
+        compile_wasm_bytes(engine, bytes)?
+    };
+
+    // Build the copy-on-write heap image now (startup) rather than lazily on the
+    // first instantiation, moving that one-time cost off the first request.
+    component.initialize_copy_on_write_image()?;
+    Ok(component)
+}
+
 /// Compile a raw wasm component from a file.
 #[cfg(feature = "jit")]
 fn compile_wasm(engine: &Engine, wasm: &Path) -> Result<Component> {
@@ -241,6 +304,23 @@ fn compile_wasm(_engine: &Engine, wasm: &Path) -> Result<Component> {
         "{} is a raw wasm component and this build has no `jit` feature; pre-compile it with \
          `omnia compile` or rebuild the host with `jit`",
         wasm.display()
+    )
+}
+
+/// Compile a raw wasm component from embedded bytes.
+#[cfg(feature = "jit")]
+fn compile_wasm_bytes(engine: &Engine, bytes: &[u8]) -> Result<Component> {
+    Component::new(engine, bytes)
+        .map_err(anyhow::Error::from)
+        .context("compiling embedded component")
+}
+
+/// Raw wasm cannot compile without the `jit` feature.
+#[cfg(not(feature = "jit"))]
+fn compile_wasm_bytes(_engine: &Engine, _bytes: &[u8]) -> Result<Component> {
+    anyhow::bail!(
+        "the embedded bytes are a raw wasm component and this build has no `jit` feature; \
+         pre-compile with `omnia compile` and embed the artifact, or rebuild the host with `jit`"
     )
 }
 

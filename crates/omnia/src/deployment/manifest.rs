@@ -9,11 +9,12 @@
 //! interface *strings*, never `source:`/`target:`/`mcp`. Consumers write the
 //! concrete file; the runtime core stays domain-agnostic.
 //!
-//! The `[[guest]]` population (file sources), the `[[route.*]]` tables, and
-//! deployment-wide and per-guest `link` allow-lists (which drive host-mediated
-//! dynamic linking) are all consumed. Distributed `[transport]` is not yet
+//! The `[[guest]]` population (file or embedded-bytes sources), the
+//! `[[route.*]]` tables, and deployment-wide and per-guest `link` allow-lists
+//! (which drive host-mediated dynamic linking) are all consumed. Distributed `[transport]` is not yet
 //! implemented: only the in-process default is accepted.
 
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -193,6 +194,7 @@ impl Manifest {
             let id = GuestId::from(entry.id.as_str());
             match &entry.source {
                 SourceSpec::Path(path) => sources.push(Source::with_id(id, path)),
+                SourceSpec::Bytes(bytes) => sources.push(Source::embedded(id, bytes.clone())),
                 SourceSpec::Oci(reference) => {
                     bail!("guest `{id}`: OCI source `{reference}` is not yet supported")
                 }
@@ -309,12 +311,12 @@ pub struct GuestEntry {
 }
 
 impl GuestEntry {
-    /// Create a guest backed by a local component path.
+    /// Create a guest from a local component path or embedded component bytes.
     #[must_use]
-    pub fn new(id: impl Into<String>, path: impl Into<PathBuf>) -> Self {
+    pub fn new(id: impl Into<String>, source: impl Into<SourceSpec>) -> Self {
         Self {
             id: id.into(),
-            source: SourceSpec::Path(path.into()),
+            source: source.into(),
             link: Vec::new(),
         }
     }
@@ -331,17 +333,76 @@ impl GuestEntry {
 ///
 /// Modelled as an externally tagged enum so TOML's `source.path = "..."` and
 /// `source.oci = "..."` each select a variant.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SourceSpec {
     /// A local `.wasm` / pre-compiled `.bin` path. [`Manifest::from_config`]
     /// resolves relative paths against the config file's directory; a relative
     /// path set programmatically resolves against the process working directory.
     Path(PathBuf),
+    /// Component bytes embedded in the host binary (typically an
+    /// `include_bytes!` blob). TOML cannot express this variant; it is set
+    /// through the `runtime!` macro or the programmatic [`GuestEntry`] API.
+    #[serde(skip)]
+    Bytes(Cow<'static, [u8]>),
     /// A digest-pinned OCI reference. Accepted by the parser and surfaced in the
     /// "not yet supported" error; the puller that consumes it lands as a
     /// follow-up.
     Oci(String),
+}
+
+// Manual: the derived impl would dump the embedded component bytes.
+impl std::fmt::Debug for SourceSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Path(path) => f.debug_tuple("Path").field(path).finish(),
+            Self::Bytes(bytes) => write!(f, "Bytes({} bytes)", bytes.len()),
+            Self::Oci(reference) => f.debug_tuple("Oci").field(reference).finish(),
+        }
+    }
+}
+
+impl From<&str> for SourceSpec {
+    fn from(path: &str) -> Self {
+        Self::Path(PathBuf::from(path))
+    }
+}
+
+impl From<String> for SourceSpec {
+    fn from(path: String) -> Self {
+        Self::Path(PathBuf::from(path))
+    }
+}
+
+impl From<&Path> for SourceSpec {
+    fn from(path: &Path) -> Self {
+        Self::Path(path.to_path_buf())
+    }
+}
+
+impl From<PathBuf> for SourceSpec {
+    fn from(path: PathBuf) -> Self {
+        Self::Path(path)
+    }
+}
+
+impl From<&'static [u8]> for SourceSpec {
+    fn from(bytes: &'static [u8]) -> Self {
+        Self::Bytes(Cow::Borrowed(bytes))
+    }
+}
+
+// `include_bytes!` yields `&[u8; N]`, so the array form is the one embedders hit.
+impl<const N: usize> From<&'static [u8; N]> for SourceSpec {
+    fn from(bytes: &'static [u8; N]) -> Self {
+        Self::Bytes(Cow::Borrowed(bytes))
+    }
+}
+
+impl From<Vec<u8>> for SourceSpec {
+    fn from(bytes: Vec<u8>) -> Self {
+        Self::Bytes(Cow::Owned(bytes))
+    }
 }
 
 /// Inbound routing: one list of routes per trigger, orthogonal to population
@@ -657,6 +718,22 @@ mod tests {
             Manifest::new().validate(true).is_ok(),
             "a dynamic deployment may start with no guests"
         );
+    }
+
+    #[test]
+    fn bytes_source_maps_to_embedded() {
+        // `b"..."` is `&'static [u8; N]` — the `include_bytes!` shape.
+        let manifest = Manifest::new()
+            .guest(GuestEntry::new("baked", b"\0asm"))
+            .guest(GuestEntry::new("read", Vec::from(*b"\0asm")));
+
+        assert!(matches!(manifest.guests[0].source, SourceSpec::Bytes(_)));
+        assert_eq!(format!("{:?}", manifest.guests[0].source), "Bytes(4 bytes)");
+
+        let sources = manifest.sources().expect("bytes sources resolve");
+        assert_eq!(sources.len(), 2);
+        assert_eq!(sources[0].id(), &GuestId::from("baked"));
+        assert_eq!(sources[1].id(), &GuestId::from("read"));
     }
 
     #[test]

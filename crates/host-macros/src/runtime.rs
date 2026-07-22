@@ -182,6 +182,23 @@ mod tests {
         })));
     }
 
+    // A bytes-valued `source:` (the `include_bytes!` embedding shape) passes
+    // through to `GuestEntry::new` unchanged.
+    #[test]
+    fn expand_embedded_bytes() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            guests: [
+                {
+                    id: "specify",
+                    source: include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/specify.wasm")),
+                },
+            ],
+            hosts: {
+                WasiOtel: OtelDefault,
+            },
+        })));
+    }
+
     #[test]
     fn expand_inline_manifest() {
         insta::assert_snapshot!(expand_pretty(quote!({
