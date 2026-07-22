@@ -125,6 +125,10 @@ Two pieces, landing together:
 
 Both pieces are additive; nothing in §4.1–4.4 anticipates them beyond the single-flight-friendly publish ordering.
 
+### 4.6 Resolver-backed command guests
+
+Command mode gains an explicit routing leg over the same lookup: `DeploymentBuilder::command_guest(id)` names the `wasi:cli/run` guest instead of relying on the sole-static-exporter catch-all, and `DeploymentBuilder::program_name(name)` overrides the deployment name used for telemetry and — in command mode — prepended to guest argv as `argv[0]` (defaulting, as before, to the manifest name). The command drive path then goes through the ordinary `Runtime::ensure_guest(id, "wasi:cli/run")`, so an explicit command guest participates in resolve-on-miss: a fully dynamic deployment starts with an empty registry and faults its command guest in through the resolver on the first (and only) miss. Fail-closed semantics replace the catch-all's inert exit `0` for this leg: an unresolved identity (no resolver, or a resolver `Ok(None)`), a resolver failure, and a resolved component lacking `wasi:cli/run` all fail the run, with the resolver's cause chain preserved through `EnsureError::ResolveFailed` for embedders that downcast to typed errors. A deployment that configures no explicit command guest keeps today's behavior exactly (sole static exporter, inert exit `0` when nothing exports `wasi:cli/run`).
+
 ## 5. What the runtime core never learns
 
 The embedder owns everything domain-shaped: filesystem layout, filename ↔ id mapping, digest sidecar formats, registry clients, trust policy, id namespacing and versioning conventions. Two install-pipeline sketches that fit the same primitive:
@@ -146,6 +150,7 @@ If a change to this design requires the core to parse an id, read a manifest con
 - Seam tests (per the integration-first policy): register → link dispatch reaches the new guest; register → host→guest `Dispatcher::invoke` reaches it; deregister → dispatch fails as unregistered while an in-flight call completes; deregister + re-register swaps behavior (upgrade); register over a static id refused; deregister of a static id refused; a registered guest importing an interface outside the link union fails registration with no partial state; a `dynamic()` deployment starting with zero static guests.
 - Extend `examples/guest-link`: a third guest absent from the manifest, verified and registered at run time from the target directory, reachable via link dispatch — proving serve-at-register end to end.
 - Resolve-on-miss and trigger fallback tests (§4.5): single-flight observed once with every waiter sharing the outcome, neither a `None` nor a resolver error cached across flights, wrong-export component refused post-load, a direct `register` racing a flight, and the HTTP fallback faulting tenants in through one boot-frozen router.
+- Resolver-backed command tests (§4.6): an empty dynamic registry resolving the explicit command guest on the first miss with exit codes passing through, resolver absence/decline/failure failing the run (cause chain preserved), a wrong-export component refused, `program_name` overriding `argv[0]`, and an explicit command guest naming a static entry hitting the registry without consulting the resolver.
 
 ## 8. References
 

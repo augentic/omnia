@@ -62,6 +62,22 @@ cargo run --example cli -- run ./target/wasm32-wasip2/debug/examples/cli_wasm.wa
 
 A backend-less command runtime is valid too: `omnia::runtime!({ mode: command });`.
 
+### Explicit command guests and resolve-on-miss
+
+By default, command mode routes to the sole static guest exporting `wasi:cli/run`; a deployment with no exporter is inert and exits `0`. A programmatic deployment can instead name the command guest explicitly:
+
+```rust
+let builder = omnia::DeploymentBuilder::new()
+    .dynamic()
+    .command_guest("app@1.2.0")
+    .program_name("app")
+    .resolver(resolver)
+    .args(argv);
+host::run(builder).await
+```
+
+`command_guest` sends the identity through the ordinary registry lookup — and hence resolve-on-miss when a `GuestResolver` is installed — so a fully dynamic deployment may start empty and fault its command guest in on the first run. This leg is fail-closed: an identity nothing supplies, a resolver failure, or a resolved component that does not export `wasi:cli/run` fails the run instead of exiting inert. `program_name` overrides the deployment name used for telemetry and prepended to guest argv as `argv[0]` (the default remains the manifest name).
+
 ## Default manifest (`config:`)
 
 The optional `config` key compiles a default manifest path into the generated `main`, used only when the command line supplies no source — no positional wasm, no `--config`, no `OMNIA_CONFIG`:

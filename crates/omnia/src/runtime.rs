@@ -248,13 +248,17 @@ where
 
     let runtime = Runtime::<B>::new(deployment, H::link).await.context("assembling runtime")?;
 
-    // start background tasks
-    drive_epoch(runtime.registry().engine().clone(), runtime.options().epoch_tick);
-    sample_pool(runtime.registry().engine().clone(), runtime.options().pool_metrics_interval);
+    // Background tasks hold Engine clones; abort them when the drive
+    // completes so a finished deployment releases its engine (and the pooling
+    // allocator's large virtual reservation) instead of leaking it into the
+    // host process.
+    let epoch = drive_epoch(runtime.registry().engine().clone(), runtime.options().epoch_tick);
+    let pool =
+        sample_pool(runtime.registry().engine().clone(), runtime.options().pool_metrics_interval);
 
     log_bootstrap_complete(&runtime, mode);
 
-    match mode {
+    let outcome = match mode {
         Mode::Command => {
             let servers_runtime = runtime.clone();
             tokio::spawn(async move {
@@ -264,11 +268,14 @@ where
             });
             command::drive(&runtime).await
         }
-        Mode::Server => {
-            H::serve(&runtime).await?;
-            Ok(ExitStatus::SUCCESS)
-        }
+        Mode::Server => H::serve(&runtime).await.map(|()| ExitStatus::SUCCESS),
+    };
+
+    epoch.abort();
+    if let Some(pool) = pool {
+        pool.abort();
     }
+    outcome
 }
 
 fn log_bootstrap_complete<B>(runtime: &Runtime<B>, mode: Mode)
@@ -283,22 +290,22 @@ where
     );
 }
 
-fn drive_epoch(engine: Engine, tick: Duration) {
+fn drive_epoch(engine: Engine, tick: Duration) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(tick);
         loop {
             interval.tick().await;
             engine.increment_epoch();
         }
-    });
+    })
 }
 
-fn sample_pool(engine: Engine, interval: Duration) {
+fn sample_pool(engine: Engine, interval: Duration) -> Option<tokio::task::JoinHandle<()>> {
     if interval.is_zero() {
-        return;
+        return None;
     }
 
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         let mut ticker = tokio::time::interval(interval);
         loop {
             ticker.tick().await;
@@ -319,6 +326,7 @@ fn sample_pool(engine: Engine, interval: Duration) {
             );
         }
     });
+    Some(handle)
 }
 
 /// Guest exit code. [`code_u8`](Self::code_u8) and [`ExitCode`](std::process::ExitCode)
