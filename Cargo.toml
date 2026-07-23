@@ -54,7 +54,7 @@ unneeded_field_pattern = "warn"
 unused_result_ok = "warn"
 
 [workspace.dependencies]
-anyhow = "1.0.103"
+anyhow = "1.0.104"
 axum = { version = "0.8.9", default-features = false, features = ["json"] }
 base64ct = { version = "1.8.3", features = ["std"] }
 bon = "3.9.3"
@@ -63,48 +63,48 @@ bytes = "1.12.1"
 # (`Descriptor` wraps `cap_std::fs::Dir`); ignored by the `outdated` task.
 # Upgrade to 4.x together with cap-primitives (crates/wasi-model) once
 # wasmtime-wasi moves to cap-std 4.
-cap-fs-ext = "3.4.5"
-cap-std = "3.4.5"
+cap-fs-ext = "4.0.2"
+cap-std = "4.0.2"
 cfg-if = "1.0.4"
 chrono = "0.4.45"
-clap = { version = "4.6.1", default-features = false, features = ["derive", "error-context", "help", "std", "usage"] }
+clap = { version = "4.6.4", default-features = false, features = ["derive", "error-context", "help", "std", "usage"] }
 clap_complete = "4.6.7"
 dashmap = "6.2.1"
 fromenv = "0.1.0"
-futures = "0.3.32"
-futures-channel = "0.3.32"
-futures-util = "0.3.32"
+futures = "0.3.33"
+futures-channel = "0.3.33"
+futures-util = "0.3.33"
 http = "1.4.2"
-http-body = "1.0.1"
-http-body-util = "0.1.3"
-hyper = "1.10.1"
+http-body = "1.1.0"
+http-body-util = "0.1.4"
+hyper = "1.11.0"
 hyper-util = "0.1.20"
 insta = "1.48.0"
 # Default features pull reqwest/rustls for remote `$ref` resolution; the gate
 # only validates self-contained schema documents.
-jsonschema = { version = "0.47.0", default-features = false }
+jsonschema = { version = "0.48.5", default-features = false }
 moka = { version = "0.12.15", features = ["sync"] }
 opentelemetry = "0.32.0"
 opentelemetry-proto = "0.32.0"
 opentelemetry_sdk = "0.32.1"
 parking_lot = "0.12.5"
 pastey = "0.2.3"
-prettyplease = "0.2.37"
-proc-macro2 = "1.0.106"
-quote = "1.0.46"
+prettyplease = "0.3.0"
+proc-macro2 = "1.0.107"
+quote = "1.0.47"
 rand = "0.10.2"
-regex = "1.13.0"
+regex = "1.13.1"
 sea-query = { version = "1.0.1", default-features = false, features = ["thread-safe", "with-chrono"] }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.150"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
 serde_urlencoded = "0.7.1"
-syn = { version = "2.0.118", features = ["full"] }
-time = "0.3.53"
-tokio = { version = "1.52.3", default-features = false }
-tokio-stream = { version = "0.1.18", features = ["sync"] }
+syn = { version = "3.0.3", features = ["full"] }
+time = "0.3.54"
+tokio = { version = "1.53.1", default-features = false }
+tokio-stream = { version = "0.1.19", features = ["sync"] }
 tokio-tungstenite = "0.30.0"
-tokio-util = { version = "0.7.18", features = ["codec"] }
-toml = { version = "1.1.2", default-features = false, features = ["parse", "serde", "std"] }
+tokio-util = { version = "0.7.19", features = ["codec"] }
+toml = { version = "1.1.3", default-features = false, features = ["parse", "serde", "std"] }
 tower = "0.5.3"
 tracing = "0.1.44"
 tracing-opentelemetry = "0.33.0"
@@ -114,12 +114,12 @@ wasip3 = { version = "0.7.0", features = ["http-compat"] }
 # Pinned to match `wrpc`'s own dependency so the link-seam value codec stays
 # byte-identical with `wrpc-wasmtime`'s.
 wasm-tokio = { version = "0.6.1", default-features = false }
-wasmtime = { version = "46.0.1", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation", "pooling-allocator"] }
-wasmtime-wasi = { version = "46.0.1", features = ["p3"] }
-wasmtime-wasi-config = "46.0.1"
-wasmtime-wasi-http = { version = "46.0.1", features = ["p3"] }
-wasmtime-wasi-io = "46.0.1"
-wit-bindgen = { version = "0.59.0", features = ["async-spawn"] }
+wasmtime = { version = "47.0.2", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation", "pooling-allocator"] }
+wasmtime-wasi = { version = "47.0.2", features = ["p3"] }
+wasmtime-wasi-config = "47.0.2"
+wasmtime-wasi-http = { version = "47.0.2", features = ["p3"] }
+wasmtime-wasi-io = "47.0.2"
+wit-bindgen = { version = "0.60.0", features = ["async-spawn"] }
 
 # `wrpc-wasmtime` 0.1.0 is unpublished (the crate was renamed from
 # `wrpc-runtime-wasmtime` upstream); it is supplied by [patch.crates-io] below

@@ -33,7 +33,7 @@ By default the host JIT-compiles `.wasm` at startup. For faster cold starts, pre
 
 Three constraints:
 
-- Compile-affecting options (`MAX_FUEL`, `MEMORY_RESERVATION`, `MEMORY_GUARD_SIZE`, `BRANCH_HINTING`) must be identical at compile time and run time.
+- Compile-affecting options (`MAX_FUEL`, `MEMORY_RESERVATION`, `MEMORY_GUARD_SIZE`, `BRANCH_HINTING`, `DEBUG_SYMBOLS`, `GENERATE_ADDRESS_MAP`) must be identical at compile time and run time.
 - The generated `runtime!` `main` only handles `run`; expose `compile` from a custom `main` (see [CLI reference](../reference/cli.md#compile-jit-feature)). A host built with `--no-default-features` (dropping `jit`) can *only* load pre-compiled `.bin` files — useful for minimizing the production binary.
 - A `.bin` is native code and a **trusted operator input**: the CLI loads it on that basis, while the programmatic API requires an explicit `unsafe` attestation (`DeploymentBuilder::precompiled()` or `GuestArtifact::precompiled`). The settings check above is a compatibility check, not an authenticity check — see the [security model](../security-model.md).
 

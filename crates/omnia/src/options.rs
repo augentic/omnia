@@ -35,9 +35,10 @@ use wasmtime::{Config, Enabled, InstanceAllocationStrategy, PoolingAllocationCon
 ///
 /// # Compile-time vs runtime settings
 ///
-/// `max_fuel`, `branch_hinting`, `memory_reservation`, and `memory_guard_size`
-/// influence generated code (the latter two via bounds-check elision), so they
-/// are applied by the [`Config`] conversion and must be identical when a
+/// `max_fuel`, `branch_hinting`, `memory_reservation`, `memory_guard_size`
+/// (the latter two via bounds-check elision), `debug_symbols`, and
+/// `generate_address_map` influence the generated artifact, so they are
+/// applied by the [`Config`] conversion and must be identical when a
 /// component is pre-compiled and when it is later loaded. Copy-on-write heap
 /// initialisation is likewise pinned there. The remaining values only affect
 /// the engine or individual stores at runtime.
@@ -71,6 +72,12 @@ pub struct RuntimeOptions {
     /// Capture guest backtraces and attach them to trap errors (`WASM_BACKTRACE`, default `false`).
     #[env(from = "WASM_BACKTRACE", default = "false")]
     pub wasm_backtrace: bool,
+    /// Emit ELF symbol tables in compiled artifacts, for profilers and `wasmtime objdump`; compile-affecting (`DEBUG_SYMBOLS`, default `false`).
+    #[env(from = "DEBUG_SYMBOLS", default = "false")]
+    pub debug_symbols: bool,
+    /// Record the machine-code-to-wasm-offset map that gives traps and backtraces their wasm offsets; compile-affecting (`GENERATE_ADDRESS_MAP`, default `true`).
+    #[env(from = "GENERATE_ADDRESS_MAP", default = "true")]
+    pub generate_address_map: bool,
     /// Per-invocation fuel budget; `0` disables metering (`MAX_FUEL`, default 0).
     #[env(from = "MAX_FUEL", default = "0")]
     pub max_fuel: u64,
@@ -192,6 +199,13 @@ impl From<&RuntimeOptions> for Config {
         if let Some(bytes) = options.memory_guard_size {
             config.memory_guard_size(bytes);
         }
+
+        // Artifact-size tunables (compile-affecting). ELF symbol tables only
+        // serve profilers and `wasmtime objdump`, so they are stripped by
+        // default; the address map stays on so trap messages keep their wasm
+        // offsets even with backtraces disabled.
+        config.debug_symbols(options.debug_symbols);
+        config.generate_address_map(options.generate_address_map);
 
         // Runtime-only engine settings (no artifact effect). Set before the
         // pooling early-return so they hold whether or not pooling is enabled.

@@ -124,7 +124,7 @@ The cursor backend requires a workspace: the host must mount a directory (`[[mou
 
 ### A pre-compiled `.bin` fails to load
 
-Compile-affecting options must match between `compile` and `run`: `MAX_FUEL`, `MEMORY_RESERVATION`, `MEMORY_GUARD_SIZE`, `BRANCH_HINTING`. Recompile with the production values set, or align the runtime's environment with the compile-time one.
+Compile-affecting options must match between `compile` and `run`: `MAX_FUEL`, `MEMORY_RESERVATION`, `MEMORY_GUARD_SIZE`, `BRANCH_HINTING`, `DEBUG_SYMBOLS`, `GENERATE_ADDRESS_MAP`. Recompile with the production values set, or align the runtime's environment with the compile-time one.
 
 ### `compile` prints an error from my `runtime!` binary
 
