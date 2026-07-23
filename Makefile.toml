@@ -71,10 +71,13 @@ cargo +nightly miri nextest run --no-tests=pass
 # Outdated
 # The cap-* stack is deliberately held at 3.x to match wasmtime-wasi (see
 # workspace Cargo.toml); drop the ignores when wasmtime-wasi moves to cap-std 4.
+# thiserror is held at 2.0.18: 2.0.19's derive pulls syn 3 beside the
+# ecosystem's syn 2, tripping the multiple-crate-versions lint.
 [tasks.outdated]
 script = '''
 cargo outdated --workspace --exit-code 1 --depth 1 \
-  --ignore cap-fs-ext --ignore cap-std --ignore cap-primitives
+  --ignore cap-fs-ext --ignore cap-std --ignore cap-primitives \
+  --ignore thiserror
 '''
 install_crate = "cargo-outdated"
 
