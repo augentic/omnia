@@ -6,6 +6,35 @@ Unreleased
 
 ### Changed
 
+<!-- Release notes generated using configuration in .github/release.yaml at main -->
+
+## What's Changed
+* Bump to 0.34.0 by @augentic-releases[bot] in https://github.com/augentic/omnia/pull/200
+* Sdk fixes by @karthik-phl in https://github.com/augentic/omnia/pull/201
+* Bump to 0.35.0 by @augentic-releases[bot] in https://github.com/augentic/omnia/pull/202
+* Instrumentation fix by @andrewweston in https://github.com/augentic/omnia/pull/203
+* Instance pooling by @andrewweston in https://github.com/augentic/omnia/pull/204
+* Guest registry by @andrewweston in https://github.com/augentic/omnia/pull/205
+* Implement wasi model by @andrewweston in https://github.com/augentic/omnia/pull/206
+* Specify readiness testing by @andrewweston in https://github.com/augentic/omnia/pull/207
+* MCP server for cursor-agent by @andrewweston in https://github.com/augentic/omnia/pull/208
+* Post-upgrade testing and code review by @andrewweston in https://github.com/augentic/omnia/pull/209
+* Async guest-2-guest linking by @andrewweston in https://github.com/augentic/omnia/pull/210
+* style fenced code by @andrewweston in https://github.com/augentic/omnia/pull/211
+* Specify-driven refactoring by @andrewweston in https://github.com/augentic/omnia/pull/212
+* Streamline testing by @andrewweston in https://github.com/augentic/omnia/pull/213
+* Replay by @andrewweston in https://github.com/augentic/omnia/pull/214
+* MCP grants by @andrewweston in https://github.com/augentic/omnia/pull/215
+* Runtime flexibility by @andrewweston in https://github.com/augentic/omnia/pull/216
+* improve runtime config by @andrewweston in https://github.com/augentic/omnia/pull/217
+* Dynamic guest resolver by @andrewweston in https://github.com/augentic/omnia/pull/218
+* Dynamic guest resolver in runtime! by @andrewweston in https://github.com/augentic/omnia/pull/219
+* Embed guest bytes by @andrewweston in https://github.com/augentic/omnia/pull/220
+* Update to wasmtime 47.0.2 by @andrewweston in https://github.com/augentic/omnia/pull/221
+
+
+**Full Changelog**: https://github.com/augentic/omnia/compare/v0.33.0...v0.35.0
+
 ---
 
 Release notes for previous releases can be found on the respective release branches of the repository.
