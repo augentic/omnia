@@ -1,4 +1,4 @@
-## 0.36.0
+## 0.35.0
 
 Released 2026-07-25
 
@@ -69,7 +69,6 @@ Released 2026-07-25
 Release notes for previous releases can be found on the respective release branches of the repository.
 
 <!-- ARCHIVE_START -->
-* [0.36.x](https://github.com/augentic/omnia/blob/release-0.36.0/RELEASES.md)
 * [0.35.x](https://github.com/augentic/omnia/blob/release-0.35.0/RELEASES.md)
 * [0.34.x](https://github.com/augentic/omnia/blob/release-0.34.0/RELEASES.md)
 * [0.33.x](https://github.com/augentic/omnia/blob/release-0.33.0/RELEASES.md)
