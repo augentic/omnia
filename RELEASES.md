@@ -4,13 +4,43 @@ Unreleased
 
 ### Added
 
+- Multi-guest registry: one process hosts many Wasm components on a shared
+  engine/linker, selected by opaque `GuestId`, with instance-per-call
+  instantiation, route tables, and host-mediated guest-to-guest linking
+- Resolve-on-miss `GuestResolver` so missing guests can be faulted in at
+  dispatch time (HTTP fallback, command routing, single-flight per identity)
+- `runtime!` keys for resolver-backed deployments: `resolver:`,
+  `command_guest:`, `program:`, and compile-time `config:` fallback
+- Embedded guest bytes (`include_bytes!` / `Source::embedded`) for
+  single-binary hosts alongside path-sourced guests
+- Dynamic `Runtime::register` / `deregister` after bootstrap, including late
+  import polyfill for guests admitted after static assembly
+- Pooling allocator enabled by default, with environment-driven
+  `RuntimeOptions` shared by `omnia compile` and `omnia create`
+- `omnia-wasi-model` host interface and workspace packaging for model /
+  working-tree workflows
+- Stateless MCP stack in `omnia-guest` (JSON-RPC + Streamable HTTP) and
+  testkit helpers for MCP grant recording
+- Concurrent (`async func`) host-mediated link dispatch via
+  `func_new_concurrent` / `send_concurrent`
+- `omnia-testkit` (dev-only) and an integration-first testing posture
+
 ### Changed
+
+- `omnia-sdk` renamed to `omnia-guest`; host/guest macro crates split into
+  `omnia-host-macros` and `omnia-guest-macros`; `omnia-otel` folded into
+  `omnia`; `omnia-wasi-jsondb` replaced by `omnia-wasi-docstore`
+- Deployments center on `Manifest` / `omnia.toml` (`OMNIA_CONFIG`), with
+  `[[mount]]` working-tree preopens and typed `DeploymentBuilder` paths
+  (safe wasm vs trusted precompiled)
+- Upgraded `wasmtime` to 47.0.2 (and matching `wasmtime-wasi*`),
+  `wit-bindgen` to 0.60, `wasip3` to 0.7, and `cap-std` / `cap-fs-ext` to 4.x
+- Compile-affecting runtime toggles now include `DEBUG_SYMBOLS` and
+  `GENERATE_ADDRESS_MAP` so AOT compile and load stay aligned
 
 <!-- Release notes generated using configuration in .github/release.yaml at main -->
 
 ## What's Changed
-* Bump to 0.34.0 by @augentic-releases[bot] in https://github.com/augentic/omnia/pull/200
-* Sdk fixes by @karthik-phl in https://github.com/augentic/omnia/pull/201
 * Bump to 0.35.0 by @augentic-releases[bot] in https://github.com/augentic/omnia/pull/202
 * Instrumentation fix by @andrewweston in https://github.com/augentic/omnia/pull/203
 * Instance pooling by @andrewweston in https://github.com/augentic/omnia/pull/204
@@ -32,8 +62,7 @@ Unreleased
 * Embed guest bytes by @andrewweston in https://github.com/augentic/omnia/pull/220
 * Update to wasmtime 47.0.2 by @andrewweston in https://github.com/augentic/omnia/pull/221
 
-
-**Full Changelog**: https://github.com/augentic/omnia/compare/v0.33.0...v0.35.0
+**Full Changelog**: https://github.com/augentic/omnia/compare/v0.34.0...v0.35.0
 
 ---
 
