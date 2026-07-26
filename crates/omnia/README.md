@@ -77,7 +77,7 @@ Telemetry::new("my-service")
     .build()?;
 ```
 
-Initialization is idempotent: the first `build` in the process installs the subscriber and providers, and later calls are no-ops that reuse them, so an embedder initializing telemetry itself and the runtime's own startup never conflict. Telemetry is batch-exported; the runtime flushes it at the end of every run so it survives fast command-mode exits, and embedders driving work themselves can call `omnia::flush_telemetry()` before the process exits. The `OTEL_GRPC_URL` environment variable is respected when set; when unset, OpenTelemetry defaults apply. When no collector is running, silence export errors with `RUST_LOG=...,opentelemetry_sdk=off`.
+Initialization is idempotent: the first `build` in the process installs the subscriber and providers, and later calls are no-ops that reuse them, so an embedder initializing telemetry itself and the runtime's own startup never conflict. Telemetry is batch-exported; the runtime flushes it at the end of every run so it survives fast command-mode exits, and embedders driving work themselves can call `omnia::telemetry::flush()` before the process exits. The `OTEL_GRPC_URL` environment variable is respected when set; when unset, OpenTelemetry defaults apply. When no collector is running, silence export errors with `RUST_LOG=...,opentelemetry_sdk=off`.
 
 ## Architecture
 

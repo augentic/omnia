@@ -25,14 +25,14 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry};
 
-static RESOURCE: OnceLock<Resource> = OnceLock::new();
+// The process's telemetry state. Like the global subscriber that references
+// the providers, it lives for the rest of the process.
+static INSTALLED: OnceLock<Installed> = OnceLock::new();
 
-// The process's provider handles, kept for flushing. Like the global
-// subscriber that references them, they live for the rest of the process.
-static PROVIDERS: OnceLock<Providers> = OnceLock::new();
-
-// Serializes first-time initialization so concurrent builds cannot race
-// between the reuse check and provider installation.
+// Serializes first-time initialization. The `OnceLock` alone cannot: `build`
+// is fallible (ruling out `get_or_init`), and without this a losing racer
+// would already have installed the global providers and failed `try_init`
+// before discovering it lost.
 static INIT: Mutex<()> = Mutex::new(());
 
 const UNKNOWN: &str = "unknown";
@@ -90,19 +90,18 @@ impl Telemetry {
     /// subscriber fails.
     pub fn build(self) -> Result<()> {
         let _init = INIT.lock().unwrap_or_else(PoisonError::into_inner);
-        if PROVIDERS.get().is_some() {
+        if INSTALLED.get().is_some() {
             return Ok(());
         }
 
         let resource = self.resource();
-        RESOURCE.set(resource.clone()).map_err(|r| anyhow!("failed to set resource: {r:?}"))?;
 
         // metrics
         let meter_provider = self.build_metrics(resource.clone())?;
         global::set_meter_provider(meter_provider.clone());
 
         // tracing
-        let tracer_provider = self.build_traces(resource)?;
+        let tracer_provider = self.build_traces(resource.clone())?;
         global::set_tracer_provider(tracer_provider.clone());
 
         let filter_layer = EnvFilter::from_default_env()
@@ -124,12 +123,13 @@ impl Telemetry {
             .with(metrics_layer)
             .try_init()?;
 
-        PROVIDERS
-            .set(Providers {
+        INSTALLED
+            .set(Installed {
+                resource,
                 tracer: tracer_provider,
                 meter: meter_provider,
             })
-            .map_err(|_providers| anyhow!("telemetry providers already installed"))
+            .map_err(|_installed| anyhow!("telemetry providers already installed"))
     }
 
     fn build_traces(&self, resource: Resource) -> Result<SdkTracerProvider> {
@@ -177,19 +177,18 @@ impl Telemetry {
     }
 }
 
-// The process's provider handles.
-struct Providers {
+// The process's resource and provider handles.
+struct Installed {
+    resource: Resource,
     tracer: SdkTracerProvider,
     meter: SdkMeterProvider,
 }
 
-impl Providers {
-    // Force-flush (not shut down) both providers, so telemetry keeps
-    // exporting afterwards and repeated flushes are safe.
-    fn flush(&self) {
-        settle("traces", self.tracer.force_flush());
-        settle("metrics", self.meter.force_flush());
-    }
+// Force-flush (not shut down) both providers, so telemetry keeps exporting
+// afterwards and repeated flushes are safe.
+fn flush_providers(tracer: &SdkTracerProvider, meter: &SdkMeterProvider) {
+    settle("traces", tracer.force_flush());
+    settle("metrics", meter.force_flush());
 }
 
 // Report a flush failure without panicking; a provider that is already shut
@@ -203,20 +202,21 @@ fn settle(signal: &str, result: OTelSdkResult) {
 
 /// Flush batched telemetry to the exporters.
 ///
-/// A no-op when telemetry was never initialized. Export continues afterwards,
-/// so call it freely — the runtime calls it at the end of every drive so
-/// queued spans and metrics survive fast command-mode exits; embedders driving
-/// work themselves should call it before the process exits.
+/// A no-op when telemetry was never initialized. This force-flushes rather
+/// than shutting down, so export continues afterwards and repeated flushes
+/// are safe — the runtime calls it at the end of every drive so queued spans
+/// and metrics survive fast command-mode exits; embedders driving work
+/// themselves should call it before the process exits.
 pub fn flush() {
-    if let Some(providers) = PROVIDERS.get() {
-        providers.flush();
+    if let Some(installed) = INSTALLED.get() {
+        flush_providers(&installed.tracer, &installed.meter);
     }
 }
 
 /// Returns the OpenTelemetry [`Resource`] used to initialize telemetry for a
 /// service, or `None` if telemetry has not been initialized.
 pub fn resource() -> Option<&'static Resource> {
-    RESOURCE.get()
+    INSTALLED.get().map(|installed| &installed.resource)
 }
 
 #[cfg(test)]
@@ -227,7 +227,7 @@ mod tests {
     use opentelemetry_sdk::metrics::SdkMeterProvider;
     use opentelemetry_sdk::trace::{SdkTracerProvider, SpanData, SpanExporter};
 
-    use super::{OTelSdkResult, Providers};
+    use super::{OTelSdkResult, flush_providers};
 
     // A span exporter that keeps its records, so flushing is observable
     // without a collector.
@@ -254,15 +254,11 @@ mod tests {
 
     // A batch-exported provider set: spans stay queued (5s schedule delay)
     // until a flush pushes them, so flush behavior is what the test sees.
-    fn providers(exporter: &Recording) -> Providers {
-        Providers {
-            tracer: SdkTracerProvider::builder().with_batch_exporter(exporter.clone()).build(),
-            meter: SdkMeterProvider::builder().build(),
-        }
-    }
-
-    fn emit(providers: &Providers, name: &'static str) {
-        providers.tracer.tracer("test").start(name);
+    fn providers(exporter: &Recording) -> (SdkTracerProvider, SdkMeterProvider) {
+        (
+            SdkTracerProvider::builder().with_batch_exporter(exporter.clone()).build(),
+            SdkMeterProvider::builder().build(),
+        )
     }
 
     // The fast-exit contract: a span emitted immediately before a flush
@@ -270,16 +266,16 @@ mod tests {
     #[test]
     fn flush_exports_queued_spans() {
         let exporter = Recording::default();
-        let providers = providers(&exporter);
+        let (tracer, meter) = providers(&exporter);
 
-        emit(&providers, "first-drive");
+        tracer.tracer("test").start("first-drive");
         assert!(exporter.names().is_empty());
 
-        providers.flush();
+        flush_providers(&tracer, &meter);
         assert_eq!(exporter.names(), ["first-drive"]);
 
-        emit(&providers, "second-drive");
-        providers.flush();
+        tracer.tracer("test").start("second-drive");
+        flush_providers(&tracer, &meter);
         assert_eq!(exporter.names(), ["first-drive", "second-drive"]);
     }
 }

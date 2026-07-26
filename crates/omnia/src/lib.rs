@@ -11,7 +11,7 @@ mod options;
 mod registry;
 mod runtime;
 mod store;
-mod telemetry;
+pub mod telemetry;
 
 pub use clap::Parser;
 pub use omnia_host_macros::runtime;
@@ -45,7 +45,7 @@ pub use self::runtime::{MainOptions, ManifestSource, main, run, run_precompiled}
 pub use self::store::{
     HasDispatcher, HasHttp, HasLimits, HasMounts, StoreBase, StoreBaseBuilder, StoreCtx,
 };
-pub use self::telemetry::{Telemetry, flush as flush_telemetry, resource};
+pub use self::telemetry::Telemetry;
 
 /// Generates the standard host-error conversions every `omnia` WASI host
 /// crate repeats.
