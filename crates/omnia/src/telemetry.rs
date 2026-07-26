@@ -30,9 +30,8 @@ use tracing_subscriber::{EnvFilter, Registry};
 static INSTALLED: OnceLock<Installed> = OnceLock::new();
 
 // Serializes first-time initialization. The `OnceLock` alone cannot: `build`
-// is fallible (ruling out `get_or_init`), and without this a losing racer
-// would already have installed the global providers and failed `try_init`
-// before discovering it lost.
+// is fallible (ruling out `get_or_init`), and without this two racers could
+// both pass the empty check and race on `try_init`.
 static INIT: Mutex<()> = Mutex::new(());
 
 const UNKNOWN: &str = "unknown";
@@ -95,14 +94,8 @@ impl Telemetry {
         }
 
         let resource = self.resource();
-
-        // metrics
         let meter_provider = self.build_metrics(resource.clone())?;
-        global::set_meter_provider(meter_provider.clone());
-
-        // tracing
         let tracer_provider = self.build_traces(resource.clone())?;
-        global::set_tracer_provider(tracer_provider.clone());
 
         let filter_layer = EnvFilter::from_default_env()
             .add_directive("hyper=off".parse()?)
@@ -115,13 +108,18 @@ impl Telemetry {
         let tracing_layer = tracing_opentelemetry::layer().with_tracer(tracer);
         let metrics_layer = MetricsLayer::new(meter_provider.clone());
 
-        // set global default subscriber
+        // Install the subscriber before publishing providers globally so a
+        // failed try_init (e.g. an existing subscriber) does not leave
+        // orphaned globals that later builds would retry against.
         Registry::default()
             .with(filter_layer)
             .with(fmt_layer)
             .with(tracing_layer)
             .with(metrics_layer)
             .try_init()?;
+
+        global::set_meter_provider(meter_provider.clone());
+        global::set_tracer_provider(tracer_provider.clone());
 
         INSTALLED
             .set(Installed {
