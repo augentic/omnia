@@ -212,6 +212,9 @@ where
     if let Some(pool) = pool {
         pool.abort();
     }
+    // Push batch-queued spans and metrics to the exporters so they survive
+    // fast command-mode exits.
+    crate::telemetry::flush();
     outcome
 }
 

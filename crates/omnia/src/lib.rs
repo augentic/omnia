@@ -45,7 +45,7 @@ pub use self::runtime::{MainOptions, ManifestSource, main, run, run_precompiled}
 pub use self::store::{
     HasDispatcher, HasHttp, HasLimits, HasMounts, StoreBase, StoreBaseBuilder, StoreCtx,
 };
-pub use self::telemetry::{Telemetry, resource};
+pub use self::telemetry::{Telemetry, flush as flush_telemetry, resource};
 
 /// Generates the standard host-error conversions every `omnia` WASI host
 /// crate repeats.
