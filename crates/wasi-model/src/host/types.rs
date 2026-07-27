@@ -4,7 +4,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::host::generated::omnia::model::completion::{Effort, Role};
+use crate::host::generated::omnia::model::completion::{Effort, Mcp, Request, Role, Tool};
 
 impl fmt::Display for Role {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -24,6 +24,44 @@ impl fmt::Display for Effort {
             Self::Medium => "medium",
             Self::High => "high",
         })
+    }
+}
+
+// The single-text-prompt form, for backends that steer output shape through
+// prose (see `Format::instruction`): system channel first, then each message
+// (non-user turns marked with their role), then the format instruction.
+impl fmt::Display for Request {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut sep = if let Some(system) = &self.system {
+            f.write_str(system)?;
+            "\n\n"
+        } else {
+            ""
+        };
+        for message in &self.messages {
+            match message.role {
+                Role::User => write!(f, "{sep}{}", message.content)?,
+                Role::System | Role::Assistant => {
+                    write!(f, "{sep}[{}]\n{}", message.role, message.content)?;
+                }
+            }
+            sep = "\n\n";
+        }
+        write!(f, "{sep}{}", self.format.instruction())
+    }
+}
+
+impl Request {
+    /// The request's MCP server grants, each carrying its own endpoint URL.
+    #[must_use]
+    pub fn mcp_servers(&self) -> Vec<&Mcp> {
+        self.tools
+            .iter()
+            .filter_map(|tool| match tool {
+                Tool::Mcp(grant) => Some(grant),
+                Tool::Function(_) => None,
+            })
+            .collect()
     }
 }
 
@@ -96,4 +134,76 @@ pub struct ToolTurn {
 pub struct Transcript {
     /// Ordered tool turns the backend drove to reach the answer.
     pub turns: Vec<ToolTurn>,
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::host::generated::omnia::model::completion::{
+        Format, Function, Grants, Mcp, Message, Request, Role, Tool,
+    };
+
+    fn request(system: Option<&str>, messages: Vec<Message>) -> Request {
+        Request {
+            model: None,
+            system: system.map(str::to_owned),
+            messages,
+            generation: None,
+            format: Format::Text,
+            tools: vec![],
+            grants: Grants {
+                references: None,
+                workspace: None,
+                verify: vec![],
+            },
+        }
+    }
+
+    fn message(role: Role, content: &str) -> Message {
+        Message {
+            role,
+            content: content.to_owned(),
+        }
+    }
+
+    #[test]
+    fn request_display_prompt() {
+        let request = request(
+            Some("sys"),
+            vec![
+                message(Role::User, "hi"),
+                message(Role::Assistant, "ack"),
+                message(Role::System, "note"),
+            ],
+        );
+        let expected = format!(
+            "sys\n\nhi\n\n[assistant]\nack\n\n[system]\nnote\n\n{}",
+            Format::Text.instruction()
+        );
+        assert_eq!(request.to_string(), expected);
+    }
+
+    #[test]
+    fn request_display_instruction_only() {
+        assert_eq!(request(None, vec![]).to_string(), Format::Text.instruction());
+    }
+
+    #[test]
+    fn mcp_servers_skips_function_tools() {
+        let mut request = request(None, vec![]);
+        request.tools = vec![
+            Tool::Function(Function {
+                name: "lookup".to_owned(),
+                description: "look things up".to_owned(),
+                parameters: "{}".to_owned(),
+            }),
+            Tool::Mcp(Mcp {
+                name: "docs".to_owned(),
+                tools: vec![],
+                url: "http://127.0.0.1:7737/mcp/docs".to_owned(),
+            }),
+        ];
+        let servers = request.mcp_servers();
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].name, "docs");
+    }
 }
