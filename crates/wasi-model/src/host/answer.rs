@@ -43,8 +43,9 @@ impl Format {
     pub fn parse(&self, text: &str) -> Result<Value, String> {
         match self {
             Self::Text => Ok(Value::String(text.to_owned())),
-            Self::Json | Self::Schema(_) => into_json(text)
-                .map_err(|error| format!("the answer was not valid JSON: {error}")),
+            Self::Json | Self::Schema(_) => {
+                into_json(text).map_err(|err| format!("answer is not valid JSON: {err}"))
+            }
         }
     }
 
@@ -92,31 +93,25 @@ fn into_json(text: &str) -> Result<Value, serde_json::Error> {
     }
 
     // 2. Fence anywhere (agent preamble + ```json … ```), closed or not.
-    if let Some(body) = fence_body(trimmed)
-        && let Ok(value) = serde_json::from_str(body)
-    {
+    if let Some(value) = from_fenced(trimmed) {
         return Ok(value);
     }
 
     // 3. First complete JSON value at the first `{` or `[`.
-       let Some(offset) = text.find(['{', '[']) else {
-        return serde_json::from_str(text);
-    };
-
-    // HACK: serde_json::from_str(&text[offset..]) doesn't work without knowing
-    // the location of the matching close brace
-    let mut de = serde_json::Deserializer::from_str(&text[offset..]);
+    let offset = trimmed.find(['{', '[']).unwrap_or(0);
+    // parse one value, ignoring any trailing text after closing `}` or `]`
+    let mut de = serde_json::Deserializer::from_str(&trimmed[offset..]);
     Value::deserialize(&mut de)
 }
 
 // Body of the first Markdown fence in `text`, if any; an unterminated fence
 // yields the remainder of the text.
-fn fence_body(text: &str) -> Option<&str> {
+fn from_fenced(text: &str) -> Option<Value> {
     let start = text.find("```")?;
     let rest = &text[start + 3..];
     let body = rest.split_once('\n').map_or(rest, |(_, body)| body);
     let body = body.find("```").map_or(body, |end| &body[..end]);
-    Some(body.trim())
+    serde_json::from_str(body.trim()).ok()
 }
 
 impl Answer {
