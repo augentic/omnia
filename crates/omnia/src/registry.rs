@@ -16,7 +16,7 @@ use std::fmt;
 use std::sync::{Arc, PoisonError, RwLock};
 
 use anyhow::{Context as _, Result, bail, ensure};
-pub use routing::{CliRoutes, HttpRoutes, PatternRoutes, Routes, TriggerRouter};
+pub use routing::{CliRoutes, HttpRoutes, PatternRoutes, Routes, RoutingPolicy, TriggerRouter};
 use wasmtime::Engine;
 use wasmtime::component::{Component, InstancePre, Linker};
 use wasmtime_wasi::WasiView;

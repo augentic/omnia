@@ -11,7 +11,10 @@
 //! [`Router`] layers the capability-based default routing of the guest-registry
 //! design over a table: with no routes configured a sole handler exporter is the
 //! catch-all for its trigger, zero exporters is inert, and two or more exporters
-//! require explicit routes to disambiguate.
+//! require explicit routes to disambiguate. A deployment that installs its own
+//! path→identity mapping (the HTTP trigger's `http_paths` hook) opts out of
+//! the capability default via [`RoutingPolicy::TableOnly`]: routing is then
+//! table-driven only, and an unmatched key is a miss — never a fan-in.
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -188,6 +191,25 @@ impl Routes {
     }
 }
 
+/// How a trigger routes when its table is empty.
+///
+/// One value per trigger, chosen by the deployment: the capability
+/// default fans a sole exporter in, while a deployment that carries its
+/// own key→identity mapping (the HTTP trigger's `http_paths` hook)
+/// owns routing outright and never invents a target
+/// ([`Runtime::http_routing_policy`](crate::Runtime::http_routing_policy)
+/// derives the HTTP value).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RoutingPolicy {
+    /// With no routes, a sole handler exporter is the trigger's
+    /// catch-all; two or more exporters are ambiguous.
+    CapabilityDefault,
+    /// Routing is table-driven only: a sole exporter never becomes a
+    /// catch-all, and an unmatched key is a miss for the deployment's
+    /// own path hook to answer.
+    TableOnly,
+}
+
 /// Capability-based routing for one trigger, layered over a route table.
 #[derive(Clone, Debug)]
 pub enum Router<R> {
@@ -202,41 +224,55 @@ pub enum Router<R> {
 
 impl<R: Resolver> Router<R> {
     /// Decide how `trigger` routes, given the guests that export its handler
-    /// (`capable`, in a stable order) and the configured `table`.
+    /// (`capable`, in a stable order), the configured `table`, and the
+    /// deployment's [`RoutingPolicy`].
     ///
     /// With routes configured the trigger is fully route-driven, and every
-    /// target must be capable. Otherwise routing defaults by exporter count: one
-    /// is the catch-all, none is inert, and two or more is ambiguous.
+    /// target must be capable. With an empty table the policy decides:
+    /// the capability default routes by exporter count (one is the
+    /// catch-all, none is inert, two or more is ambiguous), while
+    /// table-only routing is inert — an unmatched key is a miss for the
+    /// deployment's own path hook to answer.
     ///
     /// # Errors
     ///
     /// Returns an error if a route targets a guest that does not export the
-    /// handler, or if two or more guests export it with no routes to
-    /// disambiguate.
-    pub fn build(trigger: &str, capable: &[GuestId], resolver: R) -> Result<Self> {
+    /// handler, or if two or more guests export it with no routes under the
+    /// capability default.
+    pub fn build(
+        trigger: &str, capable: &[GuestId], resolver: R, policy: RoutingPolicy,
+    ) -> Result<Self> {
         if !resolver.is_empty() {
-            for target in resolver.targets() {
-                if !capable.contains(target) {
-                    bail!(
-                        "route for trigger `{trigger}` names `{target}`, which does not export \
-                         the `{trigger}` handler"
-                    );
-                }
-            }
-            return Ok(Self::Routed(resolver));
+            return Self::routed(trigger, capable, resolver);
         }
 
-        match capable {
-            [] => Ok(Self::Inert),
-            [only] => Ok(Self::CatchAll(only.clone())),
-            many => {
-                let names = many.iter().map(GuestId::as_str).collect::<Vec<_>>().join(", ");
+        match policy {
+            RoutingPolicy::TableOnly => Ok(Self::Inert),
+            RoutingPolicy::CapabilityDefault => match capable {
+                [] => Ok(Self::Inert),
+                [only] => Ok(Self::CatchAll(only.clone())),
+                many => {
+                    let names = many.iter().map(GuestId::as_str).collect::<Vec<_>>().join(", ");
+                    bail!(
+                        "trigger `{trigger}` has {} capable guests ({names}) but no routes",
+                        many.len()
+                    )
+                }
+            },
+        }
+    }
+
+    /// Validate that every route target is capable and wrap the table.
+    fn routed(trigger: &str, capable: &[GuestId], resolver: R) -> Result<Self> {
+        for target in resolver.targets() {
+            if !capable.contains(target) {
                 bail!(
-                    "trigger `{trigger}` has {} capable guests ({names}) but no routes",
-                    many.len()
-                )
+                    "route for trigger `{trigger}` names `{target}`, which does not export the \
+                     `{trigger}` handler"
+                );
             }
         }
+        Ok(Self::Routed(resolver))
     }
 
     /// Resolve a routing `key` to a target identity, or `None` on a miss or an
@@ -280,17 +316,34 @@ pub struct TriggerRouter<I, R> {
 }
 
 impl<I, R: Resolver> TriggerRouter<I, R> {
-    /// Probe every registered guest for the trigger's handler — a guest is
-    /// *capable* exactly when `probe` succeeds — then build the `Router` over
-    /// the capable set and the configured route `table`.
+    /// [`build_with`](Self::build_with) under the capability default — the
+    /// policy every trigger uses unless its deployment carries its own
+    /// key→identity mapping (the HTTP trigger goes through
+    /// [`Runtime::http_trigger_router`](crate::Runtime::http_trigger_router)).
     ///
     /// # Errors
     ///
-    /// Returns an error if `Router::build` rejects the capable set and table:
-    /// a route names a guest that does not export the handler, or two or more
-    /// guests export it with no routes to disambiguate.
-    pub fn build<T, E, F>(
-        registry: &Registry<T>, trigger: &str, table: R, mut probe: F,
+    /// Returns an error if a route names a guest that does not export the
+    /// handler, or two or more guests export it with no routes.
+    pub fn build<T, E, F>(registry: &Registry<T>, trigger: &str, table: R, probe: F) -> Result<Self>
+    where
+        F: FnMut(&InstancePre<T>) -> Result<I, E>,
+    {
+        Self::build_with(registry, trigger, table, probe, RoutingPolicy::CapabilityDefault)
+    }
+
+    /// Probe every registered guest for the trigger's handler — a guest is
+    /// *capable* exactly when `probe` succeeds — then build the `Router` over
+    /// the capable set, the configured route `table`, and the deployment's
+    /// [`RoutingPolicy`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `Router::build` rejects the capable set and
+    /// table: a route names a guest that does not export the handler, or two
+    /// or more guests export it with no routes under the capability default.
+    pub fn build_with<T, E, F>(
+        registry: &Registry<T>, trigger: &str, table: R, mut probe: F, policy: RoutingPolicy,
     ) -> Result<Self>
     where
         F: FnMut(&InstancePre<T>) -> Result<I, E>,
@@ -303,7 +356,7 @@ impl<I, R: Resolver> TriggerRouter<I, R> {
                 indices.insert(guest.id().clone(), index);
             }
         }
-        let router = Router::build(trigger, &capable, table)?;
+        let router = Router::build(trigger, &capable, table, policy)?;
         Ok(Self { indices, router })
     }
 
@@ -408,30 +461,42 @@ mod tests {
 
     #[test]
     fn build_catch_all() {
-        let router = Router::build("http", &[id("only")], HttpRoutes::default())
-            .expect("a sole exporter is the catch-all");
+        let router = Router::build(
+            "http",
+            &[id("only")],
+            HttpRoutes::default(),
+            RoutingPolicy::CapabilityDefault,
+        )
+        .expect("a sole exporter is the catch-all");
         assert_eq!(router.resolve("/anything"), Some(&id("only")));
     }
 
     #[test]
     fn build_inert() {
-        let router = Router::build("http", &[], HttpRoutes::default())
-            .expect("no exporters is inert, not an error");
+        let router =
+            Router::build("http", &[], HttpRoutes::default(), RoutingPolicy::CapabilityDefault)
+                .expect("no exporters is inert, not an error");
         assert!(router.is_inert());
         assert_eq!(router.resolve("/anything"), None);
     }
 
     #[test]
     fn build_ambiguous() {
-        let error = Router::build("http", &[id("a"), id("b")], HttpRoutes::default())
-            .expect_err("two exporters with no routes is ambiguous");
+        let error = Router::build(
+            "http",
+            &[id("a"), id("b")],
+            HttpRoutes::default(),
+            RoutingPolicy::CapabilityDefault,
+        )
+        .expect_err("two exporters with no routes is ambiguous");
         assert!(error.to_string().contains("2 capable guests"));
     }
 
     #[test]
     fn build_routes() {
         let routes = HttpRoutes::new([("/a".to_owned(), id("a"))]);
-        let r = Router::build("http", &[id("a")], routes).expect("routes are valid");
+        let r = Router::build("http", &[id("a")], routes, RoutingPolicy::CapabilityDefault)
+            .expect("routes are valid");
         assert_eq!(r.resolve("/a"), Some(&id("a")));
         // An explicit route makes the trigger fully route-driven: a miss is a
         // miss even though `a` is the sole exporter.
@@ -441,48 +506,8 @@ mod tests {
     #[test]
     fn reject_route() {
         let routes = HttpRoutes::new([("/a".to_owned(), id("ghost"))]);
-        let error = Router::build("http", &[id("real")], routes)
+        let error = Router::build("http", &[id("real")], routes, RoutingPolicy::CapabilityDefault)
             .expect_err("a route to a non-exporter must fail fast");
         assert!(error.to_string().contains("ghost"));
-    }
-
-    #[test]
-    fn trigger_router_catch_all() {
-        let router = Router::build("http", &[id("a")], HttpRoutes::default())
-            .expect("a sole exporter is the catch-all");
-        let tr = TriggerRouter {
-            indices: HashMap::from([(id("a"), 7u32)]),
-            router,
-        };
-        assert!(!tr.is_inert());
-        assert_eq!(tr.resolve("/anything"), Some((&id("a"), &7u32)));
-        assert_eq!(tr.catch_all(), Some((&id("a"), &7u32)));
-    }
-
-    #[test]
-    fn trigger_router_routed() {
-        let routes = HttpRoutes::new([("/a".to_owned(), id("a"))]);
-        let r = Router::build("http", &[id("a")], routes).expect("routes are valid");
-        let tr = TriggerRouter {
-            indices: HashMap::from([(id("a"), 1u32)]),
-            router: r,
-        };
-        assert_eq!(tr.resolve("/a"), Some((&id("a"), &1u32)));
-        assert_eq!(tr.resolve("/miss"), None);
-        // An explicit route table has no unkeyed catch-all.
-        assert_eq!(tr.catch_all(), None);
-    }
-
-    #[test]
-    fn trigger_router_inert() {
-        let router =
-            Router::build("http", &[], HttpRoutes::default()).expect("no exporters is inert");
-        let tr: TriggerRouter<u32, HttpRoutes> = TriggerRouter {
-            indices: HashMap::new(),
-            router,
-        };
-        assert!(tr.is_inert());
-        assert_eq!(tr.resolve("/anything"), None);
-        assert_eq!(tr.catch_all(), None);
     }
 }

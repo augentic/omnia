@@ -13,7 +13,7 @@ use anyhow::{Result, anyhow};
 use clap::Parser as _;
 
 use crate::cli::{Cli, Command};
-use crate::dispatch::GuestResolver;
+use crate::dispatch::{GuestResolver, HttpPaths};
 use crate::registry::GuestId;
 use crate::runtime::Mode;
 use crate::{DeploymentBuilder, Manifest};
@@ -61,6 +61,8 @@ pub struct MainOptions {
     mode: Mode,
     manifest: Option<ManifestSource>,
     resolver: Option<Arc<dyn GuestResolver>>,
+    http_paths: Option<HttpPaths>,
+    http_listener: Option<std::net::TcpListener>,
     invocation: Invocation,
     command_guest: Option<GuestId>,
 }
@@ -73,6 +75,8 @@ impl MainOptions {
             mode,
             manifest: None,
             resolver: None,
+            http_paths: None,
+            http_listener: None,
             invocation: Invocation::OmniaCli,
             command_guest: None,
         }
@@ -91,6 +95,30 @@ impl MainOptions {
     #[must_use]
     pub fn resolver<R: GuestResolver>(mut self, resolver: R) -> Self {
         self.resolver = Some(Arc::new(resolver));
+        self
+    }
+
+    /// Install the [`HttpPaths`] hook: the deployment's path→identity
+    /// mapping for request paths no static route matches. Installing one
+    /// makes HTTP routing table-driven only — a sole exporter never becomes
+    /// a catch-all, a path the hook declines (or an identity nothing
+    /// supplies) is an ordinary 404, and a resolution fault or a guest
+    /// without the handler export is a 500.
+    #[must_use]
+    pub fn http_paths<F>(mut self, hook: F) -> Self
+    where
+        F: Fn(&str) -> Option<GuestId> + Send + Sync + 'static,
+    {
+        self.http_paths = Some(Arc::new(hook));
+        self
+    }
+
+    /// Supply a pre-bound TCP listener for the HTTP trigger. The trigger
+    /// server adopts it at boot instead of binding `HTTP_ADDR` itself, and
+    /// every guest store sees `HTTP_ADDR` set to its local address.
+    #[must_use]
+    pub fn http_listener(mut self, listener: std::net::TcpListener) -> Self {
+        self.http_listener = Some(listener);
         self
     }
 
@@ -137,6 +165,8 @@ pub(super) struct EntryPlan {
     args: Vec<String>,
     dynamic: bool,
     resolver: Option<Arc<dyn GuestResolver>>,
+    http_paths: Option<HttpPaths>,
+    http_listener: Option<std::net::TcpListener>,
     command_guest: Option<GuestId>,
     program_name: Option<String>,
 }
@@ -151,6 +181,12 @@ impl EntryPlan {
         }
         if let Some(resolver) = self.resolver {
             builder = builder.resolver(resolver);
+        }
+        if let Some(hook) = self.http_paths {
+            builder = builder.http_paths_shared(hook);
+        }
+        if let Some(listener) = self.http_listener {
+            builder = builder.http_listener(listener);
         }
         if let Some(id) = self.command_guest {
             builder = builder.command_guest(id);
@@ -175,6 +211,8 @@ pub(super) fn plan(
         mode,
         manifest,
         resolver,
+        http_paths,
+        http_listener,
         invocation,
         command_guest,
     } = options;
@@ -203,6 +241,8 @@ pub(super) fn plan(
                 args: guest_args,
                 dynamic,
                 resolver,
+                http_paths,
+                http_listener,
                 command_guest,
                 program_name: Some(program_name),
             })
@@ -239,6 +279,8 @@ pub(super) fn plan(
                         args,
                         dynamic,
                         resolver,
+                        http_paths,
+                        http_listener,
                         command_guest,
                         program_name: None,
                     })

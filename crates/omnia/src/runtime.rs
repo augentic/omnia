@@ -20,12 +20,12 @@ use wasmtime::{Engine, Store};
 
 use crate::deployment::GuestArtifact;
 use crate::dispatch::{
-    EnsureError, GuestResolver, HttpFallback, ResolveHook, serve_guest, serve_links,
+    EnsureError, GuestResolver, HttpPaths, ResolveHook, serve_guest, serve_links,
 };
 use crate::host::FutureResult;
 use crate::mount::MountRegistry;
-use crate::registry::{Guest, GuestId};
-use crate::store::HasLimits;
+use crate::registry::{Guest, GuestId, HttpRoutes, RoutingPolicy, TriggerRouter};
+use crate::store::{HasLimits, merged_env};
 use crate::{
     Deployment, DeploymentBuilder, Dispatcher, Registry, RuntimeOptions, StoreBase, StoreCtx,
 };
@@ -225,7 +225,7 @@ where
     tracing::info!(
         mode = if mode.is_command() { "command" } else { "server" },
         guests = runtime.registry().len(),
-        component = env::var("COMPONENT").unwrap_or_else(|_| "unknown".into()),
+        component = runtime.name(),
         "omnia ready",
     );
 }
@@ -303,6 +303,41 @@ impl From<ExitStatus> for std::process::ExitCode {
     }
 }
 
+/// Why [`Runtime::route_http`] produced no guest for a request path.
+///
+/// Typed so the HTTP trigger server and the testkit harness map late-routing
+/// outcomes to the same wire semantics: an ordinary miss is a 404, a claimed
+/// route that cannot be served is a 500.
+#[derive(Debug)]
+pub enum RouteRefusal {
+    /// An ordinary unmatched request (a 404 on the wire): no [`HttpPaths`]
+    /// hook is installed, the hook declined the path, or the identity it
+    /// named is one nothing supplies (the resolver's definitive miss).
+    NotFound,
+    /// The hook claimed the path but serving it faulted — resolution failed,
+    /// or the guest lacks the handler export (a 500 on the wire, never an
+    /// ordinary miss).
+    Failed(EnsureError),
+}
+
+impl std::fmt::Display for RouteRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotFound => write!(f, "no route matched path"),
+            Self::Failed(_) => write!(f, "claimed route cannot be served"),
+        }
+    }
+}
+
+impl std::error::Error for RouteRefusal {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::NotFound => None,
+            Self::Failed(source) => Some(source),
+        }
+    }
+}
+
 /// Connected host runtime: registry, argv, mounts, and backend bundle.
 ///
 /// A thin handle over shared state: `clone()` bumps two reference counts, so
@@ -321,15 +356,25 @@ pub struct Runtime<B: 'static> {
 type Flight<B> = Shared<BoxFuture<'static, Result<Arc<Guest<StoreCtx<B>>>, EnsureError>>>;
 
 struct RuntimeInner<B: 'static> {
+    // Deployment name read by trigger servers and the bootstrap log —
+    // carried state, never a process environment variable.
+    name: Arc<str>,
     registry: Arc<Registry<StoreCtx<B>>>,
     args: Arc<Vec<String>>,
     mounts: Arc<MountRegistry>,
+    // One-shot deployment-supplied HTTP listener, adopted by the HTTP
+    // trigger server at boot ([`Runtime::take_http_listener`]).
+    http_listener: Mutex<Option<std::net::TcpListener>>,
+    // The complete guest environment when the deployment overrides any entry
+    // (`HTTP_ADDR` from a supplied listener), merged once at construction;
+    // `None` means plain host-environment inheritance.
+    guest_env: Option<Arc<Vec<(String, String)>>>,
     backends: B,
     // Resolve-on-miss seam (RFC guest-resolution §4.5). Install-once: hooks
     // ride the deployment builder (or the `from_parts` chainable setters) and
     // never change for the life of the runtime.
     resolver: OnceLock<Arc<dyn GuestResolver>>,
-    http_fallback: OnceLock<HttpFallback>,
+    http_paths: OnceLock<HttpPaths>,
     // Explicit command-mode guest identity; absent, command mode routes to
     // the sole static `wasi:cli/run` exporter.
     command_guest: OnceLock<GuestId>,
@@ -341,16 +386,20 @@ struct RuntimeInner<B: 'static> {
 
 impl<B: 'static> RuntimeInner<B> {
     fn new(
-        registry: Arc<Registry<StoreCtx<B>>>, args: Arc<Vec<String>>, mounts: Arc<MountRegistry>,
-        backends: B,
+        name: Arc<str>, registry: Arc<Registry<StoreCtx<B>>>, args: Arc<Vec<String>>,
+        mounts: Arc<MountRegistry>, http_listener: Option<std::net::TcpListener>,
+        guest_env: Option<Arc<Vec<(String, String)>>>, backends: B,
     ) -> Self {
         Self {
+            name,
             registry,
             args,
             mounts,
+            http_listener: Mutex::new(http_listener),
+            guest_env,
             backends,
             resolver: OnceLock::new(),
-            http_fallback: OnceLock::new(),
+            http_paths: OnceLock::new(),
             command_guest: OnceLock::new(),
             flights: Mutex::new(HashMap::new()),
         }
@@ -384,24 +433,42 @@ impl<B: Backends> Runtime<B> {
     where
         L: FnOnce(&mut Deployment<StoreCtx<B>>) -> Result<()>,
     {
+        let name = Arc::<str>::from(deployment.name());
         let args = Arc::new(deployment.args().to_vec());
         link(&mut deployment).context("linking hosts")?;
         let backends = B::connect().await.context("connecting backends")?;
         let mounts = deployment.mounts();
-        let (resolver, http_fallback) = deployment.resolve_hooks();
+        let (resolver, http_paths) = deployment.resolve_hooks();
+        let http_listener = deployment.take_http_listener();
         let command_guest = deployment.command_guest();
 
+        // A supplied listener fixes the guest-visible `HTTP_ADDR` to its
+        // actual local address: merge the complete guest environment once,
+        // here, so `store()` hands out a ready-made list per store.
+        let guest_env = match &http_listener {
+            Some(listener) => {
+                let addr = listener
+                    .local_addr()
+                    .context("reading the supplied http listener's local address")?;
+                Some(Arc::new(merged_env(&[("HTTP_ADDR".to_owned(), addr.to_string())])))
+            }
+            None => None,
+        };
+
         let runtime = Self::with_inner(Arc::new(RuntimeInner::new(
+            name,
             Arc::new(deployment.into_registry().context("assembling registry")?),
             args,
             mounts,
+            http_listener,
+            guest_env,
             backends,
         )));
         if let Some(resolver) = resolver {
             runtime.install_resolver(resolver);
         }
-        if let Some(fallback) = http_fallback {
-            runtime.install_http_fallback(fallback);
+        if let Some(hook) = http_paths {
+            runtime.install_http_paths(hook);
         }
         if let Some(id) = command_guest {
             runtime.install_command_guest(id);
@@ -434,12 +501,36 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// Low-level constructor: unlike [`Runtime::new`] it does not wire the
     /// host-mediated link serve side — a caller whose deployment declares
     /// `link` interfaces must run [`serve_links`] itself before dispatching.
+    /// The runtime name defaults to `omnia`.
     #[must_use]
     pub fn from_parts(
         registry: Arc<Registry<StoreCtx<B>>>, args: Vec<String>, mounts: Arc<MountRegistry>,
         backends: B,
     ) -> Self {
-        Self::with_inner(Arc::new(RuntimeInner::new(registry, Arc::new(args), mounts, backends)))
+        Self::with_inner(Arc::new(RuntimeInner::new(
+            Arc::from("omnia"),
+            registry,
+            Arc::new(args),
+            mounts,
+            None,
+            None,
+            backends,
+        )))
+    }
+
+    /// The deployment name — read by trigger servers and the bootstrap log.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.inner.name
+    }
+
+    /// Take the deployment-supplied pre-bound HTTP listener, if any.
+    ///
+    /// One-shot: the HTTP trigger server adopts it at boot; later calls
+    /// return `None` (falling back to the `HTTP_ADDR` environment bind).
+    #[must_use]
+    pub fn take_http_listener(&self) -> Option<std::net::TcpListener> {
+        self.inner.http_listener.lock().unwrap_or_else(PoisonError::into_inner).take()
     }
 
     /// Install a [`GuestResolver`] consulted on dispatch-path registry misses
@@ -454,25 +545,58 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         self
     }
 
-    /// Install an [`HttpFallback`] mapping unrouted request paths to guest
+    /// Install an [`HttpPaths`] hook mapping unrouted request paths to guest
     /// identities, chainable after [`from_parts`](Self::from_parts).
     ///
-    /// Deployments built through [`DeploymentBuilder`] supply the fallback via
-    /// [`DeploymentBuilder::http_fallback`] instead. Install-once: a second
-    /// fallback is ignored with a warning.
+    /// Deployments built through [`DeploymentBuilder`] supply the hook via
+    /// [`DeploymentBuilder::http_paths`] instead. Install-once: a second
+    /// hook is ignored with a warning.
     #[must_use]
-    pub fn with_http_fallback<F>(self, fallback: F) -> Self
+    pub fn with_http_paths<F>(self, hook: F) -> Self
     where
         F: Fn(&str) -> Option<GuestId> + Send + Sync + 'static,
     {
-        self.install_http_fallback(Arc::new(fallback));
+        self.install_http_paths(Arc::new(hook));
         self
     }
 
-    /// The installed HTTP trigger fallback, if any.
+    /// How the HTTP trigger routes when its table is empty: a deployment
+    /// that installs an [`HttpPaths`] hook owns HTTP routing outright, so
+    /// routing is table-driven only — a sole exporter never becomes a
+    /// catch-all, and an unmatched path is a miss for the hook to answer.
     #[must_use]
-    pub fn http_fallback(&self) -> Option<HttpFallback> {
-        self.inner.http_fallback.get().cloned()
+    pub fn http_routing_policy(&self) -> RoutingPolicy {
+        if self.inner.http_paths.get().is_some() {
+            RoutingPolicy::TableOnly
+        } else {
+            RoutingPolicy::CapabilityDefault
+        }
+    }
+
+    /// Build the HTTP trigger's [`TriggerRouter`] over this runtime's
+    /// registry, static route table, and [`RoutingPolicy`] — shared by the
+    /// trigger server and the testkit harness so the boot-time routing
+    /// decision cannot drift between them.
+    ///
+    /// `probe` resolves a guest's typed handler indices; a guest is capable
+    /// exactly when it succeeds.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a route names a guest that does not export the
+    /// handler, or two or more guests export it with no routes under the
+    /// capability default.
+    pub fn http_trigger_router<I, E, F>(&self, probe: F) -> Result<TriggerRouter<I, HttpRoutes>>
+    where
+        F: FnMut(&InstancePre<StoreCtx<B>>) -> std::result::Result<I, E>,
+    {
+        TriggerRouter::build_with(
+            self.registry(),
+            "http",
+            self.registry().routes().http().clone(),
+            probe,
+            self.http_routing_policy(),
+        )
     }
 
     /// Route command mode to an explicit guest identity, chainable after
@@ -506,9 +630,9 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         }));
     }
 
-    fn install_http_fallback(&self, fallback: HttpFallback) {
-        if self.inner.http_fallback.set(fallback).is_err() {
-            tracing::warn!("http fallback already installed; ignoring");
+    fn install_http_paths(&self, hook: HttpPaths) {
+        if self.inner.http_paths.set(hook).is_err() {
+            tracing::warn!("http paths hook already installed; ignoring");
         }
     }
 
@@ -541,14 +665,16 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// Fresh per-guest store context.
     #[must_use]
     pub fn store(&self) -> StoreCtx<B> {
-        let base = StoreBase::builder()
+        let mut builder = StoreBase::builder()
             .options(self.options())
             .dispatcher(Arc::clone(&self.dispatcher))
             .args(Arc::clone(&self.inner.args))
-            .mounts(Arc::clone(&self.inner.mounts))
-            .build();
+            .mounts(Arc::clone(&self.inner.mounts));
+        if let Some(env) = &self.inner.guest_env {
+            builder = builder.env(Arc::clone(env));
+        }
         StoreCtx {
-            base,
+            base: builder.build(),
             backends: self.inner.backends.clone(),
         }
     }
@@ -601,18 +727,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// loaded, the component's imports exceed the deployment's linked host set
     /// and `link` union, or its linked exports cannot be served.
     pub async fn register(&self, id: impl Into<GuestId>, artifact: GuestArtifact) -> Result<()> {
-        self.register_inner(id.into(), artifact, None).await
-    }
-
-    /// [`register`](Self::register) internals, with an optional expected
-    /// export the loaded component must satisfy — the resolve-on-miss path
-    /// sets it because a resolver's answer is not trusted to be well-shaped
-    /// (an unvalidated publish of a link target would create an entry whose
-    /// endpoint the retry misses forever). Validation failure happens before
-    /// serve/publish, so it leaves no partial state.
-    async fn register_inner(
-        &self, id: GuestId, artifact: GuestArtifact, expected_export: Option<&str>,
-    ) -> Result<()> {
+        let id = id.into();
         let registry = self.registry();
 
         // Early occupancy check to skip the load/serve work; the publish below
@@ -623,12 +738,15 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
             .load(registry.engine())
             .await
             .with_context(|| format!("loading guest `{id}`"))?;
-        if let Some(export) = expected_export {
-            anyhow::ensure!(
-                exports_instance(&component, registry.engine(), export),
-                "guest `{id}` does not export interface `{export}`"
-            );
-        }
+        self.register_component(id, component).await
+    }
+
+    /// [`register`](Self::register) internals over an already-loaded
+    /// component — the resolve-on-miss path loads (and export-validates) the
+    /// resolver's artifact itself before registering, so validation failure
+    /// happens before serve/publish and leaves no partial state.
+    async fn register_component(&self, id: GuestId, component: Component) -> Result<()> {
+        let registry = self.registry();
         let instance_pre = registry.instantiate_late(&id, &component)?;
         let guest = Guest::local(id.clone(), instance_pre);
 
@@ -643,6 +761,41 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
 
         tracing::info!(guest = %id, "guest registered");
         Ok(())
+    }
+
+    /// Resolve an unrouted HTTP request path through the deployment's
+    /// [`HttpPaths`] hook: path → identity →
+    /// [`ensure_guest`](Self::ensure_guest) (and hence resolve-on-miss).
+    /// Shared by the HTTP trigger server and the testkit harness so the
+    /// outcome semantics cannot drift between them.
+    ///
+    /// A hook answer of `Some(id)` claims the path, but an identity nothing
+    /// supplies ([`EnsureError::Unresolved`] — an unknown tenant) stays
+    /// [`RouteRefusal::NotFound`]: an ordinary unmatched request (a 404),
+    /// like `None` from the hook or no hook installed. Only a genuine fault
+    /// — resolution failed, or the guest lacks the `wasi:http` handler
+    /// export — is [`RouteRefusal::Failed`] (a 500 on the wire).
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`RouteRefusal`] when no guest can be produced for `path`.
+    pub async fn route_http(&self, path: &str) -> Result<Arc<Guest<StoreCtx<B>>>, RouteRefusal> {
+        let Some(hook) = self.inner.http_paths.get() else {
+            tracing::debug!(path, "no route matched and no http paths hook installed");
+            return Err(RouteRefusal::NotFound);
+        };
+        let Some(target) = hook(path) else {
+            tracing::debug!(path, "no route matched and the http paths hook declined the path");
+            return Err(RouteRefusal::NotFound);
+        };
+        match self.ensure_guest(&target, "wasi:http/handler").await {
+            Ok(guest) => Ok(guest),
+            Err(EnsureError::Unresolved(_)) => {
+                tracing::warn!(path, guest = %target, "claimed path names a guest nothing supplies");
+                Err(RouteRefusal::NotFound)
+            }
+            Err(error) => Err(RouteRefusal::Failed(error)),
+        }
     }
 
     /// Return the registered guest for `id`, faulting it in through the
@@ -660,8 +813,9 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// Returns [`EnsureError::Unresolved`] when nothing supplies the guest
     /// (no resolver, or the resolver answered `Ok(None)`),
     /// [`EnsureError::ResolveFailed`] when resolution or the subsequent
-    /// registration failed, and [`EnsureError::ExportMismatch`] when a
-    /// concurrently registered component lacks `expected_export`.
+    /// registration failed, and [`EnsureError::ExportMismatch`] when the
+    /// resolved (or concurrently registered) component lacks
+    /// `expected_export`.
     pub async fn ensure_guest(
         &self, id: &GuestId, expected_export: &str,
     ) -> Result<Arc<Guest<StoreCtx<B>>>, EnsureError> {
@@ -733,7 +887,22 @@ async fn run_flight<B: Clone + Send + Sync + 'static>(
         return Err(EnsureError::Unresolved(id.clone()));
     };
 
-    let raced = match runtime.register_inner(id.clone(), artifact, Some(expected_export)).await {
+    // A resolver's answer is not trusted to be well-shaped: load and validate
+    // the component against the dispatch site's required export before any
+    // registration, so the mismatch is typed and nothing is published.
+    let component = artifact.load(runtime.registry().engine()).await.map_err(|error| {
+        let error = error.context(format!("loading resolved guest `{id}`"));
+        tracing::error!(guest = %id, "guest resolution failed: {error:#}");
+        EnsureError::ResolveFailed(Arc::new(error))
+    })?;
+    if !exports_instance(&component, runtime.registry().engine(), expected_export) {
+        return Err(EnsureError::ExportMismatch {
+            guest: id.clone(),
+            export: expected_export.to_owned(),
+        });
+    }
+
+    let raced = match runtime.register_component(id.clone(), component).await {
         Ok(()) => false,
         // Losing the publish race to a concurrent direct `register(id)` is
         // success — an entry exists; any other failure with no entry is real.

@@ -40,6 +40,7 @@ pub struct StoreBaseBuilder<O = Unset, D = Unset> {
     dispatcher: D,
     args: Option<Arc<Vec<String>>>,
     mounts: Option<Arc<MountRegistry>>,
+    env: Option<Arc<Vec<(String, String)>>>,
 }
 
 impl<O, D> StoreBaseBuilder<O, D> {
@@ -65,6 +66,20 @@ impl<O, D> StoreBaseBuilder<O, D> {
         self.mounts = Some(mounts);
         self
     }
+
+    /// Set the complete guest environment, replacing host inheritance.
+    ///
+    /// Optional; defaults to plain inheritance. The runtime pre-merges its
+    /// deployment-derived entries (e.g. `HTTP_ADDR` from a supplied HTTP
+    /// listener) over the host environment once — so an entry replaces an
+    /// inherited value rather than appending a duplicate key (WASI env
+    /// lookups are first-match-wins) — and threads the finished list here
+    /// per store.
+    #[must_use]
+    pub fn env(mut self, env: Arc<Vec<(String, String)>>) -> Self {
+        self.env = Some(env);
+        self
+    }
 }
 
 impl<D> StoreBaseBuilder<Unset, D> {
@@ -78,6 +93,7 @@ impl<D> StoreBaseBuilder<Unset, D> {
             dispatcher: self.dispatcher,
             args: self.args,
             mounts: self.mounts,
+            env: self.env,
         }
     }
 }
@@ -98,6 +114,7 @@ impl<O> StoreBaseBuilder<O, Unset> {
             dispatcher: Set(dispatcher),
             args: self.args,
             mounts: self.mounts,
+            env: self.env,
         }
     }
 }
@@ -106,9 +123,11 @@ impl StoreBaseBuilder<Set<&RuntimeOptions>, Set<Arc<dyn Dispatcher>>> {
     /// Finish building the fixed per-store state, applying the WASI construction
     /// policy shared by every deployment.
     ///
-    /// Inherits the host environment and stdin, wires stdout/stderr to the host
-    /// streams, applies the configured argv, caps linear-memory growth, and
-    /// creates fresh, inert wRPC view state.
+    /// Applies the guest environment (the explicit
+    /// [`env`](StoreBaseBuilder::env) list when set, host inheritance
+    /// otherwise), inherits stdin, wires stdout/stderr to the host streams,
+    /// applies the configured argv, caps linear-memory growth, and creates
+    /// fresh, inert wRPC view state.
     #[must_use]
     pub fn build(self) -> StoreBase {
         let Set(options) = self.options;
@@ -116,11 +135,15 @@ impl StoreBaseBuilder<Set<&RuntimeOptions>, Set<Arc<dyn Dispatcher>>> {
         let mounts = self.mounts.unwrap_or_default();
 
         let mut wasi_builder = WasiCtxBuilder::new();
-        wasi_builder
-            .inherit_env()
-            .inherit_stdin()
-            .stdout(tokio::io::stdout())
-            .stderr(tokio::io::stderr());
+        match &self.env {
+            Some(env) => {
+                wasi_builder.envs(env);
+            }
+            None => {
+                wasi_builder.inherit_env();
+            }
+        }
+        wasi_builder.inherit_stdin().stdout(tokio::io::stdout()).stderr(tokio::io::stderr());
         if let Some(args) = &self.args {
             wasi_builder.args(args.as_slice());
         }
@@ -208,8 +231,22 @@ impl StoreBase {
             dispatcher: Unset,
             args: None,
             mounts: None,
+            env: None,
         }
     }
+}
+
+/// The host environment with `overlay` applied: replace an existing key's
+/// value, append a missing key — never a duplicate entry.
+pub fn merged_env(overlay: &[(String, String)]) -> Vec<(String, String)> {
+    let mut vars: Vec<(String, String)> = std::env::vars().collect();
+    for (key, value) in overlay {
+        match vars.iter_mut().find(|(existing, _)| existing == key) {
+            Some(entry) => entry.1.clone_from(value),
+            None => vars.push((key.clone(), value.clone())),
+        }
+    }
+    vars
 }
 
 /// The per-guest store context every deployment shares.
@@ -302,5 +339,32 @@ pub trait HasDispatcher: Send {
 impl<B: Send + 'static> HasDispatcher for StoreCtx<B> {
     fn dispatcher(&self) -> Arc<dyn Dispatcher> {
         Arc::clone(&self.base.dispatcher)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::merged_env;
+
+    // Override semantics on the private merge kernel: an overlay entry
+    // replaces an inherited key (no first-match-wins duplicate), a new key
+    // appends.
+    #[test]
+    fn merged_env_overrides() {
+        // `PATH` is present in any test environment.
+        let overlay = [
+            ("PATH".to_owned(), "overridden".to_owned()),
+            ("OMNIA_MERGED_ENV_TEST".to_owned(), "fresh".to_owned()),
+        ];
+        let merged = merged_env(&overlay);
+
+        let paths: Vec<_> = merged.iter().filter(|(key, _)| key == "PATH").collect();
+        assert_eq!(paths.len(), 1, "no duplicate key: {paths:?}");
+        assert_eq!(paths[0].1, "overridden");
+
+        let fresh: Vec<_> =
+            merged.iter().filter(|(key, _)| key == "OMNIA_MERGED_ENV_TEST").collect();
+        assert_eq!(fresh.len(), 1);
+        assert_eq!(fresh[0].1, "fresh");
     }
 }

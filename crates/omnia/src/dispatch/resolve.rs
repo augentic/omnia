@@ -41,22 +41,27 @@ pub trait GuestResolver: Send + Sync + 'static {
     ) -> FutureResult<Option<GuestArtifact>>;
 }
 
-/// Maps an unrouted HTTP request path to a guest identity, consulted when no
-/// static `[[route.http]]` prefix matches (the same shape axum gives
-/// `Router::fallback`).
+/// The deployment's path→identity hook: maps a request path no static
+/// `[[route.http]]` prefix matches to a guest identity.
 ///
-/// The returned identity goes through the ordinary registry lookup — and
-/// hence resolve-on-miss when a [`GuestResolver`] is installed. Like the
-/// resolver, a fallback is deployment code, supplied through
-/// [`DeploymentBuilder::http_fallback`](crate::DeploymentBuilder::http_fallback).
-pub type HttpFallback = Arc<dyn Fn(&str) -> Option<GuestId> + Send + Sync>;
+/// `Some(id)` claims the path — the identity goes through the ordinary
+/// registry lookup (and hence resolve-on-miss when a [`GuestResolver`] is
+/// installed). An identity nothing supplies (the resolver's definitive miss)
+/// stays an ordinary unmatched request, while a resolution fault or a guest
+/// without the handler export is a deployment fault. `None` declines the
+/// path. Like the resolver, the hook is deployment code, supplied through
+/// [`DeploymentBuilder::http_paths`](crate::DeploymentBuilder::http_paths).
+pub type HttpPaths = Arc<dyn Fn(&str) -> Option<GuestId> + Send + Sync>;
 
 /// Why [`Runtime::ensure_guest`](crate::Runtime::ensure_guest) could not
 /// produce a registered guest.
 ///
-/// Typed (rather than folded into `anyhow`) so trigger servers can map the
-/// outcomes faithfully — e.g. HTTP answers [`Unresolved`](Self::Unresolved)
-/// with 404 (unknown tenant) and the failure variants with 500.
+/// Typed (rather than folded into `anyhow`) so dispatch sites can map the
+/// outcomes faithfully — e.g. on a path the deployment's [`HttpPaths`] hook
+/// claimed, the HTTP trigger answers [`Unresolved`](Self::Unresolved) with an
+/// ordinary 404 (unknown identity) but [`ResolveFailed`](Self::ResolveFailed)
+/// and [`ExportMismatch`](Self::ExportMismatch) with an error + 500 (a
+/// deployment fault, never an ordinary miss).
 #[derive(Clone, Debug)]
 pub enum EnsureError {
     /// The guest is not registered and nothing supplied it: no resolver is
@@ -64,8 +69,8 @@ pub enum EnsureError {
     Unresolved(GuestId),
     /// The resolver — or the registration of its artifact — failed.
     ResolveFailed(Arc<anyhow::Error>),
-    /// A registered component does not export the interface the dispatch
-    /// site requires.
+    /// The resolved (or concurrently registered) component does not export
+    /// the interface the dispatch site requires.
     ExportMismatch {
         /// The guest whose component was checked.
         guest: GuestId,

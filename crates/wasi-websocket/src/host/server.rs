@@ -1,4 +1,3 @@
-use std::env;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
@@ -16,7 +15,7 @@ where
     B: Clone + Send + Sync + 'static,
     StoreCtx<B>: WasiWebSocketView,
 {
-    let component = env::var("COMPONENT").unwrap_or_else(|_| "unknown".into());
+    let component = state.name().to_owned();
     tracing::info!("starting websocket server for: {component}");
 
     // Capability probe: a guest exports the websocket handler exactly when its
