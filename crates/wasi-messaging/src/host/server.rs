@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
-use omnia::{PatternRoutes, RoutingPolicy, Runtime, StoreCtx, TriggerRouter};
+use omnia::{PatternRoutes, Runtime, StoreCtx, TriggerRouter};
 use tracing::{Instrument, debug_span, instrument};
 
 use crate::host::WasiMessagingView;
@@ -26,7 +26,6 @@ where
         "messaging",
         state.registry().routes().messaging().clone(),
         MessagingRequestReplyIndices::new,
-        RoutingPolicy::CapabilityDefault,
     )?;
     if routing.is_inert() {
         tracing::info!("no guest exports the messaging handler; messaging trigger inert");

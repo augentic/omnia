@@ -67,14 +67,14 @@ impl<O, D> StoreBaseBuilder<O, D> {
         self
     }
 
-    /// Set deployment-supplied guest environment entries, overlaid onto the
-    /// inherited host environment with override semantics: a deployment entry
-    /// replaces an inherited value rather than appending a duplicate key
-    /// (WASI env lookups are first-match-wins).
+    /// Set the complete guest environment, replacing host inheritance.
     ///
-    /// Optional; defaults to plain inheritance. The runtime threads its
+    /// Optional; defaults to plain inheritance. The runtime pre-merges its
     /// deployment-derived entries (e.g. `HTTP_ADDR` from a supplied HTTP
-    /// listener) here.
+    /// listener) over the host environment once — via [`merged_env`], so an
+    /// entry replaces an inherited value rather than appending a duplicate
+    /// key (WASI env lookups are first-match-wins) — and threads the finished
+    /// list here per store.
     #[must_use]
     pub fn env(mut self, env: Arc<Vec<(String, String)>>) -> Self {
         self.env = Some(env);
@@ -123,10 +123,11 @@ impl StoreBaseBuilder<Set<&RuntimeOptions>, Set<Arc<dyn Dispatcher>>> {
     /// Finish building the fixed per-store state, applying the WASI construction
     /// policy shared by every deployment.
     ///
-    /// Inherits the host environment (overlaying any deployment-supplied
-    /// [`env`](StoreBaseBuilder::env) entries) and stdin, wires stdout/stderr
-    /// to the host streams, applies the configured argv, caps linear-memory
-    /// growth, and creates fresh, inert wRPC view state.
+    /// Applies the guest environment (the explicit
+    /// [`env`](StoreBaseBuilder::env) list when set, host inheritance
+    /// otherwise), inherits stdin, wires stdout/stderr to the host streams,
+    /// applies the configured argv, caps linear-memory growth, and creates
+    /// fresh, inert wRPC view state.
     #[must_use]
     pub fn build(self) -> StoreBase {
         let Set(options) = self.options;
@@ -134,12 +135,9 @@ impl StoreBaseBuilder<Set<&RuntimeOptions>, Set<Arc<dyn Dispatcher>>> {
         let mounts = self.mounts.unwrap_or_default();
 
         let mut wasi_builder = WasiCtxBuilder::new();
-        match self.env.as_deref().filter(|overlay| !overlay.is_empty()) {
-            // Explicit guest environment: the host environment with the
-            // deployment's entries overlaid, so a deployment entry replaces
-            // an inherited value instead of appending a duplicate key.
-            Some(overlay) => {
-                wasi_builder.envs(&merged_env(overlay));
+        match &self.env {
+            Some(env) => {
+                wasi_builder.envs(env);
             }
             None => {
                 wasi_builder.inherit_env();
@@ -240,7 +238,7 @@ impl StoreBase {
 
 /// The host environment with `overlay` applied: replace an existing key's
 /// value, append a missing key — never a duplicate entry.
-fn merged_env(overlay: &[(String, String)]) -> Vec<(String, String)> {
+pub fn merged_env(overlay: &[(String, String)]) -> Vec<(String, String)> {
     let mut vars: Vec<(String, String)> = std::env::vars().collect();
     for (key, value) in overlay {
         match vars.iter_mut().find(|(existing, _)| existing == key) {

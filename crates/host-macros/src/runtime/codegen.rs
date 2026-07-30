@@ -45,14 +45,15 @@ impl From<&Config> for Codegen {
 
 /// Emit the `let http_listener` binding evaluated at the top of the generated
 /// `main`: the `http_listener:` expression has type
-/// `anyhow::Result<Option<std::net::TcpListener>>`, and an `Err` is a startup
-/// failure. Empty when the invocation omits the key.
+/// `anyhow::Result<std::net::TcpListener>` (writing the key means supplying a
+/// listener), and an `Err` is a startup failure. Empty when the invocation
+/// omits the key.
 fn emit_listener_binding(config: &Config) -> TokenStream {
     let Some(expr) = &config.http_listener else {
         return TokenStream::new();
     };
     quote! {
-        let http_listener: ::std::option::Option<::std::net::TcpListener> = match #expr {
+        let http_listener: ::std::net::TcpListener = match #expr {
             ::std::result::Result::Ok(listener) => listener,
             ::std::result::Result::Err(error) => {
                 ::std::eprintln!("error: {error:#}");
@@ -71,7 +72,7 @@ fn emit_main_options(config: &Config) -> TokenStream {
     };
     let manifest = emit_manifest_source(config);
     let resolver = config.resolver.as_ref().map(|expr| quote! { .resolver(#expr) });
-    let http_router = config.http_router.as_ref().map(|expr| quote! { .http_router(#expr) });
+    let http_paths = config.http_paths.as_ref().map(|expr| quote! { .http_paths(#expr) });
     // The binding emitted by `emit_listener_binding` above.
     let http_listener =
         config.http_listener.as_ref().map(|_| quote! { .http_listener(http_listener) });
@@ -82,7 +83,7 @@ fn emit_main_options(config: &Config) -> TokenStream {
         omnia::MainOptions::new(#mode)
             #manifest
             #resolver
-            #http_router
+            #http_paths
             #http_listener
             #program
             #command_guest

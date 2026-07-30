@@ -41,24 +41,27 @@ pub trait GuestResolver: Send + Sync + 'static {
     ) -> FutureResult<Option<GuestArtifact>>;
 }
 
-/// The deployment's HTTP router: maps a request path no static
+/// The deployment's path→identity hook: maps a request path no static
 /// `[[route.http]]` prefix matches to a guest identity.
 ///
-/// `Some(id)` claims the route — the identity goes through the ordinary
+/// `Some(id)` claims the path — the identity goes through the ordinary
 /// registry lookup (and hence resolve-on-miss when a [`GuestResolver`] is
-/// installed), and a claimed route that cannot be served is a fault, not a
-/// miss. `None` declines the path: an ordinary unmatched request. Like the
-/// resolver, a router is deployment code, supplied through
-/// [`DeploymentBuilder::http_router`](crate::DeploymentBuilder::http_router).
-pub type HttpRouter = Arc<dyn Fn(&str) -> Option<GuestId> + Send + Sync>;
+/// installed). An identity nothing supplies (the resolver's definitive miss)
+/// stays an ordinary unmatched request, while a resolution fault or a guest
+/// without the handler export is a deployment fault. `None` declines the
+/// path. Like the resolver, the hook is deployment code, supplied through
+/// [`DeploymentBuilder::http_paths`](crate::DeploymentBuilder::http_paths).
+pub type HttpPaths = Arc<dyn Fn(&str) -> Option<GuestId> + Send + Sync>;
 
 /// Why [`Runtime::ensure_guest`](crate::Runtime::ensure_guest) could not
 /// produce a registered guest.
 ///
 /// Typed (rather than folded into `anyhow`) so dispatch sites can map the
-/// outcomes faithfully — e.g. the HTTP trigger answers every variant on a
-/// router-claimed route with an error + 500 (a claimed route that cannot
-/// be served is a deployment fault, never an ordinary miss).
+/// outcomes faithfully — e.g. on a path the deployment's [`HttpPaths`] hook
+/// claimed, the HTTP trigger answers [`Unresolved`](Self::Unresolved) with an
+/// ordinary 404 (unknown identity) but [`ResolveFailed`](Self::ResolveFailed)
+/// and [`ExportMismatch`](Self::ExportMismatch) with an error + 500 (a
+/// deployment fault, never an ordinary miss).
 #[derive(Clone, Debug)]
 pub enum EnsureError {
     /// The guest is not registered and nothing supplied it: no resolver is

@@ -20,7 +20,7 @@ use wasmtime::{Config, Engine};
 use wasmtime_wasi::WasiView;
 use wrpc_wasmtime::WrpcView;
 
-use crate::dispatch::{DispatchHandle, FirstArgSelector, GuestResolver, GuestSelector, HttpRouter};
+use crate::dispatch::{DispatchHandle, FirstArgSelector, GuestResolver, GuestSelector, HttpPaths};
 use crate::mount::{MountRegistry, ResolvedPreopen};
 use crate::registry::{GuestId, Registry, Routes};
 use crate::{Host, Mode, RuntimeOptions, Server, Telemetry};
@@ -61,14 +61,14 @@ pub struct DeploymentBuilder<P = WasmOnly> {
     mode: Mode,
     allow_empty: bool,
     resolver: Option<Arc<dyn GuestResolver>>,
-    http_router: Option<HttpRouter>,
+    http_paths: Option<HttpPaths>,
     http_listener: Option<std::net::TcpListener>,
     command_guest: Option<GuestId>,
     program_name: Option<String>,
     policy: PhantomData<fn() -> P>,
 }
 
-// Manual: the resolver and router are non-Debug trait objects.
+// Manual: the resolver and path hook are non-Debug trait objects.
 impl<P> std::fmt::Debug for DeploymentBuilder<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeploymentBuilder")
@@ -77,7 +77,7 @@ impl<P> std::fmt::Debug for DeploymentBuilder<P> {
             .field("mode", &self.mode)
             .field("allow_empty", &self.allow_empty)
             .field("resolver", &self.resolver.is_some())
-            .field("http_router", &self.http_router.is_some())
+            .field("http_paths", &self.http_paths.is_some())
             .field("http_listener", &self.http_listener.is_some())
             .field("command_guest", &self.command_guest)
             .field("program_name", &self.program_name)
@@ -93,7 +93,7 @@ impl Default for DeploymentBuilder<WasmOnly> {
             mode: Mode::default(),
             allow_empty: false,
             resolver: None,
-            http_router: None,
+            http_paths: None,
             http_listener: None,
             command_guest: None,
             program_name: None,
@@ -132,7 +132,7 @@ impl<P> DeploymentBuilder<P> {
     /// routing (HTTP/messaging/websocket/CLI) is built at boot; registered
     /// guests are reachable via host-mediated link dispatch, host→guest
     /// [`Dispatcher::invoke`](crate::Dispatcher::invoke), and — when an
-    /// [`http_router`](Self::http_router) is installed — HTTP requests no
+    /// [`http_paths`](Self::http_paths) hook is installed — HTTP requests no
     /// static route matches.
     #[must_use]
     pub const fn dynamic(mut self) -> Self {
@@ -148,23 +148,24 @@ impl<P> DeploymentBuilder<P> {
         self
     }
 
-    /// Install the HTTP router: maps a request path no static route matches
-    /// to a guest identity, which then goes through the ordinary lookup (and
-    /// hence resolve-on-miss). A `Some` answer claims the route — a claimed
-    /// route that cannot be served is a 500, never an ordinary miss.
+    /// Install the [`HttpPaths`] hook: maps a request path no static route
+    /// matches to a guest identity, which then goes through the ordinary
+    /// lookup (and hence resolve-on-miss). An identity nothing supplies is an
+    /// ordinary 404; a resolution fault or a guest without the handler export
+    /// is a 500.
     #[must_use]
-    pub fn http_router<F>(self, router: F) -> Self
+    pub fn http_paths<F>(self, hook: F) -> Self
     where
         F: Fn(&str) -> Option<GuestId> + Send + Sync + 'static,
     {
-        self.http_router_shared(Arc::new(router))
+        self.http_paths_shared(Arc::new(hook))
     }
 
-    /// [`http_router`](Self::http_router) over an already-shared hook —
+    /// [`http_paths`](Self::http_paths) over an already-shared hook —
     /// the generated entry path carries one, so it installs without another
     /// closure wrap.
-    pub(crate) fn http_router_shared(mut self, router: HttpRouter) -> Self {
-        self.http_router = Some(router);
+    pub(crate) fn http_paths_shared(mut self, hook: HttpPaths) -> Self {
+        self.http_paths = Some(hook);
         self
     }
 
@@ -233,18 +234,19 @@ impl<P> DeploymentBuilder<P> {
             policy,
         };
 
-        init_telemetry(&plan.name)?;
-        tracing::info!("initializing runtime");
-
-        // The runtime-carried name read by trigger servers and the bootstrap
-        // log. An operator `COMPONENT` override wins over the plan name —
-        // read once here, never written back to the process environment.
+        // The runtime-carried name read by telemetry, trigger servers, and
+        // the bootstrap log. An operator `COMPONENT` override wins over the
+        // plan name — read once here, never written back to the process
+        // environment.
         let name = env::var("COMPONENT").unwrap_or_else(|_| plan.name.clone());
+
+        init_telemetry(&name)?;
+        tracing::info!("initializing runtime");
 
         let mut deployment = Deployment::from_plan(plan).await?;
         deployment.name = name;
         deployment.resolver = self.resolver;
-        deployment.http_router = self.http_router;
+        deployment.http_paths = self.http_paths;
         deployment.http_listener = self.http_listener;
         deployment.command_guest = self.command_guest;
         Ok(deployment)
@@ -270,7 +272,7 @@ impl DeploymentBuilder<WasmOnly> {
             mode: self.mode,
             allow_empty: self.allow_empty,
             resolver: self.resolver,
-            http_router: self.http_router,
+            http_paths: self.http_paths,
             http_listener: self.http_listener,
             command_guest: self.command_guest,
             program_name: self.program_name,
@@ -346,7 +348,7 @@ pub struct Deployment<T: WasiView + 'static> {
     allow_empty: bool,
     // Resolve-on-miss hooks carried from the builder into `Runtime::new`.
     resolver: Option<Arc<dyn GuestResolver>>,
-    http_router: Option<HttpRouter>,
+    http_paths: Option<HttpPaths>,
     // Pre-bound HTTP trigger listener carried from the builder.
     http_listener: Option<std::net::TcpListener>,
     // Explicit command-mode guest identity carried from the builder.
@@ -393,7 +395,7 @@ impl<T: WasiView + 'static> Deployment<T> {
             mode: plan.mode,
             allow_empty: plan.allow_empty,
             resolver: None,
-            http_router: None,
+            http_paths: None,
             http_listener: None,
             command_guest: None,
         })
@@ -450,8 +452,8 @@ impl<T: WasiView> Deployment<T> {
 
     /// The builder-carried resolve-on-miss hooks, for `Runtime::new` to
     /// install before the deployment is consumed into a registry.
-    pub(crate) fn resolve_hooks(&self) -> (Option<Arc<dyn GuestResolver>>, Option<HttpRouter>) {
-        (self.resolver.clone(), self.http_router.clone())
+    pub(crate) fn resolve_hooks(&self) -> (Option<Arc<dyn GuestResolver>>, Option<HttpPaths>) {
+        (self.resolver.clone(), self.http_paths.clone())
     }
 
     /// The builder-carried explicit command guest identity, if any.

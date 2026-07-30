@@ -60,13 +60,13 @@ In command mode, arguments after `--` on the command line are forwarded to the g
 cargo run --example cli -- run ./target/wasm32-wasip2/debug/examples/cli_wasm.wasm -- greet omnia
 ```
 
-(This `run … -- …` grammar applies to every generated binary *except* one built with the [`program:` key](#deployment-keys-resolver-http_router-program-command_guest), which disables the host CLI entirely and forwards raw argv to the guest.)
+(This `run … -- …` grammar applies to every generated binary *except* one built with the [`program:` key](#deployment-keys-resolver-http_paths-http_listener-program-command_guest), which disables the host CLI entirely and forwards raw argv to the guest.)
 
 A backend-less command runtime is valid too: `omnia::runtime!({ mode: command });`.
 
 ### Explicit command guests and resolve-on-miss
 
-By default, command mode routes to the sole static guest exporting `wasi:cli/run`; a deployment with no exporter is inert and exits `0`. A deployment can instead name the command guest explicitly — via the macro's [`command_guest:` key](#deployment-keys-resolver-http_router-program-command_guest) or programmatically:
+By default, command mode routes to the sole static guest exporting `wasi:cli/run`; a deployment with no exporter is inert and exits `0`. A deployment can instead name the command guest explicitly — via the macro's [`command_guest:` key](#deployment-keys-resolver-http_paths-http_listener-program-command_guest) or programmatically:
 
 ```rust
 let builder = omnia::DeploymentBuilder::new()
@@ -161,7 +161,7 @@ Two things to know:
 
 The [`guest-link`](../../examples/guest-link/runtime.rs) example is built this way; its [`omnia.toml`](../../examples/guest-link/Omnia.toml) expresses the same deployment as a file for `--config`.
 
-## Deployment keys (`resolver:`, `http_router:`, `program:`, `command_guest:`)
+## Deployment keys (`resolver:`, `http_paths:`, `http_listener:`, `program:`, `command_guest:`)
 
 These keys let the macro express a complete resolver-backed command deployment — static guests plus resolve-on-miss for everything else — with no handwritten `main`:
 
@@ -197,13 +197,13 @@ omnia::runtime!({
 
 The value is any expression evaluating to a type implementing `omnia::GuestResolver`; it is consulted on dispatch-path registry misses (see [dynamic guest registration](../../rfcs/guest-resolution.md)). A resolver implies a *dynamic* deployment: the guest set may start empty (an invocation with a resolver and no `guests:` is the fully dynamic deployment), and with one or more static guests the mark is a no-op. The compiled-in resolver is part of the *binary*, not the manifest — a TOML supplied via `--config` still runs with it, and resolution policy (id grammar, artifact layout, verification) stays code the deployment owns.
 
-### `http_router:` — the deployment's HTTP router
+### `http_paths:` — the deployment's path→identity hook
 
-The value is any expression evaluating to `Fn(&str) -> Option<omnia::GuestId>` (`+ Send + Sync + 'static`); it maps a request path no static `[[route.http]]` prefix matches to a guest identity, which then goes through the ordinary registry lookup — and hence resolve-on-miss when a `resolver:` is installed. Installing a router makes the deployment own HTTP routing outright: the capability default is off (a sole `wasi:http` exporter never becomes a catch-all), and a path the router declines is an ordinary 404. A `Some` answer *claims* the route, so a claimed route that cannot be served — the resolver's definitive miss, a resolution fault, or a routed guest without a `wasi:http` handler export — is an error-logged 500, never hidden as a miss. (Without a router, an unmatched path stays a routine debug-level 404 — a routes-only server does not claim every path.) Deployments assembled programmatically supply the same hook through `DeploymentBuilder::http_router`.
+The value is any expression evaluating to `Fn(&str) -> Option<omnia::GuestId>` (`+ Send + Sync + 'static`); it maps a request path no static `[[route.http]]` prefix matches to a guest identity, which then goes through the ordinary registry lookup — and hence resolve-on-miss when a `resolver:` is installed. Installing the hook makes the deployment own HTTP routing outright: the capability default is off (a sole `wasi:http` exporter never becomes a catch-all). A path the hook declines — **or** a claimed identity nothing supplies (the resolver's definitive miss: an unknown tenant) — is an ordinary 404. Only a genuine fault on a claimed path — resolution failed, or the routed guest lacks a `wasi:http` handler export — is an error-logged 500, never hidden as a miss. (Without the hook, an unmatched path stays a routine debug-level 404 — a routes-only server does not claim every path.) Deployments assembled programmatically supply the same hook through `DeploymentBuilder::http_paths`.
 
 ### `http_listener:` — a deployment-owned pre-bound listener
 
-The value is any expression evaluating to `anyhow::Result<Option<std::net::TcpListener>>`, evaluated at the top of the generated `main`: an `Err` is a startup failure, `Some(listener)` hands the HTTP trigger a pre-bound listener to adopt (it serves on that exact address instead of binding `HTTP_ADDR` itself), and `None` keeps the environment bind. With a supplied listener, every guest store sees `HTTP_ADDR` set to the listener's local address — injected with override semantics, so it wins over any inherited value. Deployments assembled programmatically supply the listener through `DeploymentBuilder::http_listener`.
+The value is any expression evaluating to `anyhow::Result<std::net::TcpListener>`, evaluated at the top of the generated `main`: writing the key means supplying a listener, and an `Err` is a startup failure. The HTTP trigger adopts the pre-bound listener (it serves on that exact address instead of binding `HTTP_ADDR` itself), and every guest store sees `HTTP_ADDR` set to the listener's local address — injected with override semantics, so it wins over any inherited value. A supplied listener that no `wasi:http`-capable guest (and no `http_paths:` hook) could ever serve fails startup rather than silently dropping the socket. Deployments assembled programmatically supply the listener through `DeploymentBuilder::http_listener`.
 
 ### `command_guest:` — explicit command routing
 

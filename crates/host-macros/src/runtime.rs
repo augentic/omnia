@@ -139,21 +139,8 @@ mod tests {
         })));
     }
 
-    #[test]
-    fn expand_http_router() {
-        insta::assert_snapshot!(expand_pretty(quote!({
-            guests: [
-                { id: "engine", source: "engine.wasm" },
-            ],
-            resolver: CacheResolver::new(),
-            http_router: mcp_route,
-            hosts: {
-                WasiHttp: HttpDefault,
-                WasiOtel: OtelDefault,
-            },
-        })));
-    }
-
+    // Covers both late-routing keys: `http_paths` alone is a strict subset
+    // of this expansion.
     #[test]
     fn expand_http_listener() {
         insta::assert_snapshot!(expand_pretty(quote!({
@@ -161,7 +148,7 @@ mod tests {
                 { id: "engine", source: "engine.wasm" },
             ],
             resolver: CacheResolver::new(),
-            http_router: mcp_route,
+            http_paths: mcp_route,
             http_listener: bind_http_listener(),
             hosts: {
                 WasiHttp: HttpDefault,

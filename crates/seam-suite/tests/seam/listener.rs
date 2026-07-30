@@ -48,7 +48,7 @@ impl Backends for Bundle {
 // that same address (override semantics: the entry wins over anything the
 // host process inherited).
 #[test]
-fn supplied_listener_serves_and_injects_addr() -> Result<()> {
+fn supplied_listener() -> Result<()> {
     fixture::RT.block_on(async {
         let guest_a = find_guest("http_routing_a_wasm.wasm");
         let manifest = temp_manifest(&format!(
