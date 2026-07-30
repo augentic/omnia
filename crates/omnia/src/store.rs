@@ -71,10 +71,10 @@ impl<O, D> StoreBaseBuilder<O, D> {
     ///
     /// Optional; defaults to plain inheritance. The runtime pre-merges its
     /// deployment-derived entries (e.g. `HTTP_ADDR` from a supplied HTTP
-    /// listener) over the host environment once — via [`merged_env`], so an
-    /// entry replaces an inherited value rather than appending a duplicate
-    /// key (WASI env lookups are first-match-wins) — and threads the finished
-    /// list here per store.
+    /// listener) over the host environment once — so an entry replaces an
+    /// inherited value rather than appending a duplicate key (WASI env
+    /// lookups are first-match-wins) — and threads the finished list here
+    /// per store.
     #[must_use]
     pub fn env(mut self, env: Arc<Vec<(String, String)>>) -> Self {
         self.env = Some(env);
