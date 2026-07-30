@@ -7,7 +7,7 @@ use wasmtime_wasi::I32Exit;
 use wasmtime_wasi::p3::bindings::{Command, CommandPre};
 
 use super::{ExitStatus, Runtime};
-use crate::registry::{Guest, GuestId, TriggerRouter};
+use crate::registry::{Guest, GuestId, RoutingPolicy, TriggerRouter};
 use crate::store::StoreCtx;
 
 /// Run the command guest once, after the [`Runtime`] is assembled.
@@ -42,6 +42,7 @@ where
         "cli",
         runtime.registry().routes().cli().clone(),
         |pre| CommandPre::new(pre.clone()).map(|_| ()),
+        RoutingPolicy::CapabilityDefault,
     )?;
     if routing.is_inert() {
         tracing::info!("no guest exports wasi:cli/run; cli trigger inert");

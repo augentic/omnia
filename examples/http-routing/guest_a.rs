@@ -19,7 +19,10 @@ impl Guest for GuestA {
     }
 }
 
-/// Respond to any path with this guest's identity.
-async fn respond() -> &'static str {
-    "http-routing example: guest a\n"
+/// Respond to any path with this guest's identity and the `HTTP_ADDR` it
+/// sees (the seam suite asserts the runtime's injected value reaches the
+/// guest environment).
+async fn respond() -> String {
+    let addr = std::env::var("HTTP_ADDR").unwrap_or_else(|_| "unset".into());
+    format!("http-routing example: guest a (HTTP_ADDR={addr})\n")
 }

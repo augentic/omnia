@@ -19,6 +19,7 @@ pub fn expand(config: &Config) -> TokenStream {
         server_types,
         backends_ty,
         backends_def,
+        listener_binding,
         main_options,
     } = Codegen::from(config);
 
@@ -63,6 +64,7 @@ pub fn expand(config: &Config) -> TokenStream {
             /// raw argv passthrough under the `program:` key).
             #[tokio::main]
             pub async fn main() -> ::std::process::ExitCode {
+                #listener_binding
                 omnia::main::<#backends_ty, Hooks>(#main_options).await
             }
 
@@ -138,13 +140,29 @@ mod tests {
     }
 
     #[test]
-    fn expand_http_fallback() {
+    fn expand_http_router() {
         insta::assert_snapshot!(expand_pretty(quote!({
             guests: [
                 { id: "engine", source: "engine.wasm" },
             ],
             resolver: CacheResolver::new(),
-            http_fallback: mcp_http_fallback,
+            http_router: mcp_route,
+            hosts: {
+                WasiHttp: HttpDefault,
+                WasiOtel: OtelDefault,
+            },
+        })));
+    }
+
+    #[test]
+    fn expand_http_listener() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            guests: [
+                { id: "engine", source: "engine.wasm" },
+            ],
+            resolver: CacheResolver::new(),
+            http_router: mcp_route,
+            http_listener: bind_http_listener(),
             hosts: {
                 WasiHttp: HttpDefault,
                 WasiOtel: OtelDefault,

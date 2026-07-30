@@ -23,7 +23,8 @@ pub struct Config {
     pub config_file: Option<Expr>,
     pub manifest: ManifestSpec,
     pub resolver: Option<Expr>,
-    pub http_fallback: Option<Expr>,
+    pub http_router: Option<Expr>,
+    pub http_listener: Option<Expr>,
     pub program: Option<Expr>,
     pub command_guest: Option<Expr>,
 }
@@ -94,7 +95,8 @@ impl Parse for Config {
         let mut config_file = None;
         let mut manifest = ManifestSpec::default();
         let mut resolver = None;
-        let mut http_fallback = None;
+        let mut http_router = None;
+        let mut http_listener = None;
         let mut program = None;
         let mut command_guest = None;
         let mut config_span: Option<Span> = None;
@@ -131,7 +133,8 @@ impl Parse for Config {
                     inline_span.get_or_insert(span);
                 }
                 Opt::Resolver(r) => resolver = Some(r),
-                Opt::HttpFallback(f) => http_fallback = Some(f),
+                Opt::HttpRouter(r) => http_router = Some(r),
+                Opt::HttpListener(l) => http_listener = Some(l),
                 Opt::Program(p, span) => {
                     program = Some(p);
                     program_span = Some(span);
@@ -183,7 +186,8 @@ impl Parse for Config {
             config_file,
             manifest,
             resolver,
-            http_fallback,
+            http_router,
+            http_listener,
             program,
             command_guest,
         })
@@ -199,7 +203,8 @@ mod kw {
     syn::custom_keyword!(link);
     syn::custom_keyword!(routes);
     syn::custom_keyword!(resolver);
-    syn::custom_keyword!(http_fallback);
+    syn::custom_keyword!(http_router);
+    syn::custom_keyword!(http_listener);
     syn::custom_keyword!(program);
     syn::custom_keyword!(command_guest);
 }
@@ -213,7 +218,8 @@ enum Opt {
     Link(Vec<Expr>, Span),
     Routes(RoutesSpec, Span),
     Resolver(Expr),
-    HttpFallback(Expr),
+    HttpRouter(Expr),
+    HttpListener(Expr),
     Program(Expr, Span),
     CommandGuest(Expr, Span),
 }
@@ -255,10 +261,14 @@ impl Parse for Opt {
             input.parse::<kw::resolver>()?;
             input.parse::<Token![:]>()?;
             Ok(Self::Resolver(input.parse()?))
-        } else if l.peek(kw::http_fallback) {
-            input.parse::<kw::http_fallback>()?;
+        } else if l.peek(kw::http_router) {
+            input.parse::<kw::http_router>()?;
             input.parse::<Token![:]>()?;
-            Ok(Self::HttpFallback(input.parse()?))
+            Ok(Self::HttpRouter(input.parse()?))
+        } else if l.peek(kw::http_listener) {
+            input.parse::<kw::http_listener>()?;
+            input.parse::<Token![:]>()?;
+            Ok(Self::HttpListener(input.parse()?))
         } else if l.peek(kw::program) {
             let key = input.parse::<kw::program>()?;
             input.parse::<Token![:]>()?;

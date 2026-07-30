@@ -20,9 +20,7 @@ use wasmtime::{Config, Engine};
 use wasmtime_wasi::WasiView;
 use wrpc_wasmtime::WrpcView;
 
-use crate::dispatch::{
-    DispatchHandle, FirstArgSelector, GuestResolver, GuestSelector, HttpFallback,
-};
+use crate::dispatch::{DispatchHandle, FirstArgSelector, GuestResolver, GuestSelector, HttpRouter};
 use crate::mount::{MountRegistry, ResolvedPreopen};
 use crate::registry::{GuestId, Registry, Routes};
 use crate::{Host, Mode, RuntimeOptions, Server, Telemetry};
@@ -63,13 +61,14 @@ pub struct DeploymentBuilder<P = WasmOnly> {
     mode: Mode,
     allow_empty: bool,
     resolver: Option<Arc<dyn GuestResolver>>,
-    http_fallback: Option<HttpFallback>,
+    http_router: Option<HttpRouter>,
+    http_listener: Option<std::net::TcpListener>,
     command_guest: Option<GuestId>,
     program_name: Option<String>,
     policy: PhantomData<fn() -> P>,
 }
 
-// Manual: the resolver and fallback are non-Debug trait objects.
+// Manual: the resolver and router are non-Debug trait objects.
 impl<P> std::fmt::Debug for DeploymentBuilder<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeploymentBuilder")
@@ -78,7 +77,8 @@ impl<P> std::fmt::Debug for DeploymentBuilder<P> {
             .field("mode", &self.mode)
             .field("allow_empty", &self.allow_empty)
             .field("resolver", &self.resolver.is_some())
-            .field("http_fallback", &self.http_fallback.is_some())
+            .field("http_router", &self.http_router.is_some())
+            .field("http_listener", &self.http_listener.is_some())
             .field("command_guest", &self.command_guest)
             .field("program_name", &self.program_name)
             .finish_non_exhaustive()
@@ -93,7 +93,8 @@ impl Default for DeploymentBuilder<WasmOnly> {
             mode: Mode::default(),
             allow_empty: false,
             resolver: None,
-            http_fallback: None,
+            http_router: None,
+            http_listener: None,
             command_guest: None,
             program_name: None,
             policy: PhantomData,
@@ -131,7 +132,7 @@ impl<P> DeploymentBuilder<P> {
     /// routing (HTTP/messaging/websocket/CLI) is built at boot; registered
     /// guests are reachable via host-mediated link dispatch, host→guest
     /// [`Dispatcher::invoke`](crate::Dispatcher::invoke), and — when an
-    /// [`http_fallback`](Self::http_fallback) is installed — HTTP requests no
+    /// [`http_router`](Self::http_router) is installed — HTTP requests no
     /// static route matches.
     #[must_use]
     pub const fn dynamic(mut self) -> Self {
@@ -147,15 +148,35 @@ impl<P> DeploymentBuilder<P> {
         self
     }
 
-    /// Install the HTTP trigger fallback: maps a request path no static route
-    /// matches to a guest identity, which then goes through the ordinary
-    /// lookup (and hence resolve-on-miss).
+    /// Install the HTTP router: maps a request path no static route matches
+    /// to a guest identity, which then goes through the ordinary lookup (and
+    /// hence resolve-on-miss). A `Some` answer claims the route — a claimed
+    /// route that cannot be served is a 500, never an ordinary miss.
     #[must_use]
-    pub fn http_fallback<F>(mut self, fallback: F) -> Self
+    pub fn http_router<F>(self, router: F) -> Self
     where
         F: Fn(&str) -> Option<GuestId> + Send + Sync + 'static,
     {
-        self.http_fallback = Some(Arc::new(fallback));
+        self.http_router_shared(Arc::new(router))
+    }
+
+    /// [`http_router`](Self::http_router) over an already-shared hook —
+    /// the generated entry path carries one, so it installs without another
+    /// closure wrap.
+    pub(crate) fn http_router_shared(mut self, router: HttpRouter) -> Self {
+        self.http_router = Some(router);
+        self
+    }
+
+    /// Supply a pre-bound TCP listener for the HTTP trigger.
+    ///
+    /// The trigger server adopts it at boot instead of binding `HTTP_ADDR`
+    /// itself, and every guest store sees `HTTP_ADDR` set to the listener's
+    /// local address (overriding any inherited value). Without one, the HTTP
+    /// trigger binds from the `HTTP_ADDR` environment variable as before.
+    #[must_use]
+    pub fn http_listener(mut self, listener: std::net::TcpListener) -> Self {
+        self.http_listener = Some(listener);
         self
     }
 
@@ -212,12 +233,19 @@ impl<P> DeploymentBuilder<P> {
             policy,
         };
 
-        init_env(&plan.name)?;
+        init_telemetry(&plan.name)?;
         tracing::info!("initializing runtime");
 
+        // The runtime-carried name read by trigger servers and the bootstrap
+        // log. An operator `COMPONENT` override wins over the plan name —
+        // read once here, never written back to the process environment.
+        let name = env::var("COMPONENT").unwrap_or_else(|_| plan.name.clone());
+
         let mut deployment = Deployment::from_plan(plan).await?;
+        deployment.name = name;
         deployment.resolver = self.resolver;
-        deployment.http_fallback = self.http_fallback;
+        deployment.http_router = self.http_router;
+        deployment.http_listener = self.http_listener;
         deployment.command_guest = self.command_guest;
         Ok(deployment)
     }
@@ -242,7 +270,8 @@ impl DeploymentBuilder<WasmOnly> {
             mode: self.mode,
             allow_empty: self.allow_empty,
             resolver: self.resolver,
-            http_fallback: self.http_fallback,
+            http_router: self.http_router,
+            http_listener: self.http_listener,
             command_guest: self.command_guest,
             program_name: self.program_name,
             policy: PhantomData,
@@ -293,6 +322,10 @@ impl DeploymentBuilder<Precompiled> {
 ///
 /// [`host`]: Self::host
 pub struct Deployment<T: WasiView + 'static> {
+    // Deployment name carried onto the runtime for trigger servers and the
+    // bootstrap log (the plan name, unless `build_inner` honored an operator
+    // `COMPONENT` override).
+    name: String,
     engine: Engine,
     linker: Linker<T>,
     options: RuntimeOptions,
@@ -313,7 +346,9 @@ pub struct Deployment<T: WasiView + 'static> {
     allow_empty: bool,
     // Resolve-on-miss hooks carried from the builder into `Runtime::new`.
     resolver: Option<Arc<dyn GuestResolver>>,
-    http_fallback: Option<HttpFallback>,
+    http_router: Option<HttpRouter>,
+    // Pre-bound HTTP trigger listener carried from the builder.
+    http_listener: Option<std::net::TcpListener>,
     // Explicit command-mode guest identity carried from the builder.
     command_guest: Option<GuestId>,
 }
@@ -345,6 +380,7 @@ impl<T: WasiView + 'static> Deployment<T> {
         };
 
         Ok(Self {
+            name: plan.name,
             engine,
             linker,
             options,
@@ -357,7 +393,8 @@ impl<T: WasiView + 'static> Deployment<T> {
             mode: plan.mode,
             allow_empty: plan.allow_empty,
             resolver: None,
-            http_fallback: None,
+            http_router: None,
+            http_listener: None,
             command_guest: None,
         })
     }
@@ -386,6 +423,13 @@ impl<T: WasiView> Deployment<T> {
         self
     }
 
+    /// The deployment name carried onto the runtime for trigger servers and
+    /// the bootstrap log.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     /// The mount registry built from the deployment's preopens.
     #[must_use]
     pub fn mounts(&self) -> Arc<MountRegistry> {
@@ -406,13 +450,19 @@ impl<T: WasiView> Deployment<T> {
 
     /// The builder-carried resolve-on-miss hooks, for `Runtime::new` to
     /// install before the deployment is consumed into a registry.
-    pub(crate) fn resolve_hooks(&self) -> (Option<Arc<dyn GuestResolver>>, Option<HttpFallback>) {
-        (self.resolver.clone(), self.http_fallback.clone())
+    pub(crate) fn resolve_hooks(&self) -> (Option<Arc<dyn GuestResolver>>, Option<HttpRouter>) {
+        (self.resolver.clone(), self.http_router.clone())
     }
 
     /// The builder-carried explicit command guest identity, if any.
     pub(crate) fn command_guest(&self) -> Option<GuestId> {
         self.command_guest.clone()
+    }
+
+    /// Take the builder-carried pre-bound HTTP listener, for `Runtime::new`
+    /// to carry onto the runtime.
+    pub(crate) const fn take_http_listener(&mut self) -> Option<std::net::TcpListener> {
+        self.http_listener.take()
     }
 
     /// Assemble the guest [`Registry`].
@@ -474,21 +524,12 @@ fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, Runt
     Ok((engine, linker, options))
 }
 
-// Initialize telemetry and the `COMPONENT` environment variable for the runtime.
+// Initialize telemetry for the runtime.
 //
 // Telemetry initialization is idempotent (`Telemetry::build`): the first call
 // in the process — here or in an embedder — installs the subscriber and
 // providers, and later deployments reuse them.
-fn init_env(name: &str) -> Result<()> {
-    if env::var_os("COMPONENT").is_none() {
-        // SAFETY: Environment variable modification is safe here because:
-        // 1. This runs during single-threaded initialization
-        // 2. Backend clients that depend on these vars are created after this
-        unsafe {
-            env::set_var("COMPONENT", name);
-        };
-    }
-
+fn init_telemetry(name: &str) -> Result<()> {
     let mut builder = Telemetry::new(name);
     if let Ok(endpoint) = env::var("OTEL_GRPC_URL") {
         builder = builder.endpoint(endpoint);

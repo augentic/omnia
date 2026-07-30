@@ -1,6 +1,8 @@
-//! HTTP trigger fallback seam: a fully dynamic deployment starts with zero
+//! Deployment HTTP router seam: a fully dynamic deployment starts with zero
 //! guests, and unrouted request paths are mapped to guest identities that a
 //! [`GuestResolver`] faults in on first use (RFC guest-resolution §4.5).
+//! A `Some` answer from the router claims the route, so a claimed route that
+//! cannot be served is a fault (the server's 500), never an ordinary miss.
 //!
 //! Driven through [`omnia_testkit::http::HttpHarness`] so routing is
 //! snapshotted once across requests — the production server's boot-frozen
@@ -100,7 +102,7 @@ async fn harness() -> Result<(HttpHarness<Bundle>, Runtime<Bundle>, Arc<TenantRe
     let deployment = DeploymentBuilder::new()
         .dynamic()
         .resolver(Arc::clone(&resolver) as Arc<dyn GuestResolver>)
-        .http_fallback(|path: &str| match path {
+        .http_router(|path: &str| match path {
             "/a" => Some(GuestId::from("a")),
             "/b" => Some(GuestId::from("b")),
             "/bad" => Some(GuestId::from("bad")),
@@ -127,7 +129,7 @@ async fn harness() -> Result<(HttpHarness<Bundle>, Runtime<Bundle>, Arc<TenantRe
 // own guest: the boot-frozen router never flips to catch-all for a late
 // guest, and a registry hit never re-resolves.
 #[test]
-fn fallback_faults_tenants_in() -> Result<()> {
+fn router_faults_tenants_in() -> Result<()> {
     fixture::RT.block_on(async {
         let (harness, runtime, resolver) = harness().await?;
 
@@ -152,19 +154,24 @@ fn fallback_faults_tenants_in() -> Result<()> {
     })
 }
 
-// A path the fallback declines stays unrouted, and a fallback identity the
-// resolver has no component for fails as unregistered — neither is cached.
+// A path the router declines stays an ordinary unmatched request (the
+// server's 404), while a claimed route whose identity nothing supplies is a
+// fault (the server's 500) — and neither outcome is cached.
 #[test]
-fn fallback_negative_outcomes() -> Result<()> {
+fn router_negative_outcomes() -> Result<()> {
     fixture::RT.block_on(async {
         let (harness, runtime, resolver) = harness().await?;
 
         let error = harness.get("/nope").await.expect_err("a declined path is unrouted");
         assert!(format!("{error:#}").contains("no route matched path"), "{error:#}");
-        assert_eq!(resolver.calls.load(Ordering::SeqCst), 0, "no fallback id, no resolve");
+        assert_eq!(resolver.calls.load(Ordering::SeqCst), 0, "no routed id, no resolve");
 
-        let error = harness.get("/missing").await.expect_err("an unknown tenant fails");
-        assert!(format!("{error:#}").contains("is not registered"), "{error:#}");
+        // The router claimed `/missing`, so the resolver's definitive miss is
+        // a served-route fault, not an ordinary 404.
+        let error = harness.get("/missing").await.expect_err("an unserved claimed route fails");
+        let rendered = format!("{error:#}");
+        assert!(rendered.contains("cannot be served"), "{rendered}");
+        assert!(rendered.contains("is not registered"), "{rendered}");
         assert!(
             runtime.registry().get(&GuestId::from("missing")).is_none(),
             "a definitive miss registers nothing"
@@ -175,11 +182,11 @@ fn fallback_negative_outcomes() -> Result<()> {
     })
 }
 
-// An installed fallback owns HTTP routing outright: a sole capable exporter
-// never becomes the catch-all, so a path the projection declines is a miss
+// An installed router owns HTTP routing outright: a sole capable exporter
+// never becomes the catch-all, so a path the router declines is a miss
 // even though a guest able to serve it exists.
 #[test]
-fn fallback_disables_catch_all() -> Result<()> {
+fn router_disables_catch_all() -> Result<()> {
     fixture::RT.block_on(async {
         let (_, runtime, _resolver) = harness().await?;
         runtime.register("resident", precompiled("http_routing_a_wasm.wasm")?).await?;
@@ -191,7 +198,7 @@ fn fallback_disables_catch_all() -> Result<()> {
             harness.get("/nope").await.expect_err("a declined path is a miss, not a catch-all");
         assert!(format!("{error:#}").contains("no route matched path"), "{error:#}");
 
-        // The projection's own targets still resolve.
+        // The router's own targets still resolve.
         let a = harness.get("/a").await?;
         assert!(String::from_utf8_lossy(a.body()).contains("guest a"), "{:?}", a.body());
 
@@ -199,18 +206,17 @@ fn fallback_disables_catch_all() -> Result<()> {
     })
 }
 
-// A fallback guest lacking `wasi:http/incoming-handler` is refused at
-// resolve-time registration — an error, not a partial route.
+// A claimed route to a guest lacking `wasi:http/incoming-handler` is refused
+// at resolve-time registration — a served-route fault, not a partial route.
 #[test]
-fn fallback_guest_without_handler_refused() -> Result<()> {
+fn router_guest_without_handler_refused() -> Result<()> {
     fixture::RT.block_on(async {
         let (harness, runtime, _resolver) = harness().await?;
 
         let error = harness.get("/bad").await.expect_err("a handler-less guest is refused");
-        assert!(
-            format!("{error:#}").contains("does not export interface `wasi:http/handler`"),
-            "{error:#}"
-        );
+        let rendered = format!("{error:#}");
+        assert!(rendered.contains("cannot be served"), "{rendered}");
+        assert!(rendered.contains("does not export interface `wasi:http/handler`"), "{rendered}");
         assert!(
             runtime.registry().get(&GuestId::from("bad")).is_none(),
             "a refused artifact must not publish the guest"

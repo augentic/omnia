@@ -1,9 +1,8 @@
-use std::env;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
-use omnia::{PatternRoutes, Runtime, StoreCtx, TriggerRouter};
+use omnia::{PatternRoutes, RoutingPolicy, Runtime, StoreCtx, TriggerRouter};
 use tracing::{Instrument, debug_span, instrument};
 
 use crate::host::WasiWebSocketView;
@@ -16,7 +15,7 @@ where
     B: Clone + Send + Sync + 'static,
     StoreCtx<B>: WasiWebSocketView,
 {
-    let component = env::var("COMPONENT").unwrap_or_else(|_| "unknown".into());
+    let component = state.name().to_owned();
     tracing::info!("starting websocket server for: {component}");
 
     // Capability probe: a guest exports the websocket handler exactly when its
@@ -27,6 +26,7 @@ where
         "websocket",
         state.registry().routes().websocket().clone(),
         DuplexIndices::new,
+        RoutingPolicy::CapabilityDefault,
     )?;
     if routing.is_inert() {
         tracing::info!("no guest exports the websocket handler; websocket trigger inert");

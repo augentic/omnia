@@ -40,8 +40,6 @@ pub const FORBIDDEN_HEADERS: [HeaderName; 9] = [
 
 #[derive(Debug, Clone, FromEnv)]
 pub struct ConnectOptions {
-    #[env(from = "HTTP_ADDR", default = "http://localhost:8080")]
-    pub addr: String,
     #[env(from = "HTTP_CONNECT_TIMEOUT", default = "10")]
     pub connect_timeout: u64,
 }
@@ -225,10 +223,7 @@ mod tests {
     use super::*;
 
     async fn test_client() -> HttpDefault {
-        let options = ConnectOptions {
-            addr: String::new(),
-            connect_timeout: 10,
-        };
+        let options = ConnectOptions { connect_timeout: 10 };
         HttpDefault::connect_with(options).await.unwrap()
     }
 

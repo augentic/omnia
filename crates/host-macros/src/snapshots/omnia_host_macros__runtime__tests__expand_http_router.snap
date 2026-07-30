@@ -1,6 +1,6 @@
 ---
 source: crates/host-macros/src/runtime.rs
-expression: "expand_pretty(quote!({\n    guests: [{ id: \"engine\", source: \"engine.wasm\" },], resolver:\n    CacheResolver::new(), http_fallback: mcp_http_fallback, hosts:\n    { WasiHttp: HttpDefault, WasiOtel: OtelDefault, },\n}))"
+expression: "expand_pretty(quote!({\n    guests: [{ id: \"engine\", source: \"engine.wasm\" },], resolver:\n    CacheResolver::new(), http_router: mcp_route, hosts:\n    { WasiHttp: HttpDefault, WasiOtel: OtelDefault, },\n}))"
 ---
 mod runtime {
     use anyhow::Result;
@@ -70,7 +70,7 @@ mod runtime {
                         ),
                     )
                     .resolver(CacheResolver::new())
-                    .http_fallback(mcp_http_fallback),
+                    .http_router(mcp_route),
             )
             .await
     }

@@ -13,7 +13,7 @@ use anyhow::{Result, anyhow};
 use clap::Parser as _;
 
 use crate::cli::{Cli, Command};
-use crate::dispatch::{GuestResolver, HttpFallback};
+use crate::dispatch::{GuestResolver, HttpRouter};
 use crate::registry::GuestId;
 use crate::runtime::Mode;
 use crate::{DeploymentBuilder, Manifest};
@@ -61,7 +61,8 @@ pub struct MainOptions {
     mode: Mode,
     manifest: Option<ManifestSource>,
     resolver: Option<Arc<dyn GuestResolver>>,
-    http_fallback: Option<HttpFallback>,
+    http_router: Option<HttpRouter>,
+    http_listener: Option<std::net::TcpListener>,
     invocation: Invocation,
     command_guest: Option<GuestId>,
 }
@@ -74,7 +75,8 @@ impl MainOptions {
             mode,
             manifest: None,
             resolver: None,
-            http_fallback: None,
+            http_router: None,
+            http_listener: None,
             invocation: Invocation::OmniaCli,
             command_guest: None,
         }
@@ -96,16 +98,27 @@ impl MainOptions {
         self
     }
 
-    /// Install the HTTP trigger fallback: the deployment's path→identity
-    /// projection for request paths no static route matches. Installing one
-    /// makes HTTP routing table-driven only — a sole exporter never becomes
-    /// a catch-all, and a path the projection declines is a warn + 404.
+    /// Install the HTTP router: the deployment's path→identity mapping for
+    /// request paths no static route matches. Installing one makes HTTP
+    /// routing table-driven only — a sole exporter never becomes a
+    /// catch-all, a path the router declines is an ordinary 404, and a
+    /// claimed route that cannot be served is a 500.
     #[must_use]
-    pub fn http_fallback<F>(mut self, fallback: F) -> Self
+    pub fn http_router<F>(mut self, router: F) -> Self
     where
         F: Fn(&str) -> Option<GuestId> + Send + Sync + 'static,
     {
-        self.http_fallback = Some(Arc::new(fallback));
+        self.http_router = Some(Arc::new(router));
+        self
+    }
+
+    /// Supply a pre-bound TCP listener for the HTTP trigger (`None` keeps
+    /// the `HTTP_ADDR` environment bind). The trigger server adopts it at
+    /// boot, and every guest store sees `HTTP_ADDR` set to its local
+    /// address.
+    #[must_use]
+    pub fn http_listener(mut self, listener: Option<std::net::TcpListener>) -> Self {
+        self.http_listener = listener;
         self
     }
 
@@ -152,7 +165,8 @@ pub(super) struct EntryPlan {
     args: Vec<String>,
     dynamic: bool,
     resolver: Option<Arc<dyn GuestResolver>>,
-    http_fallback: Option<HttpFallback>,
+    http_router: Option<HttpRouter>,
+    http_listener: Option<std::net::TcpListener>,
     command_guest: Option<GuestId>,
     program_name: Option<String>,
 }
@@ -168,8 +182,11 @@ impl EntryPlan {
         if let Some(resolver) = self.resolver {
             builder = builder.resolver(resolver);
         }
-        if let Some(fallback) = self.http_fallback {
-            builder = builder.http_fallback(move |path| fallback(path));
+        if let Some(router) = self.http_router {
+            builder = builder.http_router_shared(router);
+        }
+        if let Some(listener) = self.http_listener {
+            builder = builder.http_listener(listener);
         }
         if let Some(id) = self.command_guest {
             builder = builder.command_guest(id);
@@ -194,7 +211,8 @@ pub(super) fn plan(
         mode,
         manifest,
         resolver,
-        http_fallback,
+        http_router,
+        http_listener,
         invocation,
         command_guest,
     } = options;
@@ -223,7 +241,8 @@ pub(super) fn plan(
                 args: guest_args,
                 dynamic,
                 resolver,
-                http_fallback,
+                http_router,
+                http_listener,
                 command_guest,
                 program_name: Some(program_name),
             })
@@ -260,7 +279,8 @@ pub(super) fn plan(
                         args,
                         dynamic,
                         resolver,
-                        http_fallback,
+                        http_router,
+                        http_listener,
                         command_guest,
                         program_name: None,
                     })

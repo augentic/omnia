@@ -17,7 +17,7 @@ use hyper::body::{Body, Frame, Incoming, SizeHint};
 use hyper::header::{FORWARDED, HOST};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use omnia::{EnsureError, Guest, HttpRoutes, Runtime, StoreCtx, TriggerRouter};
+use omnia::{Guest, HttpRoutes, RouteRefusal, Runtime, StoreCtx, TriggerRouter};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
@@ -37,29 +37,43 @@ where
     B: Clone + Send + Sync + 'static,
     StoreCtx<B>: WasiHttpView,
 {
-    let component = env::var("COMPONENT").unwrap_or_else(|_| "unknown".into());
+    let component = state.name().to_owned();
+
+    // Adopt the deployment-supplied listener up front: even the inert path
+    // consumes it, so an unused listener is dropped rather than parked on
+    // the runtime.
+    let supplied = state.take_http_listener();
 
     // Capability probe: a guest exports `wasi:http/incoming-handler` exactly
     // when its typed `ServiceIndices` resolve. Build the per-guest indices and
-    // the router that selects among them once, up front. A deployment that
-    // installs an `http_fallback` owns the path→identity projection, so
-    // routing is table-driven only: a sole exporter never becomes a
-    // catch-all, and an unmatched path is a miss for the fallback to answer.
-    let table = state.registry().routes().http().clone();
-    let routing = if state.http_fallback().is_some() {
-        TriggerRouter::build_routed(state.registry(), "http", table, ServiceIndices::new)?
-    } else {
-        TriggerRouter::build(state.registry(), "http", table, ServiceIndices::new)?
-    };
-    // A fallback-equipped deployment may start inert and fault guests in per
-    // request; only a deployment with neither routes nor fallback stays quiet.
-    if routing.is_inert() && state.http_fallback().is_none() {
+    // the router that selects among them once, up front; the runtime derives
+    // the routing policy from its deployment (an installed `http_router`
+    // owns HTTP routing outright, so routing is table-driven only).
+    let routing = TriggerRouter::build(
+        state.registry(),
+        "http",
+        state.registry().routes().http().clone(),
+        ServiceIndices::new,
+        state.http_routing_policy(),
+    )?;
+    // A router-equipped deployment may start inert and fault guests in per
+    // request; only a deployment with neither routes nor router stays quiet.
+    if routing.is_inert() && state.http_router().is_none() {
         tracing::info!("no guest exports the http handler; http trigger inert");
         return Ok(());
     }
 
-    let addr = env::var("HTTP_ADDR").unwrap_or_else(|_| HTTP_ADDR.into());
-    let listener = TcpListener::bind(&addr).await?;
+    // A deployment-supplied listener is authoritative (its local address is
+    // already the guest-visible `HTTP_ADDR`); without one, bind from the
+    // `HTTP_ADDR` environment variable.
+    let listener = if let Some(listener) = supplied {
+        listener.set_nonblocking(true).context("configuring supplied http listener")?;
+        TcpListener::from_std(listener).context("adopting supplied http listener")?
+    } else {
+        let addr = env::var("HTTP_ADDR").unwrap_or_else(|_| HTTP_ADDR.into());
+        TcpListener::bind(&addr).await.with_context(|| format!("binding {addr}"))?
+    };
+    let addr = listener.local_addr().context("reading http listener address")?;
     tracing::info!("{component} http server listening on: {addr}");
 
     let handler = Handler {
@@ -138,42 +152,36 @@ where
     B: Clone + Send + Sync + 'static,
     StoreCtx<B>: WasiHttpView,
 {
-    // Resolve an unrouted path through the deployment's fallback: identity →
-    // `ensure_guest` (resolve-on-miss) → request-local handler indices. An
-    // `Err` carries the ready 404/500 response. No guest able to serve the
-    // request — no fallback, a `None` projection, the resolver's definitive
-    // miss, or a guest without a `wasi:http` handler export — is a warn +
-    // 404: loud in the log, ordinary on the wire. Only a resolution *fault*
-    // is a 500.
-    async fn fallback(
+    // Resolve an unrouted path through the runtime's shared late-routing
+    // helper (`Runtime::route_http`: router → `ensure_guest`, resolve-on-miss
+    // included), then probe request-local handler indices against the exact
+    // `InstancePre` this request instantiates. An `Err` carries the ready
+    // 404/500 response: an unmatched path (no router installed, or the
+    // router declined) is an ordinary 404, while a claimed route that cannot
+    // be served is a deployment fault — an error + 500, never hidden as a
+    // miss.
+    async fn route(
         &self, path: &str,
     ) -> std::result::Result<(Arc<Guest<StoreCtx<B>>>, ServiceIndices), hyper::Response<OutgoingBody>>
     {
-        let Some(target) = self.state.http_fallback().and_then(|fallback| fallback(path)) else {
-            tracing::warn!(path, "no route or fallback target matched; returning 404");
-            return Err(not_found());
-        };
-        let guest = match self.state.ensure_guest(&target, "wasi:http/handler").await {
+        let guest = match self.state.route_http(path).await {
             Ok(guest) => guest,
-            Err(error @ (EnsureError::Unresolved(_) | EnsureError::ExportMismatch { .. })) => {
-                tracing::warn!(path, guest = %target, %error, "no guest can serve the request; returning 404");
-                return Err(not_found());
-            }
-            Err(error @ EnsureError::ResolveFailed(_)) => {
-                let error = anyhow::Error::from(error);
-                tracing::error!(path, "fallback guest resolution failed: {error:#}");
-                return Err(internal_error());
-            }
+            Err(RouteRefusal::NotFound) => return Err(not_found()),
+            // Already logged at error level by the helper.
+            Err(RouteRefusal::Failed(_)) => return Err(internal_error()),
         };
+        // Belt-and-braces: `ensure_guest` already export-validates both the
+        // resolved and the concurrently registered component, so this arm is
+        // not expected to fire; keep the outcome aligned (error + 500) if it
+        // ever does.
         let indices = match ServiceIndices::new(guest.instance_pre()) {
             Ok(indices) => indices,
             Err(error) => {
-                tracing::warn!(
+                tracing::error!(
                     path,
-                    guest = %target,
-                    "fallback guest lacks the http handler; returning 404: {error:#}"
+                    "claimed http route guest lacks the http handler; returning 500: {error:#}"
                 );
-                return Err(not_found());
+                return Err(internal_error());
             }
         };
         Ok((guest, indices))
@@ -197,7 +205,7 @@ where
 
         // Resolve the guest by request path: a static route hit dispatches
         // through the boot-built router; a miss consults the deployment's
-        // fallback, whose identity goes through `ensure_guest` (and hence
+        // HTTP router, whose identity goes through `ensure_guest` (and hence
         // resolve-on-miss) with request-local handler indices probed against
         // the exact `InstancePre` this request instantiates.
         let guest;
@@ -209,9 +217,9 @@ where
                 guest = self.state.registry().get(guest_id).expect("a capable guest is registered");
                 indices
             } else {
-                match self.fallback(request.uri().path()).await {
-                    Ok((fallback_guest, indices)) => {
-                        guest = fallback_guest;
+                match self.route(request.uri().path()).await {
+                    Ok((routed_guest, indices)) => {
+                        guest = routed_guest;
                         late_indices = indices;
                         &late_indices
                     }

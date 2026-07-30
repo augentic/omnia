@@ -20,11 +20,11 @@ use wasmtime::{Engine, Store};
 
 use crate::deployment::GuestArtifact;
 use crate::dispatch::{
-    EnsureError, GuestResolver, HttpFallback, ResolveHook, serve_guest, serve_links,
+    EnsureError, GuestResolver, HttpRouter, ResolveHook, serve_guest, serve_links,
 };
 use crate::host::FutureResult;
 use crate::mount::MountRegistry;
-use crate::registry::{Guest, GuestId};
+use crate::registry::{Guest, GuestId, RoutingPolicy};
 use crate::store::HasLimits;
 use crate::{
     Deployment, DeploymentBuilder, Dispatcher, Registry, RuntimeOptions, StoreBase, StoreCtx,
@@ -225,7 +225,7 @@ where
     tracing::info!(
         mode = if mode.is_command() { "command" } else { "server" },
         guests = runtime.registry().len(),
-        component = env::var("COMPONENT").unwrap_or_else(|_| "unknown".into()),
+        component = runtime.name(),
         "omnia ready",
     );
 }
@@ -303,6 +303,21 @@ impl From<ExitStatus> for std::process::ExitCode {
     }
 }
 
+/// Why [`Runtime::route_http`] produced no guest for a request path.
+///
+/// Typed so the HTTP trigger server and the testkit harness map late-routing
+/// outcomes to the same wire semantics: an ordinary miss is a 404, a claimed
+/// route that cannot be served is a 500.
+#[derive(Debug)]
+pub enum RouteRefusal {
+    /// No [`HttpRouter`] is installed, or the router declined the path — an
+    /// ordinary unmatched request (a 404 on the wire).
+    NotFound,
+    /// The router claimed the path but the guest could not be served — a
+    /// deployment fault (a 500 on the wire), never an ordinary miss.
+    Failed(EnsureError),
+}
+
 /// Connected host runtime: registry, argv, mounts, and backend bundle.
 ///
 /// A thin handle over shared state: `clone()` bumps two reference counts, so
@@ -321,15 +336,25 @@ pub struct Runtime<B: 'static> {
 type Flight<B> = Shared<BoxFuture<'static, Result<Arc<Guest<StoreCtx<B>>>, EnsureError>>>;
 
 struct RuntimeInner<B: 'static> {
+    // Deployment name read by trigger servers and the bootstrap log —
+    // carried state, never a process environment variable.
+    name: Arc<str>,
     registry: Arc<Registry<StoreCtx<B>>>,
     args: Arc<Vec<String>>,
     mounts: Arc<MountRegistry>,
+    // One-shot deployment-supplied HTTP listener, adopted by the HTTP
+    // trigger server at boot ([`Runtime::take_http_listener`]).
+    http_listener: Mutex<Option<std::net::TcpListener>>,
+    // Deployment-derived guest environment overlay (`HTTP_ADDR` from the
+    // supplied listener), applied over the inherited host environment in
+    // every store.
+    guest_env: Arc<Vec<(String, String)>>,
     backends: B,
     // Resolve-on-miss seam (RFC guest-resolution §4.5). Install-once: hooks
     // ride the deployment builder (or the `from_parts` chainable setters) and
     // never change for the life of the runtime.
     resolver: OnceLock<Arc<dyn GuestResolver>>,
-    http_fallback: OnceLock<HttpFallback>,
+    http_router: OnceLock<HttpRouter>,
     // Explicit command-mode guest identity; absent, command mode routes to
     // the sole static `wasi:cli/run` exporter.
     command_guest: OnceLock<GuestId>,
@@ -341,16 +366,36 @@ struct RuntimeInner<B: 'static> {
 
 impl<B: 'static> RuntimeInner<B> {
     fn new(
-        registry: Arc<Registry<StoreCtx<B>>>, args: Arc<Vec<String>>, mounts: Arc<MountRegistry>,
-        backends: B,
+        name: Arc<str>, registry: Arc<Registry<StoreCtx<B>>>, args: Arc<Vec<String>>,
+        mounts: Arc<MountRegistry>, http_listener: Option<std::net::TcpListener>, backends: B,
     ) -> Self {
+        // A supplied listener fixes the guest-visible `HTTP_ADDR` to its
+        // actual local address; without one, guests keep the plain inherited
+        // environment.
+        let guest_env = http_listener
+            .as_ref()
+            .and_then(|listener| match listener.local_addr() {
+                Ok(addr) => Some(("HTTP_ADDR".to_owned(), addr.to_string())),
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        "supplied http listener has no local address; not injecting HTTP_ADDR"
+                    );
+                    None
+                }
+            })
+            .into_iter()
+            .collect();
         Self {
+            name,
             registry,
             args,
             mounts,
+            http_listener: Mutex::new(http_listener),
+            guest_env: Arc::new(guest_env),
             backends,
             resolver: OnceLock::new(),
-            http_fallback: OnceLock::new(),
+            http_router: OnceLock::new(),
             command_guest: OnceLock::new(),
             flights: Mutex::new(HashMap::new()),
         }
@@ -384,24 +429,28 @@ impl<B: Backends> Runtime<B> {
     where
         L: FnOnce(&mut Deployment<StoreCtx<B>>) -> Result<()>,
     {
+        let name = Arc::<str>::from(deployment.name());
         let args = Arc::new(deployment.args().to_vec());
         link(&mut deployment).context("linking hosts")?;
         let backends = B::connect().await.context("connecting backends")?;
         let mounts = deployment.mounts();
-        let (resolver, http_fallback) = deployment.resolve_hooks();
+        let (resolver, http_router) = deployment.resolve_hooks();
+        let http_listener = deployment.take_http_listener();
         let command_guest = deployment.command_guest();
 
         let runtime = Self::with_inner(Arc::new(RuntimeInner::new(
+            name,
             Arc::new(deployment.into_registry().context("assembling registry")?),
             args,
             mounts,
+            http_listener,
             backends,
         )));
         if let Some(resolver) = resolver {
             runtime.install_resolver(resolver);
         }
-        if let Some(fallback) = http_fallback {
-            runtime.install_http_fallback(fallback);
+        if let Some(router) = http_router {
+            runtime.install_http_router(router);
         }
         if let Some(id) = command_guest {
             runtime.install_command_guest(id);
@@ -434,12 +483,35 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// Low-level constructor: unlike [`Runtime::new`] it does not wire the
     /// host-mediated link serve side — a caller whose deployment declares
     /// `link` interfaces must run [`serve_links`] itself before dispatching.
+    /// The runtime name defaults to `omnia`.
     #[must_use]
     pub fn from_parts(
         registry: Arc<Registry<StoreCtx<B>>>, args: Vec<String>, mounts: Arc<MountRegistry>,
         backends: B,
     ) -> Self {
-        Self::with_inner(Arc::new(RuntimeInner::new(registry, Arc::new(args), mounts, backends)))
+        Self::with_inner(Arc::new(RuntimeInner::new(
+            Arc::from("omnia"),
+            registry,
+            Arc::new(args),
+            mounts,
+            None,
+            backends,
+        )))
+    }
+
+    /// The deployment name — read by trigger servers and the bootstrap log.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.inner.name
+    }
+
+    /// Take the deployment-supplied pre-bound HTTP listener, if any.
+    ///
+    /// One-shot: the HTTP trigger server adopts it at boot; later calls
+    /// return `None` (falling back to the `HTTP_ADDR` environment bind).
+    #[must_use]
+    pub fn take_http_listener(&self) -> Option<std::net::TcpListener> {
+        self.inner.http_listener.lock().unwrap_or_else(PoisonError::into_inner).take()
     }
 
     /// Install a [`GuestResolver`] consulted on dispatch-path registry misses
@@ -454,25 +526,40 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         self
     }
 
-    /// Install an [`HttpFallback`] mapping unrouted request paths to guest
+    /// Install an [`HttpRouter`] mapping unrouted request paths to guest
     /// identities, chainable after [`from_parts`](Self::from_parts).
     ///
-    /// Deployments built through [`DeploymentBuilder`] supply the fallback via
-    /// [`DeploymentBuilder::http_fallback`] instead. Install-once: a second
-    /// fallback is ignored with a warning.
+    /// Deployments built through [`DeploymentBuilder`] supply the router via
+    /// [`DeploymentBuilder::http_router`] instead. Install-once: a second
+    /// router is ignored with a warning.
     #[must_use]
-    pub fn with_http_fallback<F>(self, fallback: F) -> Self
+    pub fn with_http_router<F>(self, router: F) -> Self
     where
         F: Fn(&str) -> Option<GuestId> + Send + Sync + 'static,
     {
-        self.install_http_fallback(Arc::new(fallback));
+        self.install_http_router(Arc::new(router));
         self
     }
 
-    /// The installed HTTP trigger fallback, if any.
+    /// The installed HTTP router, if any.
     #[must_use]
-    pub fn http_fallback(&self) -> Option<HttpFallback> {
-        self.inner.http_fallback.get().cloned()
+    pub fn http_router(&self) -> Option<HttpRouter> {
+        self.inner.http_router.get().cloned()
+    }
+
+    /// How the HTTP trigger routes when its table is empty: a deployment
+    /// that installs an [`HttpRouter`] owns HTTP routing outright, so
+    /// routing is table-driven only — a sole exporter never becomes a
+    /// catch-all, and an unmatched path is a miss for the router to
+    /// answer. Shared by the trigger server and the testkit harness so the
+    /// choice cannot drift between them.
+    #[must_use]
+    pub fn http_routing_policy(&self) -> RoutingPolicy {
+        if self.inner.http_router.get().is_some() {
+            RoutingPolicy::TableOnly
+        } else {
+            RoutingPolicy::CapabilityDefault
+        }
     }
 
     /// Route command mode to an explicit guest identity, chainable after
@@ -506,9 +593,9 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         }));
     }
 
-    fn install_http_fallback(&self, fallback: HttpFallback) {
-        if self.inner.http_fallback.set(fallback).is_err() {
-            tracing::warn!("http fallback already installed; ignoring");
+    fn install_http_router(&self, router: HttpRouter) {
+        if self.inner.http_router.set(router).is_err() {
+            tracing::warn!("http router already installed; ignoring");
         }
     }
 
@@ -546,6 +633,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
             .dispatcher(Arc::clone(&self.dispatcher))
             .args(Arc::clone(&self.inner.args))
             .mounts(Arc::clone(&self.inner.mounts))
+            .env(Arc::clone(&self.inner.guest_env))
             .build();
         StoreCtx {
             base,
@@ -635,6 +723,40 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
 
         tracing::info!(guest = %id, "guest registered");
         Ok(())
+    }
+
+    /// Resolve an unrouted HTTP request path through the deployment's
+    /// [`HttpRouter`]: path → identity →
+    /// [`ensure_guest`](Self::ensure_guest) (and hence resolve-on-miss).
+    /// Shared by the HTTP trigger server and the testkit harness so the
+    /// outcome semantics cannot drift between them.
+    ///
+    /// A router answer of `Some(id)` claims the route, so every failure to
+    /// serve it — a definitive resolver miss, a resolution fault, or a
+    /// guest without the `wasi:http` handler export — is
+    /// [`RouteRefusal::Failed`], logged at error level (a 500 on the
+    /// wire). `None` from the router, or no router installed, is
+    /// [`RouteRefusal::NotFound`]: an ordinary unmatched path (a 404).
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`RouteRefusal`] when no guest can be produced for `path`.
+    pub async fn route_http(&self, path: &str) -> Result<Arc<Guest<StoreCtx<B>>>, RouteRefusal> {
+        let Some(router) = self.inner.http_router.get() else {
+            tracing::debug!(path, "no route matched and no http router installed");
+            return Err(RouteRefusal::NotFound);
+        };
+        let Some(target) = router(path) else {
+            tracing::debug!(path, "no route matched and the http router declined the path");
+            return Err(RouteRefusal::NotFound);
+        };
+        match self.ensure_guest(&target, "wasi:http/handler").await {
+            Ok(guest) => Ok(guest),
+            Err(error) => {
+                tracing::error!(path, guest = %target, %error, "claimed http route cannot be served");
+                Err(RouteRefusal::Failed(error))
+            }
+        }
     }
 
     /// Return the registered guest for `id`, faulting it in through the

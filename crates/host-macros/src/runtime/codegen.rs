@@ -15,6 +15,7 @@ pub struct Codegen {
     pub server_types: Vec<Path>,
     pub backends_ty: TokenStream,
     pub backends_def: TokenStream,
+    pub listener_binding: TokenStream,
     pub main_options: TokenStream,
 }
 
@@ -27,6 +28,7 @@ impl From<&Config> for Codegen {
 
         let (backends_ty, backends_def) = emit_backends(host_entries);
 
+        let listener_binding = emit_listener_binding(config);
         let main_options = emit_main_options(config);
 
         Self {
@@ -35,8 +37,28 @@ impl From<&Config> for Codegen {
             server_types,
             backends_ty,
             backends_def,
+            listener_binding,
             main_options,
         }
+    }
+}
+
+/// Emit the `let http_listener` binding evaluated at the top of the generated
+/// `main`: the `http_listener:` expression has type
+/// `anyhow::Result<Option<std::net::TcpListener>>`, and an `Err` is a startup
+/// failure. Empty when the invocation omits the key.
+fn emit_listener_binding(config: &Config) -> TokenStream {
+    let Some(expr) = &config.http_listener else {
+        return TokenStream::new();
+    };
+    quote! {
+        let http_listener: ::std::option::Option<::std::net::TcpListener> = match #expr {
+            ::std::result::Result::Ok(listener) => listener,
+            ::std::result::Result::Err(error) => {
+                ::std::eprintln!("error: {error:#}");
+                return ::std::process::ExitCode::FAILURE;
+            }
+        };
     }
 }
 
@@ -49,7 +71,10 @@ fn emit_main_options(config: &Config) -> TokenStream {
     };
     let manifest = emit_manifest_source(config);
     let resolver = config.resolver.as_ref().map(|expr| quote! { .resolver(#expr) });
-    let http_fallback = config.http_fallback.as_ref().map(|expr| quote! { .http_fallback(#expr) });
+    let http_router = config.http_router.as_ref().map(|expr| quote! { .http_router(#expr) });
+    // The binding emitted by `emit_listener_binding` above.
+    let http_listener =
+        config.http_listener.as_ref().map(|_| quote! { .http_listener(http_listener) });
     let program = config.program.as_ref().map(|expr| quote! { .direct_command(#expr) });
     let command_guest = config.command_guest.as_ref().map(|expr| quote! { .command_guest(#expr) });
 
@@ -57,7 +82,8 @@ fn emit_main_options(config: &Config) -> TokenStream {
         omnia::MainOptions::new(#mode)
             #manifest
             #resolver
-            #http_fallback
+            #http_router
+            #http_listener
             #program
             #command_guest
     }

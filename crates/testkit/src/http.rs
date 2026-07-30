@@ -3,21 +3,22 @@
 //! [`HttpHarness`] mirrors the runtime's HTTP trigger server
 //! (`crates/wasi-http/src/host/server.rs`) — snapshot the trigger router once
 //! at construction (the analogue of the server's boot), then per request
-//! resolve the guest by path (static route first, deployment fallback second),
+//! resolve the guest by path (static route first, the deployment's HTTP
+//! router second, through the runtime's shared `route_http` helper),
 //! instantiate it fresh, hand it a `wasi:http` request, and convert the
 //! response back — but skips the TCP socket and collects the response body
 //! eagerly so a test can assert on it directly. The free helpers ([`handle`],
 //! [`get`], [`post`], [`delete`], [`post_json`]) wrap a single-use harness;
 //! a scenario spanning several requests (e.g. dynamic registration through
-//! the fallback) must drive one harness so routing keeps the production
-//! server's boot-frozen lifetime.
+//! the deployment's router) must drive one harness so routing keeps the
+//! production server's boot-frozen lifetime.
 
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, anyhow, ensure};
 use bytes::Bytes;
 use http_body_util::{BodyExt as _, Full};
-use omnia::{Guest, HttpRoutes, Runtime, StoreCtx, TriggerRouter};
+use omnia::{Guest, HttpRoutes, RouteRefusal, Runtime, StoreCtx, TriggerRouter};
 use wasmtime_wasi_http::p3::WasiHttpView;
 use wasmtime_wasi_http::p3::bindings::ServiceIndices;
 use wasmtime_wasi_http::p3::bindings::http::types::{self as wasi};
@@ -43,34 +44,35 @@ where
     /// # Errors
     ///
     /// Returns an error if the router cannot be built, or if no guest exports
-    /// the HTTP handler and no fallback is installed (mirroring the server's
-    /// inert check).
+    /// the HTTP handler and no deployment router is installed (mirroring the
+    /// server's inert check).
     pub fn new(runtime: Runtime<B>) -> Result<Self> {
-        // Mirror the production server's boot: a deployment that installs an
-        // `http_fallback` owns the path→identity projection, so routing is
-        // table-driven only and a sole exporter never becomes a catch-all.
-        let table = runtime.registry().routes().http().clone();
-        let routing = if runtime.http_fallback().is_some() {
-            TriggerRouter::build_routed(runtime.registry(), "http", table, ServiceIndices::new)?
-        } else {
-            TriggerRouter::build(runtime.registry(), "http", table, ServiceIndices::new)?
-        };
+        // The runtime derives the routing policy from its deployment, so the
+        // harness cannot drift from the production server's boot.
+        let routing = TriggerRouter::build(
+            runtime.registry(),
+            "http",
+            runtime.registry().routes().http().clone(),
+            ServiceIndices::new,
+            runtime.http_routing_policy(),
+        )?;
         ensure!(
-            !routing.is_inert() || runtime.http_fallback().is_some(),
+            !routing.is_inert() || runtime.http_router().is_some(),
             "no guest exports the http handler"
         );
         Ok(Self { runtime, routing })
     }
 
-    /// Drive one request through the two-tier path (static route, then
-    /// deployment fallback) and return its fully-collected response.
+    /// Drive one request through the two-tier path (static route, then the
+    /// deployment's HTTP router) and return its fully-collected response.
     ///
     /// # Errors
     ///
-    /// Returns an error if no route or fallback matches the request path, the
-    /// fallback guest cannot be resolved or lacks the handler, the guest
-    /// traps or returns an error, or the response cannot be converted and
-    /// collected.
+    /// Returns an error if no route matches and the router declines the
+    /// request path (`no route matched path`, the server's 404), a
+    /// router-claimed route cannot be served (`cannot be served`, the
+    /// server's 500), the guest traps or returns an error, or the response
+    /// cannot be converted and collected.
     pub async fn handle(&self, request: http::Request<Bytes>) -> Result<http::Response<Bytes>> {
         let path = request.uri().path().to_owned();
         let guest: Arc<Guest<StoreCtx<B>>>;
@@ -82,22 +84,20 @@ where
                 self.runtime.registry().get(guest_id).context("resolved guest is registered")?;
             indices
         } else {
-            // Static miss: fallback → ensure (resolve-on-miss) →
-            // request-local indices, as the production server does.
-            let target = self
-                .runtime
-                .http_fallback()
-                .and_then(|fallback| fallback(&path))
-                .with_context(|| format!("no route matched path `{path}`"))?;
-            guest = self
-                .runtime
-                .ensure_guest(&target, "wasi:http/handler")
-                .await
-                .with_context(|| format!("resolving fallback guest for path `{path}`"))?;
-            late_indices =
-                ServiceIndices::new(guest.instance_pre())
-                    .map_err(anyhow::Error::from)
-                    .with_context(|| format!("fallback guest `{target}` lacks the http handler"))?;
+            // Static miss: the deployment's HTTP router → ensure
+            // (resolve-on-miss) → request-local indices, through the same
+            // shared helper as the production server, so the refusal
+            // semantics (ordinary 404 vs claimed-route 500) cannot drift.
+            guest = self.runtime.route_http(&path).await.map_err(|refusal| match refusal {
+                RouteRefusal::NotFound => anyhow!("no route matched path `{path}`"),
+                RouteRefusal::Failed(error) => anyhow::Error::from(error)
+                    .context(format!("claimed route `{path}` cannot be served")),
+            })?;
+            late_indices = ServiceIndices::new(guest.instance_pre())
+                .map_err(anyhow::Error::from)
+                .with_context(|| {
+                format!("claimed route `{path}` guest lacks the http handler")
+            })?;
             &late_indices
         };
 
