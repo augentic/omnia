@@ -13,7 +13,7 @@ use anyhow::{Result, anyhow};
 use clap::Parser as _;
 
 use crate::cli::{Cli, Command};
-use crate::dispatch::GuestResolver;
+use crate::dispatch::{GuestResolver, HttpFallback};
 use crate::registry::GuestId;
 use crate::runtime::Mode;
 use crate::{DeploymentBuilder, Manifest};
@@ -61,6 +61,7 @@ pub struct MainOptions {
     mode: Mode,
     manifest: Option<ManifestSource>,
     resolver: Option<Arc<dyn GuestResolver>>,
+    http_fallback: Option<HttpFallback>,
     invocation: Invocation,
     command_guest: Option<GuestId>,
 }
@@ -73,6 +74,7 @@ impl MainOptions {
             mode,
             manifest: None,
             resolver: None,
+            http_fallback: None,
             invocation: Invocation::OmniaCli,
             command_guest: None,
         }
@@ -91,6 +93,19 @@ impl MainOptions {
     #[must_use]
     pub fn resolver<R: GuestResolver>(mut self, resolver: R) -> Self {
         self.resolver = Some(Arc::new(resolver));
+        self
+    }
+
+    /// Install the HTTP trigger fallback: the deployment's path→identity
+    /// projection for request paths no static route matches. Installing one
+    /// makes HTTP routing table-driven only — a sole exporter never becomes
+    /// a catch-all, and a path the projection declines is a warn + 404.
+    #[must_use]
+    pub fn http_fallback<F>(mut self, fallback: F) -> Self
+    where
+        F: Fn(&str) -> Option<GuestId> + Send + Sync + 'static,
+    {
+        self.http_fallback = Some(Arc::new(fallback));
         self
     }
 
@@ -137,6 +152,7 @@ pub(super) struct EntryPlan {
     args: Vec<String>,
     dynamic: bool,
     resolver: Option<Arc<dyn GuestResolver>>,
+    http_fallback: Option<HttpFallback>,
     command_guest: Option<GuestId>,
     program_name: Option<String>,
 }
@@ -151,6 +167,9 @@ impl EntryPlan {
         }
         if let Some(resolver) = self.resolver {
             builder = builder.resolver(resolver);
+        }
+        if let Some(fallback) = self.http_fallback {
+            builder = builder.http_fallback(move |path| fallback(path));
         }
         if let Some(id) = self.command_guest {
             builder = builder.command_guest(id);
@@ -175,6 +194,7 @@ pub(super) fn plan(
         mode,
         manifest,
         resolver,
+        http_fallback,
         invocation,
         command_guest,
     } = options;
@@ -203,6 +223,7 @@ pub(super) fn plan(
                 args: guest_args,
                 dynamic,
                 resolver,
+                http_fallback,
                 command_guest,
                 program_name: Some(program_name),
             })
@@ -239,6 +260,7 @@ pub(super) fn plan(
                         args,
                         dynamic,
                         resolver,
+                        http_fallback,
                         command_guest,
                         program_name: None,
                     })

@@ -49,6 +49,7 @@ fn emit_main_options(config: &Config) -> TokenStream {
     };
     let manifest = emit_manifest_source(config);
     let resolver = config.resolver.as_ref().map(|expr| quote! { .resolver(#expr) });
+    let http_fallback = config.http_fallback.as_ref().map(|expr| quote! { .http_fallback(#expr) });
     let program = config.program.as_ref().map(|expr| quote! { .direct_command(#expr) });
     let command_guest = config.command_guest.as_ref().map(|expr| quote! { .command_guest(#expr) });
 
@@ -56,6 +57,7 @@ fn emit_main_options(config: &Config) -> TokenStream {
         omnia::MainOptions::new(#mode)
             #manifest
             #resolver
+            #http_fallback
             #program
             #command_guest
     }

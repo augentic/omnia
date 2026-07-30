@@ -11,7 +11,10 @@
 //! [`Router`] layers the capability-based default routing of the guest-registry
 //! design over a table: with no routes configured a sole handler exporter is the
 //! catch-all for its trigger, zero exporters is inert, and two or more exporters
-//! require explicit routes to disambiguate.
+//! require explicit routes to disambiguate. A deployment that installs a
+//! path→identity projection (the HTTP trigger's `http_fallback`) opts out of
+//! the capability default via [`Router::build_routed`]: routing is then
+//! table-driven only, and an unmatched key is a miss — never a fan-in.
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -215,15 +218,7 @@ impl<R: Resolver> Router<R> {
     /// disambiguate.
     pub fn build(trigger: &str, capable: &[GuestId], resolver: R) -> Result<Self> {
         if !resolver.is_empty() {
-            for target in resolver.targets() {
-                if !capable.contains(target) {
-                    bail!(
-                        "route for trigger `{trigger}` names `{target}`, which does not export \
-                         the `{trigger}` handler"
-                    );
-                }
-            }
-            return Ok(Self::Routed(resolver));
+            return Self::routed(trigger, capable, resolver);
         }
 
         match capable {
@@ -237,6 +232,35 @@ impl<R: Resolver> Router<R> {
                 )
             }
         }
+    }
+
+    /// Decide how `trigger` routes when the deployment carries its own
+    /// key→identity projection (e.g. the HTTP trigger's `http_fallback`):
+    /// routing is table-driven only, and a sole exporter never becomes a
+    /// catch-all — an unmatched key is a miss for the projection to answer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a route targets a guest that does not export the
+    /// handler.
+    pub fn build_routed(trigger: &str, capable: &[GuestId], resolver: R) -> Result<Self> {
+        if resolver.is_empty() {
+            return Ok(Self::Inert);
+        }
+        Self::routed(trigger, capable, resolver)
+    }
+
+    /// Validate that every route target is capable and wrap the table.
+    fn routed(trigger: &str, capable: &[GuestId], resolver: R) -> Result<Self> {
+        for target in resolver.targets() {
+            if !capable.contains(target) {
+                bail!(
+                    "route for trigger `{trigger}` names `{target}`, which does not export the \
+                     `{trigger}` handler"
+                );
+            }
+        }
+        Ok(Self::Routed(resolver))
     }
 
     /// Resolve a routing `key` to a target identity, or `None` on a miss or an
@@ -289,9 +313,40 @@ impl<I, R: Resolver> TriggerRouter<I, R> {
     /// Returns an error if `Router::build` rejects the capable set and table:
     /// a route names a guest that does not export the handler, or two or more
     /// guests export it with no routes to disambiguate.
-    pub fn build<T, E, F>(
-        registry: &Registry<T>, trigger: &str, table: R, mut probe: F,
+    pub fn build<T, E, F>(registry: &Registry<T>, trigger: &str, table: R, probe: F) -> Result<Self>
+    where
+        F: FnMut(&InstancePre<T>) -> Result<I, E>,
+    {
+        let (indices, capable) = Self::probe_guests(registry, probe);
+        let router = Router::build(trigger, &capable, table)?;
+        Ok(Self { indices, router })
+    }
+
+    /// [`build`](Self::build) for a trigger whose deployment carries its own
+    /// key→identity projection: routing is table-driven only ([`Router::build_routed`]),
+    /// so a sole exporter never becomes a catch-all and an unmatched key is a
+    /// miss for the projection to answer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a route names a guest that does not export the
+    /// handler.
+    pub fn build_routed<T, E, F>(
+        registry: &Registry<T>, trigger: &str, table: R, probe: F,
     ) -> Result<Self>
+    where
+        F: FnMut(&InstancePre<T>) -> Result<I, E>,
+    {
+        let (indices, capable) = Self::probe_guests(registry, probe);
+        let router = Router::build_routed(trigger, &capable, table)?;
+        Ok(Self { indices, router })
+    }
+
+    /// Probe every registered guest for the trigger's handler, collecting the
+    /// typed indices and the capable identity set.
+    fn probe_guests<T, E, F>(
+        registry: &Registry<T>, mut probe: F,
+    ) -> (HashMap<GuestId, I>, Vec<GuestId>)
     where
         F: FnMut(&InstancePre<T>) -> Result<I, E>,
     {
@@ -303,8 +358,7 @@ impl<I, R: Resolver> TriggerRouter<I, R> {
                 indices.insert(guest.id().clone(), index);
             }
         }
-        let router = Router::build(trigger, &capable, table)?;
-        Ok(Self { indices, router })
+        (indices, capable)
     }
 
     /// Returns `true` when no guest answers this trigger.
@@ -426,6 +480,35 @@ mod tests {
         let error = Router::build("http", &[id("a"), id("b")], HttpRoutes::default())
             .expect_err("two exporters with no routes is ambiguous");
         assert!(error.to_string().contains("2 capable guests"));
+    }
+
+    #[test]
+    fn build_routed_no_catch_all() {
+        // A projection-carrying trigger never fans a sole exporter in: with
+        // no routes it is inert, and an unmatched key is a miss.
+        let router = Router::build_routed("http", &[id("only")], HttpRoutes::default())
+            .expect("no routes is inert, not an error");
+        assert!(router.is_inert());
+        assert_eq!(router.resolve("/anything"), None);
+        assert_eq!(router.catch_all(), None);
+    }
+
+    #[test]
+    fn build_routed_routes_drive() {
+        // Routes still drive the trigger, and a miss stays a miss.
+        let table = HttpRoutes::new([("/a".to_owned(), id("a"))]);
+        let router =
+            Router::build_routed("http", &[id("a"), id("b")], table).expect("routes are valid");
+        assert_eq!(router.resolve("/a"), Some(&id("a")));
+        assert_eq!(router.resolve("/b"), None);
+    }
+
+    #[test]
+    fn build_routed_rejects_incapable_target() {
+        let routes = HttpRoutes::new([("/a".to_owned(), id("ghost"))]);
+        let error = Router::build_routed("http", &[id("real")], routes)
+            .expect_err("a route to a non-exporter must fail fast");
+        assert!(error.to_string().contains("ghost"));
     }
 
     #[test]

@@ -56,7 +56,9 @@ pub type HttpFallback = Arc<dyn Fn(&str) -> Option<GuestId> + Send + Sync>;
 ///
 /// Typed (rather than folded into `anyhow`) so trigger servers can map the
 /// outcomes faithfully — e.g. HTTP answers [`Unresolved`](Self::Unresolved)
-/// with 404 (unknown tenant) and the failure variants with 500.
+/// and [`ExportMismatch`](Self::ExportMismatch) with a warn + 404 (no guest
+/// can serve the request) and [`ResolveFailed`](Self::ResolveFailed) with
+/// 500 (resolution itself faulted).
 #[derive(Clone, Debug)]
 pub enum EnsureError {
     /// The guest is not registered and nothing supplied it: no resolver is
@@ -64,8 +66,8 @@ pub enum EnsureError {
     Unresolved(GuestId),
     /// The resolver — or the registration of its artifact — failed.
     ResolveFailed(Arc<anyhow::Error>),
-    /// A registered component does not export the interface the dispatch
-    /// site requires.
+    /// The resolved (or concurrently registered) component does not export
+    /// the interface the dispatch site requires.
     ExportMismatch {
         /// The guest whose component was checked.
         guest: GuestId,

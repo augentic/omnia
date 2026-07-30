@@ -138,6 +138,21 @@ mod tests {
     }
 
     #[test]
+    fn expand_http_fallback() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            guests: [
+                { id: "engine", source: "engine.wasm" },
+            ],
+            resolver: CacheResolver::new(),
+            http_fallback: mcp_http_fallback,
+            hosts: {
+                WasiHttp: HttpDefault,
+                WasiOtel: OtelDefault,
+            },
+        })));
+    }
+
+    #[test]
     fn expand_command_guest() {
         insta::assert_snapshot!(expand_pretty(quote!({
             mode: command,

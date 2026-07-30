@@ -175,6 +175,30 @@ fn fallback_negative_outcomes() -> Result<()> {
     })
 }
 
+// An installed fallback owns HTTP routing outright: a sole capable exporter
+// never becomes the catch-all, so a path the projection declines is a miss
+// even though a guest able to serve it exists.
+#[test]
+fn fallback_disables_catch_all() -> Result<()> {
+    fixture::RT.block_on(async {
+        let (_, runtime, _resolver) = harness().await?;
+        runtime.register("resident", precompiled("http_routing_a_wasm.wasm")?).await?;
+        // Re-snapshot routing with the resident guest present — the analogue
+        // of a boot over a deployment carrying one static HTTP exporter.
+        let harness = HttpHarness::new(runtime.clone()).context("snapshotting http routing")?;
+
+        let error =
+            harness.get("/nope").await.expect_err("a declined path is a miss, not a catch-all");
+        assert!(format!("{error:#}").contains("no route matched path"), "{error:#}");
+
+        // The projection's own targets still resolve.
+        let a = harness.get("/a").await?;
+        assert!(String::from_utf8_lossy(a.body()).contains("guest a"), "{:?}", a.body());
+
+        Ok(())
+    })
+}
+
 // A fallback guest lacking `wasi:http/incoming-handler` is refused at
 // resolve-time registration — an error, not a partial route.
 #[test]

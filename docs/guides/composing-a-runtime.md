@@ -60,13 +60,13 @@ In command mode, arguments after `--` on the command line are forwarded to the g
 cargo run --example cli -- run ./target/wasm32-wasip2/debug/examples/cli_wasm.wasm -- greet omnia
 ```
 
-(This `run … -- …` grammar applies to every generated binary *except* one built with the [`program:` key](#deployment-keys-resolver-program-command_guest), which disables the host CLI entirely and forwards raw argv to the guest.)
+(This `run … -- …` grammar applies to every generated binary *except* one built with the [`program:` key](#deployment-keys-resolver-http_fallback-program-command_guest), which disables the host CLI entirely and forwards raw argv to the guest.)
 
 A backend-less command runtime is valid too: `omnia::runtime!({ mode: command });`.
 
 ### Explicit command guests and resolve-on-miss
 
-By default, command mode routes to the sole static guest exporting `wasi:cli/run`; a deployment with no exporter is inert and exits `0`. A deployment can instead name the command guest explicitly — via the macro's [`command_guest:` key](#deployment-keys-resolver-program-command_guest) or programmatically:
+By default, command mode routes to the sole static guest exporting `wasi:cli/run`; a deployment with no exporter is inert and exits `0`. A deployment can instead name the command guest explicitly — via the macro's [`command_guest:` key](#deployment-keys-resolver-http_fallback-program-command_guest) or programmatically:
 
 ```rust
 let builder = omnia::DeploymentBuilder::new()
@@ -161,9 +161,9 @@ Two things to know:
 
 The [`guest-link`](../../examples/guest-link/runtime.rs) example is built this way; its [`omnia.toml`](../../examples/guest-link/Omnia.toml) expresses the same deployment as a file for `--config`.
 
-## Deployment keys (`resolver:`, `program:`, `command_guest:`)
+## Deployment keys (`resolver:`, `http_fallback:`, `program:`, `command_guest:`)
 
-Three keys let the macro express a complete resolver-backed command deployment — static guests plus resolve-on-miss for everything else — with no handwritten `main`:
+These keys let the macro express a complete resolver-backed command deployment — static guests plus resolve-on-miss for everything else — with no handwritten `main`:
 
 ```rust
 omnia::runtime!({
@@ -195,7 +195,11 @@ omnia::runtime!({
 
 ### `resolver:` — resolve-on-miss
 
-The value is any expression evaluating to a type implementing `omnia::GuestResolver`; it is consulted on dispatch-path registry misses (see [dynamic guest registration](../../rfcs/guest-resolution.md)). A resolver implies a *dynamic* deployment: the guest set may start empty (an invocation with a resolver and no `guests:` is the fully dynamic deployment), and with one or more static guests the mark is a no-op. The compiled-in resolver is part of the *binary*, not the manifest — a TOML supplied via `--config` still runs with it, and resolution policy (id grammar, artifact layout, verification) stays code the deployment owns. The other resolve-on-miss hook, `http_fallback`, remains builder-only for now.
+The value is any expression evaluating to a type implementing `omnia::GuestResolver`; it is consulted on dispatch-path registry misses (see [dynamic guest registration](../../rfcs/guest-resolution.md)). A resolver implies a *dynamic* deployment: the guest set may start empty (an invocation with a resolver and no `guests:` is the fully dynamic deployment), and with one or more static guests the mark is a no-op. The compiled-in resolver is part of the *binary*, not the manifest — a TOML supplied via `--config` still runs with it, and resolution policy (id grammar, artifact layout, verification) stays code the deployment owns.
+
+### `http_fallback:` — the HTTP path→identity projection
+
+The value is any expression evaluating to `Fn(&str) -> Option<omnia::GuestId>` (`+ Send + Sync + 'static`); it maps a request path no static `[[route.http]]` prefix matches to a guest identity, which then goes through the ordinary registry lookup — and hence resolve-on-miss when a `resolver:` is installed. Installing a fallback makes the deployment own HTTP routing outright: the capability default is off (a sole `wasi:http` exporter never becomes a catch-all), an unmatched path or a projected identity nothing supplies answers with a warn + 404, and a projected guest without a `wasi:http` handler export is likewise a warn + 404 rather than a 500. Deployments assembled programmatically supply the same hook through `DeploymentBuilder::http_fallback`.
 
 ### `command_guest:` — explicit command routing
 

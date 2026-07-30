@@ -41,13 +41,16 @@ where
 
     // Capability probe: a guest exports `wasi:http/incoming-handler` exactly
     // when its typed `ServiceIndices` resolve. Build the per-guest indices and
-    // the router that selects among them once, up front.
-    let routing = TriggerRouter::build(
-        state.registry(),
-        "http",
-        state.registry().routes().http().clone(),
-        ServiceIndices::new,
-    )?;
+    // the router that selects among them once, up front. A deployment that
+    // installs an `http_fallback` owns the path→identity projection, so
+    // routing is table-driven only: a sole exporter never becomes a
+    // catch-all, and an unmatched path is a miss for the fallback to answer.
+    let table = state.registry().routes().http().clone();
+    let routing = if state.http_fallback().is_some() {
+        TriggerRouter::build_routed(state.registry(), "http", table, ServiceIndices::new)?
+    } else {
+        TriggerRouter::build(state.registry(), "http", table, ServiceIndices::new)?
+    };
     // A fallback-equipped deployment may start inert and fault guests in per
     // request; only a deployment with neither routes nor fallback stays quiet.
     if routing.is_inert() && state.http_fallback().is_none() {
@@ -137,24 +140,26 @@ where
 {
     // Resolve an unrouted path through the deployment's fallback: identity →
     // `ensure_guest` (resolve-on-miss) → request-local handler indices. An
-    // `Err` carries the ready 404/500 response: no fallback, a `None`
-    // fallback, or the resolver's definitive miss is a 404; a resolution
-    // failure — or a fallback guest lacking the handler — is a 500.
+    // `Err` carries the ready 404/500 response. No guest able to serve the
+    // request — no fallback, a `None` projection, the resolver's definitive
+    // miss, or a guest without a `wasi:http` handler export — is a warn +
+    // 404: loud in the log, ordinary on the wire. Only a resolution *fault*
+    // is a 500.
     async fn fallback(
         &self, path: &str,
     ) -> std::result::Result<(Arc<Guest<StoreCtx<B>>>, ServiceIndices), hyper::Response<OutgoingBody>>
     {
         let Some(target) = self.state.http_fallback().and_then(|fallback| fallback(path)) else {
-            tracing::debug!(path, "no route or fallback target matched; returning 404");
+            tracing::warn!(path, "no route or fallback target matched; returning 404");
             return Err(not_found());
         };
         let guest = match self.state.ensure_guest(&target, "wasi:http/handler").await {
             Ok(guest) => guest,
-            Err(error @ EnsureError::Unresolved(_)) => {
-                tracing::debug!(path, %error, "fallback target unresolved; returning 404");
+            Err(error @ (EnsureError::Unresolved(_) | EnsureError::ExportMismatch { .. })) => {
+                tracing::warn!(path, guest = %target, %error, "no guest can serve the request; returning 404");
                 return Err(not_found());
             }
-            Err(error) => {
+            Err(error @ EnsureError::ResolveFailed(_)) => {
                 let error = anyhow::Error::from(error);
                 tracing::error!(path, "fallback guest resolution failed: {error:#}");
                 return Err(internal_error());
@@ -163,12 +168,12 @@ where
         let indices = match ServiceIndices::new(guest.instance_pre()) {
             Ok(indices) => indices,
             Err(error) => {
-                tracing::error!(
+                tracing::warn!(
                     path,
                     guest = %target,
-                    "fallback guest lacks the http handler: {error:#}"
+                    "fallback guest lacks the http handler; returning 404: {error:#}"
                 );
-                return Err(internal_error());
+                return Err(not_found());
             }
         };
         Ok((guest, indices))

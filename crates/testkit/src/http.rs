@@ -46,12 +46,15 @@ where
     /// the HTTP handler and no fallback is installed (mirroring the server's
     /// inert check).
     pub fn new(runtime: Runtime<B>) -> Result<Self> {
-        let routing = TriggerRouter::build(
-            runtime.registry(),
-            "http",
-            runtime.registry().routes().http().clone(),
-            ServiceIndices::new,
-        )?;
+        // Mirror the production server's boot: a deployment that installs an
+        // `http_fallback` owns the path→identity projection, so routing is
+        // table-driven only and a sole exporter never becomes a catch-all.
+        let table = runtime.registry().routes().http().clone();
+        let routing = if runtime.http_fallback().is_some() {
+            TriggerRouter::build_routed(runtime.registry(), "http", table, ServiceIndices::new)?
+        } else {
+            TriggerRouter::build(runtime.registry(), "http", table, ServiceIndices::new)?
+        };
         ensure!(
             !routing.is_inert() || runtime.http_fallback().is_some(),
             "no guest exports the http handler"

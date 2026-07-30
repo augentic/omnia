@@ -601,18 +601,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// loaded, the component's imports exceed the deployment's linked host set
     /// and `link` union, or its linked exports cannot be served.
     pub async fn register(&self, id: impl Into<GuestId>, artifact: GuestArtifact) -> Result<()> {
-        self.register_inner(id.into(), artifact, None).await
-    }
-
-    /// [`register`](Self::register) internals, with an optional expected
-    /// export the loaded component must satisfy — the resolve-on-miss path
-    /// sets it because a resolver's answer is not trusted to be well-shaped
-    /// (an unvalidated publish of a link target would create an entry whose
-    /// endpoint the retry misses forever). Validation failure happens before
-    /// serve/publish, so it leaves no partial state.
-    async fn register_inner(
-        &self, id: GuestId, artifact: GuestArtifact, expected_export: Option<&str>,
-    ) -> Result<()> {
+        let id = id.into();
         let registry = self.registry();
 
         // Early occupancy check to skip the load/serve work; the publish below
@@ -623,12 +612,15 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
             .load(registry.engine())
             .await
             .with_context(|| format!("loading guest `{id}`"))?;
-        if let Some(export) = expected_export {
-            anyhow::ensure!(
-                exports_instance(&component, registry.engine(), export),
-                "guest `{id}` does not export interface `{export}`"
-            );
-        }
+        self.register_component(id, component).await
+    }
+
+    /// [`register`](Self::register) internals over an already-loaded
+    /// component — the resolve-on-miss path loads (and export-validates) the
+    /// resolver's artifact itself before registering, so validation failure
+    /// happens before serve/publish and leaves no partial state.
+    async fn register_component(&self, id: GuestId, component: Component) -> Result<()> {
+        let registry = self.registry();
         let instance_pre = registry.instantiate_late(&id, &component)?;
         let guest = Guest::local(id.clone(), instance_pre);
 
@@ -660,8 +652,9 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// Returns [`EnsureError::Unresolved`] when nothing supplies the guest
     /// (no resolver, or the resolver answered `Ok(None)`),
     /// [`EnsureError::ResolveFailed`] when resolution or the subsequent
-    /// registration failed, and [`EnsureError::ExportMismatch`] when a
-    /// concurrently registered component lacks `expected_export`.
+    /// registration failed, and [`EnsureError::ExportMismatch`] when the
+    /// resolved (or concurrently registered) component lacks
+    /// `expected_export`.
     pub async fn ensure_guest(
         &self, id: &GuestId, expected_export: &str,
     ) -> Result<Arc<Guest<StoreCtx<B>>>, EnsureError> {
@@ -733,7 +726,22 @@ async fn run_flight<B: Clone + Send + Sync + 'static>(
         return Err(EnsureError::Unresolved(id.clone()));
     };
 
-    let raced = match runtime.register_inner(id.clone(), artifact, Some(expected_export)).await {
+    // A resolver's answer is not trusted to be well-shaped: load and validate
+    // the component against the dispatch site's required export before any
+    // registration, so the mismatch is typed and nothing is published.
+    let component = artifact.load(runtime.registry().engine()).await.map_err(|error| {
+        let error = error.context(format!("loading resolved guest `{id}`"));
+        tracing::error!(guest = %id, "guest resolution failed: {error:#}");
+        EnsureError::ResolveFailed(Arc::new(error))
+    })?;
+    if !exports_instance(&component, runtime.registry().engine(), expected_export) {
+        return Err(EnsureError::ExportMismatch {
+            guest: id.clone(),
+            export: expected_export.to_owned(),
+        });
+    }
+
+    let raced = match runtime.register_component(id.clone(), component).await {
         Ok(()) => false,
         // Losing the publish race to a concurrent direct `register(id)` is
         // success — an entry exists; any other failure with no entry is real.
