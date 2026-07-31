@@ -183,7 +183,7 @@ CLI → Build → Runtime::new → bootstrap → run
 
 ### Isolation and pooling
 
-Every invocation gets a **fresh instance in its own store** — no state survives between requests, and guests cannot observe each other except through host-mediated dispatch. To keep this cheap, the pooling instance allocator (on by default, `POOLING=true`) recycles instance slots; guest resource ceilings (`GUEST_TIMEOUT_MS`, `MAX_MEMORY_BYTES`, `MAX_FUEL`) bound each invocation. See [Configuration](reference/configuration.md) for the tunables.
+Every invocation gets a **fresh instance in its own store** — no state survives between requests, and guests cannot observe each other except through host-mediated dispatch. To keep this cheap, the pooling instance allocator (on by default, `POOLING=true`) recycles instance slots; guest resource ceilings (`GUEST_TIMEOUT_MS` for server/dispatch, `MAX_MEMORY_BYTES`, `MAX_FUEL`) bound each invocation. See [Configuration](reference/configuration.md) for the tunables.
 
 ## Configuration
 

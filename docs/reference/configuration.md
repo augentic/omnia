@@ -17,7 +17,7 @@ Omnia is configured entirely through environment variables (runtime options and 
 
 | Variable             | Default               | Meaning                                                               |
 | -------------------- | --------------------- | --------------------------------------------------------------------- |
-| `GUEST_TIMEOUT_MS`   | `30000`               | Wall-clock cap on a single guest invocation.                          |
+| `GUEST_TIMEOUT_MS`   | `30000`               | Wall-clock cap on a single server/dispatch guest invocation. Command mode (`wasi:cli/run`) is uncapped. |
 | `MAX_MEMORY_BYTES`   | `268435456` (256 MiB) | Maximum linear memory a guest may grow to.                            |
 | `MAX_FUEL`           | `0` (off)             | Per-invocation fuel budget; `0` disables metering. Compile-affecting. |
 | `MAX_DISPATCH_DEPTH` | `8`                   | Maximum nesting depth for host-mediated guest-to-guest calls.         |
