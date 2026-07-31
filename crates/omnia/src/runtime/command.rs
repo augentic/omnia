@@ -70,9 +70,8 @@ where
     let instance = runtime.instantiate(guest.instance_pre(), &mut store).await?;
     let command = Command::new(&mut store, &instance)?;
 
-    let outcome = store
-        .run_concurrent(async move |store| command.wasi_cli_run().call_run(store).await)
-        .await;
+    let outcome =
+        store.run_concurrent(async move |store| command.wasi_cli_run().call_run(store).await).await;
 
     let status = match outcome {
         Ok(Ok(Ok(()))) => ExitStatus::SUCCESS,
