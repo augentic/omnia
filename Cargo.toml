@@ -114,11 +114,11 @@ wasip3 = { version = "0.7.0", features = ["http-compat"] }
 # Pinned to match `wrpc`'s own dependency so the link-seam value codec stays
 # byte-identical with `wrpc-wasmtime`'s.
 wasm-tokio = { version = "0.6.1", default-features = false }
-wasmtime = { version = "47.0.2", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation", "pooling-allocator"] }
-wasmtime-wasi = { version = "47.0.2", features = ["p3"] }
-wasmtime-wasi-config = "47.0.2"
-wasmtime-wasi-http = { version = "47.0.2", features = ["p3"] }
-wasmtime-wasi-io = "47.0.2"
+wasmtime = { version = "47.0.3", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation", "pooling-allocator"] }
+wasmtime-wasi = { version = "47.0.3", features = ["p3"] }
+wasmtime-wasi-config = "47.0.3"
+wasmtime-wasi-http = { version = "47.0.3", features = ["p3"] }
+wasmtime-wasi-io = "47.0.3"
 wit-bindgen = { version = "0.60.0", features = ["async-spawn"] }
 
 # `wrpc-wasmtime` 0.1.0 is unpublished (the crate was renamed from

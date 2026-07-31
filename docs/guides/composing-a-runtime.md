@@ -191,6 +191,8 @@ omnia::runtime!({
 
 **`program:` disables the host `run` grammar entirely: the binary's argv belongs to the guest.** There is no `run` subcommand and no `--config`/`OMNIA_CONFIG`/positional-wasm override — the deployment compiled into the binary (or supplied by the resolver) is the only source, by design. The key's value (any expression evaluating to a string) becomes the program name used for telemetry and prepended to guest argv as `argv[0]`. This is pure opt-in: a binary without `program:` keeps the `run` grammar byte-for-byte.
 
+Two host log flags are reserved on this path: `--debug` and `--quiet`, anywhere in argv, are peeled before the guest sees them and select the host log preset (see [Host log flags](../reference/configuration.md#host-log-flags-program-binaries)). Everything else passes through untouched.
+
 `program:` requires `mode: command` and either a compiled-in manifest (`config:` or inline keys) or `resolver:` plus `command_guest:` (the fully dynamic shape) — anything else is a compile-time error, since a direct command with nothing to run could never work.
 
 ### `resolver:` — resolve-on-miss

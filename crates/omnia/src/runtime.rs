@@ -92,7 +92,8 @@ pub trait Wiring<B: Backends> {
 /// manifest source, resolver, invocation shape, and command guest. Without
 /// the macro's `program:` key this parses the standard
 /// `run [wasm] [--config] -- args…` grammar; with it, argv passes to the
-/// guest verbatim.
+/// guest verbatim except the reserved host log flags (`--debug` / `--quiet`),
+/// which select the telemetry [`LogMode`](crate::LogMode).
 #[doc(hidden)]
 pub async fn main<B, H>(options: MainOptions) -> ExitCode
 where

@@ -16,6 +16,7 @@ use crate::cli::{Cli, Command};
 use crate::dispatch::{GuestResolver, HttpPaths};
 use crate::registry::GuestId;
 use crate::runtime::Mode;
+use crate::telemetry::LogMode;
 use crate::{DeploymentBuilder, Manifest};
 
 /// How a runtime's compiled-in deployment manifest is supplied.
@@ -123,8 +124,10 @@ impl MainOptions {
     }
 
     /// Disable the host CLI grammar (the macro's `program:` key): argv passes
-    /// to the guest verbatim, the compiled-in manifest is the sole deployment
-    /// source, and `program_name` becomes telemetry name and `argv[0]`.
+    /// to the guest verbatim — except the reserved host log flags `--debug` /
+    /// `--quiet`, peeled into a [`LogMode`] — the compiled-in manifest is the
+    /// sole deployment source, and `program_name` becomes telemetry name and
+    /// `argv[0]`.
     #[must_use]
     pub fn direct_command(mut self, program_name: impl Into<String>) -> Self {
         self.invocation = Invocation::DirectCommand {
@@ -169,6 +172,7 @@ pub(super) struct EntryPlan {
     http_listener: Option<std::net::TcpListener>,
     command_guest: Option<GuestId>,
     program_name: Option<String>,
+    log_mode: Option<LogMode>,
 }
 
 impl EntryPlan {
@@ -194,8 +198,37 @@ impl EntryPlan {
         if let Some(name) = self.program_name {
             builder = builder.program_name(name);
         }
+        if let Some(mode) = self.log_mode {
+            builder = builder.log_mode(mode);
+        }
         builder
     }
+}
+
+/// Peel the reserved host log flags (`--debug` / `--quiet`) out of
+/// direct-command argv, returning the guest arguments and the resolved
+/// [`LogMode`] (the flagless default is [`LogMode::Progress`]).
+///
+/// The flags are host-reserved anywhere in argv — a direct-command guest
+/// never sees them — and mutually exclusive; repeating one is idempotent.
+fn peel_log_flags(args: Vec<String>) -> Result<(Vec<String>, LogMode)> {
+    let mut mode = None;
+    let mut guest_args = Vec::with_capacity(args.len());
+    for arg in args {
+        let flag = match arg.as_str() {
+            "--debug" => LogMode::Debug,
+            "--quiet" => LogMode::Quiet,
+            _ => {
+                guest_args.push(arg);
+                continue;
+            }
+        };
+        if mode.is_some_and(|current| current != flag) {
+            return Err(anyhow!("`--debug` and `--quiet` are mutually exclusive"));
+        }
+        mode = Some(flag);
+    }
+    Ok((guest_args, mode.unwrap_or(LogMode::Progress)))
 }
 
 /// Resolve [`MainOptions`] plus process argv and `OMNIA_CONFIG` into an
@@ -220,7 +253,7 @@ pub(super) fn plan(
 
     match invocation {
         Invocation::DirectCommand { program_name } => {
-            let guest_args = argv
+            let raw_args = argv
                 .into_iter()
                 .skip(1)
                 .map(|arg| {
@@ -229,6 +262,7 @@ pub(super) fn plan(
                     })
                 })
                 .collect::<Result<Vec<_>>>()?;
+            let (guest_args, log_mode) = peel_log_flags(raw_args)?;
             let manifest = manifest.map(ManifestSource::into_manifest).transpose()?;
             if manifest.is_none() && !dynamic {
                 return Err(PlanError::Fatal(anyhow!(
@@ -245,6 +279,7 @@ pub(super) fn plan(
                 http_listener,
                 command_guest,
                 program_name: Some(program_name),
+                log_mode: Some(log_mode),
             })
         }
         Invocation::OmniaCli => {
@@ -283,6 +318,7 @@ pub(super) fn plan(
                         http_listener,
                         command_guest,
                         program_name: None,
+                        log_mode: None,
                     })
                 }
                 #[cfg(feature = "jit")]
@@ -422,7 +458,48 @@ mod tests {
             .unwrap_or_else(|error| panic!("{}", fatal(error)));
         assert_eq!(plan.args, ["--config", "foo.toml", "run", "greet"]);
         assert_eq!(plan.program_name.as_deref(), Some("myprog"));
+        assert_eq!(plan.log_mode, Some(LogMode::Progress), "flagless default is progress");
         assert_eq!(first_guest(&plan), "app");
+    }
+
+    #[test]
+    fn direct_command_peels_log_flags() {
+        // The reserved flags are host-only wherever they sit in argv; the
+        // guest arguments are otherwise untouched.
+        let cases: &[(&[&str], LogMode, &[&str])] = &[
+            (&["bin", "--debug", "plan", "author"], LogMode::Debug, &["plan", "author"]),
+            (&["bin", "plan", "author", "--debug"], LogMode::Debug, &["plan", "author"]),
+            (&["bin", "plan", "--quiet", "status"], LogMode::Quiet, &["plan", "status"]),
+            (&["bin", "--debug", "run", "--debug"], LogMode::Debug, &["run"]),
+            (&["bin"], LogMode::Progress, &[]),
+        ];
+        for (args, mode, guest_args) in cases {
+            let options = MainOptions::new(Mode::Command)
+                .manifest(inline_source("app"))
+                .direct_command("app");
+            let plan =
+                plan(options, argv(args), None).unwrap_or_else(|error| panic!("{}", fatal(error)));
+            assert_eq!(plan.log_mode, Some(*mode), "argv: {args:?}");
+            assert_eq!(plan.args, *guest_args, "argv: {args:?}");
+        }
+    }
+
+    #[test]
+    fn direct_command_debug_and_quiet_conflict() {
+        let options =
+            MainOptions::new(Mode::Command).manifest(inline_source("app")).direct_command("app");
+        let error = plan(options, argv(&["bin", "--debug", "greet", "--quiet"]), None)
+            .err()
+            .expect("conflicting log flags must fail");
+        assert!(fatal(error).contains("mutually exclusive"));
+    }
+
+    #[test]
+    fn omnia_cli_carries_no_log_mode() {
+        let options = MainOptions::new(Mode::Server).manifest(inline_source("compiled"));
+        let plan = plan(options, argv(&["bin", "run"]), None)
+            .unwrap_or_else(|error| panic!("{}", fatal(error)));
+        assert_eq!(plan.log_mode, None, "the standard CLI path stays env-driven");
     }
 
     // Hard acceptance criterion: the direct path either carries a manifest or

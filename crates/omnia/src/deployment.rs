@@ -23,6 +23,7 @@ use wrpc_wasmtime::WrpcView;
 use crate::dispatch::{DispatchHandle, FirstArgSelector, GuestResolver, GuestSelector, HttpPaths};
 use crate::mount::{MountRegistry, ResolvedPreopen};
 use crate::registry::{GuestId, Registry, Routes};
+use crate::telemetry::LogMode;
 use crate::{Host, Mode, RuntimeOptions, Server, Telemetry};
 
 /// Typestate for [`DeploymentBuilder`]: only raw `.wasm` sources load (the
@@ -65,6 +66,7 @@ pub struct DeploymentBuilder<P = WasmOnly> {
     http_listener: Option<std::net::TcpListener>,
     command_guest: Option<GuestId>,
     program_name: Option<String>,
+    log_mode: Option<LogMode>,
     policy: PhantomData<fn() -> P>,
 }
 
@@ -81,6 +83,7 @@ impl<P> std::fmt::Debug for DeploymentBuilder<P> {
             .field("http_listener", &self.http_listener.is_some())
             .field("command_guest", &self.command_guest)
             .field("program_name", &self.program_name)
+            .field("log_mode", &self.log_mode)
             .finish_non_exhaustive()
     }
 }
@@ -97,6 +100,7 @@ impl Default for DeploymentBuilder<WasmOnly> {
             http_listener: None,
             command_guest: None,
             program_name: None,
+            log_mode: None,
             policy: PhantomData,
         }
     }
@@ -206,6 +210,15 @@ impl<P> DeploymentBuilder<P> {
         self
     }
 
+    /// Select the host [`LogMode`] preset installed with telemetry (the
+    /// generated direct-command entry peels `--debug` / `--quiet` into this).
+    /// Unset defers to `RUST_LOG` alone.
+    #[must_use]
+    pub const fn log_mode(mut self, mode: LogMode) -> Self {
+        self.log_mode = Some(mode);
+        self
+    }
+
     /// Resolve the manifest and build the deployment under `policy`.
     async fn build_inner<T: WasiView + 'static>(
         self, policy: ArtifactPolicy,
@@ -240,7 +253,7 @@ impl<P> DeploymentBuilder<P> {
         // environment.
         let name = env::var("COMPONENT").unwrap_or_else(|_| plan.name.clone());
 
-        init_telemetry(&name)?;
+        init_telemetry(&name, self.log_mode)?;
         tracing::info!("initializing runtime");
 
         let mut deployment = Deployment::from_plan(plan).await?;
@@ -276,6 +289,7 @@ impl DeploymentBuilder<WasmOnly> {
             http_listener: self.http_listener,
             command_guest: self.command_guest,
             program_name: self.program_name,
+            log_mode: self.log_mode,
             policy: PhantomData,
         }
     }
@@ -531,12 +545,15 @@ fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, Runt
 // Telemetry initialization is idempotent (`Telemetry::build`): the first call
 // in the process — here or in an embedder — installs the subscriber and
 // providers, and later deployments reuse them.
-fn init_telemetry(name: &str) -> Result<()> {
+fn init_telemetry(name: &str, log_mode: Option<LogMode>) -> Result<()> {
     let mut builder = Telemetry::new(name);
     if let Ok(endpoint) = env::var("OTEL_GRPC_URL") {
         builder = builder.endpoint(endpoint);
     } else {
         tracing::debug!("OTEL_GRPC_URL unset; using OpenTelemetry defaults");
+    }
+    if let Some(mode) = log_mode {
+        builder = builder.log_mode(mode);
     }
     builder.build().context("initializing telemetry")
 }
