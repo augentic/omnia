@@ -1,6 +1,4 @@
 use std::fmt::Debug;
-use std::ops::Deref;
-use std::sync::Arc;
 
 pub use omnia::FutureResult;
 
@@ -13,14 +11,5 @@ pub trait Identity: Debug + Send + Sync + 'static {
     fn get_token(&self, scopes: Vec<String>) -> FutureResult<AccessToken>;
 }
 
-/// Represents an identity resource in the WASI Vault.
-#[derive(Debug, Clone)]
-pub struct IdentityProxy(pub Arc<dyn Identity>);
-
-impl Deref for IdentityProxy {
-    type Target = Arc<dyn Identity>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+/// Represents an identity resource in the WASI Identity host.
+pub type IdentityProxy = omnia::Proxy<dyn Identity>;

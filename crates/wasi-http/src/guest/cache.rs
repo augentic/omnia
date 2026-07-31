@@ -90,6 +90,12 @@ impl Cache {
         if ctrl.no_store || ctrl.etag.is_empty() || ctrl.max_age == 0 {
             return Ok(());
         }
+        // Only successful responses are cacheable: caching a 304 or 5xx body
+        // would serve it as the resource for `max_age` seconds.
+        if !response.status().is_success() {
+            tracing::debug!("not caching non-success status {}", response.status());
+            return Ok(());
+        }
 
         tracing::debug!("caching response with etag `{}`", &ctrl.etag);
 
@@ -129,11 +135,8 @@ impl TryFrom<&http::HeaderMap> for Control {
     fn try_from(headers: &http::HeaderMap) -> Result<Self> {
         let mut control = Self::default();
 
-        let cache_control = headers.get(CACHE_CONTROL);
-        let Some(cache_control) = cache_control else {
-            tracing::debug!("no Cache-Control header present");
-            return Ok(control);
-        };
+        // `Cache::maybe_from` only parses when the header is present.
+        let cache_control = headers.get(CACHE_CONTROL).context("missing Cache-Control header")?;
 
         if cache_control.is_empty() {
             bail!("Cache-Control header is empty");
@@ -249,17 +252,6 @@ mod tests {
     use http::header::{CACHE_CONTROL, IF_NONE_MATCH};
 
     use super::*;
-
-    #[test]
-    fn header_missing() {
-        let headers = HeaderMap::new();
-        let control = Control::try_from(&headers).expect("should parse");
-
-        assert!(!control.no_cache);
-        assert!(!control.no_store);
-        assert_eq!(control.max_age, 0);
-        assert!(control.etag.is_empty());
-    }
 
     #[test]
     fn max_age_with_etag() {

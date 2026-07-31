@@ -16,7 +16,7 @@ impl<T> HostConnectionWithStore<T> for WasiSql {
 
         let result = match open_conn {
             Ok(conn) => {
-                let proxy = ConnectionProxy(conn);
+                let proxy = omnia::Proxy(conn);
                 Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
             }
             Err(err) => Err(accessor.with(|mut store| store.get().table.push(Error::from(err)))?),

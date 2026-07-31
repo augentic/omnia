@@ -23,10 +23,7 @@ use omnia_wasi_messaging::{HasMessaging, MessagingDefault, WasiMessaging, WasiMe
 use omnia_wasi_otel::{HasOtel, WasiOtel, WasiOtelCtx};
 use omnia_wasi_sql::{HasSql, SqlDefault, WasiSql, WasiSqlCtx};
 use omnia_wasi_vault::{HasVault, VaultDefault, WasiVault, WasiVaultCtx};
-use omnia_wasi_websocket::{
-    ConnectOptions as WsConnectOptions, HasWebSocket, WasiWebSocket, WasiWebSocketCtx,
-    WebSocketDefault,
-};
+use omnia_wasi_websocket::{HasWebSocket, WasiWebSocket, WasiWebSocketCtx, WebSocketDefault};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use tokio::sync::OnceCell;
@@ -192,7 +189,11 @@ pub async fn conformance() -> Result<&'static Conformance> {
 }
 
 async fn build() -> Result<Conformance> {
-    let websocket_port = free_port()?;
+    // Pre-bind the WebSocket listener so the port is known without a
+    // drop-and-rebind race; the backend serves on it directly.
+    let websocket_listener =
+        TcpListener::bind("127.0.0.1:0").context("binding the websocket listener")?;
+    let websocket_port = websocket_listener.local_addr()?.port();
     let bundle = Bundle {
         http: HttpDefault::connect().await.context("connecting http")?,
         otel: CapturingOtel::default(),
@@ -206,11 +207,8 @@ async fn build() -> Result<Conformance> {
         messaging: <MessagingDefault as Backend>::connect()
             .await
             .context("connecting messaging")?,
-        websocket: WebSocketDefault::connect_with(WsConnectOptions {
-            socket_addr: format!("127.0.0.1:{websocket_port}"),
-        })
-        .await
-        .context("connecting websocket")?,
+        websocket: WebSocketDefault::with_listener(websocket_listener)
+            .context("connecting websocket")?,
     };
 
     let keyvalue = bundle.keyvalue.clone();
@@ -256,12 +254,6 @@ async fn build() -> Result<Conformance> {
         otel,
         websocket_port,
     })
-}
-
-/// Reserve a free localhost port (for the WebSocket backend's server).
-fn free_port() -> Result<u16> {
-    let listener = TcpListener::bind("127.0.0.1:0").context("reserving a port")?;
-    Ok(listener.local_addr()?.port())
 }
 
 /// A process-unique suffix for keys/ids so concurrent tests sharing the

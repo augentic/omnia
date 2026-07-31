@@ -18,19 +18,10 @@ cfg_if::cfg_if! {
         #[derive(Clone, Debug)]
         struct CannedVerdict(Scripted);
 
-        #[derive(Clone, Copy, Debug)]
-        struct NoOptions;
-
-        impl omnia::FromEnv for NoOptions {
-            fn from_env() -> anyhow::Result<Self> {
-                Ok(Self)
-            }
-        }
-
         impl omnia::Backend for CannedVerdict {
-            type ConnectOptions = NoOptions;
+            type ConnectOptions = omnia::NoOptions;
 
-            async fn connect_with(_options: NoOptions) -> anyhow::Result<Self> {
+            async fn connect_with(_options: omnia::NoOptions) -> anyhow::Result<Self> {
                 Ok(Self(Scripted::json(serde_json::json!({
                     "verdict": "pass",
                     "reason": "the bounds check is correct",

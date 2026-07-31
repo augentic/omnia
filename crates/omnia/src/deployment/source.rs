@@ -20,6 +20,12 @@ use crate::registry::GuestId;
 // path, so it is sniffed from content, never inferred from a file extension.
 const ELF_MAGIC: [u8; 4] = [0x7f, b'E', b'L', b'F'];
 
+// Appended to every pre-compiled deserialization failure: the usual cause is a
+// compile-affecting settings mismatch, not corruption.
+const SETTINGS_HINT: &str = "the artifact must be built with the same compile-affecting settings \
+                             used by `omnia compile` (MAX_FUEL, BRANCH_HINTING, \
+                             MEMORY_RESERVATION, MEMORY_GUARD_SIZE)";
+
 /// Whether a deployment build may load pre-compiled (native) artifacts.
 ///
 /// Crate-internal on purpose: the only door to `Trust` is an `unsafe`
@@ -45,9 +51,6 @@ pub struct LoadedGuest {
 
 /// A guest loaded from a local `.wasm` (or pre-compiled `.bin`) file, or from
 /// component bytes embedded in the host binary.
-///
-/// `omnia run <guest>.wasm` is the one-guest shorthand: load it, derive its
-/// identity from the file stem, and register it as the default guest.
 pub struct Source {
     id: GuestId,
     kind: SourceKind,
@@ -60,18 +63,6 @@ enum SourceKind {
 }
 
 impl Source {
-    /// Create a file source, deriving the identity from the file stem
-    /// (`./guests/echo.wasm` -> `echo`).
-    #[must_use]
-    pub fn new(path: impl Into<PathBuf>) -> Self {
-        let path = path.into();
-        let id = id_from_path(&path);
-        Self {
-            id,
-            kind: SourceKind::Path(path),
-        }
-    }
-
     /// Create a file source registering under an explicit identity.
     #[must_use]
     pub fn with_id(id: GuestId, path: impl Into<PathBuf>) -> Self {
@@ -190,11 +181,9 @@ impl GuestArtifact {
                     // `Component::deserialize` requires.
                     unsafe { Component::deserialize(&engine, &bytes) }
                         .map_err(anyhow::Error::from)
-                        .context(
-                            "deserializing pre-compiled guest: the artifact must be built with the \
-                     same compile-affecting settings used by `omnia compile` (MAX_FUEL, \
-                     BRANCH_HINTING, MEMORY_RESERVATION, MEMORY_GUARD_SIZE)",
-                        )?
+                        .with_context(|| {
+                            format!("deserializing pre-compiled guest: {SETTINGS_HINT}")
+                        })?
                 }
                 #[cfg(feature = "jit")]
                 ArtifactKind::Wasm(bytes) => Component::new(&engine, &bytes)
@@ -216,13 +205,6 @@ impl GuestArtifact {
     }
 }
 
-/// Derive an opaque identity from a file path's stem, falling back to `default`
-/// when the path has no usable stem.
-fn id_from_path(path: &Path) -> GuestId {
-    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("default");
-    GuestId::from(stem)
-}
-
 /// Load a component from a file: raw wasm compiles (under `jit`); a
 /// pre-compiled artifact deserializes only when `policy` trusts it.
 fn load_component(engine: &Engine, wasm: &Path, policy: ArtifactPolicy) -> Result<Component> {
@@ -241,12 +223,7 @@ fn load_component(engine: &Engine, wasm: &Path, policy: ArtifactPolicy) -> Resul
         unsafe { Component::deserialize_file(engine, wasm) }
             .map_err(anyhow::Error::from)
             .with_context(|| {
-                format!(
-                    "deserializing pre-compiled component {}: the artifact must be built with \
-                     the same compile-affecting settings used by `omnia compile` (MAX_FUEL, \
-                     BRANCH_HINTING, MEMORY_RESERVATION, MEMORY_GUARD_SIZE)",
-                    wasm.display()
-                )
+                format!("deserializing pre-compiled component {}: {SETTINGS_HINT}", wasm.display())
             })?
     } else {
         compile_wasm(engine, wasm)?
@@ -274,10 +251,8 @@ fn load_component_bytes(
         // build call whose caller attested every pre-compiled artifact is
         // unmodified trusted wasmtime output — the contract
         // `Component::deserialize` requires.
-        unsafe { Component::deserialize(engine, bytes) }.map_err(anyhow::Error::from).context(
-            "deserializing embedded pre-compiled component: the artifact must be built with the \
-             same compile-affecting settings used by `omnia compile` (MAX_FUEL, BRANCH_HINTING, \
-             MEMORY_RESERVATION, MEMORY_GUARD_SIZE)",
+        unsafe { Component::deserialize(engine, bytes) }.map_err(anyhow::Error::from).with_context(
+            || format!("deserializing embedded pre-compiled component: {SETTINGS_HINT}"),
         )?
     } else {
         compile_wasm_bytes(engine, bytes)?

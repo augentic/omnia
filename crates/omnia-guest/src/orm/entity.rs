@@ -56,11 +56,11 @@ pub trait EntityValues {
     fn __to_values(&self) -> Vec<(&'static str, Value)>;
 }
 
-pub fn values_to_wasi_datatypes(values: Values) -> Result<Vec<DataType>> {
-    values.into_iter().map(value_to_wasi_datatype).collect()
+pub fn to_wasi_params(values: Values) -> Result<Vec<DataType>> {
+    values.into_iter().map(to_wasi_param).collect()
 }
 
-fn value_to_wasi_datatype(value: Value) -> Result<DataType> {
+fn to_wasi_param(value: Value) -> Result<DataType> {
     let data_type = match value {
         Value::Bool(v) => DataType::Boolean(v),
         Value::TinyInt(v) => DataType::Int32(v.map(i32::from)),
@@ -132,10 +132,10 @@ impl FetchValue for serde_json::Value {
 
 impl<T: FetchValue> FetchValue for Option<T> {
     fn fetch(row: &Row, col: &str) -> anyhow::Result<Self> {
-        match row_field(row, col) {
-            Ok(field) if !is_null(field) => Ok(Some(T::fetch(row, col)?)),
-            _ => Ok(None),
-        }
+        // Only SQL NULL maps to `None`; a missing column is a projection bug
+        // and propagates as an error rather than masquerading as NULL.
+        let field = row_field(row, col)?;
+        if is_null(field) { Ok(None) } else { T::fetch(row, col).map(Some) }
     }
 }
 
@@ -205,44 +205,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn value_to_wasi_datatype_variants() {
+    fn to_wasi_param_variants() {
         use sea_query::Value;
 
         let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
         let dt_utc: DateTime<Utc> = "2024-01-15T10:30:45Z".parse().unwrap();
 
+        assert!(matches!(to_wasi_param(Value::Int(Some(42))).unwrap(), DataType::Int32(Some(42))));
         assert!(matches!(
-            value_to_wasi_datatype(Value::Int(Some(42))).unwrap(),
-            DataType::Int32(Some(42))
-        ));
-        assert!(matches!(
-            value_to_wasi_datatype(Value::BigUnsigned(Some(10_000))).unwrap(),
+            to_wasi_param(Value::BigUnsigned(Some(10_000))).unwrap(),
             DataType::Uint64(Some(10_000))
         ));
         assert!(matches!(
-            value_to_wasi_datatype(Value::Float(Some(std::f32::consts::PI))).unwrap(),
+            to_wasi_param(Value::Float(Some(std::f32::consts::PI))).unwrap(),
             DataType::Float(Some(v)) if (v - std::f32::consts::PI).abs() < 0.01
         ));
         assert!(matches!(
-            value_to_wasi_datatype(Value::Char(Some('A'))).unwrap(),
+            to_wasi_param(Value::Char(Some('A'))).unwrap(),
             DataType::Str(Some(s)) if s == "A"
         ));
         assert!(matches!(
-            value_to_wasi_datatype(Value::Bytes(Some(vec![1, 2, 3]))).unwrap(),
+            to_wasi_param(Value::Bytes(Some(vec![1, 2, 3]))).unwrap(),
             DataType::Binary(Some(b)) if b == [1, 2, 3]
         ));
         assert!(matches!(
-            value_to_wasi_datatype(Value::ChronoDate(Some(date))).unwrap(),
+            to_wasi_param(Value::ChronoDate(Some(date))).unwrap(),
             DataType::Date(Some(s)) if s == "2024-01-15"
         ));
         assert!(matches!(
-            value_to_wasi_datatype(Value::ChronoDateTimeUtc(Some(dt_utc))).unwrap(),
+            to_wasi_param(Value::ChronoDateTimeUtc(Some(dt_utc))).unwrap(),
             DataType::Timestamp(Some(s)) if s.contains("2024-01-15") && s.contains("10:30:45")
         ));
-        assert!(matches!(
-            value_to_wasi_datatype(Value::Bool(None)).unwrap(),
-            DataType::Boolean(None)
-        ));
+        assert!(matches!(to_wasi_param(Value::Bool(None)).unwrap(), DataType::Boolean(None)));
     }
 
     #[test]

@@ -193,7 +193,7 @@ where
     let pool =
         sample_pool(runtime.registry().engine().clone(), runtime.options().pool_metrics_interval);
 
-    log_bootstrap_complete(&runtime, mode);
+    log_ready(&runtime, mode);
 
     let outcome = match mode {
         Mode::Command => {
@@ -212,13 +212,16 @@ where
     if let Some(pool) = pool {
         pool.abort();
     }
+    // Drop every link-serve endpoint: the drain tasks hold Runtime clones, so
+    // leaving them running would pin the engine past the deployment's life.
+    runtime.registry().dispatch().transport().clear();
     // Push batch-queued spans and metrics to the exporters so they survive
     // fast command-mode exits.
     crate::telemetry::flush();
     outcome
 }
 
-fn log_bootstrap_complete<B>(runtime: &Runtime<B>, mode: Mode)
+fn log_ready<B>(runtime: &Runtime<B>, mode: Mode)
 where
     B: Clone + Send + Sync + 'static,
 {
@@ -465,13 +468,13 @@ impl<B: Backends> Runtime<B> {
             backends,
         )));
         if let Some(resolver) = resolver {
-            runtime.install_resolver(resolver);
+            runtime.set_resolver(resolver);
         }
         if let Some(hook) = http_paths {
-            runtime.install_http_paths(hook);
+            runtime.set_http_paths(hook);
         }
         if let Some(id) = command_guest {
-            runtime.install_command_guest(id);
+            runtime.set_command_guest(id);
         }
         serve_links(&runtime).await.context("wiring host-mediated link serve side")?;
         Ok(runtime)
@@ -541,7 +544,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// resolver is ignored with a warning.
     #[must_use]
     pub fn with_resolver(self, resolver: Arc<dyn GuestResolver>) -> Self {
-        self.install_resolver(resolver);
+        self.set_resolver(resolver);
         self
     }
 
@@ -556,7 +559,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     where
         F: Fn(&str) -> Option<GuestId> + Send + Sync + 'static,
     {
-        self.install_http_paths(Arc::new(hook));
+        self.set_http_paths(Arc::new(hook));
         self
     }
 
@@ -607,7 +610,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// identity is ignored with a warning.
     #[must_use]
     pub fn with_command_guest(self, id: impl Into<GuestId>) -> Self {
-        self.install_command_guest(id.into());
+        self.set_command_guest(id.into());
         self
     }
 
@@ -617,7 +620,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         self.inner.command_guest.get()
     }
 
-    fn install_resolver(&self, resolver: Arc<dyn GuestResolver>) {
+    fn set_resolver(&self, resolver: Arc<dyn GuestResolver>) {
         if self.inner.resolver.set(resolver).is_err() {
             tracing::warn!("guest resolver already installed; ignoring");
             return;
@@ -625,18 +628,18 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         // The erased link-path hook holds a weak back-reference: the strong
         // chain RuntimeInner -> Registry -> DispatchHandle -> hook would
         // otherwise cycle.
-        self.registry().dispatch().install_resolve_hook(Box::new(RuntimeResolveHook {
+        self.registry().dispatch().set_resolve_hook(Box::new(RuntimeResolveHook {
             inner: Arc::downgrade(&self.inner),
         }));
     }
 
-    fn install_http_paths(&self, hook: HttpPaths) {
+    fn set_http_paths(&self, hook: HttpPaths) {
         if self.inner.http_paths.set(hook).is_err() {
             tracing::warn!("http paths hook already installed; ignoring");
         }
     }
 
-    fn install_command_guest(&self, id: GuestId) {
+    fn set_command_guest(&self, id: GuestId) {
         if self.inner.command_guest.set(id).is_err() {
             tracing::warn!("command guest already installed; ignoring");
         }
@@ -665,21 +668,25 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// Fresh per-guest store context.
     #[must_use]
     pub fn store(&self) -> StoreCtx<B> {
-        let mut builder = StoreBase::builder()
-            .options(self.options())
-            .dispatcher(Arc::clone(&self.dispatcher))
-            .args(Arc::clone(&self.inner.args))
-            .mounts(Arc::clone(&self.inner.mounts));
-        if let Some(env) = &self.inner.guest_env {
-            builder = builder.env(Arc::clone(env));
-        }
         StoreCtx {
-            base: builder.build(),
+            base: StoreBase::new(crate::StoreConfig {
+                options: self.options(),
+                dispatcher: Arc::clone(&self.dispatcher),
+                args: Some(Arc::clone(&self.inner.args)),
+                mounts: Some(Arc::clone(&self.inner.mounts)),
+                env: self.inner.guest_env.as_ref().map(Arc::clone),
+            }),
             backends: self.inner.backends.clone(),
         }
     }
 
     /// Store with epoch deadline, optional fuel, and memory limiter installed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `MAX_FUEL` is set but the engine was built without fuel
+    /// metering — a configuration mismatch that would otherwise run guests
+    /// unmetered.
     #[must_use]
     pub fn build_store(&self, data: StoreCtx<B>) -> Store<StoreCtx<B>> {
         let options = self.options();
@@ -688,10 +695,12 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         store.set_epoch_deadline(1);
         store.epoch_deadline_async_yield_and_update(1);
 
-        if options.max_fuel > 0
-            && let Err(error) = store.set_fuel(options.max_fuel)
-        {
-            tracing::warn!(%error, "failed to set fuel budget");
+        if options.max_fuel > 0 {
+            // `Config::from(&options)` enables `consume_fuel` whenever
+            // `max_fuel > 0`, so a failure here means the engine was built
+            // from different options; running unmetered would silently void
+            // the fuel bound.
+            store.set_fuel(options.max_fuel).expect("engine was built without fuel metering");
         }
 
         store.limiter(|ctx| ctx.limits());
@@ -753,11 +762,11 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         // Wire the guest's linked exports (if any); publish then makes the
         // endpoint and the registry entry observable in one atomic step. If
         // publish refuses (a racing registration won), dropping the unused
-        // server winds its drain tasks down.
-        let server = serve_guest(self, &guest)
+        // endpoint aborts its drain tasks.
+        let endpoint = serve_guest(self, &guest)
             .await
             .with_context(|| format!("serving guest `{id}` link exports"))?;
-        registry.publish(guest, server)?;
+        registry.publish(guest, endpoint)?;
 
         tracing::info!(guest = %id, "guest registered");
         Ok(())
@@ -854,6 +863,21 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         .shared();
         flights.insert(id.clone(), flight.clone());
         flight
+    }
+
+    /// The number of dispatches currently sharing the resolve-on-miss flight
+    /// for `id` (zero when none is active) — a seam-suite probe, so
+    /// single-flight tests gate on joined waiters instead of sleeping.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn flight_waiters(&self, id: &GuestId) -> usize {
+        let flights = self.inner.flights.lock().unwrap_or_else(PoisonError::into_inner);
+        // The map itself holds one clone of the shared future; the rest are
+        // waiters. `strong_count` is `None` once the future has completed.
+        flights
+            .get(id)
+            .and_then(futures::future::Shared::strong_count)
+            .map_or(0, |count| count.saturating_sub(1))
     }
 
     /// Remove a dynamically registered guest. New dispatches to `id` fail as
@@ -971,7 +995,6 @@ mod tests {
     #[test]
     fn code_u8_keeps_low_byte() {
         // The POSIX low-byte truncation is the only non-trivial ExitStatus logic.
-        assert_eq!(ExitStatus::from(2).code(), 2);
         assert_eq!(ExitStatus::from(256).code_u8(), 0);
         assert_eq!(ExitStatus::from(257).code_u8(), 1);
         assert_eq!(ExitStatus::from(-1).code_u8(), 255);

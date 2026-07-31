@@ -5,6 +5,8 @@
 //! Bindings for the OpenTelemetry specification (wasi:otel) for guest and host
 //! components.
 
+mod trace_state;
+
 #[cfg(target_arch = "wasm32")]
 mod guest;
 #[cfg(target_arch = "wasm32")]

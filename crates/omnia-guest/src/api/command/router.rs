@@ -115,7 +115,7 @@ impl Selector {
 #[derive(Clone, Debug)]
 pub struct RouteInfo {
     selector: Selector,
-    operation_type_id: Option<TypeId>,
+    operation: Option<TypeId>,
     about: Option<&'static str>,
     long_about: Option<&'static str>,
     aliases: Vec<&'static str>,
@@ -131,8 +131,8 @@ impl RouteInfo {
 
     /// Return the bound operation type, if this is not a synthetic route.
     #[must_use]
-    pub const fn operation_type_id(&self) -> Option<TypeId> {
-        self.operation_type_id
+    pub const fn operation(&self) -> Option<TypeId> {
+        self.operation
     }
 
     /// Return short route help.
@@ -230,7 +230,7 @@ type DispatchFuture<'a> = Pin<Box<dyn Future<Output = CommandResponse> + Send + 
 type BeforeDispatch<G> = Arc<dyn Fn(&G) -> Option<CommandResponse> + Send + Sync>;
 
 trait ErasedRoute<P: Provider, G>: Send + Sync {
-    fn operation_type_id(&self) -> TypeId;
+    fn operation(&self) -> TypeId;
     fn about(&self) -> Option<&'static str>;
     fn long_about(&self) -> Option<&'static str>;
     fn aliases(&self) -> &[&'static str];
@@ -257,7 +257,7 @@ where
     D: Decoder<A, O::Input, G>,
     Q: Projector<O::Output, O::Error, D::Error, G>,
 {
-    fn operation_type_id(&self) -> TypeId {
+    fn operation(&self) -> TypeId {
         TypeId::of::<O>()
     }
 
@@ -336,7 +336,7 @@ struct Registration<P: Provider, G> {
     route: Arc<dyn ErasedRoute<P, G>>,
 }
 
-struct NamespaceRegistration {
+struct NamespaceEntry {
     path: Vec<&'static str>,
     metadata: Namespace,
 }
@@ -368,7 +368,7 @@ pub struct RouterBuilder<P: Provider, G = NoGlobals> {
     invoker: Invoker<P>,
     before_dispatch: Option<BeforeDispatch<G>>,
     registrations: Vec<Registration<P, G>>,
-    namespaces: Vec<NamespaceRegistration>,
+    namespaces: Vec<NamespaceEntry>,
 }
 
 impl<P, G> RouterBuilder<P, G>
@@ -418,7 +418,7 @@ where
     where
         I: IntoIterator<Item = &'static str>,
     {
-        self.namespaces.push(NamespaceRegistration {
+        self.namespaces.push(NamespaceEntry {
             path: path.into_iter().collect(),
             metadata,
         });
@@ -462,7 +462,7 @@ where
 
         let mut command = global_command::<G>(self.command);
         let global_keys = argument_keys(&command);
-        validate_global_arguments(&root, &global_keys, &mut Vec::new())?;
+        check_global_args(&root, &global_keys, &mut Vec::new())?;
         for (name, node) in &root.children {
             command = command.subcommand(node_command(name, node));
         }
@@ -486,7 +486,7 @@ where
             selector: Selector {
                 path: vec![COMPLETIONS.to_owned()],
             },
-            operation_type_id: None,
+            operation: None,
             about: Some(self.completions.about),
             long_about: self.completions.long_about,
             aliases: Vec::new(),
@@ -585,13 +585,9 @@ where
     P: Provider,
     G: Args + FromArgMatches + Send + Sync + 'static,
 {
-    use std::io::Write as _;
-
     let argv = wasip3::cli::environment::get_arguments();
     let response = router.execute(argv).await;
-    if std::io::stdout().write_all(&response.stdout).is_err()
-        || std::io::stderr().write_all(&response.stderr).is_err()
-    {
+    if response.write_to(&mut std::io::stdout(), &mut std::io::stderr()).is_err() {
         return Err(());
     }
     if response.exit != 0 {
@@ -660,7 +656,7 @@ fn insert<P: Provider, G>(
 }
 
 fn apply_namespace<P: Provider, G>(
-    root: &mut Node<P, G>, registration: &NamespaceRegistration,
+    root: &mut Node<P, G>, registration: &NamespaceEntry,
 ) -> Result<(), BuildError> {
     let path: Vec<_> = registration.path.iter().map(ToString::to_string).collect();
     if registration.path.is_empty() {
@@ -709,7 +705,7 @@ fn validate_aliases<P: Provider, G>(node: &Node<P, G>, path: &[String]) -> Resul
     Ok(())
 }
 
-fn validate_global_arguments<P: Provider, G>(
+fn check_global_args<P: Provider, G>(
     node: &Node<P, G>, globals: &BTreeSet<String>, path: &mut Vec<String>,
 ) -> Result<(), BuildError> {
     if let Some(route) = &node.leaf
@@ -720,7 +716,7 @@ fn validate_global_arguments<P: Provider, G>(
     }
     for (name, child) in &node.children {
         path.push((*name).to_owned());
-        validate_global_arguments(child, globals, path)?;
+        check_global_args(child, globals, path)?;
         path.pop();
     }
     Ok(())
@@ -758,7 +754,7 @@ fn inventory<P: Provider, G>(registrations: &[Registration<P, G>]) -> Vec<RouteI
             selector: Selector {
                 path: registration.path.iter().map(ToString::to_string).collect(),
             },
-            operation_type_id: Some(registration.route.operation_type_id()),
+            operation: Some(registration.route.operation()),
             about: registration.route.about(),
             long_about: registration.route.long_about(),
             aliases: registration.route.aliases().to_vec(),

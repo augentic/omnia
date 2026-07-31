@@ -515,7 +515,7 @@ struct Plan {
 
 // Build the shared engine, WASI-linked linker, and runtime options.
 fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, RuntimeOptions)> {
-    let options = RuntimeOptions::load()?;
+    let options = RuntimeOptions::load_env()?;
     let engine = Engine::new(&Config::from(&options))?;
 
     // register services with runtime's Linker
@@ -563,7 +563,7 @@ mod tests {
             pool_max_memories_per_module: Some(2),
             pool_max_tables_per_module: Some(2),
             pool_decommit_batch_size: Some(8),
-            ..RuntimeOptions::load().expect("should load")
+            ..RuntimeOptions::load_env().expect("should load")
         };
         Engine::new(&Config::from(&options))
             .expect("decoupled multi-memory pooling config should build an engine");
@@ -573,7 +573,7 @@ mod tests {
     fn builds_no_pooling() {
         let options = RuntimeOptions {
             pooling: false,
-            ..RuntimeOptions::load().expect("should load")
+            ..RuntimeOptions::load_env().expect("should load")
         };
         Engine::new(&Config::from(&options)).expect("non-pooling config should build an engine");
     }

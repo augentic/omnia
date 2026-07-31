@@ -1,6 +1,4 @@
 use std::fmt::Debug;
-use std::ops::Deref;
-use std::sync::Arc;
 
 pub use omnia::FutureResult;
 
@@ -17,18 +15,8 @@ pub trait Connection: Debug + Send + Sync + 'static {
     fn exec(&self, query: String, params: Vec<DataType>) -> FutureResult<u32>;
 }
 
-/// [`ConnectionProxy`] provides a concrete wrapper around a `dyn Connection` object.
-/// It is used to store connection resources in the resource table.
-#[derive(Clone, Debug)]
-pub struct ConnectionProxy(pub Arc<dyn Connection>);
-
-impl Deref for ConnectionProxy {
-    type Target = Arc<dyn Connection>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+/// Proxy for a SQL connection, stored in the resource table.
+pub type ConnectionProxy = omnia::Proxy<dyn Connection>;
 
 /// Represents a statement resource in the WASI SQL host.
 #[derive(Clone, Debug)]

@@ -15,7 +15,6 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context as _, Result, bail};
 use futures::FutureExt as _;
@@ -46,20 +45,17 @@ type BackendFactory = Arc<dyn Fn() -> Box<dyn WasiModelCtx> + Send + Sync>;
 ///
 /// The library [`Runtime::store`] clones the bundle to build each per-guest
 /// store, so the bundle's [`Clone`] mints a fresh backend (replacing the old
-/// per-store factory call) and bumps `stores_built`.
+/// per-store factory call).
 struct TestBundle {
     backend: BackendFactory,
     model: Box<dyn WasiModelCtx>,
-    stores_built: Arc<AtomicUsize>,
 }
 
 impl Clone for TestBundle {
     fn clone(&self) -> Self {
-        self.stores_built.fetch_add(1, Ordering::SeqCst);
         Self {
             backend: Arc::clone(&self.backend),
             model: (self.backend)(),
-            stores_built: Arc::clone(&self.stores_built),
         }
     }
 }
@@ -81,13 +77,11 @@ type TestCtx = omnia::StoreCtx<TestBundle>;
 /// mounts preopened into each store (empty when no workspace is configured, a
 /// single `.` mount for the completion path so the guest lends a workspace).
 fn model_runtime(
-    registry: Arc<Registry<TestCtx>>, backend: BackendFactory, stores_built: Arc<AtomicUsize>,
-    mounts: Arc<MountRegistry>,
+    registry: Arc<Registry<TestCtx>>, backend: BackendFactory, mounts: Arc<MountRegistry>,
 ) -> Runtime<TestBundle> {
     let bundle = TestBundle {
         model: backend(),
         backend,
-        stores_built,
     };
     Runtime::from_parts(registry, Vec::new(), mounts, bundle)
 }
@@ -97,7 +91,13 @@ fn model_runtime(
 /// via `preopens.get-directories()` and lends it through `grants.workspace`.
 /// The scripted double ignores the request; any real directory serves.
 fn workspace_mount() -> (PathBuf, Arc<MountRegistry>) {
-    let dir = std::env::temp_dir().join(format!("omnia-model-ws-{}", std::process::id()));
+    workspace_mount_at("ws")
+}
+
+/// [`workspace_mount`] over a `label`-specific directory, so a test needing
+/// two distinct trees does not collide with the shared one.
+fn workspace_mount_at(label: &str) -> (PathBuf, Arc<MountRegistry>) {
+    let dir = std::env::temp_dir().join(format!("omnia-model-{label}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("creating the workspace mount dir");
     let registry =
         MountRegistry::open(vec![ResolvedPreopen::new(".".to_owned(), dir.clone(), false)])
@@ -137,10 +137,21 @@ async fn build_registry() -> Result<Arc<Registry<TestCtx>>> {
 
 /// Instantiate the guest fresh, drive `wasi:cli/run`, and return stdout.
 async fn call_run(runtime: &Runtime<TestBundle>) -> Result<String> {
+    call_run_preopening(runtime, None).await
+}
+
+/// [`call_run`] preopening `preopens` into the guest instead of the runtime's
+/// own mounts — the guest then lends a directory the deployment never
+/// authorized (host-side identity matching still runs against the runtime's
+/// registry).
+async fn call_run_preopening(
+    runtime: &Runtime<TestBundle>, preopens: Option<Arc<MountRegistry>>,
+) -> Result<String> {
     let guest =
         runtime.registry().get(&GuestId::from("model")).context("model guest is registered")?;
     let template = runtime.store();
     let mounts = Arc::clone(&template.base.mounts);
+    let preopens = preopens.unwrap_or_else(|| Arc::clone(&mounts));
     let stdout = MemoryOutputPipe::new(65536);
     let stdout_capture = stdout.clone();
 
@@ -151,13 +162,12 @@ async fn call_run(runtime: &Runtime<TestBundle>) -> Result<String> {
         .stdout(stdout)
         .stderr(tokio::io::stderr())
         .args(&["model" as &str]);
-    for entry in mounts.entries() {
-        let _ = wasi_builder.preopened_dir(
-            &entry.host_path,
-            &entry.name,
-            entry.dir_perms,
-            entry.file_perms,
-        );
+    for entry in preopens.entries() {
+        wasi_builder
+            .preopened_dir(&entry.host_path, &entry.name, entry.dir_perms, entry.file_perms)
+            .map_err(|error| {
+                anyhow::anyhow!("preopening `{}`: {error}", entry.host_path.display())
+            })?;
     }
 
     let options = runtime.options();
@@ -214,7 +224,6 @@ fn scripted() -> Result<()> {
         let runtime = model_runtime(
             Arc::clone(registry),
             Arc::new(move || Box::new(backend.clone())),
-            Arc::new(AtomicUsize::new(0)),
             mounts,
         );
 
@@ -242,12 +251,8 @@ fn rejects_schema() -> Result<()> {
         let registry = registry().await?;
         let (_mount_dir, mounts) = workspace_mount();
         let backend = ModelDefault::connect().await.context("connecting the default backend")?;
-        let runtime = model_runtime(
-            Arc::clone(registry),
-            Arc::new(move || Box::new(backend)),
-            Arc::new(AtomicUsize::new(0)),
-            mounts,
-        );
+        let runtime =
+            model_runtime(Arc::clone(registry), Arc::new(move || Box::new(backend)), mounts);
 
         let output = call_run(&runtime).await.context("driving the default backend")?;
         assert!(
@@ -260,7 +265,8 @@ fn rejects_schema() -> Result<()> {
 }
 
 /// A backend that asserts the host resolved the guest's lent workspace to
-/// its mount path — the `local-path` face the cursor backend consumes.
+/// its mount path — the `local-path` face the cursor backend consumes — and
+/// that the bounded `read` face serves the mount's contents.
 #[derive(Debug, Clone)]
 struct PathProbe {
     expected: PathBuf,
@@ -276,6 +282,8 @@ impl WasiModelCtx for PathProbe {
                 "host must resolve the lent workspace to its mount path: got {local:?}, want {}",
                 expected.display()
             );
+            let bytes = tool_host.read("hello.txt".to_owned()).await?;
+            anyhow::ensure!(bytes == b"hi", "workspace read returns the seeded file's bytes");
             Ok(Answer {
                 value: json!({ "verdict": "pass", "reason": "local path resolved" }),
                 usage: None,
@@ -294,7 +302,8 @@ impl WasiModelCtx for PathProbe {
 fn workspace() -> Result<()> {
     fixture::RT.block_on(async {
         let registry = registry().await?;
-        let (mount_dir, mounts) = workspace_mount();
+        let (mount_dir, mounts) = workspace_mount_at("probe");
+        std::fs::write(mount_dir.join("hello.txt"), b"hi").context("seeding the mount")?;
         let expected = mount_dir.clone();
         let runtime = model_runtime(
             Arc::clone(registry),
@@ -303,7 +312,6 @@ fn workspace() -> Result<()> {
                     expected: expected.clone(),
                 })
             }),
-            Arc::new(AtomicUsize::new(0)),
             mounts,
         );
 
@@ -315,6 +323,81 @@ fn workspace() -> Result<()> {
             json!({ "verdict": "pass", "reason": "local path resolved" }),
             "the host resolves the lent workspace and exposes its mount path on the ToolHost"
         );
+
+        Ok(())
+    })
+}
+
+// The guest lends a directory the deployment never authorized: the host's
+// identity match rejects it before the backend ever runs.
+#[test]
+fn out_of_scope_workspace() -> Result<()> {
+    fixture::RT.block_on(async {
+        let registry = registry().await?;
+        // The runtime authorizes one tree, but the guest is preopened (and so
+        // lends) a different one.
+        let (_authorized, mounts) = workspace_mount_at("scope-ok");
+        let (_lent, lent) = workspace_mount_at("scope-bad");
+
+        let backend = Scripted::json(answer());
+        let runtime = model_runtime(
+            Arc::clone(registry),
+            Arc::new(move || Box::new(backend.clone())),
+            mounts,
+        );
+
+        let output = call_run_preopening(&runtime, Some(lent))
+            .await
+            .context("driving the out-of-scope lend")?;
+        assert!(
+            output.contains("out of scope"),
+            "an unauthorized lend is rejected in the host: {output}"
+        );
+
+        Ok(())
+    })
+}
+
+/// A backend that drives `ToolHost::write` against the lent workspace and
+/// reports the outcome as its answer.
+#[derive(Debug, Clone)]
+struct WriteProbe;
+
+impl WasiModelCtx for WriteProbe {
+    fn complete(&self, _request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
+        async move {
+            let reason = match tool_host.write("probe.txt".to_owned(), b"data".to_vec()).await {
+                Ok(()) => "write unexpectedly succeeded".to_owned(),
+                Err(error) => format!("{error:#}"),
+            };
+            Ok(Answer {
+                value: json!({ "verdict": "probe", "reason": reason }),
+                usage: None,
+                transcript: None,
+            })
+        }
+        .boxed()
+    }
+}
+
+// A write through the ToolHost against a read-only mount is denied in the
+// host, and nothing lands on disk.
+#[test]
+fn readonly_write_denied() -> Result<()> {
+    fixture::RT.block_on(async {
+        let registry = registry().await?;
+        let (mount_dir, mounts) = workspace_mount_at("ro");
+        let runtime =
+            model_runtime(Arc::clone(registry), Arc::new(move || Box::new(WriteProbe)), mounts);
+
+        let output = call_run(&runtime).await.context("driving the write probe")?;
+        let value: Value = serde_json::from_str(&output)
+            .with_context(|| format!("probe answer should be JSON, got: {output}"))?;
+        assert!(
+            value["reason"].as_str().is_some_and(|reason| reason.contains("read-only")),
+            "the denial names the read-only mount: {value}"
+        );
+        assert!(!mount_dir.join("probe.txt").exists(), "no file lands on a denied write");
 
         Ok(())
     })

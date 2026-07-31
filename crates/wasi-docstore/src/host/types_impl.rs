@@ -79,31 +79,15 @@ impl<T> HostFilterWithStore<T> for WasiDocStore {
     }
 
     fn and(
-        mut host: Access<'_, T, Self>, filters: Vec<Resource<FilterProxy>>,
+        host: Access<'_, T, Self>, filters: Vec<Resource<FilterProxy>>,
     ) -> wasmtime::Result<Resource<FilterProxy>> {
-        wasmtime::ensure!(!filters.is_empty(), "filter.and requires at least one child");
-        let mut children = Vec::with_capacity(filters.len());
-        for r in filters {
-            let fp = host.get().table.delete(r)?;
-            children.push(fp.0);
-        }
-        let tree = FilterTree::And(children);
-        check_depth(&tree)?;
-        Ok(host.get().table.push(FilterProxy(tree))?)
+        combine(host, filters, "filter.and", FilterTree::And)
     }
 
     fn or(
-        mut host: Access<'_, T, Self>, filters: Vec<Resource<FilterProxy>>,
+        host: Access<'_, T, Self>, filters: Vec<Resource<FilterProxy>>,
     ) -> wasmtime::Result<Resource<FilterProxy>> {
-        wasmtime::ensure!(!filters.is_empty(), "filter.or requires at least one child");
-        let mut children = Vec::with_capacity(filters.len());
-        for r in filters {
-            let fp = host.get().table.delete(r)?;
-            children.push(fp.0);
-        }
-        let tree = FilterTree::Or(children);
-        check_depth(&tree)?;
-        Ok(host.get().table.push(FilterProxy(tree))?)
+        combine(host, filters, "filter.or", FilterTree::Or)
     }
 
     fn not(
@@ -126,6 +110,22 @@ impl TypesHost for WasiDocStoreCtxView<'_> {
     fn convert_error(&mut self, err: Error) -> wasmtime::Result<Error> {
         Ok(err)
     }
+}
+
+/// Consume child filter resources into one combining node (`and` / `or`).
+fn combine<T>(
+    mut host: Access<'_, T, WasiDocStore>, filters: Vec<Resource<FilterProxy>>, verb: &str,
+    node: fn(Vec<FilterTree>) -> FilterTree,
+) -> wasmtime::Result<Resource<FilterProxy>> {
+    wasmtime::ensure!(!filters.is_empty(), "{verb} requires at least one child");
+    let mut children = Vec::with_capacity(filters.len());
+    for r in filters {
+        let fp = host.get().table.delete(r)?;
+        children.push(fp.0);
+    }
+    let tree = node(children);
+    check_depth(&tree)?;
+    Ok(host.get().table.push(FilterProxy(tree))?)
 }
 
 fn check_depth(tree: &FilterTree) -> wasmtime::Result<()> {

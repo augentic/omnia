@@ -46,17 +46,11 @@ impl Host for WasiSqlCtxView<'_> {}
 pub fn get_connection<T>(
     accessor: &Accessor<T, WasiSql>, self_: &Resource<ConnectionProxy>,
 ) -> Result<ConnectionProxy> {
-    accessor.with(|mut store| {
-        let connection = store.get().table.get(self_)?;
-        Ok::<_, anyhow::Error>(connection.clone())
-    })
+    Ok(omnia::get_cloned(accessor, self_)?)
 }
 
 pub fn get_statement<T>(
     accessor: &Accessor<T, WasiSql>, self_: &Resource<Statement>,
 ) -> Result<Statement> {
-    accessor.with(|mut store| {
-        let statement = store.get().table.get(self_)?;
-        Ok::<_, anyhow::Error>(statement.clone())
-    })
+    Ok(omnia::get_cloned(accessor, self_)?)
 }

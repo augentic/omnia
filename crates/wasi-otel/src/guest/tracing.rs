@@ -1,6 +1,6 @@
 //! # Tracing
 
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use opentelemetry::{Context, global, trace as otel};
@@ -20,16 +20,14 @@ pub fn init(resource: Resource) -> SdkTracerProvider {
 
 #[derive(Debug)]
 struct Processor {
-    resource: Resource,
-    spans: Arc<Mutex<Vec<SpanData>>>,
+    spans: Mutex<Vec<SpanData>>,
 }
 
 impl Processor {
     #[must_use]
     fn new() -> Self {
         Self {
-            resource: Resource::builder_empty().build(),
-            spans: Arc::new(Mutex::new(Vec::new())),
+            spans: Mutex::new(Vec::new()),
         }
     }
 }
@@ -51,8 +49,9 @@ impl SpanProcessor for Processor {
     }
 
     fn shutdown_with_timeout(&self, _: Duration) -> OTelSdkResult {
-        let spans =
-            self.spans.lock().map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?.to_vec();
+        let spans = std::mem::take(
+            &mut *self.spans.lock().map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?,
+        );
         if spans.is_empty() {
             return Ok(());
         }
@@ -67,9 +66,7 @@ impl SpanProcessor for Processor {
         Ok(())
     }
 
-    fn set_resource(&mut self, resource: &Resource) {
-        self.resource = resource.clone();
-    }
+    fn set_resource(&mut self, _: &Resource) {}
 }
 
 impl From<wasi::SpanContext> for otel::SpanContext {
@@ -116,18 +113,7 @@ impl From<otel::SpanContext> for wasi::SpanContext {
             span_id: format!("{:x}", sc.span_id()),
             trace_flags: sc.trace_flags().into(),
             is_remote: sc.is_remote(),
-            trace_state: sc
-                .trace_state()
-                .header()
-                .split(',')
-                .filter_map(|s| {
-                    if let Some((key, value)) = s.split_once('=') {
-                        Some((key.to_string(), value.to_string()))
-                    } else {
-                        None
-                    }
-                })
-                .collect(),
+            trace_state: crate::trace_state::parse(&sc.trace_state().header()),
         }
     }
 }

@@ -1,7 +1,5 @@
 use std::fmt::Debug;
-use std::ops::Deref;
 use std::pin::Pin;
-use std::sync::Arc;
 
 use futures::Stream;
 use omnia::FutureResult;
@@ -20,16 +18,7 @@ pub trait Client: Debug + Send + Sync + 'static {
 }
 
 /// Proxy for a WebSocket server client.
-#[derive(Clone, Debug)]
-pub struct ClientProxy(pub Arc<dyn Client>);
-
-impl Deref for ClientProxy {
-    type Target = Arc<dyn Client>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+pub type ClientProxy = omnia::Proxy<dyn Client>;
 
 /// A WebSocket event crossing the boundary.
 ///

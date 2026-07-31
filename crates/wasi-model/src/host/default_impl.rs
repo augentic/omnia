@@ -20,23 +20,13 @@ use crate::host::generated::omnia::model::completion::{Format, Request};
 use crate::host::types::Answer;
 use crate::host::{FutureResult, ToolHost, WasiModelCtx};
 
-/// Options used to connect the default backend — none are needed.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct ConnectOptions;
-
-impl omnia::FromEnv for ConnectOptions {
-    fn from_env() -> Result<Self> {
-        Ok(Self)
-    }
-}
-
 /// Echo default implementation of `wasi-model`: it starts without
 /// configuration and answers every completion with its own prompt.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ModelDefault;
 
 impl Backend for ModelDefault {
-    type ConnectOptions = ConnectOptions;
+    type ConnectOptions = omnia::NoOptions;
 
     async fn connect_with(_options: Self::ConnectOptions) -> Result<Self> {
         Ok(Self)

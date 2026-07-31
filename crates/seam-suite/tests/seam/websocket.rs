@@ -13,7 +13,7 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::fixture;
 
 #[test]
-fn send_reaches_connected_peer() -> Result<()> {
+fn send_reaches_peer() -> Result<()> {
     fixture::RT.block_on(async {
         let fx = fixture::conformance().await?;
 

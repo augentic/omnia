@@ -25,8 +25,8 @@ Two backends sit behind the one `wasi-model` boundary and are selected by config
 ## Out of scope
 
 - The `complete` host boundary and backend trait (`crates/wasi-model`).
-- The genai (`omnia-genai`) and spawned-agent (`omnia-cursor`) backends (the `backends` repo).
-- The genai tool loop's full dispatch: only `resolve` is executable; the host-injected `read` / `list` / `write` / `verify` tools and guest-declared tools fail loudly rather than fabricate a result (`backends/crates/genai/src/model.rs`).
+- The genai (`omnia-genai`) and spawned-agent (`omnia-cursor`) backends (the `omnia-backends` repo).
+- The genai tool loop's full dispatch: only `resolve` is executable; the host-injected `read` / `list` / `write` / `verify` tools and guest-declared tools fail loudly rather than fabricate a result (`omnia-backends/crates/genai/src/model.rs`).
 - Verify profile execution — the `wasi-model` host routes `verify(check)` against `request.grants.verify` and acknowledges it; profile definitions, sandboxing, and severity-tiered report mapping are future work.
 
 

@@ -3,7 +3,6 @@
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use num_traits::ToPrimitive;
 use opentelemetry::global;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::OTelSdkResult;
@@ -116,7 +115,7 @@ impl From<&AggregatedMetrics> for wasi::AggregatedMetrics {
     }
 }
 
-impl<T: ToPrimitive + Copy> From<&MetricData<T>> for wasi::MetricData {
+impl<T: Copy + Into<wasi::DataValue>> From<&MetricData<T>> for wasi::MetricData {
     fn from(md: &MetricData<T>) -> Self {
         match md {
             MetricData::Gauge(v) => Self::Gauge(v.into()),
@@ -127,7 +126,7 @@ impl<T: ToPrimitive + Copy> From<&MetricData<T>> for wasi::MetricData {
     }
 }
 
-impl<T: ToPrimitive + Copy> From<&Gauge<T>> for wasi::Gauge {
+impl<T: Copy + Into<wasi::DataValue>> From<&Gauge<T>> for wasi::Gauge {
     fn from(gauge: &Gauge<T>) -> Self {
         Self {
             data_points: gauge.data_points().map(Into::into).collect(),
@@ -137,7 +136,7 @@ impl<T: ToPrimitive + Copy> From<&Gauge<T>> for wasi::Gauge {
     }
 }
 
-impl<T: ToPrimitive + Copy> From<&GaugeDataPoint<T>> for wasi::GaugeDataPoint {
+impl<T: Copy + Into<wasi::DataValue>> From<&GaugeDataPoint<T>> for wasi::GaugeDataPoint {
     fn from(data_point: &GaugeDataPoint<T>) -> Self {
         Self {
             attributes: data_point.attributes().map(Into::into).collect(),
@@ -147,7 +146,7 @@ impl<T: ToPrimitive + Copy> From<&GaugeDataPoint<T>> for wasi::GaugeDataPoint {
     }
 }
 
-impl<T: ToPrimitive + Copy> From<&Exemplar<T>> for wasi::Exemplar {
+impl<T: Copy + Into<wasi::DataValue>> From<&Exemplar<T>> for wasi::Exemplar {
     fn from(exemplar: &Exemplar<T>) -> Self {
         Self {
             filtered_attributes: exemplar.filtered_attributes().map(Into::into).collect(),
@@ -159,7 +158,7 @@ impl<T: ToPrimitive + Copy> From<&Exemplar<T>> for wasi::Exemplar {
     }
 }
 
-impl<T: ToPrimitive + Copy> From<&Sum<T>> for wasi::Sum {
+impl<T: Copy + Into<wasi::DataValue>> From<&Sum<T>> for wasi::Sum {
     fn from(sum: &Sum<T>) -> Self {
         Self {
             data_points: sum.data_points().map(Into::into).collect(),
@@ -171,7 +170,7 @@ impl<T: ToPrimitive + Copy> From<&Sum<T>> for wasi::Sum {
     }
 }
 
-impl<T: ToPrimitive + Copy> From<&SumDataPoint<T>> for wasi::SumDataPoint {
+impl<T: Copy + Into<wasi::DataValue>> From<&SumDataPoint<T>> for wasi::SumDataPoint {
     fn from(data_point: &SumDataPoint<T>) -> Self {
         Self {
             attributes: data_point.attributes().map(Into::into).collect(),
@@ -181,7 +180,7 @@ impl<T: ToPrimitive + Copy> From<&SumDataPoint<T>> for wasi::SumDataPoint {
     }
 }
 
-impl<T: ToPrimitive + Copy> From<&Histogram<T>> for wasi::Histogram {
+impl<T: Copy + Into<wasi::DataValue>> From<&Histogram<T>> for wasi::Histogram {
     fn from(histogram: &Histogram<T>) -> Self {
         Self {
             data_points: histogram.data_points().map(Into::into).collect(),
@@ -192,7 +191,7 @@ impl<T: ToPrimitive + Copy> From<&Histogram<T>> for wasi::Histogram {
     }
 }
 
-impl<T: ToPrimitive + Copy> From<&HistogramDataPoint<T>> for wasi::HistogramDataPoint {
+impl<T: Copy + Into<wasi::DataValue>> From<&HistogramDataPoint<T>> for wasi::HistogramDataPoint {
     fn from(data_point: &HistogramDataPoint<T>) -> Self {
         Self {
             attributes: data_point.attributes().map(Into::into).collect(),
@@ -207,7 +206,9 @@ impl<T: ToPrimitive + Copy> From<&HistogramDataPoint<T>> for wasi::HistogramData
     }
 }
 
-impl<T: ToPrimitive + Copy> From<&ExponentialHistogram<T>> for wasi::ExponentialHistogram {
+impl<T: Copy + Into<wasi::DataValue>> From<&ExponentialHistogram<T>>
+    for wasi::ExponentialHistogram
+{
     fn from(histogram: &ExponentialHistogram<T>) -> Self {
         Self {
             data_points: histogram.data_points().map(Into::into).collect(),
@@ -218,7 +219,7 @@ impl<T: ToPrimitive + Copy> From<&ExponentialHistogram<T>> for wasi::Exponential
     }
 }
 
-impl<T: ToPrimitive + Copy> From<&ExponentialHistogramDataPoint<T>>
+impl<T: Copy + Into<wasi::DataValue>> From<&ExponentialHistogramDataPoint<T>>
     for wasi::ExponentialHistogramDataPoint
 {
     fn from(data_point: &ExponentialHistogramDataPoint<T>) -> Self {
@@ -238,16 +239,23 @@ impl<T: ToPrimitive + Copy> From<&ExponentialHistogramDataPoint<T>>
     }
 }
 
-impl<T: ToPrimitive> From<T> for wasi::DataValue {
-    fn from(value: T) -> Self {
-        value.to_u64().map_or_else(
-            || {
-                value
-                    .to_i64()
-                    .map_or_else(|| Self::F64(value.to_f64().unwrap_or_default()), Self::S64)
-            },
-            Self::U64,
-        )
+// One impl per source type so every value crosses the boundary as itself —
+// a lossy "narrowest fit" conversion would truncate fractional f64 values.
+impl From<u64> for wasi::DataValue {
+    fn from(value: u64) -> Self {
+        Self::U64(value)
+    }
+}
+
+impl From<i64> for wasi::DataValue {
+    fn from(value: i64) -> Self {
+        Self::S64(value)
+    }
+}
+
+impl From<f64> for wasi::DataValue {
+    fn from(value: f64) -> Self {
+        Self::F64(value)
     }
 }
 

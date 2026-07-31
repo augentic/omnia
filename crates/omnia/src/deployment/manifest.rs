@@ -641,18 +641,9 @@ mod tests {
 
     #[test]
     fn reject_non_default_transport() {
-        let path = std::env::temp_dir()
-            .join(format!("omnia_manifest_transport_{}.toml", std::process::id()));
-        std::fs::write(
-            &path,
-            "[[guest]]\nid = \"only\"\nsource.path = \"./only.wasm\"\n\n\
-             [transport]\ndefault = \"unix\"\n",
-        )
-        .expect("temp manifest should write");
-
-        let manifest = Manifest::from_config(&path).expect("manifest should load");
-        let _ = std::fs::remove_file(&path);
-
+        let toml = "[[guest]]\nid = \"only\"\nsource.path = \"./only.wasm\"\n\n\
+             [transport]\ndefault = \"unix\"\n";
+        let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
         assert!(manifest.validate(false).is_err(), "distributed transport is not yet implemented");
     }
 
@@ -684,32 +675,17 @@ mod tests {
 
     #[test]
     fn reject_duplicate_guest_ids() {
-        let path =
-            std::env::temp_dir().join(format!("omnia_manifest_dup_{}.toml", std::process::id()));
-        std::fs::write(
-            &path,
-            "[[guest]]\nid = \"same\"\nsource.path = \"./a.wasm\"\n\n\
-             [[guest]]\nid = \"same\"\nsource.path = \"./b.wasm\"\n",
-        )
-        .expect("temp manifest should write");
-
-        let manifest = Manifest::from_config(&path).expect("manifest should load");
-        let _ = std::fs::remove_file(&path);
-
+        let toml = "[[guest]]\nid = \"same\"\nsource.path = \"./a.wasm\"\n\n\
+             [[guest]]\nid = \"same\"\nsource.path = \"./b.wasm\"\n";
+        let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
         let error = manifest.validate(false).expect_err("duplicate guest ids must be rejected");
         assert!(error.to_string().contains("duplicate [[guest]] id `same`"), "{error}");
     }
 
     #[test]
     fn reject_without_guests() {
-        let path =
-            std::env::temp_dir().join(format!("omnia_manifest_empty_{}.toml", std::process::id()));
-        std::fs::write(&path, "[transport]\ndefault = \"unix\"\n")
-            .expect("temp manifest should write");
-
-        let manifest = Manifest::from_config(&path).expect("manifest should load");
-        let _ = std::fs::remove_file(&path);
-
+        let manifest: Manifest =
+            toml::from_str("[transport]\ndefault = \"unix\"\n").expect("manifest should parse");
         assert!(
             manifest.validate(false).is_err(),
             "a static manifest with no guests must be rejected"

@@ -3,7 +3,7 @@
 use crate::host::Error;
 use crate::host::generated::omnia::model::completion::{Format, Request, Tool};
 
-const TOOL_NAMES: &[&str] = &["resolve", "read", "list", "write", "verify"];
+const TOOL_NAMES: &[&str] = &["resolve", "read", "list", "write"];
 
 /// Validate a guest request before it reaches a backend.
 ///
@@ -104,7 +104,6 @@ mod tests {
             grants: Grants {
                 references: None,
                 workspace: None,
-                verify: vec![],
             },
         }
     }

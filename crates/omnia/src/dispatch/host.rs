@@ -162,9 +162,9 @@ impl<B: Clone + Send + Sync + 'static> Dispatcher for crate::runtime::RuntimeDis
     }
 }
 
-/// Find the exported interface on `target`'s component that carries a function
-/// named `func`, so a host can invoke it without hardcoding a consumer
-/// interface name.
+/// Find the *unique* exported interface on `target`'s component that carries a
+/// function named `func`, so a host can invoke it without hardcoding a
+/// consumer interface name. Ambiguity is an error, never a silent first-match.
 fn find_interface<B: Clone + Send + Sync + 'static>(
     runtime: &Runtime<B>, target: &GuestId, func: &str,
 ) -> Result<Box<str>> {
@@ -174,6 +174,7 @@ fn find_interface<B: Clone + Send + Sync + 'static>(
         .get(target)
         .with_context(|| format!("dispatch target `{target}` is not registered"))?;
     let component_ty = guest.component().component_type();
+    let mut matches: Vec<Box<str>> = Vec::new();
     for (interface, types::ComponentExtern { ty, .. }) in component_ty.exports(engine) {
         let types::ComponentItem::ComponentInstance(instance_ty) = ty else {
             continue;
@@ -183,8 +184,16 @@ fn find_interface<B: Clone + Send + Sync + 'static>(
                 name == func && matches!(ty, types::ComponentItem::ComponentFunc(_))
             });
         if has_func {
-            return Ok(Box::from(interface));
+            matches.push(Box::from(interface));
         }
     }
-    bail!("dispatch target `{target}` exports no interface with a `{func}` function")
+    match matches.len() {
+        0 => bail!("dispatch target `{target}` exports no interface with a `{func}` function"),
+        1 => Ok(matches.remove(0)),
+        _ => bail!(
+            "dispatch target `{target}` exports `{func}` from several interfaces ({}); name the \
+             interface explicitly",
+            matches.join(", ")
+        ),
+    }
 }

@@ -174,16 +174,30 @@ where
     HttpHarness::new(runtime.clone())?.handle(request).await
 }
 
-fn get_request(path: &str) -> Result<http::Request<Bytes>> {
-    http::Request::get(format!("http://localhost{path}"))
+/// A request builder targeting `http://localhost{path}` with the `Host`
+/// header every helper shares.
+fn request(method: http::Method, path: &str) -> http::request::Builder {
+    http::Request::builder()
+        .method(method)
+        .uri(format!("http://localhost{path}"))
         .header(http::header::HOST, "localhost")
-        .body(Bytes::new())
-        .context("building GET request")
+}
+
+fn get_request(path: &str) -> Result<http::Request<Bytes>> {
+    request(http::Method::GET, path).body(Bytes::new()).context("building GET request")
 }
 
 fn post_request(path: &str, body: impl Into<Bytes>) -> Result<http::Request<Bytes>> {
-    http::Request::post(format!("http://localhost{path}"))
-        .header(http::header::HOST, "localhost")
+    request(http::Method::POST, path).body(body.into()).context("building POST request")
+}
+
+fn delete_request(path: &str) -> Result<http::Request<Bytes>> {
+    request(http::Method::DELETE, path).body(Bytes::new()).context("building DELETE request")
+}
+
+fn post_json_request(path: &str, body: impl Into<Bytes>) -> Result<http::Request<Bytes>> {
+    request(http::Method::POST, path)
+        .header(http::header::CONTENT_TYPE, "application/json")
         .body(body.into())
         .context("building POST request")
 }
@@ -227,11 +241,7 @@ where
     B: Clone + Send + Sync + 'static,
     StoreCtx<B>: WasiHttpView,
 {
-    let request = http::Request::delete(format!("http://localhost{path}"))
-        .header(http::header::HOST, "localhost")
-        .body(Bytes::new())
-        .context("building DELETE request")?;
-    handle(runtime, request).await
+    handle(runtime, delete_request(path)?).await
 }
 
 /// Drive a `POST {path}` request carrying a JSON `body`, tagged
@@ -247,10 +257,5 @@ where
     B: Clone + Send + Sync + 'static,
     StoreCtx<B>: WasiHttpView,
 {
-    let request = http::Request::post(format!("http://localhost{path}"))
-        .header(http::header::HOST, "localhost")
-        .header(http::header::CONTENT_TYPE, "application/json")
-        .body(body.into())
-        .context("building POST request")?;
-    handle(runtime, request).await
+    handle(runtime, post_json_request(path, body)?).await
 }

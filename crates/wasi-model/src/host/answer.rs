@@ -201,7 +201,7 @@ mod tests {
     }
 
     #[test]
-    fn trailing_prose_after_object() {
+    fn trailing_prose() {
         let text = "{\"verdict\":\"pass\"}\nthanks";
         assert_eq!(Format::Json.parse(text).unwrap(), json!({ "verdict": "pass" }));
     }

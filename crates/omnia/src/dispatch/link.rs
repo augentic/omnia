@@ -187,16 +187,23 @@ async fn ensure_endpoint(handle: &DispatchHandle, target: &GuestId, interface: &
     Ok(())
 }
 
-/// The per-call dispatch: select the target, reject crossing resources, bound
-/// depth, then round-trip the call over the in-process wRPC carrier to a
-/// freshly-instantiated target export.
-async fn send<T>(
-    mut store: StoreContextMut<'_, T>, handle: &DispatchHandle, interface: &str, func: &str,
-    ty: &types::ComponentFunc, params: &[Val], results: &mut [Val],
-) -> Result<()>
-where
-    T: WrpcView + 'static,
-{
+/// A prepared dispatch: everything [`send`] and [`send_concurrent`] share
+/// before they diverge on store threading.
+struct Call<'a> {
+    start: std::time::Instant,
+    target: GuestId,
+    forwarded: std::borrow::Cow<'a, [Val]>,
+    param_types: Vec<Type>,
+    result_types: Vec<Type>,
+    client: super::transport::LinkClient,
+}
+
+/// Shared per-call preamble: select the target, reject crossing resources,
+/// resolve the endpoint, take a depth slot, and open the client connection.
+async fn prepare<'a>(
+    handle: &DispatchHandle, interface: &str, func: &str, ty: &types::ComponentFunc,
+    params: &'a [Val],
+) -> Result<Call<'a>> {
     let start = std::time::Instant::now();
 
     let (target, forwarded) = handle
@@ -214,11 +221,9 @@ where
         }
     }
 
-    // Resolve-on-miss runs before `enter`: a slow fetch/compile must not pin
-    // a process-wide depth slot for the duration of resolution.
     ensure_endpoint(handle, &target, interface).await?;
 
-    let _guard = handle.enter(&target)?;
+    let depth = handle.enter(&target)?;
 
     let param_types: Vec<Type> = ty.params().map(|(_, ty)| ty).collect();
     let result_types: Vec<Type> = ty.results().collect();
@@ -229,11 +234,24 @@ where
         param_types.len()
     );
 
-    let client = handle.transport().connect(&target)?;
+    let client = handle.transport().connect(&target, depth)?;
 
-    // Encode the forwarded parameters with wRPC's value codec.
+    Ok(Call {
+        start,
+        target,
+        forwarded,
+        param_types,
+        result_types,
+        client,
+    })
+}
+
+/// Encode the forwarded parameters with wRPC's value codec.
+fn encode_params<T: WrpcView + 'static>(
+    mut store: StoreContextMut<'_, T>, call: &Call<'_>, interface: &str, func: &str,
+) -> Result<BytesMut> {
     let mut buf = BytesMut::new();
-    for (value, ty) in zip(&*forwarded, &param_types) {
+    for (value, ty) in zip(&*call.forwarded, &call.param_types) {
         let mut encoder = ValEncoder::new(store.as_context_mut(), ty, &[], &[]);
         encoder
             .encode(value, &mut buf)
@@ -244,19 +262,57 @@ where
             "async/stream parameters cannot cross the link seam (`{interface}/{func}`)"
         );
     }
+    Ok(buf)
+}
+
+fn timeout_error(
+    handle: &DispatchHandle, target: &GuestId, interface: &str, func: &str,
+) -> anyhow::Error {
+    anyhow::anyhow!(
+        "link dispatch to `{target}` for `{interface}/{func}` timed out after {:?}",
+        handle.timeout()
+    )
+}
+
+fn log_dispatch(call: &Call<'_>, interface: &str, func: &str) {
+    let elapsed_us = u64::try_from(call.start.elapsed().as_micros()).unwrap_or(u64::MAX);
+    tracing::debug!(
+        target = %call.target,
+        interface,
+        func,
+        transport = "in-process",
+        histogram.link_dispatch_duration_us = elapsed_us,
+        monotonic_counter.link_dispatches = 1_u64,
+        "dispatched host-mediated call",
+    );
+}
+
+/// The per-call dispatch: select the target, reject crossing resources, bound
+/// depth, then round-trip the call over the in-process wRPC carrier to a
+/// freshly-instantiated target export.
+async fn send<T>(
+    mut store: StoreContextMut<'_, T>, handle: &DispatchHandle, interface: &str, func: &str,
+    ty: &types::ComponentFunc, params: &[Val], results: &mut [Val],
+) -> Result<()>
+where
+    T: WrpcView + 'static,
+{
+    let call = prepare(handle, interface, func, ty, params).await?;
+    let buf = encode_params(store.as_context_mut(), &call, interface, func)?;
 
     // Invoke over the carrier; the request is written and flushed here, the
     // results stream back on `incoming`. No deferred (async) parameters, so the
     // outgoing half carries nothing further and is dropped. The round-trip is
     // bounded by `guest_timeout` so a hung target cannot stall the caller.
+    let target = &call.target;
     tokio::time::timeout(handle.timeout(), async {
-        let (_outgoing, incoming) = client
-            .invoke((), interface, func, buf.freeze(), &[[]; 0])
-            .await
-            .with_context(|| format!("invoking link target `{target}` for `{interface}/{func}`"))?;
+        let (_outgoing, incoming) =
+            call.client.invoke((), interface, func, buf.freeze(), &[[]; 0]).await.with_context(
+                || format!("invoking link target `{target}` for `{interface}/{func}`"),
+            )?;
 
         let mut incoming = pin!(incoming);
-        for (index, (value, ty)) in zip(results.iter_mut(), &result_types).enumerate() {
+        for (index, (value, ty)) in zip(results.iter_mut(), &call.result_types).enumerate() {
             read_value(&mut store, &mut incoming, &[], &[], value, ty, &[index])
                 .await
                 .map_err(anyhow::Error::from)
@@ -265,34 +321,19 @@ where
         anyhow::Ok(())
     })
     .await
-    .map_err(|_elapsed| {
-        anyhow::anyhow!(
-            "link dispatch to `{target}` for `{interface}/{func}` timed out after {:?}",
-            handle.timeout()
-        )
-    })??;
+    .map_err(|_elapsed| timeout_error(handle, &call.target, interface, func))??;
 
-    let elapsed_us = u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX);
-    tracing::debug!(
-        target = %target,
-        interface,
-        func,
-        transport = "in-process",
-        histogram.link_dispatch_duration_us = elapsed_us,
-        monotonic_counter.link_dispatches = 1_u64,
-        "dispatched host-mediated call",
-    );
+    log_dispatch(&call, interface, func);
     Ok(())
 }
 
 /// The concurrent dual of [`send`], for async-typed imports.
 ///
-/// Deliberately parallel rather than shared: the store threading is the whole
-/// difference. A concurrent host task only reaches the store synchronously via
-/// [`Accessor::with`], so parameters are encoded inside a single `with` (the
-/// encoder never awaits) and results are decoded store-free — sound because
-/// resources, the only values `wrpc_wasmtime::read_value` needs the store for,
-/// never cross the link seam.
+/// The store threading is the whole difference: a concurrent host task only
+/// reaches the store synchronously via [`Accessor::with`], so parameters are
+/// encoded inside a single `with` (the encoder never awaits) and results are
+/// decoded store-free — sound because resources, the only values
+/// `wrpc_wasmtime::read_value` needs the store for, never cross the link seam.
 async fn send_concurrent<T>(
     accessor: &Accessor<T>, handle: &DispatchHandle, interface: &str, func: &str,
     ty: &types::ComponentFunc, params: &[Val], results: &mut [Val],
@@ -300,69 +341,20 @@ async fn send_concurrent<T>(
 where
     T: WrpcView + 'static,
 {
-    let start = std::time::Instant::now();
+    let call = prepare(handle, interface, func, ty, params).await?;
+    let buf = accessor
+        .with(|mut access| encode_params(access.as_context_mut(), &call, interface, func))?;
 
-    let (target, forwarded) = handle
-        .selector
-        .select(interface, func, params)
-        .with_context(|| format!("selecting target for `{interface}/{func}`"))?;
-
-    // Plain records cross by value; a live resource handle never crosses.
-    for value in &*forwarded {
-        if contains_resource(value) {
-            bail!(
-                "a resource handle cannot cross the link seam (call to `{interface}/{func}`, \
-                 target `{target}`)"
-            );
-        }
-    }
-
-    // Resolve-on-miss runs before `enter`: a slow fetch/compile must not pin
-    // a process-wide depth slot for the duration of resolution.
-    ensure_endpoint(handle, &target, interface).await?;
-
-    let _guard = handle.enter(&target)?;
-
-    let param_types: Vec<Type> = ty.params().map(|(_, ty)| ty).collect();
-    let result_types: Vec<Type> = ty.results().collect();
-    ensure!(
-        forwarded.len() == param_types.len(),
-        "selector forwarded {} arguments but `{interface}/{func}` expects {}",
-        forwarded.len(),
-        param_types.len()
-    );
-
-    let client = handle.transport().connect(&target)?;
-
-    // Encode the forwarded parameters with wRPC's value codec.
-    let mut buf = BytesMut::new();
-    accessor.with(|mut access| -> Result<()> {
-        for (value, ty) in zip(&*forwarded, &param_types) {
-            let mut encoder = ValEncoder::new(access.as_context_mut(), ty, &[], &[]);
-            encoder
-                .encode(value, &mut buf)
-                .map_err(anyhow::Error::from)
-                .with_context(|| format!("encoding parameter for `{interface}/{func}`"))?;
-            ensure!(
-                encoder.deferred.is_none(),
-                "async/stream parameters cannot cross the link seam (`{interface}/{func}`)"
-            );
-        }
-        Ok(())
-    })?;
-
-    // Invoke over the carrier; the request is written and flushed here, the
-    // results stream back on `incoming`. No deferred (async) parameters, so the
-    // outgoing half carries nothing further and is dropped. The round-trip is
-    // bounded by `guest_timeout` so a hung target cannot stall the caller.
+    // Invoke over the carrier; see `send` for the streaming/timeout contract.
+    let target = &call.target;
     tokio::time::timeout(handle.timeout(), async {
-        let (_outgoing, incoming) = client
-            .invoke((), interface, func, buf.freeze(), &[[]; 0])
-            .await
-            .with_context(|| format!("invoking link target `{target}` for `{interface}/{func}`"))?;
+        let (_outgoing, incoming) =
+            call.client.invoke((), interface, func, buf.freeze(), &[[]; 0]).await.with_context(
+                || format!("invoking link target `{target}` for `{interface}/{func}`"),
+            )?;
 
         let mut incoming = pin!(incoming);
-        for (index, (value, ty)) in zip(results.iter_mut(), &result_types).enumerate() {
+        for (index, (value, ty)) in zip(results.iter_mut(), &call.result_types).enumerate() {
             read_plain_value(&mut incoming, value, ty)
                 .await
                 .with_context(|| format!("decoding result {index} from `{target}`"))?;
@@ -370,23 +362,9 @@ where
         anyhow::Ok(())
     })
     .await
-    .map_err(|_elapsed| {
-        anyhow::anyhow!(
-            "link dispatch to `{target}` for `{interface}/{func}` timed out after {:?}",
-            handle.timeout()
-        )
-    })??;
+    .map_err(|_elapsed| timeout_error(handle, &call.target, interface, func))??;
 
-    let elapsed_us = u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX);
-    tracing::debug!(
-        target = %target,
-        interface,
-        func,
-        transport = "in-process",
-        histogram.link_dispatch_duration_us = elapsed_us,
-        monotonic_counter.link_dispatches = 1_u64,
-        "dispatched host-mediated call",
-    );
+    log_dispatch(&call, interface, func);
     Ok(())
 }
 
@@ -400,22 +378,5 @@ pub(super) fn contains_resource(value: &Val) -> bool {
         | Val::Option(Some(value))
         | Val::Result(Ok(Some(value)) | Err(Some(value))) => contains_resource(value),
         _ => false,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use wasmtime::component::Val;
-
-    use super::contains_resource;
-
-    #[test]
-    fn detect_nested() {
-        // Plain values never count as resources.
-        assert!(!contains_resource(&Val::String("x".to_owned())));
-        assert!(!contains_resource(&Val::Record(vec![("f".to_owned(), Val::U32(1),)])));
-        assert!(!contains_resource(&Val::Option(None)));
-        // A nested option/list carrying plain values stays clean.
-        assert!(!contains_resource(&Val::List(vec![Val::Bool(true), Val::Bool(false)])));
     }
 }

@@ -2,11 +2,9 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
-use std::sync::Arc;
 
 use futures::Stream;
 pub use omnia::FutureResult;
-use serde::{Deserialize, Serialize};
 
 use crate::host::generated::wasi::messaging::types;
 /// Stream of messages.
@@ -27,16 +25,7 @@ pub trait Client: Debug + Send + Sync + 'static {
 }
 
 /// Proxy for a messaging client.
-#[derive(Clone, Debug)]
-pub struct ClientProxy(pub Arc<dyn Client>);
-
-impl Deref for ClientProxy {
-    type Target = Arc<dyn Client>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+pub type ClientProxy = omnia::Proxy<dyn Client>;
 
 /// A message crossing the messaging boundary.
 ///
@@ -52,8 +41,6 @@ pub struct Message {
     pub payload: Vec<u8>,
     /// Headers or metadata associated with the message.
     pub metadata: Option<Metadata>,
-    /// Optional message description.
-    pub description: Option<String>,
     /// Optional reply topic to which a response can be published.
     pub reply: Option<Reply>,
 }
@@ -70,7 +57,7 @@ impl Message {
 }
 
 /// Metadata associated with a message.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default)]
 pub struct Metadata {
     /// The metadata fields.
     pub inner: HashMap<String, String>,
@@ -121,10 +108,8 @@ impl From<types::Metadata> for Metadata {
 }
 
 /// Reply information for a message.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default)]
 pub struct Reply {
-    /// The client name.
-    pub client_name: String,
     /// The reply topic.
     pub topic: String,
 }

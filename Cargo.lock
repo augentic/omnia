@@ -855,12 +855,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "092966b41edc516079bdf31ec78a2e0588d1d0c08f78b91d8307215928642b2b"
 
 [[package]]
-name = "deranged"
-version = "0.5.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
-
-[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2027,12 +2021,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "num-conv"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "521739c6d2bac4aa25192232afe6841231376b2b26d4d9fae5ecf8ca5772e441"
-
-[[package]]
 name = "num-integer"
 version = "0.1.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2160,7 +2148,6 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
- "omnia-guest-macros",
  "omnia-wasi-blobstore",
  "omnia-wasi-config",
  "omnia-wasi-docstore",
@@ -2235,6 +2222,7 @@ dependencies = [
  "tokio-tungstenite",
  "wasmtime",
  "wasmtime-wasi",
+ "wiremock",
 ]
 
 [[package]]
@@ -2315,7 +2303,6 @@ dependencies = [
  "hyper",
  "omnia",
  "omnia-wasi-keyvalue",
- "percent-encoding",
  "reqwest 0.13.4",
  "serde",
  "serde_json",
@@ -2326,7 +2313,6 @@ dependencies = [
  "wasmtime",
  "wasmtime-wasi",
  "wasmtime-wasi-http",
- "wiremock",
 ]
 
 [[package]]
@@ -2369,10 +2355,7 @@ version = "0.35.0"
 dependencies = [
  "anyhow",
  "futures",
- "http",
  "omnia",
- "serde",
- "time",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -2406,16 +2389,13 @@ name = "omnia-wasi-otel"
 version = "0.35.0"
 dependencies = [
  "anyhow",
- "cfg-if",
  "futures",
  "hex",
- "num-traits",
  "omnia",
  "omnia-guest-macros",
  "opentelemetry",
  "opentelemetry-proto",
  "opentelemetry_sdk",
- "prost",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
@@ -2429,15 +2409,11 @@ name = "omnia-wasi-sql"
 version = "0.35.0"
 dependencies = [
  "anyhow",
- "base64ct",
- "chrono",
  "fromenv",
  "futures",
  "omnia",
  "parking_lot",
  "rusqlite",
- "sea-query",
- "serde_json",
  "tokio",
  "tracing",
  "wasmtime",
@@ -2473,7 +2449,6 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite",
  "tracing",
- "tungstenite",
  "wasmtime",
  "wasmtime-wasi",
  "wit-bindgen 0.60.0",
@@ -2670,12 +2645,6 @@ checksum = "0103b1cef7ec0cf76490e969665504990193874ea05c85ff9bab8b911d0a0564"
 dependencies = [
  "zerovec",
 ]
-
-[[package]]
-name = "powerfmt"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
 
 [[package]]
 name = "ppv-lite86"
@@ -3136,12 +3105,14 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
  "tower",
  "tower-http 0.6.11",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams",
  "web-sys",
 ]
 
@@ -3744,25 +3715,6 @@ checksum = "1ad99c4c6d32803332c548b1af0540b357b3f5fc0be8f6c6bfe8b2e6ae784070"
 dependencies = [
  "cfg-if",
 ]
-
-[[package]]
-name = "time"
-version = "0.3.54"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e1d5e639ff6bab73cb6885cc7e7b1de96c3f32c68ec55f3952614bec1092244"
-dependencies = [
- "deranged",
- "num-conv",
- "powerfmt",
- "serde_core",
- "time-core",
-]
-
-[[package]]
-name = "time-core"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e1c906769ad99c88eaa54e728060edef082f8e358ff32030cb7c7d315e81109"
 
 [[package]]
 name = "tinystr"
@@ -4382,6 +4334,19 @@ dependencies = [
  "indexmap",
  "wasm-encoder 0.254.0",
  "wasmparser 0.254.0",
+]
+
+[[package]]
+name = "wasm-streams"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d1ec4f6517c9e11ae630e200b2b65d193279042e28edd4a2cda233e46670bbb"
+dependencies = [
+ "futures-util",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

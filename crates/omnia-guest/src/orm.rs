@@ -21,6 +21,7 @@ pub use filter::{CmpOp, ColRef, Filter};
 pub use insert::{ConflictSet, InsertBuilder, NoConflict};
 pub use join::{Join, JoinKind};
 pub use omnia_wasi_sql::{DataType, Field, Row};
+pub use query::Query;
 pub use select::SelectBuilder;
 pub use update::UpdateBuilder;
 
@@ -83,7 +84,7 @@ macro_rules! entity {
                 vec![$( ($col_field, $col_table, $col_name) ),*]
             }
 
-            fn from_row(row: &$crate::orm::Row) -> anyhow::Result<Self> {
+            fn from_row(row: &$crate::orm::Row) -> $crate::anyhow::Result<Self> {
                 Ok(Self {
                     $(
                         $field_name: <$field_type as $crate::orm::FetchValue>::fetch(row, stringify!($field_name))?,

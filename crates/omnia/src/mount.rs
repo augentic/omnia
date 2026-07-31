@@ -152,12 +152,6 @@ impl MountRegistry {
         &self.entries
     }
 
-    /// Whether the registry holds no mounts.
-    #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
     /// The registered mount whose directory identity matches `(dev, ino)`, if
     /// any — how a lent descriptor selects its registry entry.
     #[must_use]
@@ -225,7 +219,6 @@ mod tests {
         let root = temp_root("identity");
         let registry = registry(".", &root, false);
 
-        assert!(!registry.is_empty());
         let entry = &registry.entries()[0];
         assert_eq!(entry.name, ".");
         assert_eq!(entry.host_path, root);

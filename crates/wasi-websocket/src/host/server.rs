@@ -38,8 +38,12 @@ where
         routing: Arc::new(routing),
     };
 
-    // handle events from the websocket clients
-    while let Some(event) = handler.events().await?.next().await {
+    // Subscribe once: a fresh subscription per iteration would drop events
+    // published between polls (broadcast receivers only see what arrives
+    // after they subscribe).
+    let mut events = handler.events().await?;
+
+    while let Some(event) = events.next().await {
         let handler = handler.clone();
 
         tokio::spawn(async move {
@@ -86,7 +90,14 @@ where
             tracing::debug!("no route for websocket event; dropping");
             return Ok(());
         };
-        let guest = self.state.registry().get(guest_id).expect("a capable guest is registered");
+        // Static resolution only yields identities drawn from the registry, so
+        // a miss is a lifecycle race (e.g. concurrent deregistration) — an
+        // error, never a server panic.
+        let guest = self
+            .state
+            .registry()
+            .get(guest_id)
+            .with_context(|| format!("routed guest `{guest_id}` is not registered"))?;
 
         let mut store_data = self.state.store();
         let event_res = store_data

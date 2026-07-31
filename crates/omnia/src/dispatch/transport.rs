@@ -32,8 +32,9 @@ use crate::registry::GuestId;
 const DUPLEX_BUF: usize = 1 << 16;
 
 /// The in-process wRPC server type: framed transport over a `tokio::io::duplex`
-/// byte stream, one connection accepted per dispatched call.
-pub type InProcServer = Server<(), ReadHalf<DuplexStream>, WriteHalf<DuplexStream>>;
+/// byte stream, one connection accepted per dispatched call. The accept
+/// context carries the caller's chain depth to the serve side.
+pub type InProcServer = Server<usize, ReadHalf<DuplexStream>, WriteHalf<DuplexStream>>;
 
 /// The in-process wRPC client handle: a single stream pair to one target's
 /// server, used for exactly one invocation.
@@ -55,12 +56,39 @@ pub trait LinkTransport: Send + Sync + 'static {
     /// The wRPC client handle this transport hands the dispatch path.
     type Client: wrpc_transport::Invoke<Context = ()>;
 
-    /// Open a fresh client connection to `target` for a single invocation.
+    /// Open a fresh client connection to `target` for a single invocation
+    /// running at `depth` in its dispatch chain; the transport carries the
+    /// depth to the serve side so nested calls stay bounded.
     ///
     /// # Errors
     ///
     /// Returns an error if `target` has no bound endpoint on this transport.
-    fn connect(&self, target: &GuestId) -> Result<Self::Client>;
+    fn connect(&self, target: &GuestId, depth: usize) -> Result<Self::Client>;
+}
+
+/// A guest's serve side: its wRPC server plus the detached tasks draining each
+/// served function's invocation stream. Dropping the endpoint aborts the
+/// drains, so removing a guest (or finishing the deployment) releases the
+/// `Runtime` clones — and with them the engine — that the tasks pin.
+pub struct Endpoint {
+    server: Arc<InProcServer>,
+    drains: Vec<tokio::task::JoinHandle<()>>,
+}
+
+impl Endpoint {
+    /// Bundle a guest's wRPC server with its drain tasks.
+    #[must_use]
+    pub const fn new(server: Arc<InProcServer>, drains: Vec<tokio::task::JoinHandle<()>>) -> Self {
+        Self { server, drains }
+    }
+}
+
+impl Drop for Endpoint {
+    fn drop(&mut self) {
+        for drain in &self.drains {
+            drain.abort();
+        }
+    }
 }
 
 /// The co-located fast transport: every target's exports are served over a wRPC
@@ -74,7 +102,7 @@ pub trait LinkTransport: Send + Sync + 'static {
 /// (the registry's transactional publish/remove).
 #[derive(Clone)]
 pub struct InProcess {
-    servers: Arc<RwLock<HashMap<GuestId, Arc<InProcServer>>>>,
+    servers: Arc<RwLock<HashMap<GuestId, Endpoint>>>,
     // The dispatch handle's lifecycle gate (see `DispatchHandle::lifecycle`).
     // Lock order: lifecycle first, then `servers` — never the reverse.
     lifecycle: Arc<RwLock<()>>,
@@ -95,7 +123,11 @@ impl InProcess {
     #[must_use]
     pub fn server(&self, target: &GuestId) -> Option<Arc<InProcServer>> {
         let _lifecycle = self.lifecycle.read().unwrap_or_else(PoisonError::into_inner);
-        self.servers.read().unwrap_or_else(PoisonError::into_inner).get(target).cloned()
+        self.servers
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(target)
+            .map(|endpoint| Arc::clone(&endpoint.server))
     }
 
     /// Add the endpoint serving `target`'s host-mediated exports, refusing an
@@ -104,13 +136,13 @@ impl InProcess {
     ///
     /// The caller must hold the lifecycle write guard (this method takes only
     /// the inner map lock, so taking the gate here would deadlock).
-    pub(crate) fn insert(&self, target: &GuestId, server: Arc<InProcServer>) -> Result<()> {
+    pub(crate) fn insert(&self, target: &GuestId, endpoint: Endpoint) -> Result<()> {
         let inserted = {
             let mut servers = self.servers.write().unwrap_or_else(PoisonError::into_inner);
             match servers.entry(target.clone()) {
                 Entry::Occupied(_) => false,
                 Entry::Vacant(slot) => {
-                    slot.insert(server);
+                    slot.insert(endpoint);
                     true
                 }
             }
@@ -119,12 +151,19 @@ impl InProcess {
         Ok(())
     }
 
-    /// Remove `target`'s endpoint; in-flight invocations hold their own
-    /// server [`Arc`] and complete.
+    /// Remove `target`'s endpoint, aborting its drain tasks; in-flight
+    /// invocations hold their own server [`Arc`] and complete.
     ///
     /// The caller must hold the lifecycle write guard.
     pub(crate) fn remove(&self, target: &GuestId) {
         self.servers.write().unwrap_or_else(PoisonError::into_inner).remove(target);
+    }
+
+    /// Drop every endpoint, aborting all drain tasks, so a finished deployment
+    /// releases the `Runtime` clones (and the engine) they pin.
+    pub(crate) fn clear(&self) {
+        let _lifecycle = self.lifecycle.write().unwrap_or_else(PoisonError::into_inner);
+        self.servers.write().unwrap_or_else(PoisonError::into_inner).clear();
     }
 }
 
@@ -181,7 +220,7 @@ impl WrpcCtx<InProcClient> for WrpcState {
 impl LinkTransport for InProcess {
     type Client = InProcClient;
 
-    fn connect(&self, target: &GuestId) -> Result<Self::Client> {
+    fn connect(&self, target: &GuestId, depth: usize) -> Result<Self::Client> {
         let server = self.server(target).with_context(|| {
             format!(
                 "no in-process endpoint serves guest `{target}` (is it registered and does it \
@@ -195,7 +234,7 @@ impl LinkTransport for InProcess {
         let (client, server_stream) = Oneshot::duplex(DUPLEX_BUF);
         let (server_rx, server_tx) = split(server_stream);
         tokio::spawn(async move {
-            if let Err(error) = server.accept((), server_tx, server_rx).await {
+            if let Err(error) = server.accept(depth, server_tx, server_rx).await {
                 tracing::error!(%error, "in-process link accept failed");
             }
         });

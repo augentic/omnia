@@ -54,7 +54,6 @@ impl Guest for CliGuest {
             grants: completion::Grants {
                 references: Some("shelf".to_string()),
                 workspace,
-                verify: vec![],
             },
         };
 

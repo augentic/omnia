@@ -1,6 +1,6 @@
 # WASI Interfaces Reference
 
-Every capability Omnia exposes to guests, its interface crate, the zero-config default backend that ships in-tree, and the production backends available in the [`backends`](https://github.com/augentic/backends) repository.
+Every capability Omnia exposes to guests, its interface crate, the zero-config default backend that ships in-tree, and the production backends available in the [`omnia-backends`](https://github.com/augentic/omnia-backends) repository.
 
 ## Interface matrix
 

@@ -7,9 +7,7 @@ use futures::FutureExt as _;
 use futures::executor::block_on;
 use omnia_guest::model::{Error, McpGrant, Message, Model, Reply, Request, Role, Tool, Usage};
 use omnia_testkit::model::{Harness, Scripted, mcp_grants};
-use omnia_wasi_model::{
-    Answer, DirEntry, FutureResult, Reference, ToolHost, VerifyReport, WasiModelCtx,
-};
+use omnia_wasi_model::{Answer, DirEntry, FutureResult, Reference, ToolHost, WasiModelCtx};
 use serde_json::json;
 
 #[test]
@@ -141,7 +139,6 @@ fn wire_request() -> omnia_wasi_model::Request {
         grants: omnia_wasi_model::Grants {
             references: None,
             workspace: None,
-            verify: vec![],
         },
     }
 }
@@ -163,10 +160,6 @@ impl ToolHost for NoTools {
     }
 
     fn write(&self, _path: String, _bytes: Vec<u8>) -> FutureResult<()> {
-        no_tools()
-    }
-
-    fn verify(&self, _check: String) -> FutureResult<VerifyReport> {
         no_tools()
     }
 }

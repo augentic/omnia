@@ -6,7 +6,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use axum::routing::{options, post};
+use axum::routing::post;
 use axum::{Json, Router};
 use http::Method;
 use omnia_guest::HttpResult;
@@ -53,15 +53,14 @@ impl Guest for Http {
             .in_scope(|| {
                 tracing::info!("received request");
 
-                let router = Router::new()
-                    .layer(
-                        CorsLayer::new()
-                            .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-                            .allow_headers(Any)
-                            .allow_origin(Any),
-                    )
-                    .route("/", post(handler))
-                    .route("/", options(handle_options));
+                // `layer` only wraps routes added before it, so CORS must come
+                // after the routes.
+                let router = Router::new().route("/", post(handler).options(handle_options)).layer(
+                    CorsLayer::new()
+                        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+                        .allow_headers(Any)
+                        .allow_origin(Any),
+                );
 
                 omnia_wasi_http::serve(router, request)
             })

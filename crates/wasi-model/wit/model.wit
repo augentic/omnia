@@ -162,8 +162,6 @@ interface completion {
         /// The runtime core never trusts a forgeable integer handle — the host resolves it from
         /// the resource table exactly as other hosts take typed resources.
         workspace: option<borrow<descriptor>>,
-        /// Allowed closed verification profile names for `verify`.
-        verify: list<string>,
     }
 
     /// Complete models-API-style request for one completion. Guests that want a
@@ -231,7 +229,7 @@ interface completion {
         invalid-request(string),
         /// Backend produced output that never passed validation.
         invalid-answer(string),
-        /// Iteration, token, time, or verify budget exhausted.
+        /// Iteration, token, or time budget exhausted.
         budget-exhausted(string),
         /// Non-repairable tool error.
         tool-failed(string),

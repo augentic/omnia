@@ -48,8 +48,8 @@ use wasmtime::{Config, Enabled, InstanceAllocationStrategy, PoolingAllocationCon
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Debug, FromEnv)]
 pub struct RuntimeOptions {
-    /// Wall-clock cap on a server or link-dispatch invocation (`GUEST_TIMEOUT_MS`, default 30s; command mode uncapped).
-    #[env(from = "GUEST_TIMEOUT_MS", default = "30000", with = parse_millis)]
+    /// Wall-clock cap on a server or link-dispatch invocation (`GUEST_TIMEOUT_MS`, default 30s, min 1ms; command mode uncapped).
+    #[env(from = "GUEST_TIMEOUT_MS", default = "30000", with = parse_timeout)]
     pub guest_timeout: Duration,
     /// Epoch-increment interval, also the CPU-bound guest yield granularity (`EPOCH_TICK_MS`, default 10ms, min 1ms).
     #[env(from = "EPOCH_TICK_MS", default = "10", with = parse_tick)]
@@ -310,7 +310,7 @@ impl RuntimeOptions {
     ///
     /// Returns an error if the runtime configuration cannot be loaded from the
     /// environment or fails cross-field validation.
-    pub fn load() -> Result<Self> {
+    pub fn load_env() -> Result<Self> {
         let options = Self::from_env().finalize().map_err(anyhow::Error::from)?;
         options.validate()?;
         Ok(options)
@@ -371,6 +371,16 @@ fn parse_millis(value: &str) -> ParseResult<Duration> {
     Ok(Duration::from_millis(value.parse::<u64>()?))
 }
 
+/// Parse the guest timeout, rejecting `0` (a zero wall-clock bound would time
+/// out every invocation immediately); used by the `FromEnv` derive.
+fn parse_timeout(value: &str) -> ParseResult<Duration> {
+    let millis = value.parse::<u64>()?;
+    if millis == 0 {
+        return Err("must be at least 1 (a zero timeout would fail every invocation)".into());
+    }
+    Ok(Duration::from_millis(millis))
+}
+
 /// Parse the epoch tick, clamping to a 1ms minimum so the ticker interval can
 /// never be zero; used by the `FromEnv` derive.
 fn parse_tick(value: &str) -> ParseResult<Duration> {
@@ -406,7 +416,7 @@ mod tests {
         let options = RuntimeOptions {
             pool_total_memories: 8,
             pool_max_memories_per_module: Some(16),
-            ..RuntimeOptions::load().expect("should load")
+            ..RuntimeOptions::load_env().expect("should load")
         };
         options.validate().unwrap_err();
     }
@@ -416,7 +426,7 @@ mod tests {
         let options = RuntimeOptions {
             pool_total_tables: 8,
             pool_max_tables_per_module: Some(16),
-            ..RuntimeOptions::load().expect("should load")
+            ..RuntimeOptions::load_env().expect("should load")
         };
         options.validate().unwrap_err();
     }
@@ -427,7 +437,7 @@ mod tests {
             pooling: false,
             pool_total_memories: 8,
             pool_max_memories_per_module: Some(16),
-            ..RuntimeOptions::load().expect("should load")
+            ..RuntimeOptions::load_env().expect("should load")
         };
         options.validate().unwrap();
     }

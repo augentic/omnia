@@ -251,7 +251,7 @@ fn inventory() {
         .find(|route| route.selector().path() == ["source", "resolve"])
         .expect("operation route");
     assert_eq!(operation.selector().path(), ["source", "resolve"]);
-    assert_eq!(operation.operation_type_id(), Some(TypeId::of::<Greet>()));
+    assert_eq!(operation.operation(), Some(TypeId::of::<Greet>()));
     assert_eq!(operation.about(), Some("Resolve a source"));
     assert_eq!(operation.aliases(), ["get"]);
     let hidden = inventory
@@ -259,10 +259,8 @@ fn inventory() {
         .find(|route| route.selector().path() == ["source", "internal"])
         .expect("hidden route");
     assert!(hidden.hidden());
-    let completion = inventory
-        .iter()
-        .find(|route| route.operation_type_id().is_none())
-        .expect("synthetic route");
+    let completion =
+        inventory.iter().find(|route| route.operation().is_none()).expect("synthetic route");
     assert_eq!(completion.selector().path(), ["completions"]);
 }
 

@@ -21,6 +21,6 @@ mod guest;
 mod manifest;
 mod runtime;
 
-pub use self::guest::find_guest;
+pub use self::guest::{find_guest, precompiled_artifact, precompiled_bytes, raw_wasm, wasm_bytes};
 pub use self::manifest::{TempManifest, temp_manifest};
 pub use self::runtime::{SingleGuest, single_guest};

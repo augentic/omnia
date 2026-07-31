@@ -7,6 +7,9 @@
 use std::env;
 use std::path::PathBuf;
 
+use anyhow::{Context as _, Result, ensure};
+use omnia::GuestArtifact;
+
 /// Locate a pre-built guest component by file name (e.g. `http_wasm.wasm`),
 /// preferring a serialized `.bin` (loaded via `Component::deserialize_file`,
 /// skipping JIT compilation) over the raw `.wasm`.
@@ -38,6 +41,60 @@ pub fn find_guest(file: &str) -> PathBuf {
     }
 
     panic!("guest `{file}` not built; run:\n  cargo make test-guests");
+}
+
+/// Read the serialized `.bin` bytes for `file`, failing fast (rather than
+/// substituting raw wasm) when the `.bin` is missing, so the pre-compiled
+/// path is genuinely exercised.
+///
+/// # Errors
+///
+/// Returns an error when the `.bin` is missing or unreadable.
+pub fn precompiled_bytes(file: &str) -> Result<Vec<u8>> {
+    let path = find_guest(file);
+    ensure!(
+        path.extension().is_some_and(|ext| ext == "bin"),
+        "{} has no serialized .bin sibling; run `cargo make test-guests`",
+        path.display()
+    );
+    std::fs::read(&path).with_context(|| format!("reading guest {}", path.display()))
+}
+
+/// Read the serialized `.bin` for `file` and wrap it as a pre-compiled
+/// registration artifact.
+///
+/// # Errors
+///
+/// Returns an error when the `.bin` is missing or unreadable.
+// The one place the test tiers attest artifact trust; every suite shares it
+// instead of repeating the `unsafe` block.
+#[allow(unsafe_code)]
+pub fn precompiled_artifact(file: &str) -> Result<GuestArtifact> {
+    let bytes = precompiled_bytes(file)?;
+    // SAFETY: the artifact was built and serialized by this workspace's own
+    // `cargo make test-guests` pipeline (omnia's compile path).
+    Ok(unsafe { GuestArtifact::precompiled(bytes) })
+}
+
+/// Read the raw `.wasm` sibling bytes for `file` (never the serialized
+/// `.bin`), so the safe raw-bytes path is genuinely exercised.
+///
+/// # Errors
+///
+/// Returns an error when the `.wasm` is missing or unreadable.
+pub fn wasm_bytes(file: &str) -> Result<Vec<u8>> {
+    let path = find_guest(file).with_extension("wasm");
+    std::fs::read(&path).with_context(|| format!("reading guest {}", path.display()))
+}
+
+/// The raw-wasm dual of [`precompiled_artifact`], exercising the safe JIT
+/// constructor.
+///
+/// # Errors
+///
+/// Returns an error when the `.wasm` is missing or unreadable.
+pub fn raw_wasm(file: &str) -> Result<GuestArtifact> {
+    Ok(GuestArtifact::wasm(wasm_bytes(file)?))
 }
 
 fn mtime(path: &std::path::Path) -> Option<std::time::SystemTime> {

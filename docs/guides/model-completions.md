@@ -30,7 +30,6 @@ let request = completion::Request {
     grants: completion::Grants {
         references: Some("shelf".to_string()),
         workspace,
-        verify: vec![],
     },
 };
 
@@ -54,9 +53,8 @@ Grants are the security boundary. Rather than giving the model backend ambient a
 
 - **`workspace`** — a directory descriptor from the guest's own preopen table (populated by the host's `[[mount]]`; see [Multi-Guest Deployments](multi-guest-deployments.md#mounts-giving-guests-a-workspace)). The model can only see a tree the host mounted *and* the guest chose to lend.
 - **`references`** — an identifier the host resolves to reference material through guest dispatch.
-- **`verify`** — named verification profiles the model may run.
 
-From these grants the **host** — not the guest, not the backend — merges the injected tools `resolve`, `read`, `list`, `write`, and `verify` into the completion. Guests must not redeclare those names in `tools`. Backends receive a `ToolHost` handle and call back into the host to execute them, so every tool invocation passes through the host's validation gate.
+From these grants the **host** — not the guest, not the backend — merges the injected tools `resolve`, `read`, `list`, and `write` into the completion. Guests must not redeclare those names in `tools`. Backends receive a `ToolHost` handle and call back into the host to execute them, so every tool invocation passes through the host's validation gate.
 
 ## Backends
 
@@ -71,11 +69,11 @@ cargo build --example model-wasm --target wasm32-wasip2
 cargo run --example model -- run --config examples/model/omnia.toml
 ```
 
-### `omnia-genai` — provider APIs (backends repo)
+### `omnia-genai` — provider APIs (omnia-backends repo)
 
 Calls LLM provider APIs in-process via the [`genai`](https://crates.io/crates/genai) SDK (OpenAI, Anthropic, Gemini, Groq, Ollama, and others). Provider API keys are read from the environment at call time (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...). It runs a bounded tool loop for the host-injected `resolve` tool and passes guest-declared functions through to the provider. MCP tools are not supported by this backend — use `omnia-cursor` for that.
 
-### `omnia-cursor` — cursor-agent (backends repo)
+### `omnia-cursor` — cursor-agent (omnia-backends repo)
 
 Spawns the [`cursor-agent`](https://cursor.com/docs/cli) CLI per completion, giving the model a full agentic session inside the granted workspace:
 
@@ -98,7 +96,7 @@ omnia::runtime!({
 });
 ```
 
-The end-to-end demo lives at [`backends/examples/cursor`](https://github.com/augentic/backends/tree/main/examples/cursor).
+The end-to-end demo lives at [`omnia-backends/examples/cursor`](https://github.com/augentic/omnia-backends/tree/main/examples/cursor).
 
 ## Serving MCP tools from a guest
 

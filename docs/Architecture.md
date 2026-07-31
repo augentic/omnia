@@ -54,7 +54,7 @@ This separation allows the same guest to run with different backends — swap th
 │  Layer 3: Backends                                              │
 │  Concrete connections to external services                      │
 │  In-tree defaults (KeyValueDefault, SqlDefault, ...) and the    │
-│  production crates in the backends repo (redis, kafka, ...)     │
+│  production crates in omnia-backends (redis, kafka, ...)         │
 ├─────────────────────────────────────────────────────────────────┤
 │  Layer 2: WASI Interfaces (crates/wasi-*)                       │
 │  Abstract service capabilities defined by WIT interfaces        │
@@ -221,13 +221,13 @@ omnia/
 └── docs/                   # This documentation
 ```
 
-Production backends live in the sibling [`backends`](https://github.com/augentic/backends) repository, one crate per service, each implementing `Backend` plus the relevant `WasiXxxCtx` traits.
+Production backends live in the sibling [`omnia-backends`](https://github.com/augentic/omnia-backends) repository, one crate per service, each implementing `Backend` plus the relevant `WasiXxxCtx` traits.
 
 ## Extending Omnia
 
 **Adding a WASI interface**: create `crates/wasi-<name>/` with the standard layout, define the WIT world in `wit/`, implement guest bindings in `src/guest.rs` and the host (including a zero-config default backend) in `src/host/`, add a seam test in `tests/seam.rs`, and create an example.
 
-**Adding a backend**: create a crate (usually in the `backends` repo), implement `Backend` with a `FromEnv`-derived `ConnectOptions`, implement the `WasiXxxCtx` trait(s) for the interfaces it serves, and add `#[ignore]`-gated live tests. No runtime-core changes are required — backends plug in through the `runtime!` host map.
+**Adding a backend**: create a crate (usually in the `omnia-backends` repo), implement `Backend` with a `FromEnv`-derived `ConnectOptions`, implement the `WasiXxxCtx` trait(s) for the interfaces it serves, and add `#[ignore]`-gated live tests. No runtime-core changes are required — backends plug in through the `runtime!` host map.
 
 ## Related Documentation
 

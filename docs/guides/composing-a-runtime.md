@@ -220,7 +220,7 @@ Every WASI interface ships with a default backend that needs no external service
 WasiKeyValue: KeyValueDefault,   // in-memory cache
 
 // Production
-WasiKeyValue: Redis,             // omnia_redis::Client from the backends repo
+WasiKeyValue: Redis,             // omnia_redis::Client from the omnia-backends repo
 ```
 
 See [WASI Interfaces](../reference/wasi-interfaces.md) for the full default/production matrix and [Production Backends](production-backends.md) for wiring instructions.

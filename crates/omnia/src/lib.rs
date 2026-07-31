@@ -31,7 +31,9 @@ pub use self::dispatch::{
     Dispatcher, EnsureError, FirstArgSelector, GuestResolver, GuestSelector, HttpPaths, LinkClient,
     WrpcState, serve_links,
 };
-pub use self::host::{Backend, FromEnv, FutureResult, Host, Server};
+pub use self::host::{
+    Backend, FromEnv, FutureResult, HasTable, Host, NoOptions, Proxy, Server, get_cloned,
+};
 pub use self::mount::{MountRegistry, ResolvedPreopen};
 pub use self::options::RuntimeOptions;
 #[cfg(feature = "jit")]
@@ -44,7 +46,7 @@ pub use self::runtime::{Backends, ExitStatus, Mode, RouteRefusal, Runtime, Wirin
 #[doc(hidden)]
 pub use self::runtime::{MainOptions, ManifestSource, main, run, run_precompiled};
 pub use self::store::{
-    HasDispatcher, HasHttp, HasLimits, HasMounts, StoreBase, StoreBaseBuilder, StoreCtx,
+    HasDispatcher, HasHttp, HasLimits, HasMounts, StoreBase, StoreConfig, StoreCtx,
 };
 pub use self::telemetry::Telemetry;
 
@@ -121,6 +123,12 @@ macro_rules! wasi_view {
                 pub ctx: &'a mut dyn [<Wasi $name Ctx>],
                 /// Mutable reference to the table used to manage resources.
                 pub table: &'a mut $crate::wasmtime_wasi::ResourceTable,
+            }
+
+            impl $crate::HasTable for [<Wasi $name CtxView>]<'_> {
+                fn table(&mut self) -> &mut $crate::wasmtime_wasi::ResourceTable {
+                    self.table
+                }
             }
 
             #[doc = concat!("A backend bundle that yields the WASI ", stringify!($name), " context for a store.")]

@@ -15,16 +15,6 @@ use crate::host::resource::{Bucket, FutureResult};
 
 type BucketCache = Cache<String, Vec<u8>>;
 
-/// Options used to connect to the key-value store.
-#[derive(Debug, Clone, Default)]
-pub struct ConnectOptions;
-
-impl omnia::FromEnv for ConnectOptions {
-    fn from_env() -> Result<Self> {
-        Ok(Self)
-    }
-}
-
 /// Default implementation for `wasi:keyvalue`.
 #[derive(Clone)]
 pub struct KeyValueDefault {
@@ -38,7 +28,7 @@ impl std::fmt::Debug for KeyValueDefault {
 }
 
 impl Backend for KeyValueDefault {
-    type ConnectOptions = ConnectOptions;
+    type ConnectOptions = omnia::NoOptions;
 
     #[instrument]
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
@@ -77,10 +67,6 @@ impl std::fmt::Debug for InMemBucket {
 }
 
 impl Bucket for InMemBucket {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
     fn get(&self, key: String) -> FutureResult<Option<Vec<u8>>> {
         tracing::debug!("getting key: {key} from bucket: {}", self.name);
         let result = self.cache.get(&key);

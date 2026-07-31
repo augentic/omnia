@@ -214,22 +214,29 @@ where
         // against the exact `InstancePre` this request instantiates.
         let guest;
         let late_indices;
-        let indices: &ServiceIndices =
-            if let Some((guest_id, indices)) = self.routing.resolve(request.uri().path()) {
-                // Static resolution only yields identities drawn from the
-                // registry, so the lookup is total.
-                guest = self.state.registry().get(guest_id).expect("a capable guest is registered");
-                indices
+        let indices: &ServiceIndices = if let Some((guest_id, indices)) =
+            self.routing.resolve(request.uri().path())
+        {
+            // Static resolution only yields identities drawn from the
+            // registry, so a miss is a lifecycle race (e.g. concurrent
+            // deregistration) — a 500, never a server panic.
+            if let Some(routed) = self.state.registry().get(guest_id) {
+                guest = routed;
             } else {
-                match self.route(request.uri().path()).await {
-                    Ok((routed_guest, indices)) => {
-                        guest = routed_guest;
-                        late_indices = indices;
-                        &late_indices
-                    }
-                    Err(response) => return Ok(response),
+                tracing::error!(guest = %guest_id, "routed guest is not registered; returning 500");
+                return Ok(internal_error());
+            }
+            indices
+        } else {
+            match self.route(request.uri().path()).await {
+                Ok((routed_guest, indices)) => {
+                    guest = routed_guest;
+                    late_indices = indices;
+                    &late_indices
                 }
-            };
+                Err(response) => return Ok(response),
+            }
+        };
 
         // instantiate the selected guest fresh (instance-per-call)
         let store_data = self.state.store();
@@ -323,15 +330,26 @@ fn fix_request(mut request: hyper::Request<Incoming>) -> Result<hyper::Request<I
     let mut uri_builder = Uri::builder().path_and_query(p_and_q);
 
     if let Some(forwarded) = request.headers().get(FORWARDED) {
-        // running behind a proxy (that we have configured)
-        for tuple in forwarded.to_str()?.split(';') {
-            let tuple = tuple.trim();
-            if let Some(host) = tuple.strip_prefix("host=") {
-                uri_builder = uri_builder.authority(host);
-            } else if let Some(proto) = tuple.strip_prefix("proto=") {
-                uri_builder = uri_builder.scheme(proto);
+        // Behind a proxy: RFC 7239 `Forwarded` is a comma-separated list of
+        // elements (one per hop; the first is the client-facing one), each a
+        // semicolon-separated set of parameters with case-insensitive names
+        // and optionally quoted values.
+        let element = forwarded.to_str()?.split(',').next().unwrap_or_default();
+        let mut scheme = "http";
+        for parameter in element.split(';') {
+            let Some((name, value)) = parameter.split_once('=') else {
+                continue;
+            };
+            let value = value.trim().trim_matches('"');
+            match name.trim().to_ascii_lowercase().as_str() {
+                "host" => uri_builder = uri_builder.authority(value),
+                "proto" => {
+                    scheme = if value.eq_ignore_ascii_case("https") { "https" } else { "http" }
+                }
+                _ => {}
             }
         }
+        uri_builder = uri_builder.scheme(scheme);
     } else {
         // running locally
         let Some(host) = request.headers().get(HOST) else {

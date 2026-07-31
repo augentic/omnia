@@ -70,8 +70,15 @@ async fn handler(body: Bytes) -> HttpResult<Json<Value>> {
     let data = IncomingValue::incoming_value_consume_sync(incoming)
         .map_err(|e| anyhow!("failed to create incoming value: {e}"))?;
 
-    // verify the round-trip was successful
-    assert_eq!(data, body);
+    // verify the round-trip was successful (an error, not a guest trap)
+    if data != body {
+        return Err(anyhow!(
+            "round-trip mismatch: read {} bytes, wrote {}",
+            data.len(),
+            body.len()
+        )
+        .into());
+    }
 
     let response =
         serde_json::from_slice::<Value>(&data).map_err(|e| anyhow!("deserializing data: {e}"))?;

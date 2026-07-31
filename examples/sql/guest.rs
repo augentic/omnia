@@ -102,7 +102,7 @@ async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> HttpResult<Json<
 
     // Not worried about concurrency issue here as one request will fail. Moreover, this
     // is an example. Ideally, this will be handled in a more idiomatic way.
-    let next_id = agencies.first().map(|a| a.agency_id + 1).unwrap_or(1);
+    let next_id = agencies.first().map_or(1, |a| a.agency_id + 1);
 
     let agency = Agency {
         agency_id: next_id,
@@ -130,6 +130,13 @@ async fn get_agency(Path(id): Path<i64>) -> HttpResult<Json<Value>> {
     tracing::info!("get agency {}", id);
     ensure_schema().await?;
 
+    let agency = fetch_agency(id).await?.ok_or_else(|| anyhow!("agency not found"))?;
+
+    Ok(Json(json!({ "agency": agency })))
+}
+
+/// Fetch a single agency by ID, or `None` when it does not exist.
+async fn fetch_agency(id: i64) -> Result<Option<Agency>> {
     let select = SelectBuilder::<Agency>::new()
         .r#where(Filter::eq("agency_id", id))
         .build()
@@ -146,9 +153,7 @@ async fn get_agency(Path(id): Path<i64>) -> HttpResult<Json<Value>> {
         .collect::<Result<Vec<_>>>()
         .context("failed row mapping")?;
 
-    let agency = agencies.first().ok_or_else(|| anyhow!("agency not found"))?;
-
-    Ok(Json(json!({ "agency": agency })))
+    Ok(agencies.into_iter().next())
 }
 
 /// Update an agency.
@@ -160,24 +165,9 @@ async fn update_agency(
     tracing::info!("update agency {}", id);
     ensure_schema().await?;
 
-    // Verify agency exists
-    let select = SelectBuilder::<Agency>::new()
-        .r#where(Filter::eq("agency_id", id))
-        .build()
-        .context("failed to build fetch agency by ID query")?;
-
-    let rows = Provider
-        .query("db".to_string(), select.sql, select.params)
-        .await
-        .context("failed to execute query")?;
-
-    let agencies = rows
-        .iter()
-        .map(Agency::from_row)
-        .collect::<Result<Vec<_>>>()
-        .context("failed row mapping")?;
-
-    let _ = agencies.first().ok_or_else(|| anyhow!("agency not found"))?;
+    if fetch_agency(id).await?.is_none() {
+        return Err(anyhow!("agency not found").into());
+    }
 
     // Build update query - conditionally set only provided fields
     let mut update = UpdateBuilder::<Agency>::new();
@@ -202,24 +192,7 @@ async fn update_agency(
         .await
         .context("failed to update agency")?;
 
-    // Fetch updated agency
-    let select = SelectBuilder::<Agency>::new()
-        .r#where(Filter::eq("agency_id", id))
-        .build()
-        .context("failed to build fetch agency by ID query")?;
-
-    let rows = Provider
-        .query("db".to_string(), select.sql, select.params)
-        .await
-        .context("failed to execute query")?;
-
-    let agencies = rows
-        .iter()
-        .map(Agency::from_row)
-        .collect::<Result<Vec<_>>>()
-        .context("failed row mapping")?;
-
-    let agency = agencies.first().ok_or_else(|| anyhow!("agency not found after update"))?;
+    let agency = fetch_agency(id).await?.ok_or_else(|| anyhow!("agency not found after update"))?;
 
     Ok(Json(json!({ "agency": agency })))
 }
@@ -258,24 +231,7 @@ async fn create_feed(
     tracing::info!("create feed for agency {}", agency_id);
     ensure_schema().await?;
 
-    // Verify agency exists
-    let select = SelectBuilder::<Agency>::new()
-        .r#where(Filter::eq("agency_id", agency_id))
-        .build()
-        .context("failed to build fetch agency by ID query")?;
-
-    let rows = Provider
-        .query("db".to_string(), select.sql, select.params)
-        .await
-        .context("failed to execute query")?;
-
-    let agencies = rows
-        .iter()
-        .map(Agency::from_row)
-        .collect::<Result<Vec<_>>>()
-        .context("failed row mapping")?;
-
-    if agencies.is_empty() {
+    if fetch_agency(agency_id).await?.is_none() {
         return Err(anyhow!("agency not found").into());
     }
 
@@ -298,7 +254,7 @@ async fn create_feed(
 
     // Not worried about concurrency issue here as one request will fail. Moreover, this
     // is an example. Ideally, this will be handled in a more idiomatic way.
-    let next_id = feeds.first().map(|f| f.feed_id + 1).unwrap_or(1);
+    let next_id = feeds.first().map_or(1, |f| f.feed_id + 1);
 
     let feed = Feed {
         feed_id: next_id,
