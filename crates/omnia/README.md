@@ -58,7 +58,7 @@ Most deployments only touch the `runtime!` macro; a hand-written runtime instead
 
 The runtime and its included services are configured via environment variables:
 
-- **`RUST_LOG`**: Controls logging verbosity (e.g., `info`, `debug`, `omnia=trace`).
+- **`RUST_LOG`**: Controls logging verbosity (e.g., `info`, `debug`, `omnia=trace`). Noisy dependencies (`hyper`, `h2`, `tonic`, `opentelemetry`, `opentelemetry_sdk`, `omnia_wasi_otel`) are always muted. Binaries built with the `runtime!` macro's `program:` key also reserve the host log flags `--debug` / `--quiet`, which are peeled from argv and win over `RUST_LOG`.
 - **`OTEL_GRPC_URL`**: OTLP gRPC endpoint for exporting host traces and metrics. Unset uses OpenTelemetry defaults (`http://localhost:4317`).
 
 ## Telemetry
@@ -77,7 +77,7 @@ Telemetry::new("my-service")
     .build()?;
 ```
 
-Initialization is idempotent: the first `build` in the process installs the subscriber and providers, and later calls are no-ops that reuse them, so an embedder initializing telemetry itself and the runtime's own startup never conflict. Telemetry is batch-exported; the runtime flushes it at the end of every run so it survives fast command-mode exits, and embedders driving work themselves can call `omnia::telemetry::flush()` before the process exits. The `OTEL_GRPC_URL` environment variable is respected when set; when unset, OpenTelemetry defaults apply. When no collector is running, silence export errors with `RUST_LOG=...,opentelemetry_sdk=off`.
+Initialization is idempotent: the first `build` in the process installs the subscriber and providers, and later calls are no-ops that reuse them, so an embedder initializing telemetry itself and the runtime's own startup never conflict. Telemetry is batch-exported; the runtime flushes it at the end of every run so it survives fast command-mode exits, and embedders driving work themselves can call `omnia::telemetry::flush()` before the process exits. The `OTEL_GRPC_URL` environment variable is respected when set; when unset, OpenTelemetry defaults apply. Export errors from a missing collector never reach the console: the subscriber's filter always mutes the `opentelemetry` and `opentelemetry_sdk` targets.
 
 ## Architecture
 
