@@ -117,8 +117,10 @@ impl Telemetry {
 
         let filter_layer = filter(self.log_mode)?;
 
-        // required for stdout
-        let fmt_layer = tracing_subscriber::fmt::layer();
+        // Console tracing goes to stderr: stdout belongs to the guest's
+        // semantic output (command mode pipes and JSON envelopes must stay
+        // clean of log lines).
+        let fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
         let tracer = tracer_provider.tracer(self.app_name);
         let tracing_layer = tracing_opentelemetry::layer().with_tracer(tracer);
         let metrics_layer = MetricsLayer::new(meter_provider.clone());
