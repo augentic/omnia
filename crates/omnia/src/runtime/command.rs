@@ -22,8 +22,8 @@ use crate::store::StoreCtx;
 /// # Errors
 ///
 /// Returns an error if the explicit command guest cannot be ensured, routing
-/// is ambiguous, the guest cannot be instantiated, the run exceeds
-/// `guest_timeout`, or the command traps without a guest exit code.
+/// is ambiguous, the guest cannot be instantiated, or the command traps
+/// without a guest exit code.
 pub(super) async fn drive<B>(runtime: &Runtime<B>) -> Result<ExitStatus>
 where
     B: Clone + Send + Sync + 'static,
@@ -70,13 +70,8 @@ where
     let instance = runtime.instantiate(guest.instance_pre(), &mut store).await?;
     let command = Command::new(&mut store, &instance)?;
 
-    // The same wall-clock bound every other trigger applies to guest work;
-    // long-running commands raise GUEST_TIMEOUT_MS.
-    let timeout = runtime.options().guest_timeout;
-    let run = store.run_concurrent(async move |store| command.wasi_cli_run().call_run(store).await);
-    let outcome = tokio::time::timeout(timeout, run)
-        .await
-        .map_err(|_elapsed| anyhow::anyhow!("wasi:cli/run timed out after {timeout:?}"))?;
+    let outcome =
+        store.run_concurrent(async move |store| command.wasi_cli_run().call_run(store).await).await;
 
     let status = match outcome {
         Ok(Ok(Ok(()))) => ExitStatus::SUCCESS,

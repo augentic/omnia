@@ -76,7 +76,7 @@ Manifest-relative resolution: `source.path` and `[[mount]] path` in a manifest *
 
 ### The guest times out (`epoch deadline` / invocation aborted around 30s)
 
-`GUEST_TIMEOUT_MS` (default 30000) caps each invocation. Raise it for legitimately long work — model completions through slow backends are the common case.
+`GUEST_TIMEOUT_MS` (default 30000) caps each **server** or link-dispatch invocation. Raise it for legitimately long request work. Command mode (`wasi:cli/run`) has no wall-clock cap — if a CLI guest appears to time out, check a backend timeout (for example `CURSOR_TIMEOUT_SECS`) or an external process deadline.
 
 ### The guest traps growing memory
 
