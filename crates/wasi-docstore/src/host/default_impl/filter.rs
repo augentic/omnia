@@ -155,7 +155,7 @@ mod tests {
     }
 
     #[test]
-    fn and_eq_int_with_is_not_null() {
+    fn and_eq_with_not_null() {
         let docs = [
             json!({"wb": 1, "zone_id": "z1"}),
             json!({"wb": 1, "zone_id": "z2"}),
@@ -179,7 +179,7 @@ mod tests {
     }
 
     #[test]
-    fn ordering_requires_comparable_types() {
+    fn ordering_needs_comparable() {
         let filter = compare("lat", ComparisonOp::Gte, ScalarValue::Float64(1.0));
         assert!(matches(&filter, &json!({"lat": 1.5})));
         assert!(!matches(&filter, &json!({"lat": "1.5"})), "string does not order against number");
@@ -227,7 +227,7 @@ mod tests {
     }
 
     #[test]
-    fn multi_field_sort_with_descending() {
+    fn multi_field_desc_sort() {
         let order = vec![
             SortField {
                 field: "a".to_string(),

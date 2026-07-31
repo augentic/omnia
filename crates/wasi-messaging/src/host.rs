@@ -16,7 +16,6 @@ mod generated {
         world: "messaging-request-reply",
         path: "wit",
         imports: {
-            // "wasi:messaging/types.[static]client.connect": store | tracing | trappable,
             default:  store | tracing | trappable,
         },
         exports: {
@@ -30,7 +29,6 @@ mod generated {
         trappable_error_type: {
             "wasi:messaging/types.error" => Error,
         },
-        // include_generated_code_from_file: true,
     });
 }
 
@@ -48,7 +46,7 @@ use self::generated::wasi::messaging::{producer, request_reply, types};
 pub use self::resource::*;
 
 /// Result type for messaging operations.
-pub type Result<T> = anyhow::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:messaging`.
 #[derive(Debug)]

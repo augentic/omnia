@@ -5,10 +5,12 @@
 
 use std::fmt::Debug;
 use std::future::Future;
+use std::ops::Deref;
+use std::sync::Arc;
 
 use anyhow::Result;
 use futures::future::BoxFuture;
-use wasmtime::component::Linker;
+use wasmtime::component::{Accessor, HasData, Linker, Resource, ResourceTable, ResourceTableError};
 
 use crate::runtime::Runtime;
 
@@ -56,7 +58,7 @@ pub trait Backend: Sized + Sync + Send {
     /// Connect to the resource.
     #[must_use]
     fn connect() -> impl Future<Output = Result<Self>> {
-        async { Self::connect_with(Self::ConnectOptions::from_env()?).await }
+        async { Self::connect_with(Self::ConnectOptions::load_env()?).await }
     }
 
     /// Connect with the specified options.
@@ -64,11 +66,80 @@ pub trait Backend: Sized + Sync + Send {
 }
 
 /// Create backend connection options from environment variables.
+///
+/// The method is `load_env` (not `from_env`) so it never shadows — or is shadowed
+/// by — the builder-returning inherent `from_env` the `fromenv` derive emits
+/// on option structs.
 pub trait FromEnv: Sized {
-    /// Create connection options from environment variables.
+    /// Load connection options from environment variables.
     ///
     /// # Errors
     ///
     /// Returns an error if required environment variables are missing or invalid.
-    fn from_env() -> Result<Self>;
+    fn load_env() -> Result<Self>;
+}
+
+/// Connection options for a [`Backend`] that needs none.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoOptions;
+
+impl FromEnv for NoOptions {
+    fn load_env() -> Result<Self> {
+        Ok(Self)
+    }
+}
+
+/// Resource-table proxy over a shared backend handle.
+///
+/// WASI host crates alias this per resource (e.g.
+/// `type BucketProxy = Proxy<dyn Bucket>`) to bridge WIT resources to their
+/// backend trait objects.
+pub struct Proxy<T: ?Sized>(pub Arc<T>);
+
+impl<T: ?Sized> Clone for Proxy<T> {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
+
+impl<T: ?Sized + Debug> Debug for Proxy<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Proxy").field(&self.0).finish()
+    }
+}
+
+impl<T: ?Sized> Deref for Proxy<T> {
+    type Target = Arc<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// Access to the store's resource table from a WASI ctx view.
+///
+/// Implemented by the `Wasi<Service>CtxView` types the [`wasi_view!`] macro
+/// generates, enabling the generic [`get_cloned`] table lookup.
+///
+/// [`wasi_view!`]: crate::wasi_view
+pub trait HasTable {
+    /// The store's resource table.
+    fn table(&mut self) -> &mut ResourceTable;
+}
+
+/// Clone `resource`'s host-side entry out of the store's resource table.
+///
+/// # Errors
+///
+/// Returns the table error when the handle is stale or belongs to another
+/// store.
+pub fn get_cloned<T, D, R>(
+    accessor: &Accessor<T, D>, resource: &Resource<R>,
+) -> std::result::Result<R, ResourceTableError>
+where
+    D: HasData,
+    for<'a> D::Data<'a>: HasTable,
+    R: Clone + Send + 'static,
+{
+    accessor.with(|mut store| store.get().table().get(resource).cloned())
 }

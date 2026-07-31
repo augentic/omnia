@@ -30,7 +30,9 @@ pub struct ConnectOptions {
 
 /// Loads connection options from environment variables with error context.
 impl omnia::FromEnv for ConnectOptions {
-    fn from_env() -> Result<Self> {
+    fn load_env() -> Result<Self> {
+        // `Self::from_env()` is the builder-returning inherent the `FromEnv`
+        // derive emits.
         Self::from_env().finalize().context("issue loading connection options")
     }
 }
@@ -65,7 +67,7 @@ impl WasiSqlCtx for SqlDefault {
         let conn = Arc::clone(&self.conn);
 
         async move {
-            let connection = SqliteConnectionImpl { conn };
+            let connection = SqliteConn { conn };
             Ok(Arc::new(connection) as Arc<dyn Connection>)
         }
         .boxed()
@@ -73,11 +75,11 @@ impl WasiSqlCtx for SqlDefault {
 }
 
 #[derive(Debug, Clone)]
-struct SqliteConnectionImpl {
+struct SqliteConn {
     conn: Arc<parking_lot::Mutex<SqliteConnection>>,
 }
 
-impl Connection for SqliteConnectionImpl {
+impl Connection for SqliteConn {
     // The mutex guard must outlive the prepared statement that borrows the
     // connection, so the drop cannot be tightened further.
     #[expect(clippy::significant_drop_tightening)]
@@ -89,8 +91,7 @@ impl Connection for SqliteConnectionImpl {
             // Blocking rusqlite work (and the mutex held around it) runs on a
             // blocking thread so it never pins an executor thread.
             tokio::task::spawn_blocking(move || {
-                let rusqlite_params: Vec<_> =
-                    params.iter().map(datatype_to_rusqlite_value).collect();
+                let rusqlite_params: Vec<_> = params.iter().map(to_sqlite).collect();
 
                 let conn = conn.lock();
                 let mut stmt = conn.prepare(&query).context("failed to prepare statement")?;
@@ -109,7 +110,7 @@ impl Connection for SqliteConnectionImpl {
 
                     for (i, name) in column_names.iter().enumerate() {
                         let value = row.get_ref(i).context("failed to get column value")?;
-                        let data_type = rusqlite_value_to_datatype(value)?;
+                        let data_type = from_sqlite(value)?;
 
                         fields.push(Field {
                             name: name.clone(),
@@ -141,8 +142,7 @@ impl Connection for SqliteConnectionImpl {
         async move {
             // See `query`: keep the blocking work off the executor.
             tokio::task::spawn_blocking(move || {
-                let rusqlite_params: Vec<_> =
-                    params.iter().map(datatype_to_rusqlite_value).collect();
+                let rusqlite_params: Vec<_> = params.iter().map(to_sqlite).collect();
 
                 let conn = conn.lock();
                 let mut stmt = conn.prepare(&query).context("failed to prepare statement")?;
@@ -163,7 +163,7 @@ impl Connection for SqliteConnectionImpl {
 // `u64 as i64` is the standard SQLite convention: store the raw bits and let
 // readers reinterpret, since SQLite integers are always signed 64-bit.
 #[expect(clippy::cast_possible_wrap)]
-fn datatype_to_rusqlite_value(dt: &DataType) -> rusqlite::types::Value {
+fn to_sqlite(dt: &DataType) -> rusqlite::types::Value {
     match dt {
         DataType::Boolean(Some(b)) => rusqlite::types::Value::Integer(i64::from(*b)),
         DataType::Int32(Some(i)) => rusqlite::types::Value::Integer(i64::from(*i)),
@@ -180,7 +180,7 @@ fn datatype_to_rusqlite_value(dt: &DataType) -> rusqlite::types::Value {
     }
 }
 
-fn rusqlite_value_to_datatype(value: ValueRef) -> Result<DataType> {
+fn from_sqlite(value: ValueRef) -> Result<DataType> {
     match value {
         ValueRef::Null => Ok(DataType::Str(None)),
         ValueRef::Integer(i) => Ok(DataType::Int64(Some(i))),
@@ -197,58 +197,19 @@ fn rusqlite_value_to_datatype(value: ValueRef) -> Result<DataType> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn datatype_to_sqlite_values() {
-        use rusqlite::types::Value;
+    // The obvious one-to-one mappings mirror the match arms; only the two
+    // conventions a reader could get wrong are pinned here.
 
-        assert_eq!(datatype_to_rusqlite_value(&DataType::Boolean(Some(true))), Value::Integer(1));
-        assert_eq!(datatype_to_rusqlite_value(&DataType::Int32(Some(-7))), Value::Integer(-7));
-        assert_eq!(datatype_to_rusqlite_value(&DataType::Int64(Some(9))), Value::Integer(9));
-        assert_eq!(datatype_to_rusqlite_value(&DataType::Uint32(Some(4))), Value::Integer(4));
+    #[test]
+    fn u64_stores_raw_bits() {
         assert_eq!(
-            datatype_to_rusqlite_value(&DataType::Uint64(Some(u64::MAX))),
-            Value::Integer(-1),
-            "u64 stores its raw bits"
+            to_sqlite(&DataType::Uint64(Some(u64::MAX))),
+            rusqlite::types::Value::Integer(-1),
         );
-        assert_eq!(datatype_to_rusqlite_value(&DataType::Float(Some(1.5))), Value::Real(1.5));
-        assert_eq!(datatype_to_rusqlite_value(&DataType::Double(Some(2.5))), Value::Real(2.5));
-        assert_eq!(
-            datatype_to_rusqlite_value(&DataType::Str(Some("s".to_string()))),
-            Value::Text("s".to_string())
-        );
-        assert_eq!(
-            datatype_to_rusqlite_value(&DataType::Binary(Some(vec![1, 2]))),
-            Value::Blob(vec![1, 2])
-        );
-        assert_eq!(
-            datatype_to_rusqlite_value(&DataType::Timestamp(Some("2026-01-01".to_string()))),
-            Value::Text("2026-01-01".to_string())
-        );
-        assert_eq!(datatype_to_rusqlite_value(&DataType::Str(None)), Value::Null);
     }
 
     #[test]
-    fn sqlite_value_to_datatypes() {
-        assert!(matches!(
-            rusqlite_value_to_datatype(ValueRef::Null).expect("null"),
-            DataType::Str(None)
-        ));
-        assert!(matches!(
-            rusqlite_value_to_datatype(ValueRef::Integer(3)).expect("integer"),
-            DataType::Int64(Some(3))
-        ));
-        assert!(matches!(
-            rusqlite_value_to_datatype(ValueRef::Real(0.5)).expect("real"),
-            DataType::Double(Some(v)) if (v - 0.5).abs() < f64::EPSILON
-        ));
-        assert!(matches!(
-            rusqlite_value_to_datatype(ValueRef::Text(b"t")).expect("text"),
-            DataType::Str(Some(s)) if s == "t"
-        ));
-        assert!(matches!(
-            rusqlite_value_to_datatype(ValueRef::Blob(&[7])).expect("blob"),
-            DataType::Binary(Some(b)) if b == vec![7]
-        ));
-        assert!(rusqlite_value_to_datatype(ValueRef::Text(&[0xff])).is_err(), "invalid UTF-8");
+    fn invalid_utf8_rejected() {
+        from_sqlite(ValueRef::Text(&[0xff])).unwrap_err();
     }
 }

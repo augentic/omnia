@@ -22,7 +22,7 @@ use omnia::{
     DeploymentBuilder, FutureResult, GuestArtifact, GuestEntry, GuestId, GuestResolver, Manifest,
     MountRegistry, Runtime, serve_links,
 };
-use omnia_testkit::find_guest;
+use omnia_testkit::{find_guest, precompiled_artifact as precompiled, raw_wasm};
 use tokio::sync::Notify;
 
 use crate::fixture;
@@ -53,9 +53,9 @@ impl Clone for Counter {
     }
 }
 
-/// Instantiate the router fresh, call its `export` with `message`, and return
-/// the echoed string.
-async fn call_router(runtime: &Runtime<Counter>, export: &str, message: &str) -> Result<String> {
+/// Instantiate the router fresh, call its string-returning `export` with
+/// `params`, and return the echoed string.
+async fn call_export(runtime: &Runtime<Counter>, export: &str, params: &[Val]) -> Result<String> {
     let guest =
         runtime.registry().get(&GuestId::from("router")).context("router guest is registered")?;
     let mut store = runtime.build_store(runtime.store());
@@ -68,7 +68,7 @@ async fn call_router(runtime: &Runtime<Counter>, export: &str, message: &str) ->
         .with_context(|| format!("router exports `{export}`"))?;
 
     let mut results = vec![Val::Bool(false)];
-    run.call_async(&mut store, &[Val::String(message.to_owned())], &mut results)
+    run.call_async(&mut store, params, &mut results)
         .await
         .map_err(anyhow::Error::from)
         .with_context(|| format!("calling router.{export}"))?;
@@ -79,42 +79,17 @@ async fn call_router(runtime: &Runtime<Counter>, export: &str, message: &str) ->
     }
 }
 
-/// Instantiate the router fresh and call `export(target, message)`.
-async fn call_router_export_to(
-    runtime: &Runtime<Counter>, export: &str, target: &str, message: &str,
-) -> Result<String> {
-    let guest =
-        runtime.registry().get(&GuestId::from("router")).context("router guest is registered")?;
-    let mut store = runtime.build_store(runtime.store());
-    let instance = runtime
-        .instantiate(guest.instance_pre(), &mut store)
-        .await
-        .context("instantiating router")?;
-    let run_to = instance
-        .get_func(&mut store, export)
-        .with_context(|| format!("router exports `{export}`"))?;
-
-    let mut results = vec![Val::Bool(false)];
-    run_to
-        .call_async(
-            &mut store,
-            &[Val::String(target.to_owned()), Val::String(message.to_owned())],
-            &mut results,
-        )
-        .await
-        .map_err(anyhow::Error::from)
-        .with_context(|| format!("calling router.{export}"))?;
-
-    match results.into_iter().next() {
-        Some(Val::String(echoed)) => Ok(echoed),
-        other => bail!("router.{export} returned a non-string result: {other:?}"),
-    }
+/// Instantiate the router fresh, call its `export` with `message`, and return
+/// the echoed string.
+async fn call_router(runtime: &Runtime<Counter>, export: &str, message: &str) -> Result<String> {
+    call_export(runtime, export, &[Val::String(message.to_owned())]).await
 }
 
 /// Call `run-to(target, message)` — the arbitrary-target leg that reaches
 /// dynamically registered guests.
 async fn call_router_to(runtime: &Runtime<Counter>, target: &str, message: &str) -> Result<String> {
-    call_router_export_to(runtime, "run-to", target, message).await
+    let params = [Val::String(target.to_owned()), Val::String(message.to_owned())];
+    call_export(runtime, "run-to", &params).await
 }
 
 /// Call `run-to-slow(target, message)` — the async-lifted arbitrary-target
@@ -122,34 +97,8 @@ async fn call_router_to(runtime: &Runtime<Counter>, target: &str, message: &str)
 async fn call_router_to_slow(
     runtime: &Runtime<Counter>, target: &str, message: &str,
 ) -> Result<String> {
-    call_router_export_to(runtime, "run-to-slow", target, message).await
-}
-
-/// Locate the serialized `.bin` for `file` and wrap it as a pre-compiled
-/// registration artifact. Fails fast (rather than substituting raw wasm) when
-/// the `.bin` is missing, so the pre-compiled path is genuinely exercised.
-fn precompiled(file: &str) -> Result<GuestArtifact> {
-    let path = find_guest(file);
-    ensure!(
-        path.extension().is_some_and(|ext| ext == "bin"),
-        "{} has no serialized .bin sibling; run `cargo make test-guests`",
-        path.display()
-    );
-    let bytes =
-        std::fs::read(&path).with_context(|| format!("reading guest {}", path.display()))?;
-    // SAFETY: the artifact was built and serialized by this workspace's own
-    // `cargo make test-guests` pipeline (omnia's compile path).
-    Ok(unsafe { GuestArtifact::precompiled(bytes) })
-}
-
-/// The raw-wasm dual of [`precompiled`], exercising the safe JIT constructor.
-/// Names the `.wasm` sibling explicitly so the pre-compiled `.bin` can never
-/// silently substitute.
-fn raw_wasm(file: &str) -> Result<GuestArtifact> {
-    let path = find_guest(file).with_extension("wasm");
-    let bytes =
-        std::fs::read(&path).with_context(|| format!("reading guest {}", path.display()))?;
-    Ok(GuestArtifact::wasm(bytes))
+    let params = [Val::String(target.to_owned()), Val::String(message.to_owned())];
+    call_export(runtime, "run-to-slow", &params).await
 }
 
 /// Build the two-guest deployment and wire the serve side, returning the
@@ -309,6 +258,34 @@ fn dispatch_async() -> Result<()> {
     })
 }
 
+// Depth is bounded per call chain, not per process: dispatches held in
+// flight concurrently (the slow leg parks each callee on a timer) must all
+// succeed even when more than MAX_DISPATCH_DEPTH of them overlap — each is
+// its own chain at depth 1.
+#[test]
+fn concurrent_dispatch() -> Result<()> {
+    fixture::RT.block_on(async {
+        let (runtime, _clones) = build_runtime().await?;
+
+        // Twice the default MAX_DISPATCH_DEPTH (8).
+        let tasks: Vec<_> = (0..16)
+            .map(|n| {
+                let runtime = runtime.clone();
+                tokio::spawn(async move {
+                    call_router_to_slow(&runtime, "responder", &format!("m{n}")).await
+                })
+            })
+            .collect();
+
+        for (n, task) in tasks.into_iter().enumerate() {
+            let echoed = task.await.expect("dispatch task")?;
+            assert_eq!(echoed, format!("responder echoes slowly: m{n}"));
+        }
+
+        Ok(())
+    })
+}
+
 // A guest registered after startup (absent from the manifest) is reachable via
 // host-mediated link dispatch — serve-at-register — and via host→guest
 // dispatch, while static dispatch is undisturbed. Registration loads the
@@ -421,7 +398,7 @@ fn static_ids_protected() -> Result<()> {
 // A failed registration (imports outside the linked host set) leaves no
 // partial state: the id stays unregistered and remains usable.
 #[test]
-fn register_failure_no_partial_state() -> Result<()> {
+fn register_failure_no_state() -> Result<()> {
     fixture::RT.block_on(async {
         let (runtime, _clones) = build_runtime().await?;
 
@@ -449,7 +426,7 @@ fn register_failure_no_partial_state() -> Result<()> {
 // exactly one wins, the winner is callable, and the loser leaves no partial
 // state behind (the id deregisters cleanly exactly once).
 #[test]
-fn register_concurrent_same_id() -> Result<()> {
+fn register_same_id_race() -> Result<()> {
     fixture::RT.block_on(async {
         let (runtime, _clones) = build_runtime().await?;
 
@@ -542,7 +519,7 @@ fn lifecycle_churn_agrees() -> Result<()> {
 // in-flight calls hold their own instance and server handles, so removal only
 // stops *new* dispatches.
 #[test]
-fn deregister_in_flight_completes() -> Result<()> {
+fn deregister_in_flight() -> Result<()> {
     fixture::RT.block_on(async {
         let (runtime, clones) = build_runtime().await?;
         runtime.register("extra", precompiled("guest_link_extra_wasm.wasm")?).await?;
@@ -627,6 +604,19 @@ async fn wait_for_calls(calls: &AtomicUsize, target: usize) -> Result<()> {
     bail!("resolver never reached {target} call(s)");
 }
 
+/// Await `target` dispatches sharing the `extra` flight (the runtime's
+/// joined-waiter probe), failing rather than hanging.
+async fn wait_for_waiters(runtime: &Runtime<Counter>, target: usize) -> Result<()> {
+    let id = GuestId::from("extra");
+    for _ in 0..2000 {
+        if runtime.flight_waiters(&id) >= target {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    bail!("the flight never reached {target} waiter(s)");
+}
+
 /// Host→guest dispatch to a resolver-supplied guest.
 async fn invoke_extra(runtime: &Runtime<Counter>, message: &str) -> Result<Vec<Val>> {
     runtime
@@ -682,7 +672,7 @@ fn resolve_on_host_dispatch() -> Result<()> {
 // N concurrent dispatches to one missing id start one flight: the resolver
 // runs once and every waiter shares the successful outcome.
 #[test]
-fn single_flight_shares_success() -> Result<()> {
+fn single_flight_success() -> Result<()> {
     fixture::RT.block_on(async {
         let (resolver, calls, gate) =
             TestResolver::gated(|_| Ok(Some(precompiled("guest_link_extra_wasm.wasm")?)));
@@ -695,10 +685,9 @@ fn single_flight_shares_success() -> Result<()> {
             })
             .collect();
 
-        // The leader is inside the resolver; give the rest time to join its
-        // flight, then release it.
-        wait_for_calls(&calls, 1).await?;
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Release the leader only once every dispatch is provably sharing its
+        // flight (each waiter holds a clone of the shared future).
+        wait_for_waiters(&runtime, 8).await?;
         gate.notify_one();
 
         for (n, task) in tasks.into_iter().enumerate() {
@@ -714,7 +703,7 @@ fn single_flight_shares_success() -> Result<()> {
 // The negative dual: every waiter of a declining flight shares the `Ok(None)`
 // outcome — no serial re-resolves under fan-out.
 #[test]
-fn single_flight_shares_decline() -> Result<()> {
+fn single_flight_decline() -> Result<()> {
     fixture::RT.block_on(async {
         let (resolver, calls, gate) = TestResolver::gated(|_| Ok(None));
         let (runtime, _clones) = build_runtime_with(Some(resolver)).await?;
@@ -726,8 +715,7 @@ fn single_flight_shares_decline() -> Result<()> {
             })
             .collect();
 
-        wait_for_calls(&calls, 1).await?;
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        wait_for_waiters(&runtime, 8).await?;
         gate.notify_one();
 
         for task in tasks {
@@ -747,7 +735,7 @@ fn single_flight_shares_decline() -> Result<()> {
 // own dispatch, a resolver error likewise, and once the resolver supplies the
 // artifact the next dispatch succeeds — no restart needed.
 #[test]
-fn negative_outcomes_not_cached() -> Result<()> {
+fn no_negative_caching() -> Result<()> {
     fixture::RT.block_on(async {
         let (resolver, calls) = TestResolver::new(|call| match call {
             0 => Ok(None),
@@ -799,7 +787,7 @@ fn wrong_export_refused() -> Result<()> {
 // flight treats losing the publish race as success, so the dispatch that
 // triggered it succeeds against whichever registration won.
 #[test]
-fn register_races_resolver_flight() -> Result<()> {
+fn register_races_resolver() -> Result<()> {
     fixture::RT.block_on(async {
         let (resolver, calls, gate) =
             TestResolver::gated(|_| Ok(Some(precompiled("guest_link_extra_wasm.wasm")?)));

@@ -110,7 +110,7 @@ The testkit `Scripted` double received more completions than it has scripted res
 
 ### `invalid-request` errors
 
-The host's validation gate rejected the request before any backend ran: empty `messages`, a guest tool named after a reserved host-injected tool (`resolve`, `read`, `list`, `write`, `verify`), or an invalid JSON Schema in `format`. The message names the violation.
+The host's validation gate rejected the request before any backend ran: empty `messages`, a guest tool named after a reserved host-injected tool (`resolve`, `read`, `list`, `write`), or an invalid JSON Schema in `format`. The message names the violation.
 
 ### `no local tree on this node` (cursor backend)
 

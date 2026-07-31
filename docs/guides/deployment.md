@@ -88,7 +88,7 @@ docker compose -f docker/redis.yaml up -d
 REDIS_URL=redis://localhost:6379 cargo run -p my-runtime -- run guest.wasm
 ```
 
-These are also the services the backends repo's [live tests](production-backends.md#verifying-against-the-real-service) run against.
+These are also the services the omnia-backends repo's [live tests](production-backends.md#verifying-against-the-real-service) run against.
 
 ## Configuration and secrets
 

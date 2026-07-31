@@ -58,12 +58,12 @@ Connection settings are *already* runtime-resolved: `Backend::connect()` default
 
 ## 3. The hard constraint
 
-A binary can only use backends **compiled into it**. The real backends (Redis, MongoDb, Postgres, NATS, …) live in the separate `backends` repo, which *depends on* `omnia`. Compiling them into a binary that ships from the `omnia` repo would create a dependency cycle (`omnia → backends → omnia`).
+A binary can only use backends **compiled into it**. The real backends (Redis, MongoDb, Postgres, NATS, …) live in the separate `omnia-backends` repo, which *depends on* `omnia`. Compiling them into a binary that ships from the `omnia` repo would create a dependency cycle (`omnia → omnia-backends → omnia`).
 
 Consequences that shape the whole design:
 
 - **omnia** ships only the *mechanism* plus its in-memory `*Default` backends.
-- The configurable binaries live **downstream** — in the `backends` repo (or a dedicated distribution crate), where the concrete backends already are. There is deliberately more than one of them (§6.2): a single universal binary would pay the union of every backend's dependency, CVE, and build cost for every deployment.
+- The configurable binaries live **downstream** — in the `omnia-backends` repo (or a dedicated distribution crate), where the concrete backends already are. There is deliberately more than one of them (§6.2): a single universal binary would pay the union of every backend's dependency, CVE, and build cost for every deployment.
 - Selecting an implementation a binary was never compiled with is impossible without a rebuild — *unless* the backend runs out-of-process (§7.1). In-process dynamic loading (native plugins, wasm-component backends) is rejected outright (§7.2). Both are out of scope for v1.
 
 ## 4. Proposed design — the dynamic seam
@@ -142,7 +142,7 @@ Selecting *which hosts* are active is the easy half:
 ### 6.1 Where this lives
 
 - **omnia** — the mechanism: the dynamic macro mode, the `Backends` registry, the `[backends]` manifest section, and the `Arc<dyn _>` view change. Plus its in-memory `*Default` impls, which need no external services.
-- **backends** — the configurable binaries (§6.2) that register the real implementations and call `run`. It already depends on omnia, so there is no cycle.
+- **omnia-backends** — the configurable binaries (§6.2) that register the real implementations and call `run`. It already depends on omnia, so there is no cycle.
 - A separate distribution repo is warranted only if a deployment must combine backends from multiple source repos.
 
 A binary built purely from omnia's `*Default` backends is possible but uninteresting — there is exactly one default per interface, so there is nothing to select. The feature only earns its keep downstream, where multiple real backends exist for an interface.
@@ -153,10 +153,10 @@ Nothing in §4 requires exactly one configurable binary — and there should not
 
 - **CVE surface is the union.** A vulnerability in the Kafka client forces a rebuild and re-ship for deployments that never select Kafka.
 - **One lockfile for everything.** Every backend SDK must coexist in a single dependency graph, permanently.
-- **The build inherits the fussiest backend.** `omnia-kafka`'s `rdkafka` (cmake build, vendored OpenSSL) is the lone native-build dependency in the `backends` workspace; everything else (`redis`/rustls, `deadpool-postgres`, `async-nats`, `mongodb`, `azure_*`, `opentelemetry-proto`) is pure Rust and cross-compiles freely.
+- **The build inherits the fussiest backend.** `omnia-kafka`'s `rdkafka` (cmake build, vendored OpenSSL) is the lone native-build dependency in the `omnia-backends` workspace; everything else (`redis`/rustls, `deadpool-postgres`, `async-nats`, `mongodb`, `azure_*`, `opentelemetry-proto`) is pure Rust and cross-compiles freely.
 - **The tested surface becomes combinatorial** instead of "the binary": CI must exercise selectable combinations, not one artifact.
 
-Instead, `backends` CI ships a small family of **profile binaries**, each a coherent bundle with §4 selection *inside* it — for example:
+Instead, `omnia-backends` CI ships a small family of **profile binaries**, each a coherent bundle with §4 selection *inside* it — for example:
 
 - `omniad` — the base/protocol profile: Redis, Postgres, NATS, plus the in-memory defaults.
 - `omniad-azure` — Blob, Table, Vault, Identity.

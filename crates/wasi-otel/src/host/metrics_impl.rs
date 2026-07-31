@@ -19,7 +19,7 @@ use opentelemetry_sdk::error::OTelSdkError;
 use wasmtime::component::Accessor;
 
 use crate::host::generated::omnia::otel::metrics::{self as wasi, HostWithStore};
-use crate::host::types_impl::datetime_nanos;
+use crate::host::types_impl::{datetime_nanos, decode_id};
 use crate::host::{WasiOtel, WasiOtelCtxView};
 
 impl<T> HostWithStore<T> for WasiOtel {
@@ -191,20 +191,30 @@ impl From<wasi::MetricData> for MetricData {
     }
 }
 
+/// The proto `NumberDataPoint` shared by the Gauge and Sum conversions.
+fn number_dp(
+    attributes: Vec<wasi::KeyValue>, value: wasi::DataValue, exemplars: Vec<wasi::Exemplar>,
+    start_time_unix_nano: u64, time_unix_nano: u64,
+) -> NumberDataPoint {
+    NumberDataPoint {
+        attributes: attributes.into_iter().map(Into::into).collect(),
+        start_time_unix_nano,
+        time_unix_nano,
+        exemplars: exemplars.into_iter().map(Into::into).collect(),
+        flags: DATA_POINT_FLAGS_DO_NOT_USE,
+        value: Some(value.into()),
+    }
+}
+
 impl From<wasi::Gauge> for Gauge {
     fn from(gauge: wasi::Gauge) -> Self {
+        let start = gauge.start_time.map(datetime_nanos).unwrap_or_default();
+        let time = datetime_nanos(gauge.time);
         Self {
             data_points: gauge
                 .data_points
                 .into_iter()
-                .map(|dp| NumberDataPoint {
-                    attributes: dp.attributes.into_iter().map(Into::into).collect(),
-                    start_time_unix_nano: gauge.start_time.map(datetime_nanos).unwrap_or_default(),
-                    time_unix_nano: datetime_nanos(gauge.time),
-                    exemplars: dp.exemplars.into_iter().map(Into::into).collect(),
-                    flags: DataPointFlags::default() as u32,
-                    value: Some(dp.value.into()),
-                })
+                .map(|dp| number_dp(dp.attributes, dp.value, dp.exemplars, start, time))
                 .collect(),
         }
     }
@@ -212,18 +222,13 @@ impl From<wasi::Gauge> for Gauge {
 
 impl From<wasi::Sum> for Sum {
     fn from(sum: wasi::Sum) -> Self {
+        let start = datetime_nanos(sum.start_time);
+        let time = datetime_nanos(sum.time);
         Self {
             data_points: sum
                 .data_points
                 .into_iter()
-                .map(|dp| NumberDataPoint {
-                    attributes: dp.attributes.into_iter().map(Into::into).collect(),
-                    start_time_unix_nano: datetime_nanos(sum.start_time),
-                    time_unix_nano: datetime_nanos(sum.time),
-                    exemplars: dp.exemplars.into_iter().map(Into::into).collect(),
-                    flags: DataPointFlags::default() as u32,
-                    value: Some(dp.value.into()),
-                })
+                .map(|dp| number_dp(dp.attributes, dp.value, dp.exemplars, start, time))
                 .collect(),
             aggregation_temporality: AggregationTemporality::from(sum.temporality).into(),
             is_monotonic: sum.is_monotonic,
@@ -246,7 +251,7 @@ impl From<wasi::Histogram> for Histogram {
                     bucket_counts: dp.bucket_counts,
                     explicit_bounds: dp.bounds,
                     exemplars: dp.exemplars.into_iter().map(Into::into).collect(),
-                    flags: DataPointFlags::default() as u32,
+                    flags: DATA_POINT_FLAGS_DO_NOT_USE,
                     min: dp.min.map(Into::into),
                     max: dp.max.map(Into::into),
                 })
@@ -278,7 +283,7 @@ impl From<wasi::ExponentialHistogram> for ExponentialHistogram {
                         offset: dp.negative_bucket.offset,
                         bucket_counts: dp.negative_bucket.counts,
                     }),
-                    flags: DataPointFlags::default() as u32,
+                    flags: DATA_POINT_FLAGS_DO_NOT_USE,
                     exemplars: dp.exemplars.into_iter().map(Into::into).collect(),
                     min: dp.min.map(Into::into),
                     max: dp.max.map(Into::into),
@@ -295,8 +300,8 @@ impl From<wasi::Exemplar> for Exemplar {
         Self {
             filtered_attributes: ex.filtered_attributes.into_iter().map(Into::into).collect(),
             time_unix_nano: datetime_nanos(ex.time),
-            span_id: hex::decode(ex.span_id).unwrap_or_default(),
-            trace_id: hex::decode(ex.trace_id).unwrap_or_default(),
+            span_id: decode_id(&ex.span_id),
+            trace_id: decode_id(&ex.trace_id),
             value: Some(ex.value.into()),
         }
     }
@@ -351,10 +356,5 @@ impl From<wasi::Temporality> for i32 {
     }
 }
 
-#[derive(Default)]
-#[repr(i32)]
-pub enum DataPointFlags {
-    #[default]
-    DoNotUse = 0,
-    // NoRecordedValueMask = 1,
-}
+// The proto `DataPointFlags` default (`FLAG_NONE` / "do not use").
+const DATA_POINT_FLAGS_DO_NOT_USE: u32 = 0;

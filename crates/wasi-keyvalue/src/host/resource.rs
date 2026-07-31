@@ -1,5 +1,4 @@
 use std::fmt::Debug;
-use std::ops::Deref;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
@@ -7,9 +6,6 @@ pub use omnia::FutureResult;
 /// Providers implement the [`Bucket`] trait to allow the host to
 /// interact with different backend buckets (stores).
 pub trait Bucket: Debug + Send + Sync + 'static {
-    /// The name of the bucket.
-    fn name(&self) -> &str;
-
     /// Get the value associated with the key.
     fn get(&self, key: String) -> FutureResult<Option<Vec<u8>>>;
 
@@ -24,19 +20,21 @@ pub trait Bucket: Debug + Send + Sync + 'static {
 
     /// List all keys in the bucket.
     fn keys(&self) -> FutureResult<Vec<String>>;
+
+    /// Native atomic increment, if the backend has one (e.g. Redis `INCRBY`).
+    ///
+    /// The default returns `None`, making the host fall back to a
+    /// read-modify-write over `get`/`set` — racy under concurrent writers, so
+    /// backends that can honor the `atomics` contract natively should
+    /// override this.
+    fn increment(&self, key: String, delta: i64) -> Option<FutureResult<i64>> {
+        let _ = (key, delta);
+        None
+    }
 }
 
 /// Proxy for a Key-Value bucket.
-#[derive(Clone, Debug)]
-pub struct BucketProxy(pub Arc<dyn Bucket>);
-
-impl Deref for BucketProxy {
-    type Target = Arc<dyn Bucket>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+pub type BucketProxy = omnia::Proxy<dyn Bucket>;
 
 /// CAS (Compare-And-Swap) operation handle.
 #[derive(Clone, Debug)]

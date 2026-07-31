@@ -4,7 +4,7 @@ use std::error::Error;
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use http::HeaderValue;
-use http::header::ETAG;
+use http::header::{ETAG, IF_NONE_MATCH};
 use http_body::Body;
 use wasip3::http::client;
 use wasip3::http_compat::{IncomingMessage, http_from_wasi_response, http_into_wasi_request};
@@ -23,14 +23,19 @@ where
     T::Data: Into<Vec<u8>>,
     T::Error: Into<Box<dyn Error + Send + Sync + 'static>>,
 {
+    let mut request = request;
     let maybe_cache = Cache::maybe_from(&request)?;
 
     // check cache when indicated by `Cache-Control` header
-    if let Some(cache) = maybe_cache.as_ref()
-        && let Some(hit) = cache.get().await?
-    {
-        tracing::debug!("cache hit");
-        return Ok(hit);
+    if let Some(cache) = maybe_cache.as_ref() {
+        if let Some(hit) = cache.get().await? {
+            tracing::debug!("cache hit");
+            return Ok(hit);
+        }
+        // The guest-side cache owns conditional semantics: forwarding
+        // `If-None-Match` would let the origin answer `304 Not Modified`,
+        // whose empty body must not become the cached resource.
+        request.headers_mut().remove(IF_NONE_MATCH);
     }
 
     // forward to `wasmtime-wasi-http` outbound proxy

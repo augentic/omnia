@@ -12,7 +12,7 @@ use std::sync::{Arc, RwLock};
 
 use anyhow::{Context, Result};
 use futures::FutureExt;
-use omnia::{Backend, FromEnv};
+use omnia::Backend;
 use serde_json::Value;
 use tracing::instrument;
 
@@ -24,16 +24,6 @@ const MAX_PAGE_SIZE: u64 = 1000;
 // Collections keyed by name; documents keyed by id (BTreeMap gives queries a
 // deterministic id-ascending base order).
 type Collections = HashMap<String, BTreeMap<String, Value>>;
-
-/// Connection options for the in-memory document store.
-#[derive(Debug, Clone, Default)]
-pub struct ConnectOptions;
-
-impl FromEnv for ConnectOptions {
-    fn from_env() -> Result<Self> {
-        Ok(Self)
-    }
-}
 
 /// Default in-memory [`WasiDocStoreCtx`].
 ///
@@ -51,7 +41,7 @@ impl std::fmt::Debug for DocStoreDefault {
 }
 
 impl Backend for DocStoreDefault {
-    type ConnectOptions = ConnectOptions;
+    type ConnectOptions = omnia::NoOptions;
 
     #[instrument]
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
@@ -124,7 +114,9 @@ impl WasiDocStoreCtx for DocStoreDefault {
     ) -> FutureResult<QueryResult> {
         let store = self.clone();
         async move {
-            let limit = options.limit.map_or(MAX_PAGE_SIZE, u64::from);
+            // Clamp rather than trust the guest-supplied page size; an
+            // oversized limit degrades to the host maximum.
+            let limit = options.limit.map_or(MAX_PAGE_SIZE, u64::from).min(MAX_PAGE_SIZE);
             anyhow::ensure!(limit > 0, "query limit must be at least 1");
             let page_size = usize::try_from(limit).unwrap_or(usize::MAX);
 
@@ -228,7 +220,7 @@ mod tests {
     }
 
     #[test]
-    fn continuation_rejects_garbage() {
+    fn continuation_rejects_junk() {
         parse_continuation(Some("not-a-number")).expect_err("garbage token is rejected");
         assert_eq!(parse_continuation(None).expect("empty token"), 0);
     }

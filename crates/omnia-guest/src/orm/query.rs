@@ -9,10 +9,13 @@ use sea_query::{
 };
 
 use super::DataType;
-use super::entity::values_to_wasi_datatypes;
+use super::entity::to_wasi_params;
 
+/// A built SQL statement: the rendered SQL plus its bound parameters.
 pub struct Query {
+    /// The rendered SQL text with numbered placeholders (`$1`, `$2`, ...).
     pub sql: String,
+    /// The bound parameter values, in placeholder order.
     pub params: Vec<DataType>,
 }
 
@@ -22,7 +25,7 @@ pub fn finish<S: QueryStatementBuilder>(
     stmt: &S, table: &'static str, kind: &'static str,
 ) -> Result<Query> {
     let (sql, values) = stmt.build_any(&QueryBuilder);
-    let params = values_to_wasi_datatypes(values)?;
+    let params = to_wasi_params(values)?;
 
     tracing::debug!(
         table,

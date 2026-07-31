@@ -44,7 +44,8 @@ async fn handler() -> HttpResult<Json<Value>> {
     let scopes = vec![SCOPE.to_string()];
     let access_token = identity.get_token(scopes).await.context("getting access token")?;
 
-    println!("access token: {}", access_token.token);
+    // Never print the token itself; report only enough to confirm success.
+    println!("access token acquired ({} chars)", access_token.token.len());
 
     Ok(Json(json!({
         "message": "Hello, World!"

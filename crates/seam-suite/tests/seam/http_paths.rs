@@ -14,15 +14,15 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use anyhow::{Context as _, Result, ensure};
+use anyhow::{Context as _, Result};
 use futures::FutureExt as _;
 use omnia::wasmtime_wasi::ResourceTable;
 use omnia::{
     Backends, DeploymentBuilder, FutureResult, GuestArtifact, GuestId, GuestResolver, HasHttp,
     Runtime, StoreCtx,
 };
-use omnia_testkit::find_guest;
 use omnia_testkit::http::HttpHarness;
+use omnia_testkit::precompiled_artifact as precompiled;
 use omnia_wasi_http::{HttpDefault, WasiHttp, WasiHttpCtxView};
 use omnia_wasi_otel::{HasOtel, OtelDefault, WasiOtel, WasiOtelCtx};
 
@@ -54,21 +54,6 @@ impl Backends for Bundle {
             otel: <OtelDefault as omnia::Backend>::connect().await.context("connecting otel")?,
         })
     }
-}
-
-/// Locate the serialized `.bin` for `file` as a registration artifact.
-fn precompiled(file: &str) -> Result<GuestArtifact> {
-    let path = find_guest(file);
-    ensure!(
-        path.extension().is_some_and(|ext| ext == "bin"),
-        "{} has no serialized .bin sibling; run `cargo make test-guests`",
-        path.display()
-    );
-    let bytes =
-        std::fs::read(&path).with_context(|| format!("reading guest {}", path.display()))?;
-    // SAFETY: the artifact was built and serialized by this workspace's own
-    // `cargo make test-guests` pipeline (omnia's compile path).
-    Ok(unsafe { GuestArtifact::precompiled(bytes) })
 }
 
 /// A counting tenant resolver: `a` and `b` map to the two routing guests,

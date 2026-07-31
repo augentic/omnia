@@ -55,11 +55,10 @@ Function names must not collide with the reserved host-injected tool names below
 | ----- | ---- | ------ |
 | `references` | `option<string>` | Guest id whose export the injected `resolve` tool dispatches to. |
 | `workspace` | `option<borrow<descriptor>>` | A `wasi:filesystem` directory descriptor from the guest's own preopen table. Being a typed resource borrow, it cannot be forged — the host resolves it back to an authorized mount by directory identity, then exposes it to backends as bounded `read`/`list`/`write` (genai) or the absolute local path (cursor's `--workspace`). |
-| `verify` | `list<string>` | Allowed verification profile names for the injected `verify` tool. |
 
 ### Host-injected tools
 
-From the grants, the host — never the guest or backend — merges these tools into the completion: **`resolve`**, **`read`**, **`list`**, **`write`**, **`verify`**. Guests must not declare tools with these names (`invalid-request`). Backends execute them by calling back through the host's `ToolHost`, so every invocation passes host validation.
+From the grants, the host — never the guest or backend — merges these tools into the completion: **`resolve`**, **`read`**, **`list`**, **`write`**. Guests must not declare tools with these names (`invalid-request`). Backends execute them by calling back through the host's `ToolHost`, so every invocation passes host validation.
 
 ## Reply
 
@@ -74,7 +73,7 @@ From the grants, the host — never the guest or backend — merges these tools 
 | ------- | ------- | ------ |
 | `invalid-request(string)` | The request is malformed (empty `messages`, reserved tool name, invalid schema document). | Not without changing the request. |
 | `invalid-answer(string)` | The backend never produced output that passed validation. | Possibly; the model may do better on retry. |
-| `budget-exhausted(string)` | Iteration, token, time, or verify budget ran out. | With a larger budget. |
+| `budget-exhausted(string)` | Iteration, token, or time budget ran out. | With a larger budget. |
 | `tool-failed(string)` | A tool call failed non-repairably. | Depends on the tool. |
 | `backend(string)` | Transport, process, or provider failure. | Usually transient. |
 
@@ -84,5 +83,5 @@ From the grants, the host — never the guest or backend — merges these tools 
 | ------- | -------- | ----- |
 | `ModelDefault` | in-tree (`wasi-model`) | Deterministic echo: text/json answer with the prompt; `format::schema` errors |
 | `Scripted` | in-tree (`omnia-testkit`) | FIFO of scripted answers for tests and examples; never runs tools |
-| `omnia-genai` | backends repo | Provider APIs in-process; function tools + injected `resolve`; no MCP |
-| `omnia-cursor` | backends repo | Spawned `cursor-agent`; requires workspace grant; MCP via `.cursor/mcp.json`; 120s default timeout |
+| `omnia-genai` | omnia-backends repo | Provider APIs in-process; function tools + injected `resolve`; no MCP |
+| `omnia-cursor` | omnia-backends repo | Spawned `cursor-agent`; requires workspace grant; MCP via `.cursor/mcp.json`; 120s default timeout |

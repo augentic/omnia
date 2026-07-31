@@ -20,172 +20,37 @@ pub trait HasLimits {
     fn limits(&mut self) -> &mut StoreLimits;
 }
 
-/// Type-state marker for a [`StoreBaseBuilder`] member that has been supplied,
-/// carrying its value until [`build`](StoreBaseBuilder::build) consumes it.
-pub struct Set<T>(T);
-
-/// Type-state marker for a [`StoreBaseBuilder`] member that is not yet supplied.
-pub struct Unset;
-
-/// Type-state builder for [`StoreBase`], created by [`StoreBase::builder`].
+/// The per-store construction inputs for [`StoreBase::new`].
 ///
-/// The `O` and `D` type parameters track whether the required
-/// [`options`](Self::options) and [`dispatcher`](Self::dispatcher) members have been
-/// supplied: each starts as `Unset` and becomes `Set<…>` once its setter runs.
-/// [`build`](Self::build) is implemented only when both are `Set`, so omitting
-/// either is a compile error rather than a runtime panic. The optional
-/// [`args`](Self::args) member defaults to empty and may be set in any state.
-pub struct StoreBaseBuilder<O = Unset, D = Unset> {
-    options: O,
-    dispatcher: D,
-    args: Option<Arc<Vec<String>>>,
-    mounts: Option<Arc<MountRegistry>>,
-    env: Option<Arc<Vec<(String, String)>>>,
-}
-
-impl<O, D> StoreBaseBuilder<O, D> {
-    /// Set the guest argv (`args[0]` is the program name).
-    ///
-    /// Takes the runtime's shared argv handle so each store clones an `Arc`
-    /// rather than the vector. Optional; defaults to empty for reactor
+/// `options` and `dispatcher` are required; the rest default sensibly (empty
+/// argv, no mounts, host env inheritance) so hand-written test runtimes build
+/// unchanged.
+pub struct StoreConfig<'a> {
+    /// Runtime options; caps linear-memory growth at
+    /// [`RuntimeOptions::max_memory_bytes`].
+    pub options: &'a RuntimeOptions,
+    /// Type-erased host->guest dispatcher: a fresh handle to the owning
+    /// [`Runtime`](crate::Runtime) so any host->guest call (such as
+    /// `wasi-model`'s `resolve`) lands a new instance.
+    pub dispatcher: Arc<dyn Dispatcher>,
+    /// Guest argv (`args[0]` is the program name); `None` for reactor
     /// deployments that do not model a CLI invocation.
-    #[must_use]
-    pub fn args(mut self, args: Arc<Vec<String>>) -> Self {
-        self.args = Some(args);
-        self
-    }
-
-    /// Set the mount registry preopened into the guest sandbox.
-    ///
-    /// Optional; defaults to an empty registry (no mounts) so reactor
-    /// deployments without `[[mount]]`s — and the hand-written test runtimes —
-    /// build unchanged. The `runtime!` macro threads the startup-validated
-    /// registry here.
-    #[must_use]
-    pub fn mounts(mut self, mounts: Arc<MountRegistry>) -> Self {
-        self.mounts = Some(mounts);
-        self
-    }
-
-    /// Set the complete guest environment, replacing host inheritance.
-    ///
-    /// Optional; defaults to plain inheritance. The runtime pre-merges its
-    /// deployment-derived entries (e.g. `HTTP_ADDR` from a supplied HTTP
-    /// listener) over the host environment once — so an entry replaces an
-    /// inherited value rather than appending a duplicate key (WASI env
-    /// lookups are first-match-wins) — and threads the finished list here
-    /// per store.
-    #[must_use]
-    pub fn env(mut self, env: Arc<Vec<(String, String)>>) -> Self {
-        self.env = Some(env);
-        self
-    }
-}
-
-impl<D> StoreBaseBuilder<Unset, D> {
-    /// Set the runtime options (required).
-    ///
-    /// Caps linear-memory growth at [`RuntimeOptions::max_memory_bytes`].
-    #[must_use]
-    pub fn options(self, options: &RuntimeOptions) -> StoreBaseBuilder<Set<&RuntimeOptions>, D> {
-        StoreBaseBuilder {
-            options: Set(options),
-            dispatcher: self.dispatcher,
-            args: self.args,
-            mounts: self.mounts,
-            env: self.env,
-        }
-    }
-}
-
-impl<O> StoreBaseBuilder<O, Unset> {
-    /// Set the type-erased host->guest dispatcher (required).
-    ///
-    /// Pass a fresh handle to the owning [`Runtime`] so any host->guest call
-    /// (such as `wasi-model`'s `resolve`) lands a new instance.
-    ///
-    /// [`Runtime`]: crate::Runtime
-    #[must_use]
-    pub fn dispatcher(
-        self, dispatcher: Arc<dyn Dispatcher>,
-    ) -> StoreBaseBuilder<O, Set<Arc<dyn Dispatcher>>> {
-        StoreBaseBuilder {
-            options: self.options,
-            dispatcher: Set(dispatcher),
-            args: self.args,
-            mounts: self.mounts,
-            env: self.env,
-        }
-    }
-}
-
-impl StoreBaseBuilder<Set<&RuntimeOptions>, Set<Arc<dyn Dispatcher>>> {
-    /// Finish building the fixed per-store state, applying the WASI construction
-    /// policy shared by every deployment.
-    ///
-    /// Applies the guest environment (the explicit
-    /// [`env`](StoreBaseBuilder::env) list when set, host inheritance
-    /// otherwise), inherits stdin, wires stdout/stderr to the host streams,
-    /// applies the configured argv, caps linear-memory growth, and creates
-    /// fresh, inert wRPC view state.
-    #[must_use]
-    pub fn build(self) -> StoreBase {
-        let Set(options) = self.options;
-        let Set(dispatcher) = self.dispatcher;
-        let mounts = self.mounts.unwrap_or_default();
-
-        let mut wasi_builder = WasiCtxBuilder::new();
-        match &self.env {
-            Some(env) => {
-                wasi_builder.envs(env);
-            }
-            None => {
-                wasi_builder.inherit_env();
-            }
-        }
-        wasi_builder.inherit_stdin().stdout(tokio::io::stdout()).stderr(tokio::io::stderr());
-        if let Some(args) = &self.args {
-            wasi_builder.args(args.as_slice());
-        }
-
-        // Preopen each authorized mount into the guest sandbox. The
-        // registry was opened + validated once at startup, so a failure here is
-        // rare (e.g. a mount removed mid-run); log and skip — the guest simply
-        // can't lend that tree and the consuming host's identity match then
-        // fails cleanly, with no ambient fallback.
-        for entry in mounts.entries() {
-            if let Err(error) = wasi_builder.preopened_dir(
-                &entry.host_path,
-                &entry.name,
-                entry.dir_perms,
-                entry.file_perms,
-            ) {
-                tracing::warn!(
-                    %error,
-                    name = %entry.name,
-                    path = %entry.host_path.display(),
-                    "failed to preopen mount; guest will not see it",
-                );
-            }
-        }
-
-        let wasi = wasi_builder.build();
-
-        StoreBase {
-            table: ResourceTable::new(),
-            wasi,
-            limits: StoreLimitsBuilder::new().memory_size(options.max_memory_bytes).build(),
-            wrpc: WrpcState::new(),
-            dispatcher,
-            mounts,
-        }
-    }
+    pub args: Option<Arc<Vec<String>>>,
+    /// Mount registry preopened into the guest sandbox; `None` for
+    /// deployments without `[[mount]]`s.
+    pub mounts: Option<Arc<MountRegistry>>,
+    /// Complete guest environment replacing host inheritance; `None` inherits
+    /// the host env. The runtime pre-merges its deployment-derived entries
+    /// (e.g. `HTTP_ADDR`) over the host environment once, so an entry replaces
+    /// an inherited value rather than appending a duplicate key (WASI env
+    /// lookups are first-match-wins).
+    pub env: Option<Arc<Vec<(String, String)>>>,
 }
 
 /// The fixed per-store state shared by every guest store context.
 ///
 /// Construction policy (WASI inheritance, argv, the memory limit, and inert wRPC
-/// view state) lives in [`StoreBase::builder`] so it is documented and
+/// view state) lives in [`StoreBase::new`] so it is documented and
 /// unit-testable instead of being inlined in [`Runtime::store`](crate::Runtime::store).
 pub struct StoreBase {
     /// The store's WASI resource table.
@@ -211,27 +76,59 @@ pub struct StoreBase {
 }
 
 impl StoreBase {
-    /// Begin building the fixed per-store state for a single guest invocation.
+    /// Build the fixed per-store state for a single guest invocation, applying
+    /// the WASI construction policy shared by every deployment.
     ///
-    /// [`options`](StoreBaseBuilder::options) and
-    /// [`dispatcher`](StoreBaseBuilder::dispatcher) are required (the type-state
-    /// builder will not expose [`build`](StoreBaseBuilder::build) until both are
-    /// set); [`args`](StoreBaseBuilder::args) is optional.
-    ///
-    /// ```ignore
-    /// let base = StoreBase::builder()
-    ///     .options(self.options())
-    ///     .dispatcher(Arc::new(self.clone()))
-    ///     .build();
-    /// ```
+    /// Applies the guest environment (the explicit [`env`](StoreConfig::env)
+    /// list when set, host inheritance otherwise), inherits stdin, wires
+    /// stdout/stderr to the host streams, applies the configured argv, caps
+    /// linear-memory growth, and creates fresh, inert wRPC view state.
     #[must_use]
-    pub const fn builder() -> StoreBaseBuilder {
-        StoreBaseBuilder {
-            options: Unset,
-            dispatcher: Unset,
-            args: None,
-            mounts: None,
-            env: None,
+    pub fn new(config: StoreConfig<'_>) -> Self {
+        let mounts = config.mounts.unwrap_or_default();
+
+        let mut wasi_builder = WasiCtxBuilder::new();
+        match &config.env {
+            Some(env) => {
+                wasi_builder.envs(env);
+            }
+            None => {
+                wasi_builder.inherit_env();
+            }
+        }
+        wasi_builder.inherit_stdin().stdout(tokio::io::stdout()).stderr(tokio::io::stderr());
+        if let Some(args) = &config.args {
+            wasi_builder.args(args.as_slice());
+        }
+
+        // Preopen each authorized mount into the guest sandbox. The
+        // registry was opened + validated once at startup, so a failure here is
+        // rare (e.g. a mount removed mid-run); log and skip — the guest simply
+        // can't lend that tree and the consuming host's identity match then
+        // fails cleanly, with no ambient fallback.
+        for entry in mounts.entries() {
+            if let Err(error) = wasi_builder.preopened_dir(
+                &entry.host_path,
+                &entry.name,
+                entry.dir_perms,
+                entry.file_perms,
+            ) {
+                tracing::warn!(
+                    %error,
+                    name = %entry.name,
+                    path = %entry.host_path.display(),
+                    "failed to preopen mount; guest will not see it",
+                );
+            }
+        }
+
+        Self {
+            table: ResourceTable::new(),
+            wasi: wasi_builder.build(),
+            limits: StoreLimitsBuilder::new().memory_size(config.options.max_memory_bytes).build(),
+            wrpc: WrpcState::new(),
+            dispatcher: config.dispatcher,
+            mounts,
         }
     }
 }

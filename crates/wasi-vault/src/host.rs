@@ -39,7 +39,7 @@ use crate::host::generated::Error;
 pub use crate::host::resource::*;
 
 /// Result type for  vault operations.
-pub type Result<T> = anyhow::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:vault`.
 #[derive(Debug)]

@@ -193,64 +193,50 @@ impl From<Timestamp> for ScalarValue {
 }
 
 impl Filter {
+    /// Compare `field` to `val` with `op`.
+    #[must_use]
+    pub fn cmp(field: &str, op: ComparisonOp, val: impl Into<ScalarValue>) -> Self {
+        Self::Compare {
+            field: field.to_string(),
+            op,
+            value: val.into(),
+        }
+    }
+
     /// Equality comparison.
     #[must_use]
     pub fn eq(field: &str, val: impl Into<ScalarValue>) -> Self {
-        Self::Compare {
-            field: field.to_string(),
-            op: ComparisonOp::Eq,
-            value: val.into(),
-        }
+        Self::cmp(field, ComparisonOp::Eq, val)
     }
 
     /// Inequality comparison.
     #[must_use]
     pub fn ne(field: &str, val: impl Into<ScalarValue>) -> Self {
-        Self::Compare {
-            field: field.to_string(),
-            op: ComparisonOp::Ne,
-            value: val.into(),
-        }
+        Self::cmp(field, ComparisonOp::Ne, val)
     }
 
     /// Greater than.
     #[must_use]
     pub fn gt(field: &str, val: impl Into<ScalarValue>) -> Self {
-        Self::Compare {
-            field: field.to_string(),
-            op: ComparisonOp::Gt,
-            value: val.into(),
-        }
+        Self::cmp(field, ComparisonOp::Gt, val)
     }
 
     /// Greater than or equal.
     #[must_use]
     pub fn gte(field: &str, val: impl Into<ScalarValue>) -> Self {
-        Self::Compare {
-            field: field.to_string(),
-            op: ComparisonOp::Gte,
-            value: val.into(),
-        }
+        Self::cmp(field, ComparisonOp::Gte, val)
     }
 
     /// Less than.
     #[must_use]
     pub fn lt(field: &str, val: impl Into<ScalarValue>) -> Self {
-        Self::Compare {
-            field: field.to_string(),
-            op: ComparisonOp::Lt,
-            value: val.into(),
-        }
+        Self::cmp(field, ComparisonOp::Lt, val)
     }
 
     /// Less than or equal.
     #[must_use]
     pub fn lte(field: &str, val: impl Into<ScalarValue>) -> Self {
-        Self::Compare {
-            field: field.to_string(),
-            op: ComparisonOp::Lte,
-            value: val.into(),
-        }
+        Self::cmp(field, ComparisonOp::Lte, val)
     }
 
     /// Field value is in the given set.

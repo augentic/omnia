@@ -1,6 +1,4 @@
 use std::fmt::Debug;
-use std::ops::Deref;
-use std::sync::Arc;
 
 use bytes::Bytes;
 pub use omnia::FutureResult;
@@ -44,13 +42,4 @@ pub trait Container: Debug + Send + Sync + 'static {
 }
 
 /// Proxy for a blobstore container.
-#[derive(Clone, Debug)]
-pub struct ContainerProxy(pub Arc<dyn Container>);
-
-impl Deref for ContainerProxy {
-    type Target = Arc<dyn Container>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+pub type ContainerProxy = omnia::Proxy<dyn Container>;

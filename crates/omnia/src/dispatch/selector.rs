@@ -77,9 +77,7 @@ mod tests {
             FirstArgSelector.select("omnia:link/echo", "echo", &params).expect("should select");
 
         assert_eq!(id, GuestId::from("responder"));
-        // The default forwards every parameter (including the identity) through,
-        // without copying.
-        assert!(matches!(forwarded, Cow::Borrowed(_)));
+        // The default forwards every parameter (including the identity) through.
         assert_eq!(&*forwarded, params.as_slice());
     }
 

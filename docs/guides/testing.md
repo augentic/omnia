@@ -10,7 +10,7 @@ The rationale and rules are codified in the repository `AGENTS.md` (Testing poli
 | -------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | **Pure tier**  | Deterministic, service-free logic: parsers, codecs, filter/type translation, macro expansion, guest-native logic | `cargo make test` (Nextest, process-per-test, parallel) |
 | **Seam tier**  | Guests driven through the real runtime against the default (in-memory) backends                                  | `cargo make test-seam` (one process, shared fixtures)   |
-| **Live tests** | A production backend's `WasiXxxCtx` against the real service (`#[ignore]`-gated, in the `backends` repo)         | Local only                                              |
+| **Live tests** | A production backend's `WasiXxxCtx` against the real service (`#[ignore]`-gated, in the `omnia-backends` repo)         | Local only                                              |
 
 Anything that crosses a WASI interface belongs at the seam, not in a unit test with mocks. Guest-side logic that can't be instrumented as `.wasm` (coverage tooling limitation) keeps native unit tests.
 
@@ -161,7 +161,7 @@ cargo test --doc --all-features --workspace   # doc tests
 
 ## Testing against real services
 
-Production backends are tested in the [`backends`](https://github.com/augentic/backends) repo with `#[ignore]`-gated live tests that drive `WasiXxxCtx` against the actual service:
+Production backends are tested in the [`omnia-backends`](https://github.com/augentic/omnia-backends) repo with `#[ignore]`-gated live tests that drive `WasiXxxCtx` against the actual service:
 
 ```bash
 docker compose -f docker/redis.yaml up -d       # from the omnia repo's docker/ files

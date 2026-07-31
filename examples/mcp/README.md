@@ -2,7 +2,7 @@
 
 A wasm guest that serves markdown to agent backends as a stateless [Model Context Protocol](https://modelcontextprotocol.io) server. It exposes `list_docs` and `read_doc` tools (and matching `doc://` resources).
 
-An end-to-end example using `WasiModel` and `cursor-agent` is available in the `cursor` [example](https://github.com/augentic/backends/tree/main/examples/cursor).
+An end-to-end example using `WasiModel` and `cursor-agent` is available in the `cursor` [example](https://github.com/augentic/omnia-backends/tree/main/examples/cursor).
 
 ## Quick Start
 

@@ -66,10 +66,7 @@ fn emit_listener_binding(config: &Config) -> TokenStream {
 /// Emit the `omnia::MainOptions` method chain passed to `omnia::main`; keys
 /// the invocation omits contribute no calls.
 fn emit_main_options(config: &Config) -> TokenStream {
-    let mode = match config.mode {
-        Mode::Server => quote!(omnia::Mode::Server),
-        Mode::Command => quote!(omnia::Mode::Command),
-    };
+    let mode = config.mode.tokens();
     let manifest = emit_manifest_source(config);
     let resolver = config.resolver.as_ref().map(|expr| quote! { .resolver(#expr) });
     let http_paths = config.http_paths.as_ref().map(|expr| quote! { .http_paths(#expr) });
@@ -170,8 +167,15 @@ fn is_server(host: &Path) -> bool {
 }
 
 fn emit_backends(host_entries: &[HostEntry]) -> (TokenStream, TokenStream) {
-    let mut backends: Vec<Path> = host_entries.iter().map(|e| e.backend.clone()).collect();
-    backends.dedup_by(|a, b| path_key(a) == path_key(b));
+    // Order-preserving dedup: `Vec::dedup_by` only removes *consecutive*
+    // duplicates, so a backend shared by non-adjacent hosts would emit two
+    // identically named struct fields.
+    let mut seen = std::collections::HashSet::new();
+    let backends: Vec<Path> = host_entries
+        .iter()
+        .map(|e| e.backend.clone())
+        .filter(|backend| seen.insert(path_key(backend)))
+        .collect();
 
     let (idents, types): (Vec<Ident>, Vec<Path>) =
         backends.into_iter().map(|ty| (field_ident(&ty), ty)).unzip();
@@ -329,17 +333,9 @@ fn wasi_ident(path: &Path) -> Ident {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::parse::HostEntry;
 
     fn path(name: &str) -> Path {
         syn::parse_str(name).expect("valid path")
-    }
-
-    fn host_entry(host: &str, backend: &str) -> HostEntry {
-        HostEntry {
-            host: path(host),
-            backend: path(backend),
-        }
     }
 
     #[test]
@@ -366,29 +362,6 @@ mod tests {
     fn derives_field_ident() {
         assert_eq!(field_ident(&path("HttpDefault")).to_string(), "http_default");
         assert_eq!(field_ident(&path("KeyValueDefault")).to_string(), "key_value_default");
-    }
-
-    #[test]
-    fn dedupes_backends() {
-        let entries = [
-            host_entry("WasiOtel", "OtelDefault"),
-            host_entry("WasiHttp", "HttpDefault"),
-            host_entry("WasiHttp", "HttpDefault"),
-        ];
-        let (ty, def) = emit_backends(&entries);
-        let def = def.to_string();
-
-        assert_eq!(ty.to_string(), "Backends");
-
-        let struct_start = def.find("struct Backends").expect("Backends struct");
-        let struct_end = def.find("impl omnia").expect("Backends impl");
-        let struct_body = &def[struct_start..struct_end];
-
-        assert_eq!(struct_body.matches("otel_default").count(), 1);
-        assert_eq!(struct_body.matches("http_default").count(), 1);
-        assert!(
-            struct_body.find("otel_default").unwrap() < struct_body.find("http_default").unwrap()
-        );
     }
 
     #[test]

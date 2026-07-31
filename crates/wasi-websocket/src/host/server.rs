@@ -90,7 +90,14 @@ where
             tracing::debug!("no route for websocket event; dropping");
             return Ok(());
         };
-        let guest = self.state.registry().get(guest_id).expect("a capable guest is registered");
+        // Static resolution only yields identities drawn from the registry, so
+        // a miss is a lifecycle race (e.g. concurrent deregistration) — an
+        // error, never a server panic.
+        let guest = self
+            .state
+            .registry()
+            .get(guest_id)
+            .with_context(|| format!("routed guest `{guest_id}` is not registered"))?;
 
         let mut store_data = self.state.store();
         let event_res = store_data

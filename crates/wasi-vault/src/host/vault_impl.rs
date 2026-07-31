@@ -11,7 +11,7 @@ impl<T> HostWithStore<T> for WasiVault {
         accessor: &Accessor<T, Self>, locker_id: String,
     ) -> Result<Resource<LockerProxy>> {
         let locker = accessor.with(|mut store| store.get().ctx.open_locker(locker_id)).await?;
-        let proxy = LockerProxy(locker);
+        let proxy = omnia::Proxy(locker);
         Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
     }
 }
@@ -74,8 +74,5 @@ impl HostLocker for WasiVaultCtxView<'_> {}
 pub fn get_locker<T>(
     accessor: &Accessor<T, WasiVault>, self_: &Resource<LockerProxy>,
 ) -> Result<LockerProxy> {
-    accessor.with(|mut store| {
-        let locker = store.get().table.get(self_)?;
-        Ok::<_, Error>(locker.clone())
-    })
+    Ok(omnia::get_cloned(accessor, self_)?)
 }

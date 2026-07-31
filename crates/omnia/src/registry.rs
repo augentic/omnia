@@ -346,7 +346,7 @@ mod tests {
     use crate::store::StoreCtx;
 
     fn assemble_empty(allow_empty: bool) -> Result<Registry<StoreCtx<()>>, anyhow::Error> {
-        let options = RuntimeOptions::load().expect("options should load");
+        let options = RuntimeOptions::load_env().expect("options should load");
         let engine = Engine::new(&Config::from(&options)).expect("engine should build");
         let linker = Linker::<StoreCtx<()>>::new(&engine);
         let dispatch = DispatchHandle::new(

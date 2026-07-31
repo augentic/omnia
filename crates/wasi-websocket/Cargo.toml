@@ -27,7 +27,6 @@ tokio = { workspace = true, features = ["sync", "time"] }
 tokio-stream.workspace = true
 tokio-tungstenite.workspace = true
 tracing.workspace = true
-tungstenite = "0.30.0"
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true
 

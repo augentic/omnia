@@ -133,8 +133,13 @@ impl<M: Entity, C> InsertBuilder<M, C> {
     ///
     /// # Errors
     ///
-    /// Returns an error if any query values cannot be converted to WASI data types.
+    /// Returns an error if no values were set, or if any query values cannot be
+    /// converted to WASI data types.
     pub fn build(self) -> Result<Query> {
+        if self.values.is_empty() {
+            anyhow::bail!("INSERT has no values; add `.set(...)` or use `from_entity`");
+        }
+
         let mut statement = sea_query::Query::insert();
         statement.into_table(Alias::new(M::TABLE));
 
@@ -143,7 +148,7 @@ impl<M: Entity, C> InsertBuilder<M, C> {
             self.values.into_iter().map(|(_, value)| SimpleExpr::Value(value)).collect();
 
         statement.columns(columns);
-        statement.values_panic(row);
+        statement.values(row).map_err(|e| anyhow::anyhow!("building INSERT values: {e}"))?;
 
         if let Some(Conflict { target, action }) = self.conflict {
             let mut on_conflict = OnConflict::columns(target.into_iter().map(Alias::new));

@@ -14,30 +14,11 @@ use omnia::wasmtime::component::Val;
 use omnia::{
     DeploymentBuilder, GuestEntry, GuestId, Manifest, MountRegistry, Runtime, serve_links,
 };
-use omnia_testkit::find_guest;
+use omnia_testkit::{find_guest, precompiled_bytes, wasm_bytes};
 
 use crate::fixture;
 
 type TestCtx = omnia::StoreCtx<()>;
-
-/// Read the raw `.wasm` sibling for `file` (never the serialized `.bin`), so
-/// the safe (`WasmOnly`) build genuinely exercises the raw-bytes path.
-fn wasm_bytes(file: &str) -> Result<Vec<u8>> {
-    let path = find_guest(file).with_extension("wasm");
-    std::fs::read(&path).with_context(|| format!("reading guest {}", path.display()))
-}
-
-/// Read the serialized `.bin` for `file`, failing fast when it is missing so
-/// the pre-compiled path is genuinely exercised.
-fn precompiled_bytes(file: &str) -> Result<Vec<u8>> {
-    let path = find_guest(file);
-    ensure!(
-        path.extension().is_some_and(|ext| ext == "bin"),
-        "{} has no serialized .bin sibling; run `cargo make test-guests`",
-        path.display()
-    );
-    std::fs::read(&path).with_context(|| format!("reading guest {}", path.display()))
-}
 
 /// Build the two-guest link deployment with the router sourced from bytes and
 /// the responder from a path, proving the two source kinds mix in one
@@ -93,7 +74,7 @@ async fn call_router(runtime: &Runtime<()>, message: &str) -> Result<String> {
 // A bytes-sourced guest dispatches like a path-sourced one: the embedded
 // router reaches the path-sourced responder over the host-mediated link.
 #[test]
-fn bytes_sourced_guest_dispatches() -> Result<()> {
+fn bytes_guest_dispatches() -> Result<()> {
     fixture::RT.block_on(async {
         let runtime = build_runtime().await?;
         let echoed = call_router(&runtime, "hello").await?;
@@ -105,7 +86,7 @@ fn bytes_sourced_guest_dispatches() -> Result<()> {
 // Pre-compiled bytes follow the same trust policy as pre-compiled paths: the
 // safe build rejects them; the `precompiled()` unsafe build admits them.
 #[test]
-fn precompiled_bytes_gated_by_artifact_policy() -> Result<()> {
+fn precompiled_needs_policy() -> Result<()> {
     fixture::RT.block_on(async {
         let bytes = precompiled_bytes("guest_link_responder_wasm.wasm")?;
 

@@ -206,7 +206,9 @@ impl<T: Copy + Into<wasi::DataValue>> From<&HistogramDataPoint<T>> for wasi::His
     }
 }
 
-impl<T: Copy + Into<wasi::DataValue>> From<&ExponentialHistogram<T>> for wasi::ExponentialHistogram {
+impl<T: Copy + Into<wasi::DataValue>> From<&ExponentialHistogram<T>>
+    for wasi::ExponentialHistogram
+{
     fn from(histogram: &ExponentialHistogram<T>) -> Self {
         Self {
             data_points: histogram.data_points().map(Into::into).collect(),

@@ -15,6 +15,16 @@ pub enum Mode {
     Command,
 }
 
+impl Mode {
+    /// The `omnia::Mode` path this mode expands to.
+    pub fn tokens(self) -> proc_macro2::TokenStream {
+        match self {
+            Self::Server => quote::quote!(omnia::Mode::Server),
+            Self::Command => quote::quote!(omnia::Mode::Command),
+        }
+    }
+}
+
 /// Configuration for the runtime macro.
 pub struct Config {
     pub mode: Mode,
@@ -108,45 +118,83 @@ impl Parse for Config {
         syn::braced!(settings in input);
         let settings = Punctuated::<Opt, Token![,]>::parse_terminated(&settings)?;
 
+        let mut seen: Vec<&'static str> = Vec::new();
         for setting in settings.into_pairs() {
-            match setting.into_value() {
-                Opt::Mode(m) => mode = m,
-                Opt::Hosts(h) => host_entries = h,
-                Opt::Config(c, span) => {
+            let Opt { name, span, value } = setting.into_value();
+            if seen.contains(&name) {
+                return Err(syn::Error::new(span, format!("duplicate `{name}:` key")));
+            }
+            seen.push(name);
+            match value {
+                OptValue::Mode(m) => mode = m,
+                OptValue::Hosts(h) => host_entries = h,
+                OptValue::Config(c) => {
                     config_file = Some(c);
                     config_span = Some(span);
                 }
-                Opt::Guests(g, span) => {
+                OptValue::Guests(g) => {
                     manifest.guests = g;
                     inline_span.get_or_insert(span);
                 }
-                Opt::Mounts(m, span) => {
+                OptValue::Mounts(m) => {
                     manifest.mounts = m;
                     inline_span.get_or_insert(span);
                 }
-                Opt::Link(l, span) => {
+                OptValue::Link(l) => {
                     manifest.link = l;
                     inline_span.get_or_insert(span);
                 }
-                Opt::Routes(r, span) => {
+                OptValue::Routes(r) => {
                     manifest.routes = r;
                     inline_span.get_or_insert(span);
                 }
-                Opt::Resolver(r) => resolver = Some(r),
-                Opt::HttpPaths(p) => http_paths = Some(p),
-                Opt::HttpListener(l) => http_listener = Some(l),
-                Opt::Program(p, span) => {
+                OptValue::Resolver(r) => resolver = Some(r),
+                OptValue::HttpPaths(p) => http_paths = Some(p),
+                OptValue::HttpListener(l) => http_listener = Some(l),
+                OptValue::Program(p) => {
                     program = Some(p);
                     program_span = Some(span);
                 }
-                Opt::CommandGuest(c, span) => {
+                OptValue::CommandGuest(c) => {
                     command_guest = Some(c);
                     command_guest_span = Some(span);
                 }
             }
         }
 
-        if let (Some(_), Some(inline)) = (config_span, inline_span) {
+        let config = Self {
+            mode,
+            host_entries,
+            config_file,
+            manifest,
+            resolver,
+            http_paths,
+            http_listener,
+            program,
+            command_guest,
+        };
+        config.validate(&KeySpans {
+            config: config_span,
+            inline: inline_span,
+            program: program_span,
+            command_guest: command_guest_span,
+        })?;
+        Ok(config)
+    }
+}
+
+/// Spans of the keys that participate in cross-key validation, kept out of
+/// [`Config`] itself since they matter only for diagnostics.
+struct KeySpans {
+    config: Option<Span>,
+    inline: Option<Span>,
+    program: Option<Span>,
+    command_guest: Option<Span>,
+}
+
+impl Config {
+    fn validate(&self, spans: &KeySpans) -> syn::Result<()> {
+        if let (Some(_), Some(inline)) = (spans.config, spans.inline) {
             return Err(syn::Error::new(
                 inline,
                 "`config:` and inline manifest keys (`guests`, `mounts`, `link`, `routes`) are \
@@ -154,8 +202,8 @@ impl Parse for Config {
             ));
         }
 
-        if let Some(span) = command_guest_span
-            && mode != Mode::Command
+        if let Some(span) = spans.command_guest
+            && self.mode != Mode::Command
         {
             return Err(syn::Error::new(
                 span,
@@ -163,12 +211,12 @@ impl Parse for Config {
             ));
         }
 
-        if let Some(span) = program_span {
-            if mode != Mode::Command {
+        if let Some(span) = spans.program {
+            if self.mode != Mode::Command {
                 return Err(syn::Error::new(span, "`program:` requires `mode: command`"));
             }
-            let has_manifest = config_file.is_some() || !manifest.is_empty();
-            let fully_dynamic = resolver.is_some() && command_guest.is_some();
+            let has_manifest = self.config_file.is_some() || !self.manifest.is_empty();
+            let fully_dynamic = self.resolver.is_some() && self.command_guest.is_some();
             if !has_manifest && !fully_dynamic {
                 return Err(syn::Error::new(
                     span,
@@ -180,17 +228,7 @@ impl Parse for Config {
             }
         }
 
-        Ok(Self {
-            mode,
-            host_entries,
-            config_file,
-            manifest,
-            resolver,
-            http_paths,
-            http_listener,
-            program,
-            command_guest,
-        })
+        Ok(())
     }
 }
 
@@ -209,77 +247,86 @@ mod kw {
     syn::custom_keyword!(command_guest);
 }
 
-enum Opt {
+/// One `key: value` setting, tagged with its key name and span so
+/// `Config::parse` can reject duplicates with a pointed diagnostic.
+struct Opt {
+    name: &'static str,
+    span: Span,
+    value: OptValue,
+}
+
+enum OptValue {
     Mode(Mode),
     Hosts(Vec<HostEntry>),
-    Config(Expr, Span),
-    Guests(Vec<GuestSpec>, Span),
-    Mounts(Vec<MountSpec>, Span),
-    Link(Vec<Expr>, Span),
-    Routes(RoutesSpec, Span),
+    Config(Expr),
+    Guests(Vec<GuestSpec>),
+    Mounts(Vec<MountSpec>),
+    Link(Vec<Expr>),
+    Routes(RoutesSpec),
     Resolver(Expr),
     HttpPaths(Expr),
     HttpListener(Expr),
-    Program(Expr, Span),
-    CommandGuest(Expr, Span),
+    Program(Expr),
+    CommandGuest(Expr),
 }
 
 impl Parse for Opt {
     fn parse(input: ParseStream) -> Result<Self> {
         let l = input.lookahead1();
-        if l.peek(kw::mode) {
-            input.parse::<kw::mode>()?;
+        let (name, span, value) = if l.peek(kw::mode) {
+            let key = input.parse::<kw::mode>()?;
             input.parse::<Token![:]>()?;
-            Ok(Self::Mode(parse_mode(input)?))
+            ("mode", key.span, OptValue::Mode(parse_mode(input)?))
         } else if l.peek(kw::hosts) {
-            input.parse::<kw::hosts>()?;
+            let key = input.parse::<kw::hosts>()?;
             input.parse::<Token![:]>()?;
             let list;
             syn::braced!(list in input);
-            Ok(Self::Hosts(parse_host_entries(&list)?))
+            ("hosts", key.span, OptValue::Hosts(parse_host_entries(&list)?))
         } else if l.peek(kw::config) {
             let key = input.parse::<kw::config>()?;
             input.parse::<Token![:]>()?;
-            Ok(Self::Config(input.parse()?, key.span))
+            ("config", key.span, OptValue::Config(input.parse()?))
         } else if l.peek(kw::guests) {
             let key = input.parse::<kw::guests>()?;
             input.parse::<Token![:]>()?;
-            Ok(Self::Guests(parse_bracketed_list(input)?, key.span))
+            ("guests", key.span, OptValue::Guests(parse_bracketed_list(input)?))
         } else if l.peek(kw::mounts) {
             let key = input.parse::<kw::mounts>()?;
             input.parse::<Token![:]>()?;
-            Ok(Self::Mounts(parse_bracketed_list(input)?, key.span))
+            ("mounts", key.span, OptValue::Mounts(parse_bracketed_list(input)?))
         } else if l.peek(kw::link) {
             let key = input.parse::<kw::link>()?;
             input.parse::<Token![:]>()?;
-            Ok(Self::Link(parse_expr_list(input)?, key.span))
+            ("link", key.span, OptValue::Link(parse_bracketed_list(input)?))
         } else if l.peek(kw::routes) {
             let key = input.parse::<kw::routes>()?;
             input.parse::<Token![:]>()?;
-            Ok(Self::Routes(input.parse()?, key.span))
+            ("routes", key.span, OptValue::Routes(input.parse()?))
         } else if l.peek(kw::resolver) {
-            input.parse::<kw::resolver>()?;
+            let key = input.parse::<kw::resolver>()?;
             input.parse::<Token![:]>()?;
-            Ok(Self::Resolver(input.parse()?))
+            ("resolver", key.span, OptValue::Resolver(input.parse()?))
         } else if l.peek(kw::http_paths) {
-            input.parse::<kw::http_paths>()?;
+            let key = input.parse::<kw::http_paths>()?;
             input.parse::<Token![:]>()?;
-            Ok(Self::HttpPaths(input.parse()?))
+            ("http_paths", key.span, OptValue::HttpPaths(input.parse()?))
         } else if l.peek(kw::http_listener) {
-            input.parse::<kw::http_listener>()?;
+            let key = input.parse::<kw::http_listener>()?;
             input.parse::<Token![:]>()?;
-            Ok(Self::HttpListener(input.parse()?))
+            ("http_listener", key.span, OptValue::HttpListener(input.parse()?))
         } else if l.peek(kw::program) {
             let key = input.parse::<kw::program>()?;
             input.parse::<Token![:]>()?;
-            Ok(Self::Program(input.parse()?, key.span))
+            ("program", key.span, OptValue::Program(input.parse()?))
         } else if l.peek(kw::command_guest) {
             let key = input.parse::<kw::command_guest>()?;
             input.parse::<Token![:]>()?;
-            Ok(Self::CommandGuest(input.parse()?, key.span))
+            ("command_guest", key.span, OptValue::CommandGuest(input.parse()?))
         } else {
-            Err(l.error())
-        }
+            return Err(l.error());
+        };
+        Ok(Self { name, span, value })
     }
 }
 
@@ -315,26 +362,36 @@ fn parse_bracketed_list<T: Parse>(input: ParseStream) -> Result<Vec<T>> {
     Ok(Punctuated::<T, Token![,]>::parse_terminated(&list)?.into_iter().collect())
 }
 
-/// Parse `[ expr, expr, ... ]`.
-fn parse_expr_list(input: ParseStream) -> Result<Vec<Expr>> {
-    parse_bracketed_list::<Expr>(input)
+/// Parse a braced `{ key: value, ... }` block, handing each key (and the
+/// stream positioned at its value) to `field`. Returns the brace span for
+/// missing-key diagnostics.
+fn parse_kv_block(
+    input: ParseStream, mut field: impl FnMut(&Ident, ParseStream) -> Result<()>,
+) -> Result<Span> {
+    let content;
+    let brace = syn::braced!(content in input);
+    while !content.is_empty() {
+        let key: Ident = content.parse()?;
+        content.parse::<Token![:]>()?;
+        field(&key, &content)?;
+        if !content.is_empty() {
+            content.parse::<Token![,]>()?;
+        }
+    }
+    Ok(brace.span.join())
 }
 
 impl Parse for GuestSpec {
     fn parse(input: ParseStream) -> Result<Self> {
-        let content;
-        let brace = syn::braced!(content in input);
         let mut id = None;
         let mut source = None;
         let mut link = Vec::new();
 
-        while !content.is_empty() {
-            let key: Ident = content.parse()?;
-            content.parse::<Token![:]>()?;
+        let span = parse_kv_block(input, |key, value| {
             match key.to_string().as_str() {
-                "id" => id = Some(content.parse()?),
-                "source" => source = Some(content.parse()?),
-                "link" => link = parse_expr_list(&content)?,
+                "id" => id = Some(value.parse()?),
+                "source" => source = Some(value.parse()?),
+                "link" => link = parse_bracketed_list(value)?,
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
@@ -342,13 +399,10 @@ impl Parse for GuestSpec {
                     ));
                 }
             }
-            if !content.is_empty() {
-                content.parse::<Token![,]>()?;
-            }
-        }
+            Ok(())
+        })?;
 
-        let missing =
-            |key| syn::Error::new(brace.span.join(), format!("guest entry is missing `{key}`"));
+        let missing = |key| syn::Error::new(span, format!("guest entry is missing `{key}`"));
         Ok(Self {
             id: id.ok_or_else(|| missing("id"))?,
             source: source.ok_or_else(|| missing("source"))?,
@@ -359,19 +413,15 @@ impl Parse for GuestSpec {
 
 impl Parse for MountSpec {
     fn parse(input: ParseStream) -> Result<Self> {
-        let content;
-        let brace = syn::braced!(content in input);
         let mut name = None;
         let mut path = None;
         let mut writable = None;
 
-        while !content.is_empty() {
-            let key: Ident = content.parse()?;
-            content.parse::<Token![:]>()?;
+        let span = parse_kv_block(input, |key, value| {
             match key.to_string().as_str() {
-                "name" => name = Some(content.parse()?),
-                "path" => path = Some(content.parse()?),
-                "writable" => writable = Some(content.parse()?),
+                "name" => name = Some(value.parse()?),
+                "path" => path = Some(value.parse()?),
+                "writable" => writable = Some(value.parse()?),
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
@@ -381,13 +431,10 @@ impl Parse for MountSpec {
                     ));
                 }
             }
-            if !content.is_empty() {
-                content.parse::<Token![,]>()?;
-            }
-        }
+            Ok(())
+        })?;
 
-        let missing =
-            |key| syn::Error::new(brace.span.join(), format!("mount entry is missing `{key}`"));
+        let missing = |key| syn::Error::new(span, format!("mount entry is missing `{key}`"));
         Ok(Self {
             name: name.ok_or_else(|| missing("name"))?,
             path: path.ok_or_else(|| missing("path"))?,
@@ -398,17 +445,13 @@ impl Parse for MountSpec {
 
 impl Parse for RoutesSpec {
     fn parse(input: ParseStream) -> Result<Self> {
-        let content;
-        syn::braced!(content in input);
         let mut routes = Self::default();
 
-        while !content.is_empty() {
-            let key: Ident = content.parse()?;
-            content.parse::<Token![:]>()?;
+        parse_kv_block(input, |key, value| {
             match key.to_string().as_str() {
-                "http" => routes.http = parse_route_entries(&content, "prefix")?,
-                "messaging" => routes.messaging = parse_route_entries(&content, "topic")?,
-                "websocket" => routes.websocket = parse_route_entries(&content, "route")?,
+                "http" => routes.http = parse_route_entries(value, "prefix")?,
+                "messaging" => routes.messaging = parse_route_entries(value, "topic")?,
+                "websocket" => routes.websocket = parse_route_entries(value, "route")?,
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
@@ -419,10 +462,8 @@ impl Parse for RoutesSpec {
                     ));
                 }
             }
-            if !content.is_empty() {
-                content.parse::<Token![,]>()?;
-            }
-        }
+            Ok(())
+        })?;
 
         Ok(routes)
     }
@@ -436,17 +477,13 @@ fn parse_route_entries(input: ParseStream, match_key: &str) -> Result<Vec<RouteE
     let mut entries = Vec::new();
 
     while !list.is_empty() {
-        let content;
-        let brace = syn::braced!(content in list);
         let mut key = None;
         let mut guest = None;
 
-        while !content.is_empty() {
-            let field: Ident = content.parse()?;
-            content.parse::<Token![:]>()?;
+        let span = parse_kv_block(&list, |field, value| {
             match field.to_string().as_str() {
-                k if k == match_key => key = Some(content.parse()?),
-                "guest" => guest = Some(content.parse()?),
+                k if k == match_key => key = Some(value.parse()?),
+                "guest" => guest = Some(value.parse()?),
                 other => {
                     return Err(syn::Error::new(
                         field.span(),
@@ -454,13 +491,10 @@ fn parse_route_entries(input: ParseStream, match_key: &str) -> Result<Vec<RouteE
                     ));
                 }
             }
-            if !content.is_empty() {
-                content.parse::<Token![,]>()?;
-            }
-        }
+            Ok(())
+        })?;
 
-        let missing =
-            |key| syn::Error::new(brace.span.join(), format!("route entry is missing `{key}`"));
+        let missing = |key| syn::Error::new(span, format!("route entry is missing `{key}`"));
         entries.push(RouteEntry {
             key: key.ok_or_else(|| missing(match_key))?,
             guest: guest.ok_or_else(|| missing("guest"))?,

@@ -37,14 +37,14 @@ pub use omnia::FutureResult;
 use omnia::{HasDispatcher, HasMounts, Host, Server};
 use wasmtime::component::{HasData, Linker};
 
-pub use self::default_impl::{ConnectOptions, ModelDefault};
+pub use self::default_impl::ModelDefault;
 pub use self::gate::validate as validate_request;
 use self::generated::omnia::model::completion;
 pub use self::generated::omnia::model::completion::{
     Effort, Error, Format, Function, Generation, Grants, Mcp, Message, Reply, Request, Role,
     Schema, Tool,
 };
-pub use self::types::{Answer, DirEntry, Reference, ToolTurn, Transcript, Usage, VerifyReport};
+pub use self::types::{Answer, DirEntry, Reference, ToolTurn, Transcript, Usage};
 
 /// Host-side service for `wasi-model` (a linked-only effect host).
 #[derive(Debug)]
@@ -94,9 +94,6 @@ pub trait ToolHost: Send + Sync {
 
     /// Accumulate an edit against the session's base tree.
     fn write(&self, path: String, bytes: Vec<u8>) -> FutureResult<()>;
-
-    /// Route a verify request to a closed profile.
-    fn verify(&self, check: String) -> FutureResult<VerifyReport>;
 
     /// The absolute host path of the lent workspace, when one was lent for
     /// this completion and resolved to an authorized mount.

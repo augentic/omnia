@@ -129,17 +129,16 @@ pub trait BlobStore: Send + Sync {
 
         async move {
             let ctr = open_container(container).await?;
-            if !ctr
-                .has_object(name.to_string())
-                .await
-                .map_err(|e| anyhow!("checking object existence: {e}"))?
-            {
-                return Ok(None);
-            }
-            let incoming = ctr
-                .get_data(name.to_string(), 0, u64::MAX)
-                .await
-                .map_err(|e| anyhow!("reading object: {e}"))?;
+            // Single round trip: fetch directly and map the host's not-found
+            // error to `None` rather than racing a separate existence check.
+            let incoming = match ctr.get_data(name.to_string(), 0, u64::MAX).await {
+                Ok(incoming) => incoming,
+                // The shared host layer lowers a missing object to this
+                // message for every backend (see wasi-blobstore
+                // `container_impl::get_data`).
+                Err(e) if e.contains("object not found") => return Ok(None),
+                Err(e) => return Err(anyhow!("reading object: {e}")),
+            };
             let data = IncomingValue::incoming_value_consume_sync(incoming)
                 .map_err(|e| anyhow!("consuming incoming value: {e}"))?;
             Ok(Some(data))

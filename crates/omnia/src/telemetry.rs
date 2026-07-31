@@ -42,9 +42,6 @@ pub struct Telemetry {
     /// service in telemetry data.
     app_name: String,
 
-    /// The name of the environment, e.g. "production", "staging", "development".
-    env_name: Option<String>,
-
     /// OTLP gRPC endpoint override; unset defers to OpenTelemetry endpoint
     /// resolution (`OTEL_EXPORTER_OTLP_*` env vars, then `http://localhost:4317`).
     endpoint: Option<String>,
@@ -56,16 +53,8 @@ impl Telemetry {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             app_name: name.into(),
-            env_name: None,
             endpoint: None,
         }
-    }
-
-    /// Set the environment name.
-    #[must_use]
-    pub fn env(mut self, env_name: impl Into<String>) -> Self {
-        self.env_name = Some(env_name.into());
-        self
     }
 
     /// Set the OpenTelemetry endpoint.
@@ -109,14 +98,20 @@ impl Telemetry {
         let metrics_layer = MetricsLayer::new(meter_provider.clone());
 
         // Install the subscriber before publishing providers globally so a
-        // failed try_init (e.g. an existing subscriber) does not leave
-        // orphaned globals that later builds would retry against.
-        Registry::default()
+        // failed try_init does not leave orphaned globals that later builds
+        // would retry against. An already-set subscriber (an embedder's own
+        // tracing setup) is tolerated: their subscriber stays, omnia's
+        // exporters are skipped, and the runtime keeps running.
+        if let Err(error) = Registry::default()
             .with(filter_layer)
             .with(fmt_layer)
             .with(tracing_layer)
             .with(metrics_layer)
-            .try_init()?;
+            .try_init()
+        {
+            tracing::warn!(%error, "a tracing subscriber is already set; omnia telemetry skipped");
+            return Ok(());
+        }
 
         global::set_meter_provider(meter_provider.clone());
         global::set_tracer_provider(tracer_provider.clone());
@@ -158,10 +153,6 @@ impl Telemetry {
         Resource::builder()
             .with_service_name(self.app_name.clone())
             .with_attributes(vec![
-                KeyValue::new(
-                    "deployment.environment",
-                    self.env_name.clone().unwrap_or_else(|| UNKNOWN.to_string()),
-                ),
                 KeyValue::new("service.namespace", self.app_name.clone()),
                 KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
                 KeyValue::new(

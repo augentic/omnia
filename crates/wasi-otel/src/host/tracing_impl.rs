@@ -14,7 +14,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 use wasmtime::component::Accessor;
 
 use crate::host::generated::omnia::otel::tracing::{self as wasi, HostWithStore};
-use crate::host::types_impl::datetime_nanos;
+use crate::host::types_impl::{datetime_nanos, decode_id};
 use crate::{WasiOtel, WasiOtelCtxView};
 
 impl<T> HostWithStore<T> for WasiOtel {
@@ -92,15 +92,11 @@ pub fn resource_spans(
 
 impl From<wasi::SpanData> for Span {
     fn from(span: wasi::SpanData) -> Self {
-        let trace_state = span.span_context.trace_state;
-        let trace_state =
-            trace_state.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(",");
-
         Self {
-            trace_id: hex::decode(span.span_context.trace_id).unwrap_or_default(),
-            span_id: hex::decode(span.span_context.span_id).unwrap_or_default(),
-            trace_state,
-            parent_span_id: hex::decode(span.parent_span_id).unwrap_or_default(),
+            trace_id: decode_id(&span.span_context.trace_id),
+            span_id: decode_id(&span.span_context.span_id),
+            trace_state: crate::trace_state::join(&span.span_context.trace_state),
+            parent_span_id: decode_id(&span.parent_span_id),
             flags: span.span_context.trace_flags.into(),
             name: span.name,
             kind: span.span_kind as i32,
@@ -124,18 +120,7 @@ impl From<&otel::SpanContext> for wasi::SpanContext {
             span_id: ctx.span_id().to_string(),
             trace_flags: ctx.trace_flags().into(),
             is_remote: ctx.is_remote(),
-            trace_state: ctx
-                .trace_state()
-                .header()
-                .split(',')
-                .filter_map(|s| {
-                    if let Some((key, ctx)) = s.split_once('=') {
-                        Some((key.to_string(), ctx.to_string()))
-                    } else {
-                        None
-                    }
-                })
-                .collect(),
+            trace_state: crate::trace_state::parse(&ctx.trace_state().header()),
         }
     }
 }
@@ -169,17 +154,11 @@ impl From<wasi::Event> for Event {
 
 impl From<wasi::Link> for Link {
     fn from(link: wasi::Link) -> Self {
-        let attrs = link.attributes.into_iter().map(Into::into).collect();
-
-        let trace_state = link.span_context.trace_state;
-        let trace_state =
-            trace_state.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(",");
-
         Self {
-            trace_id: hex::decode(link.span_context.trace_id).unwrap_or_default(),
-            span_id: hex::decode(link.span_context.span_id).unwrap_or_default(),
-            trace_state,
-            attributes: attrs,
+            trace_id: decode_id(&link.span_context.trace_id),
+            span_id: decode_id(&link.span_context.span_id),
+            trace_state: crate::trace_state::join(&link.span_context.trace_state),
+            attributes: link.attributes.into_iter().map(Into::into).collect(),
             dropped_attributes_count: 0,
             flags: link.span_context.trace_flags.into(),
         }

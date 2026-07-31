@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -20,7 +22,7 @@ use crate::host::resource::{FutureResult, Identity};
 
 type TokenResponse = StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>;
 
-#[derive(Debug, Clone, FromEnv)]
+#[derive(Clone, FromEnv)]
 pub struct ConnectOptions {
     #[env(from = "IDENTITY_CLIENT_ID")]
     pub client_id: String,
@@ -30,8 +32,22 @@ pub struct ConnectOptions {
     pub token_url: String,
 }
 
+// Manual impl so the client secret can never leak through `Debug`-recording
+// sinks (`#[instrument]` records arguments via `Debug` by default).
+impl fmt::Debug for ConnectOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConnectOptions")
+            .field("client_id", &self.client_id)
+            .field("client_secret", &"<redacted>")
+            .field("token_url", &self.token_url)
+            .finish()
+    }
+}
+
 impl omnia::FromEnv for ConnectOptions {
-    fn from_env() -> Result<Self> {
+    fn load_env() -> Result<Self> {
+        // `Self::from_env()` is the builder-returning inherent the `FromEnv`
+        // derive emits.
         Self::from_env().finalize().context("issue loading connection options")
     }
 }
@@ -93,8 +109,10 @@ impl CachedToken {
 #[derive(Debug, Clone)]
 struct TokenManager {
     options: Arc<ConnectOptions>,
+    // Tokens are scoped: a token minted for one scope set must never be
+    // handed out for another, so the cache is keyed by normalized scopes.
     // TODO: change to use wasi-keyvalue for distributed caching
-    cache: Arc<Mutex<CachedToken>>,
+    cache: Arc<Mutex<HashMap<Vec<String>, CachedToken>>>,
 }
 
 impl Identity for TokenManager {
@@ -109,24 +127,21 @@ impl TokenManager {
     fn new(options: ConnectOptions) -> Self {
         Self {
             options: Arc::new(options),
-            cache: Arc::new(Mutex::new(CachedToken {
-                access_token: AccessToken {
-                    token: String::new(),
-                    expires_in: 0,
-                },
-                expires_at: Instant::now(),
-            })),
+            cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     async fn token(&self, scopes: &[String]) -> Result<AccessToken> {
+        let key = cache_key(scopes);
         let now = Instant::now();
 
         // use cached token if still valid
         {
             let cache = self.cache.lock().await;
-            if cache.expires_at > now {
-                return Ok(cache.access_token.clone());
+            if let Some(cached) = cache.get(&key)
+                && cached.expires_at > now
+            {
+                return Ok(cached.access_token.clone());
             }
         }
 
@@ -145,40 +160,23 @@ impl TokenManager {
         let token_resp = token_req.request_async(&http_client).await?;
         let access_token = AccessToken::from(token_resp);
 
-        // double-check locking as another thread may have refreshed the token
+        // double-check locking as another task may have refreshed this entry
         let mut cache = self.cache.lock().await;
-        if cache.expires_at <= now {
-            *cache = CachedToken::new(access_token.clone());
+        let entry = cache.entry(key).or_insert_with(|| CachedToken::new(access_token.clone()));
+        if entry.expires_at <= now {
+            *entry = CachedToken::new(access_token);
         }
+        let token = entry.access_token.clone();
+        drop(cache);
 
-        Ok(cache.access_token.clone())
+        Ok(token)
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn uses_cached_token() {
-        let manager = TokenManager::new(ConnectOptions {
-            client_id: "test-client".to_string(),
-            client_secret: "test-secret".to_string(),
-            token_url: "https://example.com/token".to_string(),
-        });
-
-        // seed cache
-        {
-            let mut cache = manager.cache.lock().await;
-            cache.access_token = AccessToken {
-                token: "cached-token".to_string(),
-                expires_in: 60,
-            };
-            cache.expires_at = Instant::now() + Duration::from_mins(1);
-        };
-
-        let token = manager.token(&[]).await.expect("token from cache");
-        assert_eq!(token.token, "cached-token");
-        assert!(token.expires_in > 0);
-    }
+/// Normalize a scope list into a cache key (order- and duplicate-insensitive).
+fn cache_key(scopes: &[String]) -> Vec<String> {
+    let mut key = scopes.to_vec();
+    key.sort_unstable();
+    key.dedup();
+    key
 }

@@ -100,7 +100,7 @@ impl DispatchHandle {
 
     /// Install the resolve-on-miss hook; a second install is ignored (the
     /// hook is deployment-scoped, set once during runtime assembly).
-    pub(crate) fn install_resolve_hook(&self, hook: Box<dyn ResolveHook>) {
+    pub(crate) fn set_resolve_hook(&self, hook: Box<dyn ResolveHook>) {
         if self.resolve_hook.set(hook).is_err() {
             tracing::warn!("resolve hook already installed; ignoring");
         }

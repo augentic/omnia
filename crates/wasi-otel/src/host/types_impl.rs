@@ -166,6 +166,18 @@ impl Hash for types::InstrumentationScope {
     }
 }
 
+/// Hex-decode a guest-supplied trace/span id, warning (rather than silently
+/// substituting an empty id) when the id is malformed.
+pub fn decode_id(id: &str) -> Vec<u8> {
+    hex::decode(id).unwrap_or_else(|error| {
+        tracing::warn!(%error, id, "malformed hex trace/span id; emitting empty id");
+        Vec::new()
+    })
+}
+
 pub fn datetime_nanos(dt: types::Datetime) -> u64 {
-    (dt.seconds * 1_000_000_000) + u64::from(dt.nanoseconds)
+    // Saturate rather than overflow: a guest-supplied timestamp past the year
+    // 2554 clamps to `u64::MAX` instead of panicking (debug) or wrapping
+    // (release) into a bogus time.
+    dt.seconds.saturating_mul(1_000_000_000).saturating_add(u64::from(dt.nanoseconds))
 }

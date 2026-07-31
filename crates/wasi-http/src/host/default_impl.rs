@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use base64ct::{Base64, Encoding};
 use bytes::Bytes;
 use fromenv::FromEnv;
-use futures::Future;
+use futures::{Future, TryStreamExt};
 use http::header::{
     CONNECTION, HOST, HeaderName, PROXY_AUTHENTICATE, PROXY_AUTHORIZATION, TRANSFER_ENCODING,
     UPGRADE,
@@ -45,7 +45,9 @@ pub struct ConnectOptions {
 }
 
 impl omnia::FromEnv for ConnectOptions {
-    fn from_env() -> Result<Self> {
+    fn load_env() -> Result<Self> {
+        // `Self::from_env()` is the builder-returning inherent the `FromEnv`
+        // derive emits.
         Self::from_env().finalize().context("issue loading connection options")
     }
 }
@@ -82,10 +84,6 @@ impl Backend for HttpDefault {
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
         let connect_timeout = Duration::from_secs(options.connect_timeout);
         let builder = reqwest::Client::builder().connect_timeout(connect_timeout);
-
-        #[cfg(test)]
-        let builder = builder.no_proxy();
-
         let client = builder.build().context("building HTTP client")?;
         Ok(Self {
             hooks: HttpHooks {
@@ -142,24 +140,21 @@ impl p3::WasiHttpHooks for HttpHooks {
                     }
                     None => builder,
                 };
-
-                #[cfg(test)]
-                let builder = builder.no_proxy();
-
                 builder.build().map_err(reqwest_err)?
             } else {
                 shared_client
             };
 
-            let collected = body.collect().await.map_err(internal_err)?;
+            // Stream the outbound body instead of buffering it: a large or
+            // long-lived guest body would otherwise sit in host memory in full
+            // before the request even starts.
+            let body = reqwest::Body::wrap_stream(
+                body.into_data_stream().map_err(|e| std::io::Error::other(e.to_string())),
+            );
 
             // make request
             let url = parts.uri.to_string();
-            let send = client
-                .request(parts.method, &url)
-                .headers(parts.headers)
-                .body(collected.to_bytes())
-                .send();
+            let send = client.request(parts.method, &url).headers(parts.headers).body(body).send();
 
             // Bound time-to-response (connect + first byte). The response body is
             // streamed downstream, so it is *not* part of this deadline; its
@@ -209,188 +204,6 @@ fn reqwest_err(e: reqwest::Error) -> ErrorCode {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::pin::Pin;
-
-    use http::header::{AUTHORIZATION, CONTENT_TYPE};
-    use http::{Method, StatusCode};
-    use http_body_util::{Empty, Full};
-    use p3::WasiHttpHooks;
-    use wiremock::matchers::{body_string, header, method};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
-    use super::*;
-
-    async fn test_client() -> HttpDefault {
-        let options = ConnectOptions { connect_timeout: 10 };
-        HttpDefault::connect_with(options).await.unwrap()
-    }
-
-    #[tokio::test]
-    async fn multiple_host_headers() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200).set_body_string("Hello, World!"))
-            .mount(&server)
-            .await;
-
-        let request = Request::get(server.uri())
-            .header(HOST, "localhost-1")
-            .header(HOST, "localhost-2")
-            .body(Empty::new().map_err(internal_err).boxed_unsync())
-            .unwrap();
-
-        let result = test_client().await.handle(request).await;
-        assert!(result.is_ok());
-
-        let (response, _) = result.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        assert_eq!(body, Bytes::from("Hello, World!"));
-
-        let requests = server.received_requests().await.expect("should have requests");
-        assert_eq!(requests.len(), 1);
-
-        assert_eq!(requests[0].headers.get_all(HOST).iter().count(), 1);
-        assert!(requests[0].headers.get(HOST).unwrap().to_str().unwrap().starts_with("127.0.0.1:"));
-    }
-
-    #[tokio::test]
-    async fn post_with_body() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(body_string("test body"))
-            .respond_with(ResponseTemplate::new(201).set_body_string("Created"))
-            .mount(&server)
-            .await;
-
-        let request = Request::post(server.uri())
-            .body(Full::new(Bytes::from("test body")).map_err(internal_err).boxed_unsync())
-            .unwrap();
-
-        let result = test_client().await.handle(request).await;
-        assert!(result.is_ok());
-
-        let (response, _) = result.unwrap();
-        assert_eq!(response.status(), StatusCode::CREATED);
-    }
-
-    #[tokio::test]
-    async fn custom_headers() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(header("X-Custom-Header", "custom-value"))
-            .and(header(AUTHORIZATION, "Bearer token123"))
-            .respond_with(ResponseTemplate::new(200))
-            .mount(&server)
-            .await;
-
-        let request = Request::get(server.uri())
-            .header("X-Custom-Header", "custom-value")
-            .header(AUTHORIZATION, "Bearer token123")
-            .body(Empty::new().map_err(internal_err).boxed_unsync())
-            .unwrap();
-
-        let result = test_client().await.handle(request).await;
-        assert!(result.is_ok());
-
-        let (response, _) = result.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn permitted_headers() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .insert_header(CONNECTION, "keep-alive")
-                    .insert_header(TRANSFER_ENCODING, "chunked")
-                    .insert_header(UPGRADE, "websocket")
-                    .insert_header(CONTENT_TYPE, "application/json")
-                    .insert_header("X-Safe-Header", "safe-value"),
-            )
-            .mount(&server)
-            .await;
-
-        let request = Request::get(server.uri())
-            .body(Empty::new().map_err(internal_err).boxed_unsync())
-            .unwrap();
-
-        let result = test_client().await.handle(request).await;
-        assert!(result.is_ok());
-
-        let (response, _) = result.unwrap();
-        let headers = response.headers();
-
-        // permitted headers are preserved
-        assert_eq!(headers.get(CONTENT_TYPE).unwrap().to_str().unwrap(), "application/json");
-        assert_eq!(headers.get("X-Safe-Header").unwrap().to_str().unwrap(), "safe-value");
-
-        // verify forbidden headers are removed
-        assert!(!headers.contains_key(CONNECTION));
-        assert!(!headers.contains_key(TRANSFER_ENCODING));
-        assert!(!headers.contains_key(UPGRADE));
-    }
-
-    #[tokio::test]
-    async fn invalid_uri() {
-        let body = Full::new(Bytes::from("")).map_err(internal_err).boxed_unsync();
-        let request =
-            Request::builder().method(Method::GET).uri("not-a-valid-uri").body(body).unwrap();
-
-        let result = test_client().await.handle(request).await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn connection_refused() {
-        let request = Request::get("http://localhost:59999/test")
-            .body(Empty::new().map_err(internal_err).boxed_unsync())
-            .unwrap();
-
-        let result = test_client().await.handle(request).await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn client_cert_base64() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
-
-        let request = Request::get(server.uri())
-            .header("Client-Cert", "not-valid-base64!!!")
-            .body(Empty::new().map_err(internal_err).boxed_unsync())
-            .unwrap();
-
-        let result = test_client().await.handle(request).await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn client_cert_pem() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
-
-        let invalid_pem = "invalid pem content";
-        let encoded = Base64::encode_string(invalid_pem.as_bytes());
-        let request = Request::get(server.uri())
-            .header("Client-Cert", encoded)
-            .body(Empty::new().map_err(internal_err).boxed_unsync())
-            .unwrap();
-
-        let result = test_client().await.handle(request).await;
-        assert!(result.is_err());
-    }
-
-    impl HttpDefault {
-        async fn handle(
-            &mut self, request: Request<UnsyncBoxBody<Bytes, ErrorCode>>,
-        ) -> HttpResult<(Response<UnsyncBoxBody<Bytes, ErrorCode>>, FutureResult<()>)> {
-            let boxed = self.hooks.send_request(request, None, Box::new(async { Ok(()) }));
-            Pin::from(boxed).await
-        }
-    }
-}
+// Outbound behavior (body forwarding, header handling, error mapping, client
+// certificates) is covered at the guest–host seam in
+// `omnia-seam-suite`'s `http_outbound` scenario.

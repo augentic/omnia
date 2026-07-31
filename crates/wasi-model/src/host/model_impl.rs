@@ -15,7 +15,7 @@ use omnia::{Dispatcher, GuestId, HasDispatcher, HasMounts};
 use wasmtime::component::{Accessor, Val};
 
 use crate::host::generated::omnia::model::completion::{Host, HostWithStore, Reply, Request};
-use crate::host::types::{DirEntry, Reference, VerifyReport};
+use crate::host::types::{DirEntry, Reference};
 use crate::host::workspace::{self, Workspace};
 use crate::host::{Error, FutureResult, ToolHost, WasiModel, WasiModelCtxView, gate};
 
@@ -31,7 +31,6 @@ where
 
         let format = request.format.clone();
         let references = request.grants.references.clone();
-        let verify_allowed = request.grants.verify.clone();
 
         let answer = accessor
             .with(|mut store| {
@@ -42,7 +41,6 @@ where
                 let tool_host: Arc<dyn ToolHost> = Arc::new(BoundToolHost {
                     dispatcher,
                     references,
-                    verify_allowed,
                     workspace,
                 });
                 Ok::<_, Error>(view.ctx.complete(request, tool_host))
@@ -63,7 +61,6 @@ impl Host for WasiModelCtxView<'_> {
 struct BoundToolHost {
     dispatcher: Arc<dyn Dispatcher>,
     references: Option<String>,
-    verify_allowed: Vec<String>,
     workspace: Option<Workspace>,
 }
 
@@ -130,22 +127,5 @@ impl ToolHost for BoundToolHost {
 
     fn local_path(&self) -> Option<&std::path::Path> {
         self.workspace.as_ref().map(Workspace::local_path)
-    }
-
-    fn verify(&self, check: String) -> FutureResult<VerifyReport> {
-        let granted = self.verify_allowed.contains(&check);
-        async move {
-            if !granted {
-                return Err(anyhow!("verify profile `{check}` is not in grants.verify"));
-            }
-            Ok(VerifyReport {
-                ok: false,
-                detail: format!(
-                    "verify profile `{check}` is granted and routed; profile \
-                     execution is not yet implemented"
-                ),
-            })
-        }
-        .boxed()
     }
 }

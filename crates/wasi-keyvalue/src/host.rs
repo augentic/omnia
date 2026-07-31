@@ -40,7 +40,7 @@ use self::generated::wasi::keyvalue::{atomics, batch, store};
 pub use self::resource::*;
 
 /// Result type for key-value operations.
-pub type Result<T> = anyhow::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:keyvalue`.
 #[derive(Debug)]

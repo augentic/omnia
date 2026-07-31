@@ -44,3 +44,29 @@ fn write_then_read() -> Result<()> {
         Ok(())
     })
 }
+
+// A multi-kilobyte blob round-trips intact: the host's outgoing-value buffer
+// must grow with the body rather than cap it at a fixed capacity.
+#[test]
+fn large_blob() -> Result<()> {
+    fixture::RT.block_on(async {
+        let fx = fixture::conformance().await?;
+        let object = unique("blob-large");
+        let payload = "x".repeat(8 * 1024);
+
+        let response = http::post(
+            &fx.runtime,
+            &format!("/blobstore?object={object}"),
+            format!(r#"{{"blob":"{payload}"}}"#),
+        )
+        .await?;
+        assert!(response.status().is_success(), "guest round-trips a multi-kilobyte blob");
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(response.body())?,
+            serde_json::json!({ "blob": payload }),
+            "the large blob is echoed intact"
+        );
+
+        Ok(())
+    })
+}

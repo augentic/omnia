@@ -107,15 +107,6 @@ pub struct DirEntry {
     pub is_directory: bool,
 }
 
-/// The outcome of a `verify` profile run.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct VerifyReport {
-    /// Whether the check passed.
-    pub ok: bool,
-    /// Human-readable detail.
-    pub detail: String,
-}
-
 /// One recorded tool interaction within a completion's transcript.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolTurn {
@@ -139,7 +130,7 @@ pub struct Transcript {
 #[cfg(test)]
 mod tests {
     use crate::host::generated::omnia::model::completion::{
-        Format, Function, Grants, Mcp, Message, Request, Role, Tool,
+        Format, Grants, Message, Request, Role,
     };
 
     fn request(system: Option<&str>, messages: Vec<Message>) -> Request {
@@ -153,7 +144,6 @@ mod tests {
             grants: Grants {
                 references: None,
                 workspace: None,
-                verify: vec![],
             },
         }
     }
@@ -183,27 +173,7 @@ mod tests {
     }
 
     #[test]
-    fn request_display_instruction_only() {
+    fn display_instruction_only() {
         assert_eq!(request(None, vec![]).to_string(), Format::Text.instruction());
-    }
-
-    #[test]
-    fn mcp_servers_skips_function_tools() {
-        let mut request = request(None, vec![]);
-        request.tools = vec![
-            Tool::Function(Function {
-                name: "lookup".to_owned(),
-                description: "look things up".to_owned(),
-                parameters: "{}".to_owned(),
-            }),
-            Tool::Mcp(Mcp {
-                name: "docs".to_owned(),
-                tools: vec![],
-                url: "http://127.0.0.1:7737/mcp/docs".to_owned(),
-            }),
-        ];
-        let servers = request.mcp_servers();
-        assert_eq!(servers.len(), 1);
-        assert_eq!(servers[0].name, "docs");
     }
 }

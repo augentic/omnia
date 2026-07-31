@@ -55,4 +55,4 @@ Mitigations, cheapest first:
 ## References
 
 - `crates/wasi-model/wit/model.wit` — the authoritative `mcp` record.
-- `backends/crates/cursor/src/mcp.rs` — the `.cursor/mcp.json` guard §3 hardens.
+- `omnia-backends/crates/cursor/src/mcp.rs` — the `.cursor/mcp.json` guard §3 hardens.

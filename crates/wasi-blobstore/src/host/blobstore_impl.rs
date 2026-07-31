@@ -18,7 +18,7 @@ impl<T> HostWithStore<T> for WasiBlobstore {
             .with(|mut store| store.get().ctx.create_container(name))
             .await
             .context("creating container")?;
-        let proxy = ContainerProxy(container);
+        let proxy = omnia::Proxy(container);
         Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
     }
 
@@ -30,7 +30,7 @@ impl<T> HostWithStore<T> for WasiBlobstore {
             .with(|mut store| store.get().ctx.get_container(name))
             .await
             .context("getting container")?;
-        let proxy = ContainerProxy(container);
+        let proxy = omnia::Proxy(container);
         Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
     }
 
@@ -61,29 +61,7 @@ impl<T> HostWithStore<T> for WasiBlobstore {
             dest.container,
             dest.object
         );
-
-        let src_container = accessor
-            .with(|mut store| store.get().ctx.get_container(src.container.clone()))
-            .await
-            .context("getting source container")?;
-
-        let data = src_container
-            .get_data(src.object.clone(), 0, u64::MAX)
-            .await
-            .context("reading source object")?
-            .ok_or_else(|| {
-                Error::NotFound(format!(
-                    "source object not found: {}/{}",
-                    src.container, src.object
-                ))
-            })?;
-
-        let dest_container = accessor
-            .with(|mut store| store.get().ctx.get_container(dest.container.clone()))
-            .await
-            .context("getting destination container")?;
-
-        dest_container.write_data(dest.object, data).await.context("writing object")?;
+        copy(accessor, &src, dest).await?;
         Ok(())
     }
 
@@ -103,33 +81,37 @@ impl<T> HostWithStore<T> for WasiBlobstore {
             return Ok(());
         }
 
-        let src_container = accessor
-            .with(|mut store| store.get().ctx.get_container(src.container.clone()))
-            .await
-            .context("getting source container")?;
-
-        let src_object_name = src.object.clone();
-        let data = src_container
-            .get_data(src.object.clone(), 0, u64::MAX)
-            .await
-            .context("reading source object")?
-            .ok_or_else(|| {
-                Error::NotFound(format!(
-                    "source object not found: {}/{}",
-                    src.container, src.object
-                ))
-            })?;
-
-        let dest_container = accessor
-            .with(|mut store| store.get().ctx.get_container(dest.container.clone()))
-            .await
-            .context("getting destination container")?;
-
-        dest_container.write_data(dest.object, data).await.context("writing object")?;
-
-        src_container.delete_object(src_object_name).await.context("deleting source object")?;
+        let src_container = copy(accessor, &src, dest).await?;
+        src_container.delete_object(src.object).await.context("deleting source object")?;
         Ok(())
     }
+}
+
+/// Copy `src` to `dest`, returning the source container so `move_object` can
+/// delete the source afterwards.
+async fn copy<T>(
+    accessor: &Accessor<T, WasiBlobstore>, src: &ObjectId, dest: ObjectId,
+) -> Result<std::sync::Arc<dyn crate::host::resource::Container>> {
+    let src_container = accessor
+        .with(|mut store| store.get().ctx.get_container(src.container.clone()))
+        .await
+        .context("getting source container")?;
+
+    let data = src_container
+        .get_data(src.object.clone(), 0, u64::MAX)
+        .await
+        .context("reading source object")?
+        .ok_or_else(|| {
+            Error::NotFound(format!("source object not found: {}/{}", src.container, src.object))
+        })?;
+
+    let dest_container = accessor
+        .with(|mut store| store.get().ctx.get_container(dest.container.clone()))
+        .await
+        .context("getting destination container")?;
+
+    dest_container.write_data(dest.object, data).await.context("writing object")?;
+    Ok(src_container)
 }
 
 impl Host for WasiBlobstoreCtxView<'_> {}

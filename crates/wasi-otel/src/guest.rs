@@ -8,9 +8,7 @@
 
 mod convert;
 mod init;
-#[cfg(feature = "metrics")]
 mod metrics;
-#[cfg(feature = "tracing")]
 mod tracing;
 
 // Bindings for the `wasi:otel` world.
@@ -29,3 +27,10 @@ mod generated {
 pub use omnia_guest_macros::instrument;
 
 pub use crate::guest::init::*;
+
+// Implementation detail of the `#[instrument]` expansion: the macro emits
+// paths through this module so callers need no direct `tracing` dependency.
+#[doc(hidden)]
+pub mod __private {
+    pub use ::tracing;
+}

@@ -47,10 +47,6 @@ omnia_wasi_websocket::export!(WebSocket);
 impl omnia_wasi_websocket::handler::Guest for WebSocket {
     async fn handle(event: Event) -> Result<(), Error> {
         println!("received event: {event:?}");
-
-        // let client = Client::connect("default".to_string()).await?;
-        // client::send(&client, event, socket_id).await?;
-
         Ok(())
     }
 }

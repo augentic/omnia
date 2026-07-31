@@ -87,7 +87,7 @@ pub struct Messaging;
 omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
 
 impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
-    async fn handle(message: Message) -> anyhow::Result<(), Error> {
+    async fn handle(message: Message) -> Result<(), Error> {
         tracing::debug!("start processing msg");
 
         let topic = message.topic().unwrap_or_default();
@@ -134,7 +134,9 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
                     });
                 }
 
-                println!("sent 1000 messages in {} milliseconds", timer.elapsed().as_millis());
+                // The sends run in spawned tasks, so the timer covers only the
+                // spawning, not delivery.
+                println!("spawned 1000 sends in {} milliseconds", timer.elapsed().as_millis());
             }
             "b" => {
                 tracing::debug!("handling topic b");

@@ -13,24 +13,14 @@ use tracing::instrument;
 
 use crate::host::WasiOtelCtx;
 
-/// Options used to connect to the telemetry backend.
-#[derive(Debug, Clone, Default)]
-pub struct ConnectOptions;
-
-impl omnia::FromEnv for ConnectOptions {
-    fn from_env() -> Result<Self> {
-        Ok(Self)
-    }
-}
-
 /// Default implementation for `wasi:otel`.
 #[derive(Debug, Clone)]
 pub struct OtelDefault;
 
 impl Backend for OtelDefault {
-    type ConnectOptions = ConnectOptions;
+    type ConnectOptions = omnia::NoOptions;
 
-    // `skip_all`: recording the unit `ConnectOptions` would otherwise trip
+    // `skip_all`: recording the unit `NoOptions` would otherwise trip
     // `clippy::used_underscore_binding` on the expanded `_options`.
     #[instrument(skip_all)]
     async fn connect_with(_options: Self::ConnectOptions) -> Result<Self> {

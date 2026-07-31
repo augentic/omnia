@@ -29,7 +29,7 @@ and `cargo build` emits a single binary that runs its guest with plain `./mybina
 
 The two halves of the pipeline already exist:
 
-- **Producing cwasm** — `compile()` (`crates/omnia/src/options/compile.rs`) is the whole compiler: `Engine::new(&Config::from(&RuntimeOptions::load()?))`, `Component::from_file`, `Component::serialize`.
+- **Producing cwasm** — `compile()` (`crates/omnia/src/options/compile.rs`) is the whole compiler: `Engine::new(&Config::from(&RuntimeOptions::load_env()?))`, `Component::from_file`, `Component::serialize`.
 - **Loading cwasm** — `load_component()` (`crates/omnia/src/deployment/source.rs`) already classifies the artifact by content (wasmtime-serialized ELF vs raw wasm) and deserializes the former; admission of pre-compiled artifacts is gated by the `DeploymentBuilder::precompiled()` typestate's unsafe `build`, since wasmtime's settings-compatibility check is not an authenticity check. An embedded artifact is trusted by construction (baked into the binary at build time), so the embedded path makes that attestation internally.
 
 What is missing is the middle:
@@ -125,7 +125,7 @@ and the generated `main` passes `Some(omnia::EmbeddedGuest { name: env!("CARGO_P
 
 ## 5. Compile/run settings drift
 
-`RuntimeOptions::load()` reads the environment. For the embedded path the compile happens on the build machine and the load on the deployment machine; if the compile-affecting variables differ, `deserialize` rejects the artifact at startup. The artifact must be self-consistent **by construction**, not by operator discipline:
+`RuntimeOptions::load_env()` reads the environment. For the embedded path the compile happens on the build machine and the load on the deployment machine; if the compile-affecting variables differ, `deserialize` rejects the artifact at startup. The artifact must be self-consistent **by construction**, not by operator discipline:
 
 - `omnia-build` bakes the four compile-affecting values into the binary via `cargo:rustc-env` (`OMNIA_EMBED_MAX_FUEL`, …).
 - When constructing the engine for a deployment whose guest is embedded, those baked values **override** the runtime environment for the compile-affecting settings (non-compile-affecting options stay env-driven). A runtime env var that disagrees logs a warning naming the baked value.

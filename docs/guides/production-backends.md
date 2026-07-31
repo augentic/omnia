@@ -1,6 +1,6 @@
 # Production Backends
 
-The in-tree `*Default` backends make development friction-free, but production deployments usually need real infrastructure. The [`backends`](https://github.com/augentic/backends) repository provides drop-in implementations of the same WASI interfaces against real services. Swapping one in changes a single line in your host runtime — guests are untouched.
+The in-tree `*Default` backends make development friction-free, but production deployments usually need real infrastructure. The [`omnia-backends`](https://github.com/augentic/omnia-backends) repository provides drop-in implementations of the same WASI interfaces against real services. Swapping one in changes a single line in your host runtime — guests are untouched.
 
 ## What's available
 
@@ -47,7 +47,7 @@ Add the backend crate to your host's `Cargo.toml`:
 omnia-redis = "0.28"
 ```
 
-For local development against unreleased omnia changes, the `backends` workspace patches all `omnia`/`omnia-wasi-*` crates to a sibling checkout via `[patch.crates-io]` — keep both repositories checked out side by side and mirror that pattern if your host lives in a third workspace.
+For local development against unreleased omnia changes, the `omnia-backends` workspace patches all `omnia`/`omnia-wasi-*` crates to a sibling checkout via `[patch.crates-io]` — keep both repositories checked out side by side and mirror that pattern if your host lives in a third workspace.
 
 ## Configuration
 
@@ -65,7 +65,7 @@ Every backend reads its connection settings from environment variables at startu
 | Azure Key Vault | `AZURE_KEYVAULT_URL` + Azure credentials |
 | OpenTelemetry | `OTEL_GRPC_URL` (default `http://localhost:4317`) |
 
-Each crate's README in the `backends` repository documents its complete variable set.
+Each crate's README in the `omnia-backends` repository documents its complete variable set.
 
 ## Verifying against the real service
 

@@ -13,7 +13,7 @@ impl<T> HostWithStore<T> for WasiKeyValue {
         accessor: &Accessor<T, Self>, identifier: String,
     ) -> Result<Resource<BucketProxy>> {
         let bucket = accessor.with(|mut store| store.get().ctx.open_bucket(identifier)).await?;
-        let proxy = BucketProxy(bucket);
+        let proxy = omnia::Proxy(bucket);
         Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
     }
 }
@@ -57,7 +57,10 @@ impl<T> HostBucketWithStore<T> for WasiKeyValue {
         tracing::trace!("store::HostBucket::list_keys {cursor:?}");
         let bucket = get_bucket(accessor, &self_)?;
         let keys = bucket.keys().await.context("issue getting value")?;
-        Ok(KeyResponse { keys, cursor })
+        // `keys()` returns the complete set in one page; echoing the caller's
+        // cursor back would signal another page and loop pagination-aware
+        // guests forever.
+        Ok(KeyResponse { keys, cursor: None })
     }
 
     fn drop(
@@ -78,8 +81,5 @@ impl HostBucket for WasiKeyValueCtxView<'_> {}
 pub fn get_bucket<T>(
     accessor: &Accessor<T, WasiKeyValue>, self_: &Resource<BucketProxy>,
 ) -> Result<BucketProxy> {
-    accessor.with(|mut store| {
-        let bucket = store.get().table.get(self_).map_err(|_e| Error::NoSuchStore)?;
-        Ok::<_, Error>(bucket.clone())
-    })
+    omnia::get_cloned(accessor, self_).map_err(|_stale| Error::NoSuchStore)
 }

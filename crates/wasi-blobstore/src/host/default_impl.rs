@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use bytes::Bytes;
 use futures::FutureExt;
 use omnia::Backend;
@@ -17,16 +17,6 @@ use crate::host::WasiBlobstoreCtx;
 use crate::host::generated::wasi::blobstore::container::{ContainerMetadata, ObjectMetadata};
 use crate::host::resource::{Container, FutureResult};
 
-/// Options used to connect to the blobstore.
-#[derive(Debug, Clone, Default)]
-pub struct ConnectOptions;
-
-impl omnia::FromEnv for ConnectOptions {
-    fn from_env() -> Result<Self> {
-        Ok(Self)
-    }
-}
-
 /// Default implementation for `wasi:blobstore`.
 #[derive(Debug, Clone)]
 pub struct BlobstoreDefault {
@@ -34,7 +24,7 @@ pub struct BlobstoreDefault {
 }
 
 impl Backend for BlobstoreDefault {
-    type ConnectOptions = ConnectOptions;
+    type ConnectOptions = omnia::NoOptions;
 
     #[instrument]
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
@@ -51,10 +41,11 @@ impl WasiBlobstoreCtx for BlobstoreDefault {
         let store = Arc::clone(&self.store);
 
         async move {
-            let container = InMemContainer::new(name.clone());
-            {
+            // Idempotent: re-creating an existing container returns it
+            // rather than silently replacing it (and destroying its objects).
+            let container = {
                 let mut store = store.write();
-                store.insert(name, container.clone())
+                store.entry(name.clone()).or_insert_with(|| InMemContainer::new(name)).clone()
             };
             Ok(Arc::new(container) as Arc<dyn Container>)
         }
@@ -107,7 +98,13 @@ impl WasiBlobstoreCtx for BlobstoreDefault {
 #[derive(Debug, Clone)]
 struct InMemContainer {
     name: String,
-    objects: Arc<RwLock<HashMap<String, Bytes>>>,
+    objects: Arc<RwLock<HashMap<String, Object>>>,
+    created_at: SystemTime,
+}
+
+#[derive(Debug, Clone)]
+struct Object {
+    data: Bytes,
     created_at: SystemTime,
 }
 
@@ -136,18 +133,32 @@ impl Container for InMemContainer {
         })
     }
 
-    fn get_data(&self, name: String, _start: u64, _end: u64) -> FutureResult<Option<Bytes>> {
+    fn get_data(&self, name: String, start: u64, end: u64) -> FutureResult<Option<Bytes>> {
         tracing::debug!("getting object: {name} from container: {}", self.name);
         let objects = Arc::clone(&self.objects);
 
         async move {
-            // Note: start/end parameters are ignored in this simple implementation
-            // A full implementation would support range reads
-            let result = {
+            let Some(data) = ({
                 let objects = objects.read();
-                objects.get(&name).cloned()
+                objects.get(&name).map(|object| object.data.clone())
+            }) else {
+                return Ok(None);
             };
-            Ok(result)
+
+            // Range semantics match the production backends (azure-blob):
+            // `end` of 0 or `u64::MAX` reads to the end; otherwise `end` is
+            // inclusive per the WIT contract, clamped to the object's length.
+            let unbounded = end == 0 || end == u64::MAX;
+            if !unbounded && end < start {
+                return Err(anyhow!("invalid byte range: end ({end}) < start ({start})"));
+            }
+            let len = data.len() as u64;
+            let from = start.min(len);
+            let to = if unbounded { len } else { end.saturating_add(1).min(len) };
+            // Both bounds are clamped to the object's length, itself a usize.
+            #[allow(clippy::cast_possible_truncation)]
+            let range = from as usize..to as usize;
+            Ok(Some(data.slice(range)))
         }
         .boxed()
     }
@@ -159,7 +170,13 @@ impl Container for InMemContainer {
         async move {
             {
                 let mut objects = objects.write();
-                objects.insert(name, data)
+                objects.insert(
+                    name,
+                    Object {
+                        data,
+                        created_at: SystemTime::now(),
+                    },
+                )
             };
             Ok(())
         }
@@ -211,21 +228,17 @@ impl Container for InMemContainer {
         let container_name = self.name.clone();
 
         async move {
-            let size = {
-                let objects = objects.read();
-                objects
-                    .get(&name)
-                    .ok_or_else(|| wasmtime::Error::msg(format!("object not found: {name}")))?
-                    .len()
-            };
+            let guard = objects.read();
+            let object = guard
+                .get(&name)
+                .ok_or_else(|| wasmtime::Error::msg(format!("object not found: {name}")))?;
+            let (size, created_at) = (object.data.len(), object.created_at);
+            drop(guard);
 
             Ok(ObjectMetadata {
                 name,
                 container: container_name,
-                created_at: SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs(),
+                created_at: created_at.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
                 size: size as u64,
             })
         }

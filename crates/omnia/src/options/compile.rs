@@ -29,7 +29,7 @@ pub fn compile(wasm: &Path, output: Option<PathBuf>) -> Result<()> {
     };
 
     // compile component (compile-time config must match the loader in `create`)
-    let options = RuntimeOptions::load()?;
+    let options = RuntimeOptions::load_env()?;
     let wt_config = &Config::from(&options);
 
     let engine = Engine::new(wt_config)?;

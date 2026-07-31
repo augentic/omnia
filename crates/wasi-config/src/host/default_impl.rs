@@ -12,16 +12,6 @@ use wasmtime_wasi_config::WasiConfigVariables;
 
 use crate::WasiConfigCtx;
 
-/// Options used to connect to the config store.
-#[derive(Debug, Clone, Default)]
-pub struct ConnectOptions;
-
-impl omnia::FromEnv for ConnectOptions {
-    fn from_env() -> Result<Self> {
-        Ok(Self)
-    }
-}
-
 /// Default implementation for `wasi:config`.
 #[derive(Clone)]
 pub struct ConfigDefault {
@@ -36,7 +26,7 @@ impl Debug for ConfigDefault {
 }
 
 impl Backend for ConfigDefault {
-    type ConnectOptions = ConnectOptions;
+    type ConnectOptions = omnia::NoOptions;
 
     #[instrument]
     async fn connect_with(_: Self::ConnectOptions) -> Result<Self> {

@@ -41,7 +41,7 @@ pub use self::stub_impl::IdentityStub;
 use crate::host::generated::Error;
 
 /// Result type for identity operations.
-pub type Result<T> = anyhow::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// Host-side service for `wasi:identity`.
 #[derive(Debug)]

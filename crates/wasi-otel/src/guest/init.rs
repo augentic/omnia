@@ -3,36 +3,21 @@
 use std::sync::OnceLock;
 
 use anyhow::{Context, Result, anyhow};
-use cfg_if::cfg_if;
+use opentelemetry::trace::TracerProvider;
 use opentelemetry::{KeyValue, Value};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::OTelSdkError;
-use tracing_subscriber::Registry;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::trace::SdkTracerProvider;
+use tracing_opentelemetry::{MetricsLayer, layer as tracing_layer};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, Registry};
 
 use crate::guest::generated::omnia::otel::{resource, types};
+use crate::guest::{metrics, tracing};
 
-cfg_if! {
-    if #[cfg(feature = "metrics" )] {
-        use opentelemetry_sdk::metrics::SdkMeterProvider;
-        use tracing_opentelemetry::MetricsLayer;
-        use crate::guest::metrics;
-    }
-}
-cfg_if! {
-    if #[cfg(feature = "tracing" )] {
-        use opentelemetry_sdk::trace::SdkTracerProvider;
-        use tracing_opentelemetry::layer as tracing_layer;
-        use tracing_subscriber::EnvFilter;
-        use opentelemetry::trace::TracerProvider;
-        use crate::guest::tracing;
-    }
-}
-
-#[cfg(feature = "tracing")]
 static TRACING: OnceLock<SdkTracerProvider> = OnceLock::new();
-#[cfg(feature = "metrics")]
 static METRICS: OnceLock<SdkMeterProvider> = OnceLock::new();
 
 /// Initialize OpenTelemetry SDK and tracing subscriber.
@@ -43,12 +28,7 @@ static METRICS: OnceLock<SdkMeterProvider> = OnceLock::new();
 /// the OpenTelemetry exporter cannot be created or if setting the global
 /// subscriber fails.
 pub fn init() -> Result<Option<ExitGuard>> {
-    #[cfg(feature = "tracing")]
-    if TRACING.get().is_some() {
-        return Ok(None);
-    }
-    #[cfg(feature = "metrics")]
-    if METRICS.get().is_some() {
+    if TRACING.get().is_some() || METRICS.get().is_some() {
         return Ok(None);
     }
 
@@ -61,25 +41,15 @@ pub fn init() -> Result<Option<ExitGuard>> {
     let fmt_layer = tracing_subscriber::fmt::layer();
     let registry = Registry::default().with(filter_layer).with(fmt_layer);
 
-    // initialize tracing
-    #[cfg(feature = "tracing")]
-    let registry = {
-        let tracer_provider = tracing::init(resource.clone());
-        let tracing_layer = tracing_layer().with_tracer(tracer_provider.tracer("global"));
-        // guard.tracing = tracer_provider;
-        TRACING.set(tracer_provider).map_err(|_e| anyhow!("failed to set tracing provider"))?;
-        registry.with(tracing_layer)
-    };
+    let tracer_provider = tracing::init(resource.clone());
+    let tracing_layer = tracing_layer().with_tracer(tracer_provider.tracer("global"));
+    TRACING.set(tracer_provider).map_err(|_e| anyhow!("failed to set tracing provider"))?;
 
-    // initialize metrics
-    #[cfg(feature = "metrics")]
-    let registry = {
-        let meter_provider = metrics::init(resource);
-        let metrics_layer = MetricsLayer::new(meter_provider.clone());
-        // guard.metrics = meter_provider;
-        METRICS.set(meter_provider).map_err(|_e| anyhow!("failed to set metrics provider"))?;
-        registry.with(metrics_layer)
-    };
+    let meter_provider = metrics::init(resource);
+    let metrics_layer = MetricsLayer::new(meter_provider.clone());
+    METRICS.set(meter_provider).map_err(|_e| anyhow!("failed to set metrics provider"))?;
+
+    let registry = registry.with(tracing_layer).with(metrics_layer);
 
     registry.try_init().context("issue initializing subscriber")?;
 
@@ -91,14 +61,12 @@ pub struct ExitGuard;
 
 impl Drop for ExitGuard {
     fn drop(&mut self) {
-        #[cfg(feature = "tracing")]
         if let Some(tracer_provider) = TRACING.get() {
             match tracer_provider.shutdown() {
                 Ok(()) | Err(OTelSdkError::AlreadyShutdown) => (),
                 Err(e) => ::tracing::error!("failed to export tracing: {e}"),
             }
         }
-        #[cfg(feature = "metrics")]
         if let Some(meter_provider) = METRICS.get() {
             match meter_provider.shutdown() {
                 Ok(()) | Err(OTelSdkError::AlreadyShutdown) => (),

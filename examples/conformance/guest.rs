@@ -45,6 +45,7 @@ impl Guest for Http {
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
         let router = Router::new()
             .route("/echo", post(echo))
+            .route("/proxy", post(proxy))
             .route("/keyvalue", post(keyvalue_round_trip))
             .route("/blobstore", post(blobstore_round_trip))
             .route("/config", get(config_get_all))
@@ -65,6 +66,49 @@ impl Guest for Http {
 #[omnia_wasi_otel::instrument]
 async fn echo(Json(body): Json<Value>) -> HttpResult<Json<Value>> {
     Ok(Json(json!({ "message": "echo", "request": body })))
+}
+
+#[derive(Debug, Deserialize)]
+struct ProxyRequest {
+    url: String,
+    #[serde(default)]
+    method: Option<String>,
+    #[serde(default)]
+    headers: Vec<(String, String)>,
+    #[serde(default)]
+    body: String,
+}
+
+/// Perform an outbound `wasi:http` request described by the JSON body and
+/// report the outcome, so seam tests can observe the host's outbound hook
+/// through the real guest boundary.
+#[omnia_wasi_otel::instrument]
+async fn proxy(Json(req): Json<ProxyRequest>) -> HttpResult<Json<Value>> {
+    let method = req.method.as_deref().unwrap_or("GET");
+    let mut builder = http::Request::builder().method(method).uri(&req.url);
+    for (name, value) in &req.headers {
+        builder = builder.header(name, value);
+    }
+    let outbound = match builder.body(http_body_util::Full::new(Bytes::from(req.body))) {
+        Ok(outbound) => outbound,
+        Err(e) => return Ok(Json(json!({ "error": format!("{e:#}") }))),
+    };
+
+    match omnia_wasi_http::handle(outbound).await {
+        Ok(response) => {
+            let headers: Vec<(String, String)> = response
+                .headers()
+                .iter()
+                .map(|(k, v)| (k.to_string(), String::from_utf8_lossy(v.as_bytes()).into_owned()))
+                .collect();
+            Ok(Json(json!({
+                "status": response.status().as_u16(),
+                "headers": headers,
+                "body": String::from_utf8_lossy(response.body()).into_owned(),
+            })))
+        }
+        Err(e) => Ok(Json(json!({ "error": format!("{e:#}") }))),
+    }
 }
 
 // --- wasi:keyvalue (store + atomics CAS legs) ---
@@ -128,7 +172,10 @@ async fn blobstore_round_trip(
             .outgoing_value_write_body()
             .await
             .map_err(|()| anyhow!("failed to create stream"))?;
-        stream.blocking_write_and_flush(&body).map_err(|e| anyhow!("writing body: {e}"))?;
+        // `blocking-write-and-flush` accepts at most 4096 bytes per call.
+        for chunk in body.chunks(4096) {
+            stream.blocking_write_and_flush(chunk).map_err(|e| anyhow!("writing body: {e}"))?;
+        }
     }
 
     let container = blobstore::create_container("container".to_string())

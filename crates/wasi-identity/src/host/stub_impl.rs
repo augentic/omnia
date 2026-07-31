@@ -8,16 +8,6 @@ use crate::host::WasiIdentityCtx;
 use crate::host::generated::omnia::identity::credentials::AccessToken;
 use crate::host::resource::{FutureResult, Identity};
 
-/// Connection options for the stub (none required).
-#[derive(Debug, Clone)]
-pub struct StubOptions;
-
-impl omnia::FromEnv for StubOptions {
-    fn from_env() -> Result<Self> {
-        Ok(Self)
-    }
-}
-
 /// Credential-free `wasi:identity` backend returning a fixed token.
 ///
 /// For tests and local development where no identity provider is available;
@@ -26,7 +16,7 @@ impl omnia::FromEnv for StubOptions {
 pub struct IdentityStub;
 
 impl Backend for IdentityStub {
-    type ConnectOptions = StubOptions;
+    type ConnectOptions = omnia::NoOptions;
 
     async fn connect_with(_options: Self::ConnectOptions) -> Result<Self> {
         Ok(Self)

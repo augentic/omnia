@@ -15,16 +15,6 @@ use crate::host::resource::{FutureResult, Locker};
 
 type Store = Arc<parking_lot::RwLock<HashMap<String, HashMap<String, Vec<u8>>>>>;
 
-/// Options used to connect to the vault.
-#[derive(Debug, Clone, Default)]
-pub struct ConnectOptions;
-
-impl omnia::FromEnv for ConnectOptions {
-    fn from_env() -> Result<Self> {
-        Ok(Self)
-    }
-}
-
 /// Default implementation for `wasi:vault`.
 #[derive(Debug, Clone)]
 pub struct VaultDefault {
@@ -33,7 +23,7 @@ pub struct VaultDefault {
 }
 
 impl Backend for VaultDefault {
-    type ConnectOptions = ConnectOptions;
+    type ConnectOptions = omnia::NoOptions;
 
     #[instrument]
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
@@ -69,10 +59,6 @@ struct InMemLocker {
 }
 
 impl Locker for InMemLocker {
-    fn identifier(&self) -> String {
-        self.identifier.clone()
-    }
-
     fn get(&self, secret_id: String) -> FutureResult<Option<Vec<u8>>> {
         tracing::debug!("getting secret: {} from locker: {}", secret_id, self.identifier);
         let store = Arc::clone(&self.store);

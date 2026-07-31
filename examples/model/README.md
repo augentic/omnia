@@ -16,7 +16,7 @@ flowchart LR
   scripted -->|"validated answer"| guest
 ```
 
-The runtime core stays generic (Law 2): no model id, provider, or schema dialect lives in Omnia. The boundary only ever hands the guest a **validated answer string**. The scripted double never calls tools, so this binary never emits a `resolve`; the host→guest `resolve` path is exercised deterministically by the seam suite, and live by the `omnia-genai` backend in the `backends` repo.
+The runtime core stays generic (Law 2): no model id, provider, or schema dialect lives in Omnia. The boundary only ever hands the guest a **validated answer string**. The scripted double never calls tools, so this binary never emits a `resolve`; the host→guest `resolve` path is exercised deterministically by the seam suite, and live by the `omnia-genai` backend in the `omnia-backends` repo.
 
 ## Quick Start
 

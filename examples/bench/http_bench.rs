@@ -119,6 +119,9 @@ async fn run_worker(settings: &Settings, deadline: Instant) -> Stats {
     while Instant::now() < deadline {
         let Ok(stream) = TcpStream::connect(&settings.addr).await else {
             stats.errors += 1;
+            // Back off briefly so an unreachable server doesn't spin the
+            // worker hot on failed connects.
+            tokio::time::sleep(Duration::from_millis(50)).await;
             continue;
         };
         let _ = stream.set_nodelay(true);

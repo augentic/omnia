@@ -8,7 +8,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use axum::routing::{get, post};
+use axum::routing::get;
 use axum::{Json, Router};
 use omnia_guest::HttpResult;
 use serde_json::{Value, json};
@@ -22,7 +22,7 @@ wasip3::http::service::export!(HttpGuest);
 impl Guest for HttpGuest {
     #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
-        let router = Router::new().route("/", get(echo_get)).route("/", post(echo_post));
+        let router = Router::new().route("/", get(echo_get).post(echo_post));
         omnia_wasi_http::serve(router, request).await
     }
 }

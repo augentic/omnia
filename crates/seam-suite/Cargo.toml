@@ -49,3 +49,4 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "ti
 tokio-tungstenite.workspace = true
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true
+wiremock = "0.6.5"

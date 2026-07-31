@@ -9,7 +9,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 
 use crate::runtime::codegen::Codegen;
-pub use crate::runtime::parse::{Config, Mode};
+pub use crate::runtime::parse::Config;
 
 /// Generate the runtime module from a parsed [`Config`].
 pub fn expand(config: &Config) -> TokenStream {
@@ -23,10 +23,7 @@ pub fn expand(config: &Config) -> TokenStream {
         main_options,
     } = Codegen::from(config);
 
-    let mode = match mode {
-        Mode::Server => quote!(omnia::Mode::Server),
-        Mode::Command => quote!(omnia::Mode::Command),
-    };
+    let mode = mode.tokens();
 
     quote! {
         mod runtime {
@@ -102,6 +99,19 @@ mod tests {
                 WasiHttp: HttpDefault,
                 WasiOtel: OtelDefault,
                 WasiKeyValue: KeyValueDefault,
+            },
+        })));
+    }
+
+    // A backend shared by non-adjacent hosts must emit exactly one struct
+    // field (interleaved duplicates defeat a consecutive-only dedup).
+    #[test]
+    fn expand_shared_backend() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            hosts: {
+                WasiKeyValue: Redis,
+                WasiOtel: OtelDefault,
+                WasiMessaging: Redis,
             },
         })));
     }

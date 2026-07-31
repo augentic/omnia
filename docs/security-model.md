@@ -69,7 +69,7 @@ Mounts are the only filesystem doorway ([details](guides/multi-guest-deployments
 The `omnia:model` design extends capability thinking to LLM backends, which are effectively untrusted executors:
 
 - The backend gets **no ambient access**. It can touch a filesystem tree only if the guest lends one through `grants.workspace` — and that lend is a typed `wasi:filesystem` descriptor borrow from the guest's own preopen table, not a path string or integer handle a guest could forge. The host resolves it back to an authorized mount by identity.
-- Tools the model may call (`resolve`, `read`, `list`, `write`, `verify`) are **injected by the host** from the grants; backends execute them by calling back through the host, so every tool invocation passes host-side checks. Guests cannot impersonate these tools (reserved names are rejected).
+- Tools the model may call (`resolve`, `read`, `list`, `write`) are **injected by the host** from the grants; backends execute them by calling back through the host, so every tool invocation passes host-side checks. Guests cannot impersonate these tools (reserved names are rejected).
 - The **answer is validated by the host** against the requested format before the guest sees it — a backend cannot smuggle unvalidated output past the gate.
 - Budget errors (`budget-exhausted`) bound runaway tool loops; the cursor backend additionally kills its spawned agent on timeout.
 
@@ -94,5 +94,5 @@ Honest limits, so you can layer the right controls on top:
 - [ ] Mount the minimum directory set, read-only unless writes are required
 - [ ] Keep resource ceilings meaningful for the workload (don't blanket-raise timeouts and memory)
 - [ ] Scope backend service credentials narrowly; prefer per-deployment credentials
-- [ ] For model workloads, prefer read-only workspaces and closed `verify` profiles; treat `writable` lends as privileged
+- [ ] For model workloads, prefer read-only workspaces; treat `writable` lends as privileged
 - [ ] Run the host container as non-root with a minimal image (see [Deploying Omnia](guides/deployment.md#container-images))

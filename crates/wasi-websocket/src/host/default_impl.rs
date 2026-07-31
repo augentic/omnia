@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context as _, Result, anyhow};
 use dashmap::DashMap;
 use futures::FutureExt;
 use futures_channel::mpsc;
@@ -18,7 +18,7 @@ use futures_util::stream::TryStreamExt;
 use futures_util::{StreamExt, future, pin_mut};
 use omnia::{Backend, FutureResult};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::broadcast::{self, Receiver, Sender};
+use tokio::sync::broadcast::{self, Sender};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::{WebSocketStream, accept_async};
@@ -28,8 +28,8 @@ use crate::host::WasiWebSocketCtx;
 use crate::host::resource::{Client, Event, Events};
 
 const MAX_CONNECTIONS: usize = 1024;
-const BROADCAST_CHANNEL_CAPACITY: usize = 256;
-const PER_CLIENT_CHANNEL_CAPACITY: usize = 256;
+const BROADCAST_CAPACITY: usize = 256;
+const CLIENT_CAPACITY: usize = 256;
 
 type ConnectionMap = Arc<DashMap<String, mpsc::Sender<Message>>>;
 
@@ -41,7 +41,7 @@ pub struct ConnectOptions {
 }
 
 impl omnia::FromEnv for ConnectOptions {
-    fn from_env() -> Result<Self> {
+    fn load_env() -> Result<Self> {
         let socket_addr =
             std::env::var("WEBSOCKET_ADDR").unwrap_or_else(|_| "0.0.0.0:80".to_string());
         Ok(Self { socket_addr })
@@ -49,21 +49,10 @@ impl omnia::FromEnv for ConnectOptions {
 }
 
 /// Default implementation for `wasi:websocket`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct WebSocketDefault {
     event_tx: Sender<Event>,
-    event_rx: Receiver<Event>,
     connections: ConnectionMap,
-}
-
-impl Clone for WebSocketDefault {
-    fn clone(&self) -> Self {
-        Self {
-            event_tx: self.event_tx.clone(),
-            event_rx: self.event_tx.subscribe(),
-            connections: Arc::clone(&self.connections),
-        }
-    }
 }
 
 impl Backend for WebSocketDefault {
@@ -73,20 +62,17 @@ impl Backend for WebSocketDefault {
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
         tracing::debug!("using default WebSocket backend");
 
-        let (event_tx, event_rx) = broadcast::channel::<Event>(BROADCAST_CHANNEL_CAPACITY);
-        let connections: ConnectionMap = Arc::new(DashMap::new());
-
-        let websocket = Self {
-            event_tx,
-            event_rx,
-            connections,
-        };
+        let websocket = Self::new();
         let server = websocket.clone();
-
         tokio::spawn(async move {
-            if let Err(e) = server.listen(options.socket_addr).await {
-                tracing::error!("issue starting websocket server: {e}");
-            }
+            let listener = match TcpListener::bind(options.socket_addr).await {
+                Ok(listener) => listener,
+                Err(e) => {
+                    tracing::error!("issue starting websocket server: {e}");
+                    return;
+                }
+            };
+            server.accept_loop(listener).await;
         });
 
         Ok(websocket)
@@ -102,7 +88,7 @@ impl WasiWebSocketCtx for WebSocketDefault {
 
 impl Client for WebSocketDefault {
     fn events(&self) -> FutureResult<Events> {
-        let stream = BroadcastStream::new(self.event_rx.resubscribe());
+        let stream = BroadcastStream::new(self.event_tx.subscribe());
 
         async move {
             let stream = stream.filter_map(|res| async move {
@@ -145,9 +131,36 @@ impl Client for WebSocketDefault {
 /// separate task. It broadcasts incoming messages to all connected peers and
 /// forwards outgoing messages to connected clients.
 impl WebSocketDefault {
-    async fn listen(self, socket_addr: String) -> Result<()> {
-        let listener = TcpListener::bind(socket_addr).await?;
-        tracing::info!("websocket server listening on: {}", listener.local_addr()?);
+    fn new() -> Self {
+        let (event_tx, _) = broadcast::channel::<Event>(BROADCAST_CAPACITY);
+        Self {
+            event_tx,
+            connections: Arc::new(DashMap::new()),
+        }
+    }
+
+    /// Build the backend serving on a pre-bound `listener` instead of binding
+    /// an address, for callers that must know the port before the server
+    /// starts (no drop-and-rebind race).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the listener cannot be registered with the tokio
+    /// runtime.
+    pub fn with_listener(listener: std::net::TcpListener) -> Result<Self> {
+        listener.set_nonblocking(true).context("setting listener non-blocking")?;
+        let listener = TcpListener::from_std(listener).context("registering listener")?;
+        let websocket = Self::new();
+        let server = websocket.clone();
+        tokio::spawn(async move { server.accept_loop(listener).await });
+        Ok(websocket)
+    }
+
+    async fn accept_loop(self, listener: TcpListener) {
+        match listener.local_addr() {
+            Ok(addr) => tracing::info!("websocket server listening on: {addr}"),
+            Err(e) => tracing::warn!("websocket listener address unavailable: {e}"),
+        }
 
         loop {
             let (stream, sender_addr) = match listener.accept().await {
@@ -170,7 +183,7 @@ impl WebSocketDefault {
     }
 
     async fn handle_socket(&self, ws_stream: WebSocketStream<TcpStream>, socket_addr: String) {
-        let (tx, rx) = mpsc::channel(PER_CLIENT_CHANNEL_CAPACITY);
+        let (tx, rx) = mpsc::channel(CLIENT_CAPACITY);
 
         if let Err(e) = self.add_socket(socket_addr.clone(), tx) {
             tracing::error!("issue adding peer connection: {e}");
@@ -179,7 +192,7 @@ impl WebSocketDefault {
 
         let (outgoing, incoming) = ws_stream.split();
 
-        let incoming_broadcaster = incoming.try_for_each(|msg| {
+        let inbound = incoming.try_for_each(|msg| {
             match msg {
                 Message::Text(text) => {
                     self.send_to_guest(socket_addr.clone(), text.as_bytes().to_vec());
@@ -194,10 +207,10 @@ impl WebSocketDefault {
             future::ok(())
         });
 
-        let outgoing_forwarder = rx.map(Ok).forward(outgoing);
+        let outbound = rx.map(Ok).forward(outgoing);
 
-        pin_mut!(incoming_broadcaster, outgoing_forwarder);
-        future::select(incoming_broadcaster, outgoing_forwarder).await;
+        pin_mut!(inbound, outbound);
+        future::select(inbound, outbound).await;
         tracing::info!("{socket_addr} disconnected");
 
         self.connections.remove(&socket_addr);

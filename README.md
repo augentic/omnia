@@ -9,7 +9,7 @@ While it can be used standalone, Omnia is primarily designed to be the runtime f
 - **Secure by Default**: All guest code runs in a strict WebAssembly sandbox. Capabilities (network, filesystem, model access) are explicitly granted.
 - **Batteries Included**: Built-in support for common WASI interfaces — HTTP, key-value, messaging, SQL, blob and document storage, secrets, identity, WebSockets, observability, and model completions — each with a zero-config default backend.
 - **Developer Friendly**: Typed explicit guest APIs and the `runtime!` host macro keep boundaries visible without repetitive transport glue.
-- **Pluggable Architecture**: Swap backend implementations (e.g. in-memory to Redis) without changing or recompiling guest code. Production backends live in the sibling [`backends`](https://github.com/augentic/backends) repository.
+- **Pluggable Architecture**: Swap backend implementations (e.g. in-memory to Redis) without changing or recompiling guest code. Production backends live in the sibling [`omnia-backends`](https://github.com/augentic/omnia-backends) repository.
 - **Multi-Guest Deployments**: One runtime can host many guests with declarative routing, workspace mounts, and host-mediated guest-to-guest linking, all driven by a TOML manifest.
 
 ## Quick start

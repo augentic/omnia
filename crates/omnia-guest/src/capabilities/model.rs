@@ -151,9 +151,6 @@ pub struct Request {
     /// targets (`grants.references`).
     #[builder(into)]
     pub references: Option<String>,
-    /// Allowed closed verification profile names (`grants.verify`).
-    #[builder(default)]
-    pub verify: Vec<String>,
     /// Lend the guest's `"."` preopen through `grants.workspace`, giving the
     /// backend (and any spawned agent) the shared project mount.
     #[builder(default)]
@@ -191,7 +188,7 @@ pub enum Error {
     /// Backend produced output that never passed validation.
     #[error("invalid answer: {0}")]
     InvalidAnswer(String),
-    /// Iteration, token, time, or verify budget exhausted.
+    /// Iteration, token, or time budget exhausted.
     #[error("budget exhausted: {0}")]
     BudgetExhausted(String),
     /// Non-repairable tool error.
@@ -233,80 +230,133 @@ pub trait Model: Send + Sync {
             let wire = completion::Request {
                 model: request.model,
                 system: request.system,
-                messages: request
-                    .messages
-                    .into_iter()
-                    .map(|m| completion::Message {
-                        role: match m.role {
-                            Role::System => completion::Role::System,
-                            Role::User => completion::Role::User,
-                            Role::Assistant => completion::Role::Assistant,
-                        },
-                        content: m.content,
-                    })
-                    .collect(),
-                generation: request.generation.map(|g| completion::Generation {
-                    temperature: g.temperature,
-                    top_p: g.top_p,
-                    max_tokens: g.max_tokens,
-                    stop: g.stop,
-                    seed: g.seed,
-                    effort: g.effort.map(|e| match e {
-                        Effort::Minimal => completion::Effort::Minimal,
-                        Effort::Low => completion::Effort::Low,
-                        Effort::Medium => completion::Effort::Medium,
-                        Effort::High => completion::Effort::High,
-                    }),
-                }),
-                format: match request.format {
-                    Format::Text => completion::Format::Text,
-                    Format::Json => completion::Format::Json,
-                    Format::Schema(s) => completion::Format::Schema(completion::Schema {
-                        name: s.name,
-                        schema: s.schema,
-                    }),
-                },
-                tools: request
-                    .tools
-                    .into_iter()
-                    .map(|tool| match tool {
-                        Tool::Function(f) => completion::Tool::Function(completion::Function {
-                            name: f.name,
-                            description: f.description,
-                            parameters: f.parameters,
-                        }),
-                        Tool::Mcp(m) => completion::Tool::Mcp(completion::Mcp {
-                            name: m.name,
-                            tools: m.tools,
-                            url: m.url,
-                        }),
-                    })
-                    .collect(),
+                messages: request.messages.into_iter().map(Into::into).collect(),
+                generation: request.generation.map(Into::into),
+                format: request.format.into(),
+                tools: request.tools.into_iter().map(Into::into).collect(),
                 grants: completion::Grants {
                     references: request.references,
                     workspace,
-                    verify: request.verify,
                 },
             };
 
-            match completion::create(wire).await {
-                Ok(reply) => Ok(Reply {
-                    answer: reply.answer,
-                    usage: reply.usage.map(|u| Usage {
-                        input_tokens: u.input_tokens,
-                        output_tokens: u.output_tokens,
-                        reasoning_tokens: u.reasoning_tokens,
-                    }),
+            completion::create(wire).await.map(Into::into).map_err(Into::into)
+        }
+    }
+}
+
+/// Mirror-to-wire conversions between the target-independent records above
+/// and the `omnia:model/completion` bindings.
+#[cfg(target_arch = "wasm32")]
+mod wire {
+    use omnia_wasi_model::completion;
+
+    use super::{
+        Effort, Error, Format, Function, Generation, McpGrant, Message, Reply, Role, Tool, Usage,
+    };
+
+    impl From<Role> for completion::Role {
+        fn from(role: Role) -> Self {
+            match role {
+                Role::System => Self::System,
+                Role::User => Self::User,
+                Role::Assistant => Self::Assistant,
+            }
+        }
+    }
+
+    impl From<Message> for completion::Message {
+        fn from(message: Message) -> Self {
+            Self {
+                role: message.role.into(),
+                content: message.content,
+            }
+        }
+    }
+
+    impl From<Effort> for completion::Effort {
+        fn from(effort: Effort) -> Self {
+            match effort {
+                Effort::Minimal => Self::Minimal,
+                Effort::Low => Self::Low,
+                Effort::Medium => Self::Medium,
+                Effort::High => Self::High,
+            }
+        }
+    }
+
+    impl From<Generation> for completion::Generation {
+        fn from(generation: Generation) -> Self {
+            Self {
+                temperature: generation.temperature,
+                top_p: generation.top_p,
+                max_tokens: generation.max_tokens,
+                stop: generation.stop,
+                seed: generation.seed,
+                effort: generation.effort.map(Into::into),
+            }
+        }
+    }
+
+    impl From<Format> for completion::Format {
+        fn from(format: Format) -> Self {
+            match format {
+                Format::Text => Self::Text,
+                Format::Json => Self::Json,
+                Format::Schema(s) => Self::Schema(completion::Schema {
+                    name: s.name,
+                    schema: s.schema,
                 }),
-                Err(completion::Error::InvalidRequest(detail)) => {
-                    Err(Error::InvalidRequest(detail))
+            }
+        }
+    }
+
+    impl From<Tool> for completion::Tool {
+        fn from(tool: Tool) -> Self {
+            match tool {
+                Tool::Function(Function {
+                    name,
+                    description,
+                    parameters,
+                }) => Self::Function(completion::Function {
+                    name,
+                    description,
+                    parameters,
+                }),
+                Tool::Mcp(McpGrant { name, tools, url }) => {
+                    Self::Mcp(completion::Mcp { name, tools, url })
                 }
-                Err(completion::Error::InvalidAnswer(detail)) => Err(Error::InvalidAnswer(detail)),
-                Err(completion::Error::BudgetExhausted(detail)) => {
-                    Err(Error::BudgetExhausted(detail))
-                }
-                Err(completion::Error::ToolFailed(detail)) => Err(Error::ToolFailed(detail)),
-                Err(completion::Error::Backend(detail)) => Err(Error::Backend(detail)),
+            }
+        }
+    }
+
+    impl From<completion::Usage> for Usage {
+        fn from(usage: completion::Usage) -> Self {
+            Self {
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                reasoning_tokens: usage.reasoning_tokens,
+            }
+        }
+    }
+
+    impl From<completion::Reply> for Reply {
+        fn from(reply: completion::Reply) -> Self {
+            Self {
+                answer: reply.answer,
+                usage: reply.usage.map(Into::into),
+            }
+        }
+    }
+
+    impl From<completion::Error> for Error {
+        fn from(error: completion::Error) -> Self {
+            match error {
+                completion::Error::InvalidRequest(detail) => Self::InvalidRequest(detail),
+                completion::Error::InvalidAnswer(detail) => Self::InvalidAnswer(detail),
+                completion::Error::BudgetExhausted(detail) => Self::BudgetExhausted(detail),
+                completion::Error::ToolFailed(detail) => Self::ToolFailed(detail),
+                completion::Error::Backend(detail) => Self::Backend(detail),
             }
         }
     }

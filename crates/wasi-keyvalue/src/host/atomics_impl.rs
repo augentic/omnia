@@ -23,15 +23,29 @@ impl<T> HostWithStore<T> for WasiKeyValue {
     ) -> Result<i64> {
         let bucket = get_bucket(accessor, &bucket)?;
 
-        // A missing key starts from zero, so the increment creates it at `delta`.
-        let base =
-            bucket.get(key.clone()).await.context("issue getting value")?.map_or(0, |value| {
-                let mut buf = [0u8; 8];
-                let len = 8.min(value.len());
-                buf[..len].copy_from_slice(&value[..len]);
-                i64::from_be_bytes(buf)
-            });
-        let inc = base + delta;
+        // Prefer the backend's native atomic increment when it has one.
+        if let Some(native) = bucket.increment(key.clone(), delta) {
+            return Ok(native.await.context("issue incrementing value")?);
+        }
+
+        // Fallback: read-modify-write (racy under concurrent writers; see
+        // `Bucket::increment`). A missing key starts from zero, so the
+        // increment creates it at `delta`.
+        let base = match bucket.get(key.clone()).await.context("issue getting value")? {
+            None => 0,
+            Some(value) => {
+                let bytes: [u8; 8] = value.as_slice().try_into().map_err(|_len_mismatch| {
+                    anyhow::anyhow!(
+                        "value at `{key}` is {} bytes, not an 8-byte big-endian integer",
+                        value.len()
+                    )
+                })?;
+                i64::from_be_bytes(bytes)
+            }
+        };
+        let inc = base
+            .checked_add(delta)
+            .with_context(|| format!("incrementing `{key}` by {delta} overflows i64"))?;
 
         bucket.set(key, inc.to_be_bytes().to_vec()).await.context("issue saving increment")?;
         Ok(inc)
