@@ -2409,7 +2409,6 @@ dependencies = [
  "cfg-if",
  "futures",
  "hex",
- "num-traits",
  "omnia",
  "omnia-guest-macros",
  "opentelemetry",

@@ -212,6 +212,9 @@ where
     if let Some(pool) = pool {
         pool.abort();
     }
+    // Drop every link-serve endpoint: the drain tasks hold Runtime clones, so
+    // leaving them running would pin the engine past the deployment's life.
+    runtime.registry().dispatch().transport().clear();
     // Push batch-queued spans and metrics to the exporters so they survive
     // fast command-mode exits.
     crate::telemetry::flush();
@@ -753,11 +756,11 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         // Wire the guest's linked exports (if any); publish then makes the
         // endpoint and the registry entry observable in one atomic step. If
         // publish refuses (a racing registration won), dropping the unused
-        // server winds its drain tasks down.
-        let server = serve_guest(self, &guest)
+        // endpoint aborts its drain tasks.
+        let endpoint = serve_guest(self, &guest)
             .await
             .with_context(|| format!("serving guest `{id}` link exports"))?;
-        registry.publish(guest, server)?;
+        registry.publish(guest, endpoint)?;
 
         tracing::info!(guest = %id, "guest registered");
         Ok(())

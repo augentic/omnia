@@ -9,7 +9,8 @@ use futures::StreamExt as _;
 use wasmtime::component::types;
 use wrpc_wasmtime::ServeExt as _;
 
-use super::transport::InProcServer;
+use super::handle::with_depth;
+use super::transport::{Endpoint, InProcServer};
 use crate::registry::{Guest, GuestId};
 use crate::runtime::Runtime;
 use crate::store::StoreCtx;
@@ -46,27 +47,28 @@ where
         return Ok(());
     }
 
-    let mut servers: HashMap<GuestId, Arc<InProcServer>> = HashMap::new();
+    let mut endpoints: HashMap<GuestId, Endpoint> = HashMap::new();
     for guest in registry.guests() {
-        if let Some(server) = serve_guest(state, &guest).await? {
-            servers.insert(guest.id().clone(), server);
+        if let Some(endpoint) = serve_guest(state, &guest).await? {
+            endpoints.insert(guest.id().clone(), endpoint);
         }
     }
 
     // Publish every bootstrap endpoint as one lifecycle transition.
     let transport = handle.transport();
     let _lifecycle = handle.lifecycle_write();
-    for (id, server) in servers {
-        transport.insert(&id, server)?;
+    for (id, endpoint) in endpoints {
+        transport.insert(&id, endpoint)?;
     }
     Ok(())
 }
 
 /// Wire the serve side of one guest's host-mediated exports, returning its
-/// wRPC server — `None` when the guest exports no linked interface.
+/// endpoint (wRPC server plus drain tasks) — `None` when the guest exports no
+/// linked interface.
 ///
 /// Shared by the bootstrap walk above and by dynamic registration
-/// (serve-at-register), which hands the returned server to the registry's
+/// (serve-at-register), which hands the returned endpoint to the registry's
 /// transactional publish so endpoint and registry entry appear as one step.
 ///
 /// # Errors
@@ -74,7 +76,7 @@ where
 /// Returns an error if a guest's export cannot be served over the carrier.
 pub async fn serve_guest<B>(
     state: &Runtime<B>, guest: &Guest<StoreCtx<B>>,
-) -> Result<Option<Arc<InProcServer>>>
+) -> Result<Option<Endpoint>>
 where
     B: Clone + Send + Sync + 'static,
 {
@@ -84,6 +86,7 @@ where
 
     let component_ty = guest.component().component_type();
     let mut server: Option<Arc<InProcServer>> = None;
+    let mut drains = Vec::new();
 
     for (interface, types::ComponentExtern { ty, .. }) in component_ty.exports(&engine) {
         if !handle.links().contains(interface) {
@@ -114,23 +117,26 @@ where
                     format!("serving `{interface}/{func}` from guest `{}`", guest.id())
                 })?;
 
-            tokio::spawn(async move {
+            drains.push(tokio::spawn(async move {
                 let mut stream = pin!(stream);
                 while let Some(invocation) = stream.next().await {
                     match invocation {
-                        Ok((_cx, fut)) => {
-                            tokio::spawn(async move {
+                        Ok((depth, fut)) => {
+                            // Re-establish the caller's chain depth around the
+                            // served invocation so nested dispatches it makes
+                            // stay bounded per chain.
+                            tokio::spawn(with_depth(depth, async move {
                                 if let Err(error) = fut.await {
                                     tracing::error!(%error, "link serve invocation failed");
                                 }
-                            });
+                            }));
                         }
                         Err(error) => tracing::error!(%error, "link serve accept failed"),
                     }
                 }
-            });
+            }));
         }
     }
 
-    Ok(server)
+    Ok(server.map(|server| Endpoint::new(server, drains)))
 }

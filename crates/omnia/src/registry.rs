@@ -24,7 +24,7 @@ use wrpc_wasmtime::WrpcView;
 
 use crate::RuntimeOptions;
 use crate::deployment::LoadedGuest;
-use crate::dispatch::{self, DispatchHandle, InProcServer};
+use crate::dispatch::{self, DispatchHandle, Endpoint};
 
 /// Opaque guest identity.
 ///
@@ -267,7 +267,7 @@ impl<T: 'static> Registry<T> {
     /// entries can never be shadowed; a dynamic upgrade is
     /// deregister + register); on refusal neither map is touched, so a failed
     /// registration leaves no partial state.
-    pub(crate) fn publish(&self, guest: Guest<T>, server: Option<Arc<InProcServer>>) -> Result<()> {
+    pub(crate) fn publish(&self, guest: Guest<T>, endpoint: Option<Endpoint>) -> Result<()> {
         let id = guest.id().clone();
         let transport = self.dispatch.transport();
 
@@ -279,8 +279,8 @@ impl<T: 'static> Registry<T> {
             btree_map::Entry::Vacant(slot) => {
                 // Endpoint before entry: `insert` refuses an occupied slot, and
                 // failing here leaves the registry map untouched.
-                if let Some(server) = server {
-                    transport.insert(&id, server)?;
+                if let Some(endpoint) = endpoint {
+                    transport.insert(&id, endpoint)?;
                 }
                 slot.insert(Arc::new(guest));
             }

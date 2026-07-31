@@ -42,7 +42,6 @@ wasmtime-wasi.workspace = true
 # guest dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 cfg-if.workspace = true
-num-traits = "0.2.19"
 tracing-subscriber = { workspace = true, features = ["env-filter"], optional = true }
 omnia-guest-macros.workspace = true
 wit-bindgen.workspace = true

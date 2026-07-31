@@ -214,11 +214,9 @@ where
         }
     }
 
-    // Resolve-on-miss runs before `enter`: a slow fetch/compile must not pin
-    // a process-wide depth slot for the duration of resolution.
     ensure_endpoint(handle, &target, interface).await?;
 
-    let _guard = handle.enter(&target)?;
+    let depth = handle.enter(&target)?;
 
     let param_types: Vec<Type> = ty.params().map(|(_, ty)| ty).collect();
     let result_types: Vec<Type> = ty.results().collect();
@@ -229,7 +227,7 @@ where
         param_types.len()
     );
 
-    let client = handle.transport().connect(&target)?;
+    let client = handle.transport().connect(&target, depth)?;
 
     // Encode the forwarded parameters with wRPC's value codec.
     let mut buf = BytesMut::new();
@@ -317,11 +315,9 @@ where
         }
     }
 
-    // Resolve-on-miss runs before `enter`: a slow fetch/compile must not pin
-    // a process-wide depth slot for the duration of resolution.
     ensure_endpoint(handle, &target, interface).await?;
 
-    let _guard = handle.enter(&target)?;
+    let depth = handle.enter(&target)?;
 
     let param_types: Vec<Type> = ty.params().map(|(_, ty)| ty).collect();
     let result_types: Vec<Type> = ty.results().collect();
@@ -332,7 +328,7 @@ where
         param_types.len()
     );
 
-    let client = handle.transport().connect(&target)?;
+    let client = handle.transport().connect(&target, depth)?;
 
     // Encode the forwarded parameters with wRPC's value codec.
     let mut buf = BytesMut::new();

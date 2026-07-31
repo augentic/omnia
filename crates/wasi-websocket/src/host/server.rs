@@ -38,8 +38,12 @@ where
         routing: Arc::new(routing),
     };
 
-    // handle events from the websocket clients
-    while let Some(event) = handler.events().await?.next().await {
+    // Subscribe once: a fresh subscription per iteration would drop events
+    // published between polls (broadcast receivers only see what arrives
+    // after they subscribe).
+    let mut events = handler.events().await?;
+
+    while let Some(event) = events.next().await {
         let handler = handler.clone();
 
         tokio::spawn(async move {
