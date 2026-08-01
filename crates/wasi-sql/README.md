@@ -10,6 +10,10 @@ Implements the `wasi:sql` WIT interface.
 
 - **Host**: Uses `rusqlite` to provide a `SQLite` backend. Supports both in-memory (`:memory:`) and file-based databases.
 
+## Cargo features
+
+- `sqlite` *(default)*: the bundled-SQLite default backend (`SqlDefault`). Disable it (`default-features = false`) when supplying your own `WasiSqlCtx` backend to skip compiling bundled `SQLite`.
+
 ## Features
 
 ### Guest ORM Layer

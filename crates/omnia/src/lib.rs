@@ -2,6 +2,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 #![allow(unsafe_code)] // wasmtime component deserialization and deployment hooks
 
+#[cfg(feature = "cli")]
 mod cli;
 mod deployment;
 mod dispatch;
@@ -13,6 +14,7 @@ mod runtime;
 mod store;
 pub mod telemetry;
 
+#[cfg(feature = "cli")]
 pub use clap::Parser;
 pub use omnia_host_macros::runtime;
 #[doc(hidden)]
@@ -22,6 +24,7 @@ pub use wrpc_wasmtime::{WrpcCtxView, WrpcView};
 #[doc(hidden)]
 pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
+#[cfg(feature = "cli")]
 pub use self::cli::{Cli, Command};
 pub use self::deployment::{
     Deployment, DeploymentBuilder, GuestArtifact, GuestEntry, HttpRoute, Manifest, Mount,

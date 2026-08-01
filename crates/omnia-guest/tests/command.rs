@@ -1,5 +1,7 @@
 //! Command router public contract.
 
+#![cfg(feature = "cli")]
+
 use std::any::TypeId;
 use std::error::Error;
 use std::{fmt, io};

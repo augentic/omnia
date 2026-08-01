@@ -10,6 +10,10 @@ Implements the `wasi:identity` WIT interface.
 
 - **Default**: Uses `oauth2` crate to interact with OAuth2/OIDC providers.
 
+## Cargo features
+
+- `oauth` *(default)*: the `OAuth2` client-credentials default backend (`IdentityDefault`). Disable it (`default-features = false`) when supplying your own `WasiIdentityCtx` backend to skip compiling `oauth2` and its bundled HTTP/TLS stack.
+
 ## Configuration
 
 Requires configuration via environment variables or other sources to set provider details (Client ID, Client Secret, etc.).

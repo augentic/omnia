@@ -16,10 +16,20 @@ version.workspace = true
 workspace = true
 
 [features]
-default = ["jit"]
+default = ["cli", "jit", "otlp"]
+
+# Enables the standard `omnia run` CLI grammar in generated `main`s and the
+# `clap` re-export. Without it, deployments are direct commands (the macro's
+# `program:` key) or built programmatically via `DeploymentBuilder`.
+cli = ["dep:clap"]
 
 # Enables just-in-time wasm to machine code compilation.
 jit = ["wasmtime/cranelift"]
+
+# Enables the OTLP (gRPC) span and metric exporters. Without it, `Telemetry`
+# still installs the fmt/`EnvFilter` subscriber, while `telemetry::flush` and
+# `telemetry::resource` become no-ops.
+otlp = ["dep:opentelemetry-otlp", "dep:tracing-opentelemetry"]
 
 # Enables memory protection keys (MPK) support in the pooling allocator. MPK
 # only functions on Linux/x86_64; elsewhere it compiles but is inert
@@ -39,18 +49,21 @@ bytes.workspace = true
 cap-fs-ext.workspace = true
 cap-std.workspace = true
 cfg-if.workspace = true
-clap.workspace = true
+clap = { workspace = true, optional = true }
 fromenv.workspace = true
 futures.workspace = true
 http.workspace = true
 opentelemetry.workspace = true
-opentelemetry-otlp = { version = "0.32.0", features = ["grpc-tonic"] }
+# Tonic-only export: the defaults add an HTTP export path (opentelemetry-http →
+# reqwest) that `telemetry.rs` never uses. TLS was never enabled for the gRPC
+# channel (`tls-*` is not a default), so plaintext OTLP behavior is unchanged.
+opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["grpc-tonic", "metrics", "trace"], optional = true }
 opentelemetry_sdk = { workspace = true, features = ["rt-tokio"] }
 pastey.workspace = true
 serde.workspace = true
 toml.workspace = true
 tracing.workspace = true
-tracing-opentelemetry.workspace = true
+tracing-opentelemetry = { workspace = true, optional = true }
 tracing-subscriber.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "rt", "sync", "time"] }
 tokio-util = { workspace = true, features = ["codec"] }
