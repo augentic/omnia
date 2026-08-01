@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 use std::env;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 pub use manifest::{
@@ -67,6 +68,7 @@ pub struct DeploymentBuilder<P = WasmOnly> {
     command_guest: Option<GuestId>,
     program_name: Option<String>,
     log_mode: Option<LogMode>,
+    guest_timeout: Option<Duration>,
     policy: PhantomData<fn() -> P>,
 }
 
@@ -84,6 +86,7 @@ impl<P> std::fmt::Debug for DeploymentBuilder<P> {
             .field("command_guest", &self.command_guest)
             .field("program_name", &self.program_name)
             .field("log_mode", &self.log_mode)
+            .field("guest_timeout", &self.guest_timeout)
             .finish_non_exhaustive()
     }
 }
@@ -101,6 +104,7 @@ impl Default for DeploymentBuilder<WasmOnly> {
             command_guest: None,
             program_name: None,
             log_mode: None,
+            guest_timeout: None,
             policy: PhantomData,
         }
     }
@@ -219,6 +223,14 @@ impl<P> DeploymentBuilder<P> {
         self
     }
 
+    /// Override the wall-clock cap on server and server-rooted link-dispatch
+    /// invocations for this deployment. Unset defers to `GUEST_TIMEOUT_MS`.
+    #[must_use]
+    pub const fn guest_timeout(mut self, timeout: Duration) -> Self {
+        self.guest_timeout = Some(timeout);
+        self
+    }
+
     /// Resolve the manifest and build the deployment under `policy`.
     async fn build_inner<T: WasiView + 'static>(
         self, policy: ArtifactPolicy,
@@ -262,6 +274,9 @@ impl<P> DeploymentBuilder<P> {
         deployment.http_paths = self.http_paths;
         deployment.http_listener = self.http_listener;
         deployment.command_guest = self.command_guest;
+        if let Some(timeout) = self.guest_timeout {
+            deployment.options.guest_timeout = timeout;
+        }
         Ok(deployment)
     }
 }
@@ -290,6 +305,7 @@ impl DeploymentBuilder<WasmOnly> {
             command_guest: self.command_guest,
             program_name: self.program_name,
             log_mode: self.log_mode,
+            guest_timeout: self.guest_timeout,
             policy: PhantomData,
         }
     }

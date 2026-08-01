@@ -42,7 +42,7 @@ cargo run -- run ./path/to/guest.wasm
 The optional `mode` key selects how the runtime drives guests:
 
 - **`mode: server`** (the default) — the runtime stays up and serves requests. Trigger hosts (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`) listen for traffic and instantiate a fresh guest instance per request.
-- **`mode: command`** — the runtime drives the guest's `wasi:cli/run` export exactly once, then exits with the guest's status. Use this for jobs, CLIs, and agent tasks. Unlike server triggers, command mode applies no `GUEST_TIMEOUT_MS` wall-clock cap.
+- **`mode: command`** — the runtime drives the guest's `wasi:cli/run` export exactly once, then exits with the guest's status. Use this for jobs, CLIs, and agent tasks. Unlike server triggers, command mode applies no `GUEST_TIMEOUT_MS` wall-clock cap — to the run itself or to any link dispatch made along its call chain.
 
 ```rust
 omnia::runtime!({

@@ -48,7 +48,7 @@ use wasmtime::{Config, Enabled, InstanceAllocationStrategy, PoolingAllocationCon
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Debug, FromEnv)]
 pub struct RuntimeOptions {
-    /// Wall-clock cap on a server or link-dispatch invocation (`GUEST_TIMEOUT_MS`, default 30s, min 1ms; command mode uncapped).
+    /// Wall-clock cap on a server or server-rooted link-dispatch invocation (`GUEST_TIMEOUT_MS`, default 30s, min 1ms; a command-mode chain, including its link hops, is uncapped).
     #[env(from = "GUEST_TIMEOUT_MS", default = "30000", with = parse_timeout)]
     pub guest_timeout: Duration,
     /// Epoch-increment interval, also the CPU-bound guest yield granularity (`EPOCH_TICK_MS`, default 10ms, min 1ms).

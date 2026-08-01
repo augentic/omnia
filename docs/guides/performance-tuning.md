@@ -53,7 +53,7 @@ Per-request tuning doesn't help cold starts. For those, pre-compile guests (`com
 
 ## Limits that interact with latency
 
-- `GUEST_TIMEOUT_MS` (default 30s) bounds each server/dispatch invocation wall-clock (command mode is uncapped); `EPOCH_TICK_MS` (default 10ms) is the granularity at which CPU-bound guests yield and timeouts are enforced. Lowering the tick tightens timeout precision at slight overhead.
+- `GUEST_TIMEOUT_MS` (default 30s) bounds each server invocation and each server-rooted link-dispatch hop wall-clock (a command-mode chain, including its link hops, is uncapped); `EPOCH_TICK_MS` (default 10ms) is the granularity at which CPU-bound guests yield and timeouts are enforced. Lowering the tick tightens timeout precision at slight overhead.
 - `MAX_FUEL` adds per-instruction metering. Leave it at `0` (off) unless you need deterministic CPU budgets — metering has measurable overhead and is compile-affecting.
 - `MAX_MEMORY_BYTES` caps guest memory growth; `POOL_MAX_MEMORY_BYTES` must be at least the largest guest's requirement or instantiation falls back off the pool.
 

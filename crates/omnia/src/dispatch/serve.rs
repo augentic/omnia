@@ -9,7 +9,7 @@ use futures::StreamExt as _;
 use wasmtime::component::types;
 use wrpc_wasmtime::ServeExt as _;
 
-use super::handle::with_depth;
+use super::handle::with_chain;
 use super::transport::{Endpoint, InProcServer};
 use crate::registry::{Guest, GuestId};
 use crate::runtime::Runtime;
@@ -121,11 +121,12 @@ where
                 let mut stream = pin!(stream);
                 while let Some(invocation) = stream.next().await {
                     match invocation {
-                        Ok((depth, fut)) => {
-                            // Re-establish the caller's chain depth around the
-                            // served invocation so nested dispatches it makes
-                            // stay bounded per chain.
-                            tokio::spawn(with_depth(depth, async move {
+                        Ok((ctx, fut)) => {
+                            // Re-establish the caller's chain context around
+                            // the served invocation so nested dispatches it
+                            // makes stay bounded per chain and inherit the
+                            // chain's wall-clock policy.
+                            tokio::spawn(with_chain(ctx, async move {
                                 if let Err(error) = fut.await {
                                     tracing::error!(%error, "link serve invocation failed");
                                 }
