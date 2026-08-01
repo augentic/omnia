@@ -196,6 +196,9 @@ struct Call<'a> {
     param_types: Vec<Type>,
     result_types: Vec<Type>,
     client: super::transport::LinkClient,
+    // Whether this call's chain root runs uncapped (command mode): the
+    // round-trip then skips the `guest_timeout` wall-clock bound.
+    uncapped: bool,
 }
 
 /// Shared per-call preamble: select the target, reject crossing resources,
@@ -223,7 +226,7 @@ async fn prepare<'a>(
 
     ensure_endpoint(handle, &target, interface).await?;
 
-    let depth = handle.enter(&target)?;
+    let ctx = handle.enter(&target)?;
 
     let param_types: Vec<Type> = ty.params().map(|(_, ty)| ty).collect();
     let result_types: Vec<Type> = ty.results().collect();
@@ -234,7 +237,7 @@ async fn prepare<'a>(
         param_types.len()
     );
 
-    let client = handle.transport().connect(&target, depth)?;
+    let client = handle.transport().connect(&target, ctx)?;
 
     Ok(Call {
         start,
@@ -243,6 +246,7 @@ async fn prepare<'a>(
         param_types,
         result_types,
         client,
+        uncapped: ctx.uncapped,
     })
 }
 
@@ -274,6 +278,22 @@ fn timeout_error(
     )
 }
 
+/// Await the dispatch round-trip, bounded by `guest_timeout` unless the call's
+/// chain root runs uncapped (a command-mode `wasi:cli/run` drive).
+async fn bounded<F>(
+    handle: &DispatchHandle, call: &Call<'_>, interface: &str, func: &str, fut: F,
+) -> Result<()>
+where
+    F: Future<Output = Result<()>>,
+{
+    if call.uncapped {
+        return fut.await;
+    }
+    tokio::time::timeout(handle.timeout(), fut)
+        .await
+        .map_err(|_elapsed| timeout_error(handle, &call.target, interface, func))?
+}
+
 fn log_dispatch(call: &Call<'_>, interface: &str, func: &str) {
     let elapsed_us = u64::try_from(call.start.elapsed().as_micros()).unwrap_or(u64::MAX);
     tracing::debug!(
@@ -302,10 +322,11 @@ where
 
     // Invoke over the carrier; the request is written and flushed here, the
     // results stream back on `incoming`. No deferred (async) parameters, so the
-    // outgoing half carries nothing further and is dropped. The round-trip is
-    // bounded by `guest_timeout` so a hung target cannot stall the caller.
+    // outgoing half carries nothing further and is dropped. On a server-rooted
+    // chain the round-trip is bounded by `guest_timeout` so a hung target
+    // cannot stall the caller; a command-rooted chain runs uncapped.
     let target = &call.target;
-    tokio::time::timeout(handle.timeout(), async {
+    let round_trip = async {
         let (_outgoing, incoming) =
             call.client.invoke((), interface, func, buf.freeze(), &[[]; 0]).await.with_context(
                 || format!("invoking link target `{target}` for `{interface}/{func}`"),
@@ -319,9 +340,8 @@ where
                 .with_context(|| format!("decoding result {index} from `{target}`"))?;
         }
         anyhow::Ok(())
-    })
-    .await
-    .map_err(|_elapsed| timeout_error(handle, &call.target, interface, func))??;
+    };
+    bounded(handle, &call, interface, func, round_trip).await?;
 
     log_dispatch(&call, interface, func);
     Ok(())
@@ -347,7 +367,7 @@ where
 
     // Invoke over the carrier; see `send` for the streaming/timeout contract.
     let target = &call.target;
-    tokio::time::timeout(handle.timeout(), async {
+    let round_trip = async {
         let (_outgoing, incoming) =
             call.client.invoke((), interface, func, buf.freeze(), &[[]; 0]).await.with_context(
                 || format!("invoking link target `{target}` for `{interface}/{func}`"),
@@ -360,9 +380,8 @@ where
                 .with_context(|| format!("decoding result {index} from `{target}`"))?;
         }
         anyhow::Ok(())
-    })
-    .await
-    .map_err(|_elapsed| timeout_error(handle, &call.target, interface, func))??;
+    };
+    bounded(handle, &call, interface, func, round_trip).await?;
 
     log_dispatch(&call, interface, func);
     Ok(())

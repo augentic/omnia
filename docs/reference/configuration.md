@@ -30,7 +30,7 @@ A binary built with the `runtime!` macro's `program:` key reserves two host flag
 
 | Variable             | Default               | Meaning                                                               |
 | -------------------- | --------------------- | --------------------------------------------------------------------- |
-| `GUEST_TIMEOUT_MS`   | `30000`               | Wall-clock cap on a single server/dispatch guest invocation. Command mode (`wasi:cli/run`) is uncapped. |
+| `GUEST_TIMEOUT_MS`   | `30000`               | Wall-clock cap on a single server guest invocation and each link-dispatch hop on a server-rooted chain. A command-mode (`wasi:cli/run`) chain is uncapped, including its link hops. |
 | `MAX_MEMORY_BYTES`   | `268435456` (256 MiB) | Maximum linear memory a guest may grow to.                            |
 | `MAX_FUEL`           | `0` (off)             | Per-invocation fuel budget; `0` disables metering. Compile-affecting. |
 | `MAX_DISPATCH_DEPTH` | `8`                   | Maximum nesting depth for host-mediated guest-to-guest calls.         |

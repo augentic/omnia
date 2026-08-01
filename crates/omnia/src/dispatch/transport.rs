@@ -26,6 +26,7 @@ use wasmtime::component::ResourceTable;
 use wrpc_transport::frame::{Oneshot, Server};
 use wrpc_wasmtime::{SharedResourceTable, WrpcCtx, WrpcCtxView};
 
+use super::handle::ChainCtx;
 use crate::registry::GuestId;
 
 /// Default in-process pipe buffer size (64 kibibytes).
@@ -33,8 +34,9 @@ const DUPLEX_BUF: usize = 1 << 16;
 
 /// The in-process wRPC server type: framed transport over a `tokio::io::duplex`
 /// byte stream, one connection accepted per dispatched call. The accept
-/// context carries the caller's chain depth to the serve side.
-pub type InProcServer = Server<usize, ReadHalf<DuplexStream>, WriteHalf<DuplexStream>>;
+/// context carries the caller's chain context (depth plus wall-clock policy)
+/// to the serve side.
+pub type InProcServer = Server<ChainCtx, ReadHalf<DuplexStream>, WriteHalf<DuplexStream>>;
 
 /// The in-process wRPC client handle: a single stream pair to one target's
 /// server, used for exactly one invocation.
@@ -57,13 +59,14 @@ pub trait LinkTransport: Send + Sync + 'static {
     type Client: wrpc_transport::Invoke<Context = ()>;
 
     /// Open a fresh client connection to `target` for a single invocation
-    /// running at `depth` in its dispatch chain; the transport carries the
-    /// depth to the serve side so nested calls stay bounded.
+    /// running at `ctx` in its dispatch chain; the transport carries the
+    /// context to the serve side so nested calls stay bounded and inherit the
+    /// chain's wall-clock policy.
     ///
     /// # Errors
     ///
     /// Returns an error if `target` has no bound endpoint on this transport.
-    fn connect(&self, target: &GuestId, depth: usize) -> Result<Self::Client>;
+    fn connect(&self, target: &GuestId, ctx: ChainCtx) -> Result<Self::Client>;
 }
 
 /// A guest's serve side: its wRPC server plus the detached tasks draining each
@@ -220,7 +223,7 @@ impl WrpcCtx<InProcClient> for WrpcState {
 impl LinkTransport for InProcess {
     type Client = InProcClient;
 
-    fn connect(&self, target: &GuestId, depth: usize) -> Result<Self::Client> {
+    fn connect(&self, target: &GuestId, ctx: ChainCtx) -> Result<Self::Client> {
         let server = self.server(target).with_context(|| {
             format!(
                 "no in-process endpoint serves guest `{target}` (is it registered and does it \
@@ -234,7 +237,7 @@ impl LinkTransport for InProcess {
         let (client, server_stream) = Oneshot::duplex(DUPLEX_BUF);
         let (server_rx, server_tx) = split(server_stream);
         tokio::spawn(async move {
-            if let Err(error) = server.accept(depth, server_tx, server_rx).await {
+            if let Err(error) = server.accept(ctx, server_tx, server_rx).await {
                 tracing::error!(%error, "in-process link accept failed");
             }
         });

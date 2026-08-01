@@ -20,7 +20,7 @@ use futures::FutureExt as _;
 use omnia::wasmtime::component::Val;
 use omnia::{
     DeploymentBuilder, FutureResult, GuestArtifact, GuestEntry, GuestId, GuestResolver, Manifest,
-    MountRegistry, Runtime, serve_links,
+    MountRegistry, Runtime, as_command_chain, serve_links,
 };
 use omnia_testkit::{find_guest, precompiled_artifact as precompiled, raw_wasm};
 use tokio::sync::Notify;
@@ -104,12 +104,23 @@ async fn call_router_to_slow(
 /// Build the two-guest deployment and wire the serve side, returning the
 /// runtime plus the shared bundle-clone counter.
 async fn build_runtime() -> Result<(Runtime<Counter>, Arc<AtomicUsize>)> {
-    build_runtime_with(None).await
+    build_runtime_inner(None, None).await
 }
 
 /// [`build_runtime`] with an optional resolve-on-miss resolver installed.
 async fn build_runtime_with(
     resolver: Option<Arc<dyn GuestResolver>>,
+) -> Result<(Runtime<Counter>, Arc<AtomicUsize>)> {
+    build_runtime_inner(resolver, None).await
+}
+
+/// [`build_runtime`] with a programmatic `guest_timeout` cap.
+async fn build_runtime_capped(timeout: Duration) -> Result<(Runtime<Counter>, Arc<AtomicUsize>)> {
+    build_runtime_inner(None, Some(timeout)).await
+}
+
+async fn build_runtime_inner(
+    resolver: Option<Arc<dyn GuestResolver>>, guest_timeout: Option<Duration>,
 ) -> Result<(Runtime<Counter>, Arc<AtomicUsize>)> {
     let responder = find_guest("guest_link_responder_wasm.wasm");
     let router = find_guest("guest_link_router_wasm.wasm");
@@ -118,7 +129,10 @@ async fn build_runtime_with(
         .guest(GuestEntry::new("responder", responder))
         .guest(GuestEntry::new("router", router).link("omnia:link/echo"));
 
-    let builder = DeploymentBuilder::new().manifest(manifest).precompiled();
+    let mut builder = DeploymentBuilder::new().manifest(manifest).precompiled();
+    if let Some(timeout) = guest_timeout {
+        builder = builder.guest_timeout(timeout);
+    }
     // SAFETY: `find_guest` only returns artifacts this workspace built and
     // serialized itself (`cargo make test-guests`).
     let deployment = unsafe { builder.build::<TestCtx>() }.await.context("building runtime")?;
@@ -253,6 +267,40 @@ fn dispatch_async() -> Result<()> {
             let echoed = call_router(&runtime, "run-slow", message).await?;
             assert_eq!(echoed, format!("responder echoes slowly: {message}"));
         }
+
+        Ok(())
+    })
+}
+
+// A server-rooted chain bounds each link-dispatch hop by `guest_timeout`: a
+// cap shorter than the responder's `echo-slow` park (5ms) times the hop out.
+#[test]
+fn dispatch_timeout_on_server_chain() -> Result<()> {
+    fixture::RT.block_on(async {
+        let (runtime, _clones) = build_runtime_capped(Duration::from_millis(1)).await?;
+
+        let error = call_router(&runtime, "run-slow", "hello")
+            .await
+            .expect_err("a 1ms cap must time out the parked responder");
+        ensure!(
+            format!("{error:#}").contains("timed out after"),
+            "the failure is the link-dispatch timeout, got: {error:#}"
+        );
+
+        Ok(())
+    })
+}
+
+// The same short cap under a command-mode chain root does not apply: link
+// hops on a command chain run uncapped, matching the uncapped `wasi:cli/run`
+// drive itself.
+#[test]
+fn dispatch_uncapped_on_command_chain() -> Result<()> {
+    fixture::RT.block_on(async {
+        let (runtime, _clones) = build_runtime_capped(Duration::from_millis(1)).await?;
+
+        let echoed = as_command_chain(call_router(&runtime, "run-slow", "hello")).await?;
+        assert_eq!(echoed, "responder echoes slowly: hello");
 
         Ok(())
     })

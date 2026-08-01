@@ -29,7 +29,7 @@ pub use self::deployment::{
 };
 pub use self::dispatch::{
     Dispatcher, EnsureError, FirstArgSelector, GuestResolver, GuestSelector, HttpPaths, LinkClient,
-    WrpcState, serve_links,
+    WrpcState, as_command_chain, serve_links,
 };
 pub use self::host::{
     Backend, FromEnv, FutureResult, HasTable, Host, NoOptions, Proxy, Server, get_cloned,
