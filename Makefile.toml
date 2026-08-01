@@ -20,7 +20,7 @@ skip_rust_env_info = true
 dependencies = ["audit", "fmt", "lint", "outdated", "deps"]
 
 [tasks.ci]
-dependencies = ["fmt", "lint", "test", "test-seam", "test-docs", "docs", "vet", "outdated", "deny"]
+dependencies = ["fmt", "lint", "features", "test", "seam", "test-docs", "docs", "vet", "outdated", "deny"]
 
 # -------------------------------------
 # Individual Actions
@@ -50,6 +50,17 @@ cargo +nightly udeps --all-targets
 install_crate = "cargo-udeps"
 # args = ["machete", "--skip-target-dir"]
 # install_crate = "cargo-machete"
+
+# Feature gates: the flagged crates must stay warning-free without their
+# default features so the gates don't rot (`lint` only covers --all-features).
+[tasks.features]
+script = '''
+cargo clippy -p omnia -p omnia-wasi-sql -p omnia-wasi-identity -p omnia-guest --no-default-features --all-targets -- -D warnings
+cargo clippy -p omnia --no-default-features --features cli --all-targets -- -D warnings
+cargo clippy -p omnia --no-default-features --features jit --all-targets -- -D warnings
+cargo clippy -p omnia --no-default-features --features otlp --all-targets -- -D warnings
+'''
+install_crate = { rustup_component_name = "clippy" }
 
 # Fmt (fix in place)
 [tasks.fmt]
@@ -90,7 +101,7 @@ env = { RUSTFLAGS = "-Dwarnings" }
 # Seam tier: the consolidated guest–host suite, one process so the runtime
 # fixtures (component, linker, InstancePre) are built once.
 # `test-guests` lives in examples/Makefile.toml (extended above).
-[tasks.test-seam]
+[tasks.seam]
 dependencies = ["test-guests"]
 command = "cargo"
 args = ["test", "-p", "omnia-seam-suite", "--test", "seam"]

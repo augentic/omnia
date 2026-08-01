@@ -2,6 +2,7 @@
 //!
 //! This module implements the host-side logic for the WASI SQL service.
 
+#[cfg(feature = "sqlite")]
 mod default_impl;
 mod readwrite_impl;
 mod resource;
@@ -37,6 +38,7 @@ use omnia::{Host, Server};
 use wasmtime::component::{HasData, Linker};
 
 use self::generated::wasi::sql::{readwrite, types};
+#[cfg(feature = "sqlite")]
 pub use crate::host::default_impl::SqlDefault;
 pub use crate::host::generated::wasi::sql::types::{DataType, Field, Row};
 pub use crate::host::resource::*;

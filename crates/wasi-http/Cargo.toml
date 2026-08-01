@@ -28,7 +28,12 @@ fromenv.workspace = true
 futures.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
-reqwest = { version = "0.13.4", features = ["stream"] }
+# `rustls-no-provider` keeps TLS (and `Identity::from_pem`) without reqwest's
+# default `aws-lc-sys` provider — `ring` is already in the tree via
+# wasmtime-wasi-http. The default backend installs ring as the process
+# provider before building a client (see `host/default_impl.rs`).
+reqwest = { version = "0.13.4", default-features = false, features = ["http2", "rustls-no-provider", "stream", "system-proxy"] }
+rustls = { version = "0.23.42", default-features = false, features = ["ring", "std"] }
 tokio = { workspace = true, features = ["time"] }
 wasmtime = { workspace = true, features = ["component-model-async"] }
 wasmtime-wasi.workspace = true

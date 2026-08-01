@@ -102,6 +102,7 @@ where
 {
     let plan = match entry::plan(options, env::args_os(), env::var_os("OMNIA_CONFIG")) {
         Ok(plan) => plan,
+        #[cfg(feature = "cli")]
         Err(entry::PlanError::Usage(error)) => error.exit(),
         Err(entry::PlanError::Fatal(error)) => {
             eprintln!("{error:#}");

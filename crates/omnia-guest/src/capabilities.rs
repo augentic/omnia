@@ -7,17 +7,20 @@
 mod blob;
 mod broadcast;
 mod config;
+#[cfg(feature = "orm")]
 mod document;
 mod http;
 mod identity;
 mod messaging;
 pub mod model;
 mod state;
+#[cfg(feature = "orm")]
 mod table;
 
 pub use blob::{BlobStore, ContainerMetadata, ObjectMetadata};
 pub use broadcast::Broadcast;
 pub use config::Config;
+#[cfg(feature = "orm")]
 pub use document::DocumentStore;
 pub use http::HttpRequest;
 pub use identity::Identity;
@@ -27,4 +30,5 @@ pub use model::Model;
 #[cfg(target_arch = "wasm32")]
 pub use model::WasiModel;
 pub use state::StateStore;
+#[cfg(feature = "orm")]
 pub use table::TableStore;

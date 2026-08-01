@@ -77,11 +77,23 @@ impl HttpDefault {
     }
 }
 
+// reqwest is built with `rustls-no-provider` (keeping `aws-lc-sys` out of the
+// tree), which requires a process-level crypto provider before a client is
+// built. Ring is the provider wasmtime-wasi-http already links; an embedder
+// that installed its own provider first wins, and losing an install race
+// still leaves exactly one default in place.
+fn ensure_crypto_provider() {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+}
+
 impl Backend for HttpDefault {
     type ConnectOptions = ConnectOptions;
 
     #[instrument]
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
+        ensure_crypto_provider();
         let connect_timeout = Duration::from_secs(options.connect_timeout);
         let builder = reqwest::Client::builder().connect_timeout(connect_timeout);
         let client = builder.build().context("building HTTP client")?;

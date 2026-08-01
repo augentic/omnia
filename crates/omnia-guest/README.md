@@ -126,6 +126,13 @@ fn validate(name: &str) -> Result<(), omnia_guest::Error> {
 
 See the [workspace documentation](https://github.com/augentic/omnia) for the full architecture guide.
 
+## Cargo features
+
+- `cli` *(default)*: the typed command router (`api::command::Router`), built on `clap`.
+- `orm` *(default)*: the SQL ORM, table/document capabilities, and document-store re-exports.
+
+Guests that serve only HTTP or messaging can disable defaults to shrink wasm build time and size.
+
 ## License
 
 MIT OR Apache-2.0

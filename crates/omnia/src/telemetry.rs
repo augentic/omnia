@@ -10,16 +10,27 @@
 //! the runtime does this at the end of every drive.
 
 use std::env;
-use std::sync::{Mutex, OnceLock, PoisonError};
+#[cfg(feature = "otlp")]
+use std::sync::OnceLock;
+use std::sync::{Mutex, PoisonError};
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
+#[cfg(feature = "otlp")]
+use anyhow::anyhow;
+#[cfg(feature = "otlp")]
 use opentelemetry::trace::TracerProvider;
+#[cfg(feature = "otlp")]
 use opentelemetry::{KeyValue, global};
+#[cfg(feature = "otlp")]
 use opentelemetry_otlp::{MetricExporter, SpanExporter, WithExportConfig};
 use opentelemetry_sdk::Resource;
+#[cfg(feature = "otlp")]
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
+#[cfg(feature = "otlp")]
 use opentelemetry_sdk::metrics::SdkMeterProvider;
+#[cfg(feature = "otlp")]
 use opentelemetry_sdk::trace::SdkTracerProvider;
+#[cfg(feature = "otlp")]
 use tracing_opentelemetry::MetricsLayer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -27,6 +38,7 @@ use tracing_subscriber::{EnvFilter, Registry};
 
 // The process's telemetry state. Like the global subscriber that references
 // the providers, it lives for the rest of the process.
+#[cfg(feature = "otlp")]
 static INSTALLED: OnceLock<Installed> = OnceLock::new();
 
 // Serializes first-time initialization. The `OnceLock` alone cannot: `build`
@@ -34,6 +46,7 @@ static INSTALLED: OnceLock<Installed> = OnceLock::new();
 // both pass the empty check and race on `try_init`.
 static INIT: Mutex<()> = Mutex::new(());
 
+#[cfg(feature = "otlp")]
 const UNKNOWN: &str = "unknown";
 
 /// Log preset selecting the subscriber's filter.
@@ -57,10 +70,12 @@ pub enum LogMode {
 pub struct Telemetry {
     /// The name of the application to for the purposes of identifying the
     /// service in telemetry data.
+    #[cfg_attr(not(feature = "otlp"), allow(dead_code))]
     app_name: String,
 
     /// OTLP gRPC endpoint override; unset defers to OpenTelemetry endpoint
     /// resolution (`OTEL_EXPORTER_OTLP_*` env vars, then `http://localhost:4317`).
+    #[cfg_attr(not(feature = "otlp"), allow(dead_code))]
     endpoint: Option<String>,
 
     /// Log preset for the subscriber's filter; unset defers to `RUST_LOG`.
@@ -107,52 +122,69 @@ impl Telemetry {
     /// subscriber fails.
     pub fn build(self) -> Result<()> {
         let _init = INIT.lock().unwrap_or_else(PoisonError::into_inner);
-        if INSTALLED.get().is_some() {
-            return Ok(());
-        }
 
-        let resource = self.resource();
-        let meter_provider = self.build_metrics(resource.clone())?;
-        let tracer_provider = self.build_traces(resource.clone())?;
-
-        let filter_layer = filter(self.log_mode)?;
-
-        // Console tracing goes to stderr: stdout belongs to the guest's
-        // semantic output (command mode pipes and JSON envelopes must stay
-        // clean of log lines).
-        let fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
-        let tracer = tracer_provider.tracer(self.app_name);
-        let tracing_layer = tracing_opentelemetry::layer().with_tracer(tracer);
-        let metrics_layer = MetricsLayer::new(meter_provider.clone());
-
-        // Install the subscriber before publishing providers globally so a
-        // failed try_init does not leave orphaned globals that later builds
-        // would retry against. An already-set subscriber (an embedder's own
-        // tracing setup) is tolerated: their subscriber stays, omnia's
-        // exporters are skipped, and the runtime keeps running.
-        if let Err(error) = Registry::default()
-            .with(filter_layer)
-            .with(fmt_layer)
-            .with(tracing_layer)
-            .with(metrics_layer)
-            .try_init()
+        #[cfg(feature = "otlp")]
         {
-            tracing::warn!(%error, "a tracing subscriber is already set; omnia telemetry skipped");
-            return Ok(());
+            if INSTALLED.get().is_some() {
+                return Ok(());
+            }
+
+            let resource = self.resource();
+            let meter_provider = self.build_metrics(resource.clone())?;
+            let tracer_provider = self.build_traces(resource.clone())?;
+
+            let filter_layer = filter(self.log_mode)?;
+
+            // Console tracing goes to stderr: stdout belongs to the guest's
+            // semantic output (command mode pipes and JSON envelopes must stay
+            // clean of log lines).
+            let fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
+            let tracer = tracer_provider.tracer(self.app_name);
+            let tracing_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+            let metrics_layer = MetricsLayer::new(meter_provider.clone());
+
+            // Install the subscriber before publishing providers globally so a
+            // failed try_init does not leave orphaned globals that later builds
+            // would retry against. An already-set subscriber (an embedder's own
+            // tracing setup) is tolerated: their subscriber stays, omnia's
+            // exporters are skipped, and the runtime keeps running.
+            if let Err(error) = Registry::default()
+                .with(filter_layer)
+                .with(fmt_layer)
+                .with(tracing_layer)
+                .with(metrics_layer)
+                .try_init()
+            {
+                tracing::warn!(%error, "a tracing subscriber is already set; omnia telemetry skipped");
+                return Ok(());
+            }
+
+            global::set_meter_provider(meter_provider.clone());
+            global::set_tracer_provider(tracer_provider.clone());
+
+            INSTALLED
+                .set(Installed {
+                    resource,
+                    tracer: tracer_provider,
+                    meter: meter_provider,
+                })
+                .map_err(|_installed| anyhow!("telemetry providers already installed"))
         }
 
-        global::set_meter_provider(meter_provider.clone());
-        global::set_tracer_provider(tracer_provider.clone());
-
-        INSTALLED
-            .set(Installed {
-                resource,
-                tracer: tracer_provider,
-                meter: meter_provider,
-            })
-            .map_err(|_installed| anyhow!("telemetry providers already installed"))
+        // Without the `otlp` feature there are no providers to install: the
+        // subscriber (filter + fmt) is the whole initialization.
+        #[cfg(not(feature = "otlp"))]
+        {
+            let filter_layer = filter(self.log_mode)?;
+            let fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
+            if let Err(error) = Registry::default().with(filter_layer).with(fmt_layer).try_init() {
+                tracing::warn!(%error, "a tracing subscriber is already set; omnia telemetry skipped");
+            }
+            Ok(())
+        }
     }
 
+    #[cfg(feature = "otlp")]
     fn build_traces(&self, resource: Resource) -> Result<SdkTracerProvider> {
         let mut exporter = SpanExporter::builder().with_tonic();
         if let Some(endpoint) = &self.endpoint {
@@ -165,6 +197,7 @@ impl Telemetry {
             .build())
     }
 
+    #[cfg(feature = "otlp")]
     fn build_metrics(&self, resource: Resource) -> Result<SdkMeterProvider> {
         let mut exporter = MetricExporter::builder().with_tonic();
         if let Some(endpoint) = &self.endpoint {
@@ -177,6 +210,7 @@ impl Telemetry {
             .build())
     }
 
+    #[cfg(feature = "otlp")]
     fn resource(&self) -> Resource {
         Resource::builder()
             .with_service_name(self.app_name.clone())
@@ -226,6 +260,7 @@ fn filter(mode: Option<LogMode>) -> Result<EnvFilter> {
 }
 
 // The process's resource and provider handles.
+#[cfg(feature = "otlp")]
 struct Installed {
     resource: Resource,
     tracer: SdkTracerProvider,
@@ -234,6 +269,7 @@ struct Installed {
 
 // Force-flush (not shut down) both providers, so telemetry keeps exporting
 // afterwards and repeated flushes are safe.
+#[cfg(feature = "otlp")]
 fn flush_providers(tracer: &SdkTracerProvider, meter: &SdkMeterProvider) {
     settle("traces", tracer.force_flush());
     settle("metrics", meter.force_flush());
@@ -241,6 +277,7 @@ fn flush_providers(tracer: &SdkTracerProvider, meter: &SdkMeterProvider) {
 
 // Report a flush failure without panicking; a provider that is already shut
 // down has nothing left to flush.
+#[cfg(feature = "otlp")]
 fn settle(signal: &str, result: OTelSdkResult) {
     match result {
         Ok(()) | Err(OTelSdkError::AlreadyShutdown) => {}
@@ -255,41 +292,62 @@ fn settle(signal: &str, result: OTelSdkResult) {
 /// are safe — the runtime calls it at the end of every drive so queued spans
 /// and metrics survive fast command-mode exits; embedders driving work
 /// themselves should call it before the process exits.
+#[cfg_attr(not(feature = "otlp"), allow(clippy::missing_const_for_fn))]
 pub fn flush() {
+    #[cfg(feature = "otlp")]
     if let Some(installed) = INSTALLED.get() {
         flush_providers(&installed.tracer, &installed.meter);
     }
 }
 
-/// Returns the OpenTelemetry [`Resource`] used to initialize telemetry for a
-/// service, or `None` if telemetry has not been initialized.
+/// Returns the OpenTelemetry [`Resource`] used to initialize telemetry.
+///
+/// `None` when telemetry has not been initialized — always the case without
+/// the `otlp` feature, which builds no providers.
+#[must_use]
+#[cfg_attr(not(feature = "otlp"), allow(clippy::missing_const_for_fn))]
 pub fn resource() -> Option<&'static Resource> {
-    INSTALLED.get().map(|installed| &installed.resource)
+    #[cfg(feature = "otlp")]
+    {
+        INSTALLED.get().map(|installed| &installed.resource)
+    }
+    #[cfg(not(feature = "otlp"))]
+    {
+        None
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "otlp")]
     use std::sync::{Arc, Mutex};
 
+    #[cfg(feature = "otlp")]
     use opentelemetry::trace::{Tracer as _, TracerProvider as _};
+    #[cfg(feature = "otlp")]
     use opentelemetry_sdk::metrics::SdkMeterProvider;
+    #[cfg(feature = "otlp")]
     use opentelemetry_sdk::trace::{SdkTracerProvider, SpanData, SpanExporter};
 
+    #[cfg(feature = "otlp")]
     use super::{OTelSdkResult, flush_providers};
 
     // A span exporter that keeps its records, so flushing is observable
     // without a collector.
+    #[cfg(feature = "otlp")]
     #[derive(Clone, Debug, Default)]
     struct Recording {
         names: Arc<Mutex<Vec<String>>>,
     }
 
+    #[cfg(feature = "otlp")]
     impl Recording {
         fn names(&self) -> Vec<String> {
             self.names.lock().expect("recording lock").clone()
         }
     }
 
+    #[cfg(feature = "otlp")]
     impl SpanExporter for Recording {
         async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
             self.names
@@ -302,6 +360,7 @@ mod tests {
 
     // A batch-exported provider set: spans stay queued (5s schedule delay)
     // until a flush pushes them, so flush behavior is what the test sees.
+    #[cfg(feature = "otlp")]
     fn providers(exporter: &Recording) -> (SdkTracerProvider, SdkMeterProvider) {
         (
             SdkTracerProvider::builder().with_batch_exporter(exporter.clone()).build(),
@@ -355,6 +414,7 @@ mod tests {
 
     // The fast-exit contract: a span emitted immediately before a flush
     // reaches the exporter, and export keeps working after the flush.
+    #[cfg(feature = "otlp")]
     #[test]
     fn flush_exports_queued_spans() {
         let exporter = Recording::default();

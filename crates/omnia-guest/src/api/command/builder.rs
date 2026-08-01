@@ -145,6 +145,8 @@ impl<A, O, D> Run<A, O, D> {
 }
 
 /// A fully typed route ready for router registration.
+// Only the `cli`-gated router reads these fields.
+#[cfg_attr(not(feature = "cli"), allow(dead_code))]
 pub struct Binding<A, O, D, Q> {
     pub(crate) about: Option<&'static str>,
     pub(crate) long_about: Option<&'static str>,

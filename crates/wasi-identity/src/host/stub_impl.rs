@@ -11,7 +11,8 @@ use crate::host::resource::{FutureResult, Identity};
 /// Credential-free `wasi:identity` backend returning a fixed token.
 ///
 /// For tests and local development where no identity provider is available;
-/// production deployments use [`super::IdentityDefault`] or a backend crate.
+/// production deployments use `IdentityDefault` (the `oauth` feature) or a
+/// backend crate.
 #[derive(Debug, Clone, Default)]
 pub struct IdentityStub;
 

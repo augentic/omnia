@@ -15,12 +15,20 @@ version.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["oauth"]
+
+# Enables the OAuth2 client-credentials default backend (`IdentityDefault`).
+# Without it the host surface and `IdentityStub` stay; disabling drops the
+# `oauth2` crate and its bundled reqwest/TLS stack.
+oauth = ["dep:fromenv", "dep:oauth2"]
+
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
-fromenv.workspace = true
+fromenv = { workspace = true, optional = true }
 futures.workspace = true
-oauth2 = "5.0.0"
+oauth2 = { version = "5.0.0", optional = true }
 omnia.workspace = true
 serde.workspace = true
 tracing.workspace = true
