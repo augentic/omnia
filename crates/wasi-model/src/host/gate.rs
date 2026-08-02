@@ -39,6 +39,8 @@ pub fn validate(request: &Request) -> Result<(), Error> {
     Ok(())
 }
 
+// Unit tests by design: request gating is pure validation of the request
+// document, ahead of any backend.
 #[cfg(test)]
 mod tests {
     use super::validate;
