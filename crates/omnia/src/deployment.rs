@@ -592,6 +592,7 @@ fn init_telemetry(name: &str, log_mode: Option<LogMode>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use wasmtime::{Config, Engine};
+
     use crate::RuntimeOptions;
 
     #[test]
