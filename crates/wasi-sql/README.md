@@ -24,6 +24,8 @@ The guest module provides query builders for type-safe database operations:
 - **Query builders**: Fluent APIs for SELECT, INSERT, UPDATE, DELETE.
 - **Joins & Filters**: Type-safe query construction.
 
+- **Production**: [`omnia-postgres`](https://github.com/augentic/omnia-backends/tree/main/crates/postgres) (`PostgreSQL`) — a one-line swap in the host, guests untouched (see the [Production Backends guide](https://github.com/augentic/omnia/blob/main/docs/guides/production-backends.md)).
+
 ## Usage
 
 Add this crate to your `Cargo.toml` and use it in your runtime configuration:

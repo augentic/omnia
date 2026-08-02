@@ -184,7 +184,7 @@ impl<T: WasiView + 'static> Registry<T> {
             }
         }
 
-        tracing::info!(guests = guests.len(), "runtime initialized");
+        tracing::debug!(guests = guests.len(), "runtime initialized");
 
         let static_ids = guests.keys().cloned().collect();
         Ok(Self {

@@ -2,7 +2,7 @@
 
 A single runtime can host many guests, route inbound traffic between them, preopen host directories into their sandboxes, and let one guest call another through the host. All of this is deployment configuration in a TOML manifest — no host or guest code changes.
 
-Passing a single `.wasm` path to `run` remains the zero-config shorthand; the manifest takes over when you need more than one guest, routes, or mounts.
+Come here once a single-guest runtime works ([Composing a Runtime](composing-a-runtime.md)): passing a single `.wasm` path to `run` remains the zero-config shorthand, and the manifest takes over when you need more than one guest, routes, or mounts. This page is the canonical walk-through of the manifest and its concepts; the field-by-field schema is in [Configuration](../reference/configuration.md#deployment-manifest-omniatoml).
 
 ## The deployment manifest (`omnia.toml`)
 
@@ -65,6 +65,28 @@ Each trigger has its own route table, independent of which guests are loaded:
 If a trigger has no routes and exactly one guest exports its handler, that guest is the catch-all — so single-guest deployments need no route tables at all.
 
 The [`http-routing`](../../examples/http-routing/) example runs two HTTP guests behind `/a` and `/b` prefixes.
+
+A messaging deployment works the same way: the host backend subscribes to topics (broker configuration such as `KAFKA_TOPICS`/`NATS_TOPICS`, or everything for the in-memory default), and the route table picks which guest handles each delivered message:
+
+```toml
+[[guest]]
+id = "orders"
+source.path = "./guests/orders.wasm"     # exports the messaging handler
+
+[[guest]]
+id = "billing"
+source.path = "./guests/billing.wasm"    # exports the messaging handler
+
+[[route.messaging]]
+topic = "orders.>"                       # orders.created, orders.cancelled, ...
+guest = "orders"
+
+[[route.messaging]]
+topic = "invoices.*"                     # exactly one token after `invoices.`
+guest = "billing"
+```
+
+Each matched message instantiates a fresh instance of the routed guest, exactly like an HTTP request. Inside the guest, topic-to-operation matching stays exact — see [Messaging](messaging.md#handling-incoming-messages).
 
 ## Mounts: giving guests a workspace
 

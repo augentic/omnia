@@ -4,6 +4,8 @@ The `omnia:model/completion` interface lets a sandboxed guest request a completi
 
 This page covers the guest API, the grants model, the available backends, and how guests can also *serve* tools to models over MCP (the [Model Context Protocol](https://modelcontextprotocol.io)).
 
+> **Host prerequisite.** The runtime serving your guest must link this interface: add `WasiModel: ModelDefault` (from `omnia_wasi_model`) to the `runtime!` `hosts:` map — see [Composing a Runtime](composing-a-runtime.md). Note the default backend only echoes prompts; bind `omnia-genai`/`omnia-cursor` for real completions, or inject `omnia_testkit::model::Scripted` in tests (see [Backends](#backends)).
+
 ## Requesting a completion from a guest
 
 A model guest is typically a command-mode guest (see [Writing Guests](writing-guests.md#command-mode-guests)). It builds a `Request` and calls `completion::create`:

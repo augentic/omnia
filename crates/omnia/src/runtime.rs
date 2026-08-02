@@ -227,12 +227,11 @@ fn log_ready<B>(runtime: &Runtime<B>, mode: Mode)
 where
     B: Clone + Send + Sync + 'static,
 {
-    tracing::info!(
-        mode = if mode.is_command() { "command" } else { "server" },
-        guests = runtime.registry().len(),
-        component = runtime.name(),
-        "omnia ready",
-    );
+    if mode.is_command() {
+        tracing::debug!(component = runtime.name(), "omnia ready");
+    } else {
+        tracing::info!(component = runtime.name(), "omnia ready");
+    }
 }
 
 fn drive_epoch(engine: Engine, tick: Duration) -> tokio::task::JoinHandle<()> {
@@ -770,7 +769,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
             .with_context(|| format!("serving guest `{id}` link exports"))?;
         registry.publish(guest, endpoint)?;
 
-        tracing::info!(guest = %id, "guest registered");
+        tracing::debug!(guest = %id, "guest registered");
         Ok(())
     }
 
@@ -892,7 +891,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// registered.
     pub fn deregister(&self, id: &GuestId) -> Result<()> {
         self.registry().remove(id)?;
-        tracing::info!(guest = %id, "guest deregistered");
+        tracing::debug!(guest = %id, "guest deregistered");
         Ok(())
     }
 

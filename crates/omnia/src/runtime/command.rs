@@ -64,7 +64,7 @@ async fn run_guest<B>(
 where
     B: Clone + Send + Sync + 'static,
 {
-    tracing::info!(guest = %guest_id, "running wasi:cli/run");
+    tracing::debug!(guest = %guest_id, "running wasi:cli/run");
 
     let mut store = runtime.build_store(runtime.store());
     let instance = runtime.instantiate(guest.instance_pre(), &mut store).await?;
@@ -87,6 +87,6 @@ where
         },
     };
 
-    tracing::info!(guest = %guest_id, code = status.code(), "wasi:cli/run exited");
+    tracing::debug!(guest = %guest_id, code = status.code(), "wasi:cli/run exited");
     Ok(status)
 }

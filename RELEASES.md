@@ -2,6 +2,8 @@
 
 Released 2026-07-25
 
+Paired production-backends release: [omnia-backends 0.29.x](https://github.com/augentic/omnia-backends/blob/main/RELEASES.md).
+
 ### Added
 
 - Multi-guest registry: one process hosts many Wasm components on a shared

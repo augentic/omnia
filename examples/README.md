@@ -1,53 +1,87 @@
 # Examples
 
-This directory contains examples demonstrating WASI capabilities with Omnia.
+Every WASI capability has a runnable example here. Each example is a **guest** (a WASI component compiled to `.wasm`, holding the application logic) plus a **runtime** (a native binary that loads the guest and provides its capabilities).
 
-## Structure
-
-Each example is comprised of a **Guest** and a **Runtime**:
-
-- **Guest**: A WASI component (compiled to a `.wasm` file) that contains the business logic.
-- **Runtime**: A native Rust binary that loads the guest and provides the necessary host capabilities (like database access or network I/O).
-
-## Quick Start
+## Quick start
 
 From the repo root, build and run any single-guest example with:
-
-```bash
-make build <name>
-make run <name>
-```
-
-For example:
 
 ```bash
 make build http
 make run http
 ```
 
-Navigate to any example directory and follow the instructions in its `README.md` for test commands and example-specific setup.
+Or use Cargo directly — the two-step pattern behind the Makefile:
+
+```bash
+cargo build --example http-wasm --target wasm32-wasip2
+cargo run --example http -- run ./target/wasm32-wasip2/debug/examples/http_wasm.wasm
+```
+
+(Guest artifact names use underscores: `http_wasm.wasm`, not `http-wasm.wasm`.)
 
 Host startup logs (`initializing runtime`, trigger servers listening, and so on) use `tracing` at the `info` level. `make run` sets a sensible default `RUST_LOG`; override it when you need more detail. Without logging configured, the process stays quiet apart from Cargo's `Running …` line.
 
-Common examples include:
-- **`http`**: Basic HTTP server.
-- **`keyvalue`**: Storing and retrieving state.
-- **`messaging`**: Pub/Sub messaging.
+Each example directory has a `README.md` with test commands and example-specific setup.
 
-## Running Backend Services
+## Example index
 
-By default, the examples in this repository use **in-memory** implementations for services like Key-Value and Messaging. This means you can run them immediately without setting up external infrastructure (like Redis or NATS).
+### Getting started
 
-- **Key-Value**: Uses an in-memory cache. Data is lost when the runtime stops.
-- **Messaging**: Uses in-memory broadcast channels. Messages are only delivered to subscribers within the same process.
-- **SQL**: Uses SQLite (often in-memory or a local file).
+| Example | Demonstrates |
+| ------- | ------------ |
+| [`http`](http) | Basic HTTP server: WASI HTTP handler + Axum routing |
+| [`keyvalue`](keyvalue) | Storing and retrieving state through `wasi:keyvalue` |
+| [`cli`](cli) | A `wasi:cli/run` command-mode guest driven as a one-shot trigger |
 
-### Production Backends
+### One per capability
 
-In a production environment, you would swap these default implementations for robust backends. The Omnia architecture allows you to change the host implementation without recompiling the guest.
+| Example | Demonstrates |
+| ------- | ------------ |
+| [`blobstore`](blobstore) | Object storage containers and blobs (`wasi:blobstore`) |
+| [`config`](config) | Reading runtime configuration (`wasi:config`) |
+| [`docstore`](docstore) | JSON documents with filters, sorting, and pagination (`wasi:docstore`) |
+| [`identity`](identity) | OAuth token acquisition (`wasi:identity`) |
+| [`messaging`](messaging) | Pub-sub, request-reply, and fan-out (`wasi:messaging`) |
+| [`model`](model) | Model completion across the `omnia:model` boundary with the scripted test double |
+| [`otel`](otel) | Guest OpenTelemetry instrumentation (`wasi:otel`) |
+| [`sql`](sql) | CRUD + the guest ORM, including a JOIN endpoint (`wasi:sql`) |
+| [`vault`](vault) | Secret storage (`wasi:vault`) |
+| [`websocket`](websocket) | Real-time bidirectional messaging (`wasi:websocket`) |
 
-For example, to use Redis for Key-Value, you would update the runtime configuration to use the Redis provider instead of the default in-memory one.
+### Composition and deployment patterns
 
-### External backends
+| Example | Demonstrates |
+| ------- | ------------ |
+| [`http-proxy`](http-proxy) | Outbound HTTP from a guest, with a keyvalue caching layer |
+| [`http-routing`](http-routing) | Two HTTP guests behind path prefixes via a deployment manifest |
+| [`guest-api`](guest-api) | Transport-neutral operations with explicit typed HTTP/messaging/command routers |
+| [`guest-link`](guest-link) | Host-mediated guest-to-guest linking over in-process wRPC |
+| [`command-resolver`](command-resolver) | The `runtime!` deployment keys: `program:`, `resolver:`, `command_guest:` |
+| [`mcp`](mcp) | A guest serving MCP tools and resources to AI agents over HTTP |
 
-Some examples bind a production backend from the [`omnia-backends`](https://github.com/augentic/omnia-backends) repo instead of an in-tree default. These require a sibling `omnia-backends` checkout (for path dependencies), plus extra setup such as credentials, CLI tools, or network access. The [`cursor`](https://github.com/augentic/omnia-backends/tree/main/examples/cursor) end-to-end demo lives in that repo: its guest calls `omnia-cursor` for a live completion while serving its own MCP docs tools over HTTP (the same pattern as the in-tree [`mcp`](mcp) guest).
+### Infrastructure
+
+| Example | Demonstrates |
+| ------- | ------------ |
+| [`bench`](bench) | Self-contained HTTP load-test harness for pooling/latency tuning |
+| [`conformance`](conformance) | The shared conformance guest the seam suite drives (one route per interface) |
+
+## Backends
+
+All examples run against **in-memory** default backends — no external infrastructure needed. Data is process-local: keyvalue state is lost when the runtime stops, messages are delivered only within the process, SQL uses SQLite.
+
+Swapping a default for a production backend (Redis, Kafka, Postgres, Azure, ...) is a one-line change in the runtime, with the guest untouched — see [Production Backends](../docs/guides/production-backends.md) for the wiring recipe:
+
+```rust
+omnia::runtime!({
+    hosts: {
+        WasiHttp: HttpDefault,
+        WasiKeyValue: Redis,     // was: KeyValueDefault
+    }
+});
+```
+
+Some demos bind those production backends directly and live in the [`omnia-backends`](https://github.com/augentic/omnia-backends) repo — for example the [`cursor`](https://github.com/augentic/omnia-backends/tree/main/examples/cursor) end-to-end demo, whose guest calls `omnia-cursor` for a live completion while serving its own MCP docs tools over HTTP (the same pattern as the in-tree [`mcp`](mcp) guest). These need extra setup: credentials, CLI tools, or network access.
+
+For a complete application-scale service built on these patterns, see [`omnia-exemplar`](https://github.com/augentic/omnia-exemplar).

@@ -277,7 +277,7 @@ impl<P> DeploymentBuilder<P> {
         let name = env::var("COMPONENT").unwrap_or_else(|_| plan.name.clone());
 
         init_telemetry(&name, self.log_mode)?;
-        tracing::info!("initializing runtime");
+        tracing::debug!("initializing runtime");
 
         let mut deployment = Deployment::from_plan(plan).await?;
         deployment.name = name;
