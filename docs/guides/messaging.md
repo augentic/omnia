@@ -4,6 +4,8 @@ The `wasi:messaging` interface gives guests topic-based publish/subscribe, reque
 
 The [`messaging`](../../examples/messaging/) example demonstrates every pattern below with the default backend.
 
+> **Host prerequisite.** The runtime serving your guest must link this interface: add `WasiMessaging: MessagingDefault` (from `omnia_wasi_messaging`) to the `runtime!` `hosts:` map — see [Composing a Runtime](composing-a-runtime.md). Everything below is guest code.
+
 ## Publishing
 
 Connect a client by name, build a `Message`, and send it to a topic:

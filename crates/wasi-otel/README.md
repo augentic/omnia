@@ -14,6 +14,8 @@ Uses `opentelemetry` and `tracing` crates to export telemetry data.
 
 - **`OTEL_GRPC_URL`**: The gRPC endpoint for the OpenTelemetry collector (default: `http://localhost:4317`).
 
+- **Production**: [`omnia-opentelemetry`](https://github.com/augentic/omnia-backends/tree/main/crates/opentelemetry) (OTLP gRPC collector export) — a one-line swap in the host, guests untouched (see the [Production Backends guide](https://github.com/augentic/omnia/blob/main/docs/guides/production-backends.md)).
+
 ## Usage
 
 Add this crate to your `Cargo.toml` and use it in your runtime configuration:

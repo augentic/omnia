@@ -96,6 +96,7 @@ The key point: the guest never mentions an implementation. It talks to `wasi:key
 
 ## Where to go next
 
+- **[Starting a New Project](new-project.md)** — set up your own guest + host workspace outside this repository.
 - **[Writing Guests](guides/writing-guests.md)** — the full guest-side toolkit: more WASI capabilities, tracing, command-mode guests.
 - **[Composing a Runtime](guides/composing-a-runtime.md)** — everything the `runtime!` macro accepts and what it generates.
 - **[Multi-Guest Deployments](guides/multi-guest-deployments.md)** — run several guests in one runtime with routing and linking.

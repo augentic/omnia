@@ -98,6 +98,40 @@ Almost always a `wit-bindgen` version mismatch between your guest's dependencies
 
 Host-mediated guest-to-guest calls are nested more than 8 deep — usually accidental recursion (guest A's import dispatches to guest B, which calls back into A). Break the cycle, or raise `MAX_DISPATCH_DEPTH` if the depth is intentional.
 
+## `program:` binaries
+
+### `mybin run ...` fails with an argument error / `--config` is rejected
+
+A binary built with the `runtime!` [`program:` key](reference/runtime-macro.md#program-raw-argv-passthrough) has **no host CLI**: no `run` subcommand, no `--config`/`OMNIA_CONFIG` override, no positional wasm path. Its argv goes to the guest verbatim, so `mybin greet Ada` is correct and `mybin run -- greet Ada` hands the guest a literal `run` argument. The deployment is fixed at compile time (compiled-in manifest or resolver).
+
+### A `program:` binary logs nothing (or too much)
+
+`--debug` and `--quiet` are the only host flags on this path; they are peeled anywhere in argv and win over `RUST_LOG` (see [Host log flags](reference/configuration.md#host-log-flags-program-binaries)). Combining them is a startup failure. Without either flag, the `RUST_LOG` filter applies as usual.
+
+### The guest never sees `--debug` / `--quiet`
+
+By design — these two flags are reserved for the host log presets and removed from the guest's argv. Pick different flag names for guest-facing options.
+
+## Testing
+
+### A seam/integration test panics with `guest artifact ... not found` and build instructions
+
+Tests never build guests; `find_guest` only locates artifacts. Build the guests first — in this repo:
+
+```bash
+cargo make test-guests     # builds and serializes the seam-suite guests
+```
+
+or for your own guest, the plain two-step: `cargo build --example <name>-wasm --target wasm32-wasip2` (remember artifact names use underscores). See [Testing Your Guests](guides/testing.md).
+
+### `cargo nextest run --all` doesn't run the seam suite
+
+Intentional: the Nextest default filter (`.config/nextest.toml`) excludes `omnia-seam-suite` from the process-per-test pure tier. Run the seam tier with `cargo make test-seam` (one process, shared fixtures) — see [Seam Suite and Testing Policy](guides/testing-policy.md).
+
+### `model script exhausted` in a test
+
+The `Scripted` double received more completions than it has scripted results — see [Model completions](#model-script-exhausted) below.
+
 ## Model completions
 
 ### `the default echo backend cannot satisfy format::schema`

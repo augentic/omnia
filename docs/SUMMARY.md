@@ -7,6 +7,7 @@
 # Getting Started
 
 - [Getting Started](getting-started.md)
+- [Starting a New Project](new-project.md)
 
 ---
 
@@ -17,7 +18,7 @@
 - [Writing Guests](guides/writing-guests.md)
 - [Composing a Runtime](guides/composing-a-runtime.md)
 - [Multi-Guest Deployments](guides/multi-guest-deployments.md)
-- [Testing Guests and Runtimes](guides/testing.md)
+- [Testing Your Guests](guides/testing.md)
 
 ## Capabilities in depth
 
@@ -45,6 +46,7 @@
 # Reference
 
 - [WASI Interfaces](reference/wasi-interfaces.md)
+- [`runtime!` Macro](reference/runtime-macro.md)
 - [Model Interface](reference/model.md)
 - [DocStore Interface](reference/docstore.md)
 - [CLI](reference/cli.md)
@@ -55,3 +57,9 @@
 # Troubleshooting
 
 - [Troubleshooting](troubleshooting.md)
+
+---
+
+# Contributing
+
+- [Seam Suite and Testing Policy](guides/testing-policy.md)

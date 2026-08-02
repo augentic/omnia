@@ -239,6 +239,7 @@ fn filter(mode: Option<LogMode>) -> Result<EnvFilter> {
     let base = match mode {
         Some(LogMode::Quiet) => return Ok(EnvFilter::new("off")),
         Some(LogMode::Debug) => EnvFilter::new("info")
+            .add_directive("omnia=debug".parse()?)
             .add_directive("omnia_cursor=debug".parse()?)
             .add_directive("omnia_wasi_http=debug".parse()?),
         Some(LogMode::Progress) if env::var_os(EnvFilter::DEFAULT_ENV).is_none() => {
@@ -384,10 +385,11 @@ mod tests {
         }
 
         #[test]
-        fn debug_carries_backend_directives_and_mutes() {
+        fn debug_filter() {
             let rendered = directives(Some(LogMode::Debug));
             for directive in [
                 "info",
+                "omnia=debug",
                 "omnia_cursor=debug",
                 "omnia_wasi_http=debug",
                 "opentelemetry=off",
@@ -400,7 +402,7 @@ mod tests {
         }
 
         #[test]
-        fn env_default_keeps_mutes() {
+        fn env_default() {
             let rendered = directives(None);
             for directive in ["hyper=off", "opentelemetry=off", "omnia_wasi_otel=off"] {
                 assert!(rendered.contains(directive), "missing `{directive}` in `{rendered}`");
@@ -416,7 +418,7 @@ mod tests {
     // reaches the exporter, and export keeps working after the flush.
     #[cfg(feature = "otlp")]
     #[test]
-    fn flush_exports_queued_spans() {
+    fn flush_exports() {
         let exporter = Recording::default();
         let (tracer, meter) = providers(&exporter);
 

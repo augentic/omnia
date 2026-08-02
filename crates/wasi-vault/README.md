@@ -10,6 +10,8 @@ Implements the `wasi:vault` WIT interface.
 
 - **Default**: In-memory implementation. Secrets are not persisted.
 
+- **Production**: [`omnia-azure-vault`](https://github.com/augentic/omnia-backends/tree/main/crates/azure-vault) (Azure Key Vault) — a one-line swap in the host, guests untouched (see the [Production Backends guide](https://github.com/augentic/omnia/blob/main/docs/guides/production-backends.md)).
+
 ## Usage
 
 Add this crate to your `Cargo.toml` and use it in your runtime configuration:

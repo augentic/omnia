@@ -4,6 +4,8 @@ The `wasi:sql` interface gives guests parameterized SQL access to whatever datab
 
 The [`sql`](../../examples/sql/) example is a complete CRUD service (agencies and feeds, with a JOIN endpoint); everything below is drawn from it.
 
+> **Host prerequisite.** The runtime serving your guest must link this interface: add `WasiSql: SqlDefault` (from `omnia_wasi_sql`) to the `runtime!` `hosts:` map — see [Composing a Runtime](composing-a-runtime.md). Everything below is guest code.
+
 ## Raw SQL
 
 Open a connection by pool name, prepare a statement, and execute it. Use this level for DDL and anything the builders don't cover:

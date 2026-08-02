@@ -40,14 +40,14 @@ omnia::runtime!({
 });
 ```
 
-Add the backend crate to your host's `Cargo.toml`:
+Add the backend crate to your host's `Cargo.toml`. Each `omnia-backends` release line is paired with a specific omnia line — currently backends **0.29.x** pairs with omnia **0.35.x**; check the [omnia-backends release notes](https://github.com/augentic/omnia-backends/blob/main/RELEASES.md) for the pairing that matches your omnia version:
 
 ```toml
 [dependencies]
-omnia-redis = "0.28"
+omnia-redis = "0.29"
 ```
 
-For local development against unreleased omnia changes, the `omnia-backends` workspace patches all `omnia`/`omnia-wasi-*` crates to a sibling checkout via `[patch.crates-io]` — keep both repositories checked out side by side and mirror that pattern if your host lives in a third workspace.
+For development against unreleased omnia changes, the `omnia-backends` workspace patches all `omnia`/`omnia-wasi-*` crates via `[patch.crates-io]` — to the omnia git repository by default, or to a sibling checkout by switching those entries to `path = "../omnia/crates/<name>"`. Mirror whichever pattern fits if your host lives in a third workspace.
 
 ## Configuration
 

@@ -18,6 +18,8 @@ Implements the `wasi:identity` WIT interface.
 
 Requires configuration via environment variables or other sources to set provider details (Client ID, Client Secret, etc.).
 
+- **Production**: [`omnia-azure-id`](https://github.com/augentic/omnia-backends/tree/main/crates/azure-id) (Azure Managed Identity) — a one-line swap in the host, guests untouched (see the [Production Backends guide](https://github.com/augentic/omnia/blob/main/docs/guides/production-backends.md)).
+
 ## Usage
 
 Add this crate to your `Cargo.toml` and use it in your runtime configuration:

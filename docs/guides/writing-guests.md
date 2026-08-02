@@ -1,6 +1,17 @@
 # Writing Guests
 
-A guest is your application logic compiled to a WebAssembly component. This guide covers the patterns used across the [examples](../../examples/): HTTP handlers, WASI capabilities, message handlers, command-mode guests, and tracing.
+A guest is your application logic compiled to a WebAssembly component. This guide is an **overview**: it shows each guest-side pattern once and links to the deep dive. Choose your path:
+
+- [Project setup](#project-setup) — the crate shape every guest shares
+- [HTTP handlers](#http-handlers) — serve requests with Axum
+- [Using WASI capabilities](#using-wasi-capabilities) — storage, messaging, SQL, models, and the rest
+- [Handling incoming messages](#handling-incoming-messages) — the messaging trigger
+- [The operation contract](#the-operation-contract) — the typed router model behind command mode and typed HTTP/messaging routing
+- [Command-mode guests](#command-mode-guests) — run-once jobs and CLIs
+- [Tracing](#tracing) — spans and logs from inside the sandbox
+- [Serving MCP tools](#serving-mcp-tools) — expose tools to AI agents
+
+Every pattern here is drawn from a runnable pair in [`examples/`](../../examples/).
 
 ## Project setup
 
@@ -15,6 +26,27 @@ Typical guest dependencies:
 - `wasip3` — WASI Preview 3 bindings (exports, HTTP types, CLI, filesystem preopens)
 - `omnia-guest` — guest SDK: `HttpResult`, error types, ORM helpers, MCP support
 - `omnia-wasi-*` — the guest side of each capability you use (`omnia-wasi-keyvalue`, `omnia-wasi-messaging`, ...). These crates compile to guest bindings on `wasm32` and to the host implementation on native, so hosts and guests share one dependency name.
+
+A minimal HTTP guest crate looks like this (align `wasip3`/`wit-bindgen` with the versions the omnia workspace pins — a mismatch causes executor deadlocks, see [Troubleshooting](../troubleshooting.md#outbound-http-or-spawned-work-inside-a-handler-deadlocks)):
+
+```toml
+[package]
+name = "my-guest"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+anyhow = "1"
+axum = { version = "0.8", default-features = false, features = ["json"] }
+omnia-guest = "0.35"
+omnia-wasi-http = "0.35"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+wasip3 = { version = "0.7", features = ["http-compat"] }
+wit-bindgen = { version = "0.60", features = ["async-spawn"] }
+```
 
 Build with:
 
@@ -98,9 +130,34 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
 
 `examples/messaging` demonstrates pub-sub, request-reply, and fan-out with the in-memory default backend; the same guest works against Kafka or NATS.
 
+## The operation contract
+
+`omnia-guest` keeps application logic independent of how it is invoked. Three pieces, defined once and reused by every transport:
+
+- An **operation** is one unit of application work with a typed input and output (e.g. `CreateItem`).
+- A **provider** is the struct your operations run against — it carries their capabilities (implement `DocumentStore`, `Config`, etc. on it).
+- An **invoker** (`Invoker::new(owner, provider)`) binds the provider to an owner id and executes operations.
+
+Routers then map transport events onto operations: an HTTP router maps method + path, a messaging router maps exact topics, a command router maps CLI subcommands. Your WASI export stays visible application code — it just hands the event to the router:
+
+```rust
+fn router() -> omnia_guest::api::http::Router<MyProvider> {
+    Router::new(Invoker::new("acme-corp", MyProvider))
+        .route("/api/items", post::<CreateItem, MyProvider>())
+}
+
+impl Guest for Http {
+    async fn handle(request: Request) -> Result<Response, ErrorCode> {
+        omnia_guest::api::http::serve(router(), request).await
+    }
+}
+```
+
+Messaging uses `api::messaging::Router` and `consume::<Operation>()`; topic matching is exact, and each route can replace its payload decoder and output/error projector. The export remains visible application code and calls `api::messaging::handle`. Because the same operation types register in any router, one guest can expose the same logic over HTTP, messaging, and a CLI without duplicating it.
+
 ## Command-mode guests
 
-For run-once workloads (jobs, CLIs, agent tasks), use `omnia_guest::api::command` to bind Clap argument types to the same transport-neutral `Operation` contract. The guest still owns the explicit `wasi:cli/run` export; the adapter writes buffered output and preserves the router's exact exit status:
+For run-once workloads (jobs, CLIs, agent tasks), use `omnia_guest::api::command` to bind Clap argument types to the same [operation contract](#the-operation-contract). The guest still owns the explicit `wasi:cli/run` export; the adapter writes buffered output and preserves the router's exact exit status:
 
 ```rust,noplayground
 use clap::Command;
@@ -143,25 +200,6 @@ Annotate functions with `#[omnia_wasi_otel::instrument]` to wrap them in an Open
 #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::INFO)]
 async fn handle(request: Request) -> Result<Response, ErrorCode> { /* ... */ }
 ```
-
-## Typed operation routers
-
-`omnia-guest` keeps application operations independent of their transports. Register operation types explicitly in HTTP or exact-topic messaging routers, then call the small adapter from the WASI export you own:
-
-```rust
-fn router() -> omnia_guest::api::http::Router<MyProvider> {
-    Router::new(Invoker::new("acme-corp", MyProvider))
-        .route("/api/items", post::<CreateItem, MyProvider>())
-}
-
-impl Guest for Http {
-    async fn handle(request: Request) -> Result<Response, ErrorCode> {
-        omnia_guest::api::http::serve(router(), request).await
-    }
-}
-```
-
-Messaging uses `api::messaging::Router` and `consume::<Operation>()`; topic matching is exact, and each route can replace its payload decoder and output/error projector. The export remains visible application code and calls `api::messaging::handle`.
 
 ## Serving MCP tools
 

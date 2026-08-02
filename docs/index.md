@@ -88,5 +88,6 @@ Omnia is a lightweight runtime for WebAssembly (WASI) components built on [wasmt
 - [Architecture](Architecture.md) — three-layer design, guest registry, instance pooling
 - [WASI Interfaces](reference/wasi-interfaces.md) — every interface crate and its backends
 - [Troubleshooting](troubleshooting.md) — common build, startup, and runtime failures
+- [omnia-exemplar](https://github.com/augentic/omnia-exemplar) — a complete application-scale reference service built on Omnia
 
 </div>

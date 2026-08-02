@@ -4,6 +4,8 @@ The `wasi:docstore` interface is a JSON document store: named collections of `{ 
 
 The [`docstore`](../../examples/docstore/) example is a GTFS-flavoured service (stops, routes, stop-times) that exercises every filter type; the snippets below come from it.
 
+> **Host prerequisite.** The runtime serving your guest must link this interface: add `WasiDocStore: DocStoreDefault` (from `omnia_wasi_docstore`) to the `runtime!` `hosts:` map — see [Composing a Runtime](composing-a-runtime.md). Everything below is guest code.
+
 ## The provider
 
 Guest access goes through the `DocumentStore` trait from `omnia-guest` — implement it on a unit struct and call its methods:

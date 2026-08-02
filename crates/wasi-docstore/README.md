@@ -12,6 +12,8 @@ See the [`DocStore` Interface Reference](../../docs/reference/docstore.md) for t
 
 - **Default**: In-memory document store. Filters, sorting, and pagination are evaluated directly over the stored JSON; state is process-local and lost on exit, like the other in-memory defaults.
 
+- **Production**: [`omnia-azure-table`](https://github.com/augentic/omnia-backends/tree/main/crates/azure-table) (Azure Table Storage) — a one-line swap in the host, guests untouched (see the [Production Backends guide](https://github.com/augentic/omnia/blob/main/docs/guides/production-backends.md)).
+
 ## Usage
 
 Add this crate to your `Cargo.toml` and use it in your runtime configuration:

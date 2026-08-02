@@ -10,6 +10,8 @@ Implements the `wasi:keyvalue` WIT interface.
 
 - **Default**: In-memory cache using `moka`. Data is not persisted across restarts.
 
+- **Production**: [`omnia-redis`](https://github.com/augentic/omnia-backends/tree/main/crates/redis) (Redis), [`omnia-nats`](https://github.com/augentic/omnia-backends/tree/main/crates/nats) (NATS JetStream) — a one-line swap in the host, guests untouched (see the [Production Backends guide](https://github.com/augentic/omnia/blob/main/docs/guides/production-backends.md)).
+
 ## Usage
 
 Add this crate to your `Cargo.toml` and use it in your runtime configuration:

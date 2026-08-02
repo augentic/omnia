@@ -8,7 +8,7 @@ Omnia is configured entirely through environment variables (runtime options and 
 
 | Variable        | Default                                                    | Meaning                                                                                                                                          |
 | --------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `RUST_LOG`      | unset                                                      | Log filter (e.g. `info`, `debug`, `omnia=trace`). Startup logs, including `omnia ready`, are at `info`. On `program:` binaries the [host log flags](#host-log-flags-program-binaries) `--debug` / `--quiet` win over `RUST_LOG`. Noisy dependencies (`hyper`, `h2`, `tonic`, `opentelemetry`, `opentelemetry_sdk`, `omnia_wasi_otel`) are always muted. |
+| `RUST_LOG`      | unset                                                      | Log filter (e.g. `info`, `debug`, `omnia=trace`). The server-mode `omnia ready` readiness line is at `info`; the rest of the runtime plumbing (initializing, command-mode ready, guest lifecycle, `wasi:cli/run` bracketing) is at `debug` so bare command runs show only semantic guest progress. On `program:` binaries the [host log flags](#host-log-flags-program-binaries) `--debug` / `--quiet` win over `RUST_LOG`. Noisy dependencies (`hyper`, `h2`, `tonic`, `opentelemetry`, `opentelemetry_sdk`, `omnia_wasi_otel`) are always muted. |
 | `OTEL_GRPC_URL` | unset (`http://localhost:4317` via OpenTelemetry defaults) | OTLP gRPC endpoint for exporting host traces and metrics. Export errors from a missing collector never reach the console — the filter always mutes `opentelemetry` / `opentelemetry_sdk`. |
 | `OMNIA_CONFIG`  | unset                                                      | Path to the deployment manifest; the `--config` flag takes precedence.                                                                           |
 | `COMPONENT`     | unset                                                      | Overrides the deployment name everywhere it appears — the OpenTelemetry service name, server logs, and the `omnia ready` line; defaults to the deployment name (first guest id). Read once at startup, never written back to the environment. |
@@ -22,7 +22,7 @@ A binary built with the `runtime!` macro's `program:` key reserves two host flag
 | no flag, `RUST_LOG` unset           | `info` plus the always-on dependency mutes                                 |
 | no flag, `RUST_LOG` set             | the `RUST_LOG` filter plus the always-on dependency mutes                  |
 | `--quiet`                           | `off` — ignores `RUST_LOG`                                                 |
-| `--debug`                           | `info` plus `omnia_cursor=debug,omnia_wasi_http=debug` — ignores `RUST_LOG` |
+| `--debug`                           | `info` plus `omnia=debug,omnia_cursor=debug,omnia_wasi_http=debug` (restores the runtime-plumbing lines) — ignores `RUST_LOG` |
 
 `--debug` and `--quiet` are mutually exclusive (a startup failure when combined); repeating one is idempotent. Binaries without `program:` keep the env-only `RUST_LOG` behavior. The flag-selected presets additionally mute `omnia::telemetry`, so a collectorless command-mode run does not print a flush-failure warning at every exit; the env-only path keeps those warnings visible.
 
@@ -36,10 +36,11 @@ A binary built with the `runtime!` macro's `program:` key reserves two host flag
 | `MAX_DISPATCH_DEPTH` | `8`                   | Maximum nesting depth for host-mediated guest-to-guest calls.         |
 | `EPOCH_TICK_MS`      | `10`                  | Epoch-increment interval; the yield granularity for CPU-bound guests. |
 | `WASM_BACKTRACE`     | `false`               | Attach guest backtraces to trap errors.                               |
+| `ASYNC_STACK_ZEROING` | `false`              | Zero async (fiber) stacks before reuse, so no data lingers between guest invocations that share a recycled stack; costs a wipe per reuse. |
 
 ### Instance pooling
 
-The pooling allocator recycles instance slots so per-request instantiation stays cheap.
+The pooling allocator recycles instance slots so per-request instantiation stays cheap. The table below lists the commonly tuned variables; the **complete** list (including the long tail of wasmtime mirrors) lives in `crates/omnia/src/options.rs`, where every field carries a doc comment naming its variable and default.
 
 | Variable                     | Default                     | Meaning                                                       |
 | ---------------------------- | --------------------------- | ------------------------------------------------------------- |
