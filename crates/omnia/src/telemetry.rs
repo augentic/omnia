@@ -318,6 +318,9 @@ pub fn resource() -> Option<&'static Resource> {
     }
 }
 
+// Unit tests by design: these pin the tracing/OTLP SDK contract (filter
+// directives, exporter flush), not a WASI seam — `wasi:otel` guest telemetry
+// is covered by the `otel` seam scenario.
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "otlp")]

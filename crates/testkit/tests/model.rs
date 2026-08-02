@@ -1,5 +1,9 @@
 //! Public model test-double behavior, on both faces: the guest-side `Model`
 //! and the host-side `WasiModelCtx` served by the same `Scripted` queue.
+//!
+//! Unit tests by design: they pin the *test double's* contract (queue order,
+//! exhaustion, error scripting), not a WASI seam — the double's use against a
+//! real guest is the `model` seam scenario's job.
 
 use std::sync::Arc;
 

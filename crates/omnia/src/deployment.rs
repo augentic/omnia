@@ -69,6 +69,7 @@ pub struct DeploymentBuilder<P = WasmOnly> {
     program_name: Option<String>,
     log_mode: Option<LogMode>,
     guest_timeout: Option<Duration>,
+    max_dispatch_depth: Option<usize>,
     policy: PhantomData<fn() -> P>,
 }
 
@@ -87,6 +88,7 @@ impl<P> std::fmt::Debug for DeploymentBuilder<P> {
             .field("program_name", &self.program_name)
             .field("log_mode", &self.log_mode)
             .field("guest_timeout", &self.guest_timeout)
+            .field("max_dispatch_depth", &self.max_dispatch_depth)
             .finish_non_exhaustive()
     }
 }
@@ -105,6 +107,7 @@ impl Default for DeploymentBuilder<WasmOnly> {
             program_name: None,
             log_mode: None,
             guest_timeout: None,
+            max_dispatch_depth: None,
             policy: PhantomData,
         }
     }
@@ -231,6 +234,14 @@ impl<P> DeploymentBuilder<P> {
         self
     }
 
+    /// Override the per-chain host-mediated dispatch depth bound for this
+    /// deployment. Unset defers to `MAX_DISPATCH_DEPTH`.
+    #[must_use]
+    pub const fn max_dispatch_depth(mut self, depth: usize) -> Self {
+        self.max_dispatch_depth = Some(depth);
+        self
+    }
+
     /// Resolve the manifest and build the deployment under `policy`.
     async fn build_inner<T: WasiView + 'static>(
         self, policy: ArtifactPolicy,
@@ -277,6 +288,9 @@ impl<P> DeploymentBuilder<P> {
         if let Some(timeout) = self.guest_timeout {
             deployment.options.guest_timeout = timeout;
         }
+        if let Some(depth) = self.max_dispatch_depth {
+            deployment.options.max_dispatch_depth = depth;
+        }
         Ok(deployment)
     }
 }
@@ -306,6 +320,7 @@ impl DeploymentBuilder<WasmOnly> {
             program_name: self.program_name,
             log_mode: self.log_mode,
             guest_timeout: self.guest_timeout,
+            max_dispatch_depth: self.max_dispatch_depth,
             policy: PhantomData,
         }
     }

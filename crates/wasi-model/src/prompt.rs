@@ -79,6 +79,7 @@ fn join_non_empty(parts: &[String]) -> Option<String> {
     if kept.is_empty() { None } else { Some(kept.join("\n\n")) }
 }
 
+// Unit tests by design: prompt assembly is pure string composition.
 #[cfg(test)]
 mod tests {
     use super::{Example, Sections};

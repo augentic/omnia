@@ -216,7 +216,7 @@ where
     }
     // Drop every link-serve endpoint: the drain tasks hold Runtime clones, so
     // leaving them running would pin the engine past the deployment's life.
-    runtime.registry().dispatch().transport().clear();
+    runtime.shutdown();
     // Push batch-queued spans and metrics to the exporters so they survive
     // fast command-mode exits.
     crate::telemetry::flush();
@@ -893,6 +893,17 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         self.registry().remove(id)?;
         tracing::debug!(guest = %id, "guest deregistered");
         Ok(())
+    }
+
+    /// Release every link-serve endpoint, aborting the drain tasks that pin
+    /// `Runtime` clones (and with them the engine's pooling reservation).
+    ///
+    /// [`run`] does this as the drive completes; an embedder holding a
+    /// [`from_parts`](Self::from_parts) runtime calls it when the deployment
+    /// is finished. In-flight invocations hold their own server handles and
+    /// complete; only new dispatches are cut off.
+    pub fn shutdown(&self) {
+        self.registry().dispatch().transport().clear();
     }
 }
 

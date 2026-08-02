@@ -42,3 +42,30 @@ cargo test --doc --all-features --workspace   # doc tests
 - **Seam tests are the spec.** When an RFC and a seam test disagree, the seam test wins and the RFC receives an erratum in its status note.
 - **Replace, then delete.** Remove a superseded unit-test module in the same change as the seam test that covers it. For non-trivial deletions, back the removal with `cargo llvm-cov` before/after evidence; a trivial deletion (an exact mirror of a seam scenario, or a strict subset of a kept test) needs only its rationale in the change.
 - **Names identify, comments explain.** A test name is the scenario (`set_then_get`), not a restated expectation.
+
+## The pure/seam boundary audit
+
+The unit-test surface was audited against the seam tier with a `cargo llvm-cov` diff (seam tier alone vs pure tier alone). Every remaining unit-test module is a deliberate keeper, annotated with a one-line `//` comment at the module head stating why, so future audits do not relitigate. The decisions:
+
+| Module | Decision | Rationale |
+| ------ | -------- | --------- |
+| `omnia/src/dispatch/handle.rs` | Migrated, unit module deleted | Depth cap and uncapped inheritance now proven at the seam (`guest_link::dispatch_depth_capped`, `dispatch_uncapped_nested_hops`) |
+| `omnia/src/registry.rs` | Migrated, unit module deleted | Empty static/dynamic deployment assembly now proven at the seam (`guest_link::static_empty_deployment_rejected`, `dynamic_empty_deployment`) |
+| `omnia/src/runtime/entry.rs` | Keep | `plan()` is pure argv/env parsing; the downstream run behavior is covered in `seam/cli.rs` |
+| `omnia/src/telemetry.rs` | Keep | Pins the tracing/OTLP SDK contract (host-side plumbing, not the `wasi:otel` seam) |
+| `omnia/src/deployment/manifest.rs` | Keep | Pure translation: TOML/JSON to `Manifest` |
+| `omnia/src/registry/routing.rs` | Keep | Pure route-table matching logic |
+| `wasi-model` `answer.rs` / `gate.rs` / `prompt.rs` | Keep | Pure parser / validation / string composition |
+| `host-macros` | Keep | Token expansion snapshots; macros cannot cross a seam |
+| `testkit/tests/model.rs` | Keep | Pins the `Scripted` test double's own contract |
+| `omnia-guest` (all modules) | Keep | Guest-side carve-out: `llvm-cov` cannot instrument the guest `.wasm` |
+
+Rerun the coverage diff once per release as the drift check: any host-side line reachable only from a unit test is either a new keeper (annotate it) or a migration candidate.
+
+## Ratchet rule
+
+Coverage only moves toward the boundary, never away from it:
+
+- **New host-side behavior lands with its seam scenario in the same PR.** If the change is observable through a WASI interface, the seam suite gets the test — not a unit module with mocks.
+- **New backend mappings (in `omnia-backends`) land with a live case.** A translation unit test alone is not acceptance; the `#[ignore]`-gated live tier must prove the real service accepts the mapping.
+- **Keepers stay annotated.** A unit-test module without a keeper comment is presumed to be a migration candidate at the next audit.
