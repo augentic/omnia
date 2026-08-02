@@ -31,6 +31,16 @@ world responder {
     export echo;
 }
 
+/// The relay guest: exports `echo` and re-imports it, dispatching onward while
+/// the message (a decimal hop count) has hops left. One inbound call thus
+/// produces a host-mediated dispatch chain of arbitrary depth — the shape the
+/// seam suite drives to prove the per-chain depth bound and policy inheritance
+/// across served invocations.
+world relay {
+    import echo;
+    export echo;
+}
+
 /// The router guest: imports the host-mediated `echo` and exposes plain `run` /
 /// `run-slow` entries that call it. `run-slow` is itself async-lifted — a
 /// sync-lifted export cannot call the async-typed `echo-slow` import.

@@ -114,6 +114,11 @@ path = "guest-link/extra.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "guest-link-relay-wasm"
+path = "guest-link/relay.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "guest-link"
 path = "guest-link/runtime.rs"
 

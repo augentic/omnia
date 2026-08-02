@@ -157,6 +157,44 @@ async fn build_runtime_inner(
     Ok((runtime, clones))
 }
 
+/// Build a deployment whose dispatch targets include the relay guest (exports
+/// *and* re-imports `echo`, consuming one hop per call), with optional
+/// per-chain depth and wall-clock bounds.
+async fn build_relay_runtime(
+    max_dispatch_depth: Option<usize>, guest_timeout: Option<Duration>,
+) -> Result<Runtime<Counter>> {
+    let manifest = Manifest::new()
+        .guest(GuestEntry::new("responder", find_guest("guest_link_responder_wasm.wasm")))
+        .guest(
+            GuestEntry::new("relay", find_guest("guest_link_relay_wasm.wasm"))
+                .link("omnia:link/echo"),
+        )
+        .guest(
+            GuestEntry::new("router", find_guest("guest_link_router_wasm.wasm"))
+                .link("omnia:link/echo"),
+        );
+
+    let mut builder = DeploymentBuilder::new().manifest(manifest).precompiled();
+    if let Some(depth) = max_dispatch_depth {
+        builder = builder.max_dispatch_depth(depth);
+    }
+    if let Some(timeout) = guest_timeout {
+        builder = builder.guest_timeout(timeout);
+    }
+    // SAFETY: `find_guest` only returns artifacts this workspace built and
+    // serialized itself (`cargo make test-guests`).
+    let deployment = unsafe { builder.build::<TestCtx>() }.await.context("building runtime")?;
+    let registry = deployment.into_registry().context("assembling registry")?;
+    let runtime = Runtime::<Counter>::from_parts(
+        Arc::new(registry),
+        Vec::new(),
+        Arc::new(MountRegistry::default()),
+        Counter::default(),
+    );
+    serve_links(&runtime).await.context("wiring link serve side")?;
+    Ok(runtime)
+}
+
 /// A counting test resolver: each call runs `answer(call_index)` after
 /// awaiting `gate` (when set), so tests control both the per-call outcome and
 /// when a flight completes.
@@ -302,6 +340,71 @@ fn dispatch_uncapped_on_command_chain() -> Result<()> {
         let echoed = as_command_chain(call_router(&runtime, "run-slow", "hello")).await?;
         assert_eq!(echoed, "responder echoes slowly: hello");
 
+        Ok(())
+    })
+}
+
+// Depth accumulates across the serve side of every hop and the per-chain
+// bound fails the chain at the seam: with a bound of 3, a three-enter relay
+// chain (router→relay→relay→relay) succeeds, one more hop fails with the
+// depth error, and a fresh chain afterwards succeeds again — a failed chain
+// leaks no depth budget.
+#[test]
+fn dispatch_depth_capped() -> Result<()> {
+    fixture::RT.block_on(async {
+        let runtime = build_relay_runtime(Some(3), None).await?;
+
+        let echoed = call_router_to(&runtime, "relay", "2").await?;
+        assert_eq!(echoed, "relay relayed to the end", "three enters fit a bound of 3");
+
+        // The failing enter happens three served hops deep; the depth error
+        // traps that hop's serve invocation, so the caller observes the chain
+        // collapse (a dead carrier frame), not the bail text itself.
+        call_router_to(&runtime, "relay", "3")
+            .await
+            .expect_err("a fourth enter must exceed the bound");
+
+        let echoed = call_router_to(&runtime, "relay", "2").await?;
+        assert_eq!(echoed, "relay relayed to the end", "a fresh chain starts at depth zero");
+
+        // Release the engine (and its pooling address-space reservation)
+        // before building the second runtime: the serve drain tasks pin the
+        // runtime, so an un-shut-down engine would leak for the process life.
+        runtime.shutdown();
+        drop(runtime);
+
+        // With a bound of zero the router's own hop fails host-side, so the
+        // depth error surfaces verbatim at the caller.
+        let runtime = build_relay_runtime(Some(0), None).await?;
+        let error = call_router_to(&runtime, "responder", "hi")
+            .await
+            .expect_err("a zero bound rejects the first hop");
+        ensure!(
+            format!("{error:#}").contains("exceeds maximum 0"),
+            "the failure is the depth bound, got: {error:#}"
+        );
+
+        runtime.shutdown();
+        Ok(())
+    })
+}
+
+// Nested hops inherit the command chain's uncapped wall-clock policy: under a
+// 1ms cap, a relay chain ending on the parked responder (5ms) completes only
+// when every hop runs uncapped; the same chain server-rooted times out.
+#[test]
+fn dispatch_uncapped_nested_hops() -> Result<()> {
+    fixture::RT.block_on(async {
+        let runtime = build_relay_runtime(None, Some(Duration::from_millis(1))).await?;
+
+        call_router_to_slow(&runtime, "relay", "2")
+            .await
+            .expect_err("a server-rooted nested chain stays capped");
+
+        let echoed = as_command_chain(call_router_to_slow(&runtime, "relay", "2")).await?;
+        assert_eq!(echoed, "responder echoes slowly: 0");
+
+        runtime.shutdown();
         Ok(())
     })
 }
@@ -862,6 +965,25 @@ fn register_races_resolver() -> Result<()> {
         runtime
             .deregister(&GuestId::from("extra"))
             .expect_err("the losing flight must not leave a second entry");
+
+        Ok(())
+    })
+}
+
+// A static deployment (no `dynamic()`) with zero guests is rejected at
+// build: an empty guest set is only meaningful when the registry may grow at
+// run time (`dynamic_empty_deployment`, below).
+#[test]
+fn static_empty_deployment_rejected() -> Result<()> {
+    fixture::RT.block_on(async {
+        let outcome = DeploymentBuilder::new().manifest(Manifest::new()).build::<TestCtx>().await;
+        let Err(error) = outcome else {
+            bail!("a static deployment must declare at least one guest");
+        };
+        ensure!(
+            format!("{error:#}").contains("no [[guest]] entries"),
+            "the failure is the empty static guest set, got: {error:#}"
+        );
 
         Ok(())
     })

@@ -421,6 +421,9 @@ fn topic_matches(topic: &str, pattern: &str) -> bool {
     topic_tokens.next().is_none()
 }
 
+// Unit tests by design: route-table matching is pure (prefix/segment/topic
+// rules); dispatch *through* the built table is covered by the `routing` and
+// `http_paths` seam scenarios.
 #[cfg(test)]
 mod tests {
     use super::*;

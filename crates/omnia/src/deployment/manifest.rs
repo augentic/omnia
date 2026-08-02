@@ -487,6 +487,8 @@ pub enum TransportKind {
     Quic,
 }
 
+// Unit tests by design: manifest parsing/validation is pure translation —
+// deployment *behavior* built from a manifest is covered at the seam.
 #[cfg(test)]
 mod tests {
     use super::*;
