@@ -153,15 +153,27 @@ interface completion {
     //     named(string),
     // }
 
+    /// One lent workspace: an authorized mount root plus a relative
+    /// subpath scoping the lend to a directory beneath it.
+    record workspace-grant {
+        /// Typed `wasi:filesystem` capability for bounded `read` / `list` / `write`
+        /// (genai) and the spawned agent's direct access (cursor). A `borrow`, so the
+        /// runtime core never trusts a forgeable integer handle — the host resolves it
+        /// from the resource table exactly as other hosts take typed resources, and
+        /// requires it to be an authorized mount root.
+        root: borrow<descriptor>,
+        /// `/`-separated relative path beneath `root` scoping the lend; empty lends
+        /// the mount root itself. The host reopens it beneath the verified root, so
+        /// the grant can never escape the mount.
+        subpath: string,
+    }
+
     /// Host capabilities lent for this completion; drives host-injected tool injection.
     record grants {
         /// Guest id whose `references` export `resolve` targets.
         references: option<string>,
-        /// Typed `wasi:filesystem` capability for bounded `read` / `list` / `write`
-        /// (genai) and the spawned agent's direct access (cursor). A `borrow`, so the
-        /// The runtime core never trusts a forgeable integer handle — the host resolves it from
-        /// the resource table exactly as other hosts take typed resources.
-        workspace: option<borrow<descriptor>>,
+        /// The workspace lent for this completion.
+        workspace: option<workspace-grant>,
     }
 
     /// Complete models-API-style request for one completion. Guests that want a
