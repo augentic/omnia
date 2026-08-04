@@ -229,9 +229,10 @@ pub trait Model: Send + Sync {
             let workspace = match request.workspace.as_deref() {
                 None => None,
                 Some(path) => match resolve_lend(&directories, path) {
-                    Some((root, subpath)) => {
-                        Some(completion::WorkspaceGrant { root, subpath: subpath.to_string() })
-                    }
+                    Some((root, subpath)) => Some(completion::WorkspaceGrant {
+                        root,
+                        subpath: subpath.to_string(),
+                    }),
                     None => {
                         return Err(Error::InvalidRequest(format!(
                             "workspace lend `{path}` matches no preopen"
@@ -292,10 +293,7 @@ mod tests {
     fn resolves_mount_and_subdirectory() {
         let dirs = preopens();
         assert_eq!(resolve_lend(&dirs, ".").map(|(_, sub)| sub), Some(""));
-        assert_eq!(
-            resolve_lend(&dirs, "/emery-workspaces/ws-1").map(|(_, sub)| sub),
-            Some("ws-1")
-        );
+        assert_eq!(resolve_lend(&dirs, "/emery-workspaces/ws-1").map(|(_, sub)| sub), Some("ws-1"));
         assert_eq!(
             resolve_lend(&dirs, "/emery-workspaces/ws-1/nested").map(|(_, sub)| sub),
             Some("ws-1/nested")
