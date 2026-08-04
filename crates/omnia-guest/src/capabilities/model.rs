@@ -285,8 +285,8 @@ fn lend_subpath<'a>(name: &str, path: &'a str) -> Option<&'a str> {
 mod tests {
     use super::resolve_lend;
 
-    fn preopens() -> Vec<((), String)> {
-        vec![((), ".".to_string()), ((), "/emery-workspaces".to_string())]
+    fn preopens() -> Vec<(u8, String)> {
+        vec![(0, ".".to_string()), (1, "/emery-workspaces".to_string())]
     }
 
     #[test]
