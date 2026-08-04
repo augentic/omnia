@@ -42,7 +42,7 @@ pub use self::gate::validate as validate_request;
 use self::generated::omnia::model::completion;
 pub use self::generated::omnia::model::completion::{
     Effort, Error, Format, Function, Generation, Grants, Mcp, Message, Reply, Request, Role,
-    Schema, Tool,
+    Schema, Tool, WorkspaceGrant,
 };
 pub use self::types::{Answer, DirEntry, Reference, ToolTurn, Transcript, Usage};
 

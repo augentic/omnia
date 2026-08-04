@@ -1,10 +1,12 @@
 //! Workspace resolution in the host.
 //!
 //! A guest lends a `wasi:filesystem` workspace through
-//! `grants.workspace: option<borrow<descriptor>>`. This module turns that
-//! borrowed descriptor into an owned, `Send + Sync` [`Workspace`] the backend
-//! can use across `.await` points, *after* proving the lent directory is one the
-//! deployment authorized.
+//! `grants.workspace: option<workspace-grant>` — a borrowed mount-root
+//! descriptor plus a relative subpath. This module turns that grant into an
+//! owned, `Send + Sync` [`Workspace`] the backend can use across `.await`
+//! points, *after* proving the lent root is one the deployment authorized
+//! and reopening the subpath beneath it so the lend can never escape the
+//! mount.
 
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
@@ -16,9 +18,10 @@ use cap_std::fs::Dir;
 use futures::FutureExt as _;
 use omnia::{FutureResult, MountRegistry};
 use tokio::task::spawn_blocking;
-use wasmtime::component::{Resource, ResourceTable};
+use wasmtime::component::ResourceTable;
 use wasmtime_wasi::filesystem::Descriptor;
 
+use super::generated::omnia::model::completion::WorkspaceGrant;
 use super::types::DirEntry;
 
 const MAX_READ_BYTES: u64 = 4 * 1024 * 1024;
@@ -71,28 +74,55 @@ fn ready_err<R: Send + 'static>(err: anyhow::Error) -> FutureResult<R> {
 
 // Resolve a `grants.workspace` into a [`Workspace`].
 pub fn resolve(
-    table: &ResourceTable, registry: &MountRegistry, borrow: Option<&Resource<Descriptor>>,
+    table: &ResourceTable, registry: &MountRegistry, grant: Option<&WorkspaceGrant>,
 ) -> anyhow::Result<Option<Workspace>> {
-    let Some(resource) = borrow else {
+    let Some(grant) = grant else {
         return Ok(None);
     };
 
-    let descriptor = table.get(resource).context("resolving the lent workspace descriptor")?;
+    let descriptor = table.get(&grant.root).context("resolving the lent workspace descriptor")?;
 
     let Descriptor::Dir(dir) = descriptor else {
-        bail!("grants.workspace must be a directory descriptor, not a file");
+        bail!("grants.workspace root must be a directory descriptor, not a file");
     };
 
     let meta = dir.dir.dir_metadata().context("reading lent workspace directory metadata")?;
     let entry = registry
         .match_identity(meta.dev(), meta.ino())
-        .context("lent workspace is not an authorized mount (out of scope)")?;
+        .context("lent workspace root is not an authorized mount (out of scope)")?;
+
+    if grant.subpath.is_empty() {
+        return Ok(Some(Workspace {
+            dir: Arc::clone(&entry.dir),
+            local_path: entry.host_path.clone(),
+            writable: entry.writable(),
+        }));
+    }
+
+    check_subpath(&grant.subpath)?;
+    // cap-std's `open_dir` resolves beneath the verified mount root and
+    // refuses any escape, so the subpath grant inherits the root's authority.
+    let dir = entry
+        .dir
+        .open_dir(&grant.subpath)
+        .with_context(|| format!("opening lent workspace subpath `{}`", grant.subpath))?;
 
     Ok(Some(Workspace {
-        dir: Arc::clone(&entry.dir),
-        local_path: entry.host_path.clone(),
+        dir: Arc::new(dir),
+        local_path: entry.host_path.join(&grant.subpath),
         writable: entry.writable(),
     }))
+}
+
+// Refuse a subpath that is not a plain relative `/`-separated path.
+fn check_subpath(subpath: &str) -> anyhow::Result<()> {
+    let plain = !subpath.starts_with('/')
+        && !subpath.contains('\\')
+        && subpath.split('/').all(|part| !part.is_empty() && part != "." && part != "..");
+    if plain {
+        return Ok(());
+    }
+    bail!("grants.workspace subpath `{subpath}` is not a plain relative path");
 }
 
 fn read_blocking(dir: &Dir, path: &str) -> anyhow::Result<Vec<u8>> {

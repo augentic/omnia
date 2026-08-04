@@ -3,9 +3,11 @@
 //! Target-independent mirrors of the `omnia:model/completion` records. The
 //! one record that cannot cross off `wasm32` is the `grants.workspace`
 //! descriptor lend — a `wasi:filesystem` resource that only exists on
-//! `wasm32` — so a guest asks for it with the plain
-//! [`Request::lend_workspace`] flag and the `wasm32` default body resolves
-//! it against the guest's own `"."` preopen at the call site.
+//! `wasm32` — so a guest names the directory with the plain
+//! [`Request::workspace`] path and the `wasm32` default body resolves it
+//! against the guest's preopens at the call site: the longest preopen whose
+//! name prefixes the path becomes the lent root descriptor and the
+//! remainder rides as the grant's subpath.
 
 use std::future::Future;
 
@@ -151,10 +153,14 @@ pub struct Request {
     /// targets (`grants.references`).
     #[builder(into)]
     pub references: Option<String>,
-    /// Lend the guest's `"."` preopen through `grants.workspace`, giving the
-    /// backend (and any spawned agent) the shared project mount.
-    #[builder(default)]
-    pub lend_workspace: bool,
+    /// Deployment-local path of the directory to lend through
+    /// `grants.workspace`, giving the backend (and any spawned agent) that
+    /// directory. On `wasm32` the path must sit on (or beneath) a preopen —
+    /// `"."` lends the shared project mount, `"/mount/sub"` lends a
+    /// subdirectory of `/mount`. Off `wasm32` it is a host path the
+    /// provider consumes directly. `None` lends nothing.
+    #[builder(into)]
+    pub workspace: Option<String>,
 }
 
 /// Token accounting for one completion, when the backend reports it.
@@ -219,13 +225,21 @@ pub trait Model: Send + Sync {
             // The lent workspace borrows one of these descriptors, so the
             // table must outlive the `create` call below.
             let directories =
-                if request.lend_workspace { preopens::get_directories() } else { vec![] };
-            let workspace = directories.iter().find_map(|(dir, name)| (name == ".").then_some(dir));
-            if request.lend_workspace && workspace.is_none() {
-                return Err(Error::InvalidRequest(
-                    "workspace lend requested but the `.` preopen is absent".to_string(),
-                ));
-            }
+                if request.workspace.is_some() { preopens::get_directories() } else { vec![] };
+            let workspace = match request.workspace.as_deref() {
+                None => None,
+                Some(path) => match resolve_lend(&directories, path) {
+                    Some((root, subpath)) => Some(completion::WorkspaceGrant {
+                        root,
+                        subpath: subpath.to_string(),
+                    }),
+                    None => {
+                        return Err(Error::InvalidRequest(format!(
+                            "workspace lend `{path}` matches no preopen"
+                        )));
+                    }
+                },
+            };
 
             let wire = completion::Request {
                 model: request.model,
@@ -242,6 +256,56 @@ pub trait Model: Send + Sync {
 
             completion::create(wire).await.map(Into::into).map_err(Into::into)
         }
+    }
+}
+
+/// Resolve a lend path against the guest's preopens: the longest preopen
+/// name that equals the path or prefixes it at a `/` boundary wins; the
+/// remainder becomes the grant's subpath (empty for the mount itself).
+#[cfg(any(target_arch = "wasm32", test))]
+fn resolve_lend<'a, D>(directories: &'a [(D, String)], path: &'a str) -> Option<(&'a D, &'a str)> {
+    directories
+        .iter()
+        .filter_map(|(dir, name)| Some((dir, lend_subpath(name, path)?)))
+        .max_by_key(|(_, subpath)| std::cmp::Reverse(subpath.len()))
+}
+
+/// The subpath of `path` beneath the preopen `name`, when `name` covers it.
+#[cfg(any(target_arch = "wasm32", test))]
+fn lend_subpath<'a>(name: &str, path: &'a str) -> Option<&'a str> {
+    if path == name {
+        return Some("");
+    }
+    path.strip_prefix(name)?.strip_prefix('/').filter(|rest| !rest.is_empty())
+}
+
+// The lend resolution is pure path math that only executes on `wasm32`
+// (preopens exist nowhere else), so it is covered in-process here.
+#[cfg(test)]
+mod tests {
+    use super::resolve_lend;
+
+    fn preopens() -> Vec<(u8, String)> {
+        vec![(0, ".".to_string()), (1, "/emery-workspaces".to_string())]
+    }
+
+    #[test]
+    fn resolves_mount_and_subdirectory() {
+        let dirs = preopens();
+        assert_eq!(resolve_lend(&dirs, ".").map(|(_, sub)| sub), Some(""));
+        assert_eq!(resolve_lend(&dirs, "/emery-workspaces/ws-1").map(|(_, sub)| sub), Some("ws-1"));
+        assert_eq!(
+            resolve_lend(&dirs, "/emery-workspaces/ws-1/nested").map(|(_, sub)| sub),
+            Some("ws-1/nested")
+        );
+    }
+
+    #[test]
+    fn refuses_unmatched_and_lookalike_paths() {
+        let dirs = preopens();
+        assert!(resolve_lend(&dirs, "/elsewhere").is_none());
+        assert!(resolve_lend(&dirs, "/emery-workspaces-evil/x").is_none());
+        assert!(resolve_lend(&dirs, "/emery-workspaces/").is_none());
     }
 }
 

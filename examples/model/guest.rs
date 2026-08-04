@@ -27,11 +27,17 @@ wasip3::cli::command::export!(CliGuest);
 impl Guest for CliGuest {
     async fn run() -> Result<(), ()> {
         // Read the preopen table the host populated from `[[mount]]` and
-        // pick the tree named `.` to lend. `directories` must outlive the
-        // `create` call below — the lent `workspace` borrows one of its
-        // descriptors.
+        // pick the tree named `.` to lend as the grant's root (with an
+        // empty subpath — the mount itself). `directories` must outlive
+        // the `create` call below — the lent `workspace` borrows one of
+        // its descriptors.
         let directories = preopens::get_directories();
-        let workspace = directories.iter().find_map(|(dir, name)| (name == ".").then_some(dir));
+        let workspace = directories.iter().find_map(|(dir, name)| {
+            (name == ".").then_some(completion::WorkspaceGrant {
+                root: dir,
+                subpath: String::new(),
+            })
+        });
 
         let (system, messages) = Sections {
             role: Some("a terse code reviewer".to_string()),
