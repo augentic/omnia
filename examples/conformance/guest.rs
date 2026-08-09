@@ -17,9 +17,7 @@ use bytes::Bytes;
 use omnia_guest::document_store::{
     Document as DocDocument, Filter as DocFilter, QueryOptions as DocQueryOptions, SortField,
 };
-use omnia_guest::{DocumentStore, HttpResult};
-use omnia_wasi_blobstore::blobstore;
-use omnia_wasi_blobstore::types::{IncomingValue, OutgoingValue};
+use omnia_guest::{BlobStore, DocumentStore, HttpResult};
 use omnia_wasi_config::store as config_store;
 use omnia_wasi_identity::credentials::get_identity;
 use omnia_wasi_keyvalue::atomics::{self, Cas, CasError};
@@ -155,44 +153,32 @@ async fn keyvalue_round_trip(
     Ok(Json(json!({ "message": "keyvalue ok" })))
 }
 
-// --- wasi:blobstore (streaming write, then read back) ---
+// --- wasi:blobstore (capability write, then read back) ---
 
 #[derive(Debug, Deserialize)]
 struct BlobstoreParams {
     object: String,
 }
 
+/// The default trait bodies drive the real `wasi:blobstore` imports,
+/// so this route exercises the capability's own streaming (including
+/// the chunked write) rather than hand-rolled bindings calls.
+struct BlobProvider;
+
+impl BlobStore for BlobProvider {}
+
 #[omnia_wasi_otel::instrument]
 async fn blobstore_round_trip(
     Query(p): Query<BlobstoreParams>, body: Bytes,
 ) -> HttpResult<Json<Value>> {
-    let outgoing = OutgoingValue::new_outgoing_value();
-    {
-        let stream = outgoing
-            .outgoing_value_write_body()
-            .await
-            .map_err(|()| anyhow!("failed to create stream"))?;
-        // `blocking-write-and-flush` accepts at most 4096 bytes per call.
-        for chunk in body.chunks(4096) {
-            stream.blocking_write_and_flush(chunk).map_err(|e| anyhow!("writing body: {e}"))?;
-        }
-    }
+    BlobProvider.create_container("container").await.context("failed to create container")?;
+    BlobProvider.put("container", &p.object, &body).await.context("failed to write data")?;
 
-    let container = blobstore::create_container("container".to_string())
+    let data = BlobProvider
+        .get("container", &p.object)
         .await
-        .map_err(|e| anyhow!("failed to create container: {e}"))?;
-    container
-        .write_data(p.object.clone(), &outgoing)
-        .await
-        .map_err(|e| anyhow!("failed to write data: {e}"))?;
-    OutgoingValue::finish(outgoing).map_err(|e| anyhow!("issue finishing: {e}"))?;
-
-    let incoming = container
-        .get_data(p.object.clone(), 0, 0)
-        .await
-        .map_err(|e| anyhow!("failed to read data: {e}"))?;
-    let data = IncomingValue::incoming_value_consume_sync(incoming)
-        .map_err(|e| anyhow!("failed to consume incoming value: {e}"))?;
+        .context("failed to read data")?
+        .ok_or_else(|| anyhow!("object missing after write"))?;
     if data != body {
         Err(anyhow!("blob round-trip mismatch"))?;
     }

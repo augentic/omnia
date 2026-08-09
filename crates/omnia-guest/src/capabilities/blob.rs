@@ -153,6 +153,11 @@ pub trait BlobStore: Send + Sync {
         use anyhow::anyhow;
         use omnia_wasi_blobstore::types::OutgoingValue;
 
+        // `blocking-write-and-flush` permits at most 4096 bytes per
+        // call (the wasi:io stream write budget), so larger payloads
+        // must be written in chunks.
+        const WRITE_CHUNK: usize = 4096;
+
         async move {
             let ctr = open_container(container).await?;
             let outgoing = OutgoingValue::new_outgoing_value();
@@ -161,7 +166,10 @@ pub trait BlobStore: Send + Sync {
                     .outgoing_value_write_body()
                     .await
                     .map_err(|e| anyhow!("getting write body: {e:?}"))?;
-                body.blocking_write_and_flush(data).map_err(|e| anyhow!("writing data: {e}"))?;
+                for chunk in data.chunks(WRITE_CHUNK) {
+                    body.blocking_write_and_flush(chunk)
+                        .map_err(|e| anyhow!("writing data: {e}"))?;
+                }
             };
             ctr.write_data(name.to_string(), &outgoing)
                 .await

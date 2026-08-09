@@ -33,7 +33,7 @@ hyper.workspace = true
 # wasmtime-wasi-http. The default backend installs ring as the process
 # provider before building a client (see `host/default_impl.rs`).
 reqwest = { version = "0.13.4", default-features = false, features = ["http2", "rustls-no-provider", "stream", "system-proxy"] }
-rustls = { version = "0.23.42", default-features = false, features = ["ring", "std"] }
+rustls = { version = "0.23.43", default-features = false, features = ["ring", "std"] }
 tokio = { workspace = true, features = ["time"] }
 wasmtime = { workspace = true, features = ["component-model-async"] }
 wasmtime-wasi.workspace = true
