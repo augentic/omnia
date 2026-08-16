@@ -1,7 +1,6 @@
 //! Answer parsing, validation, projection, and repair behavior shared by the
 //! host gate and backends.
 
-use serde::Deserialize as _;
 use serde_json::Value;
 
 use crate::host::Error;
@@ -32,10 +31,11 @@ impl Format {
 
     /// Interpret a model's text turn as an answer value.
     ///
-    /// For JSON / schema answers, tolerates a wrapping Markdown fence and —
-    /// when the model prepends agent prose — an embedded fence or the first
-    /// complete JSON value in the turn. Schema conformance is still enforced
-    /// by [`Self::check`].
+    /// For JSON / schema answers, every complete JSON value in the turn is a
+    /// candidate (whole text, each fenced body, then each `{` / `[` slice). The
+    /// first value that passes [`Self::check`] wins, so an incidental `[]` in
+    /// preamble does not hide a later valid object. If none pass, the last
+    /// extracted value is returned so the host gate remains the authority.
     ///
     /// # Errors
     ///
@@ -44,7 +44,14 @@ impl Format {
         match self {
             Self::Text => Ok(Value::String(text.to_owned())),
             Self::Json | Self::Schema(_) => {
-                into_json(text).map_err(|err| format!("answer is not valid JSON: {err}"))
+                let mut last = None;
+                for value in json_values(text) {
+                    if self.check(&value).is_ok() {
+                        return Ok(value);
+                    }
+                    last = Some(value);
+                }
+                last.ok_or_else(|| "answer is not valid JSON".into())
             }
         }
     }
@@ -65,7 +72,12 @@ impl Format {
                     format!("format schema is not a valid JSON Schema: {error}")
                 })?;
                 validator.iter_errors(value).next().map_or(Ok(()), |error| {
-                    Err(format!("answer does not conform to schema `{}`: {error}", spec.name))
+                    let path = error.instance_path().as_str();
+                    let at = if path.is_empty() { "root" } else { path };
+                    Err(format!(
+                        "answer does not conform to schema `{}`: {error} at {at}",
+                        spec.name
+                    ))
                 })
             }
             _ => Ok(()),
@@ -82,36 +94,52 @@ impl Format {
     }
 }
 
-/// Parse a JSON answer, accepting raw JSON, a leading or embedded Markdown
-/// fence, or a JSON value preceded / followed by agent prose.
-fn into_json(text: &str) -> Result<Value, serde_json::Error> {
+/// Every complete JSON value in `text`, in appearance order: whole-text, then
+/// each fenced body, then each `{` / `[` slice.
+fn json_values(text: &str) -> impl Iterator<Item = Value> {
     let trimmed = text.trim();
-
-    // 1. Whole text as-is.
-    if let Ok(value) = serde_json::from_str(trimmed) {
-        return Ok(value);
-    }
-
-    // 2. Fence anywhere (agent preamble + ```json … ```), closed or not.
-    if let Some(value) = from_fenced(trimmed) {
-        return Ok(value);
-    }
-
-    // 3. First complete JSON value at the first `{` or `[`.
-    let offset = trimmed.find(['{', '[']).unwrap_or(0);
-    // parse one value, ignoring any trailing text after closing `}` or `]`
-    let mut de = serde_json::Deserializer::from_str(&trimmed[offset..]);
-    Value::deserialize(&mut de)
+    let whole = serde_json::from_str(trimmed).ok().into_iter();
+    let fenced = fenced_bodies(trimmed)
+        .into_iter()
+        .filter_map(|body| serde_json::from_str(body.trim()).ok());
+    whole.chain(fenced).chain(sliced_json(trimmed))
 }
 
-// Body of the first Markdown fence in `text`, if any; an unterminated fence
-// yields the remainder of the text.
-fn from_fenced(text: &str) -> Option<Value> {
-    let start = text.find("```")?;
-    let rest = &text[start + 3..];
-    let body = rest.split_once('\n').map_or(rest, |(_, body)| body);
-    let body = body.find("```").map_or(body, |end| &body[..end]);
-    serde_json::from_str(body.trim()).ok()
+/// Bodies of every Markdown fence in `text`; an unterminated fence yields the
+/// remainder.
+fn fenced_bodies(text: &str) -> Vec<&str> {
+    let mut bodies = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("```") {
+        let after = &rest[start + 3..];
+        let body = after.split_once('\n').map_or(after, |(_, body)| body);
+        if let Some(end) = body.find("```") {
+            bodies.push(&body[..end]);
+            rest = &body[end + 3..];
+        } else {
+            bodies.push(body);
+            break;
+        }
+    }
+    bodies
+}
+
+/// Complete JSON values starting at each `{` or `[`, continuing from the
+/// deserializer offset so nested brackets are not re-offered as roots.
+fn sliced_json(text: &str) -> Vec<Value> {
+    let mut values = Vec::new();
+    let mut rest = text;
+    while let Some(offset) = rest.find(['{', '[']) {
+        let mut stream = serde_json::Deserializer::from_str(&rest[offset..]).into_iter::<Value>();
+        match stream.next() {
+            Some(Ok(value)) => {
+                rest = &rest[offset + stream.byte_offset()..];
+                values.push(value);
+            }
+            Some(Err(_)) | None => rest = &rest[offset + 1..],
+        }
+    }
+    values
 }
 
 impl Answer {
@@ -169,6 +197,21 @@ mod tests {
         })
     }
 
+    fn phase_report_schema() -> Format {
+        Format::Schema(Schema {
+            name: "phase-report".to_owned(),
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "outcome": { "type": "string" },
+                    "source": { "type": "string" },
+                },
+                "required": ["outcome", "source"],
+            })
+            .to_string(),
+        })
+    }
+
     #[test]
     fn text_is_verbatim() {
         assert_eq!(Format::Text.parse("hello").unwrap(), json!("hello"));
@@ -200,6 +243,43 @@ mod tests {
     fn preamble_then_raw_object() {
         let text = "Done.\n{\"verdict\":\"pass\"}\n";
         assert_eq!(Format::Json.parse(text).unwrap(), json!({ "verdict": "pass" }));
+    }
+
+    #[test]
+    fn preamble_array_then_phase_report() {
+        let text = "findings: []\n{\"outcome\":\"completed\",\"source\":\"model-assisted\"}";
+        assert_eq!(
+            phase_report_schema().parse(text).unwrap(),
+            json!({ "outcome": "completed", "source": "model-assisted" })
+        );
+    }
+
+    #[test]
+    fn repair_reason_array_then_verdict() {
+        let text = "[] is not of type \"object\"\n{\"verdict\":\"pass\"}";
+        assert_eq!(verdict_schema().parse(text).unwrap(), json!({ "verdict": "pass" }));
+    }
+
+    #[test]
+    fn fenced_array_then_raw_object() {
+        let text = "```json\n[]\n```\n{\"verdict\":\"pass\"}";
+        assert_eq!(verdict_schema().parse(text).unwrap(), json!({ "verdict": "pass" }));
+    }
+
+    #[test]
+    fn whole_text_array_is_schema_error() {
+        let format = phase_report_schema();
+        let value = format.parse("[]").unwrap();
+        assert_eq!(value, json!([]));
+        let err = format.check(&value).unwrap_err();
+        assert!(err.contains("does not conform to schema `phase-report`"), "unexpected: {err}");
+        assert!(err.contains("at root"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn incidental_object_then_verdict() {
+        let text = "snippet {\"kind\":\"snippet\"}\n{\"verdict\":\"pass\"}";
+        assert_eq!(verdict_schema().parse(text).unwrap(), json!({ "verdict": "pass" }));
     }
 
     #[test]
@@ -235,6 +315,23 @@ mod tests {
         assert!(err.contains("does not conform to schema `verdict`"), "unexpected: {err}");
         let err = verdict_schema().check(&json!(42)).unwrap_err();
         assert!(err.contains("does not conform to schema `verdict`"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn check_names_instance_path() {
+        let format = Format::Schema(Schema {
+            name: "report".to_owned(),
+            schema: json!({
+                "type": "object",
+                "properties": { "ui-surface": { "type": "object" } },
+            })
+            .to_string(),
+        });
+        let root = format.check(&json!([])).unwrap_err();
+        assert!(root.contains("at root"), "unexpected: {root}");
+        let nested = format.check(&json!({ "ui-surface": [] })).unwrap_err();
+        assert!(nested.contains("/ui-surface"), "unexpected: {nested}");
+        assert_ne!(root, nested);
     }
 
     #[test]
