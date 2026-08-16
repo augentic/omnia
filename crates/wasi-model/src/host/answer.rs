@@ -31,11 +31,12 @@ impl Format {
 
     /// Interpret a model's text turn as an answer value.
     ///
-    /// For JSON / schema answers, every complete JSON value in the turn is a
-    /// candidate (whole text, each fenced body, then each `{` / `[` slice). The
-    /// first value that passes [`Self::check`] wins, so an incidental `[]` in
-    /// preamble does not hide a later valid object. If none pass, the last
-    /// extracted value is returned so the host gate remains the authority.
+    /// For JSON / schema answers, a whole-text JSON value is the only
+    /// candidate. Otherwise every complete value in the turn is tried (each
+    /// fenced body, then each `{` / `[` slice). The first value that passes
+    /// [`Self::check`] wins, so an incidental `[]` in preamble does not hide a
+    /// later valid object. If none pass, the last extracted value is returned
+    /// so the host gate remains the authority.
     ///
     /// # Errors
     ///
@@ -94,15 +95,19 @@ impl Format {
     }
 }
 
-/// Every complete JSON value in `text`, in appearance order: whole-text, then
+/// Complete JSON values in `text`. A whole-text parse is the only candidate so
+/// fence / brace scans cannot lift fragments out of string contents. Otherwise:
 /// each fenced body, then each `{` / `[` slice.
-fn json_values(text: &str) -> impl Iterator<Item = Value> {
+fn json_values(text: &str) -> Vec<Value> {
     let trimmed = text.trim();
-    let whole = serde_json::from_str(trimmed).ok().into_iter();
-    let fenced = fenced_bodies(trimmed)
+    if let Ok(value) = serde_json::from_str(trimmed) {
+        return vec![value];
+    }
+    fenced_bodies(trimmed)
         .into_iter()
-        .filter_map(|body| serde_json::from_str(body.trim()).ok());
-    whole.chain(fenced).chain(sliced_json(trimmed))
+        .filter_map(|body| serde_json::from_str(body.trim()).ok())
+        .chain(sliced_json(trimmed))
+        .collect()
 }
 
 /// Bodies of every Markdown fence in `text`; an unterminated fence yields the
@@ -274,6 +279,20 @@ mod tests {
         let err = format.check(&value).unwrap_err();
         assert!(err.contains("does not conform to schema `phase-report`"), "unexpected: {err}");
         assert!(err.contains("at root"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn whole_json_not_mined() {
+        let format = verdict_schema();
+        let fenced = r#"{"note":"```json\n{\"verdict\":\"pass\"}\n```"}"#;
+        let value = format.parse(fenced).unwrap();
+        assert_eq!(value, json!({ "note": "```json\n{\"verdict\":\"pass\"}\n```" }));
+        assert!(format.check(&value).is_err());
+
+        let quoted = r#""use {\"verdict\":\"pass\"} as the answer""#;
+        let value = format.parse(quoted).unwrap();
+        assert_eq!(value, json!("use {\"verdict\":\"pass\"} as the answer"));
+        assert!(format.check(&value).is_err());
     }
 
     #[test]
