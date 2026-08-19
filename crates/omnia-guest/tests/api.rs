@@ -48,6 +48,33 @@ impl<P: Provider> Operation<P> for Echo {
     }
 }
 
+/// Input type promoted to an operation by `#[operation]` below.
+#[derive(Debug, Deserialize)]
+struct MacroEcho {
+    name: String,
+}
+
+#[derive(Debug, Serialize)]
+struct MacroEchoReply {
+    name: String,
+    owner: String,
+}
+
+#[omnia_guest::operation]
+// The Operation contract is async; this test body just has nothing to await.
+#[allow(clippy::unused_async)]
+async fn macro_echo<P>(
+    input: MacroEcho, context: CallContext<'_, P>,
+) -> omnia_guest::Result<MacroEchoReply>
+where
+    P: Provider,
+{
+    Ok(MacroEchoReply {
+        name: input.name,
+        owner: context.owner.to_owned(),
+    })
+}
+
 struct StatefulProvider {
     calls: AtomicUsize,
 }
@@ -108,6 +135,19 @@ async fn invoke() {
 
     assert_eq!(output.owner, "tenant");
     assert_eq!(output.correlation_id.as_deref(), Some("call-1"));
+}
+
+#[tokio::test]
+async fn invoke_macro_operation() {
+    let invoker = Invoker::new("tenant", ());
+    let invocation = Invocation::new(MacroEcho {
+        name: "generated".to_string(),
+    });
+
+    let output = invoker.invoke::<MacroEcho>(invocation).await.expect("operation succeeds");
+
+    assert_eq!(output.name, "generated");
+    assert_eq!(output.owner, "tenant");
 }
 
 #[tokio::test]

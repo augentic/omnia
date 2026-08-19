@@ -1,6 +1,23 @@
 # omnia-guest-macros
 
-The independent `#[instrument]` attribute wraps a function in an OpenTelemetry span and initializes the guest subscriber on entry. Routing and WASI exports are ordinary Rust APIs in `omnia-guest`.
+Procedural attributes for Omnia guests: `#[operation]` derives an `omnia_guest::api::Operation` implementation from a bare handler function, and the independent `#[instrument]` attribute wraps a function in an OpenTelemetry span and initializes the guest subscriber on entry. Routing and WASI exports are ordinary Rust APIs in `omnia-guest`.
+
+## Operations
+
+`#[operation]` (re-exported as `omnia_guest::operation`) turns an `async fn` into an operation; it takes no arguments. The first parameter is the owned input type and becomes the impl target (`Input = Self`); the second must be `CallContext<'_, P>`; the return type is `Result<T>` (`omnia_guest::Result`, error defaults to `omnia_guest::Error`) or `Result<T, E>`. The fn's generics and bounds are reused verbatim — `CallContext` already forces `P: Provider` — and the fn itself is re-emitted unchanged (attributes included) so other handlers can call it directly.
+
+The generated `call` is a bare delegation with no instrumentation. When a span is wanted, stack `#[tracing::instrument]` on the fn itself:
+
+```rust,ignore
+#[omnia_guest::operation]
+#[tracing::instrument(skip_all)]
+async fn motion_message<P>(input: MotionMessage, context: CallContext<'_, P>) -> Result<()>
+where
+    P: Provider + Config + Publish,
+{
+    // ...
+}
+```
 
 ## Instrumentation
 

@@ -138,6 +138,29 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
 - A **provider** is the struct your operations run against — it carries their capabilities (implement `DocumentStore`, `Config`, etc. on it).
 - An **invoker** (`Invoker::new(owner, provider)`) binds the provider to an owner id and executes operations.
 
+Write an operation as a bare `async fn` and let `#[omnia_guest::operation]` derive the `Operation` impl from its signature — the first parameter is the input type (and the impl target), the second must be `CallContext<'_, P>`, and the return type is `Result<T>` (`omnia_guest::Result`) or `Result<T, E>`:
+
+```rust,noplayground
+#[omnia_guest::operation]
+async fn create_item<P>(input: CreateItem, context: CallContext<'_, P>) -> Result<ItemReply>
+where
+    P: Provider + Config + StateStore,
+{
+    // context.provider carries the capabilities in the fn's bounds
+}
+```
+
+The macro takes no arguments and adds no instrumentation. The function is re-emitted unchanged, attributes included, so other handlers can still call it directly and a span is added by stacking `#[tracing::instrument]` on the fn (`fields(...)` may reference the `input` and `context` parameters). A hand-written `impl Operation<P>` remains the escape hatch for shapes the macro doesn't cover (e.g. `Input != Self`).
+
+For a guest that runs on the WASI-backed capability defaults, declare the provider with `omnia_guest::provider!` instead of writing one empty impl per capability (the expansion compiles on `wasm32` only; native tests supply mock providers):
+
+```rust,noplayground
+omnia_guest::provider! {
+    /// Bare provider backed by the default WASI capability implementations.
+    pub struct Provider: Config + HttpRequest + Identity + Publish + StateStore;
+}
+```
+
 Routers then map transport events onto operations: an HTTP router maps method + path, a messaging router maps exact topics, a command router maps CLI subcommands. Your WASI export stays visible application code — it just hands the event to the router:
 
 ```rust

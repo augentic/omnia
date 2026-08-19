@@ -33,6 +33,7 @@ clap = { workspace = true, optional = true }
 clap_complete = { workspace = true, optional = true }
 http.workspace = true
 http-body.workspace = true
+omnia-guest-macros.workspace = true
 omnia-wasi-sql = { workspace = true, optional = true }
 omnia-wasi-http.workspace = true
 omnia-wasi-docstore = { workspace = true, optional = true }
