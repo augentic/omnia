@@ -1,0 +1,5 @@
+error: #[operation] expects exactly two parameters: `(input: <InputType>, context: CallContext<'_, P>)`
+ --> tests/compile_fail/missing_context.rs:2:18
+  |
+2 | async fn handler(input: Message) -> Result<()> {
+  |                  ^^^^^^^^^^^^^^

@@ -1,0 +1,5 @@
+error: #[operation] requires an `async fn`
+ --> tests/compile_fail/not_async.rs:2:1
+  |
+2 | fn handler<P>(input: Message, context: CallContext<'_, P>) -> Result<()> {
+  | ^^
