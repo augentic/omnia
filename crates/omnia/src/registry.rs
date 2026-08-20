@@ -16,7 +16,10 @@ use std::fmt;
 use std::sync::{Arc, PoisonError, RwLock};
 
 use anyhow::{Context as _, Result, bail, ensure};
-pub use routing::{CliRoutes, HttpRoutes, PatternRoutes, Routes, RoutingPolicy, TriggerRouter};
+// Test-only: lets manifest unit tests resolve against the aggregated tables.
+#[cfg(test)]
+pub use routing::Resolver;
+pub use routing::{CliRoutes, HttpRoutes, PatternRoutes, Routes, TriggerRouter};
 use wasmtime::Engine;
 use wasmtime::component::{Component, InstancePre, Linker};
 use wasmtime_wasi::WasiView;
@@ -206,7 +209,7 @@ impl<T: WasiView + 'static> Registry<T> {
     /// guest imports them) are polyfilled on a clone of the retained linker,
     /// from this component's own import types — the shared linker is never
     /// mutated after bootstrap. Imports outside the linked host set and the
-    /// `link` union fail here, exactly as at bootstrap.
+    /// `dispatch` set fail here, exactly as at bootstrap.
     pub(crate) fn instantiate_late(
         &self, id: &GuestId, component: &Component,
     ) -> Result<InstancePre<T>>
@@ -305,15 +308,15 @@ impl<T: 'static> Registry<T> {
         Ok(())
     }
 
-    /// Returns the per-trigger inbound route tables built from the manifest's
-    /// `[[route.*]]` sections.
+    /// Returns the per-trigger inbound route tables built from the manifest
+    /// guests' `routes` lists.
     #[must_use]
     pub const fn routes(&self) -> &Routes {
         &self.routes
     }
 
     /// Returns the shared host-mediated dynamic-linking dispatch handle (the
-    /// selector strategy, link allow-list union, and bound transport).
+    /// selector strategy, dispatch interface set, and bound transport).
     #[must_use]
     pub(crate) const fn dispatch(&self) -> &Arc<DispatchHandle> {
         &self.dispatch

@@ -98,15 +98,15 @@ Almost always a `wit-bindgen` version mismatch between your guest's dependencies
 
 Host-mediated guest-to-guest calls are nested more than 8 deep — usually accidental recursion (guest A's import dispatches to guest B, which calls back into A). Break the cycle, or raise `MAX_DISPATCH_DEPTH` if the depth is intentional.
 
-## `program:` binaries
+## Direct-command binaries
 
 ### `mybin run ...` fails with an argument error / `--config` is rejected
 
-A binary built with the `runtime!` [`program:` key](reference/runtime-macro.md#program-raw-argv-passthrough) has **no host CLI**: no `run` subcommand, no `--config`/`OMNIA_CONFIG` override, no positional wasm path. Its argv goes to the guest verbatim, so `mybin greet Ada` is correct and `mybin run -- greet Ada` hands the guest a literal `run` argument. The deployment is fixed at compile time (compiled-in manifest or resolver).
+A `runtime!` binary with `mode: command` and a compiled-in deployment is a [direct command](reference/runtime-macro.md#direct-commands-raw-argv-passthrough) with **no host CLI**: no `run` subcommand, no `--config`/`OMNIA_CONFIG` override, no positional wasm path. Its argv goes to the guest verbatim, so `mybin greet Ada` is correct and `mybin run -- greet Ada` hands the guest a literal `run` argument. The deployment is fixed at compile time (the compiled-in manifest), by design.
 
-### A `program:` binary logs nothing (or too much)
+### A direct-command binary logs nothing (or too much)
 
-`--debug` and `--quiet` are the only host flags on this path; they are peeled anywhere in argv and win over `RUST_LOG` (see [Host log flags](reference/configuration.md#host-log-flags-program-binaries)). Combining them is a startup failure. Without either flag, the `RUST_LOG` filter applies as usual.
+`--debug` and `--quiet` are the only host flags on this path; they are peeled anywhere in argv and win over `RUST_LOG` (see [Host log flags](reference/configuration.md#host-log-flags-direct-command-binaries)). Combining them is a startup failure. Without either flag, the `RUST_LOG` filter applies as usual.
 
 ### The guest never sees `--debug` / `--quiet`
 

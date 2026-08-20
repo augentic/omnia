@@ -12,7 +12,7 @@ Point the runtime at a manifest with `--config` (or the `OMNIA_CONFIG` environme
 cargo run --example http-routing -- run --config examples/http-routing/omnia.toml
 ```
 
-A runtime can also compile in a default deployment with the `runtime!` macro — a manifest path via the `config:` field, or the manifest itself via the inline `guests`/`mounts`/`link`/`routes` keys — used only when the command line supplies no source (see [Composing a Runtime](composing-a-runtime.md#default-manifest-config)).
+A runtime can also compile in a default deployment with the `runtime!` macro — a manifest path via the `config:` field, or the manifest itself via the inline `dispatch`/`guests`/`mounts` keys (each guest entry carries its own `routes`) — used only when the command line supplies no source (see [Composing a Runtime](composing-a-runtime.md#default-manifest-config)).
 
 A manifest declares guests, mounts, routes, and (eventually) transports. Every field is optional except at least one `[[guest]]`. Paths resolve relative to the manifest's own directory.
 
@@ -20,34 +20,27 @@ A manifest declares guests, mounts, routes, and (eventually) transports. Every f
 [[guest]]
 id = "api"                              # opaque identity; the runtime never parses it
 source.path = "./guests/api.wasm"       # .wasm or pre-compiled .bin
+routes.http = ["/"]
 
 [[guest]]
 id = "admin"
 source.path = "./guests/admin.wasm"
-
-[[route.http]]
-prefix = "/admin"
-guest = "admin"
-
-[[route.http]]
-prefix = "/"
-guest = "api"
+routes.http = ["/admin"]
 ```
 
 The full field reference lives in [Configuration](../reference/configuration.md#deployment-manifest-omniatoml).
 
 ## Programmatic manifests
 
-Everything the TOML expresses can also be assembled in Rust: `omnia::Manifest` is the same schema as a value, with fluent setters for guests, mounts, links, and routes. Pass it to the deployment builder (or the `runtime!`-generated `run(builder)`) instead of a file path:
+Everything the TOML expresses can also be assembled in Rust: `omnia::Manifest` is the same schema as a value, with fluent setters for guests, mounts, dispatch interfaces, and routes. Pass it to the deployment builder (or the `runtime!`-generated `run(builder)`) instead of a file path:
 
 ```rust,ignore
 use omnia::{DeploymentBuilder, GuestEntry, Manifest};
 
 let manifest = Manifest::new()
-    .guest(GuestEntry::new("api", "./guests/api.wasm"))
-    .guest(GuestEntry::new("admin", "./guests/admin.wasm").link("omnia:link/audit"))
-    .route_http("/admin", "admin")
-    .route_http("/", "api");
+    .dispatch(["omnia:link/audit"])
+    .guest(GuestEntry::new("api", "./guests/api.wasm").route_http("/"))
+    .guest(GuestEntry::new("admin", "./guests/admin.wasm").route_http("/admin"));
 
 host::run(DeploymentBuilder::new().manifest(manifest))?;
 ```
@@ -56,34 +49,28 @@ host::run(DeploymentBuilder::new().manifest(manifest))?;
 
 ## Routing inbound traffic
 
-Each trigger has its own route table, independent of which guests are loaded:
+Each guest declares the routes that target it, one optional list per trigger; the runtime aggregates them into per-trigger route tables at load:
 
-- **`[[route.http]]`** — `prefix` matched by longest path prefix. One HTTP server fronts all guests.
-- **`[[route.messaging]]`** — `topic` matched by NATS-style pattern (`.`-separated tokens, `*` matches one token, `>` matches the rest).
-- **`[[route.websocket]]`** — same pattern syntax, spelled `route`.
+- **`routes.http`** — path prefixes matched by longest prefix. One HTTP server fronts all guests.
+- **`routes.messaging`** — topics matched by NATS-style pattern (`.`-separated tokens, `*` matches one token, `>` matches the rest).
+- **`routes.websocket`** — same pattern syntax, for WebSocket routes.
 
-If a trigger has no routes and exactly one guest exports its handler, that guest is the catch-all — so single-guest deployments need no route tables at all.
+If a trigger has no routes and exactly one guest exports its handler, that guest is the catch-all — so single-guest deployments need no routes at all.
 
 The [`http-routing`](../../examples/http-routing/) example runs two HTTP guests behind `/a` and `/b` prefixes.
 
-A messaging deployment works the same way: the host backend subscribes to topics (broker configuration such as `KAFKA_TOPICS`/`NATS_TOPICS`, or everything for the in-memory default), and the route table picks which guest handles each delivered message:
+A messaging deployment works the same way: the host backend subscribes to topics (broker configuration such as `KAFKA_TOPICS`/`NATS_TOPICS`, or everything for the in-memory default), and each guest's route list picks which delivered messages it handles:
 
 ```toml
 [[guest]]
 id = "orders"
 source.path = "./guests/orders.wasm"     # exports the messaging handler
+routes.messaging = ["orders.>"]          # orders.created, orders.cancelled, ...
 
 [[guest]]
 id = "billing"
 source.path = "./guests/billing.wasm"    # exports the messaging handler
-
-[[route.messaging]]
-topic = "orders.>"                       # orders.created, orders.cancelled, ...
-guest = "orders"
-
-[[route.messaging]]
-topic = "invoices.*"                     # exactly one token after `invoices.`
-guest = "billing"
+routes.messaging = ["invoices.*"]        # exactly one token after `invoices.`
 ```
 
 Each matched message instantiates a fresh instance of the routed guest, exactly like an HTTP request. Inside the guest, topic-to-operation matching stays exact — see [Messaging](messaging.md#handling-incoming-messages).
@@ -102,7 +89,7 @@ writable = true     # omit for read-only (the default)
 The equivalent on the command line (repeatable, layered over the manifest, last-wins per name):
 
 ```bash
-cargo run --example model -- run guest.wasm --mount path=workspace,name=.,writable
+cargo run --example cli -- run guest.wasm --mount path=workspace,name=.,writable
 ```
 
 Guests discover mounts through `wasi:filesystem/preopens`:
@@ -116,9 +103,11 @@ The [`model`](../../examples/model/) example lends a mounted workspace to a mode
 
 ## Guest-to-guest linking
 
-One guest can import an interface that another guest exports, with the host mediating the call. The importing guest names the interface in its `link` allow-list:
+One guest can import an interface that another guest exports, with the host mediating the call. The deployment names the interface in its top-level `dispatch` list:
 
 ```toml
+dispatch = ["omnia:link/echo"]
+
 [[guest]]
 id = "responder"
 source.path = "./responder.wasm"        # exports omnia:link/echo
@@ -126,14 +115,13 @@ source.path = "./responder.wasm"        # exports omnia:link/echo
 [[guest]]
 id = "router"
 source.path = "./router.wasm"           # imports omnia:link/echo
-link = ["omnia:link/echo"]
 ```
 
-At startup, the runtime polyfills each linked interface onto the shared linker and dispatches calls to whichever guest exports it, over an in-process channel. The runtime sees only opaque interface strings and guest identities — no domain knowledge lives in the core (this is the glossary's [Law 2](../glossary.md#law-2)).
+At startup, the runtime polyfills each dispatched interface onto the shared linker and dispatches calls to whichever guest exports it, over an in-process channel. The runtime sees only opaque interface strings and guest identities — no domain knowledge lives in the core (this is the glossary's [Law 2](../glossary.md#law-2)).
 
 Notes:
 
-- A top-level `link = [...]` in the manifest declares deployment-wide interfaces; `--link <interface>` on the command line unions with both it and the per-guest lists. The linker is shared, so an interface linked for one guest is wired for the whole deployment.
+- `dispatch` is deployment-wide: the linker is shared, so a dispatched interface is wired for the whole deployment, and any guest importing it may call it. `--dispatch <interface>` on the command line unions with the manifest's list. An exporter need not be loaded at startup — a guest registered later can serve the interface.
 - Nested dispatch depth is bounded by `MAX_DISPATCH_DEPTH` (default 8) to catch accidental recursion.
 - Only the in-process transport is implemented; declaring `unix`, `nats`, or `quic` under `[transport]` is rejected at load.
 

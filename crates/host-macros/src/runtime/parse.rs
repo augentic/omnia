@@ -32,11 +32,6 @@ pub struct Config {
     #[allow(clippy::struct_field_names)]
     pub config_file: Option<Expr>,
     pub manifest: ManifestSpec,
-    pub resolver: Option<Expr>,
-    pub http_paths: Option<Expr>,
-    pub http_listener: Option<Expr>,
-    pub program: Option<Expr>,
-    pub command_guest: Option<Expr>,
 }
 
 /// One `Host: Backend` wiring from the `hosts: { ... }` block.
@@ -45,30 +40,29 @@ pub struct HostEntry {
     pub backend: Path,
 }
 
-/// Inline manifest keys (`guests`, `mounts`, `link`, `routes`) parsed from
+/// Inline manifest keys (`dispatch`, `guests`, `mounts`) parsed from
 /// `runtime!({ ... })`; mirrors the `omnia::Manifest` schema.
 #[derive(Default)]
 pub struct ManifestSpec {
+    pub dispatch: Vec<Expr>,
     pub guests: Vec<GuestSpec>,
     pub mounts: Vec<MountSpec>,
-    pub link: Vec<Expr>,
-    pub routes: RoutesSpec,
 }
 
 impl ManifestSpec {
     pub const fn is_empty(&self) -> bool {
-        self.guests.is_empty()
-            && self.mounts.is_empty()
-            && self.link.is_empty()
-            && self.routes.is_empty()
+        self.dispatch.is_empty() && self.guests.is_empty() && self.mounts.is_empty()
     }
 }
 
-/// One `{ id: ..., source: ..., link: [...] }` guest entry.
+/// One `{ id: ..., source: ..., routes: { ... }, command: true }` guest entry.
 pub struct GuestSpec {
     pub id: Expr,
     pub source: Expr,
-    pub link: Vec<Expr>,
+    pub routes: GuestRoutesSpec,
+    pub command: bool,
+    /// Span of the `command:` key, for cross-key diagnostics.
+    pub command_span: Option<Span>,
 }
 
 /// One `{ name: ..., path: ..., writable: ... }` mount entry.
@@ -78,24 +72,13 @@ pub struct MountSpec {
     pub writable: Option<Expr>,
 }
 
-/// Per-trigger route lists from the `routes: { ... }` block.
+/// Per-trigger route pattern lists from a guest entry's `routes: { ... }`
+/// block; the containing guest is the implicit target.
 #[derive(Default)]
-pub struct RoutesSpec {
-    pub http: Vec<RouteEntry>,
-    pub messaging: Vec<RouteEntry>,
-    pub websocket: Vec<RouteEntry>,
-}
-
-impl RoutesSpec {
-    const fn is_empty(&self) -> bool {
-        self.http.is_empty() && self.messaging.is_empty() && self.websocket.is_empty()
-    }
-}
-
-/// One route: a match key (`prefix`/`topic`/`route`) mapped to a target guest.
-pub struct RouteEntry {
-    pub key: Expr,
-    pub guest: Expr,
+pub struct GuestRoutesSpec {
+    pub http: Vec<Expr>,
+    pub messaging: Vec<Expr>,
+    pub websocket: Vec<Expr>,
 }
 
 impl Parse for Config {
@@ -104,15 +87,8 @@ impl Parse for Config {
         let mut host_entries = Vec::new();
         let mut config_file = None;
         let mut manifest = ManifestSpec::default();
-        let mut resolver = None;
-        let mut http_paths = None;
-        let mut http_listener = None;
-        let mut program = None;
-        let mut command_guest = None;
         let mut config_span: Option<Span> = None;
         let mut inline_span: Option<Span> = None;
-        let mut program_span: Option<Span> = None;
-        let mut command_guest_span: Option<Span> = None;
 
         let settings;
         syn::braced!(settings in input);
@@ -132,6 +108,10 @@ impl Parse for Config {
                     config_file = Some(c);
                     config_span = Some(span);
                 }
+                OptValue::Dispatch(d) => {
+                    manifest.dispatch = d;
+                    inline_span.get_or_insert(span);
+                }
                 OptValue::Guests(g) => {
                     manifest.guests = g;
                     inline_span.get_or_insert(span);
@@ -139,25 +119,6 @@ impl Parse for Config {
                 OptValue::Mounts(m) => {
                     manifest.mounts = m;
                     inline_span.get_or_insert(span);
-                }
-                OptValue::Link(l) => {
-                    manifest.link = l;
-                    inline_span.get_or_insert(span);
-                }
-                OptValue::Routes(r) => {
-                    manifest.routes = r;
-                    inline_span.get_or_insert(span);
-                }
-                OptValue::Resolver(r) => resolver = Some(r),
-                OptValue::HttpPaths(p) => http_paths = Some(p),
-                OptValue::HttpListener(l) => http_listener = Some(l),
-                OptValue::Program(p) => {
-                    program = Some(p);
-                    program_span = Some(span);
-                }
-                OptValue::CommandGuest(c) => {
-                    command_guest = Some(c);
-                    command_guest_span = Some(span);
                 }
             }
         }
@@ -167,17 +128,10 @@ impl Parse for Config {
             host_entries,
             config_file,
             manifest,
-            resolver,
-            http_paths,
-            http_listener,
-            program,
-            command_guest,
         };
         config.validate(&KeySpans {
             config: config_span,
             inline: inline_span,
-            program: program_span,
-            command_guest: command_guest_span,
         })?;
         Ok(config)
     }
@@ -188,8 +142,6 @@ impl Parse for Config {
 struct KeySpans {
     config: Option<Span>,
     inline: Option<Span>,
-    program: Option<Span>,
-    command_guest: Option<Span>,
 }
 
 impl Config {
@@ -197,33 +149,27 @@ impl Config {
         if let (Some(_), Some(inline)) = (spans.config, spans.inline) {
             return Err(syn::Error::new(
                 inline,
-                "`config:` and inline manifest keys (`guests`, `mounts`, `link`, `routes`) are \
+                "`config:` and inline manifest keys (`dispatch`, `guests`, `mounts`) are \
                  mutually exclusive",
             ));
         }
 
-        if let Some(span) = spans.command_guest
-            && self.mode != Mode::Command
-        {
-            return Err(syn::Error::new(
-                span,
-                "`command_guest:` requires `mode: command` (it only routes command mode)",
-            ));
-        }
-
-        if let Some(span) = spans.program {
+        let mut marked: Option<Span> = None;
+        for guest in &self.manifest.guests {
+            let Some(span) = guest.command_span else {
+                continue;
+            };
             if self.mode != Mode::Command {
-                return Err(syn::Error::new(span, "`program:` requires `mode: command`"));
-            }
-            let has_manifest = self.config_file.is_some() || !self.manifest.is_empty();
-            let fully_dynamic = self.resolver.is_some() && self.command_guest.is_some();
-            if !has_manifest && !fully_dynamic {
                 return Err(syn::Error::new(
                     span,
-                    "`program:` requires a compiled-in manifest (`config:` or inline manifest \
-                     keys) or `resolver:` plus `command_guest:` — a direct command has no \
-                     `--config`/positional-wasm override, so the deployment must be expressed \
-                     here",
+                    "`command: true` requires `mode: command` (it only routes command mode)",
+                ));
+            }
+            if marked.replace(span).is_some() {
+                return Err(syn::Error::new(
+                    span,
+                    "multiple guests marked `command: true`; at most one guest may be the \
+                     command guest",
                 ));
             }
         }
@@ -236,15 +182,11 @@ mod kw {
     syn::custom_keyword!(mode);
     syn::custom_keyword!(hosts);
     syn::custom_keyword!(config);
+    syn::custom_keyword!(dispatch);
     syn::custom_keyword!(guests);
     syn::custom_keyword!(mounts);
-    syn::custom_keyword!(link);
     syn::custom_keyword!(routes);
-    syn::custom_keyword!(resolver);
-    syn::custom_keyword!(http_paths);
-    syn::custom_keyword!(http_listener);
-    syn::custom_keyword!(program);
-    syn::custom_keyword!(command_guest);
+    syn::custom_keyword!(link);
 }
 
 /// One `key: value` setting, tagged with its key name and span so
@@ -259,15 +201,9 @@ enum OptValue {
     Mode(Mode),
     Hosts(Vec<HostEntry>),
     Config(Expr),
+    Dispatch(Vec<Expr>),
     Guests(Vec<GuestSpec>),
     Mounts(Vec<MountSpec>),
-    Link(Vec<Expr>),
-    Routes(RoutesSpec),
-    Resolver(Expr),
-    HttpPaths(Expr),
-    HttpListener(Expr),
-    Program(Expr),
-    CommandGuest(Expr),
 }
 
 impl Parse for Opt {
@@ -287,6 +223,10 @@ impl Parse for Opt {
             let key = input.parse::<kw::config>()?;
             input.parse::<Token![:]>()?;
             ("config", key.span, OptValue::Config(input.parse()?))
+        } else if l.peek(kw::dispatch) {
+            let key = input.parse::<kw::dispatch>()?;
+            input.parse::<Token![:]>()?;
+            ("dispatch", key.span, OptValue::Dispatch(parse_bracketed_list(input)?))
         } else if l.peek(kw::guests) {
             let key = input.parse::<kw::guests>()?;
             input.parse::<Token![:]>()?;
@@ -295,34 +235,23 @@ impl Parse for Opt {
             let key = input.parse::<kw::mounts>()?;
             input.parse::<Token![:]>()?;
             ("mounts", key.span, OptValue::Mounts(parse_bracketed_list(input)?))
-        } else if l.peek(kw::link) {
-            let key = input.parse::<kw::link>()?;
-            input.parse::<Token![:]>()?;
-            ("link", key.span, OptValue::Link(parse_bracketed_list(input)?))
-        } else if l.peek(kw::routes) {
+        } else if input.peek(kw::routes) {
+            // A pointed migration diagnostic, deliberately outside the
+            // lookahead set so unrelated unknown keys don't suggest `routes`.
             let key = input.parse::<kw::routes>()?;
-            input.parse::<Token![:]>()?;
-            ("routes", key.span, OptValue::Routes(input.parse()?))
-        } else if l.peek(kw::resolver) {
-            let key = input.parse::<kw::resolver>()?;
-            input.parse::<Token![:]>()?;
-            ("resolver", key.span, OptValue::Resolver(input.parse()?))
-        } else if l.peek(kw::http_paths) {
-            let key = input.parse::<kw::http_paths>()?;
-            input.parse::<Token![:]>()?;
-            ("http_paths", key.span, OptValue::HttpPaths(input.parse()?))
-        } else if l.peek(kw::http_listener) {
-            let key = input.parse::<kw::http_listener>()?;
-            input.parse::<Token![:]>()?;
-            ("http_listener", key.span, OptValue::HttpListener(input.parse()?))
-        } else if l.peek(kw::program) {
-            let key = input.parse::<kw::program>()?;
-            input.parse::<Token![:]>()?;
-            ("program", key.span, OptValue::Program(input.parse()?))
-        } else if l.peek(kw::command_guest) {
-            let key = input.parse::<kw::command_guest>()?;
-            input.parse::<Token![:]>()?;
-            ("command_guest", key.span, OptValue::CommandGuest(input.parse()?))
+            return Err(syn::Error::new(
+                key.span,
+                "the top-level `routes:` key was removed; declare routes on each guest entry \
+                 (`guests: [{ id: ..., source: ..., routes: { http: [...] } }]`)",
+            ));
+        } else if input.peek(kw::link) {
+            // Same treatment for the renamed `link:` key.
+            let key = input.parse::<kw::link>()?;
+            return Err(syn::Error::new(
+                key.span,
+                "the `link:` key was renamed; declare host-mediated interfaces with the \
+                 top-level `dispatch: [...]` key",
+            ));
         } else {
             return Err(l.error());
         };
@@ -385,17 +314,36 @@ impl Parse for GuestSpec {
     fn parse(input: ParseStream) -> Result<Self> {
         let mut id = None;
         let mut source = None;
-        let mut link = Vec::new();
+        let mut routes = GuestRoutesSpec::default();
+        let mut command = false;
+        let mut command_span = None;
 
         let span = parse_kv_block(input, |key, value| {
             match key.to_string().as_str() {
                 "id" => id = Some(value.parse()?),
                 "source" => source = Some(value.parse()?),
-                "link" => link = parse_bracketed_list(value)?,
+                "routes" => routes = value.parse()?,
+                "command" => {
+                    let lit: syn::LitBool = value.parse()?;
+                    command = lit.value();
+                    command_span = command.then(|| key.span());
+                }
+                // A pointed migration diagnostic: the per-guest `link:` list
+                // was removed — dispatch interfaces are deployment-wide.
+                "link" | "dispatch" => {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        "host-mediated interfaces are deployment-wide; declare them with the \
+                         top-level `dispatch: [...]` key, not on a guest entry",
+                    ));
+                }
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
-                        format!("unknown guest key `{other}`; expected `id`, `source`, or `link`"),
+                        format!(
+                            "unknown guest key `{other}`; expected `id`, `source`, `routes`, \
+                             or `command`"
+                        ),
                     ));
                 }
             }
@@ -406,7 +354,9 @@ impl Parse for GuestSpec {
         Ok(Self {
             id: id.ok_or_else(|| missing("id"))?,
             source: source.ok_or_else(|| missing("source"))?,
-            link,
+            routes,
+            command,
+            command_span,
         })
     }
 }
@@ -443,15 +393,15 @@ impl Parse for MountSpec {
     }
 }
 
-impl Parse for RoutesSpec {
+impl Parse for GuestRoutesSpec {
     fn parse(input: ParseStream) -> Result<Self> {
         let mut routes = Self::default();
 
         parse_kv_block(input, |key, value| {
             match key.to_string().as_str() {
-                "http" => routes.http = parse_route_entries(value, "prefix")?,
-                "messaging" => routes.messaging = parse_route_entries(value, "topic")?,
-                "websocket" => routes.websocket = parse_route_entries(value, "route")?,
+                "http" => routes.http = parse_bracketed_list(value)?,
+                "messaging" => routes.messaging = parse_bracketed_list(value)?,
+                "websocket" => routes.websocket = parse_bracketed_list(value)?,
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
@@ -467,43 +417,4 @@ impl Parse for RoutesSpec {
 
         Ok(routes)
     }
-}
-
-/// Parse `[ { <match_key>: ..., guest: ... }, ... ]` route entries; the match
-/// key is `prefix` (http), `topic` (messaging), or `route` (websocket).
-fn parse_route_entries(input: ParseStream, match_key: &str) -> Result<Vec<RouteEntry>> {
-    let list;
-    syn::bracketed!(list in input);
-    let mut entries = Vec::new();
-
-    while !list.is_empty() {
-        let mut key = None;
-        let mut guest = None;
-
-        let span = parse_kv_block(&list, |field, value| {
-            match field.to_string().as_str() {
-                k if k == match_key => key = Some(value.parse()?),
-                "guest" => guest = Some(value.parse()?),
-                other => {
-                    return Err(syn::Error::new(
-                        field.span(),
-                        format!("unknown route key `{other}`; expected `{match_key}` or `guest`"),
-                    ));
-                }
-            }
-            Ok(())
-        })?;
-
-        let missing = |key| syn::Error::new(span, format!("route entry is missing `{key}`"));
-        entries.push(RouteEntry {
-            key: key.ok_or_else(|| missing(match_key))?,
-            guest: guest.ok_or_else(|| missing("guest"))?,
-        });
-
-        if !list.is_empty() {
-            list.parse::<Token![,]>()?;
-        }
-    }
-
-    Ok(entries)
 }

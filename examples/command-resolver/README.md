@@ -1,12 +1,14 @@
-# Command Resolver Example
+# Direct Command Example
 
-Demonstrates the `runtime!` deployment keys: a static guest plus a
-`GuestResolver` for resolve-on-miss, explicit command routing
-(`command_guest:`), and raw argv passthrough (`program:`).
+Demonstrates a compiled-in command deployment: a static guest declared
+inline in the `runtime!` invocation. The static guest is the sole
+`wasi:cli/run` exporter, so command mode routes to it with no
+configuration.
 
-Because `program:` is set, the binary has **no host CLI**: there is no `run`
-subcommand and no `--config`/`OMNIA_CONFIG`/positional-wasm override — every
-argument is forwarded to the guest verbatim.
+Because the deployment is compiled in, command mode makes the binary a
+**direct command** with no host CLI: there is no `run` subcommand and no
+`--config`/`OMNIA_CONFIG`/positional-wasm override — every argument is
+forwarded to the guest verbatim.
 
 ## Quick Start
 

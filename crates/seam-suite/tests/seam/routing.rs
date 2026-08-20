@@ -1,5 +1,5 @@
-//! Multi-guest HTTP routing seam: one server fronts two guests, and
-//! `[[route.http]]` prefixes select the guest per request by longest match.
+//! Multi-guest HTTP routing seam: one server fronts two guests, and each
+//! guest's `routes.http` prefixes select it per request by longest match.
 
 use std::sync::Arc;
 
@@ -40,16 +40,12 @@ async fn runtime() -> Result<Runtime<Bundle>> {
     let manifest = temp_manifest(&format!(
         "[[guest]]\n\
          id = \"a\"\n\
-         source.path = \"{a}\"\n\n\
+         source.path = \"{a}\"\n\
+         routes.http = [\"/a\"]\n\n\
          [[guest]]\n\
          id = \"b\"\n\
-         source.path = \"{b}\"\n\n\
-         [[route.http]]\n\
-         prefix = \"/a\"\n\
-         guest = \"a\"\n\n\
-         [[route.http]]\n\
-         prefix = \"/b\"\n\
-         guest = \"b\"\n",
+         source.path = \"{b}\"\n\
+         routes.http = [\"/b\"]\n",
         a = guest_a.display(),
         b = guest_b.display(),
     ))?;

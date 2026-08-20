@@ -79,7 +79,7 @@ pub struct EmbeddedGuest {
 pub async fn main<B, H>(mode: Mode, embedded: Option<EmbeddedGuest>) -> ExitCode;
 ```
 
-- CLI ergonomics: when a guest is embedded, invoking the binary with **no subcommand** behaves as `run` (so `./mybinary` and `./mybinary run` are equivalent, and `--mount` / `--link` / `-- args` still apply). Without an embedded guest, behaviour is unchanged.
+- CLI ergonomics: when a guest is embedded, invoking the binary with **no subcommand** behaves as `run` (so `./mybinary` and `./mybinary run` are equivalent, and `--mount` / `--dispatch` / `-- args` still apply). Without an embedded guest, behaviour is unchanged.
 
 ### 4.3 Build-time precompile — `omnia-build` (new crate)
 

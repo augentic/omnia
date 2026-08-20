@@ -20,9 +20,9 @@ use super::value::read_plain_value;
 use crate::deployment::LoadedGuest;
 use crate::registry::GuestId;
 
-/// Polyfill every host-mediated import named in the `link` allow-list union onto
-/// the shared linker, bound to the dispatch handle, returning the set of
-/// interfaces wired.
+/// Polyfill every host-mediated import named in the deployment's `dispatch`
+/// set onto the shared linker, bound to the dispatch handle, returning the
+/// set of interfaces wired.
 ///
 /// Each interface is linked exactly once (the linker is shared, so the per-guest
 /// allow-lists are unioned). `wasi:*` imports are never touched here — they are
@@ -160,33 +160,6 @@ where
     Ok(())
 }
 
-/// Fault a missing link target in before the dispatch takes a depth slot.
-///
-/// The miss probe is typed — the transport's endpoint map, never the connect
-/// error string (which would break on reword and misfire on a future
-/// distributed transport's remote errors). A connect miss is not the same as
-/// "unregistered": a registered guest serving nothing in the link union has an
-/// entry but no endpoint, so when the hook succeeds yet the endpoint is still
-/// missing, the component genuinely lacks the interface. Without a hook the
-/// dispatch proceeds and `connect` reports the miss exactly as before.
-async fn ensure_endpoint(handle: &DispatchHandle, target: &GuestId, interface: &str) -> Result<()> {
-    if handle.transport().server(target).is_some() {
-        return Ok(());
-    }
-    let Some(hook) = handle.resolve_hook() else {
-        return Ok(());
-    };
-    hook.ensure(target, interface)
-        .await
-        .with_context(|| format!("resolving link target `{target}` for `{interface}`"))?;
-    ensure!(
-        handle.transport().server(target).is_some(),
-        "guest `{target}` is registered but serves no `{interface}` endpoint (the component does \
-         not export it)"
-    );
-    Ok(())
-}
-
 /// A prepared dispatch: everything [`send`] and [`send_concurrent`] share
 /// before they diverge on store threading.
 struct Call<'a> {
@@ -202,8 +175,8 @@ struct Call<'a> {
 }
 
 /// Shared per-call preamble: select the target, reject crossing resources,
-/// resolve the endpoint, take a depth slot, and open the client connection.
-async fn prepare<'a>(
+/// take a depth slot, and open the client connection.
+fn prepare<'a>(
     handle: &DispatchHandle, interface: &str, func: &str, ty: &types::ComponentFunc,
     params: &'a [Val],
 ) -> Result<Call<'a>> {
@@ -223,8 +196,6 @@ async fn prepare<'a>(
             );
         }
     }
-
-    ensure_endpoint(handle, &target, interface).await?;
 
     let ctx = handle.enter(&target)?;
 
@@ -317,7 +288,7 @@ async fn send<T>(
 where
     T: WrpcView + 'static,
 {
-    let call = prepare(handle, interface, func, ty, params).await?;
+    let call = prepare(handle, interface, func, ty, params)?;
     let buf = encode_params(store.as_context_mut(), &call, interface, func)?;
 
     // Invoke over the carrier; the request is written and flushed here, the
@@ -361,7 +332,7 @@ async fn send_concurrent<T>(
 where
     T: WrpcView + 'static,
 {
-    let call = prepare(handle, interface, func, ty, params).await?;
+    let call = prepare(handle, interface, func, ty, params)?;
     let buf = accessor
         .with(|mut access| encode_params(access.as_context_mut(), &call, interface, func))?;
 

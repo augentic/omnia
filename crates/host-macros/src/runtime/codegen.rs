@@ -15,7 +15,6 @@ pub struct Codegen {
     pub server_types: Vec<Path>,
     pub backends_ty: TokenStream,
     pub backends_def: TokenStream,
-    pub listener_binding: TokenStream,
     pub main_options: TokenStream,
 }
 
@@ -28,7 +27,6 @@ impl From<&Config> for Codegen {
 
         let (backends_ty, backends_def) = emit_backends(host_entries);
 
-        let listener_binding = emit_listener_binding(config);
         let main_options = emit_main_options(config);
 
         Self {
@@ -37,29 +35,8 @@ impl From<&Config> for Codegen {
             server_types,
             backends_ty,
             backends_def,
-            listener_binding,
             main_options,
         }
-    }
-}
-
-/// Emit the `let http_listener` binding evaluated at the top of the generated
-/// `main`: the `http_listener:` expression has type
-/// `anyhow::Result<std::net::TcpListener>` (writing the key means supplying a
-/// listener), and an `Err` is a startup failure. Empty when the invocation
-/// omits the key.
-fn emit_listener_binding(config: &Config) -> TokenStream {
-    let Some(expr) = &config.http_listener else {
-        return TokenStream::new();
-    };
-    quote! {
-        let http_listener: ::std::net::TcpListener = match #expr {
-            ::std::result::Result::Ok(listener) => listener,
-            ::std::result::Result::Err(error) => {
-                ::std::eprintln!("error: {error:#}");
-                return ::std::process::ExitCode::FAILURE;
-            }
-        };
     }
 }
 
@@ -68,22 +45,10 @@ fn emit_listener_binding(config: &Config) -> TokenStream {
 fn emit_main_options(config: &Config) -> TokenStream {
     let mode = config.mode.tokens();
     let manifest = emit_manifest_source(config);
-    let resolver = config.resolver.as_ref().map(|expr| quote! { .resolver(#expr) });
-    let http_paths = config.http_paths.as_ref().map(|expr| quote! { .http_paths(#expr) });
-    // The binding emitted by `emit_listener_binding` above.
-    let http_listener =
-        config.http_listener.as_ref().map(|_| quote! { .http_listener(http_listener) });
-    let program = config.program.as_ref().map(|expr| quote! { .direct_command(#expr) });
-    let command_guest = config.command_guest.as_ref().map(|expr| quote! { .command_guest(#expr) });
 
     quote! {
         omnia::MainOptions::new(#mode)
             #manifest
-            #resolver
-            #http_paths
-            #http_listener
-            #program
-            #command_guest
     }
 }
 
@@ -108,12 +73,27 @@ fn emit_manifest_source(config: &Config) -> Option<TokenStream> {
 
 /// Emit the fluent `omnia::Manifest` builder chain for the inline keys.
 fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
+    let dispatch = manifest.dispatch.iter().map(|interface| {
+        quote! {
+            .dispatch([#interface])
+        }
+    });
+
     let guests = manifest.guests.iter().map(|guest| {
         let id = &guest.id;
         let source = &guest.source;
-        let links = &guest.link;
+        let http = &guest.routes.http;
+        let messaging = &guest.routes.messaging;
+        let websocket = &guest.routes.websocket;
+        let command = guest.command.then(|| quote! { .command() });
         quote! {
-            .guest(omnia::GuestEntry::new(#id, #source)#(.link(#links))*)
+            .guest(
+                omnia::GuestEntry::new(#id, #source)
+                    #(.route_http(#http))*
+                    #(.route_messaging(#messaging))*
+                    #(.route_websocket(#websocket))*
+                    #command
+            )
         }
     });
 
@@ -131,31 +111,11 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
         }
     });
 
-    let links = &manifest.link;
-    let link = (!links.is_empty()).then(|| quote! { .links([#(#links),*]) });
-
-    let routes = &manifest.routes;
-    let http = routes.http.iter().map(|route| {
-        let (key, guest) = (&route.key, &route.guest);
-        quote! { .route_http(#key, #guest) }
-    });
-    let messaging = routes.messaging.iter().map(|route| {
-        let (key, guest) = (&route.key, &route.guest);
-        quote! { .route_messaging(#key, #guest) }
-    });
-    let websocket = routes.websocket.iter().map(|route| {
-        let (key, guest) = (&route.key, &route.guest);
-        quote! { .route_websocket(#key, #guest) }
-    });
-
     quote! {
         omnia::Manifest::new()
+            #(#dispatch)*
             #(#guests)*
             #(#mounts)*
-            #link
-            #(#http)*
-            #(#messaging)*
-            #(#websocket)*
     }
 }
 

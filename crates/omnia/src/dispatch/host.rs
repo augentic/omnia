@@ -15,7 +15,7 @@ use crate::runtime::Runtime;
 /// Shares the depth bound (`DispatchHandle::enter`) and resource rejection with
 /// guest→guest dispatch. The target is instantiated *fresh* on a new store and
 /// the matching export invoked directly, so the callee can never re-enter its
-/// caller and needs no `link` declaration for `interface`.
+/// caller and needs no `dispatch` declaration for `interface`.
 ///
 /// `args` and the returned values are plain `Val`s; a live resource handle on
 /// either side is rejected.
@@ -41,15 +41,12 @@ where
         }
     }
 
-    // Resolve-on-miss: a registry miss may fault the target in through the
-    // installed resolver, with `interface` as the export the component must
-    // satisfy. Runs before `enter` so a slow fetch/compile never pins a
-    // process-wide depth slot.
     let instance_pre = runtime
-        .ensure_guest(target, interface)
-        .await
-        .map_err(anyhow::Error::from)
-        .with_context(|| format!("dispatching `{interface}/{func}` to guest `{target}`"))?
+        .registry()
+        .get(target)
+        .with_context(|| {
+            format!("dispatching `{interface}/{func}` to guest `{target}`: guest is not registered")
+        })?
         .instance_pre()
         .clone();
 
@@ -65,7 +62,7 @@ where
     // its ambient store clears, so the callee's call runs unnested. The task owns
     // the whole store lifecycle (build → instantiate → call → drop), so the
     // callee is a fresh instance that cannot re-enter its caller
-    // (instance-per-call) and needs no `link` declaration for `interface`.
+    // (instance-per-call) and needs no `dispatch` declaration for `interface`.
     let task_runtime = (*runtime).clone();
     let target_owned = target.clone();
     let interface_owned = interface.to_owned();

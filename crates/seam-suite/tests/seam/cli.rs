@@ -7,20 +7,17 @@
 //! (deployment build, command routing, exit mapping); the serialized guest
 //! artifact keeps the per-case build cheap.
 //!
-//! The `command_guest` module covers the explicit command guest: an empty
-//! dynamic registry resolving the command guest on the first miss, resolver
-//! absence/failure, wrong-export refusal, `argv[0]` via `program_name`, and
-//! exit-code passthrough — plus static-deployment compatibility.
+//! The `command_flag` module covers the `command = true` guest mark: routing
+//! to the marked entry (including past a second `wasi:cli/run` exporter that
+//! would otherwise be ambiguous) and `argv[0]` via `program_name`.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use anyhow::{Context as _, Result};
-use futures::FutureExt as _;
 use omnia::{
-    Deployment, DeploymentBuilder, ExitStatus, FutureResult, GuestArtifact, GuestId, GuestResolver,
-    Manifest, Mode, Runtime, StoreCtx, Wiring, run, run_precompiled,
+    Deployment, DeploymentBuilder, ExitStatus, GuestEntry, Manifest, Mode, Runtime, StoreCtx,
+    Wiring, run_precompiled,
 };
 use omnia_testkit::find_guest;
 
@@ -42,8 +39,8 @@ impl Wiring<()> for EmptyWiring {
         Ok(())
     }
 
-    async fn serve(_runtime: &Runtime<()>) -> Result<()> {
-        Ok(())
+    fn serve(_runtime: &Runtime<()>) -> impl std::future::Future<Output = Result<()>> + Send {
+        std::future::ready(Ok(()))
     }
 }
 
@@ -90,154 +87,20 @@ fn exit_codes() -> Result<()> {
     })
 }
 
-mod command_guest {
+mod command_flag {
     use super::*;
 
-    /// A counting command-guest resolver answering every identity with
-    /// `answer()`'s outcome.
-    struct CommandResolver<F> {
-        calls: Arc<AtomicUsize>,
-        answer: F,
-    }
-
-    impl<F> CommandResolver<F>
-    where
-        F: Fn() -> Result<Option<GuestArtifact>> + Send + Sync + 'static,
-    {
-        fn new(answer: F) -> (Arc<Self>, Arc<AtomicUsize>) {
-            let calls = Arc::new(AtomicUsize::new(0));
-            (
-                Arc::new(Self {
-                    calls: Arc::clone(&calls),
-                    answer,
-                }),
-                calls,
-            )
-        }
-    }
-
-    impl<F> GuestResolver for CommandResolver<F>
-    where
-        F: Fn() -> Result<Option<GuestArtifact>> + Send + Sync + 'static,
-    {
-        fn resolve(
-            &self, _guest: GuestId, _expected_export: String,
-        ) -> FutureResult<Option<GuestArtifact>> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            let outcome = (self.answer)();
-            async move { outcome }.boxed()
-        }
-    }
-
-    /// The serialized CLI guest wrapped as a registration artifact.
-    fn cli_artifact() -> Result<GuestArtifact> {
-        omnia_testkit::precompiled_artifact("cli_wasm.wasm")
-    }
-
-    /// Drive an empty dynamic deployment whose explicit command guest resolves
-    /// through `resolver`, returning the run outcome.
-    async fn run_dynamic_cli(
-        resolver: Option<Arc<dyn GuestResolver>>, tail: &[&str],
-    ) -> Result<ExitStatus> {
-        let mut builder = DeploymentBuilder::new()
-            .dynamic()
-            .command_guest("app")
-            .program_name("app")
+    /// Drive a command deployment built from `manifest`, returning the run
+    /// outcome.
+    async fn run_manifest(manifest: Manifest, tail: &[&str]) -> Result<ExitStatus> {
+        let builder = DeploymentBuilder::new()
+            .manifest(manifest)
             .args(tail.iter().map(|arg| (*arg).to_string()).collect::<Vec<_>>())
-            .mode(Mode::Command);
-        if let Some(resolver) = resolver {
-            builder = builder.resolver(resolver);
-        }
-        run::<(), EmptyWiring>(builder).await
-    }
-
-    // An empty dynamic registry resolves the explicit command guest on the first
-    // (and only) miss; the guest runs and its exit codes pass through unchanged.
-    #[test]
-    fn resolved() -> Result<()> {
-        let _gate = engine_gate();
-        fixture::RT.block_on(async {
-            let cases: &[(&[&str], i32, &str)] = &[
-                (&["greet", "Ada"], 0, "greet exits 0"),
-                (&["fail", "42"], 42, "wasi:cli/exit carries a specific code"),
-                (&["fail"], 1, "Err(()) from run maps to 1"),
-            ];
-
-            for (tail, code, expectation) in cases {
-                let (resolver, calls) = CommandResolver::new(|| Ok(Some(cli_artifact()?)));
-                let status = run_dynamic_cli(Some(resolver), tail).await?;
-                assert_eq!(status.code(), *code, "{expectation} (argv: {tail:?})");
-                assert_eq!(calls.load(Ordering::SeqCst), 1, "one miss, one resolution");
-            }
-
-            Ok(())
-        })
-    }
-
-    // An explicit command guest with no resolver installed fails the run — never
-    // the previous inert exit 0.
-    #[test]
-    fn unresolved_fails() -> Result<()> {
-        let _gate = engine_gate();
-        fixture::RT.block_on(async {
-            let error = run_dynamic_cli(None, &["greet"])
-                .await
-                .expect_err("an unresolvable command guest must fail the run");
-            assert!(format!("{error:#}").contains("is not registered"), "{error:#}");
-            Ok(())
-        })
-    }
-
-    // A resolver decline (`Ok(None)`) is a definitive miss: the run fails.
-    #[test]
-    fn declined_fails() -> Result<()> {
-        let _gate = engine_gate();
-        fixture::RT.block_on(async {
-            let (resolver, _calls) = CommandResolver::new(|| Ok(None));
-            let error = run_dynamic_cli(Some(resolver), &["greet"])
-                .await
-                .expect_err("a declined command guest must fail the run");
-            assert!(format!("{error:#}").contains("is not registered"), "{error:#}");
-            Ok(())
-        })
-    }
-
-    // A resolver failure surfaces with its cause chain intact — the seam an
-    // embedder downcasts through for typed error rendering.
-    #[test]
-    fn resolver_failure_surfaces() -> Result<()> {
-        let _gate = engine_gate();
-        fixture::RT.block_on(async {
-            let (resolver, _calls) = CommandResolver::new(|| Err(anyhow::anyhow!("store outage")));
-            let error = run_dynamic_cli(Some(resolver), &["greet"])
-                .await
-                .expect_err("a failing resolver must fail the run");
-            let chain = format!("{error:#}");
-            assert!(chain.contains("guest resolution failed"), "{chain}");
-            assert!(chain.contains("store outage"), "the cause chain is preserved: {chain}");
-            Ok(())
-        })
-    }
-
-    // A resolved component that does not export `wasi:cli/run` is refused and
-    // leaves no partial state.
-    #[test]
-    fn wrong_export_refused() -> Result<()> {
-        let _gate = engine_gate();
-        fixture::RT.block_on(async {
-            // The link responder exports `omnia:link/echo`, not `wasi:cli/run`.
-            let (resolver, _calls) = CommandResolver::new(|| {
-                omnia_testkit::precompiled_artifact("guest_link_responder_wasm.wasm").map(Some)
-            });
-            let error = run_dynamic_cli(Some(resolver), &["greet"])
-                .await
-                .expect_err("a wrong-export command guest must fail the run");
-            assert!(
-                format!("{error:#}").contains("does not export interface `wasi:cli/run`"),
-                "{error:#}"
-            );
-            Ok(())
-        })
+            .mode(Mode::Command)
+            .precompiled();
+        // SAFETY: `find_guest` only returns artifacts this workspace built and
+        // serialized itself (`cargo make test-guests`).
+        unsafe { run_precompiled::<(), EmptyWiring>(builder) }.await
     }
 
     // `program_name` overrides `argv[0]` (command mode prepends the deployment
@@ -248,7 +111,6 @@ mod command_guest {
         fixture::RT.block_on(async {
             let deployment = DeploymentBuilder::new()
                 .dynamic()
-                .command_guest("app")
                 .program_name("myprog")
                 .args(vec!["greet".to_owned()])
                 .mode(Mode::Command)
@@ -268,26 +130,43 @@ mod command_guest {
         })
     }
 
-    // An explicit command guest naming a static `[[guest]]` entry is a registry
-    // hit — no resolver consulted, ordinary static deployments keep working.
+    // A `command = true` mark on a static `[[guest]]` entry routes the run to
+    // the marked guest.
     #[test]
     fn static_hit() -> Result<()> {
         let _gate = engine_gate();
         fixture::RT.block_on(async {
             let wasm = find_guest("cli_wasm.wasm");
-            let (resolver, calls) = CommandResolver::new(|| Ok(Some(cli_artifact()?)));
-            let builder = DeploymentBuilder::new()
-                .manifest(Manifest::from_wasm(&wasm))
-                .command_guest("cli_wasm")
-                .args(vec!["add".to_owned(), "2".to_owned(), "40".to_owned()])
-                .mode(Mode::Command)
-                .resolver(resolver)
-                .precompiled();
-            // SAFETY: `find_guest` only returns artifacts this workspace built and
-            // serialized itself (`cargo make test-guests`).
-            let status = unsafe { run_precompiled::<(), EmptyWiring>(builder) }.await?;
-            assert_eq!(status.code(), 0, "the static command guest runs");
-            assert_eq!(calls.load(Ordering::SeqCst), 0, "a registry hit never resolves");
+            let manifest = Manifest::new().guest(GuestEntry::new("app", wasm).command());
+            let status = run_manifest(manifest, &["add", "2", "40"]).await?;
+            assert_eq!(status.code(), 0, "the marked command guest runs");
+            Ok(())
+        })
+    }
+
+    // Two static `wasi:cli/run` exporters are ambiguous without a mark; the
+    // same deployment with one entry marked `command = true` routes the run.
+    #[test]
+    fn mark_disambiguates_multiple_exporters() -> Result<()> {
+        let _gate = engine_gate();
+        fixture::RT.block_on(async {
+            let wasm = find_guest("cli_wasm.wasm");
+            let tail = &["add", "2", "40"];
+
+            let unmarked = Manifest::new()
+                .guest(GuestEntry::new("first", wasm.clone()))
+                .guest(GuestEntry::new("second", wasm.clone()));
+            let error = run_manifest(unmarked, tail)
+                .await
+                .expect_err("two unmarked exporters must be ambiguous");
+            assert!(format!("{error:#}").contains("2 capable guests"), "{error:#}");
+
+            let marked = Manifest::new()
+                .guest(GuestEntry::new("first", wasm.clone()))
+                .guest(GuestEntry::new("second", wasm).command());
+            let status = run_manifest(marked, tail).await?;
+            assert_eq!(status.code(), 0, "the marked guest runs");
+
             Ok(())
         })
     }

@@ -3,8 +3,9 @@
 //! Two guests are compiled in via the `runtime!` macro's inline manifest keys
 //! (the Rust equivalent of `omnia.toml`): `responder` (exports
 //! `omnia:link/echo`) and `router` (imports it, exports `run`). The router's
-//! import is unsatisfied by its own component — the host polyfills it on the
-//! shared linker and, at bootstrap, wires the serve side of every linked
+//! import is unsatisfied by its own component — the deployment names the
+//! interface in its `dispatch:` list, so the host polyfills it on the shared
+//! linker and, at bootstrap, wires the serve side of every dispatched
 //! interface (`omnia::serve_links`, run by `Runtime::new`), so a dispatched
 //! call always finds the responder's in-process wRPC server.
 //!
@@ -19,6 +20,7 @@ cfg_if::cfg_if! {
         use omnia_wasi_otel::{WasiOtel, OtelDefault};
 
         omnia::runtime!({
+            dispatch: ["omnia:link/echo"],
             guests: [
                 {
                     id: "responder",
@@ -33,7 +35,6 @@ cfg_if::cfg_if! {
                         env!("CARGO_MANIFEST_DIR"),
                         "/../target/wasm32-wasip2/debug/examples/guest_link_router_wasm.wasm",
                     ),
-                    link: ["omnia:link/echo"],
                 },
             ],
             hosts: {

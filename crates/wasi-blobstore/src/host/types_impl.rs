@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use wasmtime::component::{Access, Accessor, Resource};
 use wasmtime::error::Context;
 use wasmtime_wasi::p2::bindings::io::streams::{InputStream, OutputStream};
@@ -20,16 +19,15 @@ impl<T> HostIncomingValueWithStore<T> for WasiBlobstore {
         Ok(value)
     }
 
-    async fn incoming_value_consume_async(
+    fn incoming_value_consume_async(
         accessor: &Accessor<T, Self>, this: Resource<IncomingValue>,
-    ) -> Result<Resource<InputStream>> {
-        let value = accessor.with(|mut store| {
+    ) -> impl std::future::Future<Output = Result<Resource<InputStream>>> {
+        std::future::ready(accessor.with(|mut store| {
             let incoming = store.get().table.get(&this).context("IncomingValue not found")?;
-            Ok::<Bytes, Error>(incoming.clone())
-        })?;
-        let rs = MemoryInputPipe::new(value);
-        let stream: InputStream = Box::new(rs);
-        Ok(accessor.with(|mut store| store.get().table.push(stream))?)
+            let rs = MemoryInputPipe::new(incoming.clone());
+            let stream: InputStream = Box::new(rs);
+            Ok(store.get().table.push(stream)?)
+        }))
     }
 
     fn size(
@@ -56,11 +54,15 @@ impl<T> HostOutgoingValueWithStore<T> for WasiBlobstore {
         Ok(host.get().table.push(OutgoingValue::new(usize::MAX))?)
     }
 
-    async fn outgoing_value_write_body(
+    fn outgoing_value_write_body(
         accessor: &wasmtime::component::Accessor<T, Self>,
         self_: wasmtime::component::Resource<OutgoingValue>,
-    ) -> wasmtime::Result<wasmtime::Result<wasmtime::component::Resource<OutputStream>, ()>> {
-        accessor.with(|mut store| {
+    ) -> impl std::future::Future<
+        Output = wasmtime::Result<
+            wasmtime::Result<wasmtime::component::Resource<OutputStream>, ()>,
+        >,
+    > {
+        std::future::ready(accessor.with(|mut store| {
             let pipe = {
                 let outgoing =
                     store.get().table.get_mut(&self_).context("OutgoingValue not found")?;
@@ -73,7 +75,7 @@ impl<T> HostOutgoingValueWithStore<T> for WasiBlobstore {
             let stream: OutputStream = Box::new(pipe);
             let stream_resource = store.get().table.push(stream)?;
             Ok(Ok(stream_resource))
-        })
+        }))
     }
 
     fn finish(mut host: Access<'_, T, Self>, this: Resource<OutgoingValue>) -> Result<()> {

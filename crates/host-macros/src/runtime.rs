@@ -19,7 +19,6 @@ pub fn expand(config: &Config) -> TokenStream {
         server_types,
         backends_ty,
         backends_def,
-        listener_binding,
         main_options,
     } = Codegen::from(config);
 
@@ -57,11 +56,11 @@ pub fn expand(config: &Config) -> TokenStream {
             }
 
             /// Entry point: run the compiled-in deployment through this
-            /// runtime's hosts and backends (the standard `run` grammar, or
-            /// raw argv passthrough under the `program:` key).
+            /// runtime's hosts and backends (raw argv passthrough for a
+            /// command deployment compiled in here, otherwise the standard
+            /// `run` grammar).
             #[tokio::main]
             pub async fn main() -> ::std::process::ExitCode {
-                #listener_binding
                 omnia::main::<#backends_ty, Hooks>(#main_options).await
             }
 
@@ -138,75 +137,33 @@ mod tests {
         })));
     }
 
+    // A `command: true` guest entry marks the command-mode target; the flag
+    // expands to `.command()` on its `GuestEntry`.
     #[test]
-    fn expand_resolver() {
-        insta::assert_snapshot!(expand_pretty(quote!({
-            guests: [
-                { id: "api", source: "api.wasm" },
-            ],
-            resolver: CacheResolver::new(),
-            hosts: {
-                WasiOtel: OtelDefault,
-            },
-        })));
-    }
-
-    // Covers both late-routing keys: `http_paths` alone is a strict subset
-    // of this expansion.
-    #[test]
-    fn expand_http_listener() {
-        insta::assert_snapshot!(expand_pretty(quote!({
-            guests: [
-                { id: "engine", source: "engine.wasm" },
-            ],
-            resolver: CacheResolver::new(),
-            http_paths: mcp_route,
-            http_listener: bind_http_listener(),
-            hosts: {
-                WasiHttp: HttpDefault,
-                WasiOtel: OtelDefault,
-            },
-        })));
-    }
-
-    #[test]
-    fn expand_command_guest() {
+    fn expand_command_flag() {
         insta::assert_snapshot!(expand_pretty(quote!({
             mode: command,
             guests: [
-                { id: "app", source: "app.wasm" },
+                { id: "app", source: "app.wasm", command: true },
                 { id: "helper", source: "helper.wasm" },
             ],
-            command_guest: "app",
         })));
     }
 
-    #[test]
-    fn expand_program() {
-        insta::assert_snapshot!(expand_pretty(quote!({
-            mode: command,
-            program: "mytool",
-            config: concat!(env!("CARGO_MANIFEST_DIR"), "/omnia.toml"),
-        })));
-    }
-
-    // The composed shape from the guest-resolution design: static guests plus
-    // resolve-on-miss, explicit command routing, and raw argv passthrough.
+    // The composed deployment shape: static guests, mounts, and explicit
+    // command routing.
     #[test]
     fn expand_deployment_keys() {
         insta::assert_snapshot!(expand_pretty(quote!({
             mode: command,
-            program: "specify-example",
             guests: [
-                { id: "specify", source: engine_component_path() },
+                { id: "specify", source: engine_component_path(), command: true },
                 { id: "target:mock", source: mock_target_path() },
             ],
             mounts: [
                 { name: "project", path: project_root(), writable: true },
                 { name: "store", path: store_root(), writable: true },
             ],
-            resolver: CacheResolver::new(),
-            command_guest: "specify",
             hosts: {
                 WasiHttp: HttpDefault,
                 WasiOtel: OtelDefault,
@@ -231,29 +188,35 @@ mod tests {
         })));
     }
 
+    // Guest-owned routes and the deployment-wide dispatch list: every trigger
+    // list expands to `route_*` builder calls on the owning `GuestEntry` (the
+    // guest id is the implicit target), the top-level `dispatch:` list to
+    // `.dispatch(...)` calls on the `Manifest`, and patterns/interfaces are
+    // arbitrary expressions.
     #[test]
     fn expand_inline_manifest() {
         insta::assert_snapshot!(expand_pretty(quote!({
+            dispatch: ["omnia:link/echo"],
             guests: [
                 {
                     id: "responder",
                     source: concat!(env!("CARGO_MANIFEST_DIR"), "/responder.wasm"),
+                    routes: {
+                        messaging: ["orders.>"],
+                        websocket: ["chat.*"],
+                    },
                 },
                 {
                     id: "router",
                     source: concat!(env!("CARGO_MANIFEST_DIR"), "/router.wasm"),
-                    link: ["omnia:link/echo"],
+                    routes: {
+                        http: ["/", concat!("/", "api")],
+                    },
                 },
             ],
-            link: ["omnia:link/other"],
             mounts: [
                 { name: ".", path: concat!(env!("CARGO_MANIFEST_DIR"), "/workspace"), writable: true },
             ],
-            routes: {
-                http: [{ prefix: "/", guest: "router" }],
-                messaging: [{ topic: "orders.>", guest: "worker" }],
-                websocket: [{ route: "chat.*", guest: "ws" }],
-            },
             hosts: {
                 WasiOtel: OtelDefault,
             },

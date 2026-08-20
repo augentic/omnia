@@ -12,10 +12,11 @@
 # scripted double ignores the workspace (it never runs tools); the host-side
 # resolution is proven by the seam suite.
 #
-# Build the guest first (see README.md), then run (this path is the runtime's
-# compiled-in default, so `--config` is optional):
+# Build the guest first (see README.md), then run (this path is compiled in
+# via runtime! `config:`, so the binary is a direct command — no `run`
+# subcommand):
 #
-#   cargo run --example model -- run
+#   cargo run --example model
 
 [[guest]]
 id = "model"

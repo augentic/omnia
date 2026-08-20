@@ -12,15 +12,9 @@
 [[guest]]
 id = "a"
 source.path = "../../target/wasm32-wasip2/debug/examples/http_routing_a_wasm.wasm"
+routes.http = ["/a"]
 
 [[guest]]
 id = "b"
 source.path = "../../target/wasm32-wasip2/debug/examples/http_routing_b_wasm.wasm"
-
-[[route.http]]
-prefix = "/a"
-guest = "a"
-
-[[route.http]]
-prefix = "/b"
-guest = "b"
+routes.http = ["/b"]

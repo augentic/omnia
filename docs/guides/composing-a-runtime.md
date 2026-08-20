@@ -62,7 +62,7 @@ cargo run --example cli -- run ./target/wasm32-wasip2/debug/examples/cli_wasm.wa
 
 A backend-less command runtime is valid too: `omnia::runtime!({ mode: command });`.
 
-By default, command mode routes to the sole static guest exporting `wasi:cli/run`. To route explicitly — needed with several guests, or a guest supplied at run time — see [`command_guest:`](../reference/runtime-macro.md#command_guest-explicit-command-routing) in the macro reference.
+By default, command mode routes to the sole static guest exporting `wasi:cli/run`. With several exporters, mark one guest entry `command: true` — see [Command routing](../reference/runtime-macro.md#command-routing-command-true) in the macro reference.
 
 ## Default manifest (`config:`)
 
@@ -85,7 +85,7 @@ cargo run -- run
 
 Explicit sources always win; the compiled-in default is the lowest-precedence fallback.
 
-The manifest itself — guests, routes, mounts, links — is covered in [Multi-Guest Deployments](multi-guest-deployments.md). A manifest can also be written inline in the macro instead of a TOML file; see [Inline manifest keys](../reference/runtime-macro.md#inline-manifest-keys-guests-mounts-link-routes).
+The manifest itself — guests, routes, mounts, dispatch interfaces — is covered in [Multi-Guest Deployments](multi-guest-deployments.md). A manifest can also be written inline in the macro instead of a TOML file; see [Inline manifest keys](../reference/runtime-macro.md#inline-manifest-keys-dispatch-guests-mounts).
 
 ## Choosing backends
 
@@ -126,23 +126,21 @@ Most runtimes never need these. Each solves one specific deployment shape — re
 
 | Key | Reach for it when |
 | --- | ----------------- |
-| [`guests:`/`mounts:`/`link:`/`routes:`](../reference/runtime-macro.md#inline-manifest-keys-guests-mounts-link-routes) | You want the deployment compiled into the binary instead of a TOML file — including embedding the guest bytes themselves. |
-| [`resolver:`](../reference/runtime-macro.md#resolver-resolve-on-miss) | Guests are not all known at compile time and must be fetched on first use (multi-tenant, artifact caches). |
-| [`command_guest:`](../reference/runtime-macro.md#command_guest-explicit-command-routing) | Command mode must route to a named guest instead of the sole-exporter default. |
-| [`http_paths:`](../reference/runtime-macro.md#http_paths-path-routing-hook) | The deployment maps HTTP paths to guest identities in code (e.g. per-tenant URL schemes). |
-| [`http_listener:`](../reference/runtime-macro.md#http_listener-pre-bound-listener) | The embedding process must own the TCP socket (port 0 in tests, socket activation). |
-| [`program:`](../reference/runtime-macro.md#program-raw-argv-passthrough) | You ship a product CLI whose argv belongs entirely to the guest — no host `run` grammar at all. |
+| [`dispatch:`/`guests:`/`mounts:`](../reference/runtime-macro.md#inline-manifest-keys-dispatch-guests-mounts) | You want the deployment compiled into the binary instead of a TOML file — including embedding the guest bytes themselves. |
 
-The [`command-resolver`](../../examples/command-resolver/runtime.rs) example composes `program:`, `resolver:`, and `command_guest:` into a complete resolver-backed command deployment.
+Shipping a product CLI whose argv belongs entirely to the guest needs no key: a command-mode runtime with a compiled-in deployment is a [direct command](../reference/runtime-macro.md#direct-commands-raw-argv-passthrough) — no host `run` grammar at all.
+
+The [`command-resolver`](../../examples/command-resolver/runtime.rs) example composes the inline manifest keys into a complete direct command deployment.
 
 ## Hand-written runtimes (advanced)
 
-The macro covers most deployments. If you need a custom entry point — extra CLI flags, non-standard startup order, embedding the runtime in a larger process — supply the deployment yourself through the macro-generated `run(builder)`: build an `omnia::Manifest` (`Manifest::from_config(path)?` for a TOML file, `Manifest::from_wasm(path)` for the one-guest shorthand, or `Manifest::new()` with the fluent `guest`/`mounts`/`links`/`route_*` setters) and pass it via `omnia::DeploymentBuilder::new().manifest(manifest)`:
+The macro covers most deployments. If you need a custom entry point — extra CLI flags, non-standard startup order, embedding the runtime in a larger process — supply the deployment yourself through the macro-generated `run(builder)`: build an `omnia::Manifest` (`Manifest::from_config(path)?` for a TOML file, `Manifest::from_wasm(path)` for the one-guest shorthand, or `Manifest::new()` with the fluent `guest`/`mounts`/`dispatch`/`route_*` setters) and pass it via `omnia::DeploymentBuilder::new().manifest(manifest)`:
 
 ```rust,ignore
 let manifest = Manifest::new()
+    .dispatch(["omnia:link/echo"])
     .guest(GuestEntry::new("responder", responder_wasm))
-    .guest(GuestEntry::new("router", router_wasm).link("omnia:link/echo"));
+    .guest(GuestEntry::new("router", router_wasm));
 
 host::run(DeploymentBuilder::new().manifest(manifest))?;
 ```

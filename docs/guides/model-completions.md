@@ -68,7 +68,7 @@ For tests, CI, and local development of model guests, inject `omnia_testkit::mod
 
 ```bash
 cargo build --example model-wasm --target wasm32-wasip2
-cargo run --example model -- run --config examples/model/omnia.toml
+cargo run --example model
 ```
 
 ### `omnia-genai` — provider APIs (omnia-backends repo)

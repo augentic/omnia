@@ -1,3 +1,84 @@
+## Unreleased
+
+### Changed
+
+- The host-mediated interface list is renamed from `link` to `dispatch`
+  and is deployment-wide only: a top-level `dispatch = [...]` in TOML, a
+  top-level `dispatch: [...]` key in the `runtime!` macro, the fluent
+  `Manifest::dispatch(...)` setter, and the CLI flag `--dispatch` (replacing
+  `--link`, no alias). The per-guest form (`GuestEntry.link` in TOML,
+  `link:` on a macro guest entry, `GuestEntry::link()`) is removed — the
+  linker is shared, so per-guest lists always flattened into one
+  deployment-level grant and never enforced a per-guest ACL. Stale keys
+  fail loudly: a leftover `link` (top-level or per-guest) or a `dispatch`
+  misplaced on a guest entry is a parse/compile error. Behavior is
+  unchanged: listed interfaces are polyfilled onto the shared linker at
+  assemble (an exporter may arrive later via `Runtime::register`), and the
+  selector still picks the target guest by routing id at call time. WIT
+  packages (`omnia:link`) and internals (`serve_links`,
+  `DispatchHandle::links`) keep their names.
+
+  ```toml
+  # before                            # after
+  [[guest]]                           dispatch = ["omnia:link/echo"]
+  id = "router"
+  source.path = "./router.wasm"       [[guest]]
+  link = ["omnia:link/echo"]          id = "router"
+                                      source.path = "./router.wasm"
+  ```
+- Routes are now guest-owned: each `[[guest]]` entry declares the routes
+  targeting it (`routes.http` / `routes.messaging` / `routes.websocket`
+  pattern lists in TOML, a `routes: { http: [...], ... }` block per guest
+  entry in the `runtime!` macro, `GuestEntry::route_http` /
+  `route_messaging` / `route_websocket` programmatically), with the
+  declaring guest as the implicit target. The top-level `[[route.*]]`
+  tables, the macro's top-level `routes:` key, the `Manifest::route_*`
+  setters, and the `RouteSpec` / `HttpRoute` / `TopicRoute` types are
+  removed; a stale top-level route section now fails manifest parsing.
+  Routing behavior is unchanged: per-guest lists aggregate into the same
+  per-trigger tables (longest-prefix HTTP, first-match NATS-style
+  patterns, capability catch-all when a trigger has no routes).
+
+  ```toml
+  # before                            # after
+  [[guest]]                           [[guest]]
+  id = "api"                          id = "api"
+  source.path = "./api.wasm"          source.path = "./api.wasm"
+                                      routes.http = ["/api"]
+  [[route.http]]
+  prefix = "/api"
+  guest = "api"
+  ```
+- Removed the `runtime!` macro's `program:` key: `mode: command` with a
+  compiled-in deployment (`config:` or inline manifest keys) is now a
+  direct command by default — raw argv passthrough with the reserved
+  `--debug` / `--quiet` host log flags, no host `run` grammar. The program
+  name (telemetry and guest `argv[0]`) defaults to the manifest name (first
+  `[[guest]]` id). Command-mode binaries without a compiled-in deployment
+  keep the `run` grammar
+- Removed the `command_guest:` key and its plumbing
+  (`DeploymentBuilder::command_guest`, `Runtime::with_command_guest`,
+  `MainOptions::command_guest`): command mode routes to the sole static
+  `wasi:cli/run` exporter, or to the guest entry marked `command = true`
+  (macro `command: true`, `GuestEntry::command()`); at most one guest may
+  carry the mark. The resolver-supplied command guest (fully dynamic
+  deployment, empty guest set) is gone with the key — a direct command
+  always compiles its manifest in
+- Removed the late-binding deployment plumbing: the resolve-on-miss pull
+  layer (`GuestResolver`, `Runtime::ensure_guest`, the single-flight
+  machinery, macro `resolver:`, `DeploymentBuilder::resolver`,
+  `Runtime::with_resolver`), the `http_paths` trigger hook (macro
+  `http_paths:`, `DeploymentBuilder::http_paths`,
+  `Runtime::with_http_paths`, `RoutingPolicy` / table-only routing,
+  `Runtime::route_http`, `RouteRefusal`), and pre-bound HTTP listener
+  adoption (macro `http_listener:`, `DeploymentBuilder::http_listener`,
+  `Runtime::take_http_listener`). A registry miss is a dispatch error and
+  an unrouted HTTP path is a 404; the HTTP trigger always binds
+  `HTTP_ADDR`. Push registration stays: `Runtime::register` / `deregister`
+  and `DeploymentBuilder::dynamic()` are the way a registry grows after
+  boot, with registered guests reachable via host-mediated link dispatch
+  and `Dispatcher::invoke`
+
 ## 0.35.0
 
 Released 2026-07-25

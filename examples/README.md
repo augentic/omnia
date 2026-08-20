@@ -57,7 +57,7 @@ Each example directory has a `README.md` with test commands and example-specific
 | [`http-routing`](http-routing) | Two HTTP guests behind path prefixes via a deployment manifest |
 | [`guest-api`](guest-api) | Transport-neutral operations with explicit typed HTTP/messaging/command routers |
 | [`guest-link`](guest-link) | Host-mediated guest-to-guest linking over in-process wRPC |
-| [`command-resolver`](command-resolver) | The `runtime!` deployment keys: `program:`, `resolver:`, `command_guest:` |
+| [`command-resolver`](command-resolver) | A compiled-in command deployment: inline guests, direct-command argv |
 | [`mcp`](mcp) | A guest serving MCP tools and resources to AI agents over HTTP |
 
 ### Infrastructure

@@ -28,8 +28,9 @@ async fn build_runtime() -> Result<Runtime<()>> {
     let router = wasm_bytes("guest_link_router_wasm.wasm")?;
 
     let manifest = Manifest::new()
+        .dispatch(["omnia:link/echo"])
         .guest(GuestEntry::new("responder", responder))
-        .guest(GuestEntry::new("router", router).link("omnia:link/echo"));
+        .guest(GuestEntry::new("router", router));
 
     // Raw wasm bytes load under the safe (WasmOnly) build — no attestation.
     let deployment = DeploymentBuilder::new()

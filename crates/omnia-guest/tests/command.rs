@@ -80,14 +80,14 @@ impl<P: Provider> Operation<P> for Greet {
     type Input = GreetInput;
     type Output = String;
 
-    async fn call(
+    fn call(
         input: Self::Input, context: CallContext<'_, P>,
-    ) -> Result<Self::Output, Self::Error> {
-        if input.fail {
+    ) -> impl std::future::Future<Output = Result<Self::Output, Self::Error>> + Send {
+        std::future::ready(if input.fail {
             Err(OperationError)
         } else {
             Ok(format!("hello {}, from {}", input.name, context.owner))
-        }
+        })
     }
 }
 
@@ -351,10 +351,10 @@ impl<P: Provider> Operation<P> for Decode {
     type Input = DecodeInput;
     type Output = String;
 
-    async fn call(
+    fn call(
         input: Self::Input, _context: CallContext<'_, P>,
-    ) -> Result<Self::Output, Self::Error> {
-        Ok(input.0.to_string())
+    ) -> impl std::future::Future<Output = Result<Self::Output, Self::Error>> + Send {
+        std::future::ready(Ok(input.0.to_string()))
     }
 }
 
