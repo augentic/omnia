@@ -97,9 +97,6 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
         }
     });
 
-    let links = &manifest.link;
-    let link = (!links.is_empty()).then(|| quote! { .links([#(#links),*]) });
-
     let routes = &manifest.routes;
     let http = routes.http.iter().map(|route| {
         let (key, guest) = (&route.key, &route.guest);
@@ -118,7 +115,6 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
         omnia::Manifest::new()
             #(#guests)*
             #(#mounts)*
-            #link
             #(#http)*
             #(#messaging)*
             #(#websocket)*

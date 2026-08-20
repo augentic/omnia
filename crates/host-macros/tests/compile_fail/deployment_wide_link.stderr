@@ -1,0 +1,5 @@
+error: expected one of: `mode`, `hosts`, `config`, `guests`, `mounts`, `routes`
+ --> tests/compile_fail/deployment_wide_link.rs:2:5
+  |
+2 |     link: ["omnia:shared/log"],
+  |     ^^^^

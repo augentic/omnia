@@ -202,7 +202,6 @@ mod tests {
                     link: ["omnia:link/echo"],
                 },
             ],
-            link: ["omnia:link/other"],
             mounts: [
                 { name: ".", path: concat!(env!("CARGO_MANIFEST_DIR"), "/workspace"), writable: true },
             ],

@@ -9,7 +9,7 @@ Every key the `omnia::runtime!` macro accepts, with exact semantics. The task-or
 | `hosts:` | The `Host: Backend` map — which WASI interfaces are linked and what implements them | Always (except a backend-less command runtime) |
 | `mode:` | `server` (default) or `command` | Running jobs/CLIs instead of servers |
 | `config:` | Compile in a default manifest *path* | You want `run` with no arguments to work |
-| `guests:`, `mounts:`, `link:`, `routes:` | Compile in a default manifest *value* (inline) | Same as `config:`, but self-contained — no TOML file at run time |
+| `guests:`, `mounts:`, `routes:` | Compile in a default manifest *value* (inline) | Same as `config:`, but self-contained — no TOML file at run time |
 
 There is no key for raw argv passthrough: a command-mode runtime with a compiled-in deployment is a [direct command](#direct-commands-raw-argv-passthrough) automatically.
 
@@ -50,9 +50,9 @@ The value is any expression evaluating to a path. Anchoring it with `env!("CARGO
 
 `config:` and the inline manifest keys are mutually exclusive — a runtime compiles in a manifest path or a manifest value, not both.
 
-## Inline manifest keys (`guests:`, `mounts:`, `link:`, `routes:`)
+## Inline manifest keys (`guests:`, `mounts:`, `routes:`)
 
-Everything `omnia.toml` expresses can also be written directly in the macro, mirroring the `omnia::Manifest` schema. The macro expands the keys to a `Manifest` value compiled into the generated `main` as the same lowest-precedence fallback as `config:`:
+The deployment `omnia.toml` expresses can also be written directly in the macro, mirroring the `omnia::Manifest` schema. The macro expands the keys to a `Manifest` value compiled into the generated `main` as the same lowest-precedence fallback as `config:`:
 
 ```rust
 omnia::runtime!({
@@ -67,7 +67,6 @@ omnia::runtime!({
             link: ["omnia:link/echo"],       // per-guest host-mediated imports
         },
     ],
-    link: ["omnia:shared/log"],              // optional deployment-wide links
     mounts: [
         { name: ".", path: concat!(env!("CARGO_MANIFEST_DIR"), "/workspace"), writable: true },
     ],
@@ -85,6 +84,7 @@ omnia::runtime!({
 - Each value is any Rust expression evaluating to the field's type (strings for ids, interfaces, and route keys; paths or embedded bytes for `source`, paths for mount `path`; a bool for `writable`, which defaults to `false`).
 - Relative paths resolve against the process working directory at run time, so anchor them with `env!("CARGO_MANIFEST_DIR")` as with `config:`.
 - A guest entry also accepts `command: true` (a literal bool), marking it as the command-mode target — see [Command routing](#command-routing-command-true).
+- Host-mediated links are declared per guest, on the importing entry's `link:`. There is no deployment-wide `link:` key in the macro; for a deployment-wide list, use `config:` with a TOML manifest (top-level `link = [...]`) or supply `run --link` at the CLI.
 
 ### Embedding a guest (`source:` bytes)
 

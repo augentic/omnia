@@ -65,7 +65,6 @@ omnia::runtime!({
             link: ["omnia:link/echo"],   // per-guest host-mediated imports
         },
     ],
-    link: ["omnia:shared/log"],          // optional deployment-wide links
     mounts: [
         { name: ".", path: concat!(env!("CARGO_MANIFEST_DIR"), "/workspace"), writable: true },
     ],
@@ -78,7 +77,7 @@ omnia::runtime!({
 });
 ```
 
-Every value is a Rust expression; anchor paths with `env!("CARGO_MANIFEST_DIR")` (relative paths resolve against the run-time working directory). `config:` and the inline keys are mutually exclusive.
+Every value is a Rust expression; anchor paths with `env!("CARGO_MANIFEST_DIR")` (relative paths resolve against the run-time working directory). `config:` and the inline keys are mutually exclusive. Host-mediated links are declared per guest on the importing entry; a deployment-wide list belongs in a TOML manifest (top-level `link = [...]`) via `config:`, or on the CLI with `run --link`.
 
 A guest's `source:` also accepts component bytes (`include_bytes!(...)`), embedding the guest in the host binary — the artifact must then exist when the host crate compiles, and it must be raw `.wasm` (embedded pre-compiled bytes are rejected by the safe build, like pre-compiled paths).
 

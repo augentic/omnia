@@ -40,22 +40,18 @@ pub struct HostEntry {
     pub backend: Path,
 }
 
-/// Inline manifest keys (`guests`, `mounts`, `link`, `routes`) parsed from
+/// Inline manifest keys (`guests`, `mounts`, `routes`) parsed from
 /// `runtime!({ ... })`; mirrors the `omnia::Manifest` schema.
 #[derive(Default)]
 pub struct ManifestSpec {
     pub guests: Vec<GuestSpec>,
     pub mounts: Vec<MountSpec>,
-    pub link: Vec<Expr>,
     pub routes: RoutesSpec,
 }
 
 impl ManifestSpec {
     pub const fn is_empty(&self) -> bool {
-        self.guests.is_empty()
-            && self.mounts.is_empty()
-            && self.link.is_empty()
-            && self.routes.is_empty()
+        self.guests.is_empty() && self.mounts.is_empty() && self.routes.is_empty()
     }
 }
 
@@ -131,10 +127,6 @@ impl Parse for Config {
                     manifest.mounts = m;
                     inline_span.get_or_insert(span);
                 }
-                OptValue::Link(l) => {
-                    manifest.link = l;
-                    inline_span.get_or_insert(span);
-                }
                 OptValue::Routes(r) => {
                     manifest.routes = r;
                     inline_span.get_or_insert(span);
@@ -168,7 +160,7 @@ impl Config {
         if let (Some(_), Some(inline)) = (spans.config, spans.inline) {
             return Err(syn::Error::new(
                 inline,
-                "`config:` and inline manifest keys (`guests`, `mounts`, `link`, `routes`) are \
+                "`config:` and inline manifest keys (`guests`, `mounts`, `routes`) are \
                  mutually exclusive",
             ));
         }
@@ -203,7 +195,6 @@ mod kw {
     syn::custom_keyword!(config);
     syn::custom_keyword!(guests);
     syn::custom_keyword!(mounts);
-    syn::custom_keyword!(link);
     syn::custom_keyword!(routes);
 }
 
@@ -221,7 +212,6 @@ enum OptValue {
     Config(Expr),
     Guests(Vec<GuestSpec>),
     Mounts(Vec<MountSpec>),
-    Link(Vec<Expr>),
     Routes(RoutesSpec),
 }
 
@@ -250,10 +240,6 @@ impl Parse for Opt {
             let key = input.parse::<kw::mounts>()?;
             input.parse::<Token![:]>()?;
             ("mounts", key.span, OptValue::Mounts(parse_bracketed_list(input)?))
-        } else if l.peek(kw::link) {
-            let key = input.parse::<kw::link>()?;
-            input.parse::<Token![:]>()?;
-            ("link", key.span, OptValue::Link(parse_bracketed_list(input)?))
         } else if l.peek(kw::routes) {
             let key = input.parse::<kw::routes>()?;
             input.parse::<Token![:]>()?;

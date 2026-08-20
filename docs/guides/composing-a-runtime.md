@@ -85,7 +85,7 @@ cargo run -- run
 
 Explicit sources always win; the compiled-in default is the lowest-precedence fallback.
 
-The manifest itself — guests, routes, mounts, links — is covered in [Multi-Guest Deployments](multi-guest-deployments.md). A manifest can also be written inline in the macro instead of a TOML file; see [Inline manifest keys](../reference/runtime-macro.md#inline-manifest-keys-guests-mounts-link-routes).
+The manifest itself — guests, routes, mounts, links — is covered in [Multi-Guest Deployments](multi-guest-deployments.md). A manifest can also be written inline in the macro instead of a TOML file; see [Inline manifest keys](../reference/runtime-macro.md#inline-manifest-keys-guests-mounts-routes).
 
 ## Choosing backends
 
@@ -126,7 +126,7 @@ Most runtimes never need these. Each solves one specific deployment shape — re
 
 | Key | Reach for it when |
 | --- | ----------------- |
-| [`guests:`/`mounts:`/`link:`/`routes:`](../reference/runtime-macro.md#inline-manifest-keys-guests-mounts-link-routes) | You want the deployment compiled into the binary instead of a TOML file — including embedding the guest bytes themselves. |
+| [`guests:`/`mounts:`/`routes:`](../reference/runtime-macro.md#inline-manifest-keys-guests-mounts-routes) | You want the deployment compiled into the binary instead of a TOML file — including embedding the guest bytes themselves. |
 
 Shipping a product CLI whose argv belongs entirely to the guest needs no key: a command-mode runtime with a compiled-in deployment is a [direct command](../reference/runtime-macro.md#direct-commands-raw-argv-passthrough) — no host `run` grammar at all.
 
