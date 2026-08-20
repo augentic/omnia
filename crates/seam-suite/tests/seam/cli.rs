@@ -212,7 +212,7 @@ mod command_flag {
             let error = run_manifest(unmarked, tail)
                 .await
                 .expect_err("two unmarked exporters must be ambiguous");
-            assert!(format!("{error:#}").contains("multiple wasi:cli/run guests"), "{error:#}");
+            assert!(format!("{error:#}").contains("2 capable guests"), "{error:#}");
 
             let marked = Manifest::new()
                 .guest(GuestEntry::new("first", wasm.clone()))
