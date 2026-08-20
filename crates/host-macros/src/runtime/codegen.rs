@@ -56,7 +56,7 @@ fn emit_listener_binding(config: &Config) -> TokenStream {
         let http_listener: ::std::net::TcpListener = match #expr {
             ::std::result::Result::Ok(listener) => listener,
             ::std::result::Result::Err(error) => {
-                ::std::eprintln!("error: {error:#}");
+                ::std::eprintln!("{error:#}");
                 return ::std::process::ExitCode::FAILURE;
             }
         };
