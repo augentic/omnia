@@ -16,6 +16,9 @@ use std::fmt;
 use std::sync::{Arc, PoisonError, RwLock};
 
 use anyhow::{Context as _, Result, bail, ensure};
+// Test-only: lets manifest unit tests resolve against the aggregated tables.
+#[cfg(test)]
+pub use routing::Resolver;
 pub use routing::{CliRoutes, HttpRoutes, PatternRoutes, Routes, TriggerRouter};
 use wasmtime::Engine;
 use wasmtime::component::{Component, InstancePre, Linker};
@@ -305,8 +308,8 @@ impl<T: 'static> Registry<T> {
         Ok(())
     }
 
-    /// Returns the per-trigger inbound route tables built from the manifest's
-    /// `[[route.*]]` sections.
+    /// Returns the per-trigger inbound route tables built from the manifest
+    /// guests' `routes` lists.
     #[must_use]
     pub const fn routes(&self) -> &Routes {
         &self.routes

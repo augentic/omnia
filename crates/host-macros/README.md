@@ -58,26 +58,26 @@ Instead of a `config:` path, the deployment can be written inline — the keys m
 ```rust,ignore
 omnia::runtime!({
     guests: [
-        { id: "responder", source: concat!(env!("CARGO_MANIFEST_DIR"), "/responder.wasm") },
+        {
+            id: "responder",
+            source: concat!(env!("CARGO_MANIFEST_DIR"), "/responder.wasm"),
+            routes: { messaging: ["orders.>"] },   // inbound routes targeting this guest
+        },
         {
             id: "router",
             source: concat!(env!("CARGO_MANIFEST_DIR"), "/router.wasm"),
             link: ["omnia:link/echo"],   // per-guest host-mediated imports
+            routes: { http: ["/"], websocket: ["chat.*"] },
         },
     ],
     mounts: [
         { name: ".", path: concat!(env!("CARGO_MANIFEST_DIR"), "/workspace"), writable: true },
     ],
-    routes: {
-        http: [{ prefix: "/", guest: "router" }],
-        messaging: [{ topic: "orders.>", guest: "worker" }],
-        websocket: [{ route: "chat.*", guest: "ws" }],
-    },
     hosts: { /* ... */ }
 });
 ```
 
-Every value is a Rust expression; anchor paths with `env!("CARGO_MANIFEST_DIR")` (relative paths resolve against the run-time working directory). `config:` and the inline keys are mutually exclusive. Host-mediated links are declared per guest on the importing entry; a deployment-wide list belongs in a TOML manifest (top-level `link = [...]`) via `config:`, or on the CLI with `run --link`.
+Every value is a Rust expression; anchor paths with `env!("CARGO_MANIFEST_DIR")` (relative paths resolve against the run-time working directory). `config:` and the inline keys are mutually exclusive. Routes are declared per guest on the target entry's `routes:` block, one pattern list per trigger, with the declaring guest as the implicit target. Host-mediated links are declared per guest on the importing entry; a deployment-wide list belongs in a TOML manifest (top-level `link = [...]`) via `config:`, or on the CLI with `run --link`.
 
 A guest's `source:` also accepts component bytes (`include_bytes!(...)`), embedding the guest in the host binary — the artifact must then exist when the host crate compiles, and it must be raw `.wasm` (embedded pre-compiled bytes are rejected by the safe build, like pre-compiled paths).
 

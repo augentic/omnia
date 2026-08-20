@@ -9,7 +9,7 @@ Every key the `omnia::runtime!` macro accepts, with exact semantics. The task-or
 | `hosts:` | The `Host: Backend` map — which WASI interfaces are linked and what implements them | Always (except a backend-less command runtime) |
 | `mode:` | `server` (default) or `command` | Running jobs/CLIs instead of servers |
 | `config:` | Compile in a default manifest *path* | You want `run` with no arguments to work |
-| `guests:`, `mounts:`, `routes:` | Compile in a default manifest *value* (inline) | Same as `config:`, but self-contained — no TOML file at run time |
+| `guests:`, `mounts:` | Compile in a default manifest *value* (inline) | Same as `config:`, but self-contained — no TOML file at run time |
 
 There is no key for raw argv passthrough: a command-mode runtime with a compiled-in deployment is a [direct command](#direct-commands-raw-argv-passthrough) automatically.
 
@@ -50,7 +50,7 @@ The value is any expression evaluating to a path. Anchoring it with `env!("CARGO
 
 `config:` and the inline manifest keys are mutually exclusive — a runtime compiles in a manifest path or a manifest value, not both.
 
-## Inline manifest keys (`guests:`, `mounts:`, `routes:`)
+## Inline manifest keys (`guests:`, `mounts:`)
 
 The deployment `omnia.toml` expresses can also be written directly in the macro, mirroring the `omnia::Manifest` schema. The macro expands the keys to a `Manifest` value compiled into the generated `main` as the same lowest-precedence fallback as `config:`:
 
@@ -60,29 +60,32 @@ omnia::runtime!({
         {
             id: "responder",
             source: concat!(env!("CARGO_MANIFEST_DIR"), "/guests/responder.wasm"),
+            routes: {
+                messaging: ["orders.>"],     // inbound routes targeting this guest
+            },
         },
         {
             id: "router",
             source: concat!(env!("CARGO_MANIFEST_DIR"), "/guests/router.wasm"),
             link: ["omnia:link/echo"],       // per-guest host-mediated imports
+            routes: {
+                http: ["/"],
+                websocket: ["chat.*"],
+            },
         },
     ],
     mounts: [
         { name: ".", path: concat!(env!("CARGO_MANIFEST_DIR"), "/workspace"), writable: true },
     ],
-    routes: {
-        http: [{ prefix: "/", guest: "router" }],
-        messaging: [{ topic: "orders.>", guest: "worker" }],
-        websocket: [{ route: "chat.*", guest: "ws" }],
-    },
     hosts: {
         WasiHttp: HttpDefault,
     }
 });
 ```
 
-- Each value is any Rust expression evaluating to the field's type (strings for ids, interfaces, and route keys; paths or embedded bytes for `source`, paths for mount `path`; a bool for `writable`, which defaults to `false`).
+- Each value is any Rust expression evaluating to the field's type (strings for ids, interfaces, and route patterns; paths or embedded bytes for `source`, paths for mount `path`; a bool for `writable`, which defaults to `false`).
 - Relative paths resolve against the process working directory at run time, so anchor them with `env!("CARGO_MANIFEST_DIR")` as with `config:`.
+- Routes are declared per guest, on the target entry's `routes:` block — one pattern list per trigger (`http` prefixes, `messaging` topics, `websocket` routes), with the declaring guest as the implicit target. There is no top-level `routes:` key.
 - A guest entry also accepts `command: true` (a literal bool), marking it as the command-mode target — see [Command routing](#command-routing-command-true).
 - Host-mediated links are declared per guest, on the importing entry's `link:`. There is no deployment-wide `link:` key in the macro; for a deployment-wide list, use `config:` with a TOML manifest (top-level `link = [...]`) or supply `run --link` at the CLI.
 

@@ -11,8 +11,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 pub use manifest::{
-    GuestEntry, HttpRoute, Manifest, Mount, RouteSpec, SourceSpec, TopicRoute, Transport,
-    TransportKind,
+    GuestEntry, GuestRoutes, Manifest, Mount, SourceSpec, Transport, TransportKind,
 };
 use source::ArtifactPolicy;
 pub use source::{GuestArtifact, LoadedGuest, Source};

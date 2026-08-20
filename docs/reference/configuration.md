@@ -73,7 +73,7 @@ Production backend variables (Redis, Kafka, Azure, ...) are listed in [Productio
 
 Selected by `--config <path>` or `OMNIA_CONFIG`, or compiled in as a default via the `runtime!` macro's `config:` field or inline manifest keys (see [Composing a Runtime](../guides/composing-a-runtime.md#default-manifest-config)). The manifest is sparse: every section is optional except at least one `[[guest]]`, and omitted fields fall back to defaults. All relative paths resolve against the manifest's directory.
 
-The same schema is constructible programmatically as an `omnia::Manifest` value (`Manifest::new()` with the fluent `guest`/`mounts`/`links`/`route_*` setters, or `Manifest::from_wasm` for the one-guest shorthand) and passed to `DeploymentBuilder::new().manifest(...)` — see [Multi-Guest Deployments](../guides/multi-guest-deployments.md#programmatic-manifests). Either way, the invariants (at least one guest, unique ids, in-process transport) are validated when the deployment is built.
+The same schema is constructible programmatically as an `omnia::Manifest` value (`Manifest::new()` with the fluent `guest`/`mounts`/`links` setters, or `Manifest::from_wasm` for the one-guest shorthand; routes are set on each `GuestEntry` with its `route_http`/`route_messaging`/`route_websocket` builders) and passed to `DeploymentBuilder::new().manifest(...)` — see [Multi-Guest Deployments](../guides/multi-guest-deployments.md#programmatic-manifests). Either way, the invariants (at least one guest, unique ids, in-process transport) are validated when the deployment is built.
 
 ```toml
 # --- Deployment-wide links (optional) ---------------------------------
@@ -84,10 +84,13 @@ link = ["omnia:shared/log"]         # host-mediated imports any guest may call
 id = "router"                       # opaque identity; never parsed by the runtime
 source.path = "./router.wasm"       # .wasm or pre-compiled .bin
 link = ["omnia:link/echo"]          # host-mediated imports this guest may call
+routes.http = ["/api"]              # inbound routes targeting this guest;
+routes.websocket = ["events.*"]     # one optional list per trigger
 
 [[guest]]
 id = "responder"
 source.path = "./responder.wasm"
+routes.messaging = ["events.build.>"]
 command = true                      # command-mode target (at most one guest)
 
 # --- Mounts (optional, repeatable) ------------------------------------
@@ -95,19 +98,6 @@ command = true                      # command-mode target (at most one guest)
 name = "."                          # guest-visible preopen name
 path = "../workspace"               # host path
 writable = true                     # omit for read-only (default)
-
-# --- Routes (optional, one table per trigger) --------------------------
-[[route.http]]
-prefix = "/api"                     # longest prefix wins
-guest = "router"
-
-[[route.messaging]]
-topic = "events.build.>"            # NATS-style: `*` one token, `>` the rest
-guest = "responder"
-
-[[route.websocket]]
-route = "events.*"                  # same pattern syntax, spelled `route`
-guest = "router"
 
 # --- Transport (optional) ----------------------------------------------
 [transport]
@@ -122,5 +112,5 @@ Field notes:
 - **`guest.link`** — interfaces the host polyfills onto the shared linker and dispatches to whichever guest exports them. The linker is shared, so an interface linked for one guest is wired for the whole deployment.
 - **`guest.command`** — marks the guest command mode drives (its `wasi:cli/run`); at most one guest may carry it. Without a mark, the sole `wasi:cli/run` exporter is the catch-all — several unmarked exporters fail the run as ambiguous.
 - **`mount`** — preopened into *every* guest sandbox. CLI `--mount` entries layer on top; a duplicate guest-visible name wins over the manifest.
-- **`route.*`** — if a trigger has no routes and exactly one guest exports its handler, that guest is the catch-all. `[[route.cli]]` is not yet parsed; a sole `wasi:cli/run` exporter receives command-mode invocations.
+- **`guest.routes`** — inbound routes targeting the declaring guest, one list per trigger: `http` prefixes (longest prefix wins), `messaging` topics and `websocket` routes (NATS-style: `*` one token, `>` the rest). Route tables are aggregated across guests at load. If a trigger has no routes and exactly one guest exports its handler, that guest is the catch-all. CLI routes are not yet parsed; a sole `wasi:cli/run` exporter receives command-mode invocations.
 - **`transport`** — `unix`, `nats`, and `quic` are reserved for distributed dispatch and rejected at load today.

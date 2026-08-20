@@ -2,6 +2,29 @@
 
 ### Changed
 
+- Routes are now guest-owned: each `[[guest]]` entry declares the routes
+  targeting it (`routes.http` / `routes.messaging` / `routes.websocket`
+  pattern lists in TOML, a `routes: { http: [...], ... }` block per guest
+  entry in the `runtime!` macro, `GuestEntry::route_http` /
+  `route_messaging` / `route_websocket` programmatically), with the
+  declaring guest as the implicit target. The top-level `[[route.*]]`
+  tables, the macro's top-level `routes:` key, the `Manifest::route_*`
+  setters, and the `RouteSpec` / `HttpRoute` / `TopicRoute` types are
+  removed; a stale top-level route section now fails manifest parsing.
+  Routing behavior is unchanged: per-guest lists aggregate into the same
+  per-trigger tables (longest-prefix HTTP, first-match NATS-style
+  patterns, capability catch-all when a trigger has no routes).
+
+  ```toml
+  # before                            # after
+  [[guest]]                           [[guest]]
+  id = "api"                          id = "api"
+  source.path = "./api.wasm"          source.path = "./api.wasm"
+                                      routes.http = ["/api"]
+  [[route.http]]
+  prefix = "/api"
+  guest = "api"
+  ```
 - Removed the `runtime!` macro's `program:` key: `mode: command` with a
   compiled-in deployment (`config:` or inline manifest keys) is now a
   direct command by default — raw argv passthrough with the reserved

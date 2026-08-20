@@ -12,7 +12,7 @@ Point the runtime at a manifest with `--config` (or the `OMNIA_CONFIG` environme
 cargo run --example http-routing -- run --config examples/http-routing/omnia.toml
 ```
 
-A runtime can also compile in a default deployment with the `runtime!` macro — a manifest path via the `config:` field, or the manifest itself via the inline `guests`/`mounts`/`routes` keys (each guest entry carries its own `link`) — used only when the command line supplies no source (see [Composing a Runtime](composing-a-runtime.md#default-manifest-config)).
+A runtime can also compile in a default deployment with the `runtime!` macro — a manifest path via the `config:` field, or the manifest itself via the inline `guests`/`mounts` keys (each guest entry carries its own `link` and `routes`) — used only when the command line supplies no source (see [Composing a Runtime](composing-a-runtime.md#default-manifest-config)).
 
 A manifest declares guests, mounts, routes, and (eventually) transports. Every field is optional except at least one `[[guest]]`. Paths resolve relative to the manifest's own directory.
 
@@ -20,18 +20,12 @@ A manifest declares guests, mounts, routes, and (eventually) transports. Every f
 [[guest]]
 id = "api"                              # opaque identity; the runtime never parses it
 source.path = "./guests/api.wasm"       # .wasm or pre-compiled .bin
+routes.http = ["/"]
 
 [[guest]]
 id = "admin"
 source.path = "./guests/admin.wasm"
-
-[[route.http]]
-prefix = "/admin"
-guest = "admin"
-
-[[route.http]]
-prefix = "/"
-guest = "api"
+routes.http = ["/admin"]
 ```
 
 The full field reference lives in [Configuration](../reference/configuration.md#deployment-manifest-omniatoml).
@@ -44,10 +38,12 @@ Everything the TOML expresses can also be assembled in Rust: `omnia::Manifest` i
 use omnia::{DeploymentBuilder, GuestEntry, Manifest};
 
 let manifest = Manifest::new()
-    .guest(GuestEntry::new("api", "./guests/api.wasm"))
-    .guest(GuestEntry::new("admin", "./guests/admin.wasm").link("omnia:link/audit"))
-    .route_http("/admin", "admin")
-    .route_http("/", "api");
+    .guest(GuestEntry::new("api", "./guests/api.wasm").route_http("/"))
+    .guest(
+        GuestEntry::new("admin", "./guests/admin.wasm")
+            .link("omnia:link/audit")
+            .route_http("/admin"),
+    );
 
 host::run(DeploymentBuilder::new().manifest(manifest))?;
 ```
@@ -56,34 +52,28 @@ host::run(DeploymentBuilder::new().manifest(manifest))?;
 
 ## Routing inbound traffic
 
-Each trigger has its own route table, independent of which guests are loaded:
+Each guest declares the routes that target it, one optional list per trigger; the runtime aggregates them into per-trigger route tables at load:
 
-- **`[[route.http]]`** — `prefix` matched by longest path prefix. One HTTP server fronts all guests.
-- **`[[route.messaging]]`** — `topic` matched by NATS-style pattern (`.`-separated tokens, `*` matches one token, `>` matches the rest).
-- **`[[route.websocket]]`** — same pattern syntax, spelled `route`.
+- **`routes.http`** — path prefixes matched by longest prefix. One HTTP server fronts all guests.
+- **`routes.messaging`** — topics matched by NATS-style pattern (`.`-separated tokens, `*` matches one token, `>` matches the rest).
+- **`routes.websocket`** — same pattern syntax, for WebSocket routes.
 
-If a trigger has no routes and exactly one guest exports its handler, that guest is the catch-all — so single-guest deployments need no route tables at all.
+If a trigger has no routes and exactly one guest exports its handler, that guest is the catch-all — so single-guest deployments need no routes at all.
 
 The [`http-routing`](../../examples/http-routing/) example runs two HTTP guests behind `/a` and `/b` prefixes.
 
-A messaging deployment works the same way: the host backend subscribes to topics (broker configuration such as `KAFKA_TOPICS`/`NATS_TOPICS`, or everything for the in-memory default), and the route table picks which guest handles each delivered message:
+A messaging deployment works the same way: the host backend subscribes to topics (broker configuration such as `KAFKA_TOPICS`/`NATS_TOPICS`, or everything for the in-memory default), and each guest's route list picks which delivered messages it handles:
 
 ```toml
 [[guest]]
 id = "orders"
 source.path = "./guests/orders.wasm"     # exports the messaging handler
+routes.messaging = ["orders.>"]          # orders.created, orders.cancelled, ...
 
 [[guest]]
 id = "billing"
 source.path = "./guests/billing.wasm"    # exports the messaging handler
-
-[[route.messaging]]
-topic = "orders.>"                       # orders.created, orders.cancelled, ...
-guest = "orders"
-
-[[route.messaging]]
-topic = "invoices.*"                     # exactly one token after `invoices.`
-guest = "billing"
+routes.messaging = ["invoices.*"]        # exactly one token after `invoices.`
 ```
 
 Each matched message instantiates a fresh instance of the routed guest, exactly like an HTTP request. Inside the guest, topic-to-operation matching stays exact — see [Messaging](messaging.md#handling-incoming-messages).

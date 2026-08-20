@@ -77,9 +77,19 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
         let id = &guest.id;
         let source = &guest.source;
         let links = &guest.link;
+        let http = &guest.routes.http;
+        let messaging = &guest.routes.messaging;
+        let websocket = &guest.routes.websocket;
         let command = guest.command.then(|| quote! { .command() });
         quote! {
-            .guest(omnia::GuestEntry::new(#id, #source)#(.link(#links))*#command)
+            .guest(
+                omnia::GuestEntry::new(#id, #source)
+                    #(.link(#links))*
+                    #(.route_http(#http))*
+                    #(.route_messaging(#messaging))*
+                    #(.route_websocket(#websocket))*
+                    #command
+            )
         }
     });
 
@@ -97,27 +107,10 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
         }
     });
 
-    let routes = &manifest.routes;
-    let http = routes.http.iter().map(|route| {
-        let (key, guest) = (&route.key, &route.guest);
-        quote! { .route_http(#key, #guest) }
-    });
-    let messaging = routes.messaging.iter().map(|route| {
-        let (key, guest) = (&route.key, &route.guest);
-        quote! { .route_messaging(#key, #guest) }
-    });
-    let websocket = routes.websocket.iter().map(|route| {
-        let (key, guest) = (&route.key, &route.guest);
-        quote! { .route_websocket(#key, #guest) }
-    });
-
     quote! {
         omnia::Manifest::new()
             #(#guests)*
             #(#mounts)*
-            #(#http)*
-            #(#messaging)*
-            #(#websocket)*
     }
 }
 

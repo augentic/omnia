@@ -40,26 +40,27 @@ pub struct HostEntry {
     pub backend: Path,
 }
 
-/// Inline manifest keys (`guests`, `mounts`, `routes`) parsed from
-/// `runtime!({ ... })`; mirrors the `omnia::Manifest` schema.
+/// Inline manifest keys (`guests`, `mounts`) parsed from `runtime!({ ... })`;
+/// mirrors the `omnia::Manifest` schema.
 #[derive(Default)]
 pub struct ManifestSpec {
     pub guests: Vec<GuestSpec>,
     pub mounts: Vec<MountSpec>,
-    pub routes: RoutesSpec,
 }
 
 impl ManifestSpec {
     pub const fn is_empty(&self) -> bool {
-        self.guests.is_empty() && self.mounts.is_empty() && self.routes.is_empty()
+        self.guests.is_empty() && self.mounts.is_empty()
     }
 }
 
-/// One `{ id: ..., source: ..., link: [...], command: true }` guest entry.
+/// One `{ id: ..., source: ..., link: [...], routes: { ... }, command: true }`
+/// guest entry.
 pub struct GuestSpec {
     pub id: Expr,
     pub source: Expr,
     pub link: Vec<Expr>,
+    pub routes: GuestRoutesSpec,
     pub command: bool,
     /// Span of the `command:` key, for cross-key diagnostics.
     pub command_span: Option<Span>,
@@ -72,24 +73,13 @@ pub struct MountSpec {
     pub writable: Option<Expr>,
 }
 
-/// Per-trigger route lists from the `routes: { ... }` block.
+/// Per-trigger route pattern lists from a guest entry's `routes: { ... }`
+/// block; the containing guest is the implicit target.
 #[derive(Default)]
-pub struct RoutesSpec {
-    pub http: Vec<RouteEntry>,
-    pub messaging: Vec<RouteEntry>,
-    pub websocket: Vec<RouteEntry>,
-}
-
-impl RoutesSpec {
-    const fn is_empty(&self) -> bool {
-        self.http.is_empty() && self.messaging.is_empty() && self.websocket.is_empty()
-    }
-}
-
-/// One route: a match key (`prefix`/`topic`/`route`) mapped to a target guest.
-pub struct RouteEntry {
-    pub key: Expr,
-    pub guest: Expr,
+pub struct GuestRoutesSpec {
+    pub http: Vec<Expr>,
+    pub messaging: Vec<Expr>,
+    pub websocket: Vec<Expr>,
 }
 
 impl Parse for Config {
@@ -127,10 +117,6 @@ impl Parse for Config {
                     manifest.mounts = m;
                     inline_span.get_or_insert(span);
                 }
-                OptValue::Routes(r) => {
-                    manifest.routes = r;
-                    inline_span.get_or_insert(span);
-                }
             }
         }
 
@@ -160,8 +146,7 @@ impl Config {
         if let (Some(_), Some(inline)) = (spans.config, spans.inline) {
             return Err(syn::Error::new(
                 inline,
-                "`config:` and inline manifest keys (`guests`, `mounts`, `routes`) are \
-                 mutually exclusive",
+                "`config:` and inline manifest keys (`guests`, `mounts`) are mutually exclusive",
             ));
         }
 
@@ -212,7 +197,6 @@ enum OptValue {
     Config(Expr),
     Guests(Vec<GuestSpec>),
     Mounts(Vec<MountSpec>),
-    Routes(RoutesSpec),
 }
 
 impl Parse for Opt {
@@ -240,10 +224,15 @@ impl Parse for Opt {
             let key = input.parse::<kw::mounts>()?;
             input.parse::<Token![:]>()?;
             ("mounts", key.span, OptValue::Mounts(parse_bracketed_list(input)?))
-        } else if l.peek(kw::routes) {
+        } else if input.peek(kw::routes) {
+            // A pointed migration diagnostic, deliberately outside the
+            // lookahead set so unrelated unknown keys don't suggest `routes`.
             let key = input.parse::<kw::routes>()?;
-            input.parse::<Token![:]>()?;
-            ("routes", key.span, OptValue::Routes(input.parse()?))
+            return Err(syn::Error::new(
+                key.span,
+                "the top-level `routes:` key was removed; declare routes on each guest entry \
+                 (`guests: [{ id: ..., source: ..., routes: { http: [...] } }]`)",
+            ));
         } else {
             return Err(l.error());
         };
@@ -307,6 +296,7 @@ impl Parse for GuestSpec {
         let mut id = None;
         let mut source = None;
         let mut link = Vec::new();
+        let mut routes = GuestRoutesSpec::default();
         let mut command = false;
         let mut command_span = None;
 
@@ -315,6 +305,7 @@ impl Parse for GuestSpec {
                 "id" => id = Some(value.parse()?),
                 "source" => source = Some(value.parse()?),
                 "link" => link = parse_bracketed_list(value)?,
+                "routes" => routes = value.parse()?,
                 "command" => {
                     let lit: syn::LitBool = value.parse()?;
                     command = lit.value();
@@ -324,8 +315,8 @@ impl Parse for GuestSpec {
                     return Err(syn::Error::new(
                         key.span(),
                         format!(
-                            "unknown guest key `{other}`; expected `id`, `source`, `link`, or \
-                             `command`"
+                            "unknown guest key `{other}`; expected `id`, `source`, `link`, \
+                             `routes`, or `command`"
                         ),
                     ));
                 }
@@ -338,6 +329,7 @@ impl Parse for GuestSpec {
             id: id.ok_or_else(|| missing("id"))?,
             source: source.ok_or_else(|| missing("source"))?,
             link,
+            routes,
             command,
             command_span,
         })
@@ -376,15 +368,15 @@ impl Parse for MountSpec {
     }
 }
 
-impl Parse for RoutesSpec {
+impl Parse for GuestRoutesSpec {
     fn parse(input: ParseStream) -> Result<Self> {
         let mut routes = Self::default();
 
         parse_kv_block(input, |key, value| {
             match key.to_string().as_str() {
-                "http" => routes.http = parse_route_entries(value, "prefix")?,
-                "messaging" => routes.messaging = parse_route_entries(value, "topic")?,
-                "websocket" => routes.websocket = parse_route_entries(value, "route")?,
+                "http" => routes.http = parse_bracketed_list(value)?,
+                "messaging" => routes.messaging = parse_bracketed_list(value)?,
+                "websocket" => routes.websocket = parse_bracketed_list(value)?,
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
@@ -400,43 +392,4 @@ impl Parse for RoutesSpec {
 
         Ok(routes)
     }
-}
-
-/// Parse `[ { <match_key>: ..., guest: ... }, ... ]` route entries; the match
-/// key is `prefix` (http), `topic` (messaging), or `route` (websocket).
-fn parse_route_entries(input: ParseStream, match_key: &str) -> Result<Vec<RouteEntry>> {
-    let list;
-    syn::bracketed!(list in input);
-    let mut entries = Vec::new();
-
-    while !list.is_empty() {
-        let mut key = None;
-        let mut guest = None;
-
-        let span = parse_kv_block(&list, |field, value| {
-            match field.to_string().as_str() {
-                k if k == match_key => key = Some(value.parse()?),
-                "guest" => guest = Some(value.parse()?),
-                other => {
-                    return Err(syn::Error::new(
-                        field.span(),
-                        format!("unknown route key `{other}`; expected `{match_key}` or `guest`"),
-                    ));
-                }
-            }
-            Ok(())
-        })?;
-
-        let missing = |key| syn::Error::new(span, format!("route entry is missing `{key}`"));
-        entries.push(RouteEntry {
-            key: key.ok_or_else(|| missing(match_key))?,
-            guest: guest.ok_or_else(|| missing("guest"))?,
-        });
-
-        if !list.is_empty() {
-            list.parse::<Token![,]>()?;
-        }
-    }
-
-    Ok(entries)
 }

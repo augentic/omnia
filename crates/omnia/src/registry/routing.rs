@@ -124,13 +124,13 @@ pub type PatternRoutes = RouteTable<PatternMatch>;
 
 /// Exact-match CLI subcommand route table.
 ///
-/// `[[route.cli]]` manifest parsing is not yet wired, so this table is empty
-/// today and a sole `wasi:cli/run` exporter is the catch-all; the type exists so
-/// the `cli` trigger routes through the same machinery as every other trigger.
+/// CLI route parsing is not yet wired, so this table is empty today and a sole
+/// `wasi:cli/run` exporter is the catch-all; the type exists so the `cli`
+/// trigger routes through the same machinery as every other trigger.
 pub type CliRoutes = RouteTable<ExactMatch>;
 
-/// The per-trigger route tables a registry carries, parsed from the manifest's
-/// `[[route.*]]` sections.
+/// The per-trigger route tables a registry carries, aggregated from the
+/// manifest guests' `routes` lists.
 #[derive(Clone, Debug, Default)]
 pub struct Routes {
     http: HttpRoutes,

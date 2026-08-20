@@ -27,8 +27,8 @@ pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 #[cfg(feature = "cli")]
 pub use self::cli::{Cli, Command};
 pub use self::deployment::{
-    Deployment, DeploymentBuilder, GuestArtifact, GuestEntry, HttpRoute, Manifest, Mount,
-    Precompiled, RouteSpec, SourceSpec, TopicRoute, Transport, TransportKind, WasmOnly,
+    Deployment, DeploymentBuilder, GuestArtifact, GuestEntry, GuestRoutes, Manifest, Mount,
+    Precompiled, SourceSpec, Transport, TransportKind, WasmOnly,
 };
 pub use self::dispatch::{
     Dispatcher, FirstArgSelector, GuestSelector, LinkClient, WrpcState, as_command_chain,

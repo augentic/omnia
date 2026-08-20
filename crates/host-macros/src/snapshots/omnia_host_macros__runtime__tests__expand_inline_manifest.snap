@@ -1,6 +1,6 @@
 ---
 source: crates/host-macros/src/runtime.rs
-expression: "expand_pretty(quote!({\n    guests:\n    [{\n        id: \"responder\", source:\n        concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/responder.wasm\"),\n    },\n    {\n        id: \"router\", source:\n        concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/router.wasm\"), link:\n        [\"omnia:link/echo\"],\n    },], mounts:\n    [{\n        name: \".\", path: concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/workspace\"),\n        writable: true\n    },], routes:\n    {\n        http: [{ prefix: \"/\", guest: \"router\" }], messaging:\n        [{ topic: \"orders.>\", guest: \"worker\" }], websocket:\n        [{ route: \"chat.*\", guest: \"ws\" }],\n    }, hosts: { WasiOtel: OtelDefault, },\n}))"
+expression: "expand_pretty(quote!({\n    guests:\n    [{\n        id: \"responder\", source:\n        concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/responder.wasm\"), routes:\n        { messaging: [\"orders.>\"], websocket: [\"chat.*\"], },\n    },\n    {\n        id: \"router\", source:\n        concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/router.wasm\"), link:\n        [\"omnia:link/echo\"], routes: { http: [\"/\", concat!(\"/\", \"api\")], },\n    },], mounts:\n    [{\n        name: \".\", path: concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/workspace\"),\n        writable: true\n    },], hosts: { WasiOtel: OtelDefault, },\n}))"
 ---
 mod runtime {
     use anyhow::Result;
@@ -56,16 +56,20 @@ mod runtime {
                             omnia::Manifest::new()
                                 .guest(
                                     omnia::GuestEntry::new(
-                                        "responder",
-                                        concat!(env!("CARGO_MANIFEST_DIR"), "/responder.wasm"),
-                                    ),
+                                            "responder",
+                                            concat!(env!("CARGO_MANIFEST_DIR"), "/responder.wasm"),
+                                        )
+                                        .route_messaging("orders.>")
+                                        .route_websocket("chat.*"),
                                 )
                                 .guest(
                                     omnia::GuestEntry::new(
                                             "router",
                                             concat!(env!("CARGO_MANIFEST_DIR"), "/router.wasm"),
                                         )
-                                        .link("omnia:link/echo"),
+                                        .link("omnia:link/echo")
+                                        .route_http("/")
+                                        .route_http(concat!("/", "api")),
                                 )
                                 .mounts([
                                     omnia::Mount {
@@ -75,10 +79,7 @@ mod runtime {
                                         ),
                                         writable: true,
                                     },
-                                ])
-                                .route_http("/", "router")
-                                .route_messaging("orders.>", "worker")
-                                .route_websocket("chat.*", "ws"),
+                                ]),
                         ),
                     ),
             )

@@ -46,7 +46,7 @@ where
         return Ok(ExitStatus::SUCCESS);
     }
     let Some((guest_id, ())) = routing.catch_all() else {
-        bail!("multiple wasi:cli/run guests but no [[route.cli]] to disambiguate");
+        bail!("multiple wasi:cli/run guests; mark one `command = true` to disambiguate");
     };
     let guest = runtime
         .registry()

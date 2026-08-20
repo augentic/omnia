@@ -48,7 +48,7 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
 }
 ```
 
-The guest router matches registered topics exactly; broker subscription patterns remain host configuration (`KAFKA_TOPICS`, `NATS_TOPICS`). `consume` decodes JSON by default and acknowledges successful operation output. Routes can use `decode_with` and `project_with` for application-specific payload and delivery policy. The current WIT handler returns only `result<_, error>`: `Ok(())` acknowledges, while projected failures return `error.other` for host-defined retry or rejection behavior. In multi-guest deployments, `[[route.messaging]]` entries select the target guest by NATS-style topic pattern — see [Multi-Guest Deployments](multi-guest-deployments.md#routing-inbound-traffic).
+The guest router matches registered topics exactly; broker subscription patterns remain host configuration (`KAFKA_TOPICS`, `NATS_TOPICS`). `consume` decodes JSON by default and acknowledges successful operation output. Routes can use `decode_with` and `project_with` for application-specific payload and delivery policy. The current WIT handler returns only `result<_, error>`: `Ok(())` acknowledges, while projected failures return `error.other` for host-defined retry or rejection behavior. In multi-guest deployments, each guest's `routes.messaging` patterns select it by NATS-style topic match — see [Multi-Guest Deployments](multi-guest-deployments.md#routing-inbound-traffic).
 
 ## Request-reply
 
@@ -119,4 +119,4 @@ impl omnia_wasi_websocket::handler::Guest for WebSocket {
 }
 ```
 
-The [`websocket`](../../examples/websocket/) example pairs an HTTP control endpoint (POST a message) with a WebSocket broadcast to all connected clients. In manifests, `[[route.websocket]]` routes use the same pattern syntax as messaging routes.
+The [`websocket`](../../examples/websocket/) example pairs an HTTP control endpoint (POST a message) with a WebSocket broadcast to all connected clients. In manifests, `routes.websocket` entries use the same pattern syntax as messaging routes.

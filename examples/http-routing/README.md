@@ -1,6 +1,6 @@
 # Multi-guest HTTP routing
 
-Two HTTP guests (`a` and `b`) behind path prefixes, wired through a deployment manifest. The host runs a single HTTP server; the manifest's `[[route.http]]` table selects the guest per request by longest-prefix match.
+Two HTTP guests (`a` and `b`) behind path prefixes, wired through a deployment manifest. The host runs a single HTTP server; each guest's `routes.http` prefixes select it per request by longest-prefix match.
 
 Because two guests export `wasi:http/incoming-handler`, the routes are **required** — without them startup fails with an ambiguity error. With a single guest (as in the other examples) routing falls back to a catch-all and no manifest is needed.
 

@@ -127,10 +127,7 @@ let manifest = temp_manifest(r#"
     [[guest]]
     id = "api"
     source.path = "/abs/path/to/api_wasm.wasm"
-
-    [[route.http]]
-    prefix = "/"
-    guest = "api"
+    routes.http = ["/"]
 "#)?;
 let deployment = DeploymentBuilder::new()
     .manifest(Manifest::from_config(manifest.path())?)

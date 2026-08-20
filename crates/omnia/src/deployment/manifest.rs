@@ -9,8 +9,8 @@
 //! interface *strings*, never `source:`/`target:`/`mcp`. Consumers write the
 //! concrete file; the runtime core stays domain-agnostic.
 //!
-//! The `[[guest]]` population (file or embedded-bytes sources), the
-//! `[[route.*]]` tables, and deployment-wide and per-guest `link` allow-lists
+//! The `[[guest]]` population (file or embedded-bytes sources), each guest's
+//! `routes` tables, and deployment-wide and per-guest `link` allow-lists
 //! (which drive host-mediated dynamic linking) are all consumed. Distributed `[transport]` is not yet
 //! implemented: only the in-process default is accepted.
 
@@ -29,8 +29,12 @@ use crate::registry::{CliRoutes, GuestId, HttpRoutes, PatternRoutes, Routes};
 
 /// The deployment manifest: which guests load and how host-mediated calls
 /// travel.
+///
+/// `deny_unknown_fields` turns a stale top-level section (for example the
+/// removed `[[route.*]]` tables — routes now live on each `[[guest]]`) into a
+/// loud parse error rather than a silent no-op.
 #[derive(Clone, Debug, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Manifest {
     /// Registry population: each entry maps an identity to a source.
     #[serde(rename = "guest")]
@@ -40,8 +44,6 @@ pub struct Manifest {
     pub mounts: Vec<Mount>,
     /// Deployment-wide host-mediated interfaces.
     pub link: Vec<String>,
-    /// Inbound route tables, one list per trigger.
-    pub route: RouteSpec,
     /// Transport configuration for host-mediated calls.
     pub transport: Transport,
 }
@@ -105,36 +107,6 @@ impl Manifest {
         S: Into<String>,
     {
         self.link.extend(links.into_iter().map(Into::into));
-        self
-    }
-
-    /// Append an HTTP prefix route.
-    #[must_use]
-    pub fn route_http(mut self, prefix: impl Into<String>, guest: impl Into<String>) -> Self {
-        self.route.http.push(HttpRoute {
-            prefix: prefix.into(),
-            guest: guest.into(),
-        });
-        self
-    }
-
-    /// Append a messaging topic route.
-    #[must_use]
-    pub fn route_messaging(mut self, topic: impl Into<String>, guest: impl Into<String>) -> Self {
-        self.route.messaging.push(TopicRoute {
-            topic: topic.into(),
-            guest: guest.into(),
-        });
-        self
-    }
-
-    /// Append a WebSocket route.
-    #[must_use]
-    pub fn route_websocket(mut self, route: impl Into<String>, guest: impl Into<String>) -> Self {
-        self.route.websocket.push(TopicRoute {
-            topic: route.into(),
-            guest: guest.into(),
-        });
         self
     }
 
@@ -225,10 +197,24 @@ impl Manifest {
             .collect()
     }
 
-    /// Per-trigger route tables parsed from the manifest's `[[route.*]]` sections.
+    /// Per-trigger route tables aggregated from each guest's `routes` lists,
+    /// in guest declaration order.
     #[must_use]
     pub fn routes(&self) -> Routes {
-        self.route.to_routes()
+        let pairs = |select: fn(&GuestRoutes) -> &Vec<String>| {
+            self.guests.iter().flat_map(move |guest| {
+                select(&guest.routes)
+                    .iter()
+                    .map(|pattern| (pattern.clone(), GuestId::from(guest.id.as_str())))
+            })
+        };
+        let http = HttpRoutes::new(pairs(|routes| &routes.http));
+        let messaging = PatternRoutes::new(pairs(|routes| &routes.messaging));
+        let websocket = PatternRoutes::new(pairs(|routes| &routes.websocket));
+        // CLI routes are not yet parsed; an empty table makes a sole
+        // `wasi:cli/run` exporter the catch-all (multi-command routing is
+        // deferred).
+        Routes::new(http, messaging, websocket, CliRoutes::default())
     }
 
     /// The identity of the guest marked `command = true`, if any.
@@ -323,6 +309,9 @@ pub struct GuestEntry {
     /// dynamic linking); the runtime core polyfills each on the shared linker.
     #[serde(default)]
     pub link: Vec<String>,
+    /// Inbound routes targeting this guest, one list per trigger.
+    #[serde(default)]
+    pub routes: GuestRoutes,
     /// Marks this guest as the command-mode `wasi:cli/run` target; without a
     /// marked guest the sole static exporter is the catch-all.
     #[serde(default)]
@@ -337,6 +326,7 @@ impl GuestEntry {
             id: id.into(),
             source: source.into(),
             link: Vec::new(),
+            routes: GuestRoutes::default(),
             command: false,
         }
     }
@@ -345,6 +335,27 @@ impl GuestEntry {
     #[must_use]
     pub fn link(mut self, interface: impl Into<String>) -> Self {
         self.link.push(interface.into());
+        self
+    }
+
+    /// Append an HTTP prefix route targeting this guest.
+    #[must_use]
+    pub fn route_http(mut self, prefix: impl Into<String>) -> Self {
+        self.routes.http.push(prefix.into());
+        self
+    }
+
+    /// Append a messaging topic route targeting this guest.
+    #[must_use]
+    pub fn route_messaging(mut self, topic: impl Into<String>) -> Self {
+        self.routes.messaging.push(topic.into());
+        self
+    }
+
+    /// Append a WebSocket route targeting this guest.
+    #[must_use]
+    pub fn route_websocket(mut self, route: impl Into<String>) -> Self {
+        self.routes.websocket.push(route.into());
         self
     }
 
@@ -432,58 +443,21 @@ impl From<Vec<u8>> for SourceSpec {
     }
 }
 
-/// Inbound routing: one list of routes per trigger, orthogonal to population
-/// (a guest may carry no route).
+/// A guest's inbound routes, one pattern list per trigger; the containing
+/// guest is the implicit target.
+///
+/// `deny_unknown_fields` turns a misspelled trigger (`routes.grpc = [...]`)
+/// into a loud parse error rather than a silent no-op.
 #[derive(Clone, Debug, Default, Deserialize)]
-#[serde(default)]
-pub struct RouteSpec {
-    /// HTTP routes, matched by longest path prefix.
-    pub http: Vec<HttpRoute>,
-    /// Messaging routes, matched by NATS-style topic pattern.
-    pub messaging: Vec<TopicRoute>,
-    /// WebSocket routes, matched by NATS-style route pattern.
-    pub websocket: Vec<TopicRoute>,
-}
-
-impl RouteSpec {
-    /// Convert the manifest's parsed routes into the registry's `GuestId`-typed,
-    /// per-trigger route tables.
-    #[must_use]
-    pub fn to_routes(&self) -> Routes {
-        let http = HttpRoutes::new(
-            self.http.iter().map(|e| (e.prefix.clone(), GuestId::from(e.guest.as_str()))),
-        );
-        let messaging = PatternRoutes::new(
-            self.messaging.iter().map(|e| (e.topic.clone(), GuestId::from(e.guest.as_str()))),
-        );
-        let websocket = PatternRoutes::new(
-            self.websocket.iter().map(|e| (e.topic.clone(), GuestId::from(e.guest.as_str()))),
-        );
-        // `[[route.cli]]` is not yet parsed; an empty table makes a sole
-        // `wasi:cli/run` exporter the catch-all (multi-command routing is
-        // deferred).
-        Routes::new(http, messaging, websocket, CliRoutes::default())
-    }
-}
-
-/// A single HTTP route: a path prefix mapped to a target guest.
-#[derive(Clone, Debug, Deserialize)]
-pub struct HttpRoute {
-    /// The path prefix; the longest matching prefix wins.
-    pub prefix: String,
-    /// The target guest identity (opaque to the runtime core).
-    pub guest: String,
-}
-
-/// A single topic/route entry: a NATS-style pattern mapped to a target guest.
-/// Messaging spells the pattern `topic`; websocket spells it `route`.
-#[derive(Clone, Debug, Deserialize)]
-pub struct TopicRoute {
-    /// The match pattern (`.`-tokenised, `*` one token, `>` trailing tokens).
-    #[serde(alias = "route")]
-    pub topic: String,
-    /// The target guest identity (opaque to the runtime core).
-    pub guest: String,
+#[serde(default, deny_unknown_fields)]
+pub struct GuestRoutes {
+    /// HTTP path prefixes, matched by longest prefix.
+    pub http: Vec<String>,
+    /// Messaging topic patterns (`.`-tokenised, `*` one token, `>` trailing
+    /// tokens).
+    pub messaging: Vec<String>,
+    /// WebSocket route patterns (same syntax as messaging).
+    pub websocket: Vec<String>,
 }
 
 /// Transport configuration for host-mediated calls.
@@ -519,6 +493,7 @@ pub enum TransportKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::registry::Resolver as _;
 
     #[test]
     fn parse_multi_guest() {
@@ -549,7 +524,51 @@ mod tests {
     }
 
     #[test]
-    fn parse_route_tables() {
+    fn parse_guest_routes() {
+        let toml = r#"
+            [[guest]]
+            id = "mcp"
+            source.path = "./guests/mcp.wasm"
+            routes.http = ["/mcp"]
+            routes.messaging = ["specify.build.>"]
+            routes.websocket = ["events.*"]
+        "#;
+
+        let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
+        assert_eq!(manifest.guests[0].routes.http, ["/mcp"]);
+        assert_eq!(manifest.guests[0].routes.messaging, ["specify.build.>"]);
+        assert_eq!(manifest.guests[0].routes.websocket, ["events.*"]);
+
+        let routes = manifest.routes();
+        assert_eq!(routes.http().resolve("/mcp/tool"), Some(&GuestId::from("mcp")));
+        assert_eq!(routes.messaging().resolve("specify.build.x"), Some(&GuestId::from("mcp")));
+        assert_eq!(routes.websocket().resolve("events.tick"), Some(&GuestId::from("mcp")));
+    }
+
+    #[test]
+    fn routes_aggregate_across_guests() {
+        let toml = r#"
+            [[guest]]
+            id = "a"
+            source.path = "./a.wasm"
+            routes.http = ["/a"]
+
+            [[guest]]
+            id = "b"
+            source.path = "./b.wasm"
+            routes.http = ["/a/b"]
+        "#;
+
+        let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
+        let routes = manifest.routes();
+        // Longest-prefix matching is preserved across guest-owned lists.
+        assert_eq!(routes.http().resolve("/a/x"), Some(&GuestId::from("a")));
+        assert_eq!(routes.http().resolve("/a/b/x"), Some(&GuestId::from("b")));
+    }
+
+    #[test]
+    fn reject_top_level_route_tables() {
+        // The removed `[[route.*]]` schema must fail loudly, not be ignored.
         let toml = r#"
             [[guest]]
             id = "mcp"
@@ -558,23 +577,14 @@ mod tests {
             [[route.http]]
             prefix = "/mcp"
             guest = "mcp"
-
-            [[route.messaging]]
-            topic = "specify.build.>"
-            guest = "mcp"
-
-            [[route.websocket]]
-            route = "events.*"
-            guest = "mcp"
         "#;
+        toml::from_str::<Manifest>(toml).unwrap_err();
+    }
 
-        let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
-        assert_eq!(manifest.route.http.len(), 1);
-        assert_eq!(manifest.route.http[0].prefix, "/mcp");
-        assert_eq!(manifest.route.http[0].guest, "mcp");
-        assert_eq!(manifest.route.messaging[0].topic, "specify.build.>");
-        // The websocket trigger reuses the topic entry via its `route` alias.
-        assert_eq!(manifest.route.websocket[0].topic, "events.*");
+    #[test]
+    fn reject_unknown_route_trigger() {
+        let toml = "[[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\nroutes.grpc = [\"/a\"]\n";
+        toml::from_str::<Manifest>(toml).unwrap_err();
     }
 
     #[test]
@@ -763,20 +773,22 @@ mod tests {
     #[test]
     fn build_programmatically() {
         let manifest = Manifest::new()
-            .guest(GuestEntry::new("router", "router.wasm").link("omnia:link/echo"))
-            .guest(GuestEntry::new("responder", "responder.wasm"))
+            .guest(
+                GuestEntry::new("router", "router.wasm")
+                    .link("omnia:link/echo")
+                    .route_http("/router")
+                    .route_messaging("jobs.>"),
+            )
+            .guest(GuestEntry::new("responder", "responder.wasm").route_websocket("events.*"))
             .mounts(["workspace,writable".parse().expect("mount should parse")])
-            .links(["omnia:shared/log"])
-            .route_http("/router", "router")
-            .route_messaging("jobs.>", "router")
-            .route_websocket("events.*", "responder");
+            .links(["omnia:shared/log"]);
 
         manifest.validate(false).expect("manifest should validate");
         assert_eq!(manifest.guests.len(), 2);
         assert_eq!(manifest.mounts.len(), 1);
-        assert_eq!(manifest.route.http.len(), 1);
-        assert_eq!(manifest.route.messaging.len(), 1);
-        assert_eq!(manifest.route.websocket.len(), 1);
+        assert_eq!(manifest.guests[0].routes.http, ["/router"]);
+        assert_eq!(manifest.guests[0].routes.messaging, ["jobs.>"]);
+        assert_eq!(manifest.guests[1].routes.websocket, ["events.*"]);
         assert!(manifest.link_interfaces().contains("omnia:link/echo"));
         assert!(manifest.link_interfaces().contains("omnia:shared/log"));
     }

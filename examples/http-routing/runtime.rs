@@ -1,7 +1,7 @@
 //! Multi-guest HTTP routing example runtime.
 //!
-//! One HTTP server fronts two guests; `omnia.toml`'s `[[route.http]]` table
-//! selects the guest per request by longest-prefix match.
+//! One HTTP server fronts two guests; each guest's `routes.http` prefixes in
+//! `omnia.toml` select it per request by longest-prefix match.
 
 cfg_if::cfg_if! {
     if #[cfg(not(target_arch = "wasm32"))] {

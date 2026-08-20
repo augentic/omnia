@@ -1,0 +1,5 @@
+error: unknown route trigger `grpc`; expected `http`, `messaging`, or `websocket`
+ --> tests/compile_fail/unknown_route_trigger.rs:3:52
+  |
+3 |         { id: "api", source: "api.wasm", routes: { grpc: ["/"] } },
+  |                                                    ^^^^

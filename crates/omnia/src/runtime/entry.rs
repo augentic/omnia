@@ -21,8 +21,8 @@ use crate::{DeploymentBuilder, Manifest};
 /// How a runtime's compiled-in deployment manifest is supplied.
 ///
 /// The `runtime!` macro emits [`Path`](Self::Path) for its `config:` key and
-/// [`Inline`](Self::Inline) for its inline manifest keys (`guests`, `mounts`,
-/// `routes`). On the standard CLI path it is the lowest-priority
+/// [`Inline`](Self::Inline) for its inline manifest keys (`guests`,
+/// `mounts`). On the standard CLI path it is the lowest-priority
 /// source (behind `--config`/`OMNIA_CONFIG` and a positional wasm path); on
 /// the direct-command path it is the sole source.
 #[derive(Clone, Debug)]

@@ -188,6 +188,9 @@ mod tests {
         })));
     }
 
+    // Guest-owned routes: every trigger list expands to `route_*` builder
+    // calls on the owning `GuestEntry` (the guest id is the implicit target),
+    // and route patterns are arbitrary expressions.
     #[test]
     fn expand_inline_manifest() {
         insta::assert_snapshot!(expand_pretty(quote!({
@@ -195,21 +198,23 @@ mod tests {
                 {
                     id: "responder",
                     source: concat!(env!("CARGO_MANIFEST_DIR"), "/responder.wasm"),
+                    routes: {
+                        messaging: ["orders.>"],
+                        websocket: ["chat.*"],
+                    },
                 },
                 {
                     id: "router",
                     source: concat!(env!("CARGO_MANIFEST_DIR"), "/router.wasm"),
                     link: ["omnia:link/echo"],
+                    routes: {
+                        http: ["/", concat!("/", "api")],
+                    },
                 },
             ],
             mounts: [
                 { name: ".", path: concat!(env!("CARGO_MANIFEST_DIR"), "/workspace"), writable: true },
             ],
-            routes: {
-                http: [{ prefix: "/", guest: "router" }],
-                messaging: [{ topic: "orders.>", guest: "worker" }],
-                websocket: [{ route: "chat.*", guest: "ws" }],
-            },
             hosts: {
                 WasiOtel: OtelDefault,
             },

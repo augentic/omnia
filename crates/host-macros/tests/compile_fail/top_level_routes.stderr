@@ -1,0 +1,5 @@
+error: the top-level `routes:` key was removed; declare routes on each guest entry (`guests: [{ id: ..., source: ..., routes: { http: [...] } }]`)
+ --> tests/compile_fail/top_level_routes.rs:5:5
+  |
+5 |     routes: {
+  |     ^^^^^^

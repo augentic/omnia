@@ -160,7 +160,7 @@ Dev-only helpers: model scripting on both faces of the model boundary (`Scripted
 
 A deployment can hold many guests. All of them share one wasmtime `Engine` and one `Linker`; the `Registry` maps each opaque `GuestId` to a pre-instantiated `InstancePre`, so per-request instantiation is cheap. Three things hang off the registry:
 
-- **Route tables** — per-trigger routing (`[[route.http]]` by longest prefix, `[[route.messaging]]`/`[[route.websocket]]` by NATS-style pattern) selects which guest handles an inbound request.
+- **Route tables** — per-trigger routing (each guest's `routes.http` by longest prefix, `routes.messaging`/`routes.websocket` by NATS-style pattern) selects which guest handles an inbound request.
 - **Mounts** — `[[mount]]` entries preopen host directories into every guest sandbox (read-only unless marked writable).
 - **Dispatch** — per-guest `link` allow-lists name interfaces the host polyfills onto the shared linker; calls dispatch to whichever guest exports the interface, over an in-process carrier, with nesting bounded by `MAX_DISPATCH_DEPTH`.
 
