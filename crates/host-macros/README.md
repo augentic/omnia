@@ -48,7 +48,7 @@ omnia::runtime!({
 ```
 
 - **`mode: server`** — trigger hosts (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`) run servers and drive guests per request.
-- **`mode: command`** — the runtime drives the guest's `wasi:cli/run` export once and exits with its status. A backend-less command runtime is valid: `omnia::runtime!({ mode: command });`
+- **`mode: command`** — the runtime drives the guest's `wasi:cli/run` export once and exits with its status. A backend-less command runtime is valid: `omnia::runtime!({ mode: command });` With a compiled-in deployment (`config:`, inline manifest keys, or `resolver:` plus `command_guest:`), the binary is a *direct command*: no host `run` grammar, argv passes to the guest verbatim.
 - **`config:`** — a path expression compiled into the generated `main` as the default manifest, used only when the command line supplies no positional wasm, `--config`, or `OMNIA_CONFIG`. Anchor it with `env!("CARGO_MANIFEST_DIR")` to make it absolute at compile time.
 
 ### Inline manifest keys

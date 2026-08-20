@@ -35,7 +35,6 @@ pub struct Config {
     pub resolver: Option<Expr>,
     pub http_paths: Option<Expr>,
     pub http_listener: Option<Expr>,
-    pub program: Option<Expr>,
     pub command_guest: Option<Expr>,
 }
 
@@ -107,11 +106,9 @@ impl Parse for Config {
         let mut resolver = None;
         let mut http_paths = None;
         let mut http_listener = None;
-        let mut program = None;
         let mut command_guest = None;
         let mut config_span: Option<Span> = None;
         let mut inline_span: Option<Span> = None;
-        let mut program_span: Option<Span> = None;
         let mut command_guest_span: Option<Span> = None;
 
         let settings;
@@ -151,10 +148,6 @@ impl Parse for Config {
                 OptValue::Resolver(r) => resolver = Some(r),
                 OptValue::HttpPaths(p) => http_paths = Some(p),
                 OptValue::HttpListener(l) => http_listener = Some(l),
-                OptValue::Program(p) => {
-                    program = Some(p);
-                    program_span = Some(span);
-                }
                 OptValue::CommandGuest(c) => {
                     command_guest = Some(c);
                     command_guest_span = Some(span);
@@ -170,13 +163,11 @@ impl Parse for Config {
             resolver,
             http_paths,
             http_listener,
-            program,
             command_guest,
         };
         config.validate(&KeySpans {
             config: config_span,
             inline: inline_span,
-            program: program_span,
             command_guest: command_guest_span,
         })?;
         Ok(config)
@@ -188,7 +179,6 @@ impl Parse for Config {
 struct KeySpans {
     config: Option<Span>,
     inline: Option<Span>,
-    program: Option<Span>,
     command_guest: Option<Span>,
 }
 
@@ -211,23 +201,6 @@ impl Config {
             ));
         }
 
-        if let Some(span) = spans.program {
-            if self.mode != Mode::Command {
-                return Err(syn::Error::new(span, "`program:` requires `mode: command`"));
-            }
-            let has_manifest = self.config_file.is_some() || !self.manifest.is_empty();
-            let fully_dynamic = self.resolver.is_some() && self.command_guest.is_some();
-            if !has_manifest && !fully_dynamic {
-                return Err(syn::Error::new(
-                    span,
-                    "`program:` requires a compiled-in manifest (`config:` or inline manifest \
-                     keys) or `resolver:` plus `command_guest:` — a direct command has no \
-                     `--config`/positional-wasm override, so the deployment must be expressed \
-                     here",
-                ));
-            }
-        }
-
         Ok(())
     }
 }
@@ -243,7 +216,6 @@ mod kw {
     syn::custom_keyword!(resolver);
     syn::custom_keyword!(http_paths);
     syn::custom_keyword!(http_listener);
-    syn::custom_keyword!(program);
     syn::custom_keyword!(command_guest);
 }
 
@@ -266,7 +238,6 @@ enum OptValue {
     Resolver(Expr),
     HttpPaths(Expr),
     HttpListener(Expr),
-    Program(Expr),
     CommandGuest(Expr),
 }
 
@@ -315,10 +286,6 @@ impl Parse for Opt {
             let key = input.parse::<kw::http_listener>()?;
             input.parse::<Token![:]>()?;
             ("http_listener", key.span, OptValue::HttpListener(input.parse()?))
-        } else if l.peek(kw::program) {
-            let key = input.parse::<kw::program>()?;
-            input.parse::<Token![:]>()?;
-            ("program", key.span, OptValue::Program(input.parse()?))
         } else if l.peek(kw::command_guest) {
             let key = input.parse::<kw::command_guest>()?;
             input.parse::<Token![:]>()?;

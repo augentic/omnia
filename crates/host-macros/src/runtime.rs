@@ -57,8 +57,9 @@ pub fn expand(config: &Config) -> TokenStream {
             }
 
             /// Entry point: run the compiled-in deployment through this
-            /// runtime's hosts and backends (the standard `run` grammar, or
-            /// raw argv passthrough under the `program:` key).
+            /// runtime's hosts and backends (raw argv passthrough for a
+            /// command deployment compiled in here, otherwise the standard
+            /// `run` grammar).
             #[tokio::main]
             pub async fn main() -> ::std::process::ExitCode {
                 #listener_binding
@@ -181,22 +182,12 @@ mod tests {
         })));
     }
 
-    #[test]
-    fn expand_program() {
-        insta::assert_snapshot!(expand_pretty(quote!({
-            mode: command,
-            program: "mytool",
-            config: concat!(env!("CARGO_MANIFEST_DIR"), "/omnia.toml"),
-        })));
-    }
-
     // The composed shape from the guest-resolution design: static guests plus
-    // resolve-on-miss, explicit command routing, and raw argv passthrough.
+    // resolve-on-miss and explicit command routing.
     #[test]
     fn expand_deployment_keys() {
         insta::assert_snapshot!(expand_pretty(quote!({
             mode: command,
-            program: "specify-example",
             guests: [
                 { id: "specify", source: engine_component_path() },
                 { id: "target:mock", source: mock_target_path() },

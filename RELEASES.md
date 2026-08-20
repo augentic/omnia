@@ -1,3 +1,15 @@
+## Unreleased
+
+### Changed
+
+- Removed the `runtime!` macro's `program:` key: `mode: command` with a
+  compiled-in deployment (`config:`, inline manifest keys, or `resolver:`
+  plus `command_guest:`) is now a direct command by default — raw argv
+  passthrough with the reserved `--debug` / `--quiet` host log flags, no
+  host `run` grammar. The program name (telemetry and guest `argv[0]`)
+  defaults to the manifest name (first `[[guest]]` id). Command-mode
+  binaries without a compiled-in deployment keep the `run` grammar
+
 ## 0.35.0
 
 Released 2026-07-25

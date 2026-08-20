@@ -35,14 +35,14 @@ This emits `target/wasm32-wasip2/debug/examples/model_wasm.wasm` (the underscore
 
 ## Run
 
-The answer is scripted in the runtime binary, so no configuration is needed:
+The answer is scripted in the runtime binary, so no configuration is needed.
+The manifest is compiled in via `runtime!`'s `config:` key, which makes this
+command-mode binary a direct command — no `run` subcommand, argv passes to the
+guest verbatim:
 
 ```bash
 export RUST_LOG=info,opentelemetry_sdk=off
-cargo run --example model -- run
-
-# or with an explicit manifest (the default is compiled in via runtime! `config:`)
-cargo run --example model -- run --config examples/model/omnia.toml
+cargo run --example model
 ```
 
 Because the guest exports a plain async `run` (not an HTTP/messaging trigger), the end-to-end completion is exercised by the seam suite rather than inbound traffic:

@@ -2,11 +2,11 @@
 //!
 //! Every deployment key lands in one [`omnia::runtime!`] invocation: a static
 //! guest from the inline manifest, a [`omnia::GuestResolver`] faulting further
-//! guests in on registry misses, explicit command routing (`command_guest:`),
-//! and raw argv passthrough (`program:`). Under `program:` there is no host
-//! `run` grammar — the binary's argv belongs to the guest, so it runs as
-//! `command-resolver greet Ada`, not `command-resolver run -- greet Ada`; see
-//! `README.md`.
+//! guests in on registry misses, and explicit command routing
+//! (`command_guest:`). Because the deployment is compiled in, command mode
+//! makes the binary a direct command — no host `run` grammar, the binary's
+//! argv belongs to the guest, so it runs as `command-resolver greet Ada`, not
+//! `command-resolver run -- greet Ada`; see `README.md`.
 
 cfg_if::cfg_if! {
     if #[cfg(not(target_arch = "wasm32"))] {
@@ -43,7 +43,6 @@ cfg_if::cfg_if! {
 
         omnia::runtime!({
             mode: command,
-            program: "command-resolver",
             guests: [
                 { id: "cli", source: concat!(
                     env!("CARGO_MANIFEST_DIR"),

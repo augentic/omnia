@@ -19,8 +19,9 @@ workspace = true
 default = ["cli", "jit", "otlp"]
 
 # Enables the standard `omnia run` CLI grammar in generated `main`s and the
-# `clap` re-export. Without it, deployments are direct commands (the macro's
-# `program:` key) or built programmatically via `DeploymentBuilder`.
+# `clap` re-export. Without it, deployments are direct commands (command mode
+# with a compiled-in deployment) or built programmatically via
+# `DeploymentBuilder`.
 cli = ["dep:clap"]
 
 # Enables just-in-time wasm to machine code compilation.

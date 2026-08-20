@@ -54,14 +54,15 @@ mod runtime {
         }
     }
     /// Entry point: run the compiled-in deployment through this
-    /// runtime's hosts and backends (the standard `run` grammar, or
-    /// raw argv passthrough under the `program:` key).
+    /// runtime's hosts and backends (raw argv passthrough for a
+    /// command deployment compiled in here, otherwise the standard
+    /// `run` grammar).
     #[tokio::main]
     pub async fn main() -> ::std::process::ExitCode {
         let http_listener: ::std::net::TcpListener = match bind_http_listener() {
             ::std::result::Result::Ok(listener) => listener,
             ::std::result::Result::Err(error) => {
-                ::std::eprintln!("error: {error:#}");
+                ::std::eprintln!("{error:#}");
                 return ::std::process::ExitCode::FAILURE;
             }
         };

@@ -1,55 +1,3 @@
-# Removing keys from the `runtime!` invocation
-
-## Context
-
-The emery runtime currently declares:
-
-```rust
-program: "emery"
-command_guest: "emery"
-link: ["emery:adapter/source@0.1.0"]
-resolver: launcher::resolver()
-http_paths: launcher::mcp_route
-http_listener: launcher::http_listener()
-```
-
-Each key maps to one `MainOptions` call in the macro-generated `main`
-(`crates/host-macros/src/runtime/codegen.rs`); omitting a key omits that
-call, so removal means falling back to the runtime's default behavior.
-
-## Resolution strategy
-
-The six keys exist to serve one deployment style: a launcher process that
-wires everything at runtime. The elegant removal is not six point fixes but
-one move — express the deployment statically in the manifest (inline
-`guests:` / per-guest `link` / `routes:` keys, or an `omnia.toml` via
-`config:`) and let the runtime defaults carry the rest. Most keys then need
-no replacement at all; the sections below give the per-key fallback and the
-recommended resolution.
-
-## Key by key
-
-
-
-### `program: "emery"`
-
-**Fallback.** The host CLI grammar returns: `emery run [wasm] [--config] -- args…` replaces raw argv passthrough. `--config`/`OMNIA_CONFIG`/positional
-wasm can override the compiled-in manifest. `--debug`/`--quiet` peeling and
-the `"emery"` telemetry name / `argv[0]` are gone. Requires the `cli`
-feature (a default feature, so no Cargo change).
-
-**Recommendation.** Migrate invokers to `emery run -- <args>`; if the old
-surface must survive a transition window, a one-line wrapper
-(`exec emery run -- "$@"`) is cheaper than keeping the key. The telemetry
-name and command-mode `argv[0]` need no replacement: `DeploymentBuilder`
-defaults `program_name` to the manifest name — the first `[[guest]]` id
-(`crates/omnia/src/deployment.rs`) — so naming the static guest entry
-`"emery"` preserves both for free. Logging reverts to the standard
-env-driven configuration; document the env var for invokers that used
-`--debug`/`--quiet`. The one genuine loss is that the compiled-in manifest
-becomes overridable at the CLI — a feature in development, and acceptable in
-production wherever the binary is not the trust boundary.
-
 ### `command_guest: "emery"`
 
 **Fallback.** Command mode routes to the *sole static* `wasi:cli/run`
@@ -147,11 +95,11 @@ harnesses, port brokering), keep this key and remove the other five.
 
 ## Cross-key constraint
 
-`program:` requires a compiled-in manifest (`config:` or inline keys) **or**
-`resolver:` + `command_guest:` (macro validation in
-`crates/host-macros/src/runtime/parse.rs`). Removing all six together always
-parses, and the recommended end state below dissolves the constraint
-entirely: no `program:`, and the deployment is the compiled-in manifest.
+None remains: the `program:` key is gone from the macro, and command mode
+with a compiled-in deployment (`config:` or inline keys, or `resolver:` +
+`command_guest:`) is a direct command — raw argv passthrough — by default
+(`plan` in `crates/omnia/src/runtime/entry.rs`). The recommended end state
+below is that shape, so `emery <args>` keeps working with no key at all.
 
 ## Recommended end state
 
@@ -164,14 +112,16 @@ omnia::runtime!({
 ```
 
 with `omnia.toml` carrying the guests (emery named first, so the telemetry
-name stays `emery`), the per-guest `link`, and the `[[route.http]]` MCP
-prefixes. Migration checklist:
+name and command-mode `argv[0]` stay `emery`), the per-guest `link`, and the
+`[[route.http]]` MCP prefixes. Because the manifest is compiled in, this
+command-mode binary is a direct command: invokers keep `emery <args>`
+untouched (with `--debug`/`--quiet` reserved as host log flags). Migration
+checklist:
 
 - Declare emery and every adapter it links to as static guests; verify
 exactly one exports `wasi:cli/run`.
 - Move `emery:adapter/source@0.1.0` to emery's per-guest `link`.
 - Encode the MCP path mapping as `[[route.http]]` prefixes.
 - Set `HTTP_ADDR` in the runtime's environment; drop the socket handoff.
-- Migrate all invokers from `emery <args>` to `emery run -- <args>`.
 
 The result is a plain, static omnia CLI runtime with no launcher coupling.

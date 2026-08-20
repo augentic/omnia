@@ -73,7 +73,6 @@ fn emit_main_options(config: &Config) -> TokenStream {
     // The binding emitted by `emit_listener_binding` above.
     let http_listener =
         config.http_listener.as_ref().map(|_| quote! { .http_listener(http_listener) });
-    let program = config.program.as_ref().map(|expr| quote! { .direct_command(#expr) });
     let command_guest = config.command_guest.as_ref().map(|expr| quote! { .command_guest(#expr) });
 
     quote! {
@@ -82,7 +81,6 @@ fn emit_main_options(config: &Config) -> TokenStream {
             #resolver
             #http_paths
             #http_listener
-            #program
             #command_guest
     }
 }

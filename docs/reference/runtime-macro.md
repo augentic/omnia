@@ -14,7 +14,8 @@ Every key the `omnia::runtime!` macro accepts, with exact semantics. The task-or
 | `command_guest:` | Explicit command-mode routing to one guest identity | More than one static guest, or the command guest comes from the resolver |
 | `http_paths:` | Path→identity hook for unrouted HTTP requests | The deployment owns HTTP routing (e.g. per-tenant paths) |
 | `http_listener:` | Adopt a pre-bound TCP listener | The embedding process controls the socket (port 0 tests, socket activation) |
-| `program:` | Raw argv passthrough — removes the host CLI | Shipping a binary whose CLI belongs entirely to the guest |
+
+There is no key for raw argv passthrough: a command-mode runtime with a compiled-in deployment is a [direct command](#direct-commands-raw-argv-passthrough) automatically.
 
 ## `hosts:`
 
@@ -30,7 +31,7 @@ The macro generates a `Backends` bundle (one connected backend per entry), the w
 - **`mode: server`** (default) — the runtime stays up and serves requests. Trigger hosts (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`) listen for traffic and instantiate a fresh guest instance per request.
 - **`mode: command`** — the runtime drives the guest's `wasi:cli/run` export exactly once, then exits with the guest's status. Unlike server triggers, command mode applies no `GUEST_TIMEOUT_MS` wall-clock cap — to the run itself or to any link dispatch made along its call chain.
 
-In command mode, arguments after `--` on the command line are forwarded to the guest as its argv (`args[0]` is the program name, supplied by the runtime). This `run … -- …` grammar applies to every generated binary *except* one built with [`program:`](#program-raw-argv-passthrough), which disables the host CLI entirely.
+Command mode has two entry surfaces, chosen by whether the deployment is compiled in. With a compiled-in deployment (`config:`, inline manifest keys, or `resolver:` plus `command_guest:`) the binary is a [direct command](#direct-commands-raw-argv-passthrough): no host CLI, argv passes to the guest verbatim. Without one, the standard `run … -- …` grammar applies — arguments after `--` are forwarded to the guest as its argv (`args[0]` is the program name, supplied by the runtime).
 
 A backend-less command runtime is valid: `omnia::runtime!({ mode: command });`.
 
@@ -162,24 +163,23 @@ The value is any expression evaluating to `anyhow::Result<std::net::TcpListener>
 
 A supplied listener that no `wasi:http`-capable guest (and no `http_paths:` hook) could ever serve fails startup rather than silently dropping the socket. Deployments assembled programmatically supply the listener through `DeploymentBuilder::http_listener`.
 
-## `program:` (raw argv passthrough)
+## Direct commands (raw argv passthrough)
 
-**You need this when you ship a binary whose command line belongs entirely to the guest** — a product CLI where `mybin greet Ada` must work, not `mybin run guest.wasm -- greet Ada`.
+**Shipping a binary whose command line belongs entirely to the guest** — a product CLI where `mybin greet Ada` must work, not `mybin run guest.wasm -- greet Ada` — needs no key at all: a `mode: command` runtime with a compiled-in deployment (`config:`, inline manifest keys, or `resolver:` plus `command_guest:`) is a *direct command*.
 
-`program:` disables the host `run` grammar entirely: the binary's argv belongs to the guest. There is no `run` subcommand and no `--config`/`OMNIA_CONFIG`/positional-wasm override — the deployment compiled into the binary (or supplied by the resolver) is the only source, by design. The key's value (any expression evaluating to a string) becomes the program name used for telemetry and prepended to guest argv as `argv[0]`. This is pure opt-in: a binary without `program:` keeps the `run` grammar byte-for-byte.
+A direct command has no host `run` grammar: the binary's argv belongs to the guest. There is no `run` subcommand and no `--config`/`OMNIA_CONFIG`/positional-wasm override — the deployment compiled into the binary (or supplied by the resolver) is the only source, by design. The program name used for telemetry and prepended to guest argv as `argv[0]` is the manifest name — the first `[[guest]]` id — unless overridden programmatically with `DeploymentBuilder::program_name`.
 
-Two host log flags are reserved on this path: `--debug` and `--quiet`, anywhere in argv, are peeled before the guest sees them and select the host log preset (see [Host log flags](configuration.md#host-log-flags-program-binaries)). Everything else passes through untouched.
+Two host log flags are reserved on this path: `--debug` and `--quiet`, anywhere in argv, are peeled before the guest sees them and select the host log preset (see [Host log flags](configuration.md#host-log-flags-direct-command-binaries)). Everything else passes through untouched.
 
-`program:` requires `mode: command` and either a compiled-in manifest (`config:` or inline keys) or `resolver:` plus `command_guest:` (the fully dynamic shape) — anything else is a compile-time error, since a direct command with nothing to run could never work.
+A `mode: command` runtime *without* a compiled-in deployment keeps the `run` grammar byte-for-byte — with no other way to name the guest, the positional wasm path and `--config` remain the entry surface.
 
 ## Composing the keys
 
-The [`command-resolver`](../../examples/command-resolver/runtime.rs) example composes `program:`, `resolver:`, and `command_guest:` into a complete resolver-backed command deployment — static guests plus resolve-on-miss for everything else — with no handwritten `main`:
+The [`command-resolver`](../../examples/command-resolver/runtime.rs) example composes `resolver:` and `command_guest:` into a complete resolver-backed direct command deployment — static guests plus resolve-on-miss for everything else — with no handwritten `main`:
 
 ```rust
 omnia::runtime!({
     mode: command,
-    program: "specify-example",
     guests: [
         { id: "specify", source: engine_component_path() },
         { id: "target:mock", source: mock_target_path() },

@@ -1,6 +1,6 @@
 ---
 source: crates/host-macros/src/runtime.rs
-expression: "expand_pretty(quote!({\n    mode: command, program: \"specify-example\", guests:\n    [{ id: \"specify\", source: engine_component_path() },\n    { id: \"target:mock\", source: mock_target_path() },], mounts:\n    [{ name: \"project\", path: project_root(), writable: true },\n    { name: \"store\", path: store_root(), writable: true },], resolver:\n    CacheResolver::new(), command_guest: \"specify\", hosts:\n    { WasiHttp: HttpDefault, WasiOtel: OtelDefault, }\n}))"
+expression: "expand_pretty(quote!({\n    mode: command, guests:\n    [{ id: \"specify\", source: engine_component_path() },\n    { id: \"target:mock\", source: mock_target_path() },], mounts:\n    [{ name: \"project\", path: project_root(), writable: true },\n    { name: \"store\", path: store_root(), writable: true },], resolver:\n    CacheResolver::new(), command_guest: \"specify\", hosts:\n    { WasiHttp: HttpDefault, WasiOtel: OtelDefault, }\n}))"
 ---
 mod runtime {
     use anyhow::Result;
@@ -54,8 +54,9 @@ mod runtime {
         }
     }
     /// Entry point: run the compiled-in deployment through this
-    /// runtime's hosts and backends (the standard `run` grammar, or
-    /// raw argv passthrough under the `program:` key).
+    /// runtime's hosts and backends (raw argv passthrough for a
+    /// command deployment compiled in here, otherwise the standard
+    /// `run` grammar).
     #[tokio::main]
     pub async fn main() -> ::std::process::ExitCode {
         omnia::main::<
@@ -89,7 +90,6 @@ mod runtime {
                         ),
                     )
                     .resolver(CacheResolver::new())
-                    .direct_command("specify-example")
                     .command_guest("specify"),
             )
             .await

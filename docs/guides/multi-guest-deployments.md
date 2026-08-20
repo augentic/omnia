@@ -102,7 +102,7 @@ writable = true     # omit for read-only (the default)
 The equivalent on the command line (repeatable, layered over the manifest, last-wins per name):
 
 ```bash
-cargo run --example model -- run guest.wasm --mount path=workspace,name=.,writable
+cargo run --example cli -- run guest.wasm --mount path=workspace,name=.,writable
 ```
 
 Guests discover mounts through `wasi:filesystem/preopens`:

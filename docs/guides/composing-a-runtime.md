@@ -131,9 +131,10 @@ Most runtimes never need these. Each solves one specific deployment shape — re
 | [`command_guest:`](../reference/runtime-macro.md#command_guest-explicit-command-routing) | Command mode must route to a named guest instead of the sole-exporter default. |
 | [`http_paths:`](../reference/runtime-macro.md#http_paths-path-routing-hook) | The deployment maps HTTP paths to guest identities in code (e.g. per-tenant URL schemes). |
 | [`http_listener:`](../reference/runtime-macro.md#http_listener-pre-bound-listener) | The embedding process must own the TCP socket (port 0 in tests, socket activation). |
-| [`program:`](../reference/runtime-macro.md#program-raw-argv-passthrough) | You ship a product CLI whose argv belongs entirely to the guest — no host `run` grammar at all. |
 
-The [`command-resolver`](../../examples/command-resolver/runtime.rs) example composes `program:`, `resolver:`, and `command_guest:` into a complete resolver-backed command deployment.
+Shipping a product CLI whose argv belongs entirely to the guest needs no key: a command-mode runtime with a compiled-in deployment is a [direct command](../reference/runtime-macro.md#direct-commands-raw-argv-passthrough) — no host `run` grammar at all.
+
+The [`command-resolver`](../../examples/command-resolver/runtime.rs) example composes `resolver:` and `command_guest:` into a complete resolver-backed direct command deployment.
 
 ## Hand-written runtimes (advanced)
 

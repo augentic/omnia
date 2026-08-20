@@ -1,12 +1,14 @@
 # Command Resolver Example
 
 Demonstrates the `runtime!` deployment keys: a static guest plus a
-`GuestResolver` for resolve-on-miss, explicit command routing
-(`command_guest:`), and raw argv passthrough (`program:`).
+`GuestResolver` for resolve-on-miss and explicit command routing
+(`command_guest:`).
 
-Because `program:` is set, the binary has **no host CLI**: there is no `run`
-subcommand and no `--config`/`OMNIA_CONFIG`/positional-wasm override — every
-argument is forwarded to the guest verbatim.
+Because the deployment is compiled in (a static guest, with the resolver
+faulting in the rest), command mode makes the binary a **direct command**
+with no host CLI: there is no `run` subcommand and no
+`--config`/`OMNIA_CONFIG`/positional-wasm override — every argument is
+forwarded to the guest verbatim.
 
 ## Quick Start
 

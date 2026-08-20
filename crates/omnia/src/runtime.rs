@@ -89,11 +89,12 @@ pub trait Wiring<B: Backends> {
 /// Entry point for generated `main` functions.
 ///
 /// `options` carries the deployment the `runtime!` macro compiled in: mode,
-/// manifest source, resolver, invocation shape, and command guest. Without
-/// the macro's `program:` key this parses the standard
-/// `run [wasm] [--config] -- args…` grammar; with it, argv passes to the
-/// guest verbatim except the reserved host log flags (`--debug` / `--quiet`),
-/// which select the telemetry [`LogMode`](crate::LogMode).
+/// manifest source, resolver, and command guest. Command mode with a
+/// compiled-in deployment (a manifest, or a resolver plus command guest) is a
+/// direct command: argv passes to the guest verbatim except the reserved host
+/// log flags (`--debug` / `--quiet`), which select the telemetry
+/// [`LogMode`](crate::LogMode). Every other shape parses the standard
+/// `run [wasm] [--config] -- args…` grammar.
 #[doc(hidden)]
 pub async fn main<B, H>(options: MainOptions) -> ExitCode
 where
