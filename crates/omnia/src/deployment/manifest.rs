@@ -151,6 +151,15 @@ impl Manifest {
                 bail!("duplicate [[guest]] id `{}`: guest identities must be unique", entry.id);
             }
         }
+        let marked: Vec<&str> =
+            self.guests.iter().filter(|e| e.command).map(|e| e.id.as_str()).collect();
+        if marked.len() > 1 {
+            bail!(
+                "multiple [[guest]] entries marked `command = true` ({}): at most one guest may \
+                 be the command guest",
+                marked.join(", ")
+            );
+        }
         if self.transport.default != TransportKind::InProcess {
             bail!(
                 "transport `{:?}` is not yet implemented; only in-process transport is supported",
@@ -220,6 +229,12 @@ impl Manifest {
     #[must_use]
     pub fn routes(&self) -> Routes {
         self.route.to_routes()
+    }
+
+    /// The identity of the guest marked `command = true`, if any.
+    #[must_use]
+    pub fn command_guest(&self) -> Option<GuestId> {
+        self.guests.iter().find(|e| e.command).map(|e| GuestId::from(e.id.as_str()))
     }
 
     /// Resolve every `[[mount]]` into a [`ResolvedPreopen`].
@@ -308,6 +323,10 @@ pub struct GuestEntry {
     /// dynamic linking); the runtime core polyfills each on the shared linker.
     #[serde(default)]
     pub link: Vec<String>,
+    /// Marks this guest as the command-mode `wasi:cli/run` target; without a
+    /// marked guest the sole static exporter is the catch-all.
+    #[serde(default)]
+    pub command: bool,
 }
 
 impl GuestEntry {
@@ -318,6 +337,7 @@ impl GuestEntry {
             id: id.into(),
             source: source.into(),
             link: Vec::new(),
+            command: false,
         }
     }
 
@@ -325,6 +345,13 @@ impl GuestEntry {
     #[must_use]
     pub fn link(mut self, interface: impl Into<String>) -> Self {
         self.link.push(interface.into());
+        self
+    }
+
+    /// Mark this guest as the command-mode `wasi:cli/run` target.
+    #[must_use]
+    pub const fn command(mut self) -> Self {
+        self.command = true;
         self
     }
 }
@@ -673,6 +700,25 @@ mod tests {
             panic!("expected path source");
         };
         assert!(source.is_absolute());
+    }
+
+    #[test]
+    fn parse_command_flag() {
+        let toml = "[[guest]]\nid = \"helper\"\nsource.path = \"./helper.wasm\"\n\n\
+             [[guest]]\nid = \"app\"\nsource.path = \"./app.wasm\"\ncommand = true\n";
+        let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
+        manifest.validate(false).expect("one marked guest validates");
+        assert!(!manifest.guests[0].command, "the flag defaults to false");
+        assert_eq!(manifest.command_guest(), Some(GuestId::from("app")));
+    }
+
+    #[test]
+    fn reject_multiple_command_guests() {
+        let manifest = Manifest::new()
+            .guest(GuestEntry::new("a", "./a.wasm").command())
+            .guest(GuestEntry::new("b", "./b.wasm").command());
+        let error = manifest.validate(false).expect_err("two marked guests must be rejected");
+        assert!(error.to_string().contains("at most one guest may be the command guest"));
     }
 
     #[test]

@@ -1,0 +1,5 @@
+error: `command: true` requires `mode: command` (it only routes command mode)
+ --> tests/compile_fail/command_flag_in_server_mode.rs:3:42
+  |
+3 |         { id: "app", source: "app.wasm", command: true },
+  |                                          ^^^^^^^

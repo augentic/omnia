@@ -62,7 +62,7 @@ cargo run --example cli -- run ./target/wasm32-wasip2/debug/examples/cli_wasm.wa
 
 A backend-less command runtime is valid too: `omnia::runtime!({ mode: command });`.
 
-By default, command mode routes to the sole static guest exporting `wasi:cli/run`. To route explicitly — needed with several guests, or a guest supplied at run time — see [`command_guest:`](../reference/runtime-macro.md#command_guest-explicit-command-routing) in the macro reference.
+By default, command mode routes to the sole static guest exporting `wasi:cli/run`. With several exporters, mark one guest entry `command: true` — see [Command routing](../reference/runtime-macro.md#command-routing-command-true) in the macro reference.
 
 ## Default manifest (`config:`)
 
@@ -128,13 +128,12 @@ Most runtimes never need these. Each solves one specific deployment shape — re
 | --- | ----------------- |
 | [`guests:`/`mounts:`/`link:`/`routes:`](../reference/runtime-macro.md#inline-manifest-keys-guests-mounts-link-routes) | You want the deployment compiled into the binary instead of a TOML file — including embedding the guest bytes themselves. |
 | [`resolver:`](../reference/runtime-macro.md#resolver-resolve-on-miss) | Guests are not all known at compile time and must be fetched on first use (multi-tenant, artifact caches). |
-| [`command_guest:`](../reference/runtime-macro.md#command_guest-explicit-command-routing) | Command mode must route to a named guest instead of the sole-exporter default. |
 | [`http_paths:`](../reference/runtime-macro.md#http_paths-path-routing-hook) | The deployment maps HTTP paths to guest identities in code (e.g. per-tenant URL schemes). |
 | [`http_listener:`](../reference/runtime-macro.md#http_listener-pre-bound-listener) | The embedding process must own the TCP socket (port 0 in tests, socket activation). |
 
 Shipping a product CLI whose argv belongs entirely to the guest needs no key: a command-mode runtime with a compiled-in deployment is a [direct command](../reference/runtime-macro.md#direct-commands-raw-argv-passthrough) — no host `run` grammar at all.
 
-The [`command-resolver`](../../examples/command-resolver/runtime.rs) example composes `resolver:` and `command_guest:` into a complete resolver-backed direct command deployment.
+The [`command-resolver`](../../examples/command-resolver/runtime.rs) example composes the inline manifest keys and `resolver:` into a complete resolver-backed direct command deployment.
 
 ## Hand-written runtimes (advanced)
 

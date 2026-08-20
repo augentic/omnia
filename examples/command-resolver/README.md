@@ -1,8 +1,9 @@
 # Command Resolver Example
 
 Demonstrates the `runtime!` deployment keys: a static guest plus a
-`GuestResolver` for resolve-on-miss and explicit command routing
-(`command_guest:`).
+`GuestResolver` for resolve-on-miss. The static guest is the sole
+`wasi:cli/run` exporter, so command mode routes to it with no
+configuration.
 
 Because the deployment is compiled in (a static guest, with the resolver
 faulting in the rest), command mode makes the binary a **direct command**

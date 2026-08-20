@@ -1,19 +1,3 @@
-### `command_guest: "emery"`
-
-**Fallback.** Command mode routes to the *sole static* `wasi:cli/run`
-exporter. Zero static exporters: inert, exits `0`. Two or more: ambiguous,
-run fails. A resolver-supplied command guest no longer works.
-
-**Recommendation.** Lean on the structural invariant instead of the name.
-With the guest set static, emery is the only command-capable guest — the
-adapter guests export `emery:adapter/source`, not `wasi:cli/run` — so the
-sole-exporter catch-all lands on emery with no configuration, and any future
-violation fails fast at boot rather than misrouting. Nothing to do beyond
-keeping exactly one `wasi:cli/run` exporter in the manifest; if adapters
-could plausibly grow that export, guard the invariant with a seam test.
-(Explicit command routing returns via `[[route.cli]]` once the runtime
-parses it; today that table is deliberately empty.)
-
 ### `link: ["emery:adapter/source@0.1.0"]`
 
 **Fallback.** `emery:adapter/source@0.1.0` is no longer host-mediated.
@@ -95,11 +79,11 @@ harnesses, port brokering), keep this key and remove the other five.
 
 ## Cross-key constraint
 
-None remains: the `program:` key is gone from the macro, and command mode
-with a compiled-in deployment (`config:` or inline keys, or `resolver:` +
-`command_guest:`) is a direct command — raw argv passthrough — by default
-(`plan` in `crates/omnia/src/runtime/entry.rs`). The recommended end state
-below is that shape, so `emery <args>` keeps working with no key at all.
+None remains: the `program:` and `command_guest:` keys are gone from the
+macro, and command mode with a compiled-in deployment (`config:` or inline
+keys) is a direct command — raw argv passthrough — by default (`plan` in
+`crates/omnia/src/runtime/entry.rs`). The recommended end state below is
+that shape, so `emery <args>` keeps working with no key at all.
 
 ## Recommended end state
 

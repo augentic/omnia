@@ -11,7 +11,6 @@ Every key the `omnia::runtime!` macro accepts, with exact semantics. The task-or
 | `config:` | Compile in a default manifest *path* | You want `run` with no arguments to work |
 | `guests:`, `mounts:`, `link:`, `routes:` | Compile in a default manifest *value* (inline) | Same as `config:`, but self-contained — no TOML file at run time |
 | `resolver:` | Resolve-on-miss for unknown guest identities | Guests arrive at run time (multi-tenant, cached artifacts) |
-| `command_guest:` | Explicit command-mode routing to one guest identity | More than one static guest, or the command guest comes from the resolver |
 | `http_paths:` | Path→identity hook for unrouted HTTP requests | The deployment owns HTTP routing (e.g. per-tenant paths) |
 | `http_listener:` | Adopt a pre-bound TCP listener | The embedding process controls the socket (port 0 tests, socket activation) |
 
@@ -31,11 +30,11 @@ The macro generates a `Backends` bundle (one connected backend per entry), the w
 - **`mode: server`** (default) — the runtime stays up and serves requests. Trigger hosts (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`) listen for traffic and instantiate a fresh guest instance per request.
 - **`mode: command`** — the runtime drives the guest's `wasi:cli/run` export exactly once, then exits with the guest's status. Unlike server triggers, command mode applies no `GUEST_TIMEOUT_MS` wall-clock cap — to the run itself or to any link dispatch made along its call chain.
 
-Command mode has two entry surfaces, chosen by whether the deployment is compiled in. With a compiled-in deployment (`config:`, inline manifest keys, or `resolver:` plus `command_guest:`) the binary is a [direct command](#direct-commands-raw-argv-passthrough): no host CLI, argv passes to the guest verbatim. Without one, the standard `run … -- …` grammar applies — arguments after `--` are forwarded to the guest as its argv (`args[0]` is the program name, supplied by the runtime).
+Command mode has two entry surfaces, chosen by whether the deployment is compiled in. With a compiled-in deployment (`config:` or inline manifest keys) the binary is a [direct command](#direct-commands-raw-argv-passthrough): no host CLI, argv passes to the guest verbatim. Without one, the standard `run … -- …` grammar applies — arguments after `--` are forwarded to the guest as its argv (`args[0]` is the program name, supplied by the runtime).
 
 A backend-less command runtime is valid: `omnia::runtime!({ mode: command });`.
 
-By default, command mode routes to the sole static guest exporting `wasi:cli/run`; a deployment with no exporter is inert and exits `0`. Use [`command_guest:`](#command_guest-explicit-command-routing) to route explicitly.
+By default, command mode routes to the sole static guest exporting `wasi:cli/run`; a deployment with no exporter is inert and exits `0`. With several exporters, mark one guest entry `command: true` — see [Command routing](#command-routing-command-true).
 
 ## `config:` (default manifest path)
 
@@ -88,6 +87,7 @@ omnia::runtime!({
 
 - Each value is any Rust expression evaluating to the field's type (strings for ids, interfaces, and route keys; paths or embedded bytes for `source`, paths for mount `path`; a bool for `writable`, which defaults to `false`).
 - Relative paths resolve against the process working directory at run time, so anchor them with `env!("CARGO_MANIFEST_DIR")` as with `config:`.
+- A guest entry also accepts `command: true` (a literal bool), marking it as the command-mode target — see [Command routing](#command-routing-command-true).
 
 ### Embedding a guest (`source:` bytes)
 
@@ -119,27 +119,25 @@ The [`guest-link`](../../examples/guest-link/runtime.rs) example is built this w
 
 The value is any expression evaluating to a type implementing `omnia::GuestResolver`; it is consulted on dispatch-path registry misses (see [dynamic guest registration](../../rfcs/guest-resolution.md)). A resolver implies a *dynamic* deployment: the guest set may start empty (an invocation with a resolver and no `guests:` is the fully dynamic deployment), and with one or more static guests the mark is a no-op. The compiled-in resolver is part of the *binary*, not the manifest — a TOML supplied via `--config` still runs with it, and resolution policy (id grammar, artifact layout, verification) stays code the deployment owns.
 
-## `command_guest:` (explicit command routing)
+## Command routing (`command: true`)
 
-**You need this when command mode should not rely on the sole-exporter default** — with several static guests, or a command guest that arrives through the resolver.
+**You need this when command mode should not rely on the sole-exporter default** — a deployment with several static guests exporting `wasi:cli/run`.
 
-The value (any expression evaluating to a guest identity) routes command mode explicitly instead of the sole-static-exporter catch-all. It requires `mode: command`. With several static guests — or a resolver-supplied command guest — explicit routing is the safer form: a future guest accidentally exporting `wasi:cli/run` cannot flip the routing.
-
-`command_guest` sends the identity through the ordinary registry lookup — and hence resolve-on-miss when a `GuestResolver` is installed — so a fully dynamic deployment may start empty and fault its command guest in on the first run. This leg is fail-closed: an identity nothing supplies, a resolver failure, or a resolved component that does not export `wasi:cli/run` fails the run instead of exiting inert.
-
-The same routing is available programmatically:
+Marking one guest entry `command: true` routes command mode to that guest instead of the sole-static-exporter catch-all. The mark requires `mode: command`, and at most one guest may carry it — several are rejected at compile time (and, for a TOML manifest, at manifest validation). With several exporters the mark is also the safer form: a future guest accidentally exporting `wasi:cli/run` cannot flip the routing.
 
 ```rust
-let builder = omnia::DeploymentBuilder::new()
-    .dynamic()
-    .command_guest("app@1.2.0")
-    .program_name("app")
-    .resolver(resolver)
-    .args(argv);
-host::run(builder).await
+omnia::runtime!({
+    mode: command,
+    guests: [
+        { id: "app", source: "app.wasm", command: true },
+        { id: "helper", source: "helper.wasm" },
+    ],
+});
 ```
 
-`program_name` overrides the deployment name used for telemetry and prepended to guest argv as `argv[0]` (the default remains the manifest name).
+The same mark is available in `omnia.toml` (`command = true` on a `[[guest]]` entry — see [Configuration](configuration.md)) and programmatically (`omnia::GuestEntry::new(id, source).command()`). This leg is fail-closed: a marked identity nothing supplies, or one whose component does not export `wasi:cli/run`, fails the run instead of exiting inert.
+
+`DeploymentBuilder::program_name` overrides the deployment name used for telemetry and prepended to guest argv as `argv[0]` (the default remains the manifest name).
 
 ## `http_paths:` (path routing hook)
 
@@ -165,9 +163,9 @@ A supplied listener that no `wasi:http`-capable guest (and no `http_paths:` hook
 
 ## Direct commands (raw argv passthrough)
 
-**Shipping a binary whose command line belongs entirely to the guest** — a product CLI where `mybin greet Ada` must work, not `mybin run guest.wasm -- greet Ada` — needs no key at all: a `mode: command` runtime with a compiled-in deployment (`config:`, inline manifest keys, or `resolver:` plus `command_guest:`) is a *direct command*.
+**Shipping a binary whose command line belongs entirely to the guest** — a product CLI where `mybin greet Ada` must work, not `mybin run guest.wasm -- greet Ada` — needs no key at all: a `mode: command` runtime with a compiled-in deployment (`config:` or inline manifest keys) is a *direct command*.
 
-A direct command has no host `run` grammar: the binary's argv belongs to the guest. There is no `run` subcommand and no `--config`/`OMNIA_CONFIG`/positional-wasm override — the deployment compiled into the binary (or supplied by the resolver) is the only source, by design. The program name used for telemetry and prepended to guest argv as `argv[0]` is the manifest name — the first `[[guest]]` id — unless overridden programmatically with `DeploymentBuilder::program_name`.
+A direct command has no host `run` grammar: the binary's argv belongs to the guest. There is no `run` subcommand and no `--config`/`OMNIA_CONFIG`/positional-wasm override — the deployment compiled into the binary is the only source, by design. The program name used for telemetry and prepended to guest argv as `argv[0]` is the manifest name — the first `[[guest]]` id — unless overridden programmatically with `DeploymentBuilder::program_name`.
 
 Two host log flags are reserved on this path: `--debug` and `--quiet`, anywhere in argv, are peeled before the guest sees them and select the host log preset (see [Host log flags](configuration.md#host-log-flags-direct-command-binaries)). Everything else passes through untouched.
 
@@ -175,13 +173,13 @@ A `mode: command` runtime *without* a compiled-in deployment keeps the `run` gra
 
 ## Composing the keys
 
-The [`command-resolver`](../../examples/command-resolver/runtime.rs) example composes `resolver:` and `command_guest:` into a complete resolver-backed direct command deployment — static guests plus resolve-on-miss for everything else — with no handwritten `main`:
+The [`command-resolver`](../../examples/command-resolver/runtime.rs) example composes the inline manifest keys and `resolver:` into a complete resolver-backed direct command deployment — static guests plus resolve-on-miss for everything else — with no handwritten `main`:
 
 ```rust
 omnia::runtime!({
     mode: command,
     guests: [
-        { id: "specify", source: engine_component_path() },
+        { id: "specify", source: engine_component_path(), command: true },
         { id: "target:mock", source: mock_target_path() },
     ],
     mounts: [
@@ -189,7 +187,6 @@ omnia::runtime!({
         { name: "store", path: store_root(), writable: true },
     ],
     resolver: CacheResolver::new(),
-    command_guest: "specify",
     hosts: {
         WasiHttp: HttpDefault,
         WasiOtel: OtelDefault,

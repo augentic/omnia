@@ -12,12 +12,11 @@ use crate::store::StoreCtx;
 
 /// Run the command guest once, after the [`Runtime`] is assembled.
 ///
-/// An explicit command guest (see
-/// [`DeploymentBuilder::command_guest`](crate::DeploymentBuilder::command_guest))
-/// goes through the ordinary [`ensure_guest`](Runtime::ensure_guest) lookup —
-/// and hence resolve-on-miss — and fails the run if nothing supplies it.
-/// Without one, the sole static `wasi:cli/run` exporter is the catch-all; a
-/// deployment with no exporter is inert and exits `0`.
+/// A guest marked `command = true` in the manifest goes through the ordinary
+/// [`ensure_guest`](Runtime::ensure_guest) lookup and fails the run if
+/// nothing supplies it. Without a marked guest, the sole static
+/// `wasi:cli/run` exporter is the catch-all; a deployment with no exporter
+/// is inert and exits `0`.
 ///
 /// # Errors
 ///

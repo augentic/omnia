@@ -54,7 +54,6 @@ pub struct MainOptions {
     resolver: Option<Arc<dyn GuestResolver>>,
     http_paths: Option<HttpPaths>,
     http_listener: Option<std::net::TcpListener>,
-    command_guest: Option<GuestId>,
 }
 
 impl MainOptions {
@@ -67,7 +66,6 @@ impl MainOptions {
             resolver: None,
             http_paths: None,
             http_listener: None,
-            command_guest: None,
         }
     }
 
@@ -110,14 +108,6 @@ impl MainOptions {
         self.http_listener = Some(listener);
         self
     }
-
-    /// Route command mode to an explicit guest identity instead of the
-    /// sole-static-exporter catch-all.
-    #[must_use]
-    pub fn command_guest(mut self, id: impl Into<GuestId>) -> Self {
-        self.command_guest = Some(id.into());
-        self
-    }
 }
 
 /// Why entry planning stopped before a deployment could be built.
@@ -146,7 +136,6 @@ pub(super) struct EntryPlan {
     resolver: Option<Arc<dyn GuestResolver>>,
     http_paths: Option<HttpPaths>,
     http_listener: Option<std::net::TcpListener>,
-    command_guest: Option<GuestId>,
     log_mode: Option<LogMode>,
 }
 
@@ -166,9 +155,6 @@ impl EntryPlan {
         }
         if let Some(listener) = self.http_listener {
             builder = builder.http_listener(listener);
-        }
-        if let Some(id) = self.command_guest {
-            builder = builder.command_guest(id);
         }
         if let Some(mode) = self.log_mode {
             builder = builder.log_mode(mode);
@@ -206,13 +192,11 @@ fn peel_log_flags(args: Vec<String>) -> Result<(Vec<String>, LogMode)> {
 /// Resolve [`MainOptions`] plus process argv and `OMNIA_CONFIG` into an
 /// [`EntryPlan`].
 ///
-/// Command mode with a compiled-in deployment — a manifest, or the fully
-/// dynamic shape (resolver plus command guest) — is a *direct command*: no
-/// host CLI grammar, argv belongs to the guest. The direct plan always
-/// carries either the compiled-in manifest or the dynamic mark, so the
-/// builder never falls through to its own `OMNIA_CONFIG` lookup — the
-/// environment is untouched by design. Every other shape parses the standard
-/// `run [wasm] [--config] -- args…` grammar.
+/// Command mode with a compiled-in manifest is a *direct command*: no host
+/// CLI grammar, argv belongs to the guest. The direct plan always carries
+/// the compiled-in manifest, so the builder never falls through to its own
+/// `OMNIA_CONFIG` lookup — the environment is untouched by design. Every
+/// other shape parses the standard `run [wasm] [--config] -- args…` grammar.
 // Without `cli`, `omnia_config` is only acknowledged, never consumed.
 #[cfg_attr(not(feature = "cli"), allow(clippy::needless_pass_by_value))]
 pub(super) fn plan(
@@ -224,15 +208,10 @@ pub(super) fn plan(
         resolver,
         http_paths,
         http_listener,
-        command_guest,
     } = options;
     let dynamic = resolver.is_some();
 
-    // A resolver alone is not enough for a direct command: without a command
-    // guest there is nothing to route argv to, so the `run` grammar (with its
-    // positional wasm path) remains the entry surface.
-    let fully_dynamic = dynamic && command_guest.is_some();
-    if mode == Mode::Command && (manifest.is_some() || fully_dynamic) {
+    if mode == Mode::Command && manifest.is_some() {
         let raw_args = argv
             .into_iter()
             .skip(1)
@@ -251,7 +230,6 @@ pub(super) fn plan(
             resolver,
             http_paths,
             http_listener,
-            command_guest,
             log_mode: Some(log_mode),
         });
     }
@@ -263,7 +241,7 @@ pub(super) fn plan(
         let _ = omnia_config;
         Err(PlanError::Fatal(anyhow!(
             "this runtime was built without omnia's `cli` feature; compile the deployment in \
-             (command mode with a manifest or resolver plus command guest) or enable the feature"
+             (command mode with a manifest) or enable the feature"
         )))
     }
     #[cfg(feature = "cli")]
@@ -301,7 +279,6 @@ pub(super) fn plan(
                     resolver,
                     http_paths,
                     http_listener,
-                    command_guest,
                     log_mode: None,
                 })
             }
@@ -436,8 +413,8 @@ mod tests {
         assert!(plan_empty.manifest.as_ref().is_some_and(|m| m.guests.is_empty()));
 
         // A positional wasm source composes with the resolver unchanged; a
-        // resolver without a command guest keeps the `run` grammar even in
-        // command mode.
+        // resolver without a compiled-in manifest keeps the `run` grammar
+        // even in command mode.
         let options = MainOptions::new(Mode::Command).resolver(NullResolver);
         let plan_wasm = plan(options, argv(&["bin", "run", "guest.wasm"]), None)
             .unwrap_or_else(|error| panic!("{}", fatal(error)));
@@ -504,21 +481,17 @@ mod tests {
         assert_eq!(plan.log_mode, None, "the standard CLI path stays env-driven");
     }
 
-    // Hard acceptance criterion: the direct path either carries a manifest or
-    // the dynamic mark, so `DeploymentBuilder::build` can never fall through
-    // to its own `OMNIA_CONFIG` lookup.
+    // Hard acceptance criterion: the direct path always carries the
+    // compiled-in manifest, so `DeploymentBuilder::build` can never fall
+    // through to its own `OMNIA_CONFIG` lookup.
     #[test]
     fn direct_command_ignores_omnia_config() {
-        // The fully dynamic shape (resolver plus command guest) is a direct
-        // command with no compiled-in manifest.
-        let options = MainOptions::new(Mode::Command).resolver(NullResolver).command_guest("app");
+        let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
         // The env names a nonexistent file; consulting it would fail loudly.
         let plan =
             plan(options, argv(&["bin", "greet"]), Some(OsString::from("/nonexistent/omnia.toml")))
                 .unwrap_or_else(|error| panic!("{}", fatal(error)));
-        assert!(plan.manifest.is_none(), "no compiled-in manifest, none loaded");
-        assert!(plan.dynamic, "the dynamic mark keeps the builder off the env fallback");
-        assert_eq!(plan.command_guest, Some(GuestId::from("app")));
+        assert_eq!(first_guest(&plan), "app", "the compiled-in manifest is the sole source");
         assert_eq!(plan.args, ["greet"]);
     }
 

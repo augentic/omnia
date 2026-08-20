@@ -380,7 +380,7 @@ struct RuntimeInner<B: 'static> {
     // never change for the life of the runtime.
     resolver: OnceLock<Arc<dyn GuestResolver>>,
     http_paths: OnceLock<HttpPaths>,
-    // Explicit command-mode guest identity; absent, command mode routes to
+    // Manifest-marked command guest identity; absent, command mode routes to
     // the sole static `wasi:cli/run` exporter.
     command_guest: OnceLock<GuestId>,
     // In-flight resolutions by identity. An entry lives exactly as long as
@@ -604,19 +604,8 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         )
     }
 
-    /// Route command mode to an explicit guest identity, chainable after
-    /// [`from_parts`](Self::from_parts).
-    ///
-    /// Deployments built through [`DeploymentBuilder`] supply the identity via
-    /// [`DeploymentBuilder::command_guest`] instead. Install-once: a second
-    /// identity is ignored with a warning.
-    #[must_use]
-    pub fn with_command_guest(self, id: impl Into<GuestId>) -> Self {
-        self.set_command_guest(id.into());
-        self
-    }
-
-    /// The explicit command-mode guest identity, if any.
+    /// The command-mode guest identity (the manifest entry marked
+    /// `command = true`), if any.
     #[must_use]
     pub fn command_guest(&self) -> Option<&GuestId> {
         self.inner.command_guest.get()

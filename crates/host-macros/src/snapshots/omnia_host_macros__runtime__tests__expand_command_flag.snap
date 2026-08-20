@@ -1,6 +1,6 @@
 ---
 source: crates/host-macros/src/runtime.rs
-expression: "expand_pretty(quote!({\n    mode: command, guests:\n    [{ id: \"app\", source: \"app.wasm\" },\n    { id: \"helper\", source: \"helper.wasm\" },], command_guest: \"app\",\n}))"
+expression: "expand_pretty(quote!({\n    mode: command, guests:\n    [{ id: \"app\", source: \"app.wasm\", command: true },\n    { id: \"helper\", source: \"helper.wasm\" },],\n}))"
 ---
 mod runtime {
     use anyhow::Result;
@@ -33,11 +33,10 @@ mod runtime {
                     .manifest(
                         omnia::ManifestSource::Inline(
                             omnia::Manifest::new()
-                                .guest(omnia::GuestEntry::new("app", "app.wasm"))
+                                .guest(omnia::GuestEntry::new("app", "app.wasm").command())
                                 .guest(omnia::GuestEntry::new("helper", "helper.wasm")),
                         ),
-                    )
-                    .command_guest("app"),
+                    ),
             )
             .await
     }

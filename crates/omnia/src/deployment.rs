@@ -65,7 +65,6 @@ pub struct DeploymentBuilder<P = WasmOnly> {
     resolver: Option<Arc<dyn GuestResolver>>,
     http_paths: Option<HttpPaths>,
     http_listener: Option<std::net::TcpListener>,
-    command_guest: Option<GuestId>,
     program_name: Option<String>,
     log_mode: Option<LogMode>,
     guest_timeout: Option<Duration>,
@@ -84,7 +83,6 @@ impl<P> std::fmt::Debug for DeploymentBuilder<P> {
             .field("resolver", &self.resolver.is_some())
             .field("http_paths", &self.http_paths.is_some())
             .field("http_listener", &self.http_listener.is_some())
-            .field("command_guest", &self.command_guest)
             .field("program_name", &self.program_name)
             .field("log_mode", &self.log_mode)
             .field("guest_timeout", &self.guest_timeout)
@@ -103,7 +101,6 @@ impl Default for DeploymentBuilder<WasmOnly> {
             resolver: None,
             http_paths: None,
             http_listener: None,
-            command_guest: None,
             program_name: None,
             log_mode: None,
             guest_timeout: None,
@@ -192,20 +189,6 @@ impl<P> DeploymentBuilder<P> {
         self
     }
 
-    /// Route command mode to an explicit guest identity instead of the
-    /// sole-static-exporter catch-all.
-    ///
-    /// The identity goes through the ordinary registry lookup — and hence
-    /// resolve-on-miss when a [`resolver`](Self::resolver) is installed — so a
-    /// dynamic deployment may name a command guest that nothing has registered
-    /// yet. An identity that stays unresolved fails the run rather than
-    /// exiting inert.
-    #[must_use]
-    pub fn command_guest(mut self, id: impl Into<GuestId>) -> Self {
-        self.command_guest = Some(id.into());
-        self
-    }
-
     /// Override the deployment name used for telemetry and — in command mode
     /// — prepended to guest argv as `argv[0]`.
     ///
@@ -257,6 +240,7 @@ impl<P> DeploymentBuilder<P> {
             Manifest::from_config(config)?
         };
         manifest.validate(self.allow_empty)?;
+        let command_guest = manifest.command_guest();
 
         let plan = Plan {
             name: self.program_name.unwrap_or_else(|| manifest.name().to_owned()),
@@ -284,7 +268,7 @@ impl<P> DeploymentBuilder<P> {
         deployment.resolver = self.resolver;
         deployment.http_paths = self.http_paths;
         deployment.http_listener = self.http_listener;
-        deployment.command_guest = self.command_guest;
+        deployment.command_guest = command_guest;
         if let Some(timeout) = self.guest_timeout {
             deployment.options.guest_timeout = timeout;
         }
@@ -316,7 +300,6 @@ impl DeploymentBuilder<WasmOnly> {
             resolver: self.resolver,
             http_paths: self.http_paths,
             http_listener: self.http_listener,
-            command_guest: self.command_guest,
             program_name: self.program_name,
             log_mode: self.log_mode,
             guest_timeout: self.guest_timeout,
@@ -396,7 +379,7 @@ pub struct Deployment<T: WasiView + 'static> {
     http_paths: Option<HttpPaths>,
     // Pre-bound HTTP trigger listener carried from the builder.
     http_listener: Option<std::net::TcpListener>,
-    // Explicit command-mode guest identity carried from the builder.
+    // Command-mode guest identity derived from the manifest's marked entry.
     command_guest: Option<GuestId>,
 }
 
@@ -501,7 +484,7 @@ impl<T: WasiView> Deployment<T> {
         (self.resolver.clone(), self.http_paths.clone())
     }
 
-    /// The builder-carried explicit command guest identity, if any.
+    /// The manifest-marked command guest identity, if any.
     pub(crate) fn command_guest(&self) -> Option<GuestId> {
         self.command_guest.clone()
     }

@@ -73,7 +73,6 @@ fn emit_main_options(config: &Config) -> TokenStream {
     // The binding emitted by `emit_listener_binding` above.
     let http_listener =
         config.http_listener.as_ref().map(|_| quote! { .http_listener(http_listener) });
-    let command_guest = config.command_guest.as_ref().map(|expr| quote! { .command_guest(#expr) });
 
     quote! {
         omnia::MainOptions::new(#mode)
@@ -81,7 +80,6 @@ fn emit_main_options(config: &Config) -> TokenStream {
             #resolver
             #http_paths
             #http_listener
-            #command_guest
     }
 }
 
@@ -110,8 +108,9 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
         let id = &guest.id;
         let source = &guest.source;
         let links = &guest.link;
+        let command = guest.command.then(|| quote! { .command() });
         quote! {
-            .guest(omnia::GuestEntry::new(#id, #source)#(.link(#links))*)
+            .guest(omnia::GuestEntry::new(#id, #source)#(.link(#links))*#command)
         }
     });
 

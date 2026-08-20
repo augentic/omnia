@@ -1,8 +1,7 @@
 omnia_host_macros::runtime!({
     guests: [
-        { id: "app", source: "app.wasm" },
+        { id: "app", source: "app.wasm", command: true },
     ],
-    command_guest: "app",
 });
 
 fn main() {}

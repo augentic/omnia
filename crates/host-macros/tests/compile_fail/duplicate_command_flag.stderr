@@ -1,0 +1,5 @@
+error: multiple guests marked `command: true`; at most one guest may be the command guest
+ --> tests/compile_fail/duplicate_command_flag.rs:5:46
+  |
+5 |         { id: "other", source: "other.wasm", command: true },
+  |                                              ^^^^^^^

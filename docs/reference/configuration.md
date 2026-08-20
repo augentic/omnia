@@ -88,6 +88,7 @@ link = ["omnia:link/echo"]          # host-mediated imports this guest may call
 [[guest]]
 id = "responder"
 source.path = "./responder.wasm"
+command = true                      # command-mode target (at most one guest)
 
 # --- Mounts (optional, repeatable) ------------------------------------
 [[mount]]
@@ -119,6 +120,7 @@ Field notes:
 - **`guest.source`** — `source.path` is implemented; `source.oci` parses but is rejected with "not yet supported".
 - **`link`** (top-level) — deployment-wide host-mediated interfaces, unioned with the per-guest lists and CLI `--link` values.
 - **`guest.link`** — interfaces the host polyfills onto the shared linker and dispatches to whichever guest exports them. The linker is shared, so an interface linked for one guest is wired for the whole deployment.
+- **`guest.command`** — marks the guest command mode drives (its `wasi:cli/run`); at most one guest may carry it. Without a mark, the sole `wasi:cli/run` exporter is the catch-all — several unmarked exporters fail the run as ambiguous.
 - **`mount`** — preopened into *every* guest sandbox. CLI `--mount` entries layer on top; a duplicate guest-visible name wins over the manifest.
 - **`route.*`** — if a trigger has no routes and exactly one guest exports its handler, that guest is the catch-all. `[[route.cli]]` is not yet parsed; a sole `wasi:cli/run` exporter receives command-mode invocations.
 - **`transport`** — `unix`, `nats`, and `quic` are reserved for distributed dispatch and rejected at load today.

@@ -1,6 +1,6 @@
 ---
 source: crates/host-macros/src/runtime.rs
-expression: "expand_pretty(quote!({\n    mode: command, guests:\n    [{ id: \"specify\", source: engine_component_path() },\n    { id: \"target:mock\", source: mock_target_path() },], mounts:\n    [{ name: \"project\", path: project_root(), writable: true },\n    { name: \"store\", path: store_root(), writable: true },], resolver:\n    CacheResolver::new(), command_guest: \"specify\", hosts:\n    { WasiHttp: HttpDefault, WasiOtel: OtelDefault, }\n}))"
+expression: "expand_pretty(quote!({\n    mode: command, guests:\n    [{ id: \"specify\", source: engine_component_path(), command: true },\n    { id: \"target:mock\", source: mock_target_path() },], mounts:\n    [{ name: \"project\", path: project_root(), writable: true },\n    { name: \"store\", path: store_root(), writable: true },], resolver:\n    CacheResolver::new(), hosts:\n    { WasiHttp: HttpDefault, WasiOtel: OtelDefault, }\n}))"
 ---
 mod runtime {
     use anyhow::Result;
@@ -68,7 +68,8 @@ mod runtime {
                         omnia::ManifestSource::Inline(
                             omnia::Manifest::new()
                                 .guest(
-                                    omnia::GuestEntry::new("specify", engine_component_path()),
+                                    omnia::GuestEntry::new("specify", engine_component_path())
+                                        .command(),
                                 )
                                 .guest(
                                     omnia::GuestEntry::new("target:mock", mock_target_path()),
@@ -89,8 +90,7 @@ mod runtime {
                                 ]),
                         ),
                     )
-                    .resolver(CacheResolver::new())
-                    .command_guest("specify"),
+                    .resolver(CacheResolver::new()),
             )
             .await
     }

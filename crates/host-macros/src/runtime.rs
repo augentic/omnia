@@ -170,15 +170,16 @@ mod tests {
         })));
     }
 
+    // A `command: true` guest entry marks the command-mode target; the flag
+    // expands to `.command()` on its `GuestEntry`.
     #[test]
-    fn expand_command_guest() {
+    fn expand_command_flag() {
         insta::assert_snapshot!(expand_pretty(quote!({
             mode: command,
             guests: [
-                { id: "app", source: "app.wasm" },
+                { id: "app", source: "app.wasm", command: true },
                 { id: "helper", source: "helper.wasm" },
             ],
-            command_guest: "app",
         })));
     }
 
@@ -189,7 +190,7 @@ mod tests {
         insta::assert_snapshot!(expand_pretty(quote!({
             mode: command,
             guests: [
-                { id: "specify", source: engine_component_path() },
+                { id: "specify", source: engine_component_path(), command: true },
                 { id: "target:mock", source: mock_target_path() },
             ],
             mounts: [
@@ -197,7 +198,6 @@ mod tests {
                 { name: "store", path: store_root(), writable: true },
             ],
             resolver: CacheResolver::new(),
-            command_guest: "specify",
             hosts: {
                 WasiHttp: HttpDefault,
                 WasiOtel: OtelDefault,

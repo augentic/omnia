@@ -3,12 +3,20 @@
 ### Changed
 
 - Removed the `runtime!` macro's `program:` key: `mode: command` with a
-  compiled-in deployment (`config:`, inline manifest keys, or `resolver:`
-  plus `command_guest:`) is now a direct command by default — raw argv
-  passthrough with the reserved `--debug` / `--quiet` host log flags, no
-  host `run` grammar. The program name (telemetry and guest `argv[0]`)
-  defaults to the manifest name (first `[[guest]]` id). Command-mode
-  binaries without a compiled-in deployment keep the `run` grammar
+  compiled-in deployment (`config:` or inline manifest keys) is now a
+  direct command by default — raw argv passthrough with the reserved
+  `--debug` / `--quiet` host log flags, no host `run` grammar. The program
+  name (telemetry and guest `argv[0]`) defaults to the manifest name (first
+  `[[guest]]` id). Command-mode binaries without a compiled-in deployment
+  keep the `run` grammar
+- Removed the `command_guest:` key and its plumbing
+  (`DeploymentBuilder::command_guest`, `Runtime::with_command_guest`,
+  `MainOptions::command_guest`): command mode routes to the sole static
+  `wasi:cli/run` exporter, or to the guest entry marked `command = true`
+  (macro `command: true`, `GuestEntry::command()`); at most one guest may
+  carry the mark. The resolver-supplied command guest (fully dynamic
+  deployment, empty guest set) is gone with the key — a direct command
+  always compiles its manifest in
 
 ## 0.35.0
 

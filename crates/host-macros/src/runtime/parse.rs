@@ -35,7 +35,6 @@ pub struct Config {
     pub resolver: Option<Expr>,
     pub http_paths: Option<Expr>,
     pub http_listener: Option<Expr>,
-    pub command_guest: Option<Expr>,
 }
 
 /// One `Host: Backend` wiring from the `hosts: { ... }` block.
@@ -63,11 +62,14 @@ impl ManifestSpec {
     }
 }
 
-/// One `{ id: ..., source: ..., link: [...] }` guest entry.
+/// One `{ id: ..., source: ..., link: [...], command: true }` guest entry.
 pub struct GuestSpec {
     pub id: Expr,
     pub source: Expr,
     pub link: Vec<Expr>,
+    pub command: bool,
+    /// Span of the `command:` key, for cross-key diagnostics.
+    pub command_span: Option<Span>,
 }
 
 /// One `{ name: ..., path: ..., writable: ... }` mount entry.
@@ -106,10 +108,8 @@ impl Parse for Config {
         let mut resolver = None;
         let mut http_paths = None;
         let mut http_listener = None;
-        let mut command_guest = None;
         let mut config_span: Option<Span> = None;
         let mut inline_span: Option<Span> = None;
-        let mut command_guest_span: Option<Span> = None;
 
         let settings;
         syn::braced!(settings in input);
@@ -148,10 +148,6 @@ impl Parse for Config {
                 OptValue::Resolver(r) => resolver = Some(r),
                 OptValue::HttpPaths(p) => http_paths = Some(p),
                 OptValue::HttpListener(l) => http_listener = Some(l),
-                OptValue::CommandGuest(c) => {
-                    command_guest = Some(c);
-                    command_guest_span = Some(span);
-                }
             }
         }
 
@@ -163,12 +159,10 @@ impl Parse for Config {
             resolver,
             http_paths,
             http_listener,
-            command_guest,
         };
         config.validate(&KeySpans {
             config: config_span,
             inline: inline_span,
-            command_guest: command_guest_span,
         })?;
         Ok(config)
     }
@@ -179,7 +173,6 @@ impl Parse for Config {
 struct KeySpans {
     config: Option<Span>,
     inline: Option<Span>,
-    command_guest: Option<Span>,
 }
 
 impl Config {
@@ -192,13 +185,24 @@ impl Config {
             ));
         }
 
-        if let Some(span) = spans.command_guest
-            && self.mode != Mode::Command
-        {
-            return Err(syn::Error::new(
-                span,
-                "`command_guest:` requires `mode: command` (it only routes command mode)",
-            ));
+        let mut marked: Option<Span> = None;
+        for guest in &self.manifest.guests {
+            let Some(span) = guest.command_span else {
+                continue;
+            };
+            if self.mode != Mode::Command {
+                return Err(syn::Error::new(
+                    span,
+                    "`command: true` requires `mode: command` (it only routes command mode)",
+                ));
+            }
+            if marked.replace(span).is_some() {
+                return Err(syn::Error::new(
+                    span,
+                    "multiple guests marked `command: true`; at most one guest may be the \
+                     command guest",
+                ));
+            }
         }
 
         Ok(())
@@ -216,7 +220,6 @@ mod kw {
     syn::custom_keyword!(resolver);
     syn::custom_keyword!(http_paths);
     syn::custom_keyword!(http_listener);
-    syn::custom_keyword!(command_guest);
 }
 
 /// One `key: value` setting, tagged with its key name and span so
@@ -238,7 +241,6 @@ enum OptValue {
     Resolver(Expr),
     HttpPaths(Expr),
     HttpListener(Expr),
-    CommandGuest(Expr),
 }
 
 impl Parse for Opt {
@@ -286,10 +288,6 @@ impl Parse for Opt {
             let key = input.parse::<kw::http_listener>()?;
             input.parse::<Token![:]>()?;
             ("http_listener", key.span, OptValue::HttpListener(input.parse()?))
-        } else if l.peek(kw::command_guest) {
-            let key = input.parse::<kw::command_guest>()?;
-            input.parse::<Token![:]>()?;
-            ("command_guest", key.span, OptValue::CommandGuest(input.parse()?))
         } else {
             return Err(l.error());
         };
@@ -353,16 +351,26 @@ impl Parse for GuestSpec {
         let mut id = None;
         let mut source = None;
         let mut link = Vec::new();
+        let mut command = false;
+        let mut command_span = None;
 
         let span = parse_kv_block(input, |key, value| {
             match key.to_string().as_str() {
                 "id" => id = Some(value.parse()?),
                 "source" => source = Some(value.parse()?),
                 "link" => link = parse_bracketed_list(value)?,
+                "command" => {
+                    let lit: syn::LitBool = value.parse()?;
+                    command = lit.value();
+                    command_span = command.then(|| key.span());
+                }
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
-                        format!("unknown guest key `{other}`; expected `id`, `source`, or `link`"),
+                        format!(
+                            "unknown guest key `{other}`; expected `id`, `source`, `link`, or \
+                             `command`"
+                        ),
                     ));
                 }
             }
@@ -374,6 +382,8 @@ impl Parse for GuestSpec {
             id: id.ok_or_else(|| missing("id"))?,
             source: source.ok_or_else(|| missing("source"))?,
             link,
+            command,
+            command_span,
         })
     }
 }
