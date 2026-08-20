@@ -209,7 +209,7 @@ impl<T: WasiView + 'static> Registry<T> {
     /// guest imports them) are polyfilled on a clone of the retained linker,
     /// from this component's own import types — the shared linker is never
     /// mutated after bootstrap. Imports outside the linked host set and the
-    /// `link` union fail here, exactly as at bootstrap.
+    /// `dispatch` set fail here, exactly as at bootstrap.
     pub(crate) fn instantiate_late(
         &self, id: &GuestId, component: &Component,
     ) -> Result<InstancePre<T>>
@@ -316,7 +316,7 @@ impl<T: 'static> Registry<T> {
     }
 
     /// Returns the shared host-mediated dynamic-linking dispatch handle (the
-    /// selector strategy, link allow-list union, and bound transport).
+    /// selector strategy, dispatch interface set, and bound transport).
     #[must_use]
     pub(crate) const fn dispatch(&self) -> &Arc<DispatchHandle> {
         &self.dispatch

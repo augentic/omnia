@@ -188,12 +188,15 @@ mod tests {
         })));
     }
 
-    // Guest-owned routes: every trigger list expands to `route_*` builder
-    // calls on the owning `GuestEntry` (the guest id is the implicit target),
-    // and route patterns are arbitrary expressions.
+    // Guest-owned routes and the deployment-wide dispatch list: every trigger
+    // list expands to `route_*` builder calls on the owning `GuestEntry` (the
+    // guest id is the implicit target), the top-level `dispatch:` list to
+    // `.dispatch(...)` calls on the `Manifest`, and patterns/interfaces are
+    // arbitrary expressions.
     #[test]
     fn expand_inline_manifest() {
         insta::assert_snapshot!(expand_pretty(quote!({
+            dispatch: ["omnia:link/echo"],
             guests: [
                 {
                     id: "responder",
@@ -206,7 +209,6 @@ mod tests {
                 {
                     id: "router",
                     source: concat!(env!("CARGO_MANIFEST_DIR"), "/router.wasm"),
-                    link: ["omnia:link/echo"],
                     routes: {
                         http: ["/", concat!("/", "api")],
                     },

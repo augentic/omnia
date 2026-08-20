@@ -73,10 +73,15 @@ fn emit_manifest_source(config: &Config) -> Option<TokenStream> {
 
 /// Emit the fluent `omnia::Manifest` builder chain for the inline keys.
 fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
+    let dispatch = manifest.dispatch.iter().map(|interface| {
+        quote! {
+            .dispatch([#interface])
+        }
+    });
+
     let guests = manifest.guests.iter().map(|guest| {
         let id = &guest.id;
         let source = &guest.source;
-        let links = &guest.link;
         let http = &guest.routes.http;
         let messaging = &guest.routes.messaging;
         let websocket = &guest.routes.websocket;
@@ -84,7 +89,6 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
         quote! {
             .guest(
                 omnia::GuestEntry::new(#id, #source)
-                    #(.link(#links))*
                     #(.route_http(#http))*
                     #(.route_messaging(#messaging))*
                     #(.route_websocket(#websocket))*
@@ -109,6 +113,7 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
 
     quote! {
         omnia::Manifest::new()
+            #(#dispatch)*
             #(#guests)*
             #(#mounts)*
     }

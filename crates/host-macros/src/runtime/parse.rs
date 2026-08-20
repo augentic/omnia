@@ -40,26 +40,25 @@ pub struct HostEntry {
     pub backend: Path,
 }
 
-/// Inline manifest keys (`guests`, `mounts`) parsed from `runtime!({ ... })`;
-/// mirrors the `omnia::Manifest` schema.
+/// Inline manifest keys (`dispatch`, `guests`, `mounts`) parsed from
+/// `runtime!({ ... })`; mirrors the `omnia::Manifest` schema.
 #[derive(Default)]
 pub struct ManifestSpec {
+    pub dispatch: Vec<Expr>,
     pub guests: Vec<GuestSpec>,
     pub mounts: Vec<MountSpec>,
 }
 
 impl ManifestSpec {
     pub const fn is_empty(&self) -> bool {
-        self.guests.is_empty() && self.mounts.is_empty()
+        self.dispatch.is_empty() && self.guests.is_empty() && self.mounts.is_empty()
     }
 }
 
-/// One `{ id: ..., source: ..., link: [...], routes: { ... }, command: true }`
-/// guest entry.
+/// One `{ id: ..., source: ..., routes: { ... }, command: true }` guest entry.
 pub struct GuestSpec {
     pub id: Expr,
     pub source: Expr,
-    pub link: Vec<Expr>,
     pub routes: GuestRoutesSpec,
     pub command: bool,
     /// Span of the `command:` key, for cross-key diagnostics.
@@ -109,6 +108,10 @@ impl Parse for Config {
                     config_file = Some(c);
                     config_span = Some(span);
                 }
+                OptValue::Dispatch(d) => {
+                    manifest.dispatch = d;
+                    inline_span.get_or_insert(span);
+                }
                 OptValue::Guests(g) => {
                     manifest.guests = g;
                     inline_span.get_or_insert(span);
@@ -146,7 +149,8 @@ impl Config {
         if let (Some(_), Some(inline)) = (spans.config, spans.inline) {
             return Err(syn::Error::new(
                 inline,
-                "`config:` and inline manifest keys (`guests`, `mounts`) are mutually exclusive",
+                "`config:` and inline manifest keys (`dispatch`, `guests`, `mounts`) are \
+                 mutually exclusive",
             ));
         }
 
@@ -178,9 +182,11 @@ mod kw {
     syn::custom_keyword!(mode);
     syn::custom_keyword!(hosts);
     syn::custom_keyword!(config);
+    syn::custom_keyword!(dispatch);
     syn::custom_keyword!(guests);
     syn::custom_keyword!(mounts);
     syn::custom_keyword!(routes);
+    syn::custom_keyword!(link);
 }
 
 /// One `key: value` setting, tagged with its key name and span so
@@ -195,6 +201,7 @@ enum OptValue {
     Mode(Mode),
     Hosts(Vec<HostEntry>),
     Config(Expr),
+    Dispatch(Vec<Expr>),
     Guests(Vec<GuestSpec>),
     Mounts(Vec<MountSpec>),
 }
@@ -216,6 +223,10 @@ impl Parse for Opt {
             let key = input.parse::<kw::config>()?;
             input.parse::<Token![:]>()?;
             ("config", key.span, OptValue::Config(input.parse()?))
+        } else if l.peek(kw::dispatch) {
+            let key = input.parse::<kw::dispatch>()?;
+            input.parse::<Token![:]>()?;
+            ("dispatch", key.span, OptValue::Dispatch(parse_bracketed_list(input)?))
         } else if l.peek(kw::guests) {
             let key = input.parse::<kw::guests>()?;
             input.parse::<Token![:]>()?;
@@ -232,6 +243,14 @@ impl Parse for Opt {
                 key.span,
                 "the top-level `routes:` key was removed; declare routes on each guest entry \
                  (`guests: [{ id: ..., source: ..., routes: { http: [...] } }]`)",
+            ));
+        } else if input.peek(kw::link) {
+            // Same treatment for the renamed `link:` key.
+            let key = input.parse::<kw::link>()?;
+            return Err(syn::Error::new(
+                key.span,
+                "the `link:` key was renamed; declare host-mediated interfaces with the \
+                 top-level `dispatch: [...]` key",
             ));
         } else {
             return Err(l.error());
@@ -295,7 +314,6 @@ impl Parse for GuestSpec {
     fn parse(input: ParseStream) -> Result<Self> {
         let mut id = None;
         let mut source = None;
-        let mut link = Vec::new();
         let mut routes = GuestRoutesSpec::default();
         let mut command = false;
         let mut command_span = None;
@@ -304,19 +322,27 @@ impl Parse for GuestSpec {
             match key.to_string().as_str() {
                 "id" => id = Some(value.parse()?),
                 "source" => source = Some(value.parse()?),
-                "link" => link = parse_bracketed_list(value)?,
                 "routes" => routes = value.parse()?,
                 "command" => {
                     let lit: syn::LitBool = value.parse()?;
                     command = lit.value();
                     command_span = command.then(|| key.span());
                 }
+                // A pointed migration diagnostic: the per-guest `link:` list
+                // was removed — dispatch interfaces are deployment-wide.
+                "link" | "dispatch" => {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        "host-mediated interfaces are deployment-wide; declare them with the \
+                         top-level `dispatch: [...]` key, not on a guest entry",
+                    ));
+                }
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
                         format!(
-                            "unknown guest key `{other}`; expected `id`, `source`, `link`, \
-                             `routes`, or `command`"
+                            "unknown guest key `{other}`; expected `id`, `source`, `routes`, \
+                             or `command`"
                         ),
                     ));
                 }
@@ -328,7 +354,6 @@ impl Parse for GuestSpec {
         Ok(Self {
             id: id.ok_or_else(|| missing("id"))?,
             source: source.ok_or_else(|| missing("source"))?,
-            link,
             routes,
             command,
             command_span,

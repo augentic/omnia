@@ -1,18 +1,24 @@
 # Host-mediated dynamic linking.
 #
 # Two guests share one runtime. `router` imports `omnia:link/echo`; the host
-# does not satisfy that import natively, so it is named in the guest's `link`
-# allow-list and the runtime core polyfills it onto the shared linker. At startup the
-# host wires the serve side of every linked interface, so calling the import
-# dispatches over the in-process wRPC carrier to `responder`, which exports it.
+# does not satisfy that import natively, so it is named in the deployment's
+# `dispatch` list and the runtime core polyfills it onto the shared linker. At
+# startup the host wires the serve side of every dispatched interface, so
+# calling the import dispatches over the in-process wRPC carrier to
+# `responder`, which exports it.
 #
-# The runtime core stays domain-agnostic: `link` and the selector see only the opaque
-# interface string `omnia:link/echo` and opaque guest ids.
+# The runtime core stays domain-agnostic: `dispatch` and the selector see only
+# the opaque interface string `omnia:link/echo` and opaque guest ids.
 #
 # Build the guests first (see README.md), then run (this path is the runtime's
 # compiled-in default, so `--config` is optional):
 #
 #   cargo run --example guest-link -- run
+
+# The host-mediated interfaces this deployment mediates. The runtime core
+# wires each named interface onto the shared linker and dispatches calls to
+# whichever guest exports it (here, `responder`).
+dispatch = ["omnia:link/echo"]
 
 [[guest]]
 id = "responder"
@@ -21,10 +27,6 @@ source.path = "../../target/wasm32-wasip2/debug/examples/guest_link_responder_wa
 [[guest]]
 id = "router"
 source.path = "../../target/wasm32-wasip2/debug/examples/guest_link_router_wasm.wasm"
-# The host-mediated imports this guest is allowed to reach. The runtime core wires each
-# named interface onto the shared linker and dispatches it to whichever guest
-# exports it (here, `responder`).
-link = ["omnia:link/echo"]
 
 # In-process is the default transport; named here for clarity. UDS / NATS / QUIC
 # slot in behind the same seam in Phase 3 with no guest or dispatch change.

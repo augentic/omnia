@@ -1,6 +1,6 @@
 # Configuration Reference
 
-Omnia is configured entirely through environment variables (runtime options and backend connections) and an optional deployment manifest (guests, routes, mounts, links). This page lists both.
+Omnia is configured entirely through environment variables (runtime options and backend connections) and an optional deployment manifest (guests, routes, mounts, dispatch interfaces). This page lists both.
 
 ## Runtime environment variables
 
@@ -73,17 +73,16 @@ Production backend variables (Redis, Kafka, Azure, ...) are listed in [Productio
 
 Selected by `--config <path>` or `OMNIA_CONFIG`, or compiled in as a default via the `runtime!` macro's `config:` field or inline manifest keys (see [Composing a Runtime](../guides/composing-a-runtime.md#default-manifest-config)). The manifest is sparse: every section is optional except at least one `[[guest]]`, and omitted fields fall back to defaults. All relative paths resolve against the manifest's directory.
 
-The same schema is constructible programmatically as an `omnia::Manifest` value (`Manifest::new()` with the fluent `guest`/`mounts`/`links` setters, or `Manifest::from_wasm` for the one-guest shorthand; routes are set on each `GuestEntry` with its `route_http`/`route_messaging`/`route_websocket` builders) and passed to `DeploymentBuilder::new().manifest(...)` — see [Multi-Guest Deployments](../guides/multi-guest-deployments.md#programmatic-manifests). Either way, the invariants (at least one guest, unique ids, in-process transport) are validated when the deployment is built.
+The same schema is constructible programmatically as an `omnia::Manifest` value (`Manifest::new()` with the fluent `guest`/`mounts`/`dispatch` setters, or `Manifest::from_wasm` for the one-guest shorthand; routes are set on each `GuestEntry` with its `route_http`/`route_messaging`/`route_websocket` builders) and passed to `DeploymentBuilder::new().manifest(...)` — see [Multi-Guest Deployments](../guides/multi-guest-deployments.md#programmatic-manifests). Either way, the invariants (at least one guest, unique ids, in-process transport) are validated when the deployment is built.
 
 ```toml
-# --- Deployment-wide links (optional) ---------------------------------
-link = ["omnia:shared/log"]         # host-mediated imports any guest may call
+# --- Host-mediated interfaces (optional, deployment-wide) --------------
+dispatch = ["omnia:link/echo"]      # interfaces the host dispatches between guests
 
 # --- Guests (required, repeatable) -----------------------------------
 [[guest]]
 id = "router"                       # opaque identity; never parsed by the runtime
 source.path = "./router.wasm"       # .wasm or pre-compiled .bin
-link = ["omnia:link/echo"]          # host-mediated imports this guest may call
 routes.http = ["/api"]              # inbound routes targeting this guest;
 routes.websocket = ["events.*"]     # one optional list per trigger
 
@@ -106,10 +105,9 @@ default = "in-process"              # the only implemented transport
 
 Field notes:
 
-- **`guest.id`** — opaque to the runtime core; routing and linking refer to it.
+- **`guest.id`** — opaque to the runtime core; routing and dispatch refer to it.
 - **`guest.source`** — `source.path` is implemented; `source.oci` parses but is rejected with "not yet supported".
-- **`link`** (top-level) — deployment-wide host-mediated interfaces, unioned with the per-guest lists and CLI `--link` values.
-- **`guest.link`** — interfaces the host polyfills onto the shared linker and dispatches to whichever guest exports them. The linker is shared, so an interface linked for one guest is wired for the whole deployment.
+- **`dispatch`** — deployment-wide host-mediated interfaces, unioned with CLI `--dispatch` values. The host polyfills each onto the shared linker and dispatches calls to whichever guest exports it — including a guest registered after startup. There is no per-guest form: the linker is shared, so a dispatched interface is wired for the whole deployment.
 - **`guest.command`** — marks the guest command mode drives (its `wasi:cli/run`); at most one guest may carry it. Without a mark, the sole `wasi:cli/run` exporter is the catch-all — several unmarked exporters fail the run as ambiguous.
 - **`mount`** — preopened into *every* guest sandbox. CLI `--mount` entries layer on top; a duplicate guest-visible name wins over the manifest.
 - **`guest.routes`** — inbound routes targeting the declaring guest, one list per trigger: `http` prefixes (longest prefix wins), `messaging` topics and `websocket` routes (NATS-style: `*` one token, `>` the rest). Route tables are aggregated across guests at load. If a trigger has no routes and exactly one guest exports its handler, that guest is the catch-all. CLI routes are not yet parsed; a sole `wasi:cli/run` exporter receives command-mode invocations.

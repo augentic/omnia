@@ -20,9 +20,9 @@ use super::value::read_plain_value;
 use crate::deployment::LoadedGuest;
 use crate::registry::GuestId;
 
-/// Polyfill every host-mediated import named in the `link` allow-list union onto
-/// the shared linker, bound to the dispatch handle, returning the set of
-/// interfaces wired.
+/// Polyfill every host-mediated import named in the deployment's `dispatch`
+/// set onto the shared linker, bound to the dispatch handle, returning the
+/// set of interfaces wired.
 ///
 /// Each interface is linked exactly once (the linker is shared, so the per-guest
 /// allow-lists are unioned). `wasi:*` imports are never touched here — they are

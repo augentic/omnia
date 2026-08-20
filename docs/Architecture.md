@@ -162,13 +162,13 @@ A deployment can hold many guests. All of them share one wasmtime `Engine` and o
 
 - **Route tables** — per-trigger routing (each guest's `routes.http` by longest prefix, `routes.messaging`/`routes.websocket` by NATS-style pattern) selects which guest handles an inbound request.
 - **Mounts** — `[[mount]]` entries preopen host directories into every guest sandbox (read-only unless marked writable).
-- **Dispatch** — per-guest `link` allow-lists name interfaces the host polyfills onto the shared linker; calls dispatch to whichever guest exports the interface, over an in-process carrier, with nesting bounded by `MAX_DISPATCH_DEPTH`.
+- **Dispatch** — the deployment-wide `dispatch` list names interfaces the host polyfills onto the shared linker; calls dispatch to whichever guest exports the interface, over an in-process carrier, with nesting bounded by `MAX_DISPATCH_DEPTH`.
 
 All of this is declared in the `omnia.toml` manifest ([reference](reference/configuration.md#deployment-manifest-omniatoml)) or assembled programmatically with the `omnia::Manifest` fluent API; a bare `.wasm` path on the command line remains the zero-config single-guest case.
 
 ## Runtime Execution Flow
 
-1. **CLI parsing** — the generated `main` delegates to `omnia::main`, which parses the `run` subcommand, resolves the deployment source into a `Manifest` (`--config`, then `OMNIA_CONFIG`, then a positional `<wasm>` via `Manifest::from_wasm`, then the compiled-in default), and appends CLI `--mount`/`--link` entries onto it.
+1. **CLI parsing** — the generated `main` delegates to `omnia::main`, which parses the `run` subcommand, resolves the deployment source into a `Manifest` (`--config`, then `OMNIA_CONFIG`, then a positional `<wasm>` via `Manifest::from_wasm`, then the compiled-in default), and appends CLI `--mount`/`--dispatch` entries onto it.
 2. **Build** — `DeploymentBuilder` validates the manifest, resolves mounts, compiles guests, and returns a `Deployment` ready for host linking.
 3. **Assemble** — `Runtime::new` runs `Wiring::link` (each host's `add_to_linker`), connects backends (`Backends::connect`), and builds the `Registry` (pre-instantiating every guest).
 4. **Bootstrap** — starts epoch interruption and pool-metric sampling, wires host-mediated link servers, then logs **`omnia ready`**.

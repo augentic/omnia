@@ -117,8 +117,9 @@ async fn build_runtime_inner(
     let router = find_guest("guest_link_router_wasm.wasm");
 
     let manifest = Manifest::new()
+        .dispatch(["omnia:link/echo"])
         .guest(GuestEntry::new("responder", responder))
-        .guest(GuestEntry::new("router", router).link("omnia:link/echo"));
+        .guest(GuestEntry::new("router", router));
 
     let mut builder = DeploymentBuilder::new().manifest(manifest).precompiled();
     if let Some(timeout) = guest_timeout {
@@ -152,15 +153,10 @@ async fn build_relay_runtime(
     max_dispatch_depth: Option<usize>, guest_timeout: Option<Duration>,
 ) -> Result<Runtime<Counter>> {
     let manifest = Manifest::new()
+        .dispatch(["omnia:link/echo"])
         .guest(GuestEntry::new("responder", find_guest("guest_link_responder_wasm.wasm")))
-        .guest(
-            GuestEntry::new("relay", find_guest("guest_link_relay_wasm.wasm"))
-                .link("omnia:link/echo"),
-        )
-        .guest(
-            GuestEntry::new("router", find_guest("guest_link_router_wasm.wasm"))
-                .link("omnia:link/echo"),
-        );
+        .guest(GuestEntry::new("relay", find_guest("guest_link_relay_wasm.wasm")))
+        .guest(GuestEntry::new("router", find_guest("guest_link_router_wasm.wasm")));
 
     let mut builder = DeploymentBuilder::new().manifest(manifest).precompiled();
     if let Some(depth) = max_dispatch_depth {
@@ -644,8 +640,9 @@ fn deregister_in_flight() -> Result<()> {
 fn late_import_polyfilled() -> Result<()> {
     fixture::RT.block_on(async {
         let responder = find_guest("guest_link_responder_wasm.wasm");
-        let manifest =
-            Manifest::new().guest(GuestEntry::new("responder", responder).link("omnia:link/echo"));
+        let manifest = Manifest::new()
+            .dispatch(["omnia:link/echo"])
+            .guest(GuestEntry::new("responder", responder));
 
         let builder = DeploymentBuilder::new().manifest(manifest).precompiled();
         // SAFETY: `find_guest` only returns artifacts this workspace built and
@@ -710,8 +707,8 @@ fn dynamic_empty_deployment() -> Result<()> {
         );
         assert!(runtime.registry().is_empty(), "a dynamic deployment starts empty");
 
-        // No `link` union is declared, so there is no serve side to wire;
-        // host→guest dispatch needs no transport.
+        // No `dispatch` interfaces are declared, so there is no serve side to
+        // wire; host→guest dispatch needs no transport.
         runtime.register("extra", precompiled("guest_link_extra_wasm.wasm")?).await?;
         let results = runtime
             .dispatcher()

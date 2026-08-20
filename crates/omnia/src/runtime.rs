@@ -412,7 +412,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     ///
     /// Low-level constructor: unlike [`Runtime::new`] it does not wire the
     /// host-mediated link serve side — a caller whose deployment declares
-    /// `link` interfaces must run [`serve_links`] itself before dispatching.
+    /// `dispatch` interfaces must run [`serve_links`] itself before dispatching.
     /// The runtime name defaults to `omnia`.
     #[must_use]
     pub fn from_parts(
@@ -560,7 +560,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     ///
     /// Returns an error if `id` is already registered, the artifact cannot be
     /// loaded, the component's imports exceed the deployment's linked host set
-    /// and `link` union, or its linked exports cannot be served.
+    /// and `dispatch` set, or its linked exports cannot be served.
     pub async fn register(&self, id: impl Into<GuestId>, artifact: GuestArtifact) -> Result<()> {
         let id = id.into();
         let registry = self.registry();

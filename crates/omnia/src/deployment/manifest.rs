@@ -10,8 +10,8 @@
 //! concrete file; the runtime core stays domain-agnostic.
 //!
 //! The `[[guest]]` population (file or embedded-bytes sources), each guest's
-//! `routes` tables, and deployment-wide and per-guest `link` allow-lists
-//! (which drive host-mediated dynamic linking) are all consumed. Distributed `[transport]` is not yet
+//! `routes` tables, and the deployment-wide `dispatch` interface list (which
+//! drives host-mediated dynamic linking) are all consumed. Distributed `[transport]` is not yet
 //! implemented: only the in-process default is accepted.
 
 use std::borrow::Cow;
@@ -42,8 +42,9 @@ pub struct Manifest {
     /// Working-tree mounts preopened into the guest sandbox.
     #[serde(rename = "mount")]
     pub mounts: Vec<Mount>,
-    /// Deployment-wide host-mediated interfaces.
-    pub link: Vec<String>,
+    /// Interfaces the host mediates between guests (host-mediated dynamic
+    /// linking); the runtime core polyfills each on the shared linker.
+    pub dispatch: Vec<String>,
     /// Transport configuration for host-mediated calls.
     pub transport: Transport,
 }
@@ -99,14 +100,14 @@ impl Manifest {
         self
     }
 
-    /// Append deployment-wide host-mediated interfaces.
+    /// Append host-mediated dispatch interfaces.
     #[must_use]
-    pub fn links<I, S>(mut self, links: I) -> Self
+    pub fn dispatch<I, S>(mut self, interfaces: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        self.link.extend(links.into_iter().map(Into::into));
+        self.dispatch.extend(interfaces.into_iter().map(Into::into));
         self
     }
 
@@ -184,17 +185,10 @@ impl Manifest {
         Ok(sources)
     }
 
-    /// Union of deployment-wide and per-guest host-mediated interfaces.
-    ///
-    /// The linker is shared, so an interface dispatched for one guest is wired
-    /// once for all.
+    /// The host-mediated dispatch interfaces as an ordered set.
     #[must_use]
-    pub fn link_interfaces(&self) -> BTreeSet<Box<str>> {
-        self.link
-            .iter()
-            .chain(self.guests.iter().flat_map(|entry| entry.link.iter()))
-            .map(|interface| Box::from(interface.as_str()))
-            .collect()
+    pub fn dispatch_interfaces(&self) -> BTreeSet<Box<str>> {
+        self.dispatch.iter().map(|interface| Box::from(interface.as_str())).collect()
     }
 
     /// Per-trigger route tables aggregated from each guest's `routes` lists,
@@ -299,16 +293,17 @@ impl FromStr for Mount {
 }
 
 /// A single registry population entry.
+///
+/// `deny_unknown_fields` turns a stale per-guest key (for example the removed
+/// `link` list — dispatch interfaces are deployment-wide now) into a loud
+/// parse error rather than a silent no-op.
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GuestEntry {
     /// Opaque guest identity (the runtime core never parses it).
     pub id: String,
     /// Where the guest's component bytes come from.
     pub source: SourceSpec,
-    /// Interfaces the host dispatches on this guest's behalf (host-mediated
-    /// dynamic linking); the runtime core polyfills each on the shared linker.
-    #[serde(default)]
-    pub link: Vec<String>,
     /// Inbound routes targeting this guest, one list per trigger.
     #[serde(default)]
     pub routes: GuestRoutes,
@@ -325,17 +320,9 @@ impl GuestEntry {
         Self {
             id: id.into(),
             source: source.into(),
-            link: Vec::new(),
             routes: GuestRoutes::default(),
             command: false,
         }
-    }
-
-    /// Append a host-mediated interface allowed for this guest.
-    #[must_use]
-    pub fn link(mut self, interface: impl Into<String>) -> Self {
-        self.link.push(interface.into());
-        self
     }
 
     /// Append an HTTP prefix route targeting this guest.
@@ -498,12 +485,11 @@ mod tests {
     #[test]
     fn parse_multi_guest() {
         let toml = r#"
-            link = ["omnia:shared/log"]
+            dispatch = ["omnia:shared/log", "augentic:specify/source"]
 
             [[guest]]
             id = "workflow"
             source.path = "./guests/workflow.wasm"
-            link = ["augentic:specify/source", "augentic:specify/target"]
 
             [[guest]]
             id = "mcp"
@@ -516,11 +502,28 @@ mod tests {
         let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
         assert_eq!(manifest.guests.len(), 2);
         assert_eq!(manifest.guests[0].id, "workflow");
-        assert_eq!(manifest.guests[0].link.len(), 2);
         assert!(matches!(manifest.guests[1].source, SourceSpec::Path(_)));
         assert_eq!(manifest.transport.default, TransportKind::InProcess);
-        assert!(manifest.link_interfaces().contains("omnia:shared/log"));
-        assert!(manifest.link_interfaces().contains("augentic:specify/source"));
+        assert!(manifest.dispatch_interfaces().contains("omnia:shared/log"));
+        assert!(manifest.dispatch_interfaces().contains("augentic:specify/source"));
+    }
+
+    #[test]
+    fn reject_stale_link_keys() {
+        // The removed top-level `link` list must fail loudly, not be ignored.
+        let toml = "link = [\"omnia:shared/log\"]\n\n\
+             [[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\n";
+        toml::from_str::<Manifest>(toml).unwrap_err();
+
+        // So must the removed per-guest form (dispatch is deployment-wide).
+        let toml = "[[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\n\
+             link = [\"omnia:link/echo\"]\n";
+        toml::from_str::<Manifest>(toml).unwrap_err();
+
+        // And `dispatch` misplaced on a guest entry.
+        let toml = "[[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\n\
+             dispatch = [\"omnia:link/echo\"]\n";
+        toml::from_str::<Manifest>(toml).unwrap_err();
     }
 
     #[test]
@@ -775,13 +778,13 @@ mod tests {
         let manifest = Manifest::new()
             .guest(
                 GuestEntry::new("router", "router.wasm")
-                    .link("omnia:link/echo")
                     .route_http("/router")
                     .route_messaging("jobs.>"),
             )
             .guest(GuestEntry::new("responder", "responder.wasm").route_websocket("events.*"))
             .mounts(["workspace,writable".parse().expect("mount should parse")])
-            .links(["omnia:shared/log"]);
+            .dispatch(["omnia:link/echo"])
+            .dispatch(["omnia:shared/log"]);
 
         manifest.validate(false).expect("manifest should validate");
         assert_eq!(manifest.guests.len(), 2);
@@ -789,7 +792,7 @@ mod tests {
         assert_eq!(manifest.guests[0].routes.http, ["/router"]);
         assert_eq!(manifest.guests[0].routes.messaging, ["jobs.>"]);
         assert_eq!(manifest.guests[1].routes.websocket, ["events.*"]);
-        assert!(manifest.link_interfaces().contains("omnia:link/echo"));
-        assert!(manifest.link_interfaces().contains("omnia:shared/log"));
+        assert!(manifest.dispatch_interfaces().contains("omnia:link/echo"));
+        assert!(manifest.dispatch_interfaces().contains("omnia:shared/log"));
     }
 }

@@ -2,6 +2,30 @@
 
 ### Changed
 
+- The host-mediated interface list is renamed from `link` to `dispatch`
+  and is deployment-wide only: a top-level `dispatch = [...]` in TOML, a
+  top-level `dispatch: [...]` key in the `runtime!` macro, the fluent
+  `Manifest::dispatch(...)` setter, and the CLI flag `--dispatch` (replacing
+  `--link`, no alias). The per-guest form (`GuestEntry.link` in TOML,
+  `link:` on a macro guest entry, `GuestEntry::link()`) is removed — the
+  linker is shared, so per-guest lists always flattened into one
+  deployment-level grant and never enforced a per-guest ACL. Stale keys
+  fail loudly: a leftover `link` (top-level or per-guest) or a `dispatch`
+  misplaced on a guest entry is a parse/compile error. Behavior is
+  unchanged: listed interfaces are polyfilled onto the shared linker at
+  assemble (an exporter may arrive later via `Runtime::register`), and the
+  selector still picks the target guest by routing id at call time. WIT
+  packages (`omnia:link`) and internals (`serve_links`,
+  `DispatchHandle::links`) keep their names.
+
+  ```toml
+  # before                            # after
+  [[guest]]                           dispatch = ["omnia:link/echo"]
+  id = "router"
+  source.path = "./router.wasm"       [[guest]]
+  link = ["omnia:link/echo"]          id = "router"
+                                      source.path = "./router.wasm"
+  ```
 - Routes are now guest-owned: each `[[guest]]` entry declares the routes
   targeting it (`routes.http` / `routes.messaging` / `routes.websocket`
   pattern lists in TOML, a `routes: { http: [...], ... }` block per guest

@@ -181,7 +181,7 @@ pub(super) fn plan(
                 wasm,
                 config,
                 mounts,
-                links,
+                dispatch,
                 args,
             } => {
                 let config = config.or_else(|| omnia_config.map(PathBuf::from));
@@ -200,7 +200,7 @@ pub(super) fn plan(
                 };
                 Ok(EntryPlan {
                     mode,
-                    manifest: Some(manifest.mounts(mounts).links(links)),
+                    manifest: Some(manifest.mounts(mounts).dispatch(dispatch)),
                     args,
                     log_mode: None,
                 })

@@ -24,14 +24,12 @@ cfg_if::cfg_if! {
                 .join("../target/wasm32-wasip2/debug/examples");
 
             let manifest = Manifest::new()
+                .dispatch(["omnia:link/echo"])
                 .guest(GuestEntry::new(
                     "responder",
                     artifacts.join("guest_link_responder_wasm.wasm"),
                 ))
-                .guest(
-                    GuestEntry::new("router", artifacts.join("guest_link_router_wasm.wasm"))
-                        .link("omnia:link/echo"),
-                );
+                .guest(GuestEntry::new("router", artifacts.join("guest_link_router_wasm.wasm")));
 
             // Raw `.wasm` sources, so the default (WasmOnly) safe build applies;
             // a deployment of trusted `omnia compile` output would transition

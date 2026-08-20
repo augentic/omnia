@@ -1,4 +1,4 @@
-//! Shared dispatch state: selector, link allow-list, transport, and depth bound.
+//! Shared dispatch state: selector, dispatch interfaces, transport, and depth bound.
 
 use std::collections::BTreeSet;
 use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -103,9 +103,8 @@ impl DispatchHandle {
         self.timeout
     }
 
-    /// The union of host-mediated interface names across every guest's `link`
-    /// allow-list — the set of interfaces to polyfill (caller side) and serve
-    /// (callee side).
+    /// The deployment's host-mediated `dispatch` interface names — the set of
+    /// interfaces to polyfill (caller side) and serve (callee side).
     #[must_use]
     pub const fn links(&self) -> &BTreeSet<Box<str>> {
         &self.links

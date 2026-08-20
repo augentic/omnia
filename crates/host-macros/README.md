@@ -57,6 +57,7 @@ Instead of a `config:` path, the deployment can be written inline — the keys m
 
 ```rust,ignore
 omnia::runtime!({
+    dispatch: ["omnia:link/echo"],   // host-mediated interfaces (deployment-wide)
     guests: [
         {
             id: "responder",
@@ -66,7 +67,6 @@ omnia::runtime!({
         {
             id: "router",
             source: concat!(env!("CARGO_MANIFEST_DIR"), "/router.wasm"),
-            link: ["omnia:link/echo"],   // per-guest host-mediated imports
             routes: { http: ["/"], websocket: ["chat.*"] },
         },
     ],
@@ -77,7 +77,7 @@ omnia::runtime!({
 });
 ```
 
-Every value is a Rust expression; anchor paths with `env!("CARGO_MANIFEST_DIR")` (relative paths resolve against the run-time working directory). `config:` and the inline keys are mutually exclusive. Routes are declared per guest on the target entry's `routes:` block, one pattern list per trigger, with the declaring guest as the implicit target. Host-mediated links are declared per guest on the importing entry; a deployment-wide list belongs in a TOML manifest (top-level `link = [...]`) via `config:`, or on the CLI with `run --link`.
+Every value is a Rust expression; anchor paths with `env!("CARGO_MANIFEST_DIR")` (relative paths resolve against the run-time working directory). `config:` and the inline keys are mutually exclusive. Routes are declared per guest on the target entry's `routes:` block, one pattern list per trigger, with the declaring guest as the implicit target. Host-mediated interfaces are declared once, deployment-wide, on the top-level `dispatch:` list (the linker is shared, so there is no per-guest form); `run --dispatch` at the CLI unions with it.
 
 A guest's `source:` also accepts component bytes (`include_bytes!(...)`), embedding the guest in the host binary — the artifact must then exist when the host crate compiles, and it must be raw `.wasm` (embedded pre-compiled bytes are rejected by the safe build, like pre-compiled paths).
 
@@ -113,7 +113,7 @@ The generated `main` handles the `run` subcommand only; to expose `compile`, wri
 
 ### `run` callable
 
-A blocking `pub fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus>` beside `main`, delegating to `omnia::run::<Backends, Hooks>` with the declared mode applied to the builder. A binary with its own argument surface mounts the runtime in-process through `run` instead of being the generated `main` — it supplies the deployment as an `omnia::Manifest` (loaded with `Manifest::from_config(path)?`, synthesized with `Manifest::from_wasm(path)`, or built fluently with `Manifest::new()`, mounts and links included) via `omnia::DeploymentBuilder::new().manifest(manifest)`, plus argv, and maps the returned `ExitStatus` onto its own exit contract.
+A blocking `pub fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus>` beside `main`, delegating to `omnia::run::<Backends, Hooks>` with the declared mode applied to the builder. A binary with its own argument surface mounts the runtime in-process through `run` instead of being the generated `main` — it supplies the deployment as an `omnia::Manifest` (loaded with `Manifest::from_config(path)?`, synthesized with `Manifest::from_wasm(path)`, or built fluently with `Manifest::new()`, mounts and dispatch interfaces included) via `omnia::DeploymentBuilder::new().manifest(manifest)`, plus argv, and maps the returned `ExitStatus` onto its own exit contract.
 
 Both are re-exported from the generated module as `pub use runtime::{run, main};` (`#[allow(unused_imports)]`, so a nested-module invocation that uses only one stays warning-clean).
 
