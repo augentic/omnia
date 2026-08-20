@@ -39,8 +39,8 @@ impl Wiring<()> for EmptyWiring {
         Ok(())
     }
 
-    async fn serve(_runtime: &Runtime<()>) -> Result<()> {
-        Ok(())
+    fn serve(_runtime: &Runtime<()>) -> impl std::future::Future<Output = Result<()>> + Send {
+        std::future::ready(Ok(()))
     }
 }
 

@@ -43,8 +43,8 @@ pub trait Backends: Clone + Send + Sync + 'static {
 /// The zero-backend bundle: a deployment that links only backend-less hosts
 /// (such as a `mode: command` `wasi:cli` deployment) connects nothing.
 impl Backends for () {
-    async fn connect() -> Result<Self> {
-        Ok(())
+    fn connect() -> impl Future<Output = Result<Self>> {
+        std::future::ready(Ok(()))
     }
 }
 
