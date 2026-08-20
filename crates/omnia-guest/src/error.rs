@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// The protocol mapping of an [`Error`].
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ErrorKind {
     /// Request payload is invalid or missing required fields.
     BadRequest,
@@ -26,7 +26,6 @@ pub enum ErrorKind {
 
 /// Domain level error type returned by the adapter.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(into = "Wire", from = "Wire")]
 pub struct Error {
     kind: ErrorKind,
     code: String,
@@ -135,59 +134,6 @@ impl From<anyhow::Error> for Error {
 impl From<serde_json::Error> for Error {
     fn from(err: serde_json::Error) -> Self {
         Self::new(ErrorKind::BadRequest, "serde_json", err.to_string())
-    }
-}
-
-/// The serialized shape: an externally tagged enum, kept byte-compatible with
-/// stored fixtures and wire payloads produced before [`Error`] became a
-/// struct.
-#[derive(Clone, Serialize, Deserialize)]
-enum Wire {
-    BadRequest { code: String, description: String },
-    NotFound { code: String, description: String },
-    ServerError { code: String, description: String },
-    BadGateway { code: String, description: String },
-    Json { code: String, body: serde_json::Value },
-}
-
-impl From<Error> for Wire {
-    fn from(error: Error) -> Self {
-        let Error {
-            kind,
-            code,
-            description,
-            body,
-        } = error;
-        match kind {
-            ErrorKind::BadRequest => Self::BadRequest { code, description },
-            ErrorKind::NotFound => Self::NotFound { code, description },
-            ErrorKind::ServerError => Self::ServerError { code, description },
-            ErrorKind::BadGateway => Self::BadGateway { code, description },
-            ErrorKind::Json => Self::Json {
-                code,
-                body: body.unwrap_or(serde_json::Value::Null),
-            },
-        }
-    }
-}
-
-impl From<Wire> for Error {
-    fn from(wire: Wire) -> Self {
-        match wire {
-            Wire::BadRequest { code, description } => {
-                Self::new(ErrorKind::BadRequest, code, description)
-            }
-            Wire::NotFound { code, description } => {
-                Self::new(ErrorKind::NotFound, code, description)
-            }
-            Wire::ServerError { code, description } => {
-                Self::new(ErrorKind::ServerError, code, description)
-            }
-            Wire::BadGateway { code, description } => {
-                Self::new(ErrorKind::BadGateway, code, description)
-            }
-            Wire::Json { code, body } => Self::json(code, body),
-        }
     }
 }
 
@@ -305,31 +251,5 @@ mod tests {
         let err = Error::json("not_a_number", serde_json::json!({"error": "oops"}));
 
         assert_eq!(err.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    }
-
-    // The externally tagged wire shape predates the struct representation;
-    // stored client fixtures depend on it.
-    #[test]
-    fn wire_format_stable() {
-        let body = serde_json::json!({"field": "email", "reason": "invalid"});
-        let err = Error::json("400", body.clone());
-        assert_eq!(
-            serde_json::to_value(&err).expect("serialize"),
-            serde_json::json!({"Json": {"code": "400", "body": body}}),
-        );
-
-        let err = bad_request!("invalid input");
-        assert_eq!(
-            serde_json::to_value(&err).expect("serialize"),
-            serde_json::json!({
-                "BadRequest": {"code": "bad_request", "description": "invalid input"}
-            }),
-        );
-
-        let deserialized: Error =
-            serde_json::from_value(serde_json::json!({"Json": {"code": "400", "body": body}}))
-                .expect("deserialize");
-        assert_eq!(deserialized.json_body(), Some(body));
-        assert_eq!(deserialized.status(), StatusCode::BAD_REQUEST);
     }
 }
