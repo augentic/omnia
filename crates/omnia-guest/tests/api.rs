@@ -36,15 +36,15 @@ impl<P: Provider> Operation<P> for Echo {
     type Input = EchoInput;
     type Output = EchoOutput;
 
-    async fn call(
+    fn call(
         input: Self::Input, context: CallContext<'_, P>,
-    ) -> Result<Self::Output, Self::Error> {
-        Ok(EchoOutput {
+    ) -> impl std::future::Future<Output = Result<Self::Output, Self::Error>> + Send {
+        std::future::ready(Ok(EchoOutput {
             name: input.name,
             count: input.count.unwrap_or(1),
             owner: context.owner.to_owned(),
             correlation_id: context.metadata.correlation_id.clone(),
-        })
+        }))
     }
 }
 
@@ -92,13 +92,13 @@ impl Operation<StatefulProvider> for ObserveProvider {
     type Input = EchoInput;
     type Output = ProviderObservation;
 
-    async fn call(
+    fn call(
         _input: Self::Input, context: CallContext<'_, StatefulProvider>,
-    ) -> Result<Self::Output, Self::Error> {
-        Ok(ProviderObservation {
+    ) -> impl std::future::Future<Output = Result<Self::Output, Self::Error>> + Send {
+        std::future::ready(Ok(ProviderObservation {
             address: std::ptr::from_ref(context.provider).addr(),
             call: context.provider.calls.fetch_add(1, Ordering::SeqCst) + 1,
-        })
+        }))
     }
 }
 

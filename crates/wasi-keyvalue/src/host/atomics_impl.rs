@@ -103,14 +103,17 @@ impl<T> HostCasWithStore<T> for WasiKeyValue {
     }
 
     /// Get the current value of the CAS handle.
-    async fn current(
+    fn current(
         accessor: &Accessor<T, Self>, self_: Resource<Cas>,
-    ) -> Result<Option<Vec<u8>>> {
-        let cas = accessor.with(|mut store| {
-            let cas = store.get().table.get(&self_).map_err(|_e| Error::NoSuchStore)?;
-            Ok::<_, Error>(cas.clone())
-        })?;
-        Ok(cas.current)
+    ) -> impl std::future::Future<Output = Result<Option<Vec<u8>>>> {
+        std::future::ready(
+            accessor
+                .with(|mut store| {
+                    let cas = store.get().table.get(&self_).map_err(|_e| Error::NoSuchStore)?;
+                    Ok::<_, Error>(cas.clone())
+                })
+                .map(|cas| cas.current),
+        )
     }
 
     /// Drop the CAS handle.

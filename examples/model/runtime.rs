@@ -21,11 +21,13 @@ cfg_if::cfg_if! {
         impl omnia::Backend for CannedVerdict {
             type ConnectOptions = omnia::NoOptions;
 
-            async fn connect_with(_options: omnia::NoOptions) -> anyhow::Result<Self> {
-                Ok(Self(Scripted::json(serde_json::json!({
+            fn connect_with(
+                _options: omnia::NoOptions,
+            ) -> impl std::future::Future<Output = anyhow::Result<Self>> {
+                std::future::ready(Ok(Self(Scripted::json(serde_json::json!({
                     "verdict": "pass",
                     "reason": "the bounds check is correct",
-                }))))
+                })))))
             }
         }
 

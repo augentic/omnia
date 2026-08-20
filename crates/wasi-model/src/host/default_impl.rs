@@ -28,8 +28,10 @@ pub struct ModelDefault;
 impl Backend for ModelDefault {
     type ConnectOptions = omnia::NoOptions;
 
-    async fn connect_with(_options: Self::ConnectOptions) -> Result<Self> {
-        Ok(Self)
+    fn connect_with(
+        _options: Self::ConnectOptions,
+    ) -> impl std::future::Future<Output = Result<Self>> {
+        std::future::ready(Ok(Self))
     }
 }
 

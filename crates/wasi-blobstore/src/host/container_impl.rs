@@ -118,10 +118,10 @@ impl<T> HostContainerWithStore<T> for WasiBlobstore {
 }
 
 impl<T> HostStreamObjectNamesWithStore<T> for WasiBlobstore {
-    async fn read_stream_object_names(
+    fn read_stream_object_names(
         accessor: &Accessor<T, Self>, self_: Resource<StreamObjectNames>, len: u64,
-    ) -> Result<(Vec<String>, bool)> {
-        accessor.with(|mut store| {
+    ) -> impl std::future::Future<Output = Result<(Vec<String>, bool)>> {
+        std::future::ready(accessor.with(|mut store| {
             let stream =
                 store.get().table.get_mut(&self_).context("StreamObjectNames not found")?;
 
@@ -131,13 +131,13 @@ impl<T> HostStreamObjectNamesWithStore<T> for WasiBlobstore {
             stream.offset += take;
             let done = stream.offset >= stream.names.len();
             Ok((batch, done))
-        })
+        }))
     }
 
-    async fn skip_stream_object_names(
+    fn skip_stream_object_names(
         accessor: &Accessor<T, Self>, self_: Resource<StreamObjectNames>, num: u64,
-    ) -> Result<(u64, bool)> {
-        accessor.with(|mut store| {
+    ) -> impl std::future::Future<Output = Result<(u64, bool)>> {
+        std::future::ready(accessor.with(|mut store| {
             let stream =
                 store.get().table.get_mut(&self_).context("StreamObjectNames not found")?;
 
@@ -146,7 +146,7 @@ impl<T> HostStreamObjectNamesWithStore<T> for WasiBlobstore {
             stream.offset += skip;
             let done = stream.offset >= stream.names.len();
             Ok((skip as u64, done))
-        })
+        }))
     }
 
     fn drop(

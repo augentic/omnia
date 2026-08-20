@@ -33,11 +33,17 @@ impl<T> HostConnectionWithStore<T> for WasiSql {
 }
 
 impl<T> HostStatementWithStore<T> for WasiSql {
-    async fn prepare(
+    fn prepare(
         accessor: &Accessor<T, Self>, query: String, params: Vec<DataType>,
-    ) -> wasmtime::Result<Result<Resource<Statement>, Resource<Error>>> {
+    ) -> impl std::future::Future<Output = wasmtime::Result<Result<Resource<Statement>, Resource<Error>>>>
+    {
         let statement = Statement { query, params };
-        Ok(Ok(accessor.with(|mut store| store.get().table.push(statement))?))
+        std::future::ready(
+            accessor
+                .with(|mut store| store.get().table.push(statement))
+                .map_err(Into::into)
+                .map(Ok),
+        )
     }
 
     fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<Statement>) -> wasmtime::Result<()> {

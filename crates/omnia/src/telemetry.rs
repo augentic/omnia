@@ -353,12 +353,12 @@ mod tests {
 
     #[cfg(feature = "otlp")]
     impl SpanExporter for Recording {
-        async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
+        fn export(&self, batch: Vec<SpanData>) -> impl std::future::Future<Output = OTelSdkResult> {
             self.names
                 .lock()
                 .expect("recording lock")
                 .extend(batch.into_iter().map(|span| span.name.into_owned()));
-            Ok(())
+            std::future::ready(Ok(()))
         }
     }
 
