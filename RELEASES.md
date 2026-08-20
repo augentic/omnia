@@ -17,6 +17,20 @@
   carry the mark. The resolver-supplied command guest (fully dynamic
   deployment, empty guest set) is gone with the key — a direct command
   always compiles its manifest in
+- Removed the late-binding deployment plumbing: the resolve-on-miss pull
+  layer (`GuestResolver`, `Runtime::ensure_guest`, the single-flight
+  machinery, macro `resolver:`, `DeploymentBuilder::resolver`,
+  `Runtime::with_resolver`), the `http_paths` trigger hook (macro
+  `http_paths:`, `DeploymentBuilder::http_paths`,
+  `Runtime::with_http_paths`, `RoutingPolicy` / table-only routing,
+  `Runtime::route_http`, `RouteRefusal`), and pre-bound HTTP listener
+  adoption (macro `http_listener:`, `DeploymentBuilder::http_listener`,
+  `Runtime::take_http_listener`). A registry miss is a dispatch error and
+  an unrouted HTTP path is a 404; the HTTP trigger always binds
+  `HTTP_ADDR`. Push registration stays: `Runtime::register` / `deregister`
+  and `DeploymentBuilder::dynamic()` are the way a registry grows after
+  boot, with registered guests reachable via host-mediated link dispatch
+  and `Dispatcher::invoke`
 
 ## 0.35.0
 

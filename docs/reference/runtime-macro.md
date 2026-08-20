@@ -10,9 +10,6 @@ Every key the `omnia::runtime!` macro accepts, with exact semantics. The task-or
 | `mode:` | `server` (default) or `command` | Running jobs/CLIs instead of servers |
 | `config:` | Compile in a default manifest *path* | You want `run` with no arguments to work |
 | `guests:`, `mounts:`, `link:`, `routes:` | Compile in a default manifest *value* (inline) | Same as `config:`, but self-contained — no TOML file at run time |
-| `resolver:` | Resolve-on-miss for unknown guest identities | Guests arrive at run time (multi-tenant, cached artifacts) |
-| `http_paths:` | Path→identity hook for unrouted HTTP requests | The deployment owns HTTP routing (e.g. per-tenant paths) |
-| `http_listener:` | Adopt a pre-bound TCP listener | The embedding process controls the socket (port 0 tests, socket activation) |
 
 There is no key for raw argv passthrough: a command-mode runtime with a compiled-in deployment is a [direct command](#direct-commands-raw-argv-passthrough) automatically.
 
@@ -113,12 +110,6 @@ Two things to know:
 
 The [`guest-link`](../../examples/guest-link/runtime.rs) example is built this way; its [`omnia.toml`](../../examples/guest-link/Omnia.toml) expresses the same deployment as a file for `--config`.
 
-## `resolver:` (resolve-on-miss)
-
-**You need this when guests are not all known at compile time** — for example multi-tenant deployments where a tenant's guest is fetched from a cache or registry the first time it is addressed.
-
-The value is any expression evaluating to a type implementing `omnia::GuestResolver`; it is consulted on dispatch-path registry misses (see [dynamic guest registration](../../rfcs/guest-resolution.md)). A resolver implies a *dynamic* deployment: the guest set may start empty (an invocation with a resolver and no `guests:` is the fully dynamic deployment), and with one or more static guests the mark is a no-op. The compiled-in resolver is part of the *binary*, not the manifest — a TOML supplied via `--config` still runs with it, and resolution policy (id grammar, artifact layout, verification) stays code the deployment owns.
-
 ## Command routing (`command: true`)
 
 **You need this when command mode should not rely on the sole-exporter default** — a deployment with several static guests exporting `wasi:cli/run`.
@@ -139,28 +130,6 @@ The same mark is available in `omnia.toml` (`command = true` on a `[[guest]]` en
 
 `DeploymentBuilder::program_name` overrides the deployment name used for telemetry and prepended to guest argv as `argv[0]` (the default remains the manifest name).
 
-## `http_paths:` (path routing hook)
-
-**You need this when the deployment owns HTTP routing** — mapping request paths to guest identities in code (for example `/tenants/<id>/...` schemes), instead of static `[[route.http]]` prefixes.
-
-The value is any expression evaluating to `Fn(&str) -> Option<omnia::GuestId>` (`+ Send + Sync + 'static`); it maps a request path no static `[[route.http]]` prefix matches to a guest identity, which then goes through the ordinary registry lookup — and hence resolve-on-miss when a `resolver:` is installed.
-
-Installing the hook makes the deployment own HTTP routing outright: the capability default is off (a sole `wasi:http` exporter never becomes a catch-all). Outcomes:
-
-- The hook declines a path, **or** claims an identity nothing supplies (the resolver's definitive miss, e.g. an unknown tenant) → an ordinary 404.
-- A genuine fault on a claimed path — resolution failed, or the routed guest lacks a `wasi:http` handler export → an error-logged 500, never hidden as a miss.
-- Without the hook, an unmatched path stays a routine debug-level 404 — a routes-only server does not claim every path.
-
-Deployments assembled programmatically supply the same hook through `DeploymentBuilder::http_paths`.
-
-## `http_listener:` (pre-bound listener)
-
-**You need this when the process, not the runtime, must own the socket** — binding port 0 in tests, inheriting a socket from a supervisor, or coordinating with another server in the same process.
-
-The value is any expression evaluating to `anyhow::Result<std::net::TcpListener>`, evaluated at the top of the generated `main`: writing the key means supplying a listener, and an `Err` is a startup failure. The HTTP trigger adopts the pre-bound listener (it serves on that exact address instead of binding `HTTP_ADDR` itself), and every guest store sees `HTTP_ADDR` set to the listener's local address — injected with override semantics, so it wins over any inherited value.
-
-A supplied listener that no `wasi:http`-capable guest (and no `http_paths:` hook) could ever serve fails startup rather than silently dropping the socket. Deployments assembled programmatically supply the listener through `DeploymentBuilder::http_listener`.
-
 ## Direct commands (raw argv passthrough)
 
 **Shipping a binary whose command line belongs entirely to the guest** — a product CLI where `mybin greet Ada` must work, not `mybin run guest.wasm -- greet Ada` — needs no key at all: a `mode: command` runtime with a compiled-in deployment (`config:` or inline manifest keys) is a *direct command*.
@@ -173,7 +142,7 @@ A `mode: command` runtime *without* a compiled-in deployment keeps the `run` gra
 
 ## Composing the keys
 
-The [`command-resolver`](../../examples/command-resolver/runtime.rs) example composes the inline manifest keys and `resolver:` into a complete resolver-backed direct command deployment — static guests plus resolve-on-miss for everything else — with no handwritten `main`:
+The [`command-resolver`](../../examples/command-resolver/runtime.rs) example composes the inline manifest keys into a complete direct command deployment with no handwritten `main`:
 
 ```rust
 omnia::runtime!({
@@ -186,7 +155,6 @@ omnia::runtime!({
         { name: "project", path: project_root(), writable: true },
         { name: "store", path: store_root(), writable: true },
     ],
-    resolver: CacheResolver::new(),
     hosts: {
         WasiHttp: HttpDefault,
         WasiOtel: OtelDefault,

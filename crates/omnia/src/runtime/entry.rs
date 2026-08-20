@@ -7,7 +7,6 @@
 
 use std::ffi::OsString;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 #[cfg(feature = "cli")]
@@ -15,8 +14,6 @@ use clap::Parser as _;
 
 #[cfg(feature = "cli")]
 use crate::cli::{Cli, Command};
-use crate::dispatch::{GuestResolver, HttpPaths};
-use crate::registry::GuestId;
 use crate::runtime::Mode;
 use crate::telemetry::LogMode;
 use crate::{DeploymentBuilder, Manifest};
@@ -51,22 +48,13 @@ impl ManifestSource {
 pub struct MainOptions {
     mode: Mode,
     manifest: Option<ManifestSource>,
-    resolver: Option<Arc<dyn GuestResolver>>,
-    http_paths: Option<HttpPaths>,
-    http_listener: Option<std::net::TcpListener>,
 }
 
 impl MainOptions {
     /// Start options for a deployment driven in `mode`.
     #[must_use]
     pub const fn new(mode: Mode) -> Self {
-        Self {
-            mode,
-            manifest: None,
-            resolver: None,
-            http_paths: None,
-            http_listener: None,
-        }
+        Self { mode, manifest: None }
     }
 
     /// Set the compiled-in manifest source (the macro's `config:` key or
@@ -74,38 +62,6 @@ impl MainOptions {
     #[must_use]
     pub fn manifest(mut self, source: ManifestSource) -> Self {
         self.manifest = Some(source);
-        self
-    }
-
-    /// Install a [`GuestResolver`] consulted on registry misses; a resolver
-    /// also marks the deployment dynamic (its guest set may start empty).
-    #[must_use]
-    pub fn resolver<R: GuestResolver>(mut self, resolver: R) -> Self {
-        self.resolver = Some(Arc::new(resolver));
-        self
-    }
-
-    /// Install the [`HttpPaths`] hook: the deployment's path→identity
-    /// mapping for request paths no static route matches. Installing one
-    /// makes HTTP routing table-driven only — a sole exporter never becomes
-    /// a catch-all, a path the hook declines (or an identity nothing
-    /// supplies) is an ordinary 404, and a resolution fault or a guest
-    /// without the handler export is a 500.
-    #[must_use]
-    pub fn http_paths<F>(mut self, hook: F) -> Self
-    where
-        F: Fn(&str) -> Option<GuestId> + Send + Sync + 'static,
-    {
-        self.http_paths = Some(Arc::new(hook));
-        self
-    }
-
-    /// Supply a pre-bound TCP listener for the HTTP trigger. The trigger
-    /// server adopts it at boot instead of binding `HTTP_ADDR` itself, and
-    /// every guest store sees `HTTP_ADDR` set to its local address.
-    #[must_use]
-    pub fn http_listener(mut self, listener: std::net::TcpListener) -> Self {
-        self.http_listener = Some(listener);
         self
     }
 }
@@ -132,10 +88,6 @@ pub(super) struct EntryPlan {
     mode: Mode,
     manifest: Option<Manifest>,
     args: Vec<String>,
-    dynamic: bool,
-    resolver: Option<Arc<dyn GuestResolver>>,
-    http_paths: Option<HttpPaths>,
-    http_listener: Option<std::net::TcpListener>,
     log_mode: Option<LogMode>,
 }
 
@@ -144,18 +96,6 @@ impl EntryPlan {
     pub(super) fn into_builder(self) -> DeploymentBuilder {
         let mut builder =
             DeploymentBuilder::new().manifest(self.manifest).args(self.args).mode(self.mode);
-        if self.dynamic {
-            builder = builder.dynamic();
-        }
-        if let Some(resolver) = self.resolver {
-            builder = builder.resolver(resolver);
-        }
-        if let Some(hook) = self.http_paths {
-            builder = builder.http_paths_shared(hook);
-        }
-        if let Some(listener) = self.http_listener {
-            builder = builder.http_listener(listener);
-        }
         if let Some(mode) = self.log_mode {
             builder = builder.log_mode(mode);
         }
@@ -202,14 +142,7 @@ fn peel_log_flags(args: Vec<String>) -> Result<(Vec<String>, LogMode)> {
 pub(super) fn plan(
     options: MainOptions, argv: impl IntoIterator<Item = OsString>, omnia_config: Option<OsString>,
 ) -> Result<EntryPlan, PlanError> {
-    let MainOptions {
-        mode,
-        manifest,
-        resolver,
-        http_paths,
-        http_listener,
-    } = options;
-    let dynamic = resolver.is_some();
+    let MainOptions { mode, manifest } = options;
 
     if mode == Mode::Command && manifest.is_some() {
         let raw_args = argv
@@ -226,10 +159,6 @@ pub(super) fn plan(
             mode,
             manifest,
             args: guest_args,
-            dynamic,
-            resolver,
-            http_paths,
-            http_listener,
             log_mode: Some(log_mode),
         });
     }
@@ -261,8 +190,6 @@ pub(super) fn plan(
                     (None, Some(wasm)) => Manifest::from_wasm(wasm),
                     (None, None) => match manifest {
                         Some(source) => source.into_manifest()?,
-                        // A resolver-backed deployment may start empty.
-                        None if dynamic => Manifest::new(),
                         None => {
                             return Err(PlanError::Fatal(anyhow!(
                                 "no guest specified: pass a <wasm> path, or --config <omnia.toml> \
@@ -275,10 +202,6 @@ pub(super) fn plan(
                     mode,
                     manifest: Some(manifest.mounts(mounts).links(links)),
                     args,
-                    dynamic,
-                    resolver,
-                    http_paths,
-                    http_listener,
                     log_mode: None,
                 })
             }
@@ -298,21 +221,8 @@ pub(super) fn plan(
 // module's job.
 #[cfg(test)]
 mod tests {
-    use futures::FutureExt as _;
-
     use super::*;
-    use crate::deployment::{GuestArtifact, GuestEntry};
-    use crate::host::FutureResult;
-
-    struct NullResolver;
-
-    impl GuestResolver for NullResolver {
-        fn resolve(
-            &self, _guest: GuestId, _expected_export: String,
-        ) -> FutureResult<Option<GuestArtifact>> {
-            async { Ok(None) }.boxed()
-        }
-    }
+    use crate::deployment::GuestEntry;
 
     fn argv(args: &[&str]) -> Vec<OsString> {
         args.iter().map(OsString::from).collect()
@@ -394,33 +304,11 @@ mod tests {
 
     #[cfg(feature = "cli")]
     #[test]
-    fn no_source_and_no_resolver_fails() {
+    fn no_source_fails() {
         let error = plan(MainOptions::new(Mode::Server), argv(&["bin", "run"]), None)
             .err()
-            .expect("a sourceless static deployment must fail");
+            .expect("a sourceless deployment must fail");
         assert!(fatal(error).contains("no guest specified"));
-    }
-
-    #[cfg(feature = "cli")]
-    #[test]
-    fn resolver_marks_dynamic_on_every_source() {
-        // No source at all: the deployment starts empty rather than erroring.
-        let options = MainOptions::new(Mode::Server).resolver(NullResolver);
-        let plan_empty = plan(options, argv(&["bin", "run"]), None)
-            .unwrap_or_else(|error| panic!("{}", fatal(error)));
-        assert!(plan_empty.dynamic);
-        assert!(plan_empty.resolver.is_some());
-        assert!(plan_empty.manifest.as_ref().is_some_and(|m| m.guests.is_empty()));
-
-        // A positional wasm source composes with the resolver unchanged; a
-        // resolver without a compiled-in manifest keeps the `run` grammar
-        // even in command mode.
-        let options = MainOptions::new(Mode::Command).resolver(NullResolver);
-        let plan_wasm = plan(options, argv(&["bin", "run", "guest.wasm"]), None)
-            .unwrap_or_else(|error| panic!("{}", fatal(error)));
-        assert!(plan_wasm.dynamic);
-        assert!(plan_wasm.resolver.is_some());
-        assert_eq!(first_guest(&plan_wasm), "guest");
     }
 
     #[cfg(feature = "cli")]

@@ -31,8 +31,8 @@ pub use self::deployment::{
     Precompiled, RouteSpec, SourceSpec, TopicRoute, Transport, TransportKind, WasmOnly,
 };
 pub use self::dispatch::{
-    Dispatcher, EnsureError, FirstArgSelector, GuestResolver, GuestSelector, HttpPaths, LinkClient,
-    WrpcState, as_command_chain, serve_links,
+    Dispatcher, FirstArgSelector, GuestSelector, LinkClient, WrpcState, as_command_chain,
+    serve_links,
 };
 pub use self::host::{
     Backend, FromEnv, FutureResult, HasTable, Host, NoOptions, Proxy, Server, get_cloned,
@@ -42,10 +42,9 @@ pub use self::options::RuntimeOptions;
 #[cfg(feature = "jit")]
 pub use self::options::compile;
 pub use self::registry::{
-    CliRoutes, Guest, GuestId, HttpRoutes, PatternRoutes, Registry, Routes, RoutingPolicy,
-    TriggerRouter,
+    CliRoutes, Guest, GuestId, HttpRoutes, PatternRoutes, Registry, Routes, TriggerRouter,
 };
-pub use self::runtime::{Backends, ExitStatus, Mode, RouteRefusal, Runtime, Wiring};
+pub use self::runtime::{Backends, ExitStatus, Mode, Runtime, Wiring};
 #[doc(hidden)]
 pub use self::runtime::{MainOptions, ManifestSource, main, run, run_precompiled};
 pub use self::store::{

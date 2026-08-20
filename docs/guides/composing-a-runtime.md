@@ -127,13 +127,10 @@ Most runtimes never need these. Each solves one specific deployment shape — re
 | Key | Reach for it when |
 | --- | ----------------- |
 | [`guests:`/`mounts:`/`link:`/`routes:`](../reference/runtime-macro.md#inline-manifest-keys-guests-mounts-link-routes) | You want the deployment compiled into the binary instead of a TOML file — including embedding the guest bytes themselves. |
-| [`resolver:`](../reference/runtime-macro.md#resolver-resolve-on-miss) | Guests are not all known at compile time and must be fetched on first use (multi-tenant, artifact caches). |
-| [`http_paths:`](../reference/runtime-macro.md#http_paths-path-routing-hook) | The deployment maps HTTP paths to guest identities in code (e.g. per-tenant URL schemes). |
-| [`http_listener:`](../reference/runtime-macro.md#http_listener-pre-bound-listener) | The embedding process must own the TCP socket (port 0 in tests, socket activation). |
 
 Shipping a product CLI whose argv belongs entirely to the guest needs no key: a command-mode runtime with a compiled-in deployment is a [direct command](../reference/runtime-macro.md#direct-commands-raw-argv-passthrough) — no host `run` grammar at all.
 
-The [`command-resolver`](../../examples/command-resolver/runtime.rs) example composes the inline manifest keys and `resolver:` into a complete resolver-backed direct command deployment.
+The [`command-resolver`](../../examples/command-resolver/runtime.rs) example composes the inline manifest keys into a complete direct command deployment.
 
 ## Hand-written runtimes (advanced)
 

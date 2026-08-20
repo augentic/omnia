@@ -44,10 +44,6 @@ Guest-to-guest calls carried through the host: a guest imports an interface name
 
 The `link` entries (deployment-wide or per-guest) naming interfaces the host will dispatch on a guest's behalf. Anything not listed is not callable — the allow-list is the boundary.
 
-### Resolver / resolve-on-miss
-
-A deployment-supplied `GuestResolver` consulted when a dispatch-path registry lookup misses, letting guests be fetched and admitted at run time instead of being declared statically.
-
 ### Seam / seam test
 
 The guest–host boundary, and the integration tests that exercise it: a real guest `.wasm` driven through a real runtime, asserting host-side effects. See [Testing](guides/testing.md).

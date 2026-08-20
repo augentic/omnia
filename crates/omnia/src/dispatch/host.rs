@@ -41,15 +41,12 @@ where
         }
     }
 
-    // Resolve-on-miss: a registry miss may fault the target in through the
-    // installed resolver, with `interface` as the export the component must
-    // satisfy. Runs before `enter` so a slow fetch/compile never pins a
-    // process-wide depth slot.
     let instance_pre = runtime
-        .ensure_guest(target, interface)
-        .await
-        .map_err(anyhow::Error::from)
-        .with_context(|| format!("dispatching `{interface}/{func}` to guest `{target}`"))?
+        .registry()
+        .get(target)
+        .with_context(|| {
+            format!("dispatching `{interface}/{func}` to guest `{target}`: guest is not registered")
+        })?
         .instance_pre()
         .clone();
 

@@ -40,10 +40,7 @@ pub struct StoreConfig<'a> {
     /// deployments without `[[mount]]`s.
     pub mounts: Option<Arc<MountRegistry>>,
     /// Complete guest environment replacing host inheritance; `None` inherits
-    /// the host env. The runtime pre-merges its deployment-derived entries
-    /// (e.g. `HTTP_ADDR`) over the host environment once, so an entry replaces
-    /// an inherited value rather than appending a duplicate key (WASI env
-    /// lookups are first-match-wins).
+    /// the host env.
     pub env: Option<Arc<Vec<(String, String)>>>,
 }
 
@@ -131,19 +128,6 @@ impl StoreBase {
             mounts,
         }
     }
-}
-
-/// The host environment with `overlay` applied: replace an existing key's
-/// value, append a missing key — never a duplicate entry.
-pub fn merged_env(overlay: &[(String, String)]) -> Vec<(String, String)> {
-    let mut vars: Vec<(String, String)> = std::env::vars().collect();
-    for (key, value) in overlay {
-        match vars.iter_mut().find(|(existing, _)| existing == key) {
-            Some(entry) => entry.1.clone_from(value),
-            None => vars.push((key.clone(), value.clone())),
-        }
-    }
-    vars
 }
 
 /// The per-guest store context every deployment shares.
@@ -236,32 +220,5 @@ pub trait HasDispatcher: Send {
 impl<B: Send + 'static> HasDispatcher for StoreCtx<B> {
     fn dispatcher(&self) -> Arc<dyn Dispatcher> {
         Arc::clone(&self.base.dispatcher)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::merged_env;
-
-    // Override semantics on the private merge kernel: an overlay entry
-    // replaces an inherited key (no first-match-wins duplicate), a new key
-    // appends.
-    #[test]
-    fn merged_env_overrides() {
-        // `PATH` is present in any test environment.
-        let overlay = [
-            ("PATH".to_owned(), "overridden".to_owned()),
-            ("OMNIA_MERGED_ENV_TEST".to_owned(), "fresh".to_owned()),
-        ];
-        let merged = merged_env(&overlay);
-
-        let paths: Vec<_> = merged.iter().filter(|(key, _)| key == "PATH").collect();
-        assert_eq!(paths.len(), 1, "no duplicate key: {paths:?}");
-        assert_eq!(paths[0].1, "overridden");
-
-        let fresh: Vec<_> =
-            merged.iter().filter(|(key, _)| key == "OMNIA_MERGED_ENV_TEST").collect();
-        assert_eq!(fresh.len(), 1);
-        assert_eq!(fresh[0].1, "fresh");
     }
 }

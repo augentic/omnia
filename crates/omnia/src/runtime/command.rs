@@ -13,14 +13,13 @@ use crate::store::StoreCtx;
 /// Run the command guest once, after the [`Runtime`] is assembled.
 ///
 /// A guest marked `command = true` in the manifest goes through the ordinary
-/// [`ensure_guest`](Runtime::ensure_guest) lookup and fails the run if
-/// nothing supplies it. Without a marked guest, the sole static
-/// `wasi:cli/run` exporter is the catch-all; a deployment with no exporter
-/// is inert and exits `0`.
+/// registry lookup and fails the run if it is not registered. Without a
+/// marked guest, the sole static `wasi:cli/run` exporter is the catch-all; a
+/// deployment with no exporter is inert and exits `0`.
 ///
 /// # Errors
 ///
-/// Returns an error if the explicit command guest cannot be ensured, routing
+/// Returns an error if the explicit command guest is not registered, routing
 /// is ambiguous, the guest cannot be instantiated, or the command traps
 /// without a guest exit code.
 pub(super) async fn drive<B>(runtime: &Runtime<B>) -> Result<ExitStatus>
@@ -30,9 +29,9 @@ where
     if let Some(id) = runtime.command_guest() {
         let id = id.clone();
         let guest = runtime
-            .ensure_guest(&id, "wasi:cli/run")
-            .await
-            .with_context(|| format!("ensuring command guest `{id}`"))?;
+            .registry()
+            .get(&id)
+            .with_context(|| format!("command guest `{id}` is not registered"))?;
         return run_guest(runtime, &id, &guest).await;
     }
 

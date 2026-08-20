@@ -102,7 +102,7 @@ Host-mediated guest-to-guest calls are nested more than 8 deep — usually accid
 
 ### `mybin run ...` fails with an argument error / `--config` is rejected
 
-A `runtime!` binary with `mode: command` and a compiled-in deployment is a [direct command](reference/runtime-macro.md#direct-commands-raw-argv-passthrough) with **no host CLI**: no `run` subcommand, no `--config`/`OMNIA_CONFIG` override, no positional wasm path. Its argv goes to the guest verbatim, so `mybin greet Ada` is correct and `mybin run -- greet Ada` hands the guest a literal `run` argument. The deployment is fixed at compile time (compiled-in manifest or resolver), by design.
+A `runtime!` binary with `mode: command` and a compiled-in deployment is a [direct command](reference/runtime-macro.md#direct-commands-raw-argv-passthrough) with **no host CLI**: no `run` subcommand, no `--config`/`OMNIA_CONFIG` override, no positional wasm path. Its argv goes to the guest verbatim, so `mybin greet Ada` is correct and `mybin run -- greet Ada` hands the guest a literal `run` argument. The deployment is fixed at compile time (the compiled-in manifest), by design.
 
 ### A direct-command binary logs nothing (or too much)
 

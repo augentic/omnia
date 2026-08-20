@@ -19,7 +19,6 @@ pub fn expand(config: &Config) -> TokenStream {
         server_types,
         backends_ty,
         backends_def,
-        listener_binding,
         main_options,
     } = Codegen::from(config);
 
@@ -62,7 +61,6 @@ pub fn expand(config: &Config) -> TokenStream {
             /// `run` grammar).
             #[tokio::main]
             pub async fn main() -> ::std::process::ExitCode {
-                #listener_binding
                 omnia::main::<#backends_ty, Hooks>(#main_options).await
             }
 
@@ -139,37 +137,6 @@ mod tests {
         })));
     }
 
-    #[test]
-    fn expand_resolver() {
-        insta::assert_snapshot!(expand_pretty(quote!({
-            guests: [
-                { id: "api", source: "api.wasm" },
-            ],
-            resolver: CacheResolver::new(),
-            hosts: {
-                WasiOtel: OtelDefault,
-            },
-        })));
-    }
-
-    // Covers both late-routing keys: `http_paths` alone is a strict subset
-    // of this expansion.
-    #[test]
-    fn expand_http_listener() {
-        insta::assert_snapshot!(expand_pretty(quote!({
-            guests: [
-                { id: "engine", source: "engine.wasm" },
-            ],
-            resolver: CacheResolver::new(),
-            http_paths: mcp_route,
-            http_listener: bind_http_listener(),
-            hosts: {
-                WasiHttp: HttpDefault,
-                WasiOtel: OtelDefault,
-            },
-        })));
-    }
-
     // A `command: true` guest entry marks the command-mode target; the flag
     // expands to `.command()` on its `GuestEntry`.
     #[test]
@@ -183,8 +150,8 @@ mod tests {
         })));
     }
 
-    // The composed shape from the guest-resolution design: static guests plus
-    // resolve-on-miss and explicit command routing.
+    // The composed deployment shape: static guests, mounts, and explicit
+    // command routing.
     #[test]
     fn expand_deployment_keys() {
         insta::assert_snapshot!(expand_pretty(quote!({
@@ -197,7 +164,6 @@ mod tests {
                 { name: "project", path: project_root(), writable: true },
                 { name: "store", path: store_root(), writable: true },
             ],
-            resolver: CacheResolver::new(),
             hosts: {
                 WasiHttp: HttpDefault,
                 WasiOtel: OtelDefault,

@@ -9,18 +9,15 @@
 //!
 //! The `command_flag` module covers the `command = true` guest mark: routing
 //! to the marked entry (including past a second `wasi:cli/run` exporter that
-//! would otherwise be ambiguous), `argv[0]` via `program_name`, and that a
-//! registry hit never consults the resolver.
+//! would otherwise be ambiguous) and `argv[0]` via `program_name`.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use anyhow::{Context as _, Result};
-use futures::FutureExt as _;
 use omnia::{
-    Deployment, DeploymentBuilder, ExitStatus, FutureResult, GuestArtifact, GuestEntry, GuestId,
-    GuestResolver, Manifest, Mode, Runtime, StoreCtx, Wiring, run_precompiled,
+    Deployment, DeploymentBuilder, ExitStatus, GuestEntry, Manifest, Mode, Runtime, StoreCtx,
+    Wiring, run_precompiled,
 };
 use omnia_testkit::find_guest;
 
@@ -93,47 +90,6 @@ fn exit_codes() -> Result<()> {
 mod command_flag {
     use super::*;
 
-    /// A counting command-guest resolver answering every identity with
-    /// `answer()`'s outcome.
-    struct CommandResolver<F> {
-        calls: Arc<AtomicUsize>,
-        answer: F,
-    }
-
-    impl<F> CommandResolver<F>
-    where
-        F: Fn() -> Result<Option<GuestArtifact>> + Send + Sync + 'static,
-    {
-        fn new(answer: F) -> (Arc<Self>, Arc<AtomicUsize>) {
-            let calls = Arc::new(AtomicUsize::new(0));
-            (
-                Arc::new(Self {
-                    calls: Arc::clone(&calls),
-                    answer,
-                }),
-                calls,
-            )
-        }
-    }
-
-    impl<F> GuestResolver for CommandResolver<F>
-    where
-        F: Fn() -> Result<Option<GuestArtifact>> + Send + Sync + 'static,
-    {
-        fn resolve(
-            &self, _guest: GuestId, _expected_export: String,
-        ) -> FutureResult<Option<GuestArtifact>> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            let outcome = (self.answer)();
-            async move { outcome }.boxed()
-        }
-    }
-
-    /// The serialized CLI guest wrapped as a registration artifact.
-    fn cli_artifact() -> Result<GuestArtifact> {
-        omnia_testkit::precompiled_artifact("cli_wasm.wasm")
-    }
-
     /// Drive a command deployment built from `manifest`, returning the run
     /// outcome.
     async fn run_manifest(manifest: Manifest, tail: &[&str]) -> Result<ExitStatus> {
@@ -174,25 +130,16 @@ mod command_flag {
         })
     }
 
-    // A `command = true` mark on a static `[[guest]]` entry is a registry
-    // hit — no resolver consulted, the marked guest runs.
+    // A `command = true` mark on a static `[[guest]]` entry routes the run to
+    // the marked guest.
     #[test]
     fn static_hit() -> Result<()> {
         let _gate = engine_gate();
         fixture::RT.block_on(async {
             let wasm = find_guest("cli_wasm.wasm");
-            let (resolver, calls) = CommandResolver::new(|| Ok(Some(cli_artifact()?)));
-            let builder = DeploymentBuilder::new()
-                .manifest(Manifest::new().guest(GuestEntry::new("app", wasm).command()))
-                .args(vec!["add".to_owned(), "2".to_owned(), "40".to_owned()])
-                .mode(Mode::Command)
-                .resolver(resolver)
-                .precompiled();
-            // SAFETY: `find_guest` only returns artifacts this workspace built and
-            // serialized itself (`cargo make test-guests`).
-            let status = unsafe { run_precompiled::<(), EmptyWiring>(builder) }.await?;
+            let manifest = Manifest::new().guest(GuestEntry::new("app", wasm).command());
+            let status = run_manifest(manifest, &["add", "2", "40"]).await?;
             assert_eq!(status.code(), 0, "the marked command guest runs");
-            assert_eq!(calls.load(Ordering::SeqCst), 0, "a registry hit never resolves");
             Ok(())
         })
     }

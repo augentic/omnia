@@ -21,7 +21,7 @@ use wasmtime::{Config, Engine};
 use wasmtime_wasi::WasiView;
 use wrpc_wasmtime::WrpcView;
 
-use crate::dispatch::{DispatchHandle, FirstArgSelector, GuestResolver, GuestSelector, HttpPaths};
+use crate::dispatch::{DispatchHandle, FirstArgSelector, GuestSelector};
 use crate::mount::{MountRegistry, ResolvedPreopen};
 use crate::registry::{GuestId, Registry, Routes};
 use crate::telemetry::LogMode;
@@ -62,9 +62,6 @@ pub struct DeploymentBuilder<P = WasmOnly> {
     args: Vec<String>,
     mode: Mode,
     allow_empty: bool,
-    resolver: Option<Arc<dyn GuestResolver>>,
-    http_paths: Option<HttpPaths>,
-    http_listener: Option<std::net::TcpListener>,
     program_name: Option<String>,
     log_mode: Option<LogMode>,
     guest_timeout: Option<Duration>,
@@ -72,7 +69,6 @@ pub struct DeploymentBuilder<P = WasmOnly> {
     policy: PhantomData<fn() -> P>,
 }
 
-// Manual: the resolver and path hook are non-Debug trait objects.
 impl<P> std::fmt::Debug for DeploymentBuilder<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeploymentBuilder")
@@ -80,9 +76,6 @@ impl<P> std::fmt::Debug for DeploymentBuilder<P> {
             .field("args", &self.args)
             .field("mode", &self.mode)
             .field("allow_empty", &self.allow_empty)
-            .field("resolver", &self.resolver.is_some())
-            .field("http_paths", &self.http_paths.is_some())
-            .field("http_listener", &self.http_listener.is_some())
             .field("program_name", &self.program_name)
             .field("log_mode", &self.log_mode)
             .field("guest_timeout", &self.guest_timeout)
@@ -98,9 +91,6 @@ impl Default for DeploymentBuilder<WasmOnly> {
             args: Vec::new(),
             mode: Mode::default(),
             allow_empty: false,
-            resolver: None,
-            http_paths: None,
-            http_listener: None,
             program_name: None,
             log_mode: None,
             guest_timeout: None,
@@ -133,59 +123,16 @@ impl<P> DeploymentBuilder<P> {
     }
 
     /// Mark the deployment as dynamically populated: the guest set may start
-    /// empty and grow at run time via [`Runtime::register`](crate::Runtime::register)
-    /// or resolve-on-miss (see [`resolver`](Self::resolver)).
+    /// empty and grow at run time via
+    /// [`Runtime::register`](crate::Runtime::register).
     ///
     /// This only relaxes the "at least one guest" check — static trigger
     /// routing (HTTP/messaging/websocket/CLI) is built at boot; registered
-    /// guests are reachable via host-mediated link dispatch, host→guest
-    /// [`Dispatcher::invoke`](crate::Dispatcher::invoke), and — when an
-    /// [`http_paths`](Self::http_paths) hook is installed — HTTP requests no
-    /// static route matches.
+    /// guests are reachable via host-mediated link dispatch and host→guest
+    /// [`Dispatcher::invoke`](crate::Dispatcher::invoke).
     #[must_use]
     pub const fn dynamic(mut self) -> Self {
         self.allow_empty = true;
-        self
-    }
-
-    /// Install a [`GuestResolver`] consulted on dispatch-path registry misses
-    /// (resolve-on-miss).
-    #[must_use]
-    pub fn resolver(mut self, resolver: Arc<dyn GuestResolver>) -> Self {
-        self.resolver = Some(resolver);
-        self
-    }
-
-    /// Install the [`HttpPaths`] hook: maps a request path no static route
-    /// matches to a guest identity, which then goes through the ordinary
-    /// lookup (and hence resolve-on-miss). An identity nothing supplies is an
-    /// ordinary 404; a resolution fault or a guest without the handler export
-    /// is a 500.
-    #[must_use]
-    pub fn http_paths<F>(self, hook: F) -> Self
-    where
-        F: Fn(&str) -> Option<GuestId> + Send + Sync + 'static,
-    {
-        self.http_paths_shared(Arc::new(hook))
-    }
-
-    /// [`http_paths`](Self::http_paths) over an already-shared hook —
-    /// the generated entry path carries one, so it installs without another
-    /// closure wrap.
-    pub(crate) fn http_paths_shared(mut self, hook: HttpPaths) -> Self {
-        self.http_paths = Some(hook);
-        self
-    }
-
-    /// Supply a pre-bound TCP listener for the HTTP trigger.
-    ///
-    /// The trigger server adopts it at boot instead of binding `HTTP_ADDR`
-    /// itself, and every guest store sees `HTTP_ADDR` set to the listener's
-    /// local address (overriding any inherited value). Without one, the HTTP
-    /// trigger binds from the `HTTP_ADDR` environment variable as before.
-    #[must_use]
-    pub fn http_listener(mut self, listener: std::net::TcpListener) -> Self {
-        self.http_listener = Some(listener);
         self
     }
 
@@ -265,9 +212,6 @@ impl<P> DeploymentBuilder<P> {
 
         let mut deployment = Deployment::from_plan(plan).await?;
         deployment.name = name;
-        deployment.resolver = self.resolver;
-        deployment.http_paths = self.http_paths;
-        deployment.http_listener = self.http_listener;
         deployment.command_guest = command_guest;
         if let Some(timeout) = self.guest_timeout {
             deployment.options.guest_timeout = timeout;
@@ -297,9 +241,6 @@ impl DeploymentBuilder<WasmOnly> {
             args: self.args,
             mode: self.mode,
             allow_empty: self.allow_empty,
-            resolver: self.resolver,
-            http_paths: self.http_paths,
-            http_listener: self.http_listener,
             program_name: self.program_name,
             log_mode: self.log_mode,
             guest_timeout: self.guest_timeout,
@@ -374,11 +315,6 @@ pub struct Deployment<T: WasiView + 'static> {
     mode: Mode,
     // Whether the guest set may start empty and grow at run time.
     allow_empty: bool,
-    // Resolve-on-miss hooks carried from the builder into `Runtime::new`.
-    resolver: Option<Arc<dyn GuestResolver>>,
-    http_paths: Option<HttpPaths>,
-    // Pre-bound HTTP trigger listener carried from the builder.
-    http_listener: Option<std::net::TcpListener>,
     // Command-mode guest identity derived from the manifest's marked entry.
     command_guest: Option<GuestId>,
 }
@@ -422,9 +358,6 @@ impl<T: WasiView + 'static> Deployment<T> {
             args: Arc::new(args),
             mode: plan.mode,
             allow_empty: plan.allow_empty,
-            resolver: None,
-            http_paths: None,
-            http_listener: None,
             command_guest: None,
         })
     }
@@ -478,21 +411,9 @@ impl<T: WasiView> Deployment<T> {
         &self.args
     }
 
-    /// The builder-carried resolve-on-miss hooks, for `Runtime::new` to
-    /// install before the deployment is consumed into a registry.
-    pub(crate) fn resolve_hooks(&self) -> (Option<Arc<dyn GuestResolver>>, Option<HttpPaths>) {
-        (self.resolver.clone(), self.http_paths.clone())
-    }
-
     /// The manifest-marked command guest identity, if any.
     pub(crate) fn command_guest(&self) -> Option<GuestId> {
         self.command_guest.clone()
-    }
-
-    /// Take the builder-carried pre-bound HTTP listener, for `Runtime::new`
-    /// to carry onto the runtime.
-    pub(crate) const fn take_http_listener(&mut self) -> Option<std::net::TcpListener> {
-        self.http_listener.take()
     }
 
     /// Assemble the guest [`Registry`].

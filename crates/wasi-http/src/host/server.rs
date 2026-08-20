@@ -7,7 +7,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context as TaskContext, Poll};
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
 use http::StatusCode;
 use http::uri::{PathAndQuery, Uri};
@@ -17,7 +17,7 @@ use hyper::body::{Body, Frame, Incoming, SizeHint};
 use hyper::header::{FORWARDED, HOST};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use omnia::{Guest, HttpRoutes, RouteRefusal, RoutingPolicy, Runtime, StoreCtx, TriggerRouter};
+use omnia::{HttpRoutes, Runtime, StoreCtx, TriggerRouter};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
@@ -39,41 +39,18 @@ where
 {
     let component = state.name().to_owned();
 
-    // Adopt the deployment-supplied listener up front, before the inert
-    // check can return: a pre-bound socket must be served or refused loudly,
-    // never parked on the runtime.
-    let supplied = state.take_http_listener();
-
     // Capability probe: a guest exports `wasi:http/incoming-handler` exactly
     // when its typed `ServiceIndices` resolve. The runtime builds the
     // per-guest indices and the router that selects among them once, up
-    // front, under its deployment's routing policy (an installed `http_paths`
-    // hook owns HTTP routing outright, so routing is table-driven only).
+    // front.
     let routing = state.http_trigger_router(ServiceIndices::new)?;
-    // A hook-equipped deployment (`TableOnly`) may start inert and fault
-    // guests in per request; only a deployment with neither routes nor hook
-    // stays quiet.
-    if routing.is_inert() && state.http_routing_policy() == RoutingPolicy::CapabilityDefault {
-        if supplied.is_some() {
-            bail!(
-                "a pre-bound http listener was supplied but no guest exports the http handler; \
-                 refusing to silently drop the socket"
-            );
-        }
+    if routing.is_inert() {
         tracing::info!("no guest exports the http handler; http trigger inert");
         return Ok(());
     }
 
-    // A deployment-supplied listener is authoritative (its local address is
-    // already the guest-visible `HTTP_ADDR`); without one, bind from the
-    // `HTTP_ADDR` environment variable.
-    let listener = if let Some(listener) = supplied {
-        listener.set_nonblocking(true).context("configuring supplied http listener")?;
-        TcpListener::from_std(listener).context("adopting supplied http listener")?
-    } else {
-        let addr = env::var("HTTP_ADDR").unwrap_or_else(|_| HTTP_ADDR.into());
-        TcpListener::bind(&addr).await.with_context(|| format!("binding {addr}"))?
-    };
+    let addr = env::var("HTTP_ADDR").unwrap_or_else(|_| HTTP_ADDR.into());
+    let listener = TcpListener::bind(&addr).await.with_context(|| format!("binding {addr}"))?;
     let addr = listener.local_addr().context("reading http listener address")?;
     tracing::info!("{component} http server listening on: {addr}");
 
@@ -153,44 +130,6 @@ where
     B: Clone + Send + Sync + 'static,
     StoreCtx<B>: WasiHttpView,
 {
-    // Resolve an unrouted path through the runtime's shared late-routing
-    // helper (`Runtime::route_http`: `http_paths` hook → `ensure_guest`,
-    // resolve-on-miss included), then probe request-local handler indices
-    // against the exact `InstancePre` this request instantiates. An `Err`
-    // carries the ready 404/500 response: an unmatched path (no hook, the
-    // hook declined, or the identity is one nothing supplies) is an ordinary
-    // 404, while a claimed path that faults is a deployment fault — an error
-    // + 500, never hidden as a miss.
-    async fn route(
-        &self, path: &str,
-    ) -> std::result::Result<(Arc<Guest<StoreCtx<B>>>, ServiceIndices), hyper::Response<OutgoingBody>>
-    {
-        let guest = match self.state.route_http(path).await {
-            Ok(guest) => guest,
-            Err(RouteRefusal::NotFound) => return Err(not_found()),
-            Err(refusal @ RouteRefusal::Failed(_)) => {
-                let error = anyhow::Error::new(refusal);
-                tracing::error!(path, "claimed http route faulted; returning 500: {error:#}");
-                return Err(internal_error());
-            }
-        };
-        // Belt-and-braces: `ensure_guest` already export-validates both the
-        // resolved and the concurrently registered component, so this arm is
-        // not expected to fire; keep the outcome aligned (error + 500) if it
-        // ever does.
-        let indices = match ServiceIndices::new(guest.instance_pre()) {
-            Ok(indices) => indices,
-            Err(error) => {
-                tracing::error!(
-                    path,
-                    "claimed http route guest lacks the http handler; returning 500: {error:#}"
-                );
-                return Err(internal_error());
-            }
-        };
-        Ok((guest, indices))
-    }
-
     // Forward request to the wasm Guest.
     async fn handle(
         &self, request: hyper::Request<Incoming>,
@@ -207,35 +146,17 @@ where
             }
         };
 
-        // Resolve the guest by request path: a static route hit dispatches
-        // through the boot-built router; a miss consults the deployment's
-        // `http_paths` hook, whose identity goes through `ensure_guest` (and
-        // hence resolve-on-miss) with request-local handler indices probed
-        // against the exact `InstancePre` this request instantiates.
-        let guest;
-        let late_indices;
-        let indices: &ServiceIndices = if let Some((guest_id, indices)) =
-            self.routing.resolve(request.uri().path())
-        {
-            // Static resolution only yields identities drawn from the
-            // registry, so a miss is a lifecycle race (e.g. concurrent
-            // deregistration) — a 500, never a server panic.
-            if let Some(routed) = self.state.registry().get(guest_id) {
-                guest = routed;
-            } else {
-                tracing::error!(guest = %guest_id, "routed guest is not registered; returning 500");
-                return Ok(internal_error());
-            }
-            indices
-        } else {
-            match self.route(request.uri().path()).await {
-                Ok((routed_guest, indices)) => {
-                    guest = routed_guest;
-                    late_indices = indices;
-                    &late_indices
-                }
-                Err(response) => return Ok(response),
-            }
+        // Resolve the guest by request path through the boot-built router; an
+        // unmatched path is an ordinary 404.
+        let Some((guest_id, indices)) = self.routing.resolve(request.uri().path()) else {
+            return Ok(not_found());
+        };
+        // Static resolution only yields identities drawn from the
+        // registry, so a miss is a lifecycle race (e.g. concurrent
+        // deregistration) — a 500, never a server panic.
+        let Some(guest) = self.state.registry().get(guest_id) else {
+            tracing::error!(guest = %guest_id, "routed guest is not registered; returning 500");
+            return Ok(internal_error());
         };
 
         // instantiate the selected guest fresh (instance-per-call)
