@@ -1,9 +1,2 @@
-[registries]
-augentic = { index = "sparse+https://pkgs.dev.azure.com/augentic/_packaging/augentic/Cargo/index/" }
-
 [registry]
-global-credential-providers = [
-  "cargo:macos-keychain",
-  "cargo:token",
-  # "cargo-credential-1password --account augentic.1password.com --vault Augentic",
-]
+global-min-publish-age = "7 days"

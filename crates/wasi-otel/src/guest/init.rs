@@ -56,23 +56,32 @@ pub fn init() -> Result<Option<ExitGuard>> {
     Ok(Some(ExitGuard))
 }
 
+/// Flush and shut down the OpenTelemetry SDK.
+///
+/// Call this before a process exit that bypasses `Drop` (for example
+/// `wasi:cli/exit`). Safe to call when telemetry was never initialized
+/// or has already been shut down.
+pub fn shutdown() {
+    if let Some(tracer_provider) = TRACING.get() {
+        match tracer_provider.shutdown() {
+            Ok(()) | Err(OTelSdkError::AlreadyShutdown) => (),
+            Err(e) => ::tracing::error!("failed to export tracing: {e}"),
+        }
+    }
+    if let Some(meter_provider) = METRICS.get() {
+        match meter_provider.shutdown() {
+            Ok(()) | Err(OTelSdkError::AlreadyShutdown) => (),
+            Err(e) => ::tracing::error!("failed to export metrics: {e}"),
+        }
+    }
+}
+
 /// [`ExitGuard`] provides a guard to export telemetry data on drop.
 pub struct ExitGuard;
 
 impl Drop for ExitGuard {
     fn drop(&mut self) {
-        if let Some(tracer_provider) = TRACING.get() {
-            match tracer_provider.shutdown() {
-                Ok(()) | Err(OTelSdkError::AlreadyShutdown) => (),
-                Err(e) => ::tracing::error!("failed to export tracing: {e}"),
-            }
-        }
-        if let Some(meter_provider) = METRICS.get() {
-            match meter_provider.shutdown() {
-                Ok(()) | Err(OTelSdkError::AlreadyShutdown) => (),
-                Err(e) => ::tracing::error!("failed to export metrics: {e}"),
-            }
-        }
+        shutdown();
     }
 }
 

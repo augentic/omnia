@@ -180,7 +180,7 @@ Messaging uses `api::messaging::Router` and `consume::<Operation>()`; topic matc
 
 ## Command-mode guests
 
-For run-once workloads (jobs, CLIs, agent tasks), use `omnia_guest::api::command` to bind Clap argument types to the same [operation contract](#the-operation-contract). The guest still owns the explicit `wasi:cli/run` export; the adapter writes buffered output and preserves the router's exact exit status:
+For run-once workloads (jobs, CLIs, agent tasks), use `omnia_guest::api::command` to bind Clap argument types to the same [operation contract](#the-operation-contract). The guest still owns the explicit `wasi:cli/run` export; the adapter initializes and flushes guest telemetry, writes buffered output, and preserves the router's exact exit status:
 
 ```rust,noplayground
 use clap::Command;
