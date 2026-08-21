@@ -1,79 +1,71 @@
 //! Errors
 
-use std::fmt;
-
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 /// Result type used across the crate.
-pub type Result<T> = std::result::Result<T, Error>;
-
-/// The protocol mapping of an [`Error`].
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub enum ErrorKind {
-    /// Request payload is invalid or missing required fields.
-    BadRequest,
-    /// Resource or data not found.
-    NotFound,
-    /// A non recoverable internal error occurred.
-    ServerError,
-    /// An upstream dependency failed while fulfilling the request.
-    BadGateway,
-    /// A domain-controlled error carrying a JSON body; the code is the HTTP
-    /// status.
-    Json,
-}
+pub type Result<T> = anyhow::Result<T, Error>;
 
 /// Domain level error type returned by the adapter.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Error {
-    kind: ErrorKind,
-    code: String,
-    description: String,
-    body: Option<serde_json::Value>,
+#[derive(Error, Debug, Clone, Serialize, Deserialize)]
+pub enum Error {
+    /// Request payload is invalid or missing required fields.
+    #[error("code: {code}, description: {description}")]
+    BadRequest {
+        /// The error code.
+        code: String,
+        /// The error description.
+        description: String,
+    },
+
+    /// Resource or data not found.
+    #[error("code: {code}, description: {description}")]
+    NotFound {
+        /// The error code.
+        code: String,
+        /// The error description.
+        description: String,
+    },
+
+    /// A non recoverable internal error occurred.
+    #[error("code: {code}, description: {description}")]
+    ServerError {
+        /// The error code.
+        code: String,
+        /// The error description.
+        description: String,
+    },
+
+    /// An upstream dependency failed while fulfilling the request.
+    #[error("code: {code}, description: {description}")]
+    BadGateway {
+        /// The error code.
+        code: String,
+        /// The error description.
+        description: String,
+    },
+
+    /// A domain-controlled error carrying a JSON body for the error response.
+    #[error("code: {code}")]
+    Json {
+        /// The error code.
+        code: String,
+        /// JSON body rendered in the error response.
+        body: serde_json::Value,
+    },
 }
 
 impl Error {
-    /// Create an error with an explicit code.
-    #[must_use]
-    pub fn new(kind: ErrorKind, code: impl Into<String>, description: impl Into<String>) -> Self {
-        Self {
-            kind,
-            code: code.into(),
-            description: description.into(),
-            body: None,
-        }
-    }
-
-    /// Create a domain-controlled JSON error; `code` is the HTTP status the
-    /// response renders with.
-    #[must_use]
-    pub fn json(code: impl Into<String>, body: serde_json::Value) -> Self {
-        let code = code.into();
-        Self {
-            kind: ErrorKind::Json,
-            description: code.clone(),
-            code,
-            body: Some(body),
-        }
-    }
-
-    /// Returns the protocol mapping of the error.
-    #[must_use]
-    pub const fn kind(&self) -> ErrorKind {
-        self.kind
-    }
-
-    /// Returns the HTTP status code associated with the error.
+    /// Returns the HTTP status code associated with the variant.
     #[must_use]
     pub fn status(&self) -> StatusCode {
-        match self.kind {
-            ErrorKind::BadRequest => StatusCode::BAD_REQUEST,
-            ErrorKind::NotFound => StatusCode::NOT_FOUND,
-            ErrorKind::ServerError => StatusCode::INTERNAL_SERVER_ERROR,
-            ErrorKind::BadGateway => StatusCode::BAD_GATEWAY,
-            ErrorKind::Json => self
-                .code
+        match self {
+            Self::BadRequest { .. } => StatusCode::BAD_REQUEST,
+            Self::NotFound { .. } => StatusCode::NOT_FOUND,
+            Self::ServerError { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::BadGateway { .. } => StatusCode::BAD_GATEWAY,
+            Self::Json { code, .. } => code
                 .parse::<u16>()
                 .ok()
                 .and_then(|n| StatusCode::from_u16(n).ok())
@@ -81,93 +73,131 @@ impl Error {
         }
     }
 
-    /// Returns the error code.
+    /// Returns the error code for the variant.
     #[must_use]
     pub fn code(&self) -> String {
-        self.code.clone()
+        match self {
+            Self::BadRequest { code, .. }
+            | Self::NotFound { code, .. }
+            | Self::ServerError { code, .. }
+            | Self::BadGateway { code, .. }
+            | Self::Json { code, .. } => code.clone(),
+        }
     }
 
     /// Returns the error description.
     #[must_use]
     pub fn description(&self) -> String {
-        self.description.clone()
+        match self {
+            Self::BadRequest { description, .. }
+            | Self::NotFound { description, .. }
+            | Self::ServerError { description, .. }
+            | Self::BadGateway { description, .. } => description.clone(),
+            Self::Json { code, .. } => code.clone(),
+        }
     }
 
-    /// Returns the JSON body of a domain-controlled JSON error.
+    /// Returns the JSON body if this is a `Json` variant.
     #[must_use]
     pub fn json_body(&self) -> Option<serde_json::Value> {
-        self.body.clone()
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.kind == ErrorKind::Json {
-            write!(f, "code: {}", self.code)
-        } else {
-            write!(f, "code: {}, description: {}", self.code, self.description)
+        match self {
+            Self::Json { body, .. } => Some(body.clone()),
+            _ => None,
         }
     }
 }
-
-impl std::error::Error for Error {}
 
 impl From<anyhow::Error> for Error {
     fn from(err: anyhow::Error) -> Self {
         let chain = err.chain().map(ToString::to_string).collect::<Vec<_>>().join(": ");
 
-        // A domain error keeps its kind/code (and JSON body) and gains the
-        // accumulated context as its description.
+        // if type is Error, return it with the newly added context
         if let Some(inner) = err.downcast_ref::<Self>() {
             tracing::debug!("Error: {err}, caused by: {inner}");
-            let mut error = inner.clone();
-            if error.kind != ErrorKind::Json {
-                error.description = chain;
-            }
-            return error;
+
+            return match inner {
+                Self::BadRequest { code, .. } => Self::BadRequest {
+                    code: code.clone(),
+                    description: chain,
+                },
+                Self::NotFound { code, .. } => Self::NotFound {
+                    code: code.clone(),
+                    description: chain,
+                },
+                Self::ServerError { code, .. } => Self::ServerError {
+                    code: code.clone(),
+                    description: chain,
+                },
+                Self::BadGateway { code, .. } => Self::BadGateway {
+                    code: code.clone(),
+                    description: chain,
+                },
+                Self::Json { code, body } => Self::Json {
+                    code: code.clone(),
+                    body: body.clone(),
+                },
+            };
         }
 
-        Self::new(ErrorKind::ServerError, "server_error", chain)
+        // otherwise, return an Internal error
+        Self::ServerError {
+            code: "server_error".to_string(),
+            description: chain,
+        }
     }
 }
 
 impl From<serde_json::Error> for Error {
     fn from(err: serde_json::Error) -> Self {
-        Self::new(ErrorKind::BadRequest, "serde_json", err.to_string())
+        Self::BadRequest {
+            code: "serde_json".to_string(),
+            description: err.to_string(),
+        }
     }
-}
-
-/// Create an [`Error`] of the given [`ErrorKind`] with its conventional code.
-#[doc(hidden)]
-#[macro_export]
-macro_rules! __guest_error {
-    ($kind:ident, $code:literal, $($arg:tt)+) => {
-        $crate::Error::new($crate::ErrorKind::$kind, $code, format!($($arg)+))
-    };
 }
 
 /// Create a new `BadRequest` error.
 #[macro_export]
 macro_rules! bad_request {
-    ($($arg:tt)+) => { $crate::__guest_error!(BadRequest, "bad_request", $($arg)+) };
+    ($fmt:expr, $($arg:tt)*) => {
+        $crate::Error::BadRequest { code: "bad_request".to_string(), description: format!($fmt, $($arg)*) }
+    };
+    ($desc:expr $(,)?) => {
+        $crate::Error::BadRequest { code: "bad_request".to_string(), description: format!($desc) }
+    };
 }
 
 /// Create a new `NotFound` error.
 #[macro_export]
 macro_rules! not_found {
-    ($($arg:tt)+) => { $crate::__guest_error!(NotFound, "not_found", $($arg)+) };
+    ($fmt:expr, $($arg:tt)*) => {
+        $crate::Error::NotFound { code: "not_found".to_string(), description: format!($fmt, $($arg)*) }
+    };
+    ($desc:expr $(,)?) => {
+        $crate::Error::NotFound { code: "not_found".to_string(), description: format!($desc) }
+    };
 }
 
 /// Create a new `ServerError` error.
 #[macro_export]
 macro_rules! server_error {
-    ($($arg:tt)+) => { $crate::__guest_error!(ServerError, "server_error", $($arg)+) };
+    ($fmt:expr, $($arg:tt)*) => {
+        $crate::Error::ServerError { code: "server_error".to_string(), description: format!($fmt, $($arg)*) }
+    };
+     ($err:expr $(,)?) => {
+        $crate::Error::ServerError { code: "server_error".to_string(), description: format!($err) }
+    };
 }
 
 /// Create a new `BadGateway` error.
 #[macro_export]
 macro_rules! bad_gateway {
-    ($($arg:tt)+) => { $crate::__guest_error!(BadGateway, "bad_gateway", $($arg)+) };
+    ($fmt:expr, $($arg:tt)*) => {
+        $crate::Error::BadGateway { code: "bad_gateway".to_string(), description: format!($fmt, $($arg)*) }
+    };
+     ($err:expr $(,)?) => {
+        $crate::Error::BadGateway { code: "bad_gateway".to_string(), description: format!($err) }
+    };
 }
 
 #[cfg(test)]
@@ -239,7 +269,10 @@ mod tests {
 
     #[test]
     fn json_error_derives_status_from_code() {
-        let err = Error::json("422", serde_json::json!({"error": "validation_failed"}));
+        let err = Error::Json {
+            code: "422".to_string(),
+            body: serde_json::json!({"error": "validation_failed"}),
+        };
 
         assert_eq!(err.status(), StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(err.code(), "422");
@@ -248,8 +281,38 @@ mod tests {
 
     #[test]
     fn json_error_invalid_code() {
-        let err = Error::json("not_a_number", serde_json::json!({"error": "oops"}));
+        let err = Error::Json {
+            code: "not_a_number".to_string(),
+            body: serde_json::json!({"error": "oops"}),
+        };
 
         assert_eq!(err.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn json_error_body() {
+        let body = serde_json::json!({"field": "email", "reason": "invalid"});
+        let err = Error::Json {
+            code: "400".to_string(),
+            body: body.clone(),
+        };
+
+        let json = serde_json::to_string(&err).expect("serialize");
+        let deserialized: Error = serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(deserialized.json_body(), Some(body));
+        assert_eq!(deserialized.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn json_error_custom_body() {
+        let custom_body = serde_json::json!({"message": "oops", "field": "id"});
+        let err = Error::Json {
+            code: "409".to_string(),
+            body: custom_body.clone(),
+        };
+
+        assert_eq!(err.json_body(), Some(custom_body));
+        assert_eq!(err.status(), StatusCode::CONFLICT);
     }
 }

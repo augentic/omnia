@@ -61,7 +61,11 @@ impl std::error::Error for DecodeError {}
 
 impl From<DecodeError> for HttpError {
     fn from(error: DecodeError) -> Self {
-        crate::Error::new(crate::ErrorKind::BadRequest, "invalid_request", error.description).into()
+        crate::Error::BadRequest {
+            code: "invalid_request".to_string(),
+            description: error.description,
+        }
+        .into()
     }
 }
 
