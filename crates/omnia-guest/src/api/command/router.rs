@@ -9,6 +9,7 @@ use std::sync::Arc;
 use clap::error::ErrorKind;
 use clap::{Arg, ArgMatches, Args, Command, FromArgMatches};
 use clap_complete::Shell;
+use tracing::Instrument as _;
 
 use super::builder::{Binding, Decoder, Outcome, Projector};
 use super::response::CommandResponse;
@@ -533,7 +534,25 @@ where
     }
 
     /// Parse and execute one argument vector.
+    ///
+    /// Runs under a `command` span carrying the selected route path and
+    /// the response exit code — never the full argv.
     pub async fn execute<I, T>(&self, argv: I) -> CommandResponse
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<std::ffi::OsString>,
+    {
+        let span = tracing::info_span!(
+            "command",
+            command = tracing::field::Empty,
+            exit = tracing::field::Empty,
+        );
+        let response = self.dispatch(argv).instrument(span.clone()).await;
+        span.record("exit", response.exit);
+        response
+    }
+
+    async fn dispatch<I, T>(&self, argv: I) -> CommandResponse
     where
         I: IntoIterator<Item = T>,
         T: Into<std::ffi::OsString>,
@@ -550,6 +569,7 @@ where
             Err(error) => return clap_error(&error),
         };
         let (path, leaf_matches) = selected(&matches);
+        tracing::Span::current().record("command", path.join(" ").as_str());
         if path == [COMPLETIONS] {
             return completion(&self.command, leaf_matches);
         }
@@ -574,7 +594,9 @@ where
 
 /// Execute an explicit command router at the WASI CLI boundary.
 ///
-/// Output is written before a non-zero response exits with its exact status.
+/// Initializes guest telemetry, runs the router, and flushes telemetry
+/// before writing output; a non-zero response then exits with its exact
+/// status.
 ///
 /// # Errors
 ///
@@ -585,14 +607,17 @@ where
     P: Provider,
     G: Args + FromArgMatches + Send + Sync + 'static,
 {
+    let _guard = omnia_wasi_otel::init();
     let argv = wasip3::cli::environment::get_arguments();
     let response = router.execute(argv).await;
+    // `exit-with-code` does not return (analogous to a trap), so no
+    // `Drop` runs past it: flush telemetry as soon as the run completes.
+    omnia_wasi_otel::shutdown();
     if response.write_to(&mut std::io::stdout(), &mut std::io::stderr()).is_err() {
         return Err(());
     }
     if response.exit != 0 {
-        // `exit-with-code` does not return (analogous to a trap), so the
-        // failure is signalled exactly once, through the exit status.
+        // The failure is signalled exactly once, through the exit status.
         wasip3::cli::exit::exit_with_code(response.exit);
     }
     Ok(())
