@@ -7,6 +7,7 @@ mod resource;
 mod store_impl;
 
 mod generated {
+    pub use self::wasi::keyvalue::atomics::CasError;
     pub use self::wasi::keyvalue::store::Error;
     pub use super::{BucketProxy, Cas};
 
@@ -22,6 +23,7 @@ mod generated {
         },
         trappable_error_type: {
             "wasi:keyvalue/store.error" => Error,
+            "wasi:keyvalue/atomics.cas-error" => CasError,
         },
 
     });

@@ -79,7 +79,7 @@ version = "0.6.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.cc]]
-version = "1.4.3"
+version = "1.4.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.chacha20]]
@@ -203,7 +203,7 @@ version = "0.2.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.either]]
-version = "1.17.0"
+version = "1.18.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.email_address]]
@@ -359,7 +359,7 @@ version = "2.3.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.icu_provider]]
-version = "2.3.0"
+version = "2.3.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.id-arena]]
@@ -663,7 +663,7 @@ version = "0.1.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls-webpki]]
-version = "0.103.14"
+version = "0.103.15"
 criteria = "safe-to-deploy"
 
 [[exemptions.same-file]]
@@ -955,11 +955,11 @@ version = "0.2.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.zerovec]]
-version = "0.11.7"
+version = "0.11.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.zerovec-derive]]
-version = "0.11.5"
+version = "0.11.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.zmij]]

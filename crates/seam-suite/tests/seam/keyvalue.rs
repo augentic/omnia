@@ -36,6 +36,45 @@ fn set_then_get() -> Result<()> {
 }
 
 #[test]
+fn cas_then_increment() -> Result<()> {
+    fixture::RT.block_on(async {
+        let fx = fixture::conformance().await?;
+        let key = unique("state-cas");
+        let counter = unique("state-counter");
+
+        // The guest drives `StateStore` through absent-expected cas (create),
+        // matching cas (swap), stale cas (typed `CasError::Conflict` asserted
+        // guest-side and reported here), then increments by 5 and -2.
+        let response =
+            http::post(&fx.runtime, &format!("/state?key={key}&counter={counter}"), "state-seed")
+                .await?;
+        assert!(response.status().is_success(), "guest completes the state legs");
+        let report: serde_json::Value =
+            serde_json::from_slice(response.body()).context("parsing the state report")?;
+        assert_eq!(report["conflict"], "swapped", "the conflict carried the observed value");
+        assert_eq!(report["counter"], 3, "increments sum guest-side");
+
+        // The StateStore defaults act on the `cache` bucket; the stale cas
+        // must have left the matching swap's value in place.
+        let bucket = fx.keyvalue.open_bucket("cache".to_owned()).await.context("open bucket")?;
+        let stored = bucket.get(key).await.context("read state key")?;
+        assert_eq!(
+            stored.as_deref(),
+            Some(b"swapped".as_slice()),
+            "the swap landed and the stale cas changed nothing"
+        );
+        let count = bucket.get(counter).await.context("read counter")?;
+        assert_eq!(
+            count.as_deref(),
+            Some(3_i64.to_be_bytes().as_slice()),
+            "the increments landed host-side"
+        );
+
+        Ok(())
+    })
+}
+
+#[test]
 fn cas_swap() -> Result<()> {
     fixture::RT.block_on(async {
         let fx = fixture::conformance().await?;

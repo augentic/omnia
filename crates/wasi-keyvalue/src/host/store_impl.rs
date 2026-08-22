@@ -56,16 +56,14 @@ impl<T> HostBucketWithStore<T> for WasiKeyValue {
     ) -> Result<KeyResponse> {
         tracing::trace!("store::HostBucket::list_keys {cursor:?}");
         let bucket = get_bucket(accessor, &self_)?;
-        let keys = bucket.keys().await.context("issue getting value")?;
+        let keys = bucket.keys().await.context("issue listing keys")?;
         // `keys()` returns the complete set in one page; echoing the caller's
         // cursor back would signal another page and loop pagination-aware
         // guests forever.
         Ok(KeyResponse { keys, cursor: None })
     }
 
-    fn drop(
-        mut accessor: Access<'_, T, Self>, rep: Resource<BucketProxy>,
-    ) -> std::result::Result<(), wasmtime::Error> {
+    fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<BucketProxy>) -> wasmtime::Result<()> {
         Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }

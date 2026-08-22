@@ -1,4 +1,3 @@
-use anyhow::anyhow;
 use wasmtime::component::{Accessor, Resource};
 
 use crate::WasiKeyValueCtxView;
@@ -40,9 +39,7 @@ impl<T> HostWithStore<T> for WasiKeyValue {
     ) -> Result<()> {
         let bucket = get_bucket(accessor, &bucket)?;
         for key in keys {
-            if let Err(e) = bucket.delete(key).await {
-                return Err(anyhow!("issue deleting value: {e}").into());
-            }
+            bucket.delete(key).await?;
         }
         Ok(())
     }

@@ -135,7 +135,7 @@ pub trait HasTable {
 /// store.
 pub fn get_cloned<T, D, R>(
     accessor: &Accessor<T, D>, resource: &Resource<R>,
-) -> std::result::Result<R, ResourceTableError>
+) -> Result<R, ResourceTableError>
 where
     D: HasData,
     for<'a> D::Data<'a>: HasTable,

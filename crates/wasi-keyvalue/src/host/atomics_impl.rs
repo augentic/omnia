@@ -1,3 +1,6 @@
+use std::future::{self, Future};
+use std::sync::Arc;
+
 use anyhow::Context;
 use wasmtime::component::{Access, Accessor, Resource};
 
@@ -11,84 +14,31 @@ use crate::host::store_impl::get_bucket;
 use crate::host::{Result, WasiKeyValue};
 
 impl<T> HostWithStore<T> for WasiKeyValue {
-    /// Atomically increment the value associated with the key in the store by
-    /// the given delta. It returns the new value.
-    ///
-    /// If the key does not exist in the store, it creates a new key-value pair
-    /// with the value set to the given delta.
-    ///
-    /// If any other error occurs, it returns an `Err(error)`.
     async fn increment(
         accessor: &Accessor<T, Self>, bucket: Resource<BucketProxy>, key: String, delta: i64,
     ) -> Result<i64> {
         let bucket = get_bucket(accessor, &bucket)?;
-
-        // Prefer the backend's native atomic increment when it has one.
-        if let Some(native) = bucket.increment(key.clone(), delta) {
-            return Ok(native.await.context("issue incrementing value")?);
-        }
-
-        // Fallback: read-modify-write (racy under concurrent writers; see
-        // `Bucket::increment`). A missing key starts from zero, so the
-        // increment creates it at `delta`.
-        let base = match bucket.get(key.clone()).await.context("issue getting value")? {
-            None => 0,
-            Some(value) => {
-                let bytes: [u8; 8] = value.as_slice().try_into().map_err(|_len_mismatch| {
-                    anyhow::anyhow!(
-                        "value at `{key}` is {} bytes, not an 8-byte big-endian integer",
-                        value.len()
-                    )
-                })?;
-                i64::from_be_bytes(bytes)
-            }
-        };
-        let inc = base
-            .checked_add(delta)
-            .with_context(|| format!("incrementing `{key}` by {delta} overflows i64"))?;
-
-        bucket.set(key, inc.to_be_bytes().to_vec()).await.context("issue saving increment")?;
-        Ok(inc)
+        Ok(bucket.increment(key, delta).await.context("issue incrementing value")?)
     }
 
-    /// Perform the swap on a CAS operation. This consumes the CAS handle and
-    /// returns an error if the CAS operation failed.
-    ///
-    /// The default is read-compare-set on the [`crate::Bucket`] trait; backends
-    /// with a native compare-and-swap primitive can tighten the race window by
-    /// versioning inside their `Bucket` implementation.
     async fn swap(
         accessor: &Accessor<T, Self>, cas: Resource<Cas>, value: Vec<u8>,
-    ) -> anyhow::Result<anyhow::Result<(), CasError>, wasmtime::Error> {
-        // The WIT consumes the handle, so remove it from the table up front.
+    ) -> std::result::Result<(), CasError> {
         let cas = accessor.with(|mut store| store.get().table.delete(cas))?;
+        let bucket = Arc::clone(&cas.bucket);
 
-        let observed = match cas.bucket.get(cas.key.clone()).await {
-            Ok(observed) => observed,
-            Err(error) => return Ok(Err(CasError::StoreError(Error::from(error)))),
-        };
-        if observed != cas.current {
-            // Stale snapshot: hand back a fresh handle at the latest value so
-            // the guest can retry, as the WIT contract requires.
-            let fresh = Cas {
-                bucket: cas.bucket,
-                key: cas.key,
-                current: observed,
-            };
-            let resource = accessor.with(|mut store| store.get().table.push(fresh))?;
-            return Ok(Err(CasError::CasFailed(resource)));
-        }
-
-        match cas.bucket.set(cas.key, value).await {
-            Ok(()) => Ok(Ok(())),
-            Err(error) => Ok(Err(CasError::StoreError(Error::from(error)))),
+        match bucket.swap(cas, value).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(fresh)) => {
+                let resource = accessor.with(|mut store| store.get().table.push(fresh))?;
+                Err(CasError::CasFailed(resource))
+            }
+            Err(error) => Err(error.into()),
         }
     }
 }
 
 impl<T> HostCasWithStore<T> for WasiKeyValue {
-    /// Construct a new CAS operation. Implementors can map the underlying functionality
-    /// (transactions, versions, etc) as desired.
     async fn new(
         accessor: &Accessor<T, Self>, bucket: Resource<BucketProxy>, key: String,
     ) -> Result<Resource<Cas>> {
@@ -102,26 +52,39 @@ impl<T> HostCasWithStore<T> for WasiKeyValue {
         Ok(accessor.with(|mut store| store.get().table.push(cas))?)
     }
 
-    /// Get the current value of the CAS handle.
     fn current(
         accessor: &Accessor<T, Self>, self_: Resource<Cas>,
-    ) -> impl std::future::Future<Output = Result<Option<Vec<u8>>>> {
-        std::future::ready(
-            accessor
-                .with(|mut store| {
-                    let cas = store.get().table.get(&self_).map_err(|_e| Error::NoSuchStore)?;
-                    Ok::<_, Error>(cas.clone())
-                })
-                .map(|cas| cas.current),
-        )
+    ) -> impl Future<Output = Result<Option<Vec<u8>>>> {
+        future::ready(accessor.with(|mut store| {
+            store
+                .get()
+                .table
+                .get(&self_)
+                .map(|cas| cas.current.clone())
+                .map_err(|_stale| Error::NoSuchStore)
+        }))
     }
 
-    /// Drop the CAS handle.
     fn drop(mut accessor: Access<'_, T, Self>, rep: Resource<Cas>) -> wasmtime::Result<()> {
-        tracing::trace!("atomics::HostCas::drop");
         Ok(accessor.get().table.delete(rep).map(|_| ())?)
     }
 }
 
-impl Host for WasiKeyValueCtxView<'_> {}
+impl From<anyhow::Error> for CasError {
+    fn from(err: anyhow::Error) -> Self {
+        Self::StoreError(Error::from(err))
+    }
+}
+
+impl From<wasmtime::component::ResourceTableError> for CasError {
+    fn from(err: wasmtime::component::ResourceTableError) -> Self {
+        Self::StoreError(Error::from(err))
+    }
+}
+
+impl Host for WasiKeyValueCtxView<'_> {
+    fn convert_cas_error(&mut self, err: CasError) -> wasmtime::Result<CasError> {
+        Ok(err)
+    }
+}
 impl HostCas for WasiKeyValueCtxView<'_> {}

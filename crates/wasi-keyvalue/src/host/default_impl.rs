@@ -2,23 +2,25 @@
 //!
 //! This is a lightweight implementation for development use only.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, Weak};
 
-use anyhow::Result;
+use anyhow::{Context as _, Result, anyhow};
 use futures::FutureExt;
 use moka::sync::Cache;
 use omnia::Backend;
 use tracing::instrument;
 
 use crate::host::WasiKeyValueCtx;
-use crate::host::resource::{Bucket, FutureResult};
+use crate::host::resource::{Bucket, Cas, FutureResult};
 
 type BucketCache = Cache<String, Vec<u8>>;
+type KeyLocks = Arc<Mutex<HashMap<String, Weak<Mutex<()>>>>>;
 
 /// Default implementation for `wasi:keyvalue`.
 #[derive(Clone)]
 pub struct KeyValueDefault {
-    store: Cache<String, BucketCache>,
+    store: Cache<String, InMemBucket>,
 }
 
 impl std::fmt::Debug for KeyValueDefault {
@@ -43,12 +45,13 @@ impl WasiKeyValueCtx for KeyValueDefault {
     fn open_bucket(&self, identifier: String) -> FutureResult<Arc<dyn Bucket>> {
         tracing::debug!("opening bucket: {identifier}");
 
-        let cache = self.store.get_with(identifier.clone(), || Cache::builder().build());
-
-        let bucket = InMemBucket {
+        // The lock registry lives with the bucket identity so every handle to
+        // the same bucket serializes writes and atomics on the same locks.
+        let bucket = self.store.get_with(identifier.clone(), || InMemBucket {
             name: identifier,
-            cache,
-        };
+            cache: Cache::builder().build(),
+            locks: Arc::default(),
+        });
 
         async move { Ok(Arc::new(bucket) as Arc<dyn Bucket>) }.boxed()
     }
@@ -58,11 +61,32 @@ impl WasiKeyValueCtx for KeyValueDefault {
 struct InMemBucket {
     name: String,
     cache: BucketCache,
+    locks: KeyLocks,
 }
 
 impl std::fmt::Debug for InMemBucket {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InMemBucket").field("name", &self.name).finish_non_exhaustive()
+    }
+}
+
+impl InMemBucket {
+    /// Per-key mutex so writes and atomics serialize per key, not per bucket.
+    ///
+    /// The registry stores [`Weak`] refs so unused keys do not keep a mutex
+    /// alive. Entries are never removed while a strong ref exists: dropping
+    /// them from the map would let a concurrent `key_lock` install a second
+    /// mutex for the same key, and `set` / `increment` / `swap` could then
+    /// interleave.
+    fn key_lock(&self, key: &str) -> Arc<Mutex<()>> {
+        let mut locks = self.locks.lock().expect("lock registry poisoned");
+        if let Some(existing) = locks.get(key).and_then(Weak::upgrade) {
+            return existing;
+        }
+        locks.retain(|_, weak| weak.strong_count() > 0);
+        let lock = Arc::new(Mutex::new(()));
+        locks.insert(key.to_string(), Arc::downgrade(&lock));
+        lock
     }
 }
 
@@ -75,12 +99,16 @@ impl Bucket for InMemBucket {
 
     fn set(&self, key: String, value: Vec<u8>) -> FutureResult<()> {
         tracing::debug!("setting key: {key} in bucket: {}", self.name);
+        let lock = self.key_lock(&key);
+        let _guard = lock.lock().expect("key lock poisoned");
         self.cache.insert(key, value);
         async move { Ok(()) }.boxed()
     }
 
     fn delete(&self, key: String) -> FutureResult<()> {
         tracing::debug!("deleting key: {key} from bucket: {}", self.name);
+        let lock = self.key_lock(&key);
+        let _guard = lock.lock().expect("key lock poisoned");
         self.cache.invalidate(&key);
         async move { Ok(()) }.boxed()
     }
@@ -96,4 +124,57 @@ impl Bucket for InMemBucket {
         let keys = self.cache.iter().map(|(k, _)| (*k).clone()).collect();
         async move { Ok(keys) }.boxed()
     }
+
+    fn increment(&self, key: String, delta: i64) -> FutureResult<i64> {
+        tracing::debug!("incrementing key: {key} in bucket: {}", self.name);
+
+        let lock = self.key_lock(&key);
+        let result = (|| {
+            let _guard = lock.lock().expect("key lock poisoned");
+            let incremented = add_i64(self.cache.get(&key).as_deref(), delta)
+                .with_context(|| format!("incrementing `{key}` by {delta}"))?;
+            self.cache.insert(key, encode_i64(incremented));
+            Ok(incremented)
+        })();
+
+        async move { result }.boxed()
+    }
+
+    fn swap(&self, cas: Cas, value: Vec<u8>) -> FutureResult<Result<(), Cas>> {
+        tracing::debug!("swapping key: {} in bucket: {}", cas.key, self.name);
+
+        let lock = self.key_lock(&cas.key);
+        let result = {
+            let _guard = lock.lock().expect("key lock poisoned");
+            let observed = self.cache.get(&cas.key);
+            if observed == cas.current {
+                self.cache.insert(cas.key, value);
+                Ok(())
+            } else {
+                Err(Cas {
+                    current: observed,
+                    ..cas
+                })
+            }
+        };
+
+        async move { Ok(result) }.boxed()
+    }
+}
+
+fn add_i64(current: Option<&[u8]>, delta: i64) -> anyhow::Result<i64> {
+    let base = match current {
+        None => 0,
+        Some(value) => {
+            let bytes: [u8; 8] = value.try_into().map_err(|_len| {
+                anyhow!("value is {} bytes, not an 8-byte big-endian integer", value.len())
+            })?;
+            i64::from_be_bytes(bytes)
+        }
+    };
+    base.checked_add(delta).context("adding delta overflows i64")
+}
+
+fn encode_i64(value: i64) -> Vec<u8> {
+    value.to_be_bytes().to_vec()
 }

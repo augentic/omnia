@@ -57,15 +57,14 @@ impl Cache {
     pub async fn set(
         &self, key: &str, value: &[u8], ttl_secs: Option<u64>,
     ) -> Result<Option<Vec<u8>>> {
-        let value = if let Some(ttl) = ttl_secs.map(|secs| Duration::seconds(secs.cast_signed())) {
-            let envelope = Cacheable::new(value, ttl);
-            &<Cacheable as TryInto<Vec<u8>>>::try_into(envelope)?
+        let stored = if let Some(ttl) = ttl_secs.map(|secs| Duration::seconds(secs.cast_signed())) {
+            Cacheable::new(value, ttl).try_into()?
         } else {
-            value
+            value.to_vec()
         };
 
         let previous = self.get(key).await?;
-        self.bucket.set(key.to_string(), value.to_vec()).await.context("setting state with ttl")?;
+        self.bucket.set(key.to_string(), stored).await.context("setting state with ttl")?;
 
         Ok(previous)
     }

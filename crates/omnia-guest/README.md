@@ -85,7 +85,7 @@ The guest crate exposes trait-based abstractions for host capabilities. When com
 | `Config` | Read configuration values from the host. |
 | `HttpRequest` | Make outbound HTTP requests. |
 | `Publish` | Publish messages to a topic. |
-| `StateStore` | Get/set/delete key-value state with optional TTL. |
+| `StateStore` | Get/set/delete key-value state with optional TTL, plus one-shot `cas` (conflict is a typed `CasError::Conflict`) and atomic `increment`. |
 | `Identity` | Obtain access tokens from an identity provider. |
 | `TableStore` | Execute SQL queries and statements via the ORM layer. |
 | `Broadcast` | Send events over WebSocket channels. |
