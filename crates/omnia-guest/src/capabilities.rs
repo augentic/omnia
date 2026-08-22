@@ -29,6 +29,6 @@ pub use messaging::{Message, Publish};
 pub use model::Model;
 #[cfg(target_arch = "wasm32")]
 pub use model::WasiModel;
-pub use state::StateStore;
+pub use state::{CasError, StateStore};
 #[cfg(feature = "orm")]
 pub use table::TableStore;

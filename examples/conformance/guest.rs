@@ -17,7 +17,7 @@ use bytes::Bytes;
 use omnia_guest::document_store::{
     Document as DocDocument, Filter as DocFilter, QueryOptions as DocQueryOptions, SortField,
 };
-use omnia_guest::{BlobStore, DocumentStore, HttpResult};
+use omnia_guest::{BlobStore, CasError as StateCasError, DocumentStore, HttpResult, StateStore};
 use omnia_wasi_config::store as config_store;
 use omnia_wasi_identity::credentials::get_identity;
 use omnia_wasi_keyvalue::atomics::{self, Cas, CasError};
@@ -45,6 +45,7 @@ impl Guest for Http {
             .route("/echo", post(echo))
             .route("/proxy", post(proxy))
             .route("/keyvalue", post(keyvalue_round_trip))
+            .route("/state", post(state_atomics))
             .route("/blobstore", post(blobstore_round_trip))
             .route("/config", get(config_get_all))
             .route("/identity", get(identity_token))
@@ -151,6 +152,46 @@ async fn keyvalue_round_trip(
     }
 
     Ok(Json(json!({ "message": "keyvalue ok" })))
+}
+
+// --- omnia_guest::StateStore (one-shot cas + increment atomics) ---
+
+#[derive(Debug, Deserialize)]
+struct StateParams {
+    key: String,
+    counter: String,
+}
+
+omnia_guest::provider! {
+    struct StateProvider: StateStore;
+}
+
+#[omnia_wasi_otel::instrument]
+async fn state_atomics(Query(p): Query<StateParams>, body: Bytes) -> HttpResult<Json<Value>> {
+    let provider = StateProvider;
+
+    // Absent-expected cas creates the key.
+    provider.cas(&p.key, None, &body).await.context("absent-expected cas")?;
+
+    // Matching-expected cas swaps.
+    provider.cas(&p.key, Some(body.as_ref()), b"swapped").await.context("matching cas")?;
+
+    // Stale-expected cas is one-shot: no retry, just the typed conflict
+    // carrying the observed value.
+    let observed = match provider.cas(&p.key, Some(b"stale"), b"must-not-land").await {
+        Ok(()) => Err(anyhow!("stale cas unexpectedly succeeded"))?,
+        Err(StateCasError::Conflict(observed)) => observed,
+        Err(e @ StateCasError::Store(_)) => Err(anyhow!("stale cas failed on the store: {e}"))?,
+    };
+
+    provider.increment(&p.counter, 5).await.context("first increment")?;
+    let counter = provider.increment(&p.counter, -2).await.context("second increment")?;
+
+    Ok(Json(json!({
+        "message": "state ok",
+        "conflict": observed.map(|bytes| String::from_utf8_lossy(&bytes).into_owned()),
+        "counter": counter,
+    })))
 }
 
 // --- wasi:blobstore (capability write, then read back) ---
