@@ -46,7 +46,7 @@ impl WasiKeyValueCtx for KeyValueDefault {
         tracing::debug!("opening bucket: {identifier}");
 
         // The lock registry lives with the bucket identity so every handle to
-        // the same bucket serializes its atomic operations on the same locks.
+        // the same bucket serializes writes and atomics on the same locks.
         let bucket = self.store.get_with(identifier.clone(), || InMemBucket {
             name: identifier,
             cache: Cache::builder().build(),
@@ -71,7 +71,7 @@ impl std::fmt::Debug for InMemBucket {
 }
 
 impl InMemBucket {
-    /// Per-key mutex so atomic operations serialize per key, not per bucket.
+    /// Per-key mutex so writes and atomics serialize per key, not per bucket.
     fn key_lock(&self, key: &str) -> Arc<Mutex<()>> {
         let mut locks = self.locks.lock().expect("lock registry poisoned");
         Arc::clone(locks.entry(key.to_string()).or_default())
@@ -87,13 +87,18 @@ impl Bucket for InMemBucket {
 
     fn set(&self, key: String, value: Vec<u8>) -> FutureResult<()> {
         tracing::debug!("setting key: {key} in bucket: {}", self.name);
+        let lock = self.key_lock(&key);
+        let _guard = lock.lock().expect("key lock poisoned");
         self.cache.insert(key, value);
         async move { Ok(()) }.boxed()
     }
 
     fn delete(&self, key: String) -> FutureResult<()> {
         tracing::debug!("deleting key: {key} from bucket: {}", self.name);
+        let lock = self.key_lock(&key);
+        let _guard = lock.lock().expect("key lock poisoned");
         self.cache.invalidate(&key);
+        self.locks.lock().expect("lock registry poisoned").remove(&key);
         async move { Ok(()) }.boxed()
     }
 
@@ -115,22 +120,9 @@ impl Bucket for InMemBucket {
         let lock = self.key_lock(&key);
         let result = (|| {
             let _guard = lock.lock().expect("key lock poisoned");
-            let base = match self.cache.get(&key) {
-                None => 0,
-                Some(value) => {
-                    let bytes: [u8; 8] = value.as_slice().try_into().map_err(|_len_mismatch| {
-                        anyhow!(
-                            "value at `{key}` is {} bytes, not an 8-byte big-endian integer",
-                            value.len()
-                        )
-                    })?;
-                    i64::from_be_bytes(bytes)
-                }
-            };
-            let incremented = base
-                .checked_add(delta)
-                .with_context(|| format!("incrementing `{key}` by {delta} overflows i64"))?;
-            self.cache.insert(key, incremented.to_be_bytes().to_vec());
+            let incremented = add_i64(self.cache.get(&key).as_deref(), delta)
+                .with_context(|| format!("incrementing `{key}` by {delta}"))?;
+            self.cache.insert(key, encode_i64(incremented));
             Ok(incremented)
         })();
 
@@ -157,4 +149,21 @@ impl Bucket for InMemBucket {
 
         async move { Ok(result) }.boxed()
     }
+}
+
+fn add_i64(current: Option<&[u8]>, delta: i64) -> anyhow::Result<i64> {
+    let base = match current {
+        None => 0,
+        Some(value) => {
+            let bytes: [u8; 8] = value.try_into().map_err(|_len| {
+                anyhow!("value is {} bytes, not an 8-byte big-endian integer", value.len())
+            })?;
+            i64::from_be_bytes(bytes)
+        }
+    };
+    base.checked_add(delta).context("adding delta overflows i64")
+}
+
+fn encode_i64(value: i64) -> Vec<u8> {
+    value.to_be_bytes().to_vec()
 }

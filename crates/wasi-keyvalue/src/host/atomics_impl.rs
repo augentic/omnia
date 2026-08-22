@@ -23,18 +23,17 @@ impl<T> HostWithStore<T> for WasiKeyValue {
 
     async fn swap(
         accessor: &Accessor<T, Self>, cas: Resource<Cas>, value: Vec<u8>,
-    ) -> wasmtime::Result<std::result::Result<(), CasError>> {
+    ) -> std::result::Result<(), CasError> {
         let cas = accessor.with(|mut store| store.get().table.delete(cas))?;
         let bucket = Arc::clone(&cas.bucket);
 
         match bucket.swap(cas, value).await {
-            Ok(Ok(())) => Ok(Ok(())),
+            Ok(Ok(())) => Ok(()),
             Ok(Err(fresh)) => {
-                // stale entry: return a refreshed entry so guest can retry
                 let resource = accessor.with(|mut store| store.get().table.push(fresh))?;
-                Ok(Err(CasError::CasFailed(resource)))
+                Err(CasError::CasFailed(resource))
             }
-            Err(error) => Ok(Err(CasError::StoreError(Error::from(error)))),
+            Err(error) => Err(error.into()),
         }
     }
 }
@@ -71,5 +70,21 @@ impl<T> HostCasWithStore<T> for WasiKeyValue {
     }
 }
 
-impl Host for WasiKeyValueCtxView<'_> {}
+impl From<anyhow::Error> for CasError {
+    fn from(err: anyhow::Error) -> Self {
+        Self::StoreError(Error::from(err))
+    }
+}
+
+impl From<wasmtime::component::ResourceTableError> for CasError {
+    fn from(err: wasmtime::component::ResourceTableError) -> Self {
+        Self::StoreError(Error::from(err))
+    }
+}
+
+impl Host for WasiKeyValueCtxView<'_> {
+    fn convert_cas_error(&mut self, err: CasError) -> wasmtime::Result<CasError> {
+        Ok(err)
+    }
+}
 impl HostCas for WasiKeyValueCtxView<'_> {}
