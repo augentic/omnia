@@ -2,23 +2,25 @@
 //!
 //! This is a lightweight implementation for development use only.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
-use anyhow::Result;
+use anyhow::{Context as _, Result, anyhow};
 use futures::FutureExt;
 use moka::sync::Cache;
 use omnia::Backend;
 use tracing::instrument;
 
 use crate::host::WasiKeyValueCtx;
-use crate::host::resource::{Bucket, FutureResult};
+use crate::host::resource::{Bucket, Cas, FutureResult};
 
 type BucketCache = Cache<String, Vec<u8>>;
+type KeyLocks = Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>;
 
 /// Default implementation for `wasi:keyvalue`.
 #[derive(Clone)]
 pub struct KeyValueDefault {
-    store: Cache<String, BucketCache>,
+    store: Cache<String, InMemBucket>,
 }
 
 impl std::fmt::Debug for KeyValueDefault {
@@ -43,12 +45,13 @@ impl WasiKeyValueCtx for KeyValueDefault {
     fn open_bucket(&self, identifier: String) -> FutureResult<Arc<dyn Bucket>> {
         tracing::debug!("opening bucket: {identifier}");
 
-        let cache = self.store.get_with(identifier.clone(), || Cache::builder().build());
-
-        let bucket = InMemBucket {
+        // The lock registry lives with the bucket identity so every handle to
+        // the same bucket serializes its atomic operations on the same locks.
+        let bucket = self.store.get_with(identifier.clone(), || InMemBucket {
             name: identifier,
-            cache,
-        };
+            cache: Cache::builder().build(),
+            locks: Arc::default(),
+        });
 
         async move { Ok(Arc::new(bucket) as Arc<dyn Bucket>) }.boxed()
     }
@@ -58,11 +61,20 @@ impl WasiKeyValueCtx for KeyValueDefault {
 struct InMemBucket {
     name: String,
     cache: BucketCache,
+    locks: KeyLocks,
 }
 
 impl std::fmt::Debug for InMemBucket {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InMemBucket").field("name", &self.name).finish_non_exhaustive()
+    }
+}
+
+impl InMemBucket {
+    /// Per-key mutex so atomic operations serialize per key, not per bucket.
+    fn key_lock(&self, key: &str) -> Arc<Mutex<()>> {
+        let mut locks = self.locks.lock().expect("lock registry poisoned");
+        Arc::clone(locks.entry(key.to_string()).or_default())
     }
 }
 
@@ -95,5 +107,54 @@ impl Bucket for InMemBucket {
         tracing::debug!("listing keys in bucket: {}", self.name);
         let keys = self.cache.iter().map(|(k, _)| (*k).clone()).collect();
         async move { Ok(keys) }.boxed()
+    }
+
+    fn increment(&self, key: String, delta: i64) -> FutureResult<i64> {
+        tracing::debug!("incrementing key: {key} in bucket: {}", self.name);
+
+        let lock = self.key_lock(&key);
+        let result = (|| {
+            let _guard = lock.lock().expect("key lock poisoned");
+            let base = match self.cache.get(&key) {
+                None => 0,
+                Some(value) => {
+                    let bytes: [u8; 8] = value.as_slice().try_into().map_err(|_len_mismatch| {
+                        anyhow!(
+                            "value at `{key}` is {} bytes, not an 8-byte big-endian integer",
+                            value.len()
+                        )
+                    })?;
+                    i64::from_be_bytes(bytes)
+                }
+            };
+            let incremented = base
+                .checked_add(delta)
+                .with_context(|| format!("incrementing `{key}` by {delta} overflows i64"))?;
+            self.cache.insert(key, incremented.to_be_bytes().to_vec());
+            Ok(incremented)
+        })();
+
+        async move { result }.boxed()
+    }
+
+    fn swap(&self, cas: Cas, value: Vec<u8>) -> FutureResult<Result<(), Cas>> {
+        tracing::debug!("swapping key: {} in bucket: {}", cas.key, self.name);
+
+        let lock = self.key_lock(&cas.key);
+        let result = {
+            let _guard = lock.lock().expect("key lock poisoned");
+            let observed = self.cache.get(&cas.key);
+            if observed == cas.current {
+                self.cache.insert(cas.key, value);
+                Ok(())
+            } else {
+                Err(Cas {
+                    current: observed,
+                    ..cas
+                })
+            }
+        };
+
+        async move { Ok(result) }.boxed()
     }
 }

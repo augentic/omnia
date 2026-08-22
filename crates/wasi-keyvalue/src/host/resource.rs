@@ -22,15 +22,11 @@ pub trait Bucket: Debug + Send + Sync + 'static {
     fn keys(&self) -> FutureResult<Vec<String>>;
 
     /// Native atomic increment, if the backend has one (e.g. Redis `INCRBY`).
-    ///
-    /// The default returns `None`, making the host fall back to a
-    /// read-modify-write over `get`/`set` — racy under concurrent writers, so
-    /// backends that can honor the `atomics` contract natively should
-    /// override this.
-    fn increment(&self, key: String, delta: i64) -> Option<FutureResult<i64>> {
-        let _ = (key, delta);
-        None
-    }
+    fn increment(&self, key: String, delta: i64) -> FutureResult<i64>;
+
+    /// Atomic swap while the value still matches the handle's snapshot; a
+    /// stale handle returns refreshed at the observed value.
+    fn swap(&self, cas: Cas, value: Vec<u8>) -> FutureResult<Result<(), Cas>>;
 }
 
 /// Proxy for a Key-Value bucket.
