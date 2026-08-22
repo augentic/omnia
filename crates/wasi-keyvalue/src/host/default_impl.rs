@@ -3,7 +3,7 @@
 //! This is a lightweight implementation for development use only.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use anyhow::{Context as _, Result, anyhow};
 use futures::FutureExt;
@@ -15,7 +15,7 @@ use crate::host::WasiKeyValueCtx;
 use crate::host::resource::{Bucket, Cas, FutureResult};
 
 type BucketCache = Cache<String, Vec<u8>>;
-type KeyLocks = Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>;
+type KeyLocks = Arc<Mutex<HashMap<String, Weak<Mutex<()>>>>>;
 
 /// Default implementation for `wasi:keyvalue`.
 #[derive(Clone)]
@@ -72,9 +72,21 @@ impl std::fmt::Debug for InMemBucket {
 
 impl InMemBucket {
     /// Per-key mutex so writes and atomics serialize per key, not per bucket.
+    ///
+    /// The registry stores [`Weak`] refs so unused keys do not keep a mutex
+    /// alive. Entries are never removed while a strong ref exists: dropping
+    /// them from the map would let a concurrent `key_lock` install a second
+    /// mutex for the same key, and `set` / `increment` / `swap` could then
+    /// interleave.
     fn key_lock(&self, key: &str) -> Arc<Mutex<()>> {
         let mut locks = self.locks.lock().expect("lock registry poisoned");
-        Arc::clone(locks.entry(key.to_string()).or_default())
+        if let Some(existing) = locks.get(key).and_then(Weak::upgrade) {
+            return existing;
+        }
+        locks.retain(|_, weak| weak.strong_count() > 0);
+        let lock = Arc::new(Mutex::new(()));
+        locks.insert(key.to_string(), Arc::downgrade(&lock));
+        lock
     }
 }
 
@@ -98,7 +110,6 @@ impl Bucket for InMemBucket {
         let lock = self.key_lock(&key);
         let _guard = lock.lock().expect("key lock poisoned");
         self.cache.invalidate(&key);
-        self.locks.lock().expect("lock registry poisoned").remove(&key);
         async move { Ok(()) }.boxed()
     }
 
