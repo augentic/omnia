@@ -114,21 +114,88 @@ pub struct HttpError {
     content_type: Option<HeaderValue>,
 }
 
-impl From<crate::Error> for HttpError {
-    fn from(error: crate::Error) -> Self {
-        if let Some(body) = error.json_body() {
-            return Self {
-                status: error.status(),
-                error: serde_json::to_string(&body).unwrap_or_else(|_| error.to_string()),
-                content_type: Some(HeaderValue::from_static("application/json")),
-            };
-        }
-
+impl HttpError {
+    /// Create a plain-text HTTP error without a content type.
+    #[must_use]
+    pub fn new(status: StatusCode, message: impl Into<String>) -> Self {
         Self {
-            status: error.status(),
-            error: error.to_string(),
+            status,
+            error: message.into(),
             content_type: None,
         }
+    }
+
+    /// Create an HTTP error with a JSON body.
+    ///
+    /// On encode failure, the body is the serializer error's [`Display`](fmt::Display) string.
+    #[must_use]
+    pub fn json(status: StatusCode, body: &impl Serialize) -> Self {
+        Self {
+            status,
+            error: serde_json::to_string(body).unwrap_or_else(|error| error.to_string()),
+            content_type: Some(HeaderValue::from_static("application/json")),
+        }
+    }
+}
+
+/// An HTTP error with a JSON body.
+///
+/// # Examples
+///
+/// ```
+/// use http::StatusCode;
+/// use omnia_guest::api::{CallContext, JsonError, Operation};
+/// use serde_json::json;
+///
+/// struct Reject;
+///
+/// impl Operation<()> for Reject {
+///     type Input = ();
+///     type Output = ();
+///     type Error = JsonError;
+///
+///     async fn call(
+///         _input: Self::Input,
+///         _context: CallContext<'_, ()>,
+///     ) -> Result<Self::Output, Self::Error> {
+///         Err(JsonError::new(
+///             StatusCode::UNPROCESSABLE_ENTITY,
+///             json!({"field": "email", "reason": "invalid"}),
+///         ))
+///     }
+/// }
+/// ```
+#[derive(Debug)]
+pub struct JsonError {
+    status: StatusCode,
+    body: serde_json::Value,
+}
+
+impl JsonError {
+    /// Create a JSON-bodied HTTP error.
+    #[must_use]
+    pub const fn new(status: StatusCode, body: serde_json::Value) -> Self {
+        Self { status, body }
+    }
+}
+
+impl fmt::Display for JsonError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.body)
+    }
+}
+
+impl std::error::Error for JsonError {}
+
+impl From<JsonError> for HttpError {
+    fn from(error: JsonError) -> Self {
+        Self::json(error.status, &error.body)
+    }
+}
+
+impl From<crate::Error> for HttpError {
+    fn from(error: crate::Error) -> Self {
+        Self::new(error.status(), error.to_string())
     }
 }
 
@@ -139,11 +206,10 @@ impl From<anyhow::Error> for HttpError {
             return Self::from(error);
         }
 
-        Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            error: format!("{error}, caused by: {}", error.root_cause()),
-            content_type: None,
-        }
+        Self::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("{error}, caused by: {}", error.root_cause()),
+        )
     }
 }
 
@@ -385,4 +451,40 @@ fn body_input<T: DeserializeOwned>(params: &RawPathParams, body: &[u8]) -> Resul
         object.insert(key.to_owned(), serde_json::Value::String(param.to_owned()));
     }
     serde_json::from_value(value).map_err(|error| invalid(format!("invalid request body: {error}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use http::{HeaderValue, StatusCode};
+    use serde_json::json;
+
+    use super::{HttpError, JsonError};
+
+    #[test]
+    fn json_sets_status_body_and_content_type() {
+        let error = HttpError::json(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &json!({"field": "email", "reason": "invalid"}),
+        );
+
+        assert_eq!(error.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(error.error.as_bytes(), br#"{"field":"email","reason":"invalid"}"#);
+        assert_eq!(
+            error.content_type.as_ref(),
+            Some(&HeaderValue::from_static("application/json"))
+        );
+    }
+
+    #[test]
+    fn json_error_converts_to_http_error() {
+        let error =
+            HttpError::from(JsonError::new(StatusCode::CONFLICT, json!({"message": "duplicate"})));
+
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert_eq!(error.error.as_bytes(), br#"{"message":"duplicate"}"#);
+        assert_eq!(
+            error.content_type.as_ref(),
+            Some(&HeaderValue::from_static("application/json"))
+        );
+    }
 }

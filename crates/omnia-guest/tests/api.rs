@@ -263,6 +263,38 @@ async fn projector() {
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 }
 
+struct Reject;
+
+impl<P: Provider> Operation<P> for Reject {
+    type Error = omnia_guest::JsonError;
+    type Input = EchoInput;
+    type Output = EchoOutput;
+
+    fn call(
+        _input: Self::Input, _context: CallContext<'_, P>,
+    ) -> impl std::future::Future<Output = Result<Self::Output, Self::Error>> + Send {
+        std::future::ready(Err(omnia_guest::JsonError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            serde_json::json!({"field": "email", "reason": "invalid"}),
+        )))
+    }
+}
+
+#[tokio::test]
+async fn json_error() {
+    let router =
+        Router::new(Invoker::new("test", ())).route("/reject", get::<Reject, ()>()).into_axum();
+    let request =
+        Request::builder().uri("/reject?name=custom").body(Body::empty()).expect("build request");
+    let response = router.oneshot(request).await.expect("router serves request");
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.expect("collect body");
+    let value: serde_json::Value = serde_json::from_slice(&bytes).expect("decode JSON body");
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(value, serde_json::json!({"field": "email", "reason": "invalid"}));
+}
+
 #[tokio::test]
 async fn route_state_clones_share_provider() {
     let router = Router::new(Invoker::new(
