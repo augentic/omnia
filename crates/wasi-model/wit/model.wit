@@ -138,21 +138,6 @@ interface completion {
         mcp(mcp),
     }
 
-    // YAGNI (Tier 1): no backend maps a tool-choice policy onto its provider
-    // (genai and cursor both ignore it), so both the variant and the
-    // `request.tool-choice` field below are commented out until one does.
-    // /// Tool selection policy (`tool_choice` in provider APIs).
-    // variant tool-choice {
-    //     /// Provider selects whether to call tools.
-    //     auto,
-    //     /// Do not call tools.
-    //     none,
-    //     /// Must call at least one tool.
-    //     required,
-    //     /// Must call the named tool.
-    //     named(string),
-    // }
-
     /// One lent workspace: an authorized mount root plus a relative
     /// subpath scoping the lend to a directory beneath it.
     record workspace-grant {
@@ -218,19 +203,6 @@ interface completion {
         usage: option<usage>,
     }
 
-    // YAGNI (Tier 1): no backend streams yet, so `create-stream` and its `event`
-    // variant are commented out until one does (the host stub only ever returned
-    // `backend("streaming unsupported")`).
-    // /// Incremental output from `create-stream`.
-    // variant event {
-    //     /// Token or fragment; diagnostic only, not validated until `done`.
-    //     delta(string),
-    //     /// Terminal success — the same validated `reply` as `create` would return.
-    //     done(reply),
-    //     /// Terminal failure mid-stream.
-    //     failed(error),
-    // }
-
     /// One tool invocation the model asks the guest to run.
     record tool-call {
         /// Correlation id: models issue parallel calls and the results stream
@@ -283,6 +255,34 @@ interface completion {
     /// keeps the writer, and passes the readable end; the host returns the
     /// `calls` stream and the `reply` future.
     create: async func(request: request, results: stream<tool-result>) -> result<session, error>;
+
+    // YAGNI (Tier 1): no backend maps a tool-choice policy onto its provider
+    // (genai and cursor both ignore it), so both the variant and the
+    // `request.tool-choice` field below are commented out until one does.
+    // /// Tool selection policy (`tool_choice` in provider APIs).
+    // variant tool-choice {
+    //     /// Provider selects whether to call tools.
+    //     auto,
+    //     /// Do not call tools.
+    //     none,
+    //     /// Must call at least one tool.
+    //     required,
+    //     /// Must call the named tool.
+    //     named(string),
+    // }
+
+    // YAGNI (Tier 1): no backend streams yet, so `create-stream` and its `event`
+    // variant are commented out until one does (the host stub only ever returned
+    // `backend("streaming unsupported")`).
+    // /// Incremental output from `create-stream`.
+    // variant event {
+    //     /// Token or fragment; diagnostic only, not validated until `done`.
+    //     delta(string),
+    //     /// Terminal success — the same validated `reply` as `create` would return.
+    //     done(reply),
+    //     /// Terminal failure mid-stream.
+    //     failed(error),
+    // }
 
     // YAGNI (Tier 1): see the `event` variant above.
     // /// Streaming completion over the same `request`. Read until `done` or `failed`.
