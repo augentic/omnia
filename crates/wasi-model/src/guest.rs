@@ -1,9 +1,10 @@
 //! # WASI Model Guest
 //!
 //! Guest-side bindings for the `omnia:model` world. A guest imports
-//! `omnia:model/completion` and calls `create`. A structured prompt template
-//! is assembled into the request's `system` / `messages` channels with
-//! [`crate::prompt::Sections`] before the call.
+//! `omnia:model/completion` and calls `create` with a guest-created results
+//! stream, receiving the session's calls stream and reply future back. A
+//! structured prompt template is assembled into the request's `system` /
+//! `messages` channels with [`crate::prompt::Sections`] before the call.
 
 mod model {
     #![allow(missing_docs)]
@@ -20,6 +21,7 @@ mod model {
 
 use self::model::omnia::model::completion::{Message, Role};
 pub use self::model::omnia::model::*;
+pub use self::model::{wit_future, wit_stream};
 
 impl crate::prompt::Sections {
     /// Assemble the template into the request's chat channels: the system

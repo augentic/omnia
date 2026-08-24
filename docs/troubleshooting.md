@@ -128,19 +128,11 @@ or for your own guest, the plain two-step: `cargo build --example <name>-wasm --
 
 Intentional: the Nextest default filter (`.config/nextest.toml`) excludes `omnia-seam-suite` from the process-per-test pure tier. Run the seam tier with `cargo make test-seam` (one process, shared fixtures) — see [Seam Suite and Testing Policy](guides/testing-policy.md).
 
-### `model script exhausted` in a test
-
-The `Scripted` double received more completions than it has scripted results — see [Model completions](#model-script-exhausted) below.
-
 ## Model completions
 
 ### `the default echo backend cannot satisfy format::schema`
 
-The runtime is serving `wasi-model` with the echo `ModelDefault`, which answers text/json completions with the prompt itself but cannot fabricate a value conforming to a guest-supplied JSON Schema. Bind a real backend (`omnia-genai`, `omnia-cursor`) in `runtime!`, or inject `omnia_testkit::model::Scripted` in tests.
-
-### `model script exhausted`
-
-The testkit `Scripted` double received more completions than it has scripted results. Script one result per expected `create` call (`Scripted::json`, `Scripted::answers`, ...), and remember clones share the same FIFO.
+The runtime is serving `wasi-model` with the echo `ModelDefault`, which answers text/json completions with the prompt itself but cannot fabricate a value conforming to a guest-supplied JSON Schema. Bind a real backend (`omnia-genai`, `omnia-cursor`) in `runtime!`, or define an inline canned `WasiModelCtx` in tests (see [the testing guide](guides/testing.md#testing-model-guests)).
 
 ### `invalid-request` errors
 

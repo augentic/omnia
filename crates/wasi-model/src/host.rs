@@ -1,11 +1,13 @@
 //! Host side of the `omnia:model/completion` boundary. Follows the shared
 //! host-crate shape (see `wasi-keyvalue`), adding a per-completion [`ToolHost`]
-//! that the `create` binding assembles from the store's mounts and dispatcher.
+//! that the `create` binding assembles from the store's mounts and the
+//! session channels it mints for the completion.
 
 mod answer;
 mod default_impl;
 mod gate;
 mod model_impl;
+mod session;
 mod types;
 mod workspace;
 
@@ -32,9 +34,10 @@ mod generated {
 
 use std::fmt::Debug;
 use std::sync::Arc;
+use std::time::Duration;
 
 pub use omnia::FutureResult;
-use omnia::{HasDispatcher, HasMounts, Host, Server};
+use omnia::{HasMounts, Host, Server};
 use wasmtime::component::{HasData, Linker};
 
 pub use self::default_impl::ModelDefault;
@@ -44,7 +47,7 @@ pub use self::generated::omnia::model::completion::{
     Effort, Error, Format, Function, Generation, Grants, Mcp, Message, Reply, Request, Role,
     Schema, Tool, WorkspaceGrant,
 };
-pub use self::types::{Answer, DirEntry, Reference, ToolTurn, Transcript, Usage};
+pub use self::types::{Answer, DirEntry, ToolTurn, Transcript, Usage};
 
 /// Host-side service for `wasi-model` (a linked-only effect host).
 #[derive(Debug)]
@@ -56,7 +59,7 @@ impl HasData for WasiModel {
 
 impl<T> Host<T> for WasiModel
 where
-    T: WasiModelView + HasMounts + HasDispatcher + 'static,
+    T: WasiModelView + HasMounts + 'static,
 {
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
         Ok(completion::add_to_linker::<_, Self>(linker, T::model)?)
@@ -65,6 +68,28 @@ where
 
 impl<B> Server<B> for WasiModel {}
 
+/// Session bounds the host enforces per completion, in `wasi-model`,
+/// regardless of backend.
+#[derive(Clone, Copy, Debug)]
+pub struct SessionLimits {
+    /// Tool calls one completion may issue before `budget-exhausted`.
+    pub max_tool_calls: u32,
+    /// Byte cap on a single tool result's output.
+    pub max_result_bytes: usize,
+    /// How long the host waits for the guest to answer one tool call.
+    pub tool_timeout: Duration,
+}
+
+impl Default for SessionLimits {
+    fn default() -> Self {
+        Self {
+            max_tool_calls: 32,
+            max_result_bytes: 1 << 20,
+            tool_timeout: Duration::from_secs(60),
+        }
+    }
+}
+
 /// The backend trait — the one place a provider's logic lives.
 pub trait WasiModelCtx: Debug + Send + Sync + 'static {
     /// Produce an answer for the gate-validated `request`, optionally lending
@@ -72,6 +97,12 @@ pub trait WasiModelCtx: Debug + Send + Sync + 'static {
     /// tool loop. The host has already taken the lent `grants.workspace`
     /// borrow, so it is always `None` here.
     fn complete(&self, request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer>;
+
+    /// Session bounds the host enforces for this backend's completions;
+    /// override to tighten (test probes shrink them).
+    fn limits(&self) -> SessionLimits {
+        SessionLimits::default()
+    }
 }
 
 /// Forward the backend trait.
@@ -79,12 +110,20 @@ impl WasiModelCtx for Box<dyn WasiModelCtx> {
     fn complete(&self, request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
         (**self).complete(request, tool_host)
     }
+
+    fn limits(&self) -> SessionLimits {
+        (**self).limits()
+    }
 }
 
 /// Host-side capabilities for one completion, lent to backends that need them.
 pub trait ToolHost: Send + Sync {
-    /// Host-mediated dynamic linking into the adapter's `references` export.
-    fn resolve(&self, reference: Reference) -> FutureResult<Vec<u8>>;
+    /// Run one declared function tool through the completion's session: the
+    /// guest's tool closure answers. The outer error is a hard host failure
+    /// (undeclared tool, exhausted budget, closed session, oversize result,
+    /// timeout); the inner `Err` is the tool's own model-visible failure
+    /// text, fed back to the model as repairable content.
+    fn call_tool(&self, name: String, arguments: String) -> FutureResult<Result<String, String>>;
 
     /// Bounded workspace read via the lent `wasi:filesystem` capability.
     fn read(&self, path: String) -> FutureResult<Vec<u8>>;

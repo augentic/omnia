@@ -57,7 +57,6 @@ The unit-test surface was audited against the seam tier with a `cargo llvm-cov` 
 | `omnia/src/registry/routing.rs` | Keep | Pure route-table matching logic |
 | `wasi-model` `answer.rs` / `gate.rs` / `prompt.rs` | Keep | Pure parser / validation / string composition |
 | `host-macros` | Keep | Token expansion snapshots; macros cannot cross a seam |
-| `testkit/tests/model.rs` | Keep | Pins the `Scripted` test double's own contract |
 | `omnia-guest` (all modules) | Keep | Guest-side carve-out: `llvm-cov` cannot instrument the guest `.wasm` |
 
 Rerun the coverage diff once per release as the drift check: any host-side line reachable only from a unit test is either a new keeper (annotate it) or a migration candidate.

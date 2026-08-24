@@ -82,6 +82,5 @@ From the grants, the host — never the guest or backend — merges these tools 
 | Backend | Location | Notes |
 | ------- | -------- | ----- |
 | `ModelDefault` | in-tree (`wasi-model`) | Deterministic echo: text/json answer with the prompt; `format::schema` errors |
-| `Scripted` | in-tree (`omnia-testkit`) | FIFO of scripted answers for tests and examples; never runs tools |
 | `omnia-genai` | omnia-backends repo | Provider APIs in-process; function tools + injected `resolve`; no MCP |
 | `omnia-cursor` | omnia-backends repo | Spawned `cursor-agent`; requires workspace grant; MCP via `.cursor/mcp.json`; 120s default timeout |

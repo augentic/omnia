@@ -5,8 +5,8 @@
 //! prompt assembly can be smoke-tested with no live model. `format::schema`
 //! cannot be satisfied by an echo (no fabricated value can conform to an
 //! arbitrary guest schema), so those completions fail loud. Deployments bind
-//! a real backend (`omnia-genai`, `omnia-cursor`); tests inject
-//! `omnia-testkit`'s scripted double.
+//! a real backend (`omnia-genai`, `omnia-cursor`); tests define inline
+//! canned `WasiModelCtx` impls that return a fixed answer.
 
 use std::fmt::Debug;
 use std::sync::Arc;

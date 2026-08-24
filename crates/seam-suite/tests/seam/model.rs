@@ -4,7 +4,7 @@
 //! the guest's `wasi:cli/run` export across the real WIT boundary. It proves
 //! the Layer 1 invariant end-to-end:
 //!
-//! 1. **scripted** — the testkit `Scripted` double serves a canned, validated
+//! 1. **canned** — an inline `Canned` backend serves a fixed, validated
 //!    answer for the guest with no live model at all;
 //! 2. **echo default** — `ModelDefault` connects with zero configuration and
 //!    echoes text/json prompts, but rejects `format::schema` (the example
@@ -23,10 +23,10 @@ use omnia::{
     Backend, Deployment, DeploymentBuilder, GuestId, Manifest, MountRegistry, Registry,
     ResolvedPreopen, Runtime, StoreBase, StoreCtx, WrpcState,
 };
-use omnia_testkit::model::Scripted;
 use omnia_testkit::{find_guest, temp_manifest};
 use omnia_wasi_model::{
-    Answer, FutureResult, HasModel, ModelDefault, Request, ToolHost, WasiModel, WasiModelCtx,
+    Answer, FutureResult, HasModel, ModelDefault, Request, SessionLimits, Tool, ToolHost,
+    WasiModel, WasiModelCtx,
 };
 use serde_json::{Value, json};
 use tokio::sync::OnceCell;
@@ -89,7 +89,7 @@ fn model_runtime(
 /// A single read-only workspace mount named `.` over a fresh temp directory —
 /// the shape `omnia.toml`'s `[[mount]]` resolves to. The example guest reads it
 /// via `preopens.get-directories()` and lends it through `grants.workspace`.
-/// The scripted double ignores the request; any real directory serves.
+/// The canned backend ignores the request; any real directory serves.
 fn workspace_mount() -> (PathBuf, Arc<MountRegistry>) {
     workspace_mount_at("ws")
 }
@@ -137,7 +137,12 @@ async fn build_registry() -> Result<Arc<Registry<TestCtx>>> {
 
 /// Instantiate the guest fresh, drive `wasi:cli/run`, and return stdout.
 async fn call_run(runtime: &Runtime<TestBundle>) -> Result<String> {
-    call_run_preopening(runtime, None).await
+    call_scenario(runtime, "default").await
+}
+
+/// [`call_run`] selecting a guest scenario via its CLI argument.
+async fn call_scenario(runtime: &Runtime<TestBundle>, scenario: &str) -> Result<String> {
+    call_run_with(runtime, scenario, None).await
 }
 
 /// [`call_run`] preopening `preopens` into the guest instead of the runtime's
@@ -146,6 +151,12 @@ async fn call_run(runtime: &Runtime<TestBundle>) -> Result<String> {
 /// registry).
 async fn call_run_preopening(
     runtime: &Runtime<TestBundle>, preopens: Option<Arc<MountRegistry>>,
+) -> Result<String> {
+    call_run_with(runtime, "default", preopens).await
+}
+
+async fn call_run_with(
+    runtime: &Runtime<TestBundle>, scenario: &str, preopens: Option<Arc<MountRegistry>>,
 ) -> Result<String> {
     let guest =
         runtime.registry().get(&GuestId::from("model")).context("model guest is registered")?;
@@ -161,7 +172,7 @@ async fn call_run_preopening(
         .inherit_stdin()
         .stdout(stdout)
         .stderr(tokio::io::stderr())
-        .args(&["model" as &str]);
+        .args(&["model", scenario]);
     for entry in preopens.entries() {
         wasi_builder
             .preopened_dir(&entry.host_path, &entry.name, entry.dir_perms, entry.file_perms)
@@ -206,10 +217,25 @@ async fn call_run_preopening(
     String::from_utf8(output.to_vec()).context("guest stdout is utf-8")
 }
 
-// The scripted double serves a canned answer, so the completion round-trips
+/// A backend that answers every completion with one fixed JSON value.
+#[derive(Clone, Debug)]
+struct Canned(Value);
+
+impl WasiModelCtx for Canned {
+    fn complete(&self, _request: Request, _tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
+        let answer = Answer {
+            value: self.0.clone(),
+            usage: None,
+            transcript: None,
+        };
+        async move { Ok(answer) }.boxed()
+    }
+}
+
+// The canned backend serves a fixed answer, so the completion round-trips
 // with no network.
 #[test]
-fn scripted() -> Result<()> {
+fn canned() -> Result<()> {
     fixture::RT.block_on(async {
         let registry = registry().await?;
 
@@ -220,23 +246,23 @@ fn scripted() -> Result<()> {
         // resolves the lent descriptor back to this mount by identity.
         let (_mount_dir, mounts) = workspace_mount();
 
-        let backend = Scripted::json(expected.clone());
+        let backend = Canned(expected.clone());
         let runtime = model_runtime(
             Arc::clone(registry),
             Arc::new(move || Box::new(backend.clone())),
             mounts,
         );
 
-        let answer = call_run(&runtime).await.context("driving the scripted backend")?;
+        let answer = call_run(&runtime).await.context("driving the canned backend")?;
         let parsed: Value = serde_json::from_str(&answer)
             .with_context(|| format!("answer should be JSON, got: {answer}"))?;
-        assert_eq!(parsed, expected, "the scripted answer round-trips to the guest");
+        assert_eq!(parsed, expected, "the canned answer round-trips to the guest");
 
         Ok(())
     })
 }
 
-/// The answer the scripted backend serves — the value the guest must print.
+/// The answer the canned backend serves — the value the guest must print.
 fn answer() -> Value {
     json!({ "verdict": "pass", "reason": "the bounds check is correct" })
 }
@@ -339,7 +365,7 @@ fn out_of_scope_workspace() -> Result<()> {
         let (_authorized, mounts) = workspace_mount_at("scope-ok");
         let (_lent, lent) = workspace_mount_at("scope-bad");
 
-        let backend = Scripted::json(answer());
+        let backend = Canned(answer());
         let runtime = model_runtime(
             Arc::clone(registry),
             Arc::new(move || Box::new(backend.clone())),
@@ -398,6 +424,374 @@ fn readonly_write_denied() -> Result<()> {
             "the denial names the read-only mount: {value}"
         );
         assert!(!mount_dir.join("probe.txt").exists(), "no file lands on a denied write");
+
+        Ok(())
+    })
+}
+
+// -- Tool-session scenarios: probe backends drive `ToolHost::call_tool`
+// -- against the scenario-selected guest.
+
+type Events = Arc<std::sync::Mutex<Vec<String>>>;
+
+fn push(events: &Events, event: String) {
+    events.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(event);
+}
+
+fn drain(events: &Events) -> Vec<String> {
+    events.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+}
+
+/// Build a `model_runtime` over a probe backend with a plain workspace mount
+/// (the tool scenarios lend nothing; the mount only satisfies the fixture).
+fn probe_runtime<P>(registry: &Arc<Registry<TestCtx>>, label: &str, probe: P) -> Runtime<TestBundle>
+where
+    P: WasiModelCtx + Clone,
+{
+    let (_dir, mounts) = workspace_mount_at(label);
+    model_runtime(Arc::clone(registry), Arc::new(move || Box::new(probe.clone())), mounts)
+}
+
+/// One `call_tool` round trip: the guest's `complete_with` closure answers
+/// over its own locals and the reply embeds the result.
+#[derive(Debug, Clone)]
+struct ToolOnceProbe;
+
+impl WasiModelCtx for ToolOnceProbe {
+    fn complete(&self, request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
+        async move {
+            anyhow::ensure!(
+                request.tools.iter().any(|tool| matches!(
+                    tool,
+                    Tool::Function(function) if function.name == "lookup"
+                )),
+                "the request advertises the guest's declared function tool"
+            );
+            let value = tool_host
+                .call_tool("lookup".to_owned(), "k1".to_owned())
+                .await?
+                .map_err(|failure| anyhow::anyhow!("tool failed: {failure}"))?;
+            Ok(Answer {
+                value: json!({ "verdict": "pass", "tool": value }),
+                usage: None,
+                transcript: None,
+            })
+        }
+        .boxed()
+    }
+}
+
+#[test]
+fn tool_round_trip() -> Result<()> {
+    fixture::RT.block_on(async {
+        let registry = registry().await?;
+        let runtime = probe_runtime(registry, "tool-once", ToolOnceProbe);
+
+        let output = call_scenario(&runtime, "round_trip").await?;
+        let value: Value = serde_json::from_str(&output)
+            .with_context(|| format!("reply should be JSON, got: {output}"))?;
+        assert_eq!(
+            value,
+            json!({ "verdict": "pass", "tool": "v1" }),
+            "the guest closure's shelf value rides back through the reply"
+        );
+
+        Ok(())
+    })
+}
+
+/// Three concurrent calls; the guest batches them and answers in reverse, so
+/// results correlate by id, not order.
+#[derive(Debug, Clone)]
+struct ParallelProbe;
+
+impl WasiModelCtx for ParallelProbe {
+    fn complete(&self, _request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
+        async move {
+            let (a, b, c) = futures::join!(
+                tool_host.call_tool("echo".to_owned(), "a".to_owned()),
+                tool_host.call_tool("echo".to_owned(), "b".to_owned()),
+                tool_host.call_tool("echo".to_owned(), "c".to_owned()),
+            );
+            for (argument, outcome) in [("a", a), ("b", b), ("c", c)] {
+                let value = outcome?.map_err(|failure| anyhow::anyhow!("tool: {failure}"))?;
+                anyhow::ensure!(
+                    value == format!("echo:{argument}"),
+                    "result for `{argument}` correlates by id, got `{value}`"
+                );
+            }
+            Ok(Answer {
+                value: json!({ "verdict": "parallel" }),
+                usage: None,
+                transcript: None,
+            })
+        }
+        .boxed()
+    }
+}
+
+#[test]
+fn parallel_calls() -> Result<()> {
+    fixture::RT.block_on(async {
+        let registry = registry().await?;
+        let runtime = probe_runtime(registry, "parallel", ParallelProbe);
+
+        let output = call_scenario(&runtime, "parallel").await?;
+        assert_eq!(
+            output.matches("answered:").count(),
+            3,
+            "the guest answers all three batched calls: {output}"
+        );
+        assert!(
+            output.contains("calls-closed") && output.contains("reply-ok:"),
+            "reversed answers still satisfy the probe: {output}"
+        );
+
+        Ok(())
+    })
+}
+
+/// The guest drops its calls reader and reply future mid-loop. The probe's
+/// in-flight work is structurally cancelled (or its next call hard-fails,
+/// whichever the guest's drops reach first) and the session shuts down — the
+/// guest observes the end via a rejected results write, so nothing hangs.
+#[derive(Debug, Clone)]
+struct DropProbe {
+    events: Events,
+}
+
+/// Logs `cancelled` if the probe future is dropped before completing.
+struct CancelLog {
+    events: Events,
+    armed: bool,
+}
+
+impl Drop for CancelLog {
+    fn drop(&mut self) {
+        if self.armed {
+            push(&self.events, "cancelled".to_owned());
+        }
+    }
+}
+
+impl WasiModelCtx for DropProbe {
+    fn complete(&self, _request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
+        let events = Arc::clone(&self.events);
+        async move {
+            let mut guard = CancelLog {
+                events: Arc::clone(&events),
+                armed: true,
+            };
+            let first = tool_host.call_tool("echo".to_owned(), "one".to_owned()).await;
+            push(
+                &events,
+                match &first {
+                    Ok(Ok(value)) => format!("first-ok:{value}"),
+                    other => format!("first-unexpected:{other:?}"),
+                },
+            );
+            let second = tool_host.call_tool("echo".to_owned(), "two".to_owned()).await;
+            guard.armed = false;
+            match second {
+                Err(error) => {
+                    push(&events, format!("second-err:{error:#}"));
+                    Err(error)
+                }
+                Ok(inner) => {
+                    push(&events, format!("second-ok:{inner:?}"));
+                    anyhow::bail!("the dropped session must fail the second call")
+                }
+            }
+        }
+        .boxed()
+    }
+}
+
+#[test]
+fn guest_drops_session() -> Result<()> {
+    fixture::RT.block_on(async {
+        let registry = registry().await?;
+        let events: Events = Arc::default();
+        let probe = DropProbe {
+            events: Arc::clone(&events),
+        };
+        let runtime = probe_runtime(registry, "drops", probe);
+
+        let output = call_scenario(&runtime, "drops_session").await?;
+        assert!(
+            output.contains("dropped-session") && output.contains("host-acked-via-results-reject"),
+            "the guest observes the session's end after dropping its ends: {output}"
+        );
+
+        let events = drain(&events);
+        assert_eq!(
+            events.first().map(String::as_str),
+            Some("first-ok:echo:one"),
+            "the first call completes before the drop: {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| event.starts_with("second-err:") || event == "cancelled"),
+            "the drop fails the next call or cancels the backend — no leaked waiter: {events:?}"
+        );
+
+        Ok(())
+    })
+}
+
+/// The guest closes its results stream with a call pending: the call
+/// hard-fails and the reply still resolves with a typed error.
+#[derive(Debug, Clone)]
+struct PendingCallProbe;
+
+impl WasiModelCtx for PendingCallProbe {
+    fn complete(&self, _request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
+        async move {
+            match tool_host.call_tool("echo".to_owned(), "one".to_owned()).await {
+                Err(error) => Err(error),
+                Ok(inner) => anyhow::bail!("the pending call must hard-fail, got {inner:?}"),
+            }
+        }
+        .boxed()
+    }
+}
+
+#[test]
+fn guest_closes_results_early() -> Result<()> {
+    fixture::RT.block_on(async {
+        let registry = registry().await?;
+        let runtime = probe_runtime(registry, "closes", PendingCallProbe);
+
+        let output = call_scenario(&runtime, "closes_results").await?;
+        assert!(
+            output.contains("results-writer-dropped") && output.contains("calls-closed"),
+            "the calls stream closes after the guest drops its writer: {output}"
+        );
+        assert!(
+            output.contains("reply-err:") && output.contains("closed its results stream"),
+            "the reply resolves with a typed error naming the closed stream: {output}"
+        );
+
+        Ok(())
+    })
+}
+
+/// Loops `call_tool` until the host's per-completion budget trips.
+#[derive(Debug, Clone)]
+struct BudgetProbe;
+
+impl WasiModelCtx for BudgetProbe {
+    fn complete(&self, _request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
+        async move {
+            for turn in 0..16 {
+                tool_host
+                    .call_tool("echo".to_owned(), turn.to_string())
+                    .await?
+                    .map_err(|failure| anyhow::anyhow!("tool: {failure}"))?;
+            }
+            anyhow::bail!("the budget must trip before 16 calls")
+        }
+        .boxed()
+    }
+
+    fn limits(&self) -> SessionLimits {
+        SessionLimits {
+            max_tool_calls: 2,
+            ..SessionLimits::default()
+        }
+    }
+}
+
+#[test]
+fn budget_exhausted() -> Result<()> {
+    fixture::RT.block_on(async {
+        let registry = registry().await?;
+        let runtime = probe_runtime(registry, "budget", BudgetProbe);
+
+        let output = call_scenario(&runtime, "budget").await?;
+        assert!(
+            output.contains("BudgetExhausted") && output.contains("budget of 2 exhausted"),
+            "the reply carries the typed budget failure: {output}"
+        );
+
+        Ok(())
+    })
+}
+
+/// One call whose result blows the byte cap: the typed failure wins over the
+/// tool's own output.
+#[derive(Debug, Clone)]
+struct OversizeProbe;
+
+impl WasiModelCtx for OversizeProbe {
+    fn complete(&self, _request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
+        async move {
+            match tool_host.call_tool("blob".to_owned(), "{}".to_owned()).await {
+                Err(error) => Err(error),
+                Ok(inner) => anyhow::bail!("the oversize result must hard-fail, got {inner:?}"),
+            }
+        }
+        .boxed()
+    }
+
+    fn limits(&self) -> SessionLimits {
+        SessionLimits {
+            max_result_bytes: 256,
+            ..SessionLimits::default()
+        }
+    }
+}
+
+#[test]
+fn oversize_result() -> Result<()> {
+    fixture::RT.block_on(async {
+        let registry = registry().await?;
+        let runtime = probe_runtime(registry, "oversize", OversizeProbe);
+
+        let output = call_scenario(&runtime, "oversize").await?;
+        assert!(
+            output.contains("ToolFailed") && output.contains("exceeds the 256-byte cap"),
+            "the reply carries the typed size-cap failure: {output}"
+        );
+
+        Ok(())
+    })
+}
+
+/// A call the guest never answers: the host's per-call timeout ends the
+/// session with a typed error instead of hanging the completion.
+#[derive(Debug, Clone)]
+struct StallProbe;
+
+impl WasiModelCtx for StallProbe {
+    fn complete(&self, _request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
+        async move {
+            match tool_host.call_tool("echo".to_owned(), "one".to_owned()).await {
+                Err(error) => Err(error),
+                Ok(inner) => anyhow::bail!("the stalled call must time out, got {inner:?}"),
+            }
+        }
+        .boxed()
+    }
+
+    fn limits(&self) -> SessionLimits {
+        SessionLimits {
+            tool_timeout: std::time::Duration::from_millis(250),
+            ..SessionLimits::default()
+        }
+    }
+}
+
+#[test]
+fn stalled_handler() -> Result<()> {
+    fixture::RT.block_on(async {
+        let registry = registry().await?;
+        let runtime = probe_runtime(registry, "stall", StallProbe);
+
+        let output = call_scenario(&runtime, "stall").await?;
+        assert!(
+            output.contains("received:") && output.contains("got no result within"),
+            "the reply carries the typed timeout failure: {output}"
+        );
 
         Ok(())
     })

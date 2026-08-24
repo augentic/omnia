@@ -52,24 +52,30 @@ Anything that crosses a WASI interface belongs at the seam, not in a unit test w
 - **`single_guest(file, bundle)`** — assembles a single-guest deployment over a backend bundle: `single_guest("x_wasm.wasm", bundle).await?.host::<WasiHttp>()?...into_runtime()?`.
 - **`temp_manifest(toml)`** — writes a deployment manifest to a unique temp file, removed on drop, for tests that need multi-guest deployments, routes, or mounts.
 - **`http`** — drives a guest's `wasi:http/handler` export in-process, with no TCP socket, e.g. `http::post(&runtime, "/", body)`.
-- **`model`** — model doubles serving both faces of the `wasi-model` boundary.
 
-### Testing model-consuming logic
+### Testing model guests
 
-`model::Scripted` returns FIFO successes or typed errors:
+There is no shared model double: each test defines the backend it needs, inline, next to the test (see `crates/seam-suite/tests/seam/model.rs` for the pattern — a canned happy-path backend alongside purpose-built probes like `PathProbe` and `WriteProbe`). The in-tree echo `ModelDefault` covers scenarios where the answer does not matter, or where its schema rejection is itself under test. A canned backend answering every completion with one fixed value is all the happy path needs:
 
 ```rust,noplayground
-use omnia_guest::model::{Model, Request};
-use omnia_testkit::model::Scripted;
+use std::sync::Arc;
 
-let model = Scripted::answers(["first", "second"]);
-let first = model.create(Request::default()).await?;
-assert_eq!(first.answer, "first");
+use futures::FutureExt as _;
+use omnia_wasi_model::{Answer, FutureResult, Request, ToolHost, WasiModelCtx};
+use serde_json::Value;
+
+#[derive(Clone, Debug)]
+struct Canned(Value);
+
+impl WasiModelCtx for Canned {
+    fn complete(&self, _request: Request, _tools: Arc<dyn ToolHost>) -> FutureResult<Answer> {
+        let answer = Answer { value: self.0.clone(), usage: None, transcript: None };
+        async move { Ok(answer) }.boxed()
+    }
+}
 ```
 
-Call `Scripted::assert_exhausted` at the end of a test when every scripted turn must be consumed. An unexpected extra call returns a deterministic `Error::Backend`; it does not panic.
-
-`Scripted` also implements the host-side `WasiModelCtx`, so the same double serves integration tests and example runtimes: script host answers with `Scripted::json` (one JSON value) or `Scripted::values` (ordered `Answer` rows) and install the clone as the deployment's model backend. The double never runs tools; a request with no scripted result remaining fails with `model script exhausted`.
+Install it as the deployment's model backend and assert on the guest-visible output; unlike an echo, a canned JSON value can satisfy a guest's `format::schema` request.
 
 ## Anatomy of a seam test
 
