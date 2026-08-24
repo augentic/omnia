@@ -15,10 +15,6 @@ cargo build -p examples --target wasm32-wasip2 \
   --example conformance-wasm \
   --example cli-wasm \
   --example model-wasm \
-  --example mcp-wasm \
-  --example guest-api-wasm \
-  --example http-routing-a-wasm \
-  --example http-routing-b-wasm \
   --example guest-link-responder-wasm \
   --example guest-link-router-wasm \
   --example guest-link-extra-wasm \
@@ -30,10 +26,6 @@ cargo run -p omnia-testkit --bin guests -- \
   "$out/conformance_wasm.wasm" \
   "$out/cli_wasm.wasm" \
   "$out/model_wasm.wasm" \
-  "$out/mcp_wasm.wasm" \
-  "$out/guest_api_wasm.wasm" \
-  "$out/http_routing_a_wasm.wasm" \
-  "$out/http_routing_b_wasm.wasm" \
   "$out/guest_link_responder_wasm.wasm" \
   "$out/guest_link_router_wasm.wasm" \
   "$out/guest_link_extra_wasm.wasm" \

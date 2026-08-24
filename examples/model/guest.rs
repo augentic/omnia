@@ -3,7 +3,7 @@
 //! A `wasi:cli/command` reactor that **imports** `omnia:model/completion` and
 //! drives one completion session when the host calls `wasi:cli/run`. It is
 //! scenario-driven via its CLI argument — the seam suite
-//! (`crates/seam-suite/tests/seam/model.rs`) selects the behavior it needs —
+//! (`crates/seam-suite/tests/model.rs`) selects the behavior it needs —
 //! making it the model acceptance vehicle.
 //!
 //! The default scenario is the happy path on the `omnia-guest` sugar: a

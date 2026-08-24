@@ -374,8 +374,7 @@ fn topic_matches(topic: &str, pattern: &str) -> bool {
 }
 
 // Unit tests by design: route-table matching is pure (prefix/segment/topic
-// rules); dispatch *through* the built table is covered by the `routing` seam
-// scenario.
+// rules).
 #[cfg(test)]
 mod tests {
     use super::*;

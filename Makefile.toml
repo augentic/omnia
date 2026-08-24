@@ -20,7 +20,7 @@ skip_rust_env_info = true
 dependencies = ["audit", "fmt", "lint", "outdated", "deps"]
 
 [tasks.ci]
-dependencies = ["fmt", "lint", "features", "test", "seam", "test-docs", "docs", "vet", "outdated", "deny"]
+dependencies = ["fmt", "lint", "features", "test", "test-docs", "docs", "vet", "outdated", "deny"]
 
 # -------------------------------------
 # Individual Actions
@@ -92,19 +92,14 @@ cargo outdated --workspace --exit-code 1 --depth 1 \
 '''
 install_crate = "cargo-outdated"
 
-# Test
+# Test: builds and serializes the seam guests first (`test-guests` lives in
+# examples/Makefile.toml, extended above), then runs the whole suite — unit
+# tests and seam integration tests alike — under Nextest, process-per-test.
 [tasks.test]
+dependencies = ["test-guests"]
 command = "cargo"
 args = ["nextest", "run", "--locked", "--all", "--all-features", "--no-tests=pass"]
 env = { RUSTFLAGS = "-Dwarnings" }
-
-# Seam tier: the consolidated guest–host suite, one process so the runtime
-# fixtures (component, linker, InstancePre) are built once.
-# `test-guests` lives in examples/Makefile.toml (extended above).
-[tasks.seam]
-dependencies = ["test-guests"]
-command = "cargo"
-args = ["test", "-p", "omnia-seam-suite", "--test", "seam"]
 
 [tasks.docs]
 command = "cargo"

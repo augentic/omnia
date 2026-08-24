@@ -38,9 +38,10 @@ wasi-keyvalue/
 │       ├── mod.rs      # WasiKeyValue host type, Host/Server impls
 │       ├── default_impl.rs   # KeyValueDefault backend
 │       └── ...
-├── tests/seam.rs       # Integration test at the guest–host boundary
 └── wit/                # WIT interface definitions (+ deps/)
 ```
+
+Seam tests live in the workspace-wide [`crates/seam-suite`](../../crates/seam-suite), and only for behavior that is the boundary itself — see the [testing policy](../guides/testing-policy.md).
 
 ## Supporting crates
 

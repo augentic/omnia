@@ -1,70 +1,46 @@
-# Seam Suite and Testing Policy
+# Testing Policy
 
-How the Omnia repository tests *itself*: the consolidated seam suite, its guest artifacts, and the coverage rules contributors follow. If you are building an application on Omnia and want to test your own guests, start with [Testing Your Guests](testing.md) instead. The binding rules are codified in the repository `AGENTS.md` (Testing policy); this page is the practical walk-through.
+How the Omnia repository tests *itself*. If you are building an application on Omnia and want to test your own guests, start with [Testing Your Guests](testing.md) instead. The binding rules are codified in the repository `AGENTS.md` (Testing policy); this page is the practical walk-through.
 
-## The seam suite
+## The tiers
 
-All of the repository's seam tests live in one unpublished package, `crates/seam-suite`, compiled into a single integration-test binary (`tests/seam/main.rs` plus one module per scenario). Running them in one process lets every scenario share:
+- **Unit tests** cover deterministic logic wherever it lives: parsers, codecs, filter/type translation, route matching, macro token expansion, and backend semantics driven directly against a `WasiXxxCtx` trait. If a behavior can be pinned without instantiating a guest, it is a unit test.
+- **Seam tests** cover behavior that *is* the guest–host boundary. They live in [`crates/seam-suite`](../../crates/seam-suite) as ordinary integration tests — one auto-discovered target per scenario family — and run under Nextest process-per-test alongside everything else. No shared fixtures, no cross-test key discipline: each test builds its own runtime from the serialized guest artifacts, which is cheap.
+- **Live tests** (in the `omnia-backends` repo) are the acceptance tier for production backends: `#[ignore]`-gated, credential-gated, driving the backend's `WasiXxxCtx` against the real service.
 
-- one tokio runtime (`fixture::RT`),
-- one conformance runtime — component, linker, and `InstancePre` built once (`fixture::conformance()`),
-- probe handles onto every shared in-memory backend, so tests assert host-side effects.
+## What earns a seam test
 
-The conformance guest (`examples/conformance/guest.rs`) exposes one HTTP route per WASI interface and imports the real guest APIs. Scenarios that need their own deployment shape (CLI, model completion/workspace, HTTP routing, MCP, typed guest API, guest-to-guest linking) build their own runtime from their own guest but still share the suite process.
+A seam test earns its keep only when the contract cannot be observed anywhere cheaper:
 
-Tests sharing the conformance backends take their keys/ids from `fixture::unique(..)` so concurrent scenarios never collide. The suite's shared fixture (`crates/seam-suite/tests/seam/fixture.rs`) is the exemplar for the bundle/runtime/probe pattern described in [Testing Your Guests](testing.md#anatomy-of-a-seam-test).
+- the host mediates between guests — dispatch depth, timeouts, registration lifecycle (`tests/guest_link.rs`);
+- the host owns a session against a backend — model tool sessions, budgets, cancellation, workspace identity matching (`tests/model.rs`);
+- a policy is applied on the way out of the sandbox — outbound header stripping, client certificates (`tests/conformance.rs`);
+- a resource or typed error threads across WIT — the keyvalue `cas-failed` fresh handle (`tests/conformance.rs`);
+- a trigger delivers inbound events to a guest export — the websocket handler leg (`tests/conformance.rs`);
+- artifact acquisition and trust — bytes-sourced guests, the pre-compiled policy (`tests/embedded.rs`);
+- CLI command routing and exit mapping (`tests/cli.rs`).
+
+One test per contract. Assert the guest-visible outcome; add a host-side **probe** only when the guest cannot observe the effect itself — a message that must land on the broker, a frame that must reach a connected peer, a write that must be denied host-side. A probe that re-reads the same in-memory store the guest just wrote and read back adds no information; don't write it.
+
+"The linker still wires this import" is not a contract worth a dedicated test: every conformance scenario already fails loudly if linking breaks, and the in-memory defaults are trivial. When a new WASI interface lands, it needs a seam test only if it carries one of the behaviors above.
 
 ## Guest artifacts are explicit
 
 Tests never invoke Cargo. `find_guest` is locate-only and fail-fast: it looks for a serialized `.bin` (preferred, loaded via deserialization instead of JIT compilation) or a `.wasm` under the example target directory and panics with build instructions when neither exists.
 
-Build (and serialize) exactly the guests the seam suite drives with:
+Build (and serialize) exactly the guests the suite drives with:
 
 ```bash
 cargo make test-guests
 ```
 
-`cargo make test-seam` depends on that task, so the one-command path is just `test-seam`. The full example set (including guests without seam coverage) still builds with `cargo make examples` for main/scheduled validation. The testkit's `guests` binary is what `test-guests` invokes to precompile built `.wasm` guests into `.bin` components via Omnia's compile path.
+`cargo make test` depends on that task, so the one-command path is just `test`. The full example set still builds with `cargo make examples` for main/scheduled validation. The testkit's `guests` binary is what `test-guests` invokes to precompile built `.wasm` guests into `.bin` components via Omnia's compile path.
 
-## Running the tiers
+## Running
 
 ```bash
-cargo make test        # pure tier: Nextest, excludes the seam suite
-cargo make test-seam   # seam tier: builds + serializes guests, then one-process suite
+cargo make test        # builds + serializes seam guests, then `cargo nextest run --all`
 cargo test --doc --all-features --workspace   # doc tests
 ```
 
-`cargo-nextest` must be installed with `--locked` (`cargo install --locked cargo-nextest`). The Nextest default filter (`.config/nextest.toml`) excludes `omnia-seam-suite`, so `cargo nextest run --all` never accidentally runs seam tests process-per-test — and never silently skips a missing guest either: a seam run with missing artifacts fails with build instructions.
-
-## Coverage rules
-
-- **Unit tests only for pure, deterministic logic** (parsers, codecs, filter/type translation, macro token expansion). Anything crossing a WASI interface, a host backend, or dispatch is tested at the seam. Guest-side logic (`crates/omnia-guest`) keeps native unit tests since coverage tooling cannot instrument the guest `.wasm`.
-- **Seam tests are the spec.** When an RFC and a seam test disagree, the seam test wins and the RFC receives an erratum in its status note.
-- **Replace, then delete.** Remove a superseded unit-test module in the same change as the seam test that covers it. For non-trivial deletions, back the removal with `cargo llvm-cov` before/after evidence; a trivial deletion (an exact mirror of a seam scenario, or a strict subset of a kept test) needs only its rationale in the change.
-- **Names identify, comments explain.** A test name is the scenario (`set_then_get`), not a restated expectation.
-
-## The pure/seam boundary audit
-
-The unit-test surface was audited against the seam tier with a `cargo llvm-cov` diff (seam tier alone vs pure tier alone). Every remaining unit-test module is a deliberate keeper, annotated with a one-line `//` comment at the module head stating why, so future audits do not relitigate. The decisions:
-
-| Module | Decision | Rationale |
-| ------ | -------- | --------- |
-| `omnia/src/dispatch/handle.rs` | Migrated, unit module deleted | Depth cap and uncapped inheritance now proven at the seam (`guest_link::dispatch_depth_capped`, `dispatch_uncapped_nested_hops`) |
-| `omnia/src/registry.rs` | Migrated, unit module deleted | Empty static/dynamic deployment assembly now proven at the seam (`guest_link::static_empty_deployment_rejected`, `dynamic_empty_deployment`) |
-| `omnia/src/runtime/entry.rs` | Keep | `plan()` is pure argv/env parsing; the downstream run behavior is covered in `seam/cli.rs` |
-| `omnia/src/telemetry.rs` | Keep | Pins the tracing/OTLP SDK contract (host-side plumbing, not the `wasi:otel` seam) |
-| `omnia/src/deployment/manifest.rs` | Keep | Pure translation: TOML/JSON to `Manifest` |
-| `omnia/src/registry/routing.rs` | Keep | Pure route-table matching logic |
-| `wasi-model` `answer.rs` / `gate.rs` / `prompt.rs` | Keep | Pure parser / validation / string composition |
-| `host-macros` | Keep | Token expansion snapshots; macros cannot cross a seam |
-| `omnia-guest` (all modules) | Keep | Guest-side carve-out: `llvm-cov` cannot instrument the guest `.wasm` |
-
-Rerun the coverage diff once per release as the drift check: any host-side line reachable only from a unit test is either a new keeper (annotate it) or a migration candidate.
-
-## Ratchet rule
-
-Coverage only moves toward the boundary, never away from it:
-
-- **New host-side behavior lands with its seam scenario in the same PR.** If the change is observable through a WASI interface, the seam suite gets the test — not a unit module with mocks.
-- **New backend mappings (in `omnia-backends`) land with a live case.** A translation unit test alone is not acceptance; the `#[ignore]`-gated live tier must prove the real service accepts the mapping.
-- **Keepers stay annotated.** A unit-test module without a keeper comment is presumed to be a migration candidate at the next audit.
+`cargo-nextest` must be installed with `--locked` (`cargo install --locked cargo-nextest`). A bare `cargo nextest run --all` without pre-built guests fails fast with build instructions — never a silent skip.

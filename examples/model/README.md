@@ -49,7 +49,7 @@ Because the guest exports a plain async `run` (not an HTTP/messaging trigger), t
 
 ```bash
 # after `cargo make test-guests` (do NOT `cargo clean` in between):
-cargo test -p omnia-seam-suite --test seam model
+cargo test -p omnia-seam-suite --test model
 ```
 
 The `canned` scenario drives the guest through an inline canned backend — asserting the validated answer returns with no network. The `workspace` scenario drives a stub backend proving the host resolves the guest's lent workspace to its mount path, and `rejects_schema` proves the in-tree echo `ModelDefault` starts with zero configuration but rejects this guest's `format::schema` request — no network, fully in CI.

@@ -122,11 +122,7 @@ Tests never build guests; `find_guest` only locates artifacts. Build the guests 
 cargo make test-guests     # builds and serializes the seam-suite guests
 ```
 
-or for your own guest, the plain two-step: `cargo build --example <name>-wasm --target wasm32-wasip2` (remember artifact names use underscores). See [Testing Your Guests](guides/testing.md).
-
-### `cargo nextest run --all` doesn't run the seam suite
-
-Intentional: the Nextest default filter (`.config/nextest.toml`) excludes `omnia-seam-suite` from the process-per-test pure tier. Run the seam tier with `cargo make test-seam` (one process, shared fixtures) — see [Seam Suite and Testing Policy](guides/testing-policy.md).
+(`cargo make test` runs it for you before Nextest). For your own guest, the plain two-step: `cargo build --example <name>-wasm --target wasm32-wasip2` (remember artifact names use underscores). See [Testing Your Guests](guides/testing.md).
 
 ## Model completions
 

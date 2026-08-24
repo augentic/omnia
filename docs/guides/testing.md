@@ -2,7 +2,7 @@
 
 Omnia's testing approach is integration-first: the boundary that matters is the guest–host seam, so tests load a real `.wasm`, link real hosts, and drive requests through the actual WIT boundary — no mocks between your guest and the runtime. This guide shows how to test *your* guests with the `omnia-testkit` scaffolding.
 
-If you are contributing to Omnia itself, the repository's own seam suite and coverage rules are in [Seam Suite and Testing Policy](testing-policy.md).
+If you are contributing to Omnia itself, the repository's own coverage rules are in [Testing Policy](testing-policy.md).
 
 ## A first guest test in five minutes
 
@@ -39,10 +39,10 @@ assert!(response.status().is_success());
 | Kind           | What it covers                                                                                                   | How it runs                                             |
 | -------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | **Pure tier**  | Deterministic, service-free logic: parsers, codecs, filter/type translation, macro expansion, guest-native logic | Ordinary unit tests (Nextest, process-per-test)         |
-| **Seam tier**  | Guests driven through the real runtime against the default (in-memory) backends                                  | Integration tests using `omnia-testkit`                 |
+| **Seam tier**  | Guests driven through the real runtime against the default (in-memory) backends                                  | Integration tests using `omnia-testkit` (Nextest, process-per-test; guests pre-built) |
 | **Live tests** | A production backend's `WasiXxxCtx` against the real service (`#[ignore]`-gated, in the `omnia-backends` repo)         | Local only                                              |
 
-Anything that crosses a WASI interface belongs at the seam, not in a unit test with mocks.
+Test where the behavior lives: deterministic logic gets unit tests, and the seam gets a test when the boundary itself is the contract — never a unit test with mocks standing in for the runtime.
 
 ## The testkit
 
@@ -55,7 +55,7 @@ Anything that crosses a WASI interface belongs at the seam, not in a unit test w
 
 ### Testing model guests
 
-There is no shared model double: each test defines the backend it needs, inline, next to the test (see `crates/seam-suite/tests/seam/model.rs` for the pattern — a canned happy-path backend alongside purpose-built probes like `PathProbe` and `WriteProbe`). The in-tree echo `ModelDefault` covers scenarios where the answer does not matter, or where its schema rejection is itself under test. A canned backend answering every completion with one fixed value is all the happy path needs:
+There is no shared model double: each test defines the backend it needs, inline, next to the test (see `crates/seam-suite/tests/model.rs` for the pattern — a canned happy-path backend alongside purpose-built probes like `PathProbe` and `WriteProbe`). The in-tree echo `ModelDefault` covers scenarios where the answer does not matter, or where its schema rejection is itself under test. A canned backend answering every completion with one fixed value is all the happy path needs:
 
 ```rust,noplayground
 use std::sync::Arc;
@@ -81,7 +81,7 @@ Install it as the deployment's model backend and assert on the guest-visible out
 
 The pattern has three parts:
 
-**1. A backend bundle with accessor impls** (mirroring the `runtime!` macro's generated `Backends`), keeping clones of the shared in-memory backends as probes:
+**1. A backend bundle with accessor impls** (mirroring the `runtime!` macro's generated `Backends`):
 
 ```rust,noplayground
 #[derive(Clone)]
@@ -98,29 +98,33 @@ impl HasKeyValue for Bundle {
 }
 ```
 
-**2. Build the runtime** with `single_guest` as above (build it once and share it when many tests drive the same guest).
+**2. Build the runtime** with `single_guest` as above.
 
-**3. Drive the guest and assert both sides of the seam** — the guest's response *and* the effect that landed in the host backend:
+**3. Drive the guest and assert the guest-visible outcome:**
 
 ```rust,noplayground
-#[test]
-fn set_then_get() -> Result<()> {
-    RT.block_on(async {
-        let response = http::post(&runtime, "/keyvalue?key=k1", "payload").await?;
-        assert!(response.status().is_success(), "guest completes the keyvalue round-trip");
-
-        // The guest stored the body under `k1`; the shared backend must now
-        // hold that write.
-        let bucket = bundle.keyvalue.open_bucket("omnia_bucket".to_owned()).await?;
-        let stored = bucket.get("k1".to_owned()).await?;
-        assert_eq!(stored.as_deref(), Some(b"payload".as_slice()), "the write reached the host");
-
-        Ok(())
-    })
+#[tokio::test]
+async fn set_then_get() -> Result<()> {
+    let response = http::post(&runtime, "/keyvalue?key=k1", "payload").await?;
+    assert!(response.status().is_success(), "guest completes the keyvalue round-trip");
+    Ok(())
 }
 ```
 
-That second assertion is the point: a `200` proves the call crossed the WIT boundary without trapping; reading the shared backend (the **probe**) proves the write actually happened host-side rather than being swallowed.
+A success response proves the call crossed the WIT boundary and that the guest's own checks (it read back what it wrote) held. Reach for a **probe** — a clone of a shared backend, read host-side — only when the guest cannot observe the effect itself: a message that must land on the broker, a frame that must reach a connected peer, a write that must be denied. For example, subscribing on the broker before the guest publishes:
+
+```rust,noplayground
+let mut subscription = bundle.messaging.connect().await?.subscribe().await?;
+let response = http::post_json(&runtime, "/publish", payload).await?;
+assert!(response.status().is_success());
+
+let message = timeout(Duration::from_secs(5), subscription.next())
+    .await?
+    .context("no delivery")?;
+assert_eq!(message.payload, payload.as_bytes(), "the publish reached the broker");
+```
+
+A probe that re-reads the same in-memory store the guest just wrote and read back adds no information — assert one side of the seam, the one only that side can see.
 
 When several tests share one runtime and its backends, derive keys/ids from a per-test unique suffix so concurrent tests never collide.
 

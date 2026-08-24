@@ -89,7 +89,7 @@ site must attest the bytes came unmodified from a trusted build pipeline.
 
 ```bash
 # after building the guests above (do NOT `cargo clean` in between):
-cargo make test-seam
+cargo test -p omnia-seam-suite --test guest_link
 ```
 
 The test builds the registry from a programmatic manifest, calls `router.run` and `router.run-slow`, and asserts each returns the responder's echo — and that the responder is instantiated exactly once per dispatched call.

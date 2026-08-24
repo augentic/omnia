@@ -10,8 +10,13 @@
 //!    echoes text/json prompts, but rejects `format::schema` (the example
 //!    guest's format) since no echo can conform to a guest schema.
 //!
-//! The registry (component + linker + `InstancePre`) is built once and shared
-//! by all tests; each test assembles its own runtime over it.
+//! The probe backends then pin the host's workspace and tool-session
+//! contracts: identity-matched lends, read-only denial, call budgets,
+//! result caps, timeouts, and session teardown.
+
+// The serialized `.bin` guests are workspace-built (`cargo make test-guests`),
+// satisfying the unsafe pre-compiled build/registration contracts.
+#![allow(unsafe_code)]
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -20,8 +25,8 @@ use anyhow::{Context as _, Result, bail};
 use futures::FutureExt as _;
 use omnia::wasmtime::StoreLimitsBuilder;
 use omnia::{
-    Backend, Deployment, DeploymentBuilder, GuestId, Manifest, MountRegistry, Registry,
-    ResolvedPreopen, Runtime, StoreBase, StoreCtx, WrpcState,
+    Deployment, DeploymentBuilder, GuestId, Manifest, MountRegistry, Registry, ResolvedPreopen,
+    Runtime, StoreBase, StoreCtx, WrpcState,
 };
 use omnia_testkit::{find_guest, temp_manifest};
 use omnia_wasi_model::{
@@ -29,12 +34,9 @@ use omnia_wasi_model::{
     WasiModel, WasiModelCtx,
 };
 use serde_json::{Value, json};
-use tokio::sync::OnceCell;
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 use wasmtime_wasi::p3::bindings::Command;
 use wasmtime_wasi::{ResourceTable, WasiCtxBuilder};
-
-use crate::fixture;
 
 /// A factory the test bundle calls per clone to mint a fresh backend.
 type BackendFactory = Arc<dyn Fn() -> Box<dyn WasiModelCtx> + Send + Sync>;
@@ -105,14 +107,8 @@ fn workspace_mount_at(label: &str) -> (PathBuf, Arc<MountRegistry>) {
     (dir, Arc::new(registry))
 }
 
-/// The shared model registry: the guest deployment with `WasiModel` linked,
-/// built once for both tests.
-async fn registry() -> Result<&'static Arc<Registry<TestCtx>>> {
-    static CELL: OnceCell<Arc<Registry<TestCtx>>> = OnceCell::const_new();
-    CELL.get_or_try_init(build_registry).await
-}
-
-async fn build_registry() -> Result<Arc<Registry<TestCtx>>> {
+/// The model registry: the guest deployment with `WasiModel` linked.
+async fn registry() -> Result<Arc<Registry<TestCtx>>> {
     let wasm = find_guest("model_wasm.wasm");
 
     // A one-guest manifest with an absolute source path. The guard removes the
@@ -234,32 +230,27 @@ impl WasiModelCtx for Canned {
 
 // The canned backend serves a fixed answer, so the completion round-trips
 // with no network.
-#[test]
-fn canned() -> Result<()> {
-    fixture::RT.block_on(async {
-        let registry = registry().await?;
+#[tokio::test(flavor = "multi_thread")]
+async fn canned() -> Result<()> {
+    let registry = registry().await?;
 
-        // The answer the guest must print after the host validates it.
-        let expected = answer();
+    // The answer the guest must print after the host validates it.
+    let expected = answer();
 
-        // The completion path preopens a workspace the example guest lends; the host
-        // resolves the lent descriptor back to this mount by identity.
-        let (_mount_dir, mounts) = workspace_mount();
+    // The completion path preopens a workspace the example guest lends; the host
+    // resolves the lent descriptor back to this mount by identity.
+    let (_mount_dir, mounts) = workspace_mount();
 
-        let backend = Canned(expected.clone());
-        let runtime = model_runtime(
-            Arc::clone(registry),
-            Arc::new(move || Box::new(backend.clone())),
-            mounts,
-        );
+    let backend = Canned(expected.clone());
+    let runtime =
+        model_runtime(Arc::clone(&registry), Arc::new(move || Box::new(backend.clone())), mounts);
 
-        let answer = call_run(&runtime).await.context("driving the canned backend")?;
-        let parsed: Value = serde_json::from_str(&answer)
-            .with_context(|| format!("answer should be JSON, got: {answer}"))?;
-        assert_eq!(parsed, expected, "the canned answer round-trips to the guest");
+    let answer = call_run(&runtime).await.context("driving the canned backend")?;
+    let parsed: Value = serde_json::from_str(&answer)
+        .with_context(|| format!("answer should be JSON, got: {answer}"))?;
+    assert_eq!(parsed, expected, "the canned answer round-trips to the guest");
 
-        Ok(())
-    })
+    Ok(())
 }
 
 /// The answer the canned backend serves — the value the guest must print.
@@ -271,28 +262,27 @@ fn answer() -> Value {
 // zero configuration, but the example guest asks for `format::schema`, which
 // an echo cannot satisfy — the completion fails with a backend error naming
 // the gap.
-#[test]
-fn rejects_schema() -> Result<()> {
-    fixture::RT.block_on(async {
-        let registry = registry().await?;
-        let (_mount_dir, mounts) = workspace_mount();
-        let backend = ModelDefault::connect().await.context("connecting the default backend")?;
-        let runtime =
-            model_runtime(Arc::clone(registry), Arc::new(move || Box::new(backend)), mounts);
+#[tokio::test(flavor = "multi_thread")]
+async fn rejects_schema() -> Result<()> {
+    let registry = registry().await?;
+    let (_mount_dir, mounts) = workspace_mount();
+    let backend = ModelDefault::connect().await.context("connecting the default backend")?;
+    let runtime =
+        model_runtime(Arc::clone(&registry), Arc::new(move || Box::new(backend)), mounts);
 
-        let output = call_run(&runtime).await.context("driving the default backend")?;
-        assert!(
-            output.contains("cannot satisfy format::schema"),
-            "the echo default must reject schema formats, got: {output}"
-        );
+    let output = call_run(&runtime).await.context("driving the default backend")?;
+    assert!(
+        output.contains("cannot satisfy format::schema"),
+        "the echo default must reject schema formats, got: {output}"
+    );
 
-        Ok(())
-    })
+    Ok(())
 }
 
 /// A backend that asserts the host resolved the guest's lent workspace to
 /// its mount path — the `local-path` face the cursor backend consumes — and
-/// that the bounded `read` face serves the mount's contents.
+/// that the bounded `read`/`list` faces (what genai serves the model as
+/// host-injected tools) surface the mount's contents.
 #[derive(Debug, Clone)]
 struct PathProbe {
     expected: PathBuf,
@@ -310,6 +300,11 @@ impl WasiModelCtx for PathProbe {
             );
             let bytes = tool_host.read("hello.txt".to_owned()).await?;
             anyhow::ensure!(bytes == b"hi", "workspace read returns the seeded file's bytes");
+            let entries = tool_host.list(String::new()).await?;
+            anyhow::ensure!(
+                entries.iter().any(|entry| entry.name == "hello.txt" && !entry.is_directory),
+                "workspace list surfaces the seeded file: {entries:?}"
+            );
             Ok(Answer {
                 value: json!({ "verdict": "pass", "reason": "local path resolved" }),
                 usage: None,
@@ -324,64 +319,57 @@ impl WasiModelCtx for PathProbe {
 /// the example guest reads it via `preopens.get-directories()` and lends it, and
 /// the host identity-matches it back to the mount — surfacing its host path on
 /// the per-completion [`ToolHost`] (what `omnia-cursor` reads).
-#[test]
-fn workspace() -> Result<()> {
-    fixture::RT.block_on(async {
-        let registry = registry().await?;
-        let (mount_dir, mounts) = workspace_mount_at("probe");
-        std::fs::write(mount_dir.join("hello.txt"), b"hi").context("seeding the mount")?;
-        let expected = mount_dir.clone();
-        let runtime = model_runtime(
-            Arc::clone(registry),
-            Arc::new(move || {
-                Box::new(PathProbe {
-                    expected: expected.clone(),
-                })
-            }),
-            mounts,
-        );
+#[tokio::test(flavor = "multi_thread")]
+async fn workspace() -> Result<()> {
+    let registry = registry().await?;
+    let (mount_dir, mounts) = workspace_mount_at("probe");
+    std::fs::write(mount_dir.join("hello.txt"), b"hi").context("seeding the mount")?;
+    let expected = mount_dir.clone();
+    let runtime = model_runtime(
+        Arc::clone(&registry),
+        Arc::new(move || {
+            Box::new(PathProbe {
+                expected: expected.clone(),
+            })
+        }),
+        mounts,
+    );
 
-        let answer = call_run(&runtime).await.context("driving the local-path probe")?;
-        let value: Value = serde_json::from_str(&answer)
-            .with_context(|| format!("probe answer should be JSON, got: {answer}"))?;
-        assert_eq!(
-            value,
-            json!({ "verdict": "pass", "reason": "local path resolved" }),
-            "the host resolves the lent workspace and exposes its mount path on the ToolHost"
-        );
+    let answer = call_run(&runtime).await.context("driving the local-path probe")?;
+    let value: Value = serde_json::from_str(&answer)
+        .with_context(|| format!("probe answer should be JSON, got: {answer}"))?;
+    assert_eq!(
+        value,
+        json!({ "verdict": "pass", "reason": "local path resolved" }),
+        "the host resolves the lent workspace and exposes its mount path on the ToolHost"
+    );
 
-        Ok(())
-    })
+    Ok(())
 }
 
 // The guest lends a directory the deployment never authorized: the host's
 // identity match rejects it before the backend ever runs.
-#[test]
-fn out_of_scope_workspace() -> Result<()> {
-    fixture::RT.block_on(async {
-        let registry = registry().await?;
-        // The runtime authorizes one tree, but the guest is preopened (and so
-        // lends) a different one.
-        let (_authorized, mounts) = workspace_mount_at("scope-ok");
-        let (_lent, lent) = workspace_mount_at("scope-bad");
+#[tokio::test(flavor = "multi_thread")]
+async fn out_of_scope_workspace() -> Result<()> {
+    let registry = registry().await?;
+    // The runtime authorizes one tree, but the guest is preopened (and so
+    // lends) a different one.
+    let (_authorized, mounts) = workspace_mount_at("scope-ok");
+    let (_lent, lent) = workspace_mount_at("scope-bad");
 
-        let backend = Canned(answer());
-        let runtime = model_runtime(
-            Arc::clone(registry),
-            Arc::new(move || Box::new(backend.clone())),
-            mounts,
-        );
+    let backend = Canned(answer());
+    let runtime =
+        model_runtime(Arc::clone(&registry), Arc::new(move || Box::new(backend.clone())), mounts);
 
-        let output = call_run_preopening(&runtime, Some(lent))
-            .await
-            .context("driving the out-of-scope lend")?;
-        assert!(
-            output.contains("out of scope"),
-            "an unauthorized lend is rejected in the host: {output}"
-        );
+    let output = call_run_preopening(&runtime, Some(lent))
+        .await
+        .context("driving the out-of-scope lend")?;
+    assert!(
+        output.contains("out of scope"),
+        "an unauthorized lend is rejected in the host: {output}"
+    );
 
-        Ok(())
-    })
+    Ok(())
 }
 
 /// A backend that drives `ToolHost::write` against the lent workspace and
@@ -408,25 +396,23 @@ impl WasiModelCtx for WriteProbe {
 
 // A write through the ToolHost against a read-only mount is denied in the
 // host, and nothing lands on disk.
-#[test]
-fn readonly_write_denied() -> Result<()> {
-    fixture::RT.block_on(async {
-        let registry = registry().await?;
-        let (mount_dir, mounts) = workspace_mount_at("ro");
-        let runtime =
-            model_runtime(Arc::clone(registry), Arc::new(move || Box::new(WriteProbe)), mounts);
+#[tokio::test(flavor = "multi_thread")]
+async fn readonly_write_denied() -> Result<()> {
+    let registry = registry().await?;
+    let (mount_dir, mounts) = workspace_mount_at("ro");
+    let runtime =
+        model_runtime(Arc::clone(&registry), Arc::new(move || Box::new(WriteProbe)), mounts);
 
-        let output = call_run(&runtime).await.context("driving the write probe")?;
-        let value: Value = serde_json::from_str(&output)
-            .with_context(|| format!("probe answer should be JSON, got: {output}"))?;
-        assert!(
-            value["reason"].as_str().is_some_and(|reason| reason.contains("read-only")),
-            "the denial names the read-only mount: {value}"
-        );
-        assert!(!mount_dir.join("probe.txt").exists(), "no file lands on a denied write");
+    let output = call_run(&runtime).await.context("driving the write probe")?;
+    let value: Value = serde_json::from_str(&output)
+        .with_context(|| format!("probe answer should be JSON, got: {output}"))?;
+    assert!(
+        value["reason"].as_str().is_some_and(|reason| reason.contains("read-only")),
+        "the denial names the read-only mount: {value}"
+    );
+    assert!(!mount_dir.join("probe.txt").exists(), "no file lands on a denied write");
 
-        Ok(())
-    })
+    Ok(())
 }
 
 // -- Tool-session scenarios: probe backends drive `ToolHost::call_tool`
@@ -481,23 +467,21 @@ impl WasiModelCtx for ToolOnceProbe {
     }
 }
 
-#[test]
-fn tool_round_trip() -> Result<()> {
-    fixture::RT.block_on(async {
-        let registry = registry().await?;
-        let runtime = probe_runtime(registry, "tool-once", ToolOnceProbe);
+#[tokio::test(flavor = "multi_thread")]
+async fn tool_round_trip() -> Result<()> {
+    let registry = registry().await?;
+    let runtime = probe_runtime(&registry, "tool-once", ToolOnceProbe);
 
-        let output = call_scenario(&runtime, "round_trip").await?;
-        let value: Value = serde_json::from_str(&output)
-            .with_context(|| format!("reply should be JSON, got: {output}"))?;
-        assert_eq!(
-            value,
-            json!({ "verdict": "pass", "tool": "v1" }),
-            "the guest closure's shelf value rides back through the reply"
-        );
+    let output = call_scenario(&runtime, "round_trip").await?;
+    let value: Value = serde_json::from_str(&output)
+        .with_context(|| format!("reply should be JSON, got: {output}"))?;
+    assert_eq!(
+        value,
+        json!({ "verdict": "pass", "tool": "v1" }),
+        "the guest closure's shelf value rides back through the reply"
+    );
 
-        Ok(())
-    })
+    Ok(())
 }
 
 /// Three concurrent calls; the guest batches them and answers in reverse, so
@@ -530,25 +514,23 @@ impl WasiModelCtx for ParallelProbe {
     }
 }
 
-#[test]
-fn parallel_calls() -> Result<()> {
-    fixture::RT.block_on(async {
-        let registry = registry().await?;
-        let runtime = probe_runtime(registry, "parallel", ParallelProbe);
+#[tokio::test(flavor = "multi_thread")]
+async fn parallel_calls() -> Result<()> {
+    let registry = registry().await?;
+    let runtime = probe_runtime(&registry, "parallel", ParallelProbe);
 
-        let output = call_scenario(&runtime, "parallel").await?;
-        assert_eq!(
-            output.matches("answered:").count(),
-            3,
-            "the guest answers all three batched calls: {output}"
-        );
-        assert!(
-            output.contains("calls-closed") && output.contains("reply-ok:"),
-            "reversed answers still satisfy the probe: {output}"
-        );
+    let output = call_scenario(&runtime, "parallel").await?;
+    assert_eq!(
+        output.matches("answered:").count(),
+        3,
+        "the guest answers all three batched calls: {output}"
+    );
+    assert!(
+        output.contains("calls-closed") && output.contains("reply-ok:"),
+        "reversed answers still satisfy the probe: {output}"
+    );
 
-        Ok(())
-    })
+    Ok(())
 }
 
 /// The guest drops its calls reader and reply future mid-loop. The probe's
@@ -607,35 +589,33 @@ impl WasiModelCtx for DropProbe {
     }
 }
 
-#[test]
-fn guest_drops_session() -> Result<()> {
-    fixture::RT.block_on(async {
-        let registry = registry().await?;
-        let events: Events = Arc::default();
-        let probe = DropProbe {
-            events: Arc::clone(&events),
-        };
-        let runtime = probe_runtime(registry, "drops", probe);
+#[tokio::test(flavor = "multi_thread")]
+async fn guest_drops_session() -> Result<()> {
+    let registry = registry().await?;
+    let events: Events = Arc::default();
+    let probe = DropProbe {
+        events: Arc::clone(&events),
+    };
+    let runtime = probe_runtime(&registry, "drops", probe);
 
-        let output = call_scenario(&runtime, "drops_session").await?;
-        assert!(
-            output.contains("dropped-session") && output.contains("host-acked-via-results-reject"),
-            "the guest observes the session's end after dropping its ends: {output}"
-        );
+    let output = call_scenario(&runtime, "drops_session").await?;
+    assert!(
+        output.contains("dropped-session") && output.contains("host-acked-via-results-reject"),
+        "the guest observes the session's end after dropping its ends: {output}"
+    );
 
-        let events = drain(&events);
-        assert_eq!(
-            events.first().map(String::as_str),
-            Some("first-ok:echo:one"),
-            "the first call completes before the drop: {events:?}"
-        );
-        assert!(
-            events.iter().any(|event| event.starts_with("second-err:") || event == "cancelled"),
-            "the drop fails the next call or cancels the backend — no leaked waiter: {events:?}"
-        );
+    let events = drain(&events);
+    assert_eq!(
+        events.first().map(String::as_str),
+        Some("first-ok:echo:one"),
+        "the first call completes before the drop: {events:?}"
+    );
+    assert!(
+        events.iter().any(|event| event.starts_with("second-err:") || event == "cancelled"),
+        "the drop fails the next call or cancels the backend — no leaked waiter: {events:?}"
+    );
 
-        Ok(())
-    })
+    Ok(())
 }
 
 /// The guest closes its results stream with a call pending: the call
@@ -655,24 +635,22 @@ impl WasiModelCtx for PendingCallProbe {
     }
 }
 
-#[test]
-fn guest_closes_results_early() -> Result<()> {
-    fixture::RT.block_on(async {
-        let registry = registry().await?;
-        let runtime = probe_runtime(registry, "closes", PendingCallProbe);
+#[tokio::test(flavor = "multi_thread")]
+async fn guest_closes_results_early() -> Result<()> {
+    let registry = registry().await?;
+    let runtime = probe_runtime(&registry, "closes", PendingCallProbe);
 
-        let output = call_scenario(&runtime, "closes_results").await?;
-        assert!(
-            output.contains("results-writer-dropped") && output.contains("calls-closed"),
-            "the calls stream closes after the guest drops its writer: {output}"
-        );
-        assert!(
-            output.contains("reply-err:") && output.contains("closed its results stream"),
-            "the reply resolves with a typed error naming the closed stream: {output}"
-        );
+    let output = call_scenario(&runtime, "closes_results").await?;
+    assert!(
+        output.contains("results-writer-dropped") && output.contains("calls-closed"),
+        "the calls stream closes after the guest drops its writer: {output}"
+    );
+    assert!(
+        output.contains("reply-err:") && output.contains("closed its results stream"),
+        "the reply resolves with a typed error naming the closed stream: {output}"
+    );
 
-        Ok(())
-    })
+    Ok(())
 }
 
 /// Loops `call_tool` until the host's per-completion budget trips.
@@ -701,20 +679,18 @@ impl WasiModelCtx for BudgetProbe {
     }
 }
 
-#[test]
-fn budget_exhausted() -> Result<()> {
-    fixture::RT.block_on(async {
-        let registry = registry().await?;
-        let runtime = probe_runtime(registry, "budget", BudgetProbe);
+#[tokio::test(flavor = "multi_thread")]
+async fn budget_exhausted() -> Result<()> {
+    let registry = registry().await?;
+    let runtime = probe_runtime(&registry, "budget", BudgetProbe);
 
-        let output = call_scenario(&runtime, "budget").await?;
-        assert!(
-            output.contains("BudgetExhausted") && output.contains("budget of 2 exhausted"),
-            "the reply carries the typed budget failure: {output}"
-        );
+    let output = call_scenario(&runtime, "budget").await?;
+    assert!(
+        output.contains("BudgetExhausted") && output.contains("budget of 2 exhausted"),
+        "the reply carries the typed budget failure: {output}"
+    );
 
-        Ok(())
-    })
+    Ok(())
 }
 
 /// One call whose result blows the byte cap: the typed failure wins over the
@@ -741,20 +717,18 @@ impl WasiModelCtx for OversizeProbe {
     }
 }
 
-#[test]
-fn oversize_result() -> Result<()> {
-    fixture::RT.block_on(async {
-        let registry = registry().await?;
-        let runtime = probe_runtime(registry, "oversize", OversizeProbe);
+#[tokio::test(flavor = "multi_thread")]
+async fn oversize_result() -> Result<()> {
+    let registry = registry().await?;
+    let runtime = probe_runtime(&registry, "oversize", OversizeProbe);
 
-        let output = call_scenario(&runtime, "oversize").await?;
-        assert!(
-            output.contains("ToolFailed") && output.contains("exceeds the 256-byte cap"),
-            "the reply carries the typed size-cap failure: {output}"
-        );
+    let output = call_scenario(&runtime, "oversize").await?;
+    assert!(
+        output.contains("ToolFailed") && output.contains("exceeds the 256-byte cap"),
+        "the reply carries the typed size-cap failure: {output}"
+    );
 
-        Ok(())
-    })
+    Ok(())
 }
 
 /// A call the guest never answers: the host's per-call timeout ends the
@@ -781,18 +755,16 @@ impl WasiModelCtx for StallProbe {
     }
 }
 
-#[test]
-fn stalled_handler() -> Result<()> {
-    fixture::RT.block_on(async {
-        let registry = registry().await?;
-        let runtime = probe_runtime(registry, "stall", StallProbe);
+#[tokio::test(flavor = "multi_thread")]
+async fn stalled_handler() -> Result<()> {
+    let registry = registry().await?;
+    let runtime = probe_runtime(&registry, "stall", StallProbe);
 
-        let output = call_scenario(&runtime, "stall").await?;
-        assert!(
-            output.contains("received:") && output.contains("got no result within"),
-            "the reply carries the typed timeout failure: {output}"
-        );
+    let output = call_scenario(&runtime, "stall").await?;
+    assert!(
+        output.contains("received:") && output.contains("got no result within"),
+        "the reply carries the typed timeout failure: {output}"
+    );
 
-        Ok(())
-    })
+    Ok(())
 }

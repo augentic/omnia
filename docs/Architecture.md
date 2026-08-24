@@ -225,7 +225,7 @@ Production backends live in the sibling [`omnia-backends`](https://github.com/au
 
 ## Extending Omnia
 
-**Adding a WASI interface**: create `crates/wasi-<name>/` with the standard layout, define the WIT world in `wit/`, implement guest bindings in `src/guest.rs` and the host (including a zero-config default backend) in `src/host/`, add a seam test in `tests/seam.rs`, and create an example.
+**Adding a WASI interface**: create `crates/wasi-<name>/` with the standard layout, define the WIT world in `wit/`, implement guest bindings in `src/guest.rs` and the host (including a zero-config default backend) in `src/host/`, and create an example. Add a scenario to `crates/seam-suite` only if the interface carries behavior that is the boundary itself (see the [testing policy](guides/testing-policy.md)).
 
 **Adding a backend**: create a crate (usually in the `omnia-backends` repo), implement `Backend` with a `FromEnv`-derived `ConnectOptions`, implement the `WasiXxxCtx` trait(s) for the interfaces it serves, and add `#[ignore]`-gated live tests. No runtime-core changes are required — backends plug in through the `runtime!` host map.
 

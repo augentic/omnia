@@ -7,6 +7,10 @@
 //! dispatches exactly like a path-sourced one, and that the artifact-trust
 //! policy applies to bytes as it does to paths.
 
+// The serialized `.bin` guests are workspace-built (`cargo make test-guests`),
+// satisfying the unsafe pre-compiled build/registration contracts.
+#![allow(unsafe_code)]
+
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail, ensure};
@@ -15,8 +19,6 @@ use omnia::{
     DeploymentBuilder, GuestEntry, GuestId, Manifest, MountRegistry, Runtime, serve_links,
 };
 use omnia_testkit::{find_guest, precompiled_bytes, wasm_bytes};
-
-use crate::fixture;
 
 type TestCtx = omnia::StoreCtx<()>;
 
@@ -74,42 +76,37 @@ async fn call_router(runtime: &Runtime<()>, message: &str) -> Result<String> {
 
 // A bytes-sourced guest dispatches like a path-sourced one: the embedded
 // router reaches the path-sourced responder over the host-mediated link.
-#[test]
-fn bytes_guest_dispatches() -> Result<()> {
-    fixture::RT.block_on(async {
-        let runtime = build_runtime().await?;
-        let echoed = call_router(&runtime, "hello").await?;
-        assert_eq!(echoed, "responder echoes: hello");
-        Ok(())
-    })
+#[tokio::test(flavor = "multi_thread")]
+async fn bytes_guest_dispatches() -> Result<()> {
+    let runtime = build_runtime().await?;
+    let echoed = call_router(&runtime, "hello").await?;
+    assert_eq!(echoed, "responder echoes: hello");
+    Ok(())
 }
 
 // Pre-compiled bytes follow the same trust policy as pre-compiled paths: the
 // safe build rejects them; the `precompiled()` unsafe build admits them.
-#[test]
-fn precompiled_needs_policy() -> Result<()> {
-    fixture::RT.block_on(async {
-        let bytes = precompiled_bytes("guest_link_responder_wasm.wasm")?;
+#[tokio::test(flavor = "multi_thread")]
+async fn precompiled_needs_policy() -> Result<()> {
+    let bytes = precompiled_bytes("guest_link_responder_wasm.wasm")?;
 
-        let manifest = Manifest::new().guest(GuestEntry::new("responder", bytes.clone()));
-        let error = DeploymentBuilder::new()
-            .manifest(manifest)
-            .build::<TestCtx>()
-            .await
-            .err()
-            .context("the safe build must reject pre-compiled bytes")?;
-        ensure!(
-            format!("{error:#}").contains("pre-compiled"),
-            "rejection names the artifact kind: {error:#}"
-        );
+    let manifest = Manifest::new().guest(GuestEntry::new("responder", bytes.clone()));
+    let error = DeploymentBuilder::new()
+        .manifest(manifest)
+        .build::<TestCtx>()
+        .await
+        .err()
+        .context("the safe build must reject pre-compiled bytes")?;
+    ensure!(
+        format!("{error:#}").contains("pre-compiled"),
+        "rejection names the artifact kind: {error:#}"
+    );
 
-        let manifest = Manifest::new().guest(GuestEntry::new("responder", bytes));
-        let builder = DeploymentBuilder::new().manifest(manifest).precompiled();
-        // SAFETY: the bytes were built and serialized by this workspace's own
-        // `cargo make test-guests` pipeline (omnia's compile path).
-        let deployment =
-            unsafe { builder.build::<TestCtx>() }.await.context("building deployment")?;
-        deployment.into_registry().context("assembling registry")?;
-        Ok(())
-    })
+    let manifest = Manifest::new().guest(GuestEntry::new("responder", bytes));
+    let builder = DeploymentBuilder::new().manifest(manifest).precompiled();
+    // SAFETY: the bytes were built and serialized by this workspace's own
+    // `cargo make test-guests` pipeline (omnia's compile path).
+    let deployment = unsafe { builder.build::<TestCtx>() }.await.context("building deployment")?;
+    deployment.into_registry().context("assembling registry")?;
+    Ok(())
 }

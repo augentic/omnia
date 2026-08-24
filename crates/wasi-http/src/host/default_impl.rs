@@ -217,5 +217,5 @@ fn reqwest_err(e: reqwest::Error) -> ErrorCode {
 }
 
 // Outbound behavior (body forwarding, header handling, error mapping, client
-// certificates) is covered at the guest–host seam in
-// `omnia-seam-suite`'s `http_outbound` scenario.
+// certificates) is covered at the guest–host seam by the outbound scenarios
+// in `omnia-seam-suite`'s `tests/conformance.rs`.
