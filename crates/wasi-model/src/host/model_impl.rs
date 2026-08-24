@@ -8,11 +8,13 @@
 //! (genai) consumes validation failures internally and only returns once it
 //! passes; the host re-validates here.
 //!
-//! Cancellation is structural: the reply future's producer *is* the backend
-//! future, so the guest dropping its session ends drops the in-flight
-//! backend work — there is no detached task. The reply future is always
-//! resolved with a value; budget and deadline failures are typed `error`
-//! values, never a dropped writer (dropping it would trap the guest).
+//! The reply pipeline runs eagerly as a spawned task, since a session guest
+//! reads `calls` before awaiting the reply (see `session::ReplyTask`).
+//! Cancellation stays structural: the guest dropping its reply future drops
+//! the producer awaiting the task, which aborts it — no in-flight backend
+//! work outlives the session. The reply future is always resolved with a
+//! value; budget and deadline failures are typed `error` values, never a
+//! dropped writer (dropping it would trap the guest).
 
 use std::sync::Arc;
 
@@ -24,7 +26,7 @@ use wasmtime::component::{Accessor, FutureReader, StreamReader};
 use crate::host::generated::omnia::model::completion::{
     Host, HostWithStore, Session, Tool, ToolResult,
 };
-use crate::host::session::{CallsProducer, ResultsConsumer, SessionClose, SessionState};
+use crate::host::session::{CallsProducer, ReplyTask, ResultsConsumer, SessionClose, SessionState};
 use crate::host::types::DirEntry;
 use crate::host::workspace::{self, Workspace};
 use crate::host::{Error, FutureResult, Request, ToolHost, WasiModel, WasiModelCtxView, gate};
@@ -85,23 +87,23 @@ where
             results.pipe(&mut access, ResultsConsumer::new(Arc::clone(&session)))?;
             let mut calls = StreamReader::new(&mut access, CallsProducer::new(calls_rx))?;
 
-            // The backend future, piped through the answer gate, is the reply
-            // future's producer. It always yields a value; a typed failure
-            // recorded by host enforcement wins over whatever the backend
-            // then returned. The guard ends the session — completion or
-            // cancellation alike — so the guest's calls loop always
-            // terminates.
+            // The reply pipeline — the backend future piped through the
+            // answer gate — runs eagerly as a spawned task (see [`ReplyTask`]
+            // for why). It always yields a value; a typed failure recorded by
+            // host enforcement wins over whatever the backend then returned.
+            // The guard ends the session — completion or cancellation alike —
+            // so the guest's calls loop always terminates.
             let close = SessionClose::new(Arc::clone(&session));
-            let reply_future = async move {
+            let task = ReplyTask::spawn(async move {
                 let _close = close;
-                let result = match backend.await {
+                match backend.await {
                     Ok(answer) => {
                         session.take_failure().map_or_else(|| answer.project(&format), Err)
                     }
                     Err(error) => Err(session.take_failure().unwrap_or_else(|| error.into())),
-                };
-                Ok::<_, wasmtime::Error>(result)
-            };
+                }
+            });
+            let reply_future = async move { Ok::<_, wasmtime::Error>(task.join().await) };
             let reply = match FutureReader::new(&mut access, reply_future) {
                 Ok(reply) => reply,
                 Err(error) => {

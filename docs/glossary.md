@@ -80,7 +80,7 @@ The `complete` binding’s pre-checks and final answer validation before the gue
 
 ### Host-injected tools
 
-Tools the host merges into a completion from `grants` (`resolve`, `read`, `list`, `write`). Guests must not redeclare these names in `prompt.tools`.
+Tools the host merges into a completion from `grants` (`read`, `list`, `write`). Guests must not redeclare these names in `prompt.tools`.
 
 ## Other uses of “floor” (not the runtime platform)
 

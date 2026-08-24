@@ -8,34 +8,28 @@ This page covers the guest API, the grants model, the available backends, and ho
 
 ## Requesting a completion from a guest
 
-A model guest is typically a command-mode guest (see [Writing Guests](writing-guests.md#command-mode-guests)). It builds a `Request` and calls `completion::create`:
+A model guest is typically a command-mode guest (see [Writing Guests](writing-guests.md#command-mode-guests)). It builds a `Request` and calls `Model::complete` on the `WasiModel` handle:
 
 ```rust,noplayground
-let (system, messages) = Sections {
+use omnia_guest::model::{Format, Message, Model as _, Request, Role, SchemaFormat, WasiModel};
+
+let (system, user) = Sections {
     role: Some("a terse code reviewer".to_string()),
     task: "decide whether the change is acceptable".to_string(),
     context: Some("the diff adds a bounds check".to_string()),
     ..Sections::default()
 }
-.channels(None);
+.assemble(None);
 
-let request = completion::Request {
-    model: None,
-    system,
-    messages,
-    generation: None,
-    format: completion::Format::Schema(completion::Schema {
-        name: "verdict".to_string(),
-        schema: "{\"type\":\"object\"}".to_string(),
-    }),
-    tools: vec![],
-    grants: completion::Grants {
-        references: Some("shelf".to_string()),
-        workspace,
-    },
-};
+let request = Request::builder()
+    .maybe_system(system)
+    .messages(vec![Message { role: Role::User, content: user }])
+    .format(Format::Schema(
+        SchemaFormat::builder().name("verdict").schema("{\"type\":\"object\"}").build(),
+    ))
+    .build();
 
-let answer = match completion::create(request).await {
+let answer = match WasiModel.complete(request).await {
     Ok(reply) => reply.answer,
     Err(error) => format!("error: {error:?}"),
 };
@@ -49,14 +43,31 @@ The pieces:
 - **`tools`** — functions the guest itself declares for the model to call, or MCP servers to attach (backend-dependent; see below).
 - **`grants`** — capabilities the guest lends to the completion.
 
+### Answering tool calls
+
+A request that declares function tools uses `Model::complete_with`, which runs the completion **session**: the model's tool calls stream back to the guest, a closure answers each one over guest state, and the future resolves with the validated reply once the model finishes:
+
+```rust,noplayground
+let outcome = WasiModel
+    .complete_with(request, |call: ToolCall| async move {
+        SHELF
+            .iter()
+            .find(|(key, _)| *key == call.arguments)
+            .map(|(_, value)| (*value).to_owned())
+            .ok_or_else(|| format!("no shelf value for `{}`", call.arguments))
+    })
+    .await;
+```
+
+The closure's `Err` is model-visible failure text the model may repair from; hard failures (budget, timeouts, oversized results) arrive as typed errors on the reply. Under the hood this is the `omnia:model/completion` session — `create` returns a `calls` stream and a `reply` future, and the guest answers on a `results` stream (see the [reference](../reference/model.md)); the sugar runs that dance so most guests never touch it. The host bounds every session: a tool-call budget, a per-result size cap, and a per-call timeout, all backend-configurable.
+
 ## Grants and host-injected tools
 
 Grants are the security boundary. Rather than giving the model backend ambient access, the guest explicitly lends:
 
 - **`workspace`** — a directory descriptor from the guest's own preopen table (populated by the host's `[[mount]]`; see [Multi-Guest Deployments](multi-guest-deployments.md#mounts-giving-guests-a-workspace)). The model can only see a tree the host mounted *and* the guest chose to lend.
-- **`references`** — an identifier the host resolves to reference material through guest dispatch.
 
-From these grants the **host** — not the guest, not the backend — merges the injected tools `resolve`, `read`, `list`, and `write` into the completion. Guests must not redeclare those names in `tools`. Backends receive a `ToolHost` handle and call back into the host to execute them, so every tool invocation passes through the host's validation gate.
+From this grant the **host** — not the guest, not the backend — merges the injected tools `read`, `list`, and `write` into the completion. Guests must not redeclare those names in `tools`. Backends receive a `ToolHost` handle and call back into the host to execute every tool — injected and guest-declared alike — so each invocation passes through the host's validation gate and session limits.
 
 ## Backends
 
@@ -73,7 +84,7 @@ cargo run --example model
 
 ### `omnia-genai` — provider APIs (omnia-backends repo)
 
-Calls LLM provider APIs in-process via the [`genai`](https://crates.io/crates/genai) SDK (OpenAI, Anthropic, Gemini, Groq, Ollama, and others). Provider API keys are read from the environment at call time (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...). It runs a bounded tool loop for the host-injected `resolve` tool and passes guest-declared functions through to the provider. MCP tools are not supported by this backend — use `omnia-cursor` for that.
+Calls LLM provider APIs in-process via the [`genai`](https://crates.io/crates/genai) SDK (OpenAI, Anthropic, Gemini, Groq, Ollama, and others). Provider API keys are read from the environment at call time (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...). It advertises the request's declared function tools to the provider and drives the bounded session tool loop, forwarding every model tool call back through the host to the guest's handler. MCP tools are not supported by this backend — use `omnia-cursor` for that.
 
 ### `omnia-cursor` — cursor-agent (omnia-backends repo)
 

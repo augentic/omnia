@@ -69,9 +69,9 @@ Mounts are the only filesystem doorway ([details](guides/multi-guest-deployments
 The `omnia:model` design extends capability thinking to LLM backends, which are effectively untrusted executors:
 
 - The backend gets **no ambient access**. It can touch a filesystem tree only if the guest lends one through `grants.workspace` — and that lend is a typed `wasi:filesystem` descriptor borrow from the guest's own preopen table, not a path string or integer handle a guest could forge. The host resolves it back to an authorized mount by identity.
-- Tools the model may call (`resolve`, `read`, `list`, `write`) are **injected by the host** from the grants; backends execute them by calling back through the host, so every tool invocation passes host-side checks. Guests cannot impersonate these tools (reserved names are rejected).
+- Host-injected tools (`read`, `list`, `write`) are **merged by the host** from the grants, and guest-declared function tools are answered by the guest itself over the completion session's streams; backends execute every tool by calling back through the host, so each invocation passes host-side checks (declared-name allowlist, size cap, timeout). Guests cannot impersonate the injected tools (reserved names are rejected).
 - The **answer is validated by the host** against the requested format before the guest sees it — a backend cannot smuggle unvalidated output past the gate.
-- Budget errors (`budget-exhausted`) bound runaway tool loops; the cursor backend additionally kills its spawned agent on timeout.
+- Session limits bound runaway tool loops: a call budget and per-call timeout (`budget-exhausted`) and a per-result size cap (`tool-failed`); the cursor backend additionally kills its spawned agent on timeout.
 
 The net effect: a prompt-injected or misbehaving model session is confined to the lent workspace and the granted tools, exactly as a guest is confined to its linked interfaces.
 

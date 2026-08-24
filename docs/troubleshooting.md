@@ -136,7 +136,7 @@ The runtime is serving `wasi-model` with the echo `ModelDefault`, which answers 
 
 ### `invalid-request` errors
 
-The host's validation gate rejected the request before any backend ran: empty `messages`, a guest tool named after a reserved host-injected tool (`resolve`, `read`, `list`, `write`), or an invalid JSON Schema in `format`. The message names the violation.
+The host's validation gate rejected the request before any backend ran: empty `messages`, a guest tool named after a reserved host-injected tool (`read`, `list`, `write`), function-tool `parameters` that are not valid JSON, or an invalid JSON Schema in `format`. The message names the violation.
 
 ### `no local tree on this node` (cursor backend)
 

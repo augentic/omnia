@@ -5,10 +5,25 @@ Reference for the `omnia:model/completion` interface (version `0.1.0`): the requ
 ## The function
 
 ```wit
-create: async func(request: request) -> result<reply, error>;
+create: async func(request: request, results: stream<tool-result>) -> result<session, error>;
 ```
 
-One request, one validated reply. There is no streaming variant yet.
+One request opens one **session**. The guest creates the `results` stream, keeps the writer, and passes the readable end; the host returns the session:
+
+```wit
+record session {
+    calls: stream<tool-call>,
+    reply: future<result<reply, error>>,
+}
+```
+
+Tool calls stream host-to-guest on `calls`; the guest answers each on `results` by `id` (calls may arrive in parallel and results are unordered). The `reply` future resolves once the host's answer gate passes — the host always resolves it, so budget and deadline failures arrive as typed `error` values, never as a dropped writer. When the completion finishes (or its call budget is exhausted) the host closes `calls`, ending the guest's tool loop.
+
+Most guests never touch this machinery: the `omnia-guest` `Model::complete` / `Model::complete_with` sugar runs the session dance and hands tool calls to a closure — see the [guide](../guides/model-completions.md).
+
+### Session limits
+
+The host enforces per-session limits (`SessionLimits`, backend-configurable via `WasiModelCtx::limits`): a tool-call budget (default 32, `budget-exhausted`), a per-result size cap (default 1 MiB, `tool-failed`), and a per-call timeout (default 60 s, `budget-exhausted`). There is no streaming variant of `create` yet.
 
 ## Request
 
@@ -44,21 +59,20 @@ The **host** enforces the contract at the `create` gate: an answer that fails va
 
 | Variant | Fields | Support |
 | ------- | ------ | ------- |
-| `function` | `name`, `description`, `parameters` (JSON Schema for the arguments object) | Passed through to the provider (genai) |
+| `function` | `name`, `description`, `parameters` (JSON Schema for the arguments object) | Advertised to the provider and executed by the guest through the session's `calls`/`results` streams (genai) |
 | `mcp` | `name`, `tools` (allowlist; empty = all), `url` (server endpoint) | Cursor backend only; genai rejects MCP grants |
 
-Function names must not collide with the reserved host-injected tool names below.
+Function names must not collide with the reserved host-injected tool names below, and `parameters` must parse as JSON (`invalid-request` otherwise).
 
 ### `grants`
 
 | Field | Type | Effect |
 | ----- | ---- | ------ |
-| `references` | `option<string>` | Guest id whose export the injected `resolve` tool dispatches to. |
-| `workspace` | `option<borrow<descriptor>>` | A `wasi:filesystem` directory descriptor from the guest's own preopen table. Being a typed resource borrow, it cannot be forged — the host resolves it back to an authorized mount by directory identity, then exposes it to backends as bounded `read`/`list`/`write` (genai) or the absolute local path (cursor's `--workspace`). |
+| `workspace` | `option<workspace-grant>` | A `wasi:filesystem` directory descriptor from the guest's own preopen table plus a relative `subpath`. Being a typed resource borrow, it cannot be forged — the host resolves it back to an authorized mount by directory identity, then exposes it to backends as bounded `read`/`list`/`write` (genai) or the absolute local path (cursor's `--workspace`). |
 
 ### Host-injected tools
 
-From the grants, the host — never the guest or backend — merges these tools into the completion: **`resolve`**, **`read`**, **`list`**, **`write`**. Guests must not declare tools with these names (`invalid-request`). Backends execute them by calling back through the host's `ToolHost`, so every invocation passes host validation.
+From the grants, the host — never the guest or backend — merges these tools into the completion: **`read`**, **`list`**, **`write`**. Guests must not declare tools with these names (`invalid-request`). Backends execute them by calling back through the host's `ToolHost`, so every invocation passes host validation. Declared function tools travel the same road: the backend forwards the model's call through `ToolHost::call_tool`, the host checks the name against the request's declared tools and enforces the session limits, and the guest's handler answers over the session streams.
 
 ## Reply
 
@@ -82,5 +96,5 @@ From the grants, the host — never the guest or backend — merges these tools 
 | Backend | Location | Notes |
 | ------- | -------- | ----- |
 | `ModelDefault` | in-tree (`wasi-model`) | Deterministic echo: text/json answer with the prompt; `format::schema` errors |
-| `omnia-genai` | omnia-backends repo | Provider APIs in-process; function tools + injected `resolve`; no MCP |
-| `omnia-cursor` | omnia-backends repo | Spawned `cursor-agent`; requires workspace grant; MCP via `.cursor/mcp.json`; 120s default timeout |
+| `omnia-genai` | omnia-backends repo | Provider APIs in-process; drives the function-tool session loop; no MCP |
+| `omnia-cursor` | omnia-backends repo | Spawned `cursor-agent`; requires workspace grant; MCP via `.cursor/mcp.json`; rejects function tools (session bridging pending); 120s default timeout |

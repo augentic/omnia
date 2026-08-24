@@ -10,6 +10,7 @@
 //! prefers over the backend's own failure.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::{Context, Poll};
@@ -20,7 +21,7 @@ use tokio::sync::{mpsc, oneshot};
 use wasmtime::StoreContextMut;
 use wasmtime::component::{Destination, Source, StreamConsumer, StreamProducer, StreamResult};
 
-use crate::host::generated::omnia::model::completion::{ToolCall, ToolResult};
+use crate::host::generated::omnia::model::completion::{Reply, ToolCall, ToolResult};
 use crate::host::{Error, FutureResult, SessionLimits};
 
 // Bounds tool calls queued toward the guest before it has read them; the
@@ -217,6 +218,45 @@ fn describe(error: &Error) -> String {
         Error::BudgetExhausted(detail) => format!("budget exhausted: {detail}"),
         Error::ToolFailed(detail) => format!("tool failed: {detail}"),
         Error::Backend(detail) => format!("backend failure: {detail}"),
+    }
+}
+
+/// The spawned reply pipeline: the backend future piped through the answer
+/// gate, started eagerly at `create` time.
+///
+/// Eager because wasmtime polls a `FutureReader` producer only once the
+/// guest awaits the reply — but a session guest reads `calls` first, so a
+/// lazy backend would deadlock the session before its first tool call.
+/// Cancellation stays structural: dropping this task (the guest dropped its
+/// reply future, so wasmtime dropped the producer awaiting it) aborts the
+/// pipeline, whose [`SessionClose`] guard then ends the session.
+///
+/// Requires a tokio runtime, which every `omnia` deployment provides.
+pub struct ReplyTask {
+    handle: tokio::task::JoinHandle<Result<Reply, Error>>,
+}
+
+impl ReplyTask {
+    pub fn spawn(pipeline: impl Future<Output = Result<Reply, Error>> + Send + 'static) -> Self {
+        Self {
+            handle: tokio::spawn(pipeline),
+        }
+    }
+
+    /// Await the pipeline's outcome; dropping this future aborts the task.
+    pub async fn join(mut self) -> Result<Reply, Error> {
+        match (&mut self.handle).await {
+            Ok(result) => result,
+            // Cancelled cannot be observed here (aborting requires dropping
+            // `self`), so this is a pipeline panic.
+            Err(error) => Err(Error::Backend(format!("reply pipeline failed: {error}"))),
+        }
+    }
+}
+
+impl Drop for ReplyTask {
+    fn drop(&mut self) {
+        self.handle.abort();
     }
 }
 
