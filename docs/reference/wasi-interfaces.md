@@ -24,7 +24,7 @@ Every capability Omnia exposes to guests, its interface crate, the zero-config d
 Notes:
 
 - Package names on crates.io carry the `omnia-` prefix (`omnia-wasi-keyvalue`, and so on); directory names in `crates/` drop it.
-- Most defaults are genuinely zero-config and in-memory. The exceptions: `HttpDefault` and `WebSocketDefault` bind real TCP ports, and `IdentityDefault` needs OAuth credentials. `ModelDefault` is a zero-config echo — it answers text/json completions with the prompt itself but rejects `format::schema`, so deployments bind a real backend and tests inject `omnia_testkit::model::Scripted`.
+- Most defaults are genuinely zero-config and in-memory. The exceptions: `HttpDefault` and `WebSocketDefault` bind real TCP ports, and `IdentityDefault` needs OAuth credentials. `ModelDefault` is a zero-config echo — it answers text/json completions with the prompt itself but rejects `format::schema`, so deployments bind a real backend and tests define inline canned backends.
 - Each interface crate compiles to guest bindings on `wasm32` and the host implementation on native targets, so guests and hosts depend on the same crate name.
 
 ## Crate anatomy
@@ -38,9 +38,10 @@ wasi-keyvalue/
 │       ├── mod.rs      # WasiKeyValue host type, Host/Server impls
 │       ├── default_impl.rs   # KeyValueDefault backend
 │       └── ...
-├── tests/seam.rs       # Integration test at the guest–host boundary
 └── wit/                # WIT interface definitions (+ deps/)
 ```
+
+ABI tests live in the workspace-wide [`crates/abi-tests`](../../crates/abi-tests), and only for behavior that is the boundary itself — see the [testing policy](../guides/testing-policy.md).
 
 ## Supporting crates
 
@@ -50,4 +51,4 @@ wasi-keyvalue/
 | `omnia-guest` | Guest SDK: `Operation`, `Invocation`, `Invoker`, explicit command/HTTP/messaging routers, errors, ORM, and MCP |
 | `omnia-guest-macros` | `#[instrument]` attribute |
 | `omnia-host-macros` | `runtime!` macro (use via `omnia::runtime!`) |
-| `omnia-testkit` | Dev-only integration-test helpers (`find_guest`, `temp_manifest`, HTTP driver) |
+| `omnia-abi-tests` | Guest–host ABI tests plus dev-only helpers (`find_guest`, `temp_manifest`, HTTP driver) |

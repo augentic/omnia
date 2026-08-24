@@ -1,53 +1,119 @@
 //! The `create` host binding.
 //!
-//! Implements the generated `completion` host trait on [`WasiModel`]. It is the
-//! host validation gate — it validates the request, hands it and a
-//! per-completion [`ToolHost`] to the backend, then *re-validates* the returned
-//! answer before mapping it to the guest-visible `answer` string. A backend
-//! that runs its own repair loop (genai) consumes validation failures
-//! internally and only returns once it passes; the host re-validates here.
+//! Implements the generated `completion` host trait on [`WasiModel`]. It is
+//! the host validation gate: it validates the request, mints the session
+//! channels (calls stream, reply future) around the backend, pipes the
+//! guest's results stream into them, and re-validates the final answer
+//! before the reply future resolves. A backend that runs its own repair loop
+//! (genai) consumes validation failures internally and only returns once it
+//! passes; the host re-validates here.
+//!
+//! The reply pipeline runs eagerly as a spawned task, since a session guest
+//! reads `calls` before awaiting the reply (see `session::ReplyTask`).
+//! Cancellation stays structural: the guest dropping its reply future drops
+//! the producer awaiting the task, which aborts it — no in-flight backend
+//! work outlives the session. The reply future is always resolved with a
+//! value; budget and deadline failures are typed `error` values, never a
+//! dropped writer (dropping it would trap the guest).
 
 use std::sync::Arc;
 
-use anyhow::{Context as _, anyhow, bail};
+use anyhow::anyhow;
 use futures::FutureExt as _;
-use omnia::{Dispatcher, GuestId, HasDispatcher, HasMounts};
-use wasmtime::component::{Accessor, Val};
+use omnia::HasMounts;
+use wasmtime::component::{Accessor, FutureReader, StreamReader};
 
-use crate::host::generated::omnia::model::completion::{Host, HostWithStore, Reply, Request};
-use crate::host::types::{DirEntry, Reference};
+use crate::host::generated::omnia::model::completion::{
+    Host, HostWithStore, Session, Tool, ToolResult,
+};
+use crate::host::session::{CallsProducer, ReplyTask, ResultsConsumer, SessionClose, SessionState};
+use crate::host::types::DirEntry;
 use crate::host::workspace::{self, Workspace};
-use crate::host::{Error, FutureResult, ToolHost, WasiModel, WasiModelCtxView, gate};
+use crate::host::{Error, FutureResult, Request, ToolHost, WasiModel, WasiModelCtxView, gate};
 
 impl<T> HostWithStore<T> for WasiModel
 where
-    T: HasMounts + HasDispatcher,
+    T: HasMounts,
 {
-    async fn create(accessor: &Accessor<T, Self>, mut request: Request) -> Result<Reply, Error> {
-        // The lent `borrow<descriptor>` cannot survive the backend await, so the
-        // host takes it out here to resolve the workspace for `ToolHost`.
+    // The generated trait method is async; opening the session is entirely
+    // synchronous store work (the backend runs behind the reply future).
+    #[expect(clippy::unused_async_trait_impl)]
+    async fn create(
+        accessor: &Accessor<T, Self>, mut request: Request, mut results: StreamReader<ToolResult>,
+    ) -> Result<Session, Error> {
+        // The lent `borrow<descriptor>` cannot survive the backend await, so
+        // the host takes it out here to resolve the workspace for `ToolHost`.
         let lent = request.grants.workspace.take();
-        gate::validate(&request)?;
+
+        if let Err(error) = gate::validate(&request) {
+            // A stream not returned to the guest must be disposed explicitly.
+            accessor.with(|mut access| results.close(&mut access))?;
+            return Err(error);
+        }
 
         let format = request.format.clone();
-        let references = request.grants.references.clone();
+        // The declared function tools are the only names `call-tool` accepts.
+        let allowed: Vec<String> = request
+            .tools
+            .iter()
+            .filter_map(|tool| match tool {
+                Tool::Function(function) => Some(function.name.clone()),
+                Tool::Mcp(_) => None,
+            })
+            .collect();
 
-        let answer = accessor
-            .with(|mut store| {
-                let mounts = store.data_mut().mounts();
-                let dispatcher = store.data_mut().dispatcher();
-                let view = store.get();
-                let workspace = workspace::resolve(view.table, &mounts, lent.as_ref())?;
-                let tool_host: Arc<dyn ToolHost> = Arc::new(BoundToolHost {
-                    dispatcher,
-                    references,
-                    workspace,
-                });
-                Ok::<_, Error>(view.ctx.complete(request, tool_host))
-            })?
-            .await?;
+        accessor.with(|mut access| {
+            let mounts = access.data_mut().mounts();
+            let resolved = {
+                let view = access.get();
+                workspace::resolve(view.table, &mounts, lent.as_ref())
+            };
+            let workspace = match resolved {
+                Ok(workspace) => workspace,
+                Err(error) => {
+                    results.close(&mut access)?;
+                    return Err(error.into());
+                }
+            };
 
-        answer.project(&format)
+            let limits = access.get().ctx.limits();
+            let (session, calls_rx) = SessionState::new(limits, allowed);
+            let tool_host: Arc<dyn ToolHost> = Arc::new(BoundToolHost {
+                session: Arc::clone(&session),
+                workspace,
+            });
+            let backend = access.get().ctx.complete(request, tool_host);
+
+            results.pipe(&mut access, ResultsConsumer::new(Arc::clone(&session)))?;
+            let mut calls = StreamReader::new(&mut access, CallsProducer::new(calls_rx))?;
+
+            // The reply pipeline — the backend future piped through the
+            // answer gate — runs eagerly as a spawned task (see [`ReplyTask`]
+            // for why). It always yields a value; a typed failure recorded by
+            // host enforcement wins over whatever the backend then returned.
+            // The guard ends the session — completion or cancellation alike —
+            // so the guest's calls loop always terminates.
+            let close = SessionClose::new(Arc::clone(&session));
+            let task = ReplyTask::spawn(async move {
+                let _close = close;
+                match backend.await {
+                    Ok(answer) => {
+                        session.take_failure().map_or_else(|| answer.project(&format), Err)
+                    }
+                    Err(error) => Err(session.take_failure().unwrap_or_else(|| error.into())),
+                }
+            });
+            let reply_future = async move { Ok::<_, wasmtime::Error>(task.join().await) };
+            let reply = match FutureReader::new(&mut access, reply_future) {
+                Ok(reply) => reply,
+                Err(error) => {
+                    calls.close(&mut access)?;
+                    return Err(error.into());
+                }
+            };
+
+            Ok(Session { calls, reply })
+        })
     }
 }
 
@@ -57,50 +123,16 @@ impl Host for WasiModelCtxView<'_> {
     }
 }
 
-// The bound tool host, built fresh per completion from the request's grants.
+// The bound tool host, built fresh per completion from the request's grants
+// and the session channels the `create` binding minted.
 struct BoundToolHost {
-    dispatcher: Arc<dyn Dispatcher>,
-    references: Option<String>,
+    session: Arc<SessionState>,
     workspace: Option<Workspace>,
 }
 
-// Convert a `resolve` export's return value into raw bytes.
-fn vals_to_bytes(results: Vec<Val>) -> anyhow::Result<Vec<u8>> {
-    let first = results.into_iter().next().context("resolve export returned no value")?;
-    match first {
-        Val::List(items) => items
-            .into_iter()
-            .map(|value| match value {
-                Val::U8(byte) => Ok(byte),
-                other => bail!("resolve result list element is not a u8: {other:?}"),
-            })
-            .collect(),
-        Val::String(text) => Ok(text.into_bytes()),
-        other => bail!("resolve export must return list<u8> or string, got {other:?}"),
-    }
-}
-
 impl ToolHost for BoundToolHost {
-    fn resolve(&self, reference: Reference) -> FutureResult<Vec<u8>> {
-        let Some(target) = self.references.clone() else {
-            return async move {
-                Err(anyhow!("resolve(`{}`) requires grants.references", reference.name))
-            }
-            .boxed();
-        };
-        let dispatcher = Arc::clone(&self.dispatcher);
-        async move {
-            let results = dispatcher
-                .invoke(
-                    GuestId::from(target),
-                    None,
-                    "resolve".to_owned(),
-                    vec![Val::String(reference.name)],
-                )
-                .await?;
-            vals_to_bytes(results)
-        }
-        .boxed()
+    fn call_tool(&self, name: String, arguments: String) -> FutureResult<Result<String, String>> {
+        Arc::clone(&self.session).call(name, arguments)
     }
 
     fn read(&self, path: String) -> FutureResult<Vec<u8>> {

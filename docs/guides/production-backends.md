@@ -17,7 +17,7 @@ The in-tree `*Default` backends make development friction-free, but production d
 | `omnia-azure-id` | Azure Managed Identity | identity |
 | `omnia-opentelemetry` | OpenTelemetry Collector (OTLP gRPC) | otel |
 | `omnia-genai` | LLM provider APIs (OpenAI, Anthropic, Gemini, ...) | model |
-| `omnia-cursor` | `cursor-agent` CLI | model |
+| `omnia-cursor` | `cursor-sdk-bridge` | model |
 
 The model backends (`genai`, `cursor`) are covered in [Model Completions and MCP](model-completions.md).
 

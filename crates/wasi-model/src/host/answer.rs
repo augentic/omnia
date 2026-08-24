@@ -183,7 +183,7 @@ impl Answer {
 }
 
 // Unit tests by design: answer extraction/repair is a pure parser; the model
-// seam scenarios cover the request/answer round-trip through a guest.
+// ABI scenarios cover the request/answer round-trip through a guest.
 #[cfg(test)]
 mod tests {
     use serde_json::json;

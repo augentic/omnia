@@ -91,13 +91,6 @@ pub struct Usage {
     pub reasoning_tokens: Option<u32>,
 }
 
-/// A reference an adapter asked the model to resolve (`ToolHost::resolve`).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Reference {
-    /// The opaque reference body the adapter's `references` shelf interprets.
-    pub name: String,
-}
-
 /// One bounded directory entry returned by `ToolHost::list`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DirEntry {
@@ -141,10 +134,7 @@ mod tests {
             generation: None,
             format: Format::Text,
             tools: vec![],
-            grants: Grants {
-                references: None,
-                workspace: None,
-            },
+            grants: Grants { workspace: None },
         }
     }
 

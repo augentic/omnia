@@ -1,6 +1,6 @@
 //! Serialize built guest components with Omnia's compile path.
 //!
-//! `cargo make test-guests` invokes this after building the curated seam
+//! `cargo make test-guests` invokes this after building the curated ABI-test
 //! guests, writing a `.bin` next to each `.wasm` so tests load pre-compiled
 //! components (`Component::deserialize_file`) instead of repeating JIT
 //! compilation in every test process.

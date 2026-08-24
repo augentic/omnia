@@ -94,7 +94,7 @@ impl Eq for Generation {}
 #[derive(Clone, Debug, PartialEq, Eq, bon::Builder)]
 pub struct Function {
     /// Tool name. Must not collide with reserved host-injected tool names
-    /// (`resolve`, `read`, …).
+    /// (`read`, `list`, `write`).
     #[builder(into)]
     pub name: String,
     /// Natural-language description for the model.
@@ -149,10 +149,6 @@ pub struct Request {
     /// tools at the backend.
     #[builder(default)]
     pub tools: Vec<Tool>,
-    /// Guest id whose `references` export the host-injected `resolve` tool
-    /// targets (`grants.references`).
-    #[builder(into)]
-    pub references: Option<String>,
     /// Deployment-local path of the directory to lend through
     /// `grants.workspace`, giving the backend (and any spawned agent) that
     /// directory. On `wasm32` the path must sit on (or beneath) a preopen —
@@ -161,6 +157,18 @@ pub struct Request {
     /// provider consumes directly. `None` lends nothing.
     #[builder(into)]
     pub workspace: Option<String>,
+}
+
+/// One tool invocation the model asked the guest to run, delivered to the
+/// [`Model::complete_with`] handler.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ToolCall {
+    /// Correlation id the session answers by; the handler never needs it.
+    pub id: String,
+    /// The declared function-tool name the model called.
+    pub name: String,
+    /// JSON arguments object for the tool, per its declared parameters schema.
+    pub arguments: String,
 }
 
 /// Token accounting for one completion, when the backend reports it.
@@ -208,17 +216,56 @@ pub enum Error {
 /// Prompt completion (Omnia Model).
 ///
 /// Default WASM implementations delegate to `omnia:model/completion` via
-/// `omnia-wasi-model`; off `wasm32` the signature is bare so hosts and tests
-/// supply their own provider.
+/// `omnia-wasi-model`, opening the completion session and answering the
+/// model's tool calls with the supplied closure; off `wasm32` the signatures
+/// are bare so hosts and tests supply their own provider.
 pub trait Model: Send + Sync {
-    /// Single-shot completion returning one validated reply.
+    /// Single-shot completion returning one validated reply. Any tool call
+    /// the model issues fails back to it; declare tools and answer them
+    /// through [`Model::complete_with`] instead.
     #[cfg(not(target_arch = "wasm32"))]
-    fn create(&self, request: Request) -> impl Future<Output = Result<Reply, Error>> + Send;
+    fn complete(&self, request: Request) -> impl Future<Output = Result<Reply, Error>> + Send;
 
-    /// Single-shot completion returning one validated reply.
+    /// Single-shot completion returning one validated reply. Any tool call
+    /// the model issues fails back to it; declare tools and answer them
+    /// through [`Model::complete_with`] instead.
     #[cfg(target_arch = "wasm32")]
-    fn create(&self, request: Request) -> impl Future<Output = Result<Reply, Error>> + Send {
-        use omnia_wasi_model::completion;
+    fn complete(&self, request: Request) -> impl Future<Output = Result<Reply, Error>> + Send {
+        self.complete_with(request, |call: ToolCall| async move {
+            Err::<String, String>(format!(
+                "tool `{}` has no handler: answer tool calls with complete_with",
+                call.name
+            ))
+        })
+    }
+
+    /// Completion with a tool closure: the model's tool calls arrive as
+    /// [`ToolCall`] values answered serially by `handler` (over the caller's
+    /// own locals and authority), and each result feeds the same model turn.
+    /// Results correlate by id, so parallel handling stays available through
+    /// the raw `omnia_wasi_model::completion` session bindings.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn complete_with<H, F>(
+        &self, request: Request, handler: H,
+    ) -> impl Future<Output = Result<Reply, Error>> + Send
+    where
+        H: FnMut(ToolCall) -> F + Send,
+        F: Future<Output = Result<String, String>> + Send;
+
+    /// Completion with a tool closure: the model's tool calls arrive as
+    /// [`ToolCall`] values answered serially by `handler` (over the caller's
+    /// own locals and authority), and each result feeds the same model turn.
+    /// Results correlate by id, so parallel handling stays available through
+    /// the raw `omnia_wasi_model::completion` session bindings.
+    #[cfg(target_arch = "wasm32")]
+    fn complete_with<H, F>(
+        &self, request: Request, mut handler: H,
+    ) -> impl Future<Output = Result<Reply, Error>> + Send
+    where
+        H: FnMut(ToolCall) -> F + Send,
+        F: Future<Output = Result<String, String>> + Send,
+    {
+        use omnia_wasi_model::{completion, wit_stream};
         use wasip3::filesystem::preopens;
 
         async move {
@@ -248,13 +295,35 @@ pub trait Model: Send + Sync {
                 generation: request.generation.map(Into::into),
                 format: request.format.into(),
                 tools: request.tools.into_iter().map(Into::into).collect(),
-                grants: completion::Grants {
-                    references: request.references,
-                    workspace,
-                },
+                grants: completion::Grants { workspace },
             };
 
-            completion::create(wire).await.map(Into::into).map_err(Into::into)
+            let (mut results, results_rx) = wit_stream::new();
+            let session = completion::create(wire, results_rx).await.map_err(Error::from)?;
+            let completion::Session { mut calls, reply } = session;
+
+            // Serial by design: each result feeds the same model turn. A
+            // rejected write means the host stopped reading results; the
+            // loop then ends on the closed calls stream.
+            let calls_loop = async {
+                while let Some(call) = calls.next().await {
+                    let id = call.id.clone();
+                    let output = handler(ToolCall {
+                        id: call.id,
+                        name: call.name,
+                        arguments: call.arguments,
+                    })
+                    .await;
+                    let _ = results.write_one(completion::ToolResult { id, output }).await;
+                }
+            };
+
+            // The host always resolves the reply future, so joining cannot
+            // hang on a well-behaved host; either side closing its stream
+            // ends the other's loop.
+            let ((), outcome) =
+                futures::join!(calls_loop, std::future::IntoFuture::into_future(reply));
+            outcome.map(Into::into).map_err(Into::into)
         }
     }
 }

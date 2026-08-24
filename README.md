@@ -57,7 +57,7 @@ The [`examples/`](examples/README.md) directory contains a complete working gues
 | [`omnia-guest`](crates/omnia-guest)             | Guest SDK — operations, explicit command/HTTP/messaging routers, errors, ORM, and MCP support |
 | [`omnia-guest-macros`](crates/guest-macros)     | `#[instrument]` observability attribute for guests                                         |
 | [`omnia-host-macros`](crates/host-macros)       | `runtime!` proc-macro for host runtime generation                                          |
-| [`omnia-testkit`](crates/testkit)               | Integration-test scaffolding (dev-only)                                                    |
+| [`omnia-abi-tests`](crates/abi-tests)           | Guest–host ABI tests and scaffolding (dev-only)                                            |
 | [`omnia-wasi-blobstore`](crates/wasi-blobstore) | wasi:blobstore host and guest bindings                                                     |
 | [`omnia-wasi-config`](crates/wasi-config)       | wasi:config host and guest bindings                                                        |
 | [`omnia-wasi-docstore`](crates/wasi-docstore)   | Document-store host and guest bindings                                                     |

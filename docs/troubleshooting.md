@@ -114,37 +114,25 @@ By design — these two flags are reserved for the host log presets and removed 
 
 ## Testing
 
-### A seam/integration test panics with `guest artifact ... not found` and build instructions
+### An ABI/integration test panics with `guest artifact ... not found` and build instructions
 
 Tests never build guests; `find_guest` only locates artifacts. Build the guests first — in this repo:
 
 ```bash
-cargo make test-guests     # builds and serializes the seam-suite guests
+cargo make test-guests     # builds and serializes the ABI-test guests
 ```
 
-or for your own guest, the plain two-step: `cargo build --example <name>-wasm --target wasm32-wasip2` (remember artifact names use underscores). See [Testing Your Guests](guides/testing.md).
-
-### `cargo nextest run --all` doesn't run the seam suite
-
-Intentional: the Nextest default filter (`.config/nextest.toml`) excludes `omnia-seam-suite` from the process-per-test pure tier. Run the seam tier with `cargo make test-seam` (one process, shared fixtures) — see [Seam Suite and Testing Policy](guides/testing-policy.md).
-
-### `model script exhausted` in a test
-
-The `Scripted` double received more completions than it has scripted results — see [Model completions](#model-script-exhausted) below.
+(`cargo make test` runs it for you before Nextest). For your own guest, the plain two-step: `cargo build --example <name>-wasm --target wasm32-wasip2` (remember artifact names use underscores). See [Testing Your Guests](guides/testing.md).
 
 ## Model completions
 
 ### `the default echo backend cannot satisfy format::schema`
 
-The runtime is serving `wasi-model` with the echo `ModelDefault`, which answers text/json completions with the prompt itself but cannot fabricate a value conforming to a guest-supplied JSON Schema. Bind a real backend (`omnia-genai`, `omnia-cursor`) in `runtime!`, or inject `omnia_testkit::model::Scripted` in tests.
-
-### `model script exhausted`
-
-The testkit `Scripted` double received more completions than it has scripted results. Script one result per expected `create` call (`Scripted::json`, `Scripted::answers`, ...), and remember clones share the same FIFO.
+The runtime is serving `wasi-model` with the echo `ModelDefault`, which answers text/json completions with the prompt itself but cannot fabricate a value conforming to a guest-supplied JSON Schema. Bind a real backend (`omnia-genai`, `omnia-cursor`) in `runtime!`, or define an inline canned `WasiModelCtx` in tests (see [the testing guide](guides/testing.md#testing-model-guests)).
 
 ### `invalid-request` errors
 
-The host's validation gate rejected the request before any backend ran: empty `messages`, a guest tool named after a reserved host-injected tool (`resolve`, `read`, `list`, `write`), or an invalid JSON Schema in `format`. The message names the violation.
+The host's validation gate rejected the request before any backend ran: empty `messages`, a guest tool named after a reserved host-injected tool (`read`, `list`, `write`), function-tool `parameters` that are not valid JSON, or an invalid JSON Schema in `format`. The message names the violation.
 
 ### `no local tree on this node` (cursor backend)
 

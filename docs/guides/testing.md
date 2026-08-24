@@ -1,8 +1,8 @@
 # Testing Your Guests
 
-Omnia's testing approach is integration-first: the boundary that matters is the guest–host seam, so tests load a real `.wasm`, link real hosts, and drive requests through the actual WIT boundary — no mocks between your guest and the runtime. This guide shows how to test *your* guests with the `omnia-testkit` scaffolding.
+Omnia's testing approach is integration-first: the boundary that matters is the guest–host boundary, so tests load a real `.wasm`, link real hosts, and drive requests through the actual WIT boundary — no mocks between your guest and the runtime. This guide shows how to test *your* guests with the scaffolding in `omnia-abi-tests`.
 
-If you are contributing to Omnia itself, the repository's own seam suite and coverage rules are in [Seam Suite and Testing Policy](testing-policy.md).
+If you are contributing to Omnia itself, the repository's own coverage rules are in [Testing Policy](testing-policy.md).
 
 ## A first guest test in five minutes
 
@@ -12,11 +12,11 @@ If you are contributing to Omnia itself, the repository's own seam suite and cov
 cargo build --example myguest-wasm --target wasm32-wasip2
 ```
 
-2. Add the testkit to your dev-dependencies:
+2. Add the scaffolding to your dev-dependencies:
 
 ```toml
 [dev-dependencies]
-omnia-testkit.workspace = true
+omnia-abi-tests.workspace = true
 ```
 
 3. Assemble a single-guest runtime over your backend bundle and drive it in-process:
@@ -39,43 +39,49 @@ assert!(response.status().is_success());
 | Kind           | What it covers                                                                                                   | How it runs                                             |
 | -------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | **Pure tier**  | Deterministic, service-free logic: parsers, codecs, filter/type translation, macro expansion, guest-native logic | Ordinary unit tests (Nextest, process-per-test)         |
-| **Seam tier**  | Guests driven through the real runtime against the default (in-memory) backends                                  | Integration tests using `omnia-testkit`                 |
+| **ABI tier**   | Guests driven through the real runtime against the default (in-memory) backends                                  | Integration tests using `omnia-abi-tests` (Nextest, process-per-test; guests pre-built) |
 | **Live tests** | A production backend's `WasiXxxCtx` against the real service (`#[ignore]`-gated, in the `omnia-backends` repo)         | Local only                                              |
 
-Anything that crosses a WASI interface belongs at the seam, not in a unit test with mocks.
+Test where the behavior lives: deterministic logic gets unit tests, and the boundary gets a test when it is itself the contract — never a unit test with mocks standing in for the runtime.
 
-## The testkit
+## The scaffolding
 
-`omnia-testkit` is a dev-only crate. Helpers:
+`omnia-abi-tests` houses Omnia's own ABI suite plus the dev-only helpers it is built from:
 
 - **`find_guest("name_wasm.wasm")`** — locates the built guest artifact (serialized `.bin` preferred, loaded via deserialization instead of JIT compilation; else the `.wasm`), panicking with build instructions when missing. No lazy builds, no silent skips.
 - **`single_guest(file, bundle)`** — assembles a single-guest deployment over a backend bundle: `single_guest("x_wasm.wasm", bundle).await?.host::<WasiHttp>()?...into_runtime()?`.
 - **`temp_manifest(toml)`** — writes a deployment manifest to a unique temp file, removed on drop, for tests that need multi-guest deployments, routes, or mounts.
 - **`http`** — drives a guest's `wasi:http/handler` export in-process, with no TCP socket, e.g. `http::post(&runtime, "/", body)`.
-- **`model`** — model doubles serving both faces of the `wasi-model` boundary.
 
-### Testing model-consuming logic
+### Testing model guests
 
-`model::Scripted` returns FIFO successes or typed errors:
+There is no shared model double: each test defines the backend it needs, inline, next to the test (see `crates/abi-tests/tests/model.rs` for the pattern — a canned happy-path backend alongside purpose-built probes like `PathProbe` and `WriteProbe`). The in-tree echo `ModelDefault` covers scenarios where the answer does not matter, or where its schema rejection is itself under test. A canned backend answering every completion with one fixed value is all the happy path needs:
 
 ```rust,noplayground
-use omnia_guest::model::{Model, Request};
-use omnia_testkit::model::Scripted;
+use std::sync::Arc;
 
-let model = Scripted::answers(["first", "second"]);
-let first = model.create(Request::default()).await?;
-assert_eq!(first.answer, "first");
+use futures::FutureExt as _;
+use omnia_wasi_model::{Answer, FutureResult, Request, ToolHost, WasiModelCtx};
+use serde_json::Value;
+
+#[derive(Clone, Debug)]
+struct Canned(Value);
+
+impl WasiModelCtx for Canned {
+    fn complete(&self, _request: Request, _tools: Arc<dyn ToolHost>) -> FutureResult<Answer> {
+        let answer = Answer { value: self.0.clone(), usage: None, transcript: None };
+        async move { Ok(answer) }.boxed()
+    }
+}
 ```
 
-Call `Scripted::assert_exhausted` at the end of a test when every scripted turn must be consumed. An unexpected extra call returns a deterministic `Error::Backend`; it does not panic.
+Install it as the deployment's model backend and assert on the guest-visible output; unlike an echo, a canned JSON value can satisfy a guest's `format::schema` request.
 
-`Scripted` also implements the host-side `WasiModelCtx`, so the same double serves integration tests and example runtimes: script host answers with `Scripted::json` (one JSON value) or `Scripted::values` (ordered `Answer` rows) and install the clone as the deployment's model backend. The double never runs tools; a request with no scripted result remaining fails with `model script exhausted`.
-
-## Anatomy of a seam test
+## Anatomy of an ABI test
 
 The pattern has three parts:
 
-**1. A backend bundle with accessor impls** (mirroring the `runtime!` macro's generated `Backends`), keeping clones of the shared in-memory backends as probes:
+**1. A backend bundle with accessor impls** (mirroring the `runtime!` macro's generated `Backends`):
 
 ```rust,noplayground
 #[derive(Clone)]
@@ -92,29 +98,33 @@ impl HasKeyValue for Bundle {
 }
 ```
 
-**2. Build the runtime** with `single_guest` as above (build it once and share it when many tests drive the same guest).
+**2. Build the runtime** with `single_guest` as above.
 
-**3. Drive the guest and assert both sides of the seam** — the guest's response *and* the effect that landed in the host backend:
+**3. Drive the guest and assert the guest-visible outcome:**
 
 ```rust,noplayground
-#[test]
-fn set_then_get() -> Result<()> {
-    RT.block_on(async {
-        let response = http::post(&runtime, "/keyvalue?key=k1", "payload").await?;
-        assert!(response.status().is_success(), "guest completes the keyvalue round-trip");
-
-        // The guest stored the body under `k1`; the shared backend must now
-        // hold that write.
-        let bucket = bundle.keyvalue.open_bucket("omnia_bucket".to_owned()).await?;
-        let stored = bucket.get("k1".to_owned()).await?;
-        assert_eq!(stored.as_deref(), Some(b"payload".as_slice()), "the write reached the host");
-
-        Ok(())
-    })
+#[tokio::test]
+async fn set_then_get() -> Result<()> {
+    let response = http::post(&runtime, "/keyvalue?key=k1", "payload").await?;
+    assert!(response.status().is_success(), "guest completes the keyvalue round-trip");
+    Ok(())
 }
 ```
 
-That second assertion is the point: a `200` proves the call crossed the WIT boundary without trapping; reading the shared backend (the **probe**) proves the write actually happened host-side rather than being swallowed.
+A success response proves the call crossed the WIT boundary and that the guest's own checks (it read back what it wrote) held. Reach for a **probe** — a clone of a shared backend, read host-side — only when the guest cannot observe the effect itself: a message that must land on the broker, a frame that must reach a connected peer, a write that must be denied. For example, subscribing on the broker before the guest publishes:
+
+```rust,noplayground
+let mut subscription = bundle.messaging.connect().await?.subscribe().await?;
+let response = http::post_json(&runtime, "/publish", payload).await?;
+assert!(response.status().is_success());
+
+let message = timeout(Duration::from_secs(5), subscription.next())
+    .await?
+    .context("no delivery")?;
+assert_eq!(message.payload, payload.as_bytes(), "the publish reached the broker");
+```
+
+A probe that re-reads the same in-memory store the guest just wrote and read back adds no information — assert one side of the boundary, the one only that side can see.
 
 When several tests share one runtime and its backends, derive keys/ids from a per-test unique suffix so concurrent tests never collide.
 

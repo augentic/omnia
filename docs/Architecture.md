@@ -152,9 +152,9 @@ omnia::runtime!({
 
 The macro generates a `Backends` bundle (one connected backend per `Host: Backend` pair, with the accessor impls that wire each backend into the library's WASI views), a `Wiring` implementation whose `link` runs inside `Runtime::new` and whose `serve` launches each trigger server, and a `main` that delegates to `omnia::main`. The runtime itself is always the library type `omnia::Runtime<Backends>` over `omnia::StoreCtx<Backends>` — the macro emits wiring, not a runtime.
 
-### Test scaffolding (`crates/testkit`)
+### ABI tests and scaffolding (`crates/abi-tests`)
 
-Dev-only helpers: model scripting on both faces of the model boundary (`Scripted` implements the guest-side `Model` and the host-side `WasiModelCtx`), and integration ("seam") runtime scaffolding (`find_guest`, ephemeral manifests, single-guest assembly, in-process HTTP driver). See [the testing guide](guides/testing.md) for usage and policy.
+The guest–host ABI test suite, plus the dev-only runtime scaffolding it is built from: `find_guest`, ephemeral manifests, single-guest assembly, and the in-process HTTP driver. See [the testing guide](guides/testing.md) for usage and policy.
 
 ## The Guest Registry
 
@@ -208,7 +208,7 @@ omnia/
 │   ├── omnia-guest/        # Guest SDK (typed transport routers, errors, ORM, MCP)
 │   ├── guest-macros/       # #[instrument] proc macro
 │   ├── host-macros/        # runtime! proc-macro
-│   ├── testkit/            # Integration-test scaffolding (dev-only)
+│   ├── abi-tests/          # Guest–host ABI tests + scaffolding (dev-only)
 │   └── wasi-*/             # WASI interface implementations
 │       ├── src/
 │       │   ├── guest.rs    # Guest bindings (wasm32)
@@ -225,7 +225,7 @@ Production backends live in the sibling [`omnia-backends`](https://github.com/au
 
 ## Extending Omnia
 
-**Adding a WASI interface**: create `crates/wasi-<name>/` with the standard layout, define the WIT world in `wit/`, implement guest bindings in `src/guest.rs` and the host (including a zero-config default backend) in `src/host/`, add a seam test in `tests/seam.rs`, and create an example.
+**Adding a WASI interface**: create `crates/wasi-<name>/` with the standard layout, define the WIT world in `wit/`, implement guest bindings in `src/guest.rs` and the host (including a zero-config default backend) in `src/host/`, and create an example. Add a scenario to `crates/abi-tests` only if the interface carries behavior that is the boundary itself (see the [testing policy](guides/testing-policy.md)).
 
 **Adding a backend**: create a crate (usually in the `omnia-backends` repo), implement `Backend` with a `FromEnv`-derived `ConnectOptions`, implement the `WasiXxxCtx` trait(s) for the interfaces it serves, and add `#[ignore]`-gated live tests. No runtime-core changes are required — backends plug in through the `runtime!` host map.
 

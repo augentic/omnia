@@ -1,6 +1,6 @@
 [package]
-name = "omnia-testkit"
-description = "Model doubles and runtime scaffolding for Omnia tests"
+name = "omnia-abi-tests"
+description = "Guest–host ABI tests and scaffolding for the Omnia workspace"
 publish = false
 authors.workspace = true
 categories.workspace = true
@@ -21,17 +21,18 @@ workspace = true
 name = "guests"
 path = "src/bin/guests.rs"
 
+# The library is the scaffolding the test targets share (`find_guest`,
+# `single_guest`, `temp_manifest`, the in-process HTTP driver); the suite
+# itself is one auto-discovered integration-test target per scenario family,
+# run process-per-test under Nextest with the rest of the workspace. Build
+# the guest artifacts first: `cargo make test-guests` (`cargo make test`
+# does both).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
 bytes.workspace = true
-futures.workspace = true
 http.workspace = true
 http-body-util.workspace = true
 omnia.workspace = true
-omnia-guest.workspace = true
-omnia-wasi-model.workspace = true
-serde.workspace = true
-serde_json.workspace = true
 tokio = { workspace = true, features = ["rt", "sync"] }
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true
@@ -39,4 +40,13 @@ wasmtime-wasi-http.workspace = true
 
 [dev-dependencies]
 futures.workspace = true
+omnia-wasi-http.workspace = true
+omnia-wasi-keyvalue.workspace = true
+omnia-wasi-messaging.workspace = true
+omnia-wasi-model.workspace = true
+omnia-wasi-otel.workspace = true
+omnia-wasi-websocket.workspace = true
 serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tokio-tungstenite.workspace = true
+wiremock = "0.6.5"

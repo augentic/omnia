@@ -1,7 +1,12 @@
-//! Shared scaffolding for testing Omnia guests and runtimes.
+//! Guest–host ABI tests for the Omnia workspace, and their scaffolding.
 //!
-//! - [`model`] — model doubles: `Scripted` serves both faces of the
-//!   `wasi-model` boundary (guest-side `Model`, host-side `WasiModelCtx`).
+//! The suite lives in `tests/`, one integration-test target per scenario
+//! family, run process-per-test under Nextest with the rest of the workspace.
+//! Build the guests it drives with `cargo make test-guests` (`cargo make
+//! test` does both).
+//!
+//! The library is the shared scaffolding:
+//!
 //! - [`find_guest`] locates a pre-built example guest artifact and fails fast
 //!   when it is missing. Tests never invoke Cargo: build guests up front with
 //!   `cargo make test-guests`.
@@ -15,7 +20,6 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 pub mod http;
-pub mod model;
 
 mod guest;
 mod manifest;

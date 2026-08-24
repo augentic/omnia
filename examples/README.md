@@ -65,7 +65,7 @@ Each example directory has a `README.md` with test commands and example-specific
 | Example | Demonstrates |
 | ------- | ------------ |
 | [`bench`](bench) | Self-contained HTTP load-test harness for pooling/latency tuning |
-| [`conformance`](conformance) | The shared conformance guest the seam suite drives (one route per interface) |
+| [`conformance`](conformance) | The conformance guest the ABI tests drive (outbound proxy, keyvalue CAS, websocket, messaging) |
 
 ## Backends
 

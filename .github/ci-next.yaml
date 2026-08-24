@@ -10,8 +10,8 @@ on:
         description: "Repo-root-relative directory holding the Cargo workspace (default: the repo root, for repos whose workspace is not in a subdirectory)."
         type: string
         default: "."
-      seam:
-        description: "Run the two-tier Omnia pipeline: build and serialize the seam guests, run the single-process seam suite, and build every WASM example on the default branch."
+      guests:
+        description: "Build and serialize the ABI-test guest artifacts before the test run (the ABI tests are ordinary Nextest integration tests over pre-built guests), and build every WASM example on the default branch."
         type: boolean
         default: false
     secrets:
@@ -55,8 +55,18 @@ jobs:
           tool: nextest
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
         working-directory: ${{ inputs.working-directory }}
-      # `--all`, not `--tests`: library unit tests must run. A repo's Nextest
-      # default filter (.config/nextest.toml) may exclude its seam suite.
+      # ABI tests are ordinary Nextest integration tests over pre-built,
+      # serialized guest artifacts; build the guests before the test run.
+      - if: inputs.guests
+        run: rustup target add wasm32-wasip2
+      - if: inputs.guests
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-make
+      - if: inputs.guests
+        run: cargo make test-guests
+        working-directory: ${{ inputs.working-directory }}
+      # `--all`, not `--tests`: library unit tests must run.
       - run: cargo nextest run --locked --all --all-features --no-tests=pass
         working-directory: ${{ inputs.working-directory }}
       - id: lib
@@ -77,55 +87,9 @@ jobs:
         env:
           RUSTDOCFLAGS: -Dwarnings
 
-  guests:
-    name: Seam guests
-    if: inputs.seam
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-wasip2
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ${{ inputs.working-directory }}
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-make
-      - run: cargo make test-guests
-        working-directory: ${{ inputs.working-directory }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: seam-guests
-          path: |
-            ${{ inputs.working-directory }}/target/wasm32-wasip2/debug/examples/*.wasm
-            ${{ inputs.working-directory }}/target/wasm32-wasip2/debug/examples/*.bin
-          retention-days: 1
-
-  seam:
-    name: Seam suite
-    if: inputs.seam
-    needs: guests
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ${{ inputs.working-directory }}
-      - uses: actions/download-artifact@v4
-        with:
-          name: seam-guests
-          path: ${{ inputs.working-directory }}/target/wasm32-wasip2/debug/examples
-      # Plain cargo test, one process: the suite shares its runtime fixture.
-      - run: cargo test --locked -p omnia-seam-suite --test seam
-        working-directory: ${{ inputs.working-directory }}
-
   examples:
     name: Full WASM example build
-    if: inputs.seam && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || github.event_name == 'schedule')
+    if: inputs.guests && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || github.event_name == 'schedule')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

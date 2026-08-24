@@ -3,23 +3,32 @@
 use crate::host::Error;
 use crate::host::generated::omnia::model::completion::{Format, Request, Tool};
 
-const TOOL_NAMES: &[&str] = &["resolve", "read", "list", "write"];
+const TOOL_NAMES: &[&str] = &["read", "list", "write"];
 
 /// Validate a guest request before it reaches a backend.
 ///
 /// # Errors
 ///
 /// Returns [`Error::InvalidRequest`] when `messages` is empty, a guest tool
-/// shadows a reserved host-injected tool name, or a `format::schema` document
-/// does not parse or compile.
+/// shadows a reserved host-injected tool name, a function tool's parameters
+/// document is not JSON, or a `format::schema` document does not parse or
+/// compile.
 pub fn validate(request: &Request) -> Result<(), Error> {
     // Only guest-declared functions carry a name that could shadow a
     // host-injected tool; MCP grants name a server, not a tool.
-    if let Some(name) = request.tools.iter().find_map(|t| match t {
-        Tool::Function(f) if TOOL_NAMES.contains(&f.name.as_str()) => Some(f.name.as_str()),
-        _ => None,
-    }) {
-        return Err(Error::InvalidRequest(format!("reserved tool name: {name}")));
+    for tool in &request.tools {
+        let Tool::Function(function) = tool else {
+            continue;
+        };
+        if TOOL_NAMES.contains(&function.name.as_str()) {
+            return Err(Error::InvalidRequest(format!("reserved tool name: {}", function.name)));
+        }
+        if serde_json::from_str::<serde_json::Value>(&function.parameters).is_err() {
+            return Err(Error::InvalidRequest(format!(
+                "function tool `{}` parameters is not valid JSON",
+                function.name
+            )));
+        }
     }
 
     if request.messages.iter().all(|m| m.content.trim().is_empty()) {
@@ -76,6 +85,31 @@ mod tests {
         validate(&request_from(vec![message(Role::User, "hi")])).unwrap();
     }
 
+    // `resolve` is no longer host-injected: a guest may declare it as an
+    // ordinary function tool.
+    #[test]
+    fn resolve_is_an_ordinary_tool_name() {
+        let mut request = request_from(vec![message(Role::User, "hi")]);
+        request.tools.push(Tool::Function(Function {
+            name: "resolve".to_owned(),
+            description: "look up a reference".to_owned(),
+            parameters: "{\"type\":\"object\"}".to_owned(),
+        }));
+        validate(&request).unwrap();
+    }
+
+    #[test]
+    fn invalid_function_parameters() {
+        let mut request = request_from(vec![message(Role::User, "hi")]);
+        request.tools.push(Tool::Function(Function {
+            name: "lookup".to_owned(),
+            description: "look something up".to_owned(),
+            parameters: "not json".to_owned(),
+        }));
+        let err = validate(&request).unwrap_err();
+        assert!(matches!(err, Error::InvalidRequest(m) if m.contains("`lookup`")));
+    }
+
     #[test]
     fn invalid_schema_document() {
         let mut request = request_from(vec![message(Role::User, "hi")]);
@@ -103,10 +137,7 @@ mod tests {
             generation: None,
             format: Format::Json,
             tools: vec![],
-            grants: Grants {
-                references: None,
-                workspace: None,
-            },
+            grants: Grants { workspace: None },
         }
     }
 
