@@ -130,44 +130,44 @@ impl From<serde_json::Error> for Error {
 /// Create a new `BadRequest` error.
 #[macro_export]
 macro_rules! bad_request {
-    ($fmt:expr, $($arg:tt)*) => {
+    ($fmt:literal, $($arg:tt)*) => {
         $crate::Error::BadRequest { code: "bad_request".to_string(), description: format!($fmt, $($arg)*) }
     };
-    ($desc:expr $(,)?) => {
-        $crate::Error::BadRequest { code: "bad_request".to_string(), description: format!($desc) }
+    ($err:expr $(,)?) => {
+        $crate::Error::BadRequest { code: "bad_request".to_string(), description: $err.to_string() }
     };
 }
 
 /// Create a new `NotFound` error.
 #[macro_export]
 macro_rules! not_found {
-    ($fmt:expr, $($arg:tt)*) => {
+    ($fmt:literal, $($arg:tt)*) => {
         $crate::Error::NotFound { code: "not_found".to_string(), description: format!($fmt, $($arg)*) }
     };
-    ($desc:expr $(,)?) => {
-        $crate::Error::NotFound { code: "not_found".to_string(), description: format!($desc) }
+    ($err:expr $(,)?) => {
+        $crate::Error::NotFound { code: "not_found".to_string(), description: $err.to_string() }
     };
 }
 
 /// Create a new `ServerError` error.
 #[macro_export]
 macro_rules! server_error {
-    ($fmt:expr, $($arg:tt)*) => {
+    ($fmt:literal, $($arg:tt)*) => {
         $crate::Error::ServerError { code: "server_error".to_string(), description: format!($fmt, $($arg)*) }
     };
-     ($err:expr $(,)?) => {
-        $crate::Error::ServerError { code: "server_error".to_string(), description: format!($err) }
+    ($err:expr $(,)?) => {
+        $crate::Error::ServerError { code: "server_error".to_string(), description: $err.to_string() }
     };
 }
 
 /// Create a new `BadGateway` error.
 #[macro_export]
 macro_rules! bad_gateway {
-    ($fmt:expr, $($arg:tt)*) => {
+    ($fmt:literal, $($arg:tt)*) => {
         $crate::Error::BadGateway { code: "bad_gateway".to_string(), description: format!($fmt, $($arg)*) }
     };
-     ($err:expr $(,)?) => {
-        $crate::Error::BadGateway { code: "bad_gateway".to_string(), description: format!($err) }
+    ($err:expr $(,)?) => {
+        $crate::Error::BadGateway { code: "bad_gateway".to_string(), description: $err.to_string() }
     };
 }
 
@@ -235,5 +235,25 @@ mod tests {
             err.to_string(),
             "code: server_error, description: error context: EOF while parsing an object at line 1 column 13"
         );
+    }
+
+    #[test]
+    fn shortcut_macros_format() {
+        let err = bad_request!("invalid field: {field}", field = "name");
+        assert_eq!(err.code(), "bad_request");
+        assert_eq!(err.description(), "invalid field: name");
+    }
+
+    #[test]
+    fn shortcut_macros_display() {
+        let msg = String::from("missing widget");
+        let err = not_found!(msg);
+        assert_eq!(err.code(), "not_found");
+        assert_eq!(err.description(), "missing widget");
+
+        let cause = anyhow!("upstream timeout");
+        let err = bad_gateway!(cause);
+        assert_eq!(err.code(), "bad_gateway");
+        assert_eq!(err.description(), "upstream timeout");
     }
 }
