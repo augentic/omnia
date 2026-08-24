@@ -28,6 +28,7 @@ omnia-wasi-http.workspace = true
 omnia-wasi-keyvalue.workspace = true
 omnia-wasi-messaging.workspace = true
 omnia-wasi-model.workspace = true
+omnia-wasi-otel.workspace = true
 omnia-wasi-websocket.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

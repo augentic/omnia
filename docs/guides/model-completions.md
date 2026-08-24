@@ -67,7 +67,7 @@ Grants are the security boundary. Rather than giving the model backend ambient a
 
 - **`workspace`** — a directory descriptor from the guest's own preopen table (populated by the host's `[[mount]]`; see [Multi-Guest Deployments](multi-guest-deployments.md#mounts-giving-guests-a-workspace)). The model can only see a tree the host mounted *and* the guest chose to lend.
 
-From this grant the **host** — not the guest, not the backend — merges the injected tools `read`, `list`, and `write` into the completion. Guests must not redeclare those names in `tools`. Backends receive a `ToolHost` handle and call back into the host to execute every tool — injected and guest-declared alike — so each invocation passes through the host's validation gate and session limits.
+This grant is what drives the host-injected tools. The names `read`, `list`, and `write` are reserved — guests must not redeclare them in `tools` — and the host serves them through the per-completion `ToolHost`, bounded to the lent tree. When a workspace is lent, the genai backend advertises `read` and `list` to the model and executes them host-side, never through the session; `write` stays reserved but is not yet advertised. The cursor backend skips them entirely — its spawned agent inspects the workspace natively. Guest-declared function tools also execute through the `ToolHost` (`call_tool`), so every invocation passes through the host's validation gate and session limits.
 
 ## Backends
 
@@ -84,7 +84,7 @@ cargo run --example model
 
 ### `omnia-genai` — provider APIs (omnia-backends repo)
 
-Calls LLM provider APIs in-process via the [`genai`](https://crates.io/crates/genai) SDK (OpenAI, Anthropic, Gemini, Groq, Ollama, and others). Provider API keys are read from the environment at call time (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...). It advertises the request's declared function tools to the provider and drives the bounded session tool loop, forwarding every model tool call back through the host to the guest's handler. MCP tools are not supported by this backend — use `omnia-cursor` for that.
+Calls LLM provider APIs in-process via the [`genai`](https://crates.io/crates/genai) SDK (OpenAI, Anthropic, Gemini, Groq, Ollama, and others). Provider API keys are read from the environment at call time (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...). It advertises the request's declared function tools — plus the host-injected `read`/`list` workspace tools when the guest lent a workspace — and drives the bounded session tool loop: `read`/`list` execute host-side against the lent tree, while every other model tool call is forwarded back through the host to the guest's handler. MCP tools are not supported by this backend — use `omnia-cursor` for that.
 
 ### `omnia-cursor` — cursor-agent (omnia-backends repo)
 

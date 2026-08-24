@@ -25,8 +25,8 @@ use anyhow::{Context as _, Result, bail};
 use futures::FutureExt as _;
 use omnia::wasmtime::StoreLimitsBuilder;
 use omnia::{
-    Deployment, DeploymentBuilder, GuestId, Manifest, MountRegistry, Registry, ResolvedPreopen,
-    Runtime, StoreBase, StoreCtx, WrpcState,
+    Backend as _, Deployment, DeploymentBuilder, GuestId, Manifest, MountRegistry, Registry,
+    ResolvedPreopen, Runtime, StoreBase, StoreCtx, WrpcState,
 };
 use omnia_testkit::{find_guest, temp_manifest};
 use omnia_wasi_model::{
@@ -267,8 +267,7 @@ async fn rejects_schema() -> Result<()> {
     let registry = registry().await?;
     let (_mount_dir, mounts) = workspace_mount();
     let backend = ModelDefault::connect().await.context("connecting the default backend")?;
-    let runtime =
-        model_runtime(Arc::clone(&registry), Arc::new(move || Box::new(backend)), mounts);
+    let runtime = model_runtime(Arc::clone(&registry), Arc::new(move || Box::new(backend)), mounts);
 
     let output = call_run(&runtime).await.context("driving the default backend")?;
     assert!(
@@ -361,9 +360,8 @@ async fn out_of_scope_workspace() -> Result<()> {
     let runtime =
         model_runtime(Arc::clone(&registry), Arc::new(move || Box::new(backend.clone())), mounts);
 
-    let output = call_run_preopening(&runtime, Some(lent))
-        .await
-        .context("driving the out-of-scope lend")?;
+    let output =
+        call_run_preopening(&runtime, Some(lent)).await.context("driving the out-of-scope lend")?;
     assert!(
         output.contains("out of scope"),
         "an unauthorized lend is rejected in the host: {output}"
@@ -534,9 +532,10 @@ async fn parallel_calls() -> Result<()> {
 }
 
 /// The guest drops its calls reader and reply future mid-loop. The probe's
-/// in-flight work is structurally cancelled (or its next call hard-fails,
-/// whichever the guest's drops reach first) and the session shuts down — the
-/// guest observes the end via a rejected results write, so nothing hangs.
+/// in-flight work is structurally cancelled — possibly before the first
+/// call's answer is delivered — or its next call hard-fails, whichever the
+/// teardown reaches first; either way the session shuts down and the guest
+/// observes the end via a rejected results write, so nothing hangs.
 #[derive(Debug, Clone)]
 struct DropProbe {
     events: Events,
@@ -604,16 +603,24 @@ async fn guest_drops_session() -> Result<()> {
         "the guest observes the session's end after dropping its ends: {output}"
     );
 
+    // The guest answers the first call and then immediately drops both
+    // session ends, so the answer's delivery races the teardown: either the
+    // first call completes and the *next* interaction fails, or the backend
+    // future is cancelled outright. Both end the session without a leaked
+    // waiter; a hang or a successful second call would be the bug.
     let events = drain(&events);
-    assert_eq!(
-        events.first().map(String::as_str),
-        Some("first-ok:echo:one"),
-        "the first call completes before the drop: {events:?}"
-    );
-    assert!(
-        events.iter().any(|event| event.starts_with("second-err:") || event == "cancelled"),
-        "the drop fails the next call or cancels the backend — no leaked waiter: {events:?}"
-    );
+    match events.first().map(String::as_str) {
+        Some("first-ok:echo:one") => assert!(
+            events.iter().any(|event| event.starts_with("second-err:") || event == "cancelled"),
+            "the drop fails the next call or cancels the backend: {events:?}"
+        ),
+        Some("cancelled") => assert_eq!(
+            events.len(),
+            1,
+            "a cancelled backend future logs nothing further: {events:?}"
+        ),
+        other => panic!("the backend neither completed nor was cancelled ({other:?}): {events:?}"),
+    }
 
     Ok(())
 }

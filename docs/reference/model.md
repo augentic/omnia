@@ -72,7 +72,7 @@ Function names must not collide with the reserved host-injected tool names below
 
 ### Host-injected tools
 
-From the grants, the host — never the guest or backend — merges these tools into the completion: **`read`**, **`list`**, **`write`**. Guests must not declare tools with these names (`invalid-request`). Backends execute them by calling back through the host's `ToolHost`, so every invocation passes host validation. Declared function tools travel the same road: the backend forwards the model's call through `ToolHost::call_tool`, the host checks the name against the request's declared tools and enforces the session limits, and the guest's handler answers over the session streams.
+The names **`read`**, **`list`**, and **`write`** are reserved for the host's workspace tools; guests must not declare tools with them (`invalid-request`). When the guest lends `grants.workspace`, the genai backend advertises `read` and `list` to the model and executes them host-side through the `ToolHost` workspace capability — bounded reads and listings that never traverse the session. Read results must be UTF-8 text and, like session tool results, fit the per-result byte cap. `write` stays reserved and served by `ToolHost` but is not yet advertised to the model. The cursor backend advertises none of these: its spawned agent inspects the workspace natively through the local path. Declared function tools travel a different road: the backend forwards the model's call through `ToolHost::call_tool`, the host checks the name against the request's declared tools and enforces the session limits, and the guest's handler answers over the session streams.
 
 ## Reply
 

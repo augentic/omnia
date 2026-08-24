@@ -274,9 +274,7 @@ async fn dispatch_depth_capped() -> Result<()> {
     // The failing enter happens three served hops deep; the depth error
     // traps that hop's serve invocation, so the caller observes the chain
     // collapse (a dead carrier frame), not the bail text itself.
-    call_router_to(&runtime, "relay", "3")
-        .await
-        .expect_err("a fourth enter must exceed the bound");
+    call_router_to(&runtime, "relay", "3").await.expect_err("a fourth enter must exceed the bound");
 
     let echoed = call_router_to(&runtime, "relay", "2").await?;
     assert_eq!(echoed, "relay relayed to the end", "a fresh chain starts at depth zero");
@@ -332,9 +330,9 @@ async fn concurrent_dispatch() -> Result<()> {
     let tasks: Vec<_> = (0..16)
         .map(|n| {
             let runtime = runtime.clone();
-            tokio::spawn(
-                async move { call_router_to_slow(&runtime, "responder", &format!("m{n}")).await },
-            )
+            tokio::spawn(async move {
+                call_router_to_slow(&runtime, "responder", &format!("m{n}")).await
+            })
         })
         .collect();
 
@@ -440,9 +438,7 @@ async fn static_ids_protected() -> Result<()> {
         .expect_err("deregistering a static entry must fail");
     assert!(error.to_string().contains("static"), "{error}");
 
-    runtime
-        .deregister(&GuestId::from("ghost"))
-        .expect_err("deregistering an unknown id must fail");
+    runtime.deregister(&GuestId::from("ghost")).expect_err("deregistering an unknown id must fail");
 
     Ok(())
 }

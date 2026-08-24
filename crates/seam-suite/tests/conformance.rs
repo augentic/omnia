@@ -215,8 +215,8 @@ async fn connection_refused() -> Result<()> {
     // Bind then drop a listener so the port is known-dead, instead of
     // assuming a fixed port is unused.
     let port = TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
-    let report = proxy(&fx.runtime, &json!({ "url": format!("http://127.0.0.1:{port}/test") }))
-        .await?;
+    let report =
+        proxy(&fx.runtime, &json!({ "url": format!("http://127.0.0.1:{port}/test") })).await?;
     assert!(report["error"].is_string(), "a refused connection surfaces: {report}");
     Ok(())
 }
@@ -266,11 +266,7 @@ async fn bad_client_cert_rejected() -> Result<()> {
 async fn keyvalue_cas() -> Result<()> {
     let fx = fx().await?;
     let response = http::post(&fx.runtime, "/keyvalue?key=k1&cas=c1", "payload-value").await?;
-    assert!(
-        response.status().is_success(),
-        "guest completes the CAS legs: {:?}",
-        response.body()
-    );
+    assert!(response.status().is_success(), "guest completes the CAS legs: {:?}", response.body());
     Ok(())
 }
 
@@ -336,10 +332,7 @@ async fn peer_round_trip() -> Result<()> {
     let mut delivered = None;
     for _ in 0..10 {
         let response = http::post(&fx.runtime, "/websocket", "hello sockets").await?;
-        assert!(
-            response.status().is_success(),
-            "guest connects and sends across the ws boundary"
-        );
+        assert!(response.status().is_success(), "guest connects and sends across the ws boundary");
         assert_eq!(
             serde_json::from_slice::<Value>(response.body())?,
             json!({ "message": "event sent" }),
@@ -364,11 +357,8 @@ async fn peer_round_trip() -> Result<()> {
 
     // Inbound leg: the peer's message must cross host -> guest handler,
     // which records it in the shared keyvalue bucket.
-    peer.send(Message::Binary(b"ping from peer".as_slice().into()))
-        .await
-        .context("peer send")?;
-    let bucket =
-        fx.keyvalue.open_bucket("omnia_bucket".to_owned()).await.context("open bucket")?;
+    peer.send(Message::Binary(b"ping from peer".as_slice().into())).await.context("peer send")?;
+    let bucket = fx.keyvalue.open_bucket("omnia_bucket".to_owned()).await.context("open bucket")?;
     let mut recorded = None;
     for _ in 0..50 {
         if let Some(value) = bucket.get("ws-inbound".to_owned()).await.context("probe")? {

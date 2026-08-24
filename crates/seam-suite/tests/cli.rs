@@ -19,19 +19,42 @@ use std::path::Path;
 
 use anyhow::{Context as _, Result};
 use omnia::{
-    Deployment, DeploymentBuilder, ExitStatus, Manifest, Mode, Runtime, StoreCtx, Wiring,
-    run_precompiled,
+    Backend as _, Backends, Deployment, DeploymentBuilder, ExitStatus, Manifest, Mode, Runtime,
+    StoreCtx, Wiring, run_precompiled,
 };
 use omnia_testkit::find_guest;
+use omnia_wasi_otel::{HasOtel, OtelDefault, WasiOtel, WasiOtelCtx};
 
-struct EmptyWiring;
+/// The `omnia-guest` command router instruments dispatch over `wasi:otel`, so
+/// every router-based guest imports it; the bundle links the no-op default.
+#[derive(Clone)]
+struct Bundle {
+    otel: OtelDefault,
+}
 
-impl Wiring<()> for EmptyWiring {
-    fn link(_deployment: &mut Deployment<StoreCtx<()>>) -> Result<()> {
+impl Backends for Bundle {
+    async fn connect() -> Result<Self> {
+        Ok(Self {
+            otel: OtelDefault::connect().await?,
+        })
+    }
+}
+
+impl HasOtel for Bundle {
+    fn otel_ctx(&mut self) -> &mut dyn WasiOtelCtx {
+        &mut self.otel
+    }
+}
+
+struct OtelWiring;
+
+impl Wiring<Bundle> for OtelWiring {
+    fn link(deployment: &mut Deployment<StoreCtx<Bundle>>) -> Result<()> {
+        deployment.host::<WasiOtel, Bundle>()?;
         Ok(())
     }
 
-    fn serve(_runtime: &Runtime<()>) -> impl std::future::Future<Output = Result<()>> + Send {
+    fn serve(_runtime: &Runtime<Bundle>) -> impl std::future::Future<Output = Result<()>> + Send {
         std::future::ready(Ok(()))
     }
 }
@@ -39,8 +62,8 @@ impl Wiring<()> for EmptyWiring {
 /// Drive `wasi:cli/run` once with `tail` guest argv (the program name is
 /// prepended by command mode) and return the guest's exit status.
 async fn run_cli(wasm: &Path, tail: &[&str]) -> Result<ExitStatus> {
-    // The `()` bundle links no hosts; `wasi:cli` is wired by the deployment
-    // builder, and `Runtime::new` threads the guest argv into every store.
+    // `wasi:cli` is wired by the deployment builder, and `Runtime::new`
+    // threads the guest argv into every store.
     let builder = DeploymentBuilder::new()
         .manifest(Manifest::from_wasm(wasm))
         .args(tail.iter().map(|arg| (*arg).to_string()).collect::<Vec<_>>())
@@ -48,7 +71,7 @@ async fn run_cli(wasm: &Path, tail: &[&str]) -> Result<ExitStatus> {
         .precompiled();
     // SAFETY: `find_guest` only returns artifacts this workspace built and
     // serialized itself (`cargo make test-guests`).
-    unsafe { run_precompiled::<(), EmptyWiring>(builder) }.await.context("running command")
+    unsafe { run_precompiled::<Bundle, OtelWiring>(builder) }.await.context("running command")
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -91,7 +114,7 @@ mod command_flag {
             .precompiled();
         // SAFETY: `find_guest` only returns artifacts this workspace built and
         // serialized itself (`cargo make test-guests`).
-        unsafe { run_precompiled::<(), EmptyWiring>(builder) }.await
+        unsafe { run_precompiled::<Bundle, OtelWiring>(builder) }.await
     }
 
     // `program_name` overrides `argv[0]` (command mode prepends the deployment

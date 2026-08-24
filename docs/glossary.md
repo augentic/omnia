@@ -80,7 +80,7 @@ The `complete` binding’s pre-checks and final answer validation before the gue
 
 ### Host-injected tools
 
-Tools the host merges into a completion from `grants` (`read`, `list`, `write`). Guests must not redeclare these names in `prompt.tools`.
+Workspace tools the host serves from `grants.workspace` under reserved names (`read`, `list`, `write`). Guests must not redeclare these names in `prompt.tools`. Backends that advertise them (genai: `read`/`list`) execute them host-side through the `ToolHost`, never through the session.
 
 ## Other uses of “floor” (not the runtime platform)
 

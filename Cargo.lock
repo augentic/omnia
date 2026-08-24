@@ -2153,6 +2153,7 @@ dependencies = [
  "omnia-wasi-keyvalue",
  "omnia-wasi-messaging",
  "omnia-wasi-model",
+ "omnia-wasi-otel",
  "omnia-wasi-websocket",
  "serde_json",
  "tokio",
