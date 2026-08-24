@@ -62,4 +62,4 @@
 
 # Contributing
 
-- [Seam Suite and Testing Policy](guides/testing-policy.md)
+- [Testing Policy](guides/testing-policy.md)

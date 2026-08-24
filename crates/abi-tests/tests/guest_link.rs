@@ -1,4 +1,4 @@
-//! Host-mediated dynamic linking seam.
+//! Host-mediated dynamic linking.
 //!
 //! Builds the `examples/guest-link` deployment — `router` imports
 //! `omnia:link/echo`, `responder` exports it — wires the serve side, and
@@ -25,7 +25,7 @@ use omnia::{
     DeploymentBuilder, GuestEntry, GuestId, Manifest, MountRegistry, Runtime, as_command_chain,
     serve_links,
 };
-use omnia_testkit::{find_guest, precompiled_artifact as precompiled, raw_wasm};
+use omnia_abi_tests::{find_guest, precompiled_artifact as precompiled, raw_wasm};
 
 /// Per-store context: the library [`omnia::StoreCtx`] over the counting
 /// [`Counter`] bundle. No host backend — the link path needs only the WASI and
@@ -260,7 +260,7 @@ async fn dispatch_uncapped_on_command_chain() -> Result<()> {
 }
 
 // Depth accumulates across the serve side of every hop and the per-chain
-// bound fails the chain at the seam: with a bound of 3, a three-enter relay
+// bound fails the chain at the boundary: with a bound of 3, a three-enter relay
 // chain (router→relay→relay→relay) succeeds, one more hop fails with the
 // depth error, and a fresh chain afterwards succeeds again — a failed chain
 // leaks no depth budget.

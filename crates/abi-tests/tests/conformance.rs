@@ -15,7 +15,7 @@ use anyhow::{Context as _, Result, ensure};
 use futures::{SinkExt as _, StreamExt as _};
 use omnia::wasmtime_wasi::ResourceTable;
 use omnia::{Backend, HasHttp, Runtime};
-use omnia_testkit::{http, single_guest};
+use omnia_abi_tests::{http, single_guest};
 use omnia_wasi_http::{HttpDefault, WasiHttp, WasiHttpCtxView};
 use omnia_wasi_keyvalue::{HasKeyValue, KeyValueDefault, WasiKeyValue, WasiKeyValueCtx};
 use omnia_wasi_messaging::{HasMessaging, MessagingDefault, WasiMessaging, WasiMessagingCtx};

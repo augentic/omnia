@@ -77,8 +77,8 @@ pub fn expand(config: &Config) -> TokenStream {
     }
 }
 
-// Unit tests by design: macro token expansion is pure and cannot cross a
-// seam; the expanded runtimes are what every seam scenario executes.
+// Unit tests by design: macro token expansion is pure; the expanded runtimes
+// are what every ABI-test scenario executes.
 #[cfg(test)]
 mod tests {
     use quote::quote;

@@ -10,8 +10,8 @@
 //! call always finds the responder's in-process wRPC server.
 //!
 //! The router exports a plain `run` rather than an HTTP/messaging trigger, so the
-//! end-to-end dispatch is driven by the seam suite
-//! (`crates/seam-suite/tests/guest_link.rs`); running this binary starts the
+//! end-to-end dispatch is driven by the ABI tests
+//! (`crates/abi-tests/tests/guest_link.rs`); running this binary starts the
 //! host and wires the link. See `README.md`.
 
 cfg_if::cfg_if! {

@@ -1,6 +1,6 @@
 //! # Conformance Wasm Guest
 //!
-//! Purpose-built guest for the `omnia-seam-suite` integration tests: one
+//! Purpose-built guest for the `omnia-abi-tests` integration tests: one
 //! HTTP-triggered component exposing the routes the suite's conformance
 //! scenarios drive — outbound proxying, the keyvalue CAS legs, a websocket
 //! send, and a messaging publish — plus a websocket handler that records
@@ -53,7 +53,7 @@ struct ProxyRequest {
 }
 
 /// Perform an outbound `wasi:http` request described by the JSON body and
-/// report the outcome, so seam tests can observe the host's outbound hook
+/// report the outcome, so ABI tests can observe the host's outbound hook
 /// through the real guest boundary.
 async fn proxy(Json(req): Json<ProxyRequest>) -> HttpResult<Json<Value>> {
     let method = req.method.as_deref().unwrap_or("GET");
@@ -158,7 +158,7 @@ omnia_wasi_websocket::export!(WebSocket);
 
 impl omnia_wasi_websocket::handler::Guest for WebSocket {
     // Inbound peer messages land here; mirror them into the keyvalue store so
-    // the seam test can observe delivery from the host side.
+    // the ABI test can observe delivery from the host side.
     async fn handle(event: Event) -> Result<(), WsHandlerError> {
         let bucket = kv_store::open("omnia_bucket".to_string())
             .await

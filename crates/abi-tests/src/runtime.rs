@@ -1,9 +1,9 @@
-//! Assembling a single-guest runtime for seam tests.
+//! Assembling a single-guest runtime for ABI tests.
 //!
-//! [`single_guest`] collapses the deployment boilerplate every seam test
-//! repeats — locate the guest, build a deployment, link hosts, assemble the
-//! registry, wrap it in a [`Runtime`] — into a small chainable builder. The
-//! test still declares its backend bundle (the `Has*` impls are the seam under
+//! [`single_guest`] collapses the deployment boilerplate every test repeats —
+//! locate the guest, build a deployment, link hosts, assemble the registry,
+//! wrap it in a [`Runtime`] — into a small chainable builder. The test still
+//! declares its backend bundle (the `Has*` impls are the boundary under
 //! test), but nothing else.
 
 use std::sync::Arc;

@@ -10,8 +10,8 @@ on:
         description: "Repo-root-relative directory holding the Cargo workspace (default: the repo root, for repos whose workspace is not in a subdirectory)."
         type: string
         default: "."
-      seam:
-        description: "Build and serialize the seam guests before the test run (they are ordinary Nextest integration tests needing pre-built artifacts), and build every WASM example on the default branch."
+      guests:
+        description: "Build and serialize the ABI-test guest artifacts before the test run (the ABI tests are ordinary Nextest integration tests over pre-built guests), and build every WASM example on the default branch."
         type: boolean
         default: false
     secrets:
@@ -55,15 +55,15 @@ jobs:
           tool: nextest
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
         working-directory: ${{ inputs.working-directory }}
-      # Seam tests are ordinary Nextest integration tests over pre-built,
+      # ABI tests are ordinary Nextest integration tests over pre-built,
       # serialized guest artifacts; build the guests before the test run.
-      - if: inputs.seam
+      - if: inputs.guests
         run: rustup target add wasm32-wasip2
-      - if: inputs.seam
+      - if: inputs.guests
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-make
-      - if: inputs.seam
+      - if: inputs.guests
         run: cargo make test-guests
         working-directory: ${{ inputs.working-directory }}
       # `--all`, not `--tests`: library unit tests must run.
@@ -89,7 +89,7 @@ jobs:
 
   examples:
     name: Full WASM example build
-    if: inputs.seam && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || github.event_name == 'schedule')
+    if: inputs.guests && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || github.event_name == 'schedule')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

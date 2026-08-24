@@ -2079,6 +2079,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "omnia-abi-tests"
+version = "0.35.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "futures",
+ "http",
+ "http-body-util",
+ "omnia",
+ "omnia-wasi-http",
+ "omnia-wasi-keyvalue",
+ "omnia-wasi-messaging",
+ "omnia-wasi-model",
+ "omnia-wasi-otel",
+ "omnia-wasi-websocket",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "wasmtime",
+ "wasmtime-wasi",
+ "wasmtime-wasi-http",
+ "wiremock",
+]
+
+[[package]]
 name = "omnia-guest"
 version = "0.35.0"
 dependencies = [
@@ -2139,42 +2164,6 @@ dependencies = [
  "quote",
  "syn 3.0.3",
  "trybuild",
-]
-
-[[package]]
-name = "omnia-seam-suite"
-version = "0.35.0"
-dependencies = [
- "anyhow",
- "futures",
- "omnia",
- "omnia-testkit",
- "omnia-wasi-http",
- "omnia-wasi-keyvalue",
- "omnia-wasi-messaging",
- "omnia-wasi-model",
- "omnia-wasi-otel",
- "omnia-wasi-websocket",
- "serde_json",
- "tokio",
- "tokio-tungstenite",
- "wasmtime-wasi",
- "wiremock",
-]
-
-[[package]]
-name = "omnia-testkit"
-version = "0.35.0"
-dependencies = [
- "anyhow",
- "bytes",
- "http",
- "http-body-util",
- "omnia",
- "tokio",
- "wasmtime",
- "wasmtime-wasi",
- "wasmtime-wasi-http",
 ]
 
 [[package]]

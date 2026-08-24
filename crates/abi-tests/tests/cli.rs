@@ -22,7 +22,7 @@ use omnia::{
     Backend as _, Backends, Deployment, DeploymentBuilder, ExitStatus, Manifest, Mode, Runtime,
     StoreCtx, Wiring, run_precompiled,
 };
-use omnia_testkit::find_guest;
+use omnia_abi_tests::find_guest;
 use omnia_wasi_otel::{HasOtel, OtelDefault, WasiOtel, WasiOtelCtx};
 
 /// The `omnia-guest` command router instruments dispatch over `wasi:otel`, so

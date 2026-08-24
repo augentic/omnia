@@ -1,4 +1,4 @@
-//! Bytes-sourced (embedded) guest acquisition seam.
+//! Bytes-sourced (embedded) guest acquisition.
 //!
 //! A `[[guest]]` entry may carry component bytes instead of a path — the
 //! `include_bytes!` embedding shape (`GuestEntry::new(id, bytes)`). These
@@ -18,7 +18,7 @@ use omnia::wasmtime::component::Val;
 use omnia::{
     DeploymentBuilder, GuestEntry, GuestId, Manifest, MountRegistry, Runtime, serve_links,
 };
-use omnia_testkit::{find_guest, precompiled_bytes, wasm_bytes};
+use omnia_abi_tests::{find_guest, precompiled_bytes, wasm_bytes};
 
 type TestCtx = omnia::StoreCtx<()>;
 

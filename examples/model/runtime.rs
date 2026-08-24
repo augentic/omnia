@@ -4,7 +4,7 @@
 //! a fixed schema answer, so the run is deterministic with no live model, no
 //! network, and no configuration. Command mode drives the `create` guest's
 //! `wasi:cli/run` export once; the end-to-end completion is also exercised by
-//! the seam suite (`crates/seam-suite/tests/model.rs`). See `README.md`.
+//! the ABI tests (`crates/abi-tests/tests/model.rs`). See `README.md`.
 
 cfg_if::cfg_if! {
     if #[cfg(not(target_arch = "wasm32"))] {

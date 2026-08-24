@@ -114,12 +114,12 @@ By design — these two flags are reserved for the host log presets and removed 
 
 ## Testing
 
-### A seam/integration test panics with `guest artifact ... not found` and build instructions
+### An ABI/integration test panics with `guest artifact ... not found` and build instructions
 
 Tests never build guests; `find_guest` only locates artifacts. Build the guests first — in this repo:
 
 ```bash
-cargo make test-guests     # builds and serializes the seam-suite guests
+cargo make test-guests     # builds and serializes the ABI-test guests
 ```
 
 (`cargo make test` runs it for you before Nextest). For your own guest, the plain two-step: `cargo build --example <name>-wasm --target wasm32-wasip2` (remember artifact names use underscores). See [Testing Your Guests](guides/testing.md).

@@ -10,7 +10,7 @@
 # read-only workspace named `.`. The `model` guest reads it via
 # `wasi:filesystem/preopens` and lends it through `grants.workspace`. The
 # canned backend ignores the workspace (it never runs tools); the host-side
-# resolution is proven by the seam suite.
+# resolution is proven by the ABI tests.
 #
 # Build the guest first (see README.md), then run (this path is compiled in
 # via runtime! `config:`, so the binary is a direct command — no `run`

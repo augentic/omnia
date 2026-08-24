@@ -28,7 +28,7 @@ use omnia::{
     Backend as _, Deployment, DeploymentBuilder, GuestId, Manifest, MountRegistry, Registry,
     ResolvedPreopen, Runtime, StoreBase, StoreCtx, WrpcState,
 };
-use omnia_testkit::{find_guest, temp_manifest};
+use omnia_abi_tests::{find_guest, temp_manifest};
 use omnia_wasi_model::{
     Answer, FutureResult, HasModel, ModelDefault, Request, SessionLimits, Tool, ToolHost,
     WasiModel, WasiModelCtx,

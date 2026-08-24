@@ -2,8 +2,8 @@
 //!
 //! A `wasi:cli/command` reactor that **imports** `omnia:model/completion` and
 //! drives one completion session when the host calls `wasi:cli/run`. It is
-//! scenario-driven via its CLI argument — the seam suite
-//! (`crates/seam-suite/tests/model.rs`) selects the behavior it needs —
+//! scenario-driven via its CLI argument — the ABI tests
+//! (`crates/abi-tests/tests/model.rs`) select the behavior they need —
 //! making it the model acceptance vehicle.
 //!
 //! The default scenario is the happy path on the `omnia-guest` sugar: a
@@ -152,7 +152,7 @@ fn wire_request(tool: &str) -> completion::Request<'static> {
         format: completion::Format::Json,
         tools: vec![completion::Tool::Function(completion::Function {
             name: tool.to_owned(),
-            description: "seam probe tool".to_owned(),
+            description: "ABI probe tool".to_owned(),
             parameters: "{\"type\":\"object\"}".to_owned(),
         })],
         grants: completion::Grants { workspace: None },

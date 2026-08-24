@@ -16,8 +16,8 @@ architecture. There are many ways to help besides contributing code:
   (toolchain pins, `wasm32-wasip2` target, nightly rustfmt).
 - [docs/getting-started.md](docs/getting-started.md) — building and running
   your first guest.
-- [docs/guides/testing.md](docs/guides/testing.md) — the integration-first
-  testing policy; seam tests are the spec.
+- [docs/guides/testing-policy.md](docs/guides/testing-policy.md) — what earns
+  a unit test, an ABI test, or a live test.
 - [docs/glossary.md](docs/glossary.md) — project terminology.
 
 ## Before you open a pull request

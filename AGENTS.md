@@ -16,8 +16,8 @@ Terminology (**runtime core**, **host-side**, **host-injected tools**, etc.) is 
 | Lint         | `cargo clippy --all-features`                                                                           |
 | Format check | `cargo +nightly fmt --all --check`                                                                      |
 | Format fix   | `cargo +nightly fmt --all`                                                                              |
-| Test         | `cargo make test` (builds + serializes the seam guests, then `cargo nextest run --all --all-features`)  |
-| Seam guests  | `cargo make test-guests` (build + serialize the seam-suite guests only)                                 |
+| Test         | `cargo make test` (builds + serializes the ABI-test guests, then `cargo nextest run --all --all-features`) |
+| Test guests  | `cargo make test-guests` (build + serialize the ABI-test guests only)                                   |
 | Doc tests    | `cargo test --doc --all-features --workspace`                                                           |
 | Task runner  | `cargo make <task>` (see `Makefile.toml` for available tasks)                                           |
 
@@ -37,15 +37,15 @@ For the HTTP example, the server listens on `localhost:8080`.
 The practical walk-through is [docs/guides/testing-policy.md](docs/guides/testing-policy.md); [docs/guides/testing.md](docs/guides/testing.md) is the guide for application authors. In short:
 
 - **Unit tests for deterministic logic, wherever it lives**: parsers, codecs, filter/type translation, route matching, macro token expansion, guest-side library code, and backend semantics driven directly against a `WasiXxxCtx` trait. If a behavior can be pinned without instantiating a guest, it is a unit test.
-- **Seam tests only for behavior that is the boundary itself**: host-mediated dispatch, model tool sessions, trigger delivery, artifact acquisition/trust, CLI exit mapping, outbound HTTP policy, resources or typed errors threading across WIT. They live in [crates/seam-suite](crates/seam-suite) as ordinary integration tests (one auto-discovered target per scenario family) and run under Nextest process-per-test with the rest of the workspace — each test builds its own runtime from serialized guests. One test per contract: assert the guest-visible outcome, and add a host-side probe only when the guest cannot observe the effect (broker delivery, peer sockets, denied writes). A probe that re-reads the store the guest just round-tripped adds nothing; don't write it. Drive HTTP guests with `omnia_testkit::http`; use `omnia_testkit::temp_manifest` for manifest-driven setups.
-- **Guest artifacts are explicit.** Tests never invoke Cargo. `cargo make test` builds and serializes the seam guests (`cargo make test-guests`) before running Nextest; `find_guest` locates artifacts and fails fast with build instructions when one is missing — no silent skips.
+- **ABI tests only for behavior that is the guest–host boundary itself**: host-mediated dispatch, model tool sessions, trigger delivery, artifact acquisition/trust, CLI exit mapping, outbound HTTP policy, resources or typed errors threading across WIT. They live in [crates/abi-tests](crates/abi-tests) as ordinary integration tests (one auto-discovered target per scenario family) and run under Nextest process-per-test with the rest of the workspace — each test builds its own runtime from serialized guests. One test per contract: assert the guest-visible outcome, and add a host-side probe only when the guest cannot observe the effect (broker delivery, peer sockets, denied writes). A probe that re-reads the store the guest just round-tripped adds nothing; don't write it. Drive HTTP guests with `omnia_abi_tests::http`; use `omnia_abi_tests::temp_manifest` for manifest-driven setups.
+- **Guest artifacts are explicit.** Tests never invoke Cargo. `cargo make test` builds and serializes the ABI-test guests (`cargo make test-guests`) before running Nextest; `find_guest` locates artifacts and fails fast with build instructions when one is missing — no silent skips.
 - **Production backends** (the `omnia-backends` repo) are accepted by `#[ignore]`-gated live tests against the real service, not by mapping unit tests alone.
 - **Names identify, comments explain.** A test name is the scenario (`set_then_get`), not a restated expectation (`set_then_get_round_trips`).
 
 ### Gotchas
 
 - `cargo-nextest` must be installed with `--locked` (`cargo install --locked cargo-nextest`); without it the build fails.
-- Seam tests need pre-built guest artifacts: a bare `cargo nextest run --all` without `cargo make test-guests` fails fast with build instructions. `cargo make test` is the one-command path.
+- ABI tests need pre-built guest artifacts: a bare `cargo nextest run --all` without `cargo make test-guests` fails fast with build instructions. `cargo make test` is the one-command path.
 - Formatting uses `cargo +nightly fmt`, not stable rustfmt (the nightly toolchain must be installed).
 - The `rust-toolchain.toml` pins the stable channel and auto-installs the `wasm32-wasip2` target plus `clippy`, `rust-src`, and `rustfmt` components.
 - `edition = "2024"` and `rust-version = "1.95"` are workspace settings; ensure the stable toolchain is at least 1.95.

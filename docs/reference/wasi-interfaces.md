@@ -41,7 +41,7 @@ wasi-keyvalue/
 └── wit/                # WIT interface definitions (+ deps/)
 ```
 
-Seam tests live in the workspace-wide [`crates/seam-suite`](../../crates/seam-suite), and only for behavior that is the boundary itself — see the [testing policy](../guides/testing-policy.md).
+ABI tests live in the workspace-wide [`crates/abi-tests`](../../crates/abi-tests), and only for behavior that is the boundary itself — see the [testing policy](../guides/testing-policy.md).
 
 ## Supporting crates
 
@@ -51,4 +51,4 @@ Seam tests live in the workspace-wide [`crates/seam-suite`](../../crates/seam-su
 | `omnia-guest` | Guest SDK: `Operation`, `Invocation`, `Invoker`, explicit command/HTTP/messaging routers, errors, ORM, and MCP |
 | `omnia-guest-macros` | `#[instrument]` attribute |
 | `omnia-host-macros` | `runtime!` macro (use via `omnia::runtime!`) |
-| `omnia-testkit` | Dev-only integration-test helpers (`find_guest`, `temp_manifest`, HTTP driver) |
+| `omnia-abi-tests` | Guest–host ABI tests plus dev-only helpers (`find_guest`, `temp_manifest`, HTTP driver) |
