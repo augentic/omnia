@@ -61,7 +61,11 @@ impl std::error::Error for DecodeError {}
 
 impl From<DecodeError> for HttpError {
     fn from(error: DecodeError) -> Self {
-        crate::Error::new(crate::ErrorKind::BadRequest, "invalid_request", error.description).into()
+        crate::Error::BadRequest {
+            code: "invalid_request".to_string(),
+            description: error.description,
+        }
+        .into()
     }
 }
 
@@ -107,24 +111,22 @@ where
 pub struct HttpError {
     status: StatusCode,
     error: String,
-    content_type: Option<HeaderValue>,
+}
+
+impl HttpError {
+    /// Create an HTTP error.
+    #[must_use]
+    pub fn new(status: StatusCode, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            error: message.into(),
+        }
+    }
 }
 
 impl From<crate::Error> for HttpError {
     fn from(error: crate::Error) -> Self {
-        if let Some(body) = error.json_body() {
-            return Self {
-                status: error.status(),
-                error: serde_json::to_string(&body).unwrap_or_else(|_| error.to_string()),
-                content_type: Some(HeaderValue::from_static("application/json")),
-            };
-        }
-
-        Self {
-            status: error.status(),
-            error: error.to_string(),
-            content_type: None,
-        }
+        Self::new(error.status(), error.to_string())
     }
 }
 
@@ -135,24 +137,16 @@ impl From<anyhow::Error> for HttpError {
             return Self::from(error);
         }
 
-        Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            error: format!("{error}, caused by: {}", error.root_cause()),
-            content_type: None,
-        }
+        Self::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("{error}, caused by: {}", error.root_cause()),
+        )
     }
 }
 
 impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
-        match self.content_type {
-            Some(content_type) => {
-                let mut headers = HeaderMap::new();
-                headers.insert(CONTENT_TYPE, content_type);
-                (self.status, headers, self.error).into_response()
-            }
-            None => (self.status, self.error).into_response(),
-        }
+        (self.status, self.error).into_response()
     }
 }
 
