@@ -122,8 +122,6 @@ fn validate(name: &str) -> Result<(), omnia_guest::Error> {
 }
 ```
 
-Use `JsonError` when the HTTP error response should carry a JSON body.
-
 ## Architecture
 
 See the [workspace documentation](https://github.com/augentic/omnia) for the full architecture guide.
