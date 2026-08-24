@@ -1,195 +1,128 @@
-// wit/model.wit — omnia:model@0.1.0
-//
-// This is the authoritative WIT for the `omnia:model/completion` interface.
-// Two deliberate deviations from the original design prose, made because the
-// established host-crate patterns win where they differ:
-//
-//  1. `create` is an `async func` (not a plain `func`). Every
-//     backend-touching WASI function in this codebase is an `async func`
-//     implemented in wasmtime's concurrent (`store`) mode — see
-//     `wasi-blobstore`'s `create-container: async func`. `create` calls an
-//     async backend (`WasiModelCtx::complete` returns a future), so it must be
-//     `async func` for the host binding to await it without blocking the
-//     executor.
-//  2. The workspace handle tracks `wasi:filesystem@0.3.0` (p3) — the version
-//     the runtime serves via `wasmtime_wasi::p3::add_to_linker` — so the `with:`
-//     remap onto wasmtime's p3 `Descriptor` resolves to the same resource the
-//     runtime already owns. p3 filesystem reads ride native component-model
-//     `stream`/`future`, so the boundary no longer pulls in `wasi:io`.
 package omnia:model@0.1.0;
 
-/// Models-API-style prompt completion. Guests import `omnia:model/completion`.
+/// Models-API-style prompt completion.
 interface completion {
-    /// Workspace handle lent through `grants.workspace`. The host resolves the lent
-    /// descriptor to an authorized mount by directory identity, then exposes it to
-    /// backends as bounded `read`/`list`/`write` (genai) and the absolute
-    /// `local-path` (cursor's `--workspace`).
     use wasi:filesystem/types@0.3.0.{descriptor};
 
-    /// JSON document encoded as UTF-8 text.
+    /// A JSON document.
     type json = string;
 
-    /// Answer returned to the guest, validated per `request.format`: plain text
-    /// for `format::text`, a JSON document for `format::json` / `format::schema`.
+    /// Answer validated against `request.format` before the guest sees it.
     type answer = string;
 
     /// Chat turn author.
     enum role {
-        /// System / instructions channel.
         system,
-        /// End-user turn.
         user,
-        /// Model turn.
         assistant,
     }
 
-    /// One chat turn passed to the provider API.
+    /// One chat turn.
     record message {
-        /// Turn author.
         role: role,
-        /// Turn body text.
         content: string,
     }
 
     /// JSON Schema constrained output (`response_format.json_schema` in provider APIs).
     record schema {
-        /// Schema name passed to the provider (e.g. `review_result`).
+        /// Schema name passed to the provider.
         name: string,
         /// JSON Schema document the answer must conform to.
         schema: json,
-        // YAGNI (Tier 1): never forwarded to a provider — genai's `JsonSpec`
-        // ignores it and cursor embeds only the schema text. Re-add when a
-        // backend actually honors provider strict mode.
-        // /// Provider strict-mode hint when supported.
+        // YAGNI (Tier 1): no backend forwards provider strict mode.
         // strict: option<bool>,
     }
 
-    /// Output shape constraint for the completion.
+    /// Output shape constraint, enforced by the host validation gate.
     variant format {
-        /// Answer is plain text.
         text,
         /// Answer must parse as a JSON object.
         json,
-        /// Answer must validate against the given JSON Schema; the host enforces
-        /// this at the `create` gate.
+        /// Answer must validate against the given JSON Schema.
         schema(schema),
     }
 
-    /// Reasoning-effort hint for models that expose a thinking budget.
+    /// Reasoning-effort hint for models with a thinking budget.
     enum effort {
-        /// Least reasoning; lowest latency and cost.
         minimal,
-        /// Reduced reasoning.
         low,
-        /// Balanced reasoning.
         medium,
-        /// Most reasoning; highest latency and cost.
         high,
     }
 
     /// Sampling and length controls. Omitted fields defer to backend defaults.
     record generation {
-        /// Sampling temperature.
         temperature: option<f32>,
-        /// Nucleus sampling threshold.
         top-p: option<f32>,
-        // YAGNI (Tier 1): not forwardable to any current backend — genai exposes
-        // no top-k control and cursor ignores `generation` entirely.
-        // /// Top-k sampling cutoff.
+        // YAGNI (Tier 1): no current backend exposes a top-k control.
         // top-k: option<u32>,
-        /// Maximum output tokens.
         max-tokens: option<u32>,
-        /// Sequences that halt generation.
         stop: list<string>,
-        /// Seed for reproducible sampling when the provider supports it.
         seed: option<u64>,
-        /// Reasoning-effort hint for thinking-capable models.
         effort: option<effort>,
     }
 
     /// Guest-declared function tool advertised to the model.
     record function {
-        /// Tool name. Must not collide with reserved host-injected tool names (`read`, `list`, `write`).
+        /// Must not collide with the reserved host-injected names (`read`, `list`, `write`).
         name: string,
         /// Natural-language description for the model.
         description: string,
-        /// JSON Schema for the tool's arguments object.
+        /// JSON Schema for the arguments object.
         parameters: json,
     }
 
-    /// Remote MCP server offered to the model for this completion. The guest
-    /// supplies the endpoint `url` directly — the single source of truth for
-    /// where the server lives.
+    /// Remote MCP server offered to the model.
     record mcp {
-        /// Logical server name identifying the server (e.g. in `.cursor/mcp.json`).
+        /// Logical server name.
         name: string,
         /// Tool allowlist; empty exposes every tool the server advertises.
         tools: list<string>,
-        /// MCP server endpoint URL.
         url: string,
     }
 
-    /// A tool offered to the model: a guest-declared function or an MCP server
-    /// grant carrying its own endpoint URL.
+    /// A tool offered to the model.
     variant tool {
-        /// Guest-declared function tool.
         function(function),
-        /// MCP server grant.
         mcp(mcp),
     }
 
-    /// One lent workspace: an authorized mount root plus a relative
-    /// subpath scoping the lend to a directory beneath it.
+    /// One lent workspace: an authorized mount root plus a relative subpath
+    /// scoping the lend.
     record workspace-grant {
-        /// Typed `wasi:filesystem` capability for bounded `read` / `list` / `write`
-        /// (genai) and the spawned agent's direct access (cursor). A `borrow`, so the
-        /// runtime core never trusts a forgeable integer handle — the host resolves it
-        /// from the resource table exactly as other hosts take typed resources, and
-        /// requires it to be an authorized mount root.
+        /// Must be an authorized mount root.
         root: borrow<descriptor>,
-        /// `/`-separated relative path beneath `root` scoping the lend; empty lends
-        /// the mount root itself. The host reopens it beneath the verified root, so
-        /// the grant can never escape the mount.
+        /// `/`-separated path beneath `root`; empty lends the root itself.
+        /// Reopened beneath the verified root, so it can never escape the mount.
         subpath: string,
     }
 
-    /// Host capabilities lent for this completion; drives host-injected tool injection.
+    /// Capabilities lent for this completion; drives host-injected tools.
     record grants {
-        /// The workspace lent for this completion.
         workspace: option<workspace-grant>,
     }
 
-    /// Complete models-API-style request for one completion. Guests that want a
-    /// structured prompt template assemble it into `system` / `messages` before
-    /// calling (the `Sections` builder in the guest bindings).
+    /// One complete request.
     record request {
-        /// Opaque model id hint; passed through unchanged. Backend may override.
+        /// Opaque model id hint; passed through unchanged, backend may override.
         model: option<string>,
-        /// System / instructions channel.
         system: option<string>,
-        /// Chat turns sent to the provider. Must not be empty.
+        /// Must not be empty.
         messages: list<message>,
-        /// Sampling and length controls.
         generation: option<generation>,
-        /// Required output shape and validation rules.
         format: format,
-        /// Guest-declared functions and MCP grants merged with host-injected tools at the backend.
+        /// Merged with host-injected tools at the backend.
         tools: list<tool>,
-        // YAGNI (Tier 1): never honored by a backend; see the `tool-choice` variant above.
-        // /// Tool selection policy. Defaults to provider/backend `auto`.
+        // YAGNI (Tier 1): see `tool-choice` below.
         // tool-choice: option<tool-choice>,
-        // YAGNI (Tier 1): never read by any backend and not part of the replay key.
-        // /// Tracing and attribution metadata (key/value pairs).
+        // YAGNI (Tier 1): no backend reads metadata.
         // metadata: list<tuple<string, string>>,
-        /// Host capabilities lent for this call.
         grants: grants,
     }
 
-    /// Token accounting for one completion, when the backend reports it.
+    /// Token accounting, when the backend reports it.
     record usage {
-        /// Prompt tokens consumed.
         input-tokens: u32,
-        /// Completion tokens produced.
         output-tokens: u32,
         /// Reasoning tokens, for models that bill them separately.
         reasoning-tokens: option<u32>,
@@ -197,39 +130,33 @@ interface completion {
 
     /// One validated completion result.
     record reply {
-        /// The validated answer, per `request.format`.
         answer: answer,
-        /// Token accounting, when the backend reports it.
         usage: option<usage>,
     }
 
     /// One tool invocation the model asks the guest to run.
     record tool-call {
-        /// Correlation id: models issue parallel calls and the results stream
-        /// is unordered, so results answer calls by `id`.
+        /// Correlation id: calls are parallel and results unordered, so
+        /// results answer calls by `id`.
         id: string,
         /// A function-tool name declared in `request.tools`.
         name: string,
-        /// Arguments object for the tool, per its declared parameters schema.
+        /// Arguments object, per the tool's declared parameters schema.
         arguments: json,
     }
 
     /// The guest's answer to one `tool-call`.
     record tool-result {
-        /// The `tool-call` id this result answers.
         id: string,
-        /// Tool output for the model, or a model-visible failure message the
-        /// model may repair from.
+        /// Tool output, or a model-visible failure the model may repair from.
         output: result<json, string>,
     }
 
     /// Typed completion failure.
     variant error {
-        /// The request itself is malformed (empty `messages`, reserved tool
-        /// name, invalid schema document); retrying without changing it is
-        /// pointless.
+        /// Malformed request; retrying unchanged is pointless.
         invalid-request(string),
-        /// Backend produced output that never passed validation.
+        /// Backend output never passed validation.
         invalid-answer(string),
         /// Iteration, token, or time budget exhausted.
         budget-exhausted(string),
@@ -239,57 +166,35 @@ interface completion {
         backend(string),
     }
 
-    /// One open completion. Tool calls stream host-to-guest; the validated
-    /// reply resolves once the host's answer gate passes. The host always
-    /// resolves `reply` — budget and deadline failures arrive as `error`
-    /// values, never as a dropped writer.
+    /// One open completion. The host always resolves `reply` — budget and
+    /// deadline failures arrive as `error` values, never as a dropped writer.
     record session {
-        /// Tool calls the model issues; closes when the completion finishes
-        /// or its call budget is exhausted.
+        /// Closes when the completion finishes or its call budget is exhausted.
         calls: stream<tool-call>,
-        /// The validated completion outcome, per `request.format`.
         reply: future<result<reply, error>>,
     }
 
     /// Open a completion session. The guest creates the `results` stream,
-    /// keeps the writer, and passes the readable end; the host returns the
-    /// `calls` stream and the `reply` future.
+    /// keeps the writer, and passes the readable end.
     create: async func(request: request, results: stream<tool-result>) -> result<session, error>;
 
-    // YAGNI (Tier 1): no backend maps a tool-choice policy onto its provider
-    // (genai and cursor both ignore it), so both the variant and the
-    // `request.tool-choice` field below are commented out until one does.
-    // /// Tool selection policy (`tool_choice` in provider APIs).
+    // YAGNI (Tier 1): no backend maps a tool-choice policy onto its provider.
     // variant tool-choice {
-    //     /// Provider selects whether to call tools.
     //     auto,
-    //     /// Do not call tools.
     //     none,
-    //     /// Must call at least one tool.
     //     required,
-    //     /// Must call the named tool.
     //     named(string),
     // }
 
-    // YAGNI (Tier 1): no backend streams yet, so `create-stream` and its `event`
-    // variant are commented out until one does (the host stub only ever returned
-    // `backend("streaming unsupported")`).
-    // /// Incremental output from `create-stream`.
+    // YAGNI (Tier 1): no backend streams yet.
     // variant event {
-    //     /// Token or fragment; diagnostic only, not validated until `done`.
     //     delta(string),
-    //     /// Terminal success — the same validated `reply` as `create` would return.
     //     done(reply),
-    //     /// Terminal failure mid-stream.
     //     failed(error),
     // }
-
-    // YAGNI (Tier 1): see the `event` variant above.
-    // /// Streaming completion over the same `request`. Read until `done` or `failed`.
     // create-stream: async func(request: request) -> result<stream<event>, error>;
 }
 
-/// Guest world: import and call `completion`.
 world model {
     import completion;
 }
