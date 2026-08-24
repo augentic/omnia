@@ -67,7 +67,7 @@ Grants are the security boundary. Rather than giving the model backend ambient a
 
 - **`workspace`** — a directory descriptor from the guest's own preopen table (populated by the host's `[[mount]]`; see [Multi-Guest Deployments](multi-guest-deployments.md#mounts-giving-guests-a-workspace)). The model can only see a tree the host mounted *and* the guest chose to lend.
 
-This grant is what drives the host-injected tools. The names `read`, `list`, and `write` are reserved — guests must not redeclare them in `tools` — and the host serves them through the per-completion `ToolHost`, bounded to the lent tree. When a workspace is lent, the genai backend advertises `read` and `list` to the model and executes them host-side, never through the session; `write` stays reserved but is not yet advertised. The cursor backend skips them entirely — its spawned agent inspects the workspace natively. Guest-declared function tools also execute through the `ToolHost` (`call_tool`), so every invocation passes through the host's validation gate and session limits.
+This grant is what drives the host-injected tools. The names `read`, `list`, and `write` are reserved — guests must not redeclare them in `tools` — and the host serves them through the per-completion `ToolHost`, bounded to the lent tree. When a workspace is lent, the genai backend advertises `read` and `list` to the model and executes them host-side, never through the session; `write` stays reserved but is not yet advertised. The cursor backend skips them entirely — its agent inspects the workspace natively. Guest-declared function tools also execute through the `ToolHost` (`call_tool`), so every invocation passes through the host's validation gate and session limits.
 
 ## Backends
 
@@ -86,13 +86,14 @@ cargo run --example model
 
 Calls LLM provider APIs in-process via the [`genai`](https://crates.io/crates/genai) SDK (OpenAI, Anthropic, Gemini, Groq, Ollama, and others). Provider API keys are read from the environment at call time (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...). It advertises the request's declared function tools — plus the host-injected `read`/`list` workspace tools when the guest lent a workspace — and drives the bounded session tool loop: `read`/`list` execute host-side against the lent tree, while every other model tool call is forwarded back through the host to the guest's handler. MCP tools are not supported by this backend — use `omnia-cursor` for that.
 
-### `omnia-cursor` — cursor-agent (omnia-backends repo)
+### `omnia-cursor` — Cursor SDK bridge (omnia-backends repo)
 
-Spawns the [`cursor-agent`](https://cursor.com/docs/cli) CLI per completion, giving the model a full agentic session inside the granted workspace:
+Drives one bridge-managed Cursor agent per completion through [`cursor-sdk-bridge`](https://github.com/cursor/sdk-bridge), giving the model a full agentic session inside the granted workspace:
 
-- Requires `cursor-agent` on `PATH` and authentication (`CURSOR_API_KEY` or a prior `cursor-agent login`).
-- The workspace grant is mandatory: the agent runs in the directory behind the guest's `grants.workspace` mount.
-- `Tool::Mcp` grants are honoured by writing the server URLs into the workspace's `.cursor/mcp.json` for the session (restored afterwards).
+- Requires `cursor-sdk-bridge` on `PATH` (or `CURSOR_SDK_BRIDGE_BIN`) and `CURSOR_API_KEY`.
+- The agent runs in the directory behind the guest's `grants.workspace` mount; without one, the completion still runs tools-only in a private empty directory with every built-in tool disabled.
+- `Tool::Function` declarations become SDK custom tools: the agent's calls route back through the backend's loopback callback into the session (`ToolHost::call_tool`), so the guest's handler answers under the host's session limits.
+- `Tool::Mcp` grants pass inline as the agent's `mcp_servers`; nothing is written into the workspace.
 
 Wire it like any other backend:
 

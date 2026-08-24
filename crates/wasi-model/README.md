@@ -12,7 +12,7 @@ Implements the `omnia:model` WIT interface (`completion`).
 
 - **Default**: `ModelDefault` (echo). It connects with zero configuration and answers every completion with its own prompt — the last message echoed as a string for `format::text`, wrapped as `{"echo": ...}` for `format::json` — so guest wiring runs deterministically with no live model. `format::schema` completions fail loud (no echo can conform to an arbitrary guest schema): bind a real backend, or define an inline canned `WasiModelCtx` in tests, which (unlike an echo) can satisfy a guest schema with a fixed answer.
 
-- **Production**: [`omnia-genai`](https://github.com/augentic/omnia-backends/tree/main/crates/genai) (provider APIs via the genai SDK), [`omnia-cursor`](https://github.com/augentic/omnia-backends/tree/main/crates/cursor) (spawned cursor-agent) — a one-line swap in the host, guests untouched (see the [Production Backends guide](https://github.com/augentic/omnia/blob/main/docs/guides/production-backends.md)).
+- **Production**: [`omnia-genai`](https://github.com/augentic/omnia-backends/tree/main/crates/genai) (provider APIs via the genai SDK), [`omnia-cursor`](https://github.com/augentic/omnia-backends/tree/main/crates/cursor) (bridge-managed Cursor agent) — a one-line swap in the host, guests untouched (see the [Production Backends guide](https://github.com/augentic/omnia/blob/main/docs/guides/production-backends.md)).
 
 ## Usage
 

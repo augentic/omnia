@@ -59,8 +59,8 @@ The **host** enforces the contract at the `create` gate: an answer that fails va
 
 | Variant | Fields | Support |
 | ------- | ------ | ------- |
-| `function` | `name`, `description`, `parameters` (JSON Schema for the arguments object) | Advertised to the provider and executed by the guest through the session's `calls`/`results` streams (genai) |
-| `mcp` | `name`, `tools` (allowlist; empty = all), `url` (server endpoint) | Cursor backend only; genai rejects MCP grants |
+| `function` | `name`, `description`, `parameters` (JSON Schema for the arguments object) | Advertised to the provider and executed by the guest through the session's `calls`/`results` streams (genai and cursor) |
+| `mcp` | `name`, `tools` (allowlist; empty = all), `url` (server endpoint) | Cursor backend only; genai rejects MCP grants. The allowlist is advisory (prompt-level), not enforced |
 
 Function names must not collide with the reserved host-injected tool names below, and `parameters` must parse as JSON (`invalid-request` otherwise).
 
@@ -68,11 +68,11 @@ Function names must not collide with the reserved host-injected tool names below
 
 | Field | Type | Effect |
 | ----- | ---- | ------ |
-| `workspace` | `option<workspace-grant>` | A `wasi:filesystem` directory descriptor from the guest's own preopen table plus a relative `subpath`. Being a typed resource borrow, it cannot be forged — the host resolves it back to an authorized mount by directory identity, then exposes it to backends as bounded `read`/`list`/`write` (genai) or the absolute local path (cursor's `--workspace`). |
+| `workspace` | `option<workspace-grant>` | A `wasi:filesystem` directory descriptor from the guest's own preopen table plus a relative `subpath`. Being a typed resource borrow, it cannot be forged — the host resolves it back to an authorized mount by directory identity, then exposes it to backends as bounded `read`/`list`/`write` (genai) or the absolute local path (the cursor agent's working directory). |
 
 ### Host-injected tools
 
-The names **`read`**, **`list`**, and **`write`** are reserved for the host's workspace tools; guests must not declare tools with them (`invalid-request`). When the guest lends `grants.workspace`, the genai backend advertises `read` and `list` to the model and executes them host-side through the `ToolHost` workspace capability — bounded reads and listings that never traverse the session. Read results must be UTF-8 text and, like session tool results, fit the per-result byte cap. `write` stays reserved and served by `ToolHost` but is not yet advertised to the model. The cursor backend advertises none of these: its spawned agent inspects the workspace natively through the local path. Declared function tools travel a different road: the backend forwards the model's call through `ToolHost::call_tool`, the host checks the name against the request's declared tools and enforces the session limits, and the guest's handler answers over the session streams.
+The names **`read`**, **`list`**, and **`write`** are reserved for the host's workspace tools; guests must not declare tools with them (`invalid-request`). When the guest lends `grants.workspace`, the genai backend advertises `read` and `list` to the model and executes them host-side through the `ToolHost` workspace capability — bounded reads and listings that never traverse the session. Read results must be UTF-8 text and, like session tool results, fit the per-result byte cap. `write` stays reserved and served by `ToolHost` but is not yet advertised to the model. The cursor backend advertises none of these: its bridge-managed agent inspects the workspace natively through the local path. Declared function tools travel a different road: the backend forwards the model's call through `ToolHost::call_tool`, the host checks the name against the request's declared tools and enforces the session limits, and the guest's handler answers over the session streams.
 
 ## Reply
 
@@ -97,4 +97,4 @@ The names **`read`**, **`list`**, and **`write`** are reserved for the host's wo
 | ------- | -------- | ----- |
 | `ModelDefault` | in-tree (`wasi-model`) | Deterministic echo: text/json answer with the prompt; `format::schema` errors |
 | `omnia-genai` | omnia-backends repo | Provider APIs in-process; drives the function-tool session loop; no MCP |
-| `omnia-cursor` | omnia-backends repo | Spawned `cursor-agent`; requires workspace grant; MCP via `.cursor/mcp.json`; rejects function tools (session bridging pending); 120s default timeout |
+| `omnia-cursor` | omnia-backends repo | Bridge-managed Cursor agent (`cursor-sdk-bridge`); function tools bridge into the session as SDK custom tools; MCP grants pass inline; workspace optional (tools-only in a private directory when unlent); 120s default inactivity timeout |
