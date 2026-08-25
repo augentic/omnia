@@ -215,7 +215,3 @@ fn reqwest_err(e: reqwest::Error) -> ErrorCode {
         internal_err(e)
     }
 }
-
-// Outbound behavior (body forwarding, header handling, error mapping, client
-// certificates) is covered at the guest–host boundary by the outbound
-// scenarios in `omnia-abi-tests`' `tests/conformance.rs`.

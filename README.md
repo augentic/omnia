@@ -42,7 +42,7 @@ omnia::runtime!({
 **[Start with the documentation index](docs/README.md)** — a graduated path from first run to full deployments:
 
 - [Getting Started](docs/getting-started.md) — first build and run, ~10 minutes
-- How-to guides — [writing guests](docs/guides/writing-guests.md), [composing a runtime](docs/guides/composing-a-runtime.md), [multi-guest deployments](docs/guides/multi-guest-deployments.md), [testing](docs/guides/testing.md), capability deep dives ([SQL](docs/guides/sql-and-orm.md), [documents](docs/guides/document-store.md), [messaging](docs/guides/messaging.md), [model/MCP](docs/guides/model-completions.md)), [production backends](docs/guides/production-backends.md), [deployment](docs/guides/deployment.md), [tuning](docs/guides/performance-tuning.md)
+- How-to guides — [writing guests](docs/guides/writing-guests.md), [composing a runtime](docs/guides/composing-a-runtime.md), [multi-guest deployments](docs/guides/multi-guest-deployments.md), capability deep dives ([SQL](docs/guides/sql-and-orm.md), [documents](docs/guides/document-store.md), [messaging](docs/guides/messaging.md), [model/MCP](docs/guides/model-completions.md)), [production backends](docs/guides/production-backends.md), [deployment](docs/guides/deployment.md), [tuning](docs/guides/performance-tuning.md)
 - [Architecture](docs/Architecture.md), [Security Model](docs/security-model.md), and [Glossary](docs/glossary.md)
 - Reference — [WASI interfaces](docs/reference/wasi-interfaces.md), [model interface](docs/reference/model.md), [CLI](docs/reference/cli.md), [configuration](docs/reference/configuration.md)
 - [Troubleshooting](docs/troubleshooting.md)
@@ -57,7 +57,6 @@ The [`examples/`](examples/README.md) directory contains a complete working gues
 | [`omnia-guest`](crates/omnia-guest)             | Guest SDK — operations, explicit command/HTTP/messaging routers, errors, ORM, and MCP support |
 | [`omnia-guest-macros`](crates/guest-macros)     | `#[instrument]` observability attribute for guests                                         |
 | [`omnia-host-macros`](crates/host-macros)       | `runtime!` proc-macro for host runtime generation                                          |
-| [`omnia-abi-tests`](crates/abi-tests)           | Guest–host ABI tests and scaffolding (dev-only)                                            |
 | [`omnia-wasi-blobstore`](crates/wasi-blobstore) | wasi:blobstore host and guest bindings                                                     |
 | [`omnia-wasi-config`](crates/wasi-config)       | wasi:config host and guest bindings                                                        |
 | [`omnia-wasi-docstore`](crates/wasi-docstore)   | Document-store host and guest bindings                                                     |

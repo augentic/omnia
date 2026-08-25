@@ -75,7 +75,7 @@ This grant is what drives the host-injected tools. The names `read`, `list`, and
 
 The default backend connects with zero configuration and answers every completion with its own prompt: the last message echoed as a string for `format::text`, wrapped as `{"echo": ...}` for `format::json`. That makes guest wiring and prompt assembly smoke-testable with no live model. `format::schema` requests fail with a `backend` error — no echo can conform to an arbitrary guest schema — so bind a real backend for typed answers.
 
-For tests, CI, and local development of model guests, define an inline `WasiModelCtx` impl that returns a fixed answer — no network, no credentials, fully deterministic, and (unlike an echo) able to satisfy `format::schema` (see the recipe in [the testing guide](testing.md#testing-model-guests)). The [`model` example](../../examples/model/) serves its fixed schema answer that way:
+For tests, CI, and local development of model guests, define an inline `WasiModelCtx` impl that returns a fixed answer — no network, no credentials, fully deterministic, and (unlike an echo) able to satisfy `format::schema` (see the recipe in [Testing Policy](testing-policy.md#canned-model-backends)). The [`model` example](../../examples/model/) serves its fixed schema answer that way:
 
 ```bash
 cargo build --example model-wasm --target wasm32-wasip2

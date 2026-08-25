@@ -92,8 +92,3 @@ impl Client for MessagingDefault {
         .boxed()
     }
 }
-
-// Publish/subscribe is covered end-to-end by the ABI tests, which drive
-// `MessagingDefault::send` from the guest and observes it on a host
-// `subscribe`. The canned request/reply stub returns a constant and needs no
-// test of its own.

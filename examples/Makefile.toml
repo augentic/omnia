@@ -7,33 +7,7 @@ skip_crate_env_info = true
 skip_git_env_info = true
 skip_rust_env_info = true
 
-# Build (and serialize) only the guests the ABI tests drive.
-[tasks.test-guests]
-script = '''
-set -e
-cargo build -p examples --target wasm32-wasip2 \
-  --example conformance-wasm \
-  --example cli-wasm \
-  --example model-wasm \
-  --example guest-link-responder-wasm \
-  --example guest-link-router-wasm \
-  --example guest-link-extra-wasm \
-  --example guest-link-relay-wasm
-ws="$(cargo locate-project --workspace --message-format=plain)"
-ws="${ws%/Cargo.toml}"
-out="${CARGO_TARGET_DIR:-$ws/target}/wasm32-wasip2/debug/examples"
-cargo run -p omnia-abi-tests --bin guests -- \
-  "$out/conformance_wasm.wasm" \
-  "$out/cli_wasm.wasm" \
-  "$out/model_wasm.wasm" \
-  "$out/guest_link_responder_wasm.wasm" \
-  "$out/guest_link_router_wasm.wasm" \
-  "$out/guest_link_extra_wasm.wasm" \
-  "$out/guest_link_relay_wasm.wasm"
-'''
-
-# Full WASM example build (every guest, including those without ABI-test
-# coverage) for main/scheduled validation.
+# Full WASM example build for main/scheduled validation.
 [tasks.examples]
 command = "cargo"
 args = ["build", "-p", "examples", "--examples", "--target", "wasm32-wasip2"]

@@ -17,7 +17,7 @@ architecture. There are many ways to help besides contributing code:
 - [docs/getting-started.md](docs/getting-started.md) — building and running
   your first guest.
 - [docs/guides/testing-policy.md](docs/guides/testing-policy.md) — what earns
-  a unit test, an ABI test, or a live test.
+  a unit test or a live test.
 - [docs/glossary.md](docs/glossary.md) — project terminology.
 
 ## Before you open a pull request

@@ -435,9 +435,8 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     }
 
     /// Build the HTTP trigger's [`TriggerRouter`] over this runtime's
-    /// registry and static route table — shared by the trigger server and
-    /// the ABI-test harness so the boot-time routing decision cannot drift
-    /// between them.
+    /// registry and static route table so the boot-time routing decision
+    /// lives in one place.
     ///
     /// `probe` resolves a guest's typed handler indices; a guest is capable
     /// exactly when it succeeds.

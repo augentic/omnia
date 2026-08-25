@@ -216,9 +216,7 @@ pub(super) fn plan(
 
 // Unit tests by design: `plan` is factored pure (argv and `OMNIA_CONFIG` are
 // parameters) precisely so source precedence and argv policy are testable
-// without spawning a binary; everything downstream of `into_builder` —
-// deployment build, command routing, exit mapping — is the `cli` ABI-test
-// target's job.
+// without spawning a binary.
 #[cfg(test)]
 mod tests {
     use super::*;

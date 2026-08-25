@@ -18,7 +18,6 @@
 - [Writing Guests](guides/writing-guests.md)
 - [Composing a Runtime](guides/composing-a-runtime.md)
 - [Multi-Guest Deployments](guides/multi-guest-deployments.md)
-- [Testing Your Guests](guides/testing.md)
 
 ## Capabilities in depth
 

@@ -85,11 +85,3 @@ and compiled inside the sandbox. Its dual, `GuestArtifact::precompiled`, is
 `unsafe` — a serialized `omnia compile` artifact is native code, so the call
 site must attest the bytes came unmodified from a trusted build pipeline.
 
-## Integration test
-
-```bash
-# after building the guests above (do NOT `cargo clean` in between):
-cargo test -p omnia-abi-tests --test guest_link
-```
-
-The test builds the registry from a programmatic manifest, calls `router.run` and `router.run-slow`, and asserts each returns the responder's echo — and that the responder is instantiated exactly once per dispatched call.

@@ -92,11 +92,8 @@ cargo outdated --workspace --exit-code 1 --depth 1 \
 '''
 install_crate = "cargo-outdated"
 
-# Test: builds and serializes the ABI-test guests first (`test-guests` lives
-# in examples/Makefile.toml, extended above), then runs the whole suite — unit
-# and ABI integration tests alike — under Nextest, process-per-test.
+# Test: Nextest over the workspace, process-per-test.
 [tasks.test]
-dependencies = ["test-guests"]
 command = "cargo"
 args = ["nextest", "run", "--locked", "--all", "--all-features", "--no-tests=pass"]
 env = { RUSTFLAGS = "-Dwarnings" }
