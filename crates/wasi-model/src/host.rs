@@ -47,7 +47,7 @@ pub use self::generated::omnia::model::completion::{
     Schema, Tool, WorkspaceGrant,
 };
 pub use self::resource::*;
-pub use self::answer::{Answer, ToolTurn, Transcript};
+pub use self::answer::{Answer, ToolTurn, Transcript, Usage};
 pub use self::session::SessionLimits;
 
 /// Result type for model operations.
