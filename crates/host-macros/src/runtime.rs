@@ -77,8 +77,7 @@ pub fn expand(config: &Config) -> TokenStream {
     }
 }
 
-// Unit tests by design: macro token expansion is pure; the expanded runtimes
-// are what every ABI-test scenario executes.
+// Unit tests by design: macro token expansion is pure.
 #[cfg(test)]
 mod tests {
     use quote::quote;

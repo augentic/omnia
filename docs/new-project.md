@@ -157,5 +157,4 @@ Production backends come from the separate [`omnia-backends`](https://github.com
 
 - **[Writing Guests](guides/writing-guests.md)** — every guest-side pattern: capabilities, messaging, command mode, tracing.
 - **[Composing a Runtime](guides/composing-a-runtime.md)** — modes, backends, and compiled-in deployments for the host.
-- **[Testing Your Guests](guides/testing.md)** — drive the guest through a real runtime in integration tests.
 - **[omnia-exemplar](https://github.com/augentic/omnia-exemplar)** — a complete application-scale reference service built this way.

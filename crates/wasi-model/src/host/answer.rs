@@ -182,8 +182,7 @@ impl Answer {
     }
 }
 
-// Unit tests by design: answer extraction/repair is a pure parser; the model
-// ABI scenarios cover the request/answer round-trip through a guest.
+// Unit tests by design: answer extraction/repair is a pure parser.
 #[cfg(test)]
 mod tests {
     use serde_json::json;

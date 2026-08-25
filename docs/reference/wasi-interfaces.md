@@ -41,8 +41,6 @@ wasi-keyvalue/
 └── wit/                # WIT interface definitions (+ deps/)
 ```
 
-ABI tests live in the workspace-wide [`crates/abi-tests`](../../crates/abi-tests), and only for behavior that is the boundary itself — see the [testing policy](../guides/testing-policy.md).
-
 ## Supporting crates
 
 | Crate | Purpose |
@@ -51,4 +49,3 @@ ABI tests live in the workspace-wide [`crates/abi-tests`](../../crates/abi-tests
 | `omnia-guest` | Guest SDK: `Operation`, `Invocation`, `Invoker`, explicit command/HTTP/messaging routers, errors, ORM, and MCP |
 | `omnia-guest-macros` | `#[instrument]` attribute |
 | `omnia-host-macros` | `runtime!` macro (use via `omnia::runtime!`) |
-| `omnia-abi-tests` | Guest–host ABI tests plus dev-only helpers (`find_guest`, `temp_manifest`, HTTP driver) |

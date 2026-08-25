@@ -475,8 +475,7 @@ pub enum TransportKind {
     Quic,
 }
 
-// Unit tests by design: manifest parsing/validation is pure translation —
-// deployment *behavior* built from a manifest is covered by the ABI tests.
+// Unit tests by design: manifest parsing/validation is pure translation.
 #[cfg(test)]
 mod tests {
     use super::*;

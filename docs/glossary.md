@@ -44,14 +44,6 @@ Guest-to-guest calls carried through the host: a guest imports an interface name
 
 The deployment-wide `dispatch` list naming interfaces the host will mediate between guests. Anything not listed is not callable — the list is the boundary, fixed at bootstrap.
 
-### ABI test
-
-An integration test of the guest–host boundary: a real guest `.wasm` driven through a real runtime, asserting the guest-visible outcome. They live in `crates/abi-tests`. See [Testing](guides/testing.md).
-
-### Probe
-
-A handle into a host backend that an ABI test uses to observe effects from the host side (e.g. a message landing on the broker) when the guest cannot observe them itself.
-
 ## Runtime platform
 
 ### Runtime core

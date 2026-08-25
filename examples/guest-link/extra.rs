@@ -3,10 +3,9 @@
 //! Exports `omnia:link/echo` like `responder`, but is *absent from the
 //! deployment manifest*: it joins the running deployment through dynamic
 //! registration (`Runtime::register`) and is then reachable via the same
-//! host-mediated dispatch as any static guest (see `register.rs` and the
-//! `guest_link` ABI scenarios).
+//! host-mediated dispatch as any static guest (see `register.rs`).
 //!
-//! Its replies are tagged `from extra` so tests can distinguish it from the
+//! Its replies are tagged `from extra` so callers can distinguish it from the
 //! responder — e.g. after a deregister + re-register upgrade swap.
 
 #![cfg(target_arch = "wasm32")]
