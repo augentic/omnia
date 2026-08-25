@@ -132,42 +132,32 @@ impl Format {
 
 // Complete JSON values in `text`. A whole-text parse is the only candidate so
 // fence / brace scans cannot lift fragments out of string contents. Otherwise:
-// each fenced body, then each `{` / `[` slice.
+// each fenced body, then each `{` / `[` slice (continuing from the deserializer
+// offset so nested brackets are not re-offered as roots).
 fn json_values(text: &str) -> Vec<Value> {
-    let trimmed = text.trim();
-    if let Ok(value) = serde_json::from_str(trimmed) {
+    // try to parse the whole text as a single JSON value
+    let text = text.trim();
+    if let Ok(value) = serde_json::from_str(text) {
         return vec![value];
     }
-    fenced_bodies(trimmed)
-        .into_iter()
-        .filter_map(|body| serde_json::from_str(body.trim()).ok())
-        .chain(sliced_json(trimmed))
-        .collect()
-}
 
-// Bodies of every Markdown fence in `text`; an unterminated fence yields the
-// remainder.
-fn fenced_bodies(text: &str) -> Vec<&str> {
-    let mut bodies = Vec::new();
+    // extract values from "```" fences
+    let mut values = Vec::new();
     let mut rest = text;
     while let Some(start) = rest.find("```") {
         let after = &rest[start + 3..];
         let body = after.split_once('\n').map_or(after, |(_, body)| body);
-        if let Some(end) = body.find("```") {
-            bodies.push(&body[..end]);
-            rest = &body[end + 3..];
-        } else {
-            bodies.push(body);
+        let end = body.find("```").unwrap_or(body.len());
+        if let Ok(value) = serde_json::from_str(body[..end].trim()) {
+            values.push(value);
+        }
+        if end == body.len() {
             break;
         }
+        rest = &body[end + 3..];
     }
-    bodies
-}
 
-// Complete JSON values starting at each `{` or `[`, continuing from the
-// deserializer offset so nested brackets are not re-offered as roots.
-fn sliced_json(text: &str) -> Vec<Value> {
-    let mut values = Vec::new();
+    // extract values from `{` or `[` slices
     let mut rest = text;
     while let Some(offset) = rest.find(['{', '[']) {
         let mut stream = serde_json::Deserializer::from_str(&rest[offset..]).into_iter::<Value>();
@@ -189,33 +179,6 @@ mod tests {
     use serde_json::json;
 
     use crate::host::generated::omnia::model::completion::{Format, Schema};
-
-    fn verdict_schema() -> Format {
-        Format::Schema(Schema {
-            name: "verdict".to_owned(),
-            schema: json!({
-                "type": "object",
-                "properties": { "verdict": { "type": "string" } },
-                "required": ["verdict"],
-            })
-            .to_string(),
-        })
-    }
-
-    fn phase_report_schema() -> Format {
-        Format::Schema(Schema {
-            name: "phase-report".to_owned(),
-            schema: json!({
-                "type": "object",
-                "properties": {
-                    "outcome": { "type": "string" },
-                    "source": { "type": "string" },
-                },
-                "required": ["outcome", "source"],
-            })
-            .to_string(),
-        })
-    }
 
     #[test]
     fn json_must_parse() {
@@ -243,7 +206,7 @@ mod tests {
     fn preamble_array_then_phase_report() {
         let text = "findings: []\n{\"outcome\":\"completed\",\"source\":\"model-assisted\"}";
         assert_eq!(
-            phase_report_schema().parse(text).unwrap(),
+            report_schema().parse(text).unwrap(),
             json!({ "outcome": "completed", "source": "model-assisted" })
         );
     }
@@ -256,7 +219,7 @@ mod tests {
 
     #[test]
     fn whole_text_array_is_schema_error() {
-        let format = phase_report_schema();
+        let format = report_schema();
         let value = format.parse("[]").unwrap();
         assert_eq!(value, json!([]));
         let err = format.check(&value).unwrap_err();
@@ -316,5 +279,32 @@ mod tests {
         let nested = format.check(&json!({ "ui-surface": [] })).unwrap_err();
         assert!(nested.contains("/ui-surface"), "unexpected: {nested}");
         assert_ne!(root, nested);
+    }
+
+    fn verdict_schema() -> Format {
+        Format::Schema(Schema {
+            name: "verdict".to_owned(),
+            schema: json!({
+                "type": "object",
+                "properties": { "verdict": { "type": "string" } },
+                "required": ["verdict"],
+            })
+            .to_string(),
+        })
+    }
+
+    fn report_schema() -> Format {
+        Format::Schema(Schema {
+            name: "phase-report".to_owned(),
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "outcome": { "type": "string" },
+                    "source": { "type": "string" },
+                },
+                "required": ["outcome", "source"],
+            })
+            .to_string(),
+        })
     }
 }
