@@ -29,7 +29,7 @@ use crate::host::generated::omnia::model::completion::{
 use crate::host::resource::DirEntry;
 use crate::host::session::{CallsProducer, ReplyTask, ResultsConsumer, SessionClose, SessionState};
 use crate::host::workspace::{self, Workspace};
-use crate::host::{Error, FutureResult, Request, ToolHost, WasiModel, WasiModelCtxView, gate};
+use crate::host::{Error, Format, FutureResult, Request, ToolHost, WasiModel, WasiModelCtxView};
 
 impl<T> HostWithStore<T> for WasiModel
 where
@@ -45,7 +45,7 @@ where
         // the host takes it out here to resolve the workspace for `ToolHost`.
         let lent = request.grants.workspace.take();
 
-        if let Err(error) = gate::validate(&request) {
+        if let Err(error) = validate(&request) {
             // A stream not returned to the guest must be disposed explicitly.
             accessor.with(|mut access| results.close(&mut access))?;
             return Err(error);
@@ -159,5 +159,133 @@ impl ToolHost for BoundToolHost {
 
     fn local_path(&self) -> Option<&std::path::Path> {
         self.workspace.as_ref().map(Workspace::local_path)
+    }
+}
+
+const TOOL_NAMES: &[&str] = &["read", "list", "write"];
+
+fn validate(request: &Request) -> Result<(), Error> {
+    for tool in &request.tools {
+        let Tool::Function(function) = tool else {
+            continue;
+        };
+        if TOOL_NAMES.contains(&function.name.as_str()) {
+            return Err(Error::InvalidRequest(format!("reserved tool name: {}", function.name)));
+        }
+        if serde_json::from_str::<serde_json::Value>(&function.parameters).is_err() {
+            return Err(Error::InvalidRequest(format!(
+                "function tool `{}` parameters is not valid JSON",
+                function.name
+            )));
+        }
+    }
+
+    if request.messages.iter().all(|m| m.content.trim().is_empty()) {
+        return Err(Error::InvalidRequest("empty request".to_owned()));
+    }
+
+    if let Format::Schema(spec) = &request.format {
+        let schema: serde_json::Value = serde_json::from_str(&spec.schema)
+            .map_err(|e| Error::InvalidRequest(format!("format schema is not valid JSON: {e}")))?;
+        jsonschema::validator_for(&schema).map_err(|e| {
+            Error::InvalidRequest(format!("format schema is not a valid JSON Schema: {e}"))
+        })?;
+    }
+
+    Ok(())
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::validate;
+    use crate::host::Error;
+    use crate::host::generated::omnia::model::completion::{
+        Format, Function, Grants, Message, Request, Role, Schema, Tool,
+    };
+
+    #[test]
+    fn reserved_tool_name() {
+        let mut request = into_request(vec![message(Role::User, "hi")]);
+        request.tools.push(Tool::Function(Function {
+            name: "read".to_owned(),
+            description: "shadow a host-injected tool".to_owned(),
+            parameters: "{}".to_owned(),
+        }));
+        let err = validate(&request).unwrap_err();
+        assert!(matches!(err, Error::InvalidRequest(m) if m.contains("reserved tool name")));
+    }
+
+    #[test]
+    fn empty_request() {
+        let err = validate(&into_request(vec![])).unwrap_err();
+        assert!(matches!(err, Error::InvalidRequest(m) if m == "empty request"));
+
+        // messages present but all blank is still empty.
+        let err = validate(&into_request(vec![message(Role::User, "   ")])).unwrap_err();
+        assert!(matches!(err, Error::InvalidRequest(m) if m == "empty request"));
+    }
+
+    // `resolve` is no longer host-injected: a guest may declare it as an
+    // ordinary function tool.
+    #[test]
+    fn resolve_is_valid() {
+        let mut request = into_request(vec![message(Role::User, "hi")]);
+        request.tools.push(Tool::Function(Function {
+            name: "resolve".to_owned(),
+            description: "look up a reference".to_owned(),
+            parameters: "{\"type\":\"object\"}".to_owned(),
+        }));
+        validate(&request).unwrap();
+    }
+
+    #[test]
+    fn invalid_params() {
+        let mut request = into_request(vec![message(Role::User, "hi")]);
+        request.tools.push(Tool::Function(Function {
+            name: "lookup".to_owned(),
+            description: "look something up".to_owned(),
+            parameters: "not json".to_owned(),
+        }));
+        let err = validate(&request).unwrap_err();
+        assert!(matches!(err, Error::InvalidRequest(m) if m.contains("`lookup`")));
+    }
+
+    #[test]
+    fn invalid_schema() {
+        let mut request = into_request(vec![message(Role::User, "hi")]);
+        request.format = Format::Schema(Schema {
+            name: "verdict".to_owned(),
+            schema: "not json".to_owned(),
+        });
+        let err = validate(&request).unwrap_err();
+        assert!(matches!(err, Error::InvalidRequest(m) if m.contains("not valid JSON")));
+
+        let mut request = into_request(vec![message(Role::User, "hi")]);
+        request.format = Format::Schema(Schema {
+            name: "verdict".to_owned(),
+            schema: "{\"type\":\"nonsense\"}".to_owned(),
+        });
+        let err = validate(&request).unwrap_err();
+        assert!(matches!(err, Error::InvalidRequest(m) if m.contains("valid JSON Schema")));
+    }
+
+    fn into_request(messages: Vec<Message>) -> Request {
+        Request {
+            model: None,
+            system: None,
+            messages,
+            generation: None,
+            format: Format::Json,
+            tools: vec![],
+            grants: Grants { workspace: None },
+        }
+    }
+
+    fn message(role: Role, content: &str) -> Message {
+        Message {
+            role,
+            content: content.to_owned(),
+        }
     }
 }

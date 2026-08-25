@@ -53,20 +53,6 @@ impl Default for SessionLimits {
     }
 }
 
-/// A backend's result: the parsed answer value, optional usage, and transcript.
-///
-/// Host-only — the guest sees a `reply` whose `answer` is the validated string
-/// the `create` binding derives from `value`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Answer {
-    /// The parsed JSON answer the backend produced.
-    pub value: serde_json::Value,
-    /// Token accounting the backend reported, surfaced to the guest as `reply.usage`.
-    pub usage: Option<Usage>,
-    /// Optional tool-call transcript the backend captured.
-    pub transcript: Option<Transcript>,
-}
-
 /// Token accounting for one completion. Mirrors the WIT `usage` record; the
 /// serde derive lets backends record it alongside the transcript.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -8,7 +8,6 @@
 mod answer;
 mod completion_impl;
 mod default_impl;
-mod gate;
 mod resource;
 mod session;
 mod workspace;
@@ -48,6 +47,7 @@ pub use self::generated::omnia::model::completion::{
     Schema, Tool, WorkspaceGrant,
 };
 pub use self::resource::*;
+pub use self::answer::Answer;
 
 /// Result type for model operations.
 pub type Result<T> = std::result::Result<T, Error>;

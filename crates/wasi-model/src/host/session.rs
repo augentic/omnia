@@ -24,8 +24,6 @@ use wasmtime::component::{Destination, Source, StreamConsumer, StreamProducer, S
 use crate::host::generated::omnia::model::completion::{Reply, ToolCall, ToolResult};
 use crate::host::{Error, FutureResult, SessionLimits};
 
-// Bounds tool calls queued toward the guest before it has read them; the
-// call budget bounds the total, so this only limits burst depth.
 const CALL_QUEUE: usize = 8;
 
 /// Shared state for one completion session: the calls bridge, the pending

@@ -4,8 +4,22 @@
 use serde_json::Value;
 
 use crate::host::Error;
-use crate::host::generated::omnia::model::completion::{Format, Reply, Usage};
-use crate::host::resource::Answer;
+use crate::host::generated::omnia::model::completion::{Format, Reply, Usage as ReplyUsage};
+use crate::host::resource::{Transcript, Usage};
+
+/// A backend's result: the parsed answer value, optional usage, and transcript.
+///
+/// Host-only — the guest sees a `reply` whose `answer` is the validated string
+/// the `create` binding derives from `value`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Answer {
+    /// The parsed JSON answer the backend produced.
+    pub value: serde_json::Value,
+    /// Token accounting the backend reported, surfaced to the guest as `reply.usage`.
+    pub usage: Option<Usage>,
+    /// Optional tool-call transcript the backend captured.
+    pub transcript: Option<Transcript>,
+}
 
 impl Answer {
     /// Validate an answer against the request's `format`.
@@ -33,7 +47,7 @@ impl Answer {
 
         Ok(Reply {
             answer: text,
-            usage: self.usage.map(|usage| Usage {
+            usage: self.usage.map(|usage| ReplyUsage {
                 input_tokens: usage.input_tokens,
                 output_tokens: usage.output_tokens,
                 reasoning_tokens: usage.reasoning_tokens,
@@ -81,13 +95,13 @@ impl Format {
             Self::Text => Ok(Value::String(text.to_owned())),
             Self::Json | Self::Schema(_) => {
                 let mut last = None;
-                for value in json_values(text) {
-                    if self.check(&value).is_ok() {
-                        return Ok(value);
+                for json in into_json(text) {
+                    if self.check(&json).is_ok() {
+                        return Ok(json);
                     }
-                    last = Some(value);
+                    last = Some(json);
                 }
-                last.ok_or_else(|| "answer is not valid JSON".into())
+                last.ok_or_else(|| "answer does not contain JSON".into())
             }
         }
     }
@@ -130,11 +144,7 @@ impl Format {
     }
 }
 
-// Complete JSON values in `text`. A whole-text parse is the only candidate so
-// fence / brace scans cannot lift fragments out of string contents. Otherwise:
-// each fenced body, then each `{` / `[` slice (continuing from the deserializer
-// offset so nested brackets are not re-offered as roots).
-fn json_values(text: &str) -> Vec<Value> {
+fn into_json(text: &str) -> Vec<Value> {
     // try to parse the whole text as a single JSON value
     let text = text.trim();
     if let Ok(value) = serde_json::from_str(text) {
@@ -172,8 +182,6 @@ fn json_values(text: &str) -> Vec<Value> {
     values
 }
 
-// Unit tests by design: answer extraction/repair is a pure parser; the model
-// ABI scenarios cover the request/answer round-trip through a guest.
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -187,7 +195,7 @@ mod tests {
             json!({ "verdict": "pass" })
         );
         let err = Format::Json.parse("not json").unwrap_err();
-        assert!(err.contains("not valid JSON"), "unexpected: {err}");
+        assert!(err.contains("does not contain JSON"), "unexpected: {err}");
     }
 
     #[test]
@@ -218,17 +226,18 @@ mod tests {
     }
 
     #[test]
-    fn whole_array() {
+    fn bad_phase_report() {
         let format = report_schema();
         let value = format.parse("[]").unwrap();
         assert_eq!(value, json!([]));
+
         let err = format.check(&value).unwrap_err();
         assert!(err.contains("does not conform to schema `phase-report`"), "unexpected: {err}");
         assert!(err.contains("at root"), "unexpected: {err}");
     }
 
     #[test]
-    fn unmined() {
+    fn bad_verdict() {
         let format = verdict_schema();
         let fenced = r#"{"note":"```json\n{\"verdict\":\"pass\"}\n```"}"#;
         let value = format.parse(fenced).unwrap();
@@ -242,21 +251,21 @@ mod tests {
     }
 
     #[test]
-    fn text() {
+    fn not_json() {
         Format::Text.check(&json!("hi")).unwrap();
         let err = Format::Text.check(&json!({ "a": 1 })).unwrap_err();
         assert!(err.contains("not a JSON string"), "unexpected: {err}");
     }
 
     #[test]
-    fn object() {
+    fn not_object() {
         Format::Json.check(&json!({ "verdict": "pass" })).unwrap();
         let err = Format::Json.check(&json!("nope")).unwrap_err();
         assert!(err.contains("not a JSON object"), "unexpected: {err}");
     }
 
     #[test]
-    fn schema() {
+    fn invalid_schema() {
         verdict_schema().check(&json!({ "verdict": "pass" })).unwrap();
         let err = verdict_schema().check(&json!({ "other": 1 })).unwrap_err();
         assert!(err.contains("does not conform to schema `verdict`"), "unexpected: {err}");
@@ -265,7 +274,7 @@ mod tests {
     }
 
     #[test]
-    fn path() {
+    fn invalid_path() {
         let format = Format::Schema(Schema {
             name: "report".to_owned(),
             schema: json!({
