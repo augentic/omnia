@@ -6,7 +6,7 @@
 //! those channels before `create` is called. It is target-independent so the
 //! assembly rules are unit-testable natively.
 
-use crate::generated::omnia::model::completion::{Message, Role};
+use crate::guest::generated::omnia::model::completion::{Message, Role};
 
 /// Structured prompt template assembled into `system` / `messages` channels.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

@@ -54,6 +54,16 @@ pub struct ToolTurn {
     pub result: serde_json::Value,
 }
 
+impl From<Usage> for ReplyUsage {
+    fn from(usage: Usage) -> Self {
+        Self {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            reasoning_tokens: usage.reasoning_tokens,
+        }
+    }
+}
+
 impl Answer {
     /// Validate an answer against the request's `format`.
     ///
@@ -80,11 +90,7 @@ impl Answer {
 
         Ok(Reply {
             answer: text,
-            usage: self.usage.map(|usage| ReplyUsage {
-                input_tokens: usage.input_tokens,
-                output_tokens: usage.output_tokens,
-                reasoning_tokens: usage.reasoning_tokens,
-            }),
+            usage: self.usage.map(Into::into),
         })
     }
 }
@@ -155,6 +161,7 @@ impl Format {
         match self {
             Self::Text if !value.is_string() => Err("answer is not a JSON string".to_owned()),
             Self::Json if !value.is_object() => Err("answer is not a JSON object".to_owned()),
+            Self::Text | Self::Json => Ok(()),
             Self::Schema(spec) => {
                 let validator = schema_validator(spec)?;
                 validator.iter_errors(value).next().map_or(Ok(()), |error| {
@@ -166,7 +173,6 @@ impl Format {
                     ))
                 })
             }
-            _ => Ok(()),
         }
     }
 
@@ -201,20 +207,14 @@ fn maybe_json(text: &str) -> Vec<Value> {
         return vec![value];
     }
 
-    // extract values from "```" fences
+    // extract values from "```" fences: fence bodies are the odd-indexed
+    // chunks between the delimiters, minus their language-tag line
     let mut values = Vec::new();
-    let mut rest = text;
-    while let Some(start) = rest.find("```") {
-        let after = &rest[start + 3..];
-        let body = after.split_once('\n').map_or(after, |(_, body)| body);
-        let end = body.find("```").unwrap_or(body.len());
-        if let Ok(value) = serde_json::from_str(body[..end].trim()) {
+    for body in text.split("```").skip(1).step_by(2) {
+        let body = body.split_once('\n').map_or(body, |(_tag, body)| body);
+        if let Ok(value) = serde_json::from_str(body.trim()) {
             values.push(value);
         }
-        if end == body.len() {
-            break;
-        }
-        rest = &body[end + 3..];
     }
 
     // extract values from `{` or `[` slices

@@ -12,17 +12,17 @@ use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context as _, anyhow, bail};
+use anyhow::{Context as _, anyhow, bail, ensure};
 use cap_primitives::fs::MetadataExt as _;
 use cap_std::fs::Dir;
-use futures::FutureExt as _;
+use futures::{FutureExt as _, future};
 use omnia::{FutureResult, MountRegistry};
 use tokio::task::spawn_blocking;
 use wasmtime::component::ResourceTable;
 use wasmtime_wasi::filesystem::Descriptor;
 
 use super::generated::omnia::model::completion::WorkspaceGrant;
-use super::resource::DirEntry;
+use super::tool_host::DirEntry;
 
 const MAX_READ_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_WRITE_BYTES: usize = 4 * 1024 * 1024;
@@ -63,15 +63,11 @@ impl Workspace {
 
     pub fn write(&self, path: String, bytes: Vec<u8>) -> FutureResult<()> {
         if !self.writable {
-            return ready_err(anyhow!("workspace is read-only; write to `{path}` denied"));
+            return future::err(anyhow!("workspace is read-only; write to `{path}` denied"))
+                .boxed();
         }
         self.run_blocking("write", move |dir| write_blocking(dir, &path, &bytes))
     }
-}
-
-// A ready future already resolved to `err`.
-fn ready_err<R: Send + 'static>(err: anyhow::Error) -> FutureResult<R> {
-    async move { Err(err) }.boxed()
 }
 
 // Resolve a `grants.workspace` into a [`Workspace`].
@@ -121,10 +117,8 @@ fn check_subpath(subpath: &str) -> anyhow::Result<()> {
     let plain = !subpath.starts_with('/')
         && !subpath.contains('\\')
         && subpath.split('/').all(|part| !part.is_empty() && part != "." && part != "..");
-    if plain {
-        return Ok(());
-    }
-    bail!("grants.workspace subpath `{subpath}` is not a plain relative path");
+    ensure!(plain, "grants.workspace subpath `{subpath}` is not a plain relative path");
+    Ok(())
 }
 
 fn read_blocking(dir: &Dir, path: &str) -> anyhow::Result<Vec<u8>> {
@@ -134,9 +128,10 @@ fn read_blocking(dir: &Dir, path: &str) -> anyhow::Result<Vec<u8>> {
     file.take(MAX_READ_BYTES + 1)
         .read_to_end(&mut buf)
         .with_context(|| format!("reading `{path}` in workspace"))?;
-    if buf.len() as u64 > MAX_READ_BYTES {
-        bail!("file `{path}` exceeds the {MAX_READ_BYTES}-byte workspace read limit");
-    }
+    ensure!(
+        buf.len() as u64 <= MAX_READ_BYTES,
+        "file `{path}` exceeds the {MAX_READ_BYTES}-byte workspace read limit"
+    );
     Ok(buf)
 }
 
@@ -150,9 +145,10 @@ fn list_blocking(dir: &Dir, path: &str) -> anyhow::Result<Vec<DirEntry>> {
     let mut entries = Vec::new();
     for entry in read_dir {
         let entry = entry.context("reading workspace directory entry")?;
-        if entries.len() >= MAX_LIST_ENTRIES {
-            bail!("directory `{path}` exceeds the {MAX_LIST_ENTRIES}-entry listing limit");
-        }
+        ensure!(
+            entries.len() < MAX_LIST_ENTRIES,
+            "directory `{path}` exceeds the {MAX_LIST_ENTRIES}-entry listing limit"
+        );
 
         let is_directory = entry.file_type().is_ok_and(|file_type| file_type.is_dir());
         entries.push(DirEntry {
@@ -164,9 +160,10 @@ fn list_blocking(dir: &Dir, path: &str) -> anyhow::Result<Vec<DirEntry>> {
 }
 
 fn write_blocking(dir: &Dir, path: &str, bytes: &[u8]) -> anyhow::Result<()> {
-    if bytes.len() > MAX_WRITE_BYTES {
-        bail!("write to `{path}` exceeds the {MAX_WRITE_BYTES}-byte workspace write limit");
-    }
+    ensure!(
+        bytes.len() <= MAX_WRITE_BYTES,
+        "write to `{path}` exceeds the {MAX_WRITE_BYTES}-byte workspace write limit"
+    );
     dir.write(path, bytes).with_context(|| format!("writing `{path}` in workspace"))
 }
 

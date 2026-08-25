@@ -3,14 +3,14 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use futures::FutureExt as _;
+use futures::{FutureExt as _, future};
 use omnia::HasMounts;
 use wasmtime::component::{Accessor, FutureReader, StreamReader};
 
 use crate::host::generated::omnia::model::completion::{Host, HostWithStore, Session, ToolResult};
 use crate::host::request::validate;
-use crate::host::resource::DirEntry;
 use crate::host::session::{CallsProducer, ReplyTask, ResultsConsumer, SessionClose, ToolSession};
+use crate::host::tool_host::DirEntry;
 use crate::host::workspace::{self, Workspace};
 use crate::host::{
     Error, FutureResult, Request, ToolHost, ToolOutcome, WasiModel, WasiModelCtxView,
@@ -20,31 +20,20 @@ impl<T> HostWithStore<T> for WasiModel
 where
     T: HasMounts,
 {
-    // The generated trait method is async; opening the session is entirely
-    // synchronous store work (the backend runs behind the reply future).
-    #[expect(clippy::unused_async_trait_impl)]
-    async fn create(
-        accessor: &Accessor<T, Self>, mut request: Request, mut results: StreamReader<ToolResult>,
-    ) -> Result<Session, Error> {
-        // A borrowed descriptor cannot survive the backend await.
-        let lent = request.grants.workspace.take();
+    fn create(
+        accessor: &Accessor<T, Self>, request: Request, mut results: StreamReader<ToolResult>,
+    ) -> impl Future<Output = Result<Session, Error>> {
+        std::future::ready(accessor.with(|mut access| {
+            // validate request
+            if let Err(error) = validate(&request) {
+                results.close(&mut access)?;
+                return Err(error);
+            }
 
-        if let Err(error) = validate(&request) {
-            // A stream not returned to the guest must be disposed explicitly.
-            accessor.with(|mut access| results.close(&mut access))?;
-            return Err(error);
-        }
-
-        let format = request.format.clone();
-        let allowed = request.function_names();
-
-        accessor.with(|mut access| {
+            // get workspace
+            let grant = request.grants.workspace.as_ref();
             let mounts = access.data_mut().mounts();
-            let resolved = {
-                let view = access.get();
-                workspace::resolve(view.table, &mounts, lent.as_ref())
-            };
-            let workspace = match resolved {
+            let workspace = match workspace::resolve(access.get().table, &mounts, grant) {
                 Ok(workspace) => workspace,
                 Err(error) => {
                     results.close(&mut access)?;
@@ -52,27 +41,34 @@ where
                 }
             };
 
+            // call model backend with request and tool host "closure"
             let limits = access.get().ctx.limits();
+            let allowed = request.function_names();
+            let format = request.format.clone();
+
             let (session, calls_rx) = ToolSession::new(limits, allowed);
             let tool_host: Arc<dyn ToolHost> = Arc::new(BoundToolHost {
                 session: Arc::clone(&session),
                 workspace,
             });
-            let backend = access.get().ctx.complete(request, tool_host);
+            let answer = access.get().ctx.complete(request, tool_host);
 
             results.pipe(&mut access, ResultsConsumer::new(Arc::clone(&session)))?;
             let mut calls = StreamReader::new(&mut access, CallsProducer::new(calls_rx))?;
 
+            // extract reply from answer
             let close = SessionClose::new(Arc::clone(&session));
-            let task = ReplyTask::spawn(async move {
+            let reply_task = ReplyTask::spawn(async move {
                 let _close = close;
-                match backend.await {
+                match answer.await {
                     Ok(answer) => session.take_error().map_or_else(|| answer.project(&format), Err),
                     Err(error) => Err(session.take_error().unwrap_or_else(|| error.into())),
                 }
             });
-            let reply_future = async move { Ok::<_, wasmtime::Error>(task.join().await) };
-            let reply = match FutureReader::new(&mut access, reply_future) {
+
+            // map the reply task to a future
+            let reply_fut = reply_task.join().map(Ok::<_, wasmtime::Error>);
+            let reply = match FutureReader::new(&mut access, reply_fut) {
                 Ok(reply) => reply,
                 Err(error) => {
                     calls.close(&mut access)?;
@@ -81,7 +77,7 @@ where
             };
 
             Ok(Session { calls, reply })
-        })
+        }))
     }
 }
 
@@ -98,31 +94,33 @@ struct BoundToolHost {
     workspace: Option<Workspace>,
 }
 
+impl BoundToolHost {
+    // Run `op` against the lent workspace, or fail when none was granted.
+    fn with_workspace<R: Send + 'static>(
+        &self, op: &str, path: String, f: impl FnOnce(&Workspace, String) -> FutureResult<R>,
+    ) -> FutureResult<R> {
+        match &self.workspace {
+            Some(workspace) => f(workspace, path),
+            None => future::err(anyhow!("{op}(`{path}`) requires grants.workspace")).boxed(),
+        }
+    }
+}
+
 impl ToolHost for BoundToolHost {
     fn call_tool(&self, name: String, arguments: String) -> FutureResult<ToolOutcome> {
         Arc::clone(&self.session).call(name, arguments)
     }
 
     fn read(&self, path: String) -> FutureResult<Vec<u8>> {
-        let Some(workspace) = self.workspace.as_ref() else {
-            return async move { Err(anyhow!("read(`{path}`) requires grants.workspace")) }.boxed();
-        };
-        workspace.read(path)
+        self.with_workspace("read", path, Workspace::read)
     }
 
     fn list(&self, path: String) -> FutureResult<Vec<DirEntry>> {
-        let Some(workspace) = self.workspace.as_ref() else {
-            return async move { Err(anyhow!("list(`{path}`) requires grants.workspace")) }.boxed();
-        };
-        workspace.list(path)
+        self.with_workspace("list", path, Workspace::list)
     }
 
     fn write(&self, path: String, bytes: Vec<u8>) -> FutureResult<()> {
-        let Some(workspace) = self.workspace.as_ref() else {
-            return async move { Err(anyhow!("write(`{path}`) requires grants.workspace")) }
-                .boxed();
-        };
-        workspace.write(path, bytes)
+        self.with_workspace("write", path, move |workspace, path| workspace.write(path, bytes))
     }
 
     fn local_path(&self) -> Option<&std::path::Path> {

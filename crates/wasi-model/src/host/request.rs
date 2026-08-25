@@ -18,23 +18,19 @@ impl fmt::Display for Role {
 }
 
 impl fmt::Display for Request {
+    // The prompt is the request's blocks joined by blank lines: the system
+    // text, each message (non-user ones under a `[role]` header), and the
+    // format's final-answer instruction.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut sep = if let Some(system) = &self.system {
-            f.write_str(system)?;
-            "\n\n"
-        } else {
-            ""
-        };
-        for message in &self.messages {
-            match message.role {
-                Role::User => write!(f, "{sep}{}", message.content)?,
-                Role::System | Role::Assistant => {
-                    write!(f, "{sep}[{}]\n{}", message.role, message.content)?;
-                }
+        let mut blocks: Vec<String> = self.system.iter().cloned().collect();
+        blocks.extend(self.messages.iter().map(|message| match message.role {
+            Role::User => message.content.clone(),
+            Role::System | Role::Assistant => {
+                format!("[{}]\n{}", message.role, message.content)
             }
-            sep = "\n\n";
-        }
-        write!(f, "{sep}{}", self.format.instruction())
+        }));
+        blocks.push(self.format.instruction());
+        f.write_str(&blocks.join("\n\n"))
     }
 }
 

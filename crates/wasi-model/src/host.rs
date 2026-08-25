@@ -9,8 +9,8 @@ mod answer;
 mod completion_impl;
 mod default_impl;
 mod request;
-mod resource;
 mod session;
+mod tool_host;
 mod workspace;
 
 mod generated {
@@ -48,8 +48,8 @@ pub use self::generated::omnia::model::completion::{
     Effort, Error, Format, Function, Generation, Grants, Mcp, Message, Reply, Request, Role,
     Schema, Tool, WorkspaceGrant,
 };
-pub use self::resource::*;
 pub use self::session::Limits;
+pub use self::tool_host::*;
 
 /// Result type for model operations.
 pub type Result<T> = std::result::Result<T, Error>;

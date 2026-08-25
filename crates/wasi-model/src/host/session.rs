@@ -68,6 +68,23 @@ struct Inner {
     error: Option<Error>,
 }
 
+impl Inner {
+    // Record `error` as the session's typed failure (the first one wins) and
+    // return the matching hard error for the backend. Spelled by hand because
+    // the generated `Display` for `Error` is `Debug`-shaped.
+    fn record(&mut self, error: Error) -> anyhow::Error {
+        let hard = anyhow!(match &error {
+            Error::InvalidRequest(detail) => format!("invalid request: {detail}"),
+            Error::InvalidAnswer(detail) => format!("invalid answer: {detail}"),
+            Error::BudgetExhausted(detail) => format!("budget exhausted: {detail}"),
+            Error::ToolFailed(detail) => format!("tool failed: {detail}"),
+            Error::Backend(detail) => format!("backend failure: {detail}"),
+        });
+        self.error.get_or_insert(error);
+        hard
+    }
+}
+
 struct PendingCall {
     id: String,
     calls: mpsc::Sender<ToolCall>,
@@ -134,13 +151,10 @@ impl ToolSession {
         };
         if inner.remaining == 0 {
             inner.calls = None;
-            return Err(record_error(
-                &mut inner,
-                Error::BudgetExhausted(format!(
-                    "tool-call budget of {} exhausted at `{name}`",
-                    self.limits.max_tool_calls
-                )),
-            ));
+            return Err(inner.record(Error::BudgetExhausted(format!(
+                "tool-call budget of {} exhausted at `{name}`",
+                self.limits.max_tool_calls
+            ))));
         }
 
         inner.remaining -= 1;
@@ -160,15 +174,10 @@ impl ToolSession {
                 let mut inner = self.lock();
                 inner.pending.remove(id);
                 inner.calls = None;
-                let error = record_error(
-                    &mut inner,
-                    Error::BudgetExhausted(format!(
-                        "tool call `{name}` got no result within {:?}",
-                        self.limits.tool_timeout
-                    )),
-                );
-                drop(inner);
-                Err(error)
+                Err(inner.record(Error::BudgetExhausted(format!(
+                    "tool call `{name}` got no result within {:?}",
+                    self.limits.tool_timeout
+                ))))
             }
             Ok(Err(_closed)) => {
                 Err(anyhow!("guest closed its results stream before answering tool call `{name}`"))
@@ -220,29 +229,11 @@ impl ToolSession {
     }
 
     fn fail(&self, error: Error) -> anyhow::Error {
-        record_error(&mut self.lock(), error)
+        self.lock().record(error)
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-}
-
-// Record `error` as the session's typed failure (the first one wins) and
-// return the matching hard error for the backend.
-fn record_error(inner: &mut Inner, error: Error) -> anyhow::Error {
-    let hard = anyhow!(describe(&error));
-    inner.error.get_or_insert(error);
-    hard
-}
-
-fn describe(error: &Error) -> String {
-    match error {
-        Error::InvalidRequest(detail) => format!("invalid request: {detail}"),
-        Error::InvalidAnswer(detail) => format!("invalid answer: {detail}"),
-        Error::BudgetExhausted(detail) => format!("budget exhausted: {detail}"),
-        Error::ToolFailed(detail) => format!("tool failed: {detail}"),
-        Error::Backend(detail) => format!("backend failure: {detail}"),
     }
 }
 
