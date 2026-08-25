@@ -109,7 +109,7 @@ omnia::runtime!({
 Two things to know:
 
 - **The guest artifact must exist when the host crate compiles** — `include_bytes!` reads it at build time, so the two-step build order (guest first, then host) becomes a hard requirement rather than a run-time one. This is why the repository's own examples stay path-based.
-- **Embed raw `.wasm`, not `omnia compile` output.** Raw wasm is safe and JIT-compiles at startup (the `jit` feature is on by default). Embedded pre-compiled bytes are native code and are rejected by the safe build, same as pre-compiled paths; they require the programmatic `DeploymentBuilder::precompiled()` unsafe build — see the [security model](../security-model.md). Single-binary shipping of a *pre-compiled* guest is the [embedded-guest design](../../rfcs/embedded-guest.md).
+- **Embed raw `.wasm`, not `omnia compile` output.** Raw wasm is safe and JIT-compiles at startup (the `jit` feature is on by default). Embedded pre-compiled bytes are native code and are rejected by the safe build, same as pre-compiled paths; they require the programmatic `DeploymentBuilder::precompiled()` unsafe build — see the [security model](../security-model.md). 
 
 The [`guest-link`](../../examples/guest-link/runtime.rs) example is built this way; its [`omnia.toml`](../../examples/guest-link/Omnia.toml) expresses the same deployment as a file for `--config`.
 
