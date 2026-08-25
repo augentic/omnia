@@ -32,7 +32,7 @@ const CALL_QUEUE: usize = 8;
 /// host-enforcement failure.
 pub struct SessionState {
     limits: SessionLimits,
-    // Function-tool names declared by the request, the only names `call-tool` accepts.
+    // Function-tool names used by request, the only names `call-tool` accepts.
     allowed: Vec<String>,
     inner: Mutex<Inner>,
 }
