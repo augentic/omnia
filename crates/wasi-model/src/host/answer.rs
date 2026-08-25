@@ -181,7 +181,7 @@ mod tests {
     use crate::host::generated::omnia::model::completion::{Format, Schema};
 
     #[test]
-    fn json_must_parse() {
+    fn json() {
         assert_eq!(
             Format::Json.parse(r#"{"verdict":"pass"}"#).unwrap(),
             json!({ "verdict": "pass" })
@@ -191,19 +191,19 @@ mod tests {
     }
 
     #[test]
-    fn code_fence_stripped() {
+    fn fence() {
         let fenced = "```json\n{\"verdict\":\"pass\"}\n```";
         assert_eq!(verdict_schema().parse(fenced).unwrap(), json!({ "verdict": "pass" }));
     }
 
     #[test]
-    fn preamble_then_raw_object() {
+    fn preamble() {
         let text = "Done.\n{\"verdict\":\"pass\"}\n";
         assert_eq!(Format::Json.parse(text).unwrap(), json!({ "verdict": "pass" }));
     }
 
     #[test]
-    fn preamble_array_then_phase_report() {
+    fn incidental() {
         let text = "findings: []\n{\"outcome\":\"completed\",\"source\":\"model-assisted\"}";
         assert_eq!(
             report_schema().parse(text).unwrap(),
@@ -212,13 +212,13 @@ mod tests {
     }
 
     #[test]
-    fn fenced_array_then_raw_object() {
+    fn fenced_array() {
         let text = "```json\n[]\n```\n{\"verdict\":\"pass\"}";
         assert_eq!(verdict_schema().parse(text).unwrap(), json!({ "verdict": "pass" }));
     }
 
     #[test]
-    fn whole_text_array_is_schema_error() {
+    fn whole_array() {
         let format = report_schema();
         let value = format.parse("[]").unwrap();
         assert_eq!(value, json!([]));
@@ -228,7 +228,7 @@ mod tests {
     }
 
     #[test]
-    fn whole_json_not_mined() {
+    fn unmined() {
         let format = verdict_schema();
         let fenced = r#"{"note":"```json\n{\"verdict\":\"pass\"}\n```"}"#;
         let value = format.parse(fenced).unwrap();
@@ -242,21 +242,21 @@ mod tests {
     }
 
     #[test]
-    fn json_string() {
+    fn text() {
         Format::Text.check(&json!("hi")).unwrap();
         let err = Format::Text.check(&json!({ "a": 1 })).unwrap_err();
         assert!(err.contains("not a JSON string"), "unexpected: {err}");
     }
 
     #[test]
-    fn json_object() {
+    fn object() {
         Format::Json.check(&json!({ "verdict": "pass" })).unwrap();
         let err = Format::Json.check(&json!("nope")).unwrap_err();
         assert!(err.contains("not a JSON object"), "unexpected: {err}");
     }
 
     #[test]
-    fn schema_enforced() {
+    fn schema() {
         verdict_schema().check(&json!({ "verdict": "pass" })).unwrap();
         let err = verdict_schema().check(&json!({ "other": 1 })).unwrap_err();
         assert!(err.contains("does not conform to schema `verdict`"), "unexpected: {err}");
@@ -265,7 +265,7 @@ mod tests {
     }
 
     #[test]
-    fn check_names_instance_path() {
+    fn path() {
         let format = Format::Schema(Schema {
             name: "report".to_owned(),
             schema: json!({
