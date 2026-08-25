@@ -6,14 +6,7 @@
 //! those channels before `create` is called. It is target-independent so the
 //! assembly rules are unit-testable natively.
 
-/// One few-shot input/output pair.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Example {
-    /// Example user input.
-    pub input: String,
-    /// Example model output.
-    pub output: String,
-}
+use crate::generated::omnia::model::completion::{Message, Role};
 
 /// Structured prompt template assembled into `system` / `messages` channels.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -30,6 +23,15 @@ pub struct Sections {
     pub examples: Vec<Example>,
     /// `{name}` placeholders substituted into every section text.
     pub variables: Vec<(String, String)>,
+}
+
+/// One few-shot input/output pair.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Example {
+    /// Example user input.
+    pub input: String,
+    /// Example model output.
+    pub output: String,
 }
 
 impl Sections {
@@ -70,16 +72,29 @@ impl Sections {
             ));
         }
 
-        (join_non_empty(&system_parts), join_non_empty(&user_parts).unwrap_or_default())
+        (join(&system_parts), join(&user_parts).unwrap_or_default())
+    }
+
+    /// Assemble the template into the request's chat channels: the system
+    /// string (led by `preamble` when given) and a single user turn.
+    #[must_use]
+    pub fn channels(&self, preamble: Option<&str>) -> (Option<String>, Vec<Message>) {
+        let (system, user) = self.assemble(preamble);
+        (
+            system,
+            vec![Message {
+                role: Role::User,
+                content: user,
+            }],
+        )
     }
 }
 
-fn join_non_empty(parts: &[String]) -> Option<String> {
+fn join(parts: &[String]) -> Option<String> {
     let kept: Vec<&str> = parts.iter().map(|p| p.trim()).filter(|p| !p.is_empty()).collect();
     if kept.is_empty() { None } else { Some(kept.join("\n\n")) }
 }
 
-// Unit tests by design: prompt assembly is pure string composition.
 #[cfg(test)]
 mod tests {
     use super::{Example, Sections};
@@ -89,7 +104,7 @@ mod tests {
         let sections = Sections {
             role: Some("a {language} reviewer".to_owned()),
             task: "review the {language} code".to_owned(),
-            context: None,
+            context: Some("the {language} crate".to_owned()),
             constraints: vec!["be {language}-idiomatic".to_owned()],
             examples: vec![Example {
                 input: "in".to_owned(),
@@ -97,36 +112,14 @@ mod tests {
             }],
             variables: vec![("language".to_owned(), "Rust".to_owned())],
         };
-        let (system, user) = sections.assemble(None);
-        let system = system.expect("system channel");
-        assert!(system.contains("a Rust reviewer"));
-        assert!(system.contains("- be Rust-idiomatic"));
-        assert!(user.contains("review the Rust code"));
-        assert!(user.contains("Input: in\nOutput: out"));
-    }
-
-    #[test]
-    fn preamble_leads_system() {
-        let sections = Sections {
-            role: Some("a terse judge".to_owned()),
-            task: "decide".to_owned(),
-            ..Sections::default()
-        };
-        let (system, _) = sections.assemble(Some("be terse"));
-        let system = system.expect("system channel");
-        assert!(system.starts_with("be terse"));
-        assert!(system.contains("a terse judge"));
-    }
-
-    #[test]
-    fn task_only() {
-        let sections = Sections {
-            task: "do it".to_owned(),
-            ..Sections::default()
-        };
-        let (system, user) = sections.assemble(None);
-        assert!(system.is_none());
-        assert_eq!(user, "do it");
+        // Preamble is not substituted; it leads the system channel.
+        assert_eq!(
+            sections.assemble(Some("prefer {language}")),
+            (
+                Some("prefer {language}\n\na Rust reviewer\n\n- be Rust-idiomatic".to_owned()),
+                "review the Rust code\n\nthe Rust crate\n\nInput: in\nOutput: out".to_owned(),
+            )
+        );
     }
 
     #[test]

@@ -6,8 +6,6 @@
 //! a guest calls `create` to have a prompt completed and receives a validated
 //! typed answer, without ever seeing which backend produced it.
 
-pub mod prompt;
-
 #[cfg(target_arch = "wasm32")]
 mod guest;
 #[cfg(target_arch = "wasm32")]

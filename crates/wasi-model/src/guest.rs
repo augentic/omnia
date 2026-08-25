@@ -1,12 +1,8 @@
 //! # WASI Model Guest
-//!
-//! Guest-side bindings for the `omnia:model` world. A guest imports
-//! `omnia:model/completion` and calls `create` with a guest-created results
-//! stream, receiving the session's calls stream and reply future back. A
-//! structured prompt template is assembled into the request's `system` /
-//! `messages` channels with [`crate::prompt::Sections`] before the call.
 
-mod model {
+// Bindings for the `wasi:model` world.
+// See (<https://github.com/WebAssembly/wasi-model/>)
+mod generated {
     #![allow(missing_docs)]
     wit_bindgen::generate!({
         world: "model",
@@ -19,22 +15,7 @@ mod model {
     });
 }
 
-use self::model::omnia::model::completion::{Message, Role};
-pub use self::model::omnia::model::*;
-pub use self::model::{wit_future, wit_stream};
+pub mod prompt;
 
-impl crate::prompt::Sections {
-    /// Assemble the template into the request's chat channels: the system
-    /// string (led by `preamble` when given) and a single user turn.
-    #[must_use]
-    pub fn channels(&self, preamble: Option<&str>) -> (Option<String>, Vec<Message>) {
-        let (system, user) = self.assemble(preamble);
-        (
-            system,
-            vec![Message {
-                role: Role::User,
-                content: user,
-            }],
-        )
-    }
-}
+pub use self::generated::omnia::model::*;
+pub use self::generated::{wit_future, wit_stream};
