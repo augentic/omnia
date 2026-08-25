@@ -47,7 +47,8 @@ pub use self::generated::omnia::model::completion::{
     Schema, Tool, WorkspaceGrant,
 };
 pub use self::resource::*;
-pub use self::answer::Answer;
+pub use self::answer::{Answer, ToolTurn, Transcript};
+pub use self::session::SessionLimits;
 
 /// Result type for model operations.
 pub type Result<T> = std::result::Result<T, Error>;

@@ -14,6 +14,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::FutureExt as _;
@@ -22,7 +23,7 @@ use wasmtime::StoreContextMut;
 use wasmtime::component::{Destination, Source, StreamConsumer, StreamProducer, StreamResult};
 
 use crate::host::generated::omnia::model::completion::{Reply, ToolCall, ToolResult};
-use crate::host::{Error, FutureResult, SessionLimits};
+use crate::host::{Error, FutureResult};
 
 const CALL_QUEUE: usize = 8;
 
@@ -31,10 +32,31 @@ const CALL_QUEUE: usize = 8;
 /// host-enforcement failure.
 pub struct SessionState {
     limits: SessionLimits,
-    // Function-tool names declared on the request — the only names
-    // `call-tool` accepts.
+    // Function-tool names declared by the request, the only names `call-tool` accepts.
     allowed: Vec<String>,
     inner: Mutex<Inner>,
+}
+
+/// Session bounds the host enforces per completion, in `wasi:model`,
+/// regardless of backend.
+#[derive(Clone, Copy, Debug)]
+pub struct SessionLimits {
+    /// Tool calls one completion may issue before `budget-exhausted`.
+    pub max_tool_calls: u32,
+    /// Byte cap on a single tool result's output.
+    pub max_result_bytes: usize,
+    /// How long the host waits for the guest to answer one tool call.
+    pub tool_timeout: Duration,
+}
+
+impl Default for SessionLimits {
+    fn default() -> Self {
+        Self {
+            max_tool_calls: 32,
+            max_result_bytes: 1 << 20,
+            tool_timeout: Duration::from_secs(60),
+        }
+    }
 }
 
 struct Inner {

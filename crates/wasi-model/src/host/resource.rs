@@ -1,5 +1,4 @@
 use std::fmt;
-use std::time::Duration;
 
 pub use omnia::FutureResult;
 use serde::{Deserialize, Serialize};
@@ -31,28 +30,6 @@ pub trait ToolHost: Send + Sync {
     }
 }
 
-/// Session bounds the host enforces per completion, in `wasi:model`,
-/// regardless of backend.
-#[derive(Clone, Copy, Debug)]
-pub struct SessionLimits {
-    /// Tool calls one completion may issue before `budget-exhausted`.
-    pub max_tool_calls: u32,
-    /// Byte cap on a single tool result's output.
-    pub max_result_bytes: usize,
-    /// How long the host waits for the guest to answer one tool call.
-    pub tool_timeout: Duration,
-}
-
-impl Default for SessionLimits {
-    fn default() -> Self {
-        Self {
-            max_tool_calls: 32,
-            max_result_bytes: 1 << 20,
-            tool_timeout: Duration::from_secs(60),
-        }
-    }
-}
-
 /// Token accounting for one completion. Mirrors the WIT `usage` record; the
 /// serde derive lets backends record it alongside the transcript.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,26 +49,6 @@ pub struct DirEntry {
     pub name: String,
     /// Whether the entry is a directory.
     pub is_directory: bool,
-}
-
-/// One recorded tool interaction within a completion's transcript.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ToolTurn {
-    /// The tool the model called.
-    pub tool: String,
-    /// The arguments the model supplied.
-    pub args: serde_json::Value,
-    /// The result the host returned.
-    pub result: serde_json::Value,
-}
-
-/// The tool-call transcript a backend may capture for diagnostics or future
-/// replay. Host-only; it never crosses the WIT boundary. Empty for backends
-/// with no tool loop (cursor).
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Transcript {
-    /// Ordered tool turns the backend drove to reach the answer.
-    pub turns: Vec<ToolTurn>,
 }
 
 impl fmt::Display for Role {

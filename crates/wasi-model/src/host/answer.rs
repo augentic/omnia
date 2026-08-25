@@ -1,11 +1,12 @@
 //! Answer parsing, validation, projection, and repair behavior shared by the
 //! host gate and backends.
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::host::Error;
 use crate::host::generated::omnia::model::completion::{Format, Reply, Usage as ReplyUsage};
-use crate::host::resource::{Transcript, Usage};
+use crate::host::resource::Usage;
 
 /// A backend's result: the parsed answer value, optional usage, and transcript.
 ///
@@ -19,6 +20,26 @@ pub struct Answer {
     pub usage: Option<Usage>,
     /// Optional tool-call transcript the backend captured.
     pub transcript: Option<Transcript>,
+}
+
+/// The tool-call transcript a backend may capture for diagnostics or future
+/// replay. Host-only; it never crosses the WIT boundary. Empty for backends
+/// with no tool loop (cursor).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Transcript {
+    /// Ordered tool turns the backend drove to reach the answer.
+    pub turns: Vec<ToolTurn>,
+}
+
+/// One recorded tool interaction within a completion's transcript.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolTurn {
+    /// The tool the model called.
+    pub tool: String,
+    /// The arguments the model supplied.
+    pub args: serde_json::Value,
+    /// The result the host returned.
+    pub result: serde_json::Value,
 }
 
 impl Answer {
