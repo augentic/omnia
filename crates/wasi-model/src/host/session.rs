@@ -31,7 +31,7 @@ const CALL_QUEUE: usize = 8;
 /// calls awaiting guest results, the call budget, and the first typed
 /// host-enforcement failure.
 pub struct ToolSession {
-    limits: SessionLimits,
+    limits: Limits,
     // Function-tool names used by request, the only names `call-tool` accepts.
     allowed: Vec<String>,
     inner: Mutex<Inner>,
@@ -40,7 +40,7 @@ pub struct ToolSession {
 /// Session bounds the host enforces per completion, in `wasi:model`,
 /// regardless of backend.
 #[derive(Clone, Copy, Debug)]
-pub struct SessionLimits {
+pub struct Limits {
     /// Tool calls one completion may issue before `budget-exhausted`.
     pub max_tool_calls: u32,
     /// Byte cap on a single tool result's output.
@@ -49,7 +49,7 @@ pub struct SessionLimits {
     pub tool_timeout: Duration,
 }
 
-impl Default for SessionLimits {
+impl Default for Limits {
     fn default() -> Self {
         Self {
             max_tool_calls: 32,
@@ -75,9 +75,7 @@ struct PendingCall {
 }
 
 impl ToolSession {
-    pub fn new(
-        limits: SessionLimits, allowed: Vec<String>,
-    ) -> (Arc<Self>, mpsc::Receiver<ToolCall>) {
+    pub fn new(limits: Limits, allowed: Vec<String>) -> (Arc<Self>, mpsc::Receiver<ToolCall>) {
         let (calls, calls_rx) = mpsc::channel(CALL_QUEUE);
         let state = Self {
             limits,

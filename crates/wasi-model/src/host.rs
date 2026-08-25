@@ -49,7 +49,7 @@ pub use self::generated::omnia::model::completion::{
     Schema, Tool, WorkspaceGrant,
 };
 pub use self::resource::*;
-pub use self::session::SessionLimits;
+pub use self::session::Limits;
 
 /// Result type for model operations.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -85,8 +85,8 @@ pub trait WasiModelCtx: Debug + Send + Sync + 'static {
     fn complete(&self, request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer>;
 
     /// Session bounds the host enforces for this backend's completions.
-    fn limits(&self) -> SessionLimits {
-        SessionLimits::default()
+    fn limits(&self) -> Limits {
+        Limits::default()
     }
 }
 
@@ -95,7 +95,7 @@ impl WasiModelCtx for Box<dyn WasiModelCtx> {
         (**self).complete(request, tool_host)
     }
 
-    fn limits(&self) -> SessionLimits {
+    fn limits(&self) -> Limits {
         (**self).limits()
     }
 }

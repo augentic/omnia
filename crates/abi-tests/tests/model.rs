@@ -30,8 +30,8 @@ use omnia::{
 };
 use omnia_abi_tests::{find_guest, temp_manifest};
 use omnia_wasi_model::{
-    Answer, FutureResult, HasModel, ModelDefault, Request, SessionLimits, Tool, ToolHost,
-    WasiModel, WasiModelCtx,
+    Answer, FutureResult, HasModel, Limits, ModelDefault, Request, Tool, ToolHost, WasiModel,
+    WasiModelCtx,
 };
 use serde_json::{Value, json};
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
@@ -678,10 +678,10 @@ impl WasiModelCtx for BudgetProbe {
         .boxed()
     }
 
-    fn limits(&self) -> SessionLimits {
-        SessionLimits {
+    fn limits(&self) -> Limits {
+        Limits {
             max_tool_calls: 2,
-            ..SessionLimits::default()
+            ..Limits::default()
         }
     }
 }
@@ -716,10 +716,10 @@ impl WasiModelCtx for OversizeProbe {
         .boxed()
     }
 
-    fn limits(&self) -> SessionLimits {
-        SessionLimits {
+    fn limits(&self) -> Limits {
+        Limits {
             max_result_bytes: 256,
-            ..SessionLimits::default()
+            ..Limits::default()
         }
     }
 }
@@ -754,10 +754,10 @@ impl WasiModelCtx for StallProbe {
         .boxed()
     }
 
-    fn limits(&self) -> SessionLimits {
-        SessionLimits {
+    fn limits(&self) -> Limits {
+        Limits {
             tool_timeout: std::time::Duration::from_millis(250),
-            ..SessionLimits::default()
+            ..Limits::default()
         }
     }
 }
