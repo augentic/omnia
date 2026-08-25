@@ -26,8 +26,8 @@ use wasmtime::component::{Accessor, FutureReader, StreamReader};
 use crate::host::generated::omnia::model::completion::{
     Host, HostWithStore, Session, Tool, ToolResult,
 };
+use crate::host::resource::DirEntry;
 use crate::host::session::{CallsProducer, ReplyTask, ResultsConsumer, SessionClose, SessionState};
-use crate::host::types::DirEntry;
 use crate::host::workspace::{self, Workspace};
 use crate::host::{Error, FutureResult, Request, ToolHost, WasiModel, WasiModelCtxView, gate};
 

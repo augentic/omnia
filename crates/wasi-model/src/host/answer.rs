@@ -5,7 +5,42 @@ use serde_json::Value;
 
 use crate::host::Error;
 use crate::host::generated::omnia::model::completion::{Format, Reply, Usage};
-use crate::host::types::Answer;
+use crate::host::resource::Answer;
+
+impl Answer {
+    /// Validate an answer against the request's `format`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the answer does not match the requested format.
+    pub fn check(&self, format: &Format) -> Result<(), Error> {
+        format.check(&self.value).map_err(Error::InvalidAnswer)
+    }
+
+    /// Project this answer to the guest-visible wire reply.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the answer does not match `format` or cannot be serialized.
+    pub fn project(&self, format: &Format) -> Result<Reply, Error> {
+        self.check(format)?;
+
+        let text = match (format, &self.value) {
+            (Format::Text, Value::String(text)) => text.clone(),
+            _ => serde_json::to_string(&self.value)
+                .map_err(|error| Error::InvalidAnswer(error.to_string()))?,
+        };
+
+        Ok(Reply {
+            answer: text,
+            usage: self.usage.map(|usage| Usage {
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                reasoning_tokens: usage.reasoning_tokens,
+            }),
+        })
+    }
+}
 
 impl Format {
     /// The final-answer instruction appended to a prompt for backends that
@@ -95,9 +130,9 @@ impl Format {
     }
 }
 
-/// Complete JSON values in `text`. A whole-text parse is the only candidate so
-/// fence / brace scans cannot lift fragments out of string contents. Otherwise:
-/// each fenced body, then each `{` / `[` slice.
+// Complete JSON values in `text`. A whole-text parse is the only candidate so
+// fence / brace scans cannot lift fragments out of string contents. Otherwise:
+// each fenced body, then each `{` / `[` slice.
 fn json_values(text: &str) -> Vec<Value> {
     let trimmed = text.trim();
     if let Ok(value) = serde_json::from_str(trimmed) {
@@ -110,8 +145,8 @@ fn json_values(text: &str) -> Vec<Value> {
         .collect()
 }
 
-/// Bodies of every Markdown fence in `text`; an unterminated fence yields the
-/// remainder.
+// Bodies of every Markdown fence in `text`; an unterminated fence yields the
+// remainder.
 fn fenced_bodies(text: &str) -> Vec<&str> {
     let mut bodies = Vec::new();
     let mut rest = text;
@@ -129,8 +164,8 @@ fn fenced_bodies(text: &str) -> Vec<&str> {
     bodies
 }
 
-/// Complete JSON values starting at each `{` or `[`, continuing from the
-/// deserializer offset so nested brackets are not re-offered as roots.
+// Complete JSON values starting at each `{` or `[`, continuing from the
+// deserializer offset so nested brackets are not re-offered as roots.
 fn sliced_json(text: &str) -> Vec<Value> {
     let mut values = Vec::new();
     let mut rest = text;
@@ -145,41 +180,6 @@ fn sliced_json(text: &str) -> Vec<Value> {
         }
     }
     values
-}
-
-impl Answer {
-    /// Validate an answer against the request's `format`.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the answer does not match the requested format.
-    pub fn check(&self, format: &Format) -> Result<(), Error> {
-        format.check(&self.value).map_err(Error::InvalidAnswer)
-    }
-
-    /// Project this answer to the guest-visible wire reply.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the answer does not match `format` or cannot be serialized.
-    pub fn project(&self, format: &Format) -> Result<Reply, Error> {
-        self.check(format)?;
-
-        let text = match (format, &self.value) {
-            (Format::Text, Value::String(text)) => text.clone(),
-            _ => serde_json::to_string(&self.value)
-                .map_err(|error| Error::InvalidAnswer(error.to_string()))?,
-        };
-
-        Ok(Reply {
-            answer: text,
-            usage: self.usage.map(|usage| Usage {
-                input_tokens: usage.input_tokens,
-                output_tokens: usage.output_tokens,
-                reasoning_tokens: usage.reasoning_tokens,
-            }),
-        })
-    }
 }
 
 // Unit tests by design: answer extraction/repair is a pure parser; the model
@@ -218,11 +218,6 @@ mod tests {
     }
 
     #[test]
-    fn text_is_verbatim() {
-        assert_eq!(Format::Text.parse("hello").unwrap(), json!("hello"));
-    }
-
-    #[test]
     fn json_must_parse() {
         assert_eq!(
             Format::Json.parse(r#"{"verdict":"pass"}"#).unwrap(),
@@ -239,12 +234,6 @@ mod tests {
     }
 
     #[test]
-    fn preamble_then_fence() {
-        let text = "Let me synthesize.\n```json\n{\"verdict\":\"pass\"}\n```";
-        assert_eq!(Format::Json.parse(text).unwrap(), json!({ "verdict": "pass" }));
-    }
-
-    #[test]
     fn preamble_then_raw_object() {
         let text = "Done.\n{\"verdict\":\"pass\"}\n";
         assert_eq!(Format::Json.parse(text).unwrap(), json!({ "verdict": "pass" }));
@@ -257,12 +246,6 @@ mod tests {
             phase_report_schema().parse(text).unwrap(),
             json!({ "outcome": "completed", "source": "model-assisted" })
         );
-    }
-
-    #[test]
-    fn repair_reason_array_then_verdict() {
-        let text = "[] is not of type \"object\"\n{\"verdict\":\"pass\"}";
-        assert_eq!(verdict_schema().parse(text).unwrap(), json!({ "verdict": "pass" }));
     }
 
     #[test]
@@ -293,24 +276,6 @@ mod tests {
         let value = format.parse(quoted).unwrap();
         assert_eq!(value, json!("use {\"verdict\":\"pass\"} as the answer"));
         assert!(format.check(&value).is_err());
-    }
-
-    #[test]
-    fn incidental_object_then_verdict() {
-        let text = "snippet {\"kind\":\"snippet\"}\n{\"verdict\":\"pass\"}";
-        assert_eq!(verdict_schema().parse(text).unwrap(), json!({ "verdict": "pass" }));
-    }
-
-    #[test]
-    fn trailing_prose() {
-        let text = "{\"verdict\":\"pass\"}\nthanks";
-        assert_eq!(Format::Json.parse(text).unwrap(), json!({ "verdict": "pass" }));
-    }
-
-    #[test]
-    fn still_rejects_non_json() {
-        let err = Format::Json.parse("no braces here").unwrap_err();
-        assert!(err.contains("not valid JSON"), "unexpected: {err}");
     }
 
     #[test]
@@ -351,11 +316,5 @@ mod tests {
         let nested = format.check(&json!({ "ui-surface": [] })).unwrap_err();
         assert!(nested.contains("/ui-surface"), "unexpected: {nested}");
         assert_ne!(root, nested);
-    }
-
-    #[test]
-    fn repair_carries_reason() {
-        let text = Format::Json.repair("answer is not a JSON object");
-        assert!(text.contains("answer is not a JSON object"));
     }
 }

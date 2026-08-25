@@ -1,15 +1,16 @@
+//! # WASI Model Service
+//!
 //! Host side of the `omnia:model/completion` boundary. Follows the shared
 //! host-crate shape (see `wasi-keyvalue`), adding a per-completion [`ToolHost`]
 //! that the `create` binding assembles from the store's mounts and the
 //! session channels it mints for the completion.
 
 mod answer;
+mod completion_impl;
 mod default_impl;
 mod gate;
-mod model_impl;
 mod resource;
 mod session;
-mod types;
 mod workspace;
 
 mod generated {
@@ -41,16 +42,17 @@ use omnia::{HasMounts, Host, Server};
 use wasmtime::component::{HasData, Linker};
 
 pub use self::default_impl::ModelDefault;
-pub use self::gate::validate as validate_request;
 use self::generated::omnia::model::completion;
 pub use self::generated::omnia::model::completion::{
     Effort, Error, Format, Function, Generation, Grants, Mcp, Message, Reply, Request, Role,
     Schema, Tool, WorkspaceGrant,
 };
-pub use self::types::{Answer, ToolTurn, Transcript, Usage};
 pub use self::resource::*;
 
-/// Host-side service for `wasi-model`.
+/// Result type for model operations.
+pub type Result<T> = std::result::Result<T, Error>;
+
+/// Host-side service for `wasi:model`.
 #[derive(Debug)]
 pub struct WasiModel;
 
@@ -69,24 +71,23 @@ where
 
 impl<B> Server<B> for WasiModel {}
 
-
-
-/// The backend trait — the one place a provider's logic lives.
+/// A trait which provides internal WASI Model context.
+///
+/// This is implemented by the resource-specific provider of model
+/// functionality. For example, the echo default, or a `genai`-backed
+/// provider.
 pub trait WasiModelCtx: Debug + Send + Sync + 'static {
-    /// Call model backend with a prose to evaluate. 
-    /// [`ToolHost`] provides closure-like  support for an in-process tool
-    /// loop — the backend tool loop can use it to request more information
-    /// from the host.
+    /// Call the model backend with a prompt to evaluate. [`ToolHost`]
+    /// provides closure-like support for an in-process tool loop — the
+    /// backend can use it to request more information from the host.
     fn complete(&self, request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer>;
 
-    /// Session bounds the host enforces for this backend's completions;
-    /// override to tighten (test probes shrink them).
+    /// Session bounds the host enforces for this backend's completions.
     fn limits(&self) -> SessionLimits {
         SessionLimits::default()
     }
 }
 
-/// Forward the backend trait.
 impl WasiModelCtx for Box<dyn WasiModelCtx> {
     fn complete(&self, request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
         (**self).complete(request, tool_host)
@@ -96,8 +97,6 @@ impl WasiModelCtx for Box<dyn WasiModelCtx> {
         (**self).limits()
     }
 }
-
-
 
 // An untyped host failure is a `backend` error at the boundary.
 omnia::host_error!(Error, Backend);

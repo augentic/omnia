@@ -22,7 +22,7 @@ use wasmtime::component::ResourceTable;
 use wasmtime_wasi::filesystem::Descriptor;
 
 use super::generated::omnia::model::completion::WorkspaceGrant;
-use super::types::DirEntry;
+use super::resource::DirEntry;
 
 const MAX_READ_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_WRITE_BYTES: usize = 4 * 1024 * 1024;
@@ -166,4 +166,25 @@ fn write_blocking(dir: &Dir, path: &str, bytes: &[u8]) -> anyhow::Result<()> {
         bail!("write to `{path}` exceeds the {MAX_WRITE_BYTES}-byte workspace write limit");
     }
     dir.write(path, bytes).with_context(|| format!("writing `{path}` in workspace"))
+}
+
+// Unit tests by design: subpath vetting is pure validation. cap-std's
+// `open_dir` is the runtime escape enforcement; the ABI workspace scenarios
+// cover mount authority and write policy.
+#[cfg(test)]
+mod tests {
+    use super::check_subpath;
+
+    #[test]
+    fn plain_relative_subpath() {
+        check_subpath("docs").unwrap();
+        check_subpath("docs/guides").unwrap();
+    }
+
+    #[test]
+    fn non_plain_subpath() {
+        for subpath in ["/abs", "docs\\guides", "docs//guides", ".", "..", "a/../b", "./a", "a/"] {
+            check_subpath(subpath).unwrap_err();
+        }
+    }
 }

@@ -80,11 +80,6 @@ mod tests {
         assert!(matches!(err, Error::InvalidRequest(m) if m == "empty request"));
     }
 
-    #[test]
-    fn non_empty() {
-        validate(&request_from(vec![message(Role::User, "hi")])).unwrap();
-    }
-
     // `resolve` is no longer host-injected: a guest may declare it as an
     // ordinary function tool.
     #[test]

@@ -1,7 +1,6 @@
 //! # WASI Model Guest
 
-// Bindings for the `wasi:model` world.
-// See (<https://github.com/WebAssembly/wasi-model/>)
+// Bindings for the `omnia:model` world.
 mod generated {
     #![allow(missing_docs)]
     wit_bindgen::generate!({
