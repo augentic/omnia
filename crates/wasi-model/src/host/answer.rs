@@ -1,14 +1,11 @@
-//! Answer parsing, validation, projection, and repair behavior shared by the
-//! host gate and backends, plus request prompt shaping (`Display`, MCP grants).
-
-use std::fmt;
+//! Answer parsing, validation, projection, and repair.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::host::Error;
 use crate::host::generated::omnia::model::completion::{
-    Format, Mcp, Reply, Request, Role, Tool, Usage as ReplyUsage,
+    Format, Reply, Schema, Usage as ReplyUsage,
 };
 
 /// A backend's result: the parsed answer value, optional usage, and transcript.
@@ -114,24 +111,31 @@ impl Format {
         }
     }
 
-    /// Interpret a model's text turn as an answer value.
-    ///
-    /// For JSON / schema answers, a whole-text JSON value is the only
-    /// candidate. Otherwise every complete value in the turn is tried (each
-    /// fenced body, then each `{` / `[` slice). The first value that passes
-    /// [`Self::check`] wins, so an incidental `[]` in preamble does not hide a
-    /// later valid object. If none pass, the last extracted value is returned
-    /// so the host gate remains the authority.
+    /// Parse and validate a model's text turn.
     ///
     /// # Errors
     ///
     /// Returns a repair reason when the text does not match this format.
     pub fn parse(&self, text: &str) -> Result<Value, String> {
+        let value = self.parse_candidate(text)?;
+        self.check(&value)?;
+        Ok(value)
+    }
+
+    /// Parse the best candidate even when it does not pass validation.
+    ///
+    /// This is only needed when a backend has exhausted its repair budget and
+    /// must return the candidate to the host's authoritative answer gate.
+    ///
+    /// # Errors
+    ///
+    /// Returns a repair reason when the text contains no candidate.
+    pub fn parse_candidate(&self, text: &str) -> Result<Value, String> {
         match self {
             Self::Text => Ok(Value::String(text.to_owned())),
             Self::Json | Self::Schema(_) => {
                 let mut last = None;
-                for json in into_json(text) {
+                for json in maybe_json(text) {
                     if self.check(&json).is_ok() {
                         return Ok(json);
                     }
@@ -152,11 +156,7 @@ impl Format {
             Self::Text if !value.is_string() => Err("answer is not a JSON string".to_owned()),
             Self::Json if !value.is_object() => Err("answer is not a JSON object".to_owned()),
             Self::Schema(spec) => {
-                let schema: Value = serde_json::from_str(&spec.schema)
-                    .map_err(|error| format!("format schema is not valid JSON: {error}"))?;
-                let validator = jsonschema::validator_for(&schema).map_err(|error| {
-                    format!("format schema is not a valid JSON Schema: {error}")
-                })?;
+                let validator = schema_validator(spec)?;
                 validator.iter_errors(value).next().map_or(Ok(()), |error| {
                     let path = error.instance_path().as_str();
                     let at = if path.is_empty() { "root" } else { path };
@@ -178,57 +178,23 @@ impl Format {
              again with only the corrected answer and nothing else."
         )
     }
-}
 
-impl fmt::Display for Role {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::System => "system",
-            Self::User => "user",
-            Self::Assistant => "assistant",
-        })
-    }
-}
-
-// The single-text-prompt form, for backends that steer output shape through
-// prose (see `Format::instruction`): system channel first, then each message
-// (non-user turns marked with their role), then the format instruction.
-impl fmt::Display for Request {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut sep = if let Some(system) = &self.system {
-            f.write_str(system)?;
-            "\n\n"
-        } else {
-            ""
-        };
-        for message in &self.messages {
-            match message.role {
-                Role::User => write!(f, "{sep}{}", message.content)?,
-                Role::System | Role::Assistant => {
-                    write!(f, "{sep}[{}]\n{}", message.role, message.content)?;
-                }
-            }
-            sep = "\n\n";
+    pub(super) fn validate_definition(&self) -> Result<(), String> {
+        match self {
+            Self::Schema(spec) => schema_validator(spec).map(drop),
+            Self::Text | Self::Json => Ok(()),
         }
-        write!(f, "{sep}{}", self.format.instruction())
     }
 }
 
-impl Request {
-    /// The request's MCP server grants, each carrying its own endpoint URL.
-    #[must_use]
-    pub fn mcp_servers(&self) -> Vec<&Mcp> {
-        self.tools
-            .iter()
-            .filter_map(|tool| match tool {
-                Tool::Mcp(grant) => Some(grant),
-                Tool::Function(_) => None,
-            })
-            .collect()
-    }
+fn schema_validator(spec: &Schema) -> Result<jsonschema::Validator, String> {
+    let schema: Value = serde_json::from_str(&spec.schema)
+        .map_err(|error| format!("format schema is not valid JSON: {error}"))?;
+    jsonschema::validator_for(&schema)
+        .map_err(|error| format!("format schema is not a valid JSON Schema: {error}"))
 }
 
-fn into_json(text: &str) -> Vec<Value> {
+fn maybe_json(text: &str) -> Vec<Value> {
     // try to parse the whole text as a single JSON value
     let text = text.trim();
     if let Ok(value) = serde_json::from_str(text) {
@@ -270,12 +236,10 @@ fn into_json(text: &str) -> Vec<Value> {
 mod tests {
     use serde_json::json;
 
-    use crate::host::generated::omnia::model::completion::{
-        Format, Grants, Message, Request, Role, Schema,
-    };
+    use crate::host::generated::omnia::model::completion::{Format, Schema};
 
     #[test]
-    fn json() {
+    fn whole_json_document() {
         assert_eq!(
             Format::Json.parse(r#"{"verdict":"pass"}"#).unwrap(),
             json!({ "verdict": "pass" })
@@ -285,19 +249,19 @@ mod tests {
     }
 
     #[test]
-    fn fence() {
+    fn fenced_json() {
         let fenced = "```json\n{\"verdict\":\"pass\"}\n```";
         assert_eq!(verdict_schema().parse(fenced).unwrap(), json!({ "verdict": "pass" }));
     }
 
     #[test]
-    fn preamble() {
+    fn json_after_preamble() {
         let text = "Done.\n{\"verdict\":\"pass\"}\n";
         assert_eq!(Format::Json.parse(text).unwrap(), json!({ "verdict": "pass" }));
     }
 
     #[test]
-    fn incidental() {
+    fn later_matching_candidate() {
         let text = "findings: []\n{\"outcome\":\"completed\",\"source\":\"model-assisted\"}";
         assert_eq!(
             report_schema().parse(text).unwrap(),
@@ -306,15 +270,16 @@ mod tests {
     }
 
     #[test]
-    fn fenced_array() {
+    fn invalid_fence_before_matching_candidate() {
         let text = "```json\n[]\n```\n{\"verdict\":\"pass\"}";
         assert_eq!(verdict_schema().parse(text).unwrap(), json!({ "verdict": "pass" }));
     }
 
     #[test]
-    fn bad_phase_report() {
+    fn invalid_candidate_survives_for_host_gate() {
         let format = report_schema();
-        let value = format.parse("[]").unwrap();
+        format.parse("[]").unwrap_err();
+        let value = format.parse_candidate("[]").unwrap();
         assert_eq!(value, json!([]));
 
         let err = format.check(&value).unwrap_err();
@@ -323,35 +288,35 @@ mod tests {
     }
 
     #[test]
-    fn bad_verdict() {
+    fn embedded_json_is_not_a_matching_candidate() {
         let format = verdict_schema();
         let fenced = r#"{"note":"```json\n{\"verdict\":\"pass\"}\n```"}"#;
-        let value = format.parse(fenced).unwrap();
+        let value = format.parse_candidate(fenced).unwrap();
         assert_eq!(value, json!({ "note": "```json\n{\"verdict\":\"pass\"}\n```" }));
         assert!(format.check(&value).is_err());
 
         let quoted = r#""use {\"verdict\":\"pass\"} as the answer""#;
-        let value = format.parse(quoted).unwrap();
+        let value = format.parse_candidate(quoted).unwrap();
         assert_eq!(value, json!("use {\"verdict\":\"pass\"} as the answer"));
         assert!(format.check(&value).is_err());
     }
 
     #[test]
-    fn not_json() {
+    fn text_rejects_object() {
         Format::Text.check(&json!("hi")).unwrap();
         let err = Format::Text.check(&json!({ "a": 1 })).unwrap_err();
         assert!(err.contains("not a JSON string"), "unexpected: {err}");
     }
 
     #[test]
-    fn not_object() {
+    fn json_rejects_string() {
         Format::Json.check(&json!({ "verdict": "pass" })).unwrap();
         let err = Format::Json.check(&json!("nope")).unwrap_err();
         assert!(err.contains("not a JSON object"), "unexpected: {err}");
     }
 
     #[test]
-    fn invalid_schema() {
+    fn schema_rejects_nonconforming_values() {
         verdict_schema().check(&json!({ "verdict": "pass" })).unwrap();
         let err = verdict_schema().check(&json!({ "other": 1 })).unwrap_err();
         assert!(err.contains("does not conform to schema `verdict`"), "unexpected: {err}");
@@ -360,7 +325,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_path() {
+    fn schema_error_identifies_instance_path() {
         let format = Format::Schema(Schema {
             name: "report".to_owned(),
             schema: json!({
@@ -401,41 +366,5 @@ mod tests {
             })
             .to_string(),
         })
-    }
-
-    fn request(system: Option<&str>, messages: Vec<Message>) -> Request {
-        Request {
-            model: None,
-            system: system.map(str::to_owned),
-            messages,
-            generation: None,
-            format: Format::Text,
-            tools: vec![],
-            grants: Grants { workspace: None },
-        }
-    }
-
-    fn message(role: Role, content: &str) -> Message {
-        Message {
-            role,
-            content: content.to_owned(),
-        }
-    }
-
-    #[test]
-    fn display_prompt() {
-        let request = request(
-            Some("sys"),
-            vec![
-                message(Role::User, "hi"),
-                message(Role::Assistant, "ack"),
-                message(Role::System, "note"),
-            ],
-        );
-        let expected = format!(
-            "sys\n\nhi\n\n[assistant]\nack\n\n[system]\nnote\n\n{}",
-            Format::Text.instruction()
-        );
-        assert_eq!(request.to_string(), expected);
     }
 }

@@ -28,7 +28,7 @@ const MAX_READ_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_WRITE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_LIST_ENTRIES: usize = 4096;
 
-// An handle to a resolved workspace mount. Built by [`resolve`].
+// A resolved workspace mount.
 pub struct Workspace {
     dir: Arc<Dir>,
     local_path: PathBuf,
@@ -41,29 +41,31 @@ impl Workspace {
         &self.local_path
     }
 
-    // Off-thread a bounded, blocking cap-std op against the mount, tagging a
-    // task-join failure with `op`.
     fn run_blocking<R: Send + 'static>(
-        &self, f: impl FnOnce(&Dir) -> anyhow::Result<R> + Send + 'static,
+        &self, op: &'static str, f: impl FnOnce(&Dir) -> anyhow::Result<R> + Send + 'static,
     ) -> FutureResult<R> {
         let dir = Arc::clone(&self.dir);
-        async move { spawn_blocking(move || f(&dir)).await.context("workspace read task failed")? }
-            .boxed()
+        async move {
+            spawn_blocking(move || f(&dir))
+                .await
+                .with_context(|| format!("workspace {op} task failed"))?
+        }
+        .boxed()
     }
 
     pub fn read(&self, path: String) -> FutureResult<Vec<u8>> {
-        self.run_blocking(move |dir| read_blocking(dir, &path))
+        self.run_blocking("read", move |dir| read_blocking(dir, &path))
     }
 
     pub fn list(&self, path: String) -> FutureResult<Vec<DirEntry>> {
-        self.run_blocking(move |dir| list_blocking(dir, &path))
+        self.run_blocking("list", move |dir| list_blocking(dir, &path))
     }
 
     pub fn write(&self, path: String, bytes: Vec<u8>) -> FutureResult<()> {
         if !self.writable {
             return ready_err(anyhow!("workspace is read-only; write to `{path}` denied"));
         }
-        self.run_blocking(move |dir| write_blocking(dir, &path, &bytes))
+        self.run_blocking("write", move |dir| write_blocking(dir, &path, &bytes))
     }
 }
 

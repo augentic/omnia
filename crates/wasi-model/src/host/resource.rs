@@ -8,7 +8,7 @@ pub trait ToolHost: Send + Sync {
     /// (undeclared tool, exhausted budget, closed session, oversize result,
     /// timeout); the inner `Err` is the tool's own model-visible failure
     /// text, fed back to the model as repairable content.
-    fn call_tool(&self, name: String, arguments: String) -> FutureResult<Result<String, String>>;
+    fn call_tool(&self, name: String, arguments: String) -> FutureResult<ToolOutcome>;
 
     /// Bounded workspace read via the lent `wasi:filesystem` capability.
     fn read(&self, path: String) -> FutureResult<Vec<u8>>;
@@ -25,6 +25,9 @@ pub trait ToolHost: Send + Sync {
         None
     }
 }
+
+/// A function tool's model-visible output or failure text.
+pub type ToolOutcome = Result<String, String>;
 
 /// One bounded directory entry returned by `ToolHost::list`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

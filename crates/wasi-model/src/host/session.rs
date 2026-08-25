@@ -23,14 +23,14 @@ use wasmtime::StoreContextMut;
 use wasmtime::component::{Destination, Source, StreamConsumer, StreamProducer, StreamResult};
 
 use crate::host::generated::omnia::model::completion::{Reply, ToolCall, ToolResult};
-use crate::host::{Error, FutureResult};
+use crate::host::{Error, FutureResult, ToolOutcome};
 
 const CALL_QUEUE: usize = 8;
 
 /// Shared state for one completion session: the calls bridge, the pending
 /// calls awaiting guest results, the call budget, and the first typed
 /// host-enforcement failure.
-pub struct SessionState {
+pub struct ToolSession {
     limits: SessionLimits,
     // Function-tool names used by request, the only names `call-tool` accepts.
     allowed: Vec<String>,
@@ -62,13 +62,19 @@ impl Default for SessionLimits {
 struct Inner {
     // Write end of the calls bridge; `None` once the host closed the stream.
     calls: Option<mpsc::Sender<ToolCall>>,
-    pending: HashMap<String, oneshot::Sender<Result<String, String>>>,
+    pending: HashMap<String, oneshot::Sender<ToolOutcome>>,
     remaining: u32,
     next_id: u64,
-    failure: Option<Error>,
+    error: Option<Error>,
 }
 
-impl SessionState {
+struct PendingCall {
+    id: String,
+    calls: mpsc::Sender<ToolCall>,
+    result: oneshot::Receiver<ToolOutcome>,
+}
+
+impl ToolSession {
     pub fn new(
         limits: SessionLimits, allowed: Vec<String>,
     ) -> (Arc<Self>, mpsc::Receiver<ToolCall>) {
@@ -81,7 +87,7 @@ impl SessionState {
                 pending: HashMap::new(),
                 remaining: limits.max_tool_calls,
                 next_id: 0,
-                failure: None,
+                error: None,
             }),
         };
         (Arc::new(state), calls_rx)
@@ -89,100 +95,101 @@ impl SessionState {
 
     /// Take the typed failure host enforcement recorded, if any. The reply
     /// pipeline prefers it over whatever the backend then returned.
-    pub fn take_failure(&self) -> Option<Error> {
-        self.lock().failure.take()
+    pub fn take_error(&self) -> Option<Error> {
+        self.lock().error.take()
     }
 
     /// Run one declared function tool through the session; see
     /// `ToolHost::call_tool` for the error contract.
-    pub fn call(
-        self: Arc<Self>, name: String, arguments: String,
-    ) -> FutureResult<Result<String, String>> {
+    pub fn call(self: Arc<Self>, name: String, arguments: String) -> FutureResult<ToolOutcome> {
         async move {
-            if !self.allowed.contains(&name) {
-                return Err(self.fail(Error::ToolFailed(format!(
-                    "model called `{name}`, which the request does not declare as a function \
-                     tool"
-                ))));
-            }
-
-            let (id, calls, receiver) = {
-                let mut inner = self.lock();
-                let Some(calls) = inner.calls.clone() else {
-                    return Err(anyhow!(
-                        "tool call `{name}` after the session closed its calls stream"
-                    ));
-                };
-                if inner.remaining == 0 {
-                    // Close the calls stream toward the guest: its loop ends,
-                    // and the reply carries the typed failure.
-                    inner.calls = None;
-                    return Err(record(
-                        &mut inner,
-                        Error::BudgetExhausted(format!(
-                            "tool-call budget of {} exhausted at `{name}`",
-                            self.limits.max_tool_calls
-                        )),
-                    ));
-                }
-                inner.remaining -= 1;
-                inner.next_id += 1;
-                let id = format!("call-{}", inner.next_id);
-                let (sender, receiver) = oneshot::channel();
-                inner.pending.insert(id.clone(), sender);
-                drop(inner);
-                (id, calls, receiver)
-            };
+            let pending = self.reserve(&name)?;
 
             let call = ToolCall {
-                id: id.clone(),
+                id: pending.id.clone(),
                 name: name.clone(),
                 arguments,
             };
-            if calls.send(call).await.is_err() {
-                self.lock().pending.remove(&id);
+            if pending.calls.send(call).await.is_err() {
+                self.lock().pending.remove(&pending.id);
                 return Err(anyhow!(
                     "guest dropped the calls stream before receiving tool call `{name}`"
                 ));
             }
 
-            let output = match tokio::time::timeout(self.limits.tool_timeout, receiver).await {
-                Err(_elapsed) => {
-                    let mut inner = self.lock();
-                    inner.pending.remove(&id);
-                    inner.calls = None;
-                    let error = record(
-                        &mut inner,
-                        Error::BudgetExhausted(format!(
-                            "tool call `{name}` got no result within {:?}",
-                            self.limits.tool_timeout
-                        )),
-                    );
-                    drop(inner);
-                    return Err(error);
-                }
-                // The pending sender dropped: the guest closed its results
-                // stream (the consumer failed every waiter).
-                Ok(Err(_closed)) => {
-                    return Err(anyhow!(
-                        "guest closed its results stream before answering tool call `{name}`"
-                    ));
-                }
-                Ok(Ok(output)) => output,
-            };
-
-            if let Ok(text) = &output
-                && text.len() > self.limits.max_result_bytes
-            {
-                return Err(self.fail(Error::ToolFailed(format!(
-                    "tool `{name}` result of {} bytes exceeds the {}-byte cap",
-                    text.len(),
-                    self.limits.max_result_bytes
-                ))));
-            }
-            Ok(output)
+            let output = self.wait_for_result(&pending.id, &name, pending.result).await?;
+            self.check_result(&name, output)
         }
         .boxed()
+    }
+
+    fn reserve(&self, name: &str) -> anyhow::Result<PendingCall> {
+        if !self.allowed.iter().any(|allowed| allowed == name) {
+            return Err(self.fail(Error::ToolFailed(format!(
+                "model called `{name}`, which the request does not declare as a function tool"
+            ))));
+        }
+
+        let mut inner = self.lock();
+        let Some(calls) = inner.calls.clone() else {
+            return Err(anyhow!("tool call `{name}` after the session closed its calls stream"));
+        };
+        if inner.remaining == 0 {
+            inner.calls = None;
+            return Err(record_error(
+                &mut inner,
+                Error::BudgetExhausted(format!(
+                    "tool-call budget of {} exhausted at `{name}`",
+                    self.limits.max_tool_calls
+                )),
+            ));
+        }
+
+        inner.remaining -= 1;
+        inner.next_id += 1;
+        let id = format!("call-{}", inner.next_id);
+        let (sender, result) = oneshot::channel();
+        inner.pending.insert(id.clone(), sender);
+        drop(inner);
+        Ok(PendingCall { id, calls, result })
+    }
+
+    async fn wait_for_result(
+        &self, id: &str, name: &str, result: oneshot::Receiver<ToolOutcome>,
+    ) -> anyhow::Result<ToolOutcome> {
+        match tokio::time::timeout(self.limits.tool_timeout, result).await {
+            Err(_elapsed) => {
+                let mut inner = self.lock();
+                inner.pending.remove(id);
+                inner.calls = None;
+                let error = record_error(
+                    &mut inner,
+                    Error::BudgetExhausted(format!(
+                        "tool call `{name}` got no result within {:?}",
+                        self.limits.tool_timeout
+                    )),
+                );
+                drop(inner);
+                Err(error)
+            }
+            Ok(Err(_closed)) => {
+                Err(anyhow!("guest closed its results stream before answering tool call `{name}`"))
+            }
+            Ok(Ok(output)) => Ok(output),
+        }
+    }
+
+    fn check_result(&self, name: &str, output: ToolOutcome) -> anyhow::Result<ToolOutcome> {
+        if let Ok(text) = &output
+            && text.len() > self.limits.max_result_bytes
+        {
+            return Err(self.fail(Error::ToolFailed(format!(
+                "tool `{name}` result of {} bytes exceeds the {}-byte cap",
+                text.len(),
+                self.limits.max_result_bytes
+            ))));
+        }
+        Ok(output)
     }
 
     // Deliver one guest result to its pending call. Unknown ids (stale after
@@ -215,7 +222,7 @@ impl SessionState {
     }
 
     fn fail(&self, error: Error) -> anyhow::Error {
-        record(&mut self.lock(), error)
+        record_error(&mut self.lock(), error)
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -225,9 +232,9 @@ impl SessionState {
 
 // Record `error` as the session's typed failure (the first one wins) and
 // return the matching hard error for the backend.
-fn record(inner: &mut Inner, error: Error) -> anyhow::Error {
+fn record_error(inner: &mut Inner, error: Error) -> anyhow::Error {
     let hard = anyhow!(describe(&error));
-    inner.failure.get_or_insert(error);
+    inner.error.get_or_insert(error);
     hard
 }
 
@@ -286,11 +293,11 @@ impl Drop for ReplyTask {
 /// guest joining the calls loop with the reply would wait on an open calls
 /// stream forever.
 pub struct SessionClose {
-    state: Arc<SessionState>,
+    state: Arc<ToolSession>,
 }
 
 impl SessionClose {
-    pub const fn new(state: Arc<SessionState>) -> Self {
+    pub const fn new(state: Arc<ToolSession>) -> Self {
         Self { state }
     }
 }
@@ -337,11 +344,11 @@ impl<D> StreamProducer<D> for CallsProducer {
 /// Routes guest tool results to their pending calls; its drop (the guest
 /// closed the results stream, or store teardown) fails every waiter.
 pub struct ResultsConsumer {
-    state: Arc<SessionState>,
+    state: Arc<ToolSession>,
 }
 
 impl ResultsConsumer {
-    pub const fn new(state: Arc<SessionState>) -> Self {
+    pub const fn new(state: Arc<ToolSession>) -> Self {
         Self { state }
     }
 }

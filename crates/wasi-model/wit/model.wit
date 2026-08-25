@@ -29,8 +29,6 @@ interface completion {
         name: string,
         /// JSON Schema document the answer must conform to.
         schema: json,
-        // YAGNI (Tier 1): no backend forwards provider strict mode.
-        // strict: option<bool>,
     }
 
     /// Output shape constraint, enforced by the host validation gate.
@@ -54,8 +52,6 @@ interface completion {
     record generation {
         temperature: option<f32>,
         top-p: option<f32>,
-        // YAGNI (Tier 1): no current backend exposes a top-k control.
-        // top-k: option<u32>,
         max-tokens: option<u32>,
         stop: list<string>,
         seed: option<u64>,
@@ -113,10 +109,6 @@ interface completion {
         format: format,
         /// Merged with host-injected tools at the backend.
         tools: list<tool>,
-        // YAGNI (Tier 1): see `tool-choice` below.
-        // tool-choice: option<tool-choice>,
-        // YAGNI (Tier 1): no backend reads metadata.
-        // metadata: list<tuple<string, string>>,
         grants: grants,
     }
 
@@ -177,22 +169,6 @@ interface completion {
     /// Open a completion session. The guest creates the `results` stream,
     /// keeps the writer, and passes the readable end.
     create: async func(request: request, results: stream<tool-result>) -> result<session, error>;
-
-    // YAGNI (Tier 1): no backend maps a tool-choice policy onto its provider.
-    // variant tool-choice {
-    //     auto,
-    //     none,
-    //     required,
-    //     named(string),
-    // }
-
-    // YAGNI (Tier 1): no backend streams yet.
-    // variant event {
-    //     delta(string),
-    //     done(reply),
-    //     failed(error),
-    // }
-    // create-stream: async func(request: request) -> result<stream<event>, error>;
 }
 
 world model {

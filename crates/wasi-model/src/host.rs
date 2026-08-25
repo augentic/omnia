@@ -8,6 +8,7 @@
 mod answer;
 mod completion_impl;
 mod default_impl;
+mod request;
 mod resource;
 mod session;
 mod workspace;
@@ -40,6 +41,7 @@ pub use omnia::FutureResult;
 use omnia::{HasMounts, Host, Server};
 use wasmtime::component::{HasData, Linker};
 
+pub use self::answer::{Answer, ToolTurn, Transcript, Usage};
 pub use self::default_impl::ModelDefault;
 use self::generated::omnia::model::completion;
 pub use self::generated::omnia::model::completion::{
@@ -47,7 +49,6 @@ pub use self::generated::omnia::model::completion::{
     Schema, Tool, WorkspaceGrant,
 };
 pub use self::resource::*;
-pub use self::answer::{Answer, ToolTurn, Transcript, Usage};
 pub use self::session::SessionLimits;
 
 /// Result type for model operations.
