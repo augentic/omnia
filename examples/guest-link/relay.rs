@@ -3,8 +3,7 @@
 //! Exports `omnia:link/echo` *and* re-imports it: each call consumes one hop
 //! from the message (a decimal hop count) and dispatches onward through the
 //! host, so a single inbound call produces a dispatch chain of arbitrary
-//! depth. The ABI tests drive it to prove the per-chain depth bound and
-//! wall-clock policy inheritance across served invocations.
+//! depth.
 
 #![cfg(target_arch = "wasm32")]
 

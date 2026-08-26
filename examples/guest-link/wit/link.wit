@@ -33,9 +33,7 @@ world responder {
 
 /// The relay guest: exports `echo` and re-imports it, dispatching onward while
 /// the message (a decimal hop count) has hops left. One inbound call thus
-/// produces a host-mediated dispatch chain of arbitrary depth — the shape the
-/// ABI tests drive to prove the per-chain depth bound and policy inheritance
-/// across served invocations.
+/// produces a host-mediated dispatch chain of arbitrary depth.
 world relay {
     import echo;
     export echo;

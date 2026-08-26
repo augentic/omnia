@@ -232,6 +232,7 @@ fn maybe_json(text: &str) -> Vec<Value> {
     values
 }
 
+// Unit tests by design: answer extraction/repair is a pure parser.
 #[cfg(test)]
 mod tests {
     use serde_json::json;

@@ -112,23 +112,11 @@ A `runtime!` binary with `mode: command` and a compiled-in deployment is a [dire
 
 By design — these two flags are reserved for the host log presets and removed from the guest's argv. Pick different flag names for guest-facing options.
 
-## Testing
-
-### An ABI/integration test panics with `guest artifact ... not found` and build instructions
-
-Tests never build guests; `find_guest` only locates artifacts. Build the guests first — in this repo:
-
-```bash
-cargo make test-guests     # builds and serializes the ABI-test guests
-```
-
-(`cargo make test` runs it for you before Nextest). For your own guest, the plain two-step: `cargo build --example <name>-wasm --target wasm32-wasip2` (remember artifact names use underscores). See [Testing Your Guests](guides/testing.md).
-
 ## Model completions
 
 ### `the default echo backend cannot satisfy format::schema`
 
-The runtime is serving `wasi-model` with the echo `ModelDefault`, which answers text/json completions with the prompt itself but cannot fabricate a value conforming to a guest-supplied JSON Schema. Bind a real backend (`omnia-genai`, `omnia-cursor`) in `runtime!`, or define an inline canned `WasiModelCtx` in tests (see [the testing guide](guides/testing.md#testing-model-guests)).
+The runtime is serving `wasi-model` with the echo `ModelDefault`, which answers text/json completions with the prompt itself but cannot fabricate a value conforming to a guest-supplied JSON Schema. Bind a real backend (`omnia-genai`, `omnia-cursor`) in `runtime!`, or define an inline canned `WasiModelCtx` in tests (see [Testing Policy](guides/testing-policy.md#canned-model-backends)).
 
 ### `invalid-request` errors
 

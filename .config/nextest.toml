@@ -1,7 +1,0 @@
-# The default filter is the guest-free tier: every library and native
-# integration test, process-per-test. `omnia-abi-tests` needs pre-built
-# guest artifacts (`cargo make test-guests`) that the current org Test
-# job does not produce, so it is excluded here. `cargo make test` passes
-# `--ignore-default-filter` after building those guests.
-[profile.default]
-default-filter = "not package(omnia-abi-tests)"

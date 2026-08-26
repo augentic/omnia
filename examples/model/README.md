@@ -16,7 +16,7 @@ flowchart LR
   canned -->|"validated answer"| guest
 ```
 
-The runtime core stays generic (Law 2): no model id, provider, or schema dialect lives in Omnia. The boundary only ever hands the guest a **validated answer string**. The canned backend never calls tools; the tool-call paths are exercised deterministically by the ABI tests, and live by the `omnia-genai` backend in the `omnia-backends` repo.
+The runtime core stays generic (Law 2): no model id, provider, or schema dialect lives in Omnia. The boundary only ever hands the guest a **validated answer string**. The canned backend never calls tools; live tool-call paths are exercised by the `omnia-genai` backend in the `omnia-backends` repo.
 
 ## Quick Start
 
@@ -45,11 +45,3 @@ export RUST_LOG=info,opentelemetry_sdk=off
 cargo run --example model
 ```
 
-Because the guest exports a plain async `run` (not an HTTP/messaging trigger), the end-to-end completion is exercised by the ABI tests rather than inbound traffic:
-
-```bash
-# after `cargo make test-guests` (do NOT `cargo clean` in between):
-cargo test -p omnia-abi-tests --test model
-```
-
-The `canned` scenario drives the guest through an inline canned backend — asserting the validated answer returns with no network. The `workspace` scenario drives a stub backend proving the host resolves the guest's lent workspace to its mount path, and `rejects_schema` proves the in-tree echo `ModelDefault` starts with zero configuration but rejects this guest's `format::schema` request — no network, fully in CI.
