@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{Context as _, anyhow};
 use futures::{FutureExt as _, future};
 use omnia::HasMounts;
 use wasmtime::component::{Accessor, FutureReader, StreamReader};
@@ -29,14 +29,19 @@ where
             }
 
             // get workspace
-            let grant = request.grants.workspace.as_ref();
-            let mounts = access.data_mut().mounts();
-            let workspace = match workspace::resolve(access.get().table, &mounts, grant) {
-                Ok(workspace) => workspace,
-                Err(error) => {
-                    results.close(&mut access)?;
-                    return Err(error.into());
+            let workspace = if let Some(grant) = request.grants.workspace.as_ref() {
+                let mounts = access.data_mut().mounts();
+                let descriptor = access.get().table.get(&grant.root)?;
+
+                match workspace::resolve(descriptor, &mounts, grant) {
+                    Ok(workspace) => Some(workspace),
+                    Err(error) => {
+                        results.close(&mut access)?;
+                        return Err(error.into());
+                    }
                 }
+            } else {
+                None
             };
 
             // call model backend with request and tool host "closure"

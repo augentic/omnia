@@ -12,13 +12,12 @@ use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context as _, anyhow, bail, ensure};
+use anyhow::{Context as _, anyhow, ensure};
 use cap_primitives::fs::MetadataExt as _;
 use cap_std::fs::Dir;
 use futures::{FutureExt as _, future};
 use omnia::{FutureResult, MountRegistry};
 use tokio::task::spawn_blocking;
-use wasmtime::component::ResourceTable;
 use wasmtime_wasi::filesystem::Descriptor;
 
 use super::generated::omnia::model::completion::WorkspaceGrant;
@@ -70,31 +69,25 @@ impl Workspace {
     }
 }
 
-// Resolve a `grants.workspace` into a [`Workspace`].
+// Resolve a lent workspace directory and grant into a [`Workspace`].
 pub fn resolve(
-    table: &ResourceTable, registry: &MountRegistry, grant: Option<&WorkspaceGrant>,
-) -> anyhow::Result<Option<Workspace>> {
-    let Some(grant) = grant else {
-        return Ok(None);
-    };
-
-    let descriptor = table.get(&grant.root).context("resolving the lent workspace descriptor")?;
-
+    descriptor: &Descriptor, registry: &MountRegistry, grant: &WorkspaceGrant,
+) -> anyhow::Result<Workspace> {
     let Descriptor::Dir(dir) = descriptor else {
-        bail!("grants.workspace root must be a directory descriptor, not a file");
+        return Err(anyhow!("grants.workspace root must be a directory"));
     };
 
     let meta = dir.dir.dir_metadata().context("reading lent workspace directory metadata")?;
     let entry = registry
         .match_identity(meta.dev(), meta.ino())
-        .context("lent workspace root is not an authorized mount (out of scope)")?;
+        .context("lent workspace root is not an authorized mount")?;
 
     if grant.subpath.is_empty() {
-        return Ok(Some(Workspace {
+        return Ok(Workspace {
             dir: Arc::clone(&entry.dir),
             local_path: entry.host_path.clone(),
             writable: entry.writable(),
-        }));
+        });
     }
 
     check_subpath(&grant.subpath)?;
@@ -105,11 +98,11 @@ pub fn resolve(
         .open_dir(&grant.subpath)
         .with_context(|| format!("opening lent workspace subpath `{}`", grant.subpath))?;
 
-    Ok(Some(Workspace {
+    Ok(Workspace {
         dir: Arc::new(dir),
         local_path: entry.host_path.join(&grant.subpath),
         writable: entry.writable(),
-    }))
+    })
 }
 
 // Refuse a subpath that is not a plain relative `/`-separated path.
@@ -123,7 +116,7 @@ fn check_subpath(subpath: &str) -> anyhow::Result<()> {
 
 fn read_blocking(dir: &Dir, path: &str) -> anyhow::Result<Vec<u8>> {
     let file = dir.open(path).with_context(|| format!("opening `{path}` in workspace"))?;
-    // Read one byte past the cap so an over-limit file is detected, not clipped.
+
     let mut buf = Vec::new();
     file.take(MAX_READ_BYTES + 1)
         .read_to_end(&mut buf)
@@ -181,7 +174,7 @@ mod tests {
     }
 
     #[test]
-    fn non_plain_subpath() {
+    fn complex_subpath() {
         for subpath in ["/abs", "docs\\guides", "docs//guides", ".", "..", "a/../b", "./a", "a/"] {
             check_subpath(subpath).unwrap_err();
         }
