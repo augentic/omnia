@@ -4,9 +4,8 @@ use std::any::TypeId;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use axum::body::{Body, to_bytes};
-use axum::response::{IntoResponse, Response};
 use http::{Method, Request, StatusCode};
-use omnia_guest::api::http::{Projector, Router, get, get_with, post};
+use omnia_guest::api::http::{Router, get, post};
 use omnia_guest::api::messaging::{
     Delivery, DeliveryError, Outcome as DeliveryOutcome, Projector as DeliveryProjector,
     Router as MessagingRouter, consume,
@@ -248,31 +247,6 @@ async fn post_non_object_body() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
-#[derive(Clone, Copy)]
-struct Accepted;
-
-impl<P: Send + Sync + 'static> Projector<EchoInput, P> for Accepted {
-    fn output(&self, _output: EchoOutput) -> Response {
-        StatusCode::ACCEPTED.into_response()
-    }
-
-    fn error(&self, _error: omnia_guest::Error) -> Response {
-        StatusCode::IM_A_TEAPOT.into_response()
-    }
-}
-
-#[tokio::test]
-async fn projector() {
-    let router = Router::new(Client::new("test", ()))
-        .route("/echo", get_with::<EchoInput, (), Accepted>(Accepted))
-        .into_axum();
-    let request =
-        Request::builder().uri("/echo?name=custom").body(Body::empty()).expect("build request");
-    let response = router.oneshot(request).await.expect("router serves request");
-
-    assert_eq!(response.status(), StatusCode::ACCEPTED);
-}
-
 #[tokio::test]
 async fn route_state_clones_share_provider() {
     let router = Router::new(Client::new(
@@ -313,20 +287,6 @@ async fn route_state_clones_share_provider() {
     assert_eq!(first["address"], second["address"]);
     assert_eq!(first["call"], 1);
     assert_eq!(second["call"], 2);
-}
-
-#[test]
-fn inventory() {
-    let router = Router::new(Client::new("test", ()))
-        .route("/echo", get::<EchoInput, ()>())
-        .route("/echo", post::<EchoInput, ()>());
-    let inventory = router.inventory();
-
-    assert_eq!(inventory.len(), 2);
-    assert_eq!(inventory[0].method(), Method::GET);
-    assert_eq!(inventory[0].path(), "/echo");
-    assert_eq!(inventory[0].operation(), TypeId::of::<EchoInput>());
-    assert_eq!(inventory[1].method(), Method::POST);
 }
 
 #[derive(Clone, Copy)]

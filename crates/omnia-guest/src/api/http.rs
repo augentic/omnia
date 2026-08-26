@@ -1,6 +1,5 @@
 //! Typed HTTP routing over application operations.
 
-use std::any::TypeId;
 use std::fmt;
 
 use axum::Router as AxumRouter;
@@ -8,7 +7,7 @@ use axum::extract::{RawPathParams, RawQuery, State};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{self, MethodRouter};
 use http::header::CONTENT_TYPE;
-use http::{HeaderMap, HeaderValue, Method, StatusCode};
+use http::{HeaderMap, HeaderValue, StatusCode};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -16,26 +15,6 @@ use crate::api::{Client, Handler, Metadata};
 
 /// Result type for HTTP handlers.
 pub type HttpResult<T, E = HttpError> = Result<T, E>;
-
-/// Projects one operation's result onto an HTTP response.
-pub trait Projector<H, P>: Clone + Send + Sync + 'static
-where
-    H: Handler<P>,
-    P: Send + Sync + 'static,
-{
-    /// Project a successful operation output.
-    fn output(&self, output: H::Output) -> Response;
-
-    /// Project an operation error.
-    fn error(&self, error: H::Error) -> Response;
-
-    /// Project a transport input-decoding failure.
-    ///
-    /// The default renders the standard bad-request [`HttpError`].
-    fn decode(&self, error: DecodeError) -> Response {
-        HttpError::from(error).into_response()
-    }
-}
 
 /// A request that could not be converted to operation input.
 #[derive(Debug)]
@@ -66,43 +45,6 @@ impl From<DecodeError> for HttpError {
             description: error.description,
         }
         .into()
-    }
-}
-
-/// Projects successful outputs as JSON and errors through [`HttpError`].
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Json;
-
-impl<H, P> Projector<H, P> for Json
-where
-    H: Handler<P>,
-    H::Output: Serialize,
-    H::Error: Into<HttpError>,
-    P: Send + Sync + 'static,
-{
-    fn output(&self, output: H::Output) -> Response {
-        match serde_json::to_vec(&output) {
-            Ok(body) => (
-                StatusCode::OK,
-                [(CONTENT_TYPE, HeaderValue::from_static("application/json"))],
-                body,
-            )
-                .into_response(),
-            Err(error) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                [(CONTENT_TYPE, HeaderValue::from_static("application/json"))],
-                serde_json::json!({
-                    "error": "encoding",
-                    "message": format!("body encoding error: {error}"),
-                })
-                .to_string(),
-            )
-                .into_response(),
-        }
-    }
-
-    fn error(&self, error: H::Error) -> Response {
-        Into::<HttpError>::into(error).into_response()
     }
 }
 
@@ -150,42 +92,12 @@ impl IntoResponse for HttpError {
     }
 }
 
-/// Read-only metadata for one registered HTTP route.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RouteInfo {
-    method: Method,
-    path: String,
-    operation: TypeId,
-}
-
-impl RouteInfo {
-    /// Return the registered HTTP method.
-    #[must_use]
-    pub const fn method(&self) -> &Method {
-        &self.method
-    }
-
-    /// Return the registered path.
-    #[must_use]
-    pub fn path(&self) -> &str {
-        &self.path
-    }
-
-    /// Return the process-local operation type identity.
-    #[must_use]
-    pub const fn operation(&self) -> TypeId {
-        self.operation
-    }
-}
-
 /// A typed HTTP method route awaiting a path.
 pub struct MethodRoute<P: Send + Sync + 'static> {
-    method: Method,
-    operation: TypeId,
     inner: MethodRouter<Client<P>>,
 }
 
-/// A per-request, inventory-bearing wrapper over [`axum::Router`].
+/// A per-request wrapper over [`axum::Router`].
 ///
 /// Construct one inside each WASI HTTP `handle` call with exactly one
 /// provider-owning [`Client`]. Axum route-state clones share that client's
@@ -194,7 +106,6 @@ pub struct MethodRoute<P: Send + Sync + 'static> {
 pub struct Router<P: Send + Sync + 'static> {
     inner: AxumRouter<Client<P>>,
     client: Client<P>,
-    inventory: Vec<RouteInfo>,
 }
 
 impl<P: Send + Sync + 'static> Router<P> {
@@ -204,26 +115,14 @@ impl<P: Send + Sync + 'static> Router<P> {
         Self {
             inner: AxumRouter::new(),
             client,
-            inventory: Vec::new(),
         }
     }
 
     /// Register one typed method route.
     #[must_use]
     pub fn route(mut self, path: &str, route: MethodRoute<P>) -> Self {
-        self.inventory.push(RouteInfo {
-            method: route.method,
-            path: path.to_owned(),
-            operation: route.operation,
-        });
         self.inner = self.inner.route(path, route.inner);
         self
-    }
-
-    /// Return registered routes in registration order.
-    #[must_use]
-    pub fn inventory(&self) -> &[RouteInfo] {
-        &self.inventory
     }
 
     /// Finish the router for Axum or a WASI HTTP adapter.
@@ -248,7 +147,7 @@ pub async fn serve<P: Send + Sync + 'static>(
     omnia_wasi_http::serve(router.into_axum(), request).await
 }
 
-/// Create a GET route with the default JSON projector.
+/// Create a GET route.
 #[must_use]
 pub fn get<H, P>() -> MethodRoute<P>
 where
@@ -257,32 +156,20 @@ where
     H::Error: Into<HttpError>,
     P: Send + Sync + 'static,
 {
-    get_with::<H, P, Json>(Json)
-}
-
-/// Create a GET route with an explicit projector.
-pub fn get_with<H, P, J>(projector: J) -> MethodRoute<P>
-where
-    H: Handler<P> + DeserializeOwned + 'static,
-    P: Send + Sync + 'static,
-    J: Projector<H, P>,
-{
     MethodRoute {
-        method: Method::GET,
-        operation: TypeId::of::<H>(),
         inner: routing::get(
             |State(client): State<Client<P>>,
              params: RawPathParams,
              RawQuery(query): RawQuery,
              headers: HeaderMap| async move {
                 let input = query_input::<H>(&params, query.as_deref());
-                invoke::<H, P, J>(&client, headers, input, projector).await
+                invoke::<H, P>(&client, headers, input).await
             },
         ),
     }
 }
 
-/// Create a POST route with the default JSON projector.
+/// Create a POST route.
 #[must_use]
 pub fn post<H, P>() -> MethodRoute<P>
 where
@@ -291,49 +178,57 @@ where
     H::Error: Into<HttpError>,
     P: Send + Sync + 'static,
 {
-    post_with::<H, P, Json>(Json)
-}
-
-/// Create a POST route with an explicit projector.
-pub fn post_with<H, P, J>(projector: J) -> MethodRoute<P>
-where
-    H: Handler<P> + DeserializeOwned + 'static,
-    P: Send + Sync + 'static,
-    J: Projector<H, P>,
-{
     MethodRoute {
-        method: Method::POST,
-        operation: TypeId::of::<H>(),
         inner: routing::post(
             |State(client): State<Client<P>>,
              params: RawPathParams,
              headers: HeaderMap,
              body: axum::body::Bytes| async move {
                 let input = body_input::<H>(&params, &body);
-                invoke::<H, P, J>(&client, headers, input, projector).await
+                invoke::<H, P>(&client, headers, input).await
             },
         ),
     }
 }
 
-async fn invoke<H, P, J>(
-    client: &Client<P>, headers: HeaderMap, input: Result<H, DecodeError>, projector: J,
+async fn invoke<H, P>(
+    client: &Client<P>, headers: HeaderMap, input: Result<H, DecodeError>,
 ) -> Response
 where
     H: Handler<P>,
+    H::Output: Serialize,
+    H::Error: Into<HttpError>,
     P: Send + Sync + 'static,
-    J: Projector<H, P>,
 {
     let input = match input {
         Ok(input) => input,
-        Err(error) => return projector.decode(error),
+        Err(error) => return HttpError::from(error).into_response(),
     };
     let metadata = Metadata::from_lookup(|name| {
         headers.get(format!("x-{name}")).and_then(|value| value.to_str().ok()).map(str::to_owned)
     });
     match client.call(input, &metadata).await {
-        Ok(output) => projector.output(output),
-        Err(error) => projector.error(error),
+        Ok(output) => json_output(output),
+        Err(error) => Into::<HttpError>::into(error).into_response(),
+    }
+}
+
+fn json_output<T: Serialize>(output: T) -> Response {
+    match serde_json::to_vec(&output) {
+        Ok(body) => {
+            (StatusCode::OK, [(CONTENT_TYPE, HeaderValue::from_static("application/json"))], body)
+                .into_response()
+        }
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            [(CONTENT_TYPE, HeaderValue::from_static("application/json"))],
+            serde_json::json!({
+                "error": "encoding",
+                "message": format!("body encoding error: {error}"),
+            })
+            .to_string(),
+        )
+            .into_response(),
     }
 }
 
