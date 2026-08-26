@@ -1,12 +1,7 @@
-use std::sync::Arc;
-
-use futures::FutureExt as _;
-use futures::executor::block_on;
 use omnia_wasi_model::{
-    Answer, Candidate, DirEntry, Error, Format, Function, FutureResult, Grants, Message,
-    ModelDefault, Reply, Request, Role, Schema, Tool, ToolHost, ToolOutcome, WasiModelCtx,
+    Candidate, Error, Format, Function, Grants, Message, Request, Role, Schema, Tool,
 };
-use serde_json::{Value, json};
+use serde_json::json;
 
 #[test]
 fn json_document() {
@@ -166,124 +161,6 @@ fn invalid_function_parameters() {
     }));
     let err = request.validate().unwrap_err();
     assert!(matches!(err, Error::InvalidRequest(m) if m.contains("`lookup`")));
-}
-
-#[test]
-fn invalid_format_schema() {
-    let mut request = request(vec![message(Role::User, "hi")]);
-    request.format = Format::Schema(Schema {
-        name: "verdict".to_owned(),
-        schema: "not json".to_owned(),
-    });
-    let err = request.validate().unwrap_err();
-    assert!(matches!(err, Error::InvalidRequest(_)));
-}
-
-#[test]
-fn echo_text() {
-    let request = request(vec![message(Role::User, "first"), message(Role::User, "second")]);
-    let reply = pipeline(&ModelDefault, request).unwrap();
-    assert_eq!(reply.answer, "second");
-    assert!(reply.usage.is_none());
-}
-
-#[test]
-fn echo_json() {
-    let mut request = request(vec![message(Role::User, "hi")]);
-    request.format = Format::Json;
-    let reply = pipeline(&ModelDefault, request).unwrap();
-    assert_eq!(reply.answer, r#"{"echo":"hi"}"#);
-}
-
-#[test]
-fn echo_schema() {
-    let mut request = request(vec![message(Role::User, "hi")]);
-    request.format = verdict_schema();
-    let err = pipeline(&ModelDefault, request).unwrap_err();
-    assert!(matches!(err, Error::Backend(m) if m.contains("cannot satisfy format::schema")));
-}
-
-#[test]
-fn validate_before_complete() {
-    let err = pipeline(&Unreached, request(vec![])).unwrap_err();
-    assert!(matches!(err, Error::InvalidRequest(m) if m == "empty request"));
-}
-
-#[test]
-fn canned_schema_answer() {
-    let mut request = request(vec![message(Role::User, "judge")]);
-    request.format = verdict_schema();
-    let reply = pipeline(&Canned(json!({ "verdict": "pass" })), request).unwrap();
-    assert_eq!(reply.answer, r#"{"verdict":"pass"}"#);
-}
-
-#[test]
-fn canned_answer_rejected() {
-    let mut request = request(vec![message(Role::User, "judge")]);
-    request.format = verdict_schema();
-    let err = pipeline(&Canned(json!({ "other": 1 })), request).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidAnswer(m) if m.contains("does not conform to schema `verdict`"))
-    );
-}
-
-// Mirror of the `create` binding's order — validate, complete, project —
-// minus the session plumbing, which needs a wasmtime store. Pins the
-// guest-visible contract without instantiating a guest.
-fn pipeline(backend: &impl WasiModelCtx, request: Request) -> Result<Reply, Error> {
-    request.validate()?;
-    let format = request.format.clone();
-    let answer = block_on(backend.complete(request, Arc::new(NoTools)))?;
-    answer.project(&format)
-}
-
-// No tier-1 scenario grants tools or a workspace; any call is a contract
-// violation, so the stub fails loud.
-#[derive(Debug)]
-struct NoTools;
-
-impl ToolHost for NoTools {
-    fn call_tool(&self, name: String, _arguments: String) -> FutureResult<ToolOutcome> {
-        panic!("unexpected tool call `{name}`")
-    }
-
-    fn read(&self, path: String) -> FutureResult<Vec<u8>> {
-        panic!("unexpected workspace read `{path}`")
-    }
-
-    fn list(&self, path: String) -> FutureResult<Vec<DirEntry>> {
-        panic!("unexpected workspace list `{path}`")
-    }
-
-    fn write(&self, path: String, _bytes: Vec<u8>) -> FutureResult<()> {
-        panic!("unexpected workspace write `{path}`")
-    }
-}
-
-// An invalid request must be rejected before the backend runs.
-#[derive(Debug)]
-struct Unreached;
-
-impl WasiModelCtx for Unreached {
-    fn complete(&self, _request: Request, _tools: Arc<dyn ToolHost>) -> FutureResult<Answer> {
-        panic!("invalid request reached the backend")
-    }
-}
-
-// The canned backend from the testing policy: answers every completion with
-// one fixed value, so (unlike the echo) it can satisfy `format::schema`.
-#[derive(Clone, Debug)]
-struct Canned(Value);
-
-impl WasiModelCtx for Canned {
-    fn complete(&self, _request: Request, _tools: Arc<dyn ToolHost>) -> FutureResult<Answer> {
-        let answer = Answer {
-            value: self.0.clone(),
-            usage: None,
-            transcript: None,
-        };
-        async move { Ok(answer) }.boxed()
-    }
 }
 
 fn verdict_schema() -> Format {

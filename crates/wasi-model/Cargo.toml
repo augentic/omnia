@@ -43,5 +43,5 @@ wasip3.workspace = true
 wit-bindgen.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-futures.workspace = true
 serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
