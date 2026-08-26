@@ -175,7 +175,7 @@ mod tests {
     use super::check_subpath;
 
     #[test]
-    fn plain_relative_subpath() {
+    fn plain_subpath() {
         check_subpath("docs").unwrap();
         check_subpath("docs/guides").unwrap();
     }
