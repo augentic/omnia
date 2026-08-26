@@ -23,7 +23,7 @@ Most guests never touch this machinery: the `omnia-guest` `Model::complete` / `M
 
 ### Session limits
 
-The host enforces per-session limits (`SessionLimits`, backend-configurable via `WasiModelCtx::limits`): a tool-call budget (default 32, `budget-exhausted`), a per-result size cap (default 1 MiB, `tool-failed`), and a per-call timeout (default 60 s, `budget-exhausted`). There is no streaming variant of `create` yet.
+The host enforces per-session limits (`Limits`, backend-configurable via `WasiModelCtx::limits`): a tool-call budget (default 32, `budget-exhausted`), a per-result size cap (default 1 MiB, `tool-failed`), and a per-call timeout (default 60 s, `budget-exhausted`). There is no streaming variant of `create` yet.
 
 ## Request
 

@@ -1,150 +1,81 @@
-//! Answer parsing, validation, projection, and repair behavior shared by the
-//! host gate and backends.
+//! Answer parsing, validation, projection, and repair.
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::host::Error;
-use crate::host::generated::omnia::model::completion::{Format, Reply, Usage};
-use crate::host::types::Answer;
+use crate::host::generated::omnia::model::completion::{
+    Format, Reply, Schema, Usage as ReplyUsage,
+};
 
-impl Format {
-    /// The final-answer instruction appended to a prompt for backends that
-    /// steer output shape through prose rather than a provider `response_format`.
-    #[must_use]
-    pub fn instruction(&self) -> String {
-        match self {
-            Self::Schema(spec) => format!(
-                "When you are done, reply with only your final answer as a single JSON value \
-                 conforming to this JSON Schema, and nothing else:\n{}",
-                spec.schema
-            ),
-            Self::Json => "When you are done, reply with only your final answer as a single JSON \
-                           object and nothing else."
-                .to_owned(),
-            Self::Text => {
-                "When you are done, reply with only your final answer as plain text and nothing \
-                 else."
-                    .to_owned()
-            }
-        }
-    }
-
-    /// Interpret a model's text turn as an answer value.
-    ///
-    /// For JSON / schema answers, a whole-text JSON value is the only
-    /// candidate. Otherwise every complete value in the turn is tried (each
-    /// fenced body, then each `{` / `[` slice). The first value that passes
-    /// [`Self::check`] wins, so an incidental `[]` in preamble does not hide a
-    /// later valid object. If none pass, the last extracted value is returned
-    /// so the host gate remains the authority.
-    ///
-    /// # Errors
-    ///
-    /// Returns a repair reason when the text does not match this format.
-    pub fn parse(&self, text: &str) -> Result<Value, String> {
-        match self {
-            Self::Text => Ok(Value::String(text.to_owned())),
-            Self::Json | Self::Schema(_) => {
-                let mut last = None;
-                for value in json_values(text) {
-                    if self.check(&value).is_ok() {
-                        return Ok(value);
-                    }
-                    last = Some(value);
-                }
-                last.ok_or_else(|| "answer is not valid JSON".into())
-            }
-        }
-    }
-
-    /// Validate an answer value against this format.
-    ///
-    /// # Errors
-    ///
-    /// Returns the first validation failure, suitable for a repair turn.
-    pub fn check(&self, value: &Value) -> Result<(), String> {
-        match self {
-            Self::Text if !value.is_string() => Err("answer is not a JSON string".to_owned()),
-            Self::Json if !value.is_object() => Err("answer is not a JSON object".to_owned()),
-            Self::Schema(spec) => {
-                let schema: Value = serde_json::from_str(&spec.schema)
-                    .map_err(|error| format!("format schema is not valid JSON: {error}"))?;
-                let validator = jsonschema::validator_for(&schema).map_err(|error| {
-                    format!("format schema is not a valid JSON Schema: {error}")
-                })?;
-                validator.iter_errors(value).next().map_or(Ok(()), |error| {
-                    let path = error.instance_path().as_str();
-                    let at = if path.is_empty() { "root" } else { path };
-                    Err(format!(
-                        "answer does not conform to schema `{}`: {error} at {at}",
-                        spec.name
-                    ))
-                })
-            }
-            _ => Ok(()),
-        }
-    }
-
-    /// Build the correction instruction for a rejected answer.
-    #[must_use]
-    pub fn repair(&self, reason: &str) -> String {
-        format!(
-            "Your previous answer did not satisfy the required response format ({reason}). Reply \
-             again with only the corrected answer and nothing else."
-        )
-    }
+/// A backend's result: the parsed answer value, optional usage, and transcript.
+///
+/// Host-only — the guest sees a `reply` whose `answer` is the validated string
+/// the `create` binding derives from `value`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Answer {
+    /// The parsed JSON answer the backend produced.
+    pub value: serde_json::Value,
+    /// Token accounting the backend reported, surfaced to the guest as `reply.usage`.
+    pub usage: Option<Usage>,
+    /// Optional tool-call transcript the backend captured.
+    pub transcript: Option<Transcript>,
 }
 
-/// Complete JSON values in `text`. A whole-text parse is the only candidate so
-/// fence / brace scans cannot lift fragments out of string contents. Otherwise:
-/// each fenced body, then each `{` / `[` slice.
-fn json_values(text: &str) -> Vec<Value> {
-    let trimmed = text.trim();
-    if let Ok(value) = serde_json::from_str(trimmed) {
-        return vec![value];
-    }
-    fenced_bodies(trimmed)
-        .into_iter()
-        .filter_map(|body| serde_json::from_str(body.trim()).ok())
-        .chain(sliced_json(trimmed))
-        .collect()
+/// Token accounting for one completion. Mirrors the WIT `usage` record; the
+/// serde derive lets backends record it alongside the transcript.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Usage {
+    /// Prompt tokens consumed.
+    pub input_tokens: u32,
+    /// Completion tokens produced.
+    pub output_tokens: u32,
+    /// Reasoning tokens, for models that bill them separately.
+    pub reasoning_tokens: Option<u32>,
 }
 
-/// Bodies of every Markdown fence in `text`; an unterminated fence yields the
-/// remainder.
-fn fenced_bodies(text: &str) -> Vec<&str> {
-    let mut bodies = Vec::new();
-    let mut rest = text;
-    while let Some(start) = rest.find("```") {
-        let after = &rest[start + 3..];
-        let body = after.split_once('\n').map_or(after, |(_, body)| body);
-        if let Some(end) = body.find("```") {
-            bodies.push(&body[..end]);
-            rest = &body[end + 3..];
-        } else {
-            bodies.push(body);
-            break;
-        }
-    }
-    bodies
+/// The tool-call transcript a backend may capture for diagnostics or future
+/// replay. Host-only; it never crosses the WIT boundary. Empty for backends
+/// with no tool loop (cursor).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Transcript {
+    /// Ordered tool turns the backend drove to reach the answer.
+    pub turns: Vec<ToolTurn>,
 }
 
-/// Complete JSON values starting at each `{` or `[`, continuing from the
-/// deserializer offset so nested brackets are not re-offered as roots.
-fn sliced_json(text: &str) -> Vec<Value> {
-    let mut values = Vec::new();
-    let mut rest = text;
-    while let Some(offset) = rest.find(['{', '[']) {
-        let mut stream = serde_json::Deserializer::from_str(&rest[offset..]).into_iter::<Value>();
-        match stream.next() {
-            Some(Ok(value)) => {
-                rest = &rest[offset + stream.byte_offset()..];
-                values.push(value);
-            }
-            Some(Err(_)) | None => rest = &rest[offset + 1..],
+/// A value extracted from a model text turn.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Candidate {
+    /// The value matches this format.
+    Valid(Value),
+    /// The value does not match this format.
+    Invalid {
+        /// The extracted value.
+        value: Value,
+        /// Why validation rejected it.
+        reason: String,
+    },
+}
+
+/// One recorded tool interaction within a completion's transcript.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolTurn {
+    /// The tool the model called.
+    pub tool: String,
+    /// The arguments the model supplied.
+    pub args: serde_json::Value,
+    /// The result the host returned.
+    pub result: serde_json::Value,
+}
+
+impl From<Usage> for ReplyUsage {
+    fn from(usage: Usage) -> Self {
+        Self {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            reasoning_tokens: usage.reasoning_tokens,
         }
     }
-    values
 }
 
 impl Answer {
@@ -173,13 +104,136 @@ impl Answer {
 
         Ok(Reply {
             answer: text,
-            usage: self.usage.map(|usage| Usage {
-                input_tokens: usage.input_tokens,
-                output_tokens: usage.output_tokens,
-                reasoning_tokens: usage.reasoning_tokens,
-            }),
+            usage: self.usage.map(Into::into),
         })
     }
+}
+
+impl Format {
+    /// The final-answer instruction appended to a prompt for backends that
+    /// steer output shape through prose rather than a provider `response_format`.
+    #[must_use]
+    pub fn instruction(&self) -> String {
+        match self {
+            Self::Schema(spec) => format!(
+                "When you are done, reply with only your final answer as a single JSON value \
+                 conforming to this JSON Schema, and nothing else:\n{}",
+                spec.schema
+            ),
+            Self::Json => "When you are done, reply with only your final answer as a single JSON \
+                           object and nothing else."
+                .to_owned(),
+            Self::Text => {
+                "When you are done, reply with only your final answer as plain text and nothing \
+                 else."
+                    .to_owned()
+            }
+        }
+    }
+
+    /// Parse the best candidate from a model's text turn.
+    ///
+    /// Prefers a value that passes [`Self::check`]; otherwise the last
+    /// extracted candidate. `Err` only when the text contains no candidate.
+    ///
+    /// # Errors
+    ///
+    /// Returns a repair reason when the text contains no candidate.
+    pub fn parse(&self, text: &str) -> Result<Candidate, String> {
+        match self {
+            Self::Text => Ok(Candidate::Valid(Value::String(text.to_owned()))),
+            Self::Json | Self::Schema(_) => {
+                let mut last = None;
+                for json in maybe_json(text) {
+                    match self.check(&json) {
+                        Ok(()) => return Ok(Candidate::Valid(json)),
+                        Err(reason) => last = Some((json, reason)),
+                    }
+                }
+                last.map(|(value, reason)| Candidate::Invalid { value, reason })
+                    .ok_or_else(|| "answer does not contain JSON".into())
+            }
+        }
+    }
+
+    /// Validate an answer value against this format.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first validation failure, suitable for a repair turn.
+    pub fn check(&self, value: &Value) -> Result<(), String> {
+        match self {
+            Self::Text if !value.is_string() => Err("answer is not a JSON string".to_owned()),
+            Self::Json if !value.is_object() => Err("answer is not a JSON object".to_owned()),
+            Self::Text | Self::Json => Ok(()),
+            Self::Schema(spec) => {
+                let validator = schema_validator(spec)?;
+                validator.iter_errors(value).next().map_or(Ok(()), |error| {
+                    let path = error.instance_path().as_str();
+                    let at = if path.is_empty() { "root" } else { path };
+                    Err(format!(
+                        "answer does not conform to schema `{}`: {error} at {at}",
+                        spec.name
+                    ))
+                })
+            }
+        }
+    }
+
+    /// Build the correction instruction for a rejected answer.
+    #[must_use]
+    pub fn repair(&self, reason: &str) -> String {
+        format!(
+            "Your previous answer did not satisfy the required response format ({reason}). Reply \
+             again with only the corrected answer and nothing else."
+        )
+    }
+
+    pub(super) fn validate_definition(&self) -> Result<(), String> {
+        match self {
+            Self::Schema(spec) => schema_validator(spec).map(drop),
+            Self::Text | Self::Json => Ok(()),
+        }
+    }
+}
+
+fn schema_validator(spec: &Schema) -> Result<jsonschema::Validator, String> {
+    let schema: Value = serde_json::from_str(&spec.schema)
+        .map_err(|error| format!("format schema is not valid JSON: {error}"))?;
+    jsonschema::validator_for(&schema)
+        .map_err(|error| format!("format schema is not a valid JSON Schema: {error}"))
+}
+
+fn maybe_json(text: &str) -> Vec<Value> {
+    // try to parse the whole text as a single JSON value
+    let text = text.trim();
+    if let Ok(value) = serde_json::from_str(text) {
+        return vec![value];
+    }
+
+    // extract values from "```" fences: fence bodies are the odd-indexed
+    // chunks between the delimiters, minus their language-tag line
+    let mut values = Vec::new();
+    for body in text.split("```").skip(1).step_by(2) {
+        let body = body.split_once('\n').map_or(body, |(_tag, body)| body);
+        if let Ok(value) = serde_json::from_str(body.trim()) {
+            values.push(value);
+        }
+    }
+
+    // extract values from `{` or `[` slices
+    let mut rest = text;
+    while let Some(offset) = rest.find(['{', '[']) {
+        let mut stream = serde_json::Deserializer::from_str(&rest[offset..]).into_iter::<Value>();
+        match stream.next() {
+            Some(Ok(value)) => {
+                rest = &rest[offset + stream.byte_offset()..];
+                values.push(value);
+            }
+            Some(Err(_)) | None => rest = &rest[offset + 1..],
+        }
+    }
+    values
 }
 
 // Unit tests by design: answer extraction/repair is a pure parser.
@@ -187,147 +241,100 @@ impl Answer {
 mod tests {
     use serde_json::json;
 
+    use super::Candidate;
     use crate::host::generated::omnia::model::completion::{Format, Schema};
 
-    fn verdict_schema() -> Format {
-        Format::Schema(Schema {
-            name: "verdict".to_owned(),
-            schema: json!({
-                "type": "object",
-                "properties": { "verdict": { "type": "string" } },
-                "required": ["verdict"],
-            })
-            .to_string(),
-        })
-    }
-
-    fn phase_report_schema() -> Format {
-        Format::Schema(Schema {
-            name: "phase-report".to_owned(),
-            schema: json!({
-                "type": "object",
-                "properties": {
-                    "outcome": { "type": "string" },
-                    "source": { "type": "string" },
-                },
-                "required": ["outcome", "source"],
-            })
-            .to_string(),
-        })
-    }
-
     #[test]
-    fn text_is_verbatim() {
-        assert_eq!(Format::Text.parse("hello").unwrap(), json!("hello"));
-    }
-
-    #[test]
-    fn json_must_parse() {
+    fn json_document() {
         assert_eq!(
             Format::Json.parse(r#"{"verdict":"pass"}"#).unwrap(),
-            json!({ "verdict": "pass" })
+            Candidate::Valid(json!({ "verdict": "pass" }))
         );
         let err = Format::Json.parse("not json").unwrap_err();
-        assert!(err.contains("not valid JSON"), "unexpected: {err}");
+        assert!(err.contains("does not contain JSON"), "unexpected: {err}");
     }
 
     #[test]
-    fn code_fence_stripped() {
+    fn fenced_json() {
         let fenced = "```json\n{\"verdict\":\"pass\"}\n```";
-        assert_eq!(verdict_schema().parse(fenced).unwrap(), json!({ "verdict": "pass" }));
-    }
-
-    #[test]
-    fn preamble_then_fence() {
-        let text = "Let me synthesize.\n```json\n{\"verdict\":\"pass\"}\n```";
-        assert_eq!(Format::Json.parse(text).unwrap(), json!({ "verdict": "pass" }));
-    }
-
-    #[test]
-    fn preamble_then_raw_object() {
-        let text = "Done.\n{\"verdict\":\"pass\"}\n";
-        assert_eq!(Format::Json.parse(text).unwrap(), json!({ "verdict": "pass" }));
-    }
-
-    #[test]
-    fn preamble_array_then_phase_report() {
-        let text = "findings: []\n{\"outcome\":\"completed\",\"source\":\"model-assisted\"}";
         assert_eq!(
-            phase_report_schema().parse(text).unwrap(),
-            json!({ "outcome": "completed", "source": "model-assisted" })
+            verdict_schema().parse(fenced).unwrap(),
+            Candidate::Valid(json!({ "verdict": "pass" }))
         );
     }
 
     #[test]
-    fn repair_reason_array_then_verdict() {
-        let text = "[] is not of type \"object\"\n{\"verdict\":\"pass\"}";
-        assert_eq!(verdict_schema().parse(text).unwrap(), json!({ "verdict": "pass" }));
+    fn json_with_preamble() {
+        let text = "Done.\n{\"verdict\":\"pass\"}\n";
+        assert_eq!(
+            Format::Json.parse(text).unwrap(),
+            Candidate::Valid(json!({ "verdict": "pass" }))
+        );
     }
 
     #[test]
-    fn fenced_array_then_raw_object() {
+    fn later_matching_candidate() {
+        let text = "findings: []\n{\"outcome\":\"completed\",\"source\":\"model-assisted\"}";
+        assert_eq!(
+            report_schema().parse(text).unwrap(),
+            Candidate::Valid(json!({ "outcome": "completed", "source": "model-assisted" }))
+        );
+    }
+
+    #[test]
+    fn invalid_fence() {
         let text = "```json\n[]\n```\n{\"verdict\":\"pass\"}";
-        assert_eq!(verdict_schema().parse(text).unwrap(), json!({ "verdict": "pass" }));
+        assert_eq!(
+            verdict_schema().parse(text).unwrap(),
+            Candidate::Valid(json!({ "verdict": "pass" }))
+        );
     }
 
     #[test]
-    fn whole_text_array_is_schema_error() {
-        let format = phase_report_schema();
-        let value = format.parse("[]").unwrap();
+    fn invalid_candidate() {
+        let Candidate::Invalid { value, reason } = report_schema().parse("[]").unwrap() else {
+            panic!("expected an invalid candidate");
+        };
         assert_eq!(value, json!([]));
-        let err = format.check(&value).unwrap_err();
-        assert!(err.contains("does not conform to schema `phase-report`"), "unexpected: {err}");
-        assert!(err.contains("at root"), "unexpected: {err}");
+        assert!(
+            reason.contains("does not conform to schema `phase-report`"),
+            "unexpected: {reason}"
+        );
+        assert!(reason.contains("at root"), "unexpected: {reason}");
     }
 
     #[test]
-    fn whole_json_not_mined() {
+    fn no_matching_candidate() {
         let format = verdict_schema();
         let fenced = r#"{"note":"```json\n{\"verdict\":\"pass\"}\n```"}"#;
-        let value = format.parse(fenced).unwrap();
+        let Candidate::Invalid { value, .. } = format.parse(fenced).unwrap() else {
+            panic!("expected an invalid candidate");
+        };
         assert_eq!(value, json!({ "note": "```json\n{\"verdict\":\"pass\"}\n```" }));
-        assert!(format.check(&value).is_err());
 
         let quoted = r#""use {\"verdict\":\"pass\"} as the answer""#;
-        let value = format.parse(quoted).unwrap();
+        let Candidate::Invalid { value, .. } = format.parse(quoted).unwrap() else {
+            panic!("expected an invalid candidate");
+        };
         assert_eq!(value, json!("use {\"verdict\":\"pass\"} as the answer"));
-        assert!(format.check(&value).is_err());
     }
 
     #[test]
-    fn incidental_object_then_verdict() {
-        let text = "snippet {\"kind\":\"snippet\"}\n{\"verdict\":\"pass\"}";
-        assert_eq!(verdict_schema().parse(text).unwrap(), json!({ "verdict": "pass" }));
-    }
-
-    #[test]
-    fn trailing_prose() {
-        let text = "{\"verdict\":\"pass\"}\nthanks";
-        assert_eq!(Format::Json.parse(text).unwrap(), json!({ "verdict": "pass" }));
-    }
-
-    #[test]
-    fn still_rejects_non_json() {
-        let err = Format::Json.parse("no braces here").unwrap_err();
-        assert!(err.contains("not valid JSON"), "unexpected: {err}");
-    }
-
-    #[test]
-    fn json_string() {
+    fn reject_object() {
         Format::Text.check(&json!("hi")).unwrap();
         let err = Format::Text.check(&json!({ "a": 1 })).unwrap_err();
         assert!(err.contains("not a JSON string"), "unexpected: {err}");
     }
 
     #[test]
-    fn json_object() {
+    fn json_rejects_string() {
         Format::Json.check(&json!({ "verdict": "pass" })).unwrap();
         let err = Format::Json.check(&json!("nope")).unwrap_err();
         assert!(err.contains("not a JSON object"), "unexpected: {err}");
     }
 
     #[test]
-    fn schema_enforced() {
+    fn reject_values() {
         verdict_schema().check(&json!({ "verdict": "pass" })).unwrap();
         let err = verdict_schema().check(&json!({ "other": 1 })).unwrap_err();
         assert!(err.contains("does not conform to schema `verdict`"), "unexpected: {err}");
@@ -336,7 +343,7 @@ mod tests {
     }
 
     #[test]
-    fn check_names_instance_path() {
+    fn schema_error_path() {
         let format = Format::Schema(Schema {
             name: "report".to_owned(),
             schema: json!({
@@ -353,8 +360,48 @@ mod tests {
     }
 
     #[test]
-    fn repair_carries_reason() {
-        let text = Format::Json.repair("answer is not a JSON object");
-        assert!(text.contains("answer is not a JSON object"));
+    fn invalid_schema() {
+        let err = Format::Schema(Schema {
+            name: "verdict".to_owned(),
+            schema: "not json".to_owned(),
+        })
+        .validate_definition()
+        .unwrap_err();
+        assert!(err.contains("not valid JSON"), "unexpected: {err}");
+
+        let err = Format::Schema(Schema {
+            name: "verdict".to_owned(),
+            schema: r#"{"type":"nonsense"}"#.to_owned(),
+        })
+        .validate_definition()
+        .unwrap_err();
+        assert!(err.contains("valid JSON Schema"), "unexpected: {err}");
+    }
+
+    fn verdict_schema() -> Format {
+        Format::Schema(Schema {
+            name: "verdict".to_owned(),
+            schema: json!({
+                "type": "object",
+                "properties": { "verdict": { "type": "string" } },
+                "required": ["verdict"],
+            })
+            .to_string(),
+        })
+    }
+
+    fn report_schema() -> Format {
+        Format::Schema(Schema {
+            name: "phase-report".to_owned(),
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "outcome": { "type": "string" },
+                    "source": { "type": "string" },
+                },
+                "required": ["outcome", "source"],
+            })
+            .to_string(),
+        })
     }
 }

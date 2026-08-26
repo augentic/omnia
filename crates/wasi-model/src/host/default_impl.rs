@@ -17,8 +17,7 @@ use omnia::Backend;
 use serde_json::{Value, json};
 
 use crate::host::generated::omnia::model::completion::{Format, Request};
-use crate::host::types::Answer;
-use crate::host::{FutureResult, ToolHost, WasiModelCtx};
+use crate::host::{Answer, FutureResult, ToolHost, WasiModelCtx};
 
 /// Echo default implementation of `wasi-model`: it starts without
 /// configuration and answers every completion with its own prompt.

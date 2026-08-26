@@ -1,6 +1,8 @@
 # WebAssembly Interface Types (WIT)
 
-`model.wit` is the authoritative definition of the `omnia:model@0.1.0` package (the `completion` interface with `create`; `create-stream` stays YAGNI-commented until a backend streams).
+`model.wit` is the authoritative definition of the `omnia:model@0.1.0` package and its `completion` interface.
+
+`create` is an `async func` like every backend-touching WASI function in this workspace: the host binding runs in wasmtime's concurrent (`store`) mode and awaits the async backend (`WasiModelCtx::complete` returns a future) without blocking the executor.
 
 ## Deps
 
