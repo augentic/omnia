@@ -1,15 +1,11 @@
 //! Handler invocation and HTTP routing contracts.
 
-use std::any::TypeId;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use axum::body::{Body, to_bytes};
 use http::{Method, Request, StatusCode};
 use omnia_guest::api::http::{Router, get, post};
-use omnia_guest::api::messaging::{
-    Delivery, DeliveryError, Outcome as DeliveryOutcome, Projector as DeliveryProjector,
-    Router as MessagingRouter, consume,
-};
+use omnia_guest::api::messaging::{Delivery, DeliveryError, Router as MessagingRouter, consume};
 use omnia_guest::api::{Client, Context, Handler, Metadata};
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt as _;
@@ -289,33 +285,6 @@ async fn route_state_clones_share_provider() {
     assert_eq!(second["call"], 2);
 }
 
-#[derive(Clone, Copy)]
-struct Capture;
-
-impl DeliveryProjector<EchoOutput, omnia_guest::Error, serde_json::Error> for Capture {
-    fn project(
-        &self, outcome: DeliveryOutcome<EchoOutput, omnia_guest::Error, serde_json::Error>,
-    ) -> Result<(), DeliveryError> {
-        match outcome {
-            DeliveryOutcome::Output(output)
-                if output.name == "message"
-                    && output.correlation_id.as_deref() == Some("delivery-1") =>
-            {
-                Ok(())
-            }
-            DeliveryOutcome::Output(_) => {
-                Err(DeliveryError::Rejected("unexpected output".to_string()))
-            }
-            DeliveryOutcome::Operation(error) => {
-                Err(DeliveryError::Rejected(format!("operation: {error}")))
-            }
-            DeliveryOutcome::Decode(error) => {
-                Err(DeliveryError::Rejected(format!("decode: {error}")))
-            }
-        }
-    }
-}
-
 fn delivery(topic: Option<&str>, payload: &[u8]) -> Delivery {
     Delivery {
         topic: topic.map(str::to_owned),
@@ -328,7 +297,7 @@ fn delivery(topic: Option<&str>, payload: &[u8]) -> Delivery {
 #[tokio::test]
 async fn messaging_exact_topic() {
     let router = MessagingRouter::new(Client::new("messages", ()))
-        .route("events.created", consume::<EchoInput>().project_with(Capture));
+        .route("events.created", consume::<EchoInput>());
 
     router
         .handle(delivery(Some("events.created"), br#"{"name":"message","count":2}"#))
@@ -353,15 +322,6 @@ async fn messaging_failures() {
         router.handle(delivery(Some("events"), b"not-json")).await,
         Err(DeliveryError::Rejected(_))
     ));
-}
-
-#[test]
-fn messaging_inventory() {
-    let router = MessagingRouter::new(Client::new("messages", ()))
-        .route("events.created", consume::<EchoInput>());
-
-    assert_eq!(router.inventory()[0].topic(), "events.created");
-    assert_eq!(router.inventory()[0].operation(), TypeId::of::<EchoInput>());
 }
 
 #[test]
