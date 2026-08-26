@@ -320,7 +320,7 @@ mod tests {
     }
 
     #[test]
-    fn text_rejects_object() {
+    fn reject_object() {
         Format::Text.check(&json!("hi")).unwrap();
         let err = Format::Text.check(&json!({ "a": 1 })).unwrap_err();
         assert!(err.contains("not a JSON string"), "unexpected: {err}");
@@ -334,7 +334,7 @@ mod tests {
     }
 
     #[test]
-    fn reject_nonconforming_values() {
+    fn reject_values() {
         verdict_schema().check(&json!({ "verdict": "pass" })).unwrap();
         let err = verdict_schema().check(&json!({ "other": 1 })).unwrap_err();
         assert!(err.contains("does not conform to schema `verdict`"), "unexpected: {err}");
