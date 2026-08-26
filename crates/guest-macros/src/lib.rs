@@ -40,17 +40,16 @@ pub fn instrument(args: TokenStream, item: TokenStream) -> TokenStream {
     TokenStream::from(new_fn)
 }
 
-/// Derives an `omnia_guest::api::Operation` implementation from a bare
+/// Derives an `omnia_guest::api::Handler` implementation from a bare
 /// handler function.
 ///
 /// The function must be an `async fn` with exactly two parameters — the owned
-/// operation input and a `CallContext<'_, P>` — returning `Result<T>`
+/// handler input and a `Context<'_, P>` — returning `Result<T>`
 /// (`omnia_guest::Result`) or `Result<T, E>`. The macro re-emits the function
 /// unchanged (attributes included, so a `#[tracing::instrument]` on the fn
-/// keeps working) and generates `impl<P> Operation<P> for <InputType>`
-/// reusing the fn's generics and bounds (which must include `P: Provider`,
-/// as `CallContext` already requires); the generated `call` delegates to the
-/// fn.
+/// keeps working) and generates `impl<P> Handler<P> for <InputType>`
+/// reusing the fn's generics and bounds; the generated `handle` delegates to
+/// the fn.
 #[proc_macro_attribute]
 pub fn operation(args: TokenStream, item: TokenStream) -> TokenStream {
     if !args.is_empty() {

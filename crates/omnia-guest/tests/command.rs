@@ -7,13 +7,11 @@ use std::error::Error;
 use std::{fmt, io};
 
 use clap::{Args, Command};
-use omnia_guest::api::Provider;
 use omnia_guest::api::command::{
     self, BuildError, CommandResponse, Completions, Namespace, Outcome, Projector, Router,
     RouterBuilder,
 };
-use omnia_guest::api::invoke::{CallContext, Invoker};
-use omnia_guest::api::operation::Operation;
+use omnia_guest::api::{Client, Context, Handler};
 
 #[derive(Args, Clone, Debug)]
 struct Globals {
@@ -73,20 +71,17 @@ impl fmt::Display for OperationError {
 
 impl Error for OperationError {}
 
-struct Greet;
-
-impl<P: Provider> Operation<P> for Greet {
+impl<P: Send + Sync + 'static> Handler<P> for GreetInput {
     type Error = OperationError;
-    type Input = GreetInput;
     type Output = String;
 
-    fn call(
-        input: Self::Input, context: CallContext<'_, P>,
+    fn handle(
+        self, context: Context<'_, P>,
     ) -> impl std::future::Future<Output = Result<Self::Output, Self::Error>> + Send {
-        std::future::ready(if input.fail {
+        std::future::ready(if self.fail {
             Err(OperationError)
         } else {
-            Ok(format!("hello {}, from {}", input.name, context.owner))
+            Ok(format!("hello {}, from {}", self.name, context.owner))
         })
     }
 }
@@ -120,7 +115,7 @@ where
 fn router() -> Router<(), Globals> {
     RouterBuilder::new(
         Command::new("demo").version("1.2.3").about("Demo commands"),
-        Invoker::new("tenant", ()),
+        Client::new("tenant", ()),
     )
     .completions(
         Completions::new()
@@ -133,7 +128,7 @@ fn router() -> Router<(), Globals> {
     )
     .route(
         ["source", "resolve"],
-        command::run::<GreetArgs, Greet>()
+        command::run::<GreetArgs, GreetInput>()
             .about("Resolve a source")
             .long_about("Resolve one configured source.")
             .alias("get")
@@ -141,7 +136,7 @@ fn router() -> Router<(), Globals> {
     )
     .route(
         ["source", "internal"],
-        command::run::<GreetArgs, Greet>()
+        command::run::<GreetArgs, GreetInput>()
             .about("Internal source command")
             .hidden()
             .project_with(Text),
@@ -253,7 +248,7 @@ fn inventory() {
         .find(|route| route.selector().path() == ["source", "resolve"])
         .expect("operation route");
     assert_eq!(operation.selector().path(), ["source", "resolve"]);
-    assert_eq!(operation.operation(), Some(TypeId::of::<Greet>()));
+    assert_eq!(operation.operation(), Some(TypeId::of::<GreetInput>()));
     assert_eq!(operation.about(), Some("Resolve a source"));
     assert_eq!(operation.aliases(), ["get"]);
     let hidden = inventory
@@ -286,7 +281,7 @@ fn conflicts() {
 
     let alias = base()
         .route(["get"], route())
-        .route(["run"], command::run::<GreetArgs, Greet>().alias("get").project_with(Text))
+        .route(["run"], command::run::<GreetArgs, GreetInput>().alias("get").project_with(Text))
         .build()
         .err()
         .expect("alias collision must fail");
@@ -297,7 +292,7 @@ fn conflicts() {
     assert!(matches!(reserved, BuildError::ReservedCompletion(_)));
 
     let global = base()
-        .route(["run"], command::run::<CollisionArgs, Greet>().project_with(Text))
+        .route(["run"], command::run::<CollisionArgs, GreetInput>().project_with(Text))
         .build()
         .err()
         .expect("global collision must fail");
@@ -330,11 +325,11 @@ fn conflicts() {
 }
 
 fn base() -> RouterBuilder<(), Globals> {
-    RouterBuilder::new(Command::new("demo"), Invoker::new("tenant", ()))
+    RouterBuilder::new(Command::new("demo"), Client::new("tenant", ()))
 }
 
-fn route() -> command::Binding<GreetArgs, Greet, command::TryIntoDecoder, Text> {
-    command::run::<GreetArgs, Greet>().project_with(Text)
+fn route() -> command::Binding<GreetArgs, GreetInput, command::TryIntoDecoder, Text> {
+    command::run::<GreetArgs, GreetInput>().project_with(Text)
 }
 
 #[derive(Args)]
@@ -344,17 +339,15 @@ struct DecodeArgs {
 }
 
 struct DecodeInput(u16);
-struct Decode;
 
-impl<P: Provider> Operation<P> for Decode {
+impl<P: Send + Sync + 'static> Handler<P> for DecodeInput {
     type Error = OperationError;
-    type Input = DecodeInput;
     type Output = String;
 
-    fn call(
-        input: Self::Input, _context: CallContext<'_, P>,
+    fn handle(
+        self, _context: Context<'_, P>,
     ) -> impl std::future::Future<Output = Result<Self::Output, Self::Error>> + Send {
-        std::future::ready(Ok(input.0.to_string()))
+        std::future::ready(Ok(self.0.to_string()))
     }
 }
 
@@ -363,7 +356,7 @@ async fn custom_decoder() {
     let router = base()
         .route(
             ["decode"],
-            command::run::<DecodeArgs, Decode>()
+            command::run::<DecodeArgs, DecodeInput>()
                 .decode_with(|args: DecodeArgs, _globals: &Globals| {
                     if args.value == 0 {
                         Err(OperationError)
@@ -405,7 +398,7 @@ where
 #[tokio::test]
 async fn projection_failure() {
     let router = base()
-        .route(["run"], command::run::<GreetArgs, Greet>().project_with(BrokenProjection))
+        .route(["run"], command::run::<GreetArgs, GreetInput>().project_with(BrokenProjection))
         .build()
         .expect("router should build");
     let response = router.execute(["demo", "run", "--name", "Ada"]).await;

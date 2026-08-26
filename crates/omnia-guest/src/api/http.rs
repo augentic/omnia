@@ -12,22 +12,22 @@ use http::{HeaderMap, HeaderValue, Method, StatusCode};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::api::{Invocation, Invoker, Metadata, Operation, Provider};
+use crate::api::{Client, Handler, Metadata};
 
 /// Result type for HTTP handlers.
 pub type HttpResult<T, E = HttpError> = Result<T, E>;
 
 /// Projects one operation's result onto an HTTP response.
-pub trait Projector<O, P>: Clone + Send + Sync + 'static
+pub trait Projector<H, P>: Clone + Send + Sync + 'static
 where
-    O: Operation<P>,
-    P: Provider,
+    H: Handler<P>,
+    P: Send + Sync + 'static,
 {
     /// Project a successful operation output.
-    fn output(&self, output: O::Output) -> Response;
+    fn output(&self, output: H::Output) -> Response;
 
     /// Project an operation error.
-    fn error(&self, error: O::Error) -> Response;
+    fn error(&self, error: H::Error) -> Response;
 
     /// Project a transport input-decoding failure.
     ///
@@ -73,14 +73,14 @@ impl From<DecodeError> for HttpError {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Json;
 
-impl<O, P> Projector<O, P> for Json
+impl<H, P> Projector<H, P> for Json
 where
-    O: Operation<P>,
-    O::Output: Serialize,
-    O::Error: Into<HttpError>,
-    P: Provider,
+    H: Handler<P>,
+    H::Output: Serialize,
+    H::Error: Into<HttpError>,
+    P: Send + Sync + 'static,
 {
-    fn output(&self, output: O::Output) -> Response {
+    fn output(&self, output: H::Output) -> Response {
         match serde_json::to_vec(&output) {
             Ok(body) => (
                 StatusCode::OK,
@@ -101,7 +101,7 @@ where
         }
     }
 
-    fn error(&self, error: O::Error) -> Response {
+    fn error(&self, error: H::Error) -> Response {
         Into::<HttpError>::into(error).into_response()
     }
 }
@@ -179,31 +179,31 @@ impl RouteInfo {
 }
 
 /// A typed HTTP method route awaiting a path.
-pub struct MethodRoute<P: Provider> {
+pub struct MethodRoute<P: Send + Sync + 'static> {
     method: Method,
     operation: TypeId,
-    inner: MethodRouter<Invoker<P>>,
+    inner: MethodRouter<Client<P>>,
 }
 
 /// A per-request, inventory-bearing wrapper over [`axum::Router`].
 ///
 /// Construct one inside each WASI HTTP `handle` call with exactly one
-/// provider-owning [`Invoker`]. Axum route-state clones share that invoker's
+/// provider-owning [`Client`]. Axum route-state clones share that client's
 /// provider allocation; no guest state is retained across WASI instances.
 /// Durable state belongs in host-side capabilities.
-pub struct Router<P: Provider> {
-    inner: AxumRouter<Invoker<P>>,
-    invoker: Invoker<P>,
+pub struct Router<P: Send + Sync + 'static> {
+    inner: AxumRouter<Client<P>>,
+    client: Client<P>,
     inventory: Vec<RouteInfo>,
 }
 
-impl<P: Provider> Router<P> {
-    /// Create an empty per-request router backed by one invoker.
+impl<P: Send + Sync + 'static> Router<P> {
+    /// Create an empty per-request router backed by one client.
     #[must_use]
-    pub fn new(invoker: Invoker<P>) -> Self {
+    pub fn new(client: Client<P>) -> Self {
         Self {
             inner: AxumRouter::new(),
-            invoker,
+            client,
             inventory: Vec::new(),
         }
     }
@@ -228,21 +228,21 @@ impl<P: Provider> Router<P> {
 
     /// Finish the router for Axum or a WASI HTTP adapter.
     pub fn into_axum(self) -> AxumRouter {
-        self.inner.with_state(self.invoker)
+        self.inner.with_state(self.client)
     }
 }
 
 /// Consume a per-request router through the WASI HTTP export.
 ///
 /// Omnia creates one component instance per HTTP request, so callers should
-/// construct the router and its provider-owning invoker in the export's
+/// construct the router and its provider-owning client in the export's
 /// `handle` method. Durable state belongs in host-side capabilities.
 ///
 /// # Errors
 ///
 /// Returns the WASI HTTP transport error.
 #[cfg(target_arch = "wasm32")]
-pub async fn serve<P: Provider>(
+pub async fn serve<P: Send + Sync + 'static>(
     router: Router<P>, request: wasip3::http::types::Request,
 ) -> Result<wasip3::http::types::Response, wasip3::http::types::ErrorCode> {
     omnia_wasi_http::serve(router.into_axum(), request).await
@@ -250,35 +250,33 @@ pub async fn serve<P: Provider>(
 
 /// Create a GET route with the default JSON projector.
 #[must_use]
-pub fn get<O, P>() -> MethodRoute<P>
+pub fn get<H, P>() -> MethodRoute<P>
 where
-    O: Operation<P>,
-    O::Input: DeserializeOwned,
-    O::Output: Serialize,
-    O::Error: Into<HttpError>,
-    P: Provider,
+    H: Handler<P> + DeserializeOwned + 'static,
+    H::Output: Serialize,
+    H::Error: Into<HttpError>,
+    P: Send + Sync + 'static,
 {
-    get_with::<O, P, Json>(Json)
+    get_with::<H, P, Json>(Json)
 }
 
 /// Create a GET route with an explicit projector.
-pub fn get_with<O, P, J>(projector: J) -> MethodRoute<P>
+pub fn get_with<H, P, J>(projector: J) -> MethodRoute<P>
 where
-    O: Operation<P>,
-    O::Input: DeserializeOwned,
-    P: Provider,
-    J: Projector<O, P>,
+    H: Handler<P> + DeserializeOwned + 'static,
+    P: Send + Sync + 'static,
+    J: Projector<H, P>,
 {
     MethodRoute {
         method: Method::GET,
-        operation: TypeId::of::<O>(),
+        operation: TypeId::of::<H>(),
         inner: routing::get(
-            |State(invoker): State<Invoker<P>>,
+            |State(client): State<Client<P>>,
              params: RawPathParams,
              RawQuery(query): RawQuery,
              headers: HeaderMap| async move {
-                let input = query_input::<O::Input>(&params, query.as_deref());
-                invoke::<O, P, J>(&invoker, headers, input, projector).await
+                let input = query_input::<H>(&params, query.as_deref());
+                invoke::<H, P, J>(&client, headers, input, projector).await
             },
         ),
     }
@@ -286,47 +284,45 @@ where
 
 /// Create a POST route with the default JSON projector.
 #[must_use]
-pub fn post<O, P>() -> MethodRoute<P>
+pub fn post<H, P>() -> MethodRoute<P>
 where
-    O: Operation<P>,
-    O::Input: DeserializeOwned,
-    O::Output: Serialize,
-    O::Error: Into<HttpError>,
-    P: Provider,
+    H: Handler<P> + DeserializeOwned + 'static,
+    H::Output: Serialize,
+    H::Error: Into<HttpError>,
+    P: Send + Sync + 'static,
 {
-    post_with::<O, P, Json>(Json)
+    post_with::<H, P, Json>(Json)
 }
 
 /// Create a POST route with an explicit projector.
-pub fn post_with<O, P, J>(projector: J) -> MethodRoute<P>
+pub fn post_with<H, P, J>(projector: J) -> MethodRoute<P>
 where
-    O: Operation<P>,
-    O::Input: DeserializeOwned,
-    P: Provider,
-    J: Projector<O, P>,
+    H: Handler<P> + DeserializeOwned + 'static,
+    P: Send + Sync + 'static,
+    J: Projector<H, P>,
 {
     MethodRoute {
         method: Method::POST,
-        operation: TypeId::of::<O>(),
+        operation: TypeId::of::<H>(),
         inner: routing::post(
-            |State(invoker): State<Invoker<P>>,
+            |State(client): State<Client<P>>,
              params: RawPathParams,
              headers: HeaderMap,
              body: axum::body::Bytes| async move {
-                let input = body_input::<O::Input>(&params, &body);
-                invoke::<O, P, J>(&invoker, headers, input, projector).await
+                let input = body_input::<H>(&params, &body);
+                invoke::<H, P, J>(&client, headers, input, projector).await
             },
         ),
     }
 }
 
-async fn invoke<O, P, J>(
-    invoker: &Invoker<P>, headers: HeaderMap, input: Result<O::Input, DecodeError>, projector: J,
+async fn invoke<H, P, J>(
+    client: &Client<P>, headers: HeaderMap, input: Result<H, DecodeError>, projector: J,
 ) -> Response
 where
-    O: Operation<P>,
-    P: Provider,
-    J: Projector<O, P>,
+    H: Handler<P>,
+    P: Send + Sync + 'static,
+    J: Projector<H, P>,
 {
     let input = match input {
         Ok(input) => input,
@@ -335,7 +331,7 @@ where
     let metadata = Metadata::from_lookup(|name| {
         headers.get(format!("x-{name}")).and_then(|value| value.to_str().ok()).map(str::to_owned)
     });
-    match invoker.invoke::<O>(Invocation::new(input).metadata(metadata)).await {
+    match client.call(input, &metadata).await {
         Ok(output) => projector.output(output),
         Err(error) => projector.error(error),
     }

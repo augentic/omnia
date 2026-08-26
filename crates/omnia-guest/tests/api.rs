@@ -1,4 +1,4 @@
-//! Operation invocation and HTTP routing contracts.
+//! Handler invocation and HTTP routing contracts.
 
 use std::any::TypeId;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -11,7 +11,7 @@ use omnia_guest::api::messaging::{
     Delivery, DeliveryError, Outcome as DeliveryOutcome, Projector as DeliveryProjector,
     Router as MessagingRouter, consume,
 };
-use omnia_guest::api::{CallContext, Invocation, Invoker, Metadata, Operation, Provider};
+use omnia_guest::api::{Client, Context, Handler, Metadata};
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt as _;
 
@@ -29,26 +29,23 @@ struct EchoOutput {
     correlation_id: Option<String>,
 }
 
-struct Echo;
-
-impl<P: Provider> Operation<P> for Echo {
+impl<P: Send + Sync + 'static> Handler<P> for EchoInput {
     type Error = omnia_guest::Error;
-    type Input = EchoInput;
     type Output = EchoOutput;
 
-    fn call(
-        input: Self::Input, context: CallContext<'_, P>,
+    fn handle(
+        self, context: Context<'_, P>,
     ) -> impl std::future::Future<Output = Result<Self::Output, Self::Error>> + Send {
         std::future::ready(Ok(EchoOutput {
-            name: input.name,
-            count: input.count.unwrap_or(1),
+            name: self.name,
+            count: self.count.unwrap_or(1),
             owner: context.owner.to_owned(),
             correlation_id: context.metadata.correlation_id.clone(),
         }))
     }
 }
 
-/// Input type promoted to an operation by `#[operation]` below.
+/// Input type promoted to a handler by `#[operation]` below.
 #[derive(Debug, Deserialize)]
 struct MacroEcho {
     name: String,
@@ -61,13 +58,13 @@ struct MacroEchoReply {
 }
 
 #[omnia_guest::operation]
-// The Operation contract is async; this test body just has nothing to await.
+// The Handler contract is async; this test body just has nothing to await.
 #[allow(clippy::unused_async)]
 async fn macro_echo<P>(
-    input: MacroEcho, context: CallContext<'_, P>,
+    input: MacroEcho, context: Context<'_, P>,
 ) -> omnia_guest::Result<MacroEchoReply>
 where
-    P: Provider,
+    P: Send + Sync + 'static,
 {
     Ok(MacroEchoReply {
         name: input.name,
@@ -85,16 +82,19 @@ struct ProviderObservation {
     call: usize,
 }
 
-struct ObserveProvider;
+#[derive(Debug, Deserialize)]
+struct ObserveInput {
+    name: String,
+}
 
-impl Operation<StatefulProvider> for ObserveProvider {
+impl Handler<StatefulProvider> for ObserveInput {
     type Error = omnia_guest::Error;
-    type Input = EchoInput;
     type Output = ProviderObservation;
 
-    fn call(
-        _input: Self::Input, context: CallContext<'_, StatefulProvider>,
+    fn handle(
+        self, context: Context<'_, StatefulProvider>,
     ) -> impl std::future::Future<Output = Result<Self::Output, Self::Error>> + Send {
+        let _ = self.name;
         std::future::ready(Ok(ProviderObservation {
             address: std::ptr::from_ref(context.provider).addr(),
             call: context.provider.calls.fetch_add(1, Ordering::SeqCst) + 1,
@@ -103,11 +103,11 @@ impl Operation<StatefulProvider> for ObserveProvider {
 }
 
 fn router() -> axum::Router {
-    Router::new(Invoker::new("test", ()))
-        .route("/echo", get::<Echo, ()>())
-        .route("/echo", post::<Echo, ()>())
-        .route("/echo/{name}", get::<Echo, ()>())
-        .route("/echo/{name}", post::<Echo, ()>())
+    Router::new(Client::new("test", ()))
+        .route("/echo", get::<EchoInput, ()>())
+        .route("/echo", post::<EchoInput, ()>())
+        .route("/echo/{name}", get::<EchoInput, ()>())
+        .route("/echo/{name}", post::<EchoInput, ()>())
         .into_axum()
 }
 
@@ -121,17 +121,22 @@ async fn send(request: Request<Body>) -> (StatusCode, serde_json::Value) {
 
 #[tokio::test]
 async fn invoke() {
-    let invoker = Invoker::new("tenant", ());
-    let invocation = Invocation::new(EchoInput {
-        name: "core".to_string(),
-        count: None,
-    })
-    .metadata(Metadata {
+    let client = Client::new("tenant", ());
+    let metadata = Metadata {
         correlation_id: Some("call-1".to_string()),
         ..Metadata::default()
-    });
+    };
 
-    let output = invoker.invoke::<Echo>(invocation).await.expect("operation succeeds");
+    let output = client
+        .call(
+            EchoInput {
+                name: "core".to_string(),
+                count: None,
+            },
+            &metadata,
+        )
+        .await
+        .expect("handler succeeds");
 
     assert_eq!(output.owner, "tenant");
     assert_eq!(output.correlation_id.as_deref(), Some("call-1"));
@@ -139,12 +144,17 @@ async fn invoke() {
 
 #[tokio::test]
 async fn invoke_macro_operation() {
-    let invoker = Invoker::new("tenant", ());
-    let invocation = Invocation::new(MacroEcho {
-        name: "generated".to_string(),
-    });
+    let client = Client::new("tenant", ());
 
-    let output = invoker.invoke::<MacroEcho>(invocation).await.expect("operation succeeds");
+    let output = client
+        .call(
+            MacroEcho {
+                name: "generated".to_string(),
+            },
+            &Metadata::default(),
+        )
+        .await
+        .expect("handler succeeds");
 
     assert_eq!(output.name, "generated");
     assert_eq!(output.owner, "tenant");
@@ -241,7 +251,7 @@ async fn post_non_object_body() {
 #[derive(Clone, Copy)]
 struct Accepted;
 
-impl<P: Provider> Projector<Echo, P> for Accepted {
+impl<P: Send + Sync + 'static> Projector<EchoInput, P> for Accepted {
     fn output(&self, _output: EchoOutput) -> Response {
         StatusCode::ACCEPTED.into_response()
     }
@@ -253,8 +263,8 @@ impl<P: Provider> Projector<Echo, P> for Accepted {
 
 #[tokio::test]
 async fn projector() {
-    let router = Router::new(Invoker::new("test", ()))
-        .route("/echo", get_with::<Echo, (), Accepted>(Accepted))
+    let router = Router::new(Client::new("test", ()))
+        .route("/echo", get_with::<EchoInput, (), Accepted>(Accepted))
         .into_axum();
     let request =
         Request::builder().uri("/echo?name=custom").body(Body::empty()).expect("build request");
@@ -265,14 +275,14 @@ async fn projector() {
 
 #[tokio::test]
 async fn route_state_clones_share_provider() {
-    let router = Router::new(Invoker::new(
+    let router = Router::new(Client::new(
         "test",
         StatefulProvider {
             calls: AtomicUsize::new(0),
         },
     ))
-    .route("/first", get::<ObserveProvider, StatefulProvider>())
-    .route("/second", get::<ObserveProvider, StatefulProvider>())
+    .route("/first", get::<ObserveInput, StatefulProvider>())
+    .route("/second", get::<ObserveInput, StatefulProvider>())
     .into_axum();
 
     let first = router
@@ -307,15 +317,15 @@ async fn route_state_clones_share_provider() {
 
 #[test]
 fn inventory() {
-    let router = Router::new(Invoker::new("test", ()))
-        .route("/echo", get::<Echo, ()>())
-        .route("/echo", post::<Echo, ()>());
+    let router = Router::new(Client::new("test", ()))
+        .route("/echo", get::<EchoInput, ()>())
+        .route("/echo", post::<EchoInput, ()>());
     let inventory = router.inventory();
 
     assert_eq!(inventory.len(), 2);
     assert_eq!(inventory[0].method(), Method::GET);
     assert_eq!(inventory[0].path(), "/echo");
-    assert_eq!(inventory[0].operation(), TypeId::of::<Echo>());
+    assert_eq!(inventory[0].operation(), TypeId::of::<EchoInput>());
     assert_eq!(inventory[1].method(), Method::POST);
 }
 
@@ -357,8 +367,8 @@ fn delivery(topic: Option<&str>, payload: &[u8]) -> Delivery {
 
 #[tokio::test]
 async fn messaging_exact_topic() {
-    let router = MessagingRouter::new(Invoker::new("messages", ()))
-        .route("events.created", consume::<Echo>().project_with(Capture));
+    let router = MessagingRouter::new(Client::new("messages", ()))
+        .route("events.created", consume::<EchoInput>().project_with(Capture));
 
     router
         .handle(delivery(Some("events.created"), br#"{"name":"message","count":2}"#))
@@ -373,7 +383,7 @@ async fn messaging_exact_topic() {
 #[tokio::test]
 async fn messaging_failures() {
     let router =
-        MessagingRouter::new(Invoker::new("messages", ())).route("events", consume::<Echo>());
+        MessagingRouter::new(Client::new("messages", ())).route("events", consume::<EchoInput>());
 
     assert_eq!(
         router.handle(delivery(None, br#"{"name":"message"}"#)).await,
@@ -387,17 +397,17 @@ async fn messaging_failures() {
 
 #[test]
 fn messaging_inventory() {
-    let router = MessagingRouter::new(Invoker::new("messages", ()))
-        .route("events.created", consume::<Echo>());
+    let router = MessagingRouter::new(Client::new("messages", ()))
+        .route("events.created", consume::<EchoInput>());
 
     assert_eq!(router.inventory()[0].topic(), "events.created");
-    assert_eq!(router.inventory()[0].operation(), TypeId::of::<Echo>());
+    assert_eq!(router.inventory()[0].operation(), TypeId::of::<EchoInput>());
 }
 
 #[test]
 #[should_panic(expected = "duplicate messaging topic")]
 fn messaging_duplicate_topic() {
-    let _router = MessagingRouter::new(Invoker::new("messages", ()))
-        .route("events", consume::<Echo>())
-        .route("events", consume::<Echo>());
+    let _router = MessagingRouter::new(Client::new("messages", ()))
+        .route("events", consume::<EchoInput>())
+        .route("events", consume::<EchoInput>());
 }

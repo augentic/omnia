@@ -11,10 +11,7 @@ use std::sync::Arc;
 
 use serde::de::DeserializeOwned;
 
-use crate::api::Provider;
-use crate::api::invocation::{Invocation, Metadata};
-use crate::api::invoke::Invoker;
-use crate::api::operation::Operation;
+use crate::api::{Client, Handler, Metadata};
 
 /// An owned inbound delivery independent of a messaging binding.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -166,11 +163,9 @@ impl<O, D, Q> Consume<O, D, Q> {
 
 type DispatchFuture<'a> = Pin<Box<dyn Future<Output = Result<(), DeliveryError>> + Send + 'a>>;
 
-trait ErasedRoute<P: Provider>: Send + Sync {
+trait ErasedRoute<P: Send + Sync + 'static>: Send + Sync {
     fn operation(&self) -> TypeId;
-    fn dispatch<'a>(
-        &'a self, delivery: &'a Delivery, invoker: &'a Invoker<P>,
-    ) -> DispatchFuture<'a>;
+    fn dispatch<'a>(&'a self, delivery: &'a Delivery, client: &'a Client<P>) -> DispatchFuture<'a>;
 }
 
 struct Route<P, O, D, Q> {
@@ -179,20 +174,18 @@ struct Route<P, O, D, Q> {
     marker: PhantomData<fn(P) -> O>,
 }
 
-impl<P, O, D, Q> ErasedRoute<P> for Route<P, O, D, Q>
+impl<P, H, D, Q> ErasedRoute<P> for Route<P, H, D, Q>
 where
-    P: Provider,
-    O: Operation<P>,
-    D: Decoder<O::Input>,
-    Q: Projector<O::Output, O::Error, D::Error>,
+    P: Send + Sync + 'static,
+    H: Handler<P> + 'static,
+    D: Decoder<H>,
+    Q: Projector<H::Output, H::Error, D::Error>,
 {
     fn operation(&self) -> TypeId {
-        TypeId::of::<O>()
+        TypeId::of::<H>()
     }
 
-    fn dispatch<'a>(
-        &'a self, delivery: &'a Delivery, invoker: &'a Invoker<P>,
-    ) -> DispatchFuture<'a> {
+    fn dispatch<'a>(&'a self, delivery: &'a Delivery, client: &'a Client<P>) -> DispatchFuture<'a> {
         Box::pin(async move {
             let input = match self.decoder.decode(delivery) {
                 Ok(input) => input,
@@ -205,8 +198,7 @@ where
                     .find(|(key, _)| key.eq_ignore_ascii_case(name))
                     .map(|(_, value)| value.clone())
             });
-            let outcome = match invoker.invoke::<O>(Invocation::new(input).metadata(metadata)).await
-            {
+            let outcome = match client.call(input, &metadata).await {
                 Ok(output) => Outcome::Output(output),
                 Err(error) => Outcome::Operation(error),
             };
@@ -237,18 +229,18 @@ impl RouteInfo {
 }
 
 /// An exact-topic messaging router.
-pub struct Router<P: Provider> {
-    invoker: Invoker<P>,
+pub struct Router<P: Send + Sync + 'static> {
+    client: Client<P>,
     routes: BTreeMap<String, Arc<dyn ErasedRoute<P>>>,
     inventory: Vec<RouteInfo>,
 }
 
-impl<P: Provider> Router<P> {
-    /// Create an empty router backed by an invoker.
+impl<P: Send + Sync + 'static> Router<P> {
+    /// Create an empty router backed by a client.
     #[must_use]
-    pub fn new(invoker: Invoker<P>) -> Self {
+    pub fn new(client: Client<P>) -> Self {
         Self {
-            invoker,
+            client,
             routes: BTreeMap::new(),
             inventory: Vec::new(),
         }
@@ -260,16 +252,16 @@ impl<P: Provider> Router<P> {
     ///
     /// Panics when the topic is empty or already registered.
     #[must_use]
-    pub fn route<O, D, Q>(mut self, topic: impl Into<String>, binding: Consume<O, D, Q>) -> Self
+    pub fn route<H, D, Q>(mut self, topic: impl Into<String>, binding: Consume<H, D, Q>) -> Self
     where
-        O: Operation<P>,
-        D: Decoder<O::Input>,
-        Q: Projector<O::Output, O::Error, D::Error>,
+        H: Handler<P> + 'static,
+        D: Decoder<H>,
+        Q: Projector<H::Output, H::Error, D::Error>,
     {
         let topic = topic.into();
         assert!(!topic.is_empty(), "messaging topic cannot be empty");
         assert!(!self.routes.contains_key(&topic), "duplicate messaging topic `{topic}`");
-        let route: Arc<dyn ErasedRoute<P>> = Arc::new(Route::<P, O, D, Q> {
+        let route: Arc<dyn ErasedRoute<P>> = Arc::new(Route::<P, H, D, Q> {
             decoder: binding.decoder,
             projector: binding.projector,
             marker: PhantomData,
@@ -300,7 +292,7 @@ impl<P: Provider> Router<P> {
             .routes
             .get(topic)
             .ok_or_else(|| DeliveryError::UnhandledTopic(topic.to_owned()))?;
-        route.dispatch(&delivery, &self.invoker).await
+        route.dispatch(&delivery, &self.client).await
     }
 }
 
@@ -314,7 +306,7 @@ impl<P: Provider> Router<P> {
 ///
 /// Returns the projected WIT delivery failure.
 #[cfg(target_arch = "wasm32")]
-pub async fn handle<P: Provider>(
+pub async fn handle<P: Send + Sync + 'static>(
     router: &Router<P>, message: omnia_wasi_messaging::types::Message,
 ) -> Result<(), omnia_wasi_messaging::types::Error> {
     let delivery = Delivery {

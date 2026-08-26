@@ -13,10 +13,7 @@ use tracing::Instrument as _;
 
 use super::builder::{Binding, Decoder, Outcome, Projector};
 use super::response::CommandResponse;
-use crate::api::Provider;
-use crate::api::invocation::{Invocation, Metadata};
-use crate::api::invoke::Invoker;
-use crate::api::operation::Operation;
+use crate::api::{Client, Handler, Metadata};
 
 const COMPLETIONS: &str = "completions";
 
@@ -230,7 +227,7 @@ fn join(path: &[String]) -> String {
 type DispatchFuture<'a> = Pin<Box<dyn Future<Output = CommandResponse> + Send + 'a>>;
 type BeforeDispatch<G> = Arc<dyn Fn(&G) -> Option<CommandResponse> + Send + Sync>;
 
-trait ErasedRoute<P: Provider, G>: Send + Sync {
+trait ErasedRoute<P: Send + Sync + 'static, G>: Send + Sync {
     fn operation(&self) -> TypeId;
     fn about(&self) -> Option<&'static str>;
     fn long_about(&self) -> Option<&'static str>;
@@ -239,7 +236,7 @@ trait ErasedRoute<P: Provider, G>: Send + Sync {
     fn argument_keys(&self) -> Vec<String>;
     fn command(&self, name: &'static str) -> Command;
     fn dispatch<'a>(
-        &'a self, matches: &'a ArgMatches, globals: &'a G, invoker: &'a Invoker<P>,
+        &'a self, matches: &'a ArgMatches, globals: &'a G, client: &'a Client<P>,
         metadata: &'a Metadata,
     ) -> DispatchFuture<'a>;
 }
@@ -251,11 +248,11 @@ struct Route<P, G, A, O, D, Q> {
 
 impl<P, G, A, O, D, Q> ErasedRoute<P, G> for Route<P, G, A, O, D, Q>
 where
-    P: Provider,
+    P: Send + Sync + 'static,
     G: Send + Sync + 'static,
     A: Args + FromArgMatches + Send + 'static,
-    O: Operation<P>,
-    D: Decoder<A, O::Input, G>,
+    O: Handler<P> + 'static,
+    D: Decoder<A, O, G>,
     Q: Projector<O::Output, O::Error, D::Error, G>,
 {
     fn operation(&self) -> TypeId {
@@ -298,7 +295,7 @@ where
     }
 
     fn dispatch<'a>(
-        &'a self, matches: &'a ArgMatches, globals: &'a G, invoker: &'a Invoker<P>,
+        &'a self, matches: &'a ArgMatches, globals: &'a G, client: &'a Client<P>,
         metadata: &'a Metadata,
     ) -> DispatchFuture<'a> {
         Box::pin(async move {
@@ -312,8 +309,7 @@ where
                     return project(&self.binding.projector, Outcome::Decode(error), globals);
                 }
             };
-            let invocation = Invocation::new(input).metadata(metadata.clone());
-            let outcome = match invoker.invoke::<O>(invocation).await {
+            let outcome = match client.call(input, metadata).await {
                 Ok(output) => Outcome::Output(output),
                 Err(error) => Outcome::Operation(error),
             };
@@ -332,7 +328,7 @@ where
     }
 }
 
-struct Registration<P: Provider, G> {
+struct Registration<P: Send + Sync + 'static, G> {
     path: Vec<&'static str>,
     route: Arc<dyn ErasedRoute<P, G>>,
 }
@@ -342,13 +338,13 @@ struct NamespaceEntry {
     metadata: Namespace,
 }
 
-struct Node<P: Provider, G> {
+struct Node<P: Send + Sync + 'static, G> {
     leaf: Option<Arc<dyn ErasedRoute<P, G>>>,
     children: BTreeMap<&'static str, Self>,
     namespace: Option<Namespace>,
 }
 
-impl<P: Provider, G> Default for Node<P, G> {
+impl<P: Send + Sync + 'static, G> Default for Node<P, G> {
     fn default() -> Self {
         Self {
             leaf: None,
@@ -363,10 +359,10 @@ impl<P: Provider, G> Default for Node<P, G> {
 /// [`build`](Self::build) validates the registrations and produces the
 /// executable [`Router`], following the `ClientBuilder` → `Client`
 /// convention.
-pub struct RouterBuilder<P: Provider, G = NoGlobals> {
+pub struct RouterBuilder<P: Send + Sync + 'static, G = NoGlobals> {
     command: Command,
     completions: Completions,
-    invoker: Invoker<P>,
+    client: Client<P>,
     before_dispatch: Option<BeforeDispatch<G>>,
     registrations: Vec<Registration<P, G>>,
     namespaces: Vec<NamespaceEntry>,
@@ -374,7 +370,7 @@ pub struct RouterBuilder<P: Provider, G = NoGlobals> {
 
 impl<P, G> RouterBuilder<P, G>
 where
-    P: Provider,
+    P: Send + Sync + 'static,
     G: Args + FromArgMatches + Send + Sync + 'static,
 {
     /// Create an empty router builder over a clap root command.
@@ -383,11 +379,11 @@ where
     /// the builder appends the route grammar and the synthetic
     /// completions command to it.
     #[must_use]
-    pub fn new(command: Command, invoker: Invoker<P>) -> Self {
+    pub fn new(command: Command, client: Client<P>) -> Self {
         Self {
             command,
             completions: Completions::new(),
-            invoker,
+            client,
             before_dispatch: None,
             registrations: Vec::new(),
             namespaces: Vec::new(),
@@ -432,8 +428,8 @@ where
     where
         I: IntoIterator<Item = &'static str>,
         A: Args + FromArgMatches + Send + 'static,
-        O: Operation<P>,
-        D: Decoder<A, O::Input, G>,
+        O: Handler<P> + 'static,
+        D: Decoder<A, O, G>,
         Q: Projector<O::Output, O::Error, D::Error, G>,
     {
         self.registrations.push(Registration {
@@ -496,7 +492,7 @@ where
         route_infos.sort_by(|left, right| left.selector.cmp(&right.selector));
         Ok(Router {
             command,
-            invoker: self.invoker,
+            client: self.client,
             before_dispatch: self.before_dispatch,
             routes,
             inventory: route_infos,
@@ -508,9 +504,9 @@ where
 ///
 /// Constructed by [`RouterBuilder::build`]; always holds a validated
 /// grammar, so execution has no unbuilt state.
-pub struct Router<P: Provider, G = NoGlobals> {
+pub struct Router<P: Send + Sync + 'static, G = NoGlobals> {
     command: Command,
-    invoker: Invoker<P>,
+    client: Client<P>,
     before_dispatch: Option<BeforeDispatch<G>>,
     routes: BTreeMap<Vec<String>, Arc<dyn ErasedRoute<P, G>>>,
     inventory: Vec<RouteInfo>,
@@ -518,7 +514,7 @@ pub struct Router<P: Provider, G = NoGlobals> {
 
 impl<P, G> Router<P, G>
 where
-    P: Provider,
+    P: Send + Sync + 'static,
     G: Args + FromArgMatches + Send + Sync + 'static,
 {
     /// Return the assembled clap grammar.
@@ -585,7 +581,7 @@ where
                 // Uniform with HTTP and messaging: the transport mints the
                 // invocation's request id, which doubles as correlation id.
                 let metadata = Metadata::minted(format!("{:032x}", rand::random::<u128>()));
-                route.dispatch(leaf_matches, &globals, &self.invoker, &metadata).await
+                route.dispatch(leaf_matches, &globals, &self.client, &metadata).await
             }
             None => CommandResponse::failure("command route was not registered\n", 1),
         }
@@ -604,7 +600,7 @@ where
 #[cfg(target_arch = "wasm32")]
 pub async fn execute_wasi<P, G>(router: &Router<P, G>) -> Result<(), ()>
 where
-    P: Provider,
+    P: Send + Sync + 'static,
     G: Args + FromArgMatches + Send + Sync + 'static,
 {
     let _guard = omnia_wasi_otel::init();
@@ -646,7 +642,7 @@ fn argument_keys(command: &Command) -> BTreeSet<String> {
         .collect()
 }
 
-fn insert<P: Provider, G>(
+fn insert<P: Send + Sync + 'static, G>(
     root: &mut Node<P, G>, registration: &Registration<P, G>,
 ) -> Result<(), BuildError> {
     if registration.path.is_empty() {
@@ -680,7 +676,7 @@ fn insert<P: Provider, G>(
     Ok(())
 }
 
-fn apply_namespace<P: Provider, G>(
+fn apply_namespace<P: Send + Sync + 'static, G>(
     root: &mut Node<P, G>, registration: &NamespaceEntry,
 ) -> Result<(), BuildError> {
     let path: Vec<_> = registration.path.iter().map(ToString::to_string).collect();
@@ -710,7 +706,9 @@ fn apply_namespace<P: Provider, G>(
     Ok(())
 }
 
-fn validate_aliases<P: Provider, G>(node: &Node<P, G>, path: &[String]) -> Result<(), BuildError> {
+fn validate_aliases<P: Send + Sync + 'static, G>(
+    node: &Node<P, G>, path: &[String],
+) -> Result<(), BuildError> {
     // Child names are unique by map key; only aliases can collide.
     let mut names: BTreeSet<&str> = node.children.keys().copied().collect();
     for child in node.children.values() {
@@ -730,7 +728,7 @@ fn validate_aliases<P: Provider, G>(node: &Node<P, G>, path: &[String]) -> Resul
     Ok(())
 }
 
-fn check_global_args<P: Provider, G>(
+fn check_global_args<P: Send + Sync + 'static, G>(
     node: &Node<P, G>, globals: &BTreeSet<String>, path: &mut Vec<String>,
 ) -> Result<(), BuildError> {
     if let Some(route) = &node.leaf
@@ -747,7 +745,7 @@ fn check_global_args<P: Provider, G>(
     Ok(())
 }
 
-fn node_command<P: Provider, G>(name: &'static str, node: &Node<P, G>) -> Command {
+fn node_command<P: Send + Sync + 'static, G>(name: &'static str, node: &Node<P, G>) -> Command {
     let mut command =
         node.leaf.as_ref().map_or_else(|| Command::new(name), |route| route.command(name));
     if let Some(namespace) = node.namespace {
@@ -772,7 +770,7 @@ fn completions_command(metadata: Completions) -> Command {
     command.arg(Arg::new("shell").required(true).value_parser(clap::value_parser!(Shell)))
 }
 
-fn inventory<P: Provider, G>(registrations: &[Registration<P, G>]) -> Vec<RouteInfo> {
+fn inventory<P: Send + Sync + 'static, G>(registrations: &[Registration<P, G>]) -> Vec<RouteInfo> {
     registrations
         .iter()
         .map(|registration| RouteInfo {

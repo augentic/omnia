@@ -1,5 +1,5 @@
 #[omnia_guest_macros::operation(name = "custom_span")]
-async fn handler<P>(input: Message, context: CallContext<'_, P>) -> Result<()> {
+async fn handler<P>(input: Message, context: Context<'_, P>) -> Result<()> {
     Ok(())
 }
 

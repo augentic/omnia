@@ -1,8 +1,8 @@
 //! # CLI Command Wasm Guest
 //!
-//! A `wasi:cli/command` reactor with explicit operation routes built by
+//! A `wasi:cli/command` reactor with explicit handler routes built by
 //! `omnia_guest::api::command`. The guest owns the `wasi:cli/run@0.3.0` export and calls
-//! the command adapter once; typed operations remain independent of argv,
+//! the command adapter once; typed handlers remain independent of argv,
 //! output, and exit-code policy.
 //!
 //! The module is `#[cfg(target_arch = "wasm32")]`-guarded because examples
@@ -18,8 +18,7 @@ use clap::{Args, Command};
 use omnia_guest::api::command::{
     self, CommandResponse, NoGlobals, Outcome, Projector, Router, RouterBuilder,
 };
-use omnia_guest::api::invoke::{CallContext, Invoker};
-use omnia_guest::api::operation::Operation;
+use omnia_guest::api::{Client, Context, Handler};
 use wasip3::exports::cli::run::Guest;
 
 #[derive(Args)]
@@ -118,57 +117,40 @@ impl fmt::Display for CommandError {
 
 impl Error for CommandError {}
 
-struct Greet;
-struct Add;
-struct Env;
-struct Fail;
-
-impl Operation<Provider> for Greet {
+impl Handler<Provider> for GreetInput {
     type Error = CommandError;
-    type Input = GreetInput;
     type Output = String;
 
-    async fn call(
-        input: Self::Input, context: CallContext<'_, Provider>,
-    ) -> Result<Self::Output, Self::Error> {
-        Ok(format!("{}, {}!\n", context.provider.greeting, input.name))
+    async fn handle(self, context: Context<'_, Provider>) -> Result<Self::Output, Self::Error> {
+        Ok(format!("{}, {}!\n", context.provider.greeting, self.name))
     }
 }
 
-impl Operation<Provider> for Add {
+impl Handler<Provider> for AddInput {
     type Error = CommandError;
-    type Input = AddInput;
     type Output = String;
 
-    async fn call(
-        input: Self::Input, _context: CallContext<'_, Provider>,
-    ) -> Result<Self::Output, Self::Error> {
-        Ok(format!("{}\n", input.numbers.iter().sum::<i64>()))
+    async fn handle(self, _context: Context<'_, Provider>) -> Result<Self::Output, Self::Error> {
+        Ok(format!("{}\n", self.numbers.iter().sum::<i64>()))
     }
 }
 
-impl Operation<Provider> for Env {
+impl Handler<Provider> for EnvInput {
     type Error = CommandError;
-    type Input = EnvInput;
     type Output = String;
 
-    async fn call(
-        _input: Self::Input, _context: CallContext<'_, Provider>,
-    ) -> Result<Self::Output, Self::Error> {
+    async fn handle(self, _context: Context<'_, Provider>) -> Result<Self::Output, Self::Error> {
         let output = std::env::vars().map(|(key, value)| format!("{key}={value}\n")).collect();
         Ok(output)
     }
 }
 
-impl Operation<Provider> for Fail {
+impl Handler<Provider> for FailInput {
     type Error = CommandError;
-    type Input = FailInput;
     type Output = String;
 
-    async fn call(
-        input: Self::Input, _context: CallContext<'_, Provider>,
-    ) -> Result<Self::Output, Self::Error> {
-        Err(input.code.map_or(CommandError::Plain, CommandError::Exit))
+    async fn handle(self, _context: Context<'_, Provider>) -> Result<Self::Output, Self::Error> {
+        Err(self.code.map_or(CommandError::Plain, CommandError::Exit))
     }
 }
 
@@ -198,27 +180,27 @@ fn router() -> Router<Provider> {
         Command::new("cli")
             .version(env!("CARGO_PKG_VERSION"))
             .about("Omnia wasi:cli/command example"),
-        Invoker::new("examples", Provider { greeting: "Hello" }),
+        Client::new("examples", Provider { greeting: "Hello" }),
     )
     .route(
         ["greet"],
-        command::run::<GreetArgs, Greet>().about("Print a greeting").project_with(Text),
+        command::run::<GreetArgs, GreetInput>().about("Print a greeting").project_with(Text),
     )
     .route(
         ["add"],
-        command::run::<AddArgs, Add>()
+        command::run::<AddArgs, AddInput>()
             .about("Print the sum of the integer arguments")
             .project_with(Text),
     )
     .route(
         ["env"],
-        command::run::<EnvArgs, Env>()
+        command::run::<EnvArgs, EnvInput>()
             .about("Print the inherited environment, one key=value per line")
             .project_with(Text),
     )
     .route(
         ["fail"],
-        command::run::<FailArgs, Fail>()
+        command::run::<FailArgs, FailInput>()
             .about("Exit with CODE via wasi:cli/exit, or fail plainly (exit 1) without it")
             .project_with(Text),
     )
