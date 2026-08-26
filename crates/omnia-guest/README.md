@@ -46,6 +46,20 @@ fn router() -> Router<MyProvider> {
 }
 ```
 
+Instead of writing the impl by hand, `#[omnia_guest::handler]` derives it from a bare `async fn` taking the owned input and a `Context<'_, P>`:
+
+```rust,ignore
+#[omnia_guest::handler]
+async fn create_item<P>(
+    input: CreateItem, context: Context<'_, P>,
+) -> omnia_guest::Result<ItemResponse>
+where
+    P: Send + Sync + 'static,
+{
+    // ...
+}
+```
+
 `Client` owns the provider and supplies `Context` (owner, provider, metadata) when it calls the handler. The application owns its WASI export explicitly:
 
 ```rust,ignore
@@ -71,6 +85,10 @@ let router = Router::new(Client::new("my-org", MyProvider))
 ```
 
 `consume` decodes JSON and acknowledges successful output.
+
+### Custom codecs
+
+`get`/`post`/`consume` are JSON defaults. When a route speaks another wire format, supply the codec yourself: `get_with`/`post_with` take a decoder `Fn(RawRequest<'_>) -> Result<H, DecodeError>` over the raw request (path parameters, query, headers, body) and an encoder `Fn(H::Output) -> Response` (reuse `api::http::json` for JSON output), and `consume_with` takes a decoder `Fn(&Delivery) -> Result<H, DecodeError>` over the whole delivery. Errors keep flowing through `Into<HttpError>`; `HttpError::with_body` carries a preformatted error body (e.g. an XML document) with its content type.
 
 Command-mode guests parse argv with clap and call `Client::call` on the same handlers. Wrap the clap dispatch in `command::execute_wasi` so guest telemetry is initialized and flushed. Omnia creates a fresh component instance for each command invocation.
 

@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use serde::de::DeserializeOwned;
 
-use crate::api::{Client, Handler, Metadata};
+use crate::api::{Client, DecodeError, Handler, Metadata};
 
 /// An owned inbound delivery independent of a messaging binding.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -49,12 +49,31 @@ impl fmt::Display for DeliveryError {
 impl Error for DeliveryError {}
 
 /// A typed messaging route awaiting a topic.
-pub struct Consume<H>(PhantomData<fn() -> H>);
+pub struct Consume<H, D> {
+    decode: D,
+    marker: PhantomData<fn() -> H>,
+}
+
+/// Create a messaging route with a custom delivery decoder.
+#[must_use]
+pub fn consume_with<H, D>(decode: D) -> Consume<H, D>
+where
+    D: Fn(&Delivery) -> Result<H, DecodeError> + Send + Sync + 'static,
+{
+    Consume {
+        decode,
+        marker: PhantomData,
+    }
+}
 
 /// Create a JSON-decoded messaging route.
 #[must_use]
-pub fn consume<H>() -> Consume<H> {
-    Consume(PhantomData)
+pub fn consume<H: DeserializeOwned>()
+-> Consume<H, impl Fn(&Delivery) -> Result<H, DecodeError> + Send + Sync + 'static> {
+    consume_with(|delivery: &Delivery| {
+        serde_json::from_slice(&delivery.payload)
+            .map_err(|error| DecodeError::new(format!("malformed JSON payload: {error}")))
+    })
 }
 
 type DispatchFuture<'a> = Pin<Box<dyn Future<Output = Result<(), DeliveryError>> + Send + 'a>>;
@@ -63,16 +82,20 @@ trait ErasedRoute<P: Send + Sync + 'static>: Send + Sync {
     fn dispatch<'a>(&'a self, delivery: &'a Delivery, client: &'a Client<P>) -> DispatchFuture<'a>;
 }
 
-struct Route<P, H>(PhantomData<fn(P) -> H>);
+struct Route<P, H, D> {
+    decode: D,
+    marker: PhantomData<fn(P) -> H>,
+}
 
-impl<P, H> ErasedRoute<P> for Route<P, H>
+impl<P, H, D> ErasedRoute<P> for Route<P, H, D>
 where
     P: Send + Sync + 'static,
-    H: Handler<P> + DeserializeOwned + 'static,
+    H: Handler<P> + 'static,
+    D: Fn(&Delivery) -> Result<H, DecodeError> + Send + Sync + 'static,
 {
     fn dispatch<'a>(&'a self, delivery: &'a Delivery, client: &'a Client<P>) -> DispatchFuture<'a> {
         Box::pin(async move {
-            let input = decode_json::<H>(delivery)
+            let input = (self.decode)(delivery)
                 .map_err(|error| DeliveryError::Rejected(error.to_string()))?;
             let metadata = Metadata::from_lookup(|name| {
                 delivery
@@ -88,10 +111,6 @@ where
                 .map_err(|error| DeliveryError::Rejected(error.to_string()))
         })
     }
-}
-
-fn decode_json<H: DeserializeOwned>(delivery: &Delivery) -> Result<H, serde_json::Error> {
-    serde_json::from_slice(&delivery.payload)
 }
 
 /// An exact-topic messaging router.
@@ -116,14 +135,21 @@ impl<P: Send + Sync + 'static> Router<P> {
     ///
     /// Panics when the topic is empty or already registered.
     #[must_use]
-    pub fn route<H>(mut self, topic: impl Into<String>, _: Consume<H>) -> Self
+    pub fn route<H, D>(mut self, topic: impl Into<String>, consume: Consume<H, D>) -> Self
     where
-        H: Handler<P> + DeserializeOwned + 'static,
+        H: Handler<P> + 'static,
+        D: Fn(&Delivery) -> Result<H, DecodeError> + Send + Sync + 'static,
     {
         let topic = topic.into();
         assert!(!topic.is_empty(), "messaging topic cannot be empty");
         assert!(!self.routes.contains_key(&topic), "duplicate messaging topic `{topic}`");
-        self.routes.insert(topic, Arc::new(Route::<P, H>(PhantomData)));
+        self.routes.insert(
+            topic,
+            Arc::new(Route::<P, H, D> {
+                decode: consume.decode,
+                marker: PhantomData,
+            }),
+        );
         self
     }
 

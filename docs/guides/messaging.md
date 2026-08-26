@@ -50,6 +50,8 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
 
 The guest router matches registered topics exactly; broker subscription patterns remain host configuration (`KAFKA_TOPICS`, `NATS_TOPICS`). `consume` decodes JSON and acknowledges successful handler output. The current WIT handler returns only `result<_, error>`: `Ok(())` acknowledges, while handler failures return `error.other` for host-defined retry or rejection behavior. In multi-guest deployments, each guest's `routes.messaging` patterns select it by NATS-style topic match — see [Multi-Guest Deployments](multi-guest-deployments.md#routing-inbound-traffic).
 
+For non-JSON payloads, register the route with `consume_with` instead: it takes a decoder closure `Fn(&Delivery) -> Result<H, DecodeError>` that sees the whole delivery (payload, `content_type`, metadata), and a decode failure rejects the message just as malformed JSON does under `consume`.
+
 ## Request-reply
 
 The requester sends and awaits a reply on the same call; the handler replies to the inbound message:

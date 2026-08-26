@@ -1,8 +1,10 @@
 //! Typed HTTP routing over application handlers.
 
-use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 
 use axum::Router as AxumRouter;
+use axum::body::Bytes;
 use axum::extract::{RawPathParams, RawQuery, State};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{self, MethodRouter};
@@ -11,38 +13,17 @@ use http::{HeaderMap, HeaderValue, StatusCode};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+pub use crate::api::DecodeError;
 use crate::api::{Client, Handler, Metadata};
 
 /// Result type for HTTP handlers.
 pub type HttpResult<T, E = HttpError> = Result<T, E>;
 
-/// A request that could not be converted to handler input.
-#[derive(Debug)]
-pub struct DecodeError {
-    description: String,
-}
-
-impl DecodeError {
-    /// Describe why the request could not be decoded.
-    #[must_use]
-    pub fn description(&self) -> &str {
-        &self.description
-    }
-}
-
-impl fmt::Display for DecodeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.description)
-    }
-}
-
-impl std::error::Error for DecodeError {}
-
 impl From<DecodeError> for HttpError {
     fn from(error: DecodeError) -> Self {
         crate::Error::BadRequest {
             code: "invalid_request".to_string(),
-            description: error.description,
+            description: error.description().to_owned(),
         }
         .into()
     }
@@ -53,15 +34,27 @@ impl From<DecodeError> for HttpError {
 pub struct HttpError {
     status: StatusCode,
     error: String,
+    body: Option<(HeaderValue, Vec<u8>)>,
 }
 
 impl HttpError {
-    /// Create an HTTP error.
+    /// Create a plain-text HTTP error.
     #[must_use]
     pub fn new(status: StatusCode, message: impl Into<String>) -> Self {
         Self {
             status,
             error: message.into(),
+            body: None,
+        }
+    }
+
+    /// Create an HTTP error carrying a preformatted wire body.
+    #[must_use]
+    pub const fn with_body(status: StatusCode, content_type: HeaderValue, body: Vec<u8>) -> Self {
+        Self {
+            status,
+            error: String::new(),
+            body: Some((content_type, body)),
         }
     }
 }
@@ -88,7 +81,12 @@ impl From<anyhow::Error> for HttpError {
 
 impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
-        (self.status, self.error).into_response()
+        match self.body {
+            Some((content_type, body)) => {
+                (self.status, [(CONTENT_TYPE, content_type)], body).into_response()
+            }
+            None => (self.status, self.error).into_response(),
+        }
     }
 }
 
@@ -147,7 +145,53 @@ pub async fn serve<P: Send + Sync + 'static>(
     omnia_wasi_http::serve(router.into_axum(), request).await
 }
 
-/// Create a GET route.
+/// A borrowed raw-request view handed to route decoders.
+#[derive(Debug)]
+pub struct RawRequest<'a> {
+    /// Path parameters in path order.
+    pub path_params: &'a [(String, String)],
+
+    /// The raw query string, when present.
+    pub query: Option<&'a str>,
+
+    /// The request headers.
+    pub headers: &'a HeaderMap,
+
+    /// The raw request body (empty for typical GETs).
+    pub body: &'a [u8],
+}
+
+/// Create a GET route with a custom decoder and encoder.
+#[must_use]
+pub fn get_with<H, P, D, E>(decode: D, encode: E) -> MethodRoute<P>
+where
+    H: Handler<P> + 'static,
+    H::Error: Into<HttpError>,
+    D: Fn(RawRequest<'_>) -> Result<H, DecodeError> + Clone + Send + Sync + 'static,
+    E: Fn(H::Output) -> Response + Clone + Send + Sync + 'static,
+    P: Send + Sync + 'static,
+{
+    MethodRoute {
+        inner: routing::get(route_handler(decode, encode)),
+    }
+}
+
+/// Create a POST route with a custom decoder and encoder.
+#[must_use]
+pub fn post_with<H, P, D, E>(decode: D, encode: E) -> MethodRoute<P>
+where
+    H: Handler<P> + 'static,
+    H::Error: Into<HttpError>,
+    D: Fn(RawRequest<'_>) -> Result<H, DecodeError> + Clone + Send + Sync + 'static,
+    E: Fn(H::Output) -> Response + Clone + Send + Sync + 'static,
+    P: Send + Sync + 'static,
+{
+    MethodRoute {
+        inner: routing::post(route_handler(decode, encode)),
+    }
+}
+
+/// Create a GET route decoding path and query parameters as JSON input.
 #[must_use]
 pub fn get<H, P>() -> MethodRoute<P>
 where
@@ -156,20 +200,10 @@ where
     H::Error: Into<HttpError>,
     P: Send + Sync + 'static,
 {
-    MethodRoute {
-        inner: routing::get(
-            |State(client): State<Client<P>>,
-             params: RawPathParams,
-             RawQuery(query): RawQuery,
-             headers: HeaderMap| async move {
-                let input = query_input::<H>(&params, query.as_deref());
-                invoke::<H, P>(&client, headers, input).await
-            },
-        ),
-    }
+    get_with(|raw: RawRequest<'_>| query_input::<H>(raw.path_params, raw.query), json)
 }
 
-/// Create a POST route.
+/// Create a POST route decoding a JSON body merged with path parameters.
 #[must_use]
 pub fn post<H, P>() -> MethodRoute<P>
 where
@@ -178,42 +212,58 @@ where
     H::Error: Into<HttpError>,
     P: Send + Sync + 'static,
 {
-    MethodRoute {
-        inner: routing::post(
-            |State(client): State<Client<P>>,
-             params: RawPathParams,
-             headers: HeaderMap,
-             body: axum::body::Bytes| async move {
-                let input = body_input::<H>(&params, &body);
-                invoke::<H, P>(&client, headers, input).await
-            },
-        ),
-    }
+    post_with(|raw: RawRequest<'_>| body_input::<H>(raw.path_params, raw.body), json)
 }
 
-async fn invoke<H, P>(
-    client: &Client<P>, headers: HeaderMap, input: Result<H, DecodeError>,
-) -> Response
+type RouteFuture = Pin<Box<dyn Future<Output = Response> + Send>>;
+
+fn route_handler<H, P, D, E>(
+    decode: D, encode: E,
+) -> impl Fn(State<Client<P>>, RawPathParams, RawQuery, HeaderMap, Bytes) -> RouteFuture
++ Clone
++ Send
++ Sync
++ 'static
 where
-    H: Handler<P>,
-    H::Output: Serialize,
+    H: Handler<P> + 'static,
     H::Error: Into<HttpError>,
+    D: Fn(RawRequest<'_>) -> Result<H, DecodeError> + Clone + Send + Sync + 'static,
+    E: Fn(H::Output) -> Response + Clone + Send + Sync + 'static,
     P: Send + Sync + 'static,
 {
-    let input = match input {
-        Ok(input) => input,
-        Err(error) => return HttpError::from(error).into_response(),
-    };
-    let metadata = Metadata::from_lookup(|name| {
-        headers.get(format!("x-{name}")).and_then(|value| value.to_str().ok()).map(str::to_owned)
-    });
-    match client.call(input, &metadata).await {
-        Ok(output) => json_output(output),
-        Err(error) => Into::<HttpError>::into(error).into_response(),
+    move |State(client), params, RawQuery(query), headers, body| {
+        let decode = decode.clone();
+        let encode = encode.clone();
+        Box::pin(async move {
+            let path_params: Vec<(String, String)> =
+                params.iter().map(|(key, value)| (key.to_owned(), value.to_owned())).collect();
+            let raw = RawRequest {
+                path_params: &path_params,
+                query: query.as_deref(),
+                headers: &headers,
+                body: &body,
+            };
+            let input = match decode(raw) {
+                Ok(input) => input,
+                Err(error) => return HttpError::from(error).into_response(),
+            };
+            let metadata = Metadata::from_lookup(|name| {
+                headers
+                    .get(format!("x-{name}"))
+                    .and_then(|value| value.to_str().ok())
+                    .map(str::to_owned)
+            });
+            match client.call(input, &metadata).await {
+                Ok(output) => encode(output),
+                Err(error) => Into::<HttpError>::into(error).into_response(),
+            }
+        })
     }
 }
 
-fn json_output<T: Serialize>(output: T) -> Response {
+/// Encode a handler output as a JSON response.
+#[must_use]
+pub fn json<T: Serialize>(output: T) -> Response {
     match serde_json::to_vec(&output) {
         Ok(body) => {
             (StatusCode::OK, [(CONTENT_TYPE, HeaderValue::from_static("application/json"))], body)
@@ -232,15 +282,14 @@ fn json_output<T: Serialize>(output: T) -> Response {
     }
 }
 
-const fn invalid(description: String) -> DecodeError {
-    DecodeError { description }
+fn invalid(description: String) -> DecodeError {
+    DecodeError::new(description)
 }
 
 fn query_input<T: DeserializeOwned>(
-    params: &RawPathParams, query: Option<&str>,
+    params: &[(String, String)], query: Option<&str>,
 ) -> Result<T, DecodeError> {
-    let mut pairs: Vec<(String, String)> =
-        params.iter().map(|(key, value)| (key.to_owned(), value.to_owned())).collect();
+    let mut pairs: Vec<(String, String)> = params.to_vec();
     if let Some(query) = query {
         let parsed: Vec<(String, String)> = serde_urlencoded::from_str(query)
             .map_err(|error| invalid(format!("malformed query string: {error}")))?;
@@ -252,7 +301,9 @@ fn query_input<T: DeserializeOwned>(
         .map_err(|error| invalid(format!("invalid request parameters: {error}")))
 }
 
-fn body_input<T: DeserializeOwned>(params: &RawPathParams, body: &[u8]) -> Result<T, DecodeError> {
+fn body_input<T: DeserializeOwned>(
+    params: &[(String, String)], body: &[u8],
+) -> Result<T, DecodeError> {
     let mut value = if body.is_empty() {
         serde_json::Value::Object(serde_json::Map::new())
     } else {
@@ -263,7 +314,7 @@ fn body_input<T: DeserializeOwned>(params: &RawPathParams, body: &[u8]) -> Resul
         return Err(invalid("the request body must be a JSON object".to_string()));
     };
     for (key, param) in params {
-        object.insert(key.to_owned(), serde_json::Value::String(param.to_owned()));
+        object.insert(key.clone(), serde_json::Value::String(param.clone()));
     }
     serde_json::from_value(value).map_err(|error| invalid(format!("invalid request body: {error}")))
 }

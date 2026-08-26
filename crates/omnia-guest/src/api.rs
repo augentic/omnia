@@ -42,6 +42,35 @@ pub mod messaging;
 
 pub use http::{HttpError, HttpResult};
 
+/// An input that could not be decoded into handler input.
+#[derive(Debug)]
+pub struct DecodeError {
+    description: String,
+}
+
+impl DecodeError {
+    /// Create a decode error from its description.
+    pub fn new(description: impl Into<String>) -> Self {
+        Self {
+            description: description.into(),
+        }
+    }
+
+    /// Describe why the input could not be decoded.
+    #[must_use]
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+}
+
+impl fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.description)
+    }
+}
+
+impl Error for DecodeError {}
+
 /// Transport-neutral invocation metadata.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Metadata {

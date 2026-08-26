@@ -180,6 +180,8 @@ impl Guest for Http {
 
 Messaging uses `api::messaging::Router` and `consume::<CreateItem>()`; topic matching is exact. The export remains visible application code and calls `api::messaging::handle`. Because the same handler types register in any router, one guest can expose the same logic over HTTP, messaging, and a CLI without duplicating it.
 
+Typed routes default to JSON. Routes that speak another wire format use the `_with` constructors instead: `http::get_with`/`http::post_with` take a decode closure over a raw-request view (path parameters, query, headers, body) plus an encode closure producing the response, and `messaging::consume_with` takes a decode closure over the whole `Delivery`. Errors keep flowing through `Into<HttpError>`, and `HttpError::with_body` carries a preformatted error body (e.g. an XML document) with its content type.
+
 ## Command-mode guests
 
 For run-once workloads (jobs, CLIs, agent tasks), parse argv with clap and call `Client::call` on the same [handler contract](#the-handler-contract). The guest still owns the explicit `wasi:cli/run` export; wrap the clap dispatch in `command::execute_wasi` so guest telemetry is initialized and flushed:

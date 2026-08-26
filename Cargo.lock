@@ -2038,6 +2038,7 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
+ "omnia-guest-macros",
  "omnia-wasi-blobstore",
  "omnia-wasi-config",
  "omnia-wasi-docstore",
@@ -2069,6 +2070,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.3",
+ "trybuild",
 ]
 
 [[package]]
