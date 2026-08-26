@@ -41,66 +41,60 @@ impl Workspace {
     }
 
     pub fn read(&self, path: String) -> FutureResult<Vec<u8>> {
-        self.run_blocking("read", move |dir| read(dir, &path))
+        self.with_dir(move |dir| {
+            let file = dir.open(&path).context("opening path in workspace")?;
+            let mut buf = Vec::new();
+            file.take(MAX_READ_BYTES + 1)
+                .read_to_end(&mut buf)
+                .context("reading path in workspace")?;
+
+            ensure!(
+                buf.len() as u64 <= MAX_READ_BYTES,
+                "file `{path}` exceeds workspace read limit"
+            );
+            Ok(buf)
+        })
     }
 
     pub fn list(&self, path: String) -> FutureResult<Vec<DirEntry>> {
-        self.run_blocking("list", move |dir| list(dir, &path))
+        self.with_dir(move |dir| {
+            let read_dir = if path.is_empty() || path == "." {
+                dir.entries().context("listing workspace root")?
+            } else {
+                dir.read_dir(&path).context("listing path in workspace")?
+            };
+
+            let mut entries = Vec::new();
+            for entry in read_dir {
+                let entry = entry.context("reading workspace directory entry")?;
+                ensure!(entries.len() < MAX_LIST_ENTRIES, "directory exceeds listing limit");
+
+                let is_directory = entry.file_type().is_ok_and(|file_type| file_type.is_dir());
+                entries.push(DirEntry {
+                    name: entry.file_name().to_string_lossy().into_owned(),
+                    is_directory,
+                });
+            }
+            Ok(entries)
+        })
     }
 
     pub fn write(&self, path: String, bytes: Vec<u8>) -> FutureResult<()> {
         if !self.writable {
             return future::err(anyhow!("workspace is read-only")).boxed();
         }
-        self.run_blocking("write", move |dir| write(dir, &path, &bytes))
+        self.with_dir(move |dir| {
+            ensure!(bytes.len() <= MAX_WRITE_BYTES, "write limit exceeded");
+            dir.write(&path, &bytes).with_context(|| format!("writing `{path}` in workspace"))
+        })
     }
 
-    fn run_blocking<R: Send + 'static>(
-        &self, op: &'static str, f: impl FnOnce(&Dir) -> anyhow::Result<R> + Send + 'static,
+    fn with_dir<R: Send + 'static>(
+        &self, f: impl FnOnce(&Dir) -> anyhow::Result<R> + Send + 'static,
     ) -> FutureResult<R> {
         let dir = Arc::clone(&self.dir);
-        async move {
-            spawn_blocking(move || f(&dir))
-                .await
-                .with_context(|| format!("workspace {op} task failed"))?
-        }
-        .boxed()
+        async move { spawn_blocking(move || f(&dir)).await? }.boxed()
     }
-}
-
-fn read(dir: &Dir, path: &str) -> anyhow::Result<Vec<u8>> {
-    let file = dir.open(path).context("opening path in workspace")?;
-    let mut buf = Vec::new();
-    file.take(MAX_READ_BYTES + 1).read_to_end(&mut buf).context("reading path in workspace")?;
-
-    ensure!(buf.len() as u64 <= MAX_READ_BYTES, "file `{path}` exceeds workspace read limit");
-    Ok(buf)
-}
-
-fn list(dir: &Dir, path: &str) -> anyhow::Result<Vec<DirEntry>> {
-    let read_dir = if path.is_empty() || path == "." {
-        dir.entries().context("listing workspace root")?
-    } else {
-        dir.read_dir(path).context("listing path in workspace")?
-    };
-
-    let mut entries = Vec::new();
-    for entry in read_dir {
-        let entry = entry.context("reading workspace directory entry")?;
-        ensure!(entries.len() < MAX_LIST_ENTRIES, "directory exceeds listing limit");
-
-        let is_directory = entry.file_type().is_ok_and(|file_type| file_type.is_dir());
-        entries.push(DirEntry {
-            name: entry.file_name().to_string_lossy().into_owned(),
-            is_directory,
-        });
-    }
-    Ok(entries)
-}
-
-fn write(dir: &Dir, path: &str, bytes: &[u8]) -> anyhow::Result<()> {
-    ensure!(bytes.len() <= MAX_WRITE_BYTES, "write limit exceeded");
-    dir.write(path, bytes).with_context(|| format!("writing `{path}` in workspace"))
 }
 
 // Resolve a lent workspace directory and grant into a [`Workspace`].
