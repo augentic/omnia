@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use axum::body::{Body, to_bytes};
 use axum::response::{IntoResponse, Response};
 use http::header::CONTENT_TYPE;
-use http::{HeaderValue, Method, Request, StatusCode};
+use http::{HeaderMap, HeaderValue, Method, Request, StatusCode};
 use omnia_guest::api::http::{RawRequest, Router, get, get_with, post, post_with};
 use omnia_guest::api::messaging::{
     Delivery, DeliveryError, Router as MessagingRouter, consume, consume_with,
@@ -548,12 +548,12 @@ impl<P: Send + Sync + 'static> Handler<P> for XmlGreet {
     }
 }
 
-fn xml_decode(raw: RawRequest<'_>) -> Result<XmlGreet, DecodeError> {
-    let content_type = raw.headers.get(CONTENT_TYPE).and_then(|value| value.to_str().ok());
+fn parse_greet(headers: &HeaderMap, body: &[u8]) -> Result<XmlGreet, DecodeError> {
+    let content_type = headers.get(CONTENT_TYPE).and_then(|value| value.to_str().ok());
     if content_type != Some("text/xml") {
         return Err(DecodeError::new("expected a text/xml request"));
     }
-    let body = std::str::from_utf8(raw.body)
+    let body = std::str::from_utf8(body)
         .map_err(|error| DecodeError::new(format!("body is not utf-8: {error}")))?;
     let start = body.find("<name>").map(|index| index + "<name>".len());
     let end = body.find("</name>");
@@ -565,18 +565,22 @@ fn xml_decode(raw: RawRequest<'_>) -> Result<XmlGreet, DecodeError> {
     }
 }
 
-fn xml_encode(greeting: String) -> Response {
-    (
-        StatusCode::OK,
-        [(CONTENT_TYPE, HeaderValue::from_static("text/xml; charset=utf-8"))],
-        format!("<greeting>{greeting}</greeting>"),
-    )
-        .into_response()
-}
-
 fn xml_router() -> axum::Router {
     Router::new(Client::new("xml", ()))
-        .route("/greet", post_with(xml_decode, xml_encode))
+        .route(
+            "/greet",
+            post_with(
+                |raw: RawRequest<'_>| parse_greet(raw.headers, raw.body),
+                |greeting: String| {
+                    (
+                        StatusCode::OK,
+                        [(CONTENT_TYPE, HeaderValue::from_static("text/xml; charset=utf-8"))],
+                        format!("<greeting>{greeting}</greeting>"),
+                    )
+                        .into_response()
+                },
+            ),
+        )
         .into_axum()
 }
 
