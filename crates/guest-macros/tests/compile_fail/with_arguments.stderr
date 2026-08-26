@@ -1,5 +1,0 @@
-error: #[operation] takes no arguments
- --> tests/compile_fail/with_arguments.rs:1:33
-  |
-1 | #[omnia_guest_macros::operation(name = "custom_span")]
-  |                                 ^^^^^^^^^^^^^^^^^^^^
