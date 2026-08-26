@@ -43,6 +43,20 @@ pub struct Transcript {
     pub turns: Vec<ToolTurn>,
 }
 
+/// A value extracted from a model text turn.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Candidate {
+    /// The value matches this format.
+    Valid(Value),
+    /// The value does not match this format.
+    Invalid {
+        /// The extracted value.
+        value: Value,
+        /// Why validation rejected it.
+        reason: String,
+    },
+}
+
 /// One recorded tool interaction within a completion's transcript.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolTurn {
@@ -117,37 +131,27 @@ impl Format {
         }
     }
 
-    /// Parse and validate a model's text turn.
+    /// Parse the best candidate from a model's text turn.
     ///
-    /// # Errors
-    ///
-    /// Returns a repair reason when the text does not match this format.
-    pub fn parse(&self, text: &str) -> Result<Value, String> {
-        let value = self.parse_candidate(text)?;
-        self.check(&value)?;
-        Ok(value)
-    }
-
-    /// Parse the best candidate even when it does not pass validation.
-    ///
-    /// This is only needed when a backend has exhausted its repair budget and
-    /// must return the candidate to the host's authoritative answer gate.
+    /// Prefers a value that passes [`Self::check`]; otherwise the last
+    /// extracted candidate. `Err` only when the text contains no candidate.
     ///
     /// # Errors
     ///
     /// Returns a repair reason when the text contains no candidate.
-    pub fn parse_candidate(&self, text: &str) -> Result<Value, String> {
+    pub fn parse(&self, text: &str) -> Result<Candidate, String> {
         match self {
-            Self::Text => Ok(Value::String(text.to_owned())),
+            Self::Text => Ok(Candidate::Valid(Value::String(text.to_owned()))),
             Self::Json | Self::Schema(_) => {
                 let mut last = None;
                 for json in maybe_json(text) {
-                    if self.check(&json).is_ok() {
-                        return Ok(json);
+                    match self.check(&json) {
+                        Ok(()) => return Ok(Candidate::Valid(json)),
+                        Err(reason) => last = Some((json, reason)),
                     }
-                    last = Some(json);
                 }
-                last.ok_or_else(|| "answer does not contain JSON".into())
+                last.map(|(value, reason)| Candidate::Invalid { value, reason })
+                    .ok_or_else(|| "answer does not contain JSON".into())
             }
         }
     }
@@ -237,13 +241,14 @@ fn maybe_json(text: &str) -> Vec<Value> {
 mod tests {
     use serde_json::json;
 
+    use super::Candidate;
     use crate::host::generated::omnia::model::completion::{Format, Schema};
 
     #[test]
     fn whole_json_document() {
         assert_eq!(
             Format::Json.parse(r#"{"verdict":"pass"}"#).unwrap(),
-            json!({ "verdict": "pass" })
+            Candidate::Valid(json!({ "verdict": "pass" }))
         );
         let err = Format::Json.parse("not json").unwrap_err();
         assert!(err.contains("does not contain JSON"), "unexpected: {err}");
@@ -252,13 +257,19 @@ mod tests {
     #[test]
     fn fenced_json() {
         let fenced = "```json\n{\"verdict\":\"pass\"}\n```";
-        assert_eq!(verdict_schema().parse(fenced).unwrap(), json!({ "verdict": "pass" }));
+        assert_eq!(
+            verdict_schema().parse(fenced).unwrap(),
+            Candidate::Valid(json!({ "verdict": "pass" }))
+        );
     }
 
     #[test]
     fn json_after_preamble() {
         let text = "Done.\n{\"verdict\":\"pass\"}\n";
-        assert_eq!(Format::Json.parse(text).unwrap(), json!({ "verdict": "pass" }));
+        assert_eq!(
+            Format::Json.parse(text).unwrap(),
+            Candidate::Valid(json!({ "verdict": "pass" }))
+        );
     }
 
     #[test]
@@ -266,40 +277,43 @@ mod tests {
         let text = "findings: []\n{\"outcome\":\"completed\",\"source\":\"model-assisted\"}";
         assert_eq!(
             report_schema().parse(text).unwrap(),
-            json!({ "outcome": "completed", "source": "model-assisted" })
+            Candidate::Valid(json!({ "outcome": "completed", "source": "model-assisted" }))
         );
     }
 
     #[test]
     fn invalid_fence_before_matching_candidate() {
         let text = "```json\n[]\n```\n{\"verdict\":\"pass\"}";
-        assert_eq!(verdict_schema().parse(text).unwrap(), json!({ "verdict": "pass" }));
+        assert_eq!(
+            verdict_schema().parse(text).unwrap(),
+            Candidate::Valid(json!({ "verdict": "pass" }))
+        );
     }
 
     #[test]
     fn invalid_candidate_survives_for_host_gate() {
-        let format = report_schema();
-        format.parse("[]").unwrap_err();
-        let value = format.parse_candidate("[]").unwrap();
+        let Candidate::Invalid { value, reason } = report_schema().parse("[]").unwrap() else {
+            panic!("expected an invalid candidate");
+        };
         assert_eq!(value, json!([]));
-
-        let err = format.check(&value).unwrap_err();
-        assert!(err.contains("does not conform to schema `phase-report`"), "unexpected: {err}");
-        assert!(err.contains("at root"), "unexpected: {err}");
+        assert!(reason.contains("does not conform to schema `phase-report`"), "unexpected: {reason}");
+        assert!(reason.contains("at root"), "unexpected: {reason}");
     }
 
     #[test]
     fn embedded_json_is_not_a_matching_candidate() {
         let format = verdict_schema();
         let fenced = r#"{"note":"```json\n{\"verdict\":\"pass\"}\n```"}"#;
-        let value = format.parse_candidate(fenced).unwrap();
+        let Candidate::Invalid { value, .. } = format.parse(fenced).unwrap() else {
+            panic!("expected an invalid candidate");
+        };
         assert_eq!(value, json!({ "note": "```json\n{\"verdict\":\"pass\"}\n```" }));
-        assert!(format.check(&value).is_err());
 
         let quoted = r#""use {\"verdict\":\"pass\"} as the answer""#;
-        let value = format.parse_candidate(quoted).unwrap();
+        let Candidate::Invalid { value, .. } = format.parse(quoted).unwrap() else {
+            panic!("expected an invalid candidate");
+        };
         assert_eq!(value, json!("use {\"verdict\":\"pass\"} as the answer"));
-        assert!(format.check(&value).is_err());
     }
 
     #[test]
