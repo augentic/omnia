@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use anyhow::{Context as _, anyhow};
+use anyhow::anyhow;
 use futures::{FutureExt as _, future};
 use omnia::HasMounts;
 use wasmtime::component::{Accessor, FutureReader, StreamReader};

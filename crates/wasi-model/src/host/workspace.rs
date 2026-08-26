@@ -40,6 +40,21 @@ impl Workspace {
         &self.local_path
     }
 
+    pub fn read(&self, path: String) -> FutureResult<Vec<u8>> {
+        self.run_blocking("read", move |dir| read(dir, &path))
+    }
+
+    pub fn list(&self, path: String) -> FutureResult<Vec<DirEntry>> {
+        self.run_blocking("list", move |dir| list(dir, &path))
+    }
+
+    pub fn write(&self, path: String, bytes: Vec<u8>) -> FutureResult<()> {
+        if !self.writable {
+            return future::err(anyhow!("workspace is read-only")).boxed();
+        }
+        self.run_blocking("write", move |dir| write(dir, &path, &bytes))
+    }
+
     fn run_blocking<R: Send + 'static>(
         &self, op: &'static str, f: impl FnOnce(&Dir) -> anyhow::Result<R> + Send + 'static,
     ) -> FutureResult<R> {
@@ -51,22 +66,41 @@ impl Workspace {
         }
         .boxed()
     }
+}
 
-    pub fn read(&self, path: String) -> FutureResult<Vec<u8>> {
-        self.run_blocking("read", move |dir| read_blocking(dir, &path))
-    }
+fn read(dir: &Dir, path: &str) -> anyhow::Result<Vec<u8>> {
+    let file = dir.open(path).context("opening path in workspace")?;
+    let mut buf = Vec::new();
+    file.take(MAX_READ_BYTES + 1).read_to_end(&mut buf).context("reading path in workspace")?;
 
-    pub fn list(&self, path: String) -> FutureResult<Vec<DirEntry>> {
-        self.run_blocking("list", move |dir| list_blocking(dir, &path))
-    }
+    ensure!(buf.len() as u64 <= MAX_READ_BYTES, "file `{path}` exceeds workspace read limit");
+    Ok(buf)
+}
 
-    pub fn write(&self, path: String, bytes: Vec<u8>) -> FutureResult<()> {
-        if !self.writable {
-            return future::err(anyhow!("workspace is read-only; write to `{path}` denied"))
-                .boxed();
-        }
-        self.run_blocking("write", move |dir| write_blocking(dir, &path, &bytes))
+fn list(dir: &Dir, path: &str) -> anyhow::Result<Vec<DirEntry>> {
+    let read_dir = if path.is_empty() || path == "." {
+        dir.entries().context("listing workspace root")?
+    } else {
+        dir.read_dir(path).context("listing path in workspace")?
+    };
+
+    let mut entries = Vec::new();
+    for entry in read_dir {
+        let entry = entry.context("reading workspace directory entry")?;
+        ensure!(entries.len() < MAX_LIST_ENTRIES, "directory exceeds listing limit");
+
+        let is_directory = entry.file_type().is_ok_and(|file_type| file_type.is_dir());
+        entries.push(DirEntry {
+            name: entry.file_name().to_string_lossy().into_owned(),
+            is_directory,
+        });
     }
+    Ok(entries)
+}
+
+fn write(dir: &Dir, path: &str, bytes: &[u8]) -> anyhow::Result<()> {
+    ensure!(bytes.len() <= MAX_WRITE_BYTES, "write limit exceeded");
+    dir.write(path, bytes).with_context(|| format!("writing `{path}` in workspace"))
 }
 
 // Resolve a lent workspace directory and grant into a [`Workspace`].
@@ -112,52 +146,6 @@ fn check_subpath(subpath: &str) -> anyhow::Result<()> {
         && subpath.split('/').all(|part| !part.is_empty() && part != "." && part != "..");
     ensure!(plain, "grants.workspace subpath `{subpath}` is not a plain relative path");
     Ok(())
-}
-
-fn read_blocking(dir: &Dir, path: &str) -> anyhow::Result<Vec<u8>> {
-    let file = dir.open(path).with_context(|| format!("opening `{path}` in workspace"))?;
-
-    let mut buf = Vec::new();
-    file.take(MAX_READ_BYTES + 1)
-        .read_to_end(&mut buf)
-        .with_context(|| format!("reading `{path}` in workspace"))?;
-    ensure!(
-        buf.len() as u64 <= MAX_READ_BYTES,
-        "file `{path}` exceeds the {MAX_READ_BYTES}-byte workspace read limit"
-    );
-    Ok(buf)
-}
-
-fn list_blocking(dir: &Dir, path: &str) -> anyhow::Result<Vec<DirEntry>> {
-    let read_dir = if path.is_empty() || path == "." {
-        dir.entries().context("listing workspace root")?
-    } else {
-        dir.read_dir(path).with_context(|| format!("listing `{path}` in workspace"))?
-    };
-
-    let mut entries = Vec::new();
-    for entry in read_dir {
-        let entry = entry.context("reading workspace directory entry")?;
-        ensure!(
-            entries.len() < MAX_LIST_ENTRIES,
-            "directory `{path}` exceeds the {MAX_LIST_ENTRIES}-entry listing limit"
-        );
-
-        let is_directory = entry.file_type().is_ok_and(|file_type| file_type.is_dir());
-        entries.push(DirEntry {
-            name: entry.file_name().to_string_lossy().into_owned(),
-            is_directory,
-        });
-    }
-    Ok(entries)
-}
-
-fn write_blocking(dir: &Dir, path: &str, bytes: &[u8]) -> anyhow::Result<()> {
-    ensure!(
-        bytes.len() <= MAX_WRITE_BYTES,
-        "write to `{path}` exceeds the {MAX_WRITE_BYTES}-byte workspace write limit"
-    );
-    dir.write(path, bytes).with_context(|| format!("writing `{path}` in workspace"))
 }
 
 // Unit tests by design: subpath vetting is pure validation. cap-std's
