@@ -1,4 +1,31 @@
 //! Transport-neutral handler invocation and transport adapters.
+//!
+//! Application logic is a [`Handler`]: the input type implements the trait,
+//! [`Client`] owns the provider, and [`Context`] is what `handle` receives.
+//!
+//! ```rust,ignore
+//! use omnia_guest::api::{Client, Context, Handler, Metadata};
+//!
+//! struct Provider;
+//!
+//! struct Greet {
+//!     name: String,
+//! }
+//!
+//! impl Handler<Provider> for Greet {
+//!     type Output = String;
+//!     type Error = std::convert::Infallible;
+//!
+//!     async fn handle(self, context: Context<'_, Provider>) -> Result<Self::Output, Self::Error> {
+//!         Ok(format!("hello, {} from {}", self.name, context.owner))
+//!     }
+//! }
+//!
+//! async fn greet() -> String {
+//!     let client = Client::new("acme", Provider);
+//!     client.call(Greet { name: "omnia".into() }, &Metadata::default()).await.unwrap()
+//! }
+//! ```
 
 use std::error::Error;
 use std::fmt;

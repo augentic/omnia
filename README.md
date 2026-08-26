@@ -54,7 +54,7 @@ The [`examples/`](examples/README.md) directory contains a complete working gues
 | Crate                                           | Description                                                                                |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | [`omnia`](crates/omnia)                         | Core runtime — wasmtime wrapper with CLI, deployment registry, dispatch, and telemetry    |
-| [`omnia-guest`](crates/omnia-guest)             | Guest SDK — operations, explicit command/HTTP/messaging routers, errors, ORM, and MCP support |
+| [`omnia-guest`](crates/omnia-guest)             | Guest SDK — `Handler`/`Client`/`Context`, HTTP/messaging routers, errors, ORM, and MCP support |
 | [`omnia-guest-macros`](crates/guest-macros)     | `#[instrument]` observability attribute for guests                                         |
 | [`omnia-host-macros`](crates/host-macros)       | `runtime!` proc-macro for host runtime generation                                          |
 | [`omnia-wasi-blobstore`](crates/wasi-blobstore) | wasi:blobstore host and guest bindings                                                     |

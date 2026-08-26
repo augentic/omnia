@@ -1,4 +1,4 @@
-//! Typed messaging routing over application operations.
+//! Typed messaging routing over application handlers.
 
 use std::collections::BTreeMap;
 use std::error::Error;

@@ -1,4 +1,4 @@
-//! Typed HTTP routing over application operations.
+//! Typed HTTP routing over application handlers.
 
 use std::fmt;
 
@@ -16,7 +16,7 @@ use crate::api::{Client, Handler, Metadata};
 /// Result type for HTTP handlers.
 pub type HttpResult<T, E = HttpError> = Result<T, E>;
 
-/// A request that could not be converted to operation input.
+/// A request that could not be converted to handler input.
 #[derive(Debug)]
 pub struct DecodeError {
     description: String,

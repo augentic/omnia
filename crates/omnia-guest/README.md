@@ -4,11 +4,11 @@ Shared traits, error types, and abstractions for building WASI guest components.
 
 ## Quick Start
 
-Define transport-neutral operations, then register them with an explicit transport router.
+Implement `Handler` on an input type, then register it with an explicit transport router.
 
 ```rust,ignore
 use omnia_guest::api::http::{Router, post};
-use omnia_guest::api::{CallContext, Invoker, Operation};
+use omnia_guest::api::{Client, Context, Handler};
 use omnia_guest::Error;
 use serde::{Deserialize, Serialize};
 
@@ -24,31 +24,29 @@ struct ItemResponse {
 }
 
 struct MyProvider;
-struct Create;
 
-impl Operation<MyProvider> for Create {
-    type Input = CreateItem;
+impl Handler<MyProvider> for CreateItem {
     type Output = ItemResponse;
     type Error = Error;
 
-    async fn call(
-        input: Self::Input,
-        _context: CallContext<'_, MyProvider>,
+    async fn handle(
+        self,
+        _context: Context<'_, MyProvider>,
     ) -> Result<Self::Output, Self::Error> {
         Ok(ItemResponse {
             id: "123".to_string(),
-            name: input.name,
+            name: self.name,
         })
     }
 }
 
 fn router() -> Router<MyProvider> {
-    Router::new(Invoker::new("my-org", MyProvider))
-        .route("/items", post::<Create, MyProvider>())
+    Router::new(Client::new("my-org", MyProvider))
+        .route("/items", post::<CreateItem, MyProvider>())
 }
 ```
 
-`Invocation<Input>` carries typed input plus transport-neutral metadata. The router creates it, and `Invoker` owns the provider and supplies `CallContext` when it calls the operation. The application owns its WASI export explicitly:
+`Client` owns the provider and supplies `Context` (owner, provider, metadata) when it calls the handler. The application owns its WASI export explicitly:
 
 ```rust,ignore
 struct Http;
@@ -61,20 +59,20 @@ impl wasip3::exports::http::handler::Guest for Http {
 }
 ```
 
-Omnia creates one WASI component instance per HTTP request. Construct one `Router` with one provider-owning `Invoker` inside each `handle` call; Axum's route-state clones share that invoker's `Arc<P>` only for that request. Durable application state belongs in host-side capabilities, not guest statics.
+Omnia creates one WASI component instance per HTTP request. Construct one `Router` with one provider-owning `Client` inside each `handle` call; Axum's route-state clones share that client's `Arc<P>` only for that request. Durable application state belongs in host-side capabilities, not guest statics.
 
-Messaging routes use the same operations with exact topic registration:
+Messaging routes use the same handlers with exact topic registration:
 
 ```rust,ignore
 use omnia_guest::api::messaging::{Router, consume};
 
-let router = Router::new(Invoker::new("my-org", MyProvider))
-    .route("items.created", consume::<Create>());
+let router = Router::new(Client::new("my-org", MyProvider))
+    .route("items.created", consume::<CreateItem>());
 ```
 
-`consume` decodes JSON and acknowledges successful output by default. `decode_with` and `project_with` make payload and delivery policy explicit when those defaults do not fit.
+`consume` decodes JSON and acknowledges successful output.
 
-Command routes use the same operations with Clap-derived arguments through `omnia_guest::api::command`. Build a `Router` explicitly inside the component's `wasi:cli/run` implementation, then call `command::execute_wasi`; `command::run::<Args, Operation>()` remains the distinct typed route builder. Omnia creates a fresh component instance for each command invocation, so no static router is needed.
+Command-mode guests parse argv with clap and call `Client::call` on the same handlers. Wrap the clap dispatch in `command::execute_wasi` so guest telemetry is initialized and flushed. Omnia creates a fresh component instance for each command invocation.
 
 ## Capabilities
 
@@ -128,10 +126,9 @@ See the [workspace documentation](https://github.com/augentic/omnia) for the ful
 
 ## Cargo features
 
-- `cli` *(default)*: the typed command router (`api::command::Router`), built on `clap`.
 - `orm` *(default)*: the SQL ORM, table/document capabilities, and document-store re-exports.
 
-Guests that serve only HTTP or messaging can disable defaults to shrink wasm build time and size.
+Guests that do not use SQL or documents can disable defaults to shrink wasm build time and size.
 
 ## License
 

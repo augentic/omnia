@@ -6,7 +6,7 @@ A guest is your application logic compiled to a WebAssembly component. This guid
 - [HTTP handlers](#http-handlers) — serve requests with Axum
 - [Using WASI capabilities](#using-wasi-capabilities) — storage, messaging, SQL, models, and the rest
 - [Handling incoming messages](#handling-incoming-messages) — the messaging trigger
-- [The operation contract](#the-operation-contract) — the typed router model behind command mode and typed HTTP/messaging routing
+- [The handler contract](#the-handler-contract) — Handler + Client + Context behind typed HTTP/messaging routing and CLI dispatch
 - [Command-mode guests](#command-mode-guests) — run-once jobs and CLIs
 - [Tracing](#tracing) — spans and logs from inside the sandbox
 - [Serving MCP tools](#serving-mcp-tools) — expose tools to AI agents
@@ -130,27 +130,29 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
 
 `examples/messaging` demonstrates pub-sub, request-reply, and fan-out with the in-memory default backend; the same guest works against Kafka or NATS.
 
-## The operation contract
+## The handler contract
 
 `omnia-guest` keeps application logic independent of how it is invoked. Three pieces, defined once and reused by every transport:
 
-- An **operation** is one unit of application work with a typed input and output (e.g. `CreateItem`).
-- A **provider** is the struct your operations run against — it carries their capabilities (implement `DocumentStore`, `Config`, etc. on it).
-- An **invoker** (`Invoker::new(owner, provider)`) binds the provider to an owner id and executes operations.
+- A **handler** is one unit of application work; the input type implements `Handler<P>` (e.g. `CreateItem`).
+- A **provider** is the struct your handlers run against — it carries their capabilities (implement `DocumentStore`, `Config`, etc. on it).
+- A **client** (`Client::new(owner, provider)`) binds the provider to an owner id and calls handlers.
 
-Write an operation as a bare `async fn` and let `#[omnia_guest::operation]` derive the `Operation` impl from its signature — the first parameter is the input type (and the impl target), the second must be `CallContext<'_, P>`, and the return type is `Result<T>` (`omnia_guest::Result`) or `Result<T, E>`:
+Write a handler by implementing `Handler<P>` on the input type. `Self` is the input; `handle` receives a `Context<'_, P>` with the owner, provider, and transport-neutral metadata:
 
 ```rust,noplayground
-#[omnia_guest::operation]
-async fn create_item<P>(input: CreateItem, context: CallContext<'_, P>) -> Result<ItemReply>
+impl Handler<P> for CreateItem
 where
-    P: Provider + Config + StateStore,
+    P: Config + StateStore,
 {
-    // context.provider carries the capabilities in the fn's bounds
+    type Output = ItemReply;
+    type Error = Error;
+
+    async fn handle(self, context: Context<'_, P>) -> Result<Self::Output, Self::Error> {
+        // context.provider carries the capabilities in the impl's bounds
+    }
 }
 ```
-
-The macro takes no arguments and adds no instrumentation. The function is re-emitted unchanged, attributes included, so other handlers can still call it directly and a span is added by stacking `#[tracing::instrument]` on the fn (`fields(...)` may reference the `input` and `context` parameters). A hand-written `impl Operation<P>` remains the escape hatch for shapes the macro doesn't cover (e.g. `Input != Self`).
 
 For a guest that runs on the WASI-backed capability defaults, declare the provider with `omnia_guest::provider!` instead of writing one empty impl per capability (the expansion compiles on `wasm32` only; native tests supply mock providers):
 
@@ -161,11 +163,11 @@ omnia_guest::provider! {
 }
 ```
 
-Routers then map transport events onto operations: an HTTP router maps method + path, a messaging router maps exact topics, a command router maps CLI subcommands. Your WASI export stays visible application code — it just hands the event to the router:
+Routers then map transport events onto handlers: an HTTP router maps method + path, a messaging router maps exact topics. Your WASI export stays visible application code — it just hands the event to the router:
 
 ```rust
 fn router() -> omnia_guest::api::http::Router<MyProvider> {
-    Router::new(Invoker::new("acme-corp", MyProvider))
+    Router::new(Client::new("acme-corp", MyProvider))
         .route("/api/items", post::<CreateItem, MyProvider>())
 }
 
@@ -176,28 +178,20 @@ impl Guest for Http {
 }
 ```
 
-Messaging uses `api::messaging::Router` and `consume::<Operation>()`; topic matching is exact, and each route can replace its payload decoder and output/error projector. The export remains visible application code and calls `api::messaging::handle`. Because the same operation types register in any router, one guest can expose the same logic over HTTP, messaging, and a CLI without duplicating it.
+Messaging uses `api::messaging::Router` and `consume::<CreateItem>()`; topic matching is exact. The export remains visible application code and calls `api::messaging::handle`. Because the same handler types register in any router, one guest can expose the same logic over HTTP, messaging, and a CLI without duplicating it.
 
 ## Command-mode guests
 
-For run-once workloads (jobs, CLIs, agent tasks), use `omnia_guest::api::command` to bind Clap argument types to the same [operation contract](#the-operation-contract). The guest still owns the explicit `wasi:cli/run` export; the adapter initializes and flushes guest telemetry, writes buffered output, and preserves the router's exact exit status:
+For run-once workloads (jobs, CLIs, agent tasks), parse argv with clap and call `Client::call` on the same [handler contract](#the-handler-contract). The guest still owns the explicit `wasi:cli/run` export; wrap the clap dispatch in `command::execute_wasi` so guest telemetry is initialized and flushed:
 
 ```rust,noplayground
-use clap::Command;
-use omnia_guest::api::command::{self, Router, RouterBuilder};
-use omnia_guest::api::invoke::Invoker;
+use clap::Parser;
+use omnia_guest::api::{Client, Metadata, command};
 use wasip3::exports::cli::run::Guest;
 
-fn router() -> Router<MyProvider> {
-    RouterBuilder::new(Command::new("jobs"), Invoker::new("acme", MyProvider))
-        .route(
-            ["sync"],
-            command::run::<SyncArgs, Sync>()
-                .about("Synchronize records")
-                .project_with(Text),
-        )
-        .build()
-        .expect("command routes are valid")
+#[derive(Parser)]
+enum App {
+    Sync(SyncInput),
 }
 
 struct Cli;
@@ -205,14 +199,27 @@ wasip3::cli::command::export!(Cli);
 
 impl Guest for Cli {
     async fn run() -> Result<(), ()> {
-        command::execute_wasi(&router()).await
+        command::execute_wasi(dispatch()).await
     }
+}
+
+async fn dispatch() -> Result<(), u8> {
+    let app = App::try_parse_from(wasip3::cli::environment::get_arguments()).map_err(|error| {
+        let _ = error.print();
+        2
+    })?;
+    let client = Client::new("acme", MyProvider);
+    let output = match app {
+        App::Sync(input) => client.call(input, &Metadata::default()).await.map_err(|_| 1)?,
+    };
+    print!("{output}");
+    Ok(())
 }
 ```
 
 - Arguments after `--` on the host command line arrive as the guest's argv (`args[0]` is the program name, supplied by the runtime).
-- Each route explicitly decodes arguments into an operation input and projects output, operation failures, and decode failures into `CommandResponse`.
-- The router supplies nested help, version and usage handling, shell completions, and a read-only route inventory.
+- clap parses argv into handler input; the guest prints output and maps handler failures to an exit code.
+- clap supplies nested help, version, and usage handling.
 - The host runtime must be built with `mode: command` — see [Composing a Runtime](composing-a-runtime.md).
 
 ## Tracing
