@@ -245,7 +245,7 @@ mod tests {
     use crate::host::generated::omnia::model::completion::{Format, Schema};
 
     #[test]
-    fn whole_json_document() {
+    fn json_document() {
         assert_eq!(
             Format::Json.parse(r#"{"verdict":"pass"}"#).unwrap(),
             Candidate::Valid(json!({ "verdict": "pass" }))
@@ -264,7 +264,7 @@ mod tests {
     }
 
     #[test]
-    fn json_after_preamble() {
+    fn json_with_preamble() {
         let text = "Done.\n{\"verdict\":\"pass\"}\n";
         assert_eq!(
             Format::Json.parse(text).unwrap(),
@@ -282,7 +282,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_fence_before_matching_candidate() {
+    fn invalid_fence() {
         let text = "```json\n[]\n```\n{\"verdict\":\"pass\"}";
         assert_eq!(
             verdict_schema().parse(text).unwrap(),
@@ -291,7 +291,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_candidate_survives_for_host_gate() {
+    fn invalid_candidate() {
         let Candidate::Invalid { value, reason } = report_schema().parse("[]").unwrap() else {
             panic!("expected an invalid candidate");
         };
@@ -304,7 +304,7 @@ mod tests {
     }
 
     #[test]
-    fn embedded_json_is_not_a_matching_candidate() {
+    fn no_matching_candidate() {
         let format = verdict_schema();
         let fenced = r#"{"note":"```json\n{\"verdict\":\"pass\"}\n```"}"#;
         let Candidate::Invalid { value, .. } = format.parse(fenced).unwrap() else {
@@ -334,7 +334,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_rejects_nonconforming_values() {
+    fn reject_nonconforming_values() {
         verdict_schema().check(&json!({ "verdict": "pass" })).unwrap();
         let err = verdict_schema().check(&json!({ "other": 1 })).unwrap_err();
         assert!(err.contains("does not conform to schema `verdict`"), "unexpected: {err}");
@@ -343,7 +343,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_error_identifies_instance_path() {
+    fn schema_error_path() {
         let format = Format::Schema(Schema {
             name: "report".to_owned(),
             schema: json!({
@@ -360,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_schema_definition() {
+    fn invalid_schema() {
         let err = Format::Schema(Schema {
             name: "verdict".to_owned(),
             schema: "not json".to_owned(),
