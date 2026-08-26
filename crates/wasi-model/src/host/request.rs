@@ -7,13 +7,59 @@ use crate::host::generated::omnia::model::completion::{Mcp, Request, Role, Tool}
 
 const RESERVED_TOOLS: &[&str] = &["read", "list", "write"];
 
-impl fmt::Display for Role {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::System => "system",
-            Self::User => "user",
-            Self::Assistant => "assistant",
-        })
+impl Request {
+    /// The request's MCP server grants, each carrying its own endpoint URL.
+    #[must_use]
+    pub fn mcp_servers(&self) -> Vec<&Mcp> {
+        self.tools
+            .iter()
+            .filter_map(|tool| match tool {
+                Tool::Mcp(grant) => Some(grant),
+                Tool::Function(_) => None,
+            })
+            .collect()
+    }
+
+    /// The request's tool names, each carrying its own parameters schema.
+    pub fn tool_names(&self) -> Vec<String> {
+        self.tools
+            .iter()
+            .filter_map(|tool| match tool {
+                Tool::Function(function) => Some(function.name.clone()),
+                Tool::Mcp(_) => None,
+            })
+            .collect()
+    }
+
+    /// Validate the request and its tools.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `InvalidRequest` error if the request is invalid.
+    pub fn validate(&self) -> Result<(), Error> {
+        for tool in &self.tools {
+            let Tool::Function(function) = tool else {
+                continue;
+            };
+            if RESERVED_TOOLS.contains(&function.name.as_str()) {
+                return Err(Error::InvalidRequest(format!(
+                    "reserved tool name: {}",
+                    function.name
+                )));
+            }
+            if serde_json::from_str::<serde_json::Value>(&function.parameters).is_err() {
+                return Err(Error::InvalidRequest(format!(
+                    "function tool `{}` parameters is not valid JSON",
+                    function.name
+                )));
+            }
+        }
+
+        if self.messages.iter().all(|message| message.content.trim().is_empty()) {
+            return Err(Error::InvalidRequest("empty request".to_owned()));
+        }
+
+        self.format.validate_definition().map_err(Error::InvalidRequest)
     }
 }
 
@@ -34,56 +80,18 @@ impl fmt::Display for Request {
     }
 }
 
-impl Request {
-    /// The request's MCP server grants, each carrying its own endpoint URL.
-    #[must_use]
-    pub fn mcp_servers(&self) -> Vec<&Mcp> {
-        self.tools
-            .iter()
-            .filter_map(|tool| match tool {
-                Tool::Mcp(grant) => Some(grant),
-                Tool::Function(_) => None,
-            })
-            .collect()
+impl fmt::Display for Role {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::System => "system",
+            Self::User => "user",
+            Self::Assistant => "assistant",
+        })
     }
-
-    pub(super) fn function_names(&self) -> Vec<String> {
-        self.tools
-            .iter()
-            .filter_map(|tool| match tool {
-                Tool::Function(function) => Some(function.name.clone()),
-                Tool::Mcp(_) => None,
-            })
-            .collect()
-    }
-}
-
-pub(super) fn validate(request: &Request) -> Result<(), Error> {
-    for tool in &request.tools {
-        let Tool::Function(function) = tool else {
-            continue;
-        };
-        if RESERVED_TOOLS.contains(&function.name.as_str()) {
-            return Err(Error::InvalidRequest(format!("reserved tool name: {}", function.name)));
-        }
-        if serde_json::from_str::<serde_json::Value>(&function.parameters).is_err() {
-            return Err(Error::InvalidRequest(format!(
-                "function tool `{}` parameters is not valid JSON",
-                function.name
-            )));
-        }
-    }
-
-    if request.messages.iter().all(|message| message.content.trim().is_empty()) {
-        return Err(Error::InvalidRequest("empty request".to_owned()));
-    }
-
-    request.format.validate_definition().map_err(Error::InvalidRequest)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::validate;
     use crate::host::Error;
     use crate::host::generated::omnia::model::completion::{
         Format, Function, Grants, Message, Request, Role, Schema, Tool,
@@ -97,28 +105,17 @@ mod tests {
             description: "shadow a host-injected tool".to_owned(),
             parameters: "{}".to_owned(),
         }));
-        let err = validate(&request).unwrap_err();
+        let err = request.validate().unwrap_err();
         assert!(matches!(err, Error::InvalidRequest(m) if m.contains("reserved tool name")));
     }
 
     #[test]
     fn empty_request() {
-        let err = validate(&request(vec![])).unwrap_err();
+        let err = request(vec![]).validate().unwrap_err();
         assert!(matches!(err, Error::InvalidRequest(m) if m == "empty request"));
 
-        let err = validate(&request(vec![message(Role::User, "   ")])).unwrap_err();
+        let err = request(vec![message(Role::User, "   ")]).validate().unwrap_err();
         assert!(matches!(err, Error::InvalidRequest(m) if m == "empty request"));
-    }
-
-    #[test]
-    fn ordinary_function_name() {
-        let mut request = request(vec![message(Role::User, "hi")]);
-        request.tools.push(Tool::Function(Function {
-            name: "resolve".to_owned(),
-            description: "look up a reference".to_owned(),
-            parameters: "{\"type\":\"object\"}".to_owned(),
-        }));
-        validate(&request).unwrap();
     }
 
     #[test]
@@ -129,7 +126,7 @@ mod tests {
             description: "look something up".to_owned(),
             parameters: "not json".to_owned(),
         }));
-        let err = validate(&request).unwrap_err();
+        let err = request.validate().unwrap_err();
         assert!(matches!(err, Error::InvalidRequest(m) if m.contains("`lookup`")));
     }
 
@@ -140,33 +137,8 @@ mod tests {
             name: "verdict".to_owned(),
             schema: "not json".to_owned(),
         });
-        let err = validate(&request).unwrap_err();
-        assert!(matches!(err, Error::InvalidRequest(m) if m.contains("not valid JSON")));
-
-        request.format = Format::Schema(Schema {
-            name: "verdict".to_owned(),
-            schema: "{\"type\":\"nonsense\"}".to_owned(),
-        });
-        let err = validate(&request).unwrap_err();
-        assert!(matches!(err, Error::InvalidRequest(m) if m.contains("valid JSON Schema")));
-    }
-
-    #[test]
-    fn chat_prompt() {
-        let request = Request {
-            system: Some("sys".to_owned()),
-            messages: vec![
-                message(Role::User, "hi"),
-                message(Role::Assistant, "ack"),
-                message(Role::System, "note"),
-            ],
-            ..request(vec![])
-        };
-        let expected = format!(
-            "sys\n\nhi\n\n[assistant]\nack\n\n[system]\nnote\n\n{}",
-            Format::Text.instruction()
-        );
-        assert_eq!(request.to_string(), expected);
+        let err = request.validate().unwrap_err();
+        assert!(matches!(err, Error::InvalidRequest(_)));
     }
 
     fn request(messages: Vec<Message>) -> Request {

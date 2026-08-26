@@ -26,13 +26,14 @@ use crate::host::generated::omnia::model::completion::{Reply, ToolCall, ToolResu
 use crate::host::{Error, FutureResult, ToolOutcome};
 
 const CALL_QUEUE: usize = 8;
+const MAX_RESULT_BYTES: usize = 1024 * 1024;
 
 /// Shared state for one completion session: the calls bridge, the pending
 /// calls awaiting guest results, the call budget, and the first typed
 /// host-enforcement failure.
 pub struct ToolSession {
     limits: Limits,
-    // Function-tool names used by request, the only names `call-tool` accepts.
+    // tool names used by request, the only names `call-tool` accepts.
     allowed: Vec<String>,
     inner: Mutex<Inner>,
 }
@@ -53,7 +54,7 @@ impl Default for Limits {
     fn default() -> Self {
         Self {
             max_tool_calls: 32,
-            max_result_bytes: 1 << 20,
+            max_result_bytes: MAX_RESULT_BYTES,
             tool_timeout: Duration::from_secs(60),
         }
     }

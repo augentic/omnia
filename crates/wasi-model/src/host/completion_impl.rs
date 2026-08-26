@@ -8,7 +8,6 @@ use omnia::HasMounts;
 use wasmtime::component::{Accessor, FutureReader, StreamReader};
 
 use crate::host::generated::omnia::model::completion::{Host, HostWithStore, Session, ToolResult};
-use crate::host::request::validate;
 use crate::host::session::{CallsProducer, ReplyTask, ResultsConsumer, SessionClose, ToolSession};
 use crate::host::tool_host::DirEntry;
 use crate::host::workspace::{self, Workspace};
@@ -24,8 +23,7 @@ where
         accessor: &Accessor<T, Self>, request: Request, mut results: StreamReader<ToolResult>,
     ) -> impl Future<Output = Result<Session, Error>> {
         std::future::ready(accessor.with(|mut access| {
-            // validate request
-            if let Err(error) = validate(&request) {
+            if let Err(error) = request.validate() {
                 results.close(&mut access)?;
                 return Err(error);
             }
@@ -43,7 +41,7 @@ where
 
             // call model backend with request and tool host "closure"
             let limits = access.get().ctx.limits();
-            let allowed = request.function_names();
+            let allowed = request.tool_names();
             let format = request.format.clone();
 
             let (session, calls_rx) = ToolSession::new(limits, allowed);

@@ -341,6 +341,25 @@ mod tests {
         assert_ne!(root, nested);
     }
 
+    #[test]
+    fn invalid_schema_definition() {
+        let err = Format::Schema(Schema {
+            name: "verdict".to_owned(),
+            schema: "not json".to_owned(),
+        })
+        .validate_definition()
+        .unwrap_err();
+        assert!(err.contains("not valid JSON"), "unexpected: {err}");
+
+        let err = Format::Schema(Schema {
+            name: "verdict".to_owned(),
+            schema: r#"{"type":"nonsense"}"#.to_owned(),
+        })
+        .validate_definition()
+        .unwrap_err();
+        assert!(err.contains("valid JSON Schema"), "unexpected: {err}");
+    }
+
     fn verdict_schema() -> Format {
         Format::Schema(Schema {
             name: "verdict".to_owned(),
