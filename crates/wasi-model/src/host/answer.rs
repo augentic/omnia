@@ -296,7 +296,10 @@ mod tests {
             panic!("expected an invalid candidate");
         };
         assert_eq!(value, json!([]));
-        assert!(reason.contains("does not conform to schema `phase-report`"), "unexpected: {reason}");
+        assert!(
+            reason.contains("does not conform to schema `phase-report`"),
+            "unexpected: {reason}"
+        );
         assert!(reason.contains("at root"), "unexpected: {reason}");
     }
 
