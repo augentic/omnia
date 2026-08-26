@@ -6,7 +6,8 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-/// Typed command routing over application operations.
+/// WASI CLI entrypoint helper.
+#[cfg(target_arch = "wasm32")]
 pub mod command;
 pub mod http;
 /// Typed exact-topic messaging routing.
@@ -150,15 +151,4 @@ impl<P: Send + Sync + 'static> fmt::Debug for Client<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Client").field("owner", &self.owner).finish_non_exhaustive()
     }
-}
-
-/// The typed outcome supplied to a route projector.
-#[derive(Debug)]
-pub enum Outcome<T, O, D> {
-    /// The operation completed successfully.
-    Output(T),
-    /// The operation returned its typed failure.
-    Operation(O),
-    /// The transport input could not be converted to operation input.
-    Decode(D),
 }

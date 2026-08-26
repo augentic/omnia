@@ -1,15 +1,28 @@
-//! Typed command routing over application operations.
+//! WASI CLI glue for guest command entrypoints.
 
-mod builder;
-mod response;
-#[cfg(feature = "cli")]
-mod router;
+use std::future::Future;
 
-pub use builder::{Binding, Decoder, Outcome, Projector, Run, TryIntoDecoder, run};
-pub use response::CommandResponse;
-#[cfg(all(target_arch = "wasm32", feature = "cli"))]
-pub use router::execute_wasi;
-#[cfg(feature = "cli")]
-pub use router::{
-    BuildError, Completions, Namespace, NoGlobals, RouteInfo, Router, RouterBuilder, Selector,
-};
+/// Execute a guest command at the WASI CLI boundary.
+///
+/// Initializes guest telemetry, awaits `run`, and flushes telemetry. The
+/// guest writes its own output; a non-zero status then exits with that
+/// exact code.
+///
+/// # Errors
+///
+/// Returns `Ok(())` when `run` succeeds. A non-zero status is reported
+/// through `wasi:cli/exit` and does not return.
+#[expect(clippy::result_unit_err, reason = "matches the wasi:cli/run contract")]
+pub async fn execute_wasi(run: impl Future<Output = Result<(), u8>>) -> Result<(), ()> {
+    let _guard = omnia_wasi_otel::init();
+    let result = run.await;
+    // `exit-with-code` does not return (analogous to a trap), so no
+    // `Drop` runs past it: flush telemetry as soon as the run completes.
+    omnia_wasi_otel::shutdown();
+    if let Err(code) = result
+        && code != 0
+    {
+        wasip3::cli::exit::exit_with_code(code);
+    }
+    Ok(())
+}

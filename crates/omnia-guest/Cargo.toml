@@ -14,10 +14,7 @@ categories.workspace = true
 workspace = true
 
 [features]
-default = ["cli", "orm"]
-
-# Enables the typed command router (`api::command::Router`), built on `clap`.
-cli = ["dep:clap", "dep:clap_complete"]
+default = ["orm"]
 
 # Enables the SQL ORM (`orm`), the table/document capabilities, and the
 # document-store re-exports.
@@ -29,15 +26,12 @@ axum = { workspace = true, features = ["json", "macros", "query"] }
 bon.workspace = true
 bytes.workspace = true
 chrono.workspace = true
-clap = { workspace = true, optional = true }
-clap_complete = { workspace = true, optional = true }
 http.workspace = true
 http-body.workspace = true
 omnia-guest-macros.workspace = true
 omnia-wasi-sql = { workspace = true, optional = true }
 omnia-wasi-http.workspace = true
 omnia-wasi-docstore = { workspace = true, optional = true }
-rand.workspace = true
 sea-query = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
