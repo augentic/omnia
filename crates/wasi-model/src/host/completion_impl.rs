@@ -1,5 +1,6 @@
 //! The `create` host binding and its answer gate.
 
+use std::fmt;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -95,6 +96,16 @@ impl Host for WasiModelCtxView<'_> {
 struct BoundToolHost {
     session: Arc<ToolSession>,
     workspace: Option<Workspace>,
+}
+
+// Manual because the session and workspace internals (channels, capability
+// handles) carry no useful state to print; the lent path is the identity.
+impl fmt::Debug for BoundToolHost {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BoundToolHost")
+            .field("workspace", &self.workspace.as_ref().map(Workspace::local_path))
+            .finish_non_exhaustive()
+    }
 }
 
 impl BoundToolHost {

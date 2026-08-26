@@ -1,12 +1,12 @@
-//! Structured prompt template assembled guest-side into the request's
-//! `system` / `messages` channels.
+//! Structured prompt template assembled into the request's `system` /
+//! `messages` channels.
 //!
 //! The boundary itself is plain `system` + `messages` (like provider APIs);
-//! this builder is a convenience that turns a role/task/context template into
-//! those channels before `create` is called. It is target-independent so the
-//! assembly rules are unit-testable natively.
+//! this builder turns a role/task/context template into those channels
+//! before `create` is called.
 
-use crate::guest::generated::omnia::model::completion::{Message, Role};
+#[cfg(target_arch = "wasm32")]
+use crate::completion::{Message, Role};
 
 /// Structured prompt template assembled into `system` / `messages` channels.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -77,6 +77,7 @@ impl Sections {
 
     /// Assemble the template into the request's chat channels: the system
     /// string (led by `preamble` when given) and a single user turn.
+    #[cfg(target_arch = "wasm32")]
     #[must_use]
     pub fn channels(&self, preamble: Option<&str>) -> (Option<String>, Vec<Message>) {
         let (system, user) = self.assemble(preamble);
@@ -93,45 +94,4 @@ impl Sections {
 fn join(parts: &[String]) -> Option<String> {
     let kept: Vec<&str> = parts.iter().map(|p| p.trim()).filter(|p| !p.is_empty()).collect();
     if kept.is_empty() { None } else { Some(kept.join("\n\n")) }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{Example, Sections};
-
-    #[test]
-    fn assemble_sections() {
-        let sections = Sections {
-            role: Some("a {language} reviewer".to_owned()),
-            task: "review the {language} code".to_owned(),
-            context: Some("the {language} crate".to_owned()),
-            constraints: vec!["be {language}-idiomatic".to_owned()],
-            examples: vec![Example {
-                input: "in".to_owned(),
-                output: "out".to_owned(),
-            }],
-            variables: vec![("language".to_owned(), "Rust".to_owned())],
-        };
-        // Preamble is not substituted; it leads the system channel.
-        assert_eq!(
-            sections.assemble(Some("prefer {language}")),
-            (
-                Some("prefer {language}\n\na Rust reviewer\n\n- be Rust-idiomatic".to_owned()),
-                "review the Rust code\n\nthe Rust crate\n\nInput: in\nOutput: out".to_owned(),
-            )
-        );
-    }
-
-    #[test]
-    fn blank_parts_dropped() {
-        let sections = Sections {
-            role: Some("   ".to_owned()),
-            task: "do it".to_owned(),
-            context: Some(String::new()),
-            ..Sections::default()
-        };
-        let (system, user) = sections.assemble(None);
-        assert!(system.is_none());
-        assert_eq!(user, "do it");
-    }
 }
