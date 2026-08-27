@@ -143,6 +143,8 @@ omnia-wasi-otel = { path = "crates/wasi-otel", version = "0.35.0" }
 omnia-wasi-sql = { path = "crates/wasi-sql", version = "0.35.0" }
 omnia-wasi-vault = { path = "crates/wasi-vault", version = "0.35.0" }
 omnia-wasi-websocket = { path = "crates/wasi-websocket", version = "0.35.0" }
+# unpublished test scaffolding (dev-dependency only; stripped on publish)
+test-utils = { path = "crates/test-utils" }
 
 [patch.crates-io]
 wrpc-transport = { git = "https://github.com/bytecodealliance/wrpc" }

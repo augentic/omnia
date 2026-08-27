@@ -7,3 +7,5 @@ jobs:
   ci:
     uses: augentic/.github/.github/workflows/ci.yaml@main
     secrets: inherit
+    with:
+      targets: wasm32-wasip2
