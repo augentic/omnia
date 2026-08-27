@@ -89,3 +89,73 @@ impl fmt::Display for Role {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Mcp, Request, Role, Tool};
+    use crate::host::{Format, Function, Grants, Message};
+
+    fn request(system: Option<&str>, messages: Vec<(Role, &str)>, tools: Vec<Tool>) -> Request {
+        Request {
+            model: None,
+            system: system.map(str::to_owned),
+            messages: messages
+                .into_iter()
+                .map(|(role, content)| Message {
+                    role,
+                    content: content.to_owned(),
+                })
+                .collect(),
+            generation: None,
+            format: Format::Text,
+            tools,
+            grants: Grants { workspace: None },
+        }
+    }
+
+    #[test]
+    fn mcp_servers_skip_functions() {
+        let request = request(
+            None,
+            vec![(Role::User, "hi")],
+            vec![
+                Tool::Function(Function {
+                    name: "lookup".to_owned(),
+                    description: "lookup".to_owned(),
+                    parameters: "{}".to_owned(),
+                }),
+                Tool::Mcp(Mcp {
+                    name: "docs".to_owned(),
+                    tools: vec!["search".to_owned()],
+                    url: "https://mcp.example".to_owned(),
+                }),
+            ],
+        );
+        let names: Vec<&str> =
+            request.mcp_servers().iter().map(|grant| grant.name.as_str()).collect();
+        assert_eq!(names, ["docs"]);
+        assert_eq!(request.tool_names(), ["lookup"]);
+    }
+
+    #[test]
+    fn prompt_joins_channels() {
+        let prompt = request(
+            Some("be terse"),
+            vec![(Role::User, "hi"), (Role::Assistant, "yo"), (Role::System, "note")],
+            vec![],
+        )
+        .to_string();
+        assert!(
+            prompt.starts_with("be terse\n\nhi\n\n[assistant]\nyo\n\n[system]\nnote\n\n"),
+            "{prompt}"
+        );
+        assert!(prompt.contains("plain text"), "{prompt}");
+    }
+
+    #[test]
+    fn role_display() {
+        assert_eq!(Role::System.to_string(), "system");
+        assert_eq!(Role::User.to_string(), "user");
+        assert_eq!(Role::Assistant.to_string(), "assistant");
+    }
+}

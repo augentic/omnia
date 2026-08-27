@@ -1,6 +1,6 @@
 //! Linker polyfill for host-mediated imports.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::iter::zip;
 use std::pin::pin;
 use std::sync::Arc;
@@ -20,11 +20,13 @@ use super::value::read_plain_value;
 use crate::deployment::LoadedGuest;
 use crate::registry::GuestId;
 
-/// The functions polyfilled onto a linker, keyed by interface name — the
-/// union across guests at function granularity, since components import only
-/// the functions they use and so per-guest imports of one interface are
-/// arbitrary subsets.
-pub type WiredLinks = BTreeMap<Box<str>, BTreeSet<Box<str>>>;
+/// The functions polyfilled onto a linker — the union across guests at
+/// function granularity, since components import only the functions they use
+/// and so per-guest imports of one interface are arbitrary subsets. Keyed by
+/// interface then function name; the value is the function's type-level
+/// asyncness, so a later guest whose import disagrees is rejected instead of
+/// failing wasmtime's pre-instantiation typecheck with no cross-guest context.
+pub type WiredLinks = BTreeMap<Box<str>, BTreeMap<Box<str>, bool>>;
 
 /// Polyfill every host-mediated import named in the deployment's `dispatch`
 /// set onto the shared linker, bound to the dispatch handle, returning the
@@ -90,7 +92,9 @@ where
 /// Registration matches the import's type-level asyncness: a plain `func` is
 /// polyfilled with `func_new_async` ([`send`]), an `async func` with
 /// `func_new_concurrent` ([`send_concurrent`]) — the sync-typed registration
-/// would fail the pre-instantiation asyncness typecheck.
+/// would fail the pre-instantiation asyncness typecheck. A function an
+/// earlier guest wired with the *other* asyncness is a cross-guest interface
+/// disagreement, rejected here with both views named.
 fn polyfill_component<T>(
     engine: &Engine, linker: &mut Linker<T>, id: &GuestId,
     component: &wasmtime::component::Component, handle: &Arc<DispatchHandle>,
@@ -111,15 +115,24 @@ where
         // Snapshot the missing function names and asyncness before mutably
         // borrowing the linker, skipping functions an earlier guest wired.
         let wired_funcs = wired.entry(Box::from(name)).or_default();
-        let funcs: Vec<(Arc<str>, bool)> = instance_ty
-            .exports(engine)
-            .filter_map(|(func, types::ComponentExtern { ty, .. })| match ty {
-                types::ComponentItem::ComponentFunc(ty) if !wired_funcs.contains(func) => {
-                    Some((Arc::from(func), ty.async_()))
-                }
-                _ => None,
-            })
-            .collect();
+        let describe = |is_async: bool| if is_async { "an async func" } else { "a plain func" };
+        let mut funcs: Vec<(Arc<str>, bool)> = Vec::new();
+        for (func, types::ComponentExtern { ty, .. }) in instance_ty.exports(engine) {
+            let types::ComponentItem::ComponentFunc(ty) = ty else {
+                continue;
+            };
+            let is_async = ty.async_();
+            match wired_funcs.get(func) {
+                Some(&earlier) if earlier == is_async => {}
+                Some(&earlier) => bail!(
+                    "guest `{id}` imports `{name}/{func}` as {}, but an earlier guest wired it \
+                     as {}; every importer of a host-mediated function must agree on asyncness",
+                    describe(is_async),
+                    describe(earlier),
+                ),
+                None => funcs.push((Arc::from(func), is_async)),
+            }
+        }
 
         // Opening the instance also (re)defines it on the linker, so an
         // allow-listed interface resolves even when every function is already
@@ -170,7 +183,7 @@ where
                 .map_err(anyhow::Error::from)
                 .with_context(|| format!("polyfilling `{name}` function `{func}`"))?;
         }
-        wired_funcs.extend(funcs.iter().map(|(func, _)| Box::from(&**func)));
+        wired_funcs.extend(funcs.iter().map(|(func, is_async)| (Box::from(&**func), *is_async)));
     }
     Ok(())
 }
