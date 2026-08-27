@@ -109,6 +109,16 @@ impl Answer {
     }
 }
 
+impl std::fmt::Display for Format {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Text => "text",
+            Self::Json => "json",
+            Self::Schema(_) => "schema",
+        })
+    }
+}
+
 impl Format {
     /// The final-answer instruction appended to a prompt for backends that
     /// steer output shape through prose rather than a provider `response_format`.
