@@ -35,8 +35,8 @@ pub struct Usage {
 }
 
 /// The tool-call transcript a backend may capture for diagnostics or future
-/// replay. Host-only; it never crosses the WIT boundary. Empty for backends
-/// with no tool loop (cursor).
+/// replay. Host-only; it never crosses the WIT boundary. Empty when the
+/// backend captured no tool turns.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Transcript {
     /// Ordered tool turns the backend drove to reach the answer.
