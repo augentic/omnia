@@ -1,8 +1,5 @@
 //! Typed HTTP routing over application handlers.
 
-use std::future::Future;
-use std::pin::Pin;
-
 use axum::Router as AxumRouter;
 use axum::body::Bytes;
 use axum::extract::{RawPathParams, RawQuery, State};
@@ -172,7 +169,15 @@ where
     P: Send + Sync + 'static,
 {
     MethodRoute {
-        inner: routing::get(route_handler(decode, encode)),
+        inner: routing::get(
+            move |state: State<Client<P>>,
+                  params: RawPathParams,
+                  query: RawQuery,
+                  headers: HeaderMap,
+                  body: Bytes| {
+                dispatch(decode, encode, state, params, query, headers, body)
+            },
+        ),
     }
 }
 
@@ -187,7 +192,15 @@ where
     P: Send + Sync + 'static,
 {
     MethodRoute {
-        inner: routing::post(route_handler(decode, encode)),
+        inner: routing::post(
+            move |state: State<Client<P>>,
+                  params: RawPathParams,
+                  query: RawQuery,
+                  headers: HeaderMap,
+                  body: Bytes| {
+                dispatch(decode, encode, state, params, query, headers, body)
+            },
+        ),
     }
 }
 
@@ -215,49 +228,35 @@ where
     post_with(|raw: RawRequest<'_>| body_input::<H>(raw.path_params, raw.body), json)
 }
 
-type RouteFuture = Pin<Box<dyn Future<Output = Response> + Send>>;
-
-fn route_handler<H, P, D, E>(
-    decode: D, encode: E,
-) -> impl Fn(State<Client<P>>, RawPathParams, RawQuery, HeaderMap, Bytes) -> RouteFuture
-+ Clone
-+ Send
-+ Sync
-+ 'static
+async fn dispatch<H, P, D, E>(
+    decode: D, encode: E, State(client): State<Client<P>>, params: RawPathParams,
+    RawQuery(query): RawQuery, headers: HeaderMap, body: Bytes,
+) -> Response
 where
-    H: Handler<P> + 'static,
+    H: Handler<P>,
     H::Error: Into<HttpError>,
-    D: Fn(RawRequest<'_>) -> Result<H, DecodeError> + Clone + Send + Sync + 'static,
-    E: Fn(H::Output) -> Response + Clone + Send + Sync + 'static,
+    D: Fn(RawRequest<'_>) -> Result<H, DecodeError>,
+    E: Fn(H::Output) -> Response,
     P: Send + Sync + 'static,
 {
-    move |State(client), params, RawQuery(query), headers, body| {
-        let decode = decode.clone();
-        let encode = encode.clone();
-        Box::pin(async move {
-            let path_params: Vec<(String, String)> =
-                params.iter().map(|(key, value)| (key.to_owned(), value.to_owned())).collect();
-            let raw = RawRequest {
-                path_params: &path_params,
-                query: query.as_deref(),
-                headers: &headers,
-                body: &body,
-            };
-            let input = match decode(raw) {
-                Ok(input) => input,
-                Err(error) => return HttpError::from(error).into_response(),
-            };
-            let metadata = Metadata::from_lookup(|name| {
-                headers
-                    .get(format!("x-{name}"))
-                    .and_then(|value| value.to_str().ok())
-                    .map(str::to_owned)
-            });
-            match client.call(input, &metadata).await {
-                Ok(output) => encode(output),
-                Err(error) => Into::<HttpError>::into(error).into_response(),
-            }
-        })
+    let path_params: Vec<(String, String)> =
+        params.iter().map(|(key, value)| (key.to_owned(), value.to_owned())).collect();
+    let raw = RawRequest {
+        path_params: &path_params,
+        query: query.as_deref(),
+        headers: &headers,
+        body: &body,
+    };
+    let input = match decode(raw) {
+        Ok(input) => input,
+        Err(error) => return HttpError::from(error).into_response(),
+    };
+    let metadata = Metadata::from_lookup(|name| {
+        headers.get(format!("x-{name}")).and_then(|value| value.to_str().ok()).map(str::to_owned)
+    });
+    match client.call(input, &metadata).await {
+        Ok(output) => encode(output),
+        Err(error) => Into::<HttpError>::into(error).into_response(),
     }
 }
 
