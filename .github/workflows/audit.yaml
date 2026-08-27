@@ -5,6 +5,15 @@ on:
     - cron: "0 0 * * *"
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+  checks: write
+
 jobs:
   audit:
     uses: augentic/.github/.github/workflows/audit.yaml@main

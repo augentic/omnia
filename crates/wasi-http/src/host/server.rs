@@ -178,9 +178,12 @@ where
                     let built = async move {
                         // Mirrors `Request::from_http`, which cannot be used
                         // here: its returned future spuriously captures the
-                        // hooks borrow (missing `use<>` bound upstream), so it
-                        // could not escape the store access. Only the header
-                        // map is hooks-dependent (forbidden-header stripping).
+                        // hooks borrow, so it could not escape the store
+                        // access. Only the header map is hooks-dependent
+                        // (forbidden-header stripping). Collapse back to
+                        // `from_http` once the missing precise-capture bound
+                        // lands upstream:
+                        // https://github.com/bytecodealliance/wasmtime/issues/14218
                         let (parts, body) = request.into_parts();
                         let http::uri::Parts {
                             scheme,

@@ -5,15 +5,13 @@ use anyhow::{Context, Result};
 use base64ct::{Base64, Encoding};
 use fromenv::FromEnv;
 use futures::{Future, TryStreamExt};
-use http::header::HOST;
 use http::{Request, Response};
 use http_body_util::BodyExt;
 use omnia::Backend;
 use tracing::instrument;
 use wasmtime::component::ResourceTable;
 use wasmtime_wasi_http::{
-    DEFAULT_FORBIDDEN_HEADERS, Error as HttpError, RequestOptions, WasiBody, WasiHttpCtx,
-    WasiHttpCtxView, WasiHttpHooks,
+    Error as HttpError, RequestOptions, WasiBody, WasiHttpCtx, WasiHttpCtxView, WasiHttpHooks,
 };
 
 pub type FutureResult<T> = Box<dyn Future<Output = Result<T, HttpError>> + Send>;
@@ -59,7 +57,7 @@ impl HttpDefault {
 
 // reqwest is built with `rustls-no-provider` (keeping `aws-lc-sys` out of the
 // tree), which requires a process-level crypto provider before a client is
-// built. Ring is the provider wasmtime-wasi-http already links; an embedder
+// built. Ring comes from this crate's own rustls dependency; an embedder
 // that installed its own provider first wins, and losing an install race
 // still leaves exactly one default in place.
 fn ensure_crypto_provider() {
@@ -88,6 +86,13 @@ impl Backend for HttpDefault {
 }
 
 impl WasiHttpHooks for HttpHooks {
+    // Suppress the runtime's `Host` header injection: reqwest derives `Host`
+    // from the URL, and a guest can never supply one (`host` is a forbidden
+    // header), so the request reaching `send_request` stays header-clean.
+    fn set_host_header(&mut self) -> bool {
+        false
+    }
+
     fn send_request(
         &mut self, request: Request<WasiBody>, options: Option<RequestOptions>,
         fut: FutureResult<()>,
@@ -103,9 +108,6 @@ impl WasiHttpHooks for HttpHooks {
 
         Box::new(async move {
             let (mut parts, body) = request.into_parts();
-
-            // remove "Host" headers (`reqwest` adds its own)
-            parts.headers.remove(HOST);
 
             // A one-off client is required for a client certificate or whenever the
             // guest overrides the connect/between-bytes timeouts (both are
@@ -159,17 +161,13 @@ impl WasiHttpHooks for HttpHooks {
                 None => send.await.map_err(reqwest_err)?,
             };
 
-            // process response
+            // process response; forbidden headers need no stripping here — the
+            // runtime routes the response through `FieldMap::new_immutable`,
+            // which strips per `is_forbidden_header`, before the guest sees it
             let converted: Response<reqwest::Body> = resp.into();
             let (parts, body) = converted.into_parts();
             let body = body.map_err(reqwest_err).boxed_unsync();
-            let mut response = Response::from_parts(parts, body);
-
-            // remove forbidden headers (disallowed by `wasmtime-wasi-http`)
-            let headers = response.headers_mut();
-            for header in &DEFAULT_FORBIDDEN_HEADERS {
-                headers.remove(header);
-            }
+            let response = Response::from_parts(parts, body);
 
             Ok((response, fut))
         })
