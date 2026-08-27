@@ -268,16 +268,13 @@ pub fn json<T: Serialize>(output: T) -> Response {
             (StatusCode::OK, [(CONTENT_TYPE, HeaderValue::from_static("application/json"))], body)
                 .into_response()
         }
-        Err(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            [(CONTENT_TYPE, HeaderValue::from_static("application/json"))],
-            serde_json::json!({
-                "error": "encoding",
-                "message": format!("body encoding error: {error}"),
-            })
-            .to_string(),
-        )
-            .into_response(),
+        Err(error) => {
+            let error = crate::server_error!("body encoding error: {}", error);
+            let body =
+                serde_json::to_vec(&error).unwrap_or_else(|_| error.to_string().into_bytes());
+            (error.status(), [(CONTENT_TYPE, HeaderValue::from_static("application/json"))], body)
+                .into_response()
+        }
     }
 }
 
