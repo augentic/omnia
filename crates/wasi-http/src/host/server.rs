@@ -22,10 +22,11 @@ use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 use tracing::{Instrument, debug_span, instrument};
+use wasmtime::AsContextMut as _;
 use wasmtime_wasi_http::io::TokioIo;
-use wasmtime_wasi_http::p3::WasiHttpView;
 use wasmtime_wasi_http::p3::bindings::ServiceIndices;
-use wasmtime_wasi_http::p3::bindings::http::types::{self as wasi, ErrorCode};
+use wasmtime_wasi_http::p3::bindings::http::types as wasi;
+use wasmtime_wasi_http::{FieldMap, WasiHttpView};
 
 type OutgoingBody = UnsyncBoxBody<Bytes, anyhow::Error>;
 
@@ -175,10 +176,31 @@ where
                     // through `sender`. A single error path means the caller
                     // never mistakes a real error for a panicked task.
                     let built = async move {
+                        // Mirrors `Request::from_http`, which cannot be used
+                        // here: its returned future spuriously captures the
+                        // hooks borrow (missing `use<>` bound upstream), so it
+                        // could not escape the store access. Only the header
+                        // map is hooks-dependent (forbidden-header stripping).
                         let (parts, body) = request.into_parts();
-                        let body = body.map_err(ErrorCode::from_hyper_request_error);
-                        let http_req = http::Request::from_parts(parts, body);
-                        let (request, io) = wasi::Request::from_http(http_req);
+                        let http::uri::Parts {
+                            scheme,
+                            authority,
+                            path_and_query,
+                            ..
+                        } = parts.uri.into_parts();
+                        let headers = store.with(|mut access| {
+                            let mut cx = access.as_context_mut();
+                            FieldMap::new_immutable(cx.data_mut().http().hooks, parts.headers)
+                        });
+                        let (request, io) = wasi::Request::new(
+                            parts.method,
+                            scheme,
+                            authority,
+                            path_and_query,
+                            headers,
+                            None,
+                            body,
+                        );
 
                         let wasi_resp = service
                             .handle(store, request)

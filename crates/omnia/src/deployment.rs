@@ -513,7 +513,7 @@ mod tests {
             pool_max_tables_per_component: Some(4),
             pool_max_memories_per_module: Some(2),
             pool_max_tables_per_module: Some(2),
-            pool_decommit_batch_size: Some(8),
+            pool_decommit_batch_size: 8,
             ..RuntimeOptions::load_env().expect("should load")
         };
         Engine::new(&Config::from(&options))

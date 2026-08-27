@@ -212,5 +212,9 @@ where
             ))
         }
         Type::Map(..) => Err(Error::new(ErrorKind::Unsupported, "`map` type not supported")),
+        // Mirrors `wrpc_wasmtime::read_value`, which rejects these too.
+        Type::FixedLengthList(..) => {
+            Err(Error::new(ErrorKind::Unsupported, "`fixed-length-list` type not supported"))
+        }
     }
 }

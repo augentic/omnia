@@ -29,7 +29,7 @@ use anyhow::{Context as _, Result};
 use cap_fs_ext::MetadataExt as _;
 use cap_std::ambient_authority;
 use cap_std::fs::Dir;
-use wasmtime_wasi::{DirPerms, FilePerms};
+use wasmtime_wasi::FsPerms;
 
 /// A preopen mount resolved to an absolute host path and WASI permissions,
 /// ready to be opened into the guest sandbox and recorded in the
@@ -40,10 +40,8 @@ pub struct ResolvedPreopen {
     pub name: String,
     /// Absolute host path of the mount root.
     pub host_path: PathBuf,
-    /// Directory permissions WASI enforces on the mount.
-    pub dir_perms: DirPerms,
-    /// File permissions WASI enforces on files opened under the mount.
-    pub file_perms: FilePerms,
+    /// Filesystem permissions WASI enforces under the mount.
+    pub perms: FsPerms,
 }
 
 impl ResolvedPreopen {
@@ -51,16 +49,11 @@ impl ResolvedPreopen {
     /// read-only when `false`, read+write when `true`.
     #[must_use]
     pub const fn new(name: String, host_path: PathBuf, writable: bool) -> Self {
-        let (dir_perms, file_perms) = if writable {
-            (DirPerms::all(), FilePerms::all())
-        } else {
-            (DirPerms::READ, FilePerms::READ)
-        };
+        let perms = if writable { FsPerms::ReadWrite } else { FsPerms::ReadOnly };
         Self {
             name,
             host_path,
-            dir_perms,
-            file_perms,
+            perms,
         }
     }
 }
@@ -78,20 +71,18 @@ pub struct Mount {
     pub host_path: PathBuf,
     /// Host-side capability handle to the mount root.
     pub dir: Arc<Dir>,
-    /// Directory permissions configured for the mount.
-    pub dir_perms: DirPerms,
-    /// File permissions configured for the mount.
-    pub file_perms: FilePerms,
+    /// Filesystem permissions configured for the mount.
+    pub perms: FsPerms,
     /// Directory identity `(device, inode)`, used to match a lent descriptor
     /// back to this entry.
     pub identity: (u64, u64),
 }
 
 impl Mount {
-    /// Whether the mount permits writes (read+write), derived from `dir_perms`.
+    /// Whether the mount permits writes (read+write), derived from `perms`.
     #[must_use]
     pub const fn writable(&self) -> bool {
-        self.dir_perms.contains(DirPerms::MUTATE)
+        matches!(self.perms, FsPerms::ReadWrite)
     }
 }
 
@@ -138,8 +129,7 @@ impl MountRegistry {
                 name: preopen.name,
                 host_path: preopen.host_path,
                 dir: Arc::new(dir),
-                dir_perms: preopen.dir_perms,
-                file_perms: preopen.file_perms,
+                perms: preopen.perms,
                 identity: (meta.dev(), meta.ino()),
             });
         }
@@ -186,7 +176,7 @@ mod tests {
     use cap_fs_ext::MetadataExt as _;
     use cap_std::ambient_authority;
     use cap_std::fs::Dir;
-    use wasmtime_wasi::DirPerms;
+    use wasmtime_wasi::FsPerms;
 
     use super::{MountRegistry, ResolvedPreopen};
 
@@ -240,13 +230,13 @@ mod tests {
     }
 
     #[test]
-    fn writable_mount_grants_mutate() {
+    fn writable_mount_grants_read_write() {
         let root = temp_root("writable");
         let registry = registry("tree", &root, true);
 
         let entry = &registry.entries()[0];
         assert!(entry.writable(), "a writable mount permits mutation");
-        assert!(entry.dir_perms.contains(DirPerms::MUTATE));
+        assert_eq!(entry.perms, FsPerms::ReadWrite);
     }
 
     #[test]

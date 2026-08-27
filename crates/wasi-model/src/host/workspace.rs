@@ -105,7 +105,10 @@ pub fn resolve(
         return Err(anyhow!("grants.workspace root must be a directory"));
     };
 
-    let meta = dir.dir.dir_metadata().context("reading lent workspace directory metadata")?;
+    // The lent handle is a plain `std::fs::File`; cap-primitives derives the
+    // portable `(dev, ino)` identity the registry keys on.
+    let meta = cap_primitives::fs::Metadata::from_file(&dir.dir)
+        .context("reading lent workspace directory metadata")?;
     let entry = registry
         .match_identity(meta.dev(), meta.ino())
         .context("lent workspace root is not an authorized mount")?;

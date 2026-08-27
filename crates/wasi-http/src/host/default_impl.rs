@@ -3,40 +3,20 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use base64ct::{Base64, Encoding};
-use bytes::Bytes;
 use fromenv::FromEnv;
 use futures::{Future, TryStreamExt};
-use http::header::{
-    CONNECTION, HOST, HeaderName, PROXY_AUTHENTICATE, PROXY_AUTHORIZATION, TRANSFER_ENCODING,
-    UPGRADE,
-};
+use http::header::HOST;
 use http::{Request, Response};
 use http_body_util::BodyExt;
-use http_body_util::combinators::UnsyncBoxBody;
 use omnia::Backend;
 use tracing::instrument;
 use wasmtime::component::ResourceTable;
-use wasmtime_wasi::TrappableError;
-use wasmtime_wasi_http::WasiHttpCtx;
-use wasmtime_wasi_http::p3::bindings::http::types::ErrorCode;
-use wasmtime_wasi_http::p3::{self, RequestOptions, WasiHttpCtxView};
+use wasmtime_wasi_http::{
+    DEFAULT_FORBIDDEN_HEADERS, Error as HttpError, RequestOptions, WasiBody, WasiHttpCtx,
+    WasiHttpCtxView, WasiHttpHooks,
+};
 
-pub type HttpResult<T> = Result<T, HttpError>;
-pub type HttpError = TrappableError<ErrorCode>;
-pub type FutureResult<T> = Box<dyn Future<Output = Result<T, ErrorCode>> + Send>;
-
-/// Set of headers that are forbidden by `wasmtime-wasi-http`.
-pub const FORBIDDEN_HEADERS: [HeaderName; 9] = [
-    CONNECTION,
-    HOST,
-    PROXY_AUTHENTICATE,
-    PROXY_AUTHORIZATION,
-    TRANSFER_ENCODING,
-    UPGRADE,
-    HeaderName::from_static("keep-alive"),
-    HeaderName::from_static("proxy-connection"),
-    HeaderName::from_static("http2-settings"),
-];
+pub type FutureResult<T> = Box<dyn Future<Output = Result<T, HttpError>> + Send>;
 
 #[derive(Debug, Clone, FromEnv)]
 pub struct ConnectOptions {
@@ -107,15 +87,12 @@ impl Backend for HttpDefault {
     }
 }
 
-impl p3::WasiHttpHooks for HttpHooks {
+impl WasiHttpHooks for HttpHooks {
     fn send_request(
-        &mut self, request: Request<UnsyncBoxBody<Bytes, ErrorCode>>,
-        options: Option<RequestOptions>, fut: FutureResult<()>,
-    ) -> Box<
-        dyn Future<
-                Output = HttpResult<(Response<UnsyncBoxBody<Bytes, ErrorCode>>, FutureResult<()>)>,
-            > + Send,
-    > {
+        &mut self, request: Request<WasiBody>, options: Option<RequestOptions>,
+        fut: FutureResult<()>,
+    ) -> Box<dyn Future<Output = Result<(Response<WasiBody>, FutureResult<()>), HttpError>> + Send>
+    {
         let shared_client = self.client.clone();
         let connect_timeout = self.connect_timeout;
 
@@ -176,7 +153,7 @@ impl p3::WasiHttpHooks for HttpHooks {
                     let budget = opt_connect.unwrap_or(connect_timeout).saturating_add(first_byte);
                     match tokio::time::timeout(budget, send).await {
                         Ok(result) => result.map_err(reqwest_err)?,
-                        Err(_elapsed) => return Err(ErrorCode::ConnectionTimeout.into()),
+                        Err(_elapsed) => return Err(HttpError::ConnectionTimeout),
                     }
                 }
                 None => send.await.map_err(reqwest_err)?,
@@ -190,7 +167,7 @@ impl p3::WasiHttpHooks for HttpHooks {
 
             // remove forbidden headers (disallowed by `wasmtime-wasi-http`)
             let headers = response.headers_mut();
-            for header in &FORBIDDEN_HEADERS {
+            for header in &DEFAULT_FORBIDDEN_HEADERS {
                 headers.remove(header);
             }
 
@@ -199,18 +176,18 @@ impl p3::WasiHttpHooks for HttpHooks {
     }
 }
 
-fn internal_err(e: impl Display) -> ErrorCode {
-    ErrorCode::InternalError(Some(e.to_string()))
+fn internal_err(e: impl Display) -> HttpError {
+    HttpError::InternalError(Some(e.to_string()))
 }
 
 #[allow(clippy::needless_pass_by_value)]
-fn reqwest_err(e: reqwest::Error) -> ErrorCode {
+fn reqwest_err(e: reqwest::Error) -> HttpError {
     if e.is_timeout() {
-        ErrorCode::ConnectionTimeout
+        HttpError::ConnectionTimeout
     } else if e.is_connect() {
-        ErrorCode::ConnectionRefused
+        HttpError::ConnectionRefused
     } else if e.is_request() {
-        ErrorCode::HttpRequestUriInvalid
+        HttpError::HttpRequestUriInvalid
     } else {
         internal_err(e)
     }

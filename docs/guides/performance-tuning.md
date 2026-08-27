@@ -40,7 +40,7 @@ The defaults (1000 instances/memories/tables/stacks, 100 warm slots) suit modera
 
 ### 3. Batched decommit
 
-`POOL_DECOMMIT_BATCH_SIZE` batches slot decommits to amortise syscalls — worth testing at high request rates.
+`POOL_DECOMMIT_BATCH_SIZE` (default 16) batches slot decommits to amortise syscalls; on Linux a whole batch flushes in a single `process_madvise` call. Set to 1 to decommit each slot immediately, or raise it at high request rates.
 
 ### 4. Linux-specific options
 

@@ -141,9 +141,9 @@ pub struct RuntimeOptions {
     /// Max metadata size per component instance, in bytes (`POOL_MAX_COMPONENT_INSTANCE_SIZE`, unset: Wasmtime default 1 `MiB`).
     #[env(from = "POOL_MAX_COMPONENT_INSTANCE_SIZE")]
     pub pool_max_component_instance_size: Option<usize>,
-    /// Slots batched per decommit to amortise syscalls (`POOL_DECOMMIT_BATCH_SIZE`, unset: Wasmtime default 1).
-    #[env(from = "POOL_DECOMMIT_BATCH_SIZE")]
-    pub pool_decommit_batch_size: Option<usize>,
+    /// Slots batched per decommit to amortise syscalls; on Linux a whole batch flushes in one `process_madvise` (`POOL_DECOMMIT_BATCH_SIZE`, default 16).
+    #[env(from = "POOL_DECOMMIT_BATCH_SIZE", default = "16")]
+    pub pool_decommit_batch_size: usize,
     /// Use the Linux `PAGEMAP_SCAN` ioctl for cheaper memory reset (`POOL_PAGEMAP_SCAN`, `auto`/`yes`/`no`, default `no`).
     #[env(from = "POOL_PAGEMAP_SCAN", default = "no", with = parse_enabled)]
     pub pool_pagemap_scan: Enabled,
@@ -247,6 +247,10 @@ impl From<&RuntimeOptions> for Config {
             .table_keep_resident(options.pool_table_keep_resident)
             .async_stack_keep_resident(options.pool_async_stack_keep_resident)
             .max_unused_warm_slots(options.pool_max_unused_warm_slots)
+            // Instance-per-call decommits pool slots on every teardown; batching
+            // amortises the syscalls (one `process_madvise` per batch on Linux)
+            // at the cost of slots waiting decommitted-later in the queue.
+            .decommit_batch_size(options.pool_decommit_batch_size)
             // Linux-only fast linear-memory reset; the default (`No`) preserves the
             // prior behaviour and `Auto` falls back cleanly where unsupported.
             .pagemap_scan(options.pool_pagemap_scan);
@@ -284,9 +288,6 @@ impl From<&RuntimeOptions> for Config {
         }
         if let Some(size) = options.pool_max_component_instance_size {
             pool.max_component_instance_size(size);
-        }
-        if let Some(size) = options.pool_decommit_batch_size {
-            pool.decommit_batch_size(size);
         }
 
         cfg_if::cfg_if! {

@@ -133,9 +133,10 @@ pub struct Registry<T: 'static> {
     guests: RwLock<BTreeMap<GuestId, Arc<Guest<T>>>>,
     // Assemble-time identities, which deregistration refuses to remove.
     static_ids: BTreeSet<GuestId>,
-    // Link interfaces polyfilled onto the shared linker at bootstrap; a late
-    // guest's remaining allow-listed imports are polyfilled on a linker clone.
-    wired_links: BTreeSet<Box<str>>,
+    // Link functions polyfilled onto the shared linker at bootstrap, per
+    // interface; a late guest's remaining allow-listed imports are polyfilled
+    // on a linker clone.
+    wired_links: dispatch::WiredLinks,
     routes: Routes,
     dispatch: Arc<DispatchHandle>,
 }
@@ -205,7 +206,7 @@ impl<T: WasiView + 'static> Registry<T> {
     /// Pre-instantiate a late (dynamically registered) component against the
     /// shared host set.
     ///
-    /// Allow-listed link imports the bootstrap did not polyfill (no static
+    /// Allow-listed link functions the bootstrap did not polyfill (no static
     /// guest imports them) are polyfilled on a clone of the retained linker,
     /// from this component's own import types — the shared linker is never
     /// mutated after bootstrap. Imports outside the linked host set and the
