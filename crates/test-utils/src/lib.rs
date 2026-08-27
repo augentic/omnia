@@ -1,11 +1,12 @@
 //! Shared harness for the e2e integration suites.
 //!
-//! The build script compiles every guest program in `crates/test-programs`
-//! to a `wasm32-wasip2` component and generates one `pub const <NAME>: &str`
-//! path per program plus a `foreach_<capability>!` macro; a suite invokes the
-//! macro to prove every guest program has a matching test. The harness below
-//! is capability-agnostic: a suite supplies its own backend bundle and links
-//! its hosts under test.
+//! The build script compiles every guest program in
+//! `crates/test-programs/programs/<capability>/` to a `wasm32-wasip2`
+//! component and generates one `pub const <NAME>: &str` path per program plus
+//! a `foreach_<capability>!` macro; a suite invokes the macro to prove every
+//! guest program has a matching test. The harness below is
+//! capability-agnostic: a suite supplies its own backend bundle and links its
+//! hosts under test.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

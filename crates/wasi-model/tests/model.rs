@@ -214,7 +214,7 @@ impl<M: WasiModelCtx + Clone> WasiModelCtx for Recording<M> {
 
 // ------------------------------------------------------------------------
 // Scenarios (one per guest program; guest-side assertions live in
-// `crates/test-programs/programs/`)
+// `crates/test-programs/programs/model/`)
 // ------------------------------------------------------------------------
 
 #[tokio::test]

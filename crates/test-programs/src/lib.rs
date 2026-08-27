@@ -1,4 +1,4 @@
-//! Shared helpers for the guest scenario programs in `programs/`.
+//! Shared helpers for the guest scenario programs in `programs/<capability>/`.
 //!
 //! Compiled only for `wasm32`; the native build of this crate is empty.
 
@@ -8,10 +8,10 @@ use omnia_guest::model::{Function, Message, Role, Tool};
 use omnia_wasi_model::completion;
 
 /// Wires a scenario `async fn` as the program's `wasi:cli/run` export:
-/// `test_programs::command!(scenario);`. The scenario asserts internally;
+/// `test_programs::run!(scenario);`. The scenario asserts internally;
 /// a panic traps the guest and fails the host-side test.
 #[macro_export]
-macro_rules! command {
+macro_rules! run {
     ($scenario:ident) => {
         struct CliGuest;
 

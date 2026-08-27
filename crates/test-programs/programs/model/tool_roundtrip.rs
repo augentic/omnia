@@ -5,7 +5,7 @@
 use omnia_guest::model::{Model as _, Request, ToolCall, WasiModel};
 use test_programs::{lookup, user};
 
-test_programs::command!(scenario);
+test_programs::run!(scenario);
 
 async fn scenario() {
     let request = Request::builder().messages(vec![user("hi")]).tools(vec![lookup()]).build();
