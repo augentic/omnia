@@ -73,7 +73,7 @@ source.path = "./guests/billing.wasm"    # exports the messaging handler
 routes.messaging = ["invoices.*"]        # exactly one token after `invoices.`
 ```
 
-Each matched message instantiates a fresh instance of the routed guest, exactly like an HTTP request. Inside the guest, topic-to-operation matching stays exact — see [Messaging](messaging.md#handling-incoming-messages).
+Each matched message instantiates a fresh instance of the routed guest, exactly like an HTTP request. Inside the guest, topic-to-handler matching stays exact — see [Messaging](messaging.md#handling-incoming-messages).
 
 ## Mounts: giving guests a workspace
 

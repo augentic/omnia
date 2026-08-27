@@ -105,7 +105,6 @@ dependencies = [
  "axum-core",
  "axum-macros",
  "bytes",
- "form_urlencoded",
  "futures-util",
  "http",
  "http-body",
@@ -119,7 +118,6 @@ dependencies = [
  "serde_core",
  "serde_json",
  "serde_path_to_error",
- "serde_urlencoded",
  "sync_wrapper",
  "tower",
  "tower-layer",
@@ -365,15 +363,6 @@ checksum = "7b48fea5a88e9ae728a2dcbedbfc0e730f7d60da42e1cb049a83c9fb8b789889"
 dependencies = [
  "anstyle",
  "clap_lex",
-]
-
-[[package]]
-name = "clap_complete"
-version = "4.6.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3be2ad0423bdbbb0e25bc89add796f3559706d4a95e1bc98e4d9662a957b6a19"
-dependencies = [
- "clap",
 ]
 
 [[package]]
@@ -2043,8 +2032,6 @@ dependencies = [
  "bon",
  "bytes",
  "chrono",
- "clap",
- "clap_complete",
  "futures",
  "http",
  "http-body",
@@ -2061,7 +2048,6 @@ dependencies = [
  "omnia-wasi-otel",
  "omnia-wasi-sql",
  "omnia-wasi-websocket",
- "rand 0.10.2",
  "sea-query",
  "serde",
  "serde_json",

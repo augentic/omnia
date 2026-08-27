@@ -1,17 +1,16 @@
-//! Operation invocation and HTTP routing contracts.
+//! Handler invocation and HTTP routing contracts.
 
-use std::any::TypeId;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use axum::body::{Body, to_bytes};
 use axum::response::{IntoResponse, Response};
-use http::{Method, Request, StatusCode};
-use omnia_guest::api::http::{Projector, Router, get, get_with, post};
+use http::header::CONTENT_TYPE;
+use http::{HeaderMap, HeaderValue, Method, Request, StatusCode};
+use omnia_guest::api::http::{RawRequest, get, get_with, post, post_with};
 use omnia_guest::api::messaging::{
-    Delivery, DeliveryError, Outcome as DeliveryOutcome, Projector as DeliveryProjector,
-    Router as MessagingRouter, consume,
+    Delivery, DeliveryError, Router as MessagingRouter, consume, consume_with,
 };
-use omnia_guest::api::{CallContext, Invocation, Invoker, Metadata, Operation, Provider};
+use omnia_guest::api::{Client, Context, DecodeError, Handler, HttpError, Metadata};
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt as _;
 
@@ -29,26 +28,23 @@ struct EchoOutput {
     correlation_id: Option<String>,
 }
 
-struct Echo;
-
-impl<P: Provider> Operation<P> for Echo {
+impl<P: Send + Sync + 'static> Handler<P> for EchoInput {
     type Error = omnia_guest::Error;
-    type Input = EchoInput;
     type Output = EchoOutput;
 
-    fn call(
-        input: Self::Input, context: CallContext<'_, P>,
+    fn handle(
+        self, context: Context<'_, P>,
     ) -> impl std::future::Future<Output = Result<Self::Output, Self::Error>> + Send {
         std::future::ready(Ok(EchoOutput {
-            name: input.name,
-            count: input.count.unwrap_or(1),
+            name: self.name,
+            count: self.count.unwrap_or(1),
             owner: context.owner.to_owned(),
             correlation_id: context.metadata.correlation_id.clone(),
         }))
     }
 }
 
-/// Input type promoted to an operation by `#[operation]` below.
+/// Input type promoted to a handler by `#[handler]` below.
 #[derive(Debug, Deserialize)]
 struct MacroEcho {
     name: String,
@@ -60,14 +56,14 @@ struct MacroEchoReply {
     owner: String,
 }
 
-#[omnia_guest::operation]
-// The Operation contract is async; this test body just has nothing to await.
+#[omnia_guest::handler]
+// The Handler contract is async; this test body just has nothing to await.
 #[allow(clippy::unused_async)]
 async fn macro_echo<P>(
-    input: MacroEcho, context: CallContext<'_, P>,
+    input: MacroEcho, context: Context<'_, P>,
 ) -> omnia_guest::Result<MacroEchoReply>
 where
-    P: Provider,
+    P: Send + Sync + 'static,
 {
     Ok(MacroEchoReply {
         name: input.name,
@@ -85,16 +81,19 @@ struct ProviderObservation {
     call: usize,
 }
 
-struct ObserveProvider;
+#[derive(Debug, Deserialize)]
+struct ObserveInput {
+    name: String,
+}
 
-impl Operation<StatefulProvider> for ObserveProvider {
+impl Handler<StatefulProvider> for ObserveInput {
     type Error = omnia_guest::Error;
-    type Input = EchoInput;
     type Output = ProviderObservation;
 
-    fn call(
-        _input: Self::Input, context: CallContext<'_, StatefulProvider>,
+    fn handle(
+        self, context: Context<'_, StatefulProvider>,
     ) -> impl std::future::Future<Output = Result<Self::Output, Self::Error>> + Send {
+        let _ = self.name;
         std::future::ready(Ok(ProviderObservation {
             address: std::ptr::from_ref(context.provider).addr(),
             call: context.provider.calls.fetch_add(1, Ordering::SeqCst) + 1,
@@ -103,12 +102,12 @@ impl Operation<StatefulProvider> for ObserveProvider {
 }
 
 fn router() -> axum::Router {
-    Router::new(Invoker::new("test", ()))
-        .route("/echo", get::<Echo, ()>())
-        .route("/echo", post::<Echo, ()>())
-        .route("/echo/{name}", get::<Echo, ()>())
-        .route("/echo/{name}", post::<Echo, ()>())
-        .into_axum()
+    axum::Router::new()
+        .route("/echo", get::<EchoInput, ()>())
+        .route("/echo", post::<EchoInput, ()>())
+        .route("/echo/{name}", get::<EchoInput, ()>())
+        .route("/echo/{name}", post::<EchoInput, ()>())
+        .with_state(Client::new("test", ()))
 }
 
 async fn send(request: Request<Body>) -> (StatusCode, serde_json::Value) {
@@ -121,30 +120,40 @@ async fn send(request: Request<Body>) -> (StatusCode, serde_json::Value) {
 
 #[tokio::test]
 async fn invoke() {
-    let invoker = Invoker::new("tenant", ());
-    let invocation = Invocation::new(EchoInput {
-        name: "core".to_string(),
-        count: None,
-    })
-    .metadata(Metadata {
+    let client = Client::new("tenant", ());
+    let metadata = Metadata {
         correlation_id: Some("call-1".to_string()),
         ..Metadata::default()
-    });
+    };
 
-    let output = invoker.invoke::<Echo>(invocation).await.expect("operation succeeds");
+    let output = client
+        .call(
+            EchoInput {
+                name: "core".to_string(),
+                count: None,
+            },
+            &metadata,
+        )
+        .await
+        .expect("handler succeeds");
 
     assert_eq!(output.owner, "tenant");
     assert_eq!(output.correlation_id.as_deref(), Some("call-1"));
 }
 
 #[tokio::test]
-async fn invoke_macro_operation() {
-    let invoker = Invoker::new("tenant", ());
-    let invocation = Invocation::new(MacroEcho {
-        name: "generated".to_string(),
-    });
+async fn invoke_macro_handler() {
+    let client = Client::new("tenant", ());
 
-    let output = invoker.invoke::<MacroEcho>(invocation).await.expect("operation succeeds");
+    let output = client
+        .call(
+            MacroEcho {
+                name: "generated".to_string(),
+            },
+            &Metadata::default(),
+        )
+        .await
+        .expect("handler succeeds");
 
     assert_eq!(output.name, "generated");
     assert_eq!(output.owner, "tenant");
@@ -238,42 +247,17 @@ async fn post_non_object_body() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
-#[derive(Clone, Copy)]
-struct Accepted;
-
-impl<P: Provider> Projector<Echo, P> for Accepted {
-    fn output(&self, _output: EchoOutput) -> Response {
-        StatusCode::ACCEPTED.into_response()
-    }
-
-    fn error(&self, _error: omnia_guest::Error) -> Response {
-        StatusCode::IM_A_TEAPOT.into_response()
-    }
-}
-
-#[tokio::test]
-async fn projector() {
-    let router = Router::new(Invoker::new("test", ()))
-        .route("/echo", get_with::<Echo, (), Accepted>(Accepted))
-        .into_axum();
-    let request =
-        Request::builder().uri("/echo?name=custom").body(Body::empty()).expect("build request");
-    let response = router.oneshot(request).await.expect("router serves request");
-
-    assert_eq!(response.status(), StatusCode::ACCEPTED);
-}
-
 #[tokio::test]
 async fn route_state_clones_share_provider() {
-    let router = Router::new(Invoker::new(
-        "test",
-        StatefulProvider {
-            calls: AtomicUsize::new(0),
-        },
-    ))
-    .route("/first", get::<ObserveProvider, StatefulProvider>())
-    .route("/second", get::<ObserveProvider, StatefulProvider>())
-    .into_axum();
+    let router = axum::Router::new()
+        .route("/first", get::<ObserveInput, StatefulProvider>())
+        .route("/second", get::<ObserveInput, StatefulProvider>())
+        .with_state(Client::new(
+            "test",
+            StatefulProvider {
+                calls: AtomicUsize::new(0),
+            },
+        ));
 
     let first = router
         .clone()
@@ -305,47 +289,6 @@ async fn route_state_clones_share_provider() {
     assert_eq!(second["call"], 2);
 }
 
-#[test]
-fn inventory() {
-    let router = Router::new(Invoker::new("test", ()))
-        .route("/echo", get::<Echo, ()>())
-        .route("/echo", post::<Echo, ()>());
-    let inventory = router.inventory();
-
-    assert_eq!(inventory.len(), 2);
-    assert_eq!(inventory[0].method(), Method::GET);
-    assert_eq!(inventory[0].path(), "/echo");
-    assert_eq!(inventory[0].operation(), TypeId::of::<Echo>());
-    assert_eq!(inventory[1].method(), Method::POST);
-}
-
-#[derive(Clone, Copy)]
-struct Capture;
-
-impl DeliveryProjector<EchoOutput, omnia_guest::Error, serde_json::Error> for Capture {
-    fn project(
-        &self, outcome: DeliveryOutcome<EchoOutput, omnia_guest::Error, serde_json::Error>,
-    ) -> Result<(), DeliveryError> {
-        match outcome {
-            DeliveryOutcome::Output(output)
-                if output.name == "message"
-                    && output.correlation_id.as_deref() == Some("delivery-1") =>
-            {
-                Ok(())
-            }
-            DeliveryOutcome::Output(_) => {
-                Err(DeliveryError::Rejected("unexpected output".to_string()))
-            }
-            DeliveryOutcome::Operation(error) => {
-                Err(DeliveryError::Rejected(format!("operation: {error}")))
-            }
-            DeliveryOutcome::Decode(error) => {
-                Err(DeliveryError::Rejected(format!("decode: {error}")))
-            }
-        }
-    }
-}
-
 fn delivery(topic: Option<&str>, payload: &[u8]) -> Delivery {
     Delivery {
         topic: topic.map(str::to_owned),
@@ -357,8 +300,8 @@ fn delivery(topic: Option<&str>, payload: &[u8]) -> Delivery {
 
 #[tokio::test]
 async fn messaging_exact_topic() {
-    let router = MessagingRouter::new(Invoker::new("messages", ()))
-        .route("events.created", consume::<Echo>().project_with(Capture));
+    let router = MessagingRouter::new(Client::new("messages", ()))
+        .route("events.created", consume::<EchoInput>());
 
     router
         .handle(delivery(Some("events.created"), br#"{"name":"message","count":2}"#))
@@ -373,7 +316,7 @@ async fn messaging_exact_topic() {
 #[tokio::test]
 async fn messaging_failures() {
     let router =
-        MessagingRouter::new(Invoker::new("messages", ())).route("events", consume::<Echo>());
+        MessagingRouter::new(Client::new("messages", ())).route("events", consume::<EchoInput>());
 
     assert_eq!(
         router.handle(delivery(None, br#"{"name":"message"}"#)).await,
@@ -386,18 +329,297 @@ async fn messaging_failures() {
 }
 
 #[test]
-fn messaging_inventory() {
-    let router = MessagingRouter::new(Invoker::new("messages", ()))
-        .route("events.created", consume::<Echo>());
-
-    assert_eq!(router.inventory()[0].topic(), "events.created");
-    assert_eq!(router.inventory()[0].operation(), TypeId::of::<Echo>());
-}
-
-#[test]
 #[should_panic(expected = "duplicate messaging topic")]
 fn messaging_duplicate_topic() {
-    let _router = MessagingRouter::new(Invoker::new("messages", ()))
-        .route("events", consume::<Echo>())
-        .route("events", consume::<Echo>());
+    let _router = MessagingRouter::new(Client::new("messages", ()))
+        .route("events", consume::<EchoInput>())
+        .route("events", consume::<EchoInput>());
+}
+
+#[derive(Debug)]
+struct RawText {
+    text: String,
+}
+
+impl<P: Send + Sync + 'static> Handler<P> for RawText {
+    type Error = omnia_guest::Error;
+    type Output = ();
+
+    fn handle(
+        self, _context: Context<'_, P>,
+    ) -> impl std::future::Future<Output = Result<Self::Output, Self::Error>> + Send {
+        let _ = self.text;
+        std::future::ready(Ok(()))
+    }
+}
+
+#[tokio::test]
+async fn consume_with_raw_payload() {
+    let router = MessagingRouter::new(Client::new("messages", ())).route(
+        "events.raw",
+        consume_with(|delivery: &Delivery| {
+            std::str::from_utf8(&delivery.payload)
+                .map(|text| RawText {
+                    text: text.to_owned(),
+                })
+                .map_err(|error| DecodeError::new(format!("payload is not utf-8: {error}")))
+        }),
+    );
+
+    router
+        .handle(delivery(Some("events.raw"), b"not-json"))
+        .await
+        .expect("raw decoder handles a payload JSON consume rejects");
+}
+
+#[derive(Debug)]
+struct JoinNames {
+    names: Vec<String>,
+}
+
+impl<P: Send + Sync + 'static> Handler<P> for JoinNames {
+    type Error = omnia_guest::Error;
+    type Output = String;
+
+    fn handle(
+        self, _context: Context<'_, P>,
+    ) -> impl std::future::Future<Output = Result<Self::Output, Self::Error>> + Send {
+        std::future::ready(Ok(self.names.join(" & ")))
+    }
+}
+
+#[derive(Debug)]
+struct Greet {
+    name: String,
+    greeting: String,
+}
+
+impl<P: Send + Sync + 'static> Handler<P> for Greet {
+    type Error = omnia_guest::Error;
+    type Output = String;
+
+    fn handle(
+        self, _context: Context<'_, P>,
+    ) -> impl std::future::Future<Output = Result<Self::Output, Self::Error>> + Send {
+        std::future::ready(Ok(format!("{}, {}", self.greeting, self.name)))
+    }
+}
+
+fn text_response(body: String) -> Response {
+    (StatusCode::OK, [(CONTENT_TYPE, HeaderValue::from_static("text/plain; charset=utf-8"))], body)
+        .into_response()
+}
+
+fn text_router() -> axum::Router {
+    axum::Router::new()
+        .route(
+            "/join",
+            post_with(
+                |raw: RawRequest<'_>| {
+                    let body = std::str::from_utf8(raw.body)
+                        .map_err(|error| DecodeError::new(format!("body is not utf-8: {error}")))?;
+                    Ok(JoinNames {
+                        names: body.lines().map(str::to_owned).collect(),
+                    })
+                },
+                text_response,
+            ),
+        )
+        .route(
+            "/greet/{name}",
+            get_with(
+                |raw: RawRequest<'_>| {
+                    let name = raw
+                        .path_params
+                        .iter()
+                        .find(|(key, _)| key == "name")
+                        .map(|(_, value)| value.clone())
+                        .ok_or_else(|| DecodeError::new("missing name path parameter"))?;
+                    let greeting = raw
+                        .headers
+                        .get("x-greeting")
+                        .and_then(|value| value.to_str().ok())
+                        .ok_or_else(|| DecodeError::new("missing x-greeting header"))?;
+                    Ok(Greet {
+                        name,
+                        greeting: greeting.to_owned(),
+                    })
+                },
+                text_response,
+            ),
+        )
+        .with_state(Client::new("test", ()))
+}
+
+async fn send_raw(
+    router: axum::Router, request: Request<Body>,
+) -> (StatusCode, Option<String>, String) {
+    let response = router.oneshot(request).await.expect("router serves request");
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.expect("collect body");
+    (status, content_type, String::from_utf8_lossy(&bytes).into_owned())
+}
+
+#[tokio::test]
+async fn post_with_text_codec() {
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/join")
+        .body(Body::from("ada\ngrace"))
+        .expect("build request");
+    let (status, content_type, body) = send_raw(text_router(), request).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(content_type.as_deref(), Some("text/plain; charset=utf-8"));
+    assert_eq!(body, "ada & grace");
+}
+
+#[tokio::test]
+async fn get_with_path_and_header() {
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/greet/ada")
+        .header("x-greeting", "hello")
+        .body(Body::empty())
+        .expect("build request");
+    let (status, content_type, body) = send_raw(text_router(), request).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(content_type.as_deref(), Some("text/plain; charset=utf-8"));
+    assert_eq!(body, "hello, ada");
+}
+
+#[tokio::test]
+async fn get_with_missing_header() {
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/greet/ada")
+        .body(Body::empty())
+        .expect("build request");
+    let (status, _, _) = send_raw(text_router(), request).await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[derive(Debug)]
+struct XmlGreet {
+    name: String,
+}
+
+#[derive(Debug)]
+struct EmptyName;
+
+impl std::fmt::Display for EmptyName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("name cannot be empty")
+    }
+}
+
+impl std::error::Error for EmptyName {}
+
+impl From<EmptyName> for HttpError {
+    fn from(error: EmptyName) -> Self {
+        let body = format!("<error><code>empty_name</code><message>{error}</message></error>");
+        Self::with_body(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            HeaderValue::from_static("text/xml; charset=utf-8"),
+            body.into_bytes(),
+        )
+    }
+}
+
+impl<P: Send + Sync + 'static> Handler<P> for XmlGreet {
+    type Error = EmptyName;
+    type Output = String;
+
+    fn handle(
+        self, _context: Context<'_, P>,
+    ) -> impl std::future::Future<Output = Result<Self::Output, Self::Error>> + Send {
+        std::future::ready(if self.name.is_empty() {
+            Err(EmptyName)
+        } else {
+            Ok(format!("hello, {}", self.name))
+        })
+    }
+}
+
+fn parse_greet(headers: &HeaderMap, body: &[u8]) -> Result<XmlGreet, DecodeError> {
+    let content_type = headers.get(CONTENT_TYPE).and_then(|value| value.to_str().ok());
+    if content_type != Some("text/xml") {
+        return Err(DecodeError::new("expected a text/xml request"));
+    }
+    let body = std::str::from_utf8(body)
+        .map_err(|error| DecodeError::new(format!("body is not utf-8: {error}")))?;
+    let start = body.find("<name>").map(|index| index + "<name>".len());
+    let end = body.find("</name>");
+    match (start, end) {
+        (Some(start), Some(end)) if start <= end => Ok(XmlGreet {
+            name: body[start..end].to_owned(),
+        }),
+        _ => Err(DecodeError::new("malformed greet document")),
+    }
+}
+
+fn xml_router() -> axum::Router {
+    axum::Router::new()
+        .route(
+            "/greet",
+            post_with(
+                |raw: RawRequest<'_>| parse_greet(raw.headers, raw.body),
+                |greeting: String| {
+                    (
+                        StatusCode::OK,
+                        [(CONTENT_TYPE, HeaderValue::from_static("text/xml; charset=utf-8"))],
+                        format!("<greeting>{greeting}</greeting>"),
+                    )
+                        .into_response()
+                },
+            ),
+        )
+        .with_state(Client::new("xml", ()))
+}
+
+fn xml_request(body: &'static str) -> Request<Body> {
+    Request::builder()
+        .method(Method::POST)
+        .uri("/greet")
+        .header(CONTENT_TYPE, "text/xml")
+        .body(Body::from(body))
+        .expect("build request")
+}
+
+#[tokio::test]
+async fn xml_success() {
+    let (status, content_type, body) =
+        send_raw(xml_router(), xml_request("<greet><name>ada</name></greet>")).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(content_type.as_deref(), Some("text/xml; charset=utf-8"));
+    assert_eq!(body, "<greeting>hello, ada</greeting>");
+}
+
+#[tokio::test]
+async fn xml_handler_error() {
+    let (status, content_type, body) =
+        send_raw(xml_router(), xml_request("<greet><name></name></greet>")).await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(content_type.as_deref(), Some("text/xml; charset=utf-8"));
+    assert_eq!(
+        body,
+        "<error><code>empty_name</code><message>name cannot be empty</message></error>"
+    );
+}
+
+#[tokio::test]
+async fn xml_malformed_body() {
+    let (status, content_type, _) = send_raw(xml_router(), xml_request("<greet>")).await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(content_type.as_deref(), Some("text/plain; charset=utf-8"));
 }
