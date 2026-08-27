@@ -1,5 +1,5 @@
-error: #[operation] takes no arguments
- --> tests/compile_fail/with_arguments.rs:1:33
+error: #[handler] takes no arguments
+ --> tests/compile_fail/with_arguments.rs:1:31
   |
-1 | #[omnia_guest_macros::operation(name = "custom_span")]
-  |                                 ^^^^^^^^^^^^^^^^^^^^
+1 | #[omnia_guest_macros::handler(name = "custom_span")]
+  |                               ^^^^^^^^^^^^^^^^^^^^

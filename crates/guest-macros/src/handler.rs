@@ -1,4 +1,4 @@
-//! Implementation details for the `#[operation]` attribute macro.
+//! Implementation details for the `#[handler]` attribute macro.
 
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -10,36 +10,33 @@ use syn::{
 pub fn expand(item_fn: &ItemFn) -> Result<TokenStream> {
     let sig = &item_fn.sig;
     if sig.asyncness.is_none() {
-        return Err(Error::new_spanned(sig.fn_token, "#[operation] requires an `async fn`"));
+        return Err(Error::new_spanned(sig.fn_token, "#[handler] requires an `async fn`"));
     }
 
     let (input_ty, provider) = params(sig)?;
     let (output_ty, error_ty) = result_types(&sig.output)?;
 
-    // The impl repeats the fn's generics verbatim. `CallContext<'_, P>` already
-    // forces `P: Provider` onto the fn, so the trait's bound is always present.
     let (impl_generics, _, where_clause) = sig.generics.split_for_impl();
     let fn_ident = &sig.ident;
 
     Ok(quote! {
         #item_fn
 
-        impl #impl_generics ::omnia_guest::api::Operation<#provider> for #input_ty #where_clause {
+        impl #impl_generics ::omnia_guest::api::Handler<#provider> for #input_ty #where_clause {
             type Error = #error_ty;
-            type Input = Self;
             type Output = #output_ty;
 
-            async fn call(
-                input: Self, context: ::omnia_guest::api::CallContext<'_, #provider>,
+            async fn handle(
+                self, context: ::omnia_guest::api::Context<'_, #provider>,
             ) -> ::core::result::Result<Self::Output, Self::Error> {
-                #fn_ident(input, context).await
+                #fn_ident(self, context).await
             }
         }
     })
 }
 
 fn params(sig: &Signature) -> Result<(&Type, &Ident)> {
-    const SHAPE: &str = "#[operation] expects exactly two parameters: `(input: <InputType>, context: CallContext<'_, P>)`";
+    const SHAPE: &str = "#[handler] expects exactly two parameters: `(input: <InputType>, context: Context<'_, P>)`";
 
     let mut inputs = sig.inputs.iter();
     let (Some(first), Some(second), None) = (inputs.next(), inputs.next(), inputs.next()) else {
@@ -53,7 +50,7 @@ fn params(sig: &Signature) -> Result<(&Type, &Ident)> {
     if !matches!(input_ty, Type::Path(_)) {
         return Err(Error::new_spanned(
             input_ty,
-            "the operation input must be an owned path type; it becomes the `Operation` impl target",
+            "the handler input must be an owned path type; it becomes the `Handler` impl target",
         ));
     }
 
@@ -63,7 +60,7 @@ fn params(sig: &Signature) -> Result<(&Type, &Ident)> {
     let provider = call_context(&context.ty).ok_or_else(|| {
         Error::new_spanned(
             &context.ty,
-            "the second parameter must be `CallContext<'_, P>` where `P` is a type parameter of the fn",
+            "the second parameter must be `Context<'_, P>` where `P` is a type parameter of the fn",
         )
     })?;
 
@@ -72,7 +69,7 @@ fn params(sig: &Signature) -> Result<(&Type, &Ident)> {
 
 fn call_context(ty: &Type) -> Option<&Ident> {
     let (name, args) = path_types(ty)?;
-    if *name != "CallContext" {
+    if *name != "Context" {
         return None;
     }
     match args.last()? {
@@ -83,7 +80,7 @@ fn call_context(ty: &Type) -> Option<&Ident> {
 
 fn result_types(output: &ReturnType) -> Result<(&Type, TokenStream)> {
     const SHAPE: &str =
-        "#[operation] handlers must return `Result<T>` (omnia_guest::Result) or `Result<T, E>`";
+        "#[handler] functions must return `Result<T>` (omnia_guest::Result) or `Result<T, E>`";
 
     let ReturnType::Type(_, ty) = output else {
         return Err(Error::new_spanned(output, SHAPE));
@@ -130,14 +127,14 @@ mod tests {
     #[test]
     fn defaults() {
         let item_fn: syn::ItemFn = parse_quote! {
-            async fn motion_message<P>(input: MotionMessage, context: CallContext<'_, P>) -> Result<()> {
+            async fn motion_message<P>(input: MotionMessage, context: Context<'_, P>) -> Result<()> {
                 todo!()
             }
         };
         let out = expand(&item_fn).expect("expands").to_string();
 
         assert!(
-            out.contains(":: omnia_guest :: api :: Operation < P > for MotionMessage"),
+            out.contains(":: omnia_guest :: api :: Handler < P > for MotionMessage"),
             "impl target must be the input type: {out}"
         );
         assert!(out.contains("type Output = ()"), "output from Result<T>: {out}");
@@ -150,7 +147,7 @@ mod tests {
     #[test]
     fn explicit_error_type() {
         let item_fn: syn::ItemFn = parse_quote! {
-            async fn lookup<P>(input: Request, context: CallContext<'_, P>) -> Result<Reply, MyError> {
+            async fn lookup<P>(input: Request, context: Context<'_, P>) -> Result<Reply, MyError> {
                 todo!()
             }
         };

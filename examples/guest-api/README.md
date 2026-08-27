@@ -1,7 +1,8 @@
 # Guest API Example
 
-Demonstrates transport-neutral `Operation` implementations, explicit typed
-HTTP route registration, and a small regular-Rust WASI HTTP export adapter.
+Demonstrates transport-neutral `Handler` implementations, explicit typed
+HTTP route registration with `get`/`post`, and a small regular-Rust WASI HTTP
+export adapter.
 
 ## Quick Start
 

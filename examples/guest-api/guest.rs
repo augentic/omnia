@@ -1,11 +1,12 @@
 //! # Typed Guest API Wasm Guest
 //!
-//! This module demonstrates the explicit operation and HTTP router API.
+//! This module demonstrates the explicit handler and HTTP router API.
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_guest::api::http::{Router, get, post, serve};
-use omnia_guest::api::{CallContext, Invoker, Operation};
+use axum::Router;
+use omnia_guest::api::http::{get, post, serve};
+use omnia_guest::api::{Client, Context, Handler};
 use omnia_guest::{Error, wasip3};
 use serde::{Deserialize, Serialize};
 
@@ -16,8 +17,6 @@ struct GreetArgs {
     name: String,
 }
 
-struct Greet;
-
 #[derive(Debug, Serialize)]
 struct Greeting {
     message: String,
@@ -25,26 +24,24 @@ struct Greeting {
     request_id: String,
 }
 
-impl Operation<Provider> for Greet {
+impl Handler<Provider> for GreetArgs {
     type Error = Error;
-    type Input = GreetArgs;
     type Output = Greeting;
 
-    async fn call(
-        input: Self::Input, context: CallContext<'_, Provider>,
-    ) -> Result<Self::Output, Self::Error> {
+    async fn handle(self, context: Context<'_, Provider>) -> Result<Self::Output, Self::Error> {
         Ok(Greeting {
-            message: format!("Hello, {}!", input.name),
+            message: format!("Hello, {}!", self.name),
             owner: context.owner.to_string(),
             request_id: context.metadata.correlation_id.as_deref().unwrap_or("none").to_string(),
         })
     }
 }
 
-fn router() -> Router<Provider> {
-    Router::new(Invoker::new("examples", Provider))
-        .route("/greet/{name}", get::<Greet, Provider>())
-        .route("/greet", post::<Greet, Provider>())
+fn router() -> Router {
+    Router::new()
+        .route("/greet/{name}", get::<GreetArgs, Provider>())
+        .route("/greet", post::<GreetArgs, Provider>())
+        .with_state(Client::new("examples", Provider))
 }
 
 struct Http;

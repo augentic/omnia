@@ -1,6 +1,5 @@
-//! Typed messaging routing over application operations.
+//! Typed messaging routing over application handlers.
 
-use std::any::TypeId;
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
@@ -11,10 +10,7 @@ use std::sync::Arc;
 
 use serde::de::DeserializeOwned;
 
-use crate::api::Provider;
-use crate::api::invocation::{Invocation, Metadata};
-use crate::api::invoke::Invoker;
-use crate::api::operation::Operation;
+use crate::api::{Client, DecodeError, Handler, Metadata};
 
 /// An owned inbound delivery independent of a messaging binding.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -29,48 +25,6 @@ pub struct Delivery {
     pub metadata: Vec<(String, String)>,
 }
 
-/// Converts an inbound delivery into an operation input.
-pub trait Decoder<I>: Clone + Send + Sync + 'static {
-    /// The decoding failure.
-    type Error: Error + Send + Sync + 'static;
-
-    /// Decode one delivery.
-    ///
-    /// # Errors
-    ///
-    /// Returns a typed payload decoding failure.
-    fn decode(&self, delivery: &Delivery) -> Result<I, Self::Error>;
-}
-
-impl<I, E, F> Decoder<I> for F
-where
-    E: Error + Send + Sync + 'static,
-    F: Fn(&Delivery) -> Result<I, E> + Clone + Send + Sync + 'static,
-{
-    type Error = E;
-
-    fn decode(&self, delivery: &Delivery) -> Result<I, Self::Error> {
-        self(delivery)
-    }
-}
-
-/// Decodes the delivery payload as JSON.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Json;
-
-impl<I> Decoder<I> for Json
-where
-    I: DeserializeOwned,
-{
-    type Error = serde_json::Error;
-
-    fn decode(&self, delivery: &Delivery) -> Result<I, Self::Error> {
-        serde_json::from_slice(&delivery.payload)
-    }
-}
-
-pub use crate::api::Outcome;
-
 /// A delivery failure projected onto the current WIT error result.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DeliveryError {
@@ -78,7 +32,7 @@ pub enum DeliveryError {
     MissingTopic,
     /// No route was registered for the exact topic.
     UnhandledTopic(String),
-    /// Application-local projection rejected the delivery.
+    /// Decoding or the handler rejected the delivery.
     Rejected(String),
 }
 
@@ -94,110 +48,55 @@ impl fmt::Display for DeliveryError {
 
 impl Error for DeliveryError {}
 
-/// Maps one typed route outcome to acknowledgement or delivery failure.
-pub trait Projector<T, O, D>: Clone + Send + Sync + 'static {
-    /// Project the operation outcome.
-    ///
-    /// `Ok(())` acknowledges the current delivery. `Err` becomes the error
-    /// arm of the current `wasi:messaging/incoming-handler.handle` result.
-    ///
-    /// # Errors
-    ///
-    /// Returns a delivery failure for host-defined retry or rejection policy.
-    fn project(&self, outcome: Outcome<T, O, D>) -> Result<(), DeliveryError>;
+/// A typed messaging route awaiting a topic.
+pub struct Consume<H, D> {
+    decode: D,
+    marker: PhantomData<fn() -> H>,
 }
 
-/// Acknowledges outputs and rejects typed operation or decoding failures.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Acknowledge;
-
-impl<T, O, D> Projector<T, O, D> for Acknowledge
-where
-    O: fmt::Display,
-    D: fmt::Display,
-{
-    fn project(&self, outcome: Outcome<T, O, D>) -> Result<(), DeliveryError> {
-        match outcome {
-            Outcome::Output(_) => Ok(()),
-            Outcome::Operation(error) => Err(DeliveryError::Rejected(error.to_string())),
-            Outcome::Decode(error) => Err(DeliveryError::Rejected(error.to_string())),
-        }
-    }
-}
-
-/// Begin a JSON-decoded, acknowledgement-projected route.
+/// Create a messaging route with a custom delivery decoder.
 #[must_use]
-pub fn consume<O>() -> Consume<O, Json, Acknowledge> {
+pub fn consume_with<H, D>(decode: D) -> Consume<H, D>
+where
+    D: Fn(&Delivery) -> Result<H, DecodeError> + Send + Sync + 'static,
+{
     Consume {
-        decoder: Json,
-        projector: Acknowledge,
+        decode,
         marker: PhantomData,
     }
 }
 
-/// A typed messaging route before registration.
-pub struct Consume<O, D, Q> {
-    decoder: D,
-    projector: Q,
-    marker: PhantomData<fn() -> O>,
-}
-
-impl<O, D, Q> Consume<O, D, Q> {
-    /// Replace the payload decoder policy.
-    #[must_use]
-    pub fn decode_with<D2>(self, decoder: D2) -> Consume<O, D2, Q> {
-        Consume {
-            decoder,
-            projector: self.projector,
-            marker: PhantomData,
-        }
-    }
-
-    /// Replace the output and error delivery policy.
-    #[must_use]
-    pub fn project_with<Q2>(self, projector: Q2) -> Consume<O, D, Q2> {
-        Consume {
-            decoder: self.decoder,
-            projector,
-            marker: PhantomData,
-        }
-    }
+/// Create a JSON-decoded messaging route.
+#[must_use]
+pub fn consume<H: DeserializeOwned>()
+-> Consume<H, impl Fn(&Delivery) -> Result<H, DecodeError> + Send + Sync + 'static> {
+    consume_with(|delivery: &Delivery| {
+        serde_json::from_slice(&delivery.payload)
+            .map_err(|error| DecodeError::new(format!("malformed JSON payload: {error}")))
+    })
 }
 
 type DispatchFuture<'a> = Pin<Box<dyn Future<Output = Result<(), DeliveryError>> + Send + 'a>>;
 
-trait ErasedRoute<P: Provider>: Send + Sync {
-    fn operation(&self) -> TypeId;
-    fn dispatch<'a>(
-        &'a self, delivery: &'a Delivery, invoker: &'a Invoker<P>,
-    ) -> DispatchFuture<'a>;
+trait ErasedRoute<P: Send + Sync + 'static>: Send + Sync {
+    fn dispatch<'a>(&'a self, delivery: &'a Delivery, client: &'a Client<P>) -> DispatchFuture<'a>;
 }
 
-struct Route<P, O, D, Q> {
-    decoder: D,
-    projector: Q,
-    marker: PhantomData<fn(P) -> O>,
+struct Route<P, H, D> {
+    decode: D,
+    marker: PhantomData<fn(P) -> H>,
 }
 
-impl<P, O, D, Q> ErasedRoute<P> for Route<P, O, D, Q>
+impl<P, H, D> ErasedRoute<P> for Route<P, H, D>
 where
-    P: Provider,
-    O: Operation<P>,
-    D: Decoder<O::Input>,
-    Q: Projector<O::Output, O::Error, D::Error>,
+    P: Send + Sync + 'static,
+    H: Handler<P> + 'static,
+    D: Fn(&Delivery) -> Result<H, DecodeError> + Send + Sync + 'static,
 {
-    fn operation(&self) -> TypeId {
-        TypeId::of::<O>()
-    }
-
-    fn dispatch<'a>(
-        &'a self, delivery: &'a Delivery, invoker: &'a Invoker<P>,
-    ) -> DispatchFuture<'a> {
+    fn dispatch<'a>(&'a self, delivery: &'a Delivery, client: &'a Client<P>) -> DispatchFuture<'a> {
         Box::pin(async move {
-            let input = match self.decoder.decode(delivery) {
-                Ok(input) => input,
-                Err(error) => return self.projector.project(Outcome::Decode(error)),
-            };
+            let input = (self.decode)(delivery)
+                .map_err(|error| DeliveryError::Rejected(error.to_string()))?;
             let metadata = Metadata::from_lookup(|name| {
                 delivery
                     .metadata
@@ -205,102 +104,67 @@ where
                     .find(|(key, _)| key.eq_ignore_ascii_case(name))
                     .map(|(_, value)| value.clone())
             });
-            let outcome = match invoker.invoke::<O>(Invocation::new(input).metadata(metadata)).await
-            {
-                Ok(output) => Outcome::Output(output),
-                Err(error) => Outcome::Operation(error),
-            };
-            self.projector.project(outcome)
+            client
+                .call(input, &metadata)
+                .await
+                .map(|_| ())
+                .map_err(|error| DeliveryError::Rejected(error.to_string()))
         })
     }
 }
 
-/// Read-only metadata for one exact topic registration.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RouteInfo {
-    topic: String,
-    operation: TypeId,
-}
-
-impl RouteInfo {
-    /// Return the exact registered topic.
-    #[must_use]
-    pub fn topic(&self) -> &str {
-        &self.topic
-    }
-
-    /// Return the process-local operation type identity.
-    #[must_use]
-    pub const fn operation(&self) -> TypeId {
-        self.operation
-    }
-}
-
 /// An exact-topic messaging router.
-pub struct Router<P: Provider> {
-    invoker: Invoker<P>,
+pub struct Router<P: Send + Sync + 'static> {
+    client: Client<P>,
     routes: BTreeMap<String, Arc<dyn ErasedRoute<P>>>,
-    inventory: Vec<RouteInfo>,
 }
 
-impl<P: Provider> Router<P> {
-    /// Create an empty router backed by an invoker.
+impl<P: Send + Sync + 'static> Router<P> {
+    /// Create an empty router backed by a client.
     #[must_use]
-    pub fn new(invoker: Invoker<P>) -> Self {
+    pub fn new(client: Client<P>) -> Self {
         Self {
-            invoker,
+            client,
             routes: BTreeMap::new(),
-            inventory: Vec::new(),
         }
     }
 
-    /// Register one operation for one exact topic.
+    /// Register one handler for one exact topic.
     ///
     /// # Panics
     ///
     /// Panics when the topic is empty or already registered.
     #[must_use]
-    pub fn route<O, D, Q>(mut self, topic: impl Into<String>, binding: Consume<O, D, Q>) -> Self
+    pub fn route<H, D>(mut self, topic: impl Into<String>, consume: Consume<H, D>) -> Self
     where
-        O: Operation<P>,
-        D: Decoder<O::Input>,
-        Q: Projector<O::Output, O::Error, D::Error>,
+        H: Handler<P> + 'static,
+        D: Fn(&Delivery) -> Result<H, DecodeError> + Send + Sync + 'static,
     {
         let topic = topic.into();
         assert!(!topic.is_empty(), "messaging topic cannot be empty");
         assert!(!self.routes.contains_key(&topic), "duplicate messaging topic `{topic}`");
-        let route: Arc<dyn ErasedRoute<P>> = Arc::new(Route::<P, O, D, Q> {
-            decoder: binding.decoder,
-            projector: binding.projector,
-            marker: PhantomData,
-        });
-        self.inventory.push(RouteInfo {
-            topic: topic.clone(),
-            operation: route.operation(),
-        });
-        self.routes.insert(topic, route);
+        self.routes.insert(
+            topic,
+            Arc::new(Route::<P, H, D> {
+                decode: consume.decode,
+                marker: PhantomData,
+            }),
+        );
         self
-    }
-
-    /// Return routes in registration order.
-    #[must_use]
-    pub fn inventory(&self) -> &[RouteInfo] {
-        &self.inventory
     }
 
     /// Dispatch one delivery by exact topic.
     ///
     /// # Errors
     ///
-    /// Returns missing-topic, unhandled-topic, decoding, operation, or
-    /// application-local projection failures.
+    /// Returns missing-topic, unhandled-topic, decoding, or handler failures.
     pub async fn handle(&self, delivery: Delivery) -> Result<(), DeliveryError> {
         let topic = delivery.topic.as_deref().ok_or(DeliveryError::MissingTopic)?;
         let route = self
             .routes
             .get(topic)
             .ok_or_else(|| DeliveryError::UnhandledTopic(topic.to_owned()))?;
-        route.dispatch(&delivery, &self.invoker).await
+        route.dispatch(&delivery, &self.client).await
     }
 }
 
@@ -312,9 +176,9 @@ impl<P: Provider> Router<P> {
 ///
 /// # Errors
 ///
-/// Returns the projected WIT delivery failure.
+/// Returns the WIT delivery failure.
 #[cfg(target_arch = "wasm32")]
-pub async fn handle<P: Provider>(
+pub async fn handle<P: Send + Sync + 'static>(
     router: &Router<P>, message: omnia_wasi_messaging::types::Message,
 ) -> Result<(), omnia_wasi_messaging::types::Error> {
     let delivery = Delivery {
