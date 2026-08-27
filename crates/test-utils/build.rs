@@ -20,6 +20,9 @@ fn main() {
     println!("cargo:rerun-if-changed={}", programs_dir.display());
     println!("cargo:rerun-if-changed={}", test_programs.join("src").display());
     println!("cargo:rerun-if-changed={}", test_programs.join("Cargo.toml").display());
+    // The guests' WIT lives outside the dep-info the nested build emits (proc
+    // macros don't track file reads), so watch it explicitly.
+    println!("cargo:rerun-if-changed={}", test_programs.join("wit").display());
 
     let programs = programs(&programs_dir);
     sync_examples(&test_programs.join("Cargo.toml"), &programs);
@@ -89,7 +92,7 @@ fn programs(dir: &Path) -> Vec<Program> {
 
         let capability = entry.file_name().into_string().expect("UTF-8 capability directory");
         match capability.as_str() {
-            "model" => {}
+            "link" | "model" => {}
             other => panic!(
                 "unknown capability directory `{other}`: add it to the match in \
                  crates/test-utils/build.rs"

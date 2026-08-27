@@ -216,7 +216,8 @@ mod tests {
     #[tokio::test]
     async fn read_over_limit() {
         let (root, workspace) = handle("read-limit", false);
-        let oversized = vec![0_u8; (MAX_READ_BYTES as usize) + 1];
+        let oversized =
+            vec![0_u8; usize::try_from(MAX_READ_BYTES).expect("read cap fits usize") + 1];
         fs::write(root.join("big.bin"), &oversized).expect("writing oversized file");
         let error = workspace.read("big.bin".to_owned()).await.expect_err("read limit");
         assert!(error.to_string().contains("exceeds workspace read limit"), "{error}");

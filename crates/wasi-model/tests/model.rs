@@ -260,6 +260,7 @@ async fn model_echo_text() {
     assert_eq!(requests[0].contents, ["hi", "second"]);
     assert!(requests[0].mcp.is_empty());
     assert!(requests[0].temperature.is_none());
+    drop(requests);
 }
 
 #[tokio::test]
@@ -271,6 +272,7 @@ async fn model_request_shape() {
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].mcp, ["docs"]);
     assert_eq!(requests[0].temperature, Some(0.25));
+    drop(requests);
 }
 
 #[tokio::test]
@@ -338,6 +340,7 @@ async fn model_sections() {
         requests[0].system.as_deref(),
         Some("prefer {language}\n\na Rust reviewer\n\n- be Rust-idiomatic")
     );
+    drop(requests);
 }
 
 #[tokio::test]
