@@ -3,7 +3,7 @@
 use axum::Router as AxumRouter;
 use axum::body::Bytes;
 use axum::extract::{RawPathParams, RawQuery, State};
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{self, MethodRouter};
 use http::header::CONTENT_TYPE;
 use http::{HeaderMap, HeaderValue, StatusCode};
@@ -213,7 +213,10 @@ where
     H::Error: Into<HttpError>,
     P: Send + Sync + 'static,
 {
-    get_with(|raw: RawRequest<'_>| query_input::<H>(raw.path_params, raw.query), json)
+    get_with(
+        |raw: RawRequest<'_>| query_input::<H>(raw.path_params, raw.query),
+        |output| Json(output).into_response(),
+    )
 }
 
 /// Create a POST route decoding a JSON body merged with path parameters.
@@ -225,7 +228,10 @@ where
     H::Error: Into<HttpError>,
     P: Send + Sync + 'static,
 {
-    post_with(|raw: RawRequest<'_>| body_input::<H>(raw.path_params, raw.body), json)
+    post_with(
+        |raw: RawRequest<'_>| body_input::<H>(raw.path_params, raw.body),
+        |output| Json(output).into_response(),
+    )
 }
 
 async fn dispatch<H, P, D, E>(
@@ -257,24 +263,6 @@ where
     match client.call(input, &metadata).await {
         Ok(output) => encode(output),
         Err(error) => Into::<HttpError>::into(error).into_response(),
-    }
-}
-
-/// Encode a handler output as a JSON response.
-#[must_use]
-pub fn json<T: Serialize>(output: T) -> Response {
-    match serde_json::to_vec(&output) {
-        Ok(body) => {
-            (StatusCode::OK, [(CONTENT_TYPE, HeaderValue::from_static("application/json"))], body)
-                .into_response()
-        }
-        Err(error) => {
-            let error = crate::server_error!("body encoding error: {}", error);
-            let body =
-                serde_json::to_vec(&error).unwrap_or_else(|_| error.to_string().into_bytes());
-            (error.status(), [(CONTENT_TYPE, HeaderValue::from_static("application/json"))], body)
-                .into_response()
-        }
     }
 }
 
