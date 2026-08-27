@@ -11,124 +11,6 @@
 
 use std::future::Future;
 
-/// Chat turn author.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Role {
-    /// System / instructions channel.
-    System,
-    /// End-user turn.
-    User,
-    /// Model turn.
-    Assistant,
-}
-
-/// One chat turn passed to the provider API.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Message {
-    /// Turn author.
-    pub role: Role,
-    /// Turn body text.
-    pub content: String,
-}
-
-/// JSON Schema constrained output.
-#[derive(Clone, Debug, PartialEq, Eq, bon::Builder)]
-pub struct SchemaFormat {
-    /// Schema name passed to the provider (e.g. `review_result`).
-    #[builder(into)]
-    pub name: String,
-    /// JSON Schema document the answer must conform to.
-    #[builder(into)]
-    pub schema: String,
-}
-
-/// Output shape constraint for the completion.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum Format {
-    /// Answer is plain text.
-    #[default]
-    Text,
-    /// Answer must parse as a JSON object.
-    Json,
-    /// Answer must validate against the given JSON Schema; the host enforces
-    /// this at the `create` gate.
-    Schema(SchemaFormat),
-}
-
-/// Reasoning-effort hint for models that expose a thinking budget.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Effort {
-    /// Least reasoning; lowest latency and cost.
-    Minimal,
-    /// Reduced reasoning.
-    Low,
-    /// Balanced reasoning.
-    Medium,
-    /// Most reasoning; highest latency and cost.
-    High,
-}
-
-/// Sampling and length controls. Omitted fields defer to backend defaults.
-#[derive(Clone, Debug, Default, PartialEq, bon::Builder)]
-pub struct Generation {
-    /// Sampling temperature.
-    pub temperature: Option<f32>,
-    /// Nucleus sampling threshold.
-    pub top_p: Option<f32>,
-    /// Maximum output tokens.
-    pub max_tokens: Option<u32>,
-    /// Sequences that halt generation.
-    #[builder(default)]
-    pub stop: Vec<String>,
-    /// Seed for reproducible sampling when the provider supports it.
-    pub seed: Option<u64>,
-    /// Reasoning-effort hint for thinking-capable models.
-    pub effort: Option<Effort>,
-}
-
-// The float fields are sampling controls set from configuration values; NaN
-// is never a meaningful setting, so total equality holds.
-impl Eq for Generation {}
-
-/// Guest-declared function tool advertised to the model.
-#[derive(Clone, Debug, PartialEq, Eq, bon::Builder)]
-pub struct Function {
-    /// Tool name. Must not collide with reserved host-injected tool names
-    /// (`read`, `list`, `write`).
-    #[builder(into)]
-    pub name: String,
-    /// Natural-language description for the model.
-    #[builder(into)]
-    pub description: String,
-    /// JSON Schema for the tool's arguments object.
-    #[builder(into)]
-    pub parameters: String,
-}
-
-/// Remote MCP server offered to the model for this completion.
-#[derive(Clone, Debug, PartialEq, Eq, bon::Builder)]
-pub struct McpGrant {
-    /// Logical server name identifying the server (e.g. in `.cursor/mcp.json`).
-    #[builder(into)]
-    pub name: String,
-    /// Tool allowlist; empty exposes every tool the server advertises.
-    #[builder(default)]
-    pub tools: Vec<String>,
-    /// MCP server endpoint URL.
-    #[builder(into)]
-    pub url: String,
-}
-
-/// A tool offered to the model: a guest-declared function or an MCP server
-/// grant carrying its own endpoint URL.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Tool {
-    /// Guest-declared function tool.
-    Function(Function),
-    /// MCP server grant.
-    Mcp(McpGrant),
-}
-
 /// Complete request for one completion.
 #[derive(Clone, Debug, Default, PartialEq, Eq, bon::Builder)]
 pub struct Request {
@@ -159,16 +41,131 @@ pub struct Request {
     pub workspace: Option<String>,
 }
 
-/// One tool invocation the model asked the guest to run, delivered to the
-/// [`Model::complete_with`] handler.
+/// One chat turn passed to the provider API.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ToolCall {
-    /// Correlation id the session answers by; the handler never needs it.
-    pub id: String,
-    /// The declared function-tool name the model called.
+pub struct Message {
+    /// Turn author.
+    pub role: Role,
+    /// Turn body text.
+    pub content: String,
+}
+
+/// Chat turn author.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Role {
+    /// System / instructions channel.
+    System,
+    /// End-user turn.
+    User,
+    /// Model turn.
+    Assistant,
+}
+
+/// Sampling and length controls. Omitted fields defer to backend defaults.
+#[derive(Clone, Debug, Default, PartialEq, bon::Builder)]
+pub struct Generation {
+    /// Sampling temperature.
+    pub temperature: Option<f32>,
+    /// Nucleus sampling threshold.
+    pub top_p: Option<f32>,
+    /// Maximum output tokens.
+    pub max_tokens: Option<u32>,
+    /// Sequences that halt generation.
+    #[builder(default)]
+    pub stop: Vec<String>,
+    /// Seed for reproducible sampling when the provider supports it.
+    pub seed: Option<u64>,
+    /// Reasoning-effort hint for thinking-capable models.
+    pub effort: Option<Effort>,
+}
+
+// The float fields are sampling controls set from configuration values; NaN
+// is never a meaningful setting, so total equality holds.
+impl Eq for Generation {}
+
+/// Reasoning-effort hint for models that expose a thinking budget.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Effort {
+    /// Least reasoning; lowest latency and cost.
+    Minimal,
+    /// Reduced reasoning.
+    Low,
+    /// Balanced reasoning.
+    Medium,
+    /// Most reasoning; highest latency and cost.
+    High,
+}
+
+/// Output shape constraint for the completion.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Format {
+    /// Answer is plain text.
+    #[default]
+    Text,
+    /// Answer must parse as a JSON object.
+    Json,
+    /// Answer must validate against the given JSON Schema; the host enforces
+    /// this at the `create` gate.
+    Schema(SchemaFormat),
+}
+
+/// JSON Schema constrained output.
+#[derive(Clone, Debug, PartialEq, Eq, bon::Builder)]
+pub struct SchemaFormat {
+    /// Schema name passed to the provider (e.g. `review_result`).
+    #[builder(into)]
     pub name: String,
-    /// JSON arguments object for the tool, per its declared parameters schema.
-    pub arguments: String,
+    /// JSON Schema document the answer must conform to.
+    #[builder(into)]
+    pub schema: String,
+}
+
+/// A tool offered to the model: a guest-declared function or an MCP server
+/// grant carrying its own endpoint URL.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Tool {
+    /// Guest-declared function tool.
+    Function(Function),
+    /// MCP server grant.
+    Mcp(McpGrant),
+}
+
+/// Guest-declared function tool advertised to the model.
+#[derive(Clone, Debug, PartialEq, Eq, bon::Builder)]
+pub struct Function {
+    /// Tool name. Must not collide with reserved host-injected tool names
+    /// (`read`, `list`, `write`).
+    #[builder(into)]
+    pub name: String,
+    /// Natural-language description for the model.
+    #[builder(into)]
+    pub description: String,
+    /// JSON Schema for the tool's arguments object.
+    #[builder(into)]
+    pub parameters: String,
+}
+
+/// Remote MCP server offered to the model for this completion.
+#[derive(Clone, Debug, PartialEq, Eq, bon::Builder)]
+pub struct McpGrant {
+    /// Logical server name identifying the server (e.g. in `.cursor/mcp.json`).
+    #[builder(into)]
+    pub name: String,
+    /// Tool allowlist; empty exposes every tool the server advertises.
+    #[builder(default)]
+    pub tools: Vec<String>,
+    /// MCP server endpoint URL.
+    #[builder(into)]
+    pub url: String,
+}
+
+/// One validated completion result.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Reply {
+    /// The validated answer, per [`Request::format`](Request).
+    pub answer: String,
+    /// Token accounting, when the backend reports it.
+    pub usage: Option<Usage>,
 }
 
 /// Token accounting for one completion, when the backend reports it.
@@ -180,15 +177,6 @@ pub struct Usage {
     pub output_tokens: u32,
     /// Reasoning tokens, for models that bill them separately.
     pub reasoning_tokens: Option<u32>,
-}
-
-/// One validated completion result.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Reply {
-    /// The validated answer, per [`Request::format`](Request).
-    pub answer: String,
-    /// Token accounting, when the backend reports it.
-    pub usage: Option<Usage>,
 }
 
 /// Typed completion failure, mirroring the `omnia:model` error variant.
@@ -211,6 +199,18 @@ pub enum Error {
     /// Transport, process, or provider failure.
     #[error("backend failure: {0}")]
     Backend(String),
+}
+
+/// One tool invocation the model asked the guest to run, delivered to the
+/// [`Model::complete_with`] handler.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ToolCall {
+    /// Correlation id the session answers by; the handler never needs it.
+    pub id: String,
+    /// The declared function-tool name the model called.
+    pub name: String,
+    /// JSON arguments object for the tool, per its declared parameters schema.
+    pub arguments: String,
 }
 
 /// Prompt completion (Omnia Model).
@@ -328,6 +328,15 @@ pub trait Model: Send + Sync {
     }
 }
 
+/// The WASI-backed provider a `wasm32` guest hands its wasm-free core; the
+/// default method body carries the whole delegation.
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Copy, Debug)]
+pub struct WasiModel;
+
+#[cfg(target_arch = "wasm32")]
+impl Model for WasiModel {}
+
 /// Resolve a lend path against the guest's preopens: the longest preopen
 /// name that equals the path or prefixes it at a `/` boundary wins; the
 /// remainder becomes the grant's subpath (empty for the mount itself).
@@ -348,36 +357,6 @@ fn lend_subpath<'a>(name: &str, path: &'a str) -> Option<&'a str> {
     path.strip_prefix(name)?.strip_prefix('/').filter(|rest| !rest.is_empty())
 }
 
-// The lend resolution is pure path math that only executes on `wasm32`
-// (preopens exist nowhere else), so it is covered in-process here.
-#[cfg(test)]
-mod tests {
-    use super::resolve_lend;
-
-    fn preopens() -> Vec<(u8, String)> {
-        vec![(0, ".".to_string()), (1, "/emery-workspaces".to_string())]
-    }
-
-    #[test]
-    fn resolves_mount_and_subdirectory() {
-        let dirs = preopens();
-        assert_eq!(resolve_lend(&dirs, ".").map(|(_, sub)| sub), Some(""));
-        assert_eq!(resolve_lend(&dirs, "/emery-workspaces/ws-1").map(|(_, sub)| sub), Some("ws-1"));
-        assert_eq!(
-            resolve_lend(&dirs, "/emery-workspaces/ws-1/nested").map(|(_, sub)| sub),
-            Some("ws-1/nested")
-        );
-    }
-
-    #[test]
-    fn refuses_unmatched_and_lookalike_paths() {
-        let dirs = preopens();
-        assert!(resolve_lend(&dirs, "/elsewhere").is_none());
-        assert!(resolve_lend(&dirs, "/emery-workspaces-evil/x").is_none());
-        assert!(resolve_lend(&dirs, "/emery-workspaces/").is_none());
-    }
-}
-
 /// Mirror-to-wire conversions between the target-independent records above
 /// and the `omnia:model/completion` bindings.
 #[cfg(target_arch = "wasm32")]
@@ -388,16 +367,6 @@ mod wire {
         Effort, Error, Format, Function, Generation, McpGrant, Message, Reply, Role, Tool, Usage,
     };
 
-    impl From<Role> for completion::Role {
-        fn from(role: Role) -> Self {
-            match role {
-                Role::System => Self::System,
-                Role::User => Self::User,
-                Role::Assistant => Self::Assistant,
-            }
-        }
-    }
-
     impl From<Message> for completion::Message {
         fn from(message: Message) -> Self {
             Self {
@@ -407,13 +376,12 @@ mod wire {
         }
     }
 
-    impl From<Effort> for completion::Effort {
-        fn from(effort: Effort) -> Self {
-            match effort {
-                Effort::Minimal => Self::Minimal,
-                Effort::Low => Self::Low,
-                Effort::Medium => Self::Medium,
-                Effort::High => Self::High,
+    impl From<Role> for completion::Role {
+        fn from(role: Role) -> Self {
+            match role {
+                Role::System => Self::System,
+                Role::User => Self::User,
+                Role::Assistant => Self::Assistant,
             }
         }
     }
@@ -427,6 +395,17 @@ mod wire {
                 stop: generation.stop,
                 seed: generation.seed,
                 effort: generation.effort.map(Into::into),
+            }
+        }
+    }
+
+    impl From<Effort> for completion::Effort {
+        fn from(effort: Effort) -> Self {
+            match effort {
+                Effort::Minimal => Self::Minimal,
+                Effort::Low => Self::Low,
+                Effort::Medium => Self::Medium,
+                Effort::High => Self::High,
             }
         }
     }
@@ -463,21 +442,21 @@ mod wire {
         }
     }
 
+    impl From<completion::Reply> for Reply {
+        fn from(reply: completion::Reply) -> Self {
+            Self {
+                answer: reply.answer,
+                usage: reply.usage.map(Into::into),
+            }
+        }
+    }
+
     impl From<completion::Usage> for Usage {
         fn from(usage: completion::Usage) -> Self {
             Self {
                 input_tokens: usage.input_tokens,
                 output_tokens: usage.output_tokens,
                 reasoning_tokens: usage.reasoning_tokens,
-            }
-        }
-    }
-
-    impl From<completion::Reply> for Reply {
-        fn from(reply: completion::Reply) -> Self {
-            Self {
-                answer: reply.answer,
-                usage: reply.usage.map(Into::into),
             }
         }
     }
@@ -495,11 +474,30 @@ mod wire {
     }
 }
 
-/// The WASI-backed provider a `wasm32` guest hands its wasm-free core; the
-/// default method body carries the whole delegation.
-#[cfg(target_arch = "wasm32")]
-#[derive(Clone, Copy, Debug)]
-pub struct WasiModel;
+#[cfg(test)]
+mod tests {
+    use super::resolve_lend;
 
-#[cfg(target_arch = "wasm32")]
-impl Model for WasiModel {}
+    fn preopens() -> Vec<(u8, String)> {
+        vec![(0, ".".to_string()), (1, "/emery-workspaces".to_string())]
+    }
+
+    #[test]
+    fn resolves_mount() {
+        let dirs = preopens();
+        assert_eq!(resolve_lend(&dirs, ".").map(|(_, sub)| sub), Some(""));
+        assert_eq!(resolve_lend(&dirs, "/emery-workspaces/ws-1").map(|(_, sub)| sub), Some("ws-1"));
+        assert_eq!(
+            resolve_lend(&dirs, "/emery-workspaces/ws-1/nested").map(|(_, sub)| sub),
+            Some("ws-1/nested")
+        );
+    }
+
+    #[test]
+    fn refuses_paths() {
+        let dirs = preopens();
+        assert!(resolve_lend(&dirs, "/elsewhere").is_none());
+        assert!(resolve_lend(&dirs, "/emery-workspaces-evil/x").is_none());
+        assert!(resolve_lend(&dirs, "/emery-workspaces/").is_none());
+    }
+}

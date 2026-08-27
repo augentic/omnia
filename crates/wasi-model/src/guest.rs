@@ -14,7 +14,5 @@ mod generated {
     });
 }
 
-pub mod prompt;
-
 pub use self::generated::omnia::model::*;
 pub use self::generated::{wit_future, wit_stream};

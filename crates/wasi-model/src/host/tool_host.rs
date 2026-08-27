@@ -1,8 +1,10 @@
+use std::fmt::Debug;
+
 pub use omnia::FutureResult;
 use serde::{Deserialize, Serialize};
 
 /// Host-side capabilities for one completion, lent to backends that need them.
-pub trait ToolHost: Send + Sync {
+pub trait ToolHost: Debug + Send + Sync {
     /// Run one declared function tool through the completion's session: the
     /// guest's tool closure answers. The outer error is a hard host failure
     /// (undeclared tool, exhausted budget, closed session, oversize result,
