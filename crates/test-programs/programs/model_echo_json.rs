@@ -4,19 +4,13 @@
 
 use omnia_guest::model::{Format, Model as _, Request, WasiModel};
 use test_programs::user;
-use wasip3::exports::cli::run::Guest;
 
-struct CliGuest;
+test_programs::command!(scenario);
 
-wasip3::cli::command::export!(CliGuest);
-
-impl Guest for CliGuest {
-    async fn run() -> Result<(), ()> {
-        let reply = WasiModel
-            .complete(Request::builder().messages(vec![user("hi")]).format(Format::Json).build())
-            .await
-            .expect("echo answers json");
-        assert_eq!(reply.answer, r#"{"echo":"hi"}"#);
-        Ok(())
-    }
+async fn scenario() {
+    let reply = WasiModel
+        .complete(Request::builder().messages(vec![user("hi")]).format(Format::Json).build())
+        .await
+        .expect("echo answers json");
+    assert_eq!(reply.answer, r#"{"echo":"hi"}"#);
 }

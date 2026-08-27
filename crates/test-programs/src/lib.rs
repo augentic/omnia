@@ -5,6 +5,26 @@
 #![cfg(target_arch = "wasm32")]
 
 use omnia_guest::model::{Function, Message, Role, Tool};
+use omnia_wasi_model::completion;
+
+/// Wires a scenario `async fn` as the program's `wasi:cli/run` export:
+/// `test_programs::command!(scenario);`. The scenario asserts internally;
+/// a panic traps the guest and fails the host-side test.
+#[macro_export]
+macro_rules! command {
+    ($scenario:ident) => {
+        struct CliGuest;
+
+        ::wasip3::cli::command::export!(CliGuest);
+
+        impl ::wasip3::exports::cli::run::Guest for CliGuest {
+            async fn run() -> Result<(), ()> {
+                $scenario().await;
+                Ok(())
+            }
+        }
+    };
+}
 
 /// The `verdict` JSON Schema several scenarios request.
 pub const VERDICT_SCHEMA: &str =
@@ -29,4 +49,34 @@ pub fn lookup() -> Tool {
     Tool::Function(
         Function::builder().name("lookup").description("test lookup").parameters("{}").build(),
     )
+}
+
+/// The raw-bindings `lookup` function tool.
+#[must_use]
+pub fn raw_lookup() -> completion::Function {
+    completion::Function {
+        name: "lookup".to_owned(),
+        description: "test lookup".to_owned(),
+        parameters: "{}".to_owned(),
+    }
+}
+
+/// A minimal raw-bindings request — one `hi` user turn, `format::text` —
+/// with the given function tools and grants.
+#[must_use]
+pub fn raw_request(
+    tools: Vec<completion::Function>, grants: completion::Grants,
+) -> completion::Request {
+    completion::Request {
+        model: None,
+        system: None,
+        messages: vec![completion::Message {
+            role: completion::Role::User,
+            content: "hi".to_owned(),
+        }],
+        generation: None,
+        format: completion::Format::Text,
+        tools: tools.into_iter().map(completion::Tool::Function).collect(),
+        grants,
+    }
 }

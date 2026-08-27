@@ -78,6 +78,16 @@ impl From<Usage> for ReplyUsage {
     }
 }
 
+impl From<Value> for Answer {
+    fn from(value: Value) -> Self {
+        Self {
+            value,
+            usage: None,
+            transcript: None,
+        }
+    }
+}
+
 impl Answer {
     /// Validate an answer against the request's `format`.
     ///

@@ -4,21 +4,15 @@
 
 use omnia_guest::model::{Model as _, Request, WasiModel};
 use test_programs::{lookup, user};
-use wasip3::exports::cli::run::Guest;
 
-struct CliGuest;
+test_programs::command!(scenario);
 
-wasip3::cli::command::export!(CliGuest);
+async fn scenario() {
+    let request = Request::builder().messages(vec![user("hi")]).tools(vec![lookup()]).build();
 
-impl Guest for CliGuest {
-    async fn run() -> Result<(), ()> {
-        let request = Request::builder().messages(vec![user("hi")]).tools(vec![lookup()]).build();
-
-        let reply = WasiModel
-            .complete_with(request, |_call| async { Err::<String, _>("no data".to_owned()) })
-            .await
-            .expect("the model turns the failure into an answer");
-        assert_eq!(reply.answer, "tool failed: no data");
-        Ok(())
-    }
+    let reply = WasiModel
+        .complete_with(request, |_call| async { Err::<String, _>("no data".to_owned()) })
+        .await
+        .expect("the model turns the failure into an answer");
+    assert_eq!(reply.answer, "tool failed: no data");
 }

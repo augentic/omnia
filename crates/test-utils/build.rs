@@ -24,6 +24,8 @@ fn main() {
     let mut buckets: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut deps_seen = HashSet::new();
     for program in &programs {
+        // Always `debug`: the nested build below uses the dev profile
+        // regardless of the outer profile.
         let artifact = out_dir.join("wasm32-wasip2/debug/examples").join(format!("{program}.wasm"));
         assert!(
             artifact.exists(),
@@ -41,7 +43,10 @@ fn main() {
         let capability = program.split('_').next().expect("program names are snake_case");
         match capability {
             "model" => {}
-            other => panic!("unknown capability prefix `{other}` in `{program}`"),
+            other => panic!(
+                "unknown capability prefix `{other}` in `{program}`: add it to the match in \
+                 crates/test-utils/build.rs"
+            ),
         }
         buckets.entry(capability.to_owned()).or_default().push(program.clone());
 

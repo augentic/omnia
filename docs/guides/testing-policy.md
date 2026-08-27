@@ -15,13 +15,13 @@ Guest-instantiating tests exist **only** through the shared pipeline below. Do n
 Two unpublished crates, patterned on wasmtime's `test-programs`:
 
 - **`crates/test-programs`** holds the guest scenario programs, one `[[example]]` cdylib per scenario (`programs/<capability>_<scenario>.rs`), named by capability prefix (`model_echo_text`). Each program asserts what the guest observes across the boundary and traps on failure; shared helpers live in its `src/lib.rs`. Everything is `#![cfg(target_arch = "wasm32")]`; the native build is empty.
-- **`crates/test-utils`** compiles every program to a `wasm32-wasip2` component from its `build.rs` (into `OUT_DIR`, so plain `cargo make test` is self-contained), and generates one `pub const <NAME>: &str` artifact path per program plus a `foreach_<capability>!` macro. It also exports the capability-agnostic `run_command` harness that builds a one-shot `wasi:cli` command deployment from a wasm path, mounts, a backend bundle, and a `link` closure.
+- **`crates/test-utils`** compiles every program to a `wasm32-wasip2` component from its `build.rs` (into `OUT_DIR`, so plain `cargo make test` is self-contained), and generates one `pub const <NAME>: &str` artifact path per program plus a `foreach_<capability>!` macro. It also exports the capability-agnostic harness: `run_host::<H, B>` builds a one-shot `wasi:cli` command deployment from a wasm path, mounts, and a backend bundle, linking the single host under test (`run_command` takes a `link` closure for multi-host suites), and `scratch` mints a per-test workspace directory removed on drop.
 
 A host crate's suite is one flat file per interface in its root `tests/` directory (`crates/wasi-model/tests/model.rs`). The file:
 
 - invokes `test_utils::foreach_<capability>!(assert_test_exists);` so a guest program without a matching, identically named test fails to compile;
 - defines its scenario backends inline next to the tests (see below);
-- runs each guest with `test_utils::run_command` (via a small local `run_guest` wrapper supplying the `Has<Capability>` bundle) and asserts `ExitStatus::SUCCESS` plus any host-side effects (recorded requests, filesystem contents).
+- runs each guest with `test_utils::run_host` (via a small local `run_guest` wrapper supplying the `Has<Capability>` bundle and requiring `ExitStatus::SUCCESS`), then asserts any host-side effects (recorded requests, filesystem contents).
 
 Assertions split by vantage point: the guest asserts what crosses the boundary to it (a panic traps and fails the host test); the host test asserts wire fidelity and side effects.
 
@@ -41,8 +41,8 @@ struct Canned(Value);
 
 impl WasiModelCtx for Canned {
     fn complete(&self, _request: Request, _tools: Arc<dyn ToolHost>) -> FutureResult<Answer> {
-        let answer = Answer { value: self.0.clone(), usage: None, transcript: None };
-        async move { Ok(answer) }.boxed()
+        let value = self.0.clone();
+        async move { Ok(value.into()) }.boxed()
     }
 }
 ```

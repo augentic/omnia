@@ -7,12 +7,11 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::FutureExt as _;
-use omnia::{Deployment, ExitStatus, Mount, StoreCtx};
+use omnia::{ExitStatus, Mount};
 use omnia_wasi_model::{
     Answer, FutureResult, HasModel, Limits, ModelDefault, Request, ToolHost, WasiModel,
     WasiModelCtx,
@@ -35,43 +34,21 @@ test_utils::foreach_model!(assert_test_exists);
 
 /// The store's backend bundle: just the model backend under test.
 #[derive(Clone, Debug)]
-struct Scenario<M>(M);
+struct Backends<M>(M);
 
-impl<M: WasiModelCtx + Clone> HasModel for Scenario<M> {
+impl<M: WasiModelCtx + Clone> HasModel for Backends<M> {
     fn model_ctx(&mut self) -> &mut dyn WasiModelCtx {
         &mut self.0
     }
 }
 
-async fn run_guest<M: WasiModelCtx + Clone>(
-    wasm: &str, mounts: Vec<Mount>, model: M,
-) -> anyhow::Result<ExitStatus> {
-    test_utils::run_command(
-        wasm,
-        mounts,
-        Scenario(model),
-        |deployment: &mut Deployment<StoreCtx<Scenario<M>>>| {
-            deployment.host::<WasiModel, Scenario<M>>()?;
-            Ok(())
-        },
-    )
-    .await
-}
-
-/// A fresh scratch directory mounted into the guest as `.`.
-fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("omnia_model_{tag}_{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).expect("creating scratch dir");
-    dir
-}
-
-fn mount(path: &Path, writable: bool) -> Mount {
-    Mount {
-        name: ".".to_owned(),
-        path: path.to_path_buf(),
-        writable,
-    }
+/// Run one guest program against `model`, requiring a clean exit; scenarios
+/// that expect failure call `test_utils::run_command` directly.
+async fn run_guest<M: WasiModelCtx + Clone>(wasm: &str, mounts: Vec<Mount>, model: M) {
+    let status = test_utils::run_host::<WasiModel, _>(wasm, mounts, Backends(model))
+        .await
+        .expect("guest runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "guest `{wasm}` failed");
 }
 
 // ------------------------------------------------------------------------
@@ -95,7 +72,7 @@ struct Canned(Value);
 impl WasiModelCtx for Canned {
     fn complete(&self, _request: Request, _tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
         let value = self.0.clone();
-        async move { Ok(answer(value)) }.boxed()
+        async move { Ok(value.into()) }.boxed()
     }
 }
 
@@ -108,17 +85,27 @@ impl WasiModelCtx for Scripted {
         let marker =
             request.messages.last().map(|message| message.content.clone()).unwrap_or_default();
         let value = (self.0)(&marker);
-        async move { Ok(answer(value)) }.boxed()
+        async move { Ok(value.into()) }.boxed()
     }
 }
 
-/// Calls one declared tool `calls` times in sequence and answers with the
+/// Calls the `lookup` tool `calls` times in sequence and answers with the
 /// last outcome (a failure becomes model-visible repair text).
 #[derive(Clone, Debug)]
 struct ToolDriver {
     tool: &'static str,
     calls: u32,
     limits: Limits,
+}
+
+impl Default for ToolDriver {
+    fn default() -> Self {
+        Self {
+            tool: "lookup",
+            calls: 1,
+            limits: Limits::default(),
+        }
+    }
 }
 
 impl WasiModelCtx for ToolDriver {
@@ -132,7 +119,7 @@ impl WasiModelCtx for ToolDriver {
                     Err(failure) => format!("tool failed: {failure}"),
                 };
             }
-            Ok(answer(Value::String(last)))
+            Ok(Value::String(last).into())
         }
         .boxed()
     }
@@ -156,7 +143,7 @@ impl WasiModelCtx for ParallelLookups {
             );
             let first = first?.map_err(|failure| anyhow::anyhow!("first call: {failure}"))?;
             let second = second?.map_err(|failure| anyhow::anyhow!("second call: {failure}"))?;
-            Ok(answer(Value::String(format!("{first}|{second}"))))
+            Ok(Value::String(format!("{first}|{second}")).into())
         }
         .boxed()
     }
@@ -176,7 +163,7 @@ impl WasiModelCtx for WorkspaceDriver {
                 tool_host.list(String::new()).await?.into_iter().map(|entry| entry.name).collect();
             names.sort();
             let text = format!("{}:{}", String::from_utf8_lossy(&seed), names.join(","));
-            Ok(answer(Value::String(text)))
+            Ok(Value::String(text).into())
         }
         .boxed()
     }
@@ -225,14 +212,6 @@ impl<M: WasiModelCtx + Clone> WasiModelCtx for Recording<M> {
     }
 }
 
-const fn answer(value: Value) -> Answer {
-    Answer {
-        value,
-        usage: None,
-        transcript: None,
-    }
-}
-
 // ------------------------------------------------------------------------
 // Scenarios (one per guest program; guest-side assertions live in
 // `crates/test-programs/programs/`)
@@ -241,9 +220,7 @@ const fn answer(value: Value) -> Answer {
 #[tokio::test]
 async fn model_echo_text() {
     let (recording, seen) = Recording::new(ModelDefault);
-    let status =
-        run_guest(test_utils::MODEL_ECHO_TEXT, vec![], recording).await.expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS);
+    run_guest(test_utils::MODEL_ECHO_TEXT, vec![], recording).await;
 
     // Wire fidelity: the request arrived at the backend intact.
     let requests = seen.lock().expect("requests lock");
@@ -254,42 +231,27 @@ async fn model_echo_text() {
 
 #[tokio::test]
 async fn model_echo_json() {
-    let status =
-        run_guest(test_utils::MODEL_ECHO_JSON, vec![], ModelDefault).await.expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS);
+    run_guest(test_utils::MODEL_ECHO_JSON, vec![], ModelDefault).await;
 }
 
 #[tokio::test]
 async fn model_echo_schema_rejected() {
-    let status = run_guest(test_utils::MODEL_ECHO_SCHEMA_REJECTED, vec![], ModelDefault)
-        .await
-        .expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS);
+    run_guest(test_utils::MODEL_ECHO_SCHEMA_REJECTED, vec![], ModelDefault).await;
 }
 
 #[tokio::test]
 async fn model_invalid_request() {
-    let status =
-        run_guest(test_utils::MODEL_INVALID_REQUEST, vec![], Unreached).await.expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS);
+    run_guest(test_utils::MODEL_INVALID_REQUEST, vec![], Unreached).await;
 }
 
 #[tokio::test]
 async fn model_schema_answer() {
-    let status =
-        run_guest(test_utils::MODEL_SCHEMA_ANSWER, vec![], Canned(json!({ "verdict": "pass" })))
-            .await
-            .expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS);
+    run_guest(test_utils::MODEL_SCHEMA_ANSWER, vec![], Canned(json!({ "verdict": "pass" }))).await;
 }
 
 #[tokio::test]
 async fn model_answer_rejected() {
-    let status =
-        run_guest(test_utils::MODEL_ANSWER_REJECTED, vec![], Canned(json!({ "other": 1 })))
-            .await
-            .expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS);
+    run_guest(test_utils::MODEL_ANSWER_REJECTED, vec![], Canned(json!({ "other": 1 }))).await;
 }
 
 #[tokio::test]
@@ -303,18 +265,13 @@ async fn model_format_gate() {
             other => panic!("unexpected marker `{other}`"),
         }
     }
-    let status = run_guest(test_utils::MODEL_FORMAT_GATE, vec![], Scripted(misshapen))
-        .await
-        .expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS);
+    run_guest(test_utils::MODEL_FORMAT_GATE, vec![], Scripted(misshapen)).await;
 }
 
 #[tokio::test]
 async fn model_sections() {
     let (recording, seen) = Recording::new(ModelDefault);
-    let status =
-        run_guest(test_utils::MODEL_SECTIONS, vec![], recording).await.expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS);
+    run_guest(test_utils::MODEL_SECTIONS, vec![], recording).await;
 
     // The assembled system channel crossed the boundary intact.
     let requests = seen.lock().expect("requests lock");
@@ -327,110 +284,71 @@ async fn model_sections() {
 
 #[tokio::test]
 async fn model_tool_roundtrip() {
-    let driver = ToolDriver {
-        tool: "lookup",
-        calls: 1,
-        limits: Limits::default(),
-    };
-    let status =
-        run_guest(test_utils::MODEL_TOOL_ROUNDTRIP, vec![], driver).await.expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS);
+    run_guest(test_utils::MODEL_TOOL_ROUNDTRIP, vec![], ToolDriver::default()).await;
 }
 
 #[tokio::test]
 async fn model_tool_failure() {
-    let driver = ToolDriver {
-        tool: "lookup",
-        calls: 1,
-        limits: Limits::default(),
-    };
-    let status =
-        run_guest(test_utils::MODEL_TOOL_FAILURE, vec![], driver).await.expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS);
+    run_guest(test_utils::MODEL_TOOL_FAILURE, vec![], ToolDriver::default()).await;
 }
 
 #[tokio::test]
 async fn model_undeclared_tool() {
-    let driver = ToolDriver {
-        tool: "lookup",
-        calls: 1,
-        limits: Limits::default(),
-    };
-    let status =
-        run_guest(test_utils::MODEL_UNDECLARED_TOOL, vec![], driver).await.expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS);
+    run_guest(test_utils::MODEL_UNDECLARED_TOOL, vec![], ToolDriver::default()).await;
 }
 
 #[tokio::test]
 async fn model_tool_budget() {
     let driver = ToolDriver {
-        tool: "lookup",
         calls: 2,
         limits: Limits {
             max_tool_calls: 1,
             ..Limits::default()
         },
+        ..ToolDriver::default()
     };
-    let status =
-        run_guest(test_utils::MODEL_TOOL_BUDGET, vec![], driver).await.expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS);
+    run_guest(test_utils::MODEL_TOOL_BUDGET, vec![], driver).await;
 }
 
 #[tokio::test]
 async fn model_tool_timeout() {
     let driver = ToolDriver {
-        tool: "lookup",
-        calls: 1,
         limits: Limits {
             tool_timeout: Duration::from_millis(50),
             ..Limits::default()
         },
+        ..ToolDriver::default()
     };
-    let status =
-        run_guest(test_utils::MODEL_TOOL_TIMEOUT, vec![], driver).await.expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS);
+    run_guest(test_utils::MODEL_TOOL_TIMEOUT, vec![], driver).await;
 }
 
 #[tokio::test]
 async fn model_out_of_order_results() {
-    let status = run_guest(test_utils::MODEL_OUT_OF_ORDER_RESULTS, vec![], ParallelLookups)
-        .await
-        .expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS);
+    run_guest(test_utils::MODEL_OUT_OF_ORDER_RESULTS, vec![], ParallelLookups).await;
 }
 
 #[tokio::test]
 async fn model_workspace_tools() {
-    let dir = scratch("tools");
-    fs::write(dir.join("seed.txt"), "hello").expect("seeding workspace");
+    let workspace = test_utils::scratch("model_tools");
+    fs::write(workspace.path().join("seed.txt"), "hello").expect("seeding workspace");
 
-    let status =
-        run_guest(test_utils::MODEL_WORKSPACE_TOOLS, vec![mount(&dir, true)], WorkspaceDriver)
-            .await
-            .expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS);
+    run_guest(test_utils::MODEL_WORKSPACE_TOOLS, vec![workspace.mount(true)], WorkspaceDriver)
+        .await;
 
     // The backend's write landed on the real filesystem.
-    let written = fs::read_to_string(dir.join("out.txt")).expect("backend wrote out.txt");
+    let written =
+        fs::read_to_string(workspace.path().join("out.txt")).expect("backend wrote out.txt");
     assert_eq!(written, "written");
-    let _ = fs::remove_dir_all(&dir);
 }
 
 #[tokio::test]
 async fn model_workspace_denied() {
     // No mount and no grant: the host-injected tools must refuse to run.
-    let status = run_guest(test_utils::MODEL_WORKSPACE_DENIED, vec![], WorkspaceDriver)
-        .await
-        .expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS);
+    run_guest(test_utils::MODEL_WORKSPACE_DENIED, vec![], WorkspaceDriver).await;
 }
 
 #[tokio::test]
 async fn model_workspace_escape() {
-    let dir = scratch("escape");
-    let status = run_guest(test_utils::MODEL_WORKSPACE_ESCAPE, vec![mount(&dir, false)], Unreached)
-        .await
-        .expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS);
-    let _ = fs::remove_dir_all(&dir);
+    let workspace = test_utils::scratch("model_escape");
+    run_guest(test_utils::MODEL_WORKSPACE_ESCAPE, vec![workspace.mount(false)], Unreached).await;
 }

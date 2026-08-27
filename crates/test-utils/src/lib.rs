@@ -5,12 +5,17 @@
 //! path per program plus a `foreach_<capability>!` macro; a suite invokes the
 //! macro to prove every guest program has a matching test. The harness below
 //! is capability-agnostic: a suite supplies its own backend bundle and links
-//! its hosts in the `link` closure.
+//! its hosts under test.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::{env, fs, process};
 
 use anyhow::Result;
-use omnia::{Deployment, DeploymentBuilder, ExitStatus, Manifest, Mode, Mount, Runtime, StoreCtx};
+use omnia::{
+    Deployment, DeploymentBuilder, ExitStatus, Host, Manifest, Mode, Mount, Runtime, Server,
+    StoreCtx,
+};
 
 include!(concat!(env!("OUT_DIR"), "/gen.rs"));
 
@@ -38,4 +43,63 @@ where
     let args = deployment.args().to_vec();
     let registry = Arc::new(deployment.into_registry()?);
     Runtime::from_parts(registry, args, mounts, backends).run_command().await
+}
+
+/// [`run_command`] for the common single-host suite: links `H` against the
+/// bundle and runs.
+///
+/// # Errors
+///
+/// Same as [`run_command`].
+pub async fn run_host<H, B>(wasm: &str, mounts: Vec<Mount>, backends: B) -> Result<ExitStatus>
+where
+    H: Host<StoreCtx<B>> + Server<B>,
+    B: Clone + Send + Sync + 'static,
+{
+    run_command(wasm, mounts, backends, |deployment| {
+        deployment.host::<H, B>()?;
+        Ok(())
+    })
+    .await
+}
+
+/// A per-test scratch directory, removed on drop — including when the test
+/// panics partway through.
+pub struct Scratch(PathBuf);
+
+impl Scratch {
+    /// The directory path.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+
+    /// A [`Mount`] preopening this directory into the guest sandbox as `.`.
+    #[must_use]
+    pub fn mount(&self, writable: bool) -> Mount {
+        Mount {
+            name: ".".to_owned(),
+            path: self.0.clone(),
+            writable,
+        }
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Create a fresh [`Scratch`] directory; `tag` keeps concurrent tests apart.
+///
+/// # Panics
+///
+/// Panics if the directory cannot be created.
+#[must_use]
+pub fn scratch(tag: &str) -> Scratch {
+    let dir = env::temp_dir().join(format!("omnia_scratch_{tag}_{}", process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("creating scratch dir");
+    Scratch(dir)
 }

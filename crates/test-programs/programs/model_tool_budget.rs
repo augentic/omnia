@@ -4,30 +4,24 @@
 
 use omnia_guest::model::{Error, Model as _, Request, WasiModel};
 use test_programs::{lookup, user};
-use wasip3::exports::cli::run::Guest;
 
-struct CliGuest;
+test_programs::command!(scenario);
 
-wasip3::cli::command::export!(CliGuest);
+async fn scenario() {
+    let request = Request::builder().messages(vec![user("hi")]).tools(vec![lookup()]).build();
 
-impl Guest for CliGuest {
-    async fn run() -> Result<(), ()> {
-        let request = Request::builder().messages(vec![user("hi")]).tools(vec![lookup()]).build();
+    let mut seen = 0_u32;
+    let error = WasiModel
+        .complete_with(request, |_call| {
+            seen += 1;
+            async { Ok::<_, String>("42".to_owned()) }
+        })
+        .await
+        .expect_err("the second call exceeds the budget");
 
-        let mut seen = 0_u32;
-        let error = WasiModel
-            .complete_with(request, |_call| {
-                seen += 1;
-                async { Ok::<_, String>("42".to_owned()) }
-            })
-            .await
-            .expect_err("the second call exceeds the budget");
-
-        assert!(
-            matches!(error, Error::BudgetExhausted(ref detail) if detail.contains("budget of 1 exhausted")),
-            "unexpected: {error:?}"
-        );
-        assert_eq!(seen, 1, "only the budgeted call reaches the guest");
-        Ok(())
-    }
+    assert!(
+        matches!(error, Error::BudgetExhausted(ref detail) if detail.contains("budget of 1 exhausted")),
+        "unexpected: {error:?}"
+    );
+    assert_eq!(seen, 1, "only the budgeted call reaches the guest");
 }

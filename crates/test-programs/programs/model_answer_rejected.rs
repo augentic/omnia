@@ -4,29 +4,21 @@
 
 use omnia_guest::model::{Error, Format, Model as _, Request, SchemaFormat, WasiModel};
 use test_programs::{VERDICT_SCHEMA, user};
-use wasip3::exports::cli::run::Guest;
 
-struct CliGuest;
+test_programs::command!(scenario);
 
-wasip3::cli::command::export!(CliGuest);
+async fn scenario() {
+    let request = Request::builder()
+        .messages(vec![user("hi")])
+        .format(Format::Schema(
+            SchemaFormat::builder().name("verdict").schema(VERDICT_SCHEMA).build(),
+        ))
+        .build();
 
-impl Guest for CliGuest {
-    async fn run() -> Result<(), ()> {
-        let request = Request::builder()
-            .messages(vec![user("hi")])
-            .format(Format::Schema(
-                SchemaFormat::builder().name("verdict").schema(VERDICT_SCHEMA).build(),
-            ))
-            .build();
-
-        let error = WasiModel
-            .complete(request)
-            .await
-            .expect_err("projection rejects a non-conforming answer");
-        assert!(
-            matches!(error, Error::InvalidAnswer(ref detail) if detail.contains("does not conform to schema `verdict`")),
-            "unexpected: {error:?}"
-        );
-        Ok(())
-    }
+    let error =
+        WasiModel.complete(request).await.expect_err("projection rejects a non-conforming answer");
+    assert!(
+        matches!(error, Error::InvalidAnswer(ref detail) if detail.contains("does not conform to schema `verdict`")),
+        "unexpected: {error:?}"
+    );
 }
