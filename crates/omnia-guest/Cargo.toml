@@ -22,7 +22,7 @@ orm = ["dep:omnia-wasi-docstore", "dep:omnia-wasi-sql", "dep:sea-query"]
 
 [dependencies]
 anyhow.workspace = true
-axum = { workspace = true, features = ["json", "macros", "query"] }
+axum = { workspace = true, features = ["json"] }
 bon.workspace = true
 bytes.workspace = true
 chrono.workspace = true

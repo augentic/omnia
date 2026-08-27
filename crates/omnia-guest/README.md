@@ -7,7 +7,7 @@ Shared traits, error types, and abstractions for building WASI guest components.
 Implement `Handler` on an input type, then register it with an explicit transport router.
 
 ```rust,ignore
-use omnia_guest::api::http::{Router, post};
+use omnia_guest::api::http::post;
 use omnia_guest::api::{Client, Context, Handler};
 use omnia_guest::Error;
 use serde::{Deserialize, Serialize};
@@ -40,9 +40,10 @@ impl Handler<MyProvider> for CreateItem {
     }
 }
 
-fn router() -> Router<MyProvider> {
-    Router::new(Client::new("my-org", MyProvider))
+fn router() -> axum::Router {
+    axum::Router::new()
         .route("/items", post::<CreateItem, MyProvider>())
+        .with_state(Client::new("my-org", MyProvider))
 }
 ```
 
@@ -73,7 +74,7 @@ impl wasip3::exports::http::handler::Guest for Http {
 }
 ```
 
-Omnia creates one WASI component instance per HTTP request. Construct one `Router` with one provider-owning `Client` inside each `handle` call; Axum's route-state clones share that client's `Arc<P>` only for that request. Durable application state belongs in host-side capabilities, not guest statics.
+Omnia creates one WASI component instance per HTTP request. Construct the `axum::Router` with one provider-owning `Client` as its state inside each `handle` call; Axum's route-state clones share that client's `Arc<P>` only for that request. Durable application state belongs in host-side capabilities, not guest statics.
 
 Messaging routes use the same handlers with exact topic registration:
 

@@ -4,7 +4,8 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_guest::api::http::{Router, get, post, serve};
+use axum::Router;
+use omnia_guest::api::http::{get, post, serve};
 use omnia_guest::api::{Client, Context, Handler};
 use omnia_guest::{Error, wasip3};
 use serde::{Deserialize, Serialize};
@@ -36,10 +37,11 @@ impl Handler<Provider> for GreetArgs {
     }
 }
 
-fn router() -> Router<Provider> {
-    Router::new(Client::new("examples", Provider))
+fn router() -> Router {
+    Router::new()
         .route("/greet/{name}", get::<GreetArgs, Provider>())
         .route("/greet", post::<GreetArgs, Provider>())
+        .with_state(Client::new("examples", Provider))
 }
 
 struct Http;

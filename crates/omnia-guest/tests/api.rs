@@ -6,7 +6,7 @@ use axum::body::{Body, to_bytes};
 use axum::response::{IntoResponse, Response};
 use http::header::CONTENT_TYPE;
 use http::{HeaderMap, HeaderValue, Method, Request, StatusCode};
-use omnia_guest::api::http::{RawRequest, Router, get, get_with, post, post_with};
+use omnia_guest::api::http::{RawRequest, get, get_with, post, post_with};
 use omnia_guest::api::messaging::{
     Delivery, DeliveryError, Router as MessagingRouter, consume, consume_with,
 };
@@ -102,12 +102,12 @@ impl Handler<StatefulProvider> for ObserveInput {
 }
 
 fn router() -> axum::Router {
-    Router::new(Client::new("test", ()))
+    axum::Router::new()
         .route("/echo", get::<EchoInput, ()>())
         .route("/echo", post::<EchoInput, ()>())
         .route("/echo/{name}", get::<EchoInput, ()>())
         .route("/echo/{name}", post::<EchoInput, ()>())
-        .into_axum()
+        .with_state(Client::new("test", ()))
 }
 
 async fn send(request: Request<Body>) -> (StatusCode, serde_json::Value) {
@@ -249,15 +249,15 @@ async fn post_non_object_body() {
 
 #[tokio::test]
 async fn route_state_clones_share_provider() {
-    let router = Router::new(Client::new(
-        "test",
-        StatefulProvider {
-            calls: AtomicUsize::new(0),
-        },
-    ))
-    .route("/first", get::<ObserveInput, StatefulProvider>())
-    .route("/second", get::<ObserveInput, StatefulProvider>())
-    .into_axum();
+    let router = axum::Router::new()
+        .route("/first", get::<ObserveInput, StatefulProvider>())
+        .route("/second", get::<ObserveInput, StatefulProvider>())
+        .with_state(Client::new(
+            "test",
+            StatefulProvider {
+                calls: AtomicUsize::new(0),
+            },
+        ));
 
     let first = router
         .clone()
@@ -411,7 +411,7 @@ fn text_response(body: String) -> Response {
 }
 
 fn text_router() -> axum::Router {
-    Router::new(Client::new("test", ()))
+    axum::Router::new()
         .route(
             "/join",
             post_with(
@@ -448,7 +448,7 @@ fn text_router() -> axum::Router {
                 text_response,
             ),
         )
-        .into_axum()
+        .with_state(Client::new("test", ()))
 }
 
 async fn send_raw(
@@ -566,7 +566,7 @@ fn parse_greet(headers: &HeaderMap, body: &[u8]) -> Result<XmlGreet, DecodeError
 }
 
 fn xml_router() -> axum::Router {
-    Router::new(Client::new("xml", ()))
+    axum::Router::new()
         .route(
             "/greet",
             post_with(
@@ -581,7 +581,7 @@ fn xml_router() -> axum::Router {
                 },
             ),
         )
-        .into_axum()
+        .with_state(Client::new("xml", ()))
 }
 
 fn xml_request(body: &'static str) -> Request<Body> {

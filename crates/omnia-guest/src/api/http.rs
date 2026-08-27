@@ -1,6 +1,13 @@
 //! Typed HTTP routing over application handlers.
+//!
+//! Routes are plain [`axum::routing::MethodRouter`]s over a [`Client`] state:
+//! register them on an [`axum::Router`], then supply exactly one
+//! provider-owning [`Client`] via `with_state`. Omnia creates one component
+//! instance per HTTP request, so construct the router and client inside the
+//! WASI HTTP export's `handle` method; axum route-state clones share that
+//! client's provider allocation, and durable state belongs in host-side
+//! capabilities.
 
-use axum::Router as AxumRouter;
 use axum::body::Bytes;
 use axum::extract::{RawPathParams, RawQuery, State};
 use axum::response::{IntoResponse, Json, Response};
@@ -87,60 +94,9 @@ impl IntoResponse for HttpError {
     }
 }
 
-/// A typed HTTP method route awaiting a path.
-pub struct MethodRoute<P: Send + Sync + 'static> {
-    inner: MethodRouter<Client<P>>,
-}
-
-/// A per-request wrapper over [`axum::Router`].
-///
-/// Construct one inside each WASI HTTP `handle` call with exactly one
-/// provider-owning [`Client`]. Axum route-state clones share that client's
-/// provider allocation; no guest state is retained across WASI instances.
-/// Durable state belongs in host-side capabilities.
-pub struct Router<P: Send + Sync + 'static> {
-    inner: AxumRouter<Client<P>>,
-    client: Client<P>,
-}
-
-impl<P: Send + Sync + 'static> Router<P> {
-    /// Create an empty per-request router backed by one client.
-    #[must_use]
-    pub fn new(client: Client<P>) -> Self {
-        Self {
-            inner: AxumRouter::new(),
-            client,
-        }
-    }
-
-    /// Register one typed method route.
-    #[must_use]
-    pub fn route(mut self, path: &str, route: MethodRoute<P>) -> Self {
-        self.inner = self.inner.route(path, route.inner);
-        self
-    }
-
-    /// Finish the router for Axum or a WASI HTTP adapter.
-    pub fn into_axum(self) -> AxumRouter {
-        self.inner.with_state(self.client)
-    }
-}
-
-/// Consume a per-request router through the WASI HTTP export.
-///
-/// Omnia creates one component instance per HTTP request, so callers should
-/// construct the router and its provider-owning client in the export's
-/// `handle` method. Durable state belongs in host-side capabilities.
-///
-/// # Errors
-///
-/// Returns the WASI HTTP transport error.
+/// Serve one WASI HTTP request through a finished [`axum::Router`].
 #[cfg(target_arch = "wasm32")]
-pub async fn serve<P: Send + Sync + 'static>(
-    router: Router<P>, request: wasip3::http::types::Request,
-) -> Result<wasip3::http::types::Response, wasip3::http::types::ErrorCode> {
-    omnia_wasi_http::serve(router.into_axum(), request).await
-}
+pub use omnia_wasi_http::serve;
 
 /// A borrowed raw-request view handed to route decoders.
 #[derive(Debug)]
@@ -159,8 +115,7 @@ pub struct RawRequest<'a> {
 }
 
 /// Create a GET route with a custom decoder and encoder.
-#[must_use]
-pub fn get_with<H, P, D, E>(decode: D, encode: E) -> MethodRoute<P>
+pub fn get_with<H, P, D, E>(decode: D, encode: E) -> MethodRouter<Client<P>>
 where
     H: Handler<P> + 'static,
     H::Error: Into<HttpError>,
@@ -168,22 +123,19 @@ where
     E: Fn(H::Output) -> Response + Clone + Send + Sync + 'static,
     P: Send + Sync + 'static,
 {
-    MethodRoute {
-        inner: routing::get(
-            move |state: State<Client<P>>,
-                  params: RawPathParams,
-                  query: RawQuery,
-                  headers: HeaderMap,
-                  body: Bytes| {
-                dispatch(decode, encode, state, params, query, headers, body)
-            },
-        ),
-    }
+    routing::get(
+        move |state: State<Client<P>>,
+              params: RawPathParams,
+              query: RawQuery,
+              headers: HeaderMap,
+              body: Bytes| {
+            dispatch(decode, encode, state, params, query, headers, body)
+        },
+    )
 }
 
 /// Create a POST route with a custom decoder and encoder.
-#[must_use]
-pub fn post_with<H, P, D, E>(decode: D, encode: E) -> MethodRoute<P>
+pub fn post_with<H, P, D, E>(decode: D, encode: E) -> MethodRouter<Client<P>>
 where
     H: Handler<P> + 'static,
     H::Error: Into<HttpError>,
@@ -191,22 +143,19 @@ where
     E: Fn(H::Output) -> Response + Clone + Send + Sync + 'static,
     P: Send + Sync + 'static,
 {
-    MethodRoute {
-        inner: routing::post(
-            move |state: State<Client<P>>,
-                  params: RawPathParams,
-                  query: RawQuery,
-                  headers: HeaderMap,
-                  body: Bytes| {
-                dispatch(decode, encode, state, params, query, headers, body)
-            },
-        ),
-    }
+    routing::post(
+        move |state: State<Client<P>>,
+              params: RawPathParams,
+              query: RawQuery,
+              headers: HeaderMap,
+              body: Bytes| {
+            dispatch(decode, encode, state, params, query, headers, body)
+        },
+    )
 }
 
 /// Create a GET route decoding path and query parameters as JSON input.
-#[must_use]
-pub fn get<H, P>() -> MethodRoute<P>
+pub fn get<H, P>() -> MethodRouter<Client<P>>
 where
     H: Handler<P> + DeserializeOwned + 'static,
     H::Output: Serialize,
@@ -220,8 +169,7 @@ where
 }
 
 /// Create a POST route decoding a JSON body merged with path parameters.
-#[must_use]
-pub fn post<H, P>() -> MethodRoute<P>
+pub fn post<H, P>() -> MethodRouter<Client<P>>
 where
     H: Handler<P> + DeserializeOwned + 'static,
     H::Output: Serialize,

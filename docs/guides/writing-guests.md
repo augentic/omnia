@@ -163,12 +163,13 @@ omnia_guest::provider! {
 }
 ```
 
-Routers then map transport events onto handlers: an HTTP router maps method + path, a messaging router maps exact topics. Your WASI export stays visible application code — it just hands the event to the router:
+Routers then map transport events onto handlers: HTTP routes are plain `axum::routing::MethodRouter`s registered on an `axum::Router` whose state is one provider-owning `Client`, and a messaging router maps exact topics. Your WASI export stays visible application code — it just hands the event to the router:
 
 ```rust
-fn router() -> omnia_guest::api::http::Router<MyProvider> {
-    Router::new(Client::new("acme-corp", MyProvider))
+fn router() -> axum::Router {
+    axum::Router::new()
         .route("/api/items", post::<CreateItem, MyProvider>())
+        .with_state(Client::new("acme-corp", MyProvider))
 }
 
 impl Guest for Http {
