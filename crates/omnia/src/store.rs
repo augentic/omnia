@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use wasmtime::{StoreLimits, StoreLimitsBuilder};
-use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+use wasmtime_wasi::{FsPerms, ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::{WasiHttpCtxView, WasiHttpView};
 use wrpc_wasmtime::{WrpcCtxView, WrpcView};
 
@@ -104,9 +104,8 @@ impl StoreBase {
         // can't lend that tree and the consuming host's identity match then
         // fails cleanly, with no ambient fallback.
         for entry in mounts.entries() {
-            if let Err(error) =
-                wasi_builder.preopened_dir(&entry.host_path, &entry.name, entry.perms)
-            {
+            let perms = if entry.writable { FsPerms::ReadWrite } else { FsPerms::ReadOnly };
+            if let Err(error) = wasi_builder.preopened_dir(&entry.host_path, &entry.name, perms) {
                 tracing::warn!(
                     %error,
                     name = %entry.name,

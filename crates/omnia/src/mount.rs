@@ -4,8 +4,8 @@
 //! `[[mount]]` so a guest can read or edit a mounted directory tree. Two
 //! host-side artefacts back that capability:
 //!
-//! - [`ResolvedPreopen`] — a mount resolved to an absolute host path plus WASI
-//!   permissions, applied per store via [`WasiCtxBuilder::preopened_dir`].
+//! - [`ResolvedPreopen`] — a mount resolved to an absolute host path plus
+//!   writability, applied per store via [`WasiCtxBuilder::preopened_dir`].
 //! - [`MountRegistry`] — the host-side source of truth that maps a lent
 //!   `wasi:filesystem` descriptor back to its mount by directory identity. It is
 //!   built once at startup (opening each directory and capturing its identity),
@@ -29,31 +29,30 @@ use anyhow::{Context as _, Result};
 use cap_fs_ext::MetadataExt as _;
 use cap_std::ambient_authority;
 use cap_std::fs::Dir;
-use wasmtime_wasi::FsPerms;
 
-/// A preopen mount resolved to an absolute host path and WASI permissions,
-/// ready to be opened into the guest sandbox and recorded in the
-/// [`MountRegistry`].
+/// A preopen mount resolved to an absolute host path and writability, ready
+/// to be opened into the guest sandbox and recorded in the [`MountRegistry`].
+///
+/// Writability maps to WASI filesystem permissions only at the preopen call
+/// site, keeping wasmtime types out of the mount API.
 #[derive(Clone, Debug)]
 pub struct ResolvedPreopen {
     /// Guest-visible name returned by `preopens.get-directories()`.
     pub name: String,
     /// Absolute host path of the mount root.
     pub host_path: PathBuf,
-    /// Filesystem permissions WASI enforces under the mount.
-    pub perms: FsPerms,
+    /// Whether the mount permits writes; read-only otherwise.
+    pub writable: bool,
 }
 
 impl ResolvedPreopen {
-    /// Build a resolved preopen, deriving WASI permissions from `writable`:
-    /// read-only when `false`, read+write when `true`.
+    /// Build a resolved preopen: read-only unless `writable`.
     #[must_use]
     pub const fn new(name: String, host_path: PathBuf, writable: bool) -> Self {
-        let perms = if writable { FsPerms::ReadWrite } else { FsPerms::ReadOnly };
         Self {
             name,
             host_path,
-            perms,
+            writable,
         }
     }
 }
@@ -71,19 +70,11 @@ pub struct Mount {
     pub host_path: PathBuf,
     /// Host-side capability handle to the mount root.
     pub dir: Arc<Dir>,
-    /// Filesystem permissions configured for the mount.
-    pub perms: FsPerms,
+    /// Whether the mount permits writes; read-only otherwise.
+    pub writable: bool,
     /// Directory identity `(device, inode)`, used to match a lent descriptor
     /// back to this entry.
     pub identity: (u64, u64),
-}
-
-impl Mount {
-    /// Whether the mount permits writes (read+write), derived from `perms`.
-    #[must_use]
-    pub const fn writable(&self) -> bool {
-        matches!(self.perms, FsPerms::ReadWrite)
-    }
 }
 
 /// The host-side registry of authorized mounts.
@@ -129,7 +120,7 @@ impl MountRegistry {
                 name: preopen.name,
                 host_path: preopen.host_path,
                 dir: Arc::new(dir),
-                perms: preopen.perms,
+                writable: preopen.writable,
                 identity: (meta.dev(), meta.ino()),
             });
         }
@@ -176,7 +167,6 @@ mod tests {
     use cap_fs_ext::MetadataExt as _;
     use cap_std::ambient_authority;
     use cap_std::fs::Dir;
-    use wasmtime_wasi::FsPerms;
 
     use super::{MountRegistry, ResolvedPreopen};
 
@@ -212,7 +202,7 @@ mod tests {
         let entry = &registry.entries()[0];
         assert_eq!(entry.name, ".");
         assert_eq!(entry.host_path, root);
-        assert!(!entry.writable(), "a mount defaults to read-only");
+        assert!(!entry.writable, "a mount defaults to read-only");
         assert_eq!(entry.identity, identity_of(&root), "the entry records the dir's (dev, ino)");
     }
 
@@ -230,13 +220,12 @@ mod tests {
     }
 
     #[test]
-    fn writable_mount_grants_read_write() {
+    fn open_records_writability() {
         let root = temp_root("writable");
         let registry = registry("tree", &root, true);
 
         let entry = &registry.entries()[0];
-        assert!(entry.writable(), "a writable mount permits mutation");
-        assert_eq!(entry.perms, FsPerms::ReadWrite);
+        assert!(entry.writable, "a writable mount permits mutation");
     }
 
     #[test]
@@ -254,7 +243,7 @@ mod tests {
         assert_eq!(registry.entries().len(), 1, "duplicate names collapse to one entry");
         let entry = &registry.entries()[0];
         assert_eq!(entry.host_path, cli_root, "the last entry wins");
-        assert!(entry.writable(), "the winning entry's permissions apply");
+        assert!(entry.writable, "the winning entry's permissions apply");
     }
 
     #[test]

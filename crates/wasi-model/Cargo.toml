@@ -23,7 +23,6 @@ tracing.workspace = true
 
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-cap-primitives = "4.0.3"
 cap-std.workspace = true
 futures.workspace = true
 jsonschema.workspace = true

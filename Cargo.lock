@@ -2205,7 +2205,6 @@ name = "omnia-wasi-model"
 version = "0.35.0"
 dependencies = [
  "anyhow",
- "cap-primitives",
  "cap-std",
  "futures",
  "jsonschema",

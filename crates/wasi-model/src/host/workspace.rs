@@ -13,8 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context as _, anyhow, ensure};
-use cap_primitives::fs::MetadataExt as _;
-use cap_std::fs::Dir;
+use cap_std::fs::{Dir, Metadata, MetadataExt as _};
 use futures::{FutureExt as _, future};
 use omnia::{FutureResult, MountRegistry};
 use tokio::task::spawn_blocking;
@@ -105,10 +104,11 @@ pub fn resolve(
         return Err(anyhow!("grants.workspace root must be a directory"));
     };
 
-    // The lent handle is a plain `std::fs::File`; cap-primitives derives the
+    // The lent handle is a plain `std::fs::File`; cap-std's `Metadata` (the
+    // same type the registry's `dir_metadata()` produces) derives the
     // portable `(dev, ino)` identity the registry keys on.
-    let meta = cap_primitives::fs::Metadata::from_file(&dir.dir)
-        .context("reading lent workspace directory metadata")?;
+    let meta =
+        Metadata::from_file(&dir.dir).context("reading lent workspace directory metadata")?;
     let entry = registry
         .match_identity(meta.dev(), meta.ino())
         .context("lent workspace root is not an authorized mount")?;
@@ -117,7 +117,7 @@ pub fn resolve(
         return Ok(Workspace {
             dir: Arc::clone(&entry.dir),
             local_path: entry.host_path.clone(),
-            writable: entry.writable(),
+            writable: entry.writable,
         });
     }
 
@@ -132,7 +132,7 @@ pub fn resolve(
     Ok(Workspace {
         dir: Arc::new(dir),
         local_path: entry.host_path.join(&grant.subpath),
-        writable: entry.writable(),
+        writable: entry.writable,
     })
 }
 
