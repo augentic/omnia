@@ -245,3 +245,152 @@ fn maybe_json(text: &str) -> Vec<Value> {
     }
     values
 }
+
+// Unit tests by design: `parse`/`check` are the pure candidate-extraction
+// and repair-reason surface backends drive directly off a model's raw text;
+// no guest boundary reaches them with these inputs.
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{Candidate, Format, Schema};
+
+    fn verdict_schema() -> Format {
+        Format::Schema(Schema {
+            name: "verdict".to_owned(),
+            schema: json!({
+                "type": "object",
+                "properties": { "verdict": { "type": "string" } },
+                "required": ["verdict"],
+            })
+            .to_string(),
+        })
+    }
+
+    fn report_schema() -> Format {
+        Format::Schema(Schema {
+            name: "phase-report".to_owned(),
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "outcome": { "type": "string" },
+                    "source": { "type": "string" },
+                },
+                "required": ["outcome", "source"],
+            })
+            .to_string(),
+        })
+    }
+
+    #[test]
+    fn json_document() {
+        assert_eq!(
+            Format::Json.parse(r#"{"verdict":"pass"}"#).unwrap(),
+            Candidate::Valid(json!({ "verdict": "pass" }))
+        );
+        let err = Format::Json.parse("not json").unwrap_err();
+        assert!(err.contains("does not contain JSON"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn fenced_json() {
+        let fenced = "```json\n{\"verdict\":\"pass\"}\n```";
+        assert_eq!(
+            verdict_schema().parse(fenced).unwrap(),
+            Candidate::Valid(json!({ "verdict": "pass" }))
+        );
+    }
+
+    #[test]
+    fn json_with_preamble() {
+        let text = "Done.\n{\"verdict\":\"pass\"}\n";
+        assert_eq!(
+            Format::Json.parse(text).unwrap(),
+            Candidate::Valid(json!({ "verdict": "pass" }))
+        );
+    }
+
+    #[test]
+    fn later_matching_candidate() {
+        let text = "findings: []\n{\"outcome\":\"completed\",\"source\":\"model-assisted\"}";
+        assert_eq!(
+            report_schema().parse(text).unwrap(),
+            Candidate::Valid(json!({ "outcome": "completed", "source": "model-assisted" }))
+        );
+    }
+
+    #[test]
+    fn invalid_fence() {
+        let text = "```json\n[]\n```\n{\"verdict\":\"pass\"}";
+        assert_eq!(
+            verdict_schema().parse(text).unwrap(),
+            Candidate::Valid(json!({ "verdict": "pass" }))
+        );
+    }
+
+    #[test]
+    fn invalid_candidate() {
+        let Candidate::Invalid { value, reason } = report_schema().parse("[]").unwrap() else {
+            panic!("expected an invalid candidate");
+        };
+        assert_eq!(value, json!([]));
+        assert!(
+            reason.contains("does not conform to schema `phase-report`"),
+            "unexpected: {reason}"
+        );
+        assert!(reason.contains("at root"), "unexpected: {reason}");
+    }
+
+    #[test]
+    fn no_matching_candidate() {
+        let format = verdict_schema();
+        let fenced = r#"{"note":"```json\n{\"verdict\":\"pass\"}\n```"}"#;
+        let Candidate::Invalid { value, .. } = format.parse(fenced).unwrap() else {
+            panic!("expected an invalid candidate");
+        };
+        assert_eq!(value, json!({ "note": "```json\n{\"verdict\":\"pass\"}\n```" }));
+
+        let quoted = r#""use {\"verdict\":\"pass\"} as the answer""#;
+        let Candidate::Invalid { value, .. } = format.parse(quoted).unwrap() else {
+            panic!("expected an invalid candidate");
+        };
+        assert_eq!(value, json!("use {\"verdict\":\"pass\"} as the answer"));
+    }
+
+    #[test]
+    fn check_text_and_json_shapes() {
+        Format::Text.check(&json!("hi")).unwrap();
+        let err = Format::Text.check(&json!({ "a": 1 })).unwrap_err();
+        assert!(err.contains("not a JSON string"), "unexpected: {err}");
+
+        Format::Json.check(&json!({ "verdict": "pass" })).unwrap();
+        let err = Format::Json.check(&json!("nope")).unwrap_err();
+        assert!(err.contains("not a JSON object"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn check_schema_values() {
+        verdict_schema().check(&json!({ "verdict": "pass" })).unwrap();
+        let err = verdict_schema().check(&json!({ "other": 1 })).unwrap_err();
+        assert!(err.contains("does not conform to schema `verdict`"), "unexpected: {err}");
+        let err = verdict_schema().check(&json!(42)).unwrap_err();
+        assert!(err.contains("does not conform to schema `verdict`"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn check_schema_error_path() {
+        let format = Format::Schema(Schema {
+            name: "report".to_owned(),
+            schema: json!({
+                "type": "object",
+                "properties": { "ui-surface": { "type": "object" } },
+            })
+            .to_string(),
+        });
+        let root = format.check(&json!([])).unwrap_err();
+        assert!(root.contains("at root"), "unexpected: {root}");
+        let nested = format.check(&json!({ "ui-surface": [] })).unwrap_err();
+        assert!(nested.contains("/ui-surface"), "unexpected: {nested}");
+        assert_ne!(root, nested);
+    }
+}

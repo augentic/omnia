@@ -4,10 +4,26 @@ How the Omnia repository tests *itself*. The binding rules are also in the repos
 
 ## The tiers
 
-- **Unit tests** cover deterministic logic wherever it lives: parsers, codecs, filter/type translation, route matching, macro token expansion, guest-side library code, and backend semantics driven directly against a `WasiXxxCtx` trait. If a behavior can be pinned without instantiating a guest, it is a unit test.
+- **End-to-end tests** are the primary tier for `wasi-*` host crates: a real guest component driven through omnia's own runtime against an inline scenario backend, pinning the whole boundary (guest bindings → linker → host binding → backend and back). The exemplar is `crates/wasi-model/tests/model.rs`.
+- **Unit tests** cover deterministic logic wherever it lives: parsers, codecs, filter/type translation, route matching, macro token expansion, guest-side library code. If a behavior is a pure function no guest boundary reaches (e.g. `Format::parse` candidate extraction, which backends drive directly), it is a unit test next to that logic.
 - **Live tests** (in the `omnia-backends` repo) are the acceptance tier for production backends: `#[ignore]`-gated, credential-gated, driving the backend's `WasiXxxCtx` against the real service.
 
-Do not add tests that compile, deserialize, or instantiate a WASM guest.
+Guest-instantiating tests exist **only** through the shared pipeline below. Do not compile, deserialize, or instantiate a WASM guest ad hoc inside an individual test.
+
+## The e2e pipeline
+
+Two unpublished crates, patterned on wasmtime's `test-programs`:
+
+- **`crates/test-programs`** holds the guest scenario programs, one `[[example]]` cdylib per scenario (`programs/<capability>_<scenario>.rs`), named by capability prefix (`model_echo_text`). Each program asserts what the guest observes across the boundary and traps on failure; shared helpers live in its `src/lib.rs`. Everything is `#![cfg(target_arch = "wasm32")]`; the native build is empty.
+- **`crates/test-utils`** compiles every program to a `wasm32-wasip2` component from its `build.rs` (into `OUT_DIR`, so plain `cargo make test` is self-contained), and generates one `pub const <NAME>: &str` artifact path per program plus a `foreach_<capability>!` macro. It also exports the capability-agnostic `run_command` harness that builds a one-shot `wasi:cli` command deployment from a wasm path, mounts, a backend bundle, and a `link` closure.
+
+A host crate's suite is one flat file per interface in its root `tests/` directory (`crates/wasi-model/tests/model.rs`). The file:
+
+- invokes `test_utils::foreach_<capability>!(assert_test_exists);` so a guest program without a matching, identically named test fails to compile;
+- defines its scenario backends inline next to the tests (see below);
+- runs each guest with `test_utils::run_command` (via a small local `run_guest` wrapper supplying the `Has<Capability>` bundle) and asserts `ExitStatus::SUCCESS` plus any host-side effects (recorded requests, filesystem contents).
+
+Assertions split by vantage point: the guest asserts what crosses the boundary to it (a panic traps and fails the host test); the host test asserts wire fidelity and side effects.
 
 ## Canned model backends
 
@@ -31,8 +47,6 @@ impl WasiModelCtx for Canned {
 }
 ```
 
-Drive that impl against `WasiModelCtx` in a unit test; do not bind it through a guest.
-
 ## Running
 
 ```bash
@@ -40,7 +54,7 @@ cargo make test                                   # `cargo nextest run --locked 
 cargo test --doc --all-features --workspace       # doc tests
 ```
 
-`cargo-nextest` must be installed with `--locked` (`cargo install --locked cargo-nextest`).
+`cargo-nextest` must be installed with `--locked` (`cargo install --locked cargo-nextest`). The `wasm32-wasip2` target must be installed (`rust-toolchain.toml` pins it); `test-utils`'s build script needs it to compile the guest programs.
 
 ## Naming
 

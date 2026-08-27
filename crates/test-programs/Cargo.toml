@@ -1,0 +1,101 @@
+[package]
+name = "test-programs"
+description = "Guest scenario programs driven by the e2e test suites"
+publish = false
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+# Guest-only crate: `test-utils`'s build script compiles every `[[example]]`
+# below for `wasm32-wasip2`; the native build is empty.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+omnia-guest.workspace = true
+omnia-wasi-model.workspace = true
+wasip3.workspace = true
+wit-bindgen.workspace = true
+
+[[example]]
+name = "model_answer_rejected"
+path = "programs/model_answer_rejected.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_echo_json"
+path = "programs/model_echo_json.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_echo_schema_rejected"
+path = "programs/model_echo_schema_rejected.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_echo_text"
+path = "programs/model_echo_text.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_format_gate"
+path = "programs/model_format_gate.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_invalid_request"
+path = "programs/model_invalid_request.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_out_of_order_results"
+path = "programs/model_out_of_order_results.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_schema_answer"
+path = "programs/model_schema_answer.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_sections"
+path = "programs/model_sections.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_tool_budget"
+path = "programs/model_tool_budget.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_tool_failure"
+path = "programs/model_tool_failure.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_tool_roundtrip"
+path = "programs/model_tool_roundtrip.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_tool_timeout"
+path = "programs/model_tool_timeout.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_undeclared_tool"
+path = "programs/model_undeclared_tool.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_workspace_denied"
+path = "programs/model_workspace_denied.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_workspace_escape"
+path = "programs/model_workspace_escape.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "model_workspace_tools"
+path = "programs/model_workspace_tools.rs"
+crate-type = ["cdylib"]

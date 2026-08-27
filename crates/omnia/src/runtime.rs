@@ -545,6 +545,18 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         Ok(instance)
     }
 
+    /// Drive the deployment's `wasi:cli/run` command once, returning the
+    /// guest's exit status.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the command guest is not registered, routing is
+    /// ambiguous, the guest cannot be instantiated, or the command traps
+    /// without a guest exit code.
+    pub async fn run_command(&self) -> Result<ExitStatus> {
+        command::drive(self).await
+    }
+
     /// Register a guest at run time: load `artifact`, pre-instantiate it
     /// against the shared host set, wire its host-mediated link serve side,
     /// then publish entry and endpoint as one atomic lifecycle transition —
