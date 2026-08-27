@@ -19,7 +19,7 @@ Two unpublished crates, patterned on wasmtime's `test-programs`:
 
 A host crate's suite is one flat file per interface in its root `tests/` directory (`crates/wasi-model/tests/model.rs`). The file:
 
-- invokes `test_utils::foreach_<capability>!(assert_test_exists);` so a guest program without a matching, identically named test fails to compile;
+- invokes `test_utils::foreach_<capability>!();` so a guest program without a matching, identically named test fails to compile;
 - defines its scenario backends inline next to the tests (see below);
 - runs each guest with `test_utils::run_host` (via a small local `run_guest` wrapper supplying the `Has<Capability>` bundle and requiring `ExitStatus::SUCCESS`), then asserts any host-side effects (recorded requests, filesystem contents).
 

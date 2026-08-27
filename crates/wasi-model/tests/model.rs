@@ -20,13 +20,7 @@ use serde_json::{Value, json};
 
 // Every guest program in `crates/test-programs` must have a matching test
 // here; a new program without one fails to compile.
-macro_rules! assert_test_exists {
-    ($name:ident) => {
-        #[expect(unused_imports, reason = "asserts the test exists")]
-        use self::$name as _;
-    };
-}
-test_utils::foreach_model!(assert_test_exists);
+test_utils::foreach_model!();
 
 // ------------------------------------------------------------------------
 // Harness

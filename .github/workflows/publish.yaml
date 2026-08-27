@@ -18,6 +18,8 @@ jobs:
     if: ${{ startsWith(github.ref_name, 'release-') }}
     uses: augentic/.github/.github/workflows/ci.yaml@main
     secrets: inherit
+    with:
+      targets: wasm32-wasip2
 
   publish:
     name: Publish

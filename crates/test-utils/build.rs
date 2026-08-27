@@ -53,11 +53,14 @@ fn main() {
     }
 
     for (capability, names) in buckets {
-        let arms: String = names.iter().map(|name| format!("        $mac!({name});\n")).collect();
+        let expect = "        #[expect(unused_imports, reason = \"asserts the test exists\")]\n";
+        let arms: String =
+            names.iter().map(|name| format!("{expect}        use self::{name} as _;\n")).collect();
         generated.push_str(&format!(
-            "/// Invokes `$mac!` once per `{capability}` guest program, so a program \
-             without a matching test fails to compile.\n#[macro_export]\nmacro_rules! \
-             foreach_{capability} {{\n    ($mac:ident) => {{\n{arms}    }};\n}}\n"
+            "/// Asserts an identically named test exists at the invocation site for \
+             every `{capability}` guest program; a program without one fails to \
+             compile.\n#[macro_export]\nmacro_rules! \
+             foreach_{capability} {{\n    () => {{\n{arms}    }};\n}}\n"
         ));
     }
 

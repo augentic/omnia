@@ -79,11 +79,6 @@ cargo +nightly miri setup
 cargo +nightly miri nextest run --no-tests=pass
 '''
 
-# Outdated
-# The cap-* stack is deliberately held at 3.x to match wasmtime-wasi (see
-# workspace Cargo.toml); drop the ignores when wasmtime-wasi moves to cap-std 4.
-# thiserror is held at 2.0.18: 2.0.19's derive pulls syn 3 beside the
-# ecosystem's syn 2, tripping the multiple-crate-versions lint.
 [tasks.outdated]
 script = '''
 cargo outdated --workspace --exit-code 1 --depth 1 \
@@ -92,7 +87,6 @@ cargo outdated --workspace --exit-code 1 --depth 1 \
 '''
 install_crate = "cargo-outdated"
 
-# Test: Nextest over the workspace, process-per-test.
 [tasks.test]
 command = "cargo"
 args = ["nextest", "run", "--locked", "--all", "--all-features", "--no-tests=pass"]
@@ -102,7 +96,6 @@ env = { RUSTFLAGS = "-Dwarnings" }
 command = "cargo"
 args = ["doc", "--no-deps", "--workspace", "--all-features", "--locked"]
 
-# Test Doc
 [tasks.test-docs]
 command = "cargo"
 args = ["test", "--doc", "--all-features", "--workspace"]
