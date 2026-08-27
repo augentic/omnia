@@ -13,7 +13,7 @@ use std::time::Duration;
 use futures::FutureExt as _;
 use omnia::{ExitStatus, Mount};
 use omnia_wasi_model::{
-    Answer, FutureResult, HasModel, Limits, ModelDefault, Request, ToolHost, WasiModel,
+    Answer, FutureResult, HasModel, Limits, ModelDefault, Request, ToolHost, Usage, WasiModel,
     WasiModelCtx,
 };
 use serde_json::{Value, json};
@@ -143,8 +143,8 @@ impl WasiModelCtx for ParallelLookups {
     }
 }
 
-/// Drives the host-injected workspace tools: reads the seed file, writes a
-/// new one, and answers with the seed content plus the sorted listing.
+/// Drives the host-injected workspace tools: reads the seed file, writes the
+/// lent `local_path`, and answers with the seed content plus the sorted listing.
 #[derive(Clone, Copy, Debug)]
 struct WorkspaceDriver;
 
@@ -152,12 +152,45 @@ impl WasiModelCtx for WorkspaceDriver {
     fn complete(&self, _request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
         async move {
             let seed = tool_host.read("seed.txt".to_owned()).await?;
-            tool_host.write("out.txt".to_owned(), b"written".to_vec()).await?;
+            let path = tool_host
+                .local_path()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            tool_host.write("out.txt".to_owned(), path.into_bytes()).await?;
             let mut names: Vec<String> =
                 tool_host.list(String::new()).await?.into_iter().map(|entry| entry.name).collect();
             names.sort();
             let text = format!("{}:{}", String::from_utf8_lossy(&seed), names.join(","));
             Ok(Value::String(text).into())
+        }
+        .boxed()
+    }
+}
+
+/// Answers with a fully specified [`Answer`], for usage projection.
+#[derive(Clone, Debug)]
+struct CannedAnswer(Answer);
+
+impl WasiModelCtx for CannedAnswer {
+    fn complete(&self, _request: Request, _tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
+        let answer = self.0.clone();
+        async move { Ok(answer) }.boxed()
+    }
+}
+
+/// Calls an undeclared tool, ignores the hard failure, and still answers —
+/// host enforcement must win over that `Ok`.
+#[derive(Clone, Copy, Debug)]
+struct IgnoringToolFailure;
+
+impl WasiModelCtx for IgnoringToolFailure {
+    fn complete(&self, _request: Request, tool_host: Arc<dyn ToolHost>) -> FutureResult<Answer> {
+        async move {
+            assert!(
+                tool_host.call_tool("lookup".to_owned(), "{}".to_owned()).await.is_err(),
+                "undeclared tool is a hard failure"
+            );
+            Ok(Value::String("should not reach the guest".to_owned()).into())
         }
         .boxed()
     }
@@ -169,6 +202,8 @@ impl WasiModelCtx for WorkspaceDriver {
 struct Seen {
     system: Option<String>,
     contents: Vec<String>,
+    mcp: Vec<String>,
+    temperature: Option<f32>,
 }
 
 /// Wraps a backend and records every request it receives, for host-side
@@ -197,6 +232,8 @@ impl<M: WasiModelCtx + Clone> WasiModelCtx for Recording<M> {
         self.seen.lock().expect("requests lock").push(Seen {
             system: request.system.clone(),
             contents: request.messages.iter().map(|message| message.content.clone()).collect(),
+            mcp: request.mcp_servers().iter().map(|grant| grant.name.clone()).collect(),
+            temperature: request.generation.as_ref().and_then(|generation| generation.temperature),
         });
         self.inner.complete(request, tool_host)
     }
@@ -221,6 +258,21 @@ async fn model_echo_text() {
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].system.as_deref(), Some("be terse"));
     assert_eq!(requests[0].contents, ["hi", "second"]);
+    assert!(requests[0].mcp.is_empty());
+    assert!(requests[0].temperature.is_none());
+    drop(requests);
+}
+
+#[tokio::test]
+async fn model_request_shape() {
+    let (recording, seen) = Recording::new(ModelDefault);
+    run_guest(test_utils::MODEL_REQUEST_SHAPE, vec![], recording).await;
+
+    let requests = seen.lock().expect("requests lock");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].mcp, ["docs"]);
+    assert_eq!(requests[0].temperature, Some(0.25));
+    drop(requests);
 }
 
 #[tokio::test]
@@ -241,6 +293,20 @@ async fn model_invalid_request() {
 #[tokio::test]
 async fn model_schema_answer() {
     run_guest(test_utils::MODEL_SCHEMA_ANSWER, vec![], Canned(json!({ "verdict": "pass" }))).await;
+}
+
+#[tokio::test]
+async fn model_usage() {
+    let answer = Answer {
+        value: json!("hi"),
+        usage: Some(Usage {
+            input_tokens: 3,
+            output_tokens: 5,
+            reasoning_tokens: Some(1),
+        }),
+        transcript: None,
+    };
+    run_guest(test_utils::MODEL_USAGE, vec![], CannedAnswer(answer)).await;
 }
 
 #[tokio::test]
@@ -274,6 +340,7 @@ async fn model_sections() {
         requests[0].system.as_deref(),
         Some("prefer {language}\n\na Rust reviewer\n\n- be Rust-idiomatic")
     );
+    drop(requests);
 }
 
 #[tokio::test]
@@ -288,7 +355,7 @@ async fn model_tool_failure() {
 
 #[tokio::test]
 async fn model_undeclared_tool() {
-    run_guest(test_utils::MODEL_UNDECLARED_TOOL, vec![], ToolDriver::default()).await;
+    run_guest(test_utils::MODEL_UNDECLARED_TOOL, vec![], IgnoringToolFailure).await;
 }
 
 #[tokio::test]
@@ -317,6 +384,28 @@ async fn model_tool_timeout() {
 }
 
 #[tokio::test]
+async fn model_tool_oversize() {
+    let driver = ToolDriver {
+        limits: Limits {
+            max_result_bytes: 4,
+            ..Limits::default()
+        },
+        ..ToolDriver::default()
+    };
+    run_guest(test_utils::MODEL_TOOL_OVERSIZE, vec![], driver).await;
+}
+
+#[tokio::test]
+async fn model_results_closed() {
+    run_guest(test_utils::MODEL_RESULTS_CLOSED, vec![], ToolDriver::default()).await;
+}
+
+#[tokio::test]
+async fn model_stale_result() {
+    run_guest(test_utils::MODEL_STALE_RESULT, vec![], ToolDriver::default()).await;
+}
+
+#[tokio::test]
 async fn model_out_of_order_results() {
     run_guest(test_utils::MODEL_OUT_OF_ORDER_RESULTS, vec![], ParallelLookups).await;
 }
@@ -329,10 +418,11 @@ async fn model_workspace_tools() {
     run_guest(test_utils::MODEL_WORKSPACE_TOOLS, vec![workspace.mount(true)], WorkspaceDriver)
         .await;
 
-    // The backend's write landed on the real filesystem.
+    // The backend's write landed on the real filesystem, and `local_path`
+    // resolved to this mount.
     let written =
         fs::read_to_string(workspace.path().join("out.txt")).expect("backend wrote out.txt");
-    assert_eq!(written, "written");
+    assert_eq!(written, workspace.path().to_string_lossy());
 }
 
 #[tokio::test]
@@ -345,4 +435,35 @@ async fn model_workspace_denied() {
 async fn model_workspace_escape() {
     let workspace = test_utils::scratch("model_escape");
     run_guest(test_utils::MODEL_WORKSPACE_ESCAPE, vec![workspace.mount(false)], Unreached).await;
+}
+
+#[tokio::test]
+async fn model_workspace_subpath() {
+    let workspace = test_utils::scratch("model_subpath");
+    let nested = workspace.path().join("nested");
+    fs::create_dir(&nested).expect("creating nested dir");
+    fs::write(nested.join("seed.txt"), "hello").expect("seeding nested workspace");
+
+    run_guest(test_utils::MODEL_WORKSPACE_SUBPATH, vec![workspace.mount(true)], WorkspaceDriver)
+        .await;
+
+    let written = fs::read_to_string(nested.join("out.txt")).expect("backend wrote nested/out.txt");
+    assert_eq!(written, nested.to_string_lossy());
+    assert!(!workspace.path().join("out.txt").exists(), "write stays under the subpath");
+}
+
+#[tokio::test]
+async fn model_workspace_readonly() {
+    let workspace = test_utils::scratch("model_readonly");
+    fs::write(workspace.path().join("seed.txt"), "hello").expect("seeding workspace");
+    run_guest(test_utils::MODEL_WORKSPACE_READONLY, vec![workspace.mount(false)], WorkspaceDriver)
+        .await;
+}
+
+#[tokio::test]
+async fn model_workspace_unauthorized() {
+    let workspace = test_utils::scratch("model_unauthorized");
+    fs::create_dir(workspace.path().join("nested")).expect("creating nested dir");
+    run_guest(test_utils::MODEL_WORKSPACE_UNAUTHORIZED, vec![workspace.mount(true)], Unreached)
+        .await;
 }

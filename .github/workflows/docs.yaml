@@ -5,12 +5,14 @@ on:
     branches: [main]
     paths:
       - "docs/**"
-      - ".github/workflows/docs.yaml"
   workflow_dispatch:
 
 concurrency:
-  group: docs-${{ github.ref }}
-  cancel-in-progress: true
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   deploy:

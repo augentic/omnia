@@ -20,6 +20,9 @@ fn main() {
     println!("cargo:rerun-if-changed={}", programs_dir.display());
     println!("cargo:rerun-if-changed={}", test_programs.join("src").display());
     println!("cargo:rerun-if-changed={}", test_programs.join("Cargo.toml").display());
+    // The guests' WIT lives outside the dep-info the nested build emits (proc
+    // macros don't track file reads), so watch it explicitly.
+    println!("cargo:rerun-if-changed={}", test_programs.join("wit").display());
 
     let programs = programs(&programs_dir);
     sync_examples(&test_programs.join("Cargo.toml"), &programs);
@@ -89,7 +92,7 @@ fn programs(dir: &Path) -> Vec<Program> {
 
         let capability = entry.file_name().into_string().expect("UTF-8 capability directory");
         match capability.as_str() {
-            "model" => {}
+            "link" | "model" => {}
             other => panic!(
                 "unknown capability directory `{other}`: add it to the match in \
                  crates/test-utils/build.rs"
@@ -174,12 +177,13 @@ fn rustflags() -> &'static str {
     }
 }
 
-// Register the guest's full dep-info (its sources plus every crate it pulls
-// in, e.g. `omnia-guest`) so editing any of them rebuilds the component.
+// Cargo's extra dep-info sits next to the uplifted example (`{name}.d`), not
+// rustc's hashed file under `deps/`. It lists this crate's sources plus every
+// local path dependency (omnia-guest, omnia-wasi-model, ...).
 fn emit_dep_info(artifact: &Path, seen: &mut HashSet<String>) {
-    let Ok(contents) = fs::read_to_string(artifact.with_extension("d")) else {
-        return;
-    };
+    let dep_info = artifact.with_extension("d");
+    let contents = fs::read_to_string(&dep_info)
+        .unwrap_or_else(|err| panic!("reading {} ({err})", dep_info.display()));
     for line in contents.lines() {
         let Some((_, deps)) = line.split_once(": ") else {
             continue;

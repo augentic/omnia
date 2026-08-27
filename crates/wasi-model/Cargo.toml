@@ -23,16 +23,13 @@ tracing.workspace = true
 
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-cap-primitives = "4.0.2"
 cap-std.workspace = true
 futures.workspace = true
 jsonschema.workspace = true
 omnia.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["rt", "sync", "time"] }
-# `component-model-async` is what `StreamReader`/`FutureReader` and the
-# producer/consumer traits the session plumbing uses live behind; today it
-# also arrives transitively via wasmtime-wasi's `p3`, but the direct use
+# `component-model-async` for `StreamReader`/`FutureReader`
 # belongs on the direct dependency.
 wasmtime = { workspace = true, features = ["component-model-async"] }
 wasmtime-wasi.workspace = true

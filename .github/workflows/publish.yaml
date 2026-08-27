@@ -3,11 +3,18 @@ name: Publish Release
 on:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
 jobs:
   skip:
     name: Skipped
     if: ${{ !startsWith(github.ref_name, 'release-') }}
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
       - run: |
           echo "This workflow only runs on the 'release-*' branches"
@@ -16,6 +23,8 @@ jobs:
   ci:
     name: CI
     if: ${{ startsWith(github.ref_name, 'release-') }}
+    permissions:
+      contents: read
     uses: augentic/.github/.github/workflows/ci.yaml@main
     secrets: inherit
     with:
@@ -24,10 +33,14 @@ jobs:
   publish:
     name: Publish
     needs: ci
+    permissions:
+      contents: write
     uses: augentic/.github/.github/workflows/publish.yaml@main
 
   crates:
     name: Publish crates
     needs: publish
+    permissions:
+      contents: read
     uses: augentic/.github/.github/workflows/crates.yaml@main
     secrets: inherit

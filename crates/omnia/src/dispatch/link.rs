@@ -1,6 +1,6 @@
 //! Linker polyfill for host-mediated imports.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::iter::zip;
 use std::pin::pin;
 use std::sync::Arc;
@@ -20,13 +20,24 @@ use super::value::read_plain_value;
 use crate::deployment::LoadedGuest;
 use crate::registry::GuestId;
 
+/// The functions polyfilled onto a linker — the union across guests at
+/// function granularity, since components import only the functions they use
+/// and so per-guest imports of one interface are arbitrary subsets. Keyed by
+/// interface then function name; the value is the function's type-level
+/// asyncness, so a later guest whose import disagrees is rejected instead of
+/// failing wasmtime's pre-instantiation typecheck with no cross-guest context.
+pub type WiredLinks = BTreeMap<Box<str>, BTreeMap<Box<str>, bool>>;
+
 /// Polyfill every host-mediated import named in the deployment's `dispatch`
 /// set onto the shared linker, bound to the dispatch handle, returning the
-/// set of interfaces wired.
+/// functions wired per interface.
 ///
-/// Each interface is linked exactly once (the linker is shared, so the per-guest
-/// allow-lists are unioned). `wasi:*` imports are never touched here — they are
-/// host-satisfied — so only the manifest-declared interfaces are dispatched.
+/// Each function is linked exactly once (the linker is shared, so the
+/// per-guest imports are unioned function-by-function, reopening an
+/// interface's [`LinkerInstance`](wasmtime::component::LinkerInstance) as
+/// later guests add functions). `wasi:*` imports are never touched here —
+/// they are host-satisfied — so only the manifest-declared interfaces are
+/// dispatched.
 ///
 /// Runs *before* pre-instantiation, so an import that is neither host-satisfied
 /// nor allow-listed remains unresolved and fails fast at `instantiate_pre`.
@@ -37,11 +48,11 @@ use crate::registry::GuestId;
 /// function cannot be defined on the linker.
 pub fn link<T>(
     engine: &Engine, linker: &mut Linker<T>, guests: &[LoadedGuest], handle: &Arc<DispatchHandle>,
-) -> Result<BTreeSet<Box<str>>>
+) -> Result<WiredLinks>
 where
     T: WasiView + WrpcView + 'static,
 {
-    let mut wired: BTreeSet<Box<str>> = BTreeSet::new();
+    let mut wired = WiredLinks::new();
     if handle.links().is_empty() {
         return Ok(wired);
     }
@@ -53,7 +64,7 @@ where
 }
 
 /// Polyfill a late (dynamically registered) component's allow-listed imports
-/// onto `linker` — a clone of the shared linker, so the interfaces the
+/// onto `linker` — a clone of the shared linker, so the functions the
 /// bootstrap already `wired` are skipped and the shared linker is never
 /// mutated after assembly.
 ///
@@ -64,7 +75,7 @@ where
 pub fn polyfill_late<T>(
     engine: &Engine, linker: &mut Linker<T>, id: &GuestId,
     component: &wasmtime::component::Component, handle: &Arc<DispatchHandle>,
-    bootstrap_wired: &BTreeSet<Box<str>>,
+    bootstrap_wired: &WiredLinks,
 ) -> Result<()>
 where
     T: WasiView + WrpcView + 'static,
@@ -81,34 +92,51 @@ where
 /// Registration matches the import's type-level asyncness: a plain `func` is
 /// polyfilled with `func_new_async` ([`send`]), an `async func` with
 /// `func_new_concurrent` ([`send_concurrent`]) — the sync-typed registration
-/// would fail the pre-instantiation asyncness typecheck.
+/// would fail the pre-instantiation asyncness typecheck. A function an
+/// earlier guest wired with the *other* asyncness is a cross-guest interface
+/// disagreement, rejected here with both views named.
 fn polyfill_component<T>(
     engine: &Engine, linker: &mut Linker<T>, id: &GuestId,
     component: &wasmtime::component::Component, handle: &Arc<DispatchHandle>,
-    wired: &mut BTreeSet<Box<str>>,
+    wired: &mut WiredLinks,
 ) -> Result<()>
 where
     T: WasiView + WrpcView + 'static,
 {
     let component_ty = component.component_type();
     for (name, types::ComponentExtern { ty, .. }) in component_ty.imports(engine) {
-        if !handle.links().contains(name) || wired.contains(name) {
+        if !handle.links().contains(name) {
             continue;
         }
         let types::ComponentItem::ComponentInstance(instance_ty) = ty else {
             bail!("link target `{name}` (imported by guest `{id}`) is not an interface");
         };
 
-        // Snapshot the interface's function names and asyncness before
-        // mutably borrowing the linker.
-        let funcs: Vec<(Arc<str>, bool)> = instance_ty
-            .exports(engine)
-            .filter_map(|(func, types::ComponentExtern { ty, .. })| match ty {
-                types::ComponentItem::ComponentFunc(ty) => Some((Arc::from(func), ty.async_())),
-                _ => None,
-            })
-            .collect();
+        // Snapshot the missing function names and asyncness before mutably
+        // borrowing the linker, skipping functions an earlier guest wired.
+        let wired_funcs = wired.entry(Box::from(name)).or_default();
+        let describe = |is_async: bool| if is_async { "an async func" } else { "a plain func" };
+        let mut funcs: Vec<(Arc<str>, bool)> = Vec::new();
+        for (func, types::ComponentExtern { ty, .. }) in instance_ty.exports(engine) {
+            let types::ComponentItem::ComponentFunc(ty) = ty else {
+                continue;
+            };
+            let is_async = ty.async_();
+            match wired_funcs.get(func) {
+                Some(&earlier) if earlier == is_async => {}
+                Some(&earlier) => bail!(
+                    "guest `{id}` imports `{name}/{func}` as {}, but an earlier guest wired it \
+                     as {}; every importer of a host-mediated function must agree on asyncness",
+                    describe(is_async),
+                    describe(earlier),
+                ),
+                None => funcs.push((Arc::from(func), is_async)),
+            }
+        }
 
+        // Opening the instance also (re)defines it on the linker, so an
+        // allow-listed interface resolves even when every function is already
+        // wired (or it has none).
         let mut root = linker.root();
         let mut interface = root
             .instance(name)
@@ -155,7 +183,7 @@ where
                 .map_err(anyhow::Error::from)
                 .with_context(|| format!("polyfilling `{name}` function `{func}`"))?;
         }
-        wired.insert(Box::from(name));
+        wired_funcs.extend(funcs.iter().map(|(func, is_async)| (Box::from(&**func), *is_async)));
     }
     Ok(())
 }

@@ -9,8 +9,7 @@ use anyhow::Result;
 pub use default_impl::HttpDefault;
 use omnia::{Host, Runtime, Server, StoreCtx};
 use wasmtime::component::Linker;
-pub use wasmtime_wasi_http::WasiHttpCtx;
-pub use wasmtime_wasi_http::p3::{WasiHttpCtxView, WasiHttpView};
+pub use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpCtxView, WasiHttpView};
 
 /// Host-side service for `wasi:http`.
 #[derive(Debug)]

@@ -3,40 +3,18 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use base64ct::{Base64, Encoding};
-use bytes::Bytes;
 use fromenv::FromEnv;
 use futures::{Future, TryStreamExt};
-use http::header::{
-    CONNECTION, HOST, HeaderName, PROXY_AUTHENTICATE, PROXY_AUTHORIZATION, TRANSFER_ENCODING,
-    UPGRADE,
-};
 use http::{Request, Response};
 use http_body_util::BodyExt;
-use http_body_util::combinators::UnsyncBoxBody;
 use omnia::Backend;
 use tracing::instrument;
 use wasmtime::component::ResourceTable;
-use wasmtime_wasi::TrappableError;
-use wasmtime_wasi_http::WasiHttpCtx;
-use wasmtime_wasi_http::p3::bindings::http::types::ErrorCode;
-use wasmtime_wasi_http::p3::{self, RequestOptions, WasiHttpCtxView};
+use wasmtime_wasi_http::{
+    Error as HttpError, RequestOptions, WasiBody, WasiHttpCtx, WasiHttpCtxView, WasiHttpHooks,
+};
 
-pub type HttpResult<T> = Result<T, HttpError>;
-pub type HttpError = TrappableError<ErrorCode>;
-pub type FutureResult<T> = Box<dyn Future<Output = Result<T, ErrorCode>> + Send>;
-
-/// Set of headers that are forbidden by `wasmtime-wasi-http`.
-pub const FORBIDDEN_HEADERS: [HeaderName; 9] = [
-    CONNECTION,
-    HOST,
-    PROXY_AUTHENTICATE,
-    PROXY_AUTHORIZATION,
-    TRANSFER_ENCODING,
-    UPGRADE,
-    HeaderName::from_static("keep-alive"),
-    HeaderName::from_static("proxy-connection"),
-    HeaderName::from_static("http2-settings"),
-];
+pub type FutureResult<T> = Box<dyn Future<Output = Result<T, HttpError>> + Send>;
 
 #[derive(Debug, Clone, FromEnv)]
 pub struct ConnectOptions {
@@ -79,7 +57,7 @@ impl HttpDefault {
 
 // reqwest is built with `rustls-no-provider` (keeping `aws-lc-sys` out of the
 // tree), which requires a process-level crypto provider before a client is
-// built. Ring is the provider wasmtime-wasi-http already links; an embedder
+// built. Ring comes from this crate's own rustls dependency; an embedder
 // that installed its own provider first wins, and losing an install race
 // still leaves exactly one default in place.
 fn ensure_crypto_provider() {
@@ -107,15 +85,19 @@ impl Backend for HttpDefault {
     }
 }
 
-impl p3::WasiHttpHooks for HttpHooks {
+impl WasiHttpHooks for HttpHooks {
+    // Suppress the runtime's `Host` header injection: reqwest derives `Host`
+    // from the URL, and a guest can never supply one (`host` is a forbidden
+    // header), so the request reaching `send_request` stays header-clean.
+    fn set_host_header(&mut self) -> bool {
+        false
+    }
+
     fn send_request(
-        &mut self, request: Request<UnsyncBoxBody<Bytes, ErrorCode>>,
-        options: Option<RequestOptions>, fut: FutureResult<()>,
-    ) -> Box<
-        dyn Future<
-                Output = HttpResult<(Response<UnsyncBoxBody<Bytes, ErrorCode>>, FutureResult<()>)>,
-            > + Send,
-    > {
+        &mut self, request: Request<WasiBody>, options: Option<RequestOptions>,
+        fut: FutureResult<()>,
+    ) -> Box<dyn Future<Output = Result<(Response<WasiBody>, FutureResult<()>), HttpError>> + Send>
+    {
         let shared_client = self.client.clone();
         let connect_timeout = self.connect_timeout;
 
@@ -126,9 +108,6 @@ impl p3::WasiHttpHooks for HttpHooks {
 
         Box::new(async move {
             let (mut parts, body) = request.into_parts();
-
-            // remove "Host" headers (`reqwest` adds its own)
-            parts.headers.remove(HOST);
 
             // A one-off client is required for a client certificate or whenever the
             // guest overrides the connect/between-bytes timeouts (both are
@@ -176,41 +155,37 @@ impl p3::WasiHttpHooks for HttpHooks {
                     let budget = opt_connect.unwrap_or(connect_timeout).saturating_add(first_byte);
                     match tokio::time::timeout(budget, send).await {
                         Ok(result) => result.map_err(reqwest_err)?,
-                        Err(_elapsed) => return Err(ErrorCode::ConnectionTimeout.into()),
+                        Err(_elapsed) => return Err(HttpError::ConnectionTimeout),
                     }
                 }
                 None => send.await.map_err(reqwest_err)?,
             };
 
-            // process response
+            // process response; forbidden headers need no stripping here — the
+            // runtime routes the response through `FieldMap::new_immutable`,
+            // which strips per `is_forbidden_header`, before the guest sees it
             let converted: Response<reqwest::Body> = resp.into();
             let (parts, body) = converted.into_parts();
             let body = body.map_err(reqwest_err).boxed_unsync();
-            let mut response = Response::from_parts(parts, body);
-
-            // remove forbidden headers (disallowed by `wasmtime-wasi-http`)
-            let headers = response.headers_mut();
-            for header in &FORBIDDEN_HEADERS {
-                headers.remove(header);
-            }
+            let response = Response::from_parts(parts, body);
 
             Ok((response, fut))
         })
     }
 }
 
-fn internal_err(e: impl Display) -> ErrorCode {
-    ErrorCode::InternalError(Some(e.to_string()))
+fn internal_err(e: impl Display) -> HttpError {
+    HttpError::InternalError(Some(e.to_string()))
 }
 
 #[allow(clippy::needless_pass_by_value)]
-fn reqwest_err(e: reqwest::Error) -> ErrorCode {
+fn reqwest_err(e: reqwest::Error) -> HttpError {
     if e.is_timeout() {
-        ErrorCode::ConnectionTimeout
+        HttpError::ConnectionTimeout
     } else if e.is_connect() {
-        ErrorCode::ConnectionRefused
+        HttpError::ConnectionRefused
     } else if e.is_request() {
-        ErrorCode::HttpRequestUriInvalid
+        HttpError::HttpRequestUriInvalid
     } else {
         internal_err(e)
     }

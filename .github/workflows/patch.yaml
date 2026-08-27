@@ -3,6 +3,13 @@ name: Create Patch
 on:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
 jobs:
   patch:
     uses: augentic/.github/.github/workflows/patch.yaml@main

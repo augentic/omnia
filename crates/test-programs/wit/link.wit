@@ -1,0 +1,33 @@
+// The host-mediated interface for the link dispatch suite. One plain and one
+// async-typed function, so importer guests can use different subsets: the
+// componentizer prunes unused imports, making each guest's view of `ops` an
+// arbitrary slice the host must union at function granularity.
+package omnia-test:link;
+
+interface ops {
+    /// Echo `message` tagged with `target` — the guest the default selector
+    /// dispatches to, forwarded through to the export unchanged.
+    ping: func(target: string, message: string) -> string;
+
+    /// The async-typed dual of `ping`.
+    ping-async: async func(target: string, message: string) -> string;
+}
+
+/// Serves `ops`; no trigger of its own, reachable only via dispatch.
+world echoer {
+    export ops;
+}
+
+/// Imports only `ping` — a strict subset of `full`'s imports.
+world partial {
+    import ops;
+    export poke: func(message: string) -> string;
+}
+
+/// Imports both `ops` functions. `poke-async` is async-lifted because a
+/// sync-lifted export cannot call the async-typed `ping-async` import.
+world full {
+    import ops;
+    export poke: func(message: string) -> string;
+    export poke-async: async func(message: string) -> string;
+}

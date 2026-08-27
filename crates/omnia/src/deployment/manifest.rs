@@ -619,10 +619,10 @@ mod tests {
         // A relative path resolves against the manifest's directory; read-only by default.
         assert_eq!(resolved[0].name, ".");
         assert_eq!(resolved[0].host_path, base.join("../.."));
-        assert!(!resolved[0].dir_perms.contains(wasmtime_wasi::DirPerms::MUTATE));
+        assert!(!resolved[0].writable);
         // An absolute path passes through unchanged, and `writable` grants mutation.
         assert_eq!(resolved[1].host_path, PathBuf::from("/srv/shared"));
-        assert!(resolved[1].dir_perms.contains(wasmtime_wasi::DirPerms::MUTATE));
+        assert!(resolved[1].writable);
     }
 
     #[test]
@@ -665,7 +665,7 @@ mod tests {
         // manifest mounts which resolve against the manifest's directory.
         let resolved = entry.resolve(Path::new("/cwd"));
         assert_eq!(resolved.host_path, PathBuf::from("/cwd/workspace"));
-        assert!(resolved.dir_perms.contains(wasmtime_wasi::DirPerms::MUTATE));
+        assert!(resolved.writable);
     }
 
     #[test]

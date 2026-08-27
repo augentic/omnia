@@ -1,4 +1,7 @@
 #![doc = include_str!("../README.md")]
+// Transitive-only duplication: `bon` 3.10 moved to prettyplease 0.3 while
+// `wit-bindgen-rust` still pins 0.2. Drop when wit-bindgen catches up.
+#![allow(clippy::multiple_crate_versions)]
 
 pub mod api;
 mod capabilities;

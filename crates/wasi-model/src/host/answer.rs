@@ -256,8 +256,8 @@ fn maybe_json(text: &str) -> Vec<Value> {
     values
 }
 
-// Unit tests by design: `parse`/`check` are the pure candidate-extraction
-// and repair-reason surface backends drive directly off a model's raw text;
+// Unit tests by design: `parse`/`check`/`instruction`/`repair` are the pure
+// candidate-extraction and prompt-shaping surface backends drive directly;
 // no guest boundary reaches them with these inputs.
 #[cfg(test)]
 mod tests {
@@ -402,5 +402,27 @@ mod tests {
         let nested = format.check(&json!({ "ui-surface": [] })).unwrap_err();
         assert!(nested.contains("/ui-surface"), "unexpected: {nested}");
         assert_ne!(root, nested);
+    }
+
+    #[test]
+    fn instruction_per_format() {
+        assert!(Format::Text.instruction().contains("plain text"));
+        assert!(Format::Json.instruction().contains("JSON object"));
+        let schema = verdict_schema().instruction();
+        assert!(schema.contains("JSON Schema"), "unexpected: {schema}");
+        assert!(schema.contains("verdict"), "unexpected: {schema}");
+    }
+
+    #[test]
+    fn repair_names_the_reason() {
+        let repair = Format::Json.repair("answer is not a JSON object");
+        assert!(repair.contains("answer is not a JSON object"), "unexpected: {repair}");
+    }
+
+    #[test]
+    fn format_display() {
+        assert_eq!(Format::Text.to_string(), "text");
+        assert_eq!(Format::Json.to_string(), "json");
+        assert_eq!(verdict_schema().to_string(), "schema");
     }
 }
