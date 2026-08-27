@@ -174,12 +174,13 @@ fn rustflags() -> &'static str {
     }
 }
 
-// Register the guest's full dep-info (its sources plus every crate it pulls
-// in, e.g. `omnia-guest`) so editing any of them rebuilds the component.
+// Cargo's extra dep-info sits next to the uplifted example (`{name}.d`), not
+// rustc's hashed file under `deps/`. It lists this crate's sources plus every
+// local path dependency (omnia-guest, omnia-wasi-model, ...).
 fn emit_dep_info(artifact: &Path, seen: &mut HashSet<String>) {
-    let Ok(contents) = fs::read_to_string(artifact.with_extension("d")) else {
-        return;
-    };
+    let dep_info = artifact.with_extension("d");
+    let contents = fs::read_to_string(&dep_info)
+        .unwrap_or_else(|err| panic!("reading {} ({err})", dep_info.display()));
     for line in contents.lines() {
         let Some((_, deps)) = line.split_once(": ") else {
             continue;
