@@ -18,7 +18,7 @@ cfg_if::cfg_if! {
         use omnia_wasi_otel::{WasiOtel, OtelDefault};
 
         omnia::runtime!({
-            plugins: ["omnia:link/echo"],
+            plugins: { interfaces: ["omnia:link/echo"] },
             guests: [
                 {
                     id: "responder",

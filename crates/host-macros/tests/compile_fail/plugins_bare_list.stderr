@@ -1,0 +1,5 @@
+error: the `plugins:` key takes a block: `plugins: { interfaces: ["ns:pkg/iface"], acquire: ... }` (`acquire` is optional)
+ --> tests/compile_fail/plugins_bare_list.rs:2:5
+  |
+2 |     plugins: ["omnia:shared/log"],
+  |     ^^^^^^^

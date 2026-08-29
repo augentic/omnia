@@ -56,7 +56,10 @@ The deployment `omnia.toml` expresses can also be written directly in the macro,
 
 ```rust
 omnia::runtime!({
-    plugins: ["omnia:link/echo"],            // host-mediated interfaces (deployment-wide)
+    plugins: {
+        interfaces: ["omnia:link/echo"],     // host-mediated interfaces (deployment-wide)
+        acquire: omnia::MountAcquire,        // optional: loader acquisition policy
+    },
     guests: [
         {
             id: "responder",
@@ -87,7 +90,8 @@ omnia::runtime!({
 - Relative paths resolve against the process working directory at run time, so anchor them with `env!("CARGO_MANIFEST_DIR")` as with `config:`.
 - Routes are declared per guest, on the target entry's `routes:` block — one pattern list per trigger (`http` prefixes, `messaging` topics, `websocket` routes), with the declaring guest as the implicit target. There is no top-level `routes:` key.
 - A guest entry also accepts `command: true` (a literal bool), marking it as the command-mode target — see [Command routing](#command-routing-command-true).
-- Host-mediated interfaces are declared once, deployment-wide, on the top-level `plugins:` list — the linker is shared, so there is no per-guest form. `run --plugins` at the CLI unions with the compiled-in list.
+- Host-mediated interfaces are declared once, deployment-wide, in the top-level `plugins:` block's `interfaces:` list — the linker is shared, so there is no per-guest form. `run --plugins` at the CLI unions with the compiled-in list. A bare `plugins: [...]` list is a compile error naming the block shape.
+- Declaring `plugins:` also links the `omnia:plugins/loader` host capability (guest-requested plugin loading); only guests whose world imports it can reach it. The optional `acquire:` value is the deployment's `Acquire` policy — the acquisition seam behind `loader.load` (core ships `omnia::MountAcquire`, preopen-relative reads). Without `acquire:`, every load refuses typed. Because `acquire:` is compiled-in code rather than manifest data, an acquire-only block (`plugins: { acquire: ... }`) composes with `config:` — the TOML declares the interfaces, the binary the acquirer.
 
 ### Embedding a guest (`source:` bytes)
 

@@ -17,6 +17,7 @@ use wasmtime::{Engine, Store};
 use crate::deployment::GuestArtifact;
 use crate::dispatch::{serve_guest, serve_links};
 use crate::mount::MountRegistry;
+use crate::plugins::{Acquire, PluginLoader, PluginsState};
 use crate::registry::{Guest, GuestId, HttpRoutes, TriggerRouter};
 use crate::store::HasLimits;
 use crate::{
@@ -310,6 +311,9 @@ pub struct Runtime<B: 'static> {
     // Cached host→guest dispatch capability, built once per runtime so
     // `store()` hands out clones instead of allocating one per store.
     dispatcher: Arc<dyn Dispatcher>,
+    // Cached plugin-load capability (the same `RuntimeDispatcher` behind a
+    // second trait object), threaded into each store beside the dispatcher.
+    loader: Arc<dyn PluginLoader>,
 }
 
 struct RuntimeInner<B: 'static> {
@@ -323,6 +327,9 @@ struct RuntimeInner<B: 'static> {
     // Manifest-marked command guest identity; absent, command mode routes to
     // the sole static `wasi:cli/run` exporter.
     command_guest: OnceLock<GuestId>,
+    // Loader state: the installed acquirer, the load serializer, and the
+    // resolved digest per loader-loaded package.
+    plugins: PluginsState,
 }
 
 impl<B: 'static> RuntimeInner<B> {
@@ -337,6 +344,7 @@ impl<B: 'static> RuntimeInner<B> {
             mounts,
             backends,
             command_guest: OnceLock::new(),
+            plugins: PluginsState::new(),
         }
     }
 }
@@ -374,6 +382,7 @@ impl<B: Backends> Runtime<B> {
         let backends = B::connect().await.context("connecting backends")?;
         let mounts = deployment.mounts();
         let command_guest = deployment.command_guest();
+        let acquirer = deployment.take_acquirer();
 
         let runtime = Self::with_inner(Arc::new(RuntimeInner::new(
             name,
@@ -384,6 +393,9 @@ impl<B: Backends> Runtime<B> {
         )));
         if let Some(id) = command_guest {
             runtime.set_command_guest(id);
+        }
+        if let Some(acquirer) = acquirer {
+            runtime.inner.plugins.install_acquirer(acquirer);
         }
         serve_links(&runtime).await.context("wiring host-mediated link serve side")?;
         Ok(runtime)
@@ -396,16 +408,23 @@ impl<B: Clone + Send + Sync + 'static> Clone for Runtime<B> {
         Self {
             inner: Arc::clone(&self.inner),
             dispatcher: Arc::clone(&self.dispatcher),
+            loader: Arc::clone(&self.loader),
         }
     }
 }
 
 impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     fn with_inner(inner: Arc<RuntimeInner<B>>) -> Self {
-        let dispatcher = Arc::new(RuntimeDispatcher {
+        // One shared hub behind two trait objects: host→guest dispatch and
+        // guest-requested plugin loading.
+        let hub = Arc::new(RuntimeDispatcher {
             inner: Arc::clone(&inner),
         });
-        Self { inner, dispatcher }
+        Self {
+            inner,
+            dispatcher: Arc::<RuntimeDispatcher<B>>::clone(&hub),
+            loader: hub,
+        }
     }
 
     /// Build a runtime from an already-assembled registry and backend bundle.
@@ -500,6 +519,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
                 args: Some(Arc::clone(&self.inner.args)),
                 mounts: Some(Arc::clone(&self.inner.mounts)),
                 env: None,
+                loader: Some(Arc::clone(&self.loader)),
             }),
             backends: self.inner.backends.clone(),
         }
@@ -617,8 +637,31 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// registered.
     pub fn deregister(&self, id: &GuestId) -> Result<()> {
         self.registry().remove(id)?;
+        self.inner.plugins.forget(id);
         tracing::debug!(guest = %id, "guest deregistered");
         Ok(())
+    }
+
+    /// Install the deployment's plugin acquirer — the acquisition policy
+    /// behind [`load_plugin`](Self::load_plugin) and the
+    /// `omnia:plugins/loader` capability.
+    ///
+    /// [`Runtime::new`] installs the builder's
+    /// [`acquirer`](crate::DeploymentBuilder::acquirer) itself; an embedder
+    /// holding a [`from_parts`](Self::from_parts) runtime calls this once.
+    /// A second installation warns and is ignored.
+    pub fn set_acquirer(&self, acquirer: impl Acquire) {
+        self.inner.plugins.install_acquirer(Arc::new(acquirer));
+    }
+
+    /// The loader state shared by every `load_plugin` call.
+    pub(crate) fn plugins_state(&self) -> &PluginsState {
+        &self.inner.plugins
+    }
+
+    /// The deployment's mount registry, lent to acquirers per load.
+    pub(crate) fn mount_registry(&self) -> Arc<MountRegistry> {
+        Arc::clone(&self.inner.mounts)
     }
 
     /// Release every link-serve endpoint, aborting the drain tasks that pin

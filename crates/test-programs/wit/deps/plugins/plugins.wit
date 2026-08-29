@@ -1,0 +1,58 @@
+package omnia:plugins@0.1.0;
+
+/// Host-side plugin loading. Request-only in both directions: the guest names
+/// code, the host acquires, verifies, validates, and registers it — component
+/// bytes never cross this interface.
+interface loader {
+    /// Where the deployment's acquirer finds a package's component bytes.
+    variant location {
+        /// A package registry; `none` selects the acquirer's default.
+        registry(option<string>),
+        /// A preopen-relative component path, read fresh on every load.
+        path(string),
+    }
+
+    /// Why a load was refused.
+    variant error {
+        /// The deployment's acquirer does not serve this location kind.
+        location-unsupported(string),
+        /// The acquirer could not produce the package bytes.
+        acquire-failed(string),
+        /// The supplied digest pin is not a `sha256:<hex>` string.
+        invalid-digest(string),
+        /// The acquired bytes do not hash to the supplied pin.
+        digest-mismatch(string),
+        /// The bytes are not a raw wasm component (a pre-compiled native
+        /// artifact is always refused), or failed validation.
+        artifact-refused(string),
+        /// The component exports no interface declared in the deployment's
+        /// plugin seam list.
+        seam-missing(string),
+        /// The package identity is already registered and cannot be re-bound.
+        already-active(string),
+        /// Loader misconfiguration or an internal registration failure.
+        internal(string),
+    }
+
+    /// A loaded plugin: a typed wrapper over the routed dispatch identity.
+    /// When the component model's runtime components land, this same slot
+    /// becomes the instance resource.
+    resource plugin {
+        /// The routed identity host-mediated dispatch keys on.
+        id: func() -> string;
+        /// The resolved `sha256:<hex>` content digest of the loaded bytes —
+        /// commit it as a pin to make an unpinned load reproducible.
+        digest: func() -> string;
+    }
+
+    /// Load `package`, idempotent on (package, digest): an already-active
+    /// package returns its handle immediately. The host acquires through the
+    /// builder-supplied acquirer, verifies the sha256 pin when given,
+    /// validates raw wasm, checks the component exports a declared plugin
+    /// seam, and registers under `package`.
+    load: async func(%package: string, %from: location, digest: option<string>) -> result<plugin, error>;
+}
+
+world imports {
+    import loader;
+}

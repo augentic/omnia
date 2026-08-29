@@ -2006,6 +2006,7 @@ dependencies = [
  "opentelemetry_sdk",
  "pastey",
  "serde",
+ "sha2",
  "test-utils",
  "tokio",
  "tokio-util",

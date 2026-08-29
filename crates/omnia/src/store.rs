@@ -11,7 +11,7 @@ use wasmtime_wasi::{FsPerms, ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView
 use wasmtime_wasi_http::{WasiHttpCtxView, WasiHttpView};
 use wrpc_wasmtime::{WrpcCtxView, WrpcView};
 
-use crate::{Dispatcher, LinkClient, MountRegistry, RuntimeOptions, WrpcState};
+use crate::{Dispatcher, LinkClient, MountRegistry, PluginLoader, RuntimeOptions, WrpcState};
 
 /// Exposes a store context's [`StoreLimits`] so the runtime can install a
 /// per-guest resource limiter on every [`Store`](wasmtime::Store) it creates.
@@ -42,6 +42,9 @@ pub struct StoreConfig<'a> {
     /// Complete guest environment replacing host inheritance; `None` inherits
     /// the host env.
     pub env: Option<Arc<Vec<(String, String)>>>,
+    /// Type-erased `omnia:plugins/loader` capability; `None` for hand-built
+    /// store contexts, where every load refuses.
+    pub loader: Option<Arc<dyn PluginLoader>>,
 }
 
 /// The fixed per-store state shared by every guest store context.
@@ -70,6 +73,9 @@ pub struct StoreBase {
     /// `descriptor` back to its mount by directory identity. Empty unless the
     /// deployment configures `[[mount]]`s.
     pub mounts: Arc<MountRegistry>,
+    /// Type-erased `omnia:plugins/loader` capability the `WasiPlugins` host
+    /// binding reaches for. Absent in hand-built store contexts.
+    pub loader: Option<Arc<dyn PluginLoader>>,
 }
 
 impl StoreBase {
@@ -122,6 +128,7 @@ impl StoreBase {
             wrpc: WrpcState::new(),
             dispatcher: config.dispatcher,
             mounts,
+            loader: config.loader,
         }
     }
 }

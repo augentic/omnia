@@ -16,6 +16,9 @@ pub struct Codegen {
     pub backends_ty: TokenStream,
     pub backends_def: TokenStream,
     pub main_options: TokenStream,
+    /// Whether to link the `omnia::WasiPlugins` loader host — declared
+    /// plugins mean the deployment opted into the loader capability.
+    pub link_plugins: bool,
 }
 
 impl From<&Config> for Codegen {
@@ -36,6 +39,7 @@ impl From<&Config> for Codegen {
             backends_ty,
             backends_def,
             main_options,
+            link_plugins: config.plugins_declared,
         }
     }
 }
@@ -45,10 +49,16 @@ impl From<&Config> for Codegen {
 fn emit_main_options(config: &Config) -> TokenStream {
     let mode = config.mode.tokens();
     let manifest = emit_manifest_source(config);
+    let acquirer = config.acquire.as_ref().map(|expr| {
+        quote! {
+            .acquirer(#expr)
+        }
+    });
 
     quote! {
         omnia::MainOptions::new(#mode)
             #manifest
+            #acquirer
     }
 }
 

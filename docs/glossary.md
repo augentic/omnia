@@ -44,6 +44,14 @@ Guest-to-guest calls carried through the host: a guest imports an interface name
 
 The deployment-wide `plugins` list naming interfaces the host will mediate between guests. Anything not listed is not callable — the list is the boundary, fixed at bootstrap.
 
+### Plugin loader
+
+The `omnia:plugins/loader` host capability: a guest names a package (location plus optional sha256 pin) and the host acquires, verifies, validates, and registers it, returning a typed handle. Request-only — component bytes never cross the interface, and the requester gains no lifecycle authority. Linked when the deployment declares a `plugins:` block; reachable only from worlds that import it.
+
+### Acquirer
+
+The deployment's compiled-in `Acquire` policy — how the loader turns a package name and location into component bytes. A composition-root value (`plugins: { acquire: ... }` in the macro, `DeploymentBuilder::acquirer` programmatically), never runtime-core machinery. Core ships `MountAcquire` (preopen-relative reads over the mount registry); registry acquirers are embedder territory.
+
 ## Runtime platform
 
 ### Runtime core
