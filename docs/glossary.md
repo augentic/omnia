@@ -46,7 +46,7 @@ The deployment-wide `plugins` list naming interfaces the host will mediate betwe
 
 ### Plugin loader
 
-The `omnia:plugins/loader` host capability: a guest names a package (location plus optional sha256 pin) and the host acquires, verifies, validates, and registers it, returning a typed handle. Request-only — component bytes never cross the interface, and the requester gains no lifecycle authority. Linked when the deployment declares a `plugins:` block; reachable only from worlds that import it.
+The `omnia:plugins/loader` host capability: a guest names a package (location plus optional sha256 pin) and the host acquires, verifies, validates, and registers it, returning a typed handle. Request-only — component bytes never cross the interface, and the requester gains no lifecycle authority. Linked when the deployment declares a `plugins:` block; reachable only from worlds that import it. The requester surface — the `Plugins` capability trait, shared `PluginRef`/`Digest` types, and ensure-once handle memoization — ships in `omnia-guest`'s `plugins` module.
 
 ### Acquirer
 

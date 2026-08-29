@@ -38,3 +38,9 @@ world requester {
     import omnia:plugins/loader@0.1.0;
     import ops;
 }
+
+/// Imports only `ops` — for requesters whose loader import arrives through
+/// the omnia-guest SDK bindings rather than this world.
+world caller {
+    import ops;
+}

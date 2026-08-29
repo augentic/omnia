@@ -51,6 +51,23 @@ async fn plugins_load_path() {
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
 }
 
+// The guest-side copies exist because published crates cannot reference WIT
+// outside their package root; the host copy stays canonical.
+#[test]
+fn wit_copies_stay_identical() {
+    let canonical = include_str!("../wit/plugins.wit");
+    assert_eq!(
+        include_str!("../../omnia-guest/wit/plugins.wit"),
+        canonical,
+        "omnia-guest's plugins.wit copy drifted from crates/omnia/wit/plugins.wit"
+    );
+    assert_eq!(
+        include_str!("../../test-programs/wit/deps/plugins/plugins.wit"),
+        canonical,
+        "test-programs' plugins.wit copy drifted from crates/omnia/wit/plugins.wit"
+    );
+}
+
 #[tokio::test]
 async fn plugins_load_refused() {
     let scratch = test_utils::scratch("plugins_load_refused");

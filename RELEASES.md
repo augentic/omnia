@@ -25,6 +25,20 @@
   shared linker when a deployment declares `plugins`; wasmtime wires it only
   into guests whose world imports `omnia:plugins/loader`. See
   [docs/security-model.md](docs/security-model.md#guest-requested-plugin-loading-omniapluginsloader).
+- The requester surface for the loader, in `omnia-guest`'s new `plugins`
+  module: a `Plugins` capability trait (WASI-backed default body on `wasm32`
+  over the crate's own `omnia:plugins/loader` bindings, bare natively so
+  suites script loads), the `WasiPlugins` zero-sized provider, shared
+  `PluginRef`/`Digest`/`Location` types compiled on both targets (`Digest`
+  validates and canonicalizes `sha256:<hex>` pins, with serde support), a
+  `Plugin` handle carrying the routed identity and resolved digest, typed
+  refusals mirroring the WIT error variant with kebab-case `code()`
+  discriminants and a conversion into the guest `Error` taxonomy
+  (`acquire-failed` → `BadGateway`, `internal` → `ServerError`, every other
+  refusal → `BadRequest`), and `PluginCache` — ensure-once memoization of
+  handles by package identity (never bytes; a conflicting re-pin refuses
+  `already-active`, mirroring the host). No consumer vocabulary anywhere:
+  any requester-class world can use it.
 
 ### Changed
 
