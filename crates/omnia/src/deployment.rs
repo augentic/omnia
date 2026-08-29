@@ -192,7 +192,7 @@ impl<P> DeploymentBuilder<P> {
             name: self.program_name.unwrap_or_else(|| manifest.name().to_owned()),
             sources: manifest.sources()?,
             routes: manifest.routes(),
-            links: manifest.dispatch_interfaces(),
+            links: manifest.plugin_interfaces(),
             preopens: manifest.preopens(),
             args: self.args,
             mode: self.mode,

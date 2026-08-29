@@ -28,7 +28,7 @@ use crate::registry::GuestId;
 /// failing wasmtime's pre-instantiation typecheck with no cross-guest context.
 pub type WiredLinks = BTreeMap<Box<str>, BTreeMap<Box<str>, bool>>;
 
-/// Polyfill every host-mediated import named in the deployment's `dispatch`
+/// Polyfill every host-mediated import named in the deployment's `plugins`
 /// set onto the shared linker, bound to the dispatch handle, returning the
 /// functions wired per interface.
 ///

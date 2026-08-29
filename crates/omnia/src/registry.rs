@@ -210,7 +210,7 @@ impl<T: WasiView + 'static> Registry<T> {
     /// guest imports them) are polyfilled on a clone of the retained linker,
     /// from this component's own import types — the shared linker is never
     /// mutated after bootstrap. Imports outside the linked host set and the
-    /// `dispatch` set fail here, exactly as at bootstrap.
+    /// `plugins` set fail here, exactly as at bootstrap.
     pub(crate) fn instantiate_late(
         &self, id: &GuestId, component: &Component,
     ) -> Result<InstancePre<T>>

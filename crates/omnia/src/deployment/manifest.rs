@@ -10,7 +10,7 @@
 //! concrete file; the runtime core stays domain-agnostic.
 //!
 //! The `[[guest]]` population (file or embedded-bytes sources), each guest's
-//! `routes` tables, and the deployment-wide `dispatch` interface list (which
+//! `routes` tables, and the deployment-wide `plugins` interface list (which
 //! drives host-mediated dynamic linking) are all consumed. Distributed `[transport]` is not yet
 //! implemented: only the in-process default is accepted.
 
@@ -44,7 +44,7 @@ pub struct Manifest {
     pub mounts: Vec<Mount>,
     /// Interfaces the host mediates between guests (host-mediated dynamic
     /// linking); the runtime core polyfills each on the shared linker.
-    pub dispatch: Vec<String>,
+    pub plugins: Vec<String>,
     /// Transport configuration for host-mediated calls.
     pub transport: Transport,
 }
@@ -100,14 +100,14 @@ impl Manifest {
         self
     }
 
-    /// Append host-mediated dispatch interfaces.
+    /// Append host-mediated plugin interfaces.
     #[must_use]
-    pub fn dispatch<I, S>(mut self, interfaces: I) -> Self
+    pub fn plugins<I, S>(mut self, interfaces: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        self.dispatch.extend(interfaces.into_iter().map(Into::into));
+        self.plugins.extend(interfaces.into_iter().map(Into::into));
         self
     }
 
@@ -185,10 +185,10 @@ impl Manifest {
         Ok(sources)
     }
 
-    /// The host-mediated dispatch interfaces as an ordered set.
+    /// The host-mediated plugin interfaces as an ordered set.
     #[must_use]
-    pub fn dispatch_interfaces(&self) -> BTreeSet<Box<str>> {
-        self.dispatch.iter().map(|interface| Box::from(interface.as_str())).collect()
+    pub fn plugin_interfaces(&self) -> BTreeSet<Box<str>> {
+        self.plugins.iter().map(|interface| Box::from(interface.as_str())).collect()
     }
 
     /// Per-trigger route tables aggregated from each guest's `routes` lists,
@@ -295,7 +295,7 @@ impl FromStr for Mount {
 /// A single registry population entry.
 ///
 /// `deny_unknown_fields` turns a stale per-guest key (for example the removed
-/// `link` list — dispatch interfaces are deployment-wide now) into a loud
+/// `link` list — plugin interfaces are deployment-wide now) into a loud
 /// parse error rather than a silent no-op.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -484,7 +484,7 @@ mod tests {
     #[test]
     fn parse_multi_guest() {
         let toml = r#"
-            dispatch = ["omnia:shared/log", "augentic:specify/source"]
+            plugins = ["omnia:shared/log", "augentic:specify/source"]
 
             [[guest]]
             id = "workflow"
@@ -503,8 +503,8 @@ mod tests {
         assert_eq!(manifest.guests[0].id, "workflow");
         assert!(matches!(manifest.guests[1].source, SourceSpec::Path(_)));
         assert_eq!(manifest.transport.default, TransportKind::InProcess);
-        assert!(manifest.dispatch_interfaces().contains("omnia:shared/log"));
-        assert!(manifest.dispatch_interfaces().contains("augentic:specify/source"));
+        assert!(manifest.plugin_interfaces().contains("omnia:shared/log"));
+        assert!(manifest.plugin_interfaces().contains("augentic:specify/source"));
     }
 
     #[test]
@@ -514,14 +514,19 @@ mod tests {
              [[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\n";
         toml::from_str::<Manifest>(toml).unwrap_err();
 
-        // So must the removed per-guest form (dispatch is deployment-wide).
+        // So must the renamed top-level `dispatch` list (now `plugins`).
+        let toml = "dispatch = [\"omnia:shared/log\"]\n\n\
+             [[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\n";
+        toml::from_str::<Manifest>(toml).unwrap_err();
+
+        // So must the removed per-guest form (plugins is deployment-wide).
         let toml = "[[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\n\
              link = [\"omnia:link/echo\"]\n";
         toml::from_str::<Manifest>(toml).unwrap_err();
 
-        // And `dispatch` misplaced on a guest entry.
+        // And `plugins` misplaced on a guest entry.
         let toml = "[[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\n\
-             dispatch = [\"omnia:link/echo\"]\n";
+             plugins = [\"omnia:link/echo\"]\n";
         toml::from_str::<Manifest>(toml).unwrap_err();
     }
 
@@ -782,8 +787,8 @@ mod tests {
             )
             .guest(GuestEntry::new("responder", "responder.wasm").route_websocket("events.*"))
             .mounts(["workspace,writable".parse().expect("mount should parse")])
-            .dispatch(["omnia:link/echo"])
-            .dispatch(["omnia:shared/log"]);
+            .plugins(["omnia:link/echo"])
+            .plugins(["omnia:shared/log"]);
 
         manifest.validate(false).expect("manifest should validate");
         assert_eq!(manifest.guests.len(), 2);
@@ -791,7 +796,7 @@ mod tests {
         assert_eq!(manifest.guests[0].routes.http, ["/router"]);
         assert_eq!(manifest.guests[0].routes.messaging, ["jobs.>"]);
         assert_eq!(manifest.guests[1].routes.websocket, ["events.*"]);
-        assert!(manifest.dispatch_interfaces().contains("omnia:link/echo"));
-        assert!(manifest.dispatch_interfaces().contains("omnia:shared/log"));
+        assert!(manifest.plugin_interfaces().contains("omnia:link/echo"));
+        assert!(manifest.plugin_interfaces().contains("omnia:shared/log"));
     }
 }

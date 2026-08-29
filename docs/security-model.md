@@ -29,14 +29,14 @@ Two further consequences of dynamic loading:
 - **Artifacts are read at startup.** A guest path can be substituted between manifest construction and load; prefer immutable or content-addressed artifact locations, especially for `.bin`.
 - **Startup cost is unbounded by the runtime.** Nothing caps the manifest's guest count or artifact sizes; compilation cost at startup is bounded only by what the manifest names — another reason the manifest is an operator-privilege input.
 
-Note also that `dispatch` interfaces (top-level in the manifest, `dispatch:` in the macro, or CLI `--dispatch`) are a deployment-level grant: the linker is shared, so a dispatched interface is wired for the *whole* deployment, and any guest importing it may call it. There is no per-guest ACL.
+Note also that `plugins` interfaces (top-level in the manifest, `plugins:` in the macro, or CLI `--plugins`) are a deployment-level grant: the linker is shared, so a dispatched interface is wired for the *whole* deployment, and any guest importing it may call it. There is no per-guest ACL.
 
 ## Isolation between requests and guests
 
 Every invocation runs in a **fresh instance in its own store**, torn down afterwards. Consequences:
 
 - Nothing persists in guest memory between requests — no request can read another's data through the guest heap, and a compromised request state dies with the instance.
-- In multi-guest deployments, guests share an engine and linker but never an instance or store. They can interact only through host-mediated dispatch, and only along interfaces named in the deployment's `dispatch` list, with nesting bounded by `MAX_DISPATCH_DEPTH`.
+- In multi-guest deployments, guests share an engine and linker but never an instance or store. They can interact only through host-mediated dispatch, and only along interfaces named in the deployment's `plugins` list, with nesting bounded by `MAX_DISPATCH_DEPTH`.
 - The runtime core treats guest ids and interface names as opaque strings — no domain knowledge, no special cases a guest could exploit by name (the glossary's [Law 2](glossary.md#law-2)).
 
 State that must persist lives behind a WASI interface (keyvalue, sql, blobstore, ...) where the host controls it.

@@ -187,15 +187,15 @@ mod tests {
         })));
     }
 
-    // Guest-owned routes and the deployment-wide dispatch list: every trigger
+    // Guest-owned routes and the deployment-wide plugins list: every trigger
     // list expands to `route_*` builder calls on the owning `GuestEntry` (the
-    // guest id is the implicit target), the top-level `dispatch:` list to
-    // `.dispatch(...)` calls on the `Manifest`, and patterns/interfaces are
+    // guest id is the implicit target), the top-level `plugins:` list to
+    // `.plugins(...)` calls on the `Manifest`, and patterns/interfaces are
     // arbitrary expressions.
     #[test]
     fn expand_inline_manifest() {
         insta::assert_snapshot!(expand_pretty(quote!({
-            dispatch: ["omnia:link/echo"],
+            plugins: ["omnia:link/echo"],
             guests: [
                 {
                     id: "responder",

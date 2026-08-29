@@ -2,6 +2,24 @@
 
 ### Changed
 
+- The host-mediated interface list is renamed from `dispatch` to `plugins`:
+  a top-level `plugins = [...]` in TOML, a top-level `plugins: [...]` key in
+  the `runtime!` macro, the fluent `Manifest::plugins(...)` setter (with the
+  `Manifest.plugins` field and the `Manifest::plugin_interfaces()` accessor),
+  and the CLI flag `--plugins` (replacing `--dispatch`, no alias). Stale keys
+  fail loudly: a leftover top-level `dispatch` (or `link`) is a parse/compile
+  error, and `plugins` misplaced on a guest entry is rejected with a pointed
+  diagnostic. Behavior is unchanged: listed interfaces are polyfilled onto
+  the shared linker at assemble (an exporter may arrive later via
+  `Runtime::register`), and the selector still picks the target guest by
+  routing id at call time. The dispatch *mechanism* keeps its names —
+  `crates/omnia/src/dispatch`, `serve_links`, `DispatchHandle`,
+  `MAX_DISPATCH_DEPTH`, and the `omnia:link` WIT packages are untouched.
+
+  ```toml
+  # before                            # after
+  dispatch = ["omnia:link/echo"]      plugins = ["omnia:link/echo"]
+  ```
 - The host-mediated interface list is renamed from `link` to `dispatch`
   and is deployment-wide only: a top-level `dispatch = [...]` in TOML, a
   top-level `dispatch: [...]` key in the `runtime!` macro, the fluent

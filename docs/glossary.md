@@ -26,11 +26,11 @@ A WASI host that runs a server and drives guest instances per inbound request: `
 
 ### Deployment manifest
 
-The `omnia.toml` file (or equivalent programmatic `omnia::Manifest`) declaring guests, mounts, routes, and dispatch interfaces. See [Configuration](reference/configuration.md#deployment-manifest-omniatoml).
+The `omnia.toml` file (or equivalent programmatic `omnia::Manifest`) declaring guests, mounts, routes, and plugin interfaces. See [Configuration](reference/configuration.md#deployment-manifest-omniatoml).
 
 ### Registry
 
-The runtime's map from each opaque guest identity (`GuestId`) to a pre-instantiated guest, plus the route tables, mounts, and dispatch interfaces that hang off it. Per-request instantiation pulls from here.
+The runtime's map from each opaque guest identity (`GuestId`) to a pre-instantiated guest, plus the route tables, mounts, and plugin interfaces that hang off it. Per-request instantiation pulls from here.
 
 ### Mount
 
@@ -38,11 +38,11 @@ A host directory preopened into every guest sandbox (`[[mount]]` in the manifest
 
 ### Dispatch (host-mediated)
 
-Guest-to-guest calls carried through the host: a guest imports an interface named in the deployment's dispatch list, and the host routes the call to whichever guest exports it. Nesting is bounded by `MAX_DISPATCH_DEPTH`.
+Guest-to-guest calls carried through the host: a guest imports an interface named in the deployment's plugins list, and the host routes the call to whichever guest exports it. Nesting is bounded by `MAX_DISPATCH_DEPTH`.
 
-### Dispatch interfaces
+### Plugin interfaces
 
-The deployment-wide `dispatch` list naming interfaces the host will mediate between guests. Anything not listed is not callable — the list is the boundary, fixed at bootstrap.
+The deployment-wide `plugins` list naming interfaces the host will mediate between guests. Anything not listed is not callable — the list is the boundary, fixed at bootstrap.
 
 ## Runtime platform
 

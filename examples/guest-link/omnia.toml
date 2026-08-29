@@ -2,12 +2,12 @@
 #
 # Two guests share one runtime. `router` imports `omnia:link/echo`; the host
 # does not satisfy that import natively, so it is named in the deployment's
-# `dispatch` list and the runtime core polyfills it onto the shared linker. At
+# `plugins` list and the runtime core polyfills it onto the shared linker. At
 # startup the host wires the serve side of every dispatched interface, so
 # calling the import dispatches over the in-process wRPC carrier to
 # `responder`, which exports it.
 #
-# The runtime core stays domain-agnostic: `dispatch` and the selector see only
+# The runtime core stays domain-agnostic: `plugins` and the selector see only
 # the opaque interface string `omnia:link/echo` and opaque guest ids.
 #
 # Build the guests first (see README.md), then run (this path is the runtime's
@@ -18,7 +18,7 @@
 # The host-mediated interfaces this deployment mediates. The runtime core
 # wires each named interface onto the shared linker and dispatches calls to
 # whichever guest exports it (here, `responder`).
-dispatch = ["omnia:link/echo"]
+plugins = ["omnia:link/echo"]
 
 [[guest]]
 id = "responder"

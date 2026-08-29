@@ -40,18 +40,18 @@ pub struct HostEntry {
     pub backend: Path,
 }
 
-/// Inline manifest keys (`dispatch`, `guests`, `mounts`) parsed from
+/// Inline manifest keys (`plugins`, `guests`, `mounts`) parsed from
 /// `runtime!({ ... })`; mirrors the `omnia::Manifest` schema.
 #[derive(Default)]
 pub struct ManifestSpec {
-    pub dispatch: Vec<Expr>,
+    pub plugins: Vec<Expr>,
     pub guests: Vec<GuestSpec>,
     pub mounts: Vec<MountSpec>,
 }
 
 impl ManifestSpec {
     pub const fn is_empty(&self) -> bool {
-        self.dispatch.is_empty() && self.guests.is_empty() && self.mounts.is_empty()
+        self.plugins.is_empty() && self.guests.is_empty() && self.mounts.is_empty()
     }
 }
 
@@ -108,8 +108,8 @@ impl Parse for Config {
                     config_file = Some(c);
                     config_span = Some(span);
                 }
-                OptValue::Dispatch(d) => {
-                    manifest.dispatch = d;
+                OptValue::Plugins(p) => {
+                    manifest.plugins = p;
                     inline_span.get_or_insert(span);
                 }
                 OptValue::Guests(g) => {
@@ -149,7 +149,7 @@ impl Config {
         if let (Some(_), Some(inline)) = (spans.config, spans.inline) {
             return Err(syn::Error::new(
                 inline,
-                "`config:` and inline manifest keys (`dispatch`, `guests`, `mounts`) are \
+                "`config:` and inline manifest keys (`plugins`, `guests`, `mounts`) are \
                  mutually exclusive",
             ));
         }
@@ -182,11 +182,12 @@ mod kw {
     syn::custom_keyword!(mode);
     syn::custom_keyword!(hosts);
     syn::custom_keyword!(config);
-    syn::custom_keyword!(dispatch);
+    syn::custom_keyword!(plugins);
     syn::custom_keyword!(guests);
     syn::custom_keyword!(mounts);
     syn::custom_keyword!(routes);
     syn::custom_keyword!(link);
+    syn::custom_keyword!(dispatch);
 }
 
 /// One `key: value` setting, tagged with its key name and span so
@@ -201,7 +202,7 @@ enum OptValue {
     Mode(Mode),
     Hosts(Vec<HostEntry>),
     Config(Expr),
-    Dispatch(Vec<Expr>),
+    Plugins(Vec<Expr>),
     Guests(Vec<GuestSpec>),
     Mounts(Vec<MountSpec>),
 }
@@ -223,10 +224,10 @@ impl Parse for Opt {
             let key = input.parse::<kw::config>()?;
             input.parse::<Token![:]>()?;
             ("config", key.span, OptValue::Config(input.parse()?))
-        } else if l.peek(kw::dispatch) {
-            let key = input.parse::<kw::dispatch>()?;
+        } else if l.peek(kw::plugins) {
+            let key = input.parse::<kw::plugins>()?;
             input.parse::<Token![:]>()?;
-            ("dispatch", key.span, OptValue::Dispatch(parse_bracketed_list(input)?))
+            ("plugins", key.span, OptValue::Plugins(parse_bracketed_list(input)?))
         } else if l.peek(kw::guests) {
             let key = input.parse::<kw::guests>()?;
             input.parse::<Token![:]>()?;
@@ -250,7 +251,15 @@ impl Parse for Opt {
             return Err(syn::Error::new(
                 key.span,
                 "the `link:` key was renamed; declare host-mediated interfaces with the \
-                 top-level `dispatch: [...]` key",
+                 top-level `plugins: [...]` key",
+            ));
+        } else if input.peek(kw::dispatch) {
+            // And for the renamed `dispatch:` key.
+            let key = input.parse::<kw::dispatch>()?;
+            return Err(syn::Error::new(
+                key.span,
+                "the `dispatch:` key was renamed; declare host-mediated interfaces with the \
+                 top-level `plugins: [...]` key",
             ));
         } else {
             return Err(l.error());
@@ -329,12 +338,12 @@ impl Parse for GuestSpec {
                     command_span = command.then(|| key.span());
                 }
                 // A pointed migration diagnostic: the per-guest `link:` list
-                // was removed — dispatch interfaces are deployment-wide.
-                "link" | "dispatch" => {
+                // was removed — plugin interfaces are deployment-wide.
+                "link" | "dispatch" | "plugins" => {
                     return Err(syn::Error::new(
                         key.span(),
                         "host-mediated interfaces are deployment-wide; declare them with the \
-                         top-level `dispatch: [...]` key, not on a guest entry",
+                         top-level `plugins: [...]` key, not on a guest entry",
                     ));
                 }
                 other => {
