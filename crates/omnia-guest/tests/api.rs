@@ -10,7 +10,7 @@ use omnia_guest::api::http::{RawRequest, get, get_with, post, post_with};
 use omnia_guest::api::messaging::{
     Delivery, DeliveryError, Router as MessagingRouter, consume, consume_with,
 };
-use omnia_guest::api::{Client, Context, DecodeError, Handler, HttpError, Metadata};
+use omnia_guest::api::{Client, Context, DecodeError, Handler, http::HttpError, Metadata};
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt as _;
 
