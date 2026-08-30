@@ -106,6 +106,7 @@ The guest crate exposes trait-based abstractions for host capabilities. When com
 | `Identity` | Obtain access tokens from an identity provider. |
 | `TableStore` | Execute SQL queries and statements via the ORM layer. |
 | `Broadcast` | Send events over WebSocket channels. |
+| `Plugins` | Request plugin loads through `omnia:plugins/loader`: name a package, a location, and an optional sha256 pin; receive a typed `Plugin` handle. The `plugins` module carries the shared `PluginRef`/`Digest` types, typed refusals convertible into `Error`, and `PluginCache` for ensure-once loads. |
 
 ### Example: Using Capabilities
 

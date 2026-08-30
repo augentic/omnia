@@ -57,7 +57,10 @@ Instead of a `config:` path, the deployment can be written inline — the keys m
 
 ```rust,ignore
 omnia::runtime!({
-    dispatch: ["omnia:link/echo"],   // host-mediated interfaces (deployment-wide)
+    plugins: {
+        interfaces: ["omnia:link/echo"],   // host-mediated interfaces (deployment-wide)
+        acquire: omnia::MountAcquire,      // optional: loader acquisition policy
+    },
     guests: [
         {
             id: "responder",
@@ -77,7 +80,7 @@ omnia::runtime!({
 });
 ```
 
-Every value is a Rust expression; anchor paths with `env!("CARGO_MANIFEST_DIR")` (relative paths resolve against the run-time working directory). `config:` and the inline keys are mutually exclusive. Routes are declared per guest on the target entry's `routes:` block, one pattern list per trigger, with the declaring guest as the implicit target. Host-mediated interfaces are declared once, deployment-wide, on the top-level `dispatch:` list (the linker is shared, so there is no per-guest form); `run --dispatch` at the CLI unions with it.
+Every value is a Rust expression; anchor paths with `env!("CARGO_MANIFEST_DIR")` (relative paths resolve against the run-time working directory). `config:` and the inline keys are mutually exclusive — except the `plugins:` block's `acquire:`, which is compiled-in code rather than manifest data, so an acquire-only block composes with `config:`. Routes are declared per guest on the target entry's `routes:` block, one pattern list per trigger, with the declaring guest as the implicit target. Host-mediated interfaces are declared once, deployment-wide, in the `plugins:` block's `interfaces:` list (the linker is shared, so there is no per-guest form); `run --plugins` at the CLI unions with it. Declaring `plugins:` also links the `omnia:plugins/loader` host capability; the optional `acquire:` supplies its acquisition policy (e.g. `omnia::MountAcquire`).
 
 A guest's `source:` also accepts component bytes (`include_bytes!(...)`), embedding the guest in the host binary — the artifact must then exist when the host crate compiles, and it must be raw `.wasm` (embedded pre-compiled bytes are rejected by the safe build, like pre-compiled paths).
 

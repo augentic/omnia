@@ -12,7 +12,7 @@ Point the runtime at a manifest with `--config` (or the `OMNIA_CONFIG` environme
 cargo run --example http-routing -- run --config examples/http-routing/omnia.toml
 ```
 
-A runtime can also compile in a default deployment with the `runtime!` macro — a manifest path via the `config:` field, or the manifest itself via the inline `dispatch`/`guests`/`mounts` keys (each guest entry carries its own `routes`) — used only when the command line supplies no source (see [Composing a Runtime](composing-a-runtime.md#default-manifest-config)).
+A runtime can also compile in a default deployment with the `runtime!` macro — a manifest path via the `config:` field, or the manifest itself via the inline `plugins`/`guests`/`mounts` keys (each guest entry carries its own `routes`) — used only when the command line supplies no source (see [Composing a Runtime](composing-a-runtime.md#default-manifest-config)).
 
 A manifest declares guests, mounts, routes, and (eventually) transports. Every field is optional except at least one `[[guest]]`. Paths resolve relative to the manifest's own directory.
 
@@ -38,7 +38,7 @@ Everything the TOML expresses can also be assembled in Rust: `omnia::Manifest` i
 use omnia::{DeploymentBuilder, GuestEntry, Manifest};
 
 let manifest = Manifest::new()
-    .dispatch(["omnia:link/audit"])
+    .plugins(["omnia:link/audit"])
     .guest(GuestEntry::new("api", "./guests/api.wasm").route_http("/"))
     .guest(GuestEntry::new("admin", "./guests/admin.wasm").route_http("/admin"));
 
@@ -103,10 +103,10 @@ The [`model`](../../examples/model/) example lends a mounted workspace to a mode
 
 ## Guest-to-guest linking
 
-One guest can import an interface that another guest exports, with the host mediating the call. The deployment names the interface in its top-level `dispatch` list:
+One guest can import an interface that another guest exports, with the host mediating the call. The deployment names the interface in its top-level `plugins` list:
 
 ```toml
-dispatch = ["omnia:link/echo"]
+plugins = ["omnia:link/echo"]
 
 [[guest]]
 id = "responder"
@@ -121,7 +121,7 @@ At startup, the runtime polyfills each dispatched interface onto the shared link
 
 Notes:
 
-- `dispatch` is deployment-wide: the linker is shared, so a dispatched interface is wired for the whole deployment, and any guest importing it may call it. `--dispatch <interface>` on the command line unions with the manifest's list. An exporter need not be loaded at startup — a guest registered later can serve the interface.
+- `plugins` is deployment-wide: the linker is shared, so a dispatched interface is wired for the whole deployment, and any guest importing it may call it. `--plugins <interface>` on the command line unions with the manifest's list. An exporter need not be loaded at startup — a guest registered later can serve the interface.
 - Nested dispatch depth is bounded by `MAX_DISPATCH_DEPTH` (default 8) to catch accidental recursion.
 - Only the in-process transport is implemented; declaring `unix`, `nats`, or `quic` under `[transport]` is rejected at load.
 

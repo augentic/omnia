@@ -32,6 +32,12 @@ pub struct Config {
     #[allow(clippy::struct_field_names)]
     pub config_file: Option<Expr>,
     pub manifest: ManifestSpec,
+    /// Whether a `plugins:` block was declared — links the `WasiPlugins`
+    /// loader host even when the block carries no interfaces.
+    pub plugins_declared: bool,
+    /// The `plugins:` block's `acquire:` expression, compiled into
+    /// `MainOptions` as the deployment's acquirer.
+    pub acquire: Option<Expr>,
 }
 
 /// One `Host: Backend` wiring from the `hosts: { ... }` block.
@@ -40,18 +46,26 @@ pub struct HostEntry {
     pub backend: Path,
 }
 
-/// Inline manifest keys (`dispatch`, `guests`, `mounts`) parsed from
-/// `runtime!({ ... })`; mirrors the `omnia::Manifest` schema.
+/// Inline manifest keys (`plugins` interfaces, `guests`, `mounts`) parsed
+/// from `runtime!({ ... })`; mirrors the `omnia::Manifest` schema.
 #[derive(Default)]
 pub struct ManifestSpec {
-    pub dispatch: Vec<Expr>,
+    pub plugins: Vec<Expr>,
     pub guests: Vec<GuestSpec>,
     pub mounts: Vec<MountSpec>,
 }
 
+/// The `plugins: { interfaces: [...], acquire: ... }` block: the deployment's
+/// host-mediated interface set plus its optional compiled-in acquirer.
+#[derive(Default)]
+pub struct PluginsSpec {
+    pub interfaces: Vec<Expr>,
+    pub acquire: Option<Expr>,
+}
+
 impl ManifestSpec {
     pub const fn is_empty(&self) -> bool {
-        self.dispatch.is_empty() && self.guests.is_empty() && self.mounts.is_empty()
+        self.plugins.is_empty() && self.guests.is_empty() && self.mounts.is_empty()
     }
 }
 
@@ -87,6 +101,8 @@ impl Parse for Config {
         let mut host_entries = Vec::new();
         let mut config_file = None;
         let mut manifest = ManifestSpec::default();
+        let mut plugins_declared = false;
+        let mut acquire = None;
         let mut config_span: Option<Span> = None;
         let mut inline_span: Option<Span> = None;
 
@@ -108,9 +124,16 @@ impl Parse for Config {
                     config_file = Some(c);
                     config_span = Some(span);
                 }
-                OptValue::Dispatch(d) => {
-                    manifest.dispatch = d;
-                    inline_span.get_or_insert(span);
+                OptValue::Plugins(p) => {
+                    plugins_declared = true;
+                    acquire = p.acquire;
+                    // `acquire:` is compiled-in code, not manifest data: only
+                    // an `interfaces:` list conflicts with `config:`, so a
+                    // config-file deployment may still compile an acquirer in.
+                    if !p.interfaces.is_empty() {
+                        manifest.plugins = p.interfaces;
+                        inline_span.get_or_insert(span);
+                    }
                 }
                 OptValue::Guests(g) => {
                     manifest.guests = g;
@@ -128,6 +151,8 @@ impl Parse for Config {
             host_entries,
             config_file,
             manifest,
+            plugins_declared,
+            acquire,
         };
         config.validate(&KeySpans {
             config: config_span,
@@ -149,7 +174,7 @@ impl Config {
         if let (Some(_), Some(inline)) = (spans.config, spans.inline) {
             return Err(syn::Error::new(
                 inline,
-                "`config:` and inline manifest keys (`dispatch`, `guests`, `mounts`) are \
+                "`config:` and inline manifest keys (`plugins`, `guests`, `mounts`) are \
                  mutually exclusive",
             ));
         }
@@ -182,11 +207,12 @@ mod kw {
     syn::custom_keyword!(mode);
     syn::custom_keyword!(hosts);
     syn::custom_keyword!(config);
-    syn::custom_keyword!(dispatch);
+    syn::custom_keyword!(plugins);
     syn::custom_keyword!(guests);
     syn::custom_keyword!(mounts);
     syn::custom_keyword!(routes);
     syn::custom_keyword!(link);
+    syn::custom_keyword!(dispatch);
 }
 
 /// One `key: value` setting, tagged with its key name and span so
@@ -201,7 +227,7 @@ enum OptValue {
     Mode(Mode),
     Hosts(Vec<HostEntry>),
     Config(Expr),
-    Dispatch(Vec<Expr>),
+    Plugins(PluginsSpec),
     Guests(Vec<GuestSpec>),
     Mounts(Vec<MountSpec>),
 }
@@ -223,10 +249,18 @@ impl Parse for Opt {
             let key = input.parse::<kw::config>()?;
             input.parse::<Token![:]>()?;
             ("config", key.span, OptValue::Config(input.parse()?))
-        } else if l.peek(kw::dispatch) {
-            let key = input.parse::<kw::dispatch>()?;
+        } else if l.peek(kw::plugins) {
+            let key = input.parse::<kw::plugins>()?;
             input.parse::<Token![:]>()?;
-            ("dispatch", key.span, OptValue::Dispatch(parse_bracketed_list(input)?))
+            // A pointed migration diagnostic for the removed bare-list form.
+            if input.peek(syn::token::Bracket) {
+                return Err(syn::Error::new(
+                    key.span,
+                    "the `plugins:` key takes a block: `plugins: { interfaces: \
+                     [\"ns:pkg/iface\"], acquire: ... }` (`acquire` is optional)",
+                ));
+            }
+            ("plugins", key.span, OptValue::Plugins(input.parse()?))
         } else if l.peek(kw::guests) {
             let key = input.parse::<kw::guests>()?;
             input.parse::<Token![:]>()?;
@@ -250,7 +284,15 @@ impl Parse for Opt {
             return Err(syn::Error::new(
                 key.span,
                 "the `link:` key was renamed; declare host-mediated interfaces with the \
-                 top-level `dispatch: [...]` key",
+                 top-level `plugins: { interfaces: [...] }` block",
+            ));
+        } else if input.peek(kw::dispatch) {
+            // And for the renamed `dispatch:` key.
+            let key = input.parse::<kw::dispatch>()?;
+            return Err(syn::Error::new(
+                key.span,
+                "the `dispatch:` key was renamed; declare host-mediated interfaces with the \
+                 top-level `plugins: { interfaces: [...] }` block",
             ));
         } else {
             return Err(l.error());
@@ -329,12 +371,12 @@ impl Parse for GuestSpec {
                     command_span = command.then(|| key.span());
                 }
                 // A pointed migration diagnostic: the per-guest `link:` list
-                // was removed — dispatch interfaces are deployment-wide.
-                "link" | "dispatch" => {
+                // was removed — plugin interfaces are deployment-wide.
+                "link" | "dispatch" | "plugins" => {
                     return Err(syn::Error::new(
                         key.span(),
                         "host-mediated interfaces are deployment-wide; declare them with the \
-                         top-level `dispatch: [...]` key, not on a guest entry",
+                         top-level `plugins: { interfaces: [...] }` block, not on a guest entry",
                     ));
                 }
                 other => {
@@ -358,6 +400,30 @@ impl Parse for GuestSpec {
             command,
             command_span,
         })
+    }
+}
+
+impl Parse for PluginsSpec {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let mut spec = Self::default();
+
+        parse_kv_block(input, |key, value| {
+            match key.to_string().as_str() {
+                "interfaces" => spec.interfaces = parse_bracketed_list(value)?,
+                "acquire" => spec.acquire = Some(value.parse()?),
+                other => {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        format!(
+                            "unknown plugins key `{other}`; expected `interfaces` or `acquire`"
+                        ),
+                    ));
+                }
+            }
+            Ok(())
+        })?;
+
+        Ok(spec)
     }
 }
 

@@ -29,14 +29,27 @@ Two further consequences of dynamic loading:
 - **Artifacts are read at startup.** A guest path can be substituted between manifest construction and load; prefer immutable or content-addressed artifact locations, especially for `.bin`.
 - **Startup cost is unbounded by the runtime.** Nothing caps the manifest's guest count or artifact sizes; compilation cost at startup is bounded only by what the manifest names — another reason the manifest is an operator-privilege input.
 
-Note also that `dispatch` interfaces (top-level in the manifest, `dispatch:` in the macro, or CLI `--dispatch`) are a deployment-level grant: the linker is shared, so a dispatched interface is wired for the *whole* deployment, and any guest importing it may call it. There is no per-guest ACL.
+Note also that `plugins` interfaces (top-level in the manifest, the `plugins:` block's `interfaces:` list in the macro, or CLI `--plugins`) are a deployment-level grant: the linker is shared, so a dispatched interface is wired for the *whole* deployment, and any guest importing it may call it. There is no per-guest ACL.
+
+## Guest-requested plugin loading (`omnia:plugins/loader`)
+
+A deployment that declares a `plugins:` block also links the loader capability, letting a guest request that the host load another component at run time. The design keeps every trust decision host-side:
+
+- **Request-only, byte-free.** The interface carries names in and a typed handle out — component bytes structurally cannot cross it in either direction. A guest never supplies code; it names a package and a location, and the host's compiled-in acquirer produces the bytes. Validation, compilation, and publication all happen host-side; the requester gains no lifecycle authority (no deregister, no mutation of mounts, hosts, routes, or the seam list).
+- **The acquirer is host policy.** Acquisition (`Acquire`) is a value the composition root compiles in (`plugins: { acquire: ... }` or `DeploymentBuilder::acquirer`). Core ships `MountAcquire`, which reads preopen-relative paths through the mount registry, fresh on every load, and refuses registry locations. No acquirer means every load refuses.
+- **Digest pins are operator-anchored.** A load may pin `sha256:<hex>`; the pin is verified against the acquired bytes *before* any wasmtime validation. Unpinned loads report the resolved digest on the returned handle (trust-on-first-use), so it can be committed as a pin. A re-load of an active package with a conflicting pin refuses.
+- **Loaded plugins are always the raw-wasm trust class.** The loader compiles through the safe `GuestArtifact::wasm` path only; native (pre-compiled) bytes are sniffed and refused typed before wasmtime sees them. A deployment built through the `Precompiled` typestate never extends that attestation to loader results.
+- **Seam-bounded.** A loaded component must export at least one interface from the deployment's declared `plugins` list, or it never registers. Its imports are bounded by the deployment's linked host set exactly like any late-registered guest.
+- **Import-gated by worlds.** The loader links once on the shared linker, but wasmtime wires it only into guests whose world imports `omnia:plugins/loader`. A guest (including a loaded plugin) whose world does not name the import can never reach it; note the converse — a loaded plugin whose world *does* import the loader can itself request loads.
+
+## Isolation between requests and guests
 
 ## Isolation between requests and guests
 
 Every invocation runs in a **fresh instance in its own store**, torn down afterwards. Consequences:
 
 - Nothing persists in guest memory between requests — no request can read another's data through the guest heap, and a compromised request state dies with the instance.
-- In multi-guest deployments, guests share an engine and linker but never an instance or store. They can interact only through host-mediated dispatch, and only along interfaces named in the deployment's `dispatch` list, with nesting bounded by `MAX_DISPATCH_DEPTH`.
+- In multi-guest deployments, guests share an engine and linker but never an instance or store. They can interact only through host-mediated dispatch, and only along interfaces named in the deployment's `plugins` list, with nesting bounded by `MAX_DISPATCH_DEPTH`.
 - The runtime core treats guest ids and interface names as opaque strings — no domain knowledge, no special cases a guest could exploit by name (the glossary's [Law 2](glossary.md#law-2)).
 
 State that must persist lives behind a WASI interface (keyvalue, sql, blobstore, ...) where the host controls it.
@@ -90,6 +103,8 @@ Honest limits, so you can layer the right controls on top:
 
 - [ ] Treat manifests and pre-compiled `.bin` artifacts as trusted operator inputs; never build either from untrusted data
 - [ ] Accept only raw `.wasm` from less-trusted sources, and run it with minimal hosts and read-only mounts
+- [ ] Pin plugin loads by digest wherever the artifact is known ahead of time; treat an unpinned load's reported digest as the pin to commit
+- [ ] Give the loader import only to worlds that genuinely request loads; keep loadable-plugin worlds free of it
 - [ ] Link only the interfaces each deployment's guests need
 - [ ] Mount the minimum directory set, read-only unless writes are required
 - [ ] Keep resource ceilings meaningful for the workload (don't blanket-raise timeouts and memory)

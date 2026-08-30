@@ -1,7 +1,83 @@
 ## Unreleased
 
+### Added
+
+- Guest-requested plugin loading: the `omnia:plugins/loader` host capability.
+  A guest whose world imports it can ask the host to load a component at run
+  time — `load(package, location, digest?)` returns a typed `plugin` handle
+  (`id()`, `digest()`); component bytes never cross the interface in either
+  direction. The host pipeline is trust-ordered: idempotency on
+  (package, digest) → acquisition through the deployment's compiled-in
+  acquirer → sha256 pin verification (before any wasmtime validation;
+  unpinned loads report the resolved digest for trust-on-first-use) → typed
+  refusal of native/pre-compiled bytes → safe `GuestArtifact::wasm`
+  validation only → refusal unless the component exports a declared plugin
+  interface → registration under the package identity. Refusals are typed
+  (`location-unsupported`, `acquire-failed`, `invalid-digest`,
+  `digest-mismatch`, `artifact-refused`, `seam-missing`, `already-active`,
+  `internal`); a deployment guest's identity can never be re-bound, and a
+  conflicting re-pin of an active package refuses. Acquisition policy is the
+  new core `Acquire` trait — a composition-root value
+  (`DeploymentBuilder::acquirer`, `MainOptions::acquirer`, or
+  `Runtime::set_acquirer` for `from_parts` embedders), with `MountAcquire`
+  shipped in core (preopen-relative reads over the mount registry, fresh on
+  every load, registry locations refused). The loader links once on the
+  shared linker when a deployment declares `plugins`; wasmtime wires it only
+  into guests whose world imports `omnia:plugins/loader`. See
+  [docs/security-model.md](docs/security-model.md#guest-requested-plugin-loading-omniapluginsloader).
+- The requester surface for the loader, in `omnia-guest`'s new `plugins`
+  module: a `Plugins` capability trait (WASI-backed default body on `wasm32`
+  over the crate's own `omnia:plugins/loader` bindings, bare natively so
+  suites script loads), the `WasiPlugins` zero-sized provider, shared
+  `PluginRef`/`Digest`/`Location` types compiled on both targets (`Digest`
+  validates and canonicalizes `sha256:<hex>` pins, with serde support), a
+  `Plugin` handle carrying the routed identity and resolved digest, typed
+  refusals mirroring the WIT error variant with kebab-case `code()`
+  discriminants and a conversion into the guest `Error` taxonomy
+  (`acquire-failed` → `BadGateway`, `internal` → `ServerError`, every other
+  refusal → `BadRequest`), and `PluginCache` — ensure-once memoization of
+  handles by package identity (never bytes; a conflicting re-pin refuses
+  `already-active`, mirroring the host). No consumer vocabulary anywhere:
+  any requester-class world can use it.
+
 ### Changed
 
+- The `runtime!` macro's `plugins:` key grows from a bracketed list to a
+  block: `plugins: { interfaces: [...], acquire: <expr> }`, with `acquire`
+  optional (a deployment that only does host-mediated dispatch needs no
+  acquirer; loads then refuse typed at run time). The bare-list form is a
+  compile error naming the block shape. Declaring the block also links the
+  `omnia::WasiPlugins` loader host. Because `acquire:` is compiled-in code
+  rather than manifest data, an acquire-only block composes with `config:` —
+  the TOML declares the interfaces, the binary the acquirer. TOML manifests
+  are unchanged (`plugins = [...]` stays a plain interface list; an acquirer
+  cannot ride a config file).
+
+  ```rust
+  // before                              // after
+  plugins: ["omnia:link/echo"],          plugins: {
+                                             interfaces: ["omnia:link/echo"],
+                                             acquire: omnia::MountAcquire,   // optional
+                                         },
+  ```
+- The host-mediated interface list is renamed from `dispatch` to `plugins`:
+  a top-level `plugins = [...]` in TOML, a top-level `plugins: [...]` key in
+  the `runtime!` macro, the fluent `Manifest::plugins(...)` setter (with the
+  `Manifest.plugins` field and the `Manifest::plugin_interfaces()` accessor),
+  and the CLI flag `--plugins` (replacing `--dispatch`, no alias). Stale keys
+  fail loudly: a leftover top-level `dispatch` (or `link`) is a parse/compile
+  error, and `plugins` misplaced on a guest entry is rejected with a pointed
+  diagnostic. Behavior is unchanged: listed interfaces are polyfilled onto
+  the shared linker at assemble (an exporter may arrive later via
+  `Runtime::register`), and the selector still picks the target guest by
+  routing id at call time. The dispatch *mechanism* keeps its names —
+  `crates/omnia/src/dispatch`, `serve_links`, `DispatchHandle`,
+  `MAX_DISPATCH_DEPTH`, and the `omnia:link` WIT packages are untouched.
+
+  ```toml
+  # before                            # after
+  dispatch = ["omnia:link/echo"]      plugins = ["omnia:link/echo"]
+  ```
 - The host-mediated interface list is renamed from `link` to `dispatch`
   and is deployment-wide only: a top-level `dispatch = [...]` in TOML, a
   top-level `dispatch: [...]` key in the `runtime!` macro, the fluent

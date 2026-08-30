@@ -31,3 +31,16 @@ world full {
     export poke: func(message: string) -> string;
     export poke-async: async func(message: string) -> string;
 }
+
+/// Requests plugin loads through `omnia:plugins/loader` and drives the
+/// loaded exporter through `ops`.
+world requester {
+    import omnia:plugins/loader@0.1.0;
+    import ops;
+}
+
+/// Imports only `ops` — for requesters whose loader import arrives through
+/// the omnia-guest SDK bindings rather than this world.
+world caller {
+    import ops;
+}

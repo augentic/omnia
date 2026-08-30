@@ -9,6 +9,7 @@ mod dispatch;
 mod host;
 mod mount;
 mod options;
+mod plugins;
 mod registry;
 mod runtime;
 mod store;
@@ -41,6 +42,10 @@ pub use self::mount::{MountRegistry, ResolvedPreopen};
 pub use self::options::RuntimeOptions;
 #[cfg(feature = "jit")]
 pub use self::options::compile;
+pub use self::plugins::{
+    Acquire, AcquireContext, AcquireError, LoadError, Location, MountAcquire, Plugin, PluginLoader,
+    WasiPlugins, WasiPluginsCtxView, WasiPluginsView,
+};
 pub use self::registry::{
     CliRoutes, Guest, GuestId, HttpRoutes, PatternRoutes, Registry, Routes, TriggerRouter,
 };

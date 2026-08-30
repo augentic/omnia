@@ -20,9 +20,17 @@ pub fn expand(config: &Config) -> TokenStream {
         backends_ty,
         backends_def,
         main_options,
+        link_plugins,
     } = Codegen::from(config);
 
     let mode = mode.tokens();
+    // A declared `plugins:` block opts the deployment into the loader host;
+    // worlds that do not import `omnia:plugins/loader` never see it.
+    let plugins_host = link_plugins.then(|| {
+        quote! {
+            deployment.host::<omnia::WasiPlugins, #backends_ty>()?;
+        }
+    });
 
     quote! {
         mod runtime {
@@ -38,6 +46,7 @@ pub fn expand(config: &Config) -> TokenStream {
 
             impl omnia::Wiring<#backends_ty> for Hooks {
                 fn link(deployment: &mut omnia::Deployment<omnia::StoreCtx<#backends_ty>>) -> Result<()> {
+                    #plugins_host
                     #(deployment.host::<#host_types, #backends_ty>()?;)*
                     Ok(())
                 }
@@ -187,15 +196,15 @@ mod tests {
         })));
     }
 
-    // Guest-owned routes and the deployment-wide dispatch list: every trigger
+    // Guest-owned routes and the deployment-wide plugins block: every trigger
     // list expands to `route_*` builder calls on the owning `GuestEntry` (the
-    // guest id is the implicit target), the top-level `dispatch:` list to
-    // `.dispatch(...)` calls on the `Manifest`, and patterns/interfaces are
-    // arbitrary expressions.
+    // guest id is the implicit target), the `plugins:` block's `interfaces:`
+    // list to `.plugins(...)` calls on the `Manifest` plus the `WasiPlugins`
+    // loader host link, and patterns/interfaces are arbitrary expressions.
     #[test]
     fn expand_inline_manifest() {
         insta::assert_snapshot!(expand_pretty(quote!({
-            dispatch: ["omnia:link/echo"],
+            plugins: { interfaces: ["omnia:link/echo"] },
             guests: [
                 {
                     id: "responder",
@@ -219,6 +228,36 @@ mod tests {
             hosts: {
                 WasiOtel: OtelDefault,
             },
+        })));
+    }
+
+    // The full plugins block: `interfaces:` reaches the manifest, `acquire:`
+    // expands to `.acquirer(...)` on `MainOptions`, and the `WasiPlugins`
+    // loader host is linked.
+    #[test]
+    fn expand_plugins_acquire() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            plugins: {
+                interfaces: ["emery:adapter/probe"],
+                acquire: omnia::MountAcquire,
+            },
+            guests: [
+                { id: "engine", source: "engine.wasm" },
+            ],
+            mounts: [
+                { name: ".", path: project_root() },
+            ],
+        })));
+    }
+
+    // An acquire-only plugins block carries no manifest data, so it composes
+    // with `config:` — the TOML declares the interfaces, the binary the
+    // acquirer.
+    #[test]
+    fn expand_plugins_acquire_with_config() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            config: concat!(env!("CARGO_MANIFEST_DIR"), "/omnia.toml"),
+            plugins: { acquire: omnia::MountAcquire },
         })));
     }
 }

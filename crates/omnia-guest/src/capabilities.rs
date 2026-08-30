@@ -13,6 +13,7 @@ mod http;
 mod identity;
 mod messaging;
 pub mod model;
+pub mod plugins;
 mod state;
 #[cfg(feature = "orm")]
 mod table;
@@ -29,6 +30,10 @@ pub use messaging::{Message, Publish};
 pub use model::Model;
 #[cfg(target_arch = "wasm32")]
 pub use model::WasiModel;
+// Loader request names stay scoped to the plugins capability.
+pub use plugins::Plugins;
+#[cfg(target_arch = "wasm32")]
+pub use plugins::WasiPlugins;
 pub use state::{CasError, StateStore};
 #[cfg(feature = "orm")]
 pub use table::TableStore;

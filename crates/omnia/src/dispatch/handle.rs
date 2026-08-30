@@ -103,7 +103,7 @@ impl DispatchHandle {
         self.timeout
     }
 
-    /// The deployment's host-mediated `dispatch` interface names — the set of
+    /// The deployment's host-mediated `plugins` interface names — the set of
     /// interfaces to polyfill (caller side) and serve (callee side).
     #[must_use]
     pub const fn links(&self) -> &BTreeSet<Box<str>> {

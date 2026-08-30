@@ -18,7 +18,7 @@ use crate::registry::GuestId;
 // Wasmtime-serialized artifacts are native ELF images; raw components carry
 // the `\0asm` wasm magic. The distinction gates the unsafe deserialization
 // path, so it is sniffed from content, never inferred from a file extension.
-const ELF_MAGIC: [u8; 4] = [0x7f, b'E', b'L', b'F'];
+pub const ELF_MAGIC: [u8; 4] = [0x7f, b'E', b'L', b'F'];
 
 // Appended to every pre-compiled deserialization failure: the usual cause is a
 // compile-affecting settings mismatch, not corruption.

@@ -7,6 +7,7 @@
 
 use std::ffi::OsString;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 #[cfg(feature = "cli")]
@@ -14,6 +15,7 @@ use clap::Parser as _;
 
 #[cfg(feature = "cli")]
 use crate::cli::{Cli, Command};
+use crate::plugins::Acquire;
 use crate::runtime::Mode;
 use crate::telemetry::LogMode;
 use crate::{DeploymentBuilder, Manifest};
@@ -48,13 +50,18 @@ impl ManifestSource {
 pub struct MainOptions {
     mode: Mode,
     manifest: Option<ManifestSource>,
+    acquirer: Option<Arc<dyn Acquire>>,
 }
 
 impl MainOptions {
     /// Start options for a deployment driven in `mode`.
     #[must_use]
     pub const fn new(mode: Mode) -> Self {
-        Self { mode, manifest: None }
+        Self {
+            mode,
+            manifest: None,
+            acquirer: None,
+        }
     }
 
     /// Set the compiled-in manifest source (the macro's `config:` key or
@@ -62,6 +69,14 @@ impl MainOptions {
     #[must_use]
     pub fn manifest(mut self, source: ManifestSource) -> Self {
         self.manifest = Some(source);
+        self
+    }
+
+    /// Set the compiled-in plugin acquirer (the macro's
+    /// `plugins: { acquire: ... }` key).
+    #[must_use]
+    pub fn acquirer(mut self, acquirer: impl Acquire) -> Self {
+        self.acquirer = Some(Arc::new(acquirer));
         self
     }
 }
@@ -89,13 +104,17 @@ pub(super) struct EntryPlan {
     manifest: Option<Manifest>,
     args: Vec<String>,
     log_mode: Option<LogMode>,
+    acquirer: Option<Arc<dyn Acquire>>,
 }
 
 impl EntryPlan {
     /// Assemble the deployment builder this plan describes.
     pub(super) fn into_builder(self) -> DeploymentBuilder {
-        let mut builder =
-            DeploymentBuilder::new().manifest(self.manifest).args(self.args).mode(self.mode);
+        let mut builder = DeploymentBuilder::new()
+            .manifest(self.manifest)
+            .args(self.args)
+            .mode(self.mode)
+            .acquirer_shared(self.acquirer);
         if let Some(mode) = self.log_mode {
             builder = builder.log_mode(mode);
         }
@@ -142,7 +161,11 @@ fn peel_log_flags(args: Vec<String>) -> Result<(Vec<String>, LogMode)> {
 pub(super) fn plan(
     options: MainOptions, argv: impl IntoIterator<Item = OsString>, omnia_config: Option<OsString>,
 ) -> Result<EntryPlan, PlanError> {
-    let MainOptions { mode, manifest } = options;
+    let MainOptions {
+        mode,
+        manifest,
+        acquirer,
+    } = options;
 
     if mode == Mode::Command && manifest.is_some() {
         let raw_args = argv
@@ -160,6 +183,7 @@ pub(super) fn plan(
             manifest,
             args: guest_args,
             log_mode: Some(log_mode),
+            acquirer,
         });
     }
 
@@ -181,7 +205,7 @@ pub(super) fn plan(
                 wasm,
                 config,
                 mounts,
-                dispatch,
+                plugins,
                 args,
             } => {
                 let config = config.or_else(|| omnia_config.map(PathBuf::from));
@@ -200,9 +224,10 @@ pub(super) fn plan(
                 };
                 Ok(EntryPlan {
                     mode,
-                    manifest: Some(manifest.mounts(mounts).dispatch(dispatch)),
+                    manifest: Some(manifest.mounts(mounts).plugins(plugins)),
                     args,
                     log_mode: None,
+                    acquirer,
                 })
             }
             #[cfg(feature = "jit")]
