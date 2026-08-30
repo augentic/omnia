@@ -89,7 +89,7 @@ let router = Router::new(Client::new("my-org", MyProvider))
 
 ### Custom codecs
 
-`get`/`post`/`consume` are JSON defaults. When a route speaks another wire format, supply the codec yourself: `get_with`/`post_with` take a decoder `Fn(RawRequest<'_>) -> Result<H, DecodeError>` over the raw request (path parameters, query, headers, body) and an encoder `Fn(H::Output) -> Response` (reuse `axum::Json` for JSON output), and `consume_with` takes a decoder `Fn(&Delivery) -> Result<H, DecodeError>` over the whole delivery. Errors keep flowing through `Into<HttpError>`; `HttpError::with_body` carries a preformatted error body (e.g. an XML document) with its content type.
+`get`/`post`/`put`/`patch`/`delete`/`consume` are JSON defaults: `get` and `delete` decode path and query parameters, while `post`/`put`/`patch` merge a JSON body with path parameters. When a route speaks another wire format (or needs other methods), supply the codec yourself: `handle_with` pairs a `MethodFilter` (unions work, e.g. `MethodFilter::POST.or(MethodFilter::PUT)`) with a decoder `Fn(RawRequest<'_>) -> Result<H, DecodeError>` over the raw request (path parameters, query, headers, body) and an encoder `Fn(H::Output) -> Response` (reuse `axum::Json` for JSON output); `consume_with` takes a decoder `Fn(&Delivery) -> Result<H, DecodeError>` over the whole delivery. Errors keep flowing through `Into<HttpError>`; `HttpError::with_body` carries a preformatted error body (e.g. an XML document) with its content type.
 
 Command-mode guests parse argv with clap and call `Client::call` on the same handlers. Wrap the clap dispatch in `command::execute_wasi` so guest telemetry is initialized and flushed. Omnia creates a fresh component instance for each command invocation.
 

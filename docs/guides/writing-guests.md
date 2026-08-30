@@ -181,7 +181,7 @@ impl Guest for Http {
 
 Messaging uses `api::messaging::Router` and `consume::<CreateItem>()`; topic matching is exact. The export remains visible application code and calls `api::messaging::handle`. Because the same handler types register in any router, one guest can expose the same logic over HTTP, messaging, and a CLI without duplicating it.
 
-Typed routes default to JSON. Routes that speak another wire format use the `_with` constructors instead: `http::get_with`/`http::post_with` take a decode closure over a raw-request view (path parameters, query, headers, body) plus an encode closure producing the response, and `messaging::consume_with` takes a decode closure over the whole `Delivery`. Errors keep flowing through `Into<HttpError>`, and `HttpError::with_body` carries a preformatted error body (e.g. an XML document) with its content type.
+Typed routes default to JSON: `http::get` and `http::delete` decode path and query parameters, while `http::post`, `http::put`, and `http::patch` merge a JSON body with path parameters. Routes that speak another wire format (or need other methods) use the general constructors instead: `http::handle_with` pairs a `MethodFilter` (unions work, e.g. `MethodFilter::POST.or(MethodFilter::PUT)`) with a decode closure over a raw-request view (path parameters, query, headers, body) plus an encode closure producing the response, and `messaging::consume_with` takes a decode closure over the whole `Delivery`. Errors keep flowing through `Into<HttpError>`, and `HttpError::with_body` carries a preformatted error body (e.g. an XML document) with its content type.
 
 ## Command-mode guests
 

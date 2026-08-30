@@ -6,11 +6,13 @@ use axum::body::{Body, to_bytes};
 use axum::response::{IntoResponse, Response};
 use http::header::CONTENT_TYPE;
 use http::{HeaderMap, HeaderValue, Method, Request, StatusCode};
-use omnia_guest::api::http::{RawRequest, get, get_with, post, post_with};
+use omnia_guest::api::http::{
+    HttpError, MethodFilter, RawRequest, delete, get, handle_with, patch, post, put,
+};
 use omnia_guest::api::messaging::{
     Delivery, DeliveryError, Router as MessagingRouter, consume, consume_with,
 };
-use omnia_guest::api::{Client, Context, DecodeError, Handler, http::HttpError, Metadata};
+use omnia_guest::api::{Client, Context, DecodeError, Handler, Metadata};
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt as _;
 
@@ -107,6 +109,9 @@ fn router() -> axum::Router {
         .route("/echo", post::<EchoInput, ()>())
         .route("/echo/{name}", get::<EchoInput, ()>())
         .route("/echo/{name}", post::<EchoInput, ()>())
+        .route("/echo/{name}", put::<EchoInput, ()>())
+        .route("/echo/{name}", patch::<EchoInput, ()>())
+        .route("/echo/{name}", delete::<EchoInput, ()>())
         .with_state(Client::new("test", ()))
 }
 
@@ -245,6 +250,62 @@ async fn post_non_object_body() {
     let (status, _) = send(request).await;
 
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn put_body_and_path() {
+    let request = Request::builder()
+        .method(Method::PUT)
+        .uri("/echo/slice")
+        .header(http::header::CONTENT_TYPE, "application/json")
+        .body(Body::from(r#"{"count":4}"#))
+        .expect("build request");
+    let (status, value) = send(request).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(value["name"], "slice");
+    assert_eq!(value["count"], 4);
+}
+
+#[tokio::test]
+async fn patch_body_and_path() {
+    let request = Request::builder()
+        .method(Method::PATCH)
+        .uri("/echo/slice")
+        .header(http::header::CONTENT_TYPE, "application/json")
+        .body(Body::from(r#"{"count":5}"#))
+        .expect("build request");
+    let (status, value) = send(request).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(value["name"], "slice");
+    assert_eq!(value["count"], 5);
+}
+
+#[tokio::test]
+async fn delete_path_and_query() {
+    let request = Request::builder()
+        .method(Method::DELETE)
+        .uri("/echo/slice?count=6")
+        .body(Body::empty())
+        .expect("build request");
+    let (status, value) = send(request).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(value["name"], "slice");
+    assert_eq!(value["count"], 6);
+}
+
+#[tokio::test]
+async fn unregistered_method() {
+    let request = Request::builder()
+        .method(Method::PUT)
+        .uri("/echo")
+        .body(Body::from(r#"{"name":"slice"}"#))
+        .expect("build request");
+    let (status, _) = send(request).await;
+
+    assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
 }
 
 #[tokio::test]
@@ -414,7 +475,8 @@ fn text_router() -> axum::Router {
     axum::Router::new()
         .route(
             "/join",
-            post_with(
+            handle_with(
+                MethodFilter::POST.or(MethodFilter::PUT),
                 |raw: RawRequest<'_>| {
                     let body = std::str::from_utf8(raw.body)
                         .map_err(|error| DecodeError::new(format!("body is not utf-8: {error}")))?;
@@ -427,7 +489,8 @@ fn text_router() -> axum::Router {
         )
         .route(
             "/greet/{name}",
-            get_with(
+            handle_with(
+                MethodFilter::GET,
                 |raw: RawRequest<'_>| {
                     let name = raw
                         .path_params
@@ -466,7 +529,7 @@ async fn send_raw(
 }
 
 #[tokio::test]
-async fn post_with_text_codec() {
+async fn text_codec_post() {
     let request = Request::builder()
         .method(Method::POST)
         .uri("/join")
@@ -480,7 +543,20 @@ async fn post_with_text_codec() {
 }
 
 #[tokio::test]
-async fn get_with_path_and_header() {
+async fn method_filter_union() {
+    let request = Request::builder()
+        .method(Method::PUT)
+        .uri("/join")
+        .body(Body::from("ada\ngrace"))
+        .expect("build request");
+    let (status, _, body) = send_raw(text_router(), request).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, "ada & grace");
+}
+
+#[tokio::test]
+async fn text_codec_path_and_header() {
     let request = Request::builder()
         .method(Method::GET)
         .uri("/greet/ada")
@@ -495,7 +571,7 @@ async fn get_with_path_and_header() {
 }
 
 #[tokio::test]
-async fn get_with_missing_header() {
+async fn text_codec_missing_header() {
     let request = Request::builder()
         .method(Method::GET)
         .uri("/greet/ada")
@@ -569,7 +645,8 @@ fn xml_router() -> axum::Router {
     axum::Router::new()
         .route(
             "/greet",
-            post_with(
+            handle_with(
+                MethodFilter::POST,
                 |raw: RawRequest<'_>| parse_greet(raw.headers, raw.body),
                 |greeting: String| {
                     (
