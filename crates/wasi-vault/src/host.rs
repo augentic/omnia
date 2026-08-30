@@ -30,7 +30,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{Host, Server};
+use omnia::{Host, Server, StoreView};
 use wasmtime::component::{HasData, Linker};
 
 use self::generated::omnia::vault::vault;
@@ -51,10 +51,10 @@ impl HasData for WasiVault {
 
 impl<T> Host<T> for WasiVault
 where
-    T: WasiVaultView + 'static,
+    T: StoreView<Self> + 'static,
 {
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        Ok(vault::add_to_linker::<_, Self>(linker, T::vault)?)
+        Ok(vault::add_to_linker::<_, Self>(linker, T::view)?)
     }
 }
 

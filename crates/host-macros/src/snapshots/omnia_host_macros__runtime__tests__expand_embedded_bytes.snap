@@ -21,8 +21,8 @@ mod runtime {
             Ok(Self { otel_default })
         }
     }
-    impl omnia_wasi_otel::HasOtel for Backends {
-        fn otel_ctx(&mut self) -> &mut dyn omnia_wasi_otel::WasiOtelCtx {
+    impl omnia::Provides<WasiOtel> for Backends {
+        fn borrow(&mut self) -> <WasiOtel as omnia::HostCtx>::Borrow<'_> {
             &mut self.otel_default
         }
     }
@@ -35,7 +35,9 @@ mod runtime {
             Ok(())
         }
         async fn serve(runtime: &omnia::Runtime<Backends>) -> Result<()> {
-            let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![];
+            let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![
+                Box::pin(WasiOtel.run(runtime)),
+            ];
             future::try_join_all(servers).await?;
             Ok(())
         }

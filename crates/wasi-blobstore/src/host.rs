@@ -35,7 +35,7 @@ use std::sync::Arc;
 
 pub use bytes::Bytes;
 pub use omnia::FutureResult;
-use omnia::{Host, Server};
+use omnia::{Host, Server, StoreView};
 pub use resource::*;
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
@@ -132,12 +132,12 @@ impl HasData for WasiBlobstore {
 
 impl<T> Host<T> for WasiBlobstore
 where
-    T: WasiBlobstoreView + 'static,
+    T: StoreView<Self> + 'static,
 {
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        blobstore::add_to_linker::<_, Self>(linker, T::blobstore)?;
-        container::add_to_linker::<_, Self>(linker, T::blobstore)?;
-        Ok(types::add_to_linker::<_, Self>(linker, T::blobstore)?)
+        blobstore::add_to_linker::<_, Self>(linker, T::view)?;
+        container::add_to_linker::<_, Self>(linker, T::view)?;
+        Ok(types::add_to_linker::<_, Self>(linker, T::view)?)
     }
 }
 

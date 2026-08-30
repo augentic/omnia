@@ -37,7 +37,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{Host, Runtime, Server, StoreCtx};
+use omnia::{Host, Runtime, Server, StoreCtx, StoreView};
 use wasmtime::component::{HasData, Linker};
 
 pub use self::default_impl::{ConnectOptions, WebSocketDefault};
@@ -59,21 +59,19 @@ impl HasData for WasiWebSocket {
 
 impl<T> Host<T> for WasiWebSocket
 where
-    T: WasiWebSocketView + 'static,
+    T: StoreView<Self> + 'static,
 {
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        client::add_to_linker::<_, Self>(linker, T::websocket)?;
-        Ok(generated_types::add_to_linker::<_, Self>(linker, T::websocket)?)
+        client::add_to_linker::<_, Self>(linker, T::view)?;
+        Ok(generated_types::add_to_linker::<_, Self>(linker, T::view)?)
     }
 }
 
 impl<B> Server<B> for WasiWebSocket
 where
     B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: WasiWebSocketView,
+    StoreCtx<B>: StoreView<Self>,
 {
-    const IS_SERVER: bool = true;
-
     async fn run(&self, state: &Runtime<B>) -> anyhow::Result<()> {
         server::run(state).await
     }

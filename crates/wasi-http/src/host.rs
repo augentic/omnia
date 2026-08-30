@@ -12,6 +12,10 @@ use wasmtime::component::Linker;
 pub use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpCtxView, WasiHttpView};
 
 /// Host-side service for `wasi:http`.
+///
+/// `wasi:http`'s linker-facing view trait is foreign, so this host's bundle
+/// accessor is keyed by core's `omnia::HttpCtx` carrier rather than by this
+/// type — the one host that is not its own carrier.
 #[derive(Debug)]
 pub struct WasiHttp;
 
@@ -29,8 +33,6 @@ where
     B: Clone + Send + Sync + 'static,
     StoreCtx<B>: WasiHttpView,
 {
-    const IS_SERVER: bool = true;
-
     async fn run(&self, state: &Runtime<B>) -> Result<()> {
         server::run(state).await
     }

@@ -26,7 +26,7 @@ mod generated {
 
 use std::fmt::Debug;
 
-use omnia::{FutureResult, Host, Server};
+use omnia::{FutureResult, Host, Server, StoreView};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use wasmtime::component::{HasData, Linker};
@@ -44,13 +44,13 @@ impl HasData for WasiOtel {
 
 impl<T> Host<T> for WasiOtel
 where
-    T: WasiOtelView + 'static,
+    T: StoreView<Self> + 'static,
 {
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        tracing::add_to_linker::<_, Self>(linker, T::otel)?;
-        metrics::add_to_linker::<_, Self>(linker, T::otel)?;
-        types::add_to_linker::<_, Self>(linker, T::otel)?;
-        Ok(resource::add_to_linker::<_, Self>(linker, T::otel)?)
+        tracing::add_to_linker::<_, Self>(linker, T::view)?;
+        metrics::add_to_linker::<_, Self>(linker, T::view)?;
+        types::add_to_linker::<_, Self>(linker, T::view)?;
+        Ok(resource::add_to_linker::<_, Self>(linker, T::view)?)
     }
 }
 

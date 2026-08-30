@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
-use omnia::{PatternRoutes, Runtime, StoreCtx, TriggerRouter};
+use omnia::{PatternRoutes, Runtime, StoreCtx, StoreView, TriggerRouter};
 use tracing::{Instrument, debug_span, instrument};
 
-use crate::host::WasiMessagingView;
+use crate::host::WasiMessaging;
 use crate::host::generated::MessagingRequestReplyIndices;
 use crate::host::resource::{Message, Subscriptions};
 
@@ -13,7 +13,7 @@ use crate::host::resource::{Message, Subscriptions};
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
 where
     B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: WasiMessagingView,
+    StoreCtx<B>: StoreView<WasiMessaging>,
 {
     let component = state.name().to_owned();
     tracing::info!("starting messaging server for: {component}");
@@ -64,7 +64,7 @@ where
 struct Handler<B>
 where
     B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: WasiMessagingView,
+    StoreCtx<B>: StoreView<WasiMessaging>,
 {
     state: Runtime<B>,
     component: String,
@@ -74,7 +74,7 @@ where
 impl<B> Handler<B>
 where
     B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: WasiMessagingView,
+    StoreCtx<B>: StoreView<WasiMessaging>,
 {
     // Forward message to the wasm guest.
     async fn handle(&self, message: Message) -> Result<()> {
@@ -96,7 +96,7 @@ where
 
         let mut store_data = self.state.store();
         let msg_res = store_data
-            .messaging()
+            .view()
             .table
             .push(message)
             .map_err(|e| anyhow!("failed to push message: {e}"))?;
@@ -129,7 +129,7 @@ where
 
         store
             .run_concurrent(async |store| {
-                let client = store.with(|mut store| store.get().messaging().ctx.connect()).await?;
+                let client = store.with(|mut store| store.get().view().ctx.connect()).await?;
                 client.subscribe().await
             })
             .await?

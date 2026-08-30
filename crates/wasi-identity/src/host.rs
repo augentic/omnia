@@ -32,7 +32,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{Host, Server};
+use omnia::{Host, Server, StoreView};
 use wasmtime::component::{HasData, Linker};
 
 #[cfg(feature = "oauth")]
@@ -55,10 +55,10 @@ impl HasData for WasiIdentity {
 
 impl<T> Host<T> for WasiIdentity
 where
-    T: WasiIdentityView + 'static,
+    T: StoreView<Self> + 'static,
 {
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        Ok(credentials::add_to_linker::<_, Self>(linker, T::identity)?)
+        Ok(credentials::add_to_linker::<_, Self>(linker, T::view)?)
     }
 }
 

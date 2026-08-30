@@ -1,0 +1,5 @@
+error: hosts rows sharing a backend share one connection; their connect options must be identical (or omitted on every row)
+ --> tests/compile_fail/conflicting_backend_options.rs:4:35
+  |
+4 |         WasiBlobstore: Filesystem(FilesystemOptions::at("b")),
+  |                                   ^^^^^^^^^^^^^^^^^
