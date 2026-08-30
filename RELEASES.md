@@ -40,8 +40,57 @@
   `already-active`, mirroring the host). No consumer vocabulary anywhere:
   any requester-class world can use it.
 
+- `hosts:` rows accept compiled-in connect options: `Host: Backend(options)`
+  lowers to `Backend::connect_with(options)` instead of the env-sourced
+  `Backend::connect()`. Use it to compile configuration into the binary — a
+  fixed storage root (e.g. a project CAS path), or a scripted test backend
+  carrying state without statics. Rows sharing a backend type share one
+  connection, so their options must be written identically on every row (or
+  omitted on every row) — a mismatch is a spanned compile error, as are
+  empty parentheses.
+
+  ```rust
+  hosts: {
+      WasiKeyValue: Filesystem(FilesystemOptions::at(".omnia/storage")),
+      WasiBlobstore: Filesystem(FilesystemOptions::at(".omnia/storage")),
+  }
+  ```
+
 ### Changed
 
+- Host wiring is trait-carried, not name-derived (pre-1.0 hard cut, no
+  aliases). Omnia core gains `HostCtx` (the host's borrow shape and view
+  assembly, `Borrow<'a>` GAT + `view`), `Provides<H>` (the one
+  bundle-accessor trait), and `StoreView<H>` (the one store-side view trait,
+  blanketed on `StoreCtx<B>` for every `B: Provides<H>`). The per-host
+  `Wasi*View` traits, `Has*` accessor traits, and per-host `StoreCtx`
+  blankets are deleted; `wasi_view!` now emits the `CtxView` struct plus the
+  host's `HostCtx` impl, and host `add_to_linker` accessors ride
+  `T: StoreView<WasiX>` / `T::view`. The `runtime!` macro emits one uniform
+  `impl omnia::Provides<...> for Backends` per `hosts:` row — no more name
+  surgery from the host ident, so re-exports and third-party hosts wire the
+  same way as first-party ones, and `wasi:config`'s shared-borrow shape is
+  carried by its own `HostCtx` impl instead of a codegen special case. One
+  special case survives, documented in codegen: `wasi:http`'s view trait is
+  foreign (`wasmtime-wasi-http`), so its row is keyed to the core-owned
+  `omnia::HttpCtx` carrier (`HasHttp` is replaced by the backend-level
+  `HttpBorrow` trait), and a dodged match now fails at compile time rather
+  than silently. Hand-built bundles implement `Provides<WasiX>` directly.
+
+  ```rust
+  // before                              // after
+  impl HasModel for Backends {           impl omnia::Provides<WasiModel> for Backends {
+      fn model_ctx(&mut self)                fn borrow(&mut self)
+          -> &mut dyn WasiModelCtx {             -> &mut dyn WasiModelCtx {
+          &mut self.0                            &mut self.0
+      }                                      }
+  }                                      }
+  ```
+- The `runtime!` macro serves every `hosts:` row uniformly through
+  `Server::run`: capability hosts resolve immediately via the no-op default,
+  trigger servers loop until shutdown. The macro's string-matched server
+  list and the unread `Server::IS_SERVER` const are deleted; a third-party
+  trigger host's `run` is now actually served instead of silently skipped.
 - The `runtime!` macro's `plugins:` key grows from a bracketed list to a
   block: `plugins: { interfaces: [...], acquire: <expr> }`, with `acquire`
   optional (a deployment that only does host-mediated dispatch needs no

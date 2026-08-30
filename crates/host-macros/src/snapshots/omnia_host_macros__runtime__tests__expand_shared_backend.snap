@@ -22,18 +22,18 @@ mod runtime {
             Ok(Self { redis, otel_default })
         }
     }
-    impl omnia_wasi_keyvalue::HasKeyValue for Backends {
-        fn keyvalue_ctx(&mut self) -> &mut dyn omnia_wasi_keyvalue::WasiKeyValueCtx {
+    impl omnia::Provides<WasiKeyValue> for Backends {
+        fn borrow(&mut self) -> <WasiKeyValue as omnia::HostCtx>::Borrow<'_> {
             &mut self.redis
         }
     }
-    impl omnia_wasi_otel::HasOtel for Backends {
-        fn otel_ctx(&mut self) -> &mut dyn omnia_wasi_otel::WasiOtelCtx {
+    impl omnia::Provides<WasiOtel> for Backends {
+        fn borrow(&mut self) -> <WasiOtel as omnia::HostCtx>::Borrow<'_> {
             &mut self.otel_default
         }
     }
-    impl omnia_wasi_messaging::HasMessaging for Backends {
-        fn messaging_ctx(&mut self) -> &mut dyn omnia_wasi_messaging::WasiMessagingCtx {
+    impl omnia::Provides<WasiMessaging> for Backends {
+        fn borrow(&mut self) -> <WasiMessaging as omnia::HostCtx>::Borrow<'_> {
             &mut self.redis
         }
     }
@@ -49,6 +49,7 @@ mod runtime {
         }
         async fn serve(runtime: &omnia::Runtime<Backends>) -> Result<()> {
             let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![
+                Box::pin(WasiKeyValue.run(runtime)), Box::pin(WasiOtel.run(runtime)),
                 Box::pin(WasiMessaging.run(runtime)),
             ];
             future::try_join_all(servers).await?;

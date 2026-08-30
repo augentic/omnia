@@ -28,7 +28,7 @@ Each entry is a `Host: Backend` pair:
 The macro generates:
 
 - a `Backends` bundle holding one connected backend per entry,
-- the wiring that links each host and starts each trigger server,
+- the wiring that links each host and runs every host's `Server::run` (a no-op for capability hosts; the serve loop for trigger hosts),
 - a `#[tokio::main] main` that parses the CLI (`run` subcommand) and drives the runtime.
 
 The result is a complete binary. Run it with:

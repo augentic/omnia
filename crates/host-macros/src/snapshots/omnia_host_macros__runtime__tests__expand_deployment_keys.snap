@@ -23,16 +23,13 @@ mod runtime {
             Ok(Self { http_default, otel_default })
         }
     }
-    impl omnia::HasHttp for Backends {
-        fn http_view<'a>(
-            &'a mut self,
-            table: &'a mut omnia::wasmtime_wasi::ResourceTable,
-        ) -> omnia_wasi_http::WasiHttpCtxView<'a> {
-            self.http_default.as_view(table)
+    impl omnia::Provides<omnia::HttpCtx> for Backends {
+        fn borrow(&mut self) -> <omnia::HttpCtx as omnia::HostCtx>::Borrow<'_> {
+            &mut self.http_default
         }
     }
-    impl omnia_wasi_otel::HasOtel for Backends {
-        fn otel_ctx(&mut self) -> &mut dyn omnia_wasi_otel::WasiOtelCtx {
+    impl omnia::Provides<WasiOtel> for Backends {
+        fn borrow(&mut self) -> <WasiOtel as omnia::HostCtx>::Borrow<'_> {
             &mut self.otel_default
         }
     }
@@ -47,7 +44,7 @@ mod runtime {
         }
         async fn serve(runtime: &omnia::Runtime<Backends>) -> Result<()> {
             let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![
-                Box::pin(WasiHttp.run(runtime)),
+                Box::pin(WasiHttp.run(runtime)), Box::pin(WasiOtel.run(runtime)),
             ];
             future::try_join_all(servers).await?;
             Ok(())

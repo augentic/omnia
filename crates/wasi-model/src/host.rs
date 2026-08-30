@@ -38,7 +38,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{HasMounts, Host, Server};
+use omnia::{HasMounts, Host, Server, StoreView};
 use wasmtime::component::{HasData, Linker};
 
 pub use self::answer::{Answer, Candidate, ToolTurn, Transcript, Usage};
@@ -64,10 +64,10 @@ impl HasData for WasiModel {
 
 impl<T> Host<T> for WasiModel
 where
-    T: WasiModelView + HasMounts + 'static,
+    T: StoreView<Self> + HasMounts + 'static,
 {
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        Ok(completion::add_to_linker::<_, Self>(linker, T::model)?)
+        Ok(completion::add_to_linker::<_, Self>(linker, T::view)?)
     }
 }
 

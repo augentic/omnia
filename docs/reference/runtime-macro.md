@@ -20,7 +20,23 @@ Each entry is a `Host: Backend` pair:
 - The **host** type (`WasiHttp`, `WasiKeyValue`, ...) is the interface implementation from an `omnia-wasi-*` crate. It links the WASI functions into the wasmtime linker and, for trigger interfaces, runs a server.
 - The **backend** type (`HttpDefault`, `KeyValueDefault`, or a production client such as `omnia_redis::Client`) is what the host delegates to. Every backend implements `omnia::Backend` and configures itself from environment variables at startup.
 
-The macro generates a `Backends` bundle (one connected backend per entry), the wiring that links each host and starts each trigger server, and a `#[tokio::main] main` that parses the CLI (`run` subcommand) and drives the runtime.
+The macro generates a `Backends` bundle (one connected backend per entry, with one `omnia::Provides` accessor impl per row), the wiring that links each host and runs every host's `Server::run` (a no-op for capability hosts; the serve loop for trigger hosts), and a `#[tokio::main] main` that parses the CLI (`run` subcommand) and drives the runtime.
+
+### Connect options
+
+A backend name may carry a connect-options expression: `Host: Backend(options)` lowers to `Backend::connect_with(options)` instead of the env-sourced `Backend::connect()`, compiling configuration into the binary — a fixed storage root, a scripted test backend carrying state — rather than reading it from the environment at startup:
+
+```rust
+omnia::runtime!({
+    hosts: {
+        WasiKeyValue: Filesystem(FilesystemOptions::at(".omnia/storage")),
+        WasiBlobstore: Filesystem(FilesystemOptions::at(".omnia/storage")),
+        WasiOtel: OtelDefault,
+    }
+});
+```
+
+The expression's type is the backend's `Backend::ConnectOptions`. Rows sharing a backend type share one connection, so their options must be written identically on every row (or omitted on every row) — a mismatch is a compile error, as are empty parentheses (drop the `()` to connect from the environment).
 
 ## `mode:`
 

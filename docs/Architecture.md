@@ -87,9 +87,9 @@ pub trait Host<T>: Debug + Sync + Send {
     fn add_to_linker(linker: &mut Linker<T>) -> Result<()>;
 }
 
-/// Implemented by WASI hosts that are trigger servers (HTTP, messaging, WebSocket).
+/// Implemented by every WASI host; `run` is a no-op default that trigger
+/// servers (HTTP, messaging, WebSocket) override with their serve loop.
 pub trait Server<B>: Debug + Sync + Send {
-    const IS_SERVER: bool = false;
     fn run(&self, state: &Runtime<B>) -> impl Future<Output = Result<()>>;
 }
 
@@ -150,7 +150,7 @@ omnia::runtime!({
 });
 ```
 
-The macro generates a `Backends` bundle (one connected backend per `Host: Backend` pair, with the accessor impls that wire each backend into the library's WASI views), a `Wiring` implementation whose `link` runs inside `Runtime::new` and whose `serve` launches each trigger server, and a `main` that delegates to `omnia::main`. The runtime itself is always the library type `omnia::Runtime<Backends>` over `omnia::StoreCtx<Backends>` — the macro emits wiring, not a runtime.
+The macro generates a `Backends` bundle (one connected backend per `Host: Backend` pair, with one uniform `omnia::Provides` impl per row wiring each backend into the library's generic `StoreView` blanket on `StoreCtx`), a `Wiring` implementation whose `link` runs inside `Runtime::new` and whose `serve` runs every host (capability hosts resolve immediately through `Server`'s no-op default; trigger servers loop until shutdown), and a `main` that delegates to `omnia::main`. The runtime itself is always the library type `omnia::Runtime<Backends>` over `omnia::StoreCtx<Backends>` — the macro emits wiring, not a runtime.
 
 ## The Guest Registry
 

@@ -33,7 +33,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{Host, Server};
+use omnia::{Host, Server, StoreView};
 use wasmtime::component::{HasData, Linker};
 
 pub use self::default_impl::KeyValueDefault;
@@ -54,12 +54,12 @@ impl HasData for WasiKeyValue {
 
 impl<T> Host<T> for WasiKeyValue
 where
-    T: WasiKeyValueView + 'static,
+    T: StoreView<Self> + 'static,
 {
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        store::add_to_linker::<_, Self>(linker, T::keyvalue)?;
-        atomics::add_to_linker::<_, Self>(linker, T::keyvalue)?;
-        Ok(batch::add_to_linker::<_, Self>(linker, T::keyvalue)?)
+        store::add_to_linker::<_, Self>(linker, T::view)?;
+        atomics::add_to_linker::<_, Self>(linker, T::view)?;
+        Ok(batch::add_to_linker::<_, Self>(linker, T::view)?)
     }
 }
 

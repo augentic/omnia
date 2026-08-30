@@ -1,0 +1,5 @@
+error: empty connect options; drop the `()` to connect from the environment
+ --> tests/compile_fail/empty_connect_options.rs:3:33
+  |
+3 |         WasiKeyValue: Filesystem(),
+  |                                 ^^

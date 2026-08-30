@@ -3,8 +3,10 @@
 //! Parses the runtime macro token stream input into structured values.
 
 use proc_macro2::Span;
+use quote::ToTokens;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
+use syn::spanned::Spanned;
 use syn::{Expr, Ident, Path, Result, Token};
 
 /// Deployment drive mode parsed from `runtime!({ ... })`.
@@ -40,10 +42,14 @@ pub struct Config {
     pub acquire: Option<Expr>,
 }
 
-/// One `Host: Backend` wiring from the `hosts: { ... }` block.
+/// One `Host: Backend` wiring from the `hosts: { ... }` block, optionally
+/// carrying compiled-in connect options: `Host: Backend(options)` lowers to
+/// `Backend::connect_with(options)` instead of the env-sourced
+/// `Backend::connect()`.
 pub struct HostEntry {
     pub host: Path,
     pub backend: Path,
+    pub options: Option<Expr>,
 }
 
 /// Inline manifest keys (`plugins` interfaces, `guests`, `mounts`) parsed
@@ -177,6 +183,24 @@ impl Config {
                 "`config:` and inline manifest keys (`plugins`, `guests`, `mounts`) are \
                  mutually exclusive",
             ));
+        }
+
+        // Rows sharing a backend type share one connection, so their connect
+        // options must agree token-for-token — or be absent on every row.
+        let mut options_seen: std::collections::HashMap<String, Option<String>> =
+            std::collections::HashMap::new();
+        for entry in &self.host_entries {
+            let backend = entry.backend.to_token_stream().to_string();
+            let options = entry.options.as_ref().map(|expr| expr.to_token_stream().to_string());
+            if *options_seen.entry(backend).or_insert_with(|| options.clone()) != options {
+                let span =
+                    entry.options.as_ref().map_or_else(|| entry.backend.span(), Spanned::span);
+                return Err(syn::Error::new(
+                    span,
+                    "hosts rows sharing a backend share one connection; their connect \
+                     options must be identical (or omitted on every row)",
+                ));
+            }
         }
 
         let mut marked: Option<Span> = None;
@@ -318,7 +342,28 @@ impl Parse for HostEntry {
         let host = input.parse::<Path>()?;
         input.parse::<Token![:]>()?;
         let backend = input.parse::<Path>()?;
-        Ok(Self { host, backend })
+        let options = if input.peek(syn::token::Paren) {
+            let args;
+            let paren = syn::parenthesized!(args in input);
+            if args.is_empty() {
+                return Err(syn::Error::new(
+                    paren.span.join(),
+                    "empty connect options; drop the `()` to connect from the environment",
+                ));
+            }
+            let expr = args.parse::<Expr>()?;
+            if !args.is_empty() {
+                return Err(args.error("expected a single connect-options expression"));
+            }
+            Some(expr)
+        } else {
+            None
+        };
+        Ok(Self {
+            host,
+            backend,
+            options,
+        })
     }
 }
 

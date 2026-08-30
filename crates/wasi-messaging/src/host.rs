@@ -36,7 +36,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use omnia::FutureResult;
-use omnia::{Host, Runtime, Server, StoreCtx};
+use omnia::{Host, Runtime, Server, StoreCtx, StoreView};
 use wasmtime::component::{HasData, Linker};
 
 pub use self::default_impl::MessagingDefault;
@@ -58,22 +58,20 @@ impl HasData for WasiMessaging {
 
 impl<T> Host<T> for WasiMessaging
 where
-    T: WasiMessagingView + 'static,
+    T: StoreView<Self> + 'static,
 {
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        producer::add_to_linker::<_, Self>(linker, T::messaging)?;
-        request_reply::add_to_linker::<_, Self>(linker, T::messaging)?;
-        Ok(types::add_to_linker::<_, Self>(linker, T::messaging)?)
+        producer::add_to_linker::<_, Self>(linker, T::view)?;
+        request_reply::add_to_linker::<_, Self>(linker, T::view)?;
+        Ok(types::add_to_linker::<_, Self>(linker, T::view)?)
     }
 }
 
 impl<B> Server<B> for WasiMessaging
 where
     B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: WasiMessagingView,
+    StoreCtx<B>: StoreView<Self>,
 {
-    const IS_SERVER: bool = true;
-
     async fn run(&self, state: &Runtime<B>) -> anyhow::Result<()> {
         server::run(state).await
     }

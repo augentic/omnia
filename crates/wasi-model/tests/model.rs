@@ -11,10 +11,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::FutureExt as _;
-use omnia::{ExitStatus, Mount};
+use omnia::{ExitStatus, Mount, Provides};
 use omnia_wasi_model::{
-    Answer, FutureResult, HasModel, Limits, ModelDefault, Request, ToolHost, Usage, WasiModel,
-    WasiModelCtx,
+    Answer, FutureResult, Limits, ModelDefault, Request, ToolHost, Usage, WasiModel, WasiModelCtx,
 };
 use serde_json::{Value, json};
 
@@ -30,8 +29,8 @@ test_utils::foreach_model!();
 #[derive(Clone, Debug)]
 struct Backends<M>(M);
 
-impl<M: WasiModelCtx + Clone> HasModel for Backends<M> {
-    fn model_ctx(&mut self) -> &mut dyn WasiModelCtx {
+impl<M: WasiModelCtx + Clone> Provides<WasiModel> for Backends<M> {
+    fn borrow(&mut self) -> &mut dyn WasiModelCtx {
         &mut self.0
     }
 }
