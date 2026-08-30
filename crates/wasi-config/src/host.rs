@@ -7,8 +7,8 @@ mod default_impl;
 use std::fmt::Debug;
 
 pub use default_impl::ConfigDefault;
-use omnia::{Host, Server};
-use wasmtime::component::{HasData, Linker};
+use omnia::{Host, HostCtx, Server, StoreView};
+use wasmtime::component::{HasData, Linker, ResourceTable};
 pub use wasmtime_wasi_config;
 use wasmtime_wasi_config::WasiConfigVariables;
 
@@ -20,38 +20,32 @@ impl HasData for WasiConfig {
     type Data<'a> = wasmtime_wasi_config::WasiConfig<'a>;
 }
 
+// `wasi:config`'s linker-facing view is a shared borrow over the backend's
+// variables — no resource table involved — so the `HostCtx` impl is
+// hand-written rather than `wasi_view!`-generated.
+impl HostCtx for WasiConfig {
+    type Borrow<'a> = &'a dyn WasiConfigCtx;
+
+    fn view<'a>(
+        borrow: Self::Borrow<'a>, _table: &'a mut ResourceTable,
+    ) -> wasmtime_wasi_config::WasiConfig<'a> {
+        wasmtime_wasi_config::WasiConfig::from(borrow.get_config())
+    }
+}
+
 impl<T> Host<T> for WasiConfig
 where
-    T: WasiConfigView + 'static,
+    T: StoreView<Self> + 'static,
 {
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        Ok(wasmtime_wasi_config::add_to_linker(linker, T::config)?)
+        Ok(wasmtime_wasi_config::add_to_linker(linker, T::view)?)
     }
 }
 
 impl<B> Server<B> for WasiConfig {}
 
-/// A trait which provides internal WASI Config state.
-/// Implemented by the `T` in `Linker<T>` during the runtime build.
-pub trait WasiConfigView: Send {
-    /// Return a [`WasiConfig`] from mutable reference to self.
-    fn config(&mut self) -> wasmtime_wasi_config::WasiConfig<'_>;
-}
-
 /// A trait which provides internal WASI Config context.
 pub trait WasiConfigCtx: Debug + Send + Sync + 'static {
     /// Get the configuration variables.
     fn get_config(&self) -> &WasiConfigVariables;
-}
-
-/// A backend bundle that can yield the `wasi:config` backend context.
-pub trait HasConfig: Send {
-    /// Borrow the `wasi:config` backend context.
-    fn config_ctx(&self) -> &dyn WasiConfigCtx;
-}
-
-impl<B: HasConfig + Send + 'static> WasiConfigView for omnia::StoreCtx<B> {
-    fn config(&mut self) -> wasmtime_wasi_config::WasiConfig<'_> {
-        wasmtime_wasi_config::WasiConfig::from(self.backends.config_ctx().get_config())
-    }
 }

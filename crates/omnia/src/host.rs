@@ -31,16 +31,13 @@ pub trait Host<T>: Debug + Sync + Send {
 ///
 /// Parameterized by the deployment's backend bundle `B` so [`run`](Self::run)
 /// receives the concrete [`Runtime<B>`].
+///
+/// The `runtime!` macro runs every linked host uniformly: a long-lived
+/// trigger server (e.g. `WasiHttp`, `WasiMessaging`, `WasiWebSocket`)
+/// overrides [`run`](Self::run) to loop on its transport until shutdown,
+/// while a capability host (e.g. `WasiKeyValue`, `WasiBlobstore`,
+/// `WasiOtel`) keeps the no-op default, which resolves immediately.
 pub trait Server<B>: Debug + Sync + Send {
-    /// Whether this host is a long-lived trigger server — one whose
-    /// [`run`](Self::run) loops on a transport and returns only on shutdown
-    /// (e.g. `WasiHttp`, `WasiMessaging`, `WasiWebSocket`).
-    ///
-    /// Defaults to `false`: a capability host with the no-op [`run`](Self::run)
-    /// (e.g. `WasiKeyValue`, `WasiBlobstore`, `WasiOtel`). The `runtime!` macro
-    /// reads this flag from the *type system* — to select which hosts to `run`.
-    const IS_SERVER: bool = false;
-
     /// Start the service.
     ///
     /// This is typically implemented by services that instantiate (or run)
@@ -48,6 +45,38 @@ pub trait Server<B>: Debug + Sync + Send {
     fn run(&self, _state: &Runtime<B>) -> impl Future<Output = Result<()>> {
         async { Ok(()) }
     }
+}
+
+/// One host's linker-facing data assembly, carried in the type system.
+///
+/// [`Borrow`](Self::Borrow) is what the host borrows from the deployment's
+/// backend bundle; [`view`](Self::view) assembles the linker-facing
+/// [`HasData::Data`] view from that borrow plus the store's resource table.
+/// The `runtime!` macro never derives names from the host type — everything
+/// it needs rides these associated items.
+///
+/// Almost every host is its own carrier. The exception is a host whose
+/// linker-facing view trait is foreign — `wasi:http`'s `WasiHttpView` is
+/// owned by `wasmtime-wasi-http` — whose carrier must live in this crate so
+/// the foreign trait's `StoreCtx` blanket can name it (see
+/// [`HttpCtx`](crate::HttpCtx)).
+pub trait HostCtx: HasData {
+    /// What this host borrows from the backend bundle.
+    type Borrow<'a>;
+
+    /// Assemble the linker-facing view from the borrow and the store's
+    /// resource table.
+    fn view<'a>(borrow: Self::Borrow<'a>, table: &'a mut ResourceTable) -> Self::Data<'a>;
+}
+
+/// The one bundle-accessor trait: a backend bundle that yields host `H`'s
+/// borrow.
+///
+/// `runtime!` deployments generate one impl per `hosts:` row; hand-built
+/// bundles implement it directly.
+pub trait Provides<H: HostCtx>: Send {
+    /// Borrow what host `H` needs from the bundle.
+    fn borrow(&mut self) -> H::Borrow<'_>;
 }
 
 /// Connect a host backend resource during runtime startup.

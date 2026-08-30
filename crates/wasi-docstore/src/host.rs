@@ -29,7 +29,7 @@ mod generated {
 use std::fmt::Debug;
 
 pub use omnia::FutureResult;
-use omnia::{Host, Server};
+use omnia::{Host, Server, StoreView};
 use wasmtime::component::{HasData, Linker};
 
 pub use self::default_impl::DocStoreDefault;
@@ -52,11 +52,11 @@ impl HasData for WasiDocStore {
 
 impl<T> Host<T> for WasiDocStore
 where
-    T: WasiDocStoreView + 'static,
+    T: StoreView<Self> + 'static,
 {
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
-        types::add_to_linker::<_, Self>(linker, T::docstore)?;
-        Ok(store::add_to_linker::<_, Self>(linker, T::docstore)?)
+        types::add_to_linker::<_, Self>(linker, T::view)?;
+        Ok(store::add_to_linker::<_, Self>(linker, T::view)?)
     }
 }
 

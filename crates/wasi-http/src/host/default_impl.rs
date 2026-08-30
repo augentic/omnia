@@ -44,9 +44,9 @@ pub struct HttpDefault {
     ctx: WasiHttpCtx,
 }
 
-impl HttpDefault {
+impl omnia::HttpBorrow for HttpDefault {
     /// Produce a [`WasiHttpCtxView`] by splitting borrows on inner fields.
-    pub fn as_view<'a>(&'a mut self, table: &'a mut ResourceTable) -> WasiHttpCtxView<'a> {
+    fn as_view<'a>(&'a mut self, table: &'a mut ResourceTable) -> WasiHttpCtxView<'a> {
         WasiHttpCtxView {
             hooks: &mut self.hooks,
             ctx: &mut self.ctx,

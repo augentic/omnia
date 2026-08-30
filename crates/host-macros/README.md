@@ -34,6 +34,8 @@ omnia::runtime!({
 
 Each key is a **host type** from a `omnia-wasi-*` crate (`WasiHttp`, `WasiKeyValue`, ...); each value is a **backend type** implementing that interface's context trait — an in-tree default (`HttpDefault`, `KeyValueDefault`, ...) or a production client from the [`omnia-backends`](https://github.com/augentic/omnia-backends) repo.
 
+A backend may carry a connect-options expression — `WasiBlobstore: Filesystem(opts)` lowers to `Backend::connect_with(opts)` instead of the env-sourced `Backend::connect()`, compiling the configuration in. Rows sharing a backend type share one connection, so their options must be written identically on every row (or omitted on every row); empty parentheses are rejected.
+
 ## Configuration Format
 
 ```rust,ignore
@@ -104,9 +106,9 @@ impl omnia::Backends for Backends {
 }
 ```
 
-### WASI view accessor impls
+### Bundle accessor impls
 
-For each declared interface, the macro emits the `HasXxx` accessor impl that exposes the bundle's backend to the library's blanket `WasiXxxView for omnia::StoreCtx<Backends>` impl. Most interfaces share one accessor shape; `wasi:http` and `wasi:config` use slightly different ones, handled as special cases in codegen.
+For each `hosts:` row, the macro emits one uniform `omnia::Provides<Ctx>` impl exposing the bundle's backend field; the generic `omnia::StoreView` blanket on `omnia::StoreCtx` turns it into the host's linker-facing view. The impl is keyed by the host type itself — its `omnia::HostCtx` impl carries the borrow shape, so no names are derived from the host and third-party hosts wire the same way. The one exception is `wasi:http`, whose linker-facing view trait is foreign (`wasmtime-wasi-http`): its row is keyed to the core-owned `omnia::HttpCtx` carrier instead.
 
 ### `main` entry point
 

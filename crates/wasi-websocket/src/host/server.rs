@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
-use omnia::{PatternRoutes, Runtime, StoreCtx, TriggerRouter};
+use omnia::{PatternRoutes, Runtime, StoreCtx, StoreView, TriggerRouter};
 use tracing::{Instrument, debug_span, instrument};
 
-use crate::host::WasiWebSocketView;
+use crate::host::WasiWebSocket;
 use crate::host::generated::DuplexIndices;
 use crate::host::resource::{Event, Events};
 
@@ -13,7 +13,7 @@ use crate::host::resource::{Event, Events};
 pub async fn run<B>(state: &Runtime<B>) -> Result<()>
 where
     B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: WasiWebSocketView,
+    StoreCtx<B>: StoreView<WasiWebSocket>,
 {
     let component = state.name().to_owned();
     tracing::info!("starting websocket server for: {component}");
@@ -66,7 +66,7 @@ where
 struct Handler<B>
 where
     B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: WasiWebSocketView,
+    StoreCtx<B>: StoreView<WasiWebSocket>,
 {
     state: Runtime<B>,
     component: String,
@@ -76,7 +76,7 @@ where
 impl<B> Handler<B>
 where
     B: Clone + Send + Sync + 'static,
-    StoreCtx<B>: WasiWebSocketView,
+    StoreCtx<B>: StoreView<WasiWebSocket>,
 {
     /// Forward event to the wasm guest.
     async fn handle(&self, event: Event) -> Result<()> {
@@ -101,7 +101,7 @@ where
 
         let mut store_data = self.state.store();
         let event_res = store_data
-            .websocket()
+            .view()
             .table
             .push(event)
             .map_err(|e| anyhow!("failed to push event: {e}"))?;
@@ -134,7 +134,7 @@ where
 
         store
             .run_concurrent(async |store| {
-                let client = store.with(|mut store| store.get().websocket().ctx.connect()).await?;
+                let client = store.with(|mut store| store.get().view().ctx.connect()).await?;
                 client.events().await
             })
             .await?

@@ -16,7 +16,6 @@ pub fn expand(config: &Config) -> TokenStream {
     let Codegen {
         mode,
         host_types,
-        server_types,
         backends_ty,
         backends_def,
         main_options,
@@ -54,9 +53,12 @@ pub fn expand(config: &Config) -> TokenStream {
                 async fn serve(
                     runtime: &omnia::Runtime<#backends_ty>,
                 ) -> Result<()> {
+                    // Every host runs uniformly: capability hosts resolve
+                    // immediately through `Server`'s no-op default, trigger
+                    // servers loop until shutdown.
                     let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![
                         #(
-                            Box::pin(#server_types.run(runtime)),
+                            Box::pin(#host_types.run(runtime)),
                         )*
                     ];
                     future::try_join_all(servers).await?;
@@ -108,6 +110,19 @@ mod tests {
                 WasiHttp: HttpDefault,
                 WasiOtel: OtelDefault,
                 WasiKeyValue: KeyValueDefault,
+            },
+        })));
+    }
+
+    // A `Backend(options)` row lowers to `connect_with(options)`; rows
+    // sharing that backend ride the same compiled-in connection.
+    #[test]
+    fn expand_connect_options() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            hosts: {
+                WasiKeyValue: Filesystem(FilesystemOptions::at(".omnia/storage")),
+                WasiBlobstore: Filesystem(FilesystemOptions::at(".omnia/storage")),
+                WasiOtel: OtelDefault,
             },
         })));
     }
