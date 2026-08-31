@@ -61,9 +61,10 @@ fn emit_main_options(config: &Config) -> TokenStream {
 
 /// Emit the `Wiring::acquirer` hook for the declarative `locations:` list:
 /// path entries fold in declaration order into one `PathAcquire` (opened
-/// fail-fast), the registry entry becomes a `RegistryAcquire` — cached in
-/// the `cache:` backend when one is declared — and the two compose by
-/// location kind, so paths-then-registry emission is order-insensitive.
+/// fail-fast) filling the `Acquirer`'s path slot, the registry entry becomes
+/// a `RegistryAcquire` — cached in the `cache:` backend when one is declared
+/// — filling its registry slot; a kind with no entry stays `None` and
+/// refuses typed at run time.
 fn emit_locations_hook(config: &Config, backends_ty: &TokenStream) -> TokenStream {
     let paths: Vec<TokenStream> = config
         .locations
@@ -78,38 +79,43 @@ fn emit_locations_hook(config: &Config, backends_ty: &TokenStream) -> TokenStrea
         LocationSpec::Path { .. } => None,
     });
 
-    let path_acquire = (!paths.is_empty()).then(|| {
+    let path_slot = if paths.is_empty() {
+        quote!(None)
+    } else {
         quote! {
-            omnia::PathAcquire::new([#(#paths,)*])
-                .expect("opening plugins locations")
+            Some(::std::sync::Arc::new(
+                omnia::PathAcquire::new([#(#paths,)*])
+                    .expect("opening plugins locations"),
+            ))
         }
-    });
-    let registry_acquire = registry.map(|endpoint| {
-        // Spanned to the `cache:` value so a missing `PluginStore` bound
-        // lands on the declaration, not the generated call.
-        let cached = config.cache.as_ref().map(|store| {
-            let field = field_ident(store);
-            quote_spanned! {store.span()=>
-                .cached(backends.#field.clone())
-            }
-        });
-        quote! { omnia::RegistryAcquire::new(#endpoint) #cached }
-    });
-
-    let acquirer = match (path_acquire, registry_acquire) {
-        (Some(paths), Some(registry)) => quote! { omnia::AcquireExt::or(#paths, #registry) },
-        (Some(paths), None) => paths,
-        (None, Some(registry)) => registry,
-        (None, None) => unreachable!("parse refuses an empty `locations:` list"),
     };
+    let registry_slot = registry.map_or_else(
+        || quote!(None),
+        |endpoint| {
+            // Spanned to the `cache:` value so a missing `PluginStore` bound
+            // lands on the declaration, not the generated call.
+            let cached = config.cache.as_ref().map(|store| {
+                let field = field_ident(store);
+                quote_spanned! {store.span()=>
+                    .cached(backends.#field.clone())
+                }
+            });
+            quote! {
+                Some(::std::sync::Arc::new(omnia::RegistryAcquire::new(#endpoint) #cached))
+            }
+        },
+    );
     // The bundle goes unused without a `cache:` backend to clone out of it.
     let param = if config.cache.is_some() { quote!(backends) } else { quote!(_backends) };
 
     quote! {
         fn acquirer(
             #param: &#backends_ty,
-        ) -> Option<::std::sync::Arc<dyn omnia::Acquire>> {
-            Some(::std::sync::Arc::new(#acquirer))
+        ) -> Option<omnia::Acquirer> {
+            Some(omnia::Acquirer {
+                registry: #registry_slot,
+                path: #path_slot,
+            })
         }
     }
 }

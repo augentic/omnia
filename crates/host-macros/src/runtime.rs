@@ -252,8 +252,8 @@ mod tests {
     // The declarative locations grammar, cached: path entries fold in
     // declaration order into one `PathAcquire`, the registry entry becomes a
     // `RegistryAcquire` cached in the `cache:` backend — which joins the
-    // bundle beside the hosts' backends — and the two compose by location
-    // kind in the generated `Wiring::acquirer` hook.
+    // bundle beside the hosts' backends — each filling its kind's slot in
+    // the `Acquirer` the generated `Wiring::acquirer` hook builds.
     #[test]
     fn expand_locations_cached() {
         insta::assert_snapshot!(expand_pretty(quote!({

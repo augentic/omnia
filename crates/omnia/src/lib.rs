@@ -44,8 +44,9 @@ pub use self::options::RuntimeOptions;
 #[cfg(feature = "jit")]
 pub use self::options::compile;
 pub use self::plugins::{
-    Acquire, AcquireError, AcquireExt, ContentStore, LoadError, Location, NoStore, Or, PathAcquire,
-    Plugin, PluginLoader, PluginStore, RegistryAcquire, ReleaseRecord, ReleaseStore, WasiPlugins,
+    AcquirePath, AcquireRegistry, Acquirer, ContentStore, LoadError, Location, NoStore,
+    PathAcquire, Plugin, PluginLoader, PluginStore, RegistryAcquire, ReleaseRecord, ReleaseStore,
+    WasiPlugins,
     WasiPluginsCtxView, WasiPluginsView,
 };
 pub use self::registry::{

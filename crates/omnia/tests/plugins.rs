@@ -8,8 +8,8 @@
 
 use anyhow::{Context as _, Result};
 use omnia::{
-    DeploymentBuilder, ExitStatus, GuestEntry, Manifest, Mode, PathAcquire, Runtime, StoreCtx,
-    WasiPlugins,
+    Acquirer, DeploymentBuilder, ExitStatus, GuestEntry, Manifest, Mode, PathAcquire, Runtime,
+    StoreCtx, WasiPlugins,
 };
 
 // Every guest program in `crates/test-programs/programs/plugins` must have a
@@ -30,9 +30,12 @@ async fn run_requester(wasm: &str, scratch: &test_utils::Scratch) -> Result<Exit
         .build::<StoreCtx<()>>()
         .await
         .context("building deployment")?;
-    let acquirer =
+    let paths =
         PathAcquire::new([(".", scratch.path())]).context("opening the scratch location")?;
-    let acquirer = std::sync::Arc::new(acquirer);
+    let acquirer = Acquirer {
+        path: Some(std::sync::Arc::new(paths)),
+        registry: None,
+    };
     let runtime = Runtime::new(
         deployment,
         |deployment| {
@@ -77,7 +80,8 @@ fn wit_copies_stay_identical() {
 // Compile-time proof that the macro's `locations:`/`cache:` grammar lowers
 // into calls that typecheck against this crate's public seam: path entries
 // fold into a `PathAcquire`, the registry entry into a `RegistryAcquire`
-// cached in the `cache:` backend, composed in the `Wiring::acquirer` hook.
+// cached in the `cache:` backend, each filling its slot in the `Acquirer`
+// built by the `Wiring::acquirer` hook.
 // Never run — the macro's snapshot suite pins the shape, this pins the types.
 mod locations_grammar {
     use std::future::Future;

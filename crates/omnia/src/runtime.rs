@@ -17,7 +17,7 @@ use wasmtime::{Engine, Store};
 use crate::deployment::GuestArtifact;
 use crate::dispatch::{serve_guest, serve_links};
 use crate::mount::MountRegistry;
-use crate::plugins::{Acquire, PluginLoader, PluginsState};
+use crate::plugins::{Acquirer, PluginLoader, PluginsState};
 use crate::registry::{Guest, GuestId, HttpRoutes, TriggerRouter};
 use crate::store::HasLimits;
 use crate::{
@@ -82,7 +82,7 @@ pub trait Wiring<B: Backends> {
     /// [`Runtime::new`] once, after [`Backends::connect`], with typed access
     /// to the connected bundle; the default is no acquirer, refusing every
     /// load.
-    fn acquirer(backends: &B) -> Option<Arc<dyn Acquire>> {
+    fn acquirer(backends: &B) -> Option<Acquirer> {
         let _ = backends;
         None
     }
@@ -393,7 +393,7 @@ impl<B: Backends> Runtime<B> {
     ) -> Result<Self>
     where
         L: FnOnce(&mut Deployment<StoreCtx<B>>) -> Result<()>,
-        A: FnOnce(&B) -> Option<Arc<dyn Acquire>>,
+        A: FnOnce(&B) -> Option<Acquirer>,
     {
         let name = Arc::<str>::from(deployment.name());
         let args = Arc::new(deployment.args().to_vec());

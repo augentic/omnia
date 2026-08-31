@@ -8,11 +8,12 @@
 //! host-side, bounded by the deployment's declared plugin interfaces.
 //!
 //! Acquisition policy (endpoints, cache, path reads) is the embedder's
-//! [`Acquire`] value, built by the [`Wiring::acquirer`](crate::Wiring::acquirer)
-//! hook (the `runtime!` macro's `plugins: { locations: [...] }` list lowers
-//! into it) once the deployment's backends have connected. The built-in
-//! acquirers ([`PathAcquire`], [`RegistryAcquire`]) live in `omnia-plugin`;
-//! core keeps zero storage and network dependencies.
+//! [`Acquirer`] value — one slot per [`Location`] kind — built by the
+//! [`Wiring::acquirer`](crate::Wiring::acquirer) hook (the `runtime!` macro's
+//! `plugins: { locations: [...] }` list lowers into it) once the deployment's
+//! backends have connected. The built-in acquirers ([`PathAcquire`],
+//! [`RegistryAcquire`]) live in `omnia-plugin`; core keeps zero storage and
+//! network dependencies.
 
 mod digest;
 mod host;
@@ -25,7 +26,7 @@ use futures::FutureExt as _;
 use futures::future::BoxFuture;
 pub use host::{WasiPlugins, WasiPluginsCtxView, WasiPluginsView};
 pub use omnia_plugin::{
-    Acquire, AcquireError, AcquireExt, ContentStore, Location, NoStore, Or, PathAcquire,
+    AcquirePath, AcquireRegistry, Acquirer, ContentStore, Location, NoStore, PathAcquire,
     PluginStore, RegistryAcquire, ReleaseRecord, ReleaseStore,
 };
 use wasmtime::component::{Component, types};
@@ -121,7 +122,7 @@ impl<B: Clone + Send + Sync + 'static> PluginLoader for RuntimeDispatcher<B> {
 /// Runtime-held loader state: the installed acquirer, the load serializer,
 /// and the resolved digest per loader-loaded package.
 pub struct PluginsState {
-    acquirer: OnceLock<Arc<dyn Acquire>>,
+    acquirer: OnceLock<Acquirer>,
     // Serializes loads: they are rare, and serialization makes the
     // (package, digest) idempotency check race-free without single-flight
     // machinery.
@@ -142,7 +143,7 @@ impl PluginsState {
     /// (the sole caller) installs at most once per runtime.
     ///
     /// [`Runtime::new`]: crate::Runtime::new
-    pub(crate) fn install_acquirer(&self, acquirer: Arc<dyn Acquire>) {
+    pub(crate) fn install_acquirer(&self, acquirer: Acquirer) {
         let fresh = self.acquirer.set(acquirer).is_ok();
         assert!(fresh, "the acquirer installs exactly once");
     }
@@ -210,12 +211,30 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
                  (`plugins: {{ locations: [...] }}`) to load `{package}`"
             )));
         };
-        let bytes = acquirer.acquire(package, &from).await.map_err(|error| match error {
-            AcquireError::Unsupported(reason) => LoadError::UnsupportedLocation(reason),
-            AcquireError::Failed(error) => {
-                LoadError::AcquireFailed(format!("acquiring `{package}`: {error:#}"))
-            }
-        })?;
+        // Loads route structurally: each location kind reaches its acquirer
+        // slot, and a kind with no slot refuses typed.
+        let acquired = match &from {
+            Location::Registry(endpoint) => match &acquirer.registry {
+                Some(registry) => registry.acquire(package, endpoint.as_deref()).await,
+                None => {
+                    return Err(LoadError::UnsupportedLocation(format!(
+                        "this deployment's locations serve no registry; loading `{package}` \
+                         from {from} needs a `{{ registry: ... }}` entry"
+                    )));
+                }
+            },
+            Location::Path(path) => match &acquirer.path {
+                Some(paths) => paths.acquire(path).await,
+                None => {
+                    return Err(LoadError::UnsupportedLocation(format!(
+                        "this deployment's locations serve no paths; loading `{package}` \
+                         from {from} needs a `{{ name: ..., path: ... }}` entry"
+                    )));
+                }
+            },
+        };
+        let bytes = acquired
+            .map_err(|error| LoadError::AcquireFailed(format!("acquiring `{package}`: {error:#}")))?;
 
         // The operator's pin binds name to bytes before any validation work.
         let resolved = digest::sha256_hex(&bytes);

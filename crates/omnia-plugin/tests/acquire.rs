@@ -1,7 +1,6 @@
 //! Acquisition over wasm-pkg-client's `local` backend: fresh-release-preferred
 //! resolution, the store as fallback and byte cache, poisoned entries,
-//! endpoint overrides, path locations, and acquirer composition — all
-//! offline.
+//! endpoint overrides, and path locations — all offline.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -10,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
 use omnia_plugin::{
-    Acquire, AcquireError, AcquireExt as _, ContentStore, Location, PathAcquire, RegistryAcquire,
+    AcquirePath as _, AcquireRegistry as _, ContentStore, PathAcquire, RegistryAcquire,
     ReleaseRecord, ReleaseStore, sha256_digest,
 };
 use tempfile::TempDir;
@@ -108,29 +107,13 @@ impl ReleaseStore for MemStore {
     }
 }
 
-async fn acquire(
-    acquirer: &impl Acquire, package: &str, from: Location,
-) -> Result<Vec<u8>, AcquireError> {
-    acquirer.acquire(package, &from).await
-}
-
-/// The failure text of an [`AcquireError::Failed`], context chain included.
-fn failure_text(error: &AcquireError) -> String {
-    match error {
-        AcquireError::Failed(error) => format!("{error:#}"),
-        AcquireError::Unsupported(reason) => {
-            panic!("expected a failure, got unsupported: {reason}")
-        }
-    }
-}
-
 #[tokio::test]
 async fn registry_fetch_round_trips() {
     let registry = TempDir::new().expect("registry dir");
     stage(registry.path(), PACKAGE, b"component bytes");
     let acquirer = registry_acquirer(registry.path()).cached(MemStore::default());
 
-    let bytes = acquire(&acquirer, PACKAGE, Location::Registry(None)).await.expect("acquires");
+    let bytes = acquirer.acquire(PACKAGE, None).await.expect("acquires");
     assert_eq!(bytes, b"component bytes");
 }
 
@@ -143,7 +126,7 @@ async fn store_miss_then_populates() {
 
     let digest = sha256_digest(b"component bytes");
     assert!(store.content_of(&digest).is_none(), "the store starts empty");
-    acquire(&acquirer, PACKAGE, Location::Registry(None)).await.expect("acquires");
+    acquirer.acquire(PACKAGE, None).await.expect("acquires");
     assert!(store.content_of(&digest).is_some(), "the store gains the digest-keyed entry");
 }
 
@@ -152,13 +135,13 @@ async fn fresh_release_preferred_over_warm_store() {
     let registry = TempDir::new().expect("registry dir");
     stage(registry.path(), PACKAGE, b"first bytes");
     let acquirer = registry_acquirer(registry.path()).cached(MemStore::default());
-    acquire(&acquirer, PACKAGE, Location::Registry(None)).await.expect("warms the store");
+    acquirer.acquire(PACKAGE, None).await.expect("warms the store");
 
     // The registry re-publishes the same version with different content. A
     // release-record cache would keep serving the stored bytes; the fresh
     // resolution must win.
     stage(registry.path(), PACKAGE, b"second bytes");
-    let bytes = acquire(&acquirer, PACKAGE, Location::Registry(None)).await.expect("re-acquires");
+    let bytes = acquirer.acquire(PACKAGE, None).await.expect("re-acquires");
     assert_eq!(bytes, b"second bytes", "the reachable registry is the authority");
 }
 
@@ -173,13 +156,13 @@ async fn network_failure_falls_back_to_stored_record() {
     let mut config = Config::empty();
     add_local_registry(&mut config, UNROUTABLE_REGISTRY, registry.path());
     let warm = RegistryAcquire::new(UNROUTABLE_REGISTRY).with_config(config).cached(store.clone());
-    acquire(&warm, PACKAGE, Location::Registry(None)).await.expect("warms the store");
+    warm.acquire(PACKAGE, None).await.expect("warms the store");
 
     // Same registry name and store, no backend mapping: resolution now dials
     // the closed port and fails as a network error, so the stored record and
     // content serve the load.
     let offline = RegistryAcquire::new(UNROUTABLE_REGISTRY).cached(store);
-    let bytes = acquire(&offline, PACKAGE, Location::Registry(None)).await.expect("falls back");
+    let bytes = offline.acquire(PACKAGE, None).await.expect("falls back");
     assert_eq!(bytes, b"component bytes");
 }
 
@@ -187,10 +170,9 @@ async fn network_failure_falls_back_to_stored_record() {
 async fn network_failure_without_record_refuses() {
     let acquirer = RegistryAcquire::new(UNROUTABLE_REGISTRY).cached(MemStore::default());
 
-    let error = acquire(&acquirer, PACKAGE, Location::Registry(None))
-        .await
-        .expect_err("nothing stored to fall back to");
-    assert!(failure_text(&error).contains("resolving"), "resolution failure: {error:?}");
+    let error =
+        acquirer.acquire(PACKAGE, None).await.expect_err("nothing stored to fall back to");
+    assert!(format!("{error:#}").contains("resolving"), "resolution failure: {error:?}");
 }
 
 #[tokio::test]
@@ -199,14 +181,12 @@ async fn poisoned_store_entry_discarded_and_refetched() {
     stage(registry.path(), PACKAGE, b"honest bytes");
     let store = MemStore::default();
     let acquirer = registry_acquirer(registry.path()).cached(store.clone());
-    acquire(&acquirer, PACKAGE, Location::Registry(None)).await.expect("warms the store");
+    acquirer.acquire(PACKAGE, None).await.expect("warms the store");
 
     let digest = sha256_digest(b"honest bytes");
     store.poison(&digest, b"poison");
 
-    let bytes = acquire(&acquirer, PACKAGE, Location::Registry(None))
-        .await
-        .expect("a poisoned entry refetches");
+    let bytes = acquirer.acquire(PACKAGE, None).await.expect("a poisoned entry refetches");
     assert_eq!(bytes, b"honest bytes");
     let healed = store.content_of(&digest).expect("reading the store entry");
     assert_eq!(healed, b"honest bytes", "the refetch overwrites the poisoned entry");
@@ -225,15 +205,12 @@ async fn release_records_scoped_per_registry() {
     let acquirer =
         RegistryAcquire::new(DEFAULT_REGISTRY).with_config(config).cached(MemStore::default());
 
-    let default_bytes =
-        acquire(&acquirer, PACKAGE, Location::Registry(None)).await.expect("default acquires");
+    let default_bytes = acquirer.acquire(PACKAGE, None).await.expect("default acquires");
     assert_eq!(default_bytes, b"default registry bytes");
     // Same package and version, same store: release records are scoped per
     // registry, so the override never answers from the default's record.
     let override_bytes =
-        acquire(&acquirer, PACKAGE, Location::Registry(Some("override.test".into())))
-            .await
-            .expect("override acquires");
+        acquirer.acquire(PACKAGE, Some("override.test")).await.expect("override acquires");
     assert_eq!(override_bytes, b"override registry bytes");
 }
 
@@ -243,39 +220,26 @@ async fn cacheless_acquirer_fetches_fresh() {
     stage(registry.path(), PACKAGE, b"first bytes");
     let acquirer = registry_acquirer(registry.path());
 
-    let first = acquire(&acquirer, PACKAGE, Location::Registry(None)).await.expect("acquires");
+    let first = acquirer.acquire(PACKAGE, None).await.expect("acquires");
     assert_eq!(first, b"first bytes");
     stage(registry.path(), PACKAGE, b"second bytes");
-    let second = acquire(&acquirer, PACKAGE, Location::Registry(None)).await.expect("re-acquires");
+    let second = acquirer.acquire(PACKAGE, None).await.expect("re-acquires");
     assert_eq!(second, b"second bytes", "nothing cached anywhere");
 }
 
 #[tokio::test]
-async fn unversioned_and_missing_packages_refuse_typed() {
+async fn unversioned_and_missing_packages_refuse() {
     let registry = TempDir::new().expect("registry dir");
     stage(registry.path(), PACKAGE, b"component bytes");
     let acquirer = registry_acquirer(registry.path());
 
-    let unversioned = acquire(&acquirer, "test:adapter", Location::Registry(None))
+    let unversioned = acquirer
+        .acquire("test:adapter", None)
         .await
         .expect_err("exact version is mandatory");
-    assert!(failure_text(&unversioned).contains("exact version"), "refusal: {unversioned:?}");
+    assert!(format!("{unversioned:#}").contains("exact version"), "refusal: {unversioned:?}");
 
-    let missing = acquire(&acquirer, "test:absent@1.0.0", Location::Registry(None))
-        .await
-        .expect_err("an absent package fails");
-    assert!(matches!(missing, AcquireError::Failed(_)), "typed failure: {missing:?}");
-}
-
-#[tokio::test]
-async fn path_location_unsupported() {
-    let registry = TempDir::new().expect("registry dir");
-    let acquirer = registry_acquirer(registry.path());
-
-    let error = acquire(&acquirer, PACKAGE, Location::Path("adapters/x.wasm".into()))
-        .await
-        .expect_err("paths are not served");
-    assert!(matches!(error, AcquireError::Unsupported(_)), "typed refusal: {error:?}");
+    acquirer.acquire("test:absent@1.0.0", None).await.expect_err("an absent package fails");
 }
 
 #[tokio::test]
@@ -284,25 +248,15 @@ async fn path_acquire_serves_its_own_locations() {
     std::fs::write(root.path().join("plugin.wasm"), b"located bytes").expect("staging component");
     let acquirer = PathAcquire::new([(".", root.path())]).expect("locations open at construction");
 
-    let prefixed = acquire(&acquirer, PACKAGE, Location::Path("./plugin.wasm".into()))
-        .await
-        .expect("prefixed path reads");
+    let prefixed = acquirer.acquire("./plugin.wasm").await.expect("prefixed path reads");
     assert_eq!(prefixed, b"located bytes");
-    let bare = acquire(&acquirer, PACKAGE, Location::Path("plugin.wasm".into()))
-        .await
-        .expect("bare path falls back to the `.` entry");
+    let bare =
+        acquirer.acquire("plugin.wasm").await.expect("bare path falls back to the `.` entry");
     assert_eq!(bare, b"located bytes");
 
     for path in ["./../secret.wasm", "/etc/passwd", ".\\x.wasm", "./a//b.wasm"] {
-        let error = acquire(&acquirer, PACKAGE, Location::Path(path.into()))
-            .await
-            .expect_err("escape refused");
-        assert!(matches!(error, AcquireError::Failed(_)), "path `{path}` must be refused");
+        acquirer.acquire(path).await.expect_err("escape refused");
     }
-    let registry = acquire(&acquirer, PACKAGE, Location::Registry(None))
-        .await
-        .expect_err("registry locations are not served");
-    assert!(matches!(registry, AcquireError::Unsupported(_)));
 }
 
 #[tokio::test]
@@ -315,9 +269,7 @@ async fn longest_location_name_wins() {
     let acquirer = PathAcquire::new([("adapters", outer.path()), ("adapters/inner", inner.path())])
         .expect("locations open");
 
-    let bytes = acquire(&acquirer, PACKAGE, Location::Path("adapters/inner/p.wasm".into()))
-        .await
-        .expect("longest prefix reads");
+    let bytes = acquirer.acquire("adapters/inner/p.wasm").await.expect("longest prefix reads");
     assert_eq!(bytes, b"inner", "the more specific location serves the path");
 }
 
@@ -326,14 +278,8 @@ async fn unlocated_path_and_missing_file_fail() {
     let root = TempDir::new().expect("location dir");
     let acquirer = PathAcquire::new([("adapters", root.path())]).expect("location opens");
 
-    let unlocated = acquire(&acquirer, PACKAGE, Location::Path("elsewhere/p.wasm".into()))
-        .await
-        .expect_err("no location matches");
-    assert!(matches!(unlocated, AcquireError::Failed(_)));
-    let missing = acquire(&acquirer, PACKAGE, Location::Path("adapters/absent.wasm".into()))
-        .await
-        .expect_err("file is absent");
-    assert!(matches!(missing, AcquireError::Failed(_)));
+    acquirer.acquire("elsewhere/p.wasm").await.expect_err("no location matches");
+    acquirer.acquire("adapters/absent.wasm").await.expect_err("file is absent");
 }
 
 #[tokio::test]
@@ -341,52 +287,4 @@ async fn path_acquire_opens_fail_fast() {
     let error = PathAcquire::new([("adapters", "/no/such/directory")])
         .expect_err("a missing location refuses at construction");
     assert!(format!("{error:#}").contains("adapters"), "the refusal names the location: {error}");
-}
-
-#[tokio::test]
-async fn or_falls_through_on_unsupported() {
-    let location_root = TempDir::new().expect("location dir");
-    std::fs::write(location_root.path().join("plugin.wasm"), b"located bytes")
-        .expect("staging located component");
-    let registry = TempDir::new().expect("registry dir");
-    stage(registry.path(), PACKAGE, b"registry bytes");
-    let composed = PathAcquire::new([(".", location_root.path())])
-        .expect("locations open")
-        .or(registry_acquirer(registry.path()));
-
-    let located = acquire(&composed, PACKAGE, Location::Path("plugin.wasm".into()))
-        .await
-        .expect("paths serve first");
-    assert_eq!(located, b"located bytes");
-    let fetched = acquire(&composed, PACKAGE, Location::Registry(None))
-        .await
-        .expect("the registry serves the fall-through");
-    assert_eq!(fetched, b"registry bytes");
-}
-
-#[tokio::test]
-async fn or_propagates_failures() {
-    let empty = TempDir::new().expect("empty registry dir");
-    let stocked = TempDir::new().expect("stocked registry dir");
-    stage(stocked.path(), PACKAGE, b"reachable bytes");
-    let composed = registry_acquirer(empty.path()).or(registry_acquirer(stocked.path()));
-
-    let error = acquire(&composed, PACKAGE, Location::Registry(None))
-        .await
-        .expect_err("a failure never falls through");
-    assert!(matches!(error, AcquireError::Failed(_)), "second never consulted: {error:?}");
-}
-
-#[tokio::test]
-async fn or_reports_both_refusals() {
-    let registry = TempDir::new().expect("registry dir");
-    let composed = registry_acquirer(registry.path()).or(registry_acquirer(registry.path()));
-
-    let error = acquire(&composed, PACKAGE, Location::Path("x.wasm".into()))
-        .await
-        .expect_err("neither serves paths");
-    let AcquireError::Unsupported(reason) = error else {
-        panic!("expected a combined unsupported refusal");
-    };
-    assert_eq!(reason.matches("registry locations only").count(), 2, "both refusals: {reason}");
 }

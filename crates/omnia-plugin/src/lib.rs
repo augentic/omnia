@@ -1,18 +1,17 @@
 //! # Plugin acquisition
 //!
-//! The [`Acquire`] seam and its built-in acquirers.
+//! The [`Acquirer`] seam and its built-in acquirers.
 //!
 //! Acquisition policy — endpoints, cache, path reads — is a value the
 //! embedder compiles in at the composition root (the `runtime!` macro's
 //! `plugins: { locations: [...] }` list, lowered into the generated
 //! `Wiring::acquirer` hook), never runtime-core machinery: the runtime
-//! consumes the [`Acquire`] trait and keeps zero storage and network
-//! dependencies. This crate is omnia-internal — its surface reaches
-//! consumers re-exported from `omnia` under the runtime's own paths.
-//! Store implementors depend on this crate for [`ContentStore`] and
-//! [`ReleaseStore`].
+//! routes each load to the [`Acquirer`] slot for its [`Location`] kind and
+//! keeps zero storage and network dependencies. This crate is omnia-internal
+//! — its surface reaches consumers re-exported from `omnia` under the
+//! runtime's own paths. Store implementors depend on this crate for
+//! [`ContentStore`] and [`ReleaseStore`].
 
-mod compose;
 mod path;
 mod registry;
 mod store;
@@ -23,7 +22,6 @@ use std::sync::Arc;
 use anyhow::{Context as _, Result, anyhow, ensure};
 use futures::future::BoxFuture;
 
-pub use self::compose::{AcquireExt, Or};
 pub use self::path::PathAcquire;
 pub use self::registry::RegistryAcquire;
 pub use self::store::{
@@ -60,41 +58,48 @@ pub(crate) struct MountEntry {
     pub(crate) dir: Arc<cap_std::fs::Dir>,
 }
 
-/// Why an acquirer produced no bytes.
-#[derive(Debug)]
-pub enum AcquireError {
-    /// The acquirer does not serve this location kind.
-    Unsupported(String),
-    /// The location is served, but the package could not be produced.
-    Failed(anyhow::Error),
+/// Registry acquisition policy — the [`Acquirer::registry`] slot.
+pub trait AcquireRegistry: Send + Sync + 'static {
+    /// Produce the raw component bytes for `package` from `registry`
+    /// (`None` selects the acquirer's default endpoint).
+    fn acquire<'a>(
+        &'a self, package: &'a str, registry: Option<&'a str>,
+    ) -> BoxFuture<'a, Result<Vec<u8>>>;
+}
+
+/// Path acquisition policy — the [`Acquirer::path`] slot.
+pub trait AcquirePath: Send + Sync + 'static {
+    /// Produce the raw component bytes at the location-relative `path`.
+    fn acquire<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<Vec<u8>>>;
 }
 
 /// Acquisition policy compiled in at the composition root — built by the
 /// runtime's `Wiring::acquirer` hook, which the `runtime!` macro's
-/// `plugins: { locations: [...] }` list lowers into.
+/// `plugins: { locations: [...] }` list lowers into. One slot per
+/// [`Location`] kind: a load routes structurally, and a kind with no slot
+/// refuses typed.
 ///
-/// An implementation owns every fetch, cache, and endpoint decision; the
-/// loader only ever receives bytes back, then verifies, validates, and
-/// registers them host-side.
-pub trait Acquire: Send + Sync + 'static {
-    /// Produce the raw component bytes for `package` from `from`.
-    fn acquire<'a>(
-        &'a self, package: &'a str, from: &'a Location,
-    ) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>>;
+/// A slot owns every fetch, cache, and endpoint decision; the loader only
+/// ever receives bytes back, then verifies, validates, and registers them
+/// host-side.
+#[derive(Clone, Default)]
+pub struct Acquirer {
+    /// Serves [`Location::Registry`] loads; `None` refuses the kind.
+    pub registry: Option<Arc<dyn AcquireRegistry>>,
+    /// Serves [`Location::Path`] loads; `None` refuses the kind.
+    pub path: Option<Arc<dyn AcquirePath>>,
 }
 
 /// Resolve `path` against `entries` and read the component fresh —
 /// [`PathAcquire`]'s read leg.
-async fn read_entry(path: &str, entries: &[MountEntry]) -> Result<Vec<u8>, AcquireError> {
-    let (dir, subpath) = resolve(path, entries).map_err(AcquireError::Failed)?;
+async fn read_entry(path: &str, entries: &[MountEntry]) -> Result<Vec<u8>> {
+    let (dir, subpath) = resolve(path, entries)?;
     // File reads are blocking I/O; keep them off the async executor.
     tokio::task::spawn_blocking(move || {
         dir.read(&subpath).with_context(|| format!("reading component `{subpath}`"))
     })
     .await
-    .context("component read task panicked")
-    .map_err(AcquireError::Failed)?
-    .map_err(AcquireError::Failed)
+    .context("component read task panicked")?
 }
 
 /// Resolve `path` to a location's capability handle plus the subpath within

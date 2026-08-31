@@ -8,15 +8,15 @@ use futures::FutureExt as _;
 use futures::future::BoxFuture;
 use sha2::{Digest as _, Sha256};
 
-/// One stored release resolution: the exact version plus the registry's
-/// content digest for it.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
-pub struct ReleaseRecord {
-    /// Exact semver version of the release.
-    pub version: String,
-    /// The registry's `sha256:<hex>` digest for the release content.
-    pub content_digest: String,
-}
+/// Both halves of the persistence behind [`RegistryAcquire`](crate::RegistryAcquire).
+///
+/// The store is a fallback and a byte cache, never an authority: the acquirer
+/// resolves releases fresh whenever the registry is reachable, refreshing the
+/// stored record, and verifies stored content against the fresh digest before
+/// serving it.
+pub trait PluginStore: ContentStore + ReleaseStore {}
+
+impl<T: ContentStore + ReleaseStore> PluginStore for T {}
 
 /// Content-addressed persistence: digest-keyed bytes shared across registries.
 ///
@@ -63,15 +63,15 @@ pub trait ReleaseStore: Send + Sync + 'static {
     ) -> BoxFuture<'a, Result<()>>;
 }
 
-/// Both halves of the persistence behind [`RegistryAcquire`](crate::RegistryAcquire).
-///
-/// The store is a fallback and a byte cache, never an authority: the acquirer
-/// resolves releases fresh whenever the registry is reachable, refreshing the
-/// stored record, and verifies stored content against the fresh digest before
-/// serving it.
-pub trait PluginStore: ContentStore + ReleaseStore {}
-
-impl<T: ContentStore + ReleaseStore> PluginStore for T {}
+/// One stored release resolution: the exact version plus the registry's
+/// content digest for it.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct ReleaseRecord {
+    /// Exact semver version of the release.
+    pub version: String,
+    /// The registry's `sha256:<hex>` digest for the release content.
+    pub content_digest: String,
+}
 
 /// The cacheless [`ContentStore`] and [`ReleaseStore`].
 ///

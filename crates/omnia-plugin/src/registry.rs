@@ -4,25 +4,25 @@
 
 use std::collections::HashMap;
 
-use anyhow::{Context as _, anyhow, bail};
+use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use futures::future::BoxFuture;
 use futures::{FutureExt as _, TryStreamExt as _};
 use tokio::sync::Mutex;
 use wasm_pkg_client::{Client, Config, ContentStream, PackageRef, Registry, Release, Version};
 
+use crate::AcquireRegistry;
 use crate::store::{
     ContentStore, NoStore, PluginStore, ReleaseRecord, ReleaseStore, sha256_digest,
 };
-use crate::{Acquire, AcquireError, Location};
 
-/// Registry acquisition for the plugin loader over [wasm-pkg-client].
+/// Registry acquisition for the plugin loader over [wasm-pkg-client] — the
+/// [`Acquirer::registry`] slot the `runtime!` macro's `{ registry: ... }`
+/// entry lowers into.
 ///
 /// Fetches exact package versions (`namespace:name@version` — remote lookup
 /// never resolves "latest") and verifies every result against the registry's
-/// content digest before returning bytes. Serves [`Location::Registry`] only;
-/// compose with a path acquirer through [`AcquireExt::or`](crate::AcquireExt::or)
-/// for path locations. The operator's own sha256 pin is verified host-side by
-/// the loader, after acquisition.
+/// content digest before returning bytes. The operator's own sha256 pin is
+/// verified host-side by the loader, after acquisition.
 ///
 /// Resolution is fresh-release-preferred: the release resolves against the
 /// registry on every load, refreshing the [`PluginStore`]'s record, and only
@@ -33,6 +33,7 @@ use crate::{Acquire, AcquireError, Location};
 /// load resolves and fetches fresh.
 ///
 /// [wasm-pkg-client]: https://github.com/bytecodealliance/wasm-pkg-tools
+/// [`Acquirer::registry`]: crate::Acquirer::registry
 pub struct RegistryAcquire<S = NoStore> {
     default_registry: String,
     config: Config,
@@ -44,7 +45,7 @@ pub struct RegistryAcquire<S = NoStore> {
 
 impl RegistryAcquire<NoStore> {
     /// Acquirer whose default endpoint is `default_registry`
-    /// (a `Location::Registry(None)` load resolves there).
+    /// (a load naming no registry resolves there).
     ///
     /// Starts from an empty client configuration — no user-global wasm-pkg
     /// config file and no hard-coded fallback registries — so the compiled
@@ -102,7 +103,7 @@ impl<S: PluginStore> RegistryAcquire<S> {
     async fn resolve_release(
         &self, client: &Client, registry: &str, package: &str, package_ref: &PackageRef,
         version: &Version,
-    ) -> Result<Release, AcquireError> {
+    ) -> Result<Release> {
         let full_name = package_ref.to_string();
         match client.get_release(package_ref, version).await {
             Ok(release) => {
@@ -110,20 +111,19 @@ impl<S: PluginStore> RegistryAcquire<S> {
                     version: version.to_string(),
                     content_digest: release.content_digest.to_string(),
                 };
-                ReleaseStore::put(&self.store, registry, &full_name, &record).await.map_err(
-                    |error| AcquireError::Failed(error.context(format!("recording `{package}`"))),
-                )?;
+                ReleaseStore::put(&self.store, registry, &full_name, &record)
+                    .await
+                    .with_context(|| format!("recording `{package}`"))?;
                 Ok(release)
             }
             Err(error) if is_network_failure(&error) => {
                 let stored =
                     ReleaseStore::get(&self.store, registry, &full_name, &version.to_string())
-                        .await
-                        .map_err(AcquireError::Failed)?;
+                        .await?;
                 let Some(record) = stored else {
-                    return Err(AcquireError::Failed(
-                        anyhow::Error::new(error).context(format!("resolving `{package}`")),
-                    ));
+                    return Err(
+                        anyhow::Error::new(error).context(format!("resolving `{package}`"))
+                    );
                 };
                 tracing::warn!(
                     package,
@@ -132,38 +132,32 @@ impl<S: PluginStore> RegistryAcquire<S> {
                     "registry unreachable; falling back to the stored release record"
                 );
                 let content_digest = record.content_digest.parse().map_err(|error| {
-                    AcquireError::Failed(anyhow!(
+                    anyhow!(
                         "stored release record for `{package}` carries a malformed digest: {error}"
-                    ))
+                    )
                 })?;
                 Ok(Release {
                     version: version.clone(),
                     content_digest,
                 })
             }
-            Err(error) => Err(AcquireError::Failed(
-                anyhow::Error::new(error).context(format!("resolving `{package}`")),
-            )),
+            Err(error) => {
+                Err(anyhow::Error::new(error).context(format!("resolving `{package}`")))
+            }
         }
     }
 }
 
-impl<S: PluginStore> Acquire for RegistryAcquire<S> {
+impl<S: PluginStore> AcquireRegistry for RegistryAcquire<S> {
     fn acquire<'a>(
-        &'a self, package: &'a str, from: &'a Location,
-    ) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>> {
+        &'a self, package: &'a str, registry: Option<&'a str>,
+    ) -> BoxFuture<'a, Result<Vec<u8>>> {
         async move {
-            let Location::Registry(endpoint) = from else {
-                return Err(AcquireError::Unsupported(format!(
-                    "RegistryAcquire serves registry locations only; acquiring `{package}` \
-                     from {from} requires a path acquirer such as PathAcquire"
-                )));
-            };
-            let (package_ref, version) = parse_package(package).map_err(AcquireError::Failed)?;
-            let registry = endpoint.as_deref().unwrap_or(&self.default_registry);
-            let parsed: Registry = registry.parse().map_err(|error| {
-                AcquireError::Failed(anyhow!("registry `{registry}` is not a valid name: {error}"))
-            })?;
+            let (package_ref, version) = parse_package(package)?;
+            let registry = registry.unwrap_or(&self.default_registry);
+            let parsed: Registry = registry
+                .parse()
+                .map_err(|error| anyhow!("registry `{registry}` is not a valid name: {error}"))?;
 
             let client = self.client(parsed).await;
             let release =
@@ -173,8 +167,7 @@ impl<S: PluginStore> Acquire for RegistryAcquire<S> {
             // The store serves content by digest — verified against the
             // fresh digest, so a poisoned or truncated entry is discarded
             // (overwritten below) instead of becoming code.
-            let stored =
-                ContentStore::get(&self.store, &digest).await.map_err(AcquireError::Failed)?;
+            let stored = ContentStore::get(&self.store, &digest).await?;
             if let Some(bytes) = stored {
                 if sha256_digest(&bytes) == digest {
                     tracing::debug!(package, digest, "package served from the store");
@@ -187,27 +180,21 @@ impl<S: PluginStore> Acquire for RegistryAcquire<S> {
                 );
             }
 
-            let content = client.stream_content(&package_ref, &release).await.map_err(|error| {
-                AcquireError::Failed(
-                    anyhow::Error::new(error).context(format!("fetching `{package}`")),
-                )
-            })?;
-            let bytes = collect(content).await.map_err(|error| {
-                AcquireError::Failed(
-                    anyhow::Error::new(error).context(format!("reading `{package}`")),
-                )
-            })?;
+            let content = client
+                .stream_content(&package_ref, &release)
+                .await
+                .with_context(|| format!("fetching `{package}`"))?;
+            let bytes = collect(content).await.with_context(|| format!("reading `{package}`"))?;
 
             let resolved = sha256_digest(&bytes);
-            if resolved != digest {
-                return Err(AcquireError::Failed(anyhow!(
-                    "package `{package}` content hashes to {resolved}, not the registry \
-                     digest {digest}"
-                )));
-            }
-            ContentStore::put(&self.store, &digest, &bytes).await.map_err(|error| {
-                AcquireError::Failed(error.context(format!("storing `{package}`")))
-            })?;
+            ensure!(
+                resolved == digest,
+                "package `{package}` content hashes to {resolved}, not the registry \
+                 digest {digest}"
+            );
+            ContentStore::put(&self.store, &digest, &bytes)
+                .await
+                .with_context(|| format!("storing `{package}`"))?;
             tracing::debug!(package, digest = %resolved, "package acquired");
             Ok(bytes)
         }

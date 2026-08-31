@@ -9,16 +9,17 @@ use cap_std::fs::Dir;
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
 
-use crate::{Acquire, AcquireError, Location, MountEntry, read_entry};
+use crate::{AcquirePath, MountEntry, read_entry};
 
 /// Path acquisition over the composition root's own `(name, directory)`
-/// entries, opened once at construction.
+/// entries, opened once at construction — the [`Acquirer::path`] slot the
+/// `runtime!` macro's `locations:` path entries lower into.
 ///
-/// The `runtime!` macro's `locations:` path entries lower into it.
 /// Resolution follows the guest's preopen rule (longest name prefix wins, a
 /// bare relative path falls back to a `.` entry, plain relative subpaths
-/// only), and every load reads fresh — never cached. Registry locations are
-/// refused.
+/// only), and every load reads fresh — never cached.
+///
+/// [`Acquirer::path`]: crate::Acquirer::path
 #[derive(Debug)]
 pub struct PathAcquire {
     entries: Vec<MountEntry>,
@@ -53,19 +54,8 @@ impl PathAcquire {
     }
 }
 
-impl Acquire for PathAcquire {
-    fn acquire<'a>(
-        &'a self, package: &'a str, from: &'a Location,
-    ) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>> {
-        async move {
-            let Location::Path(path) = from else {
-                return Err(AcquireError::Unsupported(format!(
-                    "PathAcquire reads location-relative paths only; acquiring `{package}` \
-                     from {from} requires a registry acquirer"
-                )));
-            };
-            read_entry(path, &self.entries).await
-        }
-        .boxed()
+impl AcquirePath for PathAcquire {
+    fn acquire<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<Vec<u8>>> {
+        read_entry(path, &self.entries).boxed()
     }
 }
