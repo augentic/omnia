@@ -24,7 +24,10 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
 pub use host::{WasiPlugins, WasiPluginsCtxView, WasiPluginsView};
-pub use omnia_plugin::{Acquire, AcquireContext, AcquireError, Location, MountAcquire, MountEntry};
+pub use omnia_plugin::{
+    Acquire, AcquireContext, AcquireError, AcquireExt, DirStore, Location, MountAcquire,
+    MountEntry, NoStore, Or, PathAcquire, PluginStore, RegistryAcquire, ReleaseRecord,
+};
 use wasmtime::component::{Component, types};
 
 use crate::deployment::{ELF_MAGIC, GuestArtifact};

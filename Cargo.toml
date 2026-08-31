@@ -23,10 +23,15 @@ unused_extern_crates = "warn"
 
 [workspace.lints.clippy]
 # https://doc.rust-lang.org/stable/clippy/index.html
-all = "warn"      # correctness, suspicious, style, complexity, perf
-cargo = "warn"
-nursery = "warn"
-pedantic = "warn"
+all = { level = "warn", priority = -1 }      # correctness, suspicious, style, complexity, perf
+cargo = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+
+# wasm-pkg-client's transitive tree (via omnia-plugin) and the guest tree pin
+# dependency versions conflicting with wasmtime's; deduplication is upstream
+# territory, so the whole workspace accepts the duplication.
+multiple_crate_versions = "allow"
 
 # Cherry-picked lints are from the `restriction` lint group in order to drive up
 # consistency, quality, and brevity
@@ -97,6 +102,7 @@ serde_json = "1.0.151"
 serde_urlencoded = "0.7.1"
 sha2 = "0.10.9"
 syn = { version = "3.0.4", features = ["full"] }
+tempfile = "3.24.0"
 thiserror = "2.0.20"
 tokio = { version = "1.53.1", default-features = false }
 tokio-stream = { version = "0.1.19", features = ["sync"] }
@@ -109,6 +115,7 @@ tracing-opentelemetry = "0.33.0"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 trybuild = "1.0.120"
 wasip3 = { version = "0.8.0", features = ["http-compat"] }
+wasm-pkg-client = "0.16.1"
 wasm-tokio = { version = "0.6.1", default-features = false }
 wasmtime = { version = "48.0.1", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation", "pooling-allocator"] }
 wasmtime-wasi = { version = "48.0.1", features = ["p3"] }

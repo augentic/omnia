@@ -22,6 +22,48 @@ url = "https://raw.githubusercontent.com/mozilla/supply-chain/main/audits.toml"
 [imports.zcash]
 url = "https://raw.githubusercontent.com/zcash/rust-ecosystem/main/supply-chain/audits.toml"
 
+# First-party workspace crates (and the wrpc git pins) are developed here,
+# not consumed from crates.io; the local copy is not audited as the
+# published one.
+[policy.omnia]
+audit-as-crates-io = false
+
+[policy.omnia-wasi-blobstore]
+audit-as-crates-io = false
+
+[policy.omnia-wasi-config]
+audit-as-crates-io = false
+
+[policy.omnia-wasi-http]
+audit-as-crates-io = false
+
+[policy.omnia-wasi-identity]
+audit-as-crates-io = false
+
+[policy.omnia-wasi-keyvalue]
+audit-as-crates-io = false
+
+[policy.omnia-wasi-messaging]
+audit-as-crates-io = false
+
+[policy.omnia-wasi-otel]
+audit-as-crates-io = false
+
+[policy.omnia-wasi-sql]
+audit-as-crates-io = false
+
+[policy.omnia-wasi-vault]
+audit-as-crates-io = false
+
+[policy.omnia-wasi-websocket]
+audit-as-crates-io = false
+
+[policy."wrpc-introspect:0.7.0@git:f58109eda90fabcb4085787e30db6d7899d0ce96"]
+audit-as-crates-io = false
+
+[policy."wrpc-transport:0.29.0@git:f58109eda90fabcb4085787e30db6d7899d0ce96"]
+audit-as-crates-io = false
+
 [[exemptions.addr2line]]
 version = "0.26.1"
 criteria = "safe-to-deploy"

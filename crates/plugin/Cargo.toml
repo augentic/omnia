@@ -19,7 +19,13 @@ workspace = true
 anyhow.workspace = true
 cap-std.workspace = true
 futures.workspace = true
-tokio = { workspace = true, features = ["rt"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["fs", "rt", "sync"] }
+tracing.workspace = true
+wasm-pkg-client.workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

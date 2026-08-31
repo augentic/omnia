@@ -10,12 +10,22 @@
 //! dependencies. This crate is omnia-internal — its surface reaches
 //! consumers re-exported from `omnia` under the runtime's own paths.
 
+mod compose;
+mod path;
+mod registry;
+mod store;
+
 use std::fmt;
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, anyhow, ensure};
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
+
+pub use self::compose::{AcquireExt, Or};
+pub use self::path::PathAcquire;
+pub use self::registry::RegistryAcquire;
+pub use self::store::{DirStore, NoStore, PluginStore, ReleaseRecord, sha256_digest};
 
 /// Where an acquirer finds a package's component bytes — the mirror of the
 /// `omnia:plugins/loader` `location` variant.
@@ -39,7 +49,7 @@ impl fmt::Display for Location {
 
 /// One deployment mount lent to acquirers: the guest-visible name plus the
 /// opened capability handle to the mount root.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MountEntry {
     /// Guest-visible mount name (the preopen name).
     pub name: String,
@@ -101,18 +111,24 @@ impl Acquire for MountAcquire {
                      from {from} requires a registry acquirer"
                 )));
             };
-            let (dir, subpath) = resolve(path, &context.mounts).map_err(AcquireError::Failed)?;
-            // File reads are blocking I/O; keep them off the async executor.
-            tokio::task::spawn_blocking(move || {
-                dir.read(&subpath).with_context(|| format!("reading component `{subpath}`"))
-            })
-            .await
-            .context("component read task panicked")
-            .map_err(AcquireError::Failed)?
-            .map_err(AcquireError::Failed)
+            read_entry(path, &context.mounts).await
         }
         .boxed()
     }
+}
+
+/// Resolve `path` against `entries` and read the component fresh — the read
+/// leg [`MountAcquire`] and [`PathAcquire`] share.
+async fn read_entry(path: &str, entries: &[MountEntry]) -> Result<Vec<u8>, AcquireError> {
+    let (dir, subpath) = resolve(path, entries).map_err(AcquireError::Failed)?;
+    // File reads are blocking I/O; keep them off the async executor.
+    tokio::task::spawn_blocking(move || {
+        dir.read(&subpath).with_context(|| format!("reading component `{subpath}`"))
+    })
+    .await
+    .context("component read task panicked")
+    .map_err(AcquireError::Failed)?
+    .map_err(AcquireError::Failed)
 }
 
 /// Resolve `path` to a mount's capability handle plus the subpath within it.
