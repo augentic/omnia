@@ -24,10 +24,10 @@ use std::sync::Arc;
 use omnia_core::{HasExtensions as _, Host, Server, StoreCtx};
 use wasmtime::component::{Access, Accessor, HasData, Linker, Resource, ResourceTable};
 
-use self::generated::Error;
+pub use self::generated::Error;
 use self::generated::omnia::plugins::loader;
 use crate::Location;
-use crate::loader::{LoadError, Plugin, PluginLoader, Plugins};
+use crate::loader::{Plugin, PluginLoader, Plugins};
 
 /// Host-side service for `omnia:plugins` — the loader capability this crate
 /// implements over the runtime's admission seam.
@@ -81,21 +81,6 @@ impl From<loader::Location> for Location {
         match location {
             loader::Location::Registry(registry) => Self::Registry(registry),
             loader::Location::Path(path) => Self::Path(path),
-        }
-    }
-}
-
-impl From<LoadError> for Error {
-    fn from(error: LoadError) -> Self {
-        match error {
-            LoadError::UnsupportedLocation(reason) => Self::LocationUnsupported(reason),
-            LoadError::AcquireFailed(reason) => Self::AcquireFailed(reason),
-            LoadError::InvalidDigest(reason) => Self::InvalidDigest(reason),
-            LoadError::DigestMismatch(reason) => Self::DigestMismatch(reason),
-            LoadError::ArtifactRefused(reason) => Self::ArtifactRefused(reason),
-            LoadError::SeamMissing(reason) => Self::SeamMissing(reason),
-            LoadError::AlreadyActive(reason) => Self::AlreadyActive(reason),
-            LoadError::Internal(reason) => Self::Internal(reason),
         }
     }
 }

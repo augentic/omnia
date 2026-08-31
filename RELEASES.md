@@ -13,10 +13,12 @@
   refusal of native/pre-compiled bytes → safe `GuestArtifact::wasm`
   validation only → refusal unless the component exports a declared plugin
   interface → registration under the package identity. Refusals are typed
-  (`location-unsupported`, `acquire-failed`, `invalid-digest`,
-  `digest-mismatch`, `artifact-refused`, `seam-missing`, `already-active`,
-  `internal`); a deployment guest's identity can never be re-bound, and a
-  conflicting re-pin of an active package refuses. Acquisition policy is the
+  by the caller's remedy (`refused` for a wrong request or deployment,
+  `unavailable` for a retryable acquisition failure, `already-active` for an
+  identity conflict, `internal` for a host fault), with the description
+  naming the specific cause; a deployment guest's identity can never be
+  re-bound, and a conflicting re-pin of an active package refuses.
+  Acquisition policy is the
   new `Acquirer` — a composition-root value with one slot per location kind
   (`RegistrySource`, `PathSource`), installed through `Plugins::install` by
   the `runtime!` macro's generated `Wiring::extend` hook from the declarative
@@ -42,7 +44,7 @@
   `Plugin` handle carrying the routed identity and resolved digest, typed
   refusals mirroring the WIT error variant with kebab-case `code()`
   discriminants and a conversion into the guest `Error` taxonomy
-  (`acquire-failed` → `BadGateway`, `internal` → `ServerError`, every other
+  (`unavailable` → `BadGateway`, `internal` → `ServerError`, every other
   refusal → `BadRequest`), and `PluginCache` — ensure-once memoization of
   handles by package identity (never bytes; a conflicting re-pin refuses
   `already-active`, mirroring the host). No consumer vocabulary anywhere:

@@ -30,8 +30,8 @@ use std::fmt;
 use std::sync::Arc;
 
 pub use self::digest::sha256_digest;
-pub use self::host::{WasiPlugins, WasiPluginsCtxView, WasiPluginsView};
-pub use self::loader::{LoadError, LoadPlugin, Plugin, PluginLoader, Plugins};
+pub use self::host::{Error as LoadError, WasiPlugins, WasiPluginsCtxView, WasiPluginsView};
+pub use self::loader::{LoadPlugin, Plugin, PluginLoader, Plugins};
 pub use self::path::{PathMounts, PathSource};
 pub use self::registry::{RegistryClient, RegistrySource};
 pub use self::store::{ContentStore, NoStore, PluginStore, ReleaseRecord, ReleaseStore};
@@ -64,4 +64,31 @@ pub struct Acquirer {
     pub registry: Option<Arc<dyn RegistrySource>>,
     /// Serves [`Location::Path`] loads.
     pub path: Option<Arc<dyn PathSource>>,
+}
+
+impl Acquirer {
+    // Get the package bytes from the specified location.
+    async fn acquire(&self, package: &str, from_loc: &Location) -> Result<Vec<u8>, LoadError> {
+        let outcome = match from_loc {
+            Location::Registry(endpoint) => match &self.registry {
+                Some(registry) => registry.acquire(package, endpoint.as_deref()).await,
+                None => {
+                    return Err(LoadError::Refused(format!(
+                        "this deployment's locations serve no registry; loading `{package}` \
+                         from {from_loc} needs a `{{ registry: ... }}` entry"
+                    )));
+                }
+            },
+            Location::Path(path) => match &self.path {
+                Some(paths) => paths.acquire(path).await,
+                None => {
+                    return Err(LoadError::Refused(format!(
+                        "this deployment's locations serve no paths; loading `{package}` \
+                         from {from_loc} needs a `{{ name: ..., path: ... }}` entry"
+                    )));
+                }
+            },
+        };
+        outcome.map_err(|error| LoadError::Unavailable(format!("acquiring `{package}`: {error:#}")))
+    }
 }

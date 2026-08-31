@@ -58,12 +58,12 @@ impl FromStr for Digest {
 
     fn from_str(pin: &str) -> Result<Self, Error> {
         let Some(hex) = pin.strip_prefix(SCHEME) else {
-            return Err(Error::InvalidDigest(format!(
+            return Err(Error::Refused(format!(
                 "digest pin `{pin}` does not use the `sha256:<hex>` scheme"
             )));
         };
         if hex.len() != HEX_LEN || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Err(Error::InvalidDigest(format!(
+            return Err(Error::Refused(format!(
                 "digest pin `{pin}` is not {HEX_LEN} hex characters"
             )));
         }
@@ -142,24 +142,15 @@ impl Plugin {
 /// Typed load refusal, mirroring the `omnia:plugins/loader` error variant.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
-    /// The deployment's acquirer does not serve this location kind.
-    #[error("location unsupported: {0}")]
-    LocationUnsupported(String),
-    /// The acquirer could not produce the package bytes.
-    #[error("acquire failed: {0}")]
-    AcquireFailed(String),
-    /// The supplied digest pin is not a `sha256:<hex>` string.
-    #[error("invalid digest: {0}")]
-    InvalidDigest(String),
-    /// The acquired bytes do not hash to the supplied pin.
-    #[error("digest mismatch: {0}")]
-    DigestMismatch(String),
-    /// The bytes are not a raw wasm component, or failed validation.
-    #[error("artifact refused: {0}")]
-    ArtifactRefused(String),
-    /// The component exports no declared plugin seam.
-    #[error("seam missing: {0}")]
-    SeamMissing(String),
+    /// The request or deployment is wrong and a retry cannot succeed: an
+    /// unserved location kind, a malformed or mismatched digest pin, an
+    /// invalid artifact, or a missing seam export.
+    #[error("refused: {0}")]
+    Refused(String),
+    /// The acquirer could not produce the package bytes; the source may
+    /// recover, so a retry can succeed.
+    #[error("unavailable: {0}")]
+    Unavailable(String),
     /// The package identity is already active and cannot be re-bound.
     #[error("already active: {0}")]
     AlreadyActive(String),
@@ -173,12 +164,8 @@ impl Error {
     #[must_use]
     pub const fn code(&self) -> &'static str {
         match self {
-            Self::LocationUnsupported(_) => "location-unsupported",
-            Self::AcquireFailed(_) => "acquire-failed",
-            Self::InvalidDigest(_) => "invalid-digest",
-            Self::DigestMismatch(_) => "digest-mismatch",
-            Self::ArtifactRefused(_) => "artifact-refused",
-            Self::SeamMissing(_) => "seam-missing",
+            Self::Refused(_) => "refused",
+            Self::Unavailable(_) => "unavailable",
             Self::AlreadyActive(_) => "already-active",
             Self::Internal(_) => "internal",
         }
@@ -189,14 +176,11 @@ impl From<Error> for crate::Error {
     fn from(error: Error) -> Self {
         let code = error.code().to_owned();
         match error {
-            Error::AcquireFailed(description) => Self::BadGateway { code, description },
+            Error::Unavailable(description) => Self::BadGateway { code, description },
             Error::Internal(description) => Self::ServerError { code, description },
-            Error::LocationUnsupported(description)
-            | Error::InvalidDigest(description)
-            | Error::DigestMismatch(description)
-            | Error::ArtifactRefused(description)
-            | Error::SeamMissing(description)
-            | Error::AlreadyActive(description) => Self::BadRequest { code, description },
+            Error::Refused(description) | Error::AlreadyActive(description) => {
+                Self::BadRequest { code, description }
+            }
         }
     }
 }
@@ -261,12 +245,8 @@ mod wire {
     impl From<loader::Error> for Error {
         fn from(error: loader::Error) -> Self {
             match error {
-                loader::Error::LocationUnsupported(detail) => Self::LocationUnsupported(detail),
-                loader::Error::AcquireFailed(detail) => Self::AcquireFailed(detail),
-                loader::Error::InvalidDigest(detail) => Self::InvalidDigest(detail),
-                loader::Error::DigestMismatch(detail) => Self::DigestMismatch(detail),
-                loader::Error::ArtifactRefused(detail) => Self::ArtifactRefused(detail),
-                loader::Error::SeamMissing(detail) => Self::SeamMissing(detail),
+                loader::Error::Refused(detail) => Self::Refused(detail),
+                loader::Error::Unavailable(detail) => Self::Unavailable(detail),
                 loader::Error::AlreadyActive(detail) => Self::AlreadyActive(detail),
                 loader::Error::Internal(detail) => Self::Internal(detail),
             }
@@ -349,7 +329,7 @@ mod tests {
             format!("sha256:{}", "zz".repeat(32)),
         ] {
             let error = pin.parse::<Digest>().expect_err("malformed pin refused");
-            assert!(matches!(error, Error::InvalidDigest(_)), "{pin} refused as invalid-digest");
+            assert!(matches!(error, Error::Refused(_)), "{pin} refused");
         }
     }
 
@@ -364,12 +344,8 @@ mod tests {
     #[test]
     fn taxonomy_mapping() {
         let cases = [
-            (Error::LocationUnsupported("l".into()), "location-unsupported"),
-            (Error::AcquireFailed("a".into()), "acquire-failed"),
-            (Error::InvalidDigest("i".into()), "invalid-digest"),
-            (Error::DigestMismatch("d".into()), "digest-mismatch"),
-            (Error::ArtifactRefused("r".into()), "artifact-refused"),
-            (Error::SeamMissing("s".into()), "seam-missing"),
+            (Error::Refused("r".into()), "refused"),
+            (Error::Unavailable("u".into()), "unavailable"),
             (Error::AlreadyActive("c".into()), "already-active"),
             (Error::Internal("x".into()), "internal"),
         ];
@@ -377,7 +353,7 @@ mod tests {
             let mapped = crate::Error::from(error.clone());
             assert_eq!(mapped.code(), code);
             match error {
-                Error::AcquireFailed(_) => {
+                Error::Unavailable(_) => {
                     assert!(matches!(mapped, crate::Error::BadGateway { .. }));
                 }
                 Error::Internal(_) => {

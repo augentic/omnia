@@ -28,9 +28,6 @@ cargo = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 
-# wasm-pkg-client's transitive tree (via omnia-plugin) and the guest tree pin
-# dependency versions conflicting with wasmtime's; deduplication is upstream
-# territory, so the whole workspace accepts the duplication.
 multiple_crate_versions = "allow"
 
 # Cherry-picked lints are from the `restriction` lint group in order to drive up

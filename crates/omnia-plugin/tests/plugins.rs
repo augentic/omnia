@@ -275,7 +275,10 @@ async fn reload_after_deregister_binds_fresh_bytes() {
         .load_plugin("test:echoer", location(), Some(first.digest()))
         .await
         .expect_err("the old digest no longer matches the staged bytes");
-    assert!(matches!(stale, LoadError::DigestMismatch(_)), "{stale:?}");
+    match &stale {
+        LoadError::Refused(detail) => assert!(detail.contains("not the pinned"), "{detail}"),
+        other => panic!("expected a digest-mismatch refusal: {other:?}"),
+    }
 
     let fresh = runtime.load_plugin("test:echoer", location(), None).await.expect("re-load");
     assert_ne!(fresh.digest(), first.digest(), "the re-load bound fresh bytes");
