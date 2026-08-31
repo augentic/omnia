@@ -3,10 +3,11 @@
 //! Generates the token stream fragments required to expand the runtime macro.
 
 use proc_macro2::TokenStream;
-use quote::{ToTokens, format_ident, quote};
-use syn::{Ident, Path};
+use quote::{ToTokens, format_ident, quote, quote_spanned};
+use syn::spanned::Spanned as _;
+use syn::{Expr, Ident, Path};
 
-use crate::runtime::parse::{Config, HostEntry, ManifestSpec, Mode};
+use crate::runtime::parse::{Config, HostEntry, LocationSpec, ManifestSpec, Mode};
 
 // Token fragments needed to expand the runtime macro.
 pub struct Codegen {
@@ -15,6 +16,9 @@ pub struct Codegen {
     pub backends_ty: TokenStream,
     pub backends_def: TokenStream,
     pub main_options: TokenStream,
+    /// The generated `Wiring::acquirer` hook body for the `plugins:` block's
+    /// `acquire:` expression; absent, the trait's `None` default stands.
+    pub acquirer_hook: Option<TokenStream>,
     /// Whether to link the `omnia::WasiPlugins` loader host — declared
     /// plugins mean the deployment opted into the loader capability.
     pub link_plugins: bool,
@@ -25,9 +29,14 @@ impl From<&Config> for Codegen {
         let host_entries = &config.host_entries;
         let host_types: Vec<Path> = host_entries.iter().map(|entry| entry.host.clone()).collect();
 
-        let (backends_ty, backends_def) = emit_backends(host_entries);
+        let (backends_ty, backends_def) = emit_backends(host_entries, config.cache.as_ref());
 
         let main_options = emit_main_options(config);
+        let acquirer_hook = if config.locations.is_empty() {
+            config.acquire.as_ref().map(|expr| emit_acquirer_hook(expr, &backends_ty))
+        } else {
+            Some(emit_locations_hook(config, &backends_ty))
+        };
 
         Self {
             mode: config.mode,
@@ -35,6 +44,7 @@ impl From<&Config> for Codegen {
             backends_ty,
             backends_def,
             main_options,
+            acquirer_hook,
             link_plugins: config.plugins_declared,
         }
     }
@@ -45,16 +55,77 @@ impl From<&Config> for Codegen {
 fn emit_main_options(config: &Config) -> TokenStream {
     let mode = config.mode.tokens();
     let manifest = emit_manifest_source(config);
-    let acquirer = config.acquire.as_ref().map(|expr| {
-        quote! {
-            .acquirer(#expr)
-        }
-    });
 
     quote! {
         omnia::MainOptions::new(#mode)
             #manifest
-            #acquirer
+    }
+}
+
+/// Emit the `Wiring::acquirer` hook: the `acquire:` expression becomes the
+/// deployment's acquisition policy, built once after backends connect.
+fn emit_acquirer_hook(expr: &Expr, backends_ty: &TokenStream) -> TokenStream {
+    quote! {
+        fn acquirer(
+            _backends: &#backends_ty,
+        ) -> Option<::std::sync::Arc<dyn omnia::Acquire>> {
+            Some(::std::sync::Arc::new(#expr))
+        }
+    }
+}
+
+/// Emit the `Wiring::acquirer` hook for the declarative `locations:` list:
+/// path entries fold in declaration order into one `PathAcquire` (opened
+/// fail-fast), the registry entry becomes a `RegistryAcquire` — cached in
+/// the `cache:` backend when one is declared — and the two compose by
+/// location kind, so paths-then-registry emission is order-insensitive.
+fn emit_locations_hook(config: &Config, backends_ty: &TokenStream) -> TokenStream {
+    let paths: Vec<TokenStream> = config
+        .locations
+        .iter()
+        .filter_map(|location| match location {
+            LocationSpec::Path { name, path } => Some(quote! { (#name, #path) }),
+            LocationSpec::Registry(_) => None,
+        })
+        .collect();
+    let registry = config.locations.iter().find_map(|location| match location {
+        LocationSpec::Registry(endpoint) => Some(endpoint),
+        LocationSpec::Path { .. } => None,
+    });
+
+    let path_acquire = (!paths.is_empty()).then(|| {
+        quote! {
+            omnia::PathAcquire::new([#(#paths,)*])
+                .expect("opening plugins locations")
+        }
+    });
+    let registry_acquire = registry.map(|endpoint| {
+        // Spanned to the `cache:` value so a missing `PluginStore` bound
+        // lands on the declaration, not the generated call.
+        let cached = config.cache.as_ref().map(|store| {
+            let field = field_ident(store);
+            quote_spanned! {store.span()=>
+                .cached(backends.#field.clone())
+            }
+        });
+        quote! { omnia::RegistryAcquire::new(#endpoint) #cached }
+    });
+
+    let acquirer = match (path_acquire, registry_acquire) {
+        (Some(paths), Some(registry)) => quote! { omnia::AcquireExt::or(#paths, #registry) },
+        (Some(paths), None) => paths,
+        (None, Some(registry)) => registry,
+        (None, None) => unreachable!("parse refuses an empty `locations:` list"),
+    };
+    // The bundle goes unused without a `cache:` backend to clone out of it.
+    let param = if config.cache.is_some() { quote!(backends) } else { quote!(_backends) };
+
+    quote! {
+        fn acquirer(
+            #param: &#backends_ty,
+        ) -> Option<::std::sync::Arc<dyn omnia::Acquire>> {
+            Some(::std::sync::Arc::new(#acquirer))
+        }
     }
 }
 
@@ -125,18 +196,24 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
     }
 }
 
-fn emit_backends(host_entries: &[HostEntry]) -> (TokenStream, TokenStream) {
+fn emit_backends(host_entries: &[HostEntry], cache: Option<&Path>) -> (TokenStream, TokenStream) {
     // Order-preserving dedup: `Vec::dedup_by` only removes *consecutive*
     // duplicates, so a backend shared by non-adjacent hosts would emit two
     // identically named struct fields. Parse validation guarantees rows
     // sharing a backend agree on connect options, so the first row's
-    // options stand for the shared connection.
+    // options stand for the shared connection. The `cache:` backend joins
+    // the list last (env-connected, no host row), so a hosts row naming the
+    // same backend keeps its options and shares one connection.
+    let rows = host_entries
+        .iter()
+        .map(|entry| (&entry.backend, entry.options.as_ref()))
+        .chain(cache.map(|cache| (cache, None)));
     let mut seen = std::collections::HashSet::new();
-    let backends: Vec<&HostEntry> =
-        host_entries.iter().filter(|entry| seen.insert(path_key(&entry.backend))).collect();
+    let backends: Vec<(&Path, Option<&Expr>)> =
+        rows.filter(|(backend, _)| seen.insert(path_key(backend))).collect();
 
-    let idents: Vec<Ident> = backends.iter().map(|entry| field_ident(&entry.backend)).collect();
-    let types: Vec<&Path> = backends.iter().map(|entry| &entry.backend).collect();
+    let idents: Vec<Ident> = backends.iter().map(|(backend, _)| field_ident(backend)).collect();
+    let types: Vec<&Path> = backends.iter().map(|(backend, _)| *backend).collect();
 
     if idents.is_empty() {
         return (quote! { () }, quote! {});
@@ -146,9 +223,8 @@ fn emit_backends(host_entries: &[HostEntry]) -> (TokenStream, TokenStream) {
     // from the environment.
     let connects: Vec<TokenStream> = backends
         .iter()
-        .map(|entry| {
-            let ty = &entry.backend;
-            entry.options.as_ref().map_or_else(
+        .map(|(ty, options)| {
+            options.map_or_else(
                 || quote! { <#ty as Backend>::connect() },
                 |options| quote! { <#ty as Backend>::connect_with(#options) },
             )
@@ -254,7 +330,7 @@ mod tests {
 
     #[test]
     fn empty_host_entries() {
-        let (ty, def) = emit_backends(&[]);
+        let (ty, def) = emit_backends(&[], None);
         assert_eq!(ty.to_string(), "()");
         assert!(def.is_empty());
     }

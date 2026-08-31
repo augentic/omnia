@@ -166,7 +166,7 @@ All of this is declared in the `omnia.toml` manifest ([reference](reference/conf
 
 1. **CLI parsing** — the generated `main` delegates to `omnia::main`, which parses the `run` subcommand, resolves the deployment source into a `Manifest` (`--config`, then `OMNIA_CONFIG`, then a positional `<wasm>` via `Manifest::from_wasm`, then the compiled-in default), and appends CLI `--mount`/`--plugins` entries onto it.
 2. **Build** — `DeploymentBuilder` validates the manifest, resolves mounts, compiles guests, and returns a `Deployment` ready for host linking.
-3. **Assemble** — `Runtime::new` runs `Wiring::link` (each host's `add_to_linker`), connects backends (`Backends::connect`), and builds the `Registry` (pre-instantiating every guest).
+3. **Assemble** — `Runtime::new` runs `Wiring::link` (each host's `add_to_linker`), connects backends (`Backends::connect`), installs the `Wiring::acquirer` plugin-acquisition policy, and builds the `Registry` (pre-instantiating every guest).
 4. **Bootstrap** — starts epoch interruption and pool-metric sampling, wires host-mediated link servers, then logs **`omnia ready`**.
 5. **Drive** — command mode invokes the guest's `wasi:cli/run` once and exits with its status; server mode awaits every trigger server.
 6. **Request handling** (server mode) — trigger hosts (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`) accept requests, route to a guest, instantiate it in a fresh store, and return the response.
@@ -204,6 +204,7 @@ omnia/
 │   ├── omnia-guest/        # Guest SDK (Handler/Client/Context, HTTP/messaging routers, errors, ORM, MCP)
 │   ├── guest-macros/       # #[instrument] proc macro
 │   ├── host-macros/        # runtime! proc-macro
+│   ├── plugin/             # omnia-plugin: the Acquire seam (re-exported by omnia)
 │   └── wasi-*/             # WASI interface implementations
 │       ├── src/
 │       │   ├── guest.rs    # Guest bindings (wasm32)

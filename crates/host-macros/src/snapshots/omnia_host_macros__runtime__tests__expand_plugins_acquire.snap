@@ -14,6 +14,9 @@ mod runtime {
             deployment.host::<omnia::WasiPlugins, ()>()?;
             Ok(())
         }
+        fn acquirer(_backends: &()) -> Option<::std::sync::Arc<dyn omnia::Acquire>> {
+            Some(::std::sync::Arc::new(omnia::MountAcquire))
+        }
         async fn serve(runtime: &omnia::Runtime<()>) -> Result<()> {
             let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![];
             future::try_join_all(servers).await?;
@@ -44,8 +47,7 @@ mod runtime {
                                     },
                                 ]),
                         ),
-                    )
-                    .acquirer(omnia::MountAcquire),
+                    ),
             )
             .await
     }

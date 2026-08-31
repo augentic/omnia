@@ -37,9 +37,16 @@ pub struct Config {
     /// Whether a `plugins:` block was declared — links the `WasiPlugins`
     /// loader host even when the block carries no interfaces.
     pub plugins_declared: bool,
-    /// The `plugins:` block's `acquire:` expression, compiled into
-    /// `MainOptions` as the deployment's acquirer.
+    /// The `plugins:` block's `acquire:` expression, lowered into the
+    /// generated `Wiring::acquirer` hook as the deployment's acquirer.
     pub acquire: Option<Expr>,
+    /// The `plugins:` block's `locations:` entries, lowered into the
+    /// generated `Wiring::acquirer` hook as built-in acquirers composed by
+    /// location kind.
+    pub locations: Vec<LocationSpec>,
+    /// The `plugins:` block's `cache:` backend, connected in the bundle and
+    /// attached as the registry location's `PluginStore`.
+    pub cache: Option<Path>,
 }
 
 /// One `Host: Backend` wiring from the `hosts: { ... }` block, optionally
@@ -61,12 +68,30 @@ pub struct ManifestSpec {
     pub mounts: Vec<MountSpec>,
 }
 
-/// The `plugins: { interfaces: [...], acquire: ... }` block: the deployment's
-/// host-mediated interface set plus its optional compiled-in acquirer.
+/// The `plugins: { interfaces: [...], acquire: ..., locations: [...],
+/// cache: ... }` block: the deployment's host-mediated interface set plus
+/// its compiled-in acquisition policy — either a custom `acquire:` value or
+/// the declarative `locations:` list with its optional `cache:` backend.
 #[derive(Default)]
 pub struct PluginsSpec {
     pub interfaces: Vec<Expr>,
     pub acquire: Option<Expr>,
+    pub locations: Vec<LocationSpec>,
+    pub cache: Option<Path>,
+}
+
+/// One `locations:` entry, discriminated by the keys present.
+pub enum LocationSpec {
+    /// `{ name: ..., path: ... }` — one named root the deployment opens at
+    /// startup for path loads.
+    Path {
+        /// The location name path loads resolve against.
+        name: Expr,
+        /// The host directory backing the location.
+        path: Expr,
+    },
+    /// `{ registry: ... }` — the deployment's default registry endpoint.
+    Registry(Expr),
 }
 
 impl ManifestSpec {
@@ -109,6 +134,8 @@ impl Parse for Config {
         let mut manifest = ManifestSpec::default();
         let mut plugins_declared = false;
         let mut acquire = None;
+        let mut locations = Vec::new();
+        let mut cache = None;
         let mut config_span: Option<Span> = None;
         let mut inline_span: Option<Span> = None;
 
@@ -133,8 +160,11 @@ impl Parse for Config {
                 OptValue::Plugins(p) => {
                     plugins_declared = true;
                     acquire = p.acquire;
-                    // `acquire:` is compiled-in code, not manifest data: only
-                    // an `interfaces:` list conflicts with `config:`, so a
+                    locations = p.locations;
+                    cache = p.cache;
+                    // Acquisition policy (`acquire:`, `locations:`, `cache:`)
+                    // is compiled-in code, not manifest data: only an
+                    // `interfaces:` list conflicts with `config:`, so a
                     // config-file deployment may still compile an acquirer in.
                     if !p.interfaces.is_empty() {
                         manifest.plugins = p.interfaces;
@@ -159,6 +189,8 @@ impl Parse for Config {
             manifest,
             plugins_declared,
             acquire,
+            locations,
+            cache,
         };
         config.validate(&KeySpans {
             config: config_span,
@@ -379,15 +411,22 @@ fn parse_bracketed_list<T: Parse>(input: ParseStream) -> Result<Vec<T>> {
 }
 
 /// Parse a braced `{ key: value, ... }` block, handing each key (and the
-/// stream positioned at its value) to `field`. Returns the brace span for
-/// missing-key diagnostics.
+/// stream positioned at its value) to `field`. Repeated keys are refused
+/// with a pointed diagnostic. Returns the brace span for missing-key
+/// diagnostics.
 fn parse_kv_block(
     input: ParseStream, mut field: impl FnMut(&Ident, ParseStream) -> Result<()>,
 ) -> Result<Span> {
     let content;
     let brace = syn::braced!(content in input);
+    let mut seen: Vec<String> = Vec::new();
     while !content.is_empty() {
         let key: Ident = content.parse()?;
+        let name = key.to_string();
+        if seen.contains(&name) {
+            return Err(syn::Error::new(key.span(), format!("duplicate `{name}:` key")));
+        }
+        seen.push(name);
         content.parse::<Token![:]>()?;
         field(&key, &content)?;
         if !content.is_empty() {
@@ -451,16 +490,31 @@ impl Parse for GuestSpec {
 impl Parse for PluginsSpec {
     fn parse(input: ParseStream) -> Result<Self> {
         let mut spec = Self::default();
+        let mut acquire_span = None;
+        let mut locations_span = None;
+        let mut cache_span = None;
 
         parse_kv_block(input, |key, value| {
             match key.to_string().as_str() {
                 "interfaces" => spec.interfaces = parse_bracketed_list(value)?,
-                "acquire" => spec.acquire = Some(value.parse()?),
+                "acquire" => {
+                    spec.acquire = Some(value.parse()?);
+                    acquire_span = Some(key.span());
+                }
+                "locations" => {
+                    spec.locations = parse_bracketed_list(value)?;
+                    locations_span = Some(key.span());
+                }
+                "cache" => {
+                    spec.cache = Some(value.parse()?);
+                    cache_span = Some(key.span());
+                }
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
                         format!(
-                            "unknown plugins key `{other}`; expected `interfaces` or `acquire`"
+                            "unknown plugins key `{other}`; expected `interfaces`, `acquire`, \
+                             `locations`, or `cache`"
                         ),
                     ));
                 }
@@ -468,7 +522,110 @@ impl Parse for PluginsSpec {
             Ok(())
         })?;
 
+        spec.validate(acquire_span, locations_span, cache_span)?;
         Ok(spec)
+    }
+}
+
+impl PluginsSpec {
+    /// The block's cross-key refusals, spanned to the offending key.
+    fn validate(
+        &self, acquire_span: Option<Span>, locations_span: Option<Span>, cache_span: Option<Span>,
+    ) -> Result<()> {
+        if let (Some(locations), Some(_)) = (locations_span, acquire_span) {
+            return Err(syn::Error::new(
+                locations,
+                "`locations:` and `acquire:` are mutually exclusive; declare the acquisition \
+                 policy once",
+            ));
+        }
+        if let Some(span) = locations_span
+            && self.locations.is_empty()
+        {
+            return Err(syn::Error::new(
+                span,
+                "`locations:` is empty; declare at least one `{ name, path }` or \
+                 `{ registry: ... }` entry",
+            ));
+        }
+
+        let mut registries = self.locations.iter().filter_map(|location| match location {
+            LocationSpec::Registry(endpoint) => Some(endpoint.span()),
+            LocationSpec::Path { .. } => None,
+        });
+        let first_registry = registries.next();
+        if let Some(second) = registries.next() {
+            return Err(syn::Error::new(
+                second,
+                "more than one `registry` location; a deployment compiles in one default \
+                 registry (a load's own location may still override the endpoint)",
+            ));
+        }
+
+        if let Some(span) = cache_span {
+            if acquire_span.is_some() {
+                return Err(syn::Error::new(
+                    span,
+                    "`cache:` attaches a store to the `locations:` registry entry; a custom \
+                     `acquire:` value owns its own caching",
+                ));
+            }
+            if first_registry.is_none() {
+                return Err(syn::Error::new(
+                    span,
+                    "`cache:` requires a `{ registry: ... }` location to attach the store to; \
+                     path locations always read fresh",
+                ));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Parse for LocationSpec {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let mut name = None;
+        let mut path = None;
+        let mut registry = None;
+
+        let span = parse_kv_block(input, |key, value| {
+            match key.to_string().as_str() {
+                "name" => name = Some(value.parse()?),
+                "path" => path = Some(value.parse()?),
+                "registry" => registry = Some(value.parse()?),
+                other => {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        format!(
+                            "unknown location key `{other}`; expected `name` and `path`, or \
+                             `registry`"
+                        ),
+                    ));
+                }
+            }
+            Ok(())
+        })?;
+
+        match (name, path, registry) {
+            (None, None, Some(registry)) => Ok(Self::Registry(registry)),
+            (Some(name), Some(path), None) => Ok(Self::Path { name, path }),
+            (_, _, Some(_)) => Err(syn::Error::new(
+                span,
+                "a `registry` location carries no other keys; declare paths as their own \
+                 `{ name, path }` entries",
+            )),
+            (name, _, None) => {
+                let missing = if name.is_none() { "name" } else { "path" };
+                Err(syn::Error::new(
+                    span,
+                    format!(
+                        "location entry is missing `{missing}`; a location is `{{ name, path }}` \
+                         or `{{ registry: ... }}`"
+                    ),
+                ))
+            }
+        }
     }
 }
 

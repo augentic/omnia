@@ -50,7 +50,7 @@ The `omnia:plugins/loader` host capability: a guest names a package (location pl
 
 ### Acquirer
 
-The deployment's compiled-in `Acquire` policy — how the loader turns a package name and location into component bytes. A composition-root value (`plugins: { acquire: ... }` in the macro, `DeploymentBuilder::acquirer` programmatically), never runtime-core machinery. Core ships `MountAcquire` (preopen-relative reads over the mount registry); registry acquirers are embedder territory.
+The deployment's compiled-in `Acquire` policy — how the loader turns a package name and location into component bytes. A composition-root value built by the `Wiring::acquirer` hook (the macro's `plugins: { acquire: ... }` key or declarative `locations:` list lowers into it; `Runtime::set_acquirer` serves hand-assembled runtimes), never runtime-core machinery. Core ships `MountAcquire` (preopen-relative reads over the mount registry), `PathAcquire` (named directory roots), and `RegistryAcquire` (exact package references, optionally cached in a `PluginStore`), composable with `AcquireExt::or`.
 
 ## Runtime platform
 

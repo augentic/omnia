@@ -8,13 +8,12 @@
 //! host-side, bounded by the deployment's declared plugin interfaces.
 //!
 //! Acquisition policy (endpoints, cache, path reads) is the embedder's
-//! [`Acquire`] value, compiled in at the composition root
-//! ([`DeploymentBuilder::acquirer`](crate::DeploymentBuilder::acquirer) or
-//! the `runtime!` macro's `plugins: { acquire: ... }` key). Core ships
+//! [`Acquire`] value, built by the [`Wiring::acquirer`](crate::Wiring::acquirer)
+//! hook (the `runtime!` macro's `plugins: { acquire: ... }` key lowers into
+//! it) once the deployment's backends have connected. Core ships
 //! [`MountAcquire`] — preopen-relative reads over the mount registry — and
 //! keeps zero storage and network dependencies.
 
-mod acquire;
 mod digest;
 mod host;
 
@@ -22,10 +21,13 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
-pub use acquire::{Acquire, AcquireContext, AcquireError, Location, MountAcquire};
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
 pub use host::{WasiPlugins, WasiPluginsCtxView, WasiPluginsView};
+pub use omnia_plugin::{
+    Acquire, AcquireContext, AcquireError, AcquireExt, DirStore, Location, MountAcquire,
+    MountEntry, NoStore, Or, PathAcquire, PluginStore, RegistryAcquire, ReleaseRecord,
+};
 use wasmtime::component::{Component, types};
 
 use crate::deployment::{ELF_MAGIC, GuestArtifact};
@@ -205,8 +207,18 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
                  to load `{package}`"
             )));
         };
+        // Snapshot the registry's `(name, dir)` pairs: acquirers see plain
+        // mount entries, never core's registry type.
         let context = AcquireContext {
-            mounts: self.mount_registry(),
+            mounts: self
+                .mount_registry()
+                .entries()
+                .iter()
+                .map(|mount| MountEntry {
+                    name: mount.name.clone(),
+                    dir: Arc::clone(&mount.dir),
+                })
+                .collect(),
         };
         let bytes =
             acquirer.acquire(package, &from, &context).await.map_err(|error| match error {

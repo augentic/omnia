@@ -67,7 +67,8 @@ impl Mode {
     }
 }
 
-/// Host linking and trigger-server startup for a deployment.
+/// Host linking, acquisition policy, and trigger-server startup for a
+/// deployment.
 pub trait Wiring<B: Backends> {
     /// Link every declared host into the deployment linker.
     ///
@@ -75,6 +76,16 @@ pub trait Wiring<B: Backends> {
     ///
     /// Returns an error if a host cannot be added to the linker.
     fn link(deployment: &mut Deployment<StoreCtx<B>>) -> Result<()>;
+
+    /// Build the deployment's plugin acquirer — the acquisition policy behind
+    /// `omnia:plugins/loader.load` and [`Runtime::load_plugin`]. Invoked by
+    /// [`Runtime::new`] once, after [`Backends::connect`], with typed access
+    /// to the connected bundle; the default is no acquirer, refusing every
+    /// load.
+    fn acquirer(backends: &B) -> Option<Arc<dyn Acquire>> {
+        let _ = backends;
+        None
+    }
 
     /// Run every declared long-lived trigger server concurrently.
     fn serve(runtime: &Runtime<B>) -> impl std::future::Future<Output = Result<()>> + Send;
@@ -179,7 +190,8 @@ where
 {
     let mode = deployment.mode();
 
-    let runtime = Runtime::<B>::new(deployment, H::link).await.context("assembling runtime")?;
+    let runtime =
+        Runtime::<B>::new(deployment, H::link, H::acquirer).await.context("assembling runtime")?;
 
     // Background tasks hold Engine clones; abort them when the drive
     // completes so a finished deployment releases its engine (and the pooling
@@ -365,24 +377,31 @@ impl<B: Clone + Send + Sync + 'static> RuntimeDispatcher<B> {
 }
 
 impl<B: Backends> Runtime<B> {
-    /// Link hosts, connect backends, assemble the guest registry, and wire
-    /// the host-mediated link serve side.
+    /// Link hosts, connect backends, install the acquisition policy, assemble
+    /// the guest registry, and wire the host-mediated link serve side.
+    ///
+    /// `acquire` is the [`Wiring::acquirer`] hook: invoked once, after
+    /// backends connect, so the acquisition policy is built with typed access
+    /// to the connected bundle.
     ///
     /// # Errors
     ///
     /// Returns an error if host linking, backend connection, registry
     /// assembly, or link serve wiring fails.
-    pub async fn new<L>(mut deployment: Deployment<StoreCtx<B>>, link: L) -> Result<Self>
+    pub async fn new<L, A>(
+        mut deployment: Deployment<StoreCtx<B>>, link: L, acquire: A,
+    ) -> Result<Self>
     where
         L: FnOnce(&mut Deployment<StoreCtx<B>>) -> Result<()>,
+        A: FnOnce(&B) -> Option<Arc<dyn Acquire>>,
     {
         let name = Arc::<str>::from(deployment.name());
         let args = Arc::new(deployment.args().to_vec());
         link(&mut deployment).context("linking hosts")?;
         let backends = B::connect().await.context("connecting backends")?;
+        let acquirer = acquire(&backends);
         let mounts = deployment.mounts();
         let command_guest = deployment.command_guest();
-        let acquirer = deployment.take_acquirer();
 
         let runtime = Self::with_inner(Arc::new(RuntimeInner::new(
             name,
@@ -646,10 +665,9 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// behind [`load_plugin`](Self::load_plugin) and the
     /// `omnia:plugins/loader` capability.
     ///
-    /// [`Runtime::new`] installs the builder's
-    /// [`acquirer`](crate::DeploymentBuilder::acquirer) itself; an embedder
-    /// holding a [`from_parts`](Self::from_parts) runtime calls this once.
-    /// A second installation warns and is ignored.
+    /// [`Runtime::new`] installs the [`Wiring::acquirer`] hook's product
+    /// itself; an embedder holding a [`from_parts`](Self::from_parts) runtime
+    /// calls this once. A second installation warns and is ignored.
     pub fn set_acquirer(&self, acquirer: impl Acquire) {
         self.inner.plugins.install_acquirer(Arc::new(acquirer));
     }
