@@ -52,11 +52,13 @@ impl<B: Clone + Send + Sync + 'static> LoadPlugin for Runtime<B> {
         // get the package bytes from the specified location
         let bytes = state.acquirer.acquire(package, &from).await?;
 
-        // insert the package bytes into the registry and bind
+        // the operator's pin binds name to bytes before any validation work
         let hash = crate::sha256_digest(&bytes);
-        if hash != pin.unwrap_or_default() {
+        if let Some(pin) = pin
+            && pin != hash
+        {
             return Err(LoadError::Refused(format!(
-                "package `{package}` digest is not the pinned digest"
+                "package `{package}` resolved to {hash}, which is not the pinned {pin}"
             )));
         }
 
