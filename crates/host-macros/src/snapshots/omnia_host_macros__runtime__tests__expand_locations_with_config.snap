@@ -29,16 +29,20 @@ mod runtime {
             deployment.host::<omnia::WasiPlugins, Backends>()?;
             Ok(())
         }
-        fn acquirer(backends: &Backends) -> Option<omnia::Acquirer> {
-            Some(omnia::Acquirer {
-                registry: Some(
-                    ::std::sync::Arc::new(
-                        omnia::RegistryAcquire::new("ghcr.io")
-                            .cached(backends.plugin_cache.clone()),
+        fn extend(runtime: &omnia::Runtime<Backends>) -> Result<()> {
+            let backends = runtime.backends();
+            omnia::Plugins::install(
+                runtime,
+                omnia::Acquirer {
+                    registry: Some(
+                        ::std::sync::Arc::new(
+                            omnia::RegistryClient::new("ghcr.io")
+                                .cached(backends.plugin_cache.clone()),
+                        ),
                     ),
-                ),
-                path: None,
-            })
+                    path: None,
+                },
+            )
         }
         async fn serve(runtime: &omnia::Runtime<Backends>) -> Result<()> {
             let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![];

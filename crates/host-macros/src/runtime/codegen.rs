@@ -16,9 +16,9 @@ pub struct Codegen {
     pub backends_ty: TokenStream,
     pub backends_def: TokenStream,
     pub main_options: TokenStream,
-    /// The generated `Wiring::acquirer` hook body for the `plugins:` block's
-    /// `locations:` list; absent, the trait's `None` default stands.
-    pub acquirer_hook: Option<TokenStream>,
+    /// The generated `Wiring::extend` hook for the `plugins:` block's
+    /// `locations:` list; absent, the trait's install-nothing default stands.
+    pub extend_hook: Option<TokenStream>,
     /// Whether to link the `omnia::WasiPlugins` loader host — declared
     /// plugins mean the deployment opted into the loader capability.
     pub link_plugins: bool,
@@ -32,7 +32,7 @@ impl From<&Config> for Codegen {
         let (backends_ty, backends_def) = emit_backends(host_entries, config.cache.as_ref());
 
         let main_options = emit_main_options(config);
-        let acquirer_hook =
+        let extend_hook =
             (!config.locations.is_empty()).then(|| emit_locations_hook(config, &backends_ty));
 
         Self {
@@ -41,7 +41,7 @@ impl From<&Config> for Codegen {
             backends_ty,
             backends_def,
             main_options,
-            acquirer_hook,
+            extend_hook,
             link_plugins: config.plugins_declared,
         }
     }
@@ -59,12 +59,13 @@ fn emit_main_options(config: &Config) -> TokenStream {
     }
 }
 
-/// Emit the `Wiring::acquirer` hook for the declarative `locations:` list:
-/// path entries fold in declaration order into one `PathAcquire` (opened
+/// Emit the `Wiring::extend` hook for the declarative `locations:` list:
+/// path entries fold in declaration order into one `PathMounts` (opened
 /// fail-fast) filling the `Acquirer`'s path slot, the registry entry becomes
-/// a `RegistryAcquire` — cached in the `cache:` backend when one is declared
+/// a `RegistryClient` — cached in the `cache:` backend when one is declared
 /// — filling its registry slot; a kind with no entry stays `None` and
-/// refuses typed at run time.
+/// refuses typed at run time. The built `Acquirer` installs through
+/// `omnia::Plugins::install`.
 fn emit_locations_hook(config: &Config, backends_ty: &TokenStream) -> TokenStream {
     let paths: Vec<TokenStream> = config
         .locations
@@ -83,10 +84,7 @@ fn emit_locations_hook(config: &Config, backends_ty: &TokenStream) -> TokenStrea
         quote!(None)
     } else {
         quote! {
-            Some(::std::sync::Arc::new(
-                omnia::PathAcquire::new([#(#paths,)*])
-                    .expect("opening plugins locations"),
-            ))
+            Some(::std::sync::Arc::new(omnia::PathMounts::new([#(#paths,)*])?))
         }
     };
     let registry_slot = registry.map_or_else(
@@ -101,21 +99,27 @@ fn emit_locations_hook(config: &Config, backends_ty: &TokenStream) -> TokenStrea
                 }
             });
             quote! {
-                Some(::std::sync::Arc::new(omnia::RegistryAcquire::new(#endpoint) #cached))
+                Some(::std::sync::Arc::new(omnia::RegistryClient::new(#endpoint) #cached))
             }
         },
     );
-    // The bundle goes unused without a `cache:` backend to clone out of it.
-    let param = if config.cache.is_some() { quote!(backends) } else { quote!(_backends) };
+    // The bundle is only reached for a `cache:` backend to clone out of it.
+    let bind_backends = config.cache.is_some().then(|| {
+        quote! {
+            let backends = runtime.backends();
+        }
+    });
 
     quote! {
-        fn acquirer(
-            #param: &#backends_ty,
-        ) -> Option<omnia::Acquirer> {
-            Some(omnia::Acquirer {
-                registry: #registry_slot,
-                path: #path_slot,
-            })
+        fn extend(runtime: &omnia::Runtime<#backends_ty>) -> Result<()> {
+            #bind_backends
+            omnia::Plugins::install(
+                runtime,
+                omnia::Acquirer {
+                    registry: #registry_slot,
+                    path: #path_slot,
+                },
+            )
         }
     }
 }

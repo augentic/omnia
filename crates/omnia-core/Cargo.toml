@@ -1,6 +1,6 @@
 [package]
-name = "omnia"
-description = "Ergonomic WebAssembly component runtime built on wasmtime with pluggable WASI host services"
+name = "omnia-core"
+description = "Runtime core of the omnia WebAssembly component runtime: deployment, registry, dispatch, and the capability-crate seam"
 readme = "README.md"
 authors.workspace = true
 categories.workspace = true
@@ -68,8 +68,6 @@ tracing-opentelemetry = { workspace = true, optional = true }
 tracing-subscriber.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "rt", "sync", "time"] }
 tokio-util = { workspace = true, features = ["codec"] }
-omnia-host-macros.workspace = true
-omnia-plugin.workspace = true
 wasm-tokio.workspace = true
 wasmtime = { workspace = true, features = ["runtime"] }
 wasmtime-wasi.workspace = true
@@ -79,4 +77,7 @@ wrpc-wasmtime.workspace = true
 # wrpc-runtime-wasmtime.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# Path-only (stripped at publish): integration and doc tests exercise the
+# embedder surface, so they import through the `omnia` facade.
+omnia = { path = "../omnia" }
 test-utils.workspace = true

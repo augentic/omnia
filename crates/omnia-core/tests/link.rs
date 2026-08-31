@@ -27,7 +27,7 @@ async fn boot(guests: &[(&str, &str)]) -> Result<Runtime<()>> {
         .build::<StoreCtx<()>>()
         .await
         .context("building deployment")?;
-    Runtime::new(deployment, |_| Ok(()), |()| None).await
+    Runtime::new(deployment, |_| Ok(()), |_| Ok(())).await
 }
 
 /// Instantiate `guest` fresh and drive its exported `func` with one string

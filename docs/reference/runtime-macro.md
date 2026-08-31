@@ -113,7 +113,7 @@ omnia::runtime!({
 
 ### Plugin locations (`locations:` and `cache:`)
 
-The `locations:` list declares the deployment's acquisition roots; the macro lowers them into the built-in acquirers, each filling its location kind's slot in the `Acquirer` the generated `Wiring::acquirer` hook builds:
+The `locations:` list declares the deployment's acquisition roots; the macro lowers them into the built-in acquirers, each filling its location kind's slot in the `Acquirer` the generated `Wiring::extend` hook installs through `omnia::Plugins::install`:
 
 ```rust
 omnia::runtime!({
@@ -136,12 +136,12 @@ omnia::runtime!({
 
 An entry takes one of two shapes:
 
-- **`{ name: ..., path: ... }`** — a named root for path loads. All path entries fold, in declaration order, into one `omnia::PathAcquire`, whose directories open when the runtime assembles — a missing root fails startup rather than surfacing per load. A guest's `loader.load` names the location it resolves against; guests conventionally write paths relative to their mounts, so keep location names aligned with the mount names guests see.
-- **`{ registry: ... }`** — the deployment's default registry endpoint for exact `namespace:name@version` package references, lowered to `omnia::RegistryAcquire`. At most one entry; a load's own location may still override the endpoint per load.
+- **`{ name: ..., path: ... }`** — a named root for path loads. All path entries fold, in declaration order, into one `omnia::PathMounts`, whose directories open when the runtime assembles — a missing root fails startup rather than surfacing per load. A guest's `loader.load` names the location it resolves against; guests conventionally write paths relative to their mounts, so keep location names aligned with the mount names guests see.
+- **`{ registry: ... }`** — the deployment's default registry endpoint for exact `namespace:name@version` package references, lowered to `omnia::RegistryClient`. At most one entry; a load's own location may still override the endpoint per load.
 
 Each load routes by its location kind — path loads to the path acquirer, registry loads to the registry acquirer — and a kind with no entry refuses typed. Routing is structural kind selection, never failure recovery.
 
-`cache:` names a backend type: it joins the generated `Backends` bundle exactly like a `hosts:` backend (env-connected, deduplicated — naming a backend a `hosts:` row already connects shares that connection), and its connected value must implement `omnia::PluginStore` (`ContentStore` + `ReleaseStore`). The macro attaches it to the registry acquirer (`RegistryAcquire::cached`), keeping resolution fresh-release-preferred: a reachable registry stays the authority, while the store answers content by digest and carries loads across registry unavailability.
+`cache:` names a backend type: it joins the generated `Backends` bundle exactly like a `hosts:` backend (env-connected, deduplicated — naming a backend a `hosts:` row already connects shares that connection), and its connected value must implement `omnia::PluginStore` (`ContentStore` + `ReleaseStore`). The macro attaches it to the registry acquirer (`RegistryClient::cached`), keeping resolution fresh-release-preferred: a reachable registry stays the authority, while the store answers content by digest and carries loads across registry unavailability.
 
 The grammar's refusals are all compile-time, spanned to the offending key: an empty `locations:` list, a second `registry` entry, and a `cache:` without a `{ registry: ... }` entry to attach to are each rejected with a pointed diagnostic.
 

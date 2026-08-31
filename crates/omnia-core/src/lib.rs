@@ -6,10 +6,10 @@
 mod cli;
 mod deployment;
 mod dispatch;
+mod extensions;
 mod host;
 mod mount;
 mod options;
-mod plugins;
 mod registry;
 mod runtime;
 mod store;
@@ -17,7 +17,6 @@ pub mod telemetry;
 
 #[cfg(feature = "cli")]
 pub use clap::Parser;
-pub use omnia_host_macros::runtime;
 #[doc(hidden)]
 pub use pastey;
 #[doc(hidden)]
@@ -35,6 +34,7 @@ pub use self::dispatch::{
     Dispatcher, FirstArgSelector, GuestSelector, LinkClient, WrpcState, as_command_chain,
     serve_links,
 };
+pub use self::extensions::Extensions;
 pub use self::host::{
     Backend, FromEnv, FutureResult, HasTable, Host, HostCtx, NoOptions, Provides, Proxy, Server,
     get_cloned,
@@ -43,20 +43,15 @@ pub use self::mount::{MountRegistry, ResolvedPreopen};
 pub use self::options::RuntimeOptions;
 #[cfg(feature = "jit")]
 pub use self::options::compile;
-pub use self::plugins::{
-    AcquirePath, AcquireRegistry, Acquirer, ContentStore, LoadError, Location, NoStore,
-    PathAcquire, Plugin, PluginLoader, PluginStore, RegistryAcquire, ReleaseRecord, ReleaseStore,
-    WasiPlugins, WasiPluginsCtxView, WasiPluginsView,
-};
 pub use self::registry::{
     CliRoutes, Guest, GuestId, HttpRoutes, PatternRoutes, Registry, Routes, TriggerRouter,
 };
-pub use self::runtime::{Backends, ExitStatus, Mode, Runtime, Wiring};
+pub use self::runtime::{AdmitError, Backends, ExitStatus, Mode, Runtime, WeakRuntime, Wiring};
 #[doc(hidden)]
 pub use self::runtime::{MainOptions, ManifestSource, main, run, run_precompiled};
 pub use self::store::{
-    HasDispatcher, HasLimits, HasMounts, HttpBorrow, HttpCtx, StoreBase, StoreConfig, StoreCtx,
-    StoreView,
+    HasDispatcher, HasExtensions, HasLimits, HasMounts, HttpBorrow, HttpCtx, StoreBase,
+    StoreConfig, StoreCtx, StoreView,
 };
 pub use self::telemetry::{LogMode, Telemetry};
 

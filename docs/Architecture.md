@@ -60,7 +60,7 @@ This separation allows the same guest to run with different backends — swap th
 │  Abstract service capabilities defined by WIT interfaces        │
 │  Examples: wasi-keyvalue, wasi-messaging, wasi-model            │
 ├─────────────────────────────────────────────────────────────────┤
-│  Layer 1: Runtime core (crates/omnia)                           │
+│  Layer 1: Runtime core (crates/omnia-core + capability crates) │
 │  wasmtime engine, CLI, deployment/registry, dispatch, traits    │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -69,9 +69,9 @@ Layers 1 and 2 form the **runtime core** — domain-agnostic infrastructure that
 
 ## Crate Organization
 
-### Runtime core (`crates/omnia`)
+### Runtime core (`crates/omnia-core`) and the `omnia` facade
 
-The foundation of the runtime. Provides:
+The foundation of the runtime is `omnia-core`; embedders depend on the thin `omnia` facade crate, which re-exports core, the `omnia-plugin` capability crate, and the `runtime!` macro under one root (`omnia::…` paths). Capability crates like `omnia-plugin` sit between the two: they build on core's extension seam (`Wiring::extend` + `Extensions`, plus the privileged `Runtime::admit` admission API) and surface through the facade. The core provides:
 
 - **CLI infrastructure**: the `run` subcommand (and `compile`, with the `jit` feature)
 - **Deployment pipeline**: `DeploymentBuilder` builds a deployment from a `Manifest` (loaded from `omnia.toml`, synthesized from a single `.wasm`, or constructed programmatically), `Registry` holds pre-instantiated guests
@@ -166,7 +166,7 @@ All of this is declared in the `omnia.toml` manifest ([reference](reference/conf
 
 1. **CLI parsing** — the generated `main` delegates to `omnia::main`, which parses the `run` subcommand, resolves the deployment source into a `Manifest` (`--config`, then `OMNIA_CONFIG`, then a positional `<wasm>` via `Manifest::from_wasm`, then the compiled-in default), and appends CLI `--mount`/`--plugins` entries onto it.
 2. **Build** — `DeploymentBuilder` validates the manifest, resolves mounts, compiles guests, and returns a `Deployment` ready for host linking.
-3. **Assemble** — `Runtime::new` runs `Wiring::link` (each host's `add_to_linker`), connects backends (`Backends::connect`), installs the `Wiring::acquirer` plugin-acquisition policy, and builds the `Registry` (pre-instantiating every guest).
+3. **Assemble** — `Runtime::new` runs `Wiring::link` (each host's `add_to_linker`), connects backends (`Backends::connect`), builds the `Registry` (pre-instantiating every guest), then runs the `Wiring::extend` hook to install capability extensions (such as the plugin acquisition policy).
 4. **Bootstrap** — starts epoch interruption and pool-metric sampling, wires host-mediated link servers, then logs **`omnia ready`**.
 5. **Drive** — command mode invokes the guest's `wasi:cli/run` once and exits with its status; server mode awaits every trigger server.
 6. **Request handling** (server mode) — trigger hosts (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`) accept requests, route to a guest, instantiate it in a fresh store, and return the response.
@@ -200,11 +200,12 @@ The consolidated list is in [Configuration](reference/configuration.md); individ
 ```text
 omnia/
 ├── crates/
-│   ├── omnia/              # Runtime core (engine, CLI, deployment, registry, dispatch)
+│   ├── omnia/              # Embedder facade (re-exports omnia-core + omnia-plugin + runtime!)
+│   ├── omnia-core/         # Runtime core (engine, CLI, deployment, registry, dispatch)
 │   ├── omnia-guest/        # Guest SDK (Handler/Client/Context, HTTP/messaging routers, errors, ORM, MCP)
 │   ├── guest-macros/       # #[instrument] proc macro
 │   ├── host-macros/        # runtime! proc-macro
-│   ├── omnia-plugin/       # Acquirer seam (re-exported by omnia)
+│   ├── omnia-plugin/       # Plugins capability (loader host + acquisition; re-exported by omnia)
 │   └── wasi-*/             # WASI interface implementations
 │       ├── src/
 │       │   ├── guest.rs    # Guest bindings (wasm32)

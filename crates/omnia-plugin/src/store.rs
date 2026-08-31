@@ -1,4 +1,4 @@
-//! Persistence behind [`RegistryAcquire`](crate::RegistryAcquire):
+//! Persistence behind [`RegistryClient`](crate::RegistryClient):
 //! content-addressed bytes and per-registry release records.
 //!
 //! The store is a byte cache and offline fallback, never an authority: the
@@ -15,7 +15,7 @@ use futures::FutureExt as _;
 use futures::future::BoxFuture;
 use sha2::{Digest as _, Sha256};
 
-/// Both halves of the persistence behind [`RegistryAcquire`](crate::RegistryAcquire).
+/// Both halves of the persistence behind [`RegistryClient`](crate::RegistryClient).
 pub trait PluginStore: ContentStore + ReleaseStore {}
 
 impl<T: ContentStore + ReleaseStore> PluginStore for T {}
@@ -69,7 +69,7 @@ pub struct ReleaseRecord {
 }
 
 /// The cacheless [`PluginStore`], the default for
-/// [`RegistryAcquire`](crate::RegistryAcquire).
+/// [`RegistryClient`](crate::RegistryClient).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NoStore;
 

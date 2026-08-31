@@ -58,7 +58,7 @@ Most deployments only touch the `runtime!` macro; a hand-written runtime instead
 
 The runtime and its included services are configured via environment variables:
 
-- **`RUST_LOG`**: Controls logging verbosity (e.g., `info`, `debug`, `omnia=trace`). Noisy dependencies (`hyper`, `h2`, `tonic`, `opentelemetry`, `opentelemetry_sdk`, `omnia_wasi_otel`) are always muted. Direct-command binaries (`runtime!` with `mode: command` and a compiled-in deployment) also reserve the host log flags `--debug` / `--quiet`, which are peeled from argv and win over `RUST_LOG`.
+- **`RUST_LOG`**: Controls logging verbosity (e.g., `info`, `debug`, `omnia_core=trace`). Noisy dependencies (`hyper`, `h2`, `tonic`, `opentelemetry`, `opentelemetry_sdk`, `omnia_wasi_otel`) are always muted. Direct-command binaries (`runtime!` with `mode: command` and a compiled-in deployment) also reserve the host log flags `--debug` / `--quiet`, which are peeled from argv and win over `RUST_LOG`.
 - **`OTEL_GRPC_URL`**: OTLP gRPC endpoint for exporting host traces and metrics. Unset uses OpenTelemetry defaults (`http://localhost:4317`).
 
 ## Telemetry
@@ -80,6 +80,8 @@ Telemetry::new("my-service")
 Initialization is idempotent: the first `build` in the process installs the subscriber and providers, and later calls are no-ops that reuse them, so an embedder initializing telemetry itself and the runtime's own startup never conflict. Telemetry is batch-exported; the runtime flushes it at the end of every run so it survives fast command-mode exits, and embedders driving work themselves can call `omnia::telemetry::flush()` before the process exits. The `OTEL_GRPC_URL` environment variable is respected when set; when unset, OpenTelemetry defaults apply. Export errors from a missing collector never reach the console: the subscriber's filter always mutes the `opentelemetry` and `opentelemetry_sdk` targets.
 
 ## Architecture
+
+`omnia` is a thin facade: the runtime spine lives in `omnia-core` and the `omnia:plugins/loader` capability in `omnia-plugin`, both re-exported here under one root together with the `runtime!` macro — the paths embedders (and the macro's generated code) use never name the underlying crates. Depend on `omnia-core` directly only when building a capability crate of your own.
 
 See the [workspace documentation](https://github.com/augentic/omnia) for the full architecture guide and list of available WASI interface crates.
 

@@ -1,11 +1,27 @@
-//! # Plugin acquisition
+//! # Late-bound plugins
 //!
-//! The [`Acquirer`] seam behind the `omnia:plugins/loader` capability, plus
-//! its built-in acquirers. An `Acquirer` is a value the embedder compiles in
-//! at the composition root — one slot per [`Location`] kind — so the runtime
-//! core keeps zero storage and network dependencies. Store implementors
-//! depend on this crate for [`ContentStore`] and [`ReleaseStore`].
+//! The `omnia:plugins/loader` capability crate: a guest names code (package,
+//! location, optional sha256 pin) and the host acquires, verifies, and admits
+//! it through the runtime's admission seam, handing back a typed [`Plugin`]
+//! handle. Component bytes never cross the interface in either direction, and
+//! the requester receives no lifecycle authority — validation, compilation,
+//! and publication stay host-side, bounded by the deployment's declared
+//! plugin interfaces.
+//!
+//! Everything plugin lives here: the [`WasiPlugins`] host binding, the
+//! [`LoadPlugin`] load path, and the acquisition seam. Acquisition policy
+//! (endpoints, cache, path reads) is the embedder's [`Acquirer`] value — one
+//! slot per [`Location`] kind — installed by [`Plugins::install`] from the
+//! deployment's [`Wiring::extend`](omnia_core::Wiring::extend) hook (the
+//! `runtime!` macro's `plugins: { locations: [...] }` list lowers into it).
+//! The built-in acquirers are [`PathMounts`] and [`RegistryClient`]; store
+//! implementors depend on this crate for [`ContentStore`] and
+//! [`ReleaseStore`]. The runtime core keeps zero storage and network
+//! dependencies.
 
+mod digest;
+mod host;
+mod loader;
 mod path;
 mod registry;
 mod store;
@@ -13,8 +29,10 @@ mod store;
 use std::fmt;
 use std::sync::Arc;
 
-pub use self::path::{AcquirePath, PathAcquire};
-pub use self::registry::{AcquireRegistry, RegistryAcquire};
+pub use self::host::{WasiPlugins, WasiPluginsCtxView, WasiPluginsView};
+pub use self::loader::{LoadError, LoadPlugin, Plugin, PluginLoader, Plugins};
+pub use self::path::{PathMounts, PathSource};
+pub use self::registry::{RegistryClient, RegistrySource};
 pub use self::store::{
     ContentStore, NoStore, PluginStore, ReleaseRecord, ReleaseStore, sha256_digest,
 };
@@ -44,7 +62,7 @@ impl fmt::Display for Location {
 #[derive(Clone, Default)]
 pub struct Acquirer {
     /// Serves [`Location::Registry`] loads.
-    pub registry: Option<Arc<dyn AcquireRegistry>>,
+    pub registry: Option<Arc<dyn RegistrySource>>,
     /// Serves [`Location::Path`] loads.
-    pub path: Option<Arc<dyn AcquirePath>>,
+    pub path: Option<Arc<dyn PathSource>>,
 }

@@ -239,7 +239,8 @@ fn filter(mode: Option<LogMode>) -> Result<EnvFilter> {
     let base = match mode {
         Some(LogMode::Quiet) => return Ok(EnvFilter::new("off")),
         Some(LogMode::Debug) => EnvFilter::new("info")
-            .add_directive("omnia=debug".parse()?)
+            .add_directive("omnia_core=debug".parse()?)
+            .add_directive("omnia_plugin=debug".parse()?)
             .add_directive("omnia_cursor=debug".parse()?)
             .add_directive("omnia_wasi_http=debug".parse()?),
         Some(LogMode::Progress) if env::var_os(EnvFilter::DEFAULT_ENV).is_none() => {
@@ -255,7 +256,7 @@ fn filter(mode: Option<LogMode>) -> Result<EnvFilter> {
         .add_directive("opentelemetry_sdk=off".parse()?)
         .add_directive("omnia_wasi_otel=off".parse()?);
     if mode.is_some() {
-        base = base.add_directive("omnia::telemetry=off".parse()?);
+        base = base.add_directive("omnia_core::telemetry=off".parse()?);
     }
     Ok(base)
 }
@@ -391,13 +392,14 @@ mod tests {
             let rendered = directives(Some(LogMode::Debug));
             for directive in [
                 "info",
-                "omnia=debug",
+                "omnia_core=debug",
+                "omnia_plugin=debug",
                 "omnia_cursor=debug",
                 "omnia_wasi_http=debug",
                 "opentelemetry=off",
                 "opentelemetry_sdk=off",
                 "omnia_wasi_otel=off",
-                "omnia::telemetry=off",
+                "omnia_core::telemetry=off",
             ] {
                 assert!(rendered.contains(directive), "missing `{directive}` in `{rendered}`");
             }
@@ -410,7 +412,7 @@ mod tests {
                 assert!(rendered.contains(directive), "missing `{directive}` in `{rendered}`");
             }
             assert!(
-                !rendered.contains("omnia::telemetry=off"),
+                !rendered.contains("omnia_core::telemetry=off"),
                 "the env-only path keeps flush warnings visible: `{rendered}`"
             );
         }

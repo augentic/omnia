@@ -10,7 +10,7 @@ use futures::FutureExt as _;
 use futures::future::BoxFuture;
 
 /// Path acquisition policy — the [`Acquirer::path`](crate::Acquirer::path) slot.
-pub trait AcquirePath: Send + Sync + 'static {
+pub trait PathSource: Send + Sync + 'static {
     /// Produce the raw component bytes at the location-relative `path`.
     fn acquire<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<Vec<u8>>>;
 }
@@ -18,17 +18,17 @@ pub trait AcquirePath: Send + Sync + 'static {
 /// Path acquisition over named `(name, directory)` roots, resolved like guest
 /// preopens and read fresh on every load.
 #[derive(Debug)]
-pub struct PathAcquire {
-    entries: Vec<MountEntry>,
+pub struct PathMounts {
+    entries: Vec<Mount>,
 }
 
 #[derive(Clone, Debug)]
-struct MountEntry {
+struct Mount {
     name: String,
     dir: Arc<cap_std::fs::Dir>,
 }
 
-impl PathAcquire {
+impl PathMounts {
     /// Opens every `(name, path)` entry now, surfacing a bad location as a
     /// configuration error before any load.
     ///
@@ -47,7 +47,7 @@ impl PathAcquire {
             let dir = Dir::open_ambient_dir(path, ambient_authority()).with_context(|| {
                 format!("opening plugins location `{name}` at {}", path.display())
             })?;
-            opened.push(MountEntry {
+            opened.push(Mount {
                 name,
                 dir: Arc::new(dir),
             });
@@ -56,13 +56,13 @@ impl PathAcquire {
     }
 }
 
-impl AcquirePath for PathAcquire {
+impl PathSource for PathMounts {
     fn acquire<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<Vec<u8>>> {
         read_entry(path, &self.entries).boxed()
     }
 }
 
-async fn read_entry(path: &str, entries: &[MountEntry]) -> Result<Vec<u8>> {
+async fn read_entry(path: &str, entries: &[Mount]) -> Result<Vec<u8>> {
     let (dir, subpath) = resolve(path, entries)?;
     // File reads are blocking I/O; keep them off the async executor.
     tokio::task::spawn_blocking(move || {
@@ -75,8 +75,8 @@ async fn read_entry(path: &str, entries: &[MountEntry]) -> Result<Vec<u8>> {
 // Resolve `path` to a location's capability handle plus the subpath within
 // it, longest location-name prefix first. The subpath must be plain and
 // relative — cap-std then refuses any escape at open time.
-fn resolve(path: &str, entries: &[MountEntry]) -> Result<(Arc<cap_std::fs::Dir>, String)> {
-    let mut best: Option<(&MountEntry, &str)> = None;
+fn resolve(path: &str, entries: &[Mount]) -> Result<(Arc<cap_std::fs::Dir>, String)> {
+    let mut best: Option<(&Mount, &str)> = None;
     for entry in entries {
         let subpath = if path == entry.name {
             ""

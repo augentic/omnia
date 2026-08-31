@@ -18,13 +18,13 @@
   `internal`); a deployment guest's identity can never be re-bound, and a
   conflicting re-pin of an active package refuses. Acquisition policy is the
   new `Acquirer` — a composition-root value with one slot per location kind
-  (`AcquireRegistry`, `AcquirePath`), built by the `runtime!` macro's
-  `Wiring::acquirer` hook from the declarative
+  (`RegistrySource`, `PathSource`), installed through `Plugins::install` by
+  the `runtime!` macro's generated `Wiring::extend` hook from the declarative
   `plugins: { locations: [...] }` list; loads route structurally by kind and
   an empty slot refuses typed. The built-in acquirers ship
-  in `omnia-plugin` and re-export: `PathAcquire` (named directory roots
+  in `omnia-plugin` and re-export: `PathMounts` (named directory roots
   opened fail-fast at startup, read fresh on every load) and
-  `RegistryAcquire` (exact `namespace:name@version` references
+  `RegistryClient` (exact `namespace:name@version` references
   from a compiled-in default registry endpoint, verified against the
   registry's content digest, fresh-release-preferred when the `cache:`
   backend attaches a `PluginStore` — `ContentStore` for digest-keyed
@@ -66,6 +66,23 @@
 
 ### Changed
 
+- The `omnia` crate splits into `omnia-core` (the runtime spine: deployment,
+  registry, dispatch, stores, telemetry, CLI) and a thin `omnia` facade that
+  re-exports core, `omnia-plugin`, and the `runtime!` macro under the
+  existing paths — embedder imports are unchanged. `omnia-plugin` is now the
+  whole plugins capability: the loader WIT and `WasiPlugins` host binding,
+  the `LoadPlugin` load path, digest policy, and the acquisition seam all
+  live there, built on two intentional core seams that future capability
+  crates reuse: `Runtime::admit` (the one privileged operation — safe
+  validation, seam-export check, atomic registration; typed `AdmitError`)
+  and the `Extensions` typemap (capability state installed by the new
+  `Wiring::extend` hook — replacing `Wiring::acquirer` — and read back from
+  stores through `HasExtensions`; state that calls back into the runtime
+  holds a `WeakRuntime` via `Runtime::downgrade`). `Runtime::new`'s third
+  parameter is now the extend hook (`FnOnce(&Runtime<B>) -> Result<()>`);
+  `StoreConfig::loader`/`StoreBase::loader` are replaced by the `extensions`
+  handle, and loader digest bookkeeping moved into `omnia-plugin`, pruned
+  lazily under the load lock instead of on deregistration.
 - Host wiring is trait-carried, not name-derived (pre-1.0 hard cut, no
   aliases). Omnia core gains `HostCtx` (the host's borrow shape and view
   assembly, `Borrow<'a>` GAT + `view`), `Provides<H>` (the one
@@ -103,7 +120,7 @@
   block: `plugins: { interfaces: [...], locations: [...], cache: ... }`. The
   declarative `locations:` list is the acquisition policy — named path roots
   and at most one registry endpoint, lowered into the built-in
-  `PathAcquire`/`RegistryAcquire` acquirers slotted by location kind —
+  `PathMounts`/`RegistryClient` acquirers slotted by location kind —
   and the optional `cache:` names the backend that joins the generated
   bundle as the registry's `PluginStore`. Both keys are optional (a
   deployment that only does host-mediated dispatch needs no acquirer; loads

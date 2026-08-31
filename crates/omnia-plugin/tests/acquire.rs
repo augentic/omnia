@@ -9,8 +9,8 @@ use std::sync::{Arc, Mutex};
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
 use omnia_plugin::{
-    AcquirePath as _, AcquireRegistry as _, ContentStore, PathAcquire, RegistryAcquire,
-    ReleaseRecord, ReleaseStore, sha256_digest,
+    ContentStore, PathMounts, PathSource as _, RegistryClient, RegistrySource as _, ReleaseRecord,
+    ReleaseStore, sha256_digest,
 };
 use tempfile::TempDir;
 use wasm_pkg_client::{Config, Registry};
@@ -50,10 +50,10 @@ fn add_local_registry(config: &mut Config, name: &str, root: &Path) {
 }
 
 /// A cacheless acquirer whose default registry is a local backend at `root`.
-fn registry_acquirer(root: &Path) -> RegistryAcquire {
+fn registry_acquirer(root: &Path) -> RegistryClient {
     let mut config = Config::empty();
     add_local_registry(&mut config, DEFAULT_REGISTRY, root);
-    RegistryAcquire::new(DEFAULT_REGISTRY).with_config(config)
+    RegistryClient::new(DEFAULT_REGISTRY).with_config(config)
 }
 
 type ReleaseKey = (String, String, String);
@@ -155,20 +155,20 @@ async fn network_failure_falls_back_to_stored_record() {
     // local backend mapping.
     let mut config = Config::empty();
     add_local_registry(&mut config, UNROUTABLE_REGISTRY, registry.path());
-    let warm = RegistryAcquire::new(UNROUTABLE_REGISTRY).with_config(config).cached(store.clone());
+    let warm = RegistryClient::new(UNROUTABLE_REGISTRY).with_config(config).cached(store.clone());
     warm.acquire(PACKAGE, None).await.expect("warms the store");
 
     // Same registry name and store, no backend mapping: resolution now dials
     // the closed port and fails as a network error, so the stored record and
     // content serve the load.
-    let offline = RegistryAcquire::new(UNROUTABLE_REGISTRY).cached(store);
+    let offline = RegistryClient::new(UNROUTABLE_REGISTRY).cached(store);
     let bytes = offline.acquire(PACKAGE, None).await.expect("falls back");
     assert_eq!(bytes, b"component bytes");
 }
 
 #[tokio::test]
 async fn network_failure_without_record_refuses() {
-    let acquirer = RegistryAcquire::new(UNROUTABLE_REGISTRY).cached(MemStore::default());
+    let acquirer = RegistryClient::new(UNROUTABLE_REGISTRY).cached(MemStore::default());
 
     let error = acquirer.acquire(PACKAGE, None).await.expect_err("nothing stored to fall back to");
     assert!(format!("{error:#}").contains("resolving"), "resolution failure: {error:?}");
@@ -202,7 +202,7 @@ async fn release_records_scoped_per_registry() {
     add_local_registry(&mut config, DEFAULT_REGISTRY, default_root.path());
     add_local_registry(&mut config, "override.test", override_root.path());
     let acquirer =
-        RegistryAcquire::new(DEFAULT_REGISTRY).with_config(config).cached(MemStore::default());
+        RegistryClient::new(DEFAULT_REGISTRY).with_config(config).cached(MemStore::default());
 
     let default_bytes = acquirer.acquire(PACKAGE, None).await.expect("default acquires");
     assert_eq!(default_bytes, b"default registry bytes");
@@ -243,7 +243,7 @@ async fn unversioned_and_missing_packages_refuse() {
 async fn path_acquire_serves_its_own_locations() {
     let root = TempDir::new().expect("location dir");
     std::fs::write(root.path().join("plugin.wasm"), b"located bytes").expect("staging component");
-    let acquirer = PathAcquire::new([(".", root.path())]).expect("locations open at construction");
+    let acquirer = PathMounts::new([(".", root.path())]).expect("locations open at construction");
 
     let prefixed = acquirer.acquire("./plugin.wasm").await.expect("prefixed path reads");
     assert_eq!(prefixed, b"located bytes");
@@ -263,7 +263,7 @@ async fn longest_location_name_wins() {
     std::fs::write(inner.path().join("p.wasm"), b"inner").expect("staging component");
     std::fs::create_dir_all(outer.path().join("inner")).expect("creating decoy");
     std::fs::write(outer.path().join("inner").join("p.wasm"), b"outer").expect("staging decoy");
-    let acquirer = PathAcquire::new([("adapters", outer.path()), ("adapters/inner", inner.path())])
+    let acquirer = PathMounts::new([("adapters", outer.path()), ("adapters/inner", inner.path())])
         .expect("locations open");
 
     let bytes = acquirer.acquire("adapters/inner/p.wasm").await.expect("longest prefix reads");
@@ -273,7 +273,7 @@ async fn longest_location_name_wins() {
 #[tokio::test]
 async fn unlocated_path_and_missing_file_fail() {
     let root = TempDir::new().expect("location dir");
-    let acquirer = PathAcquire::new([("adapters", root.path())]).expect("location opens");
+    let acquirer = PathMounts::new([("adapters", root.path())]).expect("location opens");
 
     acquirer.acquire("elsewhere/p.wasm").await.expect_err("no location matches");
     acquirer.acquire("adapters/absent.wasm").await.expect_err("file is absent");
@@ -281,7 +281,7 @@ async fn unlocated_path_and_missing_file_fail() {
 
 #[tokio::test]
 async fn path_acquire_opens_fail_fast() {
-    let error = PathAcquire::new([("adapters", "/no/such/directory")])
+    let error = PathMounts::new([("adapters", "/no/such/directory")])
         .expect_err("a missing location refuses at construction");
     assert!(format!("{error:#}").contains("adapters"), "the refusal names the location: {error}");
 }

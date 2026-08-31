@@ -16,7 +16,7 @@ use crate::store::{
 
 /// Registry acquisition policy — the
 /// [`Acquirer::registry`](crate::Acquirer::registry) slot.
-pub trait AcquireRegistry: Send + Sync + 'static {
+pub trait RegistrySource: Send + Sync + 'static {
     /// Produce the raw component bytes for `package` from `registry`
     /// (`None` selects the acquirer's default endpoint).
     fn acquire<'a>(
@@ -24,7 +24,7 @@ pub trait AcquireRegistry: Send + Sync + 'static {
     ) -> BoxFuture<'a, Result<Vec<u8>>>;
 }
 
-/// Registry acquisition over [wasm-pkg-client].
+/// Registry acquisition using [wasm-pkg-client].
 ///
 /// Fetches exact `namespace:name@version` references only, verifying every
 /// result against the registry's content digest. The attached [`PluginStore`]
@@ -32,16 +32,14 @@ pub trait AcquireRegistry: Send + Sync + 'static {
 /// registry is reachable.
 ///
 /// [wasm-pkg-client]: https://github.com/bytecodealliance/wasm-pkg-tools
-pub struct RegistryAcquire<S = NoStore> {
+pub struct RegistryClient<S = NoStore> {
     default_registry: String,
     config: Config,
     store: S,
-    // One client per effective registry: `Client` resolves endpoints from
-    // its `Config`, not per call, so each endpoint override needs its own.
     clients: Mutex<HashMap<Registry, Client>>,
 }
 
-impl RegistryAcquire<NoStore> {
+impl RegistryClient<NoStore> {
     /// Cacheless acquirer whose default endpoint is `default_registry`.
     ///
     /// Starts from an empty client configuration — no user-global wasm-pkg
@@ -58,7 +56,7 @@ impl RegistryAcquire<NoStore> {
     }
 }
 
-impl<S: PluginStore> RegistryAcquire<S> {
+impl<S: PluginStore> RegistryClient<S> {
     /// Replaces the client configuration (per-registry backend and
     /// credential settings).
     #[must_use]
@@ -69,8 +67,8 @@ impl<S: PluginStore> RegistryAcquire<S> {
 
     /// Attaches a [`PluginStore`] as byte cache and offline fallback.
     #[must_use]
-    pub fn cached<S2: PluginStore>(self, store: S2) -> RegistryAcquire<S2> {
-        RegistryAcquire {
+    pub fn cached<S2: PluginStore>(self, store: S2) -> RegistryClient<S2> {
+        RegistryClient {
             default_registry: self.default_registry,
             config: self.config,
             store,
@@ -136,7 +134,7 @@ impl<S: PluginStore> RegistryAcquire<S> {
     }
 }
 
-impl<S: PluginStore> AcquireRegistry for RegistryAcquire<S> {
+impl<S: PluginStore> RegistrySource for RegistryClient<S> {
     fn acquire<'a>(
         &'a self, package: &'a str, registry: Option<&'a str>,
     ) -> BoxFuture<'a, Result<Vec<u8>>> {

@@ -53,7 +53,9 @@ The [`examples/`](examples/README.md) directory contains a complete working gues
 
 | Crate                                           | Description                                                                                |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| [`omnia`](crates/omnia)                         | Core runtime — wasmtime wrapper with CLI, deployment registry, dispatch, and telemetry    |
+| [`omnia`](crates/omnia)                         | Embedder facade — re-exports the runtime core, the plugins capability, and `runtime!`     |
+| [`omnia-core`](crates/omnia-core)               | Runtime core — wasmtime wrapper with CLI, deployment registry, dispatch, and telemetry    |
+| [`omnia-plugin`](crates/omnia-plugin)           | `omnia:plugins/loader` capability — loader host, acquisition policies, and plugin stores  |
 | [`omnia-guest`](crates/omnia-guest)             | Guest SDK — `Handler`/`Client`/`Context`, HTTP/messaging routers, errors, ORM, and MCP support |
 | [`omnia-guest-macros`](crates/guest-macros)     | `#[instrument]` observability attribute for guests                                         |
 | [`omnia-host-macros`](crates/host-macros)       | `runtime!` proc-macro for host runtime generation                                          |

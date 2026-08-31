@@ -3,21 +3,21 @@
 mod command;
 mod entry;
 
-use std::env;
 use std::future::Future;
 use std::process::ExitCode;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
+use std::{env, fmt};
 
 use anyhow::{Context as _, Result};
 pub use entry::{MainOptions, ManifestSource};
-use wasmtime::component::{Component, Instance, InstancePre};
+use wasmtime::component::{Component, Instance, InstancePre, types};
 use wasmtime::{Engine, Store};
 
-use crate::deployment::GuestArtifact;
+use crate::deployment::{ELF_MAGIC, GuestArtifact};
 use crate::dispatch::{serve_guest, serve_links};
+use crate::extensions::Extensions;
 use crate::mount::MountRegistry;
-use crate::plugins::{Acquirer, PluginLoader, PluginsState};
 use crate::registry::{Guest, GuestId, HttpRoutes, TriggerRouter};
 use crate::store::HasLimits;
 use crate::{
@@ -67,7 +67,7 @@ impl Mode {
     }
 }
 
-/// Host linking, acquisition policy, and trigger-server startup for a
+/// Host linking, extension installation, and trigger-server startup for a
 /// deployment.
 pub trait Wiring<B: Backends> {
     /// Link every declared host into the deployment linker.
@@ -77,14 +77,17 @@ pub trait Wiring<B: Backends> {
     /// Returns an error if a host cannot be added to the linker.
     fn link(deployment: &mut Deployment<StoreCtx<B>>) -> Result<()>;
 
-    /// Build the deployment's plugin acquirer — the acquisition policy behind
-    /// `omnia:plugins/loader.load` and [`Runtime::load_plugin`]. Invoked by
-    /// [`Runtime::new`] once, after [`Backends::connect`], with typed access
-    /// to the connected bundle; the default is no acquirer, refusing every
-    /// load.
-    fn acquirer(backends: &B) -> Option<Acquirer> {
-        let _ = backends;
-        None
+    /// Install capability extensions into [`Runtime::extensions`]. Invoked by
+    /// [`Runtime::new`] once, after [`Backends::connect`] and runtime
+    /// assembly, so an extension is built against the connected bundle (via
+    /// [`Runtime::backends`]); the default installs nothing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an extension cannot be built or installed.
+    fn extend(runtime: &Runtime<B>) -> Result<()> {
+        let _ = runtime;
+        Ok(())
     }
 
     /// Run every declared long-lived trigger server concurrently.
@@ -191,7 +194,7 @@ where
     let mode = deployment.mode();
 
     let runtime =
-        Runtime::<B>::new(deployment, H::link, H::acquirer).await.context("assembling runtime")?;
+        Runtime::<B>::new(deployment, H::link, H::extend).await.context("assembling runtime")?;
 
     // Background tasks hold Engine clones; abort them when the drive
     // completes so a finished deployment releases its engine (and the pooling
@@ -323,9 +326,6 @@ pub struct Runtime<B: 'static> {
     // Cached host→guest dispatch capability, built once per runtime so
     // `store()` hands out clones instead of allocating one per store.
     dispatcher: Arc<dyn Dispatcher>,
-    // Cached plugin-load capability (the same `RuntimeDispatcher` behind a
-    // second trait object), threaded into each store beside the dispatcher.
-    loader: Arc<dyn PluginLoader>,
 }
 
 struct RuntimeInner<B: 'static> {
@@ -339,13 +339,13 @@ struct RuntimeInner<B: 'static> {
     // Manifest-marked command guest identity; absent, command mode routes to
     // the sole static `wasi:cli/run` exporter.
     command_guest: OnceLock<GuestId>,
-    // Loader state: the installed acquirer, the load serializer, and the
-    // resolved digest per loader-loaded package.
-    plugins: PluginsState,
+    // Capability-crate state installed by the `Wiring::extend` hook and
+    // shared with every store context.
+    extensions: Extensions,
 }
 
 impl<B: 'static> RuntimeInner<B> {
-    const fn new(
+    fn new(
         name: Arc<str>, registry: Arc<Registry<StoreCtx<B>>>, args: Arc<Vec<String>>,
         mounts: Arc<MountRegistry>, backends: B,
     ) -> Self {
@@ -356,7 +356,7 @@ impl<B: 'static> RuntimeInner<B> {
             mounts,
             backends,
             command_guest: OnceLock::new(),
-            plugins: PluginsState::new(),
+            extensions: Extensions::new(),
         }
     }
 }
@@ -376,30 +376,79 @@ impl<B: Clone + Send + Sync + 'static> RuntimeDispatcher<B> {
     }
 }
 
+/// A non-owning [`Runtime`] handle, the form a runtime extension holds to
+/// call back into the runtime without leaking it through a reference cycle.
+pub struct WeakRuntime<B: 'static> {
+    inner: Weak<RuntimeInner<B>>,
+}
+
+// Manual: a handle clone must not require `B: Clone`.
+impl<B: 'static> Clone for WeakRuntime<B> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Weak::clone(&self.inner),
+        }
+    }
+}
+
+impl<B: Clone + Send + Sync + 'static> WeakRuntime<B> {
+    /// Upgrade to a full handle; `None` once the runtime has shut down.
+    #[must_use]
+    pub fn upgrade(&self) -> Option<Runtime<B>> {
+        Some(Runtime::with_inner(self.inner.upgrade()?))
+    }
+}
+
+/// Why [`Runtime::admit`] refused a late guest; each variant carries the
+/// refusal's description.
+#[derive(Clone, Debug)]
+pub enum AdmitError {
+    /// The bytes are a native artifact, not a valid raw wasm component, or
+    /// failed pre-instantiation against the deployment's host set.
+    ArtifactRefused(String),
+    /// The component exports no interface declared in the deployment's
+    /// plugin seam list.
+    SeamMissing(String),
+    /// Serve wiring or publication failed — including an identity conflict
+    /// with a racing registration.
+    Internal(String),
+}
+
+impl fmt::Display for AdmitError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ArtifactRefused(reason) | Self::SeamMissing(reason) | Self::Internal(reason) => {
+                f.write_str(reason)
+            }
+        }
+    }
+}
+
+impl std::error::Error for AdmitError {}
+
 impl<B: Backends> Runtime<B> {
-    /// Link hosts, connect backends, install the acquisition policy, assemble
-    /// the guest registry, and wire the host-mediated link serve side.
+    /// Link hosts, connect backends, assemble the guest registry, install
+    /// capability extensions, and wire the host-mediated link serve side.
     ///
-    /// `acquire` is the [`Wiring::acquirer`] hook: invoked once, after
-    /// backends connect, so the acquisition policy is built with typed access
-    /// to the connected bundle.
+    /// `extend` is the [`Wiring::extend`] hook: invoked once, after backends
+    /// connect and the runtime is assembled, so an extension is built against
+    /// the connected bundle.
     ///
     /// # Errors
     ///
     /// Returns an error if host linking, backend connection, registry
-    /// assembly, or link serve wiring fails.
-    pub async fn new<L, A>(
-        mut deployment: Deployment<StoreCtx<B>>, link: L, acquire: A,
+    /// assembly, extension installation, or link serve wiring fails.
+    pub async fn new<L, E>(
+        mut deployment: Deployment<StoreCtx<B>>, link: L, extend: E,
     ) -> Result<Self>
     where
         L: FnOnce(&mut Deployment<StoreCtx<B>>) -> Result<()>,
-        A: FnOnce(&B) -> Option<Acquirer>,
+        E: FnOnce(&Self) -> Result<()>,
     {
         let name = Arc::<str>::from(deployment.name());
         let args = Arc::new(deployment.args().to_vec());
         link(&mut deployment).context("linking hosts")?;
         let backends = B::connect().await.context("connecting backends")?;
-        let acquirer = acquire(&backends);
         let mounts = deployment.mounts();
         let command_guest = deployment.command_guest();
 
@@ -413,9 +462,7 @@ impl<B: Backends> Runtime<B> {
         if let Some(id) = command_guest {
             runtime.set_command_guest(id);
         }
-        if let Some(acquirer) = acquirer {
-            runtime.inner.plugins.install_acquirer(acquirer);
-        }
+        extend(&runtime).context("installing runtime extensions")?;
         serve_links(&runtime).await.context("wiring host-mediated link serve side")?;
         Ok(runtime)
     }
@@ -427,23 +474,16 @@ impl<B: Clone + Send + Sync + 'static> Clone for Runtime<B> {
         Self {
             inner: Arc::clone(&self.inner),
             dispatcher: Arc::clone(&self.dispatcher),
-            loader: Arc::clone(&self.loader),
         }
     }
 }
 
 impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     fn with_inner(inner: Arc<RuntimeInner<B>>) -> Self {
-        // One shared hub behind two trait objects: host→guest dispatch and
-        // guest-requested plugin loading.
-        let hub = Arc::new(RuntimeDispatcher {
+        let dispatcher = Arc::new(RuntimeDispatcher {
             inner: Arc::clone(&inner),
         });
-        Self {
-            inner,
-            dispatcher: Arc::<RuntimeDispatcher<B>>::clone(&hub),
-            loader: hub,
-        }
+        Self { inner, dispatcher }
     }
 
     /// Build a runtime from an already-assembled registry and backend bundle.
@@ -514,6 +554,28 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         &self.inner.registry
     }
 
+    /// The deployment's connected backend bundle.
+    #[must_use]
+    pub fn backends(&self) -> &B {
+        &self.inner.backends
+    }
+
+    /// The capability-crate state installed by the [`Wiring::extend`] hook —
+    /// the same set every store context carries.
+    #[must_use]
+    pub fn extensions(&self) -> &Extensions {
+        &self.inner.extensions
+    }
+
+    /// A non-owning handle for state that must call back into the runtime;
+    /// see [`Extensions`] for why extensions never hold a [`Runtime`].
+    #[must_use]
+    pub fn downgrade(&self) -> WeakRuntime<B> {
+        WeakRuntime {
+            inner: Arc::downgrade(&self.inner),
+        }
+    }
+
     /// The cached host→guest dispatch capability — the same handle
     /// every store context carries, for host-side callers (tests,
     /// embedders) that invoke a guest export directly.
@@ -538,7 +600,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
                 args: Some(Arc::clone(&self.inner.args)),
                 mounts: Some(Arc::clone(&self.inner.mounts)),
                 env: None,
-                loader: Some(Arc::clone(&self.loader)),
+                extensions: self.inner.extensions.clone(),
             }),
             backends: self.inner.backends.clone(),
         }
@@ -646,6 +708,80 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         Ok(())
     }
 
+    /// Admit raw wasm bytes as a late guest: refuse a native (pre-compiled)
+    /// artifact before wasmtime sees the bytes, validate on the safe path,
+    /// require an export of a declared plugin interface, then register and
+    /// serve the component under `id` — the privileged registration half
+    /// behind the `omnia:plugins/loader` capability. Acquisition, digest
+    /// policy, and idempotency live with the loader (`omnia-plugin`).
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed [`AdmitError`] naming the refusal: refused artifact,
+    /// missing seam export, or an internal serve/publication failure
+    /// (including an identity conflict with a racing registration).
+    pub async fn admit(&self, id: GuestId, bytes: Vec<u8>) -> Result<(), AdmitError> {
+        // A native (pre-compiled) artifact is refused before wasmtime sees
+        // the bytes: admitted components only ever take the safe validation
+        // path, never the deployment's `Precompiled` trust policy.
+        if bytes.get(..ELF_MAGIC.len()) == Some(&ELF_MAGIC) {
+            return Err(AdmitError::ArtifactRefused(format!(
+                "`{id}` is a pre-compiled (native) artifact; admission only accepts raw wasm \
+                 components"
+            )));
+        }
+
+        // Safe validation plus sandboxed JIT — the explicitly safe constructor.
+        let component =
+            GuestArtifact::wasm(bytes).load(self.registry().engine()).await.map_err(|error| {
+                AdmitError::ArtifactRefused(format!("validating `{id}`: {error:#}"))
+            })?;
+
+        self.check_seam_export(&id, &component)?;
+
+        // The same publish sequence as `Runtime::register`: pre-instantiate
+        // against the shared host set, wire seam exports, publish atomically.
+        let instance_pre = self.registry().instantiate_late(&id, &component).map_err(|error| {
+            AdmitError::ArtifactRefused(format!("pre-instantiating `{id}`: {error:#}"))
+        })?;
+        let guest = Guest::local(id.clone(), instance_pre);
+        let endpoint = serve_guest(self, &guest).await.map_err(|error| {
+            AdmitError::Internal(format!("serving `{id}` seam exports: {error:#}"))
+        })?;
+        self.registry()
+            .publish(guest, endpoint)
+            .map_err(|error| AdmitError::Internal(format!("publishing `{id}`: {error:#}")))?;
+
+        tracing::debug!(guest = %id, "late guest admitted");
+        Ok(())
+    }
+
+    /// Refuse a component that exports no interface from the deployment's
+    /// declared plugin seam list.
+    fn check_seam_export(&self, id: &GuestId, component: &Component) -> Result<(), AdmitError> {
+        let links = self.registry().dispatch().links();
+        if links.is_empty() {
+            return Err(AdmitError::SeamMissing(format!(
+                "cannot admit `{id}`: this deployment declares no plugin interfaces"
+            )));
+        }
+        let engine = self.registry().engine();
+        let exports_seam =
+            component.component_type().exports(engine).any(|(interface, extern_)| {
+                links.contains(interface)
+                    && matches!(extern_.ty, types::ComponentItem::ComponentInstance(_))
+            });
+        if exports_seam {
+            Ok(())
+        } else {
+            let declared: Vec<&str> = links.iter().map(AsRef::as_ref).collect();
+            Err(AdmitError::SeamMissing(format!(
+                "`{id}` exports none of the declared plugin interfaces ({})",
+                declared.join(", ")
+            )))
+        }
+    }
+
     /// Remove a dynamically registered guest. New dispatches to `id` fail as
     /// unregistered; in-flight calls complete on the instance they hold
     /// (instance-per-call). Static deployment entries are refused.
@@ -656,14 +792,8 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// registered.
     pub fn deregister(&self, id: &GuestId) -> Result<()> {
         self.registry().remove(id)?;
-        self.inner.plugins.forget(id);
         tracing::debug!(guest = %id, "guest deregistered");
         Ok(())
-    }
-
-    /// The loader state shared by every `load_plugin` call.
-    pub(crate) fn plugins_state(&self) -> &PluginsState {
-        &self.inner.plugins
     }
 
     /// Release every link-serve endpoint, aborting the drain tasks that pin

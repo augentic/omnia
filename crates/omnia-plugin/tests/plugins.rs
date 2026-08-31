@@ -1,6 +1,6 @@
 //! End-to-end tests for the `omnia:plugins/loader` host capability: a real
 //! requester guest from `crates/test-programs` drives loads through omnia's
-//! runtime, with `PathAcquire` reading components staged in a scratch mount.
+//! runtime, with `PathMounts` reading components staged in a scratch mount.
 //! The requester asserts internally (handles, digests, dispatch answers, and
 //! every typed refusal); the host side stages artifacts and checks the exit.
 
@@ -8,8 +8,8 @@
 
 use anyhow::{Context as _, Result};
 use omnia::{
-    Acquirer, DeploymentBuilder, ExitStatus, GuestEntry, Manifest, Mode, PathAcquire, Runtime,
-    StoreCtx, WasiPlugins,
+    Acquirer, DeploymentBuilder, ExitStatus, GuestEntry, Manifest, Mode, PathMounts, Plugins,
+    Runtime, StoreCtx, WasiPlugins,
 };
 
 // Every guest program in `crates/test-programs/programs/plugins` must have a
@@ -18,7 +18,7 @@ test_utils::foreach_plugins!();
 
 /// Drive `wasm` as the `requester` command guest: the scratch dir mounts at
 /// `.`, `omnia-test:link/ops` is the declared plugin seam, and a `.`-rooted
-/// `PathAcquire` over the scratch dir is the compiled-in acquirer.
+/// `PathMounts` over the scratch dir is the compiled-in acquirer.
 async fn run_requester(wasm: &str, scratch: &test_utils::Scratch) -> Result<ExitStatus> {
     let manifest = Manifest::new()
         .plugins(["omnia-test:link/ops"])
@@ -30,8 +30,7 @@ async fn run_requester(wasm: &str, scratch: &test_utils::Scratch) -> Result<Exit
         .build::<StoreCtx<()>>()
         .await
         .context("building deployment")?;
-    let paths =
-        PathAcquire::new([(".", scratch.path())]).context("opening the scratch location")?;
+    let paths = PathMounts::new([(".", scratch.path())]).context("opening the scratch location")?;
     let acquirer = Acquirer {
         path: Some(std::sync::Arc::new(paths)),
         registry: None,
@@ -42,7 +41,7 @@ async fn run_requester(wasm: &str, scratch: &test_utils::Scratch) -> Result<Exit
             deployment.host::<WasiPlugins, ()>()?;
             Ok(())
         },
-        move |()| Some(acquirer),
+        move |runtime| Plugins::install(runtime, acquirer),
     )
     .await
     .context("assembling runtime")?;
@@ -68,20 +67,20 @@ fn wit_copies_stay_identical() {
     assert_eq!(
         include_str!("../../omnia-guest/wit/plugins.wit"),
         canonical,
-        "omnia-guest's plugins.wit copy drifted from crates/omnia/wit/plugins.wit"
+        "omnia-guest's plugins.wit copy drifted from crates/omnia-plugin/wit/plugins.wit"
     );
     assert_eq!(
         include_str!("../../test-programs/wit/deps/plugins/plugins.wit"),
         canonical,
-        "test-programs' plugins.wit copy drifted from crates/omnia/wit/plugins.wit"
+        "test-programs' plugins.wit copy drifted from crates/omnia-plugin/wit/plugins.wit"
     );
 }
 
 // Compile-time proof that the macro's `locations:`/`cache:` grammar lowers
 // into calls that typecheck against this crate's public seam: path entries
-// fold into a `PathAcquire`, the registry entry into a `RegistryAcquire`
+// fold into a `PathMounts`, the registry entry into a `RegistryClient`
 // cached in the `cache:` backend, each filling its slot in the `Acquirer`
-// built by the `Wiring::acquirer` hook.
+// installed by the `Wiring::extend` hook.
 // Never run — the macro's snapshot suite pins the shape, this pins the types.
 mod locations_grammar {
     use std::future::Future;
