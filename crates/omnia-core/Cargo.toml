@@ -55,9 +55,6 @@ fromenv.workspace = true
 futures.workspace = true
 http.workspace = true
 opentelemetry.workspace = true
-# Tonic-only export: the defaults add an HTTP export path (opentelemetry-http →
-# reqwest) that `telemetry.rs` never uses. TLS was never enabled for the gRPC
-# channel (`tls-*` is not a default), so plaintext OTLP behavior is unchanged.
 opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["grpc-tonic", "metrics", "trace"], optional = true }
 opentelemetry_sdk = { workspace = true, features = ["rt-tokio"] }
 pastey.workspace = true
@@ -74,10 +71,7 @@ wasmtime-wasi.workspace = true
 wasmtime-wasi-http.workspace = true
 wrpc-transport.workspace = true
 wrpc-wasmtime.workspace = true
-# wrpc-runtime-wasmtime.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-# Path-only (stripped at publish): integration and doc tests exercise the
-# embedder surface, so they import through the `omnia` facade.
 omnia.workspace = true
 test-utils.workspace = true
