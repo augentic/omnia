@@ -22,7 +22,6 @@ use wrpc_wasmtime::WrpcView;
 
 use crate::dispatch::{DispatchHandle, FirstArgSelector, GuestSelector};
 use crate::mount::{MountRegistry, ResolvedPreopen};
-use crate::plugins::Acquire;
 use crate::registry::{GuestId, Registry, Routes};
 use crate::telemetry::LogMode;
 use crate::{Host, Mode, RuntimeOptions, Server, Telemetry};
@@ -66,7 +65,6 @@ pub struct DeploymentBuilder<P = WasmOnly> {
     log_mode: Option<LogMode>,
     guest_timeout: Option<Duration>,
     max_dispatch_depth: Option<usize>,
-    acquirer: Option<Arc<dyn Acquire>>,
     policy: PhantomData<fn() -> P>,
 }
 
@@ -96,7 +94,6 @@ impl Default for DeploymentBuilder<WasmOnly> {
             log_mode: None,
             guest_timeout: None,
             max_dispatch_depth: None,
-            acquirer: None,
             policy: PhantomData,
         }
     }
@@ -174,23 +171,6 @@ impl<P> DeploymentBuilder<P> {
         self
     }
 
-    /// Compile in the plugin acquirer: the deployment's acquisition policy
-    /// behind `omnia:plugins/loader.load` (and
-    /// [`Runtime::load_plugin`](crate::Runtime::load_plugin)). Without one,
-    /// every load refuses.
-    #[must_use]
-    pub fn acquirer(mut self, acquirer: impl Acquire) -> Self {
-        self.acquirer = Some(Arc::new(acquirer));
-        self
-    }
-
-    /// [`acquirer`](Self::acquirer) over an already-erased value — the entry
-    /// planner's path from `MainOptions`.
-    pub(crate) fn acquirer_shared(mut self, acquirer: Option<Arc<dyn Acquire>>) -> Self {
-        self.acquirer = acquirer;
-        self
-    }
-
     /// Resolve the manifest and build the deployment under `policy`.
     async fn build_inner<T: WasiView + 'static>(
         self, policy: ArtifactPolicy,
@@ -232,7 +212,6 @@ impl<P> DeploymentBuilder<P> {
         let mut deployment = Deployment::from_plan(plan).await?;
         deployment.name = name;
         deployment.command_guest = command_guest;
-        deployment.acquirer = self.acquirer;
         if let Some(timeout) = self.guest_timeout {
             deployment.options.guest_timeout = timeout;
         }
@@ -265,7 +244,6 @@ impl DeploymentBuilder<WasmOnly> {
             log_mode: self.log_mode,
             guest_timeout: self.guest_timeout,
             max_dispatch_depth: self.max_dispatch_depth,
-            acquirer: self.acquirer,
             policy: PhantomData,
         }
     }
@@ -338,8 +316,6 @@ pub struct Deployment<T: WasiView + 'static> {
     allow_empty: bool,
     // Command-mode guest identity derived from the manifest's marked entry.
     command_guest: Option<GuestId>,
-    // Builder-supplied plugin acquirer, handed to the runtime at assembly.
-    acquirer: Option<Arc<dyn Acquire>>,
 }
 
 impl<T: WasiView + 'static> Deployment<T> {
@@ -382,7 +358,6 @@ impl<T: WasiView + 'static> Deployment<T> {
             mode: plan.mode,
             allow_empty: plan.allow_empty,
             command_guest: None,
-            acquirer: None,
         })
     }
 }
@@ -438,12 +413,6 @@ impl<T: WasiView> Deployment<T> {
     /// The manifest-marked command guest identity, if any.
     pub(crate) fn command_guest(&self) -> Option<GuestId> {
         self.command_guest.clone()
-    }
-
-    /// Move the builder-supplied plugin acquirer out for the runtime to
-    /// install.
-    pub(crate) fn take_acquirer(&mut self) -> Option<Arc<dyn Acquire>> {
-        self.acquirer.take()
     }
 
     /// Assemble the guest [`Registry`].

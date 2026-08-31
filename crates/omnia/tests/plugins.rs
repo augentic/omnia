@@ -27,14 +27,17 @@ async fn run_requester(wasm: &str, scratch: &test_utils::Scratch) -> Result<Exit
     let deployment = DeploymentBuilder::new()
         .manifest(manifest)
         .mode(Mode::Command)
-        .acquirer(MountAcquire)
         .build::<StoreCtx<()>>()
         .await
         .context("building deployment")?;
-    let runtime = Runtime::new(deployment, |deployment| {
-        deployment.host::<WasiPlugins, ()>()?;
-        Ok(())
-    })
+    let runtime = Runtime::new(
+        deployment,
+        |deployment| {
+            deployment.host::<WasiPlugins, ()>()?;
+            Ok(())
+        },
+        |()| Some(std::sync::Arc::new(MountAcquire)),
+    )
     .await
     .context("assembling runtime")?;
     runtime.run_command().await
@@ -66,6 +69,77 @@ fn wit_copies_stay_identical() {
         canonical,
         "test-programs' plugins.wit copy drifted from crates/omnia/wit/plugins.wit"
     );
+}
+
+// Compile-time proof that the macro's `locations:`/`cache:` grammar lowers
+// into calls that typecheck against this crate's public seam: path entries
+// fold into a `PathAcquire`, the registry entry into a `RegistryAcquire`
+// cached in the `cache:` backend, composed in the `Wiring::acquirer` hook.
+// Never run — the macro's snapshot suite pins the shape, this pins the types.
+mod locations_grammar {
+    use std::future::Future;
+
+    use anyhow::Result;
+    use omnia::futures::future::BoxFuture;
+    use omnia::{Backend, NoOptions, NoStore, PluginStore, ReleaseRecord};
+
+    // Clone without Copy: the generated hook clones the backend out of the
+    // bundle, and a Copy type would trip `clippy::clone_on_copy` there.
+    #[derive(Clone)]
+    struct Cache;
+
+    impl Backend for Cache {
+        type ConnectOptions = NoOptions;
+
+        fn connect_with(_options: NoOptions) -> impl Future<Output = Result<Self>> {
+            std::future::ready(Ok(Self))
+        }
+    }
+
+    impl PluginStore for Cache {
+        fn get_content<'a>(&'a self, digest: &'a str) -> BoxFuture<'a, Result<Option<Vec<u8>>>> {
+            NoStore.get_content(digest)
+        }
+
+        fn put_content<'a>(
+            &'a self, digest: &'a str, bytes: &'a [u8],
+        ) -> BoxFuture<'a, Result<()>> {
+            NoStore.put_content(digest, bytes)
+        }
+
+        fn get_release<'a>(
+            &'a self, registry: &'a str, package: &'a str, version: &'a str,
+        ) -> BoxFuture<'a, Result<Option<ReleaseRecord>>> {
+            NoStore.get_release(registry, package, version)
+        }
+
+        fn put_release<'a>(
+            &'a self, registry: &'a str, package: &'a str, record: &'a ReleaseRecord,
+        ) -> BoxFuture<'a, Result<()>> {
+            NoStore.put_release(registry, package, record)
+        }
+    }
+
+    omnia::runtime!({
+        plugins: {
+            interfaces: ["omnia-test:link/ops"],
+            locations: [
+                { name: "adapters", path: "adapters" },
+                { registry: "ghcr.io" },
+            ],
+            cache: Cache,
+        },
+        guests: [
+            { id: "engine", source: "engine.wasm" },
+        ],
+    });
+}
+
+#[test]
+fn locations_grammar_expands() {
+    // Touch the generated entry points so the compile-only module above is
+    // reachable for dead-code analysis.
+    let _ = (locations_grammar::main, locations_grammar::run);
 }
 
 #[tokio::test]

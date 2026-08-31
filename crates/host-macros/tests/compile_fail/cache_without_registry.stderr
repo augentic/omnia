@@ -1,0 +1,5 @@
+error: `cache:` requires a `{ registry: ... }` location to attach the store to; path locations always read fresh
+ --> tests/compile_fail/cache_without_registry.rs:5:9
+  |
+5 |         cache: PluginCache,
+  |         ^^^^^

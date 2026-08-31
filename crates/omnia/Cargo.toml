@@ -70,6 +70,7 @@ tracing-subscriber.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "rt", "sync", "time"] }
 tokio-util = { workspace = true, features = ["codec"] }
 omnia-host-macros.workspace = true
+omnia-plugin.workspace = true
 wasm-tokio.workspace = true
 wasmtime = { workspace = true, features = ["runtime"] }
 wasmtime-wasi.workspace = true

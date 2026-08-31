@@ -1,0 +1,5 @@
+error: `locations:` and `acquire:` are mutually exclusive; declare the acquisition policy once
+ --> tests/compile_fail/locations_with_acquire.rs:5:9
+  |
+5 |         locations: [{ registry: "ghcr.io" }],
+  |         ^^^^^^^^^

@@ -1,0 +1,31 @@
+[package]
+name = "omnia-plugin"
+description = "Plugin acquisition for the omnia runtime: the Acquire seam and its built-in policies"
+readme = "README.md"
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+cap-std.workspace = true
+futures.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["fs", "rt", "sync"] }
+tracing.workspace = true
+wasm-pkg-client.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
