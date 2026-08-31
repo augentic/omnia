@@ -17,12 +17,14 @@
   `digest-mismatch`, `artifact-refused`, `seam-missing`, `already-active`,
   `internal`); a deployment guest's identity can never be re-bound, and a
   conflicting re-pin of an active package refuses. Acquisition policy is the
-  new `Acquire` trait — a composition-root value built by the `runtime!`
-  macro's `Wiring::acquirer` hook from the declarative
-  `plugins: { locations: [...] }` list, with the built-in acquirers shipped
-  in `omnia-plugin` and re-exported: `PathAcquire` (named directory roots
-  opened fail-fast at startup, read fresh on every load, registry locations
-  refused) and `RegistryAcquire` (exact `namespace:name@version` references
+  new `Acquirer` — a composition-root value with one slot per location kind
+  (`AcquireRegistry`, `AcquirePath`), built by the `runtime!` macro's
+  `Wiring::acquirer` hook from the declarative
+  `plugins: { locations: [...] }` list; loads route structurally by kind and
+  an empty slot refuses typed. The built-in acquirers ship
+  in `omnia-plugin` and re-export: `PathAcquire` (named directory roots
+  opened fail-fast at startup, read fresh on every load) and
+  `RegistryAcquire` (exact `namespace:name@version` references
   from a compiled-in default registry endpoint, verified against the
   registry's content digest, fresh-release-preferred when the `cache:`
   backend attaches a `PluginStore` — `ContentStore` for digest-keyed
@@ -101,7 +103,7 @@
   block: `plugins: { interfaces: [...], locations: [...], cache: ... }`. The
   declarative `locations:` list is the acquisition policy — named path roots
   and at most one registry endpoint, lowered into the built-in
-  `PathAcquire`/`RegistryAcquire` acquirers and composed by location kind —
+  `PathAcquire`/`RegistryAcquire` acquirers slotted by location kind —
   and the optional `cache:` names the backend that joins the generated
   bundle as the registry's `PluginStore`. Both keys are optional (a
   deployment that only does host-mediated dispatch needs no acquirer; loads

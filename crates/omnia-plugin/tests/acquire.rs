@@ -170,8 +170,7 @@ async fn network_failure_falls_back_to_stored_record() {
 async fn network_failure_without_record_refuses() {
     let acquirer = RegistryAcquire::new(UNROUTABLE_REGISTRY).cached(MemStore::default());
 
-    let error =
-        acquirer.acquire(PACKAGE, None).await.expect_err("nothing stored to fall back to");
+    let error = acquirer.acquire(PACKAGE, None).await.expect_err("nothing stored to fall back to");
     assert!(format!("{error:#}").contains("resolving"), "resolution failure: {error:?}");
 }
 
@@ -233,10 +232,8 @@ async fn unversioned_and_missing_packages_refuse() {
     stage(registry.path(), PACKAGE, b"component bytes");
     let acquirer = registry_acquirer(registry.path());
 
-    let unversioned = acquirer
-        .acquire("test:adapter", None)
-        .await
-        .expect_err("exact version is mandatory");
+    let unversioned =
+        acquirer.acquire("test:adapter", None).await.expect_err("exact version is mandatory");
     assert!(format!("{unversioned:#}").contains("exact version"), "refusal: {unversioned:?}");
 
     acquirer.acquire("test:absent@1.0.0", None).await.expect_err("an absent package fails");

@@ -46,8 +46,7 @@ pub use self::options::compile;
 pub use self::plugins::{
     AcquirePath, AcquireRegistry, Acquirer, ContentStore, LoadError, Location, NoStore,
     PathAcquire, Plugin, PluginLoader, PluginStore, RegistryAcquire, ReleaseRecord, ReleaseStore,
-    WasiPlugins,
-    WasiPluginsCtxView, WasiPluginsView,
+    WasiPlugins, WasiPluginsCtxView, WasiPluginsView,
 };
 pub use self::registry::{
     CliRoutes, Guest, GuestId, HttpRoutes, PatternRoutes, Registry, Routes, TriggerRouter,

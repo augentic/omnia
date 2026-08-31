@@ -73,15 +73,14 @@ pub trait AcquirePath: Send + Sync + 'static {
     fn acquire<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<Vec<u8>>>;
 }
 
-/// Acquisition policy compiled in at the composition root — built by the
-/// runtime's `Wiring::acquirer` hook, which the `runtime!` macro's
-/// `plugins: { locations: [...] }` list lowers into. One slot per
+/// Acquisition policy compiled in at the composition root, one slot per
 /// [`Location`] kind: a load routes structurally, and a kind with no slot
 /// refuses typed.
 ///
-/// A slot owns every fetch, cache, and endpoint decision; the loader only
-/// ever receives bytes back, then verifies, validates, and registers them
-/// host-side.
+/// Built by the runtime's `Wiring::acquirer` hook, which the `runtime!`
+/// macro's `plugins: { locations: [...] }` list lowers into. A slot owns
+/// every fetch, cache, and endpoint decision; the loader only ever receives
+/// bytes back, then verifies, validates, and registers them host-side.
 #[derive(Clone, Default)]
 pub struct Acquirer {
     /// Serves [`Location::Registry`] loads; `None` refuses the kind.

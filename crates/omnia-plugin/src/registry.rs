@@ -121,9 +121,7 @@ impl<S: PluginStore> RegistryAcquire<S> {
                     ReleaseStore::get(&self.store, registry, &full_name, &version.to_string())
                         .await?;
                 let Some(record) = stored else {
-                    return Err(
-                        anyhow::Error::new(error).context(format!("resolving `{package}`"))
-                    );
+                    return Err(anyhow::Error::new(error).context(format!("resolving `{package}`")));
                 };
                 tracing::warn!(
                     package,
@@ -141,9 +139,7 @@ impl<S: PluginStore> RegistryAcquire<S> {
                     content_digest,
                 })
             }
-            Err(error) => {
-                Err(anyhow::Error::new(error).context(format!("resolving `{package}`")))
-            }
+            Err(error) => Err(anyhow::Error::new(error).context(format!("resolving `{package}`"))),
         }
     }
 }

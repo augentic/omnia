@@ -213,7 +213,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         };
         // Loads route structurally: each location kind reaches its acquirer
         // slot, and a kind with no slot refuses typed.
-        let acquired = match &from {
+        let outcome = match &from {
             Location::Registry(endpoint) => match &acquirer.registry {
                 Some(registry) => registry.acquire(package, endpoint.as_deref()).await,
                 None => {
@@ -233,8 +233,9 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
                 }
             },
         };
-        let bytes = acquired
-            .map_err(|error| LoadError::AcquireFailed(format!("acquiring `{package}`: {error:#}")))?;
+        let bytes = outcome.map_err(|error| {
+            LoadError::AcquireFailed(format!("acquiring `{package}`: {error:#}"))
+        })?;
 
         // The operator's pin binds name to bytes before any validation work.
         let resolved = digest::sha256_hex(&bytes);

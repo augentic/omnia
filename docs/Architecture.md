@@ -204,7 +204,7 @@ omnia/
 │   ├── omnia-guest/        # Guest SDK (Handler/Client/Context, HTTP/messaging routers, errors, ORM, MCP)
 │   ├── guest-macros/       # #[instrument] proc macro
 │   ├── host-macros/        # runtime! proc-macro
-│   ├── omnia-plugin/       # Acquire seam (re-exported by omnia)
+│   ├── omnia-plugin/       # Acquirer seam (re-exported by omnia)
 │   └── wasi-*/             # WASI interface implementations
 │       ├── src/
 │       │   ├── guest.rs    # Guest bindings (wasm32)
