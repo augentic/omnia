@@ -37,7 +37,7 @@ To use an OpenTelemetry Collector backend, you need to set the `OTEL_GRPC_URL` e
 Start an OpenTelemetry Collector instance:
 
 ```bash
-docker compose -f docker/otelcol.yaml up -d
+docker run -d --name otelcol -p 4317:4317 otel/opentelemetry-collector
 ```
 
 Modify the runtime.rs file to use the OpenTelemetry Collector backend:
@@ -66,5 +66,5 @@ cargo run --example otel -- run ./target/wasm32-wasip2/debug/examples/otel_wasm.
 ## Cleanup
 
 ```bash
-docker compose -f docker/otelcol.yaml down -v
+docker rm -f otelcol
 ```

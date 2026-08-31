@@ -39,7 +39,7 @@ Three constraints:
 
 ## Container images
 
-The repository's [`Dockerfile`](../../Dockerfile) shows the pattern: a multi-stage build that produces a small Alpine image running the host as a non-root user, with the guest supplied at run time. Adapted for your own host crate:
+The recommended pattern is a multi-stage build that produces a small Alpine image running the host as a non-root user, with the guest supplied at run time. For your own host crate:
 
 ```dockerfile
 FROM rust:alpine AS build
@@ -66,29 +66,10 @@ docker run -v ./guest.wasm:/app.wasm -p 8080:8080 my-runtime
 ```
 
 - **Non-root user** and CA certificates copied in for TLS-speaking backends.
-- The examples use the same pattern via [`docker/service.yaml`](../../docker/service.yaml): build context at the repo root, the built guest mounted to `/${COMPOSE_PROJECT_NAME}.wasm`, and `OTEL_GRPC_URL` pointed at a collector container.
-
-> Note: the in-repo `Dockerfile` predates the workspace reorganisation — it references a root `src/` directory and `--bin` targets that no longer exist, so treat it as the pattern to copy into your own host crate rather than something to build directly from this repo.
 
 ## Backing services for local testing
 
-The [`docker/`](../../docker/) directory ships a compose file per service so production backends can be exercised locally:
-
-| File                   | Service                   | Matches backend                         |
-| ---------------------- | ------------------------- | --------------------------------------- |
-| `docker/redis.yaml`    | Redis                     | `omnia-redis`                           |
-| `docker/kafka.yaml`    | Apache Kafka              | `omnia-kafka`                           |
-| `docker/nats.yaml`     | NATS / JetStream          | `omnia-nats`                            |
-| `docker/postgres.yaml` | PostgreSQL (+ `init.sql`) | `omnia-postgres`                        |
-| `docker/mongodb.yaml`  | MongoDB                   | `omnia-mongodb`                         |
-| `docker/otelcol.yaml`  | OpenTelemetry Collector   | `omnia-opentelemetry` / `OTEL_GRPC_URL` |
-
-```bash
-docker compose -f docker/redis.yaml up -d
-REDIS_URL=redis://localhost:6379 cargo run -p my-runtime -- run guest.wasm
-```
-
-These are also the services the omnia-backends repo's [live tests](production-backends.md#verifying-against-the-real-service) run against.
+Everything in this repository runs against in-memory defaults, so no external services are needed here. Production backends (Redis, Kafka, NATS, PostgreSQL, and so on) are the concern of the [`omnia-backends`](https://github.com/augentic/omnia-backends) repository, which is where service definitions for exercising them locally belong — see [Production Backends](production-backends.md#verifying-against-the-real-service) for how its live tests verify a backend against the real service.
 
 ## Configuration and secrets
 
