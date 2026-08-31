@@ -77,7 +77,9 @@ impl MemStore {
 }
 
 impl PluginStore for MemStore {
-    fn get_content<'a>(&'a self, digest: &'a str) -> BoxFuture<'a, anyhow::Result<Option<Vec<u8>>>> {
+    fn get_content<'a>(
+        &'a self, digest: &'a str,
+    ) -> BoxFuture<'a, anyhow::Result<Option<Vec<u8>>>> {
         let bytes = self.content_of(digest);
         async move { Ok(bytes) }.boxed()
     }
@@ -170,8 +172,7 @@ async fn network_failure_falls_back_to_stored_record() {
     // local backend mapping.
     let mut config = Config::empty();
     add_local_registry(&mut config, UNROUTABLE_REGISTRY, registry.path());
-    let warm =
-        RegistryAcquire::new(UNROUTABLE_REGISTRY).with_config(config).cached(store.clone());
+    let warm = RegistryAcquire::new(UNROUTABLE_REGISTRY).with_config(config).cached(store.clone());
     acquire(&warm, PACKAGE, Location::Registry(None)).await.expect("warms the store");
 
     // Same registry name and store, no backend mapping: resolution now dials

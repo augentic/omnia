@@ -120,8 +120,8 @@ fn resolve(path: &str, entries: &[MountEntry]) -> Result<(Arc<cap_std::fs::Dir>,
         // the same so host- and guest-side views of a path agree.
         best = entries.iter().find(|entry| entry.name == ".").map(|entry| (entry, path));
     }
-    let (entry, subpath) = best
-        .ok_or_else(|| anyhow!("path `{path}` is not under any location of this deployment"))?;
+    let (entry, subpath) =
+        best.ok_or_else(|| anyhow!("path `{path}` is not under any location of this deployment"))?;
     check_subpath(path, subpath)?;
     Ok((Arc::clone(&entry.dir), subpath.to_owned()))
 }
@@ -186,8 +186,7 @@ mod tests {
         let unlocated =
             acquire(&acquirer, "elsewhere/p.wasm").await.expect_err("no location matches");
         assert!(matches!(unlocated, AcquireError::Failed(_)));
-        let missing =
-            acquire(&acquirer, "adapters/absent.wasm").await.expect_err("file is absent");
+        let missing = acquire(&acquirer, "adapters/absent.wasm").await.expect_err("file is absent");
         assert!(matches!(missing, AcquireError::Failed(_)));
     }
 }
