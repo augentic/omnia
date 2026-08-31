@@ -37,19 +37,21 @@ mod runtime {
             deployment.host::<WasiOtel, Backends>()?;
             Ok(())
         }
-        fn acquirer(
-            backends: &Backends,
-        ) -> Option<::std::sync::Arc<dyn omnia::Acquire>> {
-            Some(
-                ::std::sync::Arc::new(
-                    omnia::AcquireExt::or(
-                        omnia::PathAcquire::new([(".", project_root())])
-                            .expect("opening plugins locations"),
+        fn acquirer(backends: &Backends) -> Option<omnia::Acquirer> {
+            Some(omnia::Acquirer {
+                registry: Some(
+                    ::std::sync::Arc::new(
                         omnia::RegistryAcquire::new("ghcr.io")
                             .cached(backends.plugin_cache.clone()),
                     ),
                 ),
-            )
+                path: Some(
+                    ::std::sync::Arc::new(
+                        omnia::PathAcquire::new([(".", project_root())])
+                            .expect("opening plugins locations"),
+                    ),
+                ),
+            })
         }
         async fn serve(runtime: &omnia::Runtime<Backends>) -> Result<()> {
             let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![
