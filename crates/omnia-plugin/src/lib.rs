@@ -9,6 +9,8 @@
 //! consumes the [`Acquire`] trait and keeps zero storage and network
 //! dependencies. This crate is omnia-internal — its surface reaches
 //! consumers re-exported from `omnia` under the runtime's own paths.
+//! Store implementors depend on this crate for [`ContentStore`] and
+//! [`ReleaseStore`].
 
 mod compose;
 mod path;
@@ -24,7 +26,9 @@ use futures::future::BoxFuture;
 pub use self::compose::{AcquireExt, Or};
 pub use self::path::PathAcquire;
 pub use self::registry::RegistryAcquire;
-pub use self::store::{NoStore, PluginStore, ReleaseRecord, sha256_digest};
+pub use self::store::{
+    ContentStore, NoStore, PluginStore, ReleaseRecord, ReleaseStore, sha256_digest,
+};
 
 /// Where an acquirer finds a package's component bytes — the mirror of the
 /// `omnia:plugins/loader` `location` variant.
@@ -133,60 +137,4 @@ fn check_subpath(path: &str, subpath: &str) -> Result<()> {
         && subpath.split('/').all(|part| !part.is_empty() && part != "." && part != "..");
     ensure!(plain, "component path `{path}` is not a plain relative path within a location");
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-
-    use crate::{Acquire as _, AcquireError, Location, PathAcquire};
-
-    fn temp_root(label: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("omnia-acq-{label}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("creating temp location root");
-        dir
-    }
-
-    async fn acquire(acquirer: &PathAcquire, path: &str) -> Result<Vec<u8>, AcquireError> {
-        acquirer.acquire("test:pkg@0.0.1", &Location::Path(path.to_owned())).await
-    }
-
-    #[tokio::test]
-    async fn longest_location_name_wins() {
-        let outer = temp_root("outer");
-        let inner = temp_root("outer-inner");
-        std::fs::write(inner.join("p.wasm"), b"inner").expect("staging component");
-        std::fs::create_dir_all(outer.join("inner")).expect("creating decoy");
-        std::fs::write(outer.join("inner").join("p.wasm"), b"outer").expect("staging decoy");
-        let acquirer = PathAcquire::new([("adapters", &outer), ("adapters/inner", &inner)])
-            .expect("locations open");
-
-        let bytes =
-            acquire(&acquirer, "adapters/inner/p.wasm").await.expect("longest prefix reads");
-        assert_eq!(bytes, b"inner", "the more specific location serves the path");
-    }
-
-    #[tokio::test]
-    async fn escape_and_absolute_paths_refused() {
-        let root = temp_root("escape");
-        let acquirer = PathAcquire::new([(".", &root)]).expect("location opens");
-
-        for path in ["./../secret.wasm", "/etc/passwd", ".\\x.wasm", "./a//b.wasm"] {
-            let error = acquire(&acquirer, path).await.expect_err("escape refused");
-            assert!(matches!(error, AcquireError::Failed(_)), "path `{path}` must be refused");
-        }
-    }
-
-    #[tokio::test]
-    async fn unlocated_path_and_missing_file_fail() {
-        let root = temp_root("missing");
-        let acquirer = PathAcquire::new([("adapters", &root)]).expect("location opens");
-
-        let unlocated =
-            acquire(&acquirer, "elsewhere/p.wasm").await.expect_err("no location matches");
-        assert!(matches!(unlocated, AcquireError::Failed(_)));
-        let missing = acquire(&acquirer, "adapters/absent.wasm").await.expect_err("file is absent");
-        assert!(matches!(missing, AcquireError::Failed(_)));
-    }
 }

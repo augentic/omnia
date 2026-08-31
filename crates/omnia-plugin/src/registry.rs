@@ -10,7 +10,9 @@ use futures::{FutureExt as _, TryStreamExt as _};
 use tokio::sync::Mutex;
 use wasm_pkg_client::{Client, Config, ContentStream, PackageRef, Registry, Release, Version};
 
-use crate::store::{NoStore, PluginStore, ReleaseRecord, sha256_digest};
+use crate::store::{
+    ContentStore, NoStore, PluginStore, ReleaseRecord, ReleaseStore, sha256_digest,
+};
 use crate::{Acquire, AcquireError, Location};
 
 /// Registry acquisition for the plugin loader over [wasm-pkg-client].
@@ -108,17 +110,16 @@ impl<S: PluginStore> RegistryAcquire<S> {
                     version: version.to_string(),
                     content_digest: release.content_digest.to_string(),
                 };
-                self.store.put_release(registry, &full_name, &record).await.map_err(|error| {
-                    AcquireError::Failed(error.context(format!("recording `{package}`")))
-                })?;
+                ReleaseStore::put(&self.store, registry, &full_name, &record).await.map_err(
+                    |error| AcquireError::Failed(error.context(format!("recording `{package}`"))),
+                )?;
                 Ok(release)
             }
             Err(error) if is_network_failure(&error) => {
-                let stored = self
-                    .store
-                    .get_release(registry, &full_name, &version.to_string())
-                    .await
-                    .map_err(AcquireError::Failed)?;
+                let stored =
+                    ReleaseStore::get(&self.store, registry, &full_name, &version.to_string())
+                        .await
+                        .map_err(AcquireError::Failed)?;
                 let Some(record) = stored else {
                     return Err(AcquireError::Failed(
                         anyhow::Error::new(error).context(format!("resolving `{package}`")),
@@ -172,7 +173,8 @@ impl<S: PluginStore> Acquire for RegistryAcquire<S> {
             // The store serves content by digest — verified against the
             // fresh digest, so a poisoned or truncated entry is discarded
             // (overwritten below) instead of becoming code.
-            let stored = self.store.get_content(&digest).await.map_err(AcquireError::Failed)?;
+            let stored =
+                ContentStore::get(&self.store, &digest).await.map_err(AcquireError::Failed)?;
             if let Some(bytes) = stored {
                 if sha256_digest(&bytes) == digest {
                     tracing::debug!(package, digest, "package served from the store");
@@ -203,7 +205,7 @@ impl<S: PluginStore> Acquire for RegistryAcquire<S> {
                      digest {digest}"
                 )));
             }
-            self.store.put_content(&digest, &bytes).await.map_err(|error| {
+            ContentStore::put(&self.store, &digest, &bytes).await.map_err(|error| {
                 AcquireError::Failed(error.context(format!("storing `{package}`")))
             })?;
             tracing::debug!(package, digest = %resolved, "package acquired");

@@ -25,8 +25,10 @@
   refused) and `RegistryAcquire` (exact `namespace:name@version` references
   from a compiled-in default registry endpoint, verified against the
   registry's content digest, fresh-release-preferred when the `cache:`
-  backend attaches a `PluginStore`). The loader links once on the shared
-  linker when a deployment declares `plugins`; wasmtime wires it only
+  backend attaches a `PluginStore` — `ContentStore` for digest-keyed
+  bytes, `ReleaseStore` for per-registry release records). The loader
+  links once on the shared linker when a deployment declares `plugins`;
+  wasmtime wires it only
   into guests whose world imports `omnia:plugins/loader`. See
   [docs/security-model.md](docs/security-model.md#guest-requested-plugin-loading-omniapluginsloader).
 - The requester surface for the loader, in `omnia-guest`'s new `plugins`

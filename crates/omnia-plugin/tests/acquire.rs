@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex};
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
 use omnia_plugin::{
-    Acquire, AcquireError, AcquireExt as _, Location, PathAcquire, PluginStore, RegistryAcquire,
-    ReleaseRecord, sha256_digest,
+    Acquire, AcquireError, AcquireExt as _, ContentStore, Location, PathAcquire, RegistryAcquire,
+    ReleaseRecord, ReleaseStore, sha256_digest,
 };
 use tempfile::TempDir;
 use wasm_pkg_client::{Config, Registry};
@@ -59,9 +59,9 @@ fn registry_acquirer(root: &Path) -> RegistryAcquire {
 
 type ReleaseKey = (String, String, String);
 
-/// An in-memory [`PluginStore`] double: digest-keyed content plus
-/// per-registry release records, with direct map access so tests can
-/// inspect and poison entries without going through the trait.
+/// An in-memory [`ContentStore`] + [`ReleaseStore`] double: digest-keyed
+/// content plus per-registry release records, with direct map access so
+/// tests can inspect and poison entries without going through the traits.
 #[derive(Clone, Default)]
 struct MemStore {
     content: Arc<Mutex<HashMap<String, Vec<u8>>>>,
@@ -78,22 +78,20 @@ impl MemStore {
     }
 }
 
-impl PluginStore for MemStore {
-    fn get_content<'a>(
-        &'a self, digest: &'a str,
-    ) -> BoxFuture<'a, anyhow::Result<Option<Vec<u8>>>> {
+impl ContentStore for MemStore {
+    fn get<'a>(&'a self, digest: &'a str) -> BoxFuture<'a, anyhow::Result<Option<Vec<u8>>>> {
         let bytes = self.content_of(digest);
         async move { Ok(bytes) }.boxed()
     }
 
-    fn put_content<'a>(
-        &'a self, digest: &'a str, bytes: &'a [u8],
-    ) -> BoxFuture<'a, anyhow::Result<()>> {
+    fn put<'a>(&'a self, digest: &'a str, bytes: &'a [u8]) -> BoxFuture<'a, anyhow::Result<()>> {
         self.content.lock().expect("content lock").insert(digest.to_owned(), bytes.to_vec());
         async move { Ok(()) }.boxed()
     }
+}
 
-    fn get_release<'a>(
+impl ReleaseStore for MemStore {
+    fn get<'a>(
         &'a self, registry: &'a str, package: &'a str, version: &'a str,
     ) -> BoxFuture<'a, anyhow::Result<Option<ReleaseRecord>>> {
         let key = (registry.to_owned(), package.to_owned(), version.to_owned());
@@ -101,7 +99,7 @@ impl PluginStore for MemStore {
         async move { Ok(record) }.boxed()
     }
 
-    fn put_release<'a>(
+    fn put<'a>(
         &'a self, registry: &'a str, package: &'a str, record: &'a ReleaseRecord,
     ) -> BoxFuture<'a, anyhow::Result<()>> {
         let key = (registry.to_owned(), package.to_owned(), record.version.clone());
@@ -295,14 +293,47 @@ async fn path_acquire_serves_its_own_locations() {
         .expect("bare path falls back to the `.` entry");
     assert_eq!(bare, b"located bytes");
 
-    let escape = acquire(&acquirer, PACKAGE, Location::Path("./../secret.wasm".into()))
-        .await
-        .expect_err("escapes refused");
-    assert!(matches!(escape, AcquireError::Failed(_)));
+    for path in ["./../secret.wasm", "/etc/passwd", ".\\x.wasm", "./a//b.wasm"] {
+        let error = acquire(&acquirer, PACKAGE, Location::Path(path.into()))
+            .await
+            .expect_err("escape refused");
+        assert!(matches!(error, AcquireError::Failed(_)), "path `{path}` must be refused");
+    }
     let registry = acquire(&acquirer, PACKAGE, Location::Registry(None))
         .await
         .expect_err("registry locations are not served");
     assert!(matches!(registry, AcquireError::Unsupported(_)));
+}
+
+#[tokio::test]
+async fn longest_location_name_wins() {
+    let outer = TempDir::new().expect("outer location");
+    let inner = TempDir::new().expect("inner location");
+    std::fs::write(inner.path().join("p.wasm"), b"inner").expect("staging component");
+    std::fs::create_dir_all(outer.path().join("inner")).expect("creating decoy");
+    std::fs::write(outer.path().join("inner").join("p.wasm"), b"outer").expect("staging decoy");
+    let acquirer = PathAcquire::new([("adapters", outer.path()), ("adapters/inner", inner.path())])
+        .expect("locations open");
+
+    let bytes = acquire(&acquirer, PACKAGE, Location::Path("adapters/inner/p.wasm".into()))
+        .await
+        .expect("longest prefix reads");
+    assert_eq!(bytes, b"inner", "the more specific location serves the path");
+}
+
+#[tokio::test]
+async fn unlocated_path_and_missing_file_fail() {
+    let root = TempDir::new().expect("location dir");
+    let acquirer = PathAcquire::new([("adapters", root.path())]).expect("location opens");
+
+    let unlocated = acquire(&acquirer, PACKAGE, Location::Path("elsewhere/p.wasm".into()))
+        .await
+        .expect_err("no location matches");
+    assert!(matches!(unlocated, AcquireError::Failed(_)));
+    let missing = acquire(&acquirer, PACKAGE, Location::Path("adapters/absent.wasm".into()))
+        .await
+        .expect_err("file is absent");
+    assert!(matches!(missing, AcquireError::Failed(_)));
 }
 
 #[tokio::test]

@@ -84,7 +84,7 @@ mod locations_grammar {
 
     use anyhow::Result;
     use omnia::futures::future::BoxFuture;
-    use omnia::{Backend, NoOptions, NoStore, PluginStore, ReleaseRecord};
+    use omnia::{Backend, ContentStore, NoOptions, NoStore, ReleaseRecord, ReleaseStore};
 
     // Clone without Copy: the generated hook clones the backend out of the
     // bundle, and a Copy type would trip `clippy::clone_on_copy` there.
@@ -99,27 +99,27 @@ mod locations_grammar {
         }
     }
 
-    impl PluginStore for Cache {
-        fn get_content<'a>(&'a self, digest: &'a str) -> BoxFuture<'a, Result<Option<Vec<u8>>>> {
-            NoStore.get_content(digest)
+    impl ContentStore for Cache {
+        fn get<'a>(&'a self, digest: &'a str) -> BoxFuture<'a, Result<Option<Vec<u8>>>> {
+            ContentStore::get(&NoStore, digest)
         }
 
-        fn put_content<'a>(
-            &'a self, digest: &'a str, bytes: &'a [u8],
-        ) -> BoxFuture<'a, Result<()>> {
-            NoStore.put_content(digest, bytes)
+        fn put<'a>(&'a self, digest: &'a str, bytes: &'a [u8]) -> BoxFuture<'a, Result<()>> {
+            ContentStore::put(&NoStore, digest, bytes)
         }
+    }
 
-        fn get_release<'a>(
+    impl ReleaseStore for Cache {
+        fn get<'a>(
             &'a self, registry: &'a str, package: &'a str, version: &'a str,
         ) -> BoxFuture<'a, Result<Option<ReleaseRecord>>> {
-            NoStore.get_release(registry, package, version)
+            ReleaseStore::get(&NoStore, registry, package, version)
         }
 
-        fn put_release<'a>(
+        fn put<'a>(
             &'a self, registry: &'a str, package: &'a str, record: &'a ReleaseRecord,
         ) -> BoxFuture<'a, Result<()>> {
-            NoStore.put_release(registry, package, record)
+            ReleaseStore::put(&NoStore, registry, package, record)
         }
     }
 

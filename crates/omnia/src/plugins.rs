@@ -25,8 +25,8 @@ use futures::FutureExt as _;
 use futures::future::BoxFuture;
 pub use host::{WasiPlugins, WasiPluginsCtxView, WasiPluginsView};
 pub use omnia_plugin::{
-    Acquire, AcquireError, AcquireExt, Location, NoStore, Or, PathAcquire, PluginStore,
-    RegistryAcquire, ReleaseRecord,
+    Acquire, AcquireError, AcquireExt, ContentStore, Location, NoStore, Or, PathAcquire,
+    PluginStore, RegistryAcquire, ReleaseRecord, ReleaseStore,
 };
 use wasmtime::component::{Component, types};
 
