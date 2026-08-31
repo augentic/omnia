@@ -18,9 +18,9 @@ cargo build --example cli-wasm --target wasm32-wasip2
 
 # run the host: argv passes straight to the guest (no `run`, no `--`)
 export RUST_LOG=info,opentelemetry_sdk=off
-cargo run --example command-resolver -- greet Ada
-cargo run --example command-resolver -- add 2 40
-cargo run --example command-resolver -- fail 42; echo $?  # 42
+cargo run --example cli-static -- greet Ada
+cargo run --example cli-static -- add 2 40
+cargo run --example cli-static -- fail 42; echo $?  # 42
 ```
 
 The `--` above is cargo's own separator; the guest receives `greet Ada`

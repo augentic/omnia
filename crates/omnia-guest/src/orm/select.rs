@@ -142,3 +142,34 @@ impl<M: Entity> SelectBuilder<M> {
 pub fn table_column(table: &str, column: &str) -> ColumnRef {
     (Alias::new(table), Alias::new(column)).into()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::test_fixtures::Stop;
+    use super::*;
+    use crate::orm::DataType;
+
+    #[test]
+    fn where_order_limit_compose() {
+        let query = SelectBuilder::<Stop>::new()
+            .r#where(Filter::eq("stop_id", 7))
+            .order_by_desc(None, "name")
+            .limit(10)
+            .build()
+            .unwrap();
+
+        assert_eq!(
+            query.sql,
+            r#"SELECT "stop"."stop_id", "stop"."name" FROM "stop" WHERE ("stop"."stop_id") = ($1) ORDER BY "stop"."name" DESC LIMIT $2"#
+        );
+        assert!(matches!(query.params[0], DataType::Int32(Some(7))));
+        assert!(matches!(query.params[1], DataType::Uint64(Some(10))));
+    }
+
+    #[test]
+    fn order_by_other_table_qualifies_column() {
+        let query =
+            SelectBuilder::<Stop>::new().order_by_desc(Some("zone"), "name").build().unwrap();
+        assert!(query.sql.ends_with(r#"ORDER BY "zone"."name" DESC"#), "sql: {}", query.sql);
+    }
+}

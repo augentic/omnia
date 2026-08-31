@@ -2,7 +2,7 @@
 
 The `wasi:sql` interface gives guests parameterized SQL access to whatever database the host configures — SQLite in development (`SqlDefault`), PostgreSQL in production (`omnia-postgres`). On top of the raw interface, `omnia-guest` provides a small ORM: an `entity!` macro that maps structs to tables and typed builders for select/insert/update/delete.
 
-The [`sql`](../../examples/sql/) example is a complete CRUD service (agencies and feeds, with a JOIN endpoint); everything below is drawn from it.
+The [`sql`](../../examples/sql/) example is a minimal CRUD service (agencies and feeds, with a JOIN endpoint) touching each builder once; the snippets below follow its patterns and extend them.
 
 > **Host prerequisite.** The runtime serving your guest must link this interface: add `WasiSql: SqlDefault` (from `omnia_wasi_sql`) to the `runtime!` `hosts:` map — see [Composing a Runtime](composing-a-runtime.md). Everything below is guest code.
 

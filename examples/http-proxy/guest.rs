@@ -7,7 +7,6 @@ use axum::body::Body;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use base64ct::{Base64, Encoding};
 use bytes::Bytes;
 use http::Method;
 use http::header::{CACHE_CONTROL, IF_NONE_MATCH};
@@ -28,8 +27,7 @@ impl Guest for HttpGuest {
         let router = Router::new()
             .route("/cache", get(cache))
             .route("/origin-sm", get(origin_sm))
-            .route("/origin-xl", post(origin_xl))
-            .route("/client-cert", post(client_cert));
+            .route("/origin-xl", post(origin_xl));
         omnia_wasi_http::serve(router, request).await
     }
 }
@@ -89,35 +87,4 @@ async fn origin_xl() -> HttpResult<Json<Value>> {
 
     tracing::info!("fetched from origin-xl");
     Ok(Json(body))
-}
-
-/// Demonstrates mTLS client certificate authentication.
-#[omnia_wasi_otel::instrument]
-async fn client_cert() -> HttpResult<Json<Value>> {
-    let auth_cert = "
-        -----BEGIN CERTIFICATE-----
-        ...Your Certificate Here...
-        -----END CERTIFICATE----- 
-        -----BEGIN PRIVATE KEY-----
-        ...Your Private Key Here...
-        -----END PRIVATE KEY-----";
-    let encoded_cert = Base64::encode_string(auth_cert.as_bytes());
-
-    let request = http::Request::builder()
-        .method(Method::GET)
-        .uri("https://jsonplaceholder.cypress.io/posts/1")
-        .header("Client-Cert", &encoded_cert)
-        .extension(CacheOptions {
-            bucket_name: "example-bucket".to_string(),
-        })
-        .body(Empty::<Bytes>::new())
-        .context("building request")?;
-
-    let response = omnia_wasi_http::handle(request).await?;
-    let body = response.into_body();
-    let body_str = Base64::encode_string(&body);
-
-    Ok(Json(serde_json::json!({
-        "cached_response": body_str
-    })))
 }

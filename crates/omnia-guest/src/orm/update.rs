@@ -90,3 +90,53 @@ impl<M: Entity> UpdateBuilder<M> {
         finish(&statement, M::TABLE, "update")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::test_fixtures::Stop;
+    use super::*;
+    use crate::orm::DataType;
+
+    #[test]
+    fn set_chain_with_filter() {
+        let query = UpdateBuilder::<Stop>::new()
+            .set("name", "Britomart")
+            .set("stop_id", 9)
+            .r#where(Filter::eq("stop_id", 7))
+            .build()
+            .unwrap();
+
+        assert_eq!(
+            query.sql,
+            r#"UPDATE "stop" SET "name" = $1, "stop_id" = $2 WHERE ("stop"."stop_id") = ($3)"#
+        );
+        assert!(matches!(&query.params[0], DataType::Str(Some(s)) if s == "Britomart"));
+        assert!(matches!(query.params[1], DataType::Int32(Some(9))));
+        assert!(matches!(query.params[2], DataType::Int32(Some(7))));
+    }
+
+    #[test]
+    fn conditional_sets_only_bind_present_values() {
+        // The optional-PATCH-field pattern: absent fields add no SET clause.
+        let name: Option<&str> = Some("Britomart");
+        let timezone: Option<&str> = None;
+
+        let mut update = UpdateBuilder::<Stop>::new();
+        if let Some(name) = name {
+            update = update.set("name", name);
+        }
+        if let Some(timezone) = timezone {
+            update = update.set("timezone", timezone);
+        }
+        let query = update.r#where(Filter::eq("stop_id", 7)).build().unwrap();
+
+        assert_eq!(query.sql, r#"UPDATE "stop" SET "name" = $1 WHERE ("stop"."stop_id") = ($2)"#);
+        assert_eq!(query.params.len(), 2);
+    }
+
+    #[test]
+    fn refuses_missing_set_or_filter() {
+        assert!(UpdateBuilder::<Stop>::new().r#where(Filter::eq("stop_id", 7)).build().is_err());
+        assert!(UpdateBuilder::<Stop>::new().set("name", "x").build().is_err());
+    }
+}
