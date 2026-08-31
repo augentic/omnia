@@ -278,4 +278,61 @@ mod tests {
             plugins: { acquire: omnia::MountAcquire },
         })));
     }
+
+    // The declarative locations grammar, cached: path entries fold in
+    // declaration order into one `PathAcquire`, the registry entry becomes a
+    // `RegistryAcquire` cached in the `cache:` backend — which joins the
+    // bundle beside the hosts' backends — and the two compose by location
+    // kind in the generated `Wiring::acquirer` hook.
+    #[test]
+    fn expand_locations_cached() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            plugins: {
+                interfaces: ["emery:adapter/probe"],
+                locations: [
+                    { name: ".", path: project_root() },
+                    { registry: "ghcr.io" },
+                ],
+                cache: PluginCache,
+            },
+            guests: [
+                { id: "engine", source: "engine.wasm" },
+            ],
+            hosts: {
+                WasiOtel: OtelDefault,
+            },
+        })));
+    }
+
+    // Cacheless locations: no store backend joins the bundle and the
+    // registry acquirer fetches fresh on every load.
+    #[test]
+    fn expand_locations_cacheless() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            plugins: {
+                interfaces: ["emery:adapter/probe"],
+                locations: [
+                    { name: "adapters", path: adapters_root() },
+                    { registry: "ghcr.io" },
+                ],
+            },
+            guests: [
+                { id: "engine", source: "engine.wasm" },
+            ],
+        })));
+    }
+
+    // Locations are acquisition policy, not manifest data, so the block
+    // composes with `config:` — the TOML declares the interfaces, the
+    // binary the locations and cache.
+    #[test]
+    fn expand_locations_with_config() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            config: concat!(env!("CARGO_MANIFEST_DIR"), "/omnia.toml"),
+            plugins: {
+                locations: [{ registry: "ghcr.io" }],
+                cache: PluginCache,
+            },
+        })));
+    }
 }

@@ -1,0 +1,5 @@
+error: `locations:` is empty; declare at least one `{ name, path }` or `{ registry: ... }` entry
+ --> tests/compile_fail/locations_empty.rs:4:9
+  |
+4 |         locations: [],
+  |         ^^^^^^^^^

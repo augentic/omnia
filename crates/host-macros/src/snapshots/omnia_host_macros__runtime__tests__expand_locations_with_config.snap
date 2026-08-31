@@ -1,0 +1,77 @@
+---
+source: crates/host-macros/src/runtime.rs
+expression: "expand_pretty(quote!({\n    config: concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/omnia.toml\"), plugins:\n    { locations: [{ registry: \"ghcr.io\" }], cache: PluginCache, },\n}))"
+---
+mod runtime {
+    use anyhow::Result;
+    use omnia::futures::future;
+    use omnia::Server;
+    use omnia::tokio;
+    use super::*;
+    use omnia::Backend;
+    #[derive(Clone)]
+    struct Backends {
+        plugin_cache: PluginCache,
+    }
+    impl omnia::Backends for Backends {
+        async fn connect() -> Result<Self> {
+            let (plugin_cache,) = tokio::try_join!(
+                < PluginCache as Backend > ::connect(),
+            )?;
+            Ok(Self { plugin_cache })
+        }
+    }
+    struct Hooks;
+    impl omnia::Wiring<Backends> for Hooks {
+        fn link(
+            deployment: &mut omnia::Deployment<omnia::StoreCtx<Backends>>,
+        ) -> Result<()> {
+            deployment.host::<omnia::WasiPlugins, Backends>()?;
+            Ok(())
+        }
+        fn acquirer(
+            backends: &Backends,
+        ) -> Option<::std::sync::Arc<dyn omnia::Acquire>> {
+            Some(
+                ::std::sync::Arc::new(
+                    omnia::RegistryAcquire::new("ghcr.io")
+                        .cached(backends.plugin_cache.clone()),
+                ),
+            )
+        }
+        async fn serve(runtime: &omnia::Runtime<Backends>) -> Result<()> {
+            let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![];
+            future::try_join_all(servers).await?;
+            Ok(())
+        }
+    }
+    /// Entry point: run the compiled-in deployment through this
+    /// runtime's hosts and backends (raw argv passthrough for a
+    /// command deployment compiled in here, otherwise the standard
+    /// `run` grammar).
+    #[tokio::main]
+    pub async fn main() -> ::std::process::ExitCode {
+        omnia::main::<
+            Backends,
+            Hooks,
+        >(
+                omnia::MainOptions::new(omnia::Mode::Server)
+                    .manifest(
+                        omnia::ManifestSource::Path(
+                            ::std::path::PathBuf::from(
+                                concat!(env!("CARGO_MANIFEST_DIR"), "/omnia.toml"),
+                            ),
+                        ),
+                    ),
+            )
+            .await
+    }
+    /// Run one deployment through this runtime's hosts and backends,
+    /// blocking until the guest completes.
+    #[tokio::main]
+    pub async fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
+        omnia::run::<Backends, Hooks>(builder.mode(omnia::Mode::Server)).await
+    }
+}
+#[allow(unused_imports)]
+pub use runtime::{run, main};
