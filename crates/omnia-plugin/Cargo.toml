@@ -30,7 +30,7 @@ wasmtime = { workspace = true, features = ["runtime"] }
 [dev-dependencies]
 # Path-only (stripped at publish): the e2e loader tests exercise the embedder
 # surface, so they import through the `omnia` facade.
-omnia = { path = "../omnia" }
+omnia.workspace = true
 tempfile.workspace = true
 test-utils.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

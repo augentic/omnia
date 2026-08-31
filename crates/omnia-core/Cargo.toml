@@ -79,5 +79,5 @@ wrpc-wasmtime.workspace = true
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 # Path-only (stripped at publish): integration and doc tests exercise the
 # embedder surface, so they import through the `omnia` facade.
-omnia = { path = "../omnia" }
+omnia.workspace = true
 test-utils.workspace = true
