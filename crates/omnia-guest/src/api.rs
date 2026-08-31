@@ -40,8 +40,6 @@ pub mod http;
 /// Typed exact-topic messaging routing.
 pub mod messaging;
 
-pub use http::{HttpError, HttpResult};
-
 /// An input that could not be decoded into handler input.
 #[derive(Debug)]
 pub struct DecodeError {
