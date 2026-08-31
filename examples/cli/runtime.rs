@@ -12,7 +12,14 @@
 
 cfg_if::cfg_if! {
     if #[cfg(not(target_arch = "wasm32"))] {
-        omnia::runtime!({ mode: command });
+        use omnia_wasi_otel::{WasiOtel, OtelDefault};
+
+        omnia::runtime!({
+            mode: command,
+            hosts: {
+                WasiOtel: OtelDefault,
+            },
+        });
     } else {
         fn main() {}
     }
