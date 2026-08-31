@@ -30,6 +30,4 @@ exclude = [
   '\.\./crates/',
   '\.\./\.\./crates/',
   '\.\./\.\./specify/',
-  '\.\./\.\./Dockerfile',
-  '\.\./\.\./docker/',
 ]
