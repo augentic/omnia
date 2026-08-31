@@ -1,10 +1,14 @@
-//! The `Acquire` seam and the preopen-relative `MountAcquire`.
+//! # Plugin acquisition
+//!
+//! The [`Acquire`] seam and the preopen-relative [`MountAcquire`].
 //!
 //! Acquisition policy — endpoints, cache, path reads — is a value the
-//! embedder compiles in at the composition root, never core machinery: core
+//! embedder compiles in at the composition root (the `runtime!` macro's
+//! `plugins: { acquire: ... }` key, lowered into the generated
+//! `Wiring::acquirer` hook), never runtime-core machinery: the runtime
 //! consumes the [`Acquire`] trait and keeps zero storage and network
-//! dependencies. [`MountAcquire`] is the battery core ships (fresh reads over
-//! the existing mount registry); registry acquirers are embedder territory.
+//! dependencies. This crate is omnia-internal — its surface reaches
+//! consumers re-exported from `omnia` under the runtime's own paths.
 
 use std::fmt;
 use std::sync::Arc;
@@ -13,10 +17,8 @@ use anyhow::{Context as _, Result, anyhow, ensure};
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
 
-use crate::mount::MountRegistry;
-
-/// Where an acquirer finds a package's component bytes — the core mirror of
-/// the `omnia:plugins/loader` `location` variant.
+/// Where an acquirer finds a package's component bytes — the mirror of the
+/// `omnia:plugins/loader` `location` variant.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Location {
     /// A package registry; `None` selects the acquirer's default.
@@ -35,14 +37,24 @@ impl fmt::Display for Location {
     }
 }
 
+/// One deployment mount lent to acquirers: the guest-visible name plus the
+/// opened capability handle to the mount root.
+#[derive(Clone)]
+pub struct MountEntry {
+    /// Guest-visible mount name (the preopen name).
+    pub name: String,
+    /// Host-side capability handle to the mount root.
+    pub dir: Arc<cap_std::fs::Dir>,
+}
+
 /// Deployment facts the runtime lends an acquirer per load.
 ///
 /// Mounts open after the composition root constructs the acquirer, so they
 /// arrive per call rather than at construction — `acquire: MountAcquire`
 /// stays a plain value in the `runtime!` declaration.
 pub struct AcquireContext {
-    /// The deployment's mount registry, for preopen-relative reads.
-    pub mounts: Arc<MountRegistry>,
+    /// The deployment's mounts, for preopen-relative reads.
+    pub mounts: Vec<MountEntry>,
 }
 
 /// Why an acquirer produced no bytes.
@@ -55,8 +67,8 @@ pub enum AcquireError {
 }
 
 /// Acquisition policy compiled in at the composition root — built by the
-/// [`Wiring::acquirer`](crate::Wiring::acquirer) hook, which the `runtime!`
-/// macro's `plugins: { acquire: ... }` key lowers into.
+/// runtime's `Wiring::acquirer` hook, which the `runtime!` macro's
+/// `plugins: { acquire: ... }` key lowers into.
 ///
 /// An implementation owns every fetch, cache, and endpoint decision; the
 /// loader only ever receives bytes back, then verifies, validates, and
@@ -68,13 +80,13 @@ pub trait Acquire: Send + Sync + 'static {
     ) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>>;
 }
 
-/// Preopen-relative path acquisition over the deployment's mount registry.
+/// Preopen-relative path acquisition over the deployment's mounts.
 ///
-/// Paths resolve against the registered mounts (longest mount-name prefix
-/// wins; a bare relative path falls back to a `.` mount, matching wasi-libc's
-/// preopen resolution) and are read fresh on every load — never cached.
-/// Registry locations are refused: composing a registry acquirer is
-/// deployment policy outside core.
+/// Paths resolve against the lent mounts (longest mount-name prefix wins; a
+/// bare relative path falls back to a `.` mount, matching wasi-libc's preopen
+/// resolution) and are read fresh on every load — never cached. Registry
+/// locations are refused: composing a registry acquirer is deployment policy
+/// outside this default.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MountAcquire;
 
@@ -108,9 +120,9 @@ impl Acquire for MountAcquire {
 /// The longest mount-name prefix wins; a plain relative path with no matching
 /// prefix falls back to a mount named `.` when one exists. The subpath must
 /// be plain and relative — cap-std then refuses any escape at open time.
-fn resolve(path: &str, mounts: &MountRegistry) -> Result<(Arc<cap_std::fs::Dir>, String)> {
-    let mut best: Option<(&crate::mount::Mount, &str)> = None;
-    for entry in mounts.entries() {
+fn resolve(path: &str, mounts: &[MountEntry]) -> Result<(Arc<cap_std::fs::Dir>, String)> {
+    let mut best: Option<(&MountEntry, &str)> = None;
+    for entry in mounts {
         let subpath = if path == entry.name {
             ""
         } else if let Some(rest) = path.strip_prefix(&entry.name).and_then(|r| r.strip_prefix('/'))
@@ -126,7 +138,7 @@ fn resolve(path: &str, mounts: &MountRegistry) -> Result<(Arc<cap_std::fs::Dir>,
     if best.is_none() {
         // wasi-libc resolves bare relative paths against a `.` preopen; do
         // the same so host- and guest-side views of a path agree.
-        best = mounts.entries().iter().find(|entry| entry.name == ".").map(|entry| (entry, path));
+        best = mounts.iter().find(|entry| entry.name == ".").map(|entry| (entry, path));
     }
     let (entry, subpath) =
         best.ok_or_else(|| anyhow!("path `{path}` is not under any mount of this deployment"))?;
@@ -148,8 +160,10 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
 
-    use crate::mount::{MountRegistry, ResolvedPreopen};
-    use crate::plugins::{Acquire as _, AcquireContext, AcquireError, Location, MountAcquire};
+    use cap_std::ambient_authority;
+    use cap_std::fs::Dir;
+
+    use crate::{Acquire as _, AcquireContext, AcquireError, Location, MountAcquire, MountEntry};
 
     fn temp_root(label: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("omnia-acq-{label}-{}", std::process::id()));
@@ -159,13 +173,16 @@ mod tests {
     }
 
     fn context(mounts: &[(&str, &PathBuf)]) -> AcquireContext {
-        let preopens = mounts
+        let mounts = mounts
             .iter()
-            .map(|(name, path)| ResolvedPreopen::new((*name).to_owned(), (*path).clone(), false))
+            .map(|(name, path)| MountEntry {
+                name: (*name).to_owned(),
+                dir: Arc::new(
+                    Dir::open_ambient_dir(path, ambient_authority()).expect("opening mount"),
+                ),
+            })
             .collect();
-        AcquireContext {
-            mounts: Arc::new(MountRegistry::open(preopens).expect("opening mounts")),
-        }
+        AcquireContext { mounts }
     }
 
     async fn acquire(context: &AcquireContext, path: &str) -> Result<Vec<u8>, AcquireError> {

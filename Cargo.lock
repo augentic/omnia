@@ -2001,6 +2001,7 @@ dependencies = [
  "futures",
  "http",
  "omnia-host-macros",
+ "omnia-plugin",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
@@ -2080,6 +2081,16 @@ dependencies = [
  "quote",
  "syn 3.0.4",
  "trybuild",
+]
+
+[[package]]
+name = "omnia-plugin"
+version = "0.35.0"
+dependencies = [
+ "anyhow",
+ "cap-std",
+ "futures",
+ "tokio",
 ]
 
 [[package]]

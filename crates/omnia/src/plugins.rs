@@ -14,7 +14,6 @@
 //! [`MountAcquire`] — preopen-relative reads over the mount registry — and
 //! keeps zero storage and network dependencies.
 
-mod acquire;
 mod digest;
 mod host;
 
@@ -22,10 +21,10 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
-pub use acquire::{Acquire, AcquireContext, AcquireError, Location, MountAcquire};
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
 pub use host::{WasiPlugins, WasiPluginsCtxView, WasiPluginsView};
+pub use omnia_plugin::{Acquire, AcquireContext, AcquireError, Location, MountAcquire, MountEntry};
 use wasmtime::component::{Component, types};
 
 use crate::deployment::{ELF_MAGIC, GuestArtifact};
@@ -205,8 +204,18 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
                  to load `{package}`"
             )));
         };
+        // Snapshot the registry's `(name, dir)` pairs: acquirers see plain
+        // mount entries, never core's registry type.
         let context = AcquireContext {
-            mounts: self.mount_registry(),
+            mounts: self
+                .mount_registry()
+                .entries()
+                .iter()
+                .map(|mount| MountEntry {
+                    name: mount.name.clone(),
+                    dir: Arc::clone(&mount.dir),
+                })
+                .collect(),
         };
         let bytes =
             acquirer.acquire(package, &from, &context).await.map_err(|error| match error {

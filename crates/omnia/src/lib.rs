@@ -44,8 +44,8 @@ pub use self::options::RuntimeOptions;
 #[cfg(feature = "jit")]
 pub use self::options::compile;
 pub use self::plugins::{
-    Acquire, AcquireContext, AcquireError, LoadError, Location, MountAcquire, Plugin, PluginLoader,
-    WasiPlugins, WasiPluginsCtxView, WasiPluginsView,
+    Acquire, AcquireContext, AcquireError, LoadError, Location, MountAcquire, MountEntry, Plugin,
+    PluginLoader, WasiPlugins, WasiPluginsCtxView, WasiPluginsView,
 };
 pub use self::registry::{
     CliRoutes, Guest, GuestId, HttpRoutes, PatternRoutes, Registry, Routes, TriggerRouter,
