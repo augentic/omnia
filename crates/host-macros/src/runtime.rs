@@ -19,7 +19,7 @@ pub fn expand(config: &Config) -> TokenStream {
         backends_ty,
         backends_def,
         main_options,
-        acquirer_hook,
+        extend_hook,
         link_plugins,
     } = Codegen::from(config);
 
@@ -51,7 +51,7 @@ pub fn expand(config: &Config) -> TokenStream {
                     Ok(())
                 }
 
-                #acquirer_hook
+                #extend_hook
 
                 async fn serve(
                     runtime: &omnia::Runtime<#backends_ty>,
@@ -250,10 +250,10 @@ mod tests {
     }
 
     // The declarative locations grammar, cached: path entries fold in
-    // declaration order into one `PathAcquire`, the registry entry becomes a
-    // `RegistryAcquire` cached in the `cache:` backend — which joins the
-    // bundle beside the hosts' backends — and the two compose by location
-    // kind in the generated `Wiring::acquirer` hook.
+    // declaration order into one `PathMounts`, the registry entry becomes a
+    // `RegistryClient` cached in the `cache:` backend — which joins the
+    // bundle beside the hosts' backends — each filling its kind's slot in
+    // the `Acquirer` the generated `Wiring::extend` hook installs.
     #[test]
     fn expand_locations_cached() {
         insta::assert_snapshot!(expand_pretty(quote!({

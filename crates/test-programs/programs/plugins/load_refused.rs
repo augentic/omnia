@@ -21,7 +21,8 @@ async fn load(package: &str, path: &str, digest: Option<&str>) -> Result<Plugin,
 }
 
 async fn scenario() {
-    // The deployment's PathAcquire serves no registry locations.
+    // The deployment's acquirer fills only the path slot; registry loads
+    // refuse typed.
     let err = loader::load("test:reg".to_owned(), Location::Registry(None), None)
         .await
         .expect_err("registry locations are unsupported");

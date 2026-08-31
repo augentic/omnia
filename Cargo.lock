@@ -1052,7 +1052,7 @@ dependencies = [
 
 [[package]]
 name = "examples"
-version = "0.35.0"
+version = "0.36.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2350,7 +2350,16 @@ dependencies = [
 
 [[package]]
 name = "omnia"
-version = "0.35.0"
+version = "0.36.0"
+dependencies = [
+ "omnia-core",
+ "omnia-host-macros",
+ "omnia-plugin",
+]
+
+[[package]]
+name = "omnia-core"
+version = "0.36.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2361,14 +2370,12 @@ dependencies = [
  "fromenv",
  "futures",
  "http",
- "omnia-host-macros",
- "omnia-plugin",
+ "omnia",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "pastey",
  "serde",
- "sha2 0.10.9",
  "test-utils",
  "tokio",
  "tokio-util",
@@ -2386,7 +2393,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-guest"
-version = "0.35.0"
+version = "0.36.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2424,7 +2431,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-guest-macros"
-version = "0.35.0"
+version = "0.36.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2434,7 +2441,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-host-macros"
-version = "0.35.0"
+version = "0.36.0"
 dependencies = [
  "insta",
  "prettyplease 0.3.0",
@@ -2446,22 +2453,26 @@ dependencies = [
 
 [[package]]
 name = "omnia-plugin"
-version = "0.35.0"
+version = "0.36.0"
 dependencies = [
  "anyhow",
  "cap-std",
  "futures",
+ "omnia",
+ "omnia-core",
  "serde",
  "sha2 0.10.9",
  "tempfile",
+ "test-utils",
  "tokio",
  "tracing",
  "wasm-pkg-client",
+ "wasmtime",
 ]
 
 [[package]]
 name = "omnia-wasi-blobstore"
-version = "0.35.0"
+version = "0.36.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2476,7 +2487,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-config"
-version = "0.35.0"
+version = "0.36.0"
 dependencies = [
  "anyhow",
  "omnia",
@@ -2488,7 +2499,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-docstore"
-version = "0.35.0"
+version = "0.36.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2503,7 +2514,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-http"
-version = "0.35.0"
+version = "0.36.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2532,7 +2543,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-identity"
-version = "0.35.0"
+version = "0.36.0"
 dependencies = [
  "anyhow",
  "fromenv",
@@ -2549,7 +2560,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-keyvalue"
-version = "0.35.0"
+version = "0.36.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2566,7 +2577,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-messaging"
-version = "0.35.0"
+version = "0.36.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -2581,7 +2592,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-model"
-version = "0.35.0"
+version = "0.36.0"
 dependencies = [
  "anyhow",
  "cap-std",
@@ -2601,7 +2612,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-otel"
-version = "0.35.0"
+version = "0.36.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -2621,7 +2632,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-sql"
-version = "0.35.0"
+version = "0.36.0"
 dependencies = [
  "anyhow",
  "fromenv",
@@ -2638,7 +2649,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-vault"
-version = "0.35.0"
+version = "0.36.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -2652,7 +2663,7 @@ dependencies = [
 
 [[package]]
 name = "omnia-wasi-websocket"
-version = "0.35.0"
+version = "0.36.0"
 dependencies = [
  "anyhow",
  "dashmap",
@@ -3945,7 +3956,7 @@ dependencies = [
 
 [[package]]
 name = "test-programs"
-version = "0.35.0"
+version = "0.36.0"
 dependencies = [
  "omnia-guest",
  "omnia-wasi-model",
@@ -3955,7 +3966,7 @@ dependencies = [
 
 [[package]]
 name = "test-utils"
-version = "0.35.0"
+version = "0.36.0"
 dependencies = [
  "anyhow",
  "omnia",

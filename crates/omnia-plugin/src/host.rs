@@ -2,7 +2,7 @@
 
 mod generated {
     pub use self::omnia::plugins::loader::Error;
-    pub use crate::plugins::Plugin;
+    pub use crate::Plugin;
 
     wasmtime::component::bindgen!({
         world: "imports",
@@ -21,15 +21,16 @@ mod generated {
 
 use std::sync::Arc;
 
+use omnia_core::{HasExtensions as _, Host, Server, StoreCtx};
 use wasmtime::component::{Access, Accessor, HasData, Linker, Resource, ResourceTable};
 
 use self::generated::Error;
 use self::generated::omnia::plugins::loader;
-use crate::plugins::{LoadError, Location, Plugin, PluginLoader};
-use crate::{Host, Server, StoreCtx};
+use crate::Location;
+use crate::loader::{LoadError, Plugin, PluginLoader, Plugins};
 
-/// Host-side service for `omnia:plugins` — the loader capability the runtime
-/// core implements itself.
+/// Host-side service for `omnia:plugins` — the loader capability this crate
+/// implements over the runtime's admission seam.
 #[derive(Debug)]
 pub struct WasiPlugins;
 
@@ -59,9 +60,9 @@ pub trait WasiPluginsView: Send {
 
 /// Borrowed view over the store's plugin-load capability and resource table.
 pub struct WasiPluginsCtxView<'a> {
-    /// The runtime's plugin-load capability; `None` in hand-built store
-    /// contexts, where every load refuses.
-    pub loader: Option<&'a Arc<dyn PluginLoader>>,
+    /// The runtime's plugin-load capability; `None` when the deployment
+    /// installed no [`Plugins`] extension, where every load refuses.
+    pub loader: Option<Arc<dyn PluginLoader>>,
     /// Mutable reference to the table used to manage resources.
     pub table: &'a mut ResourceTable,
 }
@@ -69,7 +70,7 @@ pub struct WasiPluginsCtxView<'a> {
 impl<B: Send + 'static> WasiPluginsView for StoreCtx<B> {
     fn plugins(&mut self) -> WasiPluginsCtxView<'_> {
         WasiPluginsCtxView {
-            loader: self.base.loader.as_ref(),
+            loader: self.extensions().get::<Plugins>().map(|plugins| plugins.loader()),
             table: &mut self.base.table,
         }
     }
@@ -105,14 +106,15 @@ impl<T> loader::HostWithStore<T> for WasiPlugins {
         digest: Option<String>,
     ) -> Result<Resource<Plugin>, Error> {
         let loader = accessor
-            .with(|mut store| store.get().loader.map(Arc::clone))
-            .ok_or_else(|| Error::Internal("this store carries no plugin loader".to_owned()))?;
+            .with(|mut store| store.get().loader)
+            .ok_or_else(|| Error::Internal(crate::loader::no_acquirer(&package)))?;
         let plugin = loader.load(package, from.into(), digest).await?;
         Ok(accessor.with(|mut store| store.get().table.push(plugin))?)
     }
 }
 
 impl<T> loader::HostPluginWithStore<T> for WasiPlugins {
+    // `host` and `accessor` follow the generated trait's parameter names.
     fn id(mut host: Access<'_, T, Self>, self_: Resource<Plugin>) -> wasmtime::Result<String> {
         Ok(host.get().table.get(&self_)?.id().to_string())
     }
@@ -135,4 +137,4 @@ impl loader::Host for WasiPluginsCtxView<'_> {
 
 impl loader::HostPlugin for WasiPluginsCtxView<'_> {}
 
-crate::host_error!(Error, Internal);
+omnia_core::host_error!(Error, Internal);

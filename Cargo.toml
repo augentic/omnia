@@ -11,7 +11,7 @@ keywords = ["runtime", "wasi", "wasm", "wasmtime", "component-model"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/augentic/omnia"
 rust-version = "1.97"
-version = "0.35.0"
+version = "0.36.0"
 
 [workspace.lints.rust]
 # https://dirname.github.io/rust-std-doc/rustc/lints/listing/allowed-by-default.html
@@ -120,8 +120,6 @@ wasm-tokio = { version = "0.6.1", default-features = false }
 wasmtime = { version = "48.0.1", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation", "pooling-allocator"] }
 wasmtime-wasi = { version = "48.0.1", features = ["p3"] }
 wasmtime-wasi-config = "48.0.1"
-# Defaults off: `default-send-request` (built-in hyper/rustls sender) is dead
-# weight under omnia's reqwest hooks, and the p2 HTTP host is never linked.
 wasmtime-wasi-http = { version = "48.0.1", default-features = false, features = ["p3"] }
 wasmtime-wasi-io = "48.0.1"
 wit-bindgen = { version = "0.61.1", features = ["async-spawn"] }
@@ -129,23 +127,24 @@ wrpc-transport = "0.29.0"
 wrpc-wasmtime = "0.1.0"
 
 # internally referenced crates
-omnia = { path = "crates/omnia", version = "0.35.0" }
-omnia-guest = { path = "crates/omnia-guest", version = "0.35.0" }
-omnia-guest-macros = { path = "crates/guest-macros", version = "0.35.0" }
-omnia-host-macros = { path = "crates/host-macros", version = "0.35.0" }
-omnia-plugin = { path = "crates/plugin", version = "0.35.0" }
-omnia-wasi-blobstore = { path = "crates/wasi-blobstore", version = "0.35.0" }
-omnia-wasi-config = { path = "crates/wasi-config", version = "0.35.0" }
-omnia-wasi-docstore = { path = "crates/wasi-docstore", version = "0.35.0" }
-omnia-wasi-http = { path = "crates/wasi-http", version = "0.35.0" }
-omnia-wasi-identity = { path = "crates/wasi-identity", version = "0.35.0" }
-omnia-wasi-keyvalue = { path = "crates/wasi-keyvalue", version = "0.35.0" }
-omnia-wasi-messaging = { path = "crates/wasi-messaging", version = "0.35.0" }
-omnia-wasi-model = { path = "crates/wasi-model", version = "0.35.0" }
-omnia-wasi-otel = { path = "crates/wasi-otel", version = "0.35.0" }
-omnia-wasi-sql = { path = "crates/wasi-sql", version = "0.35.0" }
-omnia-wasi-vault = { path = "crates/wasi-vault", version = "0.35.0" }
-omnia-wasi-websocket = { path = "crates/wasi-websocket", version = "0.35.0" }
+omnia = { path = "crates/omnia", version = "0.36.0" }
+omnia-core = { path = "crates/omnia-core", version = "0.36.0", default-features = false }
+omnia-guest = { path = "crates/omnia-guest", version = "0.36.0" }
+omnia-guest-macros = { path = "crates/guest-macros", version = "0.36.0" }
+omnia-host-macros = { path = "crates/host-macros", version = "0.36.0" }
+omnia-plugin = { path = "crates/omnia-plugin", version = "0.36.0" }
+omnia-wasi-blobstore = { path = "crates/wasi-blobstore", version = "0.36.0" }
+omnia-wasi-config = { path = "crates/wasi-config", version = "0.36.0" }
+omnia-wasi-docstore = { path = "crates/wasi-docstore", version = "0.36.0" }
+omnia-wasi-http = { path = "crates/wasi-http", version = "0.36.0" }
+omnia-wasi-identity = { path = "crates/wasi-identity", version = "0.36.0" }
+omnia-wasi-keyvalue = { path = "crates/wasi-keyvalue", version = "0.36.0" }
+omnia-wasi-messaging = { path = "crates/wasi-messaging", version = "0.36.0" }
+omnia-wasi-model = { path = "crates/wasi-model", version = "0.36.0" }
+omnia-wasi-otel = { path = "crates/wasi-otel", version = "0.36.0" }
+omnia-wasi-sql = { path = "crates/wasi-sql", version = "0.36.0" }
+omnia-wasi-vault = { path = "crates/wasi-vault", version = "0.36.0" }
+omnia-wasi-websocket = { path = "crates/wasi-websocket", version = "0.36.0" }
 test-utils = { path = "crates/test-utils" }
 
 [patch.crates-io]

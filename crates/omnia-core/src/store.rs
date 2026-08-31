@@ -14,8 +14,7 @@ use wasmtime_wasi_http::{WasiHttpCtxView, WasiHttpView};
 use wrpc_wasmtime::{WrpcCtxView, WrpcView};
 
 use crate::{
-    Dispatcher, HostCtx, LinkClient, MountRegistry, PluginLoader, Provides, RuntimeOptions,
-    WrpcState,
+    Dispatcher, Extensions, HostCtx, LinkClient, MountRegistry, Provides, RuntimeOptions, WrpcState,
 };
 
 /// Exposes a store context's [`StoreLimits`] so the runtime can install a
@@ -47,9 +46,9 @@ pub struct StoreConfig<'a> {
     /// Complete guest environment replacing host inheritance; `None` inherits
     /// the host env.
     pub env: Option<Arc<Vec<(String, String)>>>,
-    /// Type-erased `omnia:plugins/loader` capability; `None` for hand-built
-    /// store contexts, where every load refuses.
-    pub loader: Option<Arc<dyn PluginLoader>>,
+    /// The runtime's installed extensions; [`Extensions::new`] for hand-built
+    /// store contexts, where a capability that reads its extension refuses.
+    pub extensions: Extensions,
 }
 
 /// The fixed per-store state shared by every guest store context.
@@ -78,9 +77,10 @@ pub struct StoreBase {
     /// `descriptor` back to its mount by directory identity. Empty unless the
     /// deployment configures `[[mount]]`s.
     pub mounts: Arc<MountRegistry>,
-    /// Type-erased `omnia:plugins/loader` capability the `WasiPlugins` host
-    /// binding reaches for. Absent in hand-built store contexts.
-    pub loader: Option<Arc<dyn PluginLoader>>,
+    /// Handle to the runtime's installed extensions, the state slot a
+    /// capability crate's host binding reaches for. Empty in hand-built
+    /// store contexts.
+    pub extensions: Extensions,
 }
 
 impl StoreBase {
@@ -133,7 +133,7 @@ impl StoreBase {
             wrpc: WrpcState::new(),
             dispatcher: config.dispatcher,
             mounts,
-            loader: config.loader,
+            extensions: config.extensions,
         }
     }
 }
@@ -260,5 +260,21 @@ pub trait HasDispatcher: Send {
 impl<B: Send + 'static> HasDispatcher for StoreCtx<B> {
     fn dispatcher(&self) -> Arc<dyn Dispatcher> {
         Arc::clone(&self.base.dispatcher)
+    }
+}
+
+/// Clone-on-read access to a store's runtime extensions.
+///
+/// Lets a capability crate's host binding reach the state its
+/// [`Wiring::extend`](crate::Wiring) hook installed without carrying it on
+/// its own view.
+pub trait HasExtensions: Send {
+    /// Clone a handle to the store's runtime extensions.
+    fn extensions(&self) -> Extensions;
+}
+
+impl<B: Send + 'static> HasExtensions for StoreCtx<B> {
+    fn extensions(&self) -> Extensions {
+        self.base.extensions.clone()
     }
 }

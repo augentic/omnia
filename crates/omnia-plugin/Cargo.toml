@@ -1,6 +1,6 @@
 [package]
 name = "omnia-plugin"
-description = "Plugin acquisition for the omnia runtime: the Acquire seam and its built-in policies"
+description = "The omnia:plugins/loader capability for the omnia runtime: the loader host, acquisition policies, and plugin stores"
 readme = "README.md"
 authors.workspace = true
 categories.workspace = true
@@ -19,12 +19,16 @@ workspace = true
 anyhow.workspace = true
 cap-std.workspace = true
 futures.workspace = true
+omnia-core.workspace = true
 serde = { workspace = true, features = ["derive"] }
 sha2.workspace = true
 tokio = { workspace = true, features = ["rt", "sync"] }
 tracing.workspace = true
 wasm-pkg-client.workspace = true
+wasmtime = { workspace = true, features = ["runtime"] }
 
 [dev-dependencies]
+omnia.workspace = true
 tempfile.workspace = true
+test-utils.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

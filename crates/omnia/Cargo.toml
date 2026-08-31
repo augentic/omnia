@@ -22,62 +22,29 @@ default = ["cli", "jit", "otlp"]
 # `clap` re-export. Without it, deployments are direct commands (command mode
 # with a compiled-in deployment) or built programmatically via
 # `DeploymentBuilder`.
-cli = ["dep:clap"]
+cli = ["omnia-core/cli"]
 
 # Enables just-in-time wasm to machine code compilation.
-jit = ["wasmtime/cranelift"]
+jit = ["omnia-core/jit"]
 
 # Enables the OTLP (gRPC) span and metric exporters. Without it, `Telemetry`
 # still installs the fmt/`EnvFilter` subscriber, while `telemetry::flush` and
 # `telemetry::resource` become no-ops.
-otlp = ["dep:opentelemetry-otlp", "dep:tracing-opentelemetry"]
+otlp = ["omnia-core/otlp"]
 
 # Enables memory protection keys (MPK) support in the pooling allocator. MPK
 # only functions on Linux/x86_64; elsewhere it compiles but is inert
 # (`POOL_MEMORY_PROTECTION_KEYS=auto` falls back to leaving guard regions in
 # place). Off by default.
-mpk = ["wasmtime/memory-protection-keys"]
+mpk = ["omnia-core/mpk"]
 
 # Enables the WebAssembly GC / reference-types proposal (with the default
 # copying collector) and the pooling allocator's `total_gc_heaps` control
 # (`POOL_TOTAL_GC_HEAPS`). Current guests compile to linear memory and never
 # allocate a GC heap, so this is off by default.
-gc = ["wasmtime/gc", "wasmtime/gc-copying"]
+gc = ["omnia-core/gc"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-anyhow.workspace = true
-bytes.workspace = true
-cap-fs-ext.workspace = true
-cap-std.workspace = true
-cfg-if.workspace = true
-clap = { workspace = true, optional = true }
-fromenv.workspace = true
-futures.workspace = true
-http.workspace = true
-opentelemetry.workspace = true
-# Tonic-only export: the defaults add an HTTP export path (opentelemetry-http →
-# reqwest) that `telemetry.rs` never uses. TLS was never enabled for the gRPC
-# channel (`tls-*` is not a default), so plaintext OTLP behavior is unchanged.
-opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["grpc-tonic", "metrics", "trace"], optional = true }
-opentelemetry_sdk = { workspace = true, features = ["rt-tokio"] }
-pastey.workspace = true
-serde.workspace = true
-sha2.workspace = true
-toml.workspace = true
-tracing.workspace = true
-tracing-opentelemetry = { workspace = true, optional = true }
-tracing-subscriber.workspace = true
-tokio = { workspace = true, features = ["io-util", "macros", "rt", "sync", "time"] }
-tokio-util = { workspace = true, features = ["codec"] }
+omnia-core.workspace = true
 omnia-host-macros.workspace = true
 omnia-plugin.workspace = true
-wasm-tokio.workspace = true
-wasmtime = { workspace = true, features = ["runtime"] }
-wasmtime-wasi.workspace = true
-wasmtime-wasi-http.workspace = true
-wrpc-transport.workspace = true
-wrpc-wasmtime.workspace = true
-# wrpc-runtime-wasmtime.workspace = true
-
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-test-utils.workspace = true
