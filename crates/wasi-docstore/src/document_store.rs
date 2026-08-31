@@ -352,7 +352,7 @@ fn next_iso_date(iso_date: &str) -> anyhow::Result<String> {
 mod tests {
     use super::*;
 
-    fn bound<'a>(filter: &'a Filter, expected_op: ComparisonOp) -> &'a str {
+    fn bound(filter: &Filter, expected_op: ComparisonOp) -> &str {
         let Filter::Compare {
             field,
             op,
@@ -386,7 +386,7 @@ mod tests {
 
     #[test]
     fn on_date_rejects_invalid_date() {
-        assert!(Filter::on_date("updated", "2026-13-01").is_err());
-        assert!(Filter::on_date("updated", "not-a-date").is_err());
+        Filter::on_date("updated", "2026-13-01").unwrap_err();
+        Filter::on_date("updated", "not-a-date").unwrap_err();
     }
 }

@@ -30,26 +30,6 @@ pub mod __private {
     pub use sea_query::Value;
 }
 
-#[cfg(test)]
-pub(crate) mod test_fixtures {
-    use super::{Entity, Row};
-
-    /// Minimal two-column entity for builder unit tests.
-    pub struct Stop;
-
-    impl Entity for Stop {
-        const TABLE: &'static str = "stop";
-
-        fn projection() -> &'static [&'static str] {
-            &["stop_id", "name"]
-        }
-
-        fn from_row(_row: &Row) -> anyhow::Result<Self> {
-            anyhow::bail!("builder tests never map rows")
-        }
-    }
-}
-
 /// Declares an ORM entity with automatic `Entity` trait implementation.
 ///
 /// # Examples
@@ -150,4 +130,24 @@ macro_rules! entity {
             $($rest)*
         }
     };
+}
+
+#[cfg(test)]
+pub(crate) mod test_fixtures {
+    use super::{Entity, Row};
+
+    /// Minimal two-column entity for builder unit tests.
+    pub struct Stop;
+
+    impl Entity for Stop {
+        const TABLE: &'static str = "stop";
+
+        fn projection() -> &'static [&'static str] {
+            &["stop_id", "name"]
+        }
+
+        fn from_row(_row: &Row) -> anyhow::Result<Self> {
+            anyhow::bail!("builder tests never map rows")
+        }
+    }
 }
