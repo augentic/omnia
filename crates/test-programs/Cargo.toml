@@ -168,3 +168,8 @@ crate-type = ["cdylib"]
 name = "plugins_load_refused"
 path = "programs/plugins/load_refused.rs"
 crate-type = ["cdylib"]
+
+[[example]]
+name = "plugins_load_registry"
+path = "programs/plugins/load_registry.rs"
+crate-type = ["cdylib"]

@@ -8,7 +8,7 @@ interface loader {
     variant location {
         /// A package registry; `none` selects the acquirer's default.
         registry(option<string>),
-        /// A preopen-relative component path, read fresh on every load.
+        /// A location-relative component path, read fresh on every load.
         path(string),
     }
 

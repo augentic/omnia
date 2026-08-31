@@ -36,7 +36,7 @@ const HEX_LEN: usize = 64;
 pub enum Location {
     /// A package registry; `None` selects the acquirer's default.
     Registry(Option<String>),
-    /// A preopen-relative component path, read fresh on every load.
+    /// A location-relative component path, read fresh on every load.
     Path(String),
 }
 

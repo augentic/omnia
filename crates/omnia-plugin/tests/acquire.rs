@@ -78,19 +78,21 @@ impl MemStore {
 }
 
 impl ContentStore for MemStore {
-    fn get<'a>(&'a self, digest: &'a str) -> BoxFuture<'a, anyhow::Result<Option<Vec<u8>>>> {
+    fn content<'a>(&'a self, digest: &'a str) -> BoxFuture<'a, anyhow::Result<Option<Vec<u8>>>> {
         let bytes = self.content_of(digest);
         async move { Ok(bytes) }.boxed()
     }
 
-    fn put<'a>(&'a self, digest: &'a str, bytes: &'a [u8]) -> BoxFuture<'a, anyhow::Result<()>> {
+    fn put_content<'a>(
+        &'a self, digest: &'a str, bytes: &'a [u8],
+    ) -> BoxFuture<'a, anyhow::Result<()>> {
         self.content.lock().expect("content lock").insert(digest.to_owned(), bytes.to_vec());
         async move { Ok(()) }.boxed()
     }
 }
 
 impl ReleaseStore for MemStore {
-    fn get<'a>(
+    fn release<'a>(
         &'a self, registry: &'a str, package: &'a str, version: &'a str,
     ) -> BoxFuture<'a, anyhow::Result<Option<ReleaseRecord>>> {
         let key = (registry.to_owned(), package.to_owned(), version.to_owned());
@@ -98,7 +100,7 @@ impl ReleaseStore for MemStore {
         async move { Ok(record) }.boxed()
     }
 
-    fn put<'a>(
+    fn put_release<'a>(
         &'a self, registry: &'a str, package: &'a str, record: &'a ReleaseRecord,
     ) -> BoxFuture<'a, anyhow::Result<()>> {
         let key = (registry.to_owned(), package.to_owned(), record.version.clone());

@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::future::Future;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
@@ -85,6 +85,45 @@ impl From<AdmitError> for LoadError {
     }
 }
 
+/// The refusal for a deployment with no installed [`Plugins`] extension —
+/// shared by the `WasiPlugins` host binding and [`LoadPlugin::load_plugin`]
+/// so both entry points name the fix.
+pub fn no_acquirer(package: &str) -> String {
+    format!(
+        "this deployment has no acquirer; compile one in (`plugins: {{ locations: [...] }}`) to \
+         load `{package}`"
+    )
+}
+
+impl Acquirer {
+    /// Route `from` to its slot and produce the package bytes; an empty slot
+    /// refuses the location kind, naming the `locations:` entry that fills it.
+    async fn acquire(&self, package: &str, from: &Location) -> Result<Vec<u8>, LoadError> {
+        let outcome = match from {
+            Location::Registry(endpoint) => match &self.registry {
+                Some(registry) => registry.acquire(package, endpoint.as_deref()).await,
+                None => {
+                    return Err(LoadError::UnsupportedLocation(format!(
+                        "this deployment's locations serve no registry; loading `{package}` \
+                         from {from} needs a `{{ registry: ... }}` entry"
+                    )));
+                }
+            },
+            Location::Path(path) => match &self.path {
+                Some(paths) => paths.acquire(path).await,
+                None => {
+                    return Err(LoadError::UnsupportedLocation(format!(
+                        "this deployment's locations serve no paths; loading `{package}` \
+                         from {from} needs a `{{ name: ..., path: ... }}` entry"
+                    )));
+                }
+            },
+        };
+        outcome
+            .map_err(|error| LoadError::AcquireFailed(format!("acquiring `{package}`: {error:#}")))
+    }
+}
+
 /// Type-erased plugin loading, reachable from every store context.
 ///
 /// Lives in the runtime's extensions so the `omnia:plugins/loader` host
@@ -98,17 +137,14 @@ pub trait PluginLoader: Send + Sync + 'static {
     ) -> BoxFuture<'static, Result<Plugin, LoadError>>;
 }
 
-// The store-reachable loader. Non-owning: the extension lives inside the
-// runtime's shared state, so a strong handle would leak it through a cycle.
-struct RuntimeLoader<B: 'static> {
-    runtime: WeakRuntime<B>,
-}
-
-impl<B: Clone + Send + Sync + 'static> PluginLoader for RuntimeLoader<B> {
+// The weak handle is the loader: the extension holding it lives inside the
+// runtime's shared state, so a strong handle would leak the runtime through
+// a reference cycle.
+impl<B: Clone + Send + Sync + 'static> PluginLoader for WeakRuntime<B> {
     fn load(
         &self, package: String, from: Location, digest: Option<String>,
     ) -> BoxFuture<'static, Result<Plugin, LoadError>> {
-        let runtime = self.runtime.clone();
+        let runtime = self.clone();
         async move {
             let Some(runtime) = runtime.upgrade() else {
                 return Err(LoadError::Internal("the runtime has shut down".to_owned()));
@@ -120,15 +156,14 @@ impl<B: Clone + Send + Sync + 'static> PluginLoader for RuntimeLoader<B> {
 }
 
 /// The installed plugins extension: the deployment's acquisition policy, the
-/// load serializer, the resolved digest per loader-loaded package, and the
-/// store-reachable [`PluginLoader`].
+/// resolved digest per loader-loaded package, and the store-reachable
+/// [`PluginLoader`].
 pub struct Plugins {
     acquirer: Acquirer,
-    // Serializes loads: they are rare, and serialization makes the
-    // (package, digest) idempotency check race-free without single-flight
-    // machinery.
-    load_lock: tokio::sync::Mutex<()>,
-    digests: Mutex<BTreeMap<GuestId, Arc<str>>>,
+    // One lock serializes loads end to end *and* guards the digest records:
+    // loads are rare, and serialization makes the (package, digest)
+    // idempotency check race-free without single-flight machinery.
+    digests: tokio::sync::Mutex<BTreeMap<GuestId, Arc<str>>>,
     loader: Arc<dyn PluginLoader>,
 }
 
@@ -149,11 +184,8 @@ impl Plugins {
     {
         let plugins = Self {
             acquirer,
-            load_lock: tokio::sync::Mutex::new(()),
-            digests: Mutex::new(BTreeMap::new()),
-            loader: Arc::new(RuntimeLoader {
-                runtime: runtime.downgrade(),
-            }),
+            digests: tokio::sync::Mutex::new(BTreeMap::new()),
+            loader: Arc::new(runtime.downgrade()),
         };
         anyhow::ensure!(
             runtime.extensions().insert(plugins),
@@ -164,21 +196,6 @@ impl Plugins {
 
     pub(crate) fn loader(&self) -> Arc<dyn PluginLoader> {
         Arc::clone(&self.loader)
-    }
-
-    fn digest_of(&self, id: &GuestId) -> Option<Arc<str>> {
-        self.digests.lock().unwrap_or_else(PoisonError::into_inner).get(id).cloned()
-    }
-
-    fn record(&self, id: GuestId, digest: Arc<str>) {
-        let _ = self.digests.lock().unwrap_or_else(PoisonError::into_inner).insert(id, digest);
-    }
-
-    /// Drop the digest records of packages no longer registered, so a later
-    /// re-load binds fresh bytes instead of comparing against a deregistered
-    /// guest's.
-    fn prune(&self, live: impl Fn(&GuestId) -> bool) {
-        self.digests.lock().unwrap_or_else(PoisonError::into_inner).retain(|id, _| live(id));
     }
 }
 
@@ -199,37 +216,35 @@ pub trait LoadPlugin {
     /// location, acquisition failure, malformed or mismatched digest, refused
     /// artifact, missing seam export, identity conflict, or an internal
     /// registration failure.
-    fn load_plugin<'a>(
-        &'a self, package: &'a str, from: Location, pin: Option<&'a str>,
-    ) -> impl Future<Output = Result<Plugin, LoadError>> + Send + 'a;
+    fn load_plugin(
+        &self, package: &str, from: Location, pin: Option<&str>,
+    ) -> impl Future<Output = Result<Plugin, LoadError>> + Send;
 }
 
 impl<B: Clone + Send + Sync + 'static> LoadPlugin for Runtime<B> {
-    async fn load_plugin<'a>(
-        &'a self, package: &'a str, from: Location, pin: Option<&'a str>,
+    async fn load_plugin(
+        &self, package: &str, from: Location, pin: Option<&str>,
     ) -> Result<Plugin, LoadError> {
         // A malformed pin is refused before any acquisition work.
         let pin =
             pin.map(digest::canonicalize_pin).transpose().map_err(LoadError::InvalidDigest)?;
 
         let Some(state) = self.extensions().get::<Plugins>() else {
-            return Err(LoadError::Internal(format!(
-                "this deployment has no acquirer; compile one in \
-                 (`plugins: {{ locations: [...] }}`) to load `{package}`"
-            )));
+            return Err(LoadError::Internal(no_acquirer(package)));
         };
-        let _serial = state.load_lock.lock().await;
+        let mut digests = state.digests.lock().await;
 
         // A deregistered package's digest record is stale; loads are rare and
         // serialized, so sweep here rather than hooking deregistration.
-        state.prune(|id| self.registry().get(id).is_some());
+        digests.retain(|id, _| self.registry().get(id).is_some());
 
         let id = GuestId::from(package);
         if self.registry().get(&id).is_some() {
-            return match state.digest_of(&id) {
-                Some(digest) if pin.as_deref().is_none_or(|pin| pin == &*digest) => {
-                    Ok(Plugin { id, digest })
-                }
+            return match digests.get(&id) {
+                Some(digest) if pin.as_deref().is_none_or(|pin| pin == &**digest) => Ok(Plugin {
+                    id,
+                    digest: Arc::clone(digest),
+                }),
                 Some(digest) => Err(LoadError::AlreadyActive(format!(
                     "package `{package}` is already active with digest {digest}, which is not \
                      the requested pin"
@@ -240,31 +255,7 @@ impl<B: Clone + Send + Sync + 'static> LoadPlugin for Runtime<B> {
             };
         }
 
-        // Loads route structurally: each location kind reaches its acquirer
-        // slot, and a kind with no slot refuses typed.
-        let outcome = match &from {
-            Location::Registry(endpoint) => match &state.acquirer.registry {
-                Some(registry) => registry.acquire(package, endpoint.as_deref()).await,
-                None => {
-                    return Err(LoadError::UnsupportedLocation(format!(
-                        "this deployment's locations serve no registry; loading `{package}` \
-                         from {from} needs a `{{ registry: ... }}` entry"
-                    )));
-                }
-            },
-            Location::Path(path) => match &state.acquirer.path {
-                Some(paths) => paths.acquire(path).await,
-                None => {
-                    return Err(LoadError::UnsupportedLocation(format!(
-                        "this deployment's locations serve no paths; loading `{package}` \
-                         from {from} needs a `{{ name: ..., path: ... }}` entry"
-                    )));
-                }
-            },
-        };
-        let bytes = outcome.map_err(|error| {
-            LoadError::AcquireFailed(format!("acquiring `{package}`: {error:#}"))
-        })?;
+        let bytes = state.acquirer.acquire(package, &from).await?;
 
         // The operator's pin binds name to bytes before any validation work.
         let resolved = crate::sha256_digest(&bytes);
@@ -281,7 +272,8 @@ impl<B: Clone + Send + Sync + 'static> LoadPlugin for Runtime<B> {
         self.admit(id.clone(), bytes).await?;
 
         let digest: Arc<str> = Arc::from(resolved);
-        state.record(id.clone(), Arc::clone(&digest));
+        digests.insert(id.clone(), Arc::clone(&digest));
+        drop(digests);
         tracing::debug!(package, digest = %digest, "plugin loaded");
         Ok(Plugin { id, digest })
     }

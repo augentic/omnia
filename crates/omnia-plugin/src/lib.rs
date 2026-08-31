@@ -29,13 +29,12 @@ mod store;
 use std::fmt;
 use std::sync::Arc;
 
+pub use self::digest::sha256_digest;
 pub use self::host::{WasiPlugins, WasiPluginsCtxView, WasiPluginsView};
 pub use self::loader::{LoadError, LoadPlugin, Plugin, PluginLoader, Plugins};
 pub use self::path::{PathMounts, PathSource};
 pub use self::registry::{RegistryClient, RegistrySource};
-pub use self::store::{
-    ContentStore, NoStore, PluginStore, ReleaseRecord, ReleaseStore, sha256_digest,
-};
+pub use self::store::{ContentStore, NoStore, PluginStore, ReleaseRecord, ReleaseStore};
 
 /// Where an acquirer finds a package's component bytes — the mirror of the
 /// `omnia:plugins/loader` `location` variant.

@@ -22,10 +22,10 @@ pub struct PathMounts {
     entries: Vec<Mount>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct Mount {
     name: String,
-    dir: Arc<cap_std::fs::Dir>,
+    dir: Arc<Dir>,
 }
 
 impl PathMounts {
@@ -75,7 +75,7 @@ async fn read_entry(path: &str, entries: &[Mount]) -> Result<Vec<u8>> {
 // Resolve `path` to a location's capability handle plus the subpath within
 // it, longest location-name prefix first. The subpath must be plain and
 // relative — cap-std then refuses any escape at open time.
-fn resolve(path: &str, entries: &[Mount]) -> Result<(Arc<cap_std::fs::Dir>, String)> {
+fn resolve(path: &str, entries: &[Mount]) -> Result<(Arc<Dir>, String)> {
     let mut best: Option<(&Mount, &str)> = None;
     for entry in entries {
         let subpath = if path == entry.name {

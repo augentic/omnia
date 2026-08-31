@@ -106,13 +106,14 @@ impl<T> loader::HostWithStore<T> for WasiPlugins {
     ) -> Result<Resource<Plugin>, Error> {
         let loader = accessor
             .with(|mut store| store.get().loader)
-            .ok_or_else(|| Error::Internal("this store carries no plugin loader".to_owned()))?;
+            .ok_or_else(|| Error::Internal(crate::loader::no_acquirer(&package)))?;
         let plugin = loader.load(package, from.into(), digest).await?;
         Ok(accessor.with(|mut store| store.get().table.push(plugin))?)
     }
 }
 
 impl<T> loader::HostPluginWithStore<T> for WasiPlugins {
+    // `host` and `accessor` follow the generated trait's parameter names.
     fn id(mut host: Access<'_, T, Self>, self_: Resource<Plugin>) -> wasmtime::Result<String> {
         Ok(host.get().table.get(&self_)?.id().to_string())
     }

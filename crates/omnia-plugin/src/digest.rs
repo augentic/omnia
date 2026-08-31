@@ -1,10 +1,26 @@
-//! Operator sha256 digest pins.
+//! The canonical `sha256:<hex>` digest encoding and operator pin validation.
+
+use std::fmt::Write as _;
+
+use sha2::{Digest as _, Sha256};
 
 /// The canonical digest scheme prefix.
 const SCHEME: &str = "sha256:";
 
 /// Hex characters in a sha256 digest.
 const HEX_LEN: usize = 64;
+
+/// Hash `bytes` into their canonical `sha256:<hex>` digest string.
+#[must_use]
+pub fn sha256_digest(bytes: &[u8]) -> String {
+    let hash = Sha256::digest(bytes);
+    let mut digest = String::with_capacity(SCHEME.len() + 2 * hash.len());
+    digest.push_str(SCHEME);
+    for byte in hash {
+        let _ = write!(digest, "{byte:02x}");
+    }
+    digest
+}
 
 /// Canonicalize an operator digest pin (`sha256:` plus 64 hex characters,
 /// lowercased) so pins compare byte-for-byte against
@@ -24,7 +40,16 @@ pub fn canonicalize_pin(pin: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::canonicalize_pin;
+    use super::{canonicalize_pin, sha256_digest};
+
+    #[test]
+    fn hash_known_vector() {
+        // The well-known sha256 of the empty input.
+        assert_eq!(
+            sha256_digest(b""),
+            "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
 
     #[test]
     fn pin_canonicalizes_case() {

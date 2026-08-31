@@ -3,16 +3,15 @@
 //! [wasm-pkg-client]: https://github.com/bytecodealliance/wasm-pkg-tools
 
 use std::collections::HashMap;
+use std::sync::{Mutex, PoisonError};
 
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use futures::future::BoxFuture;
 use futures::{FutureExt as _, TryStreamExt as _};
-use tokio::sync::Mutex;
 use wasm_pkg_client::{Client, Config, ContentStream, PackageRef, Registry, Release, Version};
 
-use crate::store::{
-    ContentStore, NoStore, PluginStore, ReleaseRecord, ReleaseStore, sha256_digest,
-};
+use crate::digest::sha256_digest;
+use crate::store::{NoStore, PluginStore, ReleaseRecord};
 
 /// Registry acquisition policy — the
 /// [`Acquirer::registry`](crate::Acquirer::registry) slot.
@@ -29,7 +28,8 @@ pub trait RegistrySource: Send + Sync + 'static {
 /// Fetches exact `namespace:name@version` references only, verifying every
 /// result against the registry's content digest. The attached [`PluginStore`]
 /// is a byte cache and offline fallback — never the authority while the
-/// registry is reachable.
+/// registry is reachable — so a failing store degrades a load, never refuses
+/// it.
 ///
 /// [wasm-pkg-client]: https://github.com/bytecodealliance/wasm-pkg-tools
 pub struct RegistryClient<S = NoStore> {
@@ -76,8 +76,8 @@ impl<S: PluginStore> RegistryClient<S> {
         }
     }
 
-    async fn client(&self, registry: Registry) -> Client {
-        let mut clients = self.clients.lock().await;
+    fn client(&self, registry: Registry) -> Client {
+        let mut clients = self.clients.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(client) = clients.get(&registry) {
             return client.clone();
         }
@@ -86,6 +86,70 @@ impl<S: PluginStore> RegistryClient<S> {
         let client = Client::new(config);
         clients.insert(registry, client.clone());
         client
+    }
+
+    /// Resolve and fetch `package`, serving verified bytes from the store
+    /// when possible.
+    async fn fetch(&self, package: &str, registry: Option<&str>) -> Result<Vec<u8>> {
+        let (package_ref, version) = parse_package(package)?;
+        let registry = registry.unwrap_or(&self.default_registry);
+        let parsed: Registry = registry
+            .parse()
+            .map_err(|error| anyhow!("registry `{registry}` is not a valid name: {error}"))?;
+
+        let client = self.client(parsed);
+        let release =
+            self.resolve_release(&client, registry, package, &package_ref, &version).await?;
+        let digest = release.content_digest.to_string();
+
+        match self.store.content(&digest).await {
+            Ok(Some(bytes)) => {
+                // A poisoned entry must never become code; discard and refetch.
+                if sha256_digest(&bytes) == digest {
+                    tracing::debug!(package, digest, "package served from the store");
+                    return Ok(bytes);
+                }
+                tracing::warn!(
+                    package,
+                    digest,
+                    "stored content failed verification; discarding and refetching"
+                );
+            }
+            Ok(None) => {}
+            Err(error) => {
+                // Cache, never authority: an unreadable store degrades to a
+                // fresh fetch.
+                tracing::warn!(
+                    package,
+                    digest,
+                    error = format!("{error:#}"),
+                    "failed to read the store; fetching fresh"
+                );
+            }
+        }
+
+        let content = client
+            .stream_content(&package_ref, &release)
+            .await
+            .with_context(|| format!("fetching `{package}`"))?;
+        let bytes = collect(content).await.with_context(|| format!("reading `{package}`"))?;
+
+        let resolved = sha256_digest(&bytes);
+        ensure!(
+            resolved == digest,
+            "package `{package}` content hashes to {resolved}, not the registry \
+             digest {digest}"
+        );
+        if let Err(error) = self.store.put_content(&digest, &bytes).await {
+            tracing::warn!(
+                package,
+                digest,
+                error = format!("{error:#}"),
+                "failed to store the package content"
+            );
+        }
+        tracing::debug!(package, digest = %resolved, "package acquired");
+        Ok(bytes)
     }
 
     /// Resolve the release fresh, refreshing the store's record; fall back
@@ -101,15 +165,18 @@ impl<S: PluginStore> RegistryClient<S> {
                     version: version.to_string(),
                     content_digest: release.content_digest.to_string(),
                 };
-                ReleaseStore::put(&self.store, registry, &full_name, &record)
-                    .await
-                    .with_context(|| format!("recording `{package}`"))?;
+                if let Err(error) = self.store.put_release(registry, &full_name, &record).await {
+                    tracing::warn!(
+                        package,
+                        registry,
+                        error = format!("{error:#}"),
+                        "failed to record the release"
+                    );
+                }
                 Ok(release)
             }
             Err(error) if is_network_failure(&error) => {
-                let stored =
-                    ReleaseStore::get(&self.store, registry, &full_name, &version.to_string())
-                        .await?;
+                let stored = self.store.release(registry, &full_name, &version.to_string()).await?;
                 let Some(record) = stored else {
                     return Err(anyhow::Error::new(error).context(format!("resolving `{package}`")));
                 };
@@ -138,51 +205,7 @@ impl<S: PluginStore> RegistrySource for RegistryClient<S> {
     fn acquire<'a>(
         &'a self, package: &'a str, registry: Option<&'a str>,
     ) -> BoxFuture<'a, Result<Vec<u8>>> {
-        async move {
-            let (package_ref, version) = parse_package(package)?;
-            let registry = registry.unwrap_or(&self.default_registry);
-            let parsed: Registry = registry
-                .parse()
-                .map_err(|error| anyhow!("registry `{registry}` is not a valid name: {error}"))?;
-
-            let client = self.client(parsed).await;
-            let release =
-                self.resolve_release(&client, registry, package, &package_ref, &version).await?;
-            let digest = release.content_digest.to_string();
-
-            let stored = ContentStore::get(&self.store, &digest).await?;
-            if let Some(bytes) = stored {
-                // A poisoned entry must never become code; discard and refetch.
-                if sha256_digest(&bytes) == digest {
-                    tracing::debug!(package, digest, "package served from the store");
-                    return Ok(bytes);
-                }
-                tracing::warn!(
-                    package,
-                    digest,
-                    "stored content failed verification; discarding and refetching"
-                );
-            }
-
-            let content = client
-                .stream_content(&package_ref, &release)
-                .await
-                .with_context(|| format!("fetching `{package}`"))?;
-            let bytes = collect(content).await.with_context(|| format!("reading `{package}`"))?;
-
-            let resolved = sha256_digest(&bytes);
-            ensure!(
-                resolved == digest,
-                "package `{package}` content hashes to {resolved}, not the registry \
-                 digest {digest}"
-            );
-            ContentStore::put(&self.store, &digest, &bytes)
-                .await
-                .with_context(|| format!("storing `{package}`"))?;
-            tracing::debug!(package, digest = %resolved, "package acquired");
-            Ok(bytes)
-        }
-        .boxed()
+        self.fetch(package, registry).boxed()
     }
 }
 
@@ -210,7 +233,7 @@ async fn collect(mut stream: ContentStream) -> Result<Vec<u8>, wasm_pkg_client::
 
 /// Split an exact `namespace:name@version` reference; remote lookup never
 /// resolves "latest".
-fn parse_package(package: &str) -> anyhow::Result<(PackageRef, Version)> {
+fn parse_package(package: &str) -> Result<(PackageRef, Version)> {
     let Some((name, version)) = package.split_once('@') else {
         bail!("registry package `{package}` must pin an exact version (`namespace:name@version`)")
     };
