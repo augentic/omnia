@@ -58,7 +58,7 @@ Another process holds the trigger port. `HTTP_ADDR` (default `0.0.0.0:8080`) and
 
 ### A backend fails to connect at startup
 
-Backends connect eagerly during `Runtime::new`; a bad `REDIS_URL`/`POSTGRES_URL`/etc. fails the whole process by design. The error names the backend. For local work, either start the service (`docker compose -f docker/<service>.yaml up -d`) or switch the runtime back to the in-tree default backend.
+Backends connect eagerly during `Runtime::new`; a bad `REDIS_URL`/`POSTGRES_URL`/etc. fails the whole process by design. The error names the backend. For local work, either start the service or switch the runtime back to the in-tree default backend.
 
 ### `transport ... is not yet implemented`
 
