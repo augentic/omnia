@@ -37,8 +37,8 @@ pub struct Config {
     /// Whether a `plugins:` block was declared — links the `WasiPlugins`
     /// loader host even when the block carries no interfaces.
     pub plugins_declared: bool,
-    /// The `plugins:` block's `acquire:` expression, compiled into
-    /// `MainOptions` as the deployment's acquirer.
+    /// The `plugins:` block's `acquire:` expression, lowered into the
+    /// generated `Wiring::acquirer` hook as the deployment's acquirer.
     pub acquire: Option<Expr>,
 }
 

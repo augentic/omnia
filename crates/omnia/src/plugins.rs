@@ -8,9 +8,9 @@
 //! host-side, bounded by the deployment's declared plugin interfaces.
 //!
 //! Acquisition policy (endpoints, cache, path reads) is the embedder's
-//! [`Acquire`] value, compiled in at the composition root
-//! ([`DeploymentBuilder::acquirer`](crate::DeploymentBuilder::acquirer) or
-//! the `runtime!` macro's `plugins: { acquire: ... }` key). Core ships
+//! [`Acquire`] value, built by the [`Wiring::acquirer`](crate::Wiring::acquirer)
+//! hook (the `runtime!` macro's `plugins: { acquire: ... }` key lowers into
+//! it) once the deployment's backends have connected. Core ships
 //! [`MountAcquire`] — preopen-relative reads over the mount registry — and
 //! keeps zero storage and network dependencies.
 

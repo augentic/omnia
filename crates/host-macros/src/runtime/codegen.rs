@@ -4,7 +4,7 @@
 
 use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote};
-use syn::{Ident, Path};
+use syn::{Expr, Ident, Path};
 
 use crate::runtime::parse::{Config, HostEntry, ManifestSpec, Mode};
 
@@ -15,6 +15,9 @@ pub struct Codegen {
     pub backends_ty: TokenStream,
     pub backends_def: TokenStream,
     pub main_options: TokenStream,
+    /// The generated `Wiring::acquirer` hook body for the `plugins:` block's
+    /// `acquire:` expression; absent, the trait's `None` default stands.
+    pub acquirer_hook: Option<TokenStream>,
     /// Whether to link the `omnia::WasiPlugins` loader host — declared
     /// plugins mean the deployment opted into the loader capability.
     pub link_plugins: bool,
@@ -28,6 +31,8 @@ impl From<&Config> for Codegen {
         let (backends_ty, backends_def) = emit_backends(host_entries);
 
         let main_options = emit_main_options(config);
+        let acquirer_hook =
+            config.acquire.as_ref().map(|expr| emit_acquirer_hook(expr, &backends_ty));
 
         Self {
             mode: config.mode,
@@ -35,6 +40,7 @@ impl From<&Config> for Codegen {
             backends_ty,
             backends_def,
             main_options,
+            acquirer_hook,
             link_plugins: config.plugins_declared,
         }
     }
@@ -45,16 +51,22 @@ impl From<&Config> for Codegen {
 fn emit_main_options(config: &Config) -> TokenStream {
     let mode = config.mode.tokens();
     let manifest = emit_manifest_source(config);
-    let acquirer = config.acquire.as_ref().map(|expr| {
-        quote! {
-            .acquirer(#expr)
-        }
-    });
 
     quote! {
         omnia::MainOptions::new(#mode)
             #manifest
-            #acquirer
+    }
+}
+
+/// Emit the `Wiring::acquirer` hook: the `acquire:` expression becomes the
+/// deployment's acquisition policy, built once after backends connect.
+fn emit_acquirer_hook(expr: &Expr, backends_ty: &TokenStream) -> TokenStream {
+    quote! {
+        fn acquirer(
+            _backends: &#backends_ty,
+        ) -> Option<::std::sync::Arc<dyn omnia::Acquire>> {
+            Some(::std::sync::Arc::new(#expr))
+        }
     }
 }
 

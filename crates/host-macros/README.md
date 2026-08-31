@@ -112,7 +112,7 @@ For each `hosts:` row, the macro emits one uniform `omnia::Provides<Ctx>` impl e
 
 ### `main` entry point
 
-A `#[tokio::main]` `main` that delegates to `omnia::main::<Backends, Hooks>`, where `Hooks` is a generated `Wiring` impl: `Wiring::link` runs inside `omnia::Runtime::new` to link hosts, connect backends, and assemble the registry; `Wiring::serve` launches each trigger host's `run`. The host runtime is the library `omnia::Runtime<Backends>`; the macro does not emit a runtime type of its own.
+A `#[tokio::main]` `main` that delegates to `omnia::main::<Backends, Hooks>`, where `Hooks` is a generated `Wiring` impl: `Wiring::link` runs inside `omnia::Runtime::new` to link hosts, connect backends, and assemble the registry; `Wiring::acquirer` (emitted when the `plugins:` block carries `acquire:`) builds the plugin acquisition policy once backends have connected; `Wiring::serve` launches each trigger host's `run`. The host runtime is the library `omnia::Runtime<Backends>`; the macro does not emit a runtime type of its own.
 
 The generated `main` handles the `run` subcommand only; to expose `compile`, write a custom `main` that calls `omnia::compile`.
 

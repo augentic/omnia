@@ -19,6 +19,7 @@ pub fn expand(config: &Config) -> TokenStream {
         backends_ty,
         backends_def,
         main_options,
+        acquirer_hook,
         link_plugins,
     } = Codegen::from(config);
 
@@ -49,6 +50,8 @@ pub fn expand(config: &Config) -> TokenStream {
                     #(deployment.host::<#host_types, #backends_ty>()?;)*
                     Ok(())
                 }
+
+                #acquirer_hook
 
                 async fn serve(
                     runtime: &omnia::Runtime<#backends_ty>,
@@ -247,8 +250,8 @@ mod tests {
     }
 
     // The full plugins block: `interfaces:` reaches the manifest, `acquire:`
-    // expands to `.acquirer(...)` on `MainOptions`, and the `WasiPlugins`
-    // loader host is linked.
+    // lowers into the generated `Wiring::acquirer` hook, and the
+    // `WasiPlugins` loader host is linked.
     #[test]
     fn expand_plugins_acquire() {
         insta::assert_snapshot!(expand_pretty(quote!({

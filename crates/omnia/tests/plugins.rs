@@ -27,14 +27,17 @@ async fn run_requester(wasm: &str, scratch: &test_utils::Scratch) -> Result<Exit
     let deployment = DeploymentBuilder::new()
         .manifest(manifest)
         .mode(Mode::Command)
-        .acquirer(MountAcquire)
         .build::<StoreCtx<()>>()
         .await
         .context("building deployment")?;
-    let runtime = Runtime::new(deployment, |deployment| {
-        deployment.host::<WasiPlugins, ()>()?;
-        Ok(())
-    })
+    let runtime = Runtime::new(
+        deployment,
+        |deployment| {
+            deployment.host::<WasiPlugins, ()>()?;
+            Ok(())
+        },
+        |()| Some(std::sync::Arc::new(MountAcquire)),
+    )
     .await
     .context("assembling runtime")?;
     runtime.run_command().await

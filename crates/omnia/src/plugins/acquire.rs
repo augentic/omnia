@@ -54,9 +54,9 @@ pub enum AcquireError {
     Failed(anyhow::Error),
 }
 
-/// Acquisition policy compiled in at the composition root
-/// ([`DeploymentBuilder::acquirer`](crate::DeploymentBuilder::acquirer), or
-/// the `runtime!` macro's `plugins: { acquire: ... }` key).
+/// Acquisition policy compiled in at the composition root — built by the
+/// [`Wiring::acquirer`](crate::Wiring::acquirer) hook, which the `runtime!`
+/// macro's `plugins: { acquire: ... }` key lowers into.
 ///
 /// An implementation owns every fetch, cache, and endpoint decision; the
 /// loader only ever receives bytes back, then verifies, validates, and

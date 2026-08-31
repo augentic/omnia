@@ -40,7 +40,7 @@ cfg_if::cfg_if! {
                 .await
                 .context("building deployment")?;
             // `Runtime::new` also wires the host-mediated link serve side.
-            let runtime = Runtime::<()>::new(deployment, |_| Ok(())).await?;
+            let runtime = Runtime::<()>::new(deployment, |_| Ok(()), |()| None).await?;
 
             // The extra guest is absent from the manifest. An install pipeline
             // verifies the bytes (digest, signature — deployment policy) before
