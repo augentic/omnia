@@ -26,7 +26,8 @@ use wasmtime::component::{Access, Accessor, HasData, Linker, Resource, ResourceT
 
 use self::generated::Error;
 use self::generated::omnia::plugins::loader;
-use crate::{LoadError, Location, Plugin, PluginLoader, Plugins};
+use crate::Location;
+use crate::loader::{LoadError, Plugin, PluginLoader, Plugins};
 
 /// Host-side service for `omnia:plugins` — the loader capability this crate
 /// implements over the runtime's admission seam.

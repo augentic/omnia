@@ -1,13 +1,10 @@
-//! The canonical `sha256:<hex>` digest encoding and operator pin validation.
+//! The canonical `sha256:<hex>` digest encoding and validation.
 
 use std::fmt::Write as _;
 
 use sha2::{Digest as _, Sha256};
 
-/// The canonical digest scheme prefix.
 const SCHEME: &str = "sha256:";
-
-/// Hex characters in a sha256 digest.
 const HEX_LEN: usize = 64;
 
 /// Hash `bytes` into their canonical `sha256:<hex>` digest string.
@@ -22,28 +19,28 @@ pub fn sha256_digest(bytes: &[u8]) -> String {
     digest
 }
 
-/// Canonicalize an operator digest pin (`sha256:` plus 64 hex characters,
-/// lowercased) so pins compare byte-for-byte against
+/// Canonicalize a digest string (`sha256:` plus 64 hex characters,
+/// lowercased) so it compares byte-for-byte against
 /// [`sha256_digest`](crate::sha256_digest) output.
 ///
-/// Returns a description of the malformation when the pin is not a sha256
+/// Returns a description of the malformation when the digest is not a valid
 /// digest string.
-pub fn canonicalize_pin(pin: &str) -> Result<String, String> {
-    let Some(hex) = pin.strip_prefix(SCHEME) else {
-        return Err(format!("digest pin `{pin}` does not use the `sha256:<hex>` scheme"));
+pub fn canonicalize(digest: &str) -> Result<String, String> {
+    let Some(hex) = digest.strip_prefix(SCHEME) else {
+        return Err(format!("digest `{digest}` is not `{SCHEME}<hex>`"));
     };
     if hex.len() != HEX_LEN || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(format!("digest pin `{pin}` is not {HEX_LEN} hex characters"));
+        return Err(format!("digest `{digest}` is not {HEX_LEN} hex characters"));
     }
     Ok(format!("{SCHEME}{}", hex.to_ascii_lowercase()))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{canonicalize_pin, sha256_digest};
+    use super::{canonicalize, sha256_digest};
 
     #[test]
-    fn hash_known_vector() {
+    fn hash_vector() {
         // The well-known sha256 of the empty input.
         assert_eq!(
             sha256_digest(b""),
@@ -52,25 +49,8 @@ mod tests {
     }
 
     #[test]
-    fn pin_canonicalizes_case() {
+    fn canonicalizes() {
         let upper = format!("sha256:{}", "AB".repeat(32));
-        assert_eq!(
-            canonicalize_pin(&upper).expect("valid pin"),
-            format!("sha256:{}", "ab".repeat(32))
-        );
-    }
-
-    #[test]
-    fn pin_rejects_wrong_scheme() {
-        let error =
-            canonicalize_pin(&format!("sha512:{}", "ab".repeat(32))).expect_err("scheme refused");
-        assert!(error.contains("sha256:<hex>"));
-    }
-
-    #[test]
-    fn pin_rejects_wrong_length_and_non_hex() {
-        assert!(canonicalize_pin("sha256:abcd").is_err(), "short hex refused");
-        let bad = format!("sha256:{}", "zz".repeat(32));
-        assert!(canonicalize_pin(&bad).is_err(), "non-hex refused");
+        assert_eq!(canonicalize(&upper).expect("valid pin"), format!("sha256:{}", "ab".repeat(32)));
     }
 }

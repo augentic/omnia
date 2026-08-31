@@ -225,33 +225,25 @@ impl<B: Clone + Send + Sync + 'static> LoadPlugin for Runtime<B> {
     async fn load_plugin(
         &self, package: &str, from: Location, pin: Option<&str>,
     ) -> Result<Plugin, LoadError> {
-        // A malformed pin is refused before any acquisition work.
-        let pin =
-            pin.map(digest::canonicalize_pin).transpose().map_err(LoadError::InvalidDigest)?;
-
+        let pin = pin.map(digest::canonicalize).transpose().map_err(LoadError::InvalidDigest)?;
         let Some(state) = self.extensions().get::<Plugins>() else {
             return Err(LoadError::Internal(no_acquirer(package)));
         };
+
         let mut digests = state.digests.lock().await;
 
-        // A deregistered package's digest record is stale; loads are rare and
-        // serialized, so sweep here rather than hooking deregistration.
+        // clear out stale digest records for deregistered packages
         digests.retain(|id, _| self.registry().get(id).is_some());
 
+        // return the plugin if the package is already active
         let id = GuestId::from(package);
         if self.registry().get(&id).is_some() {
             return match digests.get(&id) {
-                Some(digest) if pin.as_deref().is_none_or(|pin| pin == &**digest) => Ok(Plugin {
+                Some(digest) if pin.as_deref() == Some(digest.as_ref()) => Ok(Plugin {
                     id,
                     digest: Arc::clone(digest),
                 }),
-                Some(digest) => Err(LoadError::AlreadyActive(format!(
-                    "package `{package}` is already active with digest {digest}, which is not \
-                     the requested pin"
-                ))),
-                None => Err(LoadError::AlreadyActive(format!(
-                    "`{package}` is a deployment guest, which the loader cannot re-bind"
-                ))),
+                _ => Err(LoadError::AlreadyActive(format!("`{package}` is already active"))),
             };
         }
 
