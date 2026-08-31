@@ -57,13 +57,15 @@ fn registry_acquirer(root: &Path) -> RegistryAcquire {
     RegistryAcquire::new(DEFAULT_REGISTRY).with_config(config)
 }
 
+type ReleaseKey = (String, String, String);
+
 /// An in-memory [`PluginStore`] double: digest-keyed content plus
 /// per-registry release records, with direct map access so tests can
 /// inspect and poison entries without going through the trait.
 #[derive(Clone, Default)]
 struct MemStore {
     content: Arc<Mutex<HashMap<String, Vec<u8>>>>,
-    releases: Arc<Mutex<HashMap<(String, String, String), ReleaseRecord>>>,
+    releases: Arc<Mutex<HashMap<ReleaseKey, ReleaseRecord>>>,
 }
 
 impl MemStore {
