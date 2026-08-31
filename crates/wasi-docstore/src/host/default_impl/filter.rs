@@ -220,6 +220,68 @@ mod tests {
     }
 
     #[test]
+    fn contains_substring() {
+        let filter = FilterTree::Contains {
+            field: "name".to_string(),
+            pattern: "Station".to_string(),
+        };
+        assert!(matches(&filter, &json!({"name": "Newmarket Station"})));
+        assert!(!matches(&filter, &json!({"name": "Britomart"})));
+        assert!(!matches(&filter, &json!({"name": 42})), "non-string never contains");
+        assert!(!matches(&filter, &json!({})), "missing field never contains");
+    }
+
+    #[test]
+    fn in_list_membership() {
+        let filter = FilterTree::InList {
+            field: "route_type".to_string(),
+            values: vec![ScalarValue::Int32(2), ScalarValue::Int32(3)],
+        };
+        assert!(matches(&filter, &json!({"route_type": 2})));
+        assert!(!matches(&filter, &json!({"route_type": 4})));
+        assert!(!matches(&filter, &json!({})), "missing field is in no list");
+    }
+
+    #[test]
+    fn is_null_matches_null_and_missing() {
+        let filter = FilterTree::IsNull("parent".to_string());
+        assert!(matches(&filter, &json!({"parent": null})));
+        assert!(matches(&filter, &json!({})), "absent field reads as null");
+        assert!(!matches(&filter, &json!({"parent": "stop-1"})));
+    }
+
+    #[test]
+    fn or_across_fields() {
+        let filter = FilterTree::Or(vec![
+            FilterTree::Contains {
+                field: "short_name".to_string(),
+                pattern: "NEX".to_string(),
+            },
+            FilterTree::Contains {
+                field: "long_name".to_string(),
+                pattern: "Northern".to_string(),
+            },
+        ]);
+        assert!(matches(&filter, &json!({"short_name": "NEX", "long_name": "x"})));
+        assert!(matches(&filter, &json!({"short_name": "x", "long_name": "Northern Express"})));
+        assert!(!matches(&filter, &json!({"short_name": "x", "long_name": "y"})));
+    }
+
+    #[test]
+    fn not_of_and_conjunction() {
+        // De Morgan: NOT(agency = AT AND type = 3) admits everything except
+        // documents satisfying both conjuncts.
+        let filter = FilterTree::Not(Box::new(FilterTree::And(vec![
+            compare("agency", ComparisonOp::Eq, ScalarValue::Str("AT".into())),
+            compare("route_type", ComparisonOp::Eq, ScalarValue::Int32(3)),
+        ])));
+        assert!(!matches(&filter, &json!({"agency": "AT", "route_type": 3})));
+        assert!(matches(&filter, &json!({"agency": "AT", "route_type": 2})));
+        assert!(matches(&filter, &json!({"agency": "Fullers", "route_type": 3})));
+        assert!(matches(&filter, &json!({})));
+    }
+
+    #[test]
     fn nested_path_lookup() {
         let doc = json!({"stop": {"zone": {"id": "z9"}}});
         let filter = compare("stop.zone.id", ComparisonOp::Eq, ScalarValue::Str("z9".into()));

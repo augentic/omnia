@@ -59,4 +59,31 @@ Cache-Control: max-age=86400,forward=https://example.com/api/v1/records/2934875
 
 In the example guest an HTTP POST will cause an error: the [If-None-Match] header has been omitted to demonstrate that the caching implementation requires the guest to set this header alongside the [Cache-Control] header.
 
+## Client Certificates (mTLS)
+
+The default `wasi-http` host supports mutual TLS on outbound requests. Set a
+`Client-Cert` header containing the base64-encoded PEM bundle (client
+certificate followed by its private key); the host strips the header before
+sending, decodes it into a TLS identity, and issues the request through a
+one-off client that presents the certificate. The header never reaches the
+origin server.
+
+```rust
+use base64ct::{Base64, Encoding};
+
+// PEM bundle: certificate first, then the private key.
+let pem = std::fs::read("client-bundle.pem")?; // or fetch from wasi:vault
+let request = http::Request::builder()
+    .method(Method::GET)
+    .uri("https://mtls.example.com/resource")
+    .header("Client-Cert", Base64::encode_string(&pem))
+    .body(Empty::<Bytes>::new())?;
+
+let response = omnia_wasi_http::handle(request).await?;
+```
+
+Keep the private key out of guest source: load it from `wasi:vault` or
+configuration at runtime. An invalid or malformed bundle fails the request
+with an internal error before any connection is attempted.
+
 [Cache-Control]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control [If-None-Match]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/If-None-Match

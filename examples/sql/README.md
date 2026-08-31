@@ -1,6 +1,9 @@
 # SQL Example
 
-Demonstrates `wasi-sql` using the default (in-memory) implementation with a two-table schema (agency/feed) showcasing JOINs, foreign keys, and full CRUD operations.
+Demonstrates `wasi-sql` using the default (in-memory) implementation: raw
+prepared statements for schema creation, then one endpoint per guest ORM
+builder — `SelectBuilder`, `InsertBuilder`, `UpdateBuilder`, `DeleteBuilder` —
+plus an `entity!` JOIN mapping across a two-table agency/feed schema.
 
 ## Quick Start
 
@@ -20,72 +23,40 @@ export RUST_LOG="info,opentelemetry_sdk=off,omnia_wasi_sql=debug,omnia_wasi_http
 cargo run --example sql -- run ./target/wasm32-wasip2/debug/examples/sql_wasm.wasm
 ```
 
-## API Endpoints
-
-### Agencies
-
-**Create an agency**
+## Test
 
 ```bash
+# create an agency (InsertBuilder)
 curl -X POST http://localhost:8080/agencies \
   -H 'Content-Type: application/json' \
-  -d '{"name":"Ritchies Transport","url":"https://ritchies.co.nz","timezone":"Pacific/Auckland"}'
-```
+  -d '{"agency_id":1,"name":"Ritchies Transport","url":"https://ritchies.co.nz","timezone":"Pacific/Auckland"}'
 
-**List all agencies**
-
-```bash
+# list agencies (SelectBuilder)
 curl http://localhost:8080/agencies
-```
 
-**Get specific agency**
-
-```bash
-curl http://localhost:8080/agencies/1
-```
-
-**Update an agency**
-
-```bash
+# update an agency (UpdateBuilder)
 curl -X PATCH http://localhost:8080/agencies/1 \
   -H 'Content-Type: application/json' \
-  -d '{"name":"Ritchies Transport Agency"}'
-```
+  -d '{"name":"Ritchies Transport Agency","timezone":"Pacific/Auckland"}'
 
-### Feeds
-
-**Create a feed for an agency**
-
-```bash
+# create a feed for the agency (InsertBuilder + existence check)
 curl -X POST http://localhost:8080/agencies/1/feeds \
   -H 'Content-Type: application/json' \
-  -d '{"description":"Bus routes and schedules"}'
-```
+  -d '{"feed_id":1,"description":"Bus routes and schedules"}'
 
-**List feeds for a specific agency**
-
-```bash
-curl http://localhost:8080/agencies/1/feeds
-```
-
-**List all feeds with agency info (demonstrates JOIN)**
-
-```bash
+# list all feeds with agency info (entity! JOIN)
 curl http://localhost:8080/feeds
-```
 
-**Delete a feed**
-
-```bash
+# delete a feed (DeleteBuilder)
 curl -X DELETE http://localhost:8080/feeds/1
 ```
 
 ## Features Demonstrated
 
-- **ORM Entity Definition** - `entity!` macro with column aliasing
-- **JOINs** - `FeedWithAgency` entity automatically joins agency table
-- **Column Aliasing** - Selecting columns from joined tables
-- **Foreign Keys** - Feed references agency via `agency_id`
-- **CRUD Operations** - Full create, read, update, delete support
-- **Filters** - WHERE clauses with type-safe filters
-- **Query Building** - SelectBuilder, InsertBuilder, UpdateBuilder, DeleteBuilder
+- **Prepared statements** — schema creation via `Statement::prepare` + `readwrite::exec`
+- **ORM entities** — the `entity!` macro, including a JOIN entity with column aliasing
+- **Query builders** — `SelectBuilder` (with `order_by_desc`, `limit`), `InsertBuilder`, `UpdateBuilder`, `DeleteBuilder`
+- **Parameterized filters** — `Filter::eq` WHERE clauses (`$1`, `$2`, ... placeholders)
+
+See the [SQL and ORM guide](../../docs/guides/sql-and-orm.md) for the full
+builder and filter vocabulary.

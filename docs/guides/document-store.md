@@ -2,7 +2,7 @@
 
 The `wasi:docstore` interface is a JSON document store: named collections of `{ id, data }` documents with a rich, backend-portable filter language and cursor-based pagination. The default backend is in-memory; production deployments swap in Azure Table Storage (`omnia-azure-table`) without guest changes.
 
-The [`docstore`](../../examples/docstore/) example is a GTFS-flavoured service (stops, routes, stop-times) that exercises every filter type; the snippets below come from it.
+The [`docstore`](../../examples/docstore/) example is a minimal GTFS-flavoured service (a `stops` collection) showing CRUD and a combined query endpoint; the snippets below extend its patterns to the full filter vocabulary.
 
 > **Host prerequisite.** The runtime serving your guest must link this interface: add `WasiDocStore: DocStoreDefault` (from `omnia_wasi_docstore`) to the `runtime!` `hosts:` map — see [Composing a Runtime](composing-a-runtime.md). Everything below is guest code.
 

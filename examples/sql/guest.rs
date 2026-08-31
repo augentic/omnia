@@ -1,26 +1,15 @@
 //! # SQL Wasm Guest (Default Backend)
 //!
-//! This module demonstrates the WASI SQL interface with the default backend.
-//! It shows how to perform database operations that work with any SQL-compatible
-//! database configured by the host.
-//!
-//! ## Operations Demonstrated
-//!
-//! - Opening database connections by name
-//! - Preparing parameterized SQL statements
-//! - Executing SELECT queries with JOINs
-//! - Executing INSERT/UPDATE/DELETE commands
-//! - Converting results to JSON
-//!
-//! ## Security
-//!
-//! Uses parameterized queries (`$1`, `$2`, etc.) to prevent SQL injection.
+//! Demonstrates the WASI SQL interface: opening connections, preparing
+//! parameterized statements, and the guest ORM — `SelectBuilder`,
+//! `InsertBuilder`, `UpdateBuilder`, `DeleteBuilder`, and an `entity!`
+//! JOIN mapping. Uses parameterized queries (`$1`, `$2`, ...) throughout.
 
 #![cfg(target_arch = "wasm32")]
 
 use anyhow::{Context, Result, anyhow};
 use axum::extract::Path;
-use axum::routing::{delete, get};
+use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use chrono::Utc;
 use omnia_guest::orm::{
@@ -41,283 +30,162 @@ wasip3::http::service::export!(Http);
 impl Guest for Http {
     #[omnia_wasi_otel::instrument(name = "http_guest_handle", level = Level::DEBUG)]
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
-        tracing::debug!("received request: {:?}", request);
         let router = Router::new()
             .route("/agencies", get(list_agencies).post(create_agency))
-            .route("/agencies/{id}", get(get_agency).patch(update_agency))
-            .route("/agencies/{id}/feeds", get(list_agency_feeds).post(create_feed))
+            .route("/agencies/{id}", patch(update_agency))
+            .route("/agencies/{id}/feeds", post(create_feed))
             .route("/feeds", get(list_all_feeds))
             .route("/feeds/{id}", delete(delete_feed));
         omnia_wasi_http::serve(router, request).await
     }
 }
 
+/// List all agencies (`SelectBuilder`).
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
 async fn list_agencies() -> HttpResult<Json<Value>> {
-    tracing::info!("list all agencies");
     ensure_schema().await?;
 
     let select = SelectBuilder::<Agency>::new()
         .order_by_desc(None, "created_at")
         .build()
-        .context("failed to build query")?;
+        .context("building query")?;
 
     let rows = Provider
         .query("db".to_string(), select.sql, select.params)
         .await
-        .context("failed to execute query")?;
+        .context("executing query")?;
 
-    let agencies = rows
-        .iter()
-        .map(Agency::from_row)
-        .collect::<Result<Vec<_>>>()
-        .context("failed row mapping")?;
+    let agencies =
+        rows.iter().map(Agency::from_row).collect::<Result<Vec<_>>>().context("mapping rows")?;
 
-    Ok(Json(json!(agencies)))
+    Ok(Json(json!({ "agencies": agencies })))
 }
 
+/// Create an agency with a client-supplied id (`InsertBuilder`).
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
 async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> HttpResult<Json<Value>> {
-    tracing::info!("create agency");
     ensure_schema().await?;
 
-    let select = SelectBuilder::<Agency>::new()
-        .order_by_desc(None, "agency_id")
-        .limit(1)
-        .build()
-        .context("failed to build max agency_id query")?;
-
-    let rows = Provider
-        .query("db".to_string(), select.sql, select.params)
-        .await
-        .context("failed to execute query")?;
-
-    let agencies = rows
-        .iter()
-        .map(Agency::from_row)
-        .collect::<Result<Vec<_>>>()
-        .context("failed row mapping")?;
-
-    // Not worried about concurrency issue here as one request will fail. Moreover, this
-    // is an example. Ideally, this will be handled in a more idiomatic way.
-    let next_id = agencies.first().map_or(1, |a| a.agency_id + 1);
-
     let agency = Agency {
-        agency_id: next_id,
+        agency_id: req.agency_id,
         name: req.name,
         url: req.url,
         timezone: req.timezone,
         created_at: Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
     };
 
-    let query = InsertBuilder::<Agency>::from_entity(&agency)
-        .build()
-        .context("failed to build insert query")?;
+    let query = InsertBuilder::<Agency>::from_entity(&agency).build().context("building insert")?;
 
-    Provider
-        .exec("db".to_string(), query.sql, query.params)
-        .await
-        .context("failed to insert agency")?;
+    Provider.exec("db".to_string(), query.sql, query.params).await.context("inserting agency")?;
 
     Ok(Json(json!({ "agency": agency })))
 }
 
-#[axum::debug_handler]
-#[omnia_wasi_otel::instrument]
-async fn get_agency(Path(id): Path<i64>) -> HttpResult<Json<Value>> {
-    tracing::info!("get agency {}", id);
-    ensure_schema().await?;
-
-    let agency = fetch_agency(id).await?.ok_or_else(|| anyhow!("agency not found"))?;
-
-    Ok(Json(json!({ "agency": agency })))
-}
-
-/// Fetch a single agency by ID, or `None` when it does not exist.
-async fn fetch_agency(id: i64) -> Result<Option<Agency>> {
-    let select = SelectBuilder::<Agency>::new()
-        .r#where(Filter::eq("agency_id", id))
-        .build()
-        .context("failed to build fetch agency by ID query")?;
-
-    let rows = Provider
-        .query("db".to_string(), select.sql, select.params)
-        .await
-        .context("failed to execute query")?;
-
-    let agencies = rows
-        .iter()
-        .map(Agency::from_row)
-        .collect::<Result<Vec<_>>>()
-        .context("failed row mapping")?;
-
-    Ok(agencies.into_iter().next())
-}
-
-/// Update an agency.
+/// Update an agency's mutable fields (`UpdateBuilder`).
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
 async fn update_agency(
     Path(id): Path<i64>, Json(req): Json<UpdateAgencyRequest>,
 ) -> HttpResult<Json<Value>> {
-    tracing::info!("update agency {}", id);
     ensure_schema().await?;
 
-    if fetch_agency(id).await?.is_none() {
+    let query = UpdateBuilder::<Agency>::new()
+        .set("name", req.name)
+        .set("timezone", req.timezone)
+        .r#where(Filter::eq("agency_id", id))
+        .build()
+        .context("building update")?;
+
+    let rows_affected = Provider
+        .exec("db".to_string(), query.sql, query.params)
+        .await
+        .context("updating agency")?;
+
+    if rows_affected == 0 {
         return Err(anyhow!("agency not found").into());
     }
 
-    // Build update query - conditionally set only provided fields
-    let mut update = UpdateBuilder::<Agency>::new();
-
-    if let Some(name) = req.name {
-        update = update.set("name", name);
-    }
-    if let Some(url) = req.url {
-        update = update.set("url", url);
-    }
-    if let Some(timezone) = req.timezone {
-        update = update.set("timezone", timezone);
-    }
-
-    let query = update
-        .r#where(Filter::eq("agency_id", id))
-        .build()
-        .context("failed to build update query")?;
-
-    Provider
-        .exec("db".to_string(), query.sql, query.params)
-        .await
-        .context("failed to update agency")?;
-
-    let agency = fetch_agency(id).await?.ok_or_else(|| anyhow!("agency not found after update"))?;
-
-    Ok(Json(json!({ "agency": agency })))
+    Ok(Json(json!({ "message": "agency updated", "agency_id": id })))
 }
 
-#[axum::debug_handler]
-#[omnia_wasi_otel::instrument]
-async fn list_agency_feeds(Path(agency_id): Path<i64>) -> HttpResult<Json<Value>> {
-    tracing::info!("list feeds for agency {}", agency_id);
-    ensure_schema().await?;
-
-    let select = SelectBuilder::<Feed>::new()
-        .r#where(Filter::eq("agency_id", agency_id))
-        .order_by_desc(None, "created_at")
-        .build()
-        .context("failed to build query to select feeds by agency_id")?;
-
-    let rows = Provider
-        .query("db".to_string(), select.sql, select.params)
-        .await
-        .context("failed to execute query")?;
-
-    let feeds = rows
-        .iter()
-        .map(Feed::from_row)
-        .collect::<Result<Vec<_>>>()
-        .context("failed row mapping")?;
-
-    Ok(Json(json!({ "feeds": feeds })))
-}
-
+/// Create a feed for an existing agency (`InsertBuilder` + existence check).
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
 async fn create_feed(
     Path(agency_id): Path<i64>, Json(req): Json<CreateFeedRequest>,
 ) -> HttpResult<Json<Value>> {
-    tracing::info!("create feed for agency {}", agency_id);
     ensure_schema().await?;
 
-    if fetch_agency(agency_id).await?.is_none() {
-        return Err(anyhow!("agency not found").into());
-    }
-
-    let select = SelectBuilder::<Feed>::new()
-        .order_by_desc(None, "feed_id")
+    let select = SelectBuilder::<Agency>::new()
+        .r#where(Filter::eq("agency_id", agency_id))
         .limit(1)
         .build()
-        .context("failed to build max feed_id query")?;
+        .context("building agency lookup")?;
 
     let rows = Provider
         .query("db".to_string(), select.sql, select.params)
         .await
-        .context("failed to execute query")?;
+        .context("executing agency lookup")?;
 
-    let feeds = rows
-        .iter()
-        .map(Feed::from_row)
-        .collect::<Result<Vec<_>>>()
-        .context("failed row mapping")?;
-
-    // Not worried about concurrency issue here as one request will fail. Moreover, this
-    // is an example. Ideally, this will be handled in a more idiomatic way.
-    let next_id = feeds.first().map_or(1, |f| f.feed_id + 1);
+    if rows.is_empty() {
+        return Err(anyhow!("agency not found").into());
+    }
 
     let feed = Feed {
-        feed_id: next_id,
+        feed_id: req.feed_id,
         agency_id,
         description: req.description,
         created_at: Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
     };
 
-    let query = InsertBuilder::<Feed>::from_entity(&feed)
-        .build()
-        .context("failed to build insert query")?;
+    let query = InsertBuilder::<Feed>::from_entity(&feed).build().context("building insert")?;
 
-    Provider
-        .exec("db".to_string(), query.sql, query.params)
-        .await
-        .context("failed to insert feed")?;
+    Provider.exec("db".to_string(), query.sql, query.params).await.context("inserting feed")?;
 
     Ok(Json(json!({ "feed": feed })))
 }
 
-/// List all feeds with their agency information (demonstrates JOIN).
+/// List all feeds with their agency information (`entity!` JOIN).
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
 async fn list_all_feeds() -> HttpResult<Json<Value>> {
-    tracing::info!("list all feeds with agency info");
     ensure_schema().await?;
 
     let select = SelectBuilder::<FeedWithAgency>::new()
         .order_by_desc(Some("feed"), "created_at")
         .limit(100)
         .build()
-        .context("failed to build fetch feeds with agencies query")?;
+        .context("building join query")?;
 
     let rows = Provider
         .query("db".to_string(), select.sql, select.params)
         .await
-        .context("failed to execute query")?;
+        .context("executing join query")?;
 
-    let feeds_with_agency = rows
+    let feeds = rows
         .iter()
         .map(FeedWithAgency::from_row)
         .collect::<Result<Vec<_>>>()
-        .context("failed row mapping")?;
+        .context("mapping rows")?;
 
-    Ok(Json(json!({ "feeds": feeds_with_agency })))
+    Ok(Json(json!({ "feeds": feeds })))
 }
 
-/// Delete a specific feed.
+/// Delete a feed (`DeleteBuilder`).
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
 async fn delete_feed(Path(id): Path<i64>) -> HttpResult<Json<Value>> {
-    tracing::info!("delete feed {}", id);
     ensure_schema().await?;
 
     let query = DeleteBuilder::<Feed>::new()
         .r#where(Filter::eq("feed_id", id))
         .build()
-        .context("failed to build delete query")?;
+        .context("building delete")?;
 
-    let rows_affected = Provider
-        .exec("db".to_string(), query.sql, query.params)
-        .await
-        .context("failed to delete feed")?;
+    let rows_affected =
+        Provider.exec("db".to_string(), query.sql, query.params).await.context("deleting feed")?;
 
     if rows_affected == 0 {
         return Err(anyhow!("feed not found").into());
@@ -326,14 +194,13 @@ async fn delete_feed(Path(id): Path<i64>) -> HttpResult<Json<Value>> {
     Ok(Json(json!({ "message": "feed deleted", "feed_id": id })))
 }
 
-/// Create the schema. This has to be called from each request handler since each request
-/// is handled by a new guest instance. This is a minor overhead from an example perspective.
+/// Create the schema with raw prepared statements. Each request is handled by
+/// a fresh guest instance, so this runs per request — fine for an example.
 async fn ensure_schema() -> Result<()> {
     let pool = Connection::open("db".to_string())
         .await
-        .map_err(|e| anyhow!("failed to open connection: {}", e.trace()))?;
+        .map_err(|e| anyhow!("opening connection: {}", e.trace()))?;
 
-    // Create agency table
     let create_agency = "CREATE TABLE IF NOT EXISTS agency (
         agency_id INTEGER PRIMARY KEY,
         name TEXT NOT NULL,
@@ -344,13 +211,12 @@ async fn ensure_schema() -> Result<()> {
 
     let stmt = Statement::prepare(create_agency.to_string(), vec![])
         .await
-        .map_err(|e| anyhow!("failed to prepare agency table creation: {}", e.trace()))?;
+        .map_err(|e| anyhow!("preparing agency table creation: {}", e.trace()))?;
 
     readwrite::exec(&pool, &stmt)
         .await
-        .map_err(|e| anyhow!("agency table creation failed: {}", e.trace()))?;
+        .map_err(|e| anyhow!("creating agency table: {}", e.trace()))?;
 
-    // Create feed table
     let create_feed = "CREATE TABLE IF NOT EXISTS feed (
         feed_id INTEGER PRIMARY KEY,
         agency_id INTEGER NOT NULL,
@@ -360,13 +226,12 @@ async fn ensure_schema() -> Result<()> {
 
     let stmt = Statement::prepare(create_feed.to_string(), vec![])
         .await
-        .map_err(|e| anyhow!("failed to prepare feed table creation: {}", e.trace()))?;
+        .map_err(|e| anyhow!("preparing feed table creation: {}", e.trace()))?;
 
     readwrite::exec(&pool, &stmt)
         .await
-        .map_err(|e| anyhow!("feed table creation failed: {}", e.trace()))?;
+        .map_err(|e| anyhow!("creating feed table: {}", e.trace()))?;
 
-    tracing::debug!("Schema initialized!");
     Ok(())
 }
 
@@ -395,26 +260,19 @@ entity!(
     }
 );
 
-// Entity with JOIN - demonstrates the power of joins
-// Uses the `columns` parameter to manually specify columns from the joined agency table.
-// Fields not in `columns` are auto-qualified with the main table (feed).
+// JOIN entity: `columns` names fields sourced from the joined agency table;
+// fields not listed are auto-qualified with the main table (feed).
 entity!(
     table = "feed",
-    columns = [
-        ("agency", "name", "agency_name"),
-        ("agency", "url", "agency_url"),
-        ("agency", "timezone", "agency_timezone"),
-    ],
+    columns = [("agency", "name", "agency_name"),],
     joins = [Join::left("agency", Filter::col_eq("feed", "agency_id", "agency", "agency_id")),],
     #[derive(Debug, Clone, Serialize)]
     pub struct FeedWithAgency {
-        pub feed_id: i64,                    // Auto: feed.feed_id
-        pub agency_id: i64,                  // Auto: feed.agency_id
-        pub description: String,             // Auto: feed.description
-        pub created_at: String,              // Auto: feed.created_at
-        pub agency_name: String,             // Manual: agency.name AS agency_name
-        pub agency_url: Option<String>,      // Manual: agency.url AS agency_url
-        pub agency_timezone: Option<String>, // Manual: agency.timezone AS agency_timezone
+        pub feed_id: i64,
+        pub agency_id: i64,
+        pub description: String,
+        pub created_at: String,
+        pub agency_name: String,
     }
 );
 
@@ -422,6 +280,7 @@ entity!(
 
 #[derive(Debug, Deserialize)]
 struct CreateAgencyRequest {
+    agency_id: i64,
     name: String,
     url: Option<String>,
     timezone: Option<String>,
@@ -429,13 +288,13 @@ struct CreateAgencyRequest {
 
 #[derive(Debug, Deserialize)]
 struct UpdateAgencyRequest {
-    name: Option<String>,
-    url: Option<String>,
-    timezone: Option<String>,
+    name: String,
+    timezone: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct CreateFeedRequest {
+    feed_id: i64,
     description: String,
 }
 

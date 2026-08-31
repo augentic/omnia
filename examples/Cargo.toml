@@ -31,8 +31,7 @@ serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-axum = { workspace = true, features = ["macros"] }
-base64ct.workspace = true
+axum = { workspace = true, features = ["macros", "query"] }
 bytes.workspace = true
 chrono.workspace = true
 clap.workspace = true
@@ -77,15 +76,6 @@ crate-type = ["cdylib"]
 [[example]]
 name = "config"
 path = "config/runtime.rs"
-
-[[example]]
-name = "guest-api-wasm"
-path = "guest-api/guest.rs"
-crate-type = ["cdylib"]
-
-[[example]]
-name = "guest-api"
-path = "guest-api/runtime.rs"
 
 [[example]]
 name = "guest-link-responder-wasm"

@@ -105,6 +105,7 @@ dependencies = [
  "axum-core",
  "axum-macros",
  "bytes",
+ "form_urlencoded",
  "futures-util",
  "http",
  "http-body",
@@ -118,6 +119,7 @@ dependencies = [
  "serde_core",
  "serde_json",
  "serde_path_to_error",
+ "serde_urlencoded",
  "sync_wrapper",
  "tower",
  "tower-layer",
@@ -875,7 +877,6 @@ version = "0.35.0"
 dependencies = [
  "anyhow",
  "axum",
- "base64ct",
  "bytes",
  "cfg-if",
  "chrono",

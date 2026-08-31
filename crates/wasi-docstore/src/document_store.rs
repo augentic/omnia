@@ -347,3 +347,46 @@ fn next_iso_date(iso_date: &str) -> anyhow::Result<String> {
         .ok_or_else(|| anyhow::anyhow!("cannot compute next day for date: {iso_date}"))?;
     Ok(next.format("%Y-%m-%d").to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bound<'a>(filter: &'a Filter, expected_op: ComparisonOp) -> &'a str {
+        let Filter::Compare {
+            field,
+            op,
+            value: ScalarValue::Timestamp(ts),
+        } = filter
+        else {
+            panic!("expected timestamp comparison, got {filter:?}");
+        };
+        assert_eq!(field, "updated");
+        assert_eq!(*op, expected_op);
+        ts
+    }
+
+    #[test]
+    fn on_date_expands_to_day_range() {
+        let Filter::And(children) = Filter::on_date("updated", "2026-03-19").unwrap() else {
+            panic!("expected And");
+        };
+        assert_eq!(children.len(), 2);
+        assert_eq!(bound(&children[0], ComparisonOp::Gte), "2026-03-19T00:00:00Z");
+        assert_eq!(bound(&children[1], ComparisonOp::Lt), "2026-03-20T00:00:00Z");
+    }
+
+    #[test]
+    fn on_date_rolls_over_month_end() {
+        let Filter::And(children) = Filter::on_date("updated", "2026-12-31").unwrap() else {
+            panic!("expected And");
+        };
+        assert_eq!(bound(&children[1], ComparisonOp::Lt), "2027-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn on_date_rejects_invalid_date() {
+        assert!(Filter::on_date("updated", "2026-13-01").is_err());
+        assert!(Filter::on_date("updated", "not-a-date").is_err());
+    }
+}

@@ -8,13 +8,13 @@ Guests are compiled and pre-instantiated **once** at startup. Per request, the r
 
 ## Measure first
 
-The [`bench`](../../examples/bench/) harness drives concurrent keep-alive HTTP load and reports throughput plus p50/p90/p99/p99.9 latency, with no external tools:
+Drive concurrent keep-alive HTTP load at a running host with any load-testing tool (for example [`wrk`](https://github.com/wg/wrk) or [`hey`](https://github.com/rakyll/hey)) and record throughput plus tail latency (p99 and up) before and after each change. The [`http`](../../examples/http/) example makes a convenient target:
 
 ```bash
 cargo build --example http-wasm --target wasm32-wasip2
 RUST_LOG=warn cargo run --example http -- run ./target/wasm32-wasip2/debug/examples/http_wasm.wasm
 # second terminal:
-BENCH_CONCURRENCY=64 BENCH_DURATION_SECS=30 cargo run --example http-bench
+hey -z 30s -c 64 http://127.0.0.1:8080/
 ```
 
 Watch two signals while it runs:

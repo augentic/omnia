@@ -71,3 +71,23 @@ impl<M: Entity> DeleteBuilder<M> {
         finish(&statement, M::TABLE, "delete")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::test_fixtures::Stop;
+    use super::*;
+    use crate::orm::DataType;
+
+    #[test]
+    fn delete_with_filter() {
+        let query = DeleteBuilder::<Stop>::new().r#where(Filter::eq("stop_id", 7)).build().unwrap();
+
+        assert_eq!(query.sql, r#"DELETE FROM "stop" WHERE ("stop"."stop_id") = ($1)"#);
+        assert!(matches!(query.params[0], DataType::Int32(Some(7))));
+    }
+
+    #[test]
+    fn refuses_unfiltered_delete() {
+        assert!(DeleteBuilder::<Stop>::new().build().is_err());
+    }
+}
