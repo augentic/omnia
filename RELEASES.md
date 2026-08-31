@@ -17,12 +17,16 @@
   `digest-mismatch`, `artifact-refused`, `seam-missing`, `already-active`,
   `internal`); a deployment guest's identity can never be re-bound, and a
   conflicting re-pin of an active package refuses. Acquisition policy is the
-  new core `Acquire` trait — a composition-root value
-  (`DeploymentBuilder::acquirer`, `MainOptions::acquirer`, or
-  `Runtime::set_acquirer` for `from_parts` embedders), with `MountAcquire`
-  shipped in core (preopen-relative reads over the mount registry, fresh on
-  every load, registry locations refused). The loader links once on the
-  shared linker when a deployment declares `plugins`; wasmtime wires it only
+  new `Acquire` trait — a composition-root value built by the `runtime!`
+  macro's `Wiring::acquirer` hook from the declarative
+  `plugins: { locations: [...] }` list, with the built-in acquirers shipped
+  in `omnia-plugin` and re-exported: `PathAcquire` (named directory roots
+  opened fail-fast at startup, read fresh on every load, registry locations
+  refused) and `RegistryAcquire` (exact `namespace:name@version` references
+  from a compiled-in default registry endpoint, verified against the
+  registry's content digest, fresh-release-preferred when the `cache:`
+  backend attaches a `PluginStore`). The loader links once on the shared
+  linker when a deployment declares `plugins`; wasmtime wires it only
   into guests whose world imports `omnia:plugins/loader`. See
   [docs/security-model.md](docs/security-model.md#guest-requested-plugin-loading-omniapluginsloader).
 - The requester surface for the loader, in `omnia-guest`'s new `plugins`
@@ -92,21 +96,32 @@
   list and the unread `Server::IS_SERVER` const are deleted; a third-party
   trigger host's `run` is now actually served instead of silently skipped.
 - The `runtime!` macro's `plugins:` key grows from a bracketed list to a
-  block: `plugins: { interfaces: [...], acquire: <expr> }`, with `acquire`
-  optional (a deployment that only does host-mediated dispatch needs no
-  acquirer; loads then refuse typed at run time). The bare-list form is a
-  compile error naming the block shape. Declaring the block also links the
-  `omnia::WasiPlugins` loader host. Because `acquire:` is compiled-in code
-  rather than manifest data, an acquire-only block composes with `config:` —
-  the TOML declares the interfaces, the binary the acquirer. TOML manifests
-  are unchanged (`plugins = [...]` stays a plain interface list; an acquirer
-  cannot ride a config file).
+  block: `plugins: { interfaces: [...], locations: [...], cache: ... }`. The
+  declarative `locations:` list is the acquisition policy — named path roots
+  and at most one registry endpoint, lowered into the built-in
+  `PathAcquire`/`RegistryAcquire` acquirers and composed by location kind —
+  and the optional `cache:` names the backend that joins the generated
+  bundle as the registry's `PluginStore`. Both keys are optional (a
+  deployment that only does host-mediated dispatch needs no acquirer; loads
+  then refuse typed at run time); an empty `locations:` list, a second
+  `registry` entry, and a `cache:` without a registry entry are spanned
+  compile errors. The bare-list form is a compile error naming the block
+  shape. Declaring the block also links the `omnia::WasiPlugins` loader
+  host. Because acquisition policy is compiled-in code rather than manifest
+  data, a policy-only block composes with `config:` — the TOML declares the
+  interfaces, the binary the acquirer. TOML manifests are unchanged
+  (`plugins = [...]` stays a plain interface list; an acquirer cannot ride a
+  config file).
 
   ```rust
   // before                              // after
   plugins: ["omnia:link/echo"],          plugins: {
                                              interfaces: ["omnia:link/echo"],
-                                             acquire: omnia::MountAcquire,   // optional
+                                             locations: [        // optional
+                                                 { name: ".", path: "." },
+                                                 { registry: "ghcr.io" },
+                                             ],
+                                             cache: Filesystem,  // optional
                                          },
   ```
 - The host-mediated interface list is renamed from `dispatch` to `plugins`:

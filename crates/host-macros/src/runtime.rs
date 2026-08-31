@@ -249,36 +249,6 @@ mod tests {
         })));
     }
 
-    // The full plugins block: `interfaces:` reaches the manifest, `acquire:`
-    // lowers into the generated `Wiring::acquirer` hook, and the
-    // `WasiPlugins` loader host is linked.
-    #[test]
-    fn expand_plugins_acquire() {
-        insta::assert_snapshot!(expand_pretty(quote!({
-            plugins: {
-                interfaces: ["emery:adapter/probe"],
-                acquire: omnia::MountAcquire,
-            },
-            guests: [
-                { id: "engine", source: "engine.wasm" },
-            ],
-            mounts: [
-                { name: ".", path: project_root() },
-            ],
-        })));
-    }
-
-    // An acquire-only plugins block carries no manifest data, so it composes
-    // with `config:` — the TOML declares the interfaces, the binary the
-    // acquirer.
-    #[test]
-    fn expand_plugins_acquire_with_config() {
-        insta::assert_snapshot!(expand_pretty(quote!({
-            config: concat!(env!("CARGO_MANIFEST_DIR"), "/omnia.toml"),
-            plugins: { acquire: omnia::MountAcquire },
-        })));
-    }
-
     // The declarative locations grammar, cached: path entries fold in
     // declaration order into one `PathAcquire`, the registry entry becomes a
     // `RegistryAcquire` cached in the `cache:` backend — which joins the

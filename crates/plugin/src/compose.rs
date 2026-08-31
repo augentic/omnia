@@ -4,7 +4,7 @@
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
 
-use crate::{Acquire, AcquireContext, AcquireError, Location};
+use crate::{Acquire, AcquireError, Location};
 
 /// Fall-through composition for every [`Acquire`] value.
 pub trait AcquireExt: Acquire + Sized {
@@ -30,12 +30,12 @@ pub struct Or<A, B> {
 
 impl<A: Acquire, B: Acquire> Acquire for Or<A, B> {
     fn acquire<'a>(
-        &'a self, package: &'a str, from: &'a Location, context: &'a AcquireContext,
+        &'a self, package: &'a str, from: &'a Location,
     ) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>> {
         async move {
-            match self.first.acquire(package, from, context).await {
+            match self.first.acquire(package, from).await {
                 Err(AcquireError::Unsupported(first_refusal)) => {
-                    match self.second.acquire(package, from, context).await {
+                    match self.second.acquire(package, from).await {
                         Err(AcquireError::Unsupported(second_refusal)) => Err(
                             AcquireError::Unsupported(format!("{first_refusal}; {second_refusal}")),
                         ),

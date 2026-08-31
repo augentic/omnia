@@ -17,7 +17,7 @@ pub struct Codegen {
     pub backends_def: TokenStream,
     pub main_options: TokenStream,
     /// The generated `Wiring::acquirer` hook body for the `plugins:` block's
-    /// `acquire:` expression; absent, the trait's `None` default stands.
+    /// `locations:` list; absent, the trait's `None` default stands.
     pub acquirer_hook: Option<TokenStream>,
     /// Whether to link the `omnia::WasiPlugins` loader host — declared
     /// plugins mean the deployment opted into the loader capability.
@@ -32,11 +32,8 @@ impl From<&Config> for Codegen {
         let (backends_ty, backends_def) = emit_backends(host_entries, config.cache.as_ref());
 
         let main_options = emit_main_options(config);
-        let acquirer_hook = if config.locations.is_empty() {
-            config.acquire.as_ref().map(|expr| emit_acquirer_hook(expr, &backends_ty))
-        } else {
-            Some(emit_locations_hook(config, &backends_ty))
-        };
+        let acquirer_hook =
+            (!config.locations.is_empty()).then(|| emit_locations_hook(config, &backends_ty));
 
         Self {
             mode: config.mode,
@@ -59,18 +56,6 @@ fn emit_main_options(config: &Config) -> TokenStream {
     quote! {
         omnia::MainOptions::new(#mode)
             #manifest
-    }
-}
-
-/// Emit the `Wiring::acquirer` hook: the `acquire:` expression becomes the
-/// deployment's acquisition policy, built once after backends connect.
-fn emit_acquirer_hook(expr: &Expr, backends_ty: &TokenStream) -> TokenStream {
-    quote! {
-        fn acquirer(
-            _backends: &#backends_ty,
-        ) -> Option<::std::sync::Arc<dyn omnia::Acquire>> {
-            Some(::std::sync::Arc::new(#expr))
-        }
     }
 }
 

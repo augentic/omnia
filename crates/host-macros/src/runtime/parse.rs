@@ -37,9 +37,6 @@ pub struct Config {
     /// Whether a `plugins:` block was declared — links the `WasiPlugins`
     /// loader host even when the block carries no interfaces.
     pub plugins_declared: bool,
-    /// The `plugins:` block's `acquire:` expression, lowered into the
-    /// generated `Wiring::acquirer` hook as the deployment's acquirer.
-    pub acquire: Option<Expr>,
     /// The `plugins:` block's `locations:` entries, lowered into the
     /// generated `Wiring::acquirer` hook as built-in acquirers composed by
     /// location kind.
@@ -68,14 +65,13 @@ pub struct ManifestSpec {
     pub mounts: Vec<MountSpec>,
 }
 
-/// The `plugins: { interfaces: [...], acquire: ..., locations: [...],
-/// cache: ... }` block: the deployment's host-mediated interface set plus
-/// its compiled-in acquisition policy — either a custom `acquire:` value or
-/// the declarative `locations:` list with its optional `cache:` backend.
+/// The `plugins: { interfaces: [...], locations: [...], cache: ... }`
+/// block: the deployment's host-mediated interface set plus its compiled-in
+/// acquisition policy — the declarative `locations:` list with its optional
+/// `cache:` backend.
 #[derive(Default)]
 pub struct PluginsSpec {
     pub interfaces: Vec<Expr>,
-    pub acquire: Option<Expr>,
     pub locations: Vec<LocationSpec>,
     pub cache: Option<Path>,
 }
@@ -133,7 +129,6 @@ impl Parse for Config {
         let mut config_file = None;
         let mut manifest = ManifestSpec::default();
         let mut plugins_declared = false;
-        let mut acquire = None;
         let mut locations = Vec::new();
         let mut cache = None;
         let mut config_span: Option<Span> = None;
@@ -159,11 +154,10 @@ impl Parse for Config {
                 }
                 OptValue::Plugins(p) => {
                     plugins_declared = true;
-                    acquire = p.acquire;
                     locations = p.locations;
                     cache = p.cache;
-                    // Acquisition policy (`acquire:`, `locations:`, `cache:`)
-                    // is compiled-in code, not manifest data: only an
+                    // Acquisition policy (`locations:`, `cache:`) is
+                    // compiled-in code, not manifest data: only an
                     // `interfaces:` list conflicts with `config:`, so a
                     // config-file deployment may still compile an acquirer in.
                     if !p.interfaces.is_empty() {
@@ -188,7 +182,6 @@ impl Parse for Config {
             config_file,
             manifest,
             plugins_declared,
-            acquire,
             locations,
             cache,
         };
@@ -313,7 +306,7 @@ impl Parse for Opt {
                 return Err(syn::Error::new(
                     key.span,
                     "the `plugins:` key takes a block: `plugins: { interfaces: \
-                     [\"ns:pkg/iface\"], acquire: ... }` (`acquire` is optional)",
+                     [\"ns:pkg/iface\"], locations: [...] }` (`locations` is optional)",
                 ));
             }
             ("plugins", key.span, OptValue::Plugins(input.parse()?))
@@ -490,17 +483,12 @@ impl Parse for GuestSpec {
 impl Parse for PluginsSpec {
     fn parse(input: ParseStream) -> Result<Self> {
         let mut spec = Self::default();
-        let mut acquire_span = None;
         let mut locations_span = None;
         let mut cache_span = None;
 
         parse_kv_block(input, |key, value| {
             match key.to_string().as_str() {
                 "interfaces" => spec.interfaces = parse_bracketed_list(value)?,
-                "acquire" => {
-                    spec.acquire = Some(value.parse()?);
-                    acquire_span = Some(key.span());
-                }
                 "locations" => {
                     spec.locations = parse_bracketed_list(value)?;
                     locations_span = Some(key.span());
@@ -513,8 +501,8 @@ impl Parse for PluginsSpec {
                     return Err(syn::Error::new(
                         key.span(),
                         format!(
-                            "unknown plugins key `{other}`; expected `interfaces`, `acquire`, \
-                             `locations`, or `cache`"
+                            "unknown plugins key `{other}`; expected `interfaces`, `locations`, \
+                             or `cache`"
                         ),
                     ));
                 }
@@ -522,23 +510,14 @@ impl Parse for PluginsSpec {
             Ok(())
         })?;
 
-        spec.validate(acquire_span, locations_span, cache_span)?;
+        spec.validate(locations_span, cache_span)?;
         Ok(spec)
     }
 }
 
 impl PluginsSpec {
     /// The block's cross-key refusals, spanned to the offending key.
-    fn validate(
-        &self, acquire_span: Option<Span>, locations_span: Option<Span>, cache_span: Option<Span>,
-    ) -> Result<()> {
-        if let (Some(locations), Some(_)) = (locations_span, acquire_span) {
-            return Err(syn::Error::new(
-                locations,
-                "`locations:` and `acquire:` are mutually exclusive; declare the acquisition \
-                 policy once",
-            ));
-        }
+    fn validate(&self, locations_span: Option<Span>, cache_span: Option<Span>) -> Result<()> {
         if let Some(span) = locations_span
             && self.locations.is_empty()
         {
@@ -562,21 +541,14 @@ impl PluginsSpec {
             ));
         }
 
-        if let Some(span) = cache_span {
-            if acquire_span.is_some() {
-                return Err(syn::Error::new(
-                    span,
-                    "`cache:` attaches a store to the `locations:` registry entry; a custom \
-                     `acquire:` value owns its own caching",
-                ));
-            }
-            if first_registry.is_none() {
-                return Err(syn::Error::new(
-                    span,
-                    "`cache:` requires a `{ registry: ... }` location to attach the store to; \
-                     path locations always read fresh",
-                ));
-            }
+        if let Some(span) = cache_span
+            && first_registry.is_none()
+        {
+            return Err(syn::Error::new(
+                span,
+                "`cache:` requires a `{ registry: ... }` location to attach the store to; \
+                 path locations always read fresh",
+            ));
         }
 
         Ok(())

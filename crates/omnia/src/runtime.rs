@@ -661,25 +661,9 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         Ok(())
     }
 
-    /// Install the deployment's plugin acquirer — the acquisition policy
-    /// behind [`load_plugin`](Self::load_plugin) and the
-    /// `omnia:plugins/loader` capability.
-    ///
-    /// [`Runtime::new`] installs the [`Wiring::acquirer`] hook's product
-    /// itself; an embedder holding a [`from_parts`](Self::from_parts) runtime
-    /// calls this once. A second installation warns and is ignored.
-    pub fn set_acquirer(&self, acquirer: impl Acquire) {
-        self.inner.plugins.install_acquirer(Arc::new(acquirer));
-    }
-
     /// The loader state shared by every `load_plugin` call.
     pub(crate) fn plugins_state(&self) -> &PluginsState {
         &self.inner.plugins
-    }
-
-    /// The deployment's mount registry, lent to acquirers per load.
-    pub(crate) fn mount_registry(&self) -> Arc<MountRegistry> {
-        Arc::clone(&self.inner.mounts)
     }
 
     /// Release every link-serve endpoint, aborting the drain tasks that pin
