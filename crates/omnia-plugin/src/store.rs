@@ -1,5 +1,12 @@
 //! Persistence behind [`RegistryAcquire`](crate::RegistryAcquire):
 //! content-addressed bytes and per-registry release records.
+//!
+//! The store is a byte cache and offline fallback, never an authority: the
+//! acquirer resolves releases fresh whenever the registry is reachable and
+//! verifies stored content against the fresh digest before serving it.
+//! Content entries are digest-keyed and shared across registries; release
+//! records are scoped per registry so an endpoint override is never answered
+//! from another registry's record.
 
 use std::fmt::Write as _;
 
@@ -9,19 +16,11 @@ use futures::future::BoxFuture;
 use sha2::{Digest as _, Sha256};
 
 /// Both halves of the persistence behind [`RegistryAcquire`](crate::RegistryAcquire).
-///
-/// The store is a fallback and a byte cache, never an authority: the acquirer
-/// resolves releases fresh whenever the registry is reachable, refreshing the
-/// stored record, and verifies stored content against the fresh digest before
-/// serving it.
 pub trait PluginStore: ContentStore + ReleaseStore {}
 
 impl<T: ContentStore + ReleaseStore> PluginStore for T {}
 
 /// Content-addressed persistence: digest-keyed bytes shared across registries.
-///
-/// The digest is the identity. Bytes that do not hash to their key must be
-/// refused — a store entry is trusted by its name.
 pub trait ContentStore: Send + Sync + 'static {
     /// The stored bytes keyed by `digest`, if any.
     ///
@@ -30,7 +29,7 @@ pub trait ContentStore: Send + Sync + 'static {
     /// Returns an error if the store cannot be read.
     fn get<'a>(&'a self, digest: &'a str) -> BoxFuture<'a, Result<Option<Vec<u8>>>>;
 
-    /// Persist `bytes` under `digest`.
+    /// Persist `bytes` under `digest`, refusing bytes that do not hash to it.
     ///
     /// # Errors
     ///
@@ -40,9 +39,6 @@ pub trait ContentStore: Send + Sync + 'static {
 }
 
 /// Per-registry resolution index: an exact package version to its digest.
-///
-/// Records are scoped per registry so an endpoint override is never
-/// answered from another registry's record.
 pub trait ReleaseStore: Send + Sync + 'static {
     /// The stored record of `package` at `version` in `registry`.
     ///
@@ -63,8 +59,7 @@ pub trait ReleaseStore: Send + Sync + 'static {
     ) -> BoxFuture<'a, Result<()>>;
 }
 
-/// One stored release resolution: the exact version plus the registry's
-/// content digest for it.
+/// One stored release resolution.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct ReleaseRecord {
     /// Exact semver version of the release.
@@ -73,10 +68,7 @@ pub struct ReleaseRecord {
     pub content_digest: String,
 }
 
-/// The cacheless [`ContentStore`] and [`ReleaseStore`].
-///
-/// Stores nothing, remembers nothing: every load resolves and fetches fresh,
-/// and registry unavailability has no fallback. The default for
+/// The cacheless [`PluginStore`], the default for
 /// [`RegistryAcquire`](crate::RegistryAcquire).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NoStore;
@@ -115,4 +107,18 @@ pub fn sha256_digest(bytes: &[u8]) -> String {
         let _ = write!(digest, "{byte:02x}");
     }
     digest
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sha256_digest;
+
+    #[test]
+    fn hash_known_vector() {
+        // The well-known sha256 of the empty input.
+        assert_eq!(
+            sha256_digest(b""),
+            "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
 }

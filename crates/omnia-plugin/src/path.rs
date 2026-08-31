@@ -1,4 +1,4 @@
-//! Compiled-in path acquisition over directories opened at construction.
+//! Path acquisition over directories opened at construction.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -9,17 +9,14 @@ use cap_std::fs::Dir;
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
 
-use crate::AcquirePath;
+/// Path acquisition policy — the [`Acquirer::path`](crate::Acquirer::path) slot.
+pub trait AcquirePath: Send + Sync + 'static {
+    /// Produce the raw component bytes at the location-relative `path`.
+    fn acquire<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<Vec<u8>>>;
+}
 
-/// Path acquisition over the composition root's own `(name, directory)`
-/// entries, opened once at construction — the [`Acquirer::path`] slot the
-/// `runtime!` macro's `locations:` path entries lower into.
-///
-/// Resolution follows the guest's preopen rule (longest name prefix wins, a
-/// bare relative path falls back to a `.` entry, plain relative subpaths
-/// only), and every load reads fresh — never cached.
-///
-/// [`Acquirer::path`]: crate::Acquirer::path
+/// Path acquisition over named `(name, directory)` roots, resolved like guest
+/// preopens and read fresh on every load.
 #[derive(Debug)]
 pub struct PathAcquire {
     entries: Vec<MountEntry>,
@@ -32,9 +29,8 @@ struct MountEntry {
 }
 
 impl PathAcquire {
-    /// Open every `(name, path)` entry now — the startup fail-fast gate: a
-    /// location whose path cannot be opened as a directory is a
-    /// configuration error surfaced before any load.
+    /// Opens every `(name, path)` entry now, surfacing a bad location as a
+    /// configuration error before any load.
     ///
     /// # Errors
     ///
@@ -76,11 +72,9 @@ async fn read_entry(path: &str, entries: &[MountEntry]) -> Result<Vec<u8>> {
     .context("component read task panicked")?
 }
 
-// Resolve `path` to a location's capability handle plus the subpath within it.
-// The longest location-name prefix wins; a plain relative path with no
-// matching prefix falls back to a location named `.` when one exists. The
-// subpath must be plain and relative — cap-std then refuses any escape at
-// open time.
+// Resolve `path` to a location's capability handle plus the subpath within
+// it, longest location-name prefix first. The subpath must be plain and
+// relative — cap-std then refuses any escape at open time.
 fn resolve(path: &str, entries: &[MountEntry]) -> Result<(Arc<cap_std::fs::Dir>, String)> {
     let mut best: Option<(&MountEntry, &str)> = None;
     for entry in entries {
@@ -96,7 +90,7 @@ fn resolve(path: &str, entries: &[MountEntry]) -> Result<(Arc<cap_std::fs::Dir>,
             best = Some((entry, subpath));
         }
     }
-    
+
     if best.is_none() {
         // wasi-libc resolves bare relative paths against a `.` preopen; do
         // the same so host- and guest-side views of a path agree.
@@ -109,7 +103,6 @@ fn resolve(path: &str, entries: &[MountEntry]) -> Result<(Arc<cap_std::fs::Dir>,
     Ok((Arc::clone(&entry.dir), subpath.to_owned()))
 }
 
-// Refuse a subpath that is not a plain relative `/`-separated path.
 fn check_subpath(path: &str, subpath: &str) -> Result<()> {
     let plain = !subpath.starts_with('/')
         && !subpath.contains('\\')

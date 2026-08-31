@@ -238,7 +238,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         })?;
 
         // The operator's pin binds name to bytes before any validation work.
-        let resolved = digest::sha256_hex(&bytes);
+        let resolved = omnia_plugin::sha256_digest(&bytes);
         if let Some(pin) = &pin
             && *pin != resolved
         {

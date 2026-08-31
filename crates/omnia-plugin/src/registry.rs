@@ -1,4 +1,4 @@
-//! Registry acquisition over [wasm-pkg-client], fresh-release-preferred.
+//! Registry acquisition over [wasm-pkg-client].
 //!
 //! [wasm-pkg-client]: https://github.com/bytecodealliance/wasm-pkg-tools
 
@@ -10,30 +10,28 @@ use futures::{FutureExt as _, TryStreamExt as _};
 use tokio::sync::Mutex;
 use wasm_pkg_client::{Client, Config, ContentStream, PackageRef, Registry, Release, Version};
 
-use crate::AcquireRegistry;
 use crate::store::{
     ContentStore, NoStore, PluginStore, ReleaseRecord, ReleaseStore, sha256_digest,
 };
 
-/// Registry acquisition for the plugin loader over [wasm-pkg-client] — the
-/// [`Acquirer::registry`] slot the `runtime!` macro's `{ registry: ... }`
-/// entry lowers into.
+/// Registry acquisition policy — the
+/// [`Acquirer::registry`](crate::Acquirer::registry) slot.
+pub trait AcquireRegistry: Send + Sync + 'static {
+    /// Produce the raw component bytes for `package` from `registry`
+    /// (`None` selects the acquirer's default endpoint).
+    fn acquire<'a>(
+        &'a self, package: &'a str, registry: Option<&'a str>,
+    ) -> BoxFuture<'a, Result<Vec<u8>>>;
+}
+
+/// Registry acquisition over [wasm-pkg-client].
 ///
-/// Fetches exact package versions (`namespace:name@version` — remote lookup
-/// never resolves "latest") and verifies every result against the registry's
-/// content digest before returning bytes. The operator's own sha256 pin is
-/// verified host-side by the loader, after acquisition.
-///
-/// Resolution is fresh-release-preferred: the release resolves against the
-/// registry on every load, refreshing the [`PluginStore`]'s record, and only
-/// a *network* failure with a stored record falls back (logged) to the store;
-/// content is served from the store by digest — verified against the fresh
-/// digest, with a poisoned entry discarded and refetched — or fetched,
-/// verified, and persisted. The [`NoStore`] default does none of that: every
-/// load resolves and fetches fresh.
+/// Fetches exact `namespace:name@version` references only, verifying every
+/// result against the registry's content digest. The attached [`PluginStore`]
+/// is a byte cache and offline fallback — never the authority while the
+/// registry is reachable.
 ///
 /// [wasm-pkg-client]: https://github.com/bytecodealliance/wasm-pkg-tools
-/// [`Acquirer::registry`]: crate::Acquirer::registry
 pub struct RegistryAcquire<S = NoStore> {
     default_registry: String,
     config: Config,
@@ -44,14 +42,11 @@ pub struct RegistryAcquire<S = NoStore> {
 }
 
 impl RegistryAcquire<NoStore> {
-    /// Acquirer whose default endpoint is `default_registry`
-    /// (a load naming no registry resolves there).
+    /// Cacheless acquirer whose default endpoint is `default_registry`.
     ///
     /// Starts from an empty client configuration — no user-global wasm-pkg
     /// config file and no hard-coded fallback registries — so the compiled
     /// binary alone attests which endpoints the deployment may reach.
-    /// Cacheless until [`cached`](Self::cached) attaches a store; an invalid
-    /// registry name refuses as a typed failure at first use.
     #[must_use]
     pub fn new(default_registry: impl Into<String>) -> Self {
         Self {
@@ -65,17 +60,14 @@ impl RegistryAcquire<NoStore> {
 
 impl<S: PluginStore> RegistryAcquire<S> {
     /// Replaces the client configuration (per-registry backend and
-    /// credential settings). The acquirer's default registry and per-load
-    /// overrides still take precedence over the configuration's own default.
+    /// credential settings).
     #[must_use]
     pub fn with_config(mut self, config: Config) -> Self {
         self.config = config;
         self
     }
 
-    /// Attaches a [`PluginStore`]; fetched content persists
-    /// verify-before-persist, release records refresh on every reachable
-    /// resolution, and a network failure falls back to the stored record.
+    /// Attaches a [`PluginStore`] as byte cache and offline fallback.
     #[must_use]
     pub fn cached<S2: PluginStore>(self, store: S2) -> RegistryAcquire<S2> {
         RegistryAcquire {
@@ -160,11 +152,9 @@ impl<S: PluginStore> AcquireRegistry for RegistryAcquire<S> {
                 self.resolve_release(&client, registry, package, &package_ref, &version).await?;
             let digest = release.content_digest.to_string();
 
-            // The store serves content by digest — verified against the
-            // fresh digest, so a poisoned or truncated entry is discarded
-            // (overwritten below) instead of becoming code.
             let stored = ContentStore::get(&self.store, &digest).await?;
             if let Some(bytes) = stored {
+                // A poisoned entry must never become code; discard and refetch.
                 if sha256_digest(&bytes) == digest {
                     tracing::debug!(package, digest, "package served from the store");
                     return Ok(bytes);

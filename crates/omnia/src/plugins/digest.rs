@@ -1,6 +1,4 @@
-//! sha256 content digests: the operator pin format and byte hashing.
-
-use sha2::{Digest as _, Sha256};
+//! Operator sha256 digest pins.
 
 /// The canonical digest scheme prefix.
 const SCHEME: &str = "sha256:";
@@ -8,24 +6,9 @@ const SCHEME: &str = "sha256:";
 /// Hex characters in a sha256 digest.
 const HEX_LEN: usize = 64;
 
-/// Hash `bytes` into the canonical `sha256:<hex>` digest string.
-pub fn sha256_hex(bytes: &[u8]) -> String {
-    let hash = Sha256::digest(bytes);
-    let mut digest = String::with_capacity(SCHEME.len() + HEX_LEN);
-    digest.push_str(SCHEME);
-    for byte in hash {
-        digest.push(nibble(byte >> 4));
-        digest.push(nibble(byte & 0xf));
-    }
-    digest
-}
-
-fn nibble(value: u8) -> char {
-    char::from_digit(u32::from(value), 16).expect("a nibble is a hex digit")
-}
-
 /// Canonicalize an operator digest pin (`sha256:` plus 64 hex characters,
-/// lowercased) so pins compare byte-for-byte against [`sha256_hex`] output.
+/// lowercased) so pins compare byte-for-byte against
+/// [`omnia_plugin::sha256_digest`] output.
 ///
 /// Returns a description of the malformation when the pin is not a sha256
 /// digest string.
@@ -41,16 +24,7 @@ pub fn canonicalize_pin(pin: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{canonicalize_pin, sha256_hex};
-
-    #[test]
-    fn hash_known_vector() {
-        // The well-known sha256 of the empty input.
-        assert_eq!(
-            sha256_hex(b""),
-            "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        );
-    }
+    use super::canonicalize_pin;
 
     #[test]
     fn pin_canonicalizes_case() {
