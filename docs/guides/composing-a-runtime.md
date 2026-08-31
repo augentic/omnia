@@ -130,7 +130,7 @@ Most runtimes never need these. Each solves one specific deployment shape — re
 
 Shipping a product CLI whose argv belongs entirely to the guest needs no key: a command-mode runtime with a compiled-in deployment is a [direct command](../reference/runtime-macro.md#direct-commands-raw-argv-passthrough) — no host `run` grammar at all.
 
-The [`command-resolver`](../../examples/command-resolver/runtime.rs) example composes the inline manifest keys into a complete direct command deployment.
+The [`cli-static`](../../examples/cli-static/runtime.rs) example composes the inline manifest keys into a complete direct command deployment.
 
 ## Hand-written runtimes (advanced)
 

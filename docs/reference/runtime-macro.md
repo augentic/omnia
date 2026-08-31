@@ -165,7 +165,7 @@ A `mode: command` runtime *without* a compiled-in deployment keeps the `run` gra
 
 ## Composing the keys
 
-The [`command-resolver`](../../examples/command-resolver/runtime.rs) example composes the inline manifest keys into a complete direct command deployment with no handwritten `main`:
+The [`cli-static`](../../examples/cli-static/runtime.rs) example composes the inline manifest keys into a complete direct command deployment with no handwritten `main`:
 
 ```rust
 omnia::runtime!({

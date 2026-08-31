@@ -48,10 +48,6 @@ wasip3.workspace = true
 wit-bindgen.workspace = true
 
 [[example]]
-name = "http-bench"
-path = "bench/http_bench.rs"
-
-[[example]]
 name = "blobstore-wasm"
 path = "blobstore/guest.rs"
 crate-type = ["cdylib"]
@@ -70,8 +66,8 @@ name = "cli"
 path = "cli/runtime.rs"
 
 [[example]]
-name = "command-resolver"
-path = "command-resolver/runtime.rs"
+name = "cli-static"
+path = "cli-static/runtime.rs"
 
 [[example]]
 name = "config-wasm"

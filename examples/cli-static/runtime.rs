@@ -5,8 +5,8 @@
 //! exporter, so command mode routes to it with no configuration. Because the
 //! deployment is compiled in, command mode makes the binary a direct command
 //! — no host `run` grammar, the binary's argv belongs to the guest, so it
-//! runs as `command-resolver greet Ada`, not
-//! `command-resolver run -- greet Ada`; see `README.md`.
+//! runs as `cli-static greet Ada`, not
+//! `cli-static run -- greet Ada`; see `README.md`.
 
 cfg_if::cfg_if! {
     if #[cfg(not(target_arch = "wasm32"))] {
