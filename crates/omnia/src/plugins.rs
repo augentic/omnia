@@ -9,10 +9,10 @@
 //!
 //! Acquisition policy (endpoints, cache, path reads) is the embedder's
 //! [`Acquire`] value, built by the [`Wiring::acquirer`](crate::Wiring::acquirer)
-//! hook (the `runtime!` macro's `plugins: { acquire: ... }` key lowers into
-//! it) once the deployment's backends have connected. Core ships
-//! [`MountAcquire`] — preopen-relative reads over the mount registry — and
-//! keeps zero storage and network dependencies.
+//! hook (the `runtime!` macro's `plugins: { locations: [...] }` list lowers
+//! into it) once the deployment's backends have connected. The built-in
+//! acquirers ([`PathAcquire`], [`RegistryAcquire`]) live in `omnia-plugin`;
+//! core keeps zero storage and network dependencies.
 
 mod digest;
 mod host;
@@ -25,8 +25,8 @@ use futures::FutureExt as _;
 use futures::future::BoxFuture;
 pub use host::{WasiPlugins, WasiPluginsCtxView, WasiPluginsView};
 pub use omnia_plugin::{
-    Acquire, AcquireContext, AcquireError, AcquireExt, DirStore, Location, MountAcquire,
-    MountEntry, NoStore, Or, PathAcquire, PluginStore, RegistryAcquire, ReleaseRecord,
+    Acquire, AcquireError, AcquireExt, Location, NoStore, Or, PathAcquire, PluginStore,
+    RegistryAcquire, ReleaseRecord,
 };
 use wasmtime::component::{Component, types};
 
@@ -138,10 +138,13 @@ impl PluginsState {
         }
     }
 
+    /// Install the `Wiring::acquirer` hook's product; [`Runtime::new`]
+    /// (the sole caller) installs at most once per runtime.
+    ///
+    /// [`Runtime::new`]: crate::Runtime::new
     pub(crate) fn install_acquirer(&self, acquirer: Arc<dyn Acquire>) {
-        if self.acquirer.set(acquirer).is_err() {
-            tracing::warn!("acquirer already installed; ignoring");
-        }
+        let fresh = self.acquirer.set(acquirer).is_ok();
+        assert!(fresh, "the acquirer installs exactly once");
     }
 
     /// Drop the digest record of a deregistered package so a later re-load
@@ -203,30 +206,16 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
 
         let Some(acquirer) = state.acquirer.get() else {
             return Err(LoadError::Internal(format!(
-                "this deployment has no acquirer; compile one in (`plugins: {{ acquire: ... }}`) \
-                 to load `{package}`"
+                "this deployment has no acquirer; compile one in \
+                 (`plugins: {{ locations: [...] }}`) to load `{package}`"
             )));
         };
-        // Snapshot the registry's `(name, dir)` pairs: acquirers see plain
-        // mount entries, never core's registry type.
-        let context = AcquireContext {
-            mounts: self
-                .mount_registry()
-                .entries()
-                .iter()
-                .map(|mount| MountEntry {
-                    name: mount.name.clone(),
-                    dir: Arc::clone(&mount.dir),
-                })
-                .collect(),
-        };
-        let bytes =
-            acquirer.acquire(package, &from, &context).await.map_err(|error| match error {
-                AcquireError::Unsupported(reason) => LoadError::UnsupportedLocation(reason),
-                AcquireError::Failed(error) => {
-                    LoadError::AcquireFailed(format!("acquiring `{package}`: {error:#}"))
-                }
-            })?;
+        let bytes = acquirer.acquire(package, &from).await.map_err(|error| match error {
+            AcquireError::Unsupported(reason) => LoadError::UnsupportedLocation(reason),
+            AcquireError::Failed(error) => {
+                LoadError::AcquireFailed(format!("acquiring `{package}`: {error:#}"))
+            }
+        })?;
 
         // The operator's pin binds name to bytes before any validation work.
         let resolved = digest::sha256_hex(&bytes);

@@ -3,7 +3,6 @@
 //! [wasm-pkg-client]: https://github.com/bytecodealliance/wasm-pkg-tools
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 use anyhow::{Context as _, anyhow, bail};
 use futures::future::BoxFuture;
@@ -11,8 +10,8 @@ use futures::{FutureExt as _, TryStreamExt as _};
 use tokio::sync::Mutex;
 use wasm_pkg_client::{Client, Config, ContentStream, PackageRef, Registry, Release, Version};
 
-use crate::store::{DirStore, NoStore, PluginStore, ReleaseRecord, sha256_digest};
-use crate::{Acquire, AcquireContext, AcquireError, Location};
+use crate::store::{NoStore, PluginStore, ReleaseRecord, sha256_digest};
+use crate::{Acquire, AcquireError, Location};
 
 /// Registry acquisition for the plugin loader over [wasm-pkg-client].
 ///
@@ -84,12 +83,6 @@ impl<S: PluginStore> RegistryAcquire<S> {
         }
     }
 
-    /// Attaches a [`DirStore`] rooted at `root` (created lazily).
-    #[must_use]
-    pub fn cached_at(self, root: impl Into<PathBuf>) -> RegistryAcquire<DirStore> {
-        self.cached(DirStore::new(root))
-    }
-
     async fn client(&self, registry: Registry) -> Client {
         let mut clients = self.clients.lock().await;
         if let Some(client) = clients.get(&registry) {
@@ -156,13 +149,13 @@ impl<S: PluginStore> RegistryAcquire<S> {
 
 impl<S: PluginStore> Acquire for RegistryAcquire<S> {
     fn acquire<'a>(
-        &'a self, package: &'a str, from: &'a Location, _context: &'a AcquireContext,
+        &'a self, package: &'a str, from: &'a Location,
     ) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>> {
         async move {
             let Location::Registry(endpoint) = from else {
                 return Err(AcquireError::Unsupported(format!(
                     "RegistryAcquire serves registry locations only; acquiring `{package}` \
-                     from {from} requires a path acquirer such as MountAcquire"
+                     from {from} requires a path acquirer such as PathAcquire"
                 )));
             };
             let (package_ref, version) = parse_package(package).map_err(AcquireError::Failed)?;

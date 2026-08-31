@@ -1,10 +1,10 @@
 //! # Plugin acquisition
 //!
-//! The [`Acquire`] seam and the preopen-relative [`MountAcquire`].
+//! The [`Acquire`] seam and its built-in acquirers.
 //!
 //! Acquisition policy — endpoints, cache, path reads — is a value the
 //! embedder compiles in at the composition root (the `runtime!` macro's
-//! `plugins: { acquire: ... }` key, lowered into the generated
+//! `plugins: { locations: [...] }` list, lowered into the generated
 //! `Wiring::acquirer` hook), never runtime-core machinery: the runtime
 //! consumes the [`Acquire`] trait and keeps zero storage and network
 //! dependencies. This crate is omnia-internal — its surface reaches
@@ -19,13 +19,12 @@ use std::fmt;
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, anyhow, ensure};
-use futures::FutureExt as _;
 use futures::future::BoxFuture;
 
 pub use self::compose::{AcquireExt, Or};
 pub use self::path::PathAcquire;
 pub use self::registry::RegistryAcquire;
-pub use self::store::{DirStore, NoStore, PluginStore, ReleaseRecord, sha256_digest};
+pub use self::store::{NoStore, PluginStore, ReleaseRecord, sha256_digest};
 
 /// Where an acquirer finds a package's component bytes — the mirror of the
 /// `omnia:plugins/loader` `location` variant.
@@ -47,24 +46,14 @@ impl fmt::Display for Location {
     }
 }
 
-/// One deployment mount lent to acquirers: the guest-visible name plus the
-/// opened capability handle to the mount root.
+/// One named acquisition root: the location name plus the opened capability
+/// handle to its directory.
 #[derive(Clone, Debug)]
-pub struct MountEntry {
-    /// Guest-visible mount name (the preopen name).
-    pub name: String,
-    /// Host-side capability handle to the mount root.
-    pub dir: Arc<cap_std::fs::Dir>,
-}
-
-/// Deployment facts the runtime lends an acquirer per load.
-///
-/// Mounts open after the composition root constructs the acquirer, so they
-/// arrive per call rather than at construction — `acquire: MountAcquire`
-/// stays a plain value in the `runtime!` declaration.
-pub struct AcquireContext {
-    /// The deployment's mounts, for preopen-relative reads.
-    pub mounts: Vec<MountEntry>,
+pub(crate) struct MountEntry {
+    /// The location name path loads resolve against.
+    pub(crate) name: String,
+    /// Host-side capability handle to the location root.
+    pub(crate) dir: Arc<cap_std::fs::Dir>,
 }
 
 /// Why an acquirer produced no bytes.
@@ -78,7 +67,7 @@ pub enum AcquireError {
 
 /// Acquisition policy compiled in at the composition root — built by the
 /// runtime's `Wiring::acquirer` hook, which the `runtime!` macro's
-/// `plugins: { acquire: ... }` key lowers into.
+/// `plugins: { locations: [...] }` list lowers into.
 ///
 /// An implementation owns every fetch, cache, and endpoint decision; the
 /// loader only ever receives bytes back, then verifies, validates, and
@@ -86,39 +75,12 @@ pub enum AcquireError {
 pub trait Acquire: Send + Sync + 'static {
     /// Produce the raw component bytes for `package` from `from`.
     fn acquire<'a>(
-        &'a self, package: &'a str, from: &'a Location, context: &'a AcquireContext,
+        &'a self, package: &'a str, from: &'a Location,
     ) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>>;
 }
 
-/// Preopen-relative path acquisition over the deployment's mounts.
-///
-/// Paths resolve against the lent mounts (longest mount-name prefix wins; a
-/// bare relative path falls back to a `.` mount, matching wasi-libc's preopen
-/// resolution) and are read fresh on every load — never cached. Registry
-/// locations are refused: composing a registry acquirer is deployment policy
-/// outside this default.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct MountAcquire;
-
-impl Acquire for MountAcquire {
-    fn acquire<'a>(
-        &'a self, package: &'a str, from: &'a Location, context: &'a AcquireContext,
-    ) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>> {
-        async move {
-            let Location::Path(path) = from else {
-                return Err(AcquireError::Unsupported(format!(
-                    "MountAcquire reads preopen-relative paths only; acquiring `{package}` \
-                     from {from} requires a registry acquirer"
-                )));
-            };
-            read_entry(path, &context.mounts).await
-        }
-        .boxed()
-    }
-}
-
-/// Resolve `path` against `entries` and read the component fresh — the read
-/// leg [`MountAcquire`] and [`PathAcquire`] share.
+/// Resolve `path` against `entries` and read the component fresh —
+/// [`PathAcquire`]'s read leg.
 async fn read_entry(path: &str, entries: &[MountEntry]) -> Result<Vec<u8>, AcquireError> {
     let (dir, subpath) = resolve(path, entries).map_err(AcquireError::Failed)?;
     // File reads are blocking I/O; keep them off the async executor.
@@ -131,14 +93,16 @@ async fn read_entry(path: &str, entries: &[MountEntry]) -> Result<Vec<u8>, Acqui
     .map_err(AcquireError::Failed)
 }
 
-/// Resolve `path` to a mount's capability handle plus the subpath within it.
+/// Resolve `path` to a location's capability handle plus the subpath within
+/// it.
 ///
-/// The longest mount-name prefix wins; a plain relative path with no matching
-/// prefix falls back to a mount named `.` when one exists. The subpath must
-/// be plain and relative — cap-std then refuses any escape at open time.
-fn resolve(path: &str, mounts: &[MountEntry]) -> Result<(Arc<cap_std::fs::Dir>, String)> {
+/// The longest location-name prefix wins; a plain relative path with no
+/// matching prefix falls back to a location named `.` when one exists. The
+/// subpath must be plain and relative — cap-std then refuses any escape at
+/// open time.
+fn resolve(path: &str, entries: &[MountEntry]) -> Result<(Arc<cap_std::fs::Dir>, String)> {
     let mut best: Option<(&MountEntry, &str)> = None;
-    for entry in mounts {
+    for entry in entries {
         let subpath = if path == entry.name {
             ""
         } else if let Some(rest) = path.strip_prefix(&entry.name).and_then(|r| r.strip_prefix('/'))
@@ -154,10 +118,10 @@ fn resolve(path: &str, mounts: &[MountEntry]) -> Result<(Arc<cap_std::fs::Dir>, 
     if best.is_none() {
         // wasi-libc resolves bare relative paths against a `.` preopen; do
         // the same so host- and guest-side views of a path agree.
-        best = mounts.iter().find(|entry| entry.name == ".").map(|entry| (entry, path));
+        best = entries.iter().find(|entry| entry.name == ".").map(|entry| (entry, path));
     }
-    let (entry, subpath) =
-        best.ok_or_else(|| anyhow!("path `{path}` is not under any mount of this deployment"))?;
+    let (entry, subpath) = best
+        .ok_or_else(|| anyhow!("path `{path}` is not under any location of this deployment"))?;
     check_subpath(path, subpath)?;
     Ok((Arc::clone(&entry.dir), subpath.to_owned()))
 }
@@ -167,100 +131,63 @@ fn check_subpath(path: &str, subpath: &str) -> Result<()> {
     let plain = !subpath.starts_with('/')
         && !subpath.contains('\\')
         && subpath.split('/').all(|part| !part.is_empty() && part != "." && part != "..");
-    ensure!(plain, "component path `{path}` is not a plain relative path within a mount");
+    ensure!(plain, "component path `{path}` is not a plain relative path within a location");
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
-    use std::sync::Arc;
 
-    use cap_std::ambient_authority;
-    use cap_std::fs::Dir;
-
-    use crate::{Acquire as _, AcquireContext, AcquireError, Location, MountAcquire, MountEntry};
+    use crate::{Acquire as _, AcquireError, Location, PathAcquire};
 
     fn temp_root(label: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("omnia-acq-{label}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("creating temp mount root");
+        std::fs::create_dir_all(&dir).expect("creating temp location root");
         dir
     }
 
-    fn context(mounts: &[(&str, &PathBuf)]) -> AcquireContext {
-        let mounts = mounts
-            .iter()
-            .map(|(name, path)| MountEntry {
-                name: (*name).to_owned(),
-                dir: Arc::new(
-                    Dir::open_ambient_dir(path, ambient_authority()).expect("opening mount"),
-                ),
-            })
-            .collect();
-        AcquireContext { mounts }
-    }
-
-    async fn acquire(context: &AcquireContext, path: &str) -> Result<Vec<u8>, AcquireError> {
-        MountAcquire.acquire("test:pkg@0.0.1", &Location::Path(path.to_owned()), context).await
+    async fn acquire(acquirer: &PathAcquire, path: &str) -> Result<Vec<u8>, AcquireError> {
+        acquirer.acquire("test:pkg@0.0.1", &Location::Path(path.to_owned())).await
     }
 
     #[tokio::test]
-    async fn dot_mount_serves_prefixed_and_bare_paths() {
-        let root = temp_root("dot");
-        std::fs::write(root.join("plugin.wasm"), b"bytes").expect("staging component");
-        let context = context(&[(".", &root)]);
-
-        let prefixed = acquire(&context, "./plugin.wasm").await.expect("prefixed path reads");
-        assert_eq!(prefixed, b"bytes");
-        let bare = acquire(&context, "plugin.wasm").await.expect("bare path reads");
-        assert_eq!(bare, b"bytes");
-    }
-
-    #[tokio::test]
-    async fn longest_mount_name_wins() {
+    async fn longest_location_name_wins() {
         let outer = temp_root("outer");
         let inner = temp_root("outer-inner");
         std::fs::write(inner.join("p.wasm"), b"inner").expect("staging component");
         std::fs::create_dir_all(outer.join("inner")).expect("creating decoy");
         std::fs::write(outer.join("inner").join("p.wasm"), b"outer").expect("staging decoy");
-        let context = context(&[("adapters", &outer), ("adapters/inner", &inner)]);
+        let acquirer = PathAcquire::new([("adapters", &outer), ("adapters/inner", &inner)])
+            .expect("locations open");
 
-        let bytes = acquire(&context, "adapters/inner/p.wasm").await.expect("longest prefix reads");
-        assert_eq!(bytes, b"inner", "the more specific mount serves the path");
+        let bytes =
+            acquire(&acquirer, "adapters/inner/p.wasm").await.expect("longest prefix reads");
+        assert_eq!(bytes, b"inner", "the more specific location serves the path");
     }
 
     #[tokio::test]
     async fn escape_and_absolute_paths_refused() {
         let root = temp_root("escape");
-        let context = context(&[(".", &root)]);
+        let acquirer = PathAcquire::new([(".", &root)]).expect("location opens");
 
         for path in ["./../secret.wasm", "/etc/passwd", ".\\x.wasm", "./a//b.wasm"] {
-            let error = acquire(&context, path).await.expect_err("escape refused");
+            let error = acquire(&acquirer, path).await.expect_err("escape refused");
             assert!(matches!(error, AcquireError::Failed(_)), "path `{path}` must be refused");
         }
     }
 
     #[tokio::test]
-    async fn unmounted_path_and_missing_file_fail() {
+    async fn unlocated_path_and_missing_file_fail() {
         let root = temp_root("missing");
-        let context = context(&[("adapters", &root)]);
+        let acquirer = PathAcquire::new([("adapters", &root)]).expect("location opens");
 
-        let unmounted = acquire(&context, "elsewhere/p.wasm").await.expect_err("no mount matches");
-        assert!(matches!(unmounted, AcquireError::Failed(_)));
-        let missing = acquire(&context, "adapters/absent.wasm").await.expect_err("file is absent");
+        let unlocated =
+            acquire(&acquirer, "elsewhere/p.wasm").await.expect_err("no location matches");
+        assert!(matches!(unlocated, AcquireError::Failed(_)));
+        let missing =
+            acquire(&acquirer, "adapters/absent.wasm").await.expect_err("file is absent");
         assert!(matches!(missing, AcquireError::Failed(_)));
-    }
-
-    #[tokio::test]
-    async fn registry_location_unsupported() {
-        let root = temp_root("registry");
-        let context = context(&[(".", &root)]);
-
-        let error = MountAcquire
-            .acquire("test:pkg@0.0.1", &Location::Registry(None), &context)
-            .await
-            .expect_err("registry locations are not served");
-        assert!(matches!(error, AcquireError::Unsupported(_)));
     }
 }
