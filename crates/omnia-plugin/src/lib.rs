@@ -19,7 +19,7 @@ mod store;
 use std::fmt;
 use std::sync::Arc;
 
-use anyhow::{Context as _, Result, anyhow, ensure};
+use anyhow::Result;
 use futures::future::BoxFuture;
 
 pub use self::path::PathAcquire;
@@ -48,31 +48,6 @@ impl fmt::Display for Location {
     }
 }
 
-/// One named acquisition root: the location name plus the opened capability
-/// handle to its directory.
-#[derive(Clone, Debug)]
-pub(crate) struct MountEntry {
-    /// The location name path loads resolve against.
-    pub(crate) name: String,
-    /// Host-side capability handle to the location root.
-    pub(crate) dir: Arc<cap_std::fs::Dir>,
-}
-
-/// Registry acquisition policy — the [`Acquirer::registry`] slot.
-pub trait AcquireRegistry: Send + Sync + 'static {
-    /// Produce the raw component bytes for `package` from `registry`
-    /// (`None` selects the acquirer's default endpoint).
-    fn acquire<'a>(
-        &'a self, package: &'a str, registry: Option<&'a str>,
-    ) -> BoxFuture<'a, Result<Vec<u8>>>;
-}
-
-/// Path acquisition policy — the [`Acquirer::path`] slot.
-pub trait AcquirePath: Send + Sync + 'static {
-    /// Produce the raw component bytes at the location-relative `path`.
-    fn acquire<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<Vec<u8>>>;
-}
-
 /// Acquisition policy compiled in at the composition root, one slot per
 /// [`Location`] kind: a load routes structurally, and a kind with no slot
 /// refuses typed.
@@ -89,56 +64,17 @@ pub struct Acquirer {
     pub path: Option<Arc<dyn AcquirePath>>,
 }
 
-/// Resolve `path` against `entries` and read the component fresh —
-/// [`PathAcquire`]'s read leg.
-async fn read_entry(path: &str, entries: &[MountEntry]) -> Result<Vec<u8>> {
-    let (dir, subpath) = resolve(path, entries)?;
-    // File reads are blocking I/O; keep them off the async executor.
-    tokio::task::spawn_blocking(move || {
-        dir.read(&subpath).with_context(|| format!("reading component `{subpath}`"))
-    })
-    .await
-    .context("component read task panicked")?
+/// Registry acquisition policy — the [`Acquirer::registry`] slot.
+pub trait AcquireRegistry: Send + Sync + 'static {
+    /// Produce the raw component bytes for `package` from `registry`
+    /// (`None` selects the acquirer's default endpoint).
+    fn acquire<'a>(
+        &'a self, package: &'a str, registry: Option<&'a str>,
+    ) -> BoxFuture<'a, Result<Vec<u8>>>;
 }
 
-/// Resolve `path` to a location's capability handle plus the subpath within
-/// it.
-///
-/// The longest location-name prefix wins; a plain relative path with no
-/// matching prefix falls back to a location named `.` when one exists. The
-/// subpath must be plain and relative — cap-std then refuses any escape at
-/// open time.
-fn resolve(path: &str, entries: &[MountEntry]) -> Result<(Arc<cap_std::fs::Dir>, String)> {
-    let mut best: Option<(&MountEntry, &str)> = None;
-    for entry in entries {
-        let subpath = if path == entry.name {
-            ""
-        } else if let Some(rest) = path.strip_prefix(&entry.name).and_then(|r| r.strip_prefix('/'))
-        {
-            rest
-        } else {
-            continue;
-        };
-        if best.is_none_or(|(current, _)| entry.name.len() > current.name.len()) {
-            best = Some((entry, subpath));
-        }
-    }
-    if best.is_none() {
-        // wasi-libc resolves bare relative paths against a `.` preopen; do
-        // the same so host- and guest-side views of a path agree.
-        best = entries.iter().find(|entry| entry.name == ".").map(|entry| (entry, path));
-    }
-    let (entry, subpath) =
-        best.ok_or_else(|| anyhow!("path `{path}` is not under any location of this deployment"))?;
-    check_subpath(path, subpath)?;
-    Ok((Arc::clone(&entry.dir), subpath.to_owned()))
-}
-
-// Refuse a subpath that is not a plain relative `/`-separated path.
-fn check_subpath(path: &str, subpath: &str) -> Result<()> {
-    let plain = !subpath.starts_with('/')
-        && !subpath.contains('\\')
-        && subpath.split('/').all(|part| !part.is_empty() && part != "." && part != "..");
-    ensure!(plain, "component path `{path}` is not a plain relative path within a location");
-    Ok(())
+/// Path acquisition policy — the [`Acquirer::path`] slot.
+pub trait AcquirePath: Send + Sync + 'static {
+    /// Produce the raw component bytes at the location-relative `path`.
+    fn acquire<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<Vec<u8>>>;
 }
