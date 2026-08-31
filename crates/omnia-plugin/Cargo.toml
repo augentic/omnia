@@ -28,8 +28,6 @@ wasm-pkg-client.workspace = true
 wasmtime = { workspace = true, features = ["runtime"] }
 
 [dev-dependencies]
-# Path-only (stripped at publish): the e2e loader tests exercise the embedder
-# surface, so they import through the `omnia` facade.
 omnia.workspace = true
 tempfile.workspace = true
 test-utils.workspace = true
