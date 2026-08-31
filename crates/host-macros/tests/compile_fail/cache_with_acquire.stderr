@@ -1,5 +1,0 @@
-error: `cache:` attaches a store to the `locations:` registry entry; a custom `acquire:` value owns its own caching
- --> tests/compile_fail/cache_with_acquire.rs:5:9
-  |
-5 |         cache: PluginCache,
-  |         ^^^^^

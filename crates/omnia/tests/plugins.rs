@@ -1,6 +1,6 @@
 //! End-to-end tests for the `omnia:plugins/loader` host capability: a real
 //! requester guest from `crates/test-programs` drives loads through omnia's
-//! runtime, with `MountAcquire` reading components staged in a scratch mount.
+//! runtime, with `PathAcquire` reading components staged in a scratch mount.
 //! The requester asserts internally (handles, digests, dispatch answers, and
 //! every typed refusal); the host side stages artifacts and checks the exit.
 
@@ -8,7 +8,7 @@
 
 use anyhow::{Context as _, Result};
 use omnia::{
-    DeploymentBuilder, ExitStatus, GuestEntry, Manifest, Mode, MountAcquire, Runtime, StoreCtx,
+    DeploymentBuilder, ExitStatus, GuestEntry, Manifest, Mode, PathAcquire, Runtime, StoreCtx,
     WasiPlugins,
 };
 
@@ -17,8 +17,8 @@ use omnia::{
 test_utils::foreach_plugins!();
 
 /// Drive `wasm` as the `requester` command guest: the scratch dir mounts at
-/// `.`, `omnia-test:link/ops` is the declared plugin seam, and `MountAcquire`
-/// is the compiled-in acquirer.
+/// `.`, `omnia-test:link/ops` is the declared plugin seam, and a `.`-rooted
+/// `PathAcquire` over the scratch dir is the compiled-in acquirer.
 async fn run_requester(wasm: &str, scratch: &test_utils::Scratch) -> Result<ExitStatus> {
     let manifest = Manifest::new()
         .plugins(["omnia-test:link/ops"])
@@ -30,13 +30,16 @@ async fn run_requester(wasm: &str, scratch: &test_utils::Scratch) -> Result<Exit
         .build::<StoreCtx<()>>()
         .await
         .context("building deployment")?;
+    let acquirer =
+        PathAcquire::new([(".", scratch.path())]).context("opening the scratch location")?;
+    let acquirer = std::sync::Arc::new(acquirer);
     let runtime = Runtime::new(
         deployment,
         |deployment| {
             deployment.host::<WasiPlugins, ()>()?;
             Ok(())
         },
-        |()| Some(std::sync::Arc::new(MountAcquire)),
+        move |()| Some(acquirer),
     )
     .await
     .context("assembling runtime")?;

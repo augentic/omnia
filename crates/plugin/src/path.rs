@@ -9,18 +9,16 @@ use cap_std::fs::Dir;
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
 
-use crate::{Acquire, AcquireContext, AcquireError, Location, MountEntry, read_entry};
+use crate::{Acquire, AcquireError, Location, MountEntry, read_entry};
 
 /// Path acquisition over the composition root's own `(name, directory)`
 /// entries, opened once at construction.
 ///
-/// The declarative counterpart of [`MountAcquire`](crate::MountAcquire):
-/// where that battery reads through the deployment's lent mounts, this one
-/// owns its directories — the `runtime!` macro's `locations:` path entries
-/// lower into it. Resolution is the shared mount-path rule (longest name
-/// prefix wins, a bare relative path falls back to a `.` entry, plain
-/// relative subpaths only), and every load reads fresh — never cached.
-/// Registry locations are refused.
+/// The `runtime!` macro's `locations:` path entries lower into it.
+/// Resolution follows the guest's preopen rule (longest name prefix wins, a
+/// bare relative path falls back to a `.` entry, plain relative subpaths
+/// only), and every load reads fresh — never cached. Registry locations are
+/// refused.
 #[derive(Debug)]
 pub struct PathAcquire {
     entries: Vec<MountEntry>,
@@ -57,7 +55,7 @@ impl PathAcquire {
 
 impl Acquire for PathAcquire {
     fn acquire<'a>(
-        &'a self, package: &'a str, from: &'a Location, _context: &'a AcquireContext,
+        &'a self, package: &'a str, from: &'a Location,
     ) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>> {
         async move {
             let Location::Path(path) = from else {
