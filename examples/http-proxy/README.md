@@ -86,4 +86,5 @@ Keep the private key out of guest source: load it from `wasi:vault` or
 configuration at runtime. An invalid or malformed bundle fails the request
 with an internal error before any connection is attempted.
 
-[Cache-Control]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control [If-None-Match]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/If-None-Match
+[Cache-Control]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control
+[If-None-Match]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/If-None-Match
