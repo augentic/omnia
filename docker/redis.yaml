@@ -1,8 +1,0 @@
-services:
-  redis:
-    image: redis:latest
-    container_name: redis
-    command: redis-server --save "" --appendonly no --loglevel warning
-    ports:
-      - 6379:6379
-
