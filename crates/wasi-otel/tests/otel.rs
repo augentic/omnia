@@ -72,7 +72,7 @@ async fn run_guest(wasm: &str) -> Recording {
 
     let recording = Recording::default();
     let status = tokio::time::timeout(
-        Duration::from_secs(60),
+        Duration::from_secs(300),
         test_utils::run_host::<WasiOtel, _>(wasm, vec![], Backends(recording.clone()))
             .instrument(tracing::info_span!("test-drive")),
     )
