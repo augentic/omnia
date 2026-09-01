@@ -17,16 +17,12 @@ mod runtime {
         fn extend(runtime: &omnia::Runtime<()>) -> Result<()> {
             omnia::Plugins::install(
                 runtime,
-                omnia::Acquirer {
-                    registry: Some(
-                        ::std::sync::Arc::new(omnia::RegistryClient::new("ghcr.io")),
+                Some(::std::sync::Arc::new(omnia::RegistryClient::new("ghcr.io"))),
+                Some(
+                    ::std::sync::Arc::new(
+                        omnia::PathMounts::new([("adapters", adapters_root())])?,
                     ),
-                    path: Some(
-                        ::std::sync::Arc::new(
-                            omnia::PathMounts::new([("adapters", adapters_root())])?,
-                        ),
-                    ),
-                },
+                ),
             )
         }
         async fn serve(runtime: &omnia::Runtime<()>) -> Result<()> {

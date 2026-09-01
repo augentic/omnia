@@ -29,7 +29,7 @@ tracing-opentelemetry.workspace = true
 futures.workspace = true
 hex = "0.4.3"
 opentelemetry-proto.workspace = true
-omnia.workspace = true
+omnia-core.workspace = true
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true
 
@@ -41,5 +41,6 @@ omnia-guest-macros.workspace = true
 wit-bindgen.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+omnia.workspace = true
 test-utils.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "time"] }

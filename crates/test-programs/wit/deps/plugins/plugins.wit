@@ -14,35 +14,29 @@ interface loader {
 
     /// Why a load was refused.
     variant error {
-        /// The deployment's acquirer does not serve this location kind.
-        location-unsupported(string),
-        /// The acquirer could not produce the package bytes.
-        acquire-failed(string),
-        /// The supplied digest pin is not a `sha256:<hex>` string.
-        invalid-digest(string),
-        /// The acquired bytes do not hash to the supplied pin.
-        digest-mismatch(string),
-        /// The bytes are not a raw wasm component (a pre-compiled native
-        /// artifact is always refused), or failed validation.
-        artifact-refused(string),
-        /// The component exports no interface declared in the deployment's
-        /// plugin seam list.
-        seam-missing(string),
+        /// The request or deployment is wrong and a retry cannot succeed:
+        /// an unserved location kind, a malformed or mismatched digest pin,
+        /// bytes that are not a raw wasm component (a pre-compiled native
+        /// artifact is always refused) or failed validation, or a component
+        /// exporting no interface from the deployment's plugin seam list.
+        refused(string),
+        /// The acquirer could not produce the package bytes; the source may
+        /// recover, so a retry can succeed.
+        unavailable(string),
         /// The package identity is already registered and cannot be re-bound.
         already-active(string),
         /// Loader misconfiguration or an internal registration failure.
         internal(string),
     }
 
-    /// A loaded plugin: a typed wrapper over the routed dispatch identity.
-    /// When the component model's runtime components land, this same slot
-    /// becomes the instance resource.
-    resource plugin {
+    /// A loaded plugin: a plain value, because the requester holds no
+    /// lifecycle authority over the loaded component.
+    record plugin {
         /// The routed identity host-mediated dispatch keys on.
-        id: func() -> string;
+        id: string,
         /// The resolved `sha256:<hex>` content digest of the loaded bytes —
         /// commit it as a pin to make an unpinned load reproducible.
-        digest: func() -> string;
+        digest: string,
     }
 
     /// Load `package`, idempotent on (package, digest): an already-active

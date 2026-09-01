@@ -17,7 +17,7 @@ pub use omnia_core::{
     Registry, ResolvedPreopen, Routes, Runtime, RuntimeOptions, Server, SourceSpec, StoreBase,
     StoreConfig, StoreCtx, StoreView, Telemetry, Transport, TransportKind, TriggerRouter, WasmOnly,
     WeakRuntime, Wiring, WrpcState, as_command_chain, get_cloned, host_error, serve_links,
-    telemetry, wasi_view,
+    sha256_digest, telemetry, wasi_view,
 };
 #[cfg(feature = "cli")]
 pub use omnia_core::{Cli, Command, Parser};
@@ -28,7 +28,6 @@ pub use omnia_core::{
 };
 pub use omnia_host_macros::runtime;
 pub use omnia_plugin::{
-    Acquirer, ContentStore, LoadError, LoadPlugin, Location, NoStore, PathMounts, PathSource,
-    Plugin, PluginLoader, PluginStore, Plugins, RegistryClient, RegistrySource, ReleaseRecord,
-    ReleaseStore, WasiPlugins, WasiPluginsCtxView, WasiPluginsView, sha256_digest,
+    ContentStore, LoadError, Location, NoStore, PathMounts, PathSource, Plugin, PluginLoader,
+    Plugins, RegistryClient, RegistrySource, ReleaseStore, WasiPlugins,
 };

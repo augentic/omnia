@@ -31,7 +31,7 @@ type HostResources = HashMap<
 /// [`Runtime::from_parts`](crate::Runtime::from_parts) wires it explicitly.
 ///
 /// Spawns one detached task per served function to drain its invocation stream.
-/// A no-op when the deployment declares no `plugins` interface.
+/// A no-op when the deployment declares no link interfaces.
 ///
 /// # Errors
 ///

@@ -26,7 +26,7 @@ mod generated {
 
 use std::fmt::Debug;
 
-use omnia::{FutureResult, Host, Server, StoreView};
+use omnia_core::{FutureResult, Host, Server, StoreView};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use wasmtime::component::{HasData, Linker};
@@ -74,4 +74,4 @@ pub trait WasiOtelCtx: Debug + Send + Sync + 'static {
     fn export_metrics(&self, request: ExportMetricsServiceRequest) -> FutureResult<()>;
 }
 
-omnia::wasi_view!(Otel);
+omnia_core::wasi_view!(Otel);

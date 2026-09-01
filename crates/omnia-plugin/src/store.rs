@@ -12,11 +12,6 @@ use anyhow::Result;
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
 
-/// Both halves of the persistence behind [`RegistryClient`](crate::RegistryClient).
-pub trait PluginStore: ContentStore + ReleaseStore {}
-
-impl<T: ContentStore + ReleaseStore> PluginStore for T {}
-
 /// Content-addressed persistence: digest-keyed bytes shared across registries.
 pub trait ContentStore: Send + Sync + 'static {
     /// The stored bytes keyed by `digest`, if any.
@@ -35,37 +30,30 @@ pub trait ContentStore: Send + Sync + 'static {
     fn put_content<'a>(&'a self, digest: &'a str, bytes: &'a [u8]) -> BoxFuture<'a, Result<()>>;
 }
 
-/// Per-registry resolution index: an exact package version to its digest.
+/// Per-registry resolution index: an exact package version to its
+/// `sha256:<hex>` content digest.
 pub trait ReleaseStore: Send + Sync + 'static {
-    /// The stored record of `package` at `version` in `registry`.
+    /// The stored content digest of `package` at `version` in `registry`.
     ///
     /// # Errors
     ///
     /// Returns an error if the store cannot be read.
     fn release<'a>(
         &'a self, registry: &'a str, package: &'a str, version: &'a str,
-    ) -> BoxFuture<'a, Result<Option<ReleaseRecord>>>;
+    ) -> BoxFuture<'a, Result<Option<String>>>;
 
-    /// Persist `record` as the resolution of `package` in `registry`.
+    /// Persist `digest` as the resolution of `package` at `version` in
+    /// `registry`.
     ///
     /// # Errors
     ///
     /// Returns an error if the store cannot persist the record.
     fn put_release<'a>(
-        &'a self, registry: &'a str, package: &'a str, record: &'a ReleaseRecord,
+        &'a self, registry: &'a str, package: &'a str, version: &'a str, digest: &'a str,
     ) -> BoxFuture<'a, Result<()>>;
 }
 
-/// One stored release resolution.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
-pub struct ReleaseRecord {
-    /// Exact semver version of the release.
-    pub version: String,
-    /// The registry's `sha256:<hex>` digest for the release content.
-    pub content_digest: String,
-}
-
-/// The cacheless [`PluginStore`], the default for
+/// The cacheless store, the default for
 /// [`RegistryClient`](crate::RegistryClient).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NoStore;
@@ -83,12 +71,12 @@ impl ContentStore for NoStore {
 impl ReleaseStore for NoStore {
     fn release<'a>(
         &'a self, _registry: &'a str, _package: &'a str, _version: &'a str,
-    ) -> BoxFuture<'a, Result<Option<ReleaseRecord>>> {
+    ) -> BoxFuture<'a, Result<Option<String>>> {
         async { Ok(None) }.boxed()
     }
 
     fn put_release<'a>(
-        &'a self, _registry: &'a str, _package: &'a str, _record: &'a ReleaseRecord,
+        &'a self, _registry: &'a str, _package: &'a str, _version: &'a str, _digest: &'a str,
     ) -> BoxFuture<'a, Result<()>> {
         async { Ok(()) }.boxed()
     }

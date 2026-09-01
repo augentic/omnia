@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use futures::FutureExt as _;
-use omnia::Backend;
+use omnia_core::Backend;
 use serde_json::{Value, json};
 
 use crate::host::generated::omnia::model::completion::{Format, Request};
@@ -25,7 +25,7 @@ use crate::host::{Answer, FutureResult, ToolHost, WasiModelCtx};
 pub struct ModelDefault;
 
 impl Backend for ModelDefault {
-    type ConnectOptions = omnia::NoOptions;
+    type ConnectOptions = omnia_core::NoOptions;
 
     fn connect_with(
         _options: Self::ConnectOptions,

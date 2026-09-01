@@ -1,192 +1,126 @@
-//! The load path of the `omnia:plugins/loader` capability: pin policy,
-//! idempotency, acquisition routing, and admission into the runtime.
+//! The `omnia:plugins/loader` load path.
 
-use std::collections::BTreeMap;
-use std::fmt;
 use std::future::Future;
 use std::sync::Arc;
 
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
-use omnia_core::{AdmitError, GuestId, Runtime, WeakRuntime};
+use omnia_core::{AdmitError, GuestId, Runtime, WeakRuntime, sha256_digest};
 
-use crate::{Acquirer, Location, digest};
+use crate::Location;
+use crate::host::Error;
+use crate::path::PathSource;
+use crate::registry::RegistrySource;
 
-/// A loaded plugin handle: the routed identity plus the resolved content
-/// digest.
-#[derive(Clone, Debug)]
-pub struct Plugin {
-    id: GuestId,
-    digest: Arc<str>,
-}
-
-impl Plugin {
-    /// The routed identity host-mediated dispatch keys on.
-    #[must_use]
-    pub const fn id(&self) -> &GuestId {
-        &self.id
-    }
-
-    /// The resolved `sha256:<hex>` digest of the loaded bytes.
-    #[must_use]
-    pub fn digest(&self) -> &str {
-        &self.digest
-    }
-}
-
-/// Why a `loader.load` request was refused; each variant carries the
-/// refusal's description and maps onto one `omnia:plugins/loader.error`
-/// discriminant.
-#[derive(Clone, Debug)]
-pub enum LoadError {
-    /// The deployment's acquirer does not serve the requested location kind.
-    UnsupportedLocation(String),
-    /// The acquirer could not produce the package bytes.
-    AcquireFailed(String),
-    /// The supplied digest pin is not a `sha256:<hex>` string.
-    InvalidDigest(String),
-    /// The acquired bytes do not hash to the supplied pin.
-    DigestMismatch(String),
-    /// The bytes are not a raw wasm component, or failed validation.
-    ArtifactRefused(String),
-    /// The component exports no interface declared in the deployment's
-    /// plugin seam list.
-    SeamMissing(String),
-    /// The package identity is already registered and cannot be re-bound.
-    AlreadyActive(String),
-    /// Loader misconfiguration or an internal registration failure.
-    Internal(String),
-}
-
-impl fmt::Display for LoadError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnsupportedLocation(reason)
-            | Self::AcquireFailed(reason)
-            | Self::InvalidDigest(reason)
-            | Self::DigestMismatch(reason)
-            | Self::ArtifactRefused(reason)
-            | Self::SeamMissing(reason)
-            | Self::AlreadyActive(reason)
-            | Self::Internal(reason) => f.write_str(reason),
-        }
-    }
-}
-
-impl std::error::Error for LoadError {}
-
-impl From<AdmitError> for LoadError {
-    fn from(error: AdmitError) -> Self {
-        match error {
-            AdmitError::ArtifactRefused(reason) => Self::ArtifactRefused(reason),
-            AdmitError::SeamMissing(reason) => Self::SeamMissing(reason),
-            AdmitError::Internal(reason) => Self::Internal(reason),
-        }
-    }
-}
-
-/// The refusal for a deployment with no installed [`Plugins`] extension —
-/// shared by the `WasiPlugins` host binding and [`LoadPlugin::load_plugin`]
-/// so both entry points name the fix.
-pub fn no_acquirer(package: &str) -> String {
-    format!(
-        "this deployment has no acquirer; compile one in (`plugins: {{ locations: [...] }}`) to \
-         load `{package}`"
-    )
-}
-
-impl Acquirer {
-    /// Route `from` to its slot and produce the package bytes; an empty slot
-    /// refuses the location kind, naming the `locations:` entry that fills it.
-    async fn acquire(&self, package: &str, from: &Location) -> Result<Vec<u8>, LoadError> {
-        let outcome = match from {
-            Location::Registry(endpoint) => match &self.registry {
-                Some(registry) => registry.acquire(package, endpoint.as_deref()).await,
-                None => {
-                    return Err(LoadError::UnsupportedLocation(format!(
-                        "this deployment's locations serve no registry; loading `{package}` \
-                         from {from} needs a `{{ registry: ... }}` entry"
-                    )));
-                }
-            },
-            Location::Path(path) => match &self.path {
-                Some(paths) => paths.acquire(path).await,
-                None => {
-                    return Err(LoadError::UnsupportedLocation(format!(
-                        "this deployment's locations serve no paths; loading `{package}` \
-                         from {from} needs a `{{ name: ..., path: ... }}` entry"
-                    )));
-                }
-            },
-        };
-        outcome
-            .map_err(|error| LoadError::AcquireFailed(format!("acquiring `{package}`: {error:#}")))
-    }
-}
-
-/// Type-erased plugin loading, reachable from every store context.
-///
-/// Lives in the runtime's extensions so the `omnia:plugins/loader` host
-/// binding invokes [`LoadPlugin::load_plugin`] without naming the concrete
-/// runtime.
-pub trait PluginLoader: Send + Sync + 'static {
-    /// Load `package` (idempotent on package plus digest), returning its
-    /// handle.
+/// Host-side `omnia:plugins/loader.load` — embedder sugar over the runtime's
+/// installed [`Plugins`] extension.
+pub trait PluginLoader {
+    /// Acquire, pin-check, and admit `package`. Idempotent on (package, digest).
+    ///
+    /// # Errors
+    ///
+    /// `refused` on a bad request or pin, `unavailable` on acquisition failure,
+    /// `already-active` on an identity conflict, `internal` on registration
+    /// failure.
     fn load(
-        &self, package: String, from: Location, digest: Option<String>,
-    ) -> BoxFuture<'static, Result<Plugin, LoadError>>;
+        &self, package: &str, from: Location, pin: Option<&str>,
+    ) -> impl Future<Output = Result<Plugin, Error>> + Send;
 }
 
-// The weak handle is the loader: the extension holding it lives inside the
-// runtime's shared state, so a strong handle would leak the runtime through
-// a reference cycle.
-impl<B: Clone + Send + Sync + 'static> PluginLoader for WeakRuntime<B> {
+impl<B: Clone + Send + Sync + 'static> PluginLoader for Runtime<B> {
     fn load(
-        &self, package: String, from: Location, digest: Option<String>,
-    ) -> BoxFuture<'static, Result<Plugin, LoadError>> {
-        let runtime = self.clone();
+        &self, package: &str, from: Location, pin: Option<&str>,
+    ) -> impl Future<Output = Result<Plugin, Error>> + Send {
+        let plugins = self.extensions().get::<Plugins>();
         async move {
-            let Some(runtime) = runtime.upgrade() else {
-                return Err(LoadError::Internal("the runtime has shut down".to_owned()));
+            match plugins {
+                Some(plugins) => plugins.load(package, from, pin).await,
+                None => Err(Error::Internal(format!(
+                    "this deployment has no plugins; compile one in (`plugins: {{ locations: [...] }}`) to load `{package}`"
+                ))),
+            }
+        }
+    }
+}
+
+/// The privileged runtime half the loader drives — the registry record and
+/// the admission seam — erased of the deployment's backend type so
+/// [`Plugins`] can live in the runtime's extensions.
+trait Admission: Send + Sync + 'static {
+    /// The registration state of `id`, with any recorded digest.
+    fn registration(&self, id: &GuestId) -> Result<Registration, Error>;
+
+    /// Admit raw wasm bytes as the late guest `id`.
+    fn admit(&self, id: GuestId, bytes: Vec<u8>) -> BoxFuture<'static, Result<(), AdmitError>>;
+}
+
+// Weak: a strong handle would cycle through the extension.
+impl<B: Clone + Send + Sync + 'static> Admission for WeakRuntime<B> {
+    fn registration(&self, id: &GuestId) -> Result<Registration, Error> {
+        let runtime = self
+            .upgrade()
+            .ok_or_else(|| Error::Internal("the runtime has shut down".to_owned()))?;
+        Ok(runtime.registry().get(id).map_or(Registration::Absent, |guest| {
+            Registration::Active(guest.digest().map(str::to_owned))
+        }))
+    }
+
+    fn admit(&self, id: GuestId, bytes: Vec<u8>) -> BoxFuture<'static, Result<(), AdmitError>> {
+        let weak = self.clone();
+        async move {
+            let Some(runtime) = weak.upgrade() else {
+                return Err(AdmitError::Internal("the runtime has shut down".to_owned()));
             };
-            runtime.load_plugin(&package, from, digest.as_deref()).await
+            runtime.admit(id, bytes).await
         }
         .boxed()
     }
 }
 
-/// The installed plugins extension: the deployment's acquisition policy, the
-/// resolved digest per loader-loaded package, and the store-reachable
-/// [`PluginLoader`].
+enum Registration {
+    Absent,
+    Active(Option<String>),
+}
+
+impl Registration {
+    /// The recorded digest, when active with one.
+    fn digest(self) -> Option<String> {
+        match self {
+            Self::Active(digest) => digest,
+            Self::Absent => None,
+        }
+    }
+}
+
+/// Installed acquisition policy over the runtime's admission seam.
 pub struct Plugins {
-    acquirer: Acquirer,
-    // One lock serializes loads end to end *and* guards the digest records:
-    // loads are rare, and serialization makes the (package, digest)
-    // idempotency check race-free without single-flight machinery.
-    digests: tokio::sync::Mutex<BTreeMap<GuestId, Arc<str>>>,
-    loader: Arc<dyn PluginLoader>,
+    registry: Option<Arc<dyn RegistrySource>>,
+    path: Option<Arc<dyn PathSource>>,
+    admission: Box<dyn Admission>,
 }
 
 impl Plugins {
-    /// Install the loader capability on `runtime`: the acquisition policy
-    /// behind `omnia:plugins/loader.load` and [`LoadPlugin::load_plugin`],
-    /// plus the store-reachable loader the `WasiPlugins` host binding serves.
-    /// The [`Wiring::extend`](omnia_core::Wiring::extend) hook is the
-    /// intended caller (the `runtime!` macro's `plugins: { locations: [...] }`
-    /// list lowers into it).
+    /// Install the loader capability on `runtime`.
+    ///
+    /// `registry` and `path` are the compiled-in slots, one per [`Location`]
+    /// kind; `None` refuses that kind.
     ///
     /// # Errors
     ///
     /// Returns an error if the capability is already installed.
-    pub fn install<B>(runtime: &Runtime<B>, acquirer: Acquirer) -> anyhow::Result<()>
+    pub fn install<B>(
+        runtime: &Runtime<B>, registry: Option<Arc<dyn RegistrySource>>,
+        path: Option<Arc<dyn PathSource>>,
+    ) -> anyhow::Result<()>
     where
         B: Clone + Send + Sync + 'static,
     {
         let plugins = Self {
-            acquirer,
-            digests: tokio::sync::Mutex::new(BTreeMap::new()),
-            loader: Arc::new(runtime.downgrade()),
+            registry,
+            path,
+            admission: Box::new(runtime.downgrade()),
         };
+
         anyhow::ensure!(
             runtime.extensions().insert(plugins),
             "the plugins capability installs exactly once per runtime"
@@ -194,79 +128,127 @@ impl Plugins {
         Ok(())
     }
 
-    pub(crate) fn loader(&self) -> Arc<dyn PluginLoader> {
-        Arc::clone(&self.loader)
-    }
-}
-
-/// Late-bound plugin loading over a [`Runtime`] — the host side of the
-/// `omnia:plugins/loader.load` capability.
-pub trait LoadPlugin {
-    /// Load a plugin: acquire bytes through the deployment's acquirer, verify
-    /// the operator's sha256 pin, then admit the component (safe validation,
-    /// seam check, registration) under `package`.
-    ///
-    /// Idempotent on (package, digest): an already-loaded package returns its
-    /// handle immediately, and a conflicting pin for it refuses. A static
-    /// deployment guest can never be re-bound.
+    /// Acquire, pin-check, and admit `package` through the runtime's
+    /// admission seam. Idempotent on (package, digest).
     ///
     /// # Errors
     ///
-    /// Returns a typed [`LoadError`] naming the refusal: unsupported
-    /// location, acquisition failure, malformed or mismatched digest, refused
-    /// artifact, missing seam export, identity conflict, or an internal
+    /// `refused` on a bad request or pin, `unavailable` on acquisition
+    /// failure, `already-active` on an identity conflict, `internal` on
     /// registration failure.
-    fn load_plugin(
+    pub async fn load(
         &self, package: &str, from: Location, pin: Option<&str>,
-    ) -> impl Future<Output = Result<Plugin, LoadError>> + Send;
-}
+    ) -> Result<Plugin, Error> {
+        let pin = pin.map(canonicalize).transpose().map_err(Error::Refused)?;
 
-impl<B: Clone + Send + Sync + 'static> LoadPlugin for Runtime<B> {
-    async fn load_plugin(
-        &self, package: &str, from: Location, pin: Option<&str>,
-    ) -> Result<Plugin, LoadError> {
-        let pin = pin.map(digest::canonicalize).transpose().map_err(LoadError::InvalidDigest)?;
-        let Some(state) = self.extensions().get::<Plugins>() else {
-            return Err(LoadError::Internal(no_acquirer(package)));
-        };
-
-        let mut digests = state.digests.lock().await;
-
-        // clear out stale digest records for deregistered packages
-        digests.retain(|id, _| self.registry().get(id).is_some());
-
-        // return the plugin if the package is already active
         let id = GuestId::from(package);
-        if self.registry().get(&id).is_some() {
-            return match digests.get(&id) {
-                Some(digest) if pin.as_deref() == Some(digest.as_ref()) => Ok(Plugin {
-                    id,
-                    digest: Arc::clone(digest),
-                }),
-                _ => Err(LoadError::AlreadyActive(format!("`{package}` is already active"))),
-            };
+        if let Registration::Active(recorded) = self.admission.registration(&id)? {
+            return attest_active(package, id, recorded.as_deref(), pin.as_deref());
         }
 
-        let bytes = state.acquirer.acquire(package, &from).await?;
+        let bytes = self.acquire(package, &from).await?;
 
         // The operator's pin binds name to bytes before any validation work.
-        let resolved = crate::sha256_digest(&bytes);
-        if let Some(pin) = &pin
-            && *pin != resolved
-        {
-            return Err(LoadError::DigestMismatch(format!(
-                "package `{package}` resolved to {resolved}, which is not the pinned {pin}"
+        let hash = sha256_digest(&bytes);
+        if pin.is_some_and(|pin| pin != hash) {
+            return Err(Error::Refused(format!(
+                "resolved package `{package}` digest {hash} does not match the pinned digest"
             )));
         }
 
-        // Validation, the seam check, and atomic publication are the
-        // runtime's one privileged admission operation.
-        self.admit(id.clone(), bytes).await?;
+        match self.admission.admit(id.clone(), bytes).await {
+            Ok(()) => {
+                tracing::debug!(package, "plugin loaded");
+                Ok(Plugin {
+                    id,
+                    digest: Arc::from(hash),
+                })
+            }
+            Err(AdmitError::AlreadyRegistered(_)) => {
+                let recorded = self.admission.registration(&id)?.digest();
+                attest_active(package, id, recorded.as_deref(), Some(&hash))
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
 
-        let digest: Arc<str> = Arc::from(resolved);
-        digests.insert(id.clone(), Arc::clone(&digest));
-        drop(digests);
-        tracing::debug!(package, digest = %digest, "plugin loaded");
-        Ok(Plugin { id, digest })
+    async fn acquire(&self, package: &str, from: &Location) -> Result<Vec<u8>, Error> {
+        match from {
+            Location::Registry(endpoint) => match &self.registry {
+                Some(registry) => registry.acquire(package, endpoint.as_deref()).await,
+                None => Err(Error::Refused(format!(
+                    "this deployment's locations serve no registry; loading `{package}` needs \
+                     a `{{ registry: ... }}` entry"
+                ))),
+            },
+            Location::Path(path) => match &self.path {
+                Some(paths) => paths.acquire(path).await,
+                None => Err(Error::Refused(format!(
+                    "this deployment's locations serve no paths; loading `{package}` from \
+                     `{path}` needs a `{{ name: ..., path: ... }}` entry"
+                ))),
+            },
+        }
+    }
+}
+
+const SCHEME: &str = "sha256:";
+const HEX_LEN: usize = 64;
+
+// Canonicalize a digest so it can be compared.
+fn canonicalize(digest: &str) -> Result<String, String> {
+    let Some(hex) = digest.strip_prefix(SCHEME) else {
+        return Err(format!("digest `{digest}` is not `{SCHEME}<hex>`"));
+    };
+    if hex.len() != HEX_LEN || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(format!("digest `{digest}` is not {HEX_LEN} hex characters"));
+    }
+    Ok(format!("{SCHEME}{}", hex.to_ascii_lowercase()))
+}
+
+/// Attest an active registration as the requested (package, digest), or
+/// refuse: an active identity never re-binds.
+fn attest_active(
+    package: &str, id: GuestId, recorded: Option<&str>, wanted: Option<&str>,
+) -> Result<Plugin, Error> {
+    match recorded {
+        Some(digest) if wanted == Some(digest) => Ok(Plugin {
+            id,
+            digest: Arc::from(digest),
+        }),
+        _ => Err(Error::AlreadyActive(format!("`{package}` is already active"))),
+    }
+}
+
+/// Loaded plugin: routed identity plus content digest.
+#[derive(Clone, Debug)]
+pub struct Plugin {
+    id: GuestId,
+    digest: Arc<str>,
+}
+
+impl Plugin {
+    /// Routed identity for host-mediated dispatch.
+    #[must_use]
+    pub const fn id(&self) -> &GuestId {
+        &self.id
+    }
+
+    /// Resolved `sha256:<hex>` of the loaded bytes.
+    #[must_use]
+    pub fn digest(&self) -> &str {
+        &self.digest
+    }
+}
+
+impl From<AdmitError> for Error {
+    fn from(error: AdmitError) -> Self {
+        match error {
+            AdmitError::ArtifactRefused(reason) | AdmitError::SeamMissing(reason) => {
+                Self::Refused(reason)
+            }
+            AdmitError::AlreadyRegistered(reason) => Self::AlreadyActive(reason),
+            AdmitError::Internal(reason) => Self::Internal(reason),
+        }
     }
 }

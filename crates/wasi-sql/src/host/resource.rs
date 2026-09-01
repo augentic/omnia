@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-pub use omnia::FutureResult;
+pub use omnia_core::FutureResult;
 
 use crate::host::{DataType, Row};
 
@@ -16,7 +16,7 @@ pub trait Connection: Debug + Send + Sync + 'static {
 }
 
 /// Proxy for a SQL connection, stored in the resource table.
-pub type ConnectionProxy = omnia::Proxy<dyn Connection>;
+pub type ConnectionProxy = omnia_core::Proxy<dyn Connection>;
 
 /// Represents a statement resource in the WASI SQL host.
 #[derive(Clone, Debug)]

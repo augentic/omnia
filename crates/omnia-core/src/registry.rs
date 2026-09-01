@@ -76,6 +76,9 @@ enum Target<T: 'static> {
 pub struct Guest<T: 'static> {
     id: GuestId,
     target: Target<T>,
+    // Content digest of the admitted bytes; `None` for assemble-time and
+    // `register`-path entries, whose bytes the registry never hashed.
+    digest: Option<Arc<str>>,
 }
 
 impl<T: 'static> Guest<T> {
@@ -85,13 +88,29 @@ impl<T: 'static> Guest<T> {
         Self {
             id,
             target: Target::Local(instance_pre),
+            digest: None,
         }
+    }
+
+    /// Record the `sha256:<hex>` content digest of the guest's bytes, so the
+    /// attestation lives and dies with the registry entry itself.
+    #[must_use]
+    pub fn with_digest(mut self, digest: impl Into<Arc<str>>) -> Self {
+        self.digest = Some(digest.into());
+        self
     }
 
     /// Returns the guest's identity.
     #[must_use]
     pub const fn id(&self) -> &GuestId {
         &self.id
+    }
+
+    /// The recorded `sha256:<hex>` content digest, if the guest was admitted
+    /// from hashed bytes.
+    #[must_use]
+    pub fn digest(&self) -> Option<&str> {
+        self.digest.as_deref()
     }
 
     /// Returns the guest's pre-instantiated component, ready to instantiate
@@ -210,7 +229,7 @@ impl<T: WasiView + 'static> Registry<T> {
     /// guest imports them) are polyfilled on a clone of the retained linker,
     /// from this component's own import types — the shared linker is never
     /// mutated after bootstrap. Imports outside the linked host set and the
-    /// `plugins` set fail here, exactly as at bootstrap.
+    /// declared link interfaces fail here, exactly as at bootstrap.
     pub(crate) fn instantiate_late(
         &self, id: &GuestId, component: &Component,
     ) -> Result<InstancePre<T>>
@@ -271,7 +290,9 @@ impl<T: 'static> Registry<T> {
     /// entries can never be shadowed; a dynamic upgrade is
     /// deregister + register); on refusal neither map is touched, so a failed
     /// registration leaves no partial state.
-    pub(crate) fn publish(&self, guest: Guest<T>, endpoint: Option<Endpoint>) -> Result<()> {
+    pub(crate) fn publish(
+        &self, guest: Guest<T>, endpoint: Option<Endpoint>,
+    ) -> Result<(), PublishError> {
         let id = guest.id().clone();
         let transport = self.dispatch.transport();
 
@@ -279,12 +300,12 @@ impl<T: 'static> Registry<T> {
         let _lifecycle = self.dispatch.lifecycle_write();
         let mut guests = self.guests.write().unwrap_or_else(PoisonError::into_inner);
         match guests.entry(id.clone()) {
-            btree_map::Entry::Occupied(_) => bail!("guest `{id}` is already registered"),
+            btree_map::Entry::Occupied(_) => return Err(PublishError::Occupied(id)),
             btree_map::Entry::Vacant(slot) => {
                 // Endpoint before entry: `insert` refuses an occupied slot, and
                 // failing here leaves the registry map untouched.
                 if let Some(endpoint) = endpoint {
-                    transport.insert(&id, endpoint)?;
+                    transport.insert(&id, endpoint).map_err(PublishError::Transport)?;
                 }
                 slot.insert(Arc::new(guest));
             }
@@ -335,5 +356,24 @@ impl<T: 'static> Registry<T> {
     pub fn is_empty(&self) -> bool {
         let _lifecycle = self.dispatch.lifecycle_read();
         self.guests.read().unwrap_or_else(PoisonError::into_inner).is_empty()
+    }
+}
+
+/// Why [`Registry::publish`] refused a late guest; `Occupied` is distinct so
+/// callers can treat an identity conflict as a race, not a fault.
+#[derive(Debug)]
+pub enum PublishError {
+    /// The identity is already registered.
+    Occupied(GuestId),
+    /// Link-endpoint installation failed.
+    Transport(anyhow::Error),
+}
+
+impl PublishError {
+    pub(crate) fn into_anyhow(self) -> anyhow::Error {
+        match self {
+            Self::Occupied(id) => anyhow::anyhow!("guest `{id}` is already registered"),
+            Self::Transport(error) => error,
+        }
     }
 }

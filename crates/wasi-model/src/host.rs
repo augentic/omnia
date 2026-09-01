@@ -37,8 +37,8 @@ mod generated {
 use std::fmt::Debug;
 use std::sync::Arc;
 
-pub use omnia::FutureResult;
-use omnia::{HasMounts, Host, Server, StoreView};
+pub use omnia_core::FutureResult;
+use omnia_core::{HasMounts, Host, Server, StoreView};
 use wasmtime::component::{HasData, Linker};
 
 pub use self::answer::{Answer, Candidate, ToolTurn, Transcript, Usage};
@@ -101,5 +101,5 @@ impl WasiModelCtx for Box<dyn WasiModelCtx> {
 }
 
 // An untyped host failure is a `backend` error at the boundary.
-omnia::host_error!(Error, Backend);
-omnia::wasi_view!(Model);
+omnia_core::host_error!(Error, Backend);
+omnia_core::wasi_view!(Model);

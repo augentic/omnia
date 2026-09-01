@@ -27,7 +27,7 @@ impl<T> HostWithStore<T> for WasiOtel {
         accessor: &Accessor<T, Self>, rm: wasi::ResourceMetrics,
     ) -> Result<(), wasi::Error> {
         // return if opentelemetry is not initialized
-        if omnia::telemetry::resource().is_none() {
+        if omnia_core::telemetry::resource().is_none() {
             tracing::warn!("otel resource not initialized, skipping metrics export");
             return Ok(());
         }
@@ -51,7 +51,7 @@ impl From<OTelSdkError> for wasi::Error {
     }
 }
 
-omnia::host_error!(wasi::Error, InternalFailure);
+omnia_core::host_error!(wasi::Error, InternalFailure);
 
 impl From<wasi::ResourceMetrics> for ExportMetricsServiceRequest {
     fn from(rm: wasi::ResourceMetrics) -> Self {

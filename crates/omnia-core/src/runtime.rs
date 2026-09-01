@@ -18,7 +18,7 @@ use crate::deployment::{ELF_MAGIC, GuestArtifact};
 use crate::dispatch::{serve_guest, serve_links};
 use crate::extensions::Extensions;
 use crate::mount::MountRegistry;
-use crate::registry::{Guest, GuestId, HttpRoutes, TriggerRouter};
+use crate::registry::{Guest, GuestId, HttpRoutes, PublishError, TriggerRouter};
 use crate::store::HasLimits;
 use crate::{
     Deployment, DeploymentBuilder, Dispatcher, Registry, RuntimeOptions, StoreBase, StoreCtx,
@@ -407,19 +407,22 @@ pub enum AdmitError {
     /// failed pre-instantiation against the deployment's host set.
     ArtifactRefused(String),
     /// The component exports no interface declared in the deployment's
-    /// plugin seam list.
+    /// link seam list.
     SeamMissing(String),
-    /// Serve wiring or publication failed — including an identity conflict
-    /// with a racing registration.
+    /// The identity is already registered — an earlier or racing
+    /// registration holds it.
+    AlreadyRegistered(String),
+    /// Serve wiring or publication failed.
     Internal(String),
 }
 
 impl fmt::Display for AdmitError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ArtifactRefused(reason) | Self::SeamMissing(reason) | Self::Internal(reason) => {
-                f.write_str(reason)
-            }
+            Self::ArtifactRefused(reason)
+            | Self::SeamMissing(reason)
+            | Self::AlreadyRegistered(reason)
+            | Self::Internal(reason) => f.write_str(reason),
         }
     }
 }
@@ -490,7 +493,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     ///
     /// Low-level constructor: unlike [`Runtime::new`] it does not wire the
     /// host-mediated link serve side — a caller whose deployment declares
-    /// `plugins` interfaces must run [`serve_links`] itself before dispatching.
+    /// link interfaces must run [`serve_links`] itself before dispatching.
     /// The runtime name defaults to `omnia`.
     #[must_use]
     pub fn from_parts(
@@ -672,7 +675,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     ///
     /// Returns an error if `id` is already registered, the artifact cannot be
     /// loaded, the component's imports exceed the deployment's linked host set
-    /// and `plugins` set, or its linked exports cannot be served.
+    /// and declared link interfaces, or its linked exports cannot be served.
     pub async fn register(&self, id: impl Into<GuestId>, artifact: GuestArtifact) -> Result<()> {
         let id = id.into();
         let registry = self.registry();
@@ -702,7 +705,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         let endpoint = serve_guest(self, &guest)
             .await
             .with_context(|| format!("serving guest `{id}` link exports"))?;
-        registry.publish(guest, endpoint)?;
+        registry.publish(guest, endpoint).map_err(PublishError::into_anyhow)?;
 
         tracing::debug!(guest = %id, "guest registered");
         Ok(())
@@ -710,16 +713,20 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
 
     /// Admit raw wasm bytes as a late guest: refuse a native (pre-compiled)
     /// artifact before wasmtime sees the bytes, validate on the safe path,
-    /// require an export of a declared plugin interface, then register and
+    /// require an export of a declared link interface, then register and
     /// serve the component under `id` — the privileged registration half
     /// behind the `omnia:plugins/loader` capability. Acquisition, digest
     /// policy, and idempotency live with the loader (`omnia-plugin`).
     ///
+    /// The registry entry records the content digest of `bytes`, so the
+    /// attestation lives exactly as long as the entry —
+    /// [`Guest::digest`](crate::Guest::digest) reads it back.
+    ///
     /// # Errors
     ///
     /// Returns a typed [`AdmitError`] naming the refusal: refused artifact,
-    /// missing seam export, or an internal serve/publication failure
-    /// (including an identity conflict with a racing registration).
+    /// missing seam export, an identity already registered (an earlier or
+    /// racing registration), or an internal serve/publication failure.
     pub async fn admit(&self, id: GuestId, bytes: Vec<u8>) -> Result<(), AdmitError> {
         // A native (pre-compiled) artifact is refused before wasmtime sees
         // the bytes: admitted components only ever take the safe validation
@@ -730,6 +737,8 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
                  components"
             )));
         }
+
+        let digest: std::sync::Arc<str> = std::sync::Arc::from(crate::sha256_digest(&bytes));
 
         // Safe validation plus sandboxed JIT — the explicitly safe constructor.
         let component =
@@ -744,25 +753,30 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         let instance_pre = self.registry().instantiate_late(&id, &component).map_err(|error| {
             AdmitError::ArtifactRefused(format!("pre-instantiating `{id}`: {error:#}"))
         })?;
-        let guest = Guest::local(id.clone(), instance_pre);
+        let guest = Guest::local(id.clone(), instance_pre).with_digest(digest);
         let endpoint = serve_guest(self, &guest).await.map_err(|error| {
             AdmitError::Internal(format!("serving `{id}` seam exports: {error:#}"))
         })?;
-        self.registry()
-            .publish(guest, endpoint)
-            .map_err(|error| AdmitError::Internal(format!("publishing `{id}`: {error:#}")))?;
+        self.registry().publish(guest, endpoint).map_err(|error| match error {
+            PublishError::Occupied(id) => {
+                AdmitError::AlreadyRegistered(format!("guest `{id}` is already registered"))
+            }
+            PublishError::Transport(error) => {
+                AdmitError::Internal(format!("publishing `{id}`: {error:#}"))
+            }
+        })?;
 
         tracing::debug!(guest = %id, "late guest admitted");
         Ok(())
     }
 
     /// Refuse a component that exports no interface from the deployment's
-    /// declared plugin seam list.
+    /// declared link seam list.
     fn check_seam_export(&self, id: &GuestId, component: &Component) -> Result<(), AdmitError> {
         let links = self.registry().dispatch().links();
         if links.is_empty() {
             return Err(AdmitError::SeamMissing(format!(
-                "cannot admit `{id}`: this deployment declares no plugin interfaces"
+                "cannot admit `{id}`: this deployment declares no link interfaces"
             )));
         }
         let engine = self.registry().engine();
@@ -776,7 +790,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         } else {
             let declared: Vec<&str> = links.iter().map(AsRef::as_ref).collect();
             Err(AdmitError::SeamMissing(format!(
-                "`{id}` exports none of the declared plugin interfaces ({})",
+                "`{id}` exports none of the declared link interfaces ({})",
                 declared.join(", ")
             )))
         }

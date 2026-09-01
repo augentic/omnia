@@ -33,8 +33,8 @@ mod generated {
 use std::fmt::Debug;
 use std::sync::Arc;
 
-pub use omnia::FutureResult;
-use omnia::{Host, Server, StoreView};
+pub use omnia_core::FutureResult;
+use omnia_core::{Host, Server, StoreView};
 use wasmtime::component::{HasData, Linker};
 
 use self::generated::wasi::sql::{readwrite, types};
@@ -59,7 +59,7 @@ impl Error {
     }
 }
 
-omnia::host_error!(Error, Other);
+omnia_core::host_error!(Error, Other);
 
 /// Host-side service for `wasi:sql`.
 #[derive(Debug)]
@@ -90,4 +90,4 @@ pub trait WasiSqlCtx: Debug + Send + Sync + 'static {
     fn open(&self, name: String) -> FutureResult<Arc<dyn Connection>>;
 }
 
-omnia::wasi_view!(Sql);
+omnia_core::wasi_view!(Sql);

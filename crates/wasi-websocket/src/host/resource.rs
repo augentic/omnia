@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::pin::Pin;
 
 use futures::Stream;
-use omnia::FutureResult;
+use omnia_core::FutureResult;
 
 /// Stream of events.
 pub type Events = Pin<Box<dyn Stream<Item = Event> + Send>>;
@@ -18,7 +18,7 @@ pub trait Client: Debug + Send + Sync + 'static {
 }
 
 /// Proxy for a WebSocket server client.
-pub type ClientProxy = omnia::Proxy<dyn Client>;
+pub type ClientProxy = omnia_core::Proxy<dyn Client>;
 
 /// A WebSocket event crossing the boundary.
 ///

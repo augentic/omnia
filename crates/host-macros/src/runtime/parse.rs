@@ -38,11 +38,11 @@ pub struct Config {
     /// loader host even when the block carries no interfaces.
     pub plugins_declared: bool,
     /// The `plugins:` block's `locations:` entries, lowered into the
-    /// generated `Wiring::acquirer` hook as built-in acquirers slotted by
+    /// generated `Wiring::extend` hook as built-in acquirers slotted by
     /// location kind.
     pub locations: Vec<LocationSpec>,
     /// The `plugins:` block's `cache:` backend, connected in the bundle and
-    /// attached as the registry location's `PluginStore`.
+    /// attached as the registry location's store.
     pub cache: Option<Path>,
 }
 

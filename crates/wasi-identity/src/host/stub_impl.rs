@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use futures::FutureExt;
-use omnia::Backend;
+use omnia_core::Backend;
 
 use crate::host::WasiIdentityCtx;
 use crate::host::generated::omnia::identity::credentials::AccessToken;
@@ -17,7 +17,7 @@ use crate::host::resource::{FutureResult, Identity};
 pub struct IdentityStub;
 
 impl Backend for IdentityStub {
-    type ConnectOptions = omnia::NoOptions;
+    type ConnectOptions = omnia_core::NoOptions;
 
     fn connect_with(
         _options: Self::ConnectOptions,

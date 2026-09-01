@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-pub use omnia::FutureResult;
+pub use omnia_core::FutureResult;
 
 /// Providers implement the [`Bucket`] trait to allow the host to
 /// interact with different backend buckets (stores).
@@ -30,7 +30,7 @@ pub trait Bucket: Debug + Send + Sync + 'static {
 }
 
 /// Proxy for a Key-Value bucket.
-pub type BucketProxy = omnia::Proxy<dyn Bucket>;
+pub type BucketProxy = omnia_core::Proxy<dyn Bucket>;
 
 /// CAS (Compare-And-Swap) operation handle.
 #[derive(Clone, Debug)]

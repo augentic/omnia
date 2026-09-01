@@ -9,10 +9,15 @@ use cap_std::fs::Dir;
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
 
-/// Path acquisition policy — the [`Acquirer::path`](crate::Acquirer::path) slot.
+use crate::LoadError;
+
+/// Path acquisition policy — the path slot of [`Plugins`](crate::Plugins).
 pub trait PathSource: Send + Sync + 'static {
-    /// Produce the raw component bytes at the location-relative `path`.
-    fn acquire<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<Vec<u8>>>;
+    /// Produce the raw component bytes at the location-relative `path`,
+    /// split by remedy: [`LoadError::Refused`] for a path no location
+    /// serves, never for a read failure a retry might clear
+    /// ([`LoadError::Unavailable`]).
+    fn acquire<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<Vec<u8>, LoadError>>;
 }
 
 /// Path acquisition over named `(name, directory)` roots, resolved like guest
@@ -47,55 +52,59 @@ impl PathMounts {
             let dir = Dir::open_ambient_dir(path, ambient_authority()).with_context(|| {
                 format!("opening plugins location `{name}` at {}", path.display())
             })?;
+
             opened.push(Mount {
                 name,
                 dir: Arc::new(dir),
             });
         }
+
         Ok(Self { entries: opened })
     }
 }
 
 impl PathSource for PathMounts {
-    fn acquire<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<Vec<u8>>> {
-        read_entry(path, &self.entries).boxed()
-    }
-}
+    fn acquire<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<Vec<u8>, LoadError>> {
+        let entries = &self.entries;
 
-async fn read_entry(path: &str, entries: &[Mount]) -> Result<Vec<u8>> {
-    let (dir, subpath) = resolve(path, entries)?;
-    // File reads are blocking I/O; keep them off the async executor.
-    tokio::task::spawn_blocking(move || {
-        dir.read(&subpath).with_context(|| format!("reading component `{subpath}`"))
-    })
-    .await
-    .context("component read task panicked")?
+        async move {
+            let (dir, subpath) =
+                resolve(path, entries).map_err(|error| LoadError::Refused(format!("{error:#}")))?;
+
+            // file read is blocking I/O
+            tokio::task::spawn_blocking(move || {
+                dir.read(&subpath).with_context(|| format!("reading component `{subpath}`"))
+            })
+            .await
+            .context("component read task panicked")
+            .and_then(|res| res)
+            .map_err(|err| LoadError::Unavailable(format!("{err:#}")))
+        }
+        .boxed()
+    }
 }
 
 // Resolve `path` to a location's capability handle plus the subpath within
 // it, longest location-name prefix first. The subpath must be plain and
 // relative — cap-std then refuses any escape at open time.
 fn resolve(path: &str, entries: &[Mount]) -> Result<(Arc<Dir>, String)> {
-    let mut best: Option<(&Mount, &str)> = None;
-    for entry in entries {
-        let subpath = if path == entry.name {
-            ""
-        } else if let Some(rest) = path.strip_prefix(&entry.name).and_then(|r| r.strip_prefix('/'))
-        {
-            rest
-        } else {
-            continue;
-        };
-        if best.is_none_or(|(current, _)| entry.name.len() > current.name.len()) {
-            best = Some((entry, subpath));
-        }
-    }
-
-    if best.is_none() {
+    let best = entries
+        .iter()
+        .filter_map(|entry| {
+            if path == entry.name {
+                // Naming a location itself yields an empty subpath, which
+                // `check_subpath` refuses — kept so the refusal names the
+                // location rather than "under no location".
+                return Some((entry, ""));
+            }
+            let subpath = path.strip_prefix(&entry.name)?.strip_prefix('/')?;
+            Some((entry, subpath))
+        })
+        .max_by_key(|(entry, _)| entry.name.len())
         // wasi-libc resolves bare relative paths against a `.` preopen; do
         // the same so host- and guest-side views of a path agree.
-        best = entries.iter().find(|entry| entry.name == ".").map(|entry| (entry, path));
-    }
+        .or_else(|| entries.iter().find(|entry| entry.name == ".").map(|entry| (entry, path)));
+
     let (entry, subpath) =
         best.ok_or_else(|| anyhow!("path `{path}` is not under any location of this deployment"))?;
     check_subpath(path, subpath)?;
@@ -104,8 +113,9 @@ fn resolve(path: &str, entries: &[Mount]) -> Result<(Arc<Dir>, String)> {
 }
 
 fn check_subpath(path: &str, subpath: &str) -> Result<()> {
-    let plain = !subpath.starts_with('/')
-        && !subpath.contains('\\')
+    // A leading '/' surfaces as an empty first segment, so the split check
+    // also refuses absolute paths.
+    let plain = !subpath.contains('\\')
         && subpath.split('/').all(|part| !part.is_empty() && part != "." && part != "..");
     ensure!(plain, "component path `{path}` is not a plain relative path within a location");
     Ok(())

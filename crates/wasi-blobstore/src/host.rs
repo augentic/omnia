@@ -34,8 +34,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub use bytes::Bytes;
-pub use omnia::FutureResult;
-use omnia::{Host, Server, StoreView};
+pub use omnia_core::FutureResult;
+use omnia_core::{Host, Server, StoreView};
 pub use resource::*;
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
@@ -61,7 +61,7 @@ impl std::fmt::Display for Error {
     }
 }
 
-omnia::host_error!(Error, Other);
+omnia_core::host_error!(Error, Other);
 
 /// Incoming value for a blobstore operation.
 pub type IncomingValue = Bytes;
@@ -161,7 +161,7 @@ pub trait WasiBlobstoreCtx: Debug + Send + Sync + 'static {
     fn container_exists(&self, name: String) -> FutureResult<bool>;
 }
 
-omnia::wasi_view!(Blobstore);
+omnia_core::wasi_view!(Blobstore);
 
 #[cfg(test)]
 mod tests {

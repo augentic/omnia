@@ -21,7 +21,7 @@ tracing.workspace = true
 
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-omnia.workspace = true
+omnia-core.workspace = true
 wasmtime = { workspace = true, features = ["component-model-async"] }
 wasmtime-wasi-config.workspace = true
 

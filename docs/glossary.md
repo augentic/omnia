@@ -48,9 +48,9 @@ The deployment-wide `plugins` list naming interfaces the host will mediate betwe
 
 The `omnia:plugins/loader` host capability: a guest names a package (location plus optional sha256 pin) and the host acquires, verifies, validates, and registers it, returning a typed handle. Request-only — component bytes never cross the interface, and the requester gains no lifecycle authority. Linked when the deployment declares a `plugins:` block; reachable only from worlds that import it. The requester surface — the `Plugins` capability trait, shared `PluginRef`/`Digest` types, and ensure-once handle memoization — ships in `omnia-guest`'s `plugins` module.
 
-### Acquirer
+### Acquisition policy
 
-The deployment's compiled-in `Acquirer` policy — how the loader turns a package name and location into component bytes. A composition-root value installed through `Plugins::install` from the `Wiring::extend` hook (the macro's declarative `plugins: { locations: [...] }` list lowers into it), never runtime-core machinery. One slot per location kind, filled by the built-in acquirers `PathMounts` (named directory roots, read fresh on every load) and `RegistryClient` (exact package references, optionally cached in a `PluginStore`); loads route structurally by kind, and an empty slot refuses typed.
+How the loader turns a package name and location into component bytes. Compiled in at the composition root and installed through `Plugins::install` from the `Wiring::extend` hook (the macro's declarative `plugins: { locations: [...] }` list lowers into it), never runtime-core machinery. One slot per location kind, filled by the built-in acquirers `PathMounts` (named directory roots, read fresh on every load) and `RegistryClient` (exact package references, optionally cached in a `ContentStore` + `ReleaseStore` backend); loads route structurally by kind, and an empty slot refuses typed.
 
 ## Runtime platform
 

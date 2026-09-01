@@ -4,8 +4,9 @@
 
 - Guest-requested plugin loading: the `omnia:plugins/loader` host capability.
   A guest whose world imports it can ask the host to load a component at run
-  time — `load(package, location, digest?)` returns a typed `plugin` handle
-  (`id()`, `digest()`); component bytes never cross the interface in either
+  time — `load(package, location, digest?)` returns a plain `plugin` record
+  (`id`, `digest`), a value carrying no lifecycle authority over the loaded
+  component; component bytes never cross the interface in either
   direction. The host pipeline is trust-ordered: idempotency on
   (package, digest) → acquisition through the deployment's compiled-in
   acquirer → sha256 pin verification (before any wasmtime validation;
@@ -13,12 +14,14 @@
   refusal of native/pre-compiled bytes → safe `GuestArtifact::wasm`
   validation only → refusal unless the component exports a declared plugin
   interface → registration under the package identity. Refusals are typed
-  (`location-unsupported`, `acquire-failed`, `invalid-digest`,
-  `digest-mismatch`, `artifact-refused`, `seam-missing`, `already-active`,
-  `internal`); a deployment guest's identity can never be re-bound, and a
-  conflicting re-pin of an active package refuses. Acquisition policy is the
-  new `Acquirer` — a composition-root value with one slot per location kind
-  (`RegistrySource`, `PathSource`), installed through `Plugins::install` by
+  by the caller's remedy (`refused` for a wrong request or deployment,
+  `unavailable` for a retryable acquisition failure, `already-active` for an
+  identity conflict, `internal` for a host fault), with the description
+  naming the specific cause; a deployment guest's identity can never be
+  re-bound, and a conflicting re-pin of an active package refuses.
+  Acquisition policy is a pair of
+  composition-root slots, one per location kind (`RegistrySource`,
+  `PathSource`), installed through `Plugins::install` by
   the `runtime!` macro's generated `Wiring::extend` hook from the declarative
   `plugins: { locations: [...] }` list; loads route structurally by kind and
   an empty slot refuses typed. The built-in acquirers ship
@@ -27,7 +30,7 @@
   `RegistryClient` (exact `namespace:name@version` references
   from a compiled-in default registry endpoint, verified against the
   registry's content digest, fresh-release-preferred when the `cache:`
-  backend attaches a `PluginStore` — `ContentStore` for digest-keyed
+  backend attaches a store — `ContentStore` for digest-keyed
   bytes, `ReleaseStore` for per-registry release records). The loader
   links once on the shared linker when a deployment declares `plugins`;
   wasmtime wires it only
@@ -42,7 +45,7 @@
   `Plugin` handle carrying the routed identity and resolved digest, typed
   refusals mirroring the WIT error variant with kebab-case `code()`
   discriminants and a conversion into the guest `Error` taxonomy
-  (`acquire-failed` → `BadGateway`, `internal` → `ServerError`, every other
+  (`unavailable` → `BadGateway`, `internal` → `ServerError`, every other
   refusal → `BadRequest`), and `PluginCache` — ensure-once memoization of
   handles by package identity (never bytes; a conflicting re-pin refuses
   `already-active`, mirroring the host). No consumer vocabulary anywhere:
@@ -66,12 +69,35 @@
 
 ### Changed
 
+- Plugin loads are lock-free and race-safe. The loader's (package, digest)
+  idempotency record now rides the registry entry itself (`Guest::digest`,
+  recorded by `Runtime::admit` from the admitted bytes), so the attestation
+  can never outlive or misdescribe the guest it names — an identity
+  deregistered and re-registered by the embedder no longer answers a pinned
+  re-load with a stale digest. The loader's shadow digest map and the global
+  load mutex are deleted; concurrent loads race through `admit`, whose
+  atomic publication reports the loser via the new
+  `AdmitError::AlreadyRegistered` variant, resolved against the winner's
+  recorded digest (idempotent success on a match, `already-active`
+  otherwise). `sha256_digest` moves to `omnia-core` (still re-exported from
+  `omnia`).
+- Acquirers refuse honestly: `RegistrySource` and `PathSource` return the
+  loader's typed `LoadError` — `refused` for an authoritative "no" (a
+  malformed reference, a package or path the source does not serve),
+  `unavailable` for a failure a retry may clear — so an unknown package no
+  longer reports as retryable.
+- The runtime core drops "plugin" from its vocabulary: the manifest accessor
+  `Manifest::plugin_interfaces()` is renamed to `link_interfaces()`, and
+  admission refusals name "link interfaces". The config surface is
+  unchanged — the TOML `plugins = [...]` list, the macro `plugins:` block,
+  and the CLI `--plugins` flag keep their names; only `omnia-plugin` speaks
+  "plugin".
 - The `omnia` crate splits into `omnia-core` (the runtime spine: deployment,
   registry, dispatch, stores, telemetry, CLI) and a thin `omnia` facade that
   re-exports core, `omnia-plugin`, and the `runtime!` macro under the
   existing paths — embedder imports are unchanged. `omnia-plugin` is now the
   whole plugins capability: the loader WIT and `WasiPlugins` host binding,
-  the `LoadPlugin` load path, digest policy, and the acquisition seam all
+  the `Plugins` load path, digest policy, and the acquisition seam all
   live there, built on two intentional core seams that future capability
   crates reuse: `Runtime::admit` (the one privileged operation — safe
   validation, seam-export check, atomic registration; typed `AdmitError`)
@@ -81,8 +107,9 @@
   holds a `WeakRuntime` via `Runtime::downgrade`). `Runtime::new`'s third
   parameter is now the extend hook (`FnOnce(&Runtime<B>) -> Result<()>`);
   `StoreConfig::loader`/`StoreBase::loader` are replaced by the `extensions`
-  handle, and loader digest bookkeeping moved into `omnia-plugin`, pruned
-  lazily under the load lock instead of on deregistration.
+  handle, and the loader's digest record rides the registry entry itself
+  (`Guest::digest`, recorded at admission), living and dying with the guest
+  it attests.
 - Host wiring is trait-carried, not name-derived (pre-1.0 hard cut, no
   aliases). Omnia core gains `HostCtx` (the host's borrow shape and view
   assembly, `Borrow<'a>` GAT + `view`), `Provides<H>` (the one
@@ -122,7 +149,7 @@
   and at most one registry endpoint, lowered into the built-in
   `PathMounts`/`RegistryClient` acquirers slotted by location kind —
   and the optional `cache:` names the backend that joins the generated
-  bundle as the registry's `PluginStore`. Both keys are optional (a
+  bundle as the registry's store. Both keys are optional (a
   deployment that only does host-mediated dispatch needs no acquirer; loads
   then refuse typed at run time); an empty `locations:` list, a second
   `registry` entry, and a `cache:` without a registry entry are spanned
@@ -148,7 +175,7 @@
 - The host-mediated interface list is renamed from `dispatch` to `plugins`:
   a top-level `plugins = [...]` in TOML, a top-level `plugins: [...]` key in
   the `runtime!` macro, the fluent `Manifest::plugins(...)` setter (with the
-  `Manifest.plugins` field and the `Manifest::plugin_interfaces()` accessor),
+  `Manifest.plugins` field and the `Manifest::link_interfaces()` accessor),
   and the CLI flag `--plugins` (replacing `--dispatch`, no alias). Stale keys
   fail loudly: a leftover top-level `dispatch` (or `link`) is a parse/compile
   error, and `plugins` misplaced on a guest entry is rejected with a pointed

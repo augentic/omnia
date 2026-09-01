@@ -9,7 +9,7 @@ use crate::host::{Result, WasiWebSocket, WasiWebSocketCtxView};
 impl<T> HostClientWithStore<T> for WasiWebSocket {
     async fn connect(accessor: &Accessor<T, Self>, _name: String) -> Result<Resource<ClientProxy>> {
         let socket = accessor.with(|mut store| store.get().ctx.connect()).await?;
-        let proxy = omnia::Proxy(socket);
+        let proxy = omnia_core::Proxy(socket);
         Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
     }
 
@@ -58,11 +58,11 @@ impl HostEvent for WasiWebSocketCtxView<'_> {}
 pub fn get_client<T>(
     accessor: &Accessor<T, WasiWebSocket>, self_: &Resource<ClientProxy>,
 ) -> Result<ClientProxy> {
-    Ok(omnia::get_cloned(accessor, self_)?)
+    Ok(omnia_core::get_cloned(accessor, self_)?)
 }
 
 pub fn get_event<T>(
     accessor: &Accessor<T, WasiWebSocket>, self_: &Resource<Event>,
 ) -> Result<Event> {
-    Ok(omnia::get_cloned(accessor, self_)?)
+    Ok(omnia_core::get_cloned(accessor, self_)?)
 }

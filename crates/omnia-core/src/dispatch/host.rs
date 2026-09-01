@@ -15,7 +15,7 @@ use crate::runtime::Runtime;
 /// Shares the depth bound (`DispatchHandle::enter`) and resource rejection with
 /// guest→guest dispatch. The target is instantiated *fresh* on a new store and
 /// the matching export invoked directly, so the callee can never re-enter its
-/// caller and needs no `plugins` declaration for `interface`.
+/// caller and needs no declared link interface for `interface`.
 ///
 /// `args` and the returned values are plain `Val`s; a live resource handle on
 /// either side is rejected.
@@ -62,7 +62,7 @@ where
     // its ambient store clears, so the callee's call runs unnested. The task owns
     // the whole store lifecycle (build → instantiate → call → drop), so the
     // callee is a fresh instance that cannot re-enter its caller
-    // (instance-per-call) and needs no `plugins` declaration for `interface`.
+    // (instance-per-call) and needs no declared link interface for `interface`.
     let task_runtime = (*runtime).clone();
     let target_owned = target.clone();
     let interface_owned = interface.to_owned();

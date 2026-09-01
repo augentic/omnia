@@ -109,11 +109,11 @@ omnia::runtime!({
 - Routes are declared per guest, on the target entry's `routes:` block — one pattern list per trigger (`http` prefixes, `messaging` topics, `websocket` routes), with the declaring guest as the implicit target. There is no top-level `routes:` key.
 - A guest entry also accepts `command: true` (a literal bool), marking it as the command-mode target — see [Command routing](#command-routing-command-true).
 - Host-mediated interfaces are declared once, deployment-wide, in the top-level `plugins:` block's `interfaces:` list — the linker is shared, so there is no per-guest form. `run --plugins` at the CLI unions with the compiled-in list. A bare `plugins: [...]` list is a compile error naming the block shape.
-- Declaring `plugins:` also links the `omnia:plugins/loader` host capability (guest-requested plugin loading); only guests whose world imports it can reach it. The optional [`locations:` list](#plugin-locations-locations-and-cache) is the deployment's `Acquirer` policy — the acquisition seam behind `loader.load`, lowered into the built-in acquirers. Without a `locations:` list, every load refuses typed. Because acquisition policy is compiled-in code rather than manifest data, a policy-only block (`plugins: { locations: [...] }`) composes with `config:` — the TOML declares the interfaces, the binary the policy.
+- Declaring `plugins:` also links the `omnia:plugins/loader` host capability (guest-requested plugin loading); only guests whose world imports it can reach it. The optional [`locations:` list](#plugin-locations-locations-and-cache) is the deployment's acquisition policy — the acquisition seam behind `loader.load`, lowered into the built-in acquirers. Without a `locations:` list, every load refuses typed. Because acquisition policy is compiled-in code rather than manifest data, a policy-only block (`plugins: { locations: [...] }`) composes with `config:` — the TOML declares the interfaces, the binary the policy.
 
 ### Plugin locations (`locations:` and `cache:`)
 
-The `locations:` list declares the deployment's acquisition roots; the macro lowers them into the built-in acquirers, each filling its location kind's slot in the `Acquirer` the generated `Wiring::extend` hook installs through `omnia::Plugins::install`:
+The `locations:` list declares the deployment's acquisition roots; the macro lowers them into the built-in acquirers, each filling its location kind's slot on `Plugins` via the generated `Wiring::extend` hook:
 
 ```rust
 omnia::runtime!({
@@ -141,7 +141,7 @@ An entry takes one of two shapes:
 
 Each load routes by its location kind — path loads to the path acquirer, registry loads to the registry acquirer — and a kind with no entry refuses typed. Routing is structural kind selection, never failure recovery.
 
-`cache:` names a backend type: it joins the generated `Backends` bundle exactly like a `hosts:` backend (env-connected, deduplicated — naming a backend a `hosts:` row already connects shares that connection), and its connected value must implement `omnia::PluginStore` (`ContentStore` + `ReleaseStore`). The macro attaches it to the registry acquirer (`RegistryClient::cached`), keeping resolution fresh-release-preferred: a reachable registry stays the authority, while the store answers content by digest and carries loads across registry unavailability.
+`cache:` names a backend type: it joins the generated `Backends` bundle exactly like a `hosts:` backend (env-connected, deduplicated — naming a backend a `hosts:` row already connects shares that connection), and its connected value must implement both `omnia::ContentStore` and `omnia::ReleaseStore`. The macro attaches it to the registry acquirer (`RegistryClient::cached`), keeping resolution fresh-release-preferred: a reachable registry stays the authority, while the store answers content by digest and carries loads across registry unavailability.
 
 The grammar's refusals are all compile-time, spanned to the offending key: an empty `locations:` list, a second `registry` entry, and a `cache:` without a `{ registry: ... }` entry to attach to are each rejected with a pointed diagnostic.
 

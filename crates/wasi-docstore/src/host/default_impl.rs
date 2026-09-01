@@ -12,7 +12,7 @@ use std::sync::{Arc, RwLock};
 
 use anyhow::{Context, Result};
 use futures::FutureExt;
-use omnia::Backend;
+use omnia_core::Backend;
 use serde_json::Value;
 use tracing::instrument;
 
@@ -41,7 +41,7 @@ impl std::fmt::Debug for DocStoreDefault {
 }
 
 impl Backend for DocStoreDefault {
-    type ConnectOptions = omnia::NoOptions;
+    type ConnectOptions = omnia_core::NoOptions;
 
     #[instrument]
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {

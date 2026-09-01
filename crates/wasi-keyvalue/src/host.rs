@@ -32,8 +32,8 @@ mod generated {
 use std::fmt::Debug;
 use std::sync::Arc;
 
-pub use omnia::FutureResult;
-use omnia::{Host, Server, StoreView};
+pub use omnia_core::FutureResult;
+use omnia_core::{Host, Server, StoreView};
 use wasmtime::component::{HasData, Linker};
 
 pub use self::default_impl::KeyValueDefault;
@@ -74,5 +74,5 @@ pub trait WasiKeyValueCtx: Debug + Send + Sync + 'static {
     fn open_bucket(&self, identifier: String) -> FutureResult<Arc<dyn Bucket>>;
 }
 
-omnia::host_error!(Error, Other);
-omnia::wasi_view!(KeyValue);
+omnia_core::host_error!(Error, Other);
+omnia_core::wasi_view!(KeyValue);

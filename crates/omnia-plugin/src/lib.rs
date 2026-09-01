@@ -9,32 +9,27 @@
 //! plugin interfaces.
 //!
 //! Everything plugin lives here: the [`WasiPlugins`] host binding, the
-//! [`LoadPlugin`] load path, and the acquisition seam. Acquisition policy
-//! (endpoints, cache, path reads) is the embedder's [`Acquirer`] value — one
-//! slot per [`Location`] kind — installed by [`Plugins::install`] from the
-//! deployment's [`Wiring::extend`](omnia_core::Wiring::extend) hook (the
-//! `runtime!` macro's `plugins: { locations: [...] }` list lowers into it).
-//! The built-in acquirers are [`PathMounts`] and [`RegistryClient`]; store
+//! [`Plugins`] load path, and the acquisition seam. Acquisition policy
+//! (endpoints, cache, path reads) is the two slots [`Plugins::install`]
+//! takes — one per [`Location`] kind — from the deployment's
+//! [`Wiring::extend`](omnia_core::Wiring::extend) hook (the `runtime!`
+//! macro's `plugins: { locations: [...] }` list lowers into it). The
+//! built-in acquirers are [`PathMounts`] and [`RegistryClient`]; store
 //! implementors depend on this crate for [`ContentStore`] and
 //! [`ReleaseStore`]. The runtime core keeps zero storage and network
 //! dependencies.
 
-mod digest;
 mod host;
 mod loader;
 mod path;
 mod registry;
 mod store;
 
-use std::fmt;
-use std::sync::Arc;
-
-pub use self::digest::sha256_digest;
-pub use self::host::{WasiPlugins, WasiPluginsCtxView, WasiPluginsView};
-pub use self::loader::{LoadError, LoadPlugin, Plugin, PluginLoader, Plugins};
+pub use self::host::{Error as LoadError, WasiPlugins, WasiPluginsCtxView};
+pub use self::loader::{Plugin, PluginLoader, Plugins};
 pub use self::path::{PathMounts, PathSource};
 pub use self::registry::{RegistryClient, RegistrySource};
-pub use self::store::{ContentStore, NoStore, PluginStore, ReleaseRecord, ReleaseStore};
+pub use self::store::{ContentStore, NoStore, ReleaseStore};
 
 /// Where an acquirer finds a package's component bytes — the mirror of the
 /// `omnia:plugins/loader` `location` variant.
@@ -44,24 +39,4 @@ pub enum Location {
     Registry(Option<String>),
     /// A location-relative component path.
     Path(String),
-}
-
-impl fmt::Display for Location {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Registry(None) => f.write_str("the default registry"),
-            Self::Registry(Some(registry)) => write!(f, "registry `{registry}`"),
-            Self::Path(path) => write!(f, "path `{path}`"),
-        }
-    }
-}
-
-/// Compiled-in acquisition policy: one slot per [`Location`] kind, where an
-/// empty slot refuses the kind.
-#[derive(Clone, Default)]
-pub struct Acquirer {
-    /// Serves [`Location::Registry`] loads.
-    pub registry: Option<Arc<dyn RegistrySource>>,
-    /// Serves [`Location::Path`] loads.
-    pub path: Option<Arc<dyn PathSource>>,
 }

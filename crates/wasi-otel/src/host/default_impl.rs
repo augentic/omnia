@@ -6,7 +6,7 @@
 
 use anyhow::Result;
 use futures::FutureExt;
-use omnia::{Backend, FutureResult};
+use omnia_core::{Backend, FutureResult};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use tracing::instrument;
@@ -18,7 +18,7 @@ use crate::host::WasiOtelCtx;
 pub struct OtelDefault;
 
 impl Backend for OtelDefault {
-    type ConnectOptions = omnia::NoOptions;
+    type ConnectOptions = omnia_core::NoOptions;
 
     // `skip_all`: recording the unit `NoOptions` would otherwise trip
     // `clippy::used_underscore_binding` on the expanded `_options`.

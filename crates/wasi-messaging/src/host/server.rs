@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
-use omnia::{PatternRoutes, Runtime, StoreCtx, StoreView, TriggerRouter};
+use omnia_core::{PatternRoutes, Runtime, StoreCtx, StoreView, TriggerRouter};
 use tracing::{Instrument, debug_span, instrument};
 
 use crate::host::WasiMessaging;
