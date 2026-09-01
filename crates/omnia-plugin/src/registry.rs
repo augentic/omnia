@@ -5,13 +5,13 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, PoisonError};
 
-use anyhow::{Context as _, Result, anyhow, bail};
+use anyhow::{Context as _, Result, bail};
 use futures::future::BoxFuture;
 use futures::{FutureExt as _, TryStreamExt as _};
 use omnia_core::sha256_digest;
 use wasm_pkg_client::{Client, Config, ContentStream, PackageRef, Registry, Release, Version};
 
-use crate::AcquireError;
+use crate::LoadError;
 use crate::store::{NoStore, PluginStore, ReleaseRecord};
 
 /// Registry acquisition policy — the
@@ -19,11 +19,11 @@ use crate::store::{NoStore, PluginStore, ReleaseRecord};
 pub trait RegistrySource: Send + Sync + 'static {
     /// Produce the raw component bytes for `package` from `registry`
     /// (`None` selects the acquirer's default endpoint), split by remedy:
-    /// [`AcquireError::Refused`] for an authoritative "no", never for a
-    /// source failure a retry might clear.
+    /// [`LoadError::Refused`] for an authoritative "no", never for a
+    /// source failure a retry might clear ([`LoadError::Unavailable`]).
     fn acquire<'a>(
         &'a self, package: &'a str, registry: Option<&'a str>,
-    ) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>>;
+    ) -> BoxFuture<'a, Result<Vec<u8>, LoadError>>;
 }
 
 /// Registry acquisition using [wasm-pkg-client].
@@ -93,11 +93,12 @@ impl<S: PluginStore> RegistryClient<S> {
 
     /// Resolve and fetch `package`, serving verified bytes from the store
     /// when possible.
-    async fn fetch(&self, package: &str, registry: Option<&str>) -> Result<Vec<u8>, AcquireError> {
-        let (package_ref, version) = parse_package(package).map_err(AcquireError::Refused)?;
+    async fn fetch(&self, package: &str, registry: Option<&str>) -> Result<Vec<u8>, LoadError> {
+        let (package_ref, version) =
+            parse_package(package).map_err(|error| LoadError::Refused(format!("{error:#}")))?;
         let registry = registry.unwrap_or(&self.default_registry);
         let parsed: Registry = registry.parse().map_err(|error| {
-            AcquireError::Refused(anyhow!("registry `{registry}` is not a valid name: {error}"))
+            LoadError::Refused(format!("registry `{registry}` is not a valid name: {error}"))
         })?;
 
         let client = self.client(parsed);
@@ -131,21 +132,18 @@ impl<S: PluginStore> RegistryClient<S> {
             }
         }
 
-        let content = client.stream_content(&package_ref, &release).await.map_err(|error| {
-            AcquireError::Unavailable(
-                anyhow::Error::new(error).context(format!("fetching `{package}`")),
-            )
-        })?;
-        let bytes = collect(content).await.map_err(|error| {
-            AcquireError::Unavailable(
-                anyhow::Error::new(error).context(format!("reading `{package}`")),
-            )
-        })?;
+        let content = client
+            .stream_content(&package_ref, &release)
+            .await
+            .map_err(|error| LoadError::Unavailable(format!("fetching `{package}`: {error}")))?;
+        let bytes = collect(content)
+            .await
+            .map_err(|error| LoadError::Unavailable(format!("reading `{package}`: {error}")))?;
 
         let resolved = sha256_digest(&bytes);
         if resolved != digest {
             // The registry misdelivered; a retry may serve honest bytes.
-            return Err(AcquireError::Unavailable(anyhow!(
+            return Err(LoadError::Unavailable(format!(
                 "package `{package}` content hashes to {resolved}, not the registry \
                  digest {digest}"
             )));
@@ -167,7 +165,7 @@ impl<S: PluginStore> RegistryClient<S> {
     async fn resolve_release(
         &self, client: &Client, registry: &str, package: &str, package_ref: &PackageRef,
         version: &Version,
-    ) -> Result<Release, AcquireError> {
+    ) -> Result<Release, LoadError> {
         let full_name = package_ref.to_string();
         match client.get_release(package_ref, version).await {
             Ok(release) => {
@@ -190,11 +188,9 @@ impl<S: PluginStore> RegistryClient<S> {
                     .store
                     .release(registry, &full_name, &version.to_string())
                     .await
-                    .map_err(AcquireError::Unavailable)?;
+                    .map_err(|error| LoadError::Unavailable(format!("{error:#}")))?;
                 let Some(record) = stored else {
-                    return Err(AcquireError::Unavailable(
-                        anyhow::Error::new(error).context(format!("resolving `{package}`")),
-                    ));
+                    return Err(LoadError::Unavailable(format!("resolving `{package}`: {error}")));
                 };
                 tracing::warn!(
                     package,
@@ -203,7 +199,7 @@ impl<S: PluginStore> RegistryClient<S> {
                     "registry unreachable; falling back to the stored release record"
                 );
                 let content_digest = record.content_digest.parse().map_err(|error| {
-                    AcquireError::Unavailable(anyhow!(
+                    LoadError::Unavailable(format!(
                         "stored release record for `{package}` carries a malformed digest: {error}"
                     ))
                 })?;
@@ -214,9 +210,7 @@ impl<S: PluginStore> RegistryClient<S> {
             }
             // An authoritative registry answer — not found, yanked, malformed
             // input — refuses: retrying the same reference cannot succeed.
-            Err(error) => Err(AcquireError::Refused(
-                anyhow::Error::new(error).context(format!("resolving `{package}`")),
-            )),
+            Err(error) => Err(LoadError::Refused(format!("resolving `{package}`: {error}"))),
         }
     }
 }
@@ -224,7 +218,7 @@ impl<S: PluginStore> RegistryClient<S> {
 impl<S: PluginStore> RegistrySource for RegistryClient<S> {
     fn acquire<'a>(
         &'a self, package: &'a str, registry: Option<&'a str>,
-    ) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>> {
+    ) -> BoxFuture<'a, Result<Vec<u8>, LoadError>> {
         self.fetch(package, registry).boxed()
     }
 }

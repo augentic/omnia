@@ -33,9 +33,7 @@ impl<B: Clone + Send + Sync + 'static> LoadPlugin for Runtime<B> {
             return Err(LoadError::Internal(no_acquirer(package)));
         };
 
-        // Return the plugin if the package is already loaded. The digest
-        // record lives on the registry entry itself, so it can never outlive
-        // (or misdescribe) the guest it attests.
+        // return the plugin if the package is already loaded
         let id = GuestId::from(package);
         if let Some(guest) = self.registry().get(&id) {
             return already_active(package, id, guest.digest(), pin.as_deref());
@@ -52,9 +50,7 @@ impl<B: Clone + Send + Sync + 'static> LoadPlugin for Runtime<B> {
             )));
         }
 
-        // Publication inside `admit` is the transactional occupancy check, so
-        // concurrent loads need no lock: the loser of a race resolves against
-        // the winner's recorded digest.
+        // admit the wasm guest into the runtime
         match self.admit(id.clone(), bytes).await {
             Ok(()) => {
                 tracing::debug!(package, "plugin loaded");
@@ -73,9 +69,6 @@ impl<B: Clone + Send + Sync + 'static> LoadPlugin for Runtime<B> {
     }
 }
 
-/// Resolve a load against an already-registered identity: idempotent success
-/// when `wanted` names the recorded digest, `already-active` otherwise
-/// (including entries with no digest record, which a load never attests).
 fn already_active(
     package: &str, id: GuestId, recorded: Option<&str>, wanted: Option<&str>,
 ) -> Result<Plugin, LoadError> {

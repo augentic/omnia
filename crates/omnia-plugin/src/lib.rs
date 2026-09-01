@@ -57,30 +57,6 @@ impl fmt::Display for Location {
     }
 }
 
-/// Why an acquirer could not produce a package's bytes, split by remedy.
-///
-/// A [`Refused`](Self::Refused) request can never succeed as written; an
-/// [`Unavailable`](Self::Unavailable) source may recover.
-#[derive(Debug)]
-pub enum AcquireError {
-    /// An authoritative refusal — a malformed reference, a package or path
-    /// the source does not serve; retrying the same request cannot succeed.
-    Refused(anyhow::Error),
-    /// The source failed to produce the bytes but may recover, so a retry
-    /// can succeed.
-    Unavailable(anyhow::Error),
-}
-
-impl fmt::Display for AcquireError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let (Self::Refused(error) | Self::Unavailable(error)) = self;
-        // `:#` keeps the full context chain from acquisition errors.
-        if f.alternate() { write!(f, "{error:#}") } else { write!(f, "{error}") }
-    }
-}
-
-impl std::error::Error for AcquireError {}
-
 /// Compiled-in acquisition policy: one slot per [`Location`] kind, where an
 /// empty slot refuses the kind.
 #[derive(Clone, Default)]
@@ -94,34 +70,21 @@ pub struct Acquirer {
 impl Acquirer {
     // Get the package bytes from the specified location.
     async fn acquire(&self, package: &str, from_loc: &Location) -> Result<Vec<u8>, LoadError> {
-        let outcome = match from_loc {
+        match from_loc {
             Location::Registry(endpoint) => match &self.registry {
                 Some(registry) => registry.acquire(package, endpoint.as_deref()).await,
-                None => {
-                    return Err(LoadError::Refused(format!(
-                        "this deployment's locations serve no registry; loading `{package}` \
-                         from {from_loc} needs a `{{ registry: ... }}` entry"
-                    )));
-                }
+                None => Err(LoadError::Refused(format!(
+                    "this deployment's locations serve no registry; loading `{package}` \
+                     from {from_loc} needs a `{{ registry: ... }}` entry"
+                ))),
             },
             Location::Path(path) => match &self.path {
                 Some(paths) => paths.acquire(path).await,
-                None => {
-                    return Err(LoadError::Refused(format!(
-                        "this deployment's locations serve no paths; loading `{package}` \
-                         from {from_loc} needs a `{{ name: ..., path: ... }}` entry"
-                    )));
-                }
+                None => Err(LoadError::Refused(format!(
+                    "this deployment's locations serve no paths; loading `{package}` \
+                     from {from_loc} needs a `{{ name: ..., path: ... }}` entry"
+                ))),
             },
-        };
-
-        outcome.map_err(|error| match error {
-            AcquireError::Refused(error) => {
-                LoadError::Refused(format!("acquiring `{package}`: {error:#}"))
-            }
-            AcquireError::Unavailable(error) => {
-                LoadError::Unavailable(format!("acquiring `{package}`: {error:#}"))
-            }
-        })
+        }
     }
 }

@@ -81,10 +81,9 @@
   otherwise). `sha256_digest` moves to `omnia-core` (still re-exported from
   `omnia-plugin` and `omnia`).
 - Acquirers refuse honestly: `RegistrySource` and `PathSource` return the
-  new typed `AcquireError` — `Refused` for an authoritative "no" (a
+  loader's typed `LoadError` — `refused` for an authoritative "no" (a
   malformed reference, a package or path the source does not serve),
-  `Unavailable` for a failure a retry may clear — and the loader maps them
-  onto the WIT `refused`/`unavailable` variants, so an unknown package no
+  `unavailable` for a failure a retry may clear — so an unknown package no
   longer reports as retryable.
 - The runtime core drops "plugin" from its vocabulary: the manifest accessor
   `Manifest::plugin_interfaces()` is renamed to `link_interfaces()`, and

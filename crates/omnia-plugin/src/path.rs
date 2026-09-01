@@ -9,14 +9,15 @@ use cap_std::fs::Dir;
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
 
-use crate::AcquireError;
+use crate::LoadError;
 
 /// Path acquisition policy — the [`Acquirer::path`](crate::Acquirer::path) slot.
 pub trait PathSource: Send + Sync + 'static {
     /// Produce the raw component bytes at the location-relative `path`,
-    /// split by remedy: [`AcquireError::Refused`] for a path no location
-    /// serves, never for a read failure a retry might clear.
-    fn acquire<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>>;
+    /// split by remedy: [`LoadError::Refused`] for a path no location
+    /// serves, never for a read failure a retry might clear
+    /// ([`LoadError::Unavailable`]).
+    fn acquire<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<Vec<u8>, LoadError>>;
 }
 
 /// Path acquisition over named `(name, directory)` roots, resolved like guest
@@ -61,16 +62,17 @@ impl PathMounts {
 }
 
 impl PathSource for PathMounts {
-    fn acquire<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>> {
+    fn acquire<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<Vec<u8>, LoadError>> {
         read_entry(path, &self.entries).boxed()
     }
 }
 
-async fn read_entry(path: &str, entries: &[Mount]) -> Result<Vec<u8>, AcquireError> {
+async fn read_entry(path: &str, entries: &[Mount]) -> Result<Vec<u8>, LoadError> {
     // A path no location serves (or that escapes one) is wrong as written;
     // a failed read of a served path may clear on retry (locations are read
     // fresh on every load).
-    let (dir, subpath) = resolve(path, entries).map_err(AcquireError::Refused)?;
+    let (dir, subpath) =
+        resolve(path, entries).map_err(|error| LoadError::Refused(format!("{error:#}")))?;
     // File reads are blocking I/O; keep them off the async executor.
     tokio::task::spawn_blocking(move || {
         dir.read(&subpath).with_context(|| format!("reading component `{subpath}`"))
@@ -78,7 +80,7 @@ async fn read_entry(path: &str, entries: &[Mount]) -> Result<Vec<u8>, AcquireErr
     .await
     .context("component read task panicked")
     .and_then(|outcome| outcome)
-    .map_err(AcquireError::Unavailable)
+    .map_err(|error| LoadError::Unavailable(format!("{error:#}")))
 }
 
 // Resolve `path` to a location's capability handle plus the subpath within
