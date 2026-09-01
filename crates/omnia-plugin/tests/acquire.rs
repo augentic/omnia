@@ -8,9 +8,9 @@ use std::sync::{Arc, Mutex};
 
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
+use omnia::sha256_digest;
 use omnia_plugin::{
     ContentStore, PathMounts, PathSource as _, RegistryClient, RegistrySource as _, ReleaseStore,
-    sha256_digest,
 };
 use tempfile::TempDir;
 use wasm_pkg_client::{Config, Registry};

@@ -19,14 +19,11 @@
 //! [`ReleaseStore`]. The runtime core keeps zero storage and network
 //! dependencies.
 
-mod digest;
 mod host;
 mod loader;
 mod path;
 mod registry;
 mod store;
-
-pub use omnia_core::sha256_digest;
 
 pub use self::host::{Error as LoadError, WasiPlugins, WasiPluginsCtxView};
 pub use self::loader::{Plugin, PluginLoader, Plugins};

@@ -23,7 +23,7 @@ use wasmtime::component::{Accessor, HasData, Linker};
 pub use self::generated::Error;
 use self::generated::omnia::plugins::loader;
 use crate::Location;
-use crate::loader::{Plugins, missing_plugins};
+use crate::loader::Plugins;
 
 /// Host-side service for `omnia:plugins` — the loader capability this crate
 /// implements over the runtime's admission seam.
@@ -70,7 +70,9 @@ impl<T> loader::HostWithStore<T> for WasiPlugins {
     ) -> Result<loader::Plugin, Error> {
         let plugins = accessor
             .with(|mut store| store.get().plugins)
-            .ok_or_else(|| missing_plugins(&package))?;
+            .ok_or_else(|| Error::Internal(format!(
+                "this deployment has no plugins; compile one in (`plugins: {{ locations: [...] }}`) to load `{package}`"
+            )))?;
         let plugin = plugins.load(&package, from.into(), digest.as_deref()).await?;
         Ok(loader::Plugin {
             id: plugin.id().to_string(),

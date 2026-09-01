@@ -7,10 +7,10 @@ use futures::FutureExt as _;
 use futures::future::BoxFuture;
 use omnia_core::{AdmitError, GuestId, Runtime, WeakRuntime, sha256_digest};
 
+use crate::Location;
 use crate::host::Error as LoadError;
 use crate::path::PathSource;
 use crate::registry::RegistrySource;
-use crate::{Location, digest};
 
 /// Host-side `omnia:plugins/loader.load` — embedder sugar over the runtime's
 /// installed [`Plugins`] extension.
@@ -35,21 +35,15 @@ impl<B: Clone + Send + Sync + 'static> PluginLoader for Runtime<B> {
         async move {
             match plugins {
                 Some(plugins) => plugins.load(package, from, pin).await,
-                None => Err(missing_plugins(package)),
+                None => Err(LoadError::Internal(format!(
+                    "this deployment has no plugins; compile one in (`plugins: {{ locations: [...] }}`) to load `{package}`"
+                ))),
             }
         }
     }
 }
 
-/// The refusal for a deployment that never installed [`Plugins`].
-pub fn missing_plugins(package: &str) -> LoadError {
-    LoadError::Internal(format!(
-        "this deployment has no plugins; compile one in (`plugins: {{ locations: [...] }}`) to \
-         load `{package}`"
-    ))
-}
-
-/// A guest identity's registration state at load time.
+// A guest identity's registration state at load time.
 enum Registration {
     /// No guest holds the identity.
     Absent,
@@ -148,7 +142,7 @@ impl Plugins {
     pub async fn load(
         &self, package: &str, from: Location, pin: Option<&str>,
     ) -> Result<Plugin, LoadError> {
-        let pin = pin.map(digest::canonicalize).transpose().map_err(LoadError::Refused)?;
+        let pin = pin.map(canonicalize).transpose().map_err(LoadError::Refused)?;
 
         let id = GuestId::from(package);
         if let Registration::Active(recorded) = self.admission.registration(&id)? {
@@ -199,6 +193,20 @@ impl Plugins {
             },
         }
     }
+}
+
+const SCHEME: &str = "sha256:";
+const HEX_LEN: usize = 64;
+
+// Canonicalize a digest so it can be compared.
+fn canonicalize(digest: &str) -> Result<String, String> {
+    let Some(hex) = digest.strip_prefix(SCHEME) else {
+        return Err(format!("digest `{digest}` is not `{SCHEME}<hex>`"));
+    };
+    if hex.len() != HEX_LEN || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(format!("digest `{digest}` is not {HEX_LEN} hex characters"));
+    }
+    Ok(format!("{SCHEME}{}", hex.to_ascii_lowercase()))
 }
 
 /// Attest an active registration as the requested (package, digest), or

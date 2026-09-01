@@ -80,7 +80,7 @@
   `AdmitError::AlreadyRegistered` variant, resolved against the winner's
   recorded digest (idempotent success on a match, `already-active`
   otherwise). `sha256_digest` moves to `omnia-core` (still re-exported from
-  `omnia-plugin` and `omnia`).
+  `omnia`).
 - Acquirers refuse honestly: `RegistrySource` and `PathSource` return the
   loader's typed `LoadError` — `refused` for an authoritative "no" (a
   malformed reference, a package or path the source does not serve),
