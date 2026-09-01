@@ -10,11 +10,11 @@
 //!
 //! Everything plugin lives here: the [`WasiPlugins`] host binding, the
 //! [`LoadPlugin`] load path, and the acquisition seam. Acquisition policy
-//! (endpoints, cache, path reads) is the embedder's [`Acquirer`] value — one
-//! slot per [`Location`] kind — installed by [`Plugins::install`] from the
-//! deployment's [`Wiring::extend`](omnia_core::Wiring::extend) hook (the
-//! `runtime!` macro's `plugins: { locations: [...] }` list lowers into it).
-//! The built-in acquirers are [`PathMounts`] and [`RegistryClient`]; store
+//! (endpoints, cache, path reads) is the two slots [`Plugins::install`]
+//! takes — one per [`Location`] kind — from the deployment's
+//! [`Wiring::extend`](omnia_core::Wiring::extend) hook (the `runtime!`
+//! macro's `plugins: { locations: [...] }` list lowers into it). The
+//! built-in acquirers are [`PathMounts`] and [`RegistryClient`]; store
 //! implementors depend on this crate for [`ContentStore`] and
 //! [`ReleaseStore`]. The runtime core keeps zero storage and network
 //! dependencies.
@@ -27,7 +27,6 @@ mod registry;
 mod store;
 
 use std::fmt;
-use std::sync::Arc;
 
 pub use omnia_core::sha256_digest;
 
@@ -53,38 +52,6 @@ impl fmt::Display for Location {
             Self::Registry(None) => f.write_str("the default registry"),
             Self::Registry(Some(registry)) => write!(f, "registry `{registry}`"),
             Self::Path(path) => write!(f, "path `{path}`"),
-        }
-    }
-}
-
-/// Compiled-in acquisition policy: one slot per [`Location`] kind, where an
-/// empty slot refuses the kind.
-#[derive(Clone, Default)]
-pub struct Acquirer {
-    /// Serves [`Location::Registry`] loads.
-    pub registry: Option<Arc<dyn RegistrySource>>,
-    /// Serves [`Location::Path`] loads.
-    pub path: Option<Arc<dyn PathSource>>,
-}
-
-impl Acquirer {
-    // Get the package bytes from the specified location.
-    async fn acquire(&self, package: &str, from_loc: &Location) -> Result<Vec<u8>, LoadError> {
-        match from_loc {
-            Location::Registry(endpoint) => match &self.registry {
-                Some(registry) => registry.acquire(package, endpoint.as_deref()).await,
-                None => Err(LoadError::Refused(format!(
-                    "this deployment's locations serve no registry; loading `{package}` \
-                     from {from_loc} needs a `{{ registry: ... }}` entry"
-                ))),
-            },
-            Location::Path(path) => match &self.path {
-                Some(paths) => paths.acquire(path).await,
-                None => Err(LoadError::Refused(format!(
-                    "this deployment's locations serve no paths; loading `{package}` \
-                     from {from_loc} needs a `{{ name: ..., path: ... }}` entry"
-                ))),
-            },
         }
     }
 }

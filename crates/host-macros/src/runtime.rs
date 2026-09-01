@@ -253,7 +253,7 @@ mod tests {
     // declaration order into one `PathMounts`, the registry entry becomes a
     // `RegistryClient` cached in the `cache:` backend — which joins the
     // bundle beside the hosts' backends — each filling its kind's slot in
-    // the `Acquirer` the generated `Wiring::extend` hook installs.
+    // the slots the generated `Wiring::extend` hook installs.
     #[test]
     fn expand_locations_cached() {
         insta::assert_snapshot!(expand_pretty(quote!({

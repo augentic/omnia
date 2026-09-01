@@ -8,7 +8,9 @@ use futures::future::BoxFuture;
 use omnia_core::{AdmitError, GuestId, Runtime, WeakRuntime, sha256_digest};
 
 use crate::host::Error as LoadError;
-use crate::{Acquirer, Location, digest};
+use crate::path::PathSource;
+use crate::registry::RegistrySource;
+use crate::{Location, digest};
 
 /// Host-side `omnia:plugins/loader.load`.
 pub trait LoadPlugin {
@@ -40,7 +42,7 @@ impl<B: Clone + Send + Sync + 'static> LoadPlugin for Runtime<B> {
         }
 
         // get the package bytes from the specified location
-        let bytes = loaded.acquirer.acquire(package, &from).await?;
+        let bytes = loaded.acquire(package, &from).await?;
 
         // the operator's pin binds name to bytes before any validation work
         let hash = sha256_digest(&bytes);
@@ -83,22 +85,30 @@ fn already_active(
 
 /// Installed acquisition policy and store-reachable loader.
 pub struct Plugins {
-    acquirer: Acquirer,
+    registry: Option<Arc<dyn RegistrySource>>,
+    path: Option<Arc<dyn PathSource>>,
     loader: Arc<dyn PluginLoader>,
 }
 
 impl Plugins {
     /// Install the loader capability on `runtime`.
     ///
+    /// `registry` and `path` are the compiled-in slots, one per [`Location`]
+    /// kind; `None` refuses that kind.
+    ///
     /// # Errors
     ///
     /// Returns an error if the capability is already installed.
-    pub fn install<B>(runtime: &Runtime<B>, acquirer: Acquirer) -> anyhow::Result<()>
+    pub fn install<B>(
+        runtime: &Runtime<B>, registry: Option<Arc<dyn RegistrySource>>,
+        path: Option<Arc<dyn PathSource>>,
+    ) -> anyhow::Result<()>
     where
         B: Clone + Send + Sync + 'static,
     {
         let plugins = Self {
-            acquirer,
+            registry,
+            path,
             loader: Arc::new(runtime.downgrade()),
         };
         anyhow::ensure!(
@@ -110,6 +120,25 @@ impl Plugins {
 
     pub(crate) fn loader(&self) -> Arc<dyn PluginLoader> {
         Arc::clone(&self.loader)
+    }
+
+    async fn acquire(&self, package: &str, from_loc: &Location) -> Result<Vec<u8>, LoadError> {
+        match from_loc {
+            Location::Registry(endpoint) => match &self.registry {
+                Some(registry) => registry.acquire(package, endpoint.as_deref()).await,
+                None => Err(LoadError::Refused(format!(
+                    "this deployment's locations serve no registry; loading `{package}` \
+                     from {from_loc} needs a `{{ registry: ... }}` entry"
+                ))),
+            },
+            Location::Path(path) => match &self.path {
+                Some(paths) => paths.acquire(path).await,
+                None => Err(LoadError::Refused(format!(
+                    "this deployment's locations serve no paths; loading `{package}` \
+                     from {from_loc} needs a `{{ name: ..., path: ... }}` entry"
+                ))),
+            },
+        }
     }
 }
 

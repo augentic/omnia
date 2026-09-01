@@ -61,10 +61,10 @@ fn emit_main_options(config: &Config) -> TokenStream {
 
 /// Emit the `Wiring::extend` hook for the declarative `locations:` list:
 /// path entries fold in declaration order into one `PathMounts` (opened
-/// fail-fast) filling the `Acquirer`'s path slot, the registry entry becomes
-/// a `RegistryClient` — cached in the `cache:` backend when one is declared
-/// — filling its registry slot; a kind with no entry stays `None` and
-/// refuses typed at run time. The built `Acquirer` installs through
+/// fail-fast) filling the path slot, the registry entry becomes a
+/// `RegistryClient` — cached in the `cache:` backend when one is declared
+/// — filling the registry slot; a kind with no entry stays `None` and
+/// refuses typed at run time. The slots install through
 /// `omnia::Plugins::install`.
 fn emit_locations_hook(config: &Config, backends_ty: &TokenStream) -> TokenStream {
     let paths: Vec<TokenStream> = config
@@ -113,13 +113,7 @@ fn emit_locations_hook(config: &Config, backends_ty: &TokenStream) -> TokenStrea
     quote! {
         fn extend(runtime: &omnia::Runtime<#backends_ty>) -> Result<()> {
             #bind_backends
-            omnia::Plugins::install(
-                runtime,
-                omnia::Acquirer {
-                    registry: #registry_slot,
-                    path: #path_slot,
-                },
-            )
+            omnia::Plugins::install(runtime, #registry_slot, #path_slot)
         }
     }
 }

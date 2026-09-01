@@ -6,9 +6,9 @@ Everything plugin lives here:
 
 - the loader WIT and the `WasiPlugins` host binding,
 - the `LoadPlugin` load path (pin policy, idempotency, acquisition routing) over `omnia-core`'s privileged `Runtime::admit` seam,
-- the `Acquirer` acquisition policy — one slot per location kind — with the built-in `PathMounts` and `RegistryClient` policies, installed by `Plugins::install` from the deployment's `Wiring::extend` hook (the `runtime!` macro's `plugins: { locations: [...] }` list lowers into it).
+- the acquisition policy — one slot per location kind — with the built-in `PathMounts` and `RegistryClient` policies, installed by `Plugins::install` from the deployment's `Wiring::extend` hook (the `runtime!` macro's `plugins: { locations: [...] }` list lowers into it).
 
-The surface reaches embedders re-exported from the `omnia` facade (`omnia::WasiPlugins`, `omnia::Acquirer`, `omnia::PathMounts`, …). Store implementors depend on this crate directly for `ContentStore` and `ReleaseStore`.
+The surface reaches embedders re-exported from the `omnia` facade (`omnia::WasiPlugins`, `omnia::PathMounts`, `omnia::Plugins`, …). Store implementors depend on this crate directly for `ContentStore` and `ReleaseStore`.
 
 ## License
 

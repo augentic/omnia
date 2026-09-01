@@ -14,8 +14,8 @@ use wasm_pkg_client::{Client, Config, ContentStream, PackageRef, Registry, Relea
 use crate::LoadError;
 use crate::store::{NoStore, PluginStore, ReleaseRecord};
 
-/// Registry acquisition policy — the
-/// [`Acquirer::registry`](crate::Acquirer::registry) slot.
+/// Registry acquisition policy — the registry slot of
+/// [`Plugins`](crate::Plugins).
 pub trait RegistrySource: Send + Sync + 'static {
     /// Produce the raw component bytes for `package` from `registry`
     /// (`None` selects the acquirer's default endpoint), split by remedy:

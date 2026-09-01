@@ -14,9 +14,9 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
 use omnia::{
-    Acquirer, DeploymentBuilder, ExitStatus, GuestArtifact, GuestEntry, LoadError, LoadPlugin as _,
-    Location, Manifest, Mode, PathMounts, Plugins, RegistryClient, Runtime, StoreCtx, WasiPlugins,
-    sha256_digest,
+    DeploymentBuilder, ExitStatus, GuestArtifact, GuestEntry, LoadError, LoadPlugin as _, Location,
+    Manifest, Mode, PathMounts, PathSource, Plugins, RegistryClient, RegistrySource, Runtime,
+    StoreCtx, WasiPlugins, sha256_digest,
 };
 
 // Every guest program in `crates/test-programs/programs/plugins` must have a
@@ -24,10 +24,11 @@ use omnia::{
 test_utils::foreach_plugins!();
 
 /// Assemble the requester deployment around `wasm`: the scratch dir mounts at
-/// `.`, `omnia-test:link/ops` is the declared plugin seam, and `acquirer` is
-/// the compiled-in acquisition policy.
+/// `.`, `omnia-test:link/ops` is the declared plugin seam, and the two slots
+/// are the compiled-in acquisition policy.
 async fn requester_runtime(
-    wasm: &str, scratch: &test_utils::Scratch, acquirer: Acquirer,
+    wasm: &str, scratch: &test_utils::Scratch, registry: Option<Arc<dyn RegistrySource>>,
+    path: Option<Arc<dyn PathSource>>,
 ) -> Result<Runtime<()>> {
     let manifest = Manifest::new()
         .plugins(["omnia-test:link/ops"])
@@ -45,27 +46,24 @@ async fn requester_runtime(
             deployment.host::<WasiPlugins, ()>()?;
             Ok(())
         },
-        move |runtime| Plugins::install(runtime, acquirer),
+        move |runtime| Plugins::install(runtime, registry, path),
     )
     .await
     .context("assembling runtime")
 }
 
-/// Drive `wasm` as the `requester` command guest under `acquirer`.
+/// Drive `wasm` as the `requester` command guest under the given slots.
 async fn run_requester(
-    wasm: &str, scratch: &test_utils::Scratch, acquirer: Acquirer,
+    wasm: &str, scratch: &test_utils::Scratch, registry: Option<Arc<dyn RegistrySource>>,
+    path: Option<Arc<dyn PathSource>>,
 ) -> Result<ExitStatus> {
-    let runtime = requester_runtime(wasm, scratch, acquirer).await?;
+    let runtime = requester_runtime(wasm, scratch, registry, path).await?;
     runtime.run_command().await
 }
 
 /// A `.`-rooted `PathMounts` over the scratch dir filling the path slot.
-fn path_acquirer(scratch: &test_utils::Scratch) -> Acquirer {
-    let paths = PathMounts::new([(".", scratch.path())]).expect("opening the scratch location");
-    Acquirer {
-        path: Some(Arc::new(paths)),
-        registry: None,
-    }
+fn path_source(scratch: &test_utils::Scratch) -> Arc<dyn PathSource> {
+    Arc::new(PathMounts::new([(".", scratch.path())]).expect("opening the scratch location"))
 }
 
 #[derive(serde::Serialize)]
@@ -74,8 +72,8 @@ struct LocalBackendConfig {
 }
 
 /// Stage `wasm` as `package` in a wasm-pkg `local` backend rooted at `root`
-/// and return an acquirer whose default registry `registry.test` serves it.
-fn registry_acquirer(root: &Path, package: &str, wasm: &str) -> Acquirer {
+/// and return a client whose default registry `registry.test` serves it.
+fn registry_source(root: &Path, package: &str, wasm: &str) -> Arc<dyn RegistrySource> {
     let (name, version) = package.split_once('@').expect("test packages pin versions");
     let (namespace, name) = name.split_once(':').expect("test packages are namespaced");
     let dir = root.join(namespace).join(name);
@@ -95,10 +93,7 @@ fn registry_acquirer(root: &Path, package: &str, wasm: &str) -> Acquirer {
             },
         )
         .expect("local backend config serializes");
-    Acquirer {
-        registry: Some(Arc::new(RegistryClient::new("registry.test").with_config(config))),
-        path: None,
-    }
+    Arc::new(RegistryClient::new("registry.test").with_config(config))
 }
 
 #[tokio::test]
@@ -107,18 +102,19 @@ async fn plugins_load_path() {
     std::fs::copy(test_utils::LINK_ECHOER, scratch.path().join("plugin.wasm"))
         .expect("staging the loadable echoer");
 
-    let status = run_requester(test_utils::PLUGINS_LOAD_PATH, &scratch, path_acquirer(&scratch))
-        .await
-        .expect("deployment runs");
+    let status =
+        run_requester(test_utils::PLUGINS_LOAD_PATH, &scratch, None, Some(path_source(&scratch)))
+            .await
+            .expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
 }
 
 #[tokio::test]
 async fn plugins_load_registry() {
     let scratch = test_utils::scratch("plugins_load_registry");
-    let acquirer = registry_acquirer(scratch.path(), "test:echoer@1.0.0", test_utils::LINK_ECHOER);
+    let registry = registry_source(scratch.path(), "test:echoer@1.0.0", test_utils::LINK_ECHOER);
 
-    let status = run_requester(test_utils::PLUGINS_LOAD_REGISTRY, &scratch, acquirer)
+    let status = run_requester(test_utils::PLUGINS_LOAD_REGISTRY, &scratch, Some(registry), None)
         .await
         .expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
@@ -144,8 +140,7 @@ fn wit_copies_stay_identical() {
 // Compile-time proof that the macro's `locations:`/`cache:` grammar lowers
 // into calls that typecheck against this crate's public seam: path entries
 // fold into a `PathMounts`, the registry entry into a `RegistryClient`
-// cached in the `cache:` backend, each filling its slot in the `Acquirer`
-// installed by the `Wiring::extend` hook.
+// cached in the `cache:` backend, each filling its slot on `Plugins`.
 // Never run — the macro's snapshot suite pins the shape, this pins the types.
 mod locations_grammar {
     use std::future::Future;
@@ -228,9 +223,14 @@ async fn plugins_load_refused() {
     std::fs::write(scratch.path().join("native.bin"), [0x7f, b'E', b'L', b'F', 0, 0, 0, 0])
         .expect("staging native bytes");
 
-    let status = run_requester(test_utils::PLUGINS_LOAD_REFUSED, &scratch, path_acquirer(&scratch))
-        .await
-        .expect("deployment runs");
+    let status = run_requester(
+        test_utils::PLUGINS_LOAD_REFUSED,
+        &scratch,
+        None,
+        Some(path_source(&scratch)),
+    )
+    .await
+    .expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
 }
 
@@ -257,10 +257,14 @@ async fn reload_after_deregister_binds_fresh_bytes() {
     std::fs::copy(test_utils::LINK_ECHOER, scratch.path().join("plugin.wasm"))
         .expect("staging the loadable echoer");
     // The requester guest is manifest ballast: these loads are host-driven.
-    let runtime =
-        requester_runtime(test_utils::PLUGINS_LOAD_PATH, &scratch, path_acquirer(&scratch))
-            .await
-            .expect("assembling runtime");
+    let runtime = requester_runtime(
+        test_utils::PLUGINS_LOAD_PATH,
+        &scratch,
+        None,
+        Some(path_source(&scratch)),
+    )
+    .await
+    .expect("assembling runtime");
     let location = || Location::Path("./plugin.wasm".to_owned());
 
     let first = runtime.load_plugin("test:echoer", location(), None).await.expect("first load");
@@ -297,10 +301,14 @@ async fn pinned_reload_refuses_after_external_reregistration() {
     let scratch = test_utils::scratch("plugins_reregister");
     std::fs::copy(test_utils::LINK_ECHOER, scratch.path().join("plugin.wasm"))
         .expect("staging the loadable echoer");
-    let runtime =
-        requester_runtime(test_utils::PLUGINS_LOAD_PATH, &scratch, path_acquirer(&scratch))
-            .await
-            .expect("assembling runtime");
+    let runtime = requester_runtime(
+        test_utils::PLUGINS_LOAD_PATH,
+        &scratch,
+        None,
+        Some(path_source(&scratch)),
+    )
+    .await
+    .expect("assembling runtime");
     let location = || Location::Path("./plugin.wasm".to_owned());
 
     let first = runtime.load_plugin("test:echoer", location(), None).await.expect("first load");
