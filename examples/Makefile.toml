@@ -12,13 +12,13 @@ skip_rust_env_info = true
 command = "cargo"
 args = ["build", "-p", "examples", "--examples", "--target", "wasm32-wasip2"]
 
-# Smoke-test every example against its README contract (see smoke.sh).
+# Smoke-test every example against its README contract (see smoke.rs).
 [tasks.smoke]
 workspace = false
 dependencies = ["examples"]
 script = '''
 cargo build -p examples --examples
-bash "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/examples/smoke.sh"
+cargo run -p examples --bin smoke
 '''
 
 [tasks.build]
