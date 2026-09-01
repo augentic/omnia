@@ -6,7 +6,6 @@ use anyhow::{Context, Result, anyhow};
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::{KeyValue, Value};
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::error::OTelSdkError;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use tracing_opentelemetry::{MetricsLayer, layer as tracing_layer};
@@ -34,7 +33,11 @@ pub fn init() -> Result<Option<ExitGuard>> {
 
     let resource: Resource = resource::resource().into();
 
-    let filter_layer = EnvFilter::from_default_env()
+    // Default to ERROR when `RUST_LOG` is unset so error telemetry is never
+    // silently dropped (an empty `EnvFilter` disables everything).
+    let filter_layer = EnvFilter::builder()
+        .with_default_directive(tracing_subscriber::filter::LevelFilter::ERROR.into())
+        .from_env_lossy()
         .add_directive("hyper=off".parse()?)
         .add_directive("h2=off".parse()?)
         .add_directive("tonic=off".parse()?);
@@ -43,36 +46,50 @@ pub fn init() -> Result<Option<ExitGuard>> {
 
     let tracer_provider = tracing::init(resource.clone());
     let tracing_layer = tracing_layer().with_tracer(tracer_provider.tracer("global"));
-    TRACING.set(tracer_provider).map_err(|_e| anyhow!("failed to set tracing provider"))?;
 
     let meter_provider = metrics::init(resource);
     let metrics_layer = MetricsLayer::new(meter_provider.clone());
-    METRICS.set(meter_provider).map_err(|_e| anyhow!("failed to set metrics provider"))?;
 
     let registry = registry.with(tracing_layer).with(metrics_layer);
 
+    // Publish the providers only after the subscriber installs: a failed
+    // `try_init` (e.g. the embedder already set a global subscriber) must
+    // not leave the OnceLocks populated, or every later `init` would report
+    // `Ok(None)` instead of surfacing the error.
     registry.try_init().context("issue initializing subscriber")?;
+
+    TRACING.set(tracer_provider).map_err(|_e| anyhow!("failed to set tracing provider"))?;
+    METRICS.set(meter_provider).map_err(|_e| anyhow!("failed to set metrics provider"))?;
 
     Ok(Some(ExitGuard))
 }
 
-/// Flush and shut down the OpenTelemetry SDK.
+/// Export buffered spans and recorded metrics to the host.
 ///
-/// Call this before a process exit that bypasses `Drop` (for example
-/// `wasi:cli/exit`). Safe to call when telemetry was never initialized
-/// or has already been shut down.
-pub fn shutdown() {
-    if let Some(tracer_provider) = TRACING.get() {
-        match tracer_provider.shutdown() {
-            Ok(()) | Err(OTelSdkError::AlreadyShutdown) => (),
-            Err(e) => ::tracing::error!("failed to export tracing: {e}"),
-        }
-    }
-    if let Some(meter_provider) = METRICS.get() {
-        match meter_provider.shutdown() {
-            Ok(()) | Err(OTelSdkError::AlreadyShutdown) => (),
-            Err(e) => ::tracing::error!("failed to export metrics: {e}"),
-        }
+/// Export failures are logged, never propagated: telemetry must not affect
+/// application logic. Safe to call when telemetry was never initialized.
+pub async fn flush() {
+    tracing::flush().await;
+    metrics::flush().await;
+}
+
+/// [`flush`] if `guard` owns the telemetry lifecycle, disarming it.
+///
+/// The `#[instrument]` macro awaits this as the outermost instrumented
+/// function returns, so telemetry is exported before the surrounding export
+/// completes — including ahead of a `wasi:cli/exit` that bypasses `Drop`.
+pub async fn flush_guard(guard: Result<Option<ExitGuard>>) {
+    if let Ok(Some(guard)) = guard {
+        std::mem::forget(guard);
+        // The generated `wasi::export` futures are `!Send`; run them as a
+        // task on the single-threaded executor and await a `Send` signal so
+        // instrumented functions stay usable as `Send` handlers (e.g. axum).
+        let (tx, rx) = futures::channel::oneshot::channel();
+        wit_bindgen::spawn_local(async move {
+            flush().await;
+            let _ = tx.send(());
+        });
+        let _ = rx.await;
     }
 }
 
@@ -81,7 +98,13 @@ pub struct ExitGuard;
 
 impl Drop for ExitGuard {
     fn drop(&mut self) {
-        shutdown();
+        // `Drop` cannot await and a blocking flush deadlocks when the guard
+        // drops as an async export completes (the block wins spawned work,
+        // such as a response-body writer, that only finishes after the
+        // export returns). Defer the export onto the surrounding
+        // component-model task instead; it runs after the export's result
+        // is returned and before the task exits.
+        wit_bindgen::spawn_local(flush());
     }
 }
 
