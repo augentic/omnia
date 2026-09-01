@@ -12,7 +12,7 @@ use omnia_core::sha256_digest;
 use wasm_pkg_client::{Client, Config, ContentStream, PackageRef, Registry, Release, Version};
 
 use crate::LoadError;
-use crate::store::{NoStore, PluginStore, ReleaseRecord};
+use crate::store::{ContentStore, NoStore, ReleaseRecord, ReleaseStore};
 
 /// Registry acquisition policy — the registry slot of
 /// [`Plugins`](crate::Plugins).
@@ -29,10 +29,9 @@ pub trait RegistrySource: Send + Sync + 'static {
 /// Registry acquisition using [wasm-pkg-client].
 ///
 /// Fetches exact `namespace:name@version` references only, verifying every
-/// result against the registry's content digest. The attached [`PluginStore`]
-/// is a byte cache and offline fallback — never the authority while the
-/// registry is reachable — so a failing store degrades a load, never refuses
-/// it.
+/// result against the registry's content digest. The attached store is a
+/// byte cache and offline fallback — never the authority while the registry
+/// is reachable — so a failing store degrades a load, never refuses it.
 ///
 /// [wasm-pkg-client]: https://github.com/bytecodealliance/wasm-pkg-tools
 pub struct RegistryClient<S = NoStore> {
@@ -59,7 +58,7 @@ impl RegistryClient<NoStore> {
     }
 }
 
-impl<S: PluginStore> RegistryClient<S> {
+impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
     /// Replaces the client configuration (per-registry backend and
     /// credential settings).
     #[must_use]
@@ -68,9 +67,9 @@ impl<S: PluginStore> RegistryClient<S> {
         self
     }
 
-    /// Attaches a [`PluginStore`] as byte cache and offline fallback.
+    /// Attaches a store as byte cache and offline fallback.
     #[must_use]
-    pub fn cached<S2: PluginStore>(self, store: S2) -> RegistryClient<S2> {
+    pub fn cached<S2: ContentStore + ReleaseStore>(self, store: S2) -> RegistryClient<S2> {
         RegistryClient {
             default_registry: self.default_registry,
             config: self.config,
@@ -215,7 +214,7 @@ impl<S: PluginStore> RegistryClient<S> {
     }
 }
 
-impl<S: PluginStore> RegistrySource for RegistryClient<S> {
+impl<S: ContentStore + ReleaseStore> RegistrySource for RegistryClient<S> {
     fn acquire<'a>(
         &'a self, package: &'a str, registry: Option<&'a str>,
     ) -> BoxFuture<'a, Result<Vec<u8>, LoadError>> {

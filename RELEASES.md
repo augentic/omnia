@@ -18,9 +18,9 @@
   identity conflict, `internal` for a host fault), with the description
   naming the specific cause; a deployment guest's identity can never be
   re-bound, and a conflicting re-pin of an active package refuses.
-  Acquisition policy is the
-  new `Acquirer` — a composition-root value with one slot per location kind
-  (`RegistrySource`, `PathSource`), installed through `Plugins::install` by
+  Acquisition policy is a pair of
+  composition-root slots, one per location kind (`RegistrySource`,
+  `PathSource`), installed through `Plugins::install` by
   the `runtime!` macro's generated `Wiring::extend` hook from the declarative
   `plugins: { locations: [...] }` list; loads route structurally by kind and
   an empty slot refuses typed. The built-in acquirers ship
@@ -29,7 +29,7 @@
   `RegistryClient` (exact `namespace:name@version` references
   from a compiled-in default registry endpoint, verified against the
   registry's content digest, fresh-release-preferred when the `cache:`
-  backend attaches a `PluginStore` — `ContentStore` for digest-keyed
+  backend attaches a store — `ContentStore` for digest-keyed
   bytes, `ReleaseStore` for per-registry release records). The loader
   links once on the shared linker when a deployment declares `plugins`;
   wasmtime wires it only
@@ -148,7 +148,7 @@
   and at most one registry endpoint, lowered into the built-in
   `PathMounts`/`RegistryClient` acquirers slotted by location kind —
   and the optional `cache:` names the backend that joins the generated
-  bundle as the registry's `PluginStore`. Both keys are optional (a
+  bundle as the registry's store. Both keys are optional (a
   deployment that only does host-mediated dispatch needs no acquirer; loads
   then refuse typed at run time); an empty `locations:` list, a second
   `registry` entry, and a `cache:` without a registry entry are spanned

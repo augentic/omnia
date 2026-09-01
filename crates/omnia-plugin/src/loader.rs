@@ -31,8 +31,10 @@ impl<B: Clone + Send + Sync + 'static> LoadPlugin for Runtime<B> {
         &self, package: &str, from: Location, pin: Option<&str>,
     ) -> Result<Plugin, LoadError> {
         let pin = pin.map(digest::canonicalize).transpose().map_err(LoadError::Refused)?;
-        let Some(loaded) = self.extensions().get::<Plugins>() else {
-            return Err(LoadError::Internal(no_acquirer(package)));
+        let Some(plugins) = self.extensions().get::<Plugins>() else {
+            return Err(LoadError::Internal(format!(
+                "this deployment has no plugins; compile one in (`plugins: {{ locations: [...] }}`) to load `{package}`"
+            )));
         };
 
         // return the plugin if the package is already loaded
@@ -42,7 +44,7 @@ impl<B: Clone + Send + Sync + 'static> LoadPlugin for Runtime<B> {
         }
 
         // get the package bytes from the specified location
-        let bytes = loaded.acquire(package, &from).await?;
+        let bytes = plugins.load(package, &from).await?;
 
         // the operator's pin binds name to bytes before any validation work
         let hash = sha256_digest(&bytes);
@@ -122,7 +124,7 @@ impl Plugins {
         Arc::clone(&self.loader)
     }
 
-    async fn acquire(&self, package: &str, from_loc: &Location) -> Result<Vec<u8>, LoadError> {
+    async fn load(&self, package: &str, from_loc: &Location) -> Result<Vec<u8>, LoadError> {
         match from_loc {
             Location::Registry(endpoint) => match &self.registry {
                 Some(registry) => registry.acquire(package, endpoint.as_deref()).await,
@@ -197,12 +199,4 @@ impl From<AdmitError> for LoadError {
             AdmitError::Internal(reason) => Self::Internal(reason),
         }
     }
-}
-
-/// Refusal when the deployment installed no [`Plugins`] extension.
-pub fn no_acquirer(package: &str) -> String {
-    format!(
-        "this deployment has no acquirer; compile one in (`plugins: {{ locations: [...] }}`) to \
-         load `{package}`"
-    )
 }

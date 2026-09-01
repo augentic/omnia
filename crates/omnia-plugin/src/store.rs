@@ -12,11 +12,6 @@ use anyhow::Result;
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
 
-/// Both halves of the persistence behind [`RegistryClient`](crate::RegistryClient).
-pub trait PluginStore: ContentStore + ReleaseStore {}
-
-impl<T: ContentStore + ReleaseStore> PluginStore for T {}
-
 /// Content-addressed persistence: digest-keyed bytes shared across registries.
 pub trait ContentStore: Send + Sync + 'static {
     /// The stored bytes keyed by `digest`, if any.
@@ -65,7 +60,7 @@ pub struct ReleaseRecord {
     pub content_digest: String,
 }
 
-/// The cacheless [`PluginStore`], the default for
+/// The cacheless store, the default for
 /// [`RegistryClient`](crate::RegistryClient).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NoStore;

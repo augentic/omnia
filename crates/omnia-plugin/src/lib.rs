@@ -34,7 +34,7 @@ pub use self::host::{Error as LoadError, WasiPlugins, WasiPluginsCtxView, WasiPl
 pub use self::loader::{LoadPlugin, Plugin, PluginLoader, Plugins};
 pub use self::path::{PathMounts, PathSource};
 pub use self::registry::{RegistryClient, RegistrySource};
-pub use self::store::{ContentStore, NoStore, PluginStore, ReleaseRecord, ReleaseStore};
+pub use self::store::{ContentStore, NoStore, ReleaseRecord, ReleaseStore};
 
 /// Where an acquirer finds a package's component bytes — the mirror of the
 /// `omnia:plugins/loader` `location` variant.

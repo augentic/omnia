@@ -90,8 +90,8 @@ fn emit_locations_hook(config: &Config, backends_ty: &TokenStream) -> TokenStrea
     let registry_slot = registry.map_or_else(
         || quote!(None),
         |endpoint| {
-            // Spanned to the `cache:` value so a missing `PluginStore` bound
-            // lands on the declaration, not the generated call.
+            // Spanned to the `cache:` value so a missing store bound lands
+            // on the declaration, not the generated call.
             let cached = config.cache.as_ref().map(|store| {
                 let field = field_ident(store);
                 quote_spanned! {store.span()=>

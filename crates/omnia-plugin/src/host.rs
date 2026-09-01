@@ -92,7 +92,9 @@ impl<T> loader::HostWithStore<T> for WasiPlugins {
     ) -> Result<Resource<Plugin>, Error> {
         let loader = accessor
             .with(|mut store| store.get().loader)
-            .ok_or_else(|| Error::Internal(crate::loader::no_acquirer(&package)))?;
+            .ok_or_else(|| Error::Internal(
+                format!("this deployment has no plugins; compile one in (`plugins: {{ locations: [...] }}`) to load `{package}`")
+            ))?;
         let plugin = loader.load(package, from.into(), digest).await?;
         Ok(accessor.with(|mut store| store.get().table.push(plugin))?)
     }

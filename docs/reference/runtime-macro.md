@@ -141,7 +141,7 @@ An entry takes one of two shapes:
 
 Each load routes by its location kind — path loads to the path acquirer, registry loads to the registry acquirer — and a kind with no entry refuses typed. Routing is structural kind selection, never failure recovery.
 
-`cache:` names a backend type: it joins the generated `Backends` bundle exactly like a `hosts:` backend (env-connected, deduplicated — naming a backend a `hosts:` row already connects shares that connection), and its connected value must implement `omnia::PluginStore` (`ContentStore` + `ReleaseStore`). The macro attaches it to the registry acquirer (`RegistryClient::cached`), keeping resolution fresh-release-preferred: a reachable registry stays the authority, while the store answers content by digest and carries loads across registry unavailability.
+`cache:` names a backend type: it joins the generated `Backends` bundle exactly like a `hosts:` backend (env-connected, deduplicated — naming a backend a `hosts:` row already connects shares that connection), and its connected value must implement both `omnia::ContentStore` and `omnia::ReleaseStore`. The macro attaches it to the registry acquirer (`RegistryClient::cached`), keeping resolution fresh-release-preferred: a reachable registry stays the authority, while the store answers content by digest and carries loads across registry unavailability.
 
 The grammar's refusals are all compile-time, spanned to the offending key: an empty `locations:` list, a second `registry` entry, and a `cache:` without a `{ registry: ... }` entry to attach to are each rejected with a pointed diagnostic.
 
