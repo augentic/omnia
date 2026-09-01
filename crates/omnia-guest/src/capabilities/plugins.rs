@@ -106,8 +106,8 @@ pub struct PluginRef {
 
 /// A loaded plugin: the routed dispatch identity plus its resolved digest.
 ///
-/// Today a plain handle; when the component model's runtime components land
-/// this slot becomes the instance resource itself.
+/// A plain value — loading confers no lifecycle authority over the loaded
+/// component.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Plugin {
     id: String,
@@ -218,11 +218,11 @@ pub trait Plugins: Send + Sync {
         };
         let pin = plugin.digest.as_ref().map(|digest| digest.as_str().to_owned());
         async move {
-            let handle = loader::load(package, from, pin).await?;
-            let digest = handle.digest().parse().map_err(|error: Error| {
+            let loaded = loader::load(package, from, pin).await?;
+            let digest = loaded.digest.parse().map_err(|error: Error| {
                 Error::Internal(format!("host reported a malformed digest: {error}"))
             })?;
-            Ok(Plugin::new(handle.id(), digest))
+            Ok(Plugin::new(loaded.id, digest))
         }
     }
 }

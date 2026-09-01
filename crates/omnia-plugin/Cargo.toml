@@ -20,7 +20,6 @@ anyhow.workspace = true
 cap-std.workspace = true
 futures.workspace = true
 omnia-core.workspace = true
-serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["rt"] }
 tracing.workspace = true
 wasm-pkg-client.workspace = true
@@ -28,6 +27,7 @@ wasmtime = { workspace = true, features = ["runtime"] }
 
 [dev-dependencies]
 omnia.workspace = true
+serde = { workspace = true, features = ["derive"] }
 tempfile.workspace = true
 test-utils.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

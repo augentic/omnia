@@ -4,8 +4,9 @@
 
 - Guest-requested plugin loading: the `omnia:plugins/loader` host capability.
   A guest whose world imports it can ask the host to load a component at run
-  time — `load(package, location, digest?)` returns a typed `plugin` handle
-  (`id()`, `digest()`); component bytes never cross the interface in either
+  time — `load(package, location, digest?)` returns a plain `plugin` record
+  (`id`, `digest`), a value carrying no lifecycle authority over the loaded
+  component; component bytes never cross the interface in either
   direction. The host pipeline is trust-ordered: idempotency on
   (package, digest) → acquisition through the deployment's compiled-in
   acquirer → sha256 pin verification (before any wasmtime validation;
@@ -96,7 +97,7 @@
   re-exports core, `omnia-plugin`, and the `runtime!` macro under the
   existing paths — embedder imports are unchanged. `omnia-plugin` is now the
   whole plugins capability: the loader WIT and `WasiPlugins` host binding,
-  the `PluginLoader` load path, digest policy, and the acquisition seam all
+  the `Plugins` load path, digest policy, and the acquisition seam all
   live there, built on two intentional core seams that future capability
   crates reuse: `Runtime::admit` (the one privileged operation — safe
   validation, seam-export check, atomic registration; typed `AdmitError`)

@@ -9,8 +9,8 @@ use std::sync::{Arc, Mutex};
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
 use omnia_plugin::{
-    ContentStore, PathMounts, PathSource as _, RegistryClient, RegistrySource as _, ReleaseRecord,
-    ReleaseStore, sha256_digest,
+    ContentStore, PathMounts, PathSource as _, RegistryClient, RegistrySource as _, ReleaseStore,
+    sha256_digest,
 };
 use tempfile::TempDir;
 use wasm_pkg_client::{Config, Registry};
@@ -64,7 +64,7 @@ type ReleaseKey = (String, String, String);
 #[derive(Clone, Default)]
 struct MemStore {
     content: Arc<Mutex<HashMap<String, Vec<u8>>>>,
-    releases: Arc<Mutex<HashMap<ReleaseKey, ReleaseRecord>>>,
+    releases: Arc<Mutex<HashMap<ReleaseKey, String>>>,
 }
 
 impl MemStore {
@@ -94,17 +94,17 @@ impl ContentStore for MemStore {
 impl ReleaseStore for MemStore {
     fn release<'a>(
         &'a self, registry: &'a str, package: &'a str, version: &'a str,
-    ) -> BoxFuture<'a, anyhow::Result<Option<ReleaseRecord>>> {
+    ) -> BoxFuture<'a, anyhow::Result<Option<String>>> {
         let key = (registry.to_owned(), package.to_owned(), version.to_owned());
-        let record = self.releases.lock().expect("release lock").get(&key).cloned();
-        async move { Ok(record) }.boxed()
+        let digest = self.releases.lock().expect("release lock").get(&key).cloned();
+        async move { Ok(digest) }.boxed()
     }
 
     fn put_release<'a>(
-        &'a self, registry: &'a str, package: &'a str, record: &'a ReleaseRecord,
+        &'a self, registry: &'a str, package: &'a str, version: &'a str, digest: &'a str,
     ) -> BoxFuture<'a, anyhow::Result<()>> {
-        let key = (registry.to_owned(), package.to_owned(), record.version.clone());
-        self.releases.lock().expect("release lock").insert(key, record.clone());
+        let key = (registry.to_owned(), package.to_owned(), version.to_owned());
+        self.releases.lock().expect("release lock").insert(key, digest.to_owned());
         async move { Ok(()) }.boxed()
     }
 }

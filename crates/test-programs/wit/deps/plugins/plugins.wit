@@ -29,15 +29,14 @@ interface loader {
         internal(string),
     }
 
-    /// A loaded plugin: a typed wrapper over the routed dispatch identity.
-    /// When the component model's runtime components land, this same slot
-    /// becomes the instance resource.
-    resource plugin {
+    /// A loaded plugin: a plain value, because the requester holds no
+    /// lifecycle authority over the loaded component.
+    record plugin {
         /// The routed identity host-mediated dispatch keys on.
-        id: func() -> string;
+        id: string,
         /// The resolved `sha256:<hex>` content digest of the loaded bytes —
         /// commit it as a pin to make an unpinned load reproducible.
-        digest: func() -> string;
+        digest: string,
     }
 
     /// Load `package`, idempotent on (package, digest): an already-active

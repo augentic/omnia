@@ -147,7 +147,7 @@ mod locations_grammar {
 
     use anyhow::Result;
     use omnia::futures::future::BoxFuture;
-    use omnia::{Backend, ContentStore, NoOptions, NoStore, ReleaseRecord, ReleaseStore};
+    use omnia::{Backend, ContentStore, NoOptions, NoStore, ReleaseStore};
 
     // Clone without Copy: the generated hook clones the backend out of the
     // bundle, and a Copy type would trip `clippy::clone_on_copy` there.
@@ -177,14 +177,14 @@ mod locations_grammar {
     impl ReleaseStore for Cache {
         fn release<'a>(
             &'a self, registry: &'a str, package: &'a str, version: &'a str,
-        ) -> BoxFuture<'a, Result<Option<ReleaseRecord>>> {
+        ) -> BoxFuture<'a, Result<Option<String>>> {
             ReleaseStore::release(&NoStore, registry, package, version)
         }
 
         fn put_release<'a>(
-            &'a self, registry: &'a str, package: &'a str, record: &'a ReleaseRecord,
+            &'a self, registry: &'a str, package: &'a str, version: &'a str, digest: &'a str,
         ) -> BoxFuture<'a, Result<()>> {
-            ReleaseStore::put_release(&NoStore, registry, package, record)
+            ReleaseStore::put_release(&NoStore, registry, package, version, digest)
         }
     }
 
@@ -267,7 +267,7 @@ async fn reload_after_deregister_binds_fresh_bytes() {
     .expect("assembling runtime");
     let location = || Location::Path("./plugin.wasm".to_owned());
 
-    let first = runtime.load("test:echoer".into(), location(), None).await.expect("first load");
+    let first = runtime.load("test:echoer", location(), None).await.expect("first load");
     runtime.deregister(first.id()).expect("deregistering the loaded plugin");
 
     // Same component, one extra custom section: same behavior, new digest.
@@ -276,7 +276,7 @@ async fn reload_after_deregister_binds_fresh_bytes() {
     std::fs::write(scratch.path().join("plugin.wasm"), &changed).expect("re-staging");
 
     let stale = runtime
-        .load("test:echoer".into(), location(), Some(first.digest().to_owned()))
+        .load("test:echoer", location(), Some(first.digest()))
         .await
         .expect_err("the old digest no longer matches the staged bytes");
     match &stale {
@@ -286,7 +286,7 @@ async fn reload_after_deregister_binds_fresh_bytes() {
         other => panic!("expected a digest-mismatch refusal: {other:?}"),
     }
 
-    let fresh = runtime.load("test:echoer".into(), location(), None).await.expect("re-load");
+    let fresh = runtime.load("test:echoer", location(), None).await.expect("re-load");
     assert_ne!(fresh.digest(), first.digest(), "the re-load bound fresh bytes");
     assert_eq!(fresh.digest(), sha256_digest(&changed));
     runtime.shutdown();
@@ -311,7 +311,7 @@ async fn pinned_reload_refuses_after_external_reregistration() {
     .expect("assembling runtime");
     let location = || Location::Path("./plugin.wasm".to_owned());
 
-    let first = runtime.load("test:echoer".into(), location(), None).await.expect("first load");
+    let first = runtime.load("test:echoer", location(), None).await.expect("first load");
     runtime.deregister(first.id()).expect("deregistering the loaded plugin");
 
     // Same component, one extra custom section: same behavior, new digest —
@@ -324,9 +324,46 @@ async fn pinned_reload_refuses_after_external_reregistration() {
         .expect("re-registering externally");
 
     let stale = runtime
-        .load("test:echoer".into(), location(), Some(first.digest().to_owned()))
+        .load("test:echoer", location(), Some(first.digest()))
         .await
         .expect_err("a load never attests an externally registered guest");
     assert!(matches!(stale, LoadError::AlreadyActive(_)), "{stale:?}");
+    runtime.shutdown();
+}
+
+// A deployment that links the loader host but never installs the `Plugins`
+// extension refuses every load as loader misconfiguration.
+#[tokio::test]
+async fn load_without_plugins_installed_refuses() {
+    let scratch = test_utils::scratch("plugins_uninstalled");
+    let manifest = Manifest::new()
+        .plugins(["omnia-test:link/ops"])
+        .guest(GuestEntry::new("requester", test_utils::PLUGINS_LOAD_PATH))
+        .mounts([scratch.mount(false)]);
+    let deployment = DeploymentBuilder::new()
+        .manifest(manifest)
+        .mode(Mode::Command)
+        .build::<StoreCtx<()>>()
+        .await
+        .expect("building deployment");
+    let runtime = Runtime::new(
+        deployment,
+        |deployment| {
+            deployment.host::<WasiPlugins, ()>()?;
+            Ok(())
+        },
+        |_| Ok(()),
+    )
+    .await
+    .expect("assembling runtime");
+
+    let error = runtime
+        .load("test:echoer", Location::Path("./plugin.wasm".to_owned()), None)
+        .await
+        .expect_err("a deployment without plugins refuses every load");
+    assert!(
+        matches!(&error, LoadError::Internal(detail) if detail.contains("has no plugins")),
+        "{error:?}"
+    );
     runtime.shutdown();
 }

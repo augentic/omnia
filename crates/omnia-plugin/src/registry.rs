@@ -2,9 +2,6 @@
 //!
 //! [wasm-pkg-client]: https://github.com/bytecodealliance/wasm-pkg-tools
 
-use std::collections::HashMap;
-use std::sync::{Mutex, PoisonError};
-
 use anyhow::{Context as _, Result, bail};
 use futures::future::BoxFuture;
 use futures::{FutureExt as _, TryStreamExt as _};
@@ -12,7 +9,7 @@ use omnia_core::sha256_digest;
 use wasm_pkg_client::{Client, Config, ContentStream, PackageRef, Registry, Release, Version};
 
 use crate::LoadError;
-use crate::store::{ContentStore, NoStore, ReleaseRecord, ReleaseStore};
+use crate::store::{ContentStore, NoStore, ReleaseStore};
 
 /// Registry acquisition policy — the registry slot of
 /// [`Plugins`](crate::Plugins).
@@ -38,7 +35,6 @@ pub struct RegistryClient<S = NoStore> {
     default_registry: String,
     config: Config,
     store: S,
-    clients: Mutex<HashMap<Registry, Client>>,
 }
 
 impl RegistryClient<NoStore> {
@@ -53,7 +49,6 @@ impl RegistryClient<NoStore> {
             default_registry: default_registry.into(),
             config: Config::empty(),
             store: NoStore,
-            clients: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -74,20 +69,15 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
             default_registry: self.default_registry,
             config: self.config,
             store,
-            clients: self.clients,
         }
     }
 
+    /// A client routed at `registry`; loads are rare, so a fresh client per
+    /// fetch beats caching machinery.
     fn client(&self, registry: Registry) -> Client {
-        let mut clients = self.clients.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(client) = clients.get(&registry) {
-            return client.clone();
-        }
         let mut config = self.config.clone();
-        config.set_default_registry(Some(registry.clone()));
-        let client = Client::new(config);
-        clients.insert(registry, client.clone());
-        client
+        config.set_default_registry(Some(registry));
+        Client::new(config)
     }
 
     /// Resolve and fetch `package`, serving verified bytes from the store
@@ -105,30 +95,8 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
             self.resolve_release(&client, registry, package, &package_ref, &version).await?;
         let digest = release.content_digest.to_string();
 
-        match self.store.content(&digest).await {
-            Ok(Some(bytes)) => {
-                // A poisoned entry must never become code; discard and refetch.
-                if sha256_digest(&bytes) == digest {
-                    tracing::debug!(package, digest, "package served from the store");
-                    return Ok(bytes);
-                }
-                tracing::warn!(
-                    package,
-                    digest,
-                    "stored content failed verification; discarding and refetching"
-                );
-            }
-            Ok(None) => {}
-            Err(error) => {
-                // Cache, never authority: an unreadable store degrades to a
-                // fresh fetch.
-                tracing::warn!(
-                    package,
-                    digest,
-                    error = format!("{error:#}"),
-                    "failed to read the store; fetching fresh"
-                );
-            }
+        if let Some(bytes) = self.stored(package, &digest).await {
+            return Ok(bytes);
         }
 
         let content = client
@@ -159,6 +127,39 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
         Ok(bytes)
     }
 
+    /// The store's verified bytes for `digest`; `None` on a miss, a failed
+    /// verification, or an unreadable store — the cache never refuses a load.
+    async fn stored(&self, package: &str, digest: &str) -> Option<Vec<u8>> {
+        match self.store.content(digest).await {
+            Ok(Some(bytes)) => {
+                // A poisoned entry must never become code; discard and refetch.
+                if sha256_digest(&bytes) == digest {
+                    tracing::debug!(package, digest, "package served from the store");
+                    Some(bytes)
+                } else {
+                    tracing::warn!(
+                        package,
+                        digest,
+                        "stored content failed verification; discarding and refetching"
+                    );
+                    None
+                }
+            }
+            Ok(None) => None,
+            Err(error) => {
+                // Cache, never authority: an unreadable store degrades to a
+                // fresh fetch.
+                tracing::warn!(
+                    package,
+                    digest,
+                    error = format!("{error:#}"),
+                    "failed to read the store; fetching fresh"
+                );
+                None
+            }
+        }
+    }
+
     /// Resolve the release fresh, refreshing the store's record; fall back
     /// to the stored record — logged — only on a network failure.
     async fn resolve_release(
@@ -168,11 +169,12 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
         let full_name = package_ref.to_string();
         match client.get_release(package_ref, version).await {
             Ok(release) => {
-                let record = ReleaseRecord {
-                    version: version.to_string(),
-                    content_digest: release.content_digest.to_string(),
-                };
-                if let Err(error) = self.store.put_release(registry, &full_name, &record).await {
+                let digest = release.content_digest.to_string();
+                if let Err(error) = self
+                    .store
+                    .put_release(registry, &full_name, &version.to_string(), &digest)
+                    .await
+                {
                     tracing::warn!(
                         package,
                         registry,
@@ -188,7 +190,7 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
                     .release(registry, &full_name, &version.to_string())
                     .await
                     .map_err(|error| LoadError::Unavailable(format!("{error:#}")))?;
-                let Some(record) = stored else {
+                let Some(digest) = stored else {
                     return Err(LoadError::Unavailable(format!("resolving `{package}`: {error}")));
                 };
                 tracing::warn!(
@@ -197,7 +199,7 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
                     error = format!("{error:#}"),
                     "registry unreachable; falling back to the stored release record"
                 );
-                let content_digest = record.content_digest.parse().map_err(|error| {
+                let content_digest = digest.parse().map_err(|error| {
                     LoadError::Unavailable(format!(
                         "stored release record for `{package}` carries a malformed digest: {error}"
                     ))

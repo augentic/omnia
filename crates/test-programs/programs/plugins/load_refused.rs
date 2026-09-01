@@ -67,9 +67,9 @@ async fn scenario() {
 
     // An active loaded package refuses a conflicting re-pin.
     let plugin = load("test:echoer", "./plugin.wasm", None).await.expect("load succeeds");
+    assert_eq!(plugin.id, "test:echoer");
     let err = load("test:echoer", "./plugin.wasm", Some(&wrong))
         .await
         .expect_err("conflicting pin for an active package");
     assert!(matches!(err, Error::AlreadyActive(_)), "{err:?}");
-    drop(plugin);
 }

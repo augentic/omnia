@@ -88,26 +88,22 @@ impl PathSource for PathMounts {
 // it, longest location-name prefix first. The subpath must be plain and
 // relative — cap-std then refuses any escape at open time.
 fn resolve(path: &str, entries: &[Mount]) -> Result<(Arc<Dir>, String)> {
-    let mut best: Option<(&Mount, &str)> = None;
-    for entry in entries {
-        let subpath = if path == entry.name {
-            ""
-        } else if let Some(rest) = path.strip_prefix(&entry.name).and_then(|r| r.strip_prefix('/'))
-        {
-            rest
-        } else {
-            continue;
-        };
-        if best.is_none_or(|(current, _)| entry.name.len() > current.name.len()) {
-            best = Some((entry, subpath));
-        }
-    }
-
-    if best.is_none() {
+    let best = entries
+        .iter()
+        .filter_map(|entry| {
+            if path == entry.name {
+                // Naming a location itself yields an empty subpath, which
+                // `check_subpath` refuses — kept so the refusal names the
+                // location rather than "under no location".
+                return Some((entry, ""));
+            }
+            let subpath = path.strip_prefix(&entry.name)?.strip_prefix('/')?;
+            Some((entry, subpath))
+        })
+        .max_by_key(|(entry, _)| entry.name.len())
         // wasi-libc resolves bare relative paths against a `.` preopen; do
         // the same so host- and guest-side views of a path agree.
-        best = entries.iter().find(|entry| entry.name == ".").map(|entry| (entry, path));
-    }
+        .or_else(|| entries.iter().find(|entry| entry.name == ".").map(|entry| (entry, path)));
 
     let (entry, subpath) =
         best.ok_or_else(|| anyhow!("path `{path}` is not under any location of this deployment"))?;
@@ -117,8 +113,9 @@ fn resolve(path: &str, entries: &[Mount]) -> Result<(Arc<Dir>, String)> {
 }
 
 fn check_subpath(path: &str, subpath: &str) -> Result<()> {
-    let plain = !subpath.starts_with('/')
-        && !subpath.contains('\\')
+    // A leading '/' surfaces as an empty first segment, so the split check
+    // also refuses absolute paths.
+    let plain = !subpath.contains('\\')
         && subpath.split('/').all(|part| !part.is_empty() && part != "." && part != "..");
     ensure!(plain, "component path `{path}` is not a plain relative path within a location");
     Ok(())

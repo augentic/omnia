@@ -29,6 +29,5 @@ pub use omnia_core::{
 pub use omnia_host_macros::runtime;
 pub use omnia_plugin::{
     ContentStore, LoadError, Location, NoStore, PathMounts, PathSource, Plugin, PluginLoader,
-    Plugins, RegistryClient, RegistrySource, ReleaseRecord, ReleaseStore, WasiPlugins,
-    sha256_digest,
+    Plugins, RegistryClient, RegistrySource, ReleaseStore, WasiPlugins, sha256_digest,
 };
