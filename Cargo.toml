@@ -28,8 +28,6 @@ cargo = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 
-multiple_crate_versions = "allow"
-
 # Cherry-picked lints are from the `restriction` lint group in order to drive up
 # consistency, quality, and brevity
 # See https://microsoft.github.io/rust-guidelines/guidelines/universal/index.html
