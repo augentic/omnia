@@ -29,7 +29,8 @@ mod store;
 use std::fmt;
 use std::sync::Arc;
 
-pub use self::digest::sha256_digest;
+pub use omnia_core::sha256_digest;
+
 pub use self::host::{Error as LoadError, WasiPlugins, WasiPluginsCtxView, WasiPluginsView};
 pub use self::loader::{LoadPlugin, Plugin, PluginLoader, Plugins};
 pub use self::path::{PathMounts, PathSource};
@@ -55,6 +56,30 @@ impl fmt::Display for Location {
         }
     }
 }
+
+/// Why an acquirer could not produce a package's bytes, split by remedy.
+///
+/// A [`Refused`](Self::Refused) request can never succeed as written; an
+/// [`Unavailable`](Self::Unavailable) source may recover.
+#[derive(Debug)]
+pub enum AcquireError {
+    /// An authoritative refusal — a malformed reference, a package or path
+    /// the source does not serve; retrying the same request cannot succeed.
+    Refused(anyhow::Error),
+    /// The source failed to produce the bytes but may recover, so a retry
+    /// can succeed.
+    Unavailable(anyhow::Error),
+}
+
+impl fmt::Display for AcquireError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (Self::Refused(error) | Self::Unavailable(error)) = self;
+        // `:#` keeps the full context chain from acquisition errors.
+        if f.alternate() { write!(f, "{error:#}") } else { write!(f, "{error}") }
+    }
+}
+
+impl std::error::Error for AcquireError {}
 
 /// Compiled-in acquisition policy: one slot per [`Location`] kind, where an
 /// empty slot refuses the kind.
@@ -89,6 +114,14 @@ impl Acquirer {
                 }
             },
         };
-        outcome.map_err(|err| LoadError::Unavailable(format!("acquiring `{package}`: {err:#}")))
+
+        outcome.map_err(|error| match error {
+            AcquireError::Refused(error) => {
+                LoadError::Refused(format!("acquiring `{package}`: {error:#}"))
+            }
+            AcquireError::Unavailable(error) => {
+                LoadError::Unavailable(format!("acquiring `{package}`: {error:#}"))
+            }
+        })
     }
 }

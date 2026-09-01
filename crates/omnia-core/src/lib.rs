@@ -5,6 +5,7 @@
 #[cfg(feature = "cli")]
 mod cli;
 mod deployment;
+mod digest;
 mod dispatch;
 mod extensions;
 mod host;
@@ -30,6 +31,7 @@ pub use self::deployment::{
     Deployment, DeploymentBuilder, GuestArtifact, GuestEntry, GuestRoutes, Manifest, Mount,
     Precompiled, SourceSpec, Transport, TransportKind, WasmOnly,
 };
+pub use self::digest::sha256_digest;
 pub use self::dispatch::{
     Dispatcher, FirstArgSelector, GuestSelector, LinkClient, WrpcState, as_command_chain,
     serve_links,

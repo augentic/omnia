@@ -68,6 +68,30 @@
 
 ### Changed
 
+- Plugin loads are lock-free and race-safe. The loader's (package, digest)
+  idempotency record now rides the registry entry itself (`Guest::digest`,
+  recorded by `Runtime::admit` from the admitted bytes), so the attestation
+  can never outlive or misdescribe the guest it names — an identity
+  deregistered and re-registered by the embedder no longer answers a pinned
+  re-load with a stale digest. The loader's shadow digest map and the global
+  load mutex are deleted; concurrent loads race through `admit`, whose
+  atomic publication reports the loser via the new
+  `AdmitError::AlreadyRegistered` variant, resolved against the winner's
+  recorded digest (idempotent success on a match, `already-active`
+  otherwise). `sha256_digest` moves to `omnia-core` (still re-exported from
+  `omnia-plugin` and `omnia`).
+- Acquirers refuse honestly: `RegistrySource` and `PathSource` return the
+  new typed `AcquireError` — `Refused` for an authoritative "no" (a
+  malformed reference, a package or path the source does not serve),
+  `Unavailable` for a failure a retry may clear — and the loader maps them
+  onto the WIT `refused`/`unavailable` variants, so an unknown package no
+  longer reports as retryable.
+- The runtime core drops "plugin" from its vocabulary: the manifest accessor
+  `Manifest::plugin_interfaces()` is renamed to `link_interfaces()`, and
+  admission refusals name "link interfaces". The config surface is
+  unchanged — the TOML `plugins = [...]` list, the macro `plugins:` block,
+  and the CLI `--plugins` flag keep their names; only `omnia-plugin` speaks
+  "plugin".
 - The `omnia` crate splits into `omnia-core` (the runtime spine: deployment,
   registry, dispatch, stores, telemetry, CLI) and a thin `omnia` facade that
   re-exports core, `omnia-plugin`, and the `runtime!` macro under the
@@ -83,8 +107,9 @@
   holds a `WeakRuntime` via `Runtime::downgrade`). `Runtime::new`'s third
   parameter is now the extend hook (`FnOnce(&Runtime<B>) -> Result<()>`);
   `StoreConfig::loader`/`StoreBase::loader` are replaced by the `extensions`
-  handle, and loader digest bookkeeping moved into `omnia-plugin`, pruned
-  lazily under the load lock instead of on deregistration.
+  handle, and the loader's digest record rides the registry entry itself
+  (`Guest::digest`, recorded at admission), living and dying with the guest
+  it attests.
 - Host wiring is trait-carried, not name-derived (pre-1.0 hard cut, no
   aliases). Omnia core gains `HostCtx` (the host's borrow shape and view
   assembly, `Borrow<'a>` GAT + `view`), `Provides<H>` (the one
@@ -150,7 +175,7 @@
 - The host-mediated interface list is renamed from `dispatch` to `plugins`:
   a top-level `plugins = [...]` in TOML, a top-level `plugins: [...]` key in
   the `runtime!` macro, the fluent `Manifest::plugins(...)` setter (with the
-  `Manifest.plugins` field and the `Manifest::plugin_interfaces()` accessor),
+  `Manifest.plugins` field and the `Manifest::link_interfaces()` accessor),
   and the CLI flag `--plugins` (replacing `--dispatch`, no alias). Stale keys
   fail loudly: a leftover top-level `dispatch` (or `link`) is a parse/compile
   error, and `plugins` misplaced on a guest entry is rejected with a pointed

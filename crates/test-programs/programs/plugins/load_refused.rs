@@ -47,7 +47,7 @@ async fn scenario() {
     let wrong = format!("sha256:{}", "ab".repeat(32));
     let err =
         load("test:mismatch", "./plugin.wasm", Some(&wrong)).await.expect_err("mismatched pin");
-    assert_refused(&err, "not the pinned");
+    assert_refused(&err, "does not match the pinned");
 
     // A missing file is an acquisition failure, not a validation one.
     let err = load("test:absent", "./absent.wasm", None).await.expect_err("missing component");
@@ -57,9 +57,9 @@ async fn scenario() {
     let err = load("test:native", "./native.bin", None).await.expect_err("native bytes");
     assert_refused(&err, "pre-compiled");
 
-    // A valid component that exports no declared plugin interface.
+    // A valid component that exports no declared link interface.
     let err = load("test:noseam", "./noseam.wasm", None).await.expect_err("no seam export");
-    assert_refused(&err, "plugin interfaces");
+    assert_refused(&err, "link interfaces");
 
     // A deployment guest's identity can never be re-bound by a load.
     let err = load("requester", "./plugin.wasm", None).await.expect_err("static identity");

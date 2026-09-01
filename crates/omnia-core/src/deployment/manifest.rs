@@ -100,7 +100,7 @@ impl Manifest {
         self
     }
 
-    /// Append host-mediated plugin interfaces.
+    /// Append host-mediated link interfaces (the manifest's `plugins` list).
     #[must_use]
     pub fn plugins<I, S>(mut self, interfaces: I) -> Self
     where
@@ -185,9 +185,10 @@ impl Manifest {
         Ok(sources)
     }
 
-    /// The host-mediated plugin interfaces as an ordered set.
+    /// The host-mediated link interfaces (the `plugins` list) as an ordered
+    /// set.
     #[must_use]
-    pub fn plugin_interfaces(&self) -> BTreeSet<Box<str>> {
+    pub fn link_interfaces(&self) -> BTreeSet<Box<str>> {
         self.plugins.iter().map(|interface| Box::from(interface.as_str())).collect()
     }
 
@@ -503,8 +504,8 @@ mod tests {
         assert_eq!(manifest.guests[0].id, "workflow");
         assert!(matches!(manifest.guests[1].source, SourceSpec::Path(_)));
         assert_eq!(manifest.transport.default, TransportKind::InProcess);
-        assert!(manifest.plugin_interfaces().contains("omnia:shared/log"));
-        assert!(manifest.plugin_interfaces().contains("augentic:specify/source"));
+        assert!(manifest.link_interfaces().contains("omnia:shared/log"));
+        assert!(manifest.link_interfaces().contains("augentic:specify/source"));
     }
 
     #[test]
@@ -796,7 +797,7 @@ mod tests {
         assert_eq!(manifest.guests[0].routes.http, ["/router"]);
         assert_eq!(manifest.guests[0].routes.messaging, ["jobs.>"]);
         assert_eq!(manifest.guests[1].routes.websocket, ["events.*"]);
-        assert!(manifest.plugin_interfaces().contains("omnia:link/echo"));
-        assert!(manifest.plugin_interfaces().contains("omnia:shared/log"));
+        assert!(manifest.link_interfaces().contains("omnia:link/echo"));
+        assert!(manifest.link_interfaces().contains("omnia:shared/log"));
     }
 }

@@ -1,12 +1,11 @@
 //! The `omnia:plugins/loader` load path.
 
-use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::Arc;
 
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
-use omnia_core::{AdmitError, GuestId, Runtime, WeakRuntime};
+use omnia_core::{AdmitError, GuestId, Runtime, WeakRuntime, sha256_digest};
 
 use crate::host::Error as LoadError;
 use crate::{Acquirer, Location, digest};
@@ -34,50 +33,64 @@ impl<B: Clone + Send + Sync + 'static> LoadPlugin for Runtime<B> {
             return Err(LoadError::Internal(no_acquirer(package)));
         };
 
-        let mut digests = loaded.digests.lock().await;
-        digests.retain(|id, _| self.registry().get(id).is_some());
-
-        // return the plugin if the package is already loaded
+        // Return the plugin if the package is already loaded. The digest
+        // record lives on the registry entry itself, so it can never outlive
+        // (or misdescribe) the guest it attests.
         let id = GuestId::from(package);
-        if self.registry().get(&id).is_some() {
-            return match digests.get(&id) {
-                Some(digest) if pin.as_deref() == Some(digest.as_ref()) => Ok(Plugin {
-                    id,
-                    digest: Arc::clone(digest),
-                }),
-                _ => Err(LoadError::AlreadyActive(format!("`{package}` is already active"))),
-            };
+        if let Some(guest) = self.registry().get(&id) {
+            return already_active(package, id, guest.digest(), pin.as_deref());
         }
 
         // get the package bytes from the specified location
         let bytes = loaded.acquirer.acquire(package, &from).await?;
 
         // the operator's pin binds name to bytes before any validation work
-        let hash = crate::sha256_digest(&bytes);
+        let hash = sha256_digest(&bytes);
         if pin.is_some_and(|pin| pin != hash) {
             return Err(LoadError::Refused(format!(
                 "resolved package `{package}` digest {hash} does not match the pinned digest"
             )));
         }
 
-        // load the guest into the runtime
-        self.admit(id.clone(), bytes).await?;
-
-        // insert the digest into the registry
-        let digest = Arc::from(hash);
-        digests.insert(id.clone(), Arc::clone(&digest));
-        drop(digests);
-
-        tracing::debug!(package, "plugin loaded");
-        Ok(Plugin { id, digest })
+        // Publication inside `admit` is the transactional occupancy check, so
+        // concurrent loads need no lock: the loser of a race resolves against
+        // the winner's recorded digest.
+        match self.admit(id.clone(), bytes).await {
+            Ok(()) => {
+                tracing::debug!(package, "plugin loaded");
+                Ok(Plugin {
+                    id,
+                    digest: Arc::from(hash),
+                })
+            }
+            Err(AdmitError::AlreadyRegistered(_)) => {
+                let recorded =
+                    self.registry().get(&id).and_then(|guest| guest.digest().map(str::to_owned));
+                already_active(package, id, recorded.as_deref(), Some(&hash))
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 }
 
-/// Installed acquisition policy, digest records, and store-reachable loader.
+/// Resolve a load against an already-registered identity: idempotent success
+/// when `wanted` names the recorded digest, `already-active` otherwise
+/// (including entries with no digest record, which a load never attests).
+fn already_active(
+    package: &str, id: GuestId, recorded: Option<&str>, wanted: Option<&str>,
+) -> Result<Plugin, LoadError> {
+    match recorded {
+        Some(digest) if wanted == Some(digest) => Ok(Plugin {
+            id,
+            digest: Arc::from(digest),
+        }),
+        _ => Err(LoadError::AlreadyActive(format!("`{package}` is already active"))),
+    }
+}
+
+/// Installed acquisition policy and store-reachable loader.
 pub struct Plugins {
     acquirer: Acquirer,
-    // Serializes loads so the (package, digest) check is race-free.
-    digests: tokio::sync::Mutex<BTreeMap<GuestId, Arc<str>>>,
     loader: Arc<dyn PluginLoader>,
 }
 
@@ -93,7 +106,6 @@ impl Plugins {
     {
         let plugins = Self {
             acquirer,
-            digests: tokio::sync::Mutex::new(BTreeMap::new()),
             loader: Arc::new(runtime.downgrade()),
         };
         anyhow::ensure!(
@@ -159,6 +171,7 @@ impl From<AdmitError> for LoadError {
             AdmitError::ArtifactRefused(reason) | AdmitError::SeamMissing(reason) => {
                 Self::Refused(reason)
             }
+            AdmitError::AlreadyRegistered(reason) => Self::AlreadyActive(reason),
             AdmitError::Internal(reason) => Self::Internal(reason),
         }
     }

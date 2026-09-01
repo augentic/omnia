@@ -66,7 +66,7 @@ pub struct StoreBase {
     /// [`Store`]: wasmtime::Store
     pub limits: StoreLimits,
     /// Per-store wRPC view state for host-mediated dynamic linking; inert
-    /// unless the deployment declares `plugins` interfaces.
+    /// unless the deployment declares link interfaces (the manifest `plugins` list).
     pub wrpc: WrpcState,
     /// Type-erased host->guest dispatcher (e.g. `wasi-model`'s `resolve`); a
     /// fresh handle to the owning runtime. Inert unless a host binding reaches

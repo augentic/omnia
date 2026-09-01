@@ -14,8 +14,8 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
 use omnia::{
-    Acquirer, DeploymentBuilder, ExitStatus, GuestEntry, LoadError, LoadPlugin as _, Location,
-    Manifest, Mode, PathMounts, Plugins, RegistryClient, Runtime, StoreCtx, WasiPlugins,
+    Acquirer, DeploymentBuilder, ExitStatus, GuestArtifact, GuestEntry, LoadError, LoadPlugin as _,
+    Location, Manifest, Mode, PathMounts, Plugins, RegistryClient, Runtime, StoreCtx, WasiPlugins,
     sha256_digest,
 };
 
@@ -276,12 +276,49 @@ async fn reload_after_deregister_binds_fresh_bytes() {
         .await
         .expect_err("the old digest no longer matches the staged bytes");
     match &stale {
-        LoadError::Refused(detail) => assert!(detail.contains("not the pinned"), "{detail}"),
+        LoadError::Refused(detail) => {
+            assert!(detail.contains("does not match the pinned"), "{detail}");
+        }
         other => panic!("expected a digest-mismatch refusal: {other:?}"),
     }
 
     let fresh = runtime.load_plugin("test:echoer", location(), None).await.expect("re-load");
     assert_ne!(fresh.digest(), first.digest(), "the re-load bound fresh bytes");
     assert_eq!(fresh.digest(), sha256_digest(&changed));
+    runtime.shutdown();
+}
+
+// The digest record lives on the registry entry, so an embedder swapping the
+// identity outside the load path (deregister + `Runtime::register`) leaves no
+// stale attestation behind: a pinned re-load must refuse rather than answer
+// with the old digest over the new bytes.
+#[tokio::test]
+async fn pinned_reload_refuses_after_external_reregistration() {
+    let scratch = test_utils::scratch("plugins_reregister");
+    std::fs::copy(test_utils::LINK_ECHOER, scratch.path().join("plugin.wasm"))
+        .expect("staging the loadable echoer");
+    let runtime =
+        requester_runtime(test_utils::PLUGINS_LOAD_PATH, &scratch, path_acquirer(&scratch))
+            .await
+            .expect("assembling runtime");
+    let location = || Location::Path("./plugin.wasm".to_owned());
+
+    let first = runtime.load_plugin("test:echoer", location(), None).await.expect("first load");
+    runtime.deregister(first.id()).expect("deregistering the loaded plugin");
+
+    // Same component, one extra custom section: same behavior, new digest —
+    // registered by the embedder, not through the loader.
+    let mut changed = std::fs::read(test_utils::LINK_ECHOER).expect("reading the echoer");
+    changed.extend_from_slice(&custom_section(b"reregister"));
+    runtime
+        .register("test:echoer", GuestArtifact::wasm(changed))
+        .await
+        .expect("re-registering externally");
+
+    let stale = runtime
+        .load_plugin("test:echoer", location(), Some(first.digest()))
+        .await
+        .expect_err("a load never attests an externally registered guest");
+    assert!(matches!(stale, LoadError::AlreadyActive(_)), "{stale:?}");
     runtime.shutdown();
 }
