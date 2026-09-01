@@ -28,10 +28,9 @@ impl Guest for HttpGuest {
 }
 
 #[omnia_wasi_otel::instrument]
-async fn echo_get(Json(body): Json<Value>) -> HttpResult<Json<Value>> {
+async fn echo_get() -> HttpResult<Json<Value>> {
     Ok(Json(json!({
-        "message": "Hello from echo_get!",
-        "request": body
+        "message": "Hello from echo_get!"
     })))
 }
 
