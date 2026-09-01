@@ -89,6 +89,6 @@ impl Acquirer {
                 }
             },
         };
-        outcome.map_err(|error| LoadError::Unavailable(format!("acquiring `{package}`: {error:#}")))
+        outcome.map_err(|err| LoadError::Unavailable(format!("acquiring `{package}`: {err:#}")))
     }
 }

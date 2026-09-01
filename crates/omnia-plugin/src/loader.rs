@@ -30,11 +30,11 @@ impl<B: Clone + Send + Sync + 'static> LoadPlugin for Runtime<B> {
         &self, package: &str, from: Location, pin: Option<&str>,
     ) -> Result<Plugin, LoadError> {
         let pin = pin.map(digest::canonicalize).transpose().map_err(LoadError::Refused)?;
-        let Some(state) = self.extensions().get::<Plugins>() else {
+        let Some(loaded) = self.extensions().get::<Plugins>() else {
             return Err(LoadError::Internal(no_acquirer(package)));
         };
 
-        let mut digests = state.digests.lock().await;
+        let mut digests = loaded.digests.lock().await;
         digests.retain(|id, _| self.registry().get(id).is_some());
 
         // return the plugin if the package is already loaded
@@ -50,15 +50,13 @@ impl<B: Clone + Send + Sync + 'static> LoadPlugin for Runtime<B> {
         }
 
         // get the package bytes from the specified location
-        let bytes = state.acquirer.acquire(package, &from).await?;
+        let bytes = loaded.acquirer.acquire(package, &from).await?;
 
         // the operator's pin binds name to bytes before any validation work
         let hash = crate::sha256_digest(&bytes);
-        if let Some(pin) = pin
-            && pin != hash
-        {
+        if pin.is_some_and(|pin| pin != hash) {
             return Err(LoadError::Refused(format!(
-                "package `{package}` resolved to {hash}, which is not the pinned {pin}"
+                "resolved package `{package}` digest {hash} does not match the pinned digest"
             )));
         }
 
