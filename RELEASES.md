@@ -96,7 +96,7 @@
   re-exports core, `omnia-plugin`, and the `runtime!` macro under the
   existing paths — embedder imports are unchanged. `omnia-plugin` is now the
   whole plugins capability: the loader WIT and `WasiPlugins` host binding,
-  the `LoadPlugin` load path, digest policy, and the acquisition seam all
+  the `PluginLoader` load path, digest policy, and the acquisition seam all
   live there, built on two intentional core seams that future capability
   crates reuse: `Runtime::admit` (the one privileged operation — safe
   validation, seam-export check, atomic registration; typed `AdmitError`)

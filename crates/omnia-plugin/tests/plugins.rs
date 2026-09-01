@@ -5,7 +5,7 @@
 //! requester asserts internally (handles, digests, dispatch answers, and
 //! every typed refusal); the host side stages artifacts and checks the exit.
 //! Lifecycle scenarios the WASI surface cannot reach (deregistration) drive
-//! [`LoadPlugin`] host-side over the same runtime.
+//! [`PluginLoader`] host-side over the same runtime.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -14,8 +14,8 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
 use omnia::{
-    DeploymentBuilder, ExitStatus, GuestArtifact, GuestEntry, LoadError, LoadPlugin as _, Location,
-    Manifest, Mode, PathMounts, PathSource, Plugins, RegistryClient, RegistrySource, Runtime,
+    DeploymentBuilder, ExitStatus, GuestArtifact, GuestEntry, LoadError, Location, Manifest, Mode,
+    PathMounts, PathSource, PluginLoader as _, Plugins, RegistryClient, RegistrySource, Runtime,
     StoreCtx, WasiPlugins, sha256_digest,
 };
 
@@ -267,7 +267,7 @@ async fn reload_after_deregister_binds_fresh_bytes() {
     .expect("assembling runtime");
     let location = || Location::Path("./plugin.wasm".to_owned());
 
-    let first = runtime.load_plugin("test:echoer", location(), None).await.expect("first load");
+    let first = runtime.load("test:echoer".into(), location(), None).await.expect("first load");
     runtime.deregister(first.id()).expect("deregistering the loaded plugin");
 
     // Same component, one extra custom section: same behavior, new digest.
@@ -276,7 +276,7 @@ async fn reload_after_deregister_binds_fresh_bytes() {
     std::fs::write(scratch.path().join("plugin.wasm"), &changed).expect("re-staging");
 
     let stale = runtime
-        .load_plugin("test:echoer", location(), Some(first.digest()))
+        .load("test:echoer".into(), location(), Some(first.digest().to_owned()))
         .await
         .expect_err("the old digest no longer matches the staged bytes");
     match &stale {
@@ -286,7 +286,7 @@ async fn reload_after_deregister_binds_fresh_bytes() {
         other => panic!("expected a digest-mismatch refusal: {other:?}"),
     }
 
-    let fresh = runtime.load_plugin("test:echoer", location(), None).await.expect("re-load");
+    let fresh = runtime.load("test:echoer".into(), location(), None).await.expect("re-load");
     assert_ne!(fresh.digest(), first.digest(), "the re-load bound fresh bytes");
     assert_eq!(fresh.digest(), sha256_digest(&changed));
     runtime.shutdown();
@@ -311,7 +311,7 @@ async fn pinned_reload_refuses_after_external_reregistration() {
     .expect("assembling runtime");
     let location = || Location::Path("./plugin.wasm".to_owned());
 
-    let first = runtime.load_plugin("test:echoer", location(), None).await.expect("first load");
+    let first = runtime.load("test:echoer".into(), location(), None).await.expect("first load");
     runtime.deregister(first.id()).expect("deregistering the loaded plugin");
 
     // Same component, one extra custom section: same behavior, new digest —
@@ -324,7 +324,7 @@ async fn pinned_reload_refuses_after_external_reregistration() {
         .expect("re-registering externally");
 
     let stale = runtime
-        .load_plugin("test:echoer", location(), Some(first.digest()))
+        .load("test:echoer".into(), location(), Some(first.digest().to_owned()))
         .await
         .expect_err("a load never attests an externally registered guest");
     assert!(matches!(stale, LoadError::AlreadyActive(_)), "{stale:?}");

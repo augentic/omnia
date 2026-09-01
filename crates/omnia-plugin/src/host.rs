@@ -27,7 +27,7 @@ use wasmtime::component::{Access, Accessor, HasData, Linker, Resource, ResourceT
 pub use self::generated::Error;
 use self::generated::omnia::plugins::loader;
 use crate::Location;
-use crate::loader::{Plugin, PluginLoader, Plugins};
+use crate::loader::{Plugin, PluginLoader as _, Plugins};
 
 /// Host-side service for `omnia:plugins` — the loader capability this crate
 /// implements over the runtime's admission seam.
@@ -62,7 +62,7 @@ pub trait WasiPluginsView: Send {
 pub struct WasiPluginsCtxView<'a> {
     /// The runtime's plugin-load capability; `None` when the deployment
     /// installed no [`Plugins`] extension, where every load refuses.
-    pub loader: Option<Arc<dyn PluginLoader>>,
+    pub plugins: Option<Arc<Plugins>>,
     /// Mutable reference to the table used to manage resources.
     pub table: &'a mut ResourceTable,
 }
@@ -70,7 +70,7 @@ pub struct WasiPluginsCtxView<'a> {
 impl<B: Send + 'static> WasiPluginsView for StoreCtx<B> {
     fn plugins(&mut self) -> WasiPluginsCtxView<'_> {
         WasiPluginsCtxView {
-            loader: self.extensions().get::<Plugins>().map(|plugins| plugins.loader()),
+            plugins: self.extensions().get::<Plugins>(),
             table: &mut self.base.table,
         }
     }
@@ -90,12 +90,12 @@ impl<T> loader::HostWithStore<T> for WasiPlugins {
         accessor: &Accessor<T, Self>, package: String, from: loader::Location,
         digest: Option<String>,
     ) -> Result<Resource<Plugin>, Error> {
-        let loader = accessor
-            .with(|mut store| store.get().loader)
+        let plugins = accessor
+            .with(|mut store| store.get().plugins)
             .ok_or_else(|| Error::Internal(
                 format!("this deployment has no plugins; compile one in (`plugins: {{ locations: [...] }}`) to load `{package}`")
             ))?;
-        let plugin = loader.load(package, from.into(), digest).await?;
+        let plugin = plugins.load(package, from.into(), digest).await?;
         Ok(accessor.with(|mut store| store.get().table.push(plugin))?)
     }
 }

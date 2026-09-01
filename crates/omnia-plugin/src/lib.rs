@@ -9,7 +9,7 @@
 //! plugin interfaces.
 //!
 //! Everything plugin lives here: the [`WasiPlugins`] host binding, the
-//! [`LoadPlugin`] load path, and the acquisition seam. Acquisition policy
+//! [`PluginLoader`] load path, and the acquisition seam. Acquisition policy
 //! (endpoints, cache, path reads) is the two slots [`Plugins::install`]
 //! takes — one per [`Location`] kind — from the deployment's
 //! [`Wiring::extend`](omnia_core::Wiring::extend) hook (the `runtime!`
@@ -31,7 +31,7 @@ use std::fmt;
 pub use omnia_core::sha256_digest;
 
 pub use self::host::{Error as LoadError, WasiPlugins, WasiPluginsCtxView, WasiPluginsView};
-pub use self::loader::{LoadPlugin, Plugin, PluginLoader, Plugins};
+pub use self::loader::{Plugin, PluginLoader, Plugins};
 pub use self::path::{PathMounts, PathSource};
 pub use self::registry::{RegistryClient, RegistrySource};
 pub use self::store::{ContentStore, NoStore, ReleaseRecord, ReleaseStore};
