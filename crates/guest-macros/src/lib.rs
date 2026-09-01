@@ -32,7 +32,6 @@ pub fn instrument(args: TokenStream, item: TokenStream) -> TokenStream {
     let new_fn = quote! {
         #(#fn_attrs)*
         #vis #signature {
-            let _guard = ::omnia_wasi_otel::init();
             #body
         }
     };

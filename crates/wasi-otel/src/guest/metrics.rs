@@ -1,6 +1,6 @@
 //! # Metrics
 
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 
 use opentelemetry::global;
@@ -18,11 +18,35 @@ use opentelemetry_sdk::metrics::{
 
 use crate::guest::generated::omnia::otel::metrics as wasi;
 
+/// The manual reader, reachable without the provider so [`flush`] can
+/// collect from any point in the guest.
+static READER: OnceLock<Reader> = OnceLock::new();
+
 pub fn init(resource: Resource) -> SdkMeterProvider {
     let reader = Reader::new();
+    let _ = READER.set(reader.clone());
     let provider = SdkMeterProvider::builder().with_resource(resource).with_reader(reader).build();
     global::set_meter_provider(provider.clone());
     provider
+}
+
+/// Export all recorded metrics to the host; a collection with no data
+/// points is skipped rather than exported empty.
+pub(crate) async fn flush() {
+    let Some(reader) = READER.get() else { return };
+    let mut rm = ResourceMetrics::default();
+    if let Err(e) = reader.0.collect(&mut rm) {
+        tracing::error!("failed to collect metrics: {e}");
+        return;
+    }
+    if rm.scope_metrics().next().is_none() {
+        return;
+    }
+
+    let metrics: wasi::ResourceMetrics = rm.into();
+    if let Err(e) = wasi::export(metrics).await {
+        tracing::error!("failed to export metrics: {e}");
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -53,16 +77,8 @@ impl MetricReader for Reader {
     }
 
     fn shutdown_with_timeout(&self, _: Duration) -> OTelSdkResult {
-        let mut rm = ResourceMetrics::default();
-        self.0.collect(&mut rm)?;
-
-        wit_bindgen::block_on(async move {
-            let metrics: wasi::ResourceMetrics = rm.into();
-            if let Err(e) = wasi::export(metrics).await {
-                tracing::error!("failed to export metrics: {e}");
-            }
-        });
-
+        // Never block here: see `tracing::Processor::shutdown_with_timeout`.
+        wit_bindgen::spawn_local(flush());
         Ok(())
     }
 }

@@ -15,11 +15,11 @@ use std::io::Write as _;
 /// through `wasi:cli/exit` and does not return.
 #[expect(clippy::result_unit_err, reason = "matches the wasi:cli/run contract")]
 pub async fn execute_wasi(run: impl Future<Output = Result<(), u8>>) -> Result<(), ()> {
-    let _guard = omnia_wasi_otel::init();
+    let guard = omnia_wasi_otel::init();
     let result = run.await;
     // `exit-with-code` does not return (analogous to a trap), so no
     // `Drop` runs past it: flush telemetry as soon as the run completes.
-    omnia_wasi_otel::shutdown();
+    omnia_wasi_otel::flush_guard(guard).await;
     // Rust's exit-time stdout flush never runs here (`exit-with-code` traps
     // out, and a reactor export has no `main`), so flush the line buffer
     // explicitly; stderr is unbuffered by contract.

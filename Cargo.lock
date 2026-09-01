@@ -2622,6 +2622,8 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-proto",
  "opentelemetry_sdk",
+ "test-utils",
+ "tokio",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
@@ -3958,8 +3960,11 @@ dependencies = [
 name = "test-programs"
 version = "0.36.0"
 dependencies = [
+ "futures",
  "omnia-guest",
  "omnia-wasi-model",
+ "omnia-wasi-otel",
+ "tracing",
  "wasip3",
  "wit-bindgen 0.61.1",
 ]
