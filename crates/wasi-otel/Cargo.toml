@@ -41,5 +41,6 @@ omnia-guest-macros.workspace = true
 wit-bindgen.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+omnia.workspace = true
 test-utils.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "time"] }
