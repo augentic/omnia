@@ -46,15 +46,20 @@ pub fn init() -> Result<Option<ExitGuard>> {
 
     let tracer_provider = tracing::init(resource.clone());
     let tracing_layer = tracing_layer().with_tracer(tracer_provider.tracer("global"));
-    TRACING.set(tracer_provider).map_err(|_e| anyhow!("failed to set tracing provider"))?;
 
     let meter_provider = metrics::init(resource);
     let metrics_layer = MetricsLayer::new(meter_provider.clone());
-    METRICS.set(meter_provider).map_err(|_e| anyhow!("failed to set metrics provider"))?;
 
     let registry = registry.with(tracing_layer).with(metrics_layer);
 
+    // Publish the providers only after the subscriber installs: a failed
+    // `try_init` (e.g. the embedder already set a global subscriber) must
+    // not leave the OnceLocks populated, or every later `init` would report
+    // `Ok(None)` instead of surfacing the error.
     registry.try_init().context("issue initializing subscriber")?;
+
+    TRACING.set(tracer_provider).map_err(|_e| anyhow!("failed to set tracing provider"))?;
+    METRICS.set(meter_provider).map_err(|_e| anyhow!("failed to set metrics provider"))?;
 
     Ok(Some(ExitGuard))
 }

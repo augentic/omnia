@@ -64,9 +64,11 @@ start_server() { # start_server <name> <cmd...>
 }
 
 stop_server() {
-  [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null
-  wait "$SERVER_PID" 2>/dev/null
-  SERVER_PID=""
+  if [ -n "$SERVER_PID" ]; then
+    kill "$SERVER_PID" 2>/dev/null
+    wait "$SERVER_PID" 2>/dev/null
+    SERVER_PID=""
+  fi
   for _ in $(seq 1 40); do
     nc -z localhost 8080 2>/dev/null || return 0
     sleep 0.5
@@ -143,7 +145,13 @@ stop_server
 if start_server http-proxy "$BIN/http-proxy" run "$WASM/http_proxy_wasm.wasm"; then
   check http-proxy cache1 200 http://localhost:8080/cache
   check http-proxy cache2 200 http://localhost:8080/cache
-  check http-proxy origin-sm 200 http://localhost:8080/origin-sm
+  # The origin routes proxy jsonplaceholder.cypress.io; probe it directly and
+  # skip (rather than fail) when there is no outbound internet.
+  if curl -s --max-time 10 -o /dev/null https://jsonplaceholder.cypress.io/posts/1; then
+    check http-proxy origin-sm 200 http://localhost:8080/origin-sm
+  else
+    note "SKIP http-proxy/origin-sm (no outbound internet)"
+  fi
 fi
 stop_server
 

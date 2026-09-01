@@ -15,8 +15,12 @@ use crate::guest::generated::omnia::otel::tracing as wasi;
 static SPANS: OnceLock<Arc<Mutex<Vec<SpanData>>>> = OnceLock::new();
 
 pub fn init(resource: Resource) -> SdkTracerProvider {
-    let processor = Processor::new();
-    let _ = SPANS.set(Arc::clone(&processor.spans));
+    // Reuse the shared buffer if a previous `init` attempt already set it,
+    // so a retried initialization never orphans buffered spans.
+    let spans = SPANS.get_or_init(|| Arc::new(Mutex::new(Vec::new())));
+    let processor = Processor {
+        spans: Arc::clone(spans),
+    };
     let provider =
         SdkTracerProvider::builder().with_resource(resource).with_span_processor(processor).build();
     global::set_tracer_provider(provider.clone());
@@ -42,15 +46,6 @@ pub(crate) async fn flush() {
 #[derive(Debug)]
 struct Processor {
     spans: Arc<Mutex<Vec<SpanData>>>,
-}
-
-impl Processor {
-    #[must_use]
-    fn new() -> Self {
-        Self {
-            spans: Arc::new(Mutex::new(Vec::new())),
-        }
-    }
 }
 
 impl SpanProcessor for Processor {

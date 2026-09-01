@@ -23,8 +23,9 @@ use crate::guest::generated::omnia::otel::metrics as wasi;
 static READER: OnceLock<Reader> = OnceLock::new();
 
 pub fn init(resource: Resource) -> SdkMeterProvider {
-    let reader = Reader::new();
-    let _ = READER.set(reader.clone());
+    // Reuse the shared reader if a previous `init` attempt already set it,
+    // so a retried initialization never orphans recorded metrics.
+    let reader = READER.get_or_init(Reader::new).clone();
     let provider = SdkMeterProvider::builder().with_resource(resource).with_reader(reader).build();
     global::set_meter_provider(provider.clone());
     provider
