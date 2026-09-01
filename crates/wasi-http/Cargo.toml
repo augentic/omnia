@@ -38,7 +38,7 @@ tokio = { workspace = true, features = ["time"] }
 wasmtime = { workspace = true, features = ["component-model-async"] }
 wasmtime-wasi.workspace = true
 wasmtime-wasi-http.workspace = true
-omnia.workspace = true
+omnia-core.workspace = true
 
 # guest dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]

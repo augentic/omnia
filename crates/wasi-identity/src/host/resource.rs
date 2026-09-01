@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-pub use omnia::FutureResult;
+pub use omnia_core::FutureResult;
 
 pub use crate::host::generated::omnia::identity::credentials::AccessToken;
 
@@ -12,4 +12,4 @@ pub trait Identity: Debug + Send + Sync + 'static {
 }
 
 /// Represents an identity resource in the WASI Identity host.
-pub type IdentityProxy = omnia::Proxy<dyn Identity>;
+pub type IdentityProxy = omnia_core::Proxy<dyn Identity>;

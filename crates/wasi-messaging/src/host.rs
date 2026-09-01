@@ -35,8 +35,8 @@ mod generated {
 use std::fmt::Debug;
 use std::sync::Arc;
 
-pub use omnia::FutureResult;
-use omnia::{Host, Runtime, Server, StoreCtx, StoreView};
+pub use omnia_core::FutureResult;
+use omnia_core::{Host, Runtime, Server, StoreCtx, StoreView};
 use wasmtime::component::{HasData, Linker};
 
 pub use self::default_impl::MessagingDefault;
@@ -93,5 +93,5 @@ pub trait WasiMessagingCtx: Debug + Send + Sync + 'static {
     fn connect(&self) -> FutureResult<Arc<dyn Client>>;
 }
 
-omnia::host_error!(Error, Other);
-omnia::wasi_view!(Messaging);
+omnia_core::host_error!(Error, Other);
+omnia_core::wasi_view!(Messaging);

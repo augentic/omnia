@@ -7,7 +7,7 @@ use fromenv::FromEnv;
 use futures::{Future, TryStreamExt};
 use http::{Request, Response};
 use http_body_util::BodyExt;
-use omnia::Backend;
+use omnia_core::Backend;
 use tracing::instrument;
 use wasmtime::component::ResourceTable;
 use wasmtime_wasi_http::{
@@ -22,7 +22,7 @@ pub struct ConnectOptions {
     pub connect_timeout: u64,
 }
 
-impl omnia::FromEnv for ConnectOptions {
+impl omnia_core::FromEnv for ConnectOptions {
     fn load_env() -> Result<Self> {
         // `Self::from_env()` is the builder-returning inherent the `FromEnv`
         // derive emits.
@@ -44,7 +44,7 @@ pub struct HttpDefault {
     ctx: WasiHttpCtx,
 }
 
-impl omnia::HttpBorrow for HttpDefault {
+impl omnia_core::HttpBorrow for HttpDefault {
     /// Produce a [`WasiHttpCtxView`] by splitting borrows on inner fields.
     fn as_view<'a>(&'a mut self, table: &'a mut ResourceTable) -> WasiHttpCtxView<'a> {
         WasiHttpCtxView {

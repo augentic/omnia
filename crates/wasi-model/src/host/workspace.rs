@@ -15,7 +15,7 @@ use std::sync::Arc;
 use anyhow::{Context as _, anyhow, ensure};
 use cap_std::fs::{Dir, Metadata, MetadataExt as _};
 use futures::{FutureExt as _, future};
-use omnia::{FutureResult, MountRegistry};
+use omnia_core::{FutureResult, MountRegistry};
 use tokio::task::spawn_blocking;
 use wasmtime_wasi::filesystem::Descriptor;
 

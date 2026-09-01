@@ -163,5 +163,5 @@ impl HostStreamObjectNames for WasiBlobstoreCtxView<'_> {}
 pub fn get_container<T>(
     accessor: &Accessor<T, WasiBlobstore>, self_: &Resource<ContainerProxy>,
 ) -> Result<ContainerProxy> {
-    Ok(omnia::get_cloned(accessor, self_).context("Container not found")?)
+    Ok(omnia_core::get_cloned(accessor, self_).context("Container not found")?)
 }

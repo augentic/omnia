@@ -11,7 +11,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use fromenv::FromEnv;
 use futures::FutureExt;
-use omnia::Backend;
+use omnia_core::Backend;
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection as SqliteConnection, params_from_iter};
 use tracing::instrument;
@@ -29,7 +29,7 @@ pub struct ConnectOptions {
 }
 
 /// Loads connection options from environment variables with error context.
-impl omnia::FromEnv for ConnectOptions {
+impl omnia_core::FromEnv for ConnectOptions {
     fn load_env() -> Result<Self> {
         // `Self::from_env()` is the builder-returning inherent the `FromEnv`
         // derive emits.

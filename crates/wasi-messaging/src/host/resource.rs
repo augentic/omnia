@@ -4,7 +4,7 @@ use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 
 use futures::Stream;
-pub use omnia::FutureResult;
+pub use omnia_core::FutureResult;
 
 use crate::host::generated::wasi::messaging::types;
 /// Stream of messages.
@@ -25,7 +25,7 @@ pub trait Client: Debug + Send + Sync + 'static {
 }
 
 /// Proxy for a messaging client.
-pub type ClientProxy = omnia::Proxy<dyn Client>;
+pub type ClientProxy = omnia_core::Proxy<dyn Client>;
 
 /// A message crossing the messaging boundary.
 ///

@@ -18,7 +18,7 @@ impl<T> HostWithStore<T> for WasiBlobstore {
             .with(|mut store| store.get().ctx.create_container(name))
             .await
             .context("creating container")?;
-        let proxy = omnia::Proxy(container);
+        let proxy = omnia_core::Proxy(container);
         Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
     }
 
@@ -30,7 +30,7 @@ impl<T> HostWithStore<T> for WasiBlobstore {
             .with(|mut store| store.get().ctx.get_container(name))
             .await
             .context("getting container")?;
-        let proxy = omnia::Proxy(container);
+        let proxy = omnia_core::Proxy(container);
         Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
     }
 

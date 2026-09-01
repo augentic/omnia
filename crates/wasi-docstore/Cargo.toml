@@ -23,7 +23,7 @@ chrono.workspace = true
 # host dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 futures.workspace = true
-omnia.workspace = true
+omnia-core.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 wasmtime.workspace = true

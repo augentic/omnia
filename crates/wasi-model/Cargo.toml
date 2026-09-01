@@ -26,7 +26,7 @@ tracing.workspace = true
 cap-std.workspace = true
 futures.workspace = true
 jsonschema.workspace = true
-omnia.workspace = true
+omnia-core.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["rt", "sync", "time"] }
 # `component-model-async` for `StreamReader`/`FutureReader`
@@ -40,6 +40,7 @@ wasip3.workspace = true
 wit-bindgen.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+omnia.workspace = true
 serde_json.workspace = true
 test-utils.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }

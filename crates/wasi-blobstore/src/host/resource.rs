@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 
 use bytes::Bytes;
-pub use omnia::FutureResult;
+pub use omnia_core::FutureResult;
 
 use crate::host::generated::wasi::blobstore::container::{ContainerMetadata, ObjectMetadata};
 
@@ -42,4 +42,4 @@ pub trait Container: Debug + Send + Sync + 'static {
 }
 
 /// Proxy for a blobstore container.
-pub type ContainerProxy = omnia::Proxy<dyn Container>;
+pub type ContainerProxy = omnia_core::Proxy<dyn Container>;

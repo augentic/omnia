@@ -7,7 +7,7 @@ mod default_impl;
 use std::fmt::Debug;
 
 pub use default_impl::ConfigDefault;
-use omnia::{Host, HostCtx, Server, StoreView};
+use omnia_core::{Host, HostCtx, Server, StoreView};
 use wasmtime::component::{HasData, Linker, ResourceTable};
 pub use wasmtime_wasi_config;
 use wasmtime_wasi_config::WasiConfigVariables;

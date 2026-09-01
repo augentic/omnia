@@ -46,11 +46,11 @@ impl Host for WasiSqlCtxView<'_> {}
 pub fn get_connection<T>(
     accessor: &Accessor<T, WasiSql>, self_: &Resource<ConnectionProxy>,
 ) -> Result<ConnectionProxy> {
-    Ok(omnia::get_cloned(accessor, self_)?)
+    Ok(omnia_core::get_cloned(accessor, self_)?)
 }
 
 pub fn get_statement<T>(
     accessor: &Accessor<T, WasiSql>, self_: &Resource<Statement>,
 ) -> Result<Statement> {
-    Ok(omnia::get_cloned(accessor, self_)?)
+    Ok(omnia_core::get_cloned(accessor, self_)?)
 }

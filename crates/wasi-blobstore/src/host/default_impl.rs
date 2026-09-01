@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Result, anyhow};
 use bytes::Bytes;
 use futures::FutureExt;
-use omnia::Backend;
+use omnia_core::Backend;
 use parking_lot::RwLock;
 use tracing::instrument;
 
@@ -24,7 +24,7 @@ pub struct BlobstoreDefault {
 }
 
 impl Backend for BlobstoreDefault {
-    type ConnectOptions = omnia::NoOptions;
+    type ConnectOptions = omnia_core::NoOptions;
 
     #[instrument]
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {

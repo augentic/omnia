@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-pub use omnia::FutureResult;
+pub use omnia_core::FutureResult;
 
 /// Providers implement the [`Locker`] trait to allow the host to
 /// interact with different backend lockers (stores).
@@ -22,4 +22,4 @@ pub trait Locker: Debug + Send + Sync + 'static {
 }
 
 /// Represents a locker resource in the WASI Vault.
-pub type LockerProxy = omnia::Proxy<dyn Locker>;
+pub type LockerProxy = omnia_core::Proxy<dyn Locker>;

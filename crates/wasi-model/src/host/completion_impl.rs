@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use futures::{FutureExt as _, future};
-use omnia::HasMounts;
+use omnia_core::HasMounts;
 use wasmtime::component::{Accessor, FutureReader, StreamReader};
 
 use crate::host::generated::omnia::model::completion::{Host, HostWithStore, Session, ToolResult};

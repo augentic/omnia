@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, Weak};
 use anyhow::{Context as _, Result, anyhow};
 use futures::FutureExt;
 use moka::sync::Cache;
-use omnia::Backend;
+use omnia_core::Backend;
 use tracing::instrument;
 
 use crate::host::WasiKeyValueCtx;
@@ -30,7 +30,7 @@ impl std::fmt::Debug for KeyValueDefault {
 }
 
 impl Backend for KeyValueDefault {
-    type ConnectOptions = omnia::NoOptions;
+    type ConnectOptions = omnia_core::NoOptions;
 
     #[instrument]
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {

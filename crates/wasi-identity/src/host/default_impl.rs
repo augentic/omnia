@@ -13,7 +13,7 @@ use oauth2::{
     ClientId, ClientSecret, EmptyExtraTokenFields, Scope, StandardTokenResponse,
     TokenResponse as _, TokenUrl,
 };
-use omnia::Backend;
+use omnia_core::Backend;
 use tracing::instrument;
 
 use crate::host::WasiIdentityCtx;
@@ -44,7 +44,7 @@ impl fmt::Debug for ConnectOptions {
     }
 }
 
-impl omnia::FromEnv for ConnectOptions {
+impl omnia_core::FromEnv for ConnectOptions {
     fn load_env() -> Result<Self> {
         // `Self::from_env()` is the builder-returning inherent the `FromEnv`
         // derive emits.

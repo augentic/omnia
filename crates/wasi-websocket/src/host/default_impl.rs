@@ -16,7 +16,7 @@ use futures::FutureExt;
 use futures_channel::mpsc;
 use futures_util::stream::TryStreamExt;
 use futures_util::{StreamExt, future, pin_mut};
-use omnia::{Backend, FutureResult};
+use omnia_core::{Backend, FutureResult};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast::{self, Sender};
 use tokio_stream::wrappers::BroadcastStream;
@@ -40,7 +40,7 @@ pub struct ConnectOptions {
     pub socket_addr: String,
 }
 
-impl omnia::FromEnv for ConnectOptions {
+impl omnia_core::FromEnv for ConnectOptions {
     fn load_env() -> Result<Self> {
         let socket_addr =
             std::env::var("WEBSOCKET_ADDR").unwrap_or_else(|_| "0.0.0.0:80".to_string());

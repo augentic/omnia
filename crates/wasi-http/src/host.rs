@@ -7,14 +7,14 @@ mod server;
 
 use anyhow::Result;
 pub use default_impl::HttpDefault;
-use omnia::{Host, Runtime, Server, StoreCtx};
+use omnia_core::{Host, Runtime, Server, StoreCtx};
 use wasmtime::component::Linker;
 pub use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpCtxView, WasiHttpView};
 
 /// Host-side service for `wasi:http`.
 ///
 /// `wasi:http`'s linker-facing view trait is foreign, so this host's bundle
-/// accessor is keyed by core's `omnia::HttpCtx` carrier rather than by this
+/// accessor is keyed by the `omnia_core::HttpCtx` carrier rather than by this
 /// type — the one host that is not its own carrier.
 #[derive(Debug)]
 pub struct WasiHttp;

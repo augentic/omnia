@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-pub use omnia::FutureResult;
+pub use omnia_core::FutureResult;
 use serde::{Deserialize, Serialize};
 
 /// Host-side capabilities for one completion, lent to backends that need them.

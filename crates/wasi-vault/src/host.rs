@@ -29,8 +29,8 @@ mod generated {
 use std::fmt::Debug;
 use std::sync::Arc;
 
-pub use omnia::FutureResult;
-use omnia::{Host, Server, StoreView};
+pub use omnia_core::FutureResult;
+use omnia_core::{Host, Server, StoreView};
 use wasmtime::component::{HasData, Linker};
 
 use self::generated::omnia::vault::vault;
@@ -69,5 +69,5 @@ pub trait WasiVaultCtx: Debug + Send + Sync + 'static {
     fn open_locker(&self, identifier: String) -> FutureResult<Arc<dyn Locker>>;
 }
 
-omnia::host_error!(Error, Other);
-omnia::wasi_view!(Vault);
+omnia_core::host_error!(Error, Other);
+omnia_core::wasi_view!(Vault);

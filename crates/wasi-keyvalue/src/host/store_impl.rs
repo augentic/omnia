@@ -13,7 +13,7 @@ impl<T> HostWithStore<T> for WasiKeyValue {
         accessor: &Accessor<T, Self>, identifier: String,
     ) -> Result<Resource<BucketProxy>> {
         let bucket = accessor.with(|mut store| store.get().ctx.open_bucket(identifier)).await?;
-        let proxy = omnia::Proxy(bucket);
+        let proxy = omnia_core::Proxy(bucket);
         Ok(accessor.with(|mut store| store.get().table.push(proxy))?)
     }
 }
@@ -79,5 +79,5 @@ impl HostBucket for WasiKeyValueCtxView<'_> {}
 pub fn get_bucket<T>(
     accessor: &Accessor<T, WasiKeyValue>, self_: &Resource<BucketProxy>,
 ) -> Result<BucketProxy> {
-    omnia::get_cloned(accessor, self_).map_err(|_stale| Error::NoSuchStore)
+    omnia_core::get_cloned(accessor, self_).map_err(|_stale| Error::NoSuchStore)
 }

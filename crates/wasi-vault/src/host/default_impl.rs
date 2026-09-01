@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use futures::FutureExt;
-use omnia::Backend;
+use omnia_core::Backend;
 use tracing::instrument;
 
 use crate::host::WasiVaultCtx;
@@ -23,7 +23,7 @@ pub struct VaultDefault {
 }
 
 impl Backend for VaultDefault {
-    type ConnectOptions = omnia::NoOptions;
+    type ConnectOptions = omnia_core::NoOptions;
 
     #[instrument]
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {

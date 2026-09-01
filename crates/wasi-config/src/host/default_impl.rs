@@ -6,7 +6,7 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use anyhow::Result;
-use omnia::Backend;
+use omnia_core::Backend;
 use tracing::instrument;
 use wasmtime_wasi_config::WasiConfigVariables;
 
@@ -26,7 +26,7 @@ impl Debug for ConfigDefault {
 }
 
 impl Backend for ConfigDefault {
-    type ConnectOptions = omnia::NoOptions;
+    type ConnectOptions = omnia_core::NoOptions;
 
     #[instrument]
     async fn connect_with(_: Self::ConnectOptions) -> Result<Self> {

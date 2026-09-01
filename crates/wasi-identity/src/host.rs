@@ -31,8 +31,8 @@ mod generated {
 use std::fmt::Debug;
 use std::sync::Arc;
 
-pub use omnia::FutureResult;
-use omnia::{Host, Server, StoreView};
+pub use omnia_core::FutureResult;
+use omnia_core::{Host, Server, StoreView};
 use wasmtime::component::{HasData, Linker};
 
 #[cfg(feature = "oauth")]
@@ -73,5 +73,5 @@ pub trait WasiIdentityCtx: Debug + Send + Sync + 'static {
     fn get_identity(&self, name: String) -> FutureResult<Arc<dyn Identity>>;
 }
 
-omnia::host_error!(Error, InternalFailure);
-omnia::wasi_view!(Identity);
+omnia_core::host_error!(Error, InternalFailure);
+omnia_core::wasi_view!(Identity);
