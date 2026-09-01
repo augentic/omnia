@@ -30,7 +30,7 @@ impl<B: Clone + Send + Sync + 'static> PluginLoader for Runtime<B> {
         &self, package: String, from: Location, pin: Option<String>,
     ) -> BoxFuture<'static, Result<Plugin, LoadError>> {
         let runtime = self.clone();
-        async move { run(&runtime, &package, from, pin.as_deref()).await }.boxed()
+        async move { load(&runtime, &package, from, pin.as_deref()).await }.boxed()
     }
 }
 
@@ -44,7 +44,7 @@ impl<B: Clone + Send + Sync + 'static> PluginLoader for WeakRuntime<B> {
             let Some(runtime) = runtime.upgrade() else {
                 return Err(LoadError::Internal("the runtime has shut down".to_owned()));
             };
-            run(&runtime, &package, from, pin.as_deref()).await
+            load(&runtime, &package, from, pin.as_deref()).await
         }
         .boxed()
     }
@@ -58,7 +58,7 @@ impl PluginLoader for Plugins {
     }
 }
 
-async fn run<B: Clone + Send + Sync + 'static>(
+async fn load<B: Clone + Send + Sync + 'static>(
     runtime: &Runtime<B>, package: &str, from: Location, pin: Option<&str>,
 ) -> Result<Plugin, LoadError> {
     let pin = pin.map(digest::canonicalize).transpose().map_err(LoadError::Refused)?;
@@ -71,7 +71,7 @@ async fn run<B: Clone + Send + Sync + 'static>(
     // return the plugin if the package is already loaded
     let id = GuestId::from(package);
     if let Some(guest) = runtime.registry().get(&id) {
-        return already_active(package, id, guest.digest(), pin.as_deref());
+        return is_active(package, id, guest.digest(), pin.as_deref());
     }
 
     // get the package bytes from the specified location
@@ -97,13 +97,13 @@ async fn run<B: Clone + Send + Sync + 'static>(
         Err(AdmitError::AlreadyRegistered(_)) => {
             let recorded =
                 runtime.registry().get(&id).and_then(|guest| guest.digest().map(str::to_owned));
-            already_active(package, id, recorded.as_deref(), Some(&hash))
+            is_active(package, id, recorded.as_deref(), Some(&hash))
         }
         Err(error) => Err(error.into()),
     }
 }
 
-fn already_active(
+fn is_active(
     package: &str, id: GuestId, recorded: Option<&str>, wanted: Option<&str>,
 ) -> Result<Plugin, LoadError> {
     match recorded {
