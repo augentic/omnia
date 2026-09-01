@@ -1,35 +1,51 @@
 //! # Tracing
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use opentelemetry::{Context, global, trace as otel};
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
+use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::{SdkTracerProvider, Span, SpanData, SpanProcessor};
 
 use crate::guest::generated::omnia::otel::tracing as wasi;
 
+/// The processor's span buffer, reachable without the provider so
+/// [`flush`] can drain it from any point in the guest.
+static SPANS: OnceLock<Arc<Mutex<Vec<SpanData>>>> = OnceLock::new();
+
 pub fn init(resource: Resource) -> SdkTracerProvider {
-    let processor = Processor::new();
+    // Reuse the shared buffer if a previous `init` attempt already set it,
+    // so a retried initialization never orphans buffered spans.
+    let spans = SPANS.get_or_init(|| Arc::new(Mutex::new(Vec::new())));
+    let processor = Processor {
+        spans: Arc::clone(spans),
+    };
     let provider =
         SdkTracerProvider::builder().with_resource(resource).with_span_processor(processor).build();
     global::set_tracer_provider(provider.clone());
     provider
 }
 
-#[derive(Debug)]
-struct Processor {
-    spans: Mutex<Vec<SpanData>>,
+/// Export all buffered spans to the host.
+pub(crate) async fn flush() {
+    let Some(buffer) = SPANS.get() else { return };
+    let Ok(mut guard) = buffer.lock() else { return };
+    let spans = std::mem::take(&mut *guard);
+    drop(guard);
+    if spans.is_empty() {
+        return;
+    }
+
+    let spans = spans.into_iter().map(Into::into).collect::<Vec<_>>();
+    if let Err(e) = wasi::export(spans).await {
+        tracing::error!("failed to export spans: {e}");
+    }
 }
 
-impl Processor {
-    #[must_use]
-    fn new() -> Self {
-        Self {
-            spans: Mutex::new(Vec::new()),
-        }
-    }
+#[derive(Debug)]
+struct Processor {
+    spans: Arc<Mutex<Vec<SpanData>>>,
 }
 
 impl SpanProcessor for Processor {
@@ -49,20 +65,11 @@ impl SpanProcessor for Processor {
     }
 
     fn shutdown_with_timeout(&self, _: Duration) -> OTelSdkResult {
-        let spans = std::mem::take(
-            &mut *self.spans.lock().map_err(|e| OTelSdkError::InternalFailure(e.to_string()))?,
-        );
-        if spans.is_empty() {
-            return Ok(());
-        }
-
-        wit_bindgen::block_on(async move {
-            let spans = spans.into_iter().map(Into::into).collect::<Vec<_>>();
-            if let Err(e) = wasi::export(spans).await {
-                tracing::error!("failed to export spans: {e}");
-            }
-        });
-
+        // Never block here: shutdown can run inside a live component-model
+        // task (e.g. a guard dropping as an async export completes), where a
+        // blocking wait steals and then deadlocks against spawned work only
+        // the surrounding task can finish. Defer the export onto that task.
+        wit_bindgen::spawn_local(flush());
         Ok(())
     }
 

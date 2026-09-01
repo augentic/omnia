@@ -92,7 +92,7 @@ fn programs(dir: &Path) -> Vec<Program> {
 
         let capability = entry.file_name().into_string().expect("UTF-8 capability directory");
         match capability.as_str() {
-            "link" | "model" | "plugins" => {}
+            "link" | "model" | "otel" | "plugins" => {}
             other => panic!(
                 "unknown capability directory `{other}`: add it to the match in \
                  crates/test-utils/build.rs"

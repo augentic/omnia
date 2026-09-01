@@ -185,6 +185,10 @@ criteria = "safe-to-deploy"
 version = "0.2.17"
 criteria = "safe-to-deploy"
 
+[[exemptions.cpufeatures]]
+version = "0.3.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.crc32fast]]
 version = "1.5.1"
 criteria = "safe-to-deploy"
@@ -506,15 +510,15 @@ version = "0.3.104"
 criteria = "safe-to-deploy"
 
 [[exemptions.jsonschema]]
-version = "0.52.0"
+version = "0.52.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.jsonschema-regex]]
-version = "0.52.0"
+version = "0.52.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.jsonschema-value]]
-version = "0.52.0"
+version = "0.52.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.jsonwebtoken]]
@@ -758,7 +762,7 @@ version = "0.5.18"
 criteria = "safe-to-deploy"
 
 [[exemptions.referencing]]
-version = "0.52.0"
+version = "0.52.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.ring]]
@@ -859,10 +863,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.simd_cesu8]]
 version = "1.2.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.simdutf8]]
-version = "0.1.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.spdx]]

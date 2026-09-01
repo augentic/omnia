@@ -156,6 +156,22 @@ lto = true
 opt-level = "s"
 strip = true
 
+# Guest components are JIT-compiled through Cranelift on every e2e test run;
+# unoptimized codegen is ~10x slower and pushes the wasi-* suites toward their
+# deadlines on CI runners. Only these dependencies build optimized — workspace
+# code keeps full dev-profile debuggability.
+[profile.dev.package.cranelift-codegen]
+opt-level = 3
+
+[profile.dev.package.regalloc2]
+opt-level = 3
+
+# Wasm-to-CLIF translation and trampoline generation. Crate name is
+# version-coupled: wasmtime 48 renamed `wasmtime-cranelift` to this; cargo
+# silently ignores the entry if a future bump renames it again.
+[profile.dev.package.wasmtime-internal-cranelift]
+opt-level = 3
+
 # [package.metadata.cargo-udeps.ignore]
 # normal = ["openssl"]
 

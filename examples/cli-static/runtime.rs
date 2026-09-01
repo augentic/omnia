@@ -10,8 +10,13 @@
 
 cfg_if::cfg_if! {
     if #[cfg(not(target_arch = "wasm32"))] {
+        use omnia_wasi_otel::{WasiOtel, OtelDefault};
+
         omnia::runtime!({
             mode: command,
+            hosts: {
+                WasiOtel: OtelDefault,
+            },
             guests: [
                 { id: "cli", source: concat!(
                     env!("CARGO_MANIFEST_DIR"),
