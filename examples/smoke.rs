@@ -22,11 +22,8 @@ use bytes::Bytes;
 use http_body_util::{BodyExt as _, Full};
 use hyper::header::{AUTHORIZATION, CONTENT_TYPE};
 use hyper::service::service_fn;
-use hyper_util::client::legacy::Client;
-use hyper_util::client::legacy::connect::HttpConnector;
-use hyper_util::rt::{TokioExecutor, TokioIo};
-
-type HttpClient = Client<HttpConnector, Full<Bytes>>;
+use hyper_util::rt::TokioIo;
+use reqwest::Client;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const HELLO: &str = r#"{"text":"hello"}"#;
@@ -359,7 +356,7 @@ async fn main() -> Result<()> {
         .iter()
         .filter(|s| filters.is_empty() || filters.iter().any(|f| s.name().starts_with(f.as_str())));
 
-    let client: HttpClient = Client::builder(TokioExecutor::new()).build_http();
+    let client = Client::builder().timeout(REQUEST_TIMEOUT).build()?;
     let mut results = Vec::new();
     for scenario in selected {
         let outcomes = match scenario {
@@ -418,7 +415,7 @@ fn spawn_logged(
 }
 
 async fn run_server(
-    ctx: &Ctx, client: &HttpClient, name: &str, wasm: Option<&str>, checks: &[Check],
+    ctx: &Ctx, client: &Client, name: &str, wasm: Option<&str>, checks: &[Check],
     env: Vec<(&str, String)>, expect_log: Option<&str>,
 ) -> Vec<Outcome> {
     let mut outcomes = Vec::new();
@@ -464,7 +461,7 @@ async fn run_server(
     outcomes
 }
 
-async fn run_check(client: &HttpClient, name: &str, check: &Check, outcomes: &mut Vec<Outcome>) {
+async fn run_check(client: &Client, name: &str, check: &Check, outcomes: &mut Vec<Outcome>) {
     let label = check.label;
     match request(client, check).await {
         Ok((status, body)) => {
@@ -491,22 +488,18 @@ async fn run_check(client: &HttpClient, name: &str, check: &Check, outcomes: &mu
     }
 }
 
-async fn request(client: &HttpClient, check: &Check) -> Result<(u16, String)> {
-    let uri: hyper::Uri = format!("http://localhost:8080{}", check.path).parse()?;
-    let mut builder = hyper::Request::builder().method(check.method).uri(uri);
-    if check.json_body.is_some() {
-        builder = builder.header(hyper::header::CONTENT_TYPE, "application/json");
+/// The client's timeout covers the whole exchange, so a hung server surfaces as
+/// a failed check rather than stalling the run.
+async fn request(client: &Client, check: &Check) -> Result<(u16, String)> {
+    let method = reqwest::Method::from_bytes(check.method.as_bytes())?;
+    let mut builder = client.request(method, format!("http://localhost:8080{}", check.path));
+    if let Some(json) = check.json_body {
+        builder = builder.header(CONTENT_TYPE, "application/json").body(json);
     }
-    let body = Full::new(Bytes::from_static(check.json_body.unwrap_or("").as_bytes()));
-    let response = tokio::time::timeout(REQUEST_TIMEOUT, client.request(builder.body(body)?))
-        .await
-        .context("request timed out")??;
+    let response = builder.send().await?;
     let status = response.status().as_u16();
-    let body = tokio::time::timeout(REQUEST_TIMEOUT, response.into_body().collect())
-        .await
-        .context("body read timed out")??
-        .to_bytes();
-    Ok((status, String::from_utf8_lossy(&body).into_owned()))
+    let body = response.text().await?;
+    Ok((status, body))
 }
 
 fn run_command(
