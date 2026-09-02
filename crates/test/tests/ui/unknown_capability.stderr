@@ -1,0 +1,9 @@
+error: `Telemetry` is not a capability `doubles!` has a double for
+ --> tests/ui/unknown_capability.rs:1:1
+  |
+1 | / omnia_test::doubles! {
+2 | |     struct Provider: Config + Telemetry;
+3 | | }
+  | |_^
+  |
+  = note: this error originates in the macro `$crate::__doubles` which comes from the expansion of the macro `omnia_test::doubles` (in Nightly builds, run with -Z macro-backtrace for more info)

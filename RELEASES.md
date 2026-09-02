@@ -67,6 +67,24 @@
   }
   ```
 
+- `omnia-test` (`crates/test`, unpublished): test doubles, a component
+  runtime harness, and a `wasm32-wasip2` fixture pipeline behind three
+  additive features. `guest` (default) carries a native double per
+  `omnia_guest` capability trait — `Scripted: Model`, `ScriptedLoader:
+  Plugins`, `Memory: StateStore + BlobStore` (with `Namespaced`),
+  `MemoryDocs` over the docstore default, `ScriptedTables`, `MatchedHttp`,
+  `Sink: Publish + Broadcast`, `MapConfig`, `FixedIdentity` — plus
+  `doubles!` (a `provider!`-shaped declaration seeded with the default double
+  per capability) and `forward!` (delegating capability impls to fields, with
+  a bracketed generic header). `host` carries `Deployment`, a manifest-driven
+  command run over `Backends`, the twelve in-memory defaults with the model
+  swappable for a `ScriptedModel: WasiModelCtx`, and `Scratch` for per-test
+  directories. `build` is `std`-only: `Components` runs the nested cargo
+  build a consumer's `build.rs` needs and writes `gen.rs` with one path
+  constant per program and a `foreach_<group>!` completeness macro per
+  group. Both scripted models share one `Script` core, so the same script
+  reads identically at the handler and component rungs.
+
 ### Changed
 
 - Plugin loads are lock-free and race-safe. The loader's (package, digest)

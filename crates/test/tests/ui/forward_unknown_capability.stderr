@@ -1,0 +1,12 @@
+error: no rules expected identifier `Telemetry`
+ --> tests/ui/forward_unknown_capability.rs:5:1
+  |
+5 | omnia_test::forward!(impl Provider { Telemetry => config });
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no rules expected this token in macro call
+  |
+note: while trying to match `Config`
+ --> src/guest/macros.rs
+  |
+  |     ([$($generics:tt)*] $provider:ty; Config => $field:ident) => {
+  |                                       ^^^^^^
+  = note: this error originates in the macro `$crate::__forward_body` which comes from the expansion of the macro `omnia_test::forward` (in Nightly builds, run with -Z macro-backtrace for more info)
