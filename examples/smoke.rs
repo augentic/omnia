@@ -5,13 +5,13 @@
 //! IMPORTANT: Assumes guests and hosts are already built — run via
 //! `cargo make smoke`, which builds both first.
 //!
-//! Backends the examples would otherwise reach over the network are stood in
-//! for by in-process stubs (see [`serve_token_stub`]), so a run needs no
-//! credentials. Expected skip: the http-proxy origin routes need outbound
-//! internet.
+//! Credentialed backends are stood in for by in-process stubs (see
+//! [`serve_token_stub`]), so a run needs no secrets. Outbound internet is
+//! assumed: the http-proxy checks reach its public origin, and an unreachable
+//! origin is a failure like any other.
 
 use std::fs::{self, File};
-use std::net::{Ipv4Addr, SocketAddr, TcpStream, ToSocketAddrs as _};
+use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::thread::sleep;
@@ -105,7 +105,6 @@ struct Check {
     json_body: Option<&'static str>,
     expect_status: u16,
     expect_body_contains: Option<&'static str>,
-    requires_internet: bool,
 }
 
 impl Check {
@@ -120,7 +119,6 @@ impl Check {
             json_body,
             expect_status: 200,
             expect_body_contains: None,
-            requires_internet: false,
         }
     }
 
@@ -141,11 +139,6 @@ impl Check {
         self.expect_body_contains = Some(needle);
         self
     }
-
-    const fn needs_internet(mut self) -> Self {
-        self.requires_internet = true;
-        self
-    }
 }
 
 enum Expect {
@@ -159,7 +152,6 @@ enum Expect {
 enum Outcome {
     Pass(String),
     Fail(String),
-    Skip(String),
     Warn(String),
 }
 
@@ -168,7 +160,6 @@ impl Outcome {
         match self {
             Self::Pass(msg) => format!("PASS {msg}"),
             Self::Fail(msg) => format!("FAIL {msg}"),
-            Self::Skip(msg) => format!("SKIP {msg}"),
             Self::Warn(msg) => format!("WARN {msg}"),
         }
     }
@@ -245,14 +236,14 @@ const SCENARIOS: &[Scenario] = &[
         ],
     ),
     Scenario::server("otel", Some("otel_wasm.wasm"), &[Check::post("post", "/", HELLO)]),
+    // All three routes proxy jsonplaceholder.cypress.io.
     Scenario::server(
         "http-proxy",
         Some("http_proxy_wasm.wasm"),
         &[
             Check::get("cache1", "/cache"),
             Check::get("cache2", "/cache"),
-            // Proxies jsonplaceholder.cypress.io; skipped without internet.
-            Check::get("origin-sm", "/origin-sm").needs_internet(),
+            Check::get("origin-sm", "/origin-sm"),
         ],
     ),
     Scenario::server(
@@ -459,10 +450,6 @@ async fn run_server(
     }
 
     for check in checks {
-        if check.requires_internet && !internet_available() {
-            outcomes.push(Outcome::Skip(format!("{name}/{} (no outbound internet)", check.label)));
-            continue;
-        }
         run_check(client, name, check, &mut outcomes).await;
     }
     stop_server(&mut child, &mut outcomes);
@@ -691,17 +678,6 @@ fn stop_server(child: &mut Child, outcomes: &mut Vec<Outcome>) {
 fn port_open() -> bool {
     let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
     TcpStream::connect_timeout(&addr, Duration::from_millis(250)).is_ok()
-}
-
-/// Probe the origin the http-proxy example fronts; a TCP connect to its
-/// HTTPS port is enough to distinguish "offline" from "origin reachable".
-fn internet_available() -> bool {
-    let Ok(mut addrs) = "jsonplaceholder.cypress.io:443".to_socket_addrs() else {
-        return false;
-    };
-    addrs
-        .next()
-        .is_some_and(|addr| TcpStream::connect_timeout(&addr, Duration::from_secs(10)).is_ok())
 }
 
 /// First 200 characters, matching the old script's `head -c 200` diagnostics.
