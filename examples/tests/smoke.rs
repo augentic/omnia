@@ -486,7 +486,10 @@ async fn run_check(client: &Client, name: &str, check: &Check, outcomes: &mut Ve
                 if body.contains(needle) {
                     outcomes.push(Outcome::Pass(format!("{name}/{label}-body")));
                 } else {
-                    outcomes.push(Outcome::Fail(format!("{name}/{label}-body body={body}")));
+                    outcomes.push(Outcome::Fail(format!(
+                        "{name}/{label}-body body={}",
+                        snippet(&body)
+                    )));
                 }
             }
         }
@@ -533,7 +536,7 @@ fn run_command(
         }
         Expect::OkWith(needle) => {
             let log = fs::read_to_string(&log_path).unwrap_or_default();
-            if code == 0 && log.to_lowercase().contains(needle) {
+            if code == 0 && log.to_lowercase().contains(&needle.to_lowercase()) {
                 Outcome::Pass(name.to_string())
             } else {
                 Outcome::Fail(format!("{name} (exit {code}) {}", snippet(&log)))
@@ -646,14 +649,22 @@ async fn token_endpoint(
     let (parts, body) = request.into_parts();
     let form = String::from_utf8_lossy(&body.collect().await?.to_bytes()).into_owned();
     let authorization = parts.headers.get(AUTHORIZATION).and_then(|value| value.to_str().ok());
+    let credentials_match = authorization == Some(IDENTITY_BASIC_AUTH);
     let granted = parts.method == hyper::Method::POST
-        && authorization == Some(IDENTITY_BASIC_AUTH)
+        && credentials_match
         && form.split('&').any(|pair| pair == "grant_type=client_credentials");
     let (status, body) = if granted {
         (200, r#"{"access_token":"smoke-token","token_type":"bearer","expires_in":3600}"#)
     } else {
+        // Never echo the header itself: a misconfigured run could point real
+        // credentials at this stub, and the log ends up in CI output.
+        let authorization = match authorization {
+            None => "absent",
+            Some(_) if credentials_match => "matched",
+            Some(_) => "present, not the smoke credentials",
+        };
         eprintln!(
-            "token stub rejected {} {} authorization={authorization:?} form={form}",
+            "token stub rejected {} {} authorization={authorization} form={form}",
             parts.method, parts.uri
         );
         (400, r#"{"error":"invalid_client"}"#)
