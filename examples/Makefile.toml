@@ -12,13 +12,15 @@ skip_rust_env_info = true
 command = "cargo"
 args = ["build", "-p", "examples", "--examples", "--target", "wasm32-wasip2"]
 
-# Smoke-test every example against its README contract (see smoke.sh).
+# Smoke-test every example against its README contract (see tests/smoke.rs).
+# The test is #[ignore]d so the regular test loop skips it; run it on purpose
+# here. Set SMOKE_FILTER to narrow the scenarios.
 [tasks.smoke]
 workspace = false
 dependencies = ["examples"]
 script = '''
 cargo build -p examples --examples
-bash "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/examples/smoke.sh"
+cargo nextest run -p examples --test smoke --run-ignored ignored-only --no-capture
 '''
 
 [tasks.build]

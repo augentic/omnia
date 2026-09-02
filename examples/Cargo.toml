@@ -22,13 +22,17 @@ omnia-wasi-vault.workspace = true
 omnia-wasi-websocket.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-bytes.workspace = true
-http-body-util.workspace = true
-hyper = { workspace = true, features = ["client", "http1"] }
-hyper-util = { workspace = true, features = ["tokio"] }
 omnia.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
+
+# Used only by the smoke runner in tests/.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+bytes.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["http1", "server"] }
+hyper-util = { workspace = true, features = ["tokio"] }
+reqwest.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 axum = { workspace = true, features = ["macros", "query"] }
@@ -45,6 +49,10 @@ tower-http = { version = "0.7.0", features = ["cors", "trace"] }
 tracing.workspace = true
 wasip3.workspace = true
 wit-bindgen.workspace = true
+
+[[test]]
+name = "smoke"
+path = "tests/smoke.rs"
 
 [[example]]
 name = "blobstore-wasm"
