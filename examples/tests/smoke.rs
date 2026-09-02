@@ -3,7 +3,10 @@
 //! exit codes.
 //!
 //! IMPORTANT: Assumes guests and hosts are already built — run via
-//! `cargo make smoke`, which builds both first.
+//! `cargo make smoke`, which builds both first. The test is `#[ignore]`d so
+//! the regular `cargo make test` loop skips it. `SMOKE_FILTER` narrows a run
+//! to scenarios whose names start with any of its comma-separated prefixes,
+//! e.g. `SMOKE_FILTER=identity,cli/`.
 //!
 //! Credentialed backends are stood in for by in-process stubs (see
 //! [`serve_token_stub`]), so a run needs no secrets. Outbound internet is
@@ -332,8 +335,9 @@ fn identity_env(ctx: &Ctx) -> Vec<(&'static str, String)> {
     ]
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+#[tokio::test]
+#[ignore = "needs pre-built example hosts and guests plus outbound internet; run via `cargo make smoke`"]
+async fn examples() -> Result<()> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().context("workspace root")?;
     let target =
         std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| root.join("target"), PathBuf::from);
@@ -350,13 +354,17 @@ async fn main() -> Result<()> {
         bail!("port 8080 is already in use; stop that server first");
     }
 
-    // Optional argv prefixes narrow the run, e.g. `smoke identity cli/`.
-    let filters: Vec<String> = std::env::args().skip(1).collect();
+    let filters: Vec<String> = std::env::var("SMOKE_FILTER")
+        .map(|v| v.split(',').filter(|f| !f.is_empty()).map(str::to_owned).collect())
+        .unwrap_or_default();
     let selected = SCENARIOS
         .iter()
         .filter(|s| filters.is_empty() || filters.iter().any(|f| s.name().starts_with(f.as_str())));
 
-    let client = Client::builder().timeout(REQUEST_TIMEOUT).build()?;
+    // Every server scenario restarts a host on the same port; a pooled
+    // keep-alive socket to the previous host would be reused for the next
+    // one's first request and get reset. Never keep idle connections.
+    let client = Client::builder().timeout(REQUEST_TIMEOUT).pool_max_idle_per_host(0).build()?;
     let mut results = Vec::new();
     for scenario in selected {
         let outcomes = match scenario {
@@ -395,7 +403,7 @@ async fn main() -> Result<()> {
     }
     println!("logs: {}", ctx.log.display());
     if fail > 0 {
-        std::process::exit(1);
+        bail!("{fail} smoke check(s) failed");
     }
     Ok(())
 }
