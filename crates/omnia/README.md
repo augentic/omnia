@@ -48,7 +48,7 @@ The runtime is built around a set of traits that allow services to be plugged in
 - **Host-mediated linking (advanced):** `serve_links`, `GuestSelector`, `FirstArgSelector`, `LinkClient`, `WrpcState`
 - **Telemetry + CLI:** `Telemetry`, `resource`, `Cli`, `Command`, `Parser`
 - **Plugins (`omnia:plugins/loader`):** `WasiPlugins`, `Plugins`, `PluginLoader`, `Location`, the `PathMounts`/`RegistryClient` acquirers with their `PathSource`/`RegistrySource` seams, and the `ContentStore`/`ReleaseStore` cache traits
-- **Error vocabulary:** `anyhow` is re-exported (`omnia::anyhow::Result`) because `Backend`, `Wiring`, and the generated runtime module speak it
+- **Signature vocabulary:** `anyhow` (`omnia::anyhow::Result`) because `Backend`, `Wiring`, and the generated runtime module speak it, and `futures` (`omnia::futures::future::BoxFuture`) because the plugin store and acquirer seams return it
 
 Most deployments only touch the `runtime!` macro; a hand-written runtime instead implements [`Wiring`] and calls `run`.
 

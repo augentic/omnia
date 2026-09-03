@@ -12,9 +12,12 @@
 // keeps the documented surface at `omnia::…`, the only path embedders use.
 
 // `anyhow` is the error vocabulary of `Backend`, `Wiring`, and the generated
-// runtime module, so embedders reach it from here without a direct
-// dependency of their own.
+// runtime module; `futures` supplies the `BoxFuture` in the plugin store and
+// acquirer seams (`ContentStore`, `ReleaseStore`, `PathSource`,
+// `RegistrySource`). Both are part of the facade's public signatures, so
+// embedders reach them from here without a direct dependency of their own.
 pub use anyhow;
+pub use futures;
 #[cfg(feature = "jit")]
 #[doc(inline)]
 pub use omnia_core::compile;
@@ -35,8 +38,8 @@ pub use omnia_core::{
 pub use omnia_core::{Cli, Command, Parser};
 #[doc(hidden)]
 pub use omnia_core::{
-    MainOptions, ManifestSource, WrpcCtxView, WrpcView, futures, main, pastey, run,
-    run_precompiled, tokio, wasmtime, wasmtime_wasi,
+    MainOptions, ManifestSource, WrpcCtxView, WrpcView, main, pastey, run, run_precompiled, tokio,
+    wasmtime, wasmtime_wasi,
 };
 #[doc(inline)]
 pub use omnia_host_macros::runtime;

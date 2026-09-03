@@ -78,7 +78,9 @@
   module imports `omnia::anyhow::Result` rather than `anyhow::Result`, so
   `runtime!` no longer requires `anyhow` in the embedder's own `Cargo.toml`
   (`omnia::anyhow` is now a documented re-export, being the error vocabulary
-  of `Backend` and `Wiring`). `omnia-plugin`'s docs no longer tell store
+  of `Backend` and `Wiring`, as is `omnia::futures`, whose `BoxFuture` the
+  `ContentStore`/`ReleaseStore`/`PathSource`/`RegistrySource` seams return).
+  `omnia-plugin`'s docs no longer tell store
   implementors to depend on it directly — `ContentStore`/`ReleaseStore` and
   the `Backend`/`NoOptions` a `cache:` store also needs all reach embedders
   through `omnia`; depending on `omnia-core` or `omnia-plugin` is only for
