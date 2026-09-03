@@ -15,6 +15,23 @@
 //!     .write_gen("gen.rs");
 //! ```
 //!
+//! Programs are `[[example]]` targets of one package — listed with
+//! [`Components::examples`] or discovered with [`Components::scan`] — or
+//! `cdylib` packages compiled as the components they ship as, listed with
+//! [`Components::packages`] or discovered with [`Components::scan_packages`];
+//! [`Components::extra_package`] builds a driver guest beside them:
+//!
+//! ```no_run
+//! // build.rs — every crate under sources/ is a component under test,
+//! // named SOURCE_<NAME> with a foreach_source! arm; the caller drives them.
+//! omnia_test::build::Components::in_workspace("../..")
+//!     .scan_packages("sources")
+//!     .group("source")
+//!     .extra_package("caller")
+//!     .build()
+//!     .write_gen("gen.rs");
+//! ```
+//!
 //! The nested build is a no-op when the outer target is itself `wasm32`;
 //! `gen.rs` then holds only its header.
 

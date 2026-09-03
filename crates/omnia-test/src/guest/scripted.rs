@@ -232,9 +232,12 @@ pub fn function_tools(request: &Request) -> Vec<&Function> {
 ///
 /// Keyed rather than FIFO because the loader contract is per package: a
 /// request for a package with a scripted refusal fails with it; otherwise
-/// the load resolves to the scripted digest, the request's own pin, or a
-/// deterministic placeholder. A pin that disagrees with the resolved digest
-/// is refused before anything else, as the host would.
+/// the load resolves, in order, to the digest scripted for the package, the
+/// request's own pin, the loader-wide default set by [`defaulting`], or a
+/// deterministic per-package placeholder. A pin that disagrees with the
+/// resolved digest is refused before anything else, as the host would.
+///
+/// [`defaulting`]: Self::defaulting
 ///
 /// ```
 /// use omnia_guest::plugins::{Error, Location, PluginRef, Plugins as _};
@@ -257,6 +260,7 @@ pub struct ScriptedLoader {
 #[derive(Debug, Default)]
 struct LoaderInner {
     digests: Mutex<BTreeMap<String, Digest>>,
+    default: Mutex<Option<Digest>>,
     refusals: Mutex<BTreeMap<String, plugins::Error>>,
     loads: Mutex<Vec<PluginRef>>,
 }
@@ -270,6 +274,19 @@ impl ScriptedLoader {
     #[must_use]
     pub fn digest(self, package: impl Into<String>, digest: Digest) -> Self {
         self.inner.digests.lock().expect("digests lock").insert(package.into(), digest);
+        self
+    }
+
+    /// Resolves every package without a scripted digest or a pin of its own
+    /// to `digest`, in place of the per-package placeholder — for suites that
+    /// assert one fixed digest in their envelopes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a lock is poisoned.
+    #[must_use]
+    pub fn defaulting(self, digest: Digest) -> Self {
+        *self.inner.default.lock().expect("default lock") = Some(digest);
         self
     }
 
@@ -309,6 +326,7 @@ impl ScriptedLoader {
             .get(&plugin.package)
             .cloned()
             .or_else(|| plugin.digest.clone())
+            .or_else(|| self.inner.default.lock().expect("default lock").clone())
             .unwrap_or_else(|| placeholder_digest(&plugin.package));
         match &plugin.digest {
             Some(pin) if *pin != resolved => Err(plugins::Error::Refused(format!(

@@ -76,7 +76,9 @@
   the rung it uses, and a build-dependency line that forgets
   `default-features = false` still pulls nothing but `std`.
   - `guest`: a native double per `omnia_guest` capability trait —
-    `Scripted: Model`, `ScriptedLoader: Plugins`, `Memory: StateStore +
+    `Scripted: Model`, `ScriptedLoader: Plugins` (per-package digests and
+    refusals, plus `defaulting(digest)` for every unscripted, unpinned load
+    in place of the per-package placeholder), `Memory: StateStore +
     BlobStore` (with `Namespaced`; the `BlobStoreExt` operations derive from
     the primitives), `MemoryDocs` over the docstore default,
     `ScriptedTables`, `MatchedHttp`, `Sink: Publish + Broadcast`,
@@ -106,6 +108,11 @@
   - `build`, `std`-only: `Components` runs the nested cargo build a
     consumer's `build.rs` needs and writes `gen.rs` with one path constant
     per program and a `foreach_<group>!` completeness macro per group.
+    Programs are `[[example]]` targets (`examples`, `scan`) or the shipped
+    `cdylib` packages themselves (`packages`, `scan_packages` over a
+    directory of crates — constants read `<GROUP>_<NAME>`, arms are the
+    crate name), and `extra_package` builds a driver guest beside them with
+    a constant but no arm; `Program` gains a `constant` field.
   Both scripted models share one `Script` core, so the same script reads
   identically at the handler and component rungs. `cargo make ci` now checks
   each feature alone and in combination (`features`, `hack`) and guards the

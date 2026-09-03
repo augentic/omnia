@@ -11,8 +11,9 @@ pub(super) struct Artifact<'a> {
     pub(super) path: String,
 }
 
-/// Renders `gen.rs`: one `pub const <NAME>: &str` per artifact, then one
-/// `foreach_<group>!` completeness macro per group.
+/// Renders `gen.rs`: one `pub const <CONSTANT>: &str` per artifact, then one
+/// `foreach_<group>!` completeness macro per group (an ungrouped artifact —
+/// an extra package — gets a constant and no arm).
 pub(super) fn render_gen(header: &str, artifacts: &[Artifact<'_>]) -> String {
     let mut generated = String::from(header);
     let mut groups: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
@@ -21,11 +22,12 @@ pub(super) fn render_gen(header: &str, artifacts: &[Artifact<'_>]) -> String {
         writeln!(
             generated,
             "/// Path to the compiled `{name}` guest component.\npub const {}: &str = {:?};",
-            name.to_uppercase(),
-            artifact.path
+            artifact.program.constant, artifact.path
         )
         .expect("writing to a String");
-        groups.entry(&artifact.program.group).or_default().push(name);
+        if !artifact.program.group.is_empty() {
+            groups.entry(&artifact.program.group).or_default().push(name);
+        }
     }
 
     for (group, names) in groups {
@@ -93,9 +95,45 @@ mod tests {
     fn program(name: &str, group: &str, source: &str) -> Program {
         Program {
             name: name.into(),
+            constant: name.to_uppercase(),
             group: group.into(),
             source: source.into(),
         }
+    }
+
+    // A package constant carries its group; an ungrouped extra has a
+    // constant and no `foreach_` arm.
+    #[test]
+    fn gen_package_constants_and_ungrouped_extras() {
+        let intent = Program {
+            name: "intent".into(),
+            constant: "SOURCE_INTENT".into(),
+            group: "source".into(),
+            source: "intent".into(),
+        };
+        let caller = Program {
+            name: "caller".into(),
+            constant: "CALLER".into(),
+            group: String::new(),
+            source: "caller".into(),
+        };
+        let artifacts = [
+            Artifact {
+                program: &intent,
+                path: "/out/intent.wasm".into(),
+            },
+            Artifact {
+                program: &caller,
+                path: "/out/caller.wasm".into(),
+            },
+        ];
+        let rendered = render_gen("", &artifacts);
+        assert!(rendered.contains("pub const SOURCE_INTENT: &str = \"/out/intent.wasm\";"));
+        assert!(rendered.contains("pub const CALLER: &str = \"/out/caller.wasm\";"));
+        assert!(rendered.contains("macro_rules! foreach_source"));
+        assert!(rendered.contains("use self::intent as _;"));
+        assert!(!rendered.contains("use self::caller as _;"));
+        assert_eq!(rendered.matches("macro_rules!").count(), 1);
     }
 
     #[test]
