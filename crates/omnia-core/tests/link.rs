@@ -13,7 +13,7 @@ use omnia::{DeploymentBuilder, GuestArtifact, GuestEntry, GuestId, Manifest, Run
 
 // Every guest program in `crates/test-programs` must have a matching test
 // here; a new program without one fails to compile.
-test_artifacts::foreach_link!();
+test_programs::foreach_link!();
 
 /// Boot a runtime over `guests` (assembled in order) with
 /// `omnia-test:link/ops` dispatched.
@@ -62,7 +62,7 @@ async fn call(runtime: &Runtime<()>, guest: &str, func: &str, message: &str) -> 
 #[tokio::test]
 async fn link_echoer() {
     let runtime =
-        boot(&[("echoer", test_artifacts::LINK_ECHOER), ("full", test_artifacts::LINK_FULL)])
+        boot(&[("echoer", test_programs::LINK_ECHOER), ("full", test_programs::LINK_FULL)])
             .await
             .expect("deployment boots");
 
@@ -76,7 +76,7 @@ async fn link_echoer() {
 #[tokio::test]
 async fn link_partial() {
     let runtime =
-        boot(&[("echoer", test_artifacts::LINK_ECHOER), ("partial", test_artifacts::LINK_PARTIAL)])
+        boot(&[("echoer", test_programs::LINK_ECHOER), ("partial", test_programs::LINK_PARTIAL)])
             .await
             .expect("deployment boots");
 
@@ -92,9 +92,9 @@ async fn link_partial() {
 #[tokio::test]
 async fn link_full() {
     let runtime = boot(&[
-        ("echoer", test_artifacts::LINK_ECHOER),
-        ("partial", test_artifacts::LINK_PARTIAL),
-        ("full", test_artifacts::LINK_FULL),
+        ("echoer", test_programs::LINK_ECHOER),
+        ("partial", test_programs::LINK_PARTIAL),
+        ("full", test_programs::LINK_FULL),
     ])
     .await
     .expect("subset-first deployment boots");
@@ -113,11 +113,11 @@ async fn link_full() {
 #[tokio::test]
 async fn link_full_registered_late() {
     let runtime =
-        boot(&[("echoer", test_artifacts::LINK_ECHOER), ("partial", test_artifacts::LINK_PARTIAL)])
+        boot(&[("echoer", test_programs::LINK_ECHOER), ("partial", test_programs::LINK_PARTIAL)])
             .await
             .expect("deployment boots");
 
-    let wasm = std::fs::read(test_artifacts::LINK_FULL).expect("reading full guest artifact");
+    let wasm = std::fs::read(test_programs::LINK_FULL).expect("reading full guest artifact");
     runtime.register("full", GuestArtifact::wasm(wasm)).await.expect("late registration");
 
     let sync = call(&runtime, "full", "poke", "late").await.expect("sync dispatch");

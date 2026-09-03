@@ -2379,7 +2379,7 @@ dependencies = [
  "pastey",
  "serde",
  "sha2 0.10.9",
- "test-artifacts",
+ "test-programs",
  "tokio",
  "tokio-util",
  "toml",
@@ -2468,7 +2468,7 @@ dependencies = [
  "omnia-wasi-otel",
  "serde",
  "tempfile",
- "test-artifacts",
+ "test-programs",
  "tokio",
  "tracing",
  "wasm-pkg-client",
@@ -2501,7 +2501,7 @@ dependencies = [
  "omnia-wasi-websocket",
  "serde_json",
  "tempfile",
- "test-artifacts",
+ "test-programs",
  "tokio",
  "trybuild",
 ]
@@ -2639,7 +2639,7 @@ dependencies = [
  "omnia-test",
  "serde",
  "serde_json",
- "test-artifacts",
+ "test-programs",
  "tokio",
  "tracing",
  "wasip3",
@@ -2662,7 +2662,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-proto",
  "opentelemetry_sdk",
- "test-artifacts",
+ "test-programs",
  "tokio",
  "tracing",
  "tracing-opentelemetry",
@@ -3997,18 +3997,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "test-artifacts"
-version = "0.36.0"
-dependencies = [
- "omnia-test",
-]
-
-[[package]]
 name = "test-programs"
 version = "0.36.0"
 dependencies = [
  "futures",
  "omnia-guest",
+ "omnia-test",
  "omnia-wasi-model",
  "omnia-wasi-otel",
  "tracing",

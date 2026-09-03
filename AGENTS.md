@@ -35,9 +35,9 @@ For the HTTP example, the server listens on `localhost:8080`.
 
 The practical walk-through is [docs/guides/testing-policy.md](docs/guides/testing-policy.md). In short:
 
-- **End-to-end tests are the primary tier for `wasi-*` host crates**: a real guest component from `crates/test-programs` (compiled by `crates/test-artifacts`'s build script) driven through omnia's own runtime (`omnia_test::host`) against an inline scenario backend, in one flat file per interface in the host crate's root `tests/` directory. Exemplar: `crates/wasi-model/tests/model.rs`, which invokes `test_artifacts::foreach_model!` so every guest program must have a matching test.
+- **End-to-end tests are the primary tier for `wasi-*` host crates**: a real guest component from `crates/test-programs` (compiled by that crate's own build script) driven through omnia's own runtime (`omnia_test::host`) against an inline scenario backend, in one flat file per interface in the host crate's root `tests/` directory. Exemplar: `crates/wasi-model/tests/model.rs`, which invokes `test_programs::foreach_model!` so every guest program must have a matching test.
 - **Unit tests for deterministic logic, wherever it lives**: parsers, codecs, filter/type translation, route matching, macro token expansion, guest-side library code. If a behavior is a pure function no guest boundary reaches, it is a unit test next to that logic.
-- **Guest-instantiating tests exist only through the `test-programs`/`test-artifacts` pipeline.** Never compile, deserialize, or instantiate a WASM guest ad hoc inside an individual test.
+- **Guest-instantiating tests exist only through the `test-programs` pipeline.** Never compile, deserialize, or instantiate a WASM guest ad hoc inside an individual test.
 - **Production backends** (the `omnia-backends` repo) are accepted by `#[ignore]`-gated live tests against the real service, not by mapping unit tests alone.
 - **Names identify, comments explain.** A test name is the scenario (`set_then_get`), not a restated expectation (`set_then_get_round_trips`).
 
