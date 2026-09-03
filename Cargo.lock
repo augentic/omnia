@@ -2354,6 +2354,8 @@ dependencies = [
 name = "omnia"
 version = "0.36.0"
 dependencies = [
+ "anyhow",
+ "futures",
  "omnia-core",
  "omnia-host-macros",
  "omnia-plugin",

@@ -3,7 +3,7 @@ source: crates/host-macros/src/runtime.rs
 expression: "expand_pretty(quote!({\n    hosts:\n    {\n        WasiKeyValue: Filesystem(FilesystemOptions::at(\".omnia/storage\")),\n        WasiBlobstore: Filesystem(FilesystemOptions::at(\".omnia/storage\")),\n        WasiOtel: OtelDefault,\n    },\n}))"
 ---
 mod runtime {
-    use anyhow::Result;
+    use omnia::anyhow::Result;
     use omnia::futures::future;
     use omnia::Server;
     use omnia::tokio;

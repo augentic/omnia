@@ -891,7 +891,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// Release every link-serve endpoint, aborting the drain tasks that pin
     /// `Runtime` clones (and with them the engine's pooling reservation).
     ///
-    /// [`run`] does this as the drive completes; an embedder holding a
+    /// `run` does this as the drive completes; an embedder holding a
     /// [`from_parts`](Self::from_parts) runtime calls it when the deployment
     /// is finished. In-flight invocations hold their own server handles and
     /// complete; only new dispatches are cut off.

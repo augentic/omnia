@@ -3,7 +3,7 @@ source: crates/host-macros/src/runtime.rs
 expression: "expand_pretty(quote!({ mode: command, hosts: { WasiOtel: OtelDefault, }, }))"
 ---
 mod runtime {
-    use anyhow::Result;
+    use omnia::anyhow::Result;
     use omnia::futures::future;
     use omnia::Server;
     use omnia::tokio;

@@ -11,14 +11,18 @@
 //! Everything plugin lives here: the [`WasiPlugins`] host binding, the
 //! [`Plugins`] load path, and the acquisition seam. Acquisition policy
 //! (endpoints, cache, path reads) is the two slots [`Plugins::install`]
-//! takes — one per [`Origin`] kind — from the deployment's
-//! [`Wiring::extend`](omnia_core::Wiring::extend) hook.
-//! [`Plugins::install_declared`] fills them from the deployment's declared
-//! locations (the `runtime!` macro's `plugins: { locations: [...] }` list,
-//! carried as manifest data). The built-in acquirers are [`PathMounts`] and
-//! [`RegistryClient`]; store implementors depend on this crate for
-//! [`ContentStore`] and [`ReleaseStore`]. The runtime core keeps zero
-//! storage and network dependencies.
+//! takes — one per [`Origin`] kind — from the deployment's `Wiring::extend`
+//! hook. [`Plugins::install_declared`] fills them from the deployment's
+//! declared locations (the `runtime!` macro's `plugins: { locations: [...] }`
+//! list, carried as manifest data). The built-in acquirers are
+//! [`PathMounts`] and [`RegistryClient`]; a store behind `RegistryClient`
+//! implements [`ContentStore`] and [`ReleaseStore`]. The runtime core keeps
+//! zero storage and network dependencies.
+//!
+//! Embedders — deployments and store implementors alike — reach all of this
+//! through the `omnia` facade's re-exports, never by depending on this crate
+//! or on `omnia-core` directly; those are dependencies for building another
+//! capability crate.
 
 mod host;
 mod loader;

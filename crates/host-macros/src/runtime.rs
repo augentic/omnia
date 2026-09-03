@@ -45,7 +45,9 @@ pub fn expand(config: &Config) -> TokenStream {
 
     quote! {
         mod runtime {
-            use anyhow::Result;
+            // Every path resolves through the facade so an embedder's only
+            // required dependency is `omnia` itself.
+            use omnia::anyhow::Result;
             use omnia::futures::future;
             use omnia::Server;
             use omnia::tokio;

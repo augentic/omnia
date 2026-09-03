@@ -141,6 +141,22 @@
   `BlobStore` impl (they are no longer trait members) and import
   `omnia_guest::BlobStoreExt` where a call site uses them. `Memory` and
   `Namespaced` in `omnia-test` drop their overrides accordingly.
+- The `omnia` facade is the whole embedder dependency, in documentation as
+  well as in code. Its re-exports are `#[doc(inline)]`, so rustdoc renders
+  every runtime and plugin item as `omnia::…` instead of a wall of
+  `pub use omnia_core::…` lines whose pages — and every path a reader copies
+  from them — spelled the underlying crate; `WasiPluginsCtxView` joins the
+  plugin re-exports so that surface is complete. The generated runtime
+  module imports `omnia::anyhow::Result` rather than `anyhow::Result`, so
+  `runtime!` no longer requires `anyhow` in the embedder's own `Cargo.toml`
+  (`omnia::anyhow` is now a documented re-export, being the error vocabulary
+  of `Backend` and `Wiring`, as is `omnia::futures`, whose `BoxFuture` the
+  `ContentStore`/`ReleaseStore`/`PathSource`/`RegistrySource` seams return).
+  `omnia-plugin`'s docs no longer tell store
+  implementors to depend on it directly — `ContentStore`/`ReleaseStore` and
+  the `Backend`/`NoOptions` a `cache:` store also needs all reach embedders
+  through `omnia`; depending on `omnia-core` or `omnia-plugin` is only for
+  building another capability crate.
 - Plugin loads are lock-free and race-safe. The loader's (package, digest)
   idempotency record now rides the registry entry itself (`Guest::digest`,
   recorded by `Runtime::admit` from the admitted bytes), so the attestation

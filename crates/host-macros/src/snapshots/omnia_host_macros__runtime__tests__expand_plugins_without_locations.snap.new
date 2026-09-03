@@ -1,5 +1,6 @@
 ---
 source: crates/host-macros/src/runtime.rs
+assertion_line: 315
 expression: "expand_pretty(quote!({\n    plugins: { interfaces: [\"emery:adapter/probe\"] }, guests:\n    [{ id: \"engine\", source: \"engine.wasm\" },],\n}))"
 ---
 mod runtime {
