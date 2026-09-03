@@ -65,7 +65,7 @@ pub trait DocumentStore: Send + Sync {
     }
 }
 
-forward_pointers!(DocumentStore {
+delegate_deref!(DocumentStore {
     fn get(&self, store: &str, id: &str) -> impl Future<Output = Result<Option<Document>>> + Send {
         (**self).get(store, id)
     }

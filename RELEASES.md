@@ -83,7 +83,7 @@
     twin of `omnia_guest::provider!` (same name, same grammar; a test
     declaration differs from `src/lib.rs` by the crate path alone, seeded
     with the default double per capability, `StateStore` and `BlobStore`
-    sharing one `storage` field) and `forward!` (delegating capability impls
+    sharing one `storage` field) and `delegate!` (delegating capability impls
     to fields, with a bracketed generic header).
   - `host`: `Deployment`, an overlay on a manifest — built from nothing with
     `Deployment::new()` or from a `runtime!` module's compiled-in
@@ -130,7 +130,7 @@
 - Every `omnia-guest` capability trait is implemented for `Arc<T>`, `&T`,
   and `Box<T>` where `T` implements it, forwarding on both targets, so a
   provider field may hold a double behind a shared handle and a
-  `P: StateStore` bound accepts `Arc<Memory>` with no `forward!`.
+  `P: StateStore` bound accepts `Arc<Memory>` with no `delegate!`.
 - `BlobStore` splits: the ten primitives (`get`, `put`, `delete`, `list`,
   `get_range`, `object_info`, `create_container`, `delete_container`,
   `container_exists`, `container_info`) stay on `BlobStore`; `has`,

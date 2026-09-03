@@ -227,7 +227,7 @@ pub trait Plugins: Send + Sync {
     }
 }
 
-forward_pointers!(Plugins {
+delegate_deref!(Plugins {
     fn load(&self, plugin: &PluginRef) -> impl Future<Output = Result<Plugin, Error>> + Send {
         (**self).load(plugin)
     }

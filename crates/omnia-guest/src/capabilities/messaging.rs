@@ -52,7 +52,7 @@ pub trait Publish: Send + Sync {
     }
 }
 
-forward_pointers!(Publish {
+delegate_deref!(Publish {
     fn send(&self, topic: &str, message: &Message) -> impl Future<Output = Result<()>> + Send {
         (**self).send(topic, message)
     }

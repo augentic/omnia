@@ -8,9 +8,9 @@
 //! where `T` implements it, so a provider may hold a capability behind a
 //! pointer and a `P: Capability` bound accepts one.
 
-// The pointer impls forward on both targets: an empty impl would hand a
+// The pointer impls delegate on both targets: an empty impl would hand a
 // wrapped provider the WASI defaults in place of its own overrides.
-macro_rules! forward_pointers {
+macro_rules! delegate_deref {
     ($trait:ident { $($body:tt)* }) => {
         impl<P: $trait + ?Sized> $trait for ::std::sync::Arc<P> { $($body)* }
         impl<P: $trait + ?Sized> $trait for &P { $($body)* }

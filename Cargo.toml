@@ -129,8 +129,6 @@ omnia-guest = { path = "crates/omnia-guest", version = "0.36.0" }
 omnia-guest-macros = { path = "crates/guest-macros", version = "0.36.0" }
 omnia-host-macros = { path = "crates/host-macros", version = "0.36.0" }
 omnia-plugin = { path = "crates/omnia-plugin", version = "0.36.0" }
-# No default features so a `build.rs` line can take `build` alone; in-workspace
-# consumers name the feature set they need.
 omnia-test = { path = "crates/omnia-test", version = "0.36.0", default-features = false }
 omnia-wasi-blobstore = { path = "crates/wasi-blobstore", version = "0.36.0" }
 omnia-wasi-config = { path = "crates/wasi-config", version = "0.36.0" }
@@ -171,8 +169,3 @@ opt-level = 3
 [profile.dev.package.wasmtime-internal-cranelift]
 opt-level = 3
 
-# [package.metadata.cargo-udeps.ignore]
-# normal = ["openssl"]
-
-# [package.metadata.cargo-machete]
-# ignored = ["openssl"]

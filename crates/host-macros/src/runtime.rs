@@ -20,7 +20,7 @@ pub fn expand(config: &Config) -> TokenStream {
         backends_ty,
         backends_def,
         main_options,
-        manifest_source,
+        manifest,
         link_plugins,
     } = Codegen::from(config);
 
@@ -40,7 +40,7 @@ pub fn expand(config: &Config) -> TokenStream {
             }
         }
     });
-    let manifest_source = manifest_source
+    let manifest = manifest
         .unwrap_or_else(|| quote! { omnia::ManifestSource::Inline(omnia::Manifest::new()) });
 
     quote! {
@@ -89,7 +89,7 @@ pub fn expand(config: &Config) -> TokenStream {
             /// manifest keys; empty when neither is declared), for an
             /// embedder to overlay before `run_with`.
             pub fn manifest() -> omnia::ManifestSource {
-                #manifest_source
+                #manifest
             }
 
             /// Entry point: run the compiled-in deployment through this

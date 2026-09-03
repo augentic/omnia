@@ -72,7 +72,7 @@ async fn prepare(
     Ok((conn, stmt))
 }
 
-forward_pointers!(TableStore {
+delegate_deref!(TableStore {
     fn query(
         &self, conn_name: String, query: String, params: Vec<DataType>,
     ) -> impl Future<Output = Result<Vec<Row>>> + Send {

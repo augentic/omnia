@@ -31,7 +31,7 @@ pub trait HttpRequest: Send + Sync {
     }
 }
 
-forward_pointers!(HttpRequest {
+delegate_deref!(HttpRequest {
     fn fetch<T>(&self, request: Request<T>) -> impl Future<Output = Result<Response<Bytes>>> + Send
     where
         T: Body + Any + Send,

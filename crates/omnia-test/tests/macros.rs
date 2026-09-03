@@ -1,4 +1,4 @@
-//! `provider!` and `forward!` expansions, plus the compile-fail diagnostics
+//! `provider!` and `delegate!` expansions, plus the compile-fail diagnostics
 //! under `tests/ui/`.
 
 use std::sync::Arc;
@@ -26,7 +26,7 @@ struct Layered<S> {
     identity: FixedIdentity,
 }
 
-omnia_test::forward!(impl[S: StateStore + BlobStore + Send + Sync + 'static] Layered<S> {
+omnia_test::delegate!(impl[S: StateStore + BlobStore + Send + Sync + 'static] Layered<S> {
     Model => model,
     StateStore + BlobStore => storage,
     Identity => identity,
@@ -42,7 +42,7 @@ fn user(content: &str) -> Request {
 }
 
 #[tokio::test]
-async fn provider_seeds_through_builders_and_forward_to_fields() {
+async fn provider_seeds_through_builders_and_delegates_to_fields() {
     let provider = Everything::default()
         .config(MapConfig::default().with([("region", "eu")]))
         .identity(FixedIdentity::new("tok"))
@@ -73,7 +73,7 @@ async fn exemplar_provider_line_compiles_and_defaults() {
 }
 
 #[tokio::test]
-async fn forward_derefs_through_arc_fields() {
+async fn delegate_derefs_through_arc_fields() {
     let storage = Arc::new(Memory::default());
     let provider = Layered {
         model: Scripted::answering(["ok"]),

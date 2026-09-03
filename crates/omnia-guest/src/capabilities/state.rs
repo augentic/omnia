@@ -143,7 +143,7 @@ pub trait StateStore: Send + Sync {
     }
 }
 
-forward_pointers!(StateStore {
+delegate_deref!(StateStore {
     fn get(&self, key: &str) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
         (**self).get(key)
     }

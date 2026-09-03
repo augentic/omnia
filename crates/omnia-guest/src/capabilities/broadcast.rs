@@ -30,7 +30,7 @@ pub trait Broadcast: Send + Sync {
     }
 }
 
-forward_pointers!(Broadcast {
+delegate_deref!(Broadcast {
     fn send(
         &self, name: &str, data: &[u8], sockets: Option<Vec<String>>,
     ) -> impl Future<Output = Result<()>> + Send {

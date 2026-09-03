@@ -23,7 +23,7 @@ pub trait Identity: Send + Sync {
     }
 }
 
-forward_pointers!(Identity {
+delegate_deref!(Identity {
     fn access_token(&self, identity: String) -> impl Future<Output = Result<String>> + Send {
         (**self).access_token(identity)
     }

@@ -328,7 +328,7 @@ pub trait Model: Send + Sync {
     }
 }
 
-forward_pointers!(Model {
+delegate_deref!(Model {
     fn complete(&self, request: Request) -> impl Future<Output = Result<Reply, Error>> + Send {
         (**self).complete(request)
     }

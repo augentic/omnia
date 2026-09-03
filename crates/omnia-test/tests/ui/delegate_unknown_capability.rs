@@ -2,6 +2,6 @@ struct Provider {
     config: omnia_test::guest::MapConfig,
 }
 
-omnia_test::forward!(impl Provider { Telemetry => config });
+omnia_test::delegate!(impl Provider { Telemetry => config });
 
 fn main() {}

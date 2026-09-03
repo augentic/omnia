@@ -21,7 +21,7 @@ pub trait Config: Send + Sync {
     }
 }
 
-forward_pointers!(Config {
+delegate_deref!(Config {
     fn get(&self, key: &str) -> impl Future<Output = Result<String>> + Send {
         (**self).get(key)
     }

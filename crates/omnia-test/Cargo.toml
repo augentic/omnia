@@ -19,7 +19,7 @@ workspace = true
 # No default: a consumer names the rung it uses, and a build-dependency line
 # that forgets `default-features = false` still pulls nothing but `std`.
 default = []
-# Native doubles for the `omnia_guest` capability traits, plus `provider!` and `forward!`.
+# Native doubles for the `omnia_guest` capability traits, plus `provider!` and `delegate!`.
 # `omnia-guest/orm` already carries the docstore and sql host crates the
 # `MemoryDocs` and `ScriptedTables` doubles wrap.
 guest = [

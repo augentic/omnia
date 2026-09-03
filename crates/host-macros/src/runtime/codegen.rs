@@ -20,7 +20,7 @@ pub struct Codegen {
     pub main_options: TokenStream,
     /// The compiled-in `omnia::ManifestSource`; absent when the invocation
     /// declares neither `config:` nor inline manifest keys.
-    pub manifest_source: Option<TokenStream>,
+    pub manifest: Option<TokenStream>,
     /// Whether to link the `omnia::WasiPlugins` loader host and install the
     /// declared locations — a `plugins:` block means the deployment opted
     /// into the loader capability.
@@ -35,8 +35,8 @@ impl From<&Config> for Codegen {
 
         let (backends_ty, backends_def) = emit_backends(host_entries);
 
-        let manifest_source = emit_manifest_source(config);
-        let main_options = emit_main_options(config, manifest_source.is_some());
+        let manifest = emit_manifest(config);
+        let main_options = emit_main_options(config, manifest.is_some());
 
         Self {
             mode: config.mode,
@@ -45,7 +45,7 @@ impl From<&Config> for Codegen {
             backends_ty,
             backends_def,
             main_options,
-            manifest_source,
+            manifest,
             link_plugins: config.plugins_declared,
         }
     }
@@ -67,7 +67,7 @@ fn emit_main_options(config: &Config, has_manifest: bool) -> TokenStream {
 /// Emit the `omnia::ManifestSource` for the compiled-in deployment
 /// manifest: `Path` for a `config:` expression, `Inline` for the inline
 /// manifest keys, nothing when neither is declared.
-fn emit_manifest_source(config: &Config) -> Option<TokenStream> {
+fn emit_manifest(config: &Config) -> Option<TokenStream> {
     if let Some(expr) = &config.config_file {
         return Some(quote! {
             omnia::ManifestSource::Path(::std::path::PathBuf::from(#expr))

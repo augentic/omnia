@@ -11,7 +11,7 @@ error[E0124]: field `config` is already declared
   |
   = note: this error originates in the macro `$crate::__provider` which comes from the expansion of the macro `omnia_test::provider` (in Nightly builds, run with -Z macro-backtrace for more info)
 
-error[E0119]: conflicting implementations of trait `omnia_test::guest::__forward::omnia_guest::capabilities::config::Config` for type `Provider`
+error[E0119]: conflicting implementations of trait `omnia_test::guest::__delegate::omnia_guest::capabilities::config::Config` for type `Provider`
  --> tests/ui/duplicate_capability.rs:1:1
   |
 1 | / omnia_test::provider! {
@@ -22,7 +22,7 @@ error[E0119]: conflicting implementations of trait `omnia_test::guest::__forward
   | |_first implementation here
   |   conflicting implementation for `Provider`
   |
-  = note: this error originates in the macro `$crate::__forward_trait` which comes from the expansion of the macro `omnia_test::provider` (in Nightly builds, run with -Z macro-backtrace for more info)
+  = note: this error originates in the macro `$crate::__delegate_trait` which comes from the expansion of the macro `omnia_test::provider` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0592]: duplicate definitions with name `config`
  --> tests/ui/duplicate_capability.rs:1:1

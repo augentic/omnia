@@ -1,7 +1,7 @@
-//! Support for the `forward!` expansion: one marker trait per capability
+//! Support for the `delegate!` expansion: one marker trait per capability
 //! whose only method hands back `&Self`.
 //!
-//! `forward!` calls `self.field.__as()` inside a block that imports exactly
+//! `delegate!` calls `self.field.__as()` inside a block that imports exactly
 //! one of these traits. Method resolution auto-derefs, so the field may hold
 //! the double directly or behind an `Arc`, and the returned reference feeds a
 //! fully qualified trait call with no ambiguity between capabilities that

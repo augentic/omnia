@@ -28,7 +28,7 @@ omnia-test = { version = "0.36", features = ["build"] }
 
 The target gate on the dev line is the canonical shape for a guest crate: handler tests compile natively, and the component never sees the crate. The crate is also empty on `wasm32` (`#![cfg(not(target_arch = "wasm32"))]`), so an ungated line resolves on both targets and contributes nothing to the component; the gate simply keeps the host crates out of the `wasm32` dependency graph. The `build` line stays `std`-only by contract (omnia's CI guards its dependency tree), so it never pulls the runtime into a `build.rs`.
 
-## Handler rung: `provider!` and `forward!`
+## Handler rung: `provider!` and `delegate!`
 
 A guest declares its production provider with `omnia_guest::provider!`: one struct, the capabilities it needs, and empty impls that pick up the WASI-backed default bodies on `wasm32`.
 
@@ -67,7 +67,7 @@ The two declarations differ by the crate path alone, so a reader compares the te
 
 Every capability trait is also implemented for `Arc<T>`, `&T`, and `Box<T>`, so a handler bounded on `P: StateStore` accepts `Arc<Memory>` directly.
 
-When the provider is hand-written — generic over a storage type, say, or holding a double behind an `Arc` — `forward!` writes the delegating impls instead of a struct:
+When the provider is hand-written — generic over a storage type, say, or holding a double behind an `Arc` — `delegate!` writes the delegating impls instead of a struct:
 
 ```rust,ignore
 #[derive(Clone)]
@@ -76,13 +76,13 @@ struct Provider<S> {
     storage: Arc<S>,
 }
 
-omnia_test::forward!(impl[S: StateStore + BlobStore + Send + Sync + 'static] Provider<S> {
+omnia_test::delegate!(impl[S: StateStore + BlobStore + Send + Sync + 'static] Provider<S> {
     Model => model,
     StateStore + BlobStore => storage,
 });
 ```
 
-The generic header goes in square brackets so the macro can find the type that follows it. Use `provider!` for the common case and `forward!` when the struct itself carries meaning.
+The generic header goes in square brackets so the macro can find the type that follows it. Use `provider!` for the common case and `delegate!` when the struct itself carries meaning.
 
 ## Component rung: `Deployment` over `Backends`
 

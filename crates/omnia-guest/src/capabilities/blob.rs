@@ -442,7 +442,7 @@ pub trait BlobStoreExt: BlobStore {
 
 impl<T: BlobStore + ?Sized> BlobStoreExt for T {}
 
-forward_pointers!(BlobStore {
+delegate_deref!(BlobStore {
     fn get(
         &self, container: &str, name: &str,
     ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
