@@ -3,7 +3,7 @@ source: crates/host-macros/src/runtime.rs
 expression: "expand_pretty(quote!({\n    mode: command, guests:\n    [{ id: \"app\", source: \"app.wasm\", command: true },\n    { id: \"helper\", source: \"helper.wasm\" },],\n}))"
 ---
 mod runtime {
-    use anyhow::Result;
+    use omnia::anyhow::Result;
     use omnia::futures::future;
     use omnia::Server;
     use omnia::tokio;
