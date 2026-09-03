@@ -4,27 +4,44 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use super::env::{self, WASM_TARGET};
 use super::render::{Artifact, dep_info_paths, refresh_examples, render_gen};
 
-/// One guest program: an `[[example]]` compiled to a component.
+/// One guest program compiled to a component: an `[[example]]` of one
+/// package, or a `cdylib` package of its own.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Program {
-    /// The example name, and the stem of the artifact and generated constant.
+    /// The artifact stem, and the `foreach_<group>!` arm's identifier.
     pub name: String,
+    /// The generated `pub const` name: the uppercased `name` for an example,
+    /// `<GROUP>_<NAME>` for a package.
+    pub constant: String,
     /// The `foreach_<group>!` macro this program belongs to.
     pub group: String,
-    /// The source path relative to the package manifest.
+    /// An example's source path relative to the package manifest, or a
+    /// package's name as the nested build is told it.
     pub source: String,
 }
 
-/// Where programs come from: an explicit example list or a scanned
-/// `<group>/<scenario>.rs` tree.
+/// Where programs come from: an explicit example list, a scanned
+/// `<group>/<scenario>.rs` tree, or `cdylib` packages — listed, or every
+/// crate directory under one parent.
 #[derive(Clone, Debug)]
 enum Source {
     Examples(Vec<String>),
     Scan(PathBuf),
+    Packages(Vec<String>),
+    ScanPackages(PathBuf),
+}
+
+impl Source {
+    /// Whether the artifacts are `[[example]]` targets, uplifted under
+    /// `debug/examples/` rather than `debug/`.
+    const fn is_examples(&self) -> bool {
+        matches!(self, Self::Examples(_) | Self::Scan(_))
+    }
 }
 
 /// A nested `wasm32-wasip2` build of guest programs, configured from a
@@ -34,6 +51,7 @@ pub struct Components {
     root: PathBuf,
     package: Option<String>,
     source: Source,
+    extras: Vec<String>,
     sync: Option<PathBuf>,
     group: String,
     tracked: Vec<PathBuf>,
@@ -48,6 +66,7 @@ impl Components {
             root: root.as_ref().to_path_buf(),
             package: None,
             source: Source::Examples(Vec::new()),
+            extras: Vec::new(),
             sync: None,
             group: "examples".to_owned(),
             tracked: Vec::new(),
@@ -74,6 +93,35 @@ impl Components {
     #[must_use]
     pub fn scan(mut self, dir: impl AsRef<Path>) -> Self {
         self.source = Source::Scan(dir.as_ref().to_path_buf());
+        self
+    }
+
+    /// An explicit list of workspace `cdylib` packages compiled as
+    /// components in their own right — the shipped components, not example
+    /// stand-ins — all in the current group. Each is named by its crate name
+    /// (`-` becomes `_`) and its constant is `<GROUP>_<NAME>`.
+    #[must_use]
+    pub fn packages<S: Into<String>>(mut self, names: impl IntoIterator<Item = S>) -> Self {
+        self.source = Source::Packages(names.into_iter().map(Into::into).collect());
+        self
+    }
+
+    /// Discovers packages as every `<dir>/<name>/Cargo.toml` (relative to
+    /// the workspace root); an entry under `dir` that is not a crate
+    /// directory is a layout error. Otherwise as [`packages`](Self::packages).
+    #[must_use]
+    pub fn scan_packages(mut self, dir: impl AsRef<Path>) -> Self {
+        self.source = Source::ScanPackages(dir.as_ref().to_path_buf());
+        self
+    }
+
+    /// One more workspace `cdylib` package built alongside the programs and
+    /// given a path constant (its uppercased crate name) but no
+    /// `foreach_<group>!` arm — a driver guest the suite runs against every
+    /// program rather than a fixture under test.
+    #[must_use]
+    pub fn extra_package(mut self, name: impl Into<String>) -> Self {
+        self.extras.push(name.into());
         self
     }
 
@@ -122,7 +170,9 @@ impl Components {
             return Built {
                 header,
                 programs: Vec::new(),
+                extras: Vec::new(),
                 artifacts_dir: PathBuf::new(),
+                examples: self.source.is_examples(),
             };
         }
 
@@ -134,11 +184,48 @@ impl Components {
             rerun_if_changed(&root.join(tracked));
         }
 
-        let programs = match &self.source {
+        let programs = self.programs(&root);
+        if let Some(manifest) = &self.sync {
+            assert!(
+                self.source.is_examples(),
+                "sync_examples refreshes an [[example]] list; packages have none"
+            );
+            sync(&root.join(manifest), &programs);
+        }
+
+        let target_dir = env::path_var("OUT_DIR").join("fixtures");
+        let status = self
+            .nested_build(&root, &target_dir, &programs)
+            .status()
+            .unwrap_or_else(|err| panic!("spawning the {WASM_TARGET} fixture build: {err}"));
+        assert!(
+            status.success(),
+            "the fixture components could not be built; install the target with `rustup target \
+             add {WASM_TARGET}` and retry"
+        );
+
+        // Always `debug`: the nested build uses the dev profile regardless of
+        // the outer profile.
+        let built = Built {
+            header,
+            programs,
+            extras: self.extras.iter().map(|package| extra_program(package)).collect(),
+            artifacts_dir: target_dir.join(WASM_TARGET).join("debug"),
+            examples: self.source.is_examples(),
+        };
+        built.register_inputs();
+        built
+    }
+
+    /// The programs the source names, discovering and registering scanned
+    /// directories.
+    fn programs(&self, root: &Path) -> Vec<Program> {
+        match &self.source {
             Source::Examples(names) => names
                 .iter()
                 .map(|name| Program {
                     name: name.clone(),
+                    constant: name.to_uppercase(),
                     group: self.group.clone(),
                     source: format!("examples/{name}.rs"),
                 })
@@ -148,13 +235,18 @@ impl Components {
                 rerun_if_changed(&dir);
                 scan(&dir)
             }
-        };
-        if let Some(manifest) = &self.sync {
-            sync(&root.join(manifest), &programs);
+            Source::Packages(names) => package_programs(&self.group, names.clone()),
+            Source::ScanPackages(dir) => {
+                let dir = root.join(dir);
+                rerun_if_changed(&dir);
+                package_programs(&self.group, scan_packages(&dir))
+            }
         }
+    }
 
-        let target_dir = env::path_var("OUT_DIR").join("fixtures");
-        let mut command = env::nested_build(&root, &target_dir);
+    /// The nested cargo invocation selecting the programs and extras.
+    fn nested_build(&self, root: &Path, target_dir: &Path, programs: &[Program]) -> Command {
+        let mut command = env::nested_build(root, target_dir);
         if let Some(package) = &self.package {
             command.arg(format!("--package={package}"));
         }
@@ -167,45 +259,16 @@ impl Components {
             Source::Scan(_) => {
                 command.arg("--examples");
             }
-        }
-        let status = command
-            .status()
-            .unwrap_or_else(|err| panic!("spawning the {WASM_TARGET} fixture build: {err}"));
-        assert!(
-            status.success(),
-            "the fixture components could not be built; install the target with `rustup target \
-             add {WASM_TARGET}` and retry"
-        );
-
-        // Always `debug`: the nested build uses the dev profile regardless of
-        // the outer profile.
-        let artifacts_dir = target_dir.join(WASM_TARGET).join("debug/examples");
-        let mut seen = BTreeSet::new();
-        for program in &programs {
-            let artifact = artifacts_dir.join(format!("{}.wasm", program.name));
-            assert!(
-                artifact.exists(),
-                "no artifact for `{}` at {}: is it an `[[example]]` of the package?",
-                program.name,
-                artifact.display()
-            );
-            // Cargo's extra dep-info sits next to the uplifted example
-            // (`{name}.d`) and lists the program's sources plus every local
-            // path dependency, so edits there rebuild the fixture.
-            let dep_info = artifact.with_extension("d");
-            let contents = fs::read_to_string(&dep_info)
-                .unwrap_or_else(|err| panic!("reading {}: {err}", dep_info.display()));
-            for path in dep_info_paths(&contents) {
-                if seen.insert(path.clone()) {
-                    println!("cargo:rerun-if-changed={path}");
+            Source::Packages(_) | Source::ScanPackages(_) => {
+                for program in programs {
+                    command.args(["--package", &program.source]);
                 }
             }
         }
-        Built {
-            header,
-            programs,
-            artifacts_dir,
+        for package in &self.extras {
+            command.args(["--package", package]);
         }
+        command
     }
 }
 
@@ -219,7 +282,11 @@ pub const EXAMPLES_MARKER: &str = "# Generated by build.rs from programs/<group>
 pub struct Built {
     header: String,
     programs: Vec<Program>,
+    // `extra_package` components: a constant each, no group.
+    extras: Vec<Program>,
+    // The profile directory; examples are uplifted one level below it.
     artifacts_dir: PathBuf,
+    examples: bool,
 }
 
 impl Built {
@@ -229,15 +296,58 @@ impl Built {
         &self.programs
     }
 
+    /// The extra packages built beside the programs (see
+    /// [`Components::extra_package`]); empty under a `wasm32` outer target.
+    #[must_use]
+    pub fn extras(&self) -> &[Program] {
+        &self.extras
+    }
+
     /// The compiled component for `program`.
     #[must_use]
     pub fn artifact(&self, program: &Program) -> PathBuf {
-        self.artifacts_dir.join(format!("{}.wasm", program.name))
+        let file = format!("{}.wasm", program.name);
+        if self.examples && !program.group.is_empty() {
+            self.artifacts_dir.join("examples").join(file)
+        } else {
+            self.artifacts_dir.join(file)
+        }
+    }
+
+    /// Asserts every artifact exists and registers each one's dep-info
+    /// prerequisites with cargo.
+    fn register_inputs(&self) {
+        let mut seen = BTreeSet::new();
+        for program in self.programs.iter().chain(&self.extras) {
+            let artifact = self.artifact(program);
+            assert!(
+                artifact.exists(),
+                "no artifact for `{}` at {}: is it {}?",
+                program.name,
+                artifact.display(),
+                if self.examples && !program.group.is_empty() {
+                    "an `[[example]]` of the package"
+                } else {
+                    "a `cdylib` package of the workspace"
+                }
+            );
+            // Cargo's extra dep-info sits next to the uplifted artifact
+            // (`{name}.d`) and lists the program's sources plus every local
+            // path dependency, so edits there rebuild the fixture.
+            let dep_info = artifact.with_extension("d");
+            let contents = fs::read_to_string(&dep_info)
+                .unwrap_or_else(|err| panic!("reading {}: {err}", dep_info.display()));
+            for path in dep_info_paths(&contents) {
+                if seen.insert(path.clone()) {
+                    println!("cargo:rerun-if-changed={path}");
+                }
+            }
+        }
     }
 
     /// Writes `gen.rs` (or another `file` name) under `OUT_DIR`: one
-    /// `pub const <NAME>: &str` per program and one `foreach_<group>!` per
-    /// group, for the consumer to `include!`.
+    /// `pub const <NAME>: &str` per program and extra package, and one
+    /// `foreach_<group>!` per group, for the consumer to `include!`.
     ///
     /// # Panics
     ///
@@ -247,6 +357,7 @@ impl Built {
         let artifacts: Vec<_> = self
             .programs
             .iter()
+            .chain(&self.extras)
             .map(|program| {
                 let path = self.artifact(program);
                 let path = path.to_str().expect("artifact path is UTF-8").to_owned();
@@ -306,6 +417,24 @@ fn scan(dir: &Path) -> Vec<Program> {
     programs_from(&relative, groups)
 }
 
+/// Discovers `<dir>/<name>/Cargo.toml` package directories, registering the
+/// parent with cargo; anything else under `dir` is a layout error.
+fn scan_packages(dir: &Path) -> Vec<String> {
+    let mut packages = Vec::new();
+    for entry in read_dir(dir) {
+        let path = entry.path();
+        assert!(
+            path.join("Cargo.toml").is_file(),
+            "`{}` is not a crate directory (`{}` holds crate directories only)",
+            path.display(),
+            dir.display()
+        );
+        packages.push(entry.file_name().into_string().expect("UTF-8 crate directory"));
+    }
+    assert!(!packages.is_empty(), "no crate directories under {}", dir.display());
+    packages
+}
+
 fn read_dir(dir: &Path) -> impl Iterator<Item = fs::DirEntry> {
     fs::read_dir(dir)
         .unwrap_or_else(|err| panic!("reading {}: {err}", dir.display()))
@@ -320,11 +449,47 @@ fn programs_from(
     let mut programs: Vec<Program> = groups
         .into_iter()
         .flat_map(|(group, scenarios)| {
-            scenarios.into_iter().map(move |scenario| Program {
-                name: format!("{group}_{scenario}"),
-                source: format!("{programs_dir}/{group}/{scenario}.rs"),
-                group: group.clone(),
+            scenarios.into_iter().map(move |scenario| {
+                let name = format!("{group}_{scenario}");
+                Program {
+                    constant: name.to_uppercase(),
+                    name,
+                    source: format!("{programs_dir}/{group}/{scenario}.rs"),
+                    group: group.clone(),
+                }
             })
+        })
+        .collect();
+    programs.sort_by(|left, right| left.name.cmp(&right.name));
+    programs
+}
+
+/// An ungrouped program for an extra `cdylib` package: a constant, no arm.
+fn extra_program(package: &str) -> Program {
+    let name = package.replace('-', "_");
+    Program {
+        constant: name.to_uppercase(),
+        name,
+        group: String::new(),
+        source: package.to_owned(),
+    }
+}
+
+/// One program per `cdylib` package in `group`, sorted by name: the crate
+/// name (`-` as `_`) is the artifact stem and `foreach_<group>!` arm, the
+/// package name is what the nested build is told, and the constant carries
+/// the group so it reads beside scanned programs (`SOURCE_INTENT`).
+fn package_programs(group: &str, packages: Vec<String>) -> Vec<Program> {
+    let mut programs: Vec<Program> = packages
+        .into_iter()
+        .map(|package| {
+            let name = package.replace('-', "_");
+            Program {
+                constant: format!("{group}_{name}").to_uppercase(),
+                name,
+                group: group.to_owned(),
+                source: package,
+            }
         })
         .collect();
     programs.sort_by(|left, right| left.name.cmp(&right.name));
@@ -367,21 +532,76 @@ mod tests {
             [
                 Program {
                     name: "link_echo".into(),
+                    constant: "LINK_ECHO".into(),
                     group: "link".into(),
                     source: "programs/link/echo.rs".into(),
                 },
                 Program {
                     name: "model_echo_text".into(),
+                    constant: "MODEL_ECHO_TEXT".into(),
                     group: "model".into(),
                     source: "programs/model/echo_text.rs".into(),
                 },
                 Program {
                     name: "model_tools".into(),
+                    constant: "MODEL_TOOLS".into(),
                     group: "model".into(),
                     source: "programs/model/tools.rs".into(),
                 },
             ]
         );
+    }
+
+    // A package's crate name is the artifact stem and macro arm, the group
+    // prefixes only the constant, and the build is told the package name.
+    #[test]
+    fn package_programs_carry_the_group_in_the_constant_only() {
+        let programs =
+            package_programs("source", vec!["typescript".to_owned(), "gtfs-adapter".to_owned()]);
+        assert_eq!(
+            programs,
+            [
+                Program {
+                    name: "gtfs_adapter".into(),
+                    constant: "SOURCE_GTFS_ADAPTER".into(),
+                    group: "source".into(),
+                    source: "gtfs-adapter".into(),
+                },
+                Program {
+                    name: "typescript".into(),
+                    constant: "SOURCE_TYPESCRIPT".into(),
+                    group: "source".into(),
+                    source: "typescript".into(),
+                },
+            ]
+        );
+    }
+
+    // Examples are uplifted under `debug/examples/`; packages and extras sit
+    // in the profile directory itself.
+    #[test]
+    fn artifacts_follow_cargos_uplift_layout() {
+        let program = |name: &str, group: &str| Program {
+            name: name.into(),
+            constant: name.to_uppercase(),
+            group: group.into(),
+            source: name.into(),
+        };
+        let mut built = Built {
+            header: String::new(),
+            programs: vec![program("adapter", "examples")],
+            extras: vec![program("caller", "")],
+            artifacts_dir: PathBuf::from("/out/debug"),
+            examples: true,
+        };
+        assert_eq!(
+            built.artifact(&built.programs[0]),
+            Path::new("/out/debug/examples/adapter.wasm")
+        );
+        assert_eq!(built.artifact(&built.extras[0]), Path::new("/out/debug/caller.wasm"));
+
+        built.examples = false;
+        assert_eq!(built.artifact(&built.programs[0]), Path::new("/out/debug/adapter.wasm"));
     }
 
     #[test]
@@ -401,5 +621,15 @@ mod tests {
         let explicit = Components::in_workspace(".").examples(["adapter"]).group("mock");
         assert!(matches!(&explicit.source, Source::Examples(names) if names == &["adapter"]));
         assert_eq!(explicit.group, "mock");
+
+        let packages = Components::in_workspace("../..")
+            .scan_packages("sources")
+            .group("source")
+            .extra_package("caller");
+        assert!(
+            matches!(&packages.source, Source::ScanPackages(dir) if dir == Path::new("sources"))
+        );
+        assert!(!packages.source.is_examples());
+        assert_eq!(packages.extras, ["caller"]);
     }
 }

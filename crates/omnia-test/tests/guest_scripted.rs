@@ -180,6 +180,35 @@ async fn loader_refuses_a_disagreeing_pin() {
     }
 }
 
+// The default sits below the scripted digest and the request pin: an
+// unscripted, unpinned load takes it in place of the placeholder; a pin of
+// its own still wins; a pin disagreeing with a scripted digest is still
+// refused rather than falling through to the default.
+#[tokio::test]
+async fn loader_defaulting_fills_unscripted_unpinned_loads() {
+    let loader =
+        ScriptedLoader::default().digest("acme:tool", digest("ab")).defaulting(digest("ef"));
+
+    let unpinned =
+        PluginRef::builder().package("acme:other").location(Location::Registry(None)).build();
+    assert_eq!(*loader.load(&unpinned).await.expect("loads").digest(), digest("ef"));
+
+    let pinned = PluginRef::builder()
+        .package("acme:other")
+        .location(Location::Path("./plugins".into()))
+        .digest(digest("cd"))
+        .build();
+    assert_eq!(*loader.load(&pinned).await.expect("loads").digest(), digest("cd"));
+
+    let disagreeing = PluginRef::builder()
+        .package("acme:tool")
+        .location(Location::Registry(None))
+        .digest(digest("ef"))
+        .build();
+    assert!(matches!(loader.load(&disagreeing).await, Err(plugins::Error::Refused(_))));
+    assert_eq!(loader.loads().len(), 3);
+}
+
 #[tokio::test]
 async fn loader_scripted_refusal_wins() {
     let loader = ScriptedLoader::default()
