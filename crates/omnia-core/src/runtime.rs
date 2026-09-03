@@ -104,19 +104,18 @@ pub trait Wiring<B: Clone + Send + Sync + 'static> {
 /// and manifest source. Command mode with a compiled-in deployment is a
 /// direct command: argv passes to the guest verbatim except the reserved host
 /// log flags (`--debug` / `--quiet`), which select the telemetry
-/// [`LogMode`](crate::LogMode). Every other shape parses the standard
-/// `run [wasm] [--config] -- args…` grammar.
+/// [`LogMode`](crate::LogMode). Every other shape needs the standard
+/// `run [wasm] [--config] -- args…` grammar, served by `omnia-cli`'s `main`;
+/// this one refuses it.
 #[doc(hidden)]
 pub async fn main<B, H>(options: MainOptions) -> ExitCode
 where
     B: Backends,
     H: Wiring<B>,
 {
-    let plan = match entry::plan(options, env::args_os(), env::var_os("OMNIA_CONFIG")) {
+    let plan = match entry::plan(options, env::args_os()) {
         Ok(plan) => plan,
-        #[cfg(feature = "cli")]
-        Err(entry::PlanError::Usage(error)) => error.exit(),
-        Err(entry::PlanError::Fatal(error)) => {
+        Err(error) => {
             eprintln!("{error:#}");
             return ExitCode::FAILURE;
         }

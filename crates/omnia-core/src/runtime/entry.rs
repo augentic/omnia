@@ -1,19 +1,16 @@
 //! Entry planning for the generated `main`: macro-compiled [`MainOptions`]
-//! plus process argv and environment resolve into a deployment builder.
+//! plus process argv resolve into a deployment builder.
 //!
-//! [`plan`] is pure with respect to the process — argv and `OMNIA_CONFIG` are
-//! parameters — so source precedence and argv policy are unit-testable
-//! without spawning a binary.
+//! Core plans only direct commands; the standard `run` grammar lives in
+//! `omnia-cli`, which delegates the direct shape back here. [`plan`] is pure
+//! with respect to the process — argv is a parameter — so argv policy is
+//! unit-testable without spawning a binary.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
-#[cfg(feature = "cli")]
-use clap::Parser as _;
 
-#[cfg(feature = "cli")]
-use crate::cli::{Cli, Command};
 use crate::runtime::Mode;
 use crate::telemetry::LogMode;
 use crate::{DeploymentBuilder, Manifest};
@@ -22,9 +19,9 @@ use crate::{DeploymentBuilder, Manifest};
 ///
 /// The `runtime!` macro emits [`Path`](Self::Path) for its `config:` key and
 /// [`Inline`](Self::Inline) for its inline manifest keys (`guests`,
-/// `mounts`). On the standard CLI path it is the lowest-priority
-/// source (behind `--config`/`OMNIA_CONFIG` and a positional wasm path); on
-/// the direct-command path it is the sole source.
+/// `mounts`). On the standard CLI path (`omnia-cli`) it is the
+/// lowest-priority source (behind `--config`/`OMNIA_CONFIG` and a positional
+/// wasm path); on the direct-command path it is the sole source.
 #[derive(Clone, Debug)]
 pub enum ManifestSource {
     /// A manifest path, loaded only when this source is selected.
@@ -82,23 +79,6 @@ impl MainOptions {
     }
 }
 
-/// Why entry planning stopped before a deployment could be built.
-pub(super) enum PlanError {
-    /// A clap-level outcome (usage error, `--help`, `--version`); the caller
-    /// delegates to [`clap::Error::exit`] so stream and exit code match the
-    /// standard CLI behavior.
-    #[cfg(feature = "cli")]
-    Usage(clap::Error),
-    /// A startup failure reported on stderr.
-    Fatal(anyhow::Error),
-}
-
-impl From<anyhow::Error> for PlanError {
-    fn from(error: anyhow::Error) -> Self {
-        Self::Fatal(error)
-    }
-}
-
 /// The planner's outcome: every deployment decision, resolved.
 pub(super) struct EntryPlan {
     mode: Mode,
@@ -145,35 +125,29 @@ fn peel_log_flags(args: Vec<String>) -> Result<(Vec<String>, LogMode)> {
     Ok((guest_args, mode.unwrap_or(LogMode::Progress)))
 }
 
-/// Resolve [`MainOptions`] plus process argv and `OMNIA_CONFIG` into an
-/// [`EntryPlan`].
+/// Resolve [`MainOptions`] plus process argv into an [`EntryPlan`].
 ///
 /// Command mode with a compiled-in manifest is a *direct command*: no host
 /// CLI grammar, argv belongs to the guest. The direct plan always carries
 /// the compiled-in manifest, so the builder never falls through to its own
 /// `OMNIA_CONFIG` lookup — the environment is untouched by design. Every
-/// other shape parses the standard `run [wasm] [--config] -- args…` grammar.
-// Without `cli`, `omnia_config` is only acknowledged, never consumed.
-#[cfg_attr(not(feature = "cli"), allow(clippy::needless_pass_by_value))]
+/// other shape needs the standard `run` grammar, which only `omnia-cli`
+/// provides.
+///
+/// # Errors
+///
+/// Returns an error if the shape is not a direct command, or if the direct
+/// plan fails (see [`plan_direct`]).
 pub(super) fn plan(
-    options: MainOptions, argv: impl IntoIterator<Item = OsString>, omnia_config: Option<OsString>,
-) -> Result<EntryPlan, PlanError> {
+    options: MainOptions, argv: impl IntoIterator<Item = OsString>,
+) -> Result<EntryPlan> {
     if options.is_direct() {
-        return plan_direct(options, argv).map_err(PlanError::Fatal);
+        return plan_direct(options, argv);
     }
-
-    // Without the `cli` feature the standard grammar cannot be parsed; only
-    // direct-command deployments are entry points.
-    #[cfg(not(feature = "cli"))]
-    {
-        let _ = omnia_config;
-        Err(PlanError::Fatal(anyhow!(
-            "this runtime was built without omnia's `cli` feature; compile the deployment in \
-             (command mode with a manifest) or enable the feature"
-        )))
-    }
-    #[cfg(feature = "cli")]
-    plan_cli(options, argv, omnia_config)
+    Err(anyhow!(
+        "this runtime was built without omnia's `cli` feature; compile the deployment in \
+         (command mode with a manifest) or enable the feature"
+    ))
 }
 
 /// Plan a direct command: argv belongs to the guest bar the reserved host log
@@ -205,54 +179,8 @@ pub(super) fn plan_direct(
     })
 }
 
-/// Plan the standard `run [wasm] [--config] -- args…` grammar, resolving the
-/// manifest by the `--config` › `OMNIA_CONFIG` › positional wasm › compiled-in
-/// ladder.
-#[cfg(feature = "cli")]
-fn plan_cli(
-    options: MainOptions, argv: impl IntoIterator<Item = OsString>, omnia_config: Option<OsString>,
-) -> Result<EntryPlan, PlanError> {
-    let (mode, manifest) = options.into_parts();
-    let cli = Cli::try_parse_from(argv).map_err(PlanError::Usage)?;
-    match cli.command {
-        Command::Run {
-            wasm,
-            config,
-            mounts,
-            plugins,
-            args,
-        } => {
-            let config = config.or_else(|| omnia_config.map(PathBuf::from));
-            let manifest = match (config, wasm) {
-                (Some(config), _) => Manifest::from_config(config)?,
-                (None, Some(wasm)) => Manifest::from_wasm(wasm),
-                (None, None) => match manifest {
-                    Some(source) => source.into_manifest()?,
-                    None => {
-                        return Err(PlanError::Fatal(anyhow!(
-                            "no guest specified: pass a <wasm> path, or --config <omnia.toml> (or \
-                             set OMNIA_CONFIG)"
-                        )));
-                    }
-                },
-            };
-            Ok(EntryPlan {
-                mode,
-                manifest: Some(manifest.mounts(mounts).plugins(plugins)),
-                args,
-                log_mode: None,
-            })
-        }
-        #[cfg(feature = "jit")]
-        Command::Compile { .. } => Err(PlanError::Fatal(anyhow!(
-            "the generated `main` only supports `run`; supply a custom `main` for other subcommands"
-        ))),
-    }
-}
-
-// Unit tests by design: `plan` is factored pure (argv and `OMNIA_CONFIG` are
-// parameters) precisely so source precedence and argv policy are testable
-// without spawning a binary.
+// Unit tests by design: `plan` is factored pure (argv is a parameter)
+// precisely so argv policy is testable without spawning a binary.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,94 +200,16 @@ mod tests {
         plan.manifest.as_ref().expect("plan carries a manifest").guests[0].id.as_str()
     }
 
-    #[cfg(feature = "cli")]
-    fn temp_manifest(tag: &str, guest: &str) -> PathBuf {
-        let path =
-            std::env::temp_dir().join(format!("omnia_entry_{tag}_{}.toml", std::process::id()));
-        std::fs::write(&path, format!("[[guest]]\nid = \"{guest}\"\nsource.path = \"./g.wasm\"\n"))
-            .expect("temp manifest should write");
-        path
-    }
-
-    fn fatal(error: PlanError) -> String {
-        match error {
-            PlanError::Fatal(error) => format!("{error:#}"),
-            #[cfg(feature = "cli")]
-            PlanError::Usage(error) => panic!("expected a fatal error, got usage: {error}"),
-        }
-    }
-
-    #[cfg(feature = "cli")]
-    #[test]
-    fn config_beats_positional_wasm_and_compiled_source() {
-        let path = temp_manifest("precedence", "from_config");
-        let options = MainOptions::new(Mode::Server).manifest(inline_source("compiled"));
-        let plan = plan(
-            options,
-            argv(&["bin", "run", "guest.wasm", "--config", path.to_str().unwrap()]),
-            None,
-        )
-        .unwrap_or_else(|error| panic!("{}", fatal(error)));
-        let _ = std::fs::remove_file(&path);
-        assert_eq!(first_guest(&plan), "from_config");
-    }
-
-    #[cfg(feature = "cli")]
-    #[test]
-    fn omnia_config_env_beats_positional_wasm() {
-        let path = temp_manifest("env", "from_env");
-        let plan = plan(
-            MainOptions::new(Mode::Server),
-            argv(&["bin", "run", "guest.wasm"]),
-            Some(path.clone().into_os_string()),
-        )
-        .unwrap_or_else(|error| panic!("{}", fatal(error)));
-        let _ = std::fs::remove_file(&path);
-        assert_eq!(first_guest(&plan), "from_env");
-    }
-
-    #[cfg(feature = "cli")]
-    #[test]
-    fn positional_wasm_beats_compiled_source() {
-        let options = MainOptions::new(Mode::Server).manifest(inline_source("compiled"));
-        let plan = plan(options, argv(&["bin", "run", "guest.wasm"]), None)
-            .unwrap_or_else(|error| panic!("{}", fatal(error)));
-        assert_eq!(first_guest(&plan), "guest");
-    }
-
-    #[cfg(feature = "cli")]
-    #[test]
-    fn compiled_source_is_the_fallback() {
-        let options = MainOptions::new(Mode::Server).manifest(inline_source("compiled"));
-        let plan = plan(options, argv(&["bin", "run"]), None)
-            .unwrap_or_else(|error| panic!("{}", fatal(error)));
-        assert_eq!(first_guest(&plan), "compiled");
-    }
-
-    #[cfg(feature = "cli")]
-    #[test]
-    fn no_source_fails() {
-        let error = plan(MainOptions::new(Mode::Server), argv(&["bin", "run"]), None)
-            .err()
-            .expect("a sourceless deployment must fail");
-        assert!(fatal(error).contains("no guest specified"));
-    }
-
-    #[cfg(feature = "cli")]
-    #[test]
-    fn command_mode_without_deployment_keeps_run_grammar() {
-        let plan = plan(MainOptions::new(Mode::Command), argv(&["bin", "run", "guest.wasm"]), None)
-            .unwrap_or_else(|error| panic!("{}", fatal(error)));
-        assert_eq!(first_guest(&plan), "guest");
-        assert_eq!(plan.log_mode, None, "the standard CLI path stays env-driven");
+    fn fatal(error: &anyhow::Error) -> String {
+        format!("{error:#}")
     }
 
     #[test]
     fn direct_command_forwards_argv_verbatim() {
         // `--config` and `run` are guest arguments, not host CLI options.
         let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
-        let plan = plan(options, argv(&["bin", "--config", "foo.toml", "run", "greet"]), None)
-            .unwrap_or_else(|error| panic!("{}", fatal(error)));
+        let plan = plan(options, argv(&["bin", "--config", "foo.toml", "run", "greet"]))
+            .unwrap_or_else(|error| panic!("{}", fatal(&error)));
         assert_eq!(plan.args, ["--config", "foo.toml", "run", "greet"]);
         assert_eq!(plan.log_mode, Some(LogMode::Progress), "flagless default is progress");
         assert_eq!(first_guest(&plan), "app");
@@ -379,7 +229,7 @@ mod tests {
         for (args, mode, guest_args) in cases {
             let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
             let plan =
-                plan(options, argv(args), None).unwrap_or_else(|error| panic!("{}", fatal(error)));
+                plan(options, argv(args)).unwrap_or_else(|error| panic!("{}", fatal(&error)));
             assert_eq!(plan.log_mode, Some(*mode), "argv: {args:?}");
             assert_eq!(plan.args, *guest_args, "argv: {args:?}");
         }
@@ -388,33 +238,31 @@ mod tests {
     #[test]
     fn direct_command_debug_and_quiet_conflict() {
         let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
-        let error = plan(options, argv(&["bin", "--debug", "greet", "--quiet"]), None)
+        let error = plan(options, argv(&["bin", "--debug", "greet", "--quiet"]))
             .err()
             .expect("conflicting log flags must fail");
-        assert!(fatal(error).contains("mutually exclusive"));
-    }
-
-    #[cfg(feature = "cli")]
-    #[test]
-    fn omnia_cli_carries_no_log_mode() {
-        let options = MainOptions::new(Mode::Server).manifest(inline_source("compiled"));
-        let plan = plan(options, argv(&["bin", "run"]), None)
-            .unwrap_or_else(|error| panic!("{}", fatal(error)));
-        assert_eq!(plan.log_mode, None, "the standard CLI path stays env-driven");
+        assert!(fatal(&error).contains("mutually exclusive"));
     }
 
     // Hard acceptance criterion: the direct path always carries the
     // compiled-in manifest, so `DeploymentBuilder::build` can never fall
-    // through to its own `OMNIA_CONFIG` lookup.
+    // through to its own `OMNIA_CONFIG` lookup — the planner never reads the
+    // environment at all.
     #[test]
     fn direct_command_ignores_omnia_config() {
         let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
-        // The env names a nonexistent file; consulting it would fail loudly.
-        let plan =
-            plan(options, argv(&["bin", "greet"]), Some(OsString::from("/nonexistent/omnia.toml")))
-                .unwrap_or_else(|error| panic!("{}", fatal(error)));
+        let plan = plan(options, argv(&["bin", "greet"]))
+            .unwrap_or_else(|error| panic!("{}", fatal(&error)));
         assert_eq!(first_guest(&plan), "app", "the compiled-in manifest is the sole source");
         assert_eq!(plan.args, ["greet"]);
+    }
+
+    #[test]
+    fn non_direct_shape_is_refused() {
+        let error = plan(MainOptions::new(Mode::Server), argv(&["bin", "run", "guest.wasm"]))
+            .err()
+            .expect("core cannot serve the `run` grammar");
+        assert!(fatal(&error).contains("built without omnia's `cli` feature"));
     }
 
     #[cfg(unix)]
@@ -424,29 +272,9 @@ mod tests {
 
         let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
         let bad = OsString::from_vec(vec![b'f', b'o', 0x80]);
-        let error = plan(options, vec![OsString::from("bin"), bad], None)
+        let error = plan(options, vec![OsString::from("bin"), bad])
             .err()
             .expect("non-UTF-8 argv must fail, not panic");
-        assert!(fatal(error).contains("not valid UTF-8"));
-    }
-
-    #[cfg(feature = "cli")]
-    #[test]
-    fn compiled_path_load_failure_surfaces() {
-        let options = MainOptions::new(Mode::Server)
-            .manifest(ManifestSource::Path(PathBuf::from("/nonexistent/omnia.toml")));
-        let error = plan(options, argv(&["bin", "run"]), None)
-            .err()
-            .expect("a missing compiled-in manifest path must fail");
-        assert!(fatal(error).contains("reading manifest"));
-    }
-
-    #[cfg(feature = "cli")]
-    #[test]
-    fn usage_error_is_delegated_to_clap() {
-        let error = plan(MainOptions::new(Mode::Server), argv(&["bin", "bogus"]), None)
-            .err()
-            .expect("an unknown subcommand is a usage error");
-        assert!(matches!(error, PlanError::Usage(_)));
+        assert!(fatal(&error).contains("not valid UTF-8"));
     }
 }

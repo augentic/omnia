@@ -2380,7 +2380,6 @@ dependencies = [
  "cap-fs-ext",
  "cap-std",
  "cfg-if",
- "clap",
  "fromenv",
  "futures",
  "http",
