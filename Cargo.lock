@@ -2362,6 +2362,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "omnia-cli"
+version = "0.36.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "omnia-core",
+]
+
+[[package]]
 name = "omnia-core"
 version = "0.36.0"
 dependencies = [
