@@ -175,10 +175,7 @@ fn locations_grammar_carries_manifest_data() {
     let manifest = locations_grammar::manifest().into_manifest().expect("inline source resolves");
     assert_eq!(
         manifest.locations,
-        [
-            Location::path("adapters", "adapters"),
-            Location::registry("ghcr.io"),
-        ]
+        [Location::path("adapters", "adapters"), Location::registry("ghcr.io"),]
     );
 }
 

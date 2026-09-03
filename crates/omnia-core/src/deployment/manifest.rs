@@ -721,10 +721,7 @@ mod tests {
         manifest.resolve_paths(Path::new("/deploy/app"));
         assert_eq!(
             manifest.locations,
-            [
-                Location::path(".", "/deploy/app/adapters"),
-                Location::registry("ghcr.io"),
-            ]
+            [Location::path(".", "/deploy/app/adapters"), Location::registry("ghcr.io"),]
         );
         manifest.validate(false).expect("one registry is allowed");
     }
@@ -738,10 +735,9 @@ mod tests {
 
     #[test]
     fn reject_two_registry_locations() {
-        let manifest = Manifest::new().guest(GuestEntry::new("a", "./a.wasm")).locations([
-            Location::registry("ghcr.io"),
-            Location::registry("docker.io"),
-        ]);
+        let manifest = Manifest::new()
+            .guest(GuestEntry::new("a", "./a.wasm"))
+            .locations([Location::registry("ghcr.io"), Location::registry("docker.io")]);
         let error = manifest.validate(false).expect_err("two registries must be refused");
         assert!(error.to_string().contains("multiple registry"), "{error}");
     }

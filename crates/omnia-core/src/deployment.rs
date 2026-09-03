@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 pub use manifest::{
-    GuestEntry, GuestRoutes, Manifest, Mount, Location, SourceSpec, Transport, TransportKind,
+    GuestEntry, GuestRoutes, Location, Manifest, Mount, SourceSpec, Transport, TransportKind,
 };
 use source::ArtifactPolicy;
 pub use source::{ELF_MAGIC, GuestArtifact, LoadedGuest, Source};

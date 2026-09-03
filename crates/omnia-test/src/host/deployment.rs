@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
 use omnia::{
-    DeploymentBuilder, ExitStatus, GuestEntry, Host, Manifest, ManifestSource, Mode, Mount,
-    Location, Plugins, Provides, Runtime, Server, SourceSpec, StoreCtx, WasiPlugins, Wiring,
+    DeploymentBuilder, ExitStatus, GuestEntry, Host, Location, Manifest, ManifestSource, Mode,
+    Mount, Plugins, Provides, Runtime, Server, SourceSpec, StoreCtx, WasiPlugins, Wiring,
 };
 use omnia_wasi_otel::WasiOtel;
 
