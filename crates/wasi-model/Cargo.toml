@@ -43,5 +43,5 @@ wit-bindgen.workspace = true
 omnia.workspace = true
 omnia-test = { workspace = true, features = ["host"] }
 serde_json.workspace = true
-test-utils.workspace = true
+test-artifacts.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }

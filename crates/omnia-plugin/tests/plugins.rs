@@ -18,19 +18,19 @@ use omnia::{
     PathMounts, PathSource, PluginLoader as _, Plugins, RegistryClient, RegistrySource, Runtime,
     StoreCtx, WasiPlugins, sha256_digest,
 };
-use omnia_test::host::Backends;
+use omnia_test::host::{Backends, Scratch, scratch};
 use omnia_wasi_otel::WasiOtel;
 
 // Every guest program in `crates/test-programs/programs/plugins` must have a
 // matching test here; a new program without one fails to compile.
-test_utils::foreach_plugins!();
+test_artifacts::foreach_plugins!();
 
 /// Assemble the requester deployment around `wasm`: the scratch dir mounts at
 /// `.`, `omnia-test:link/ops` is the declared plugin seam, and the two slots
 /// are the compiled-in acquisition policy. The telemetry host serves the
 /// `command!` guest's otel imports.
 async fn requester_runtime(
-    wasm: &str, scratch: &test_utils::Scratch, registry: Option<Arc<dyn RegistrySource>>,
+    wasm: &str, scratch: &Scratch, registry: Option<Arc<dyn RegistrySource>>,
     path: Option<Arc<dyn PathSource>>,
 ) -> Result<Runtime<Backends>> {
     let manifest = Manifest::new()
@@ -59,7 +59,7 @@ async fn requester_runtime(
 
 /// Drive `wasm` as the `requester` command guest under the given slots.
 async fn run_requester(
-    wasm: &str, scratch: &test_utils::Scratch, registry: Option<Arc<dyn RegistrySource>>,
+    wasm: &str, scratch: &Scratch, registry: Option<Arc<dyn RegistrySource>>,
     path: Option<Arc<dyn PathSource>>,
 ) -> Result<ExitStatus> {
     let runtime = requester_runtime(wasm, scratch, registry, path).await?;
@@ -67,7 +67,7 @@ async fn run_requester(
 }
 
 /// A `.`-rooted `PathMounts` over the scratch dir filling the path slot.
-fn path_source(scratch: &test_utils::Scratch) -> Arc<dyn PathSource> {
+fn path_source(scratch: &Scratch) -> Arc<dyn PathSource> {
     Arc::new(PathMounts::new([(".", scratch.path())]).expect("opening the scratch location"))
 }
 
@@ -103,25 +103,31 @@ fn registry_source(root: &Path, package: &str, wasm: &str) -> Arc<dyn RegistrySo
 
 #[tokio::test]
 async fn plugins_load_path() {
-    let scratch = test_utils::scratch("plugins_load_path");
-    std::fs::copy(test_utils::LINK_ECHOER, scratch.path().join("plugin.wasm"))
+    let scratch = scratch();
+    std::fs::copy(test_artifacts::LINK_ECHOER, scratch.path().join("plugin.wasm"))
         .expect("staging the loadable echoer");
 
-    let status =
-        run_requester(test_utils::PLUGINS_LOAD_PATH, &scratch, None, Some(path_source(&scratch)))
-            .await
-            .expect("deployment runs");
+    let status = run_requester(
+        test_artifacts::PLUGINS_LOAD_PATH,
+        &scratch,
+        None,
+        Some(path_source(&scratch)),
+    )
+    .await
+    .expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
 }
 
 #[tokio::test]
 async fn plugins_load_registry() {
-    let scratch = test_utils::scratch("plugins_load_registry");
-    let registry = registry_source(scratch.path(), "test:echoer@1.0.0", test_utils::LINK_ECHOER);
+    let scratch = scratch();
+    let registry =
+        registry_source(scratch.path(), "test:echoer@1.0.0", test_artifacts::LINK_ECHOER);
 
-    let status = run_requester(test_utils::PLUGINS_LOAD_REGISTRY, &scratch, Some(registry), None)
-        .await
-        .expect("deployment runs");
+    let status =
+        run_requester(test_artifacts::PLUGINS_LOAD_REGISTRY, &scratch, Some(registry), None)
+            .await
+            .expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
 }
 
@@ -179,11 +185,11 @@ fn locations_grammar_carries_manifest_data() {
 
 #[tokio::test]
 async fn plugins_load_refused() {
-    let scratch = test_utils::scratch("plugins_load_refused");
-    std::fs::copy(test_utils::LINK_ECHOER, scratch.path().join("plugin.wasm"))
+    let scratch = scratch();
+    std::fs::copy(test_artifacts::LINK_ECHOER, scratch.path().join("plugin.wasm"))
         .expect("staging the loadable echoer");
     // Exports no `omnia-test:link/ops` instance — the seam-missing target.
-    std::fs::copy(test_utils::LINK_FULL, scratch.path().join("noseam.wasm"))
+    std::fs::copy(test_artifacts::LINK_FULL, scratch.path().join("noseam.wasm"))
         .expect("staging the seamless component");
     // Leading ELF magic is exactly what the loader sniffs; the tail is junk,
     // proving refusal happens before any wasmtime parsing.
@@ -191,7 +197,7 @@ async fn plugins_load_refused() {
         .expect("staging native bytes");
 
     let status = run_requester(
-        test_utils::PLUGINS_LOAD_REFUSED,
+        test_artifacts::PLUGINS_LOAD_REFUSED,
         &scratch,
         None,
         Some(path_source(&scratch)),
@@ -220,12 +226,12 @@ fn custom_section(payload: &[u8]) -> Vec<u8> {
 // the re-load binds the freshly staged bytes, and a stale pin refuses.
 #[tokio::test]
 async fn reload_after_deregister_binds_fresh_bytes() {
-    let scratch = test_utils::scratch("plugins_reload");
-    std::fs::copy(test_utils::LINK_ECHOER, scratch.path().join("plugin.wasm"))
+    let scratch = scratch();
+    std::fs::copy(test_artifacts::LINK_ECHOER, scratch.path().join("plugin.wasm"))
         .expect("staging the loadable echoer");
     // The requester guest is manifest ballast: these loads are host-driven.
     let runtime = requester_runtime(
-        test_utils::PLUGINS_LOAD_PATH,
+        test_artifacts::PLUGINS_LOAD_PATH,
         &scratch,
         None,
         Some(path_source(&scratch)),
@@ -238,7 +244,7 @@ async fn reload_after_deregister_binds_fresh_bytes() {
     runtime.deregister(first.id()).expect("deregistering the loaded plugin");
 
     // Same component, one extra custom section: same behavior, new digest.
-    let mut changed = std::fs::read(test_utils::LINK_ECHOER).expect("reading the echoer");
+    let mut changed = std::fs::read(test_artifacts::LINK_ECHOER).expect("reading the echoer");
     changed.extend_from_slice(&custom_section(b"reload"));
     std::fs::write(scratch.path().join("plugin.wasm"), &changed).expect("re-staging");
 
@@ -265,11 +271,11 @@ async fn reload_after_deregister_binds_fresh_bytes() {
 // with the old digest over the new bytes.
 #[tokio::test]
 async fn pinned_reload_refuses_after_external_reregistration() {
-    let scratch = test_utils::scratch("plugins_reregister");
-    std::fs::copy(test_utils::LINK_ECHOER, scratch.path().join("plugin.wasm"))
+    let scratch = scratch();
+    std::fs::copy(test_artifacts::LINK_ECHOER, scratch.path().join("plugin.wasm"))
         .expect("staging the loadable echoer");
     let runtime = requester_runtime(
-        test_utils::PLUGINS_LOAD_PATH,
+        test_artifacts::PLUGINS_LOAD_PATH,
         &scratch,
         None,
         Some(path_source(&scratch)),
@@ -283,7 +289,7 @@ async fn pinned_reload_refuses_after_external_reregistration() {
 
     // Same component, one extra custom section: same behavior, new digest —
     // registered by the embedder, not through the loader.
-    let mut changed = std::fs::read(test_utils::LINK_ECHOER).expect("reading the echoer");
+    let mut changed = std::fs::read(test_artifacts::LINK_ECHOER).expect("reading the echoer");
     changed.extend_from_slice(&custom_section(b"reregister"));
     runtime
         .register("test:echoer", GuestArtifact::wasm(changed))
@@ -302,10 +308,10 @@ async fn pinned_reload_refuses_after_external_reregistration() {
 // extension refuses every load as loader misconfiguration.
 #[tokio::test]
 async fn load_without_plugins_installed_refuses() {
-    let scratch = test_utils::scratch("plugins_uninstalled");
+    let scratch = scratch();
     let manifest = Manifest::new()
         .plugins(["omnia-test:link/ops"])
-        .guest(GuestEntry::new("requester", test_utils::PLUGINS_LOAD_PATH))
+        .guest(GuestEntry::new("requester", test_artifacts::PLUGINS_LOAD_PATH))
         .mounts([scratch.mount(false)]);
     let deployment = DeploymentBuilder::new()
         .manifest(manifest)

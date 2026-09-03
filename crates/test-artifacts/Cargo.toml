@@ -1,17 +1,13 @@
 [package]
-name = "test-utils"
-description = "Guest-component build pipeline and runtime harness for the e2e test suites"
+name = "test-artifacts"
+description = "The compiled guest components the e2e test suites drive, as path constants"
 publish = false
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 version.workspace = true
 
-[dependencies]
-anyhow.workspace = true
-omnia.workspace = true
-omnia-test = { workspace = true, features = ["host"] }
-omnia-wasi-otel.workspace = true
-
+# The crate is `build.rs` plus the `gen.rs` it writes: no runtime
+# dependencies. A suite drives the artifacts through `omnia_test::host`.
 [build-dependencies]
 omnia-test = { workspace = true, features = ["build"] }

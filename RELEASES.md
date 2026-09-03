@@ -115,9 +115,8 @@
   export, run through `command::execute_wasi` so telemetry is initialized
   and flushed around it. The e2e scenario programs use it in place of the
   deleted `test_programs::run!`; because the export now imports
-  `omnia:otel`, `omnia_test::host::Deployment::run_host` (and
-  `test_utils::run_host`) link `WasiOtel` beside the host under test and
-  require `B: Provides<WasiOtel>`.
+  `omnia:otel`, `omnia_test::host::Deployment::run_host` links `WasiOtel`
+  beside the host under test and requires `B: Provides<WasiOtel>`.
 
 - `omnia_wasi_websocket::WebSocketDefault::new()` (and `Default`) is public:
   the backend without a listener, whose `connect()` still yields a client.

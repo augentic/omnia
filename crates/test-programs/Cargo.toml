@@ -8,7 +8,7 @@ rust-version.workspace = true
 version.workspace = true
 autoexamples = false
 
-# Guest-only crate: `test-utils`'s build script (through `omnia_test::build`)
+# Guest-only crate: `test-artifacts`'s build script (through `omnia_test::build`)
 # compiles every `programs/<capability>/<scenario>.rs` as an `[[example]]`
 # cdylib for `wasm32-wasip2`; the native build is empty.
 [target.'cfg(target_arch = "wasm32")'.dependencies]

@@ -13,7 +13,7 @@ use std::time::Duration;
 use futures::FutureExt as _;
 use omnia::{ExitStatus, Mount};
 use omnia_test::Exchange;
-use omnia_test::host::{Backends, ScriptedModel};
+use omnia_test::host::{Backends, Deployment, ScriptedModel, scratch};
 use omnia_wasi_model::{
     Answer, FutureResult, Limits, ModelDefault, Request, ToolHost, Usage, WasiModel, WasiModelCtx,
 };
@@ -21,18 +21,21 @@ use serde_json::{Value, json};
 
 // Every guest program in `crates/test-programs` must have a matching test
 // here; a new program without one fails to compile.
-test_utils::foreach_model!();
+test_artifacts::foreach_model!();
 
 // ------------------------------------------------------------------------
 // Harness
 // ------------------------------------------------------------------------
 
-/// Run one guest program against `model`, requiring a clean exit; scenarios
-/// that expect failure call `test_utils::run_command` directly.
+/// Run one guest program against `model`, requiring a clean exit.
 async fn run_guest<M: WasiModelCtx + Clone>(wasm: &str, mounts: Vec<Mount>, model: M) {
     let backends = Backends::defaults().await.model(model);
-    let status =
-        test_utils::run_host::<WasiModel, _>(wasm, mounts, backends).await.expect("guest runs");
+    let status = Deployment::new()
+        .guest("guest", wasm)
+        .mounts(mounts)
+        .run_host::<WasiModel, _>(backends)
+        .await
+        .expect("guest runs");
     assert_eq!(status, ExitStatus::SUCCESS, "guest `{wasm}` failed");
 }
 
@@ -136,7 +139,7 @@ fn workspace_exchanges() -> Vec<Exchange> {
 #[tokio::test]
 async fn model_echo_text() {
     let model = run_scripted(
-        test_utils::MODEL_ECHO_TEXT,
+        test_artifacts::MODEL_ECHO_TEXT,
         vec![],
         ScriptedModel::answering([json!("second")]),
     )
@@ -154,7 +157,7 @@ async fn model_echo_text() {
 #[tokio::test]
 async fn model_request_shape() {
     let model = run_scripted(
-        test_utils::MODEL_REQUEST_SHAPE,
+        test_artifacts::MODEL_REQUEST_SHAPE,
         vec![],
         ScriptedModel::answering([json!("hi")]),
     )
@@ -168,25 +171,25 @@ async fn model_request_shape() {
 
 #[tokio::test]
 async fn model_echo_json() {
-    run_guest(test_utils::MODEL_ECHO_JSON, vec![], ModelDefault).await;
+    run_guest(test_artifacts::MODEL_ECHO_JSON, vec![], ModelDefault).await;
 }
 
 #[tokio::test]
 async fn model_echo_schema_rejected() {
-    run_guest(test_utils::MODEL_ECHO_SCHEMA_REJECTED, vec![], ModelDefault).await;
+    run_guest(test_artifacts::MODEL_ECHO_SCHEMA_REJECTED, vec![], ModelDefault).await;
 }
 
 #[tokio::test]
 async fn model_invalid_request() {
     // Every request is refused at the host's gate; an empty script proves
     // the backend is never reached.
-    run_scripted(test_utils::MODEL_INVALID_REQUEST, vec![], ScriptedModel::default()).await;
+    run_scripted(test_artifacts::MODEL_INVALID_REQUEST, vec![], ScriptedModel::default()).await;
 }
 
 #[tokio::test]
 async fn model_schema_answer() {
     let model = ScriptedModel::answering([json!({ "verdict": "pass" })]);
-    run_scripted(test_utils::MODEL_SCHEMA_ANSWER, vec![], model).await;
+    run_scripted(test_artifacts::MODEL_SCHEMA_ANSWER, vec![], model).await;
 }
 
 #[tokio::test]
@@ -200,13 +203,13 @@ async fn model_usage() {
         }),
         transcript: None,
     };
-    run_scripted(test_utils::MODEL_USAGE, vec![], ScriptedModel::replying([answer])).await;
+    run_scripted(test_artifacts::MODEL_USAGE, vec![], ScriptedModel::replying([answer])).await;
 }
 
 #[tokio::test]
 async fn model_answer_rejected() {
     let model = ScriptedModel::answering([json!({ "other": 1 })]);
-    run_scripted(test_utils::MODEL_ANSWER_REJECTED, vec![], model).await;
+    run_scripted(test_artifacts::MODEL_ANSWER_REJECTED, vec![], model).await;
 }
 
 #[tokio::test]
@@ -219,7 +222,7 @@ async fn model_format_gate() {
         json!([]),
         json!({ "ui-surface": [] }),
     ]);
-    let model = run_scripted(test_utils::MODEL_FORMAT_GATE, vec![], model).await;
+    let model = run_scripted(test_artifacts::MODEL_FORMAT_GATE, vec![], model).await;
     let seen = model.seen();
     let markers: Vec<&str> = seen.iter().map(|seen| seen.messages[0].as_str()).collect();
     assert_eq!(markers, ["object-for-text", "string-for-json", "root-mismatch", "nested-mismatch"]);
@@ -229,7 +232,7 @@ async fn model_format_gate() {
 async fn model_sections() {
     let user_turn = "review the Rust code\n\nthe Rust crate\n\nInput: in\nOutput: out";
     let model = run_scripted(
-        test_utils::MODEL_SECTIONS,
+        test_artifacts::MODEL_SECTIONS,
         vec![],
         ScriptedModel::answering([json!(user_turn)]),
     )
@@ -246,21 +249,24 @@ async fn model_sections() {
 
 #[tokio::test]
 async fn model_tool_roundtrip() {
-    let model = run_scripted(test_utils::MODEL_TOOL_ROUNDTRIP, vec![], lookup_turn("42")).await;
+    let model = run_scripted(test_artifacts::MODEL_TOOL_ROUNDTRIP, vec![], lookup_turn("42")).await;
     assert_eq!(model.exchanges(), [lookup(Ok("42"))]);
 }
 
 #[tokio::test]
 async fn model_tool_failure() {
-    let model =
-        run_scripted(test_utils::MODEL_TOOL_FAILURE, vec![], lookup_turn("tool failed: no data"))
-            .await;
+    let model = run_scripted(
+        test_artifacts::MODEL_TOOL_FAILURE,
+        vec![],
+        lookup_turn("tool failed: no data"),
+    )
+    .await;
     assert_eq!(model.exchanges(), [lookup(Err("no data"))]);
 }
 
 #[tokio::test]
 async fn model_undeclared_tool() {
-    run_guest(test_utils::MODEL_UNDECLARED_TOOL, vec![], IgnoringToolFailure).await;
+    run_guest(test_artifacts::MODEL_UNDECLARED_TOOL, vec![], IgnoringToolFailure).await;
 }
 
 #[tokio::test]
@@ -271,7 +277,7 @@ async fn model_tool_budget() {
             max_tool_calls: 1,
             ..Limits::default()
         });
-    let model = run_scripted(test_utils::MODEL_TOOL_BUDGET, vec![], model).await;
+    let model = run_scripted(test_artifacts::MODEL_TOOL_BUDGET, vec![], model).await;
     assert_eq!(model.exchanges(), [lookup(Ok("42"))], "the second call never reaches the guest");
 }
 
@@ -281,7 +287,7 @@ async fn model_tool_timeout() {
         tool_timeout: Duration::from_millis(50),
         ..Limits::default()
     });
-    let model = run_scripted(test_utils::MODEL_TOOL_TIMEOUT, vec![], model).await;
+    let model = run_scripted(test_artifacts::MODEL_TOOL_TIMEOUT, vec![], model).await;
     assert!(model.exchanges().is_empty(), "the unanswered call fails hard");
 }
 
@@ -291,34 +297,34 @@ async fn model_tool_oversize() {
         max_result_bytes: 4,
         ..Limits::default()
     });
-    let model = run_scripted(test_utils::MODEL_TOOL_OVERSIZE, vec![], model).await;
+    let model = run_scripted(test_artifacts::MODEL_TOOL_OVERSIZE, vec![], model).await;
     assert!(model.exchanges().is_empty(), "the oversize result fails hard");
 }
 
 #[tokio::test]
 async fn model_results_closed() {
-    let model = run_scripted(test_utils::MODEL_RESULTS_CLOSED, vec![], lookup_turn("42")).await;
+    let model = run_scripted(test_artifacts::MODEL_RESULTS_CLOSED, vec![], lookup_turn("42")).await;
     assert!(model.exchanges().is_empty(), "the closed stream fails hard");
 }
 
 #[tokio::test]
 async fn model_stale_result() {
-    let model = run_scripted(test_utils::MODEL_STALE_RESULT, vec![], lookup_turn("42")).await;
+    let model = run_scripted(test_artifacts::MODEL_STALE_RESULT, vec![], lookup_turn("42")).await;
     assert_eq!(model.exchanges(), [lookup(Ok("42"))]);
 }
 
 #[tokio::test]
 async fn model_out_of_order_results() {
-    run_guest(test_utils::MODEL_OUT_OF_ORDER_RESULTS, vec![], ParallelLookups).await;
+    run_guest(test_artifacts::MODEL_OUT_OF_ORDER_RESULTS, vec![], ParallelLookups).await;
 }
 
 #[tokio::test]
 async fn model_workspace_tools() {
-    let workspace = test_utils::scratch("model_tools");
+    let workspace = scratch();
     fs::write(workspace.path().join("seed.txt"), "hello").expect("seeding workspace");
 
     let model = run_scripted(
-        test_utils::MODEL_WORKSPACE_TOOLS,
+        test_artifacts::MODEL_WORKSPACE_TOOLS,
         vec![workspace.mount(true)],
         workspace_turn(),
     )
@@ -334,16 +340,17 @@ async fn model_workspace_tools() {
 #[tokio::test]
 async fn model_workspace_denied() {
     // No mount and no grant: the host-injected tools must refuse to run.
-    let model = run_scripted(test_utils::MODEL_WORKSPACE_DENIED, vec![], workspace_turn()).await;
+    let model =
+        run_scripted(test_artifacts::MODEL_WORKSPACE_DENIED, vec![], workspace_turn()).await;
     assert!(model.exchanges().is_empty(), "the first read fails hard");
     assert_eq!(model.lent(), [None]);
 }
 
 #[tokio::test]
 async fn model_workspace_escape() {
-    let workspace = test_utils::scratch("model_escape");
+    let workspace = scratch();
     run_scripted(
-        test_utils::MODEL_WORKSPACE_ESCAPE,
+        test_artifacts::MODEL_WORKSPACE_ESCAPE,
         vec![workspace.mount(false)],
         ScriptedModel::default(),
     )
@@ -352,13 +359,13 @@ async fn model_workspace_escape() {
 
 #[tokio::test]
 async fn model_workspace_subpath() {
-    let workspace = test_utils::scratch("model_subpath");
+    let workspace = scratch();
     let nested = workspace.path().join("nested");
     fs::create_dir(&nested).expect("creating nested dir");
     fs::write(nested.join("seed.txt"), "hello").expect("seeding nested workspace");
 
     let model = run_scripted(
-        test_utils::MODEL_WORKSPACE_SUBPATH,
+        test_artifacts::MODEL_WORKSPACE_SUBPATH,
         vec![workspace.mount(true)],
         workspace_turn(),
     )
@@ -372,10 +379,10 @@ async fn model_workspace_subpath() {
 
 #[tokio::test]
 async fn model_workspace_readonly() {
-    let workspace = test_utils::scratch("model_readonly");
+    let workspace = scratch();
     fs::write(workspace.path().join("seed.txt"), "hello").expect("seeding workspace");
     let model = run_scripted(
-        test_utils::MODEL_WORKSPACE_READONLY,
+        test_artifacts::MODEL_WORKSPACE_READONLY,
         vec![workspace.mount(false)],
         workspace_turn(),
     )
@@ -385,10 +392,10 @@ async fn model_workspace_readonly() {
 
 #[tokio::test]
 async fn model_workspace_unauthorized() {
-    let workspace = test_utils::scratch("model_unauthorized");
+    let workspace = scratch();
     fs::create_dir(workspace.path().join("nested")).expect("creating nested dir");
     run_scripted(
-        test_utils::MODEL_WORKSPACE_UNAUTHORIZED,
+        test_artifacts::MODEL_WORKSPACE_UNAUTHORIZED,
         vec![workspace.mount(true)],
         ScriptedModel::default(),
     )

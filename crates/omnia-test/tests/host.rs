@@ -15,7 +15,7 @@ use omnia_wasi_model::WasiModel;
 use omnia_wasi_otel::WasiOtel;
 use serde_json::json;
 
-test_utils::foreach_config!();
+test_artifacts::foreach_config!();
 
 // A production `runtime!` as an embedder would write it: the compiled-in
 // deployment and its hosts, connected from the environment under `main`.
@@ -26,7 +26,7 @@ mod production {
 
     omnia::runtime!({
         mode: command,
-        guests: [{ id: "echo", source: test_utils::MODEL_ECHO_TEXT }],
+        guests: [{ id: "echo", source: test_artifacts::MODEL_ECHO_TEXT }],
         hosts: {
             WasiModel: ModelDefault,
             WasiKeyValue: KeyValueDefault,
@@ -46,7 +46,7 @@ mod production_plugins {
             interfaces: ["omnia-test:link/ops"],
             locations: [{ name: ".", path: "/nonexistent/adapters" }],
         },
-        guests: [{ id: "requester", source: test_utils::PLUGINS_LOAD_PATH }],
+        guests: [{ id: "requester", source: test_artifacts::PLUGINS_LOAD_PATH }],
         hosts: { WasiOtel: OtelDefault },
     });
 }
@@ -73,7 +73,7 @@ async fn runtime_overlay_drives_the_production_wiring() {
 async fn path_root_rewrites_the_production_location() {
     let _ = (production_plugins::main, production_plugins::run);
     let scratch = scratch();
-    std::fs::copy(test_utils::LINK_ECHOER, scratch.path().join("plugin.wasm"))
+    std::fs::copy(test_artifacts::LINK_ECHOER, scratch.path().join("plugin.wasm"))
         .expect("staging the loadable echoer");
 
     let deployment = Deployment::from(production_plugins::manifest())
@@ -96,7 +96,7 @@ async fn path_root_rewrites_the_production_location() {
 async fn scripted_model_answers_a_guest_completion() {
     let backends = Backends::defaults().await.model(ScriptedModel::answering([json!("second")]));
     let status = Deployment::new()
-        .guest("echo", test_utils::MODEL_ECHO_TEXT)
+        .guest("echo", test_artifacts::MODEL_ECHO_TEXT)
         .run_host::<WasiModel, _>(backends.clone())
         .await
         .expect("deployment runs");
@@ -116,7 +116,7 @@ async fn scripted_calls_drive_the_guest_tool_handler() {
     let model = ScriptedModel::answering([json!("42")]).calling(0, [("lookup", "{}")]);
     let backends = Backends::defaults().await.model(model);
     let status = Deployment::new()
-        .guest("tools", test_utils::MODEL_TOOL_ROUNDTRIP)
+        .guest("tools", test_artifacts::MODEL_TOOL_ROUNDTRIP)
         .command("tools")
         .run_host::<WasiModel, _>(backends.clone())
         .await
@@ -138,7 +138,7 @@ async fn scripted_calls_drive_the_guest_tool_handler() {
 async fn exhausted_script_fails_the_guest_not_the_test() {
     let backends = Backends::defaults().await.model(ScriptedModel::default());
     let outcome = Deployment::new()
-        .guest("echo", test_utils::MODEL_ECHO_TEXT)
+        .guest("echo", test_artifacts::MODEL_ECHO_TEXT)
         .run_host::<WasiModel, _>(backends.clone())
         .await;
     assert!(!matches!(outcome, Ok(ExitStatus::SUCCESS)), "the guest's expect fails: {outcome:?}");
@@ -154,7 +154,7 @@ async fn then_answers_past_the_script() {
     let model = ScriptedModel::answering([]).then(|| json!("second"));
     let backends = Backends::defaults().await.model(model);
     let status = Deployment::new()
-        .guest("echo", test_utils::MODEL_ECHO_TEXT)
+        .guest("echo", test_artifacts::MODEL_ECHO_TEXT)
         .run_host::<WasiModel, _>(backends)
         .await
         .expect("deployment runs");
@@ -165,8 +165,8 @@ async fn then_answers_past_the_script() {
 async fn link_pair_dispatches_through_the_booted_runtime() {
     let runtime = Deployment::new()
         .plugins(["omnia-test:link/ops"])
-        .guest("echoer", test_utils::LINK_ECHOER)
-        .guest("full", test_utils::LINK_FULL)
+        .guest("echoer", test_artifacts::LINK_ECHOER)
+        .guest("full", test_artifacts::LINK_FULL)
         .boot(Backends::defaults().await, |_| Ok(()))
         .await
         .expect("deployment boots");
@@ -179,12 +179,12 @@ async fn link_pair_dispatches_through_the_booted_runtime() {
 #[tokio::test]
 async fn path_root_serves_plugin_loads() {
     let scratch = scratch();
-    std::fs::copy(test_utils::LINK_ECHOER, scratch.path().join("plugin.wasm"))
+    std::fs::copy(test_artifacts::LINK_ECHOER, scratch.path().join("plugin.wasm"))
         .expect("staging the loadable echoer");
 
     let status = Deployment::new()
         .plugins(["omnia-test:link/ops"])
-        .guest("requester", test_utils::PLUGINS_LOAD_PATH)
+        .guest("requester", test_artifacts::PLUGINS_LOAD_PATH)
         .mount(scratch.mount(false))
         .path_root(scratch.path())
         .run(Backends::defaults().await, |deployment| {
@@ -200,7 +200,7 @@ async fn path_root_serves_plugin_loads() {
 async fn config_seeded() {
     let backends = Backends::defaults().await.config([("GREETING", "hello")]);
     let status = Deployment::new()
-        .guest("config", test_utils::CONFIG_SEEDED)
+        .guest("config", test_artifacts::CONFIG_SEEDED)
         .run_host::<WasiConfig, _>(backends)
         .await
         .expect("deployment runs");

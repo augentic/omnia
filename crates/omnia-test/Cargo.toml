@@ -96,7 +96,7 @@ omnia-wasi-model.workspace = true
 omnia-wasi-otel.workspace = true
 omnia-wasi-sql.workspace = true
 serde_json.workspace = true
-test-utils.workspace = true
+test-artifacts.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 trybuild.workspace = true
 
