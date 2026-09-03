@@ -7,25 +7,6 @@
 use omnia_guest::model::{Function, Message, Role, Tool};
 use omnia_wasi_model::completion;
 
-/// Wires a scenario `async fn` as the program's `wasi:cli/run` export:
-/// `test_programs::run!(scenario);`. The scenario asserts internally;
-/// a panic traps the guest and fails the host-side test.
-#[macro_export]
-macro_rules! run {
-    ($scenario:ident) => {
-        struct CliGuest;
-
-        ::wasip3::cli::command::export!(CliGuest);
-
-        impl ::wasip3::exports::cli::run::Guest for CliGuest {
-            async fn run() -> Result<(), ()> {
-                $scenario().await;
-                Ok(())
-            }
-        }
-    };
-}
-
 /// The `verdict` JSON Schema several scenarios request.
 pub const VERDICT_SCHEMA: &str =
     r#"{"type":"object","properties":{"verdict":{"type":"string"}},"required":["verdict"]}"#;

@@ -1,7 +1,7 @@
 error[E0124]: field `config` is already declared
  --> tests/ui/duplicate_capability.rs:1:1
   |
-1 | / omnia_test::doubles! {
+1 | / omnia_test::provider! {
 2 | |     struct Provider: Config + StateStore + Config;
 3 | | }
   | | ^
@@ -9,12 +9,12 @@ error[E0124]: field `config` is already declared
   | |_field already declared
   |   `config` first declared here
   |
-  = note: this error originates in the macro `$crate::__doubles` which comes from the expansion of the macro `omnia_test::doubles` (in Nightly builds, run with -Z macro-backtrace for more info)
+  = note: this error originates in the macro `$crate::__provider` which comes from the expansion of the macro `omnia_test::provider` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0119]: conflicting implementations of trait `omnia_test::guest::__forward::omnia_guest::capabilities::config::Config` for type `Provider`
  --> tests/ui/duplicate_capability.rs:1:1
   |
-1 | / omnia_test::doubles! {
+1 | / omnia_test::provider! {
 2 | |     struct Provider: Config + StateStore + Config;
 3 | | }
   | | ^
@@ -22,12 +22,12 @@ error[E0119]: conflicting implementations of trait `omnia_test::guest::__forward
   | |_first implementation here
   |   conflicting implementation for `Provider`
   |
-  = note: this error originates in the macro `$crate::__forward_trait` which comes from the expansion of the macro `omnia_test::doubles` (in Nightly builds, run with -Z macro-backtrace for more info)
+  = note: this error originates in the macro `$crate::__forward_trait` which comes from the expansion of the macro `omnia_test::provider` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0592]: duplicate definitions with name `config`
  --> tests/ui/duplicate_capability.rs:1:1
   |
-1 | / omnia_test::doubles! {
+1 | / omnia_test::provider! {
 2 | |     struct Provider: Config + StateStore + Config;
 3 | | }
   | | ^
@@ -35,12 +35,12 @@ error[E0592]: duplicate definitions with name `config`
   | |_duplicate definitions for `config`
   |   other definition for `config`
   |
-  = note: this error originates in the macro `$crate::__doubles` which comes from the expansion of the macro `omnia_test::doubles` (in Nightly builds, run with -Z macro-backtrace for more info)
+  = note: this error originates in the macro `$crate::__provider` which comes from the expansion of the macro `omnia_test::provider` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0062]: field `config` specified more than once
  --> tests/ui/duplicate_capability.rs:1:1
   |
-1 | / omnia_test::doubles! {
+1 | / omnia_test::provider! {
 2 | |     struct Provider: Config + StateStore + Config;
 3 | | }
   | | ^
@@ -48,12 +48,12 @@ error[E0062]: field `config` specified more than once
   | |_used more than once
   |   first use of `config`
   |
-  = note: this error originates in the macro `$crate::__doubles` which comes from the expansion of the macro `omnia_test::doubles` (in Nightly builds, run with -Z macro-backtrace for more info)
+  = note: this error originates in the macro `$crate::__provider` which comes from the expansion of the macro `omnia_test::provider` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0062]: field `config` specified more than once
  --> tests/ui/duplicate_capability.rs:1:1
   |
-1 | / omnia_test::doubles! {
+1 | / omnia_test::provider! {
 2 | |     struct Provider: Config + StateStore + Config;
 3 | | }
   | | ^
@@ -61,4 +61,4 @@ error[E0062]: field `config` specified more than once
   | |_used more than once
   |   first use of `config`
   |
-  = note: this error originates in the macro `$crate::__doubles` which comes from the expansion of the macro `omnia_test::doubles` (in Nightly builds, run with -Z macro-backtrace for more info)
+  = note: this error originates in the macro `$crate::__provider` which comes from the expansion of the macro `omnia_test::provider` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -1,4 +1,4 @@
-error: `config:` and inline manifest keys (`plugins`, `guests`, `mounts`) are mutually exclusive
+error: `config:` and inline manifest keys (`plugins` interfaces and locations, `guests`, `mounts`) are mutually exclusive; declare `[[location]]` entries in the config file
  --> tests/compile_fail/config_and_inline.rs:3:5
   |
 3 |     guests: [

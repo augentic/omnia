@@ -5,12 +5,12 @@ use std::sync::Arc;
 
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
-use omnia_core::{AdmitError, GuestId, Runtime, WeakRuntime, sha256_digest};
+use omnia_core::{AdmitError, GuestId, PluginLocation, Runtime, WeakRuntime, sha256_digest};
 
 use crate::Location;
 use crate::host::Error;
-use crate::path::PathSource;
-use crate::registry::RegistrySource;
+use crate::path::{PathMounts, PathSource};
+use crate::registry::{RegistryClient, RegistrySource};
 
 /// Host-side `omnia:plugins/loader.load` — embedder sugar over the runtime's
 /// installed [`Plugins`] extension.
@@ -126,6 +126,44 @@ impl Plugins {
             "the plugins capability installs exactly once per runtime"
         );
         Ok(())
+    }
+
+    /// Install the loader capability over the deployment's declared
+    /// locations ([`Runtime::plugin_locations`]): every path entry folds, in
+    /// declaration order, into one [`PathMounts`] filling the path slot, the
+    /// registry entry into a cacheless [`RegistryClient`] filling the
+    /// registry slot. A deployment declaring no locations installs nothing,
+    /// so a load refuses as loader misconfiguration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a path location cannot be opened or the capability
+    /// is already installed.
+    pub fn install_declared<B>(runtime: &Runtime<B>) -> anyhow::Result<()>
+    where
+        B: Clone + Send + Sync + 'static,
+    {
+        let locations = runtime.plugin_locations();
+        if locations.is_empty() {
+            return Ok(());
+        }
+        let paths: Vec<(&str, &std::path::Path)> = locations
+            .iter()
+            .filter_map(|location| match location {
+                PluginLocation::Path { name, path } => Some((name.as_str(), path.as_path())),
+                PluginLocation::Registry { .. } => None,
+            })
+            .collect();
+        let path: Option<Arc<dyn PathSource>> =
+            if paths.is_empty() { None } else { Some(Arc::new(PathMounts::new(paths)?)) };
+        let registry: Option<Arc<dyn RegistrySource>> =
+            locations.iter().find_map(|location| match location {
+                PluginLocation::Registry { registry } => {
+                    Some(Arc::new(RegistryClient::new(registry.as_str())) as Arc<dyn RegistrySource>)
+                }
+                PluginLocation::Path { .. } => None,
+            });
+        Self::install(runtime, registry, path)
     }
 
     /// Acquire, pin-check, and admit `package` through the runtime's

@@ -18,6 +18,8 @@ use omnia::{
     PathMounts, PathSource, PluginLoader as _, Plugins, RegistryClient, RegistrySource, Runtime,
     StoreCtx, WasiPlugins, sha256_digest,
 };
+use omnia_test::host::Backends;
+use omnia_wasi_otel::WasiOtel;
 
 // Every guest program in `crates/test-programs/programs/plugins` must have a
 // matching test here; a new program without one fails to compile.
@@ -25,11 +27,12 @@ test_utils::foreach_plugins!();
 
 /// Assemble the requester deployment around `wasm`: the scratch dir mounts at
 /// `.`, `omnia-test:link/ops` is the declared plugin seam, and the two slots
-/// are the compiled-in acquisition policy.
+/// are the compiled-in acquisition policy. The telemetry host serves the
+/// `command!` guest's otel imports.
 async fn requester_runtime(
     wasm: &str, scratch: &test_utils::Scratch, registry: Option<Arc<dyn RegistrySource>>,
     path: Option<Arc<dyn PathSource>>,
-) -> Result<Runtime<()>> {
+) -> Result<Runtime<Backends>> {
     let manifest = Manifest::new()
         .plugins(["omnia-test:link/ops"])
         .guest(GuestEntry::new("requester", wasm))
@@ -37,13 +40,15 @@ async fn requester_runtime(
     let deployment = DeploymentBuilder::new()
         .manifest(manifest)
         .mode(Mode::Command)
-        .build::<StoreCtx<()>>()
+        .build::<StoreCtx<Backends>>()
         .await
         .context("building deployment")?;
-    Runtime::new(
+    Runtime::with_backends(
         deployment,
+        Backends::defaults().await,
         |deployment| {
-            deployment.host::<WasiPlugins, ()>()?;
+            deployment.host::<WasiPlugins, Backends>()?;
+            deployment.host::<WasiOtel, Backends>()?;
             Ok(())
         },
         move |runtime| Plugins::install(runtime, registry, path),
@@ -137,57 +142,12 @@ fn wit_copies_stay_identical() {
     );
 }
 
-// Compile-time proof that the macro's `locations:`/`cache:` grammar lowers
-// into calls that typecheck against this crate's public seam: path entries
-// fold into a `PathMounts`, the registry entry into a `RegistryClient`
-// cached in the `cache:` backend, each filling its slot on `Plugins`.
-// Never run — the macro's snapshot suite pins the shape, this pins the types.
+// Compile-time proof that the macro's `locations:` grammar lowers into
+// manifest data this crate's `Plugins::install_declared` consumes: path
+// entries fold into a `PathMounts`, the registry entry into a
+// `RegistryClient`, each filling its slot on `Plugins`. The macro's snapshot
+// suite pins the expansion shape; this pins the types and the carried data.
 mod locations_grammar {
-    use std::future::Future;
-
-    use anyhow::Result;
-    use omnia::futures::future::BoxFuture;
-    use omnia::{Backend, ContentStore, NoOptions, NoStore, ReleaseStore};
-
-    // Clone without Copy: the generated hook clones the backend out of the
-    // bundle, and a Copy type would trip `clippy::clone_on_copy` there.
-    #[derive(Clone)]
-    struct Cache;
-
-    impl Backend for Cache {
-        type ConnectOptions = NoOptions;
-
-        fn connect_with(_options: NoOptions) -> impl Future<Output = Result<Self>> {
-            std::future::ready(Ok(Self))
-        }
-    }
-
-    impl ContentStore for Cache {
-        fn content<'a>(&'a self, digest: &'a str) -> BoxFuture<'a, Result<Option<Vec<u8>>>> {
-            ContentStore::content(&NoStore, digest)
-        }
-
-        fn put_content<'a>(
-            &'a self, digest: &'a str, bytes: &'a [u8],
-        ) -> BoxFuture<'a, Result<()>> {
-            ContentStore::put_content(&NoStore, digest, bytes)
-        }
-    }
-
-    impl ReleaseStore for Cache {
-        fn release<'a>(
-            &'a self, registry: &'a str, package: &'a str, version: &'a str,
-        ) -> BoxFuture<'a, Result<Option<String>>> {
-            ReleaseStore::release(&NoStore, registry, package, version)
-        }
-
-        fn put_release<'a>(
-            &'a self, registry: &'a str, package: &'a str, version: &'a str, digest: &'a str,
-        ) -> BoxFuture<'a, Result<()>> {
-            ReleaseStore::put_release(&NoStore, registry, package, version, digest)
-        }
-    }
-
     omnia::runtime!({
         plugins: {
             interfaces: ["omnia-test:link/ops"],
@@ -195,7 +155,6 @@ mod locations_grammar {
                 { name: "adapters", path: "adapters" },
                 { registry: "ghcr.io" },
             ],
-            cache: Cache,
         },
         guests: [
             { id: "engine", source: "engine.wasm" },
@@ -204,10 +163,18 @@ mod locations_grammar {
 }
 
 #[test]
-fn locations_grammar_expands() {
+fn locations_grammar_carries_manifest_data() {
     // Touch the generated entry points so the compile-only module above is
     // reachable for dead-code analysis.
-    let _ = (locations_grammar::main, locations_grammar::run);
+    let _ = (locations_grammar::main, locations_grammar::run, locations_grammar::run_with::<()>);
+    let manifest = locations_grammar::manifest().into_manifest().expect("inline source resolves");
+    assert_eq!(
+        manifest.locations,
+        [
+            omnia::PluginLocation::path("adapters", "adapters"),
+            omnia::PluginLocation::registry("ghcr.io"),
+        ]
+    );
 }
 
 #[tokio::test]
@@ -343,13 +310,15 @@ async fn load_without_plugins_installed_refuses() {
     let deployment = DeploymentBuilder::new()
         .manifest(manifest)
         .mode(Mode::Command)
-        .build::<StoreCtx<()>>()
+        .build::<StoreCtx<Backends>>()
         .await
         .expect("building deployment");
-    let runtime = Runtime::new(
+    let runtime = Runtime::with_backends(
         deployment,
+        Backends::defaults().await,
         |deployment| {
-            deployment.host::<WasiPlugins, ()>()?;
+            deployment.host::<WasiPlugins, Backends>()?;
+            deployment.host::<WasiOtel, Backends>()?;
             Ok(())
         },
         |_| Ok(()),

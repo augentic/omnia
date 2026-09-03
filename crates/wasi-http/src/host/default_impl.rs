@@ -1,3 +1,7 @@
+// `derive(FromEnv)` generates undocumented `from_env`/`requirements` associated
+// functions that would otherwise trip `missing_docs`.
+#![allow(missing_docs)]
+
 use std::fmt::Display;
 use std::time::Duration;
 
@@ -16,8 +20,10 @@ use wasmtime_wasi_http::{
 
 pub type FutureResult<T> = Box<dyn Future<Output = Result<T, HttpError>> + Send>;
 
+/// Options for the default outbound `wasi:http` client.
 #[derive(Debug, Clone, FromEnv)]
 pub struct ConnectOptions {
+    /// Connect timeout in seconds (`HTTP_CONNECT_TIMEOUT`, default 10).
     #[env(from = "HTTP_CONNECT_TIMEOUT", default = "10")]
     pub connect_timeout: u64,
 }

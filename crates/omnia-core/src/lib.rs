@@ -29,7 +29,7 @@ pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 pub use self::cli::{Cli, Command};
 pub use self::deployment::{
     Deployment, DeploymentBuilder, GuestArtifact, GuestEntry, GuestRoutes, Manifest, Mount,
-    Precompiled, SourceSpec, Transport, TransportKind, WasmOnly,
+    PluginLocation, Precompiled, SourceSpec, Transport, TransportKind, WasmOnly,
 };
 pub use self::digest::sha256_digest;
 pub use self::dispatch::{
@@ -50,7 +50,7 @@ pub use self::registry::{
 };
 pub use self::runtime::{AdmitError, Backends, ExitStatus, Mode, Runtime, WeakRuntime, Wiring};
 #[doc(hidden)]
-pub use self::runtime::{MainOptions, ManifestSource, main, run, run_precompiled};
+pub use self::runtime::{MainOptions, ManifestSource, main, run, run_precompiled, run_with};
 pub use self::store::{
     HasDispatcher, HasExtensions, HasLimits, HasMounts, HttpBorrow, HttpCtx, StoreBase,
     StoreConfig, StoreCtx, StoreView,

@@ -20,7 +20,19 @@ skip_rust_env_info = true
 dependencies = ["audit", "fmt", "lint", "outdated", "deps"]
 
 [tasks.ci]
-dependencies = ["fmt", "lint", "features", "test", "test-docs", "docs", "vet", "outdated", "deny"]
+dependencies = [
+  "fmt",
+  "lint",
+  "features",
+  "hack",
+  "tree-guard",
+  "test",
+  "test-docs",
+  "docs",
+  "vet",
+  "outdated",
+  "deny",
+]
 
 # -------------------------------------
 # Individual Actions
@@ -59,8 +71,45 @@ cargo clippy -p omnia -p omnia-wasi-sql -p omnia-wasi-identity -p omnia-guest --
 cargo clippy -p omnia --no-default-features --features cli --all-targets -- -D warnings
 cargo clippy -p omnia --no-default-features --features jit --all-targets -- -D warnings
 cargo clippy -p omnia --no-default-features --features otlp --all-targets -- -D warnings
+for features in build guest host guest,host; do
+  cargo clippy -p omnia-test --no-default-features --features "$features" --all-targets -- -D warnings
+done
 '''
 install_crate = { rustup_component_name = "clippy" }
+
+# Every feature combination of the published test crate must build on its
+# own, without dev-dependencies masking a missing `dep:` line.
+[tasks.hack]
+command = "cargo"
+args = [
+  "hack",
+  "check",
+  "--feature-powerset",
+  "--exclude-features",
+  "default",
+  "--no-dev-deps",
+  "-p",
+  "omnia-test",
+]
+install_crate = "cargo-hack"
+
+# `omnia-test/build` must stay `std`-only so a consumer's `build.rs` never
+# pulls the runtime into its build-dependency graph: the tree is one line.
+[tasks.tree-guard]
+script = '''
+tree="$(cargo tree -p omnia-test --no-default-features --features build -e normal)"
+if [ "$(printf '%s\n' "$tree" | wc -l)" -ne 1 ]; then
+  printf 'omnia-test/build pulls dependencies:\n%s\n' "$tree" >&2
+  exit 1
+fi
+'''
+
+# Semver check against the last published omnia-test; joins `ci` once the
+# first release exists as a baseline.
+[tasks.semver]
+command = "cargo"
+args = ["semver-checks", "-p", "omnia-test", "--all-features"]
+install_crate = "cargo-semver-checks"
 
 # Fmt (fix in place)
 [tasks.fmt]

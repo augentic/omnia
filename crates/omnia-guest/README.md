@@ -91,7 +91,7 @@ let router = Router::new(Client::new("my-org", MyProvider))
 
 `get`/`post`/`put`/`patch`/`delete`/`consume` are JSON defaults: `get` and `delete` decode path and query parameters, while `post`/`put`/`patch` merge a JSON body with path parameters. When a route speaks another wire format (or needs other methods), supply the codec yourself: `handle_with` pairs a `MethodFilter` (unions work, e.g. `MethodFilter::POST.or(MethodFilter::PUT)`) with a decoder `Fn(RawRequest<'_>) -> Result<H, DecodeError>` over the raw request (path parameters, query, headers, body) and an encoder `Fn(H::Output) -> Response` (reuse `axum::Json` for JSON output); `consume_with` takes a decoder `Fn(&Delivery) -> Result<H, DecodeError>` over the whole delivery. Errors keep flowing through `Into<HttpError>`; `HttpError::with_body` carries a preformatted error body (e.g. an XML document) with its content type.
 
-Command-mode guests parse argv with clap and call `Client::call` on the same handlers. Wrap the clap dispatch in `command::execute_wasi` so guest telemetry is initialized and flushed. Omnia creates a fresh component instance for each command invocation.
+Command-mode guests parse argv with clap and call `Client::call` on the same handlers. `omnia_guest::command!(entry)` wires an `async fn` returning `()` or `Result<(), u8>` as the `wasi:cli/run` export through `command::execute_wasi`, so guest telemetry is initialized and flushed. Omnia creates a fresh component instance for each command invocation.
 
 ## Capabilities
 
@@ -107,6 +107,11 @@ The guest crate exposes trait-based abstractions for host capabilities. When com
 | `TableStore` | Execute SQL queries and statements via the ORM layer. |
 | `Broadcast` | Send events over WebSocket channels. |
 | `Plugins` | Request plugin loads through `omnia:plugins/loader`: name a package, a location, and an optional sha256 pin; receive a typed `Plugin` handle. The `plugins` module carries the shared `PluginRef`/`Digest` types, typed refusals convertible into `Error`, and `PluginCache` for ensure-once loads. |
+| `BlobStore` / `BlobStoreExt` | Object storage. `BlobStore` is the ten primitives an implementor writes; `BlobStoreExt` (`has`, `delete_objects`, `clear`, `copy_object`, `move_object`) is derived for every `BlobStore` — one host call each on `wasm32`, composed from the primitives natively. |
+| `DocumentStore` | Document CRUD and filtered queries. |
+| `Model` | Prompt completions, with tool calls answered by a guest closure. |
+
+Every trait is also implemented for `Arc<T>`, `&T`, and `Box<T>` where `T` implements it, so a capability may sit behind a shared handle and still satisfy a `P: Capability` bound.
 
 ### Example: Using Capabilities
 

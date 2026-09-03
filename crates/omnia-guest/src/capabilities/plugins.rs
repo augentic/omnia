@@ -227,6 +227,12 @@ pub trait Plugins: Send + Sync {
     }
 }
 
+forward_pointers!(Plugins {
+    fn load(&self, plugin: &PluginRef) -> impl Future<Output = Result<Plugin, Error>> + Send {
+        (**self).load(plugin)
+    }
+});
+
 /// The WASI-backed provider a `wasm32` guest hands its wasm-free core; the
 /// default method body carries the whole delegation.
 #[cfg(target_arch = "wasm32")]
@@ -306,13 +312,7 @@ impl<P: Plugins> PluginCache<P> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    use super::{Digest, Error, Location, Plugin, PluginCache, PluginRef, Plugins};
-
-    fn digest(hex_pair: &str) -> Digest {
-        format!("sha256:{}", hex_pair.repeat(32)).parse().expect("a valid digest")
-    }
+    use super::{Digest, Error};
 
     #[test]
     fn digest_canonicalizes_case() {
@@ -362,71 +362,5 @@ mod tests {
                 _ => assert!(matches!(mapped, crate::Error::BadRequest { .. })),
             }
         }
-    }
-
-    /// Scripted provider: answers every load with the requested pin (or a
-    /// fixed digest) and counts host round-trips.
-    struct Scripted {
-        calls: AtomicUsize,
-    }
-
-    impl Scripted {
-        fn new() -> Self {
-            Self {
-                calls: AtomicUsize::new(0),
-            }
-        }
-    }
-
-    impl Plugins for Scripted {
-        fn load(
-            &self, plugin: &PluginRef,
-        ) -> impl std::future::Future<Output = Result<Plugin, Error>> + Send {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            let handle = Plugin::new(
-                plugin.package.clone(),
-                plugin.digest.clone().unwrap_or_else(|| digest("ab")),
-            );
-            async move { Ok(handle) }
-        }
-    }
-
-    fn path_ref(package: &str, pin: Option<Digest>) -> PluginRef {
-        PluginRef::builder()
-            .package(package)
-            .location(Location::Path("./plugin.wasm".into()))
-            .maybe_digest(pin)
-            .build()
-    }
-
-    #[tokio::test]
-    async fn ensure_loads_once_per_package() {
-        let cache = PluginCache::new(Scripted::new());
-        let first = cache.ensure(&path_ref("test:echoer", None)).await.expect("cold load");
-        let again = cache.ensure(&path_ref("test:echoer", None)).await.expect("memo hit");
-        assert_eq!(first, again);
-        assert_eq!(cache.provider.calls.load(Ordering::SeqCst), 1);
-
-        cache.ensure(&path_ref("test:other", None)).await.expect("distinct package loads");
-        assert_eq!(cache.provider.calls.load(Ordering::SeqCst), 2);
-    }
-
-    #[tokio::test]
-    async fn ensure_refuses_conflicting_re_pin() {
-        let cache = PluginCache::new(Scripted::new());
-        cache.ensure(&path_ref("test:echoer", Some(digest("ab")))).await.expect("pinned load");
-
-        let error = cache
-            .ensure(&path_ref("test:echoer", Some(digest("cd"))))
-            .await
-            .expect_err("conflicting pin refused");
-        assert!(matches!(error, Error::AlreadyActive(_)));
-        assert_eq!(cache.provider.calls.load(Ordering::SeqCst), 1, "the host is never re-asked");
-
-        let matching = cache
-            .ensure(&path_ref("test:echoer", Some(digest("ab"))))
-            .await
-            .expect("matching pin served from the memo");
-        assert_eq!(matching.digest(), &digest("ab"));
     }
 }

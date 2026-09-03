@@ -11,7 +11,19 @@
 use futures::channel::oneshot;
 use tracing::Level;
 
-test_programs::run!(scenario);
+struct CliGuest;
+
+wasip3::cli::command::export!(CliGuest);
+
+// Not `omnia_guest::command!`: that initializes telemetry before the scenario
+// and flushes after it, so `traced` would neither own the guard nor flush
+// while the receiver is pending — the exact condition this regression needs.
+impl wasip3::exports::cli::run::Guest for CliGuest {
+    async fn run() -> Result<(), ()> {
+        scenario().await;
+        Ok(())
+    }
+}
 
 async fn scenario() {
     let (tx, rx) = oneshot::channel::<()>();

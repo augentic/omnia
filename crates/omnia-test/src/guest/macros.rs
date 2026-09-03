@@ -1,11 +1,19 @@
-//! `doubles!` and `forward!`.
+//! `provider!` and `forward!`.
+//!
+//! `omnia_test::provider!` is the native twin of `omnia_guest::provider!`:
+//! the same token and grammar, so a test's declaration differs from
+//! `src/lib.rs` by the crate path alone. The production macro expands to
+//! empty impls over the WASI defaults for `wasm32`; this one expands to a
+//! double per capability for the native handler rung.
 
 /// Declares a provider struct holding one default double per capability.
 ///
-/// Accepts `provider!`'s grammar verbatim. Each capability becomes a `pub`
-/// field named for it, seeded through a consuming builder of the same name,
-/// and the capability impl forwards to that field. The struct derives
-/// `Clone`, `Debug`, and `Default`.
+/// Accepts `omnia_guest::provider!`'s grammar verbatim. Each capability
+/// becomes a `pub` field named for it, seeded through a consuming builder of
+/// the same name, and the capability impl forwards to that field. `StateStore` and
+/// `BlobStore` share one `storage` field, as one `Memory` serves both — the
+/// shape a production provider's single storage backend has. The struct
+/// derives `Clone`, `Debug`, and `Default`.
 ///
 /// | Capability | Field | Double |
 /// | ---------- | ----- | ------ |
@@ -14,8 +22,8 @@
 /// | `Identity` | `identity` | [`FixedIdentity`](crate::guest::FixedIdentity) |
 /// | `Publish` | `publish` | [`Sink`](crate::guest::Sink) |
 /// | `Broadcast` | `broadcast` | [`Sink`](crate::guest::Sink) |
-/// | `StateStore` | `state` | [`Memory`](crate::guest::Memory) |
-/// | `BlobStore` | `blobs` | [`Memory`](crate::guest::Memory) |
+/// | `StateStore` | `storage` | [`Memory`](crate::guest::Memory) |
+/// | `BlobStore` | `storage` | [`Memory`](crate::guest::Memory) |
 /// | `DocumentStore` | `docs` | [`MemoryDocs`](crate::guest::MemoryDocs) |
 /// | `TableStore` | `tables` | [`ScriptedTables`](crate::guest::ScriptedTables) |
 /// | `Model` | `model` | [`Scripted`](crate::guest::Scripted) |
@@ -26,7 +34,7 @@
 /// use omnia_guest::{Config, StateStore as _};
 /// use omnia_test::guest::{MapConfig, Scripted};
 ///
-/// omnia_test::doubles! {
+/// omnia_test::provider! {
 ///     /// The provider a handler test drives.
 ///     pub struct Provider: Config + StateStore + Model;
 /// }
@@ -35,78 +43,102 @@
 /// let provider = Provider::default()
 ///     .config(MapConfig::default().with([("region", "eu")]))
 ///     .model(Scripted::answering(["ok"]));
-/// provider.state.insert_state("seen", b"1");
+/// provider.storage.insert_state("seen", b"1");
 ///
 /// assert_eq!(Config::get(&provider, "region").await.unwrap(), "eu");
 /// let request = Request::builder().messages(vec![]).build();
 /// assert_eq!(provider.complete(request).await.unwrap().answer, "ok");
-/// assert_eq!(provider.state.state("seen"), Some(b"1".to_vec()));
+/// assert_eq!(provider.storage.state("seen"), Some(b"1".to_vec()));
 /// # });
 /// ```
 #[macro_export]
-macro_rules! doubles {
+macro_rules! provider {
     (
         $(#[$attr:meta])*
         $vis:vis struct $name:ident: $first:ident $(+ $capability:ident)*;
     ) => {
-        $crate::__doubles!(@munch [$(#[$attr])* $vis $name] [] $first $($capability)*);
+        $crate::__provider!(@munch [$(#[$attr])* $vis $name] [] $first $($capability)*);
     };
 }
 
+// `@munch` resolves each capability to `(Capability field Double)`; `@fields`
+// then walks that list once, emitting a field per distinct name — the shared
+// `storage` field is declared by whichever of `StateStore` / `BlobStore` comes
+// first (the trailing `no` / `yes` token tracks it) and forwarded by both.
 #[doc(hidden)]
 #[macro_export]
-macro_rules! __doubles {
+macro_rules! __provider {
     (@munch $head:tt [$($acc:tt)*] Config $($rest:ident)*) => {
-        $crate::__doubles!(@munch $head [$($acc)* (Config config $crate::guest::MapConfig)] $($rest)*);
+        $crate::__provider!(@munch $head [$($acc)* (Config config $crate::guest::MapConfig)] $($rest)*);
     };
     (@munch $head:tt [$($acc:tt)*] HttpRequest $($rest:ident)*) => {
-        $crate::__doubles!(@munch $head [$($acc)* (HttpRequest http $crate::guest::MatchedHttp)] $($rest)*);
+        $crate::__provider!(@munch $head [$($acc)* (HttpRequest http $crate::guest::MatchedHttp)] $($rest)*);
     };
     (@munch $head:tt [$($acc:tt)*] Identity $($rest:ident)*) => {
-        $crate::__doubles!(@munch $head [$($acc)* (Identity identity $crate::guest::FixedIdentity)] $($rest)*);
+        $crate::__provider!(@munch $head [$($acc)* (Identity identity $crate::guest::FixedIdentity)] $($rest)*);
     };
     (@munch $head:tt [$($acc:tt)*] Publish $($rest:ident)*) => {
-        $crate::__doubles!(@munch $head [$($acc)* (Publish publish $crate::guest::Sink)] $($rest)*);
+        $crate::__provider!(@munch $head [$($acc)* (Publish publish $crate::guest::Sink)] $($rest)*);
     };
     (@munch $head:tt [$($acc:tt)*] Broadcast $($rest:ident)*) => {
-        $crate::__doubles!(@munch $head [$($acc)* (Broadcast broadcast $crate::guest::Sink)] $($rest)*);
+        $crate::__provider!(@munch $head [$($acc)* (Broadcast broadcast $crate::guest::Sink)] $($rest)*);
     };
     (@munch $head:tt [$($acc:tt)*] StateStore $($rest:ident)*) => {
-        $crate::__doubles!(@munch $head [$($acc)* (StateStore state $crate::guest::Memory)] $($rest)*);
+        $crate::__provider!(@munch $head [$($acc)* (StateStore storage $crate::guest::Memory)] $($rest)*);
     };
     (@munch $head:tt [$($acc:tt)*] BlobStore $($rest:ident)*) => {
-        $crate::__doubles!(@munch $head [$($acc)* (BlobStore blobs $crate::guest::Memory)] $($rest)*);
+        $crate::__provider!(@munch $head [$($acc)* (BlobStore storage $crate::guest::Memory)] $($rest)*);
     };
     (@munch $head:tt [$($acc:tt)*] DocumentStore $($rest:ident)*) => {
-        $crate::__doubles!(@munch $head [$($acc)* (DocumentStore docs $crate::guest::MemoryDocs)] $($rest)*);
+        $crate::__provider!(@munch $head [$($acc)* (DocumentStore docs $crate::guest::MemoryDocs)] $($rest)*);
     };
     (@munch $head:tt [$($acc:tt)*] TableStore $($rest:ident)*) => {
-        $crate::__doubles!(@munch $head [$($acc)* (TableStore tables $crate::guest::ScriptedTables)] $($rest)*);
+        $crate::__provider!(@munch $head [$($acc)* (TableStore tables $crate::guest::ScriptedTables)] $($rest)*);
     };
     (@munch $head:tt [$($acc:tt)*] Model $($rest:ident)*) => {
-        $crate::__doubles!(@munch $head [$($acc)* (Model model $crate::guest::Scripted)] $($rest)*);
+        $crate::__provider!(@munch $head [$($acc)* (Model model $crate::guest::Scripted)] $($rest)*);
     };
     (@munch $head:tt [$($acc:tt)*] Plugins $($rest:ident)*) => {
-        $crate::__doubles!(@munch $head [$($acc)* (Plugins plugins $crate::guest::ScriptedLoader)] $($rest)*);
+        $crate::__provider!(@munch $head [$($acc)* (Plugins plugins $crate::guest::ScriptedLoader)] $($rest)*);
     };
     (@munch $head:tt [$($acc:tt)*] $unknown:ident $($rest:ident)*) => {
         ::core::compile_error!(::core::concat!(
-            "`", ::core::stringify!($unknown), "` is not a capability `doubles!` has a double for"
+            "`", ::core::stringify!($unknown), "` is not a capability `provider!` has a double for"
         ));
     };
-    (@munch [$(#[$attr:meta])* $vis:vis $name:ident] [$(($capability:ident $field:ident $double:ty))*]) => {
+    (@munch $head:tt [$($acc:tt)*]) => {
+        $crate::__provider!(@fields $head [$($acc)*] [] [] no);
+    };
+
+    (@fields $head:tt [($capability:ident storage $double:ty) $($rest:tt)*] [$($fields:tt)*] [$($fwd:tt)*] no) => {
+        $crate::__provider!(@fields $head [$($rest)*]
+            [$($fields)* (storage $double, "The `StateStore` / `BlobStore` double: one shared `Memory`.")]
+            [$($fwd)* ($capability storage)] yes);
+    };
+    (@fields $head:tt [($capability:ident storage $double:ty) $($rest:tt)*] [$($fields:tt)*] [$($fwd:tt)*] yes) => {
+        $crate::__provider!(@fields $head [$($rest)*] [$($fields)*] [$($fwd)* ($capability storage)] yes);
+    };
+    (@fields $head:tt [($capability:ident $field:ident $double:ty) $($rest:tt)*] [$($fields:tt)*] [$($fwd:tt)*] $storage:ident) => {
+        $crate::__provider!(@fields $head [$($rest)*]
+            [$($fields)* ($field $double, ::core::concat!("The `", ::core::stringify!($capability), "` double."))]
+            [$($fwd)* ($capability $field)] $storage);
+    };
+    (
+        @fields [$(#[$attr:meta])* $vis:vis $name:ident] []
+        [$(($field:ident $double:ty, $doc:expr))*] [$(($capability:ident $fwd_field:ident))*] $storage:ident
+    ) => {
         $(#[$attr])*
         #[derive(::core::clone::Clone, ::core::fmt::Debug, ::core::default::Default)]
         $vis struct $name {
             $(
-                #[doc = ::core::concat!("The `", ::core::stringify!($capability), "` double.")]
+                #[doc = $doc]
                 pub $field: $double,
             )*
         }
 
         impl $name {
             $(
-                #[doc = ::core::concat!("Replaces the `", ::core::stringify!($capability), "` double.")]
+                #[doc = ::core::concat!("Replaces the `", ::core::stringify!($field), "` double.")]
                 #[must_use]
                 pub fn $field(mut self, $field: $double) -> Self {
                     self.$field = $field;
@@ -115,7 +147,7 @@ macro_rules! __doubles {
             )*
         }
 
-        $crate::forward!(impl $name { $($capability => $field,)* });
+        $crate::forward!(impl $name { $($capability => $fwd_field,)* });
     };
 }
 
@@ -362,15 +394,6 @@ macro_rules! __forward_trait {
                 )
             }
 
-            fn has(
-                &self, container: &str, name: &str,
-            ) -> impl ::core::future::Future<
-                Output = $crate::guest::__forward::omnia_guest::anyhow::Result<bool>,
-            > + Send {
-                use $crate::guest::__forward::AsBlobStore as _;
-                $crate::guest::__forward::omnia_guest::BlobStore::has(self.$field.__as(), container, name)
-            }
-
             fn list(
                 &self, container: &str,
             ) -> impl ::core::future::Future<
@@ -412,28 +435,6 @@ macro_rules! __forward_trait {
                 )
             }
 
-            fn delete_objects(
-                &self, container: &str, names: &[::std::string::String],
-            ) -> impl ::core::future::Future<
-                Output = $crate::guest::__forward::omnia_guest::anyhow::Result<()>,
-            > + Send {
-                use $crate::guest::__forward::AsBlobStore as _;
-                $crate::guest::__forward::omnia_guest::BlobStore::delete_objects(
-                    self.$field.__as(),
-                    container,
-                    names,
-                )
-            }
-
-            fn clear(
-                &self, container: &str,
-            ) -> impl ::core::future::Future<
-                Output = $crate::guest::__forward::omnia_guest::anyhow::Result<()>,
-            > + Send {
-                use $crate::guest::__forward::AsBlobStore as _;
-                $crate::guest::__forward::omnia_guest::BlobStore::clear(self.$field.__as(), container)
-            }
-
             fn create_container(
                 &self, name: &str,
             ) -> impl ::core::future::Future<
@@ -470,36 +471,6 @@ macro_rules! __forward_trait {
             > + Send {
                 use $crate::guest::__forward::AsBlobStore as _;
                 $crate::guest::__forward::omnia_guest::BlobStore::container_info(self.$field.__as(), container)
-            }
-
-            fn copy_object(
-                &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
-            ) -> impl ::core::future::Future<
-                Output = $crate::guest::__forward::omnia_guest::anyhow::Result<()>,
-            > + Send {
-                use $crate::guest::__forward::AsBlobStore as _;
-                $crate::guest::__forward::omnia_guest::BlobStore::copy_object(
-                    self.$field.__as(),
-                    src_container,
-                    src_name,
-                    dest_container,
-                    dest_name,
-                )
-            }
-
-            fn move_object(
-                &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
-            ) -> impl ::core::future::Future<
-                Output = $crate::guest::__forward::omnia_guest::anyhow::Result<()>,
-            > + Send {
-                use $crate::guest::__forward::AsBlobStore as _;
-                $crate::guest::__forward::omnia_guest::BlobStore::move_object(
-                    self.$field.__as(),
-                    src_container,
-                    src_name,
-                    dest_container,
-                    dest_name,
-                )
             }
         }
     };

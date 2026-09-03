@@ -2,8 +2,9 @@
 //!
 //! One double per capability, each a plain `Clone + Default` value a
 //! handler-level test seeds, hands to the provider under test, and reads
-//! back. `doubles!` assembles a provider from them by capability name;
-//! `forward!` delegates a provider's capability impls to its fields.
+//! back. `provider!` — the native twin of `omnia_guest::provider!` —
+//! assembles a provider from them by capability name; `forward!` delegates
+//! a hand-written provider's capability impls to its fields.
 
 #[doc(hidden)]
 pub mod __forward;
@@ -17,9 +18,9 @@ mod tables;
 
 pub use docs::MemoryDocs;
 pub use http::{MatchedHttp, Recorded};
-pub use memory::{Blobs, Memory, Namespaced, State};
+pub use memory::{BlobSnapshot, Memory, Namespaced, StateSnapshot};
 pub use scripted::{Scripted, ScriptedLoader, Turn, function_tools};
 pub use sink::{Broadcasted, FixedIdentity, MapConfig, Sink};
 pub use tables::{Predicate, ScriptedTables, Statement};
 
-pub use crate::{doubles, forward};
+pub use crate::{forward, provider};

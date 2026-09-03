@@ -2,12 +2,16 @@
 //!
 //! A [`Script`] holds an ordered queue of turns and records every request
 //! that consumed one. Consuming past the end panics unless the script opted
-//! into a fallback with [`Script::then`]; leaving turns unconsumed fails the
-//! test either explicitly ([`Script::assert_exhausted`]) or when the last
-//! handle drops. Clones share one queue, so a scenario and the provider it
-//! hands to the code under test observe the same state.
+//! into a fallback with [`Script::then`]; a double whose caller is the
+//! runtime rather than the test thread uses [`Script::try_next`] instead,
+//! which records the overrun so the test still fails at
+//! [`Script::assert_exhausted`]. Leaving turns unconsumed fails the test
+//! either explicitly or when the last handle drops. Clones share one queue,
+//! so a scenario and the provider it hands to the code under test observe
+//! the same state.
 
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::{fmt, thread};
 
@@ -32,6 +36,12 @@ struct Inner<Req, Turn> {
     turns: Mutex<VecDeque<Turn>>,
     seen: Mutex<Vec<Req>>,
     fallback: OnceLock<Fallback<Turn>>,
+    // Requests that found the script exhausted with no fallback, answered
+    // softly by `try_next`; reported by `assert_exhausted` and the drop check.
+    overruns: AtomicUsize,
+    // Set once `assert_exhausted` has reported, so the drop check does not
+    // fail the same test a second time.
+    checked: AtomicBool,
 }
 
 impl<Req, Turn> Clone for Script<Req, Turn> {
@@ -47,6 +57,7 @@ impl<Req, Turn> fmt::Debug for Script<Req, Turn> {
         f.debug_struct("Script")
             .field("remaining", &self.remaining())
             .field("seen", &self.inner.seen.lock().map_or(0, |seen| seen.len()))
+            .field("overruns", &self.overruns())
             .field("soft", &self.inner.fallback.get().is_some())
             .finish()
     }
@@ -60,6 +71,8 @@ impl<Req, Turn> Script<Req, Turn> {
                 turns: Mutex::new(turns.into_iter().collect()),
                 seen: Mutex::new(Vec::new()),
                 fallback: OnceLock::new(),
+                overruns: AtomicUsize::new(0),
+                checked: AtomicBool::new(false),
             }),
         }
     }
@@ -106,7 +119,7 @@ impl<Req, Turn> Script<Req, Turn> {
     /// [`Script::then`], or if a lock is poisoned.
     #[track_caller]
     pub fn next(&self, request: Req) -> Turn {
-        self.try_next(request).unwrap_or_else(|| {
+        self.pop(request).unwrap_or_else(|| {
             let consumed = self.inner.seen.lock().map_or(0, |seen| seen.len());
             panic!(
                 "script exhausted: {} turn(s) consumed, none scripted for request #{consumed}",
@@ -116,13 +129,22 @@ impl<Req, Turn> Script<Req, Turn> {
     }
 
     /// Records `request` and pops the next turn, or `None` once the script
-    /// is exhausted and no fallback was set — for doubles whose contract is
-    /// to fail the caller rather than the test thread.
+    /// is exhausted and no fallback was set — for doubles whose caller is
+    /// the runtime rather than the test thread. The overrun is recorded so
+    /// [`Script::assert_exhausted`] and the drop check still fail the test.
     ///
     /// # Panics
     ///
     /// Panics if a lock is poisoned.
     pub fn try_next(&self, request: Req) -> Option<Turn> {
+        let turn = self.pop(request);
+        if turn.is_none() {
+            self.inner.overruns.fetch_add(1, Ordering::SeqCst);
+        }
+        turn
+    }
+
+    fn pop(&self, request: Req) -> Option<Turn> {
         self.inner.seen.lock().expect("seen lock").push(request);
         let popped = self.inner.turns.lock().expect("script lock").pop_front();
         popped.or_else(|| self.inner.fallback.get().map(|fallback| fallback()))
@@ -151,30 +173,46 @@ impl<Req, Turn> Script<Req, Turn> {
         self.inner.turns.lock().expect("script lock").len()
     }
 
-    /// Asserts that every scripted turn was consumed.
+    /// The number of requests [`Script::try_next`] answered past the script.
+    #[must_use]
+    pub fn overruns(&self) -> usize {
+        self.inner.overruns.load(Ordering::SeqCst)
+    }
+
+    /// Asserts that every scripted turn was consumed and none was requested
+    /// past the end.
     ///
     /// # Panics
     ///
-    /// Panics naming the number of unconsumed turns, or if a lock is poisoned.
+    /// Panics naming the number of unconsumed turns or overruns, or if a lock
+    /// is poisoned.
     #[track_caller]
     pub fn assert_exhausted(&self) {
+        self.inner.checked.store(true, Ordering::SeqCst);
         let left = self.remaining();
-        assert_eq!(left, 0, "script has {left} unconsumed turn(s)");
+        let overruns = self.overruns();
+        assert!(
+            left == 0 && overruns == 0,
+            "script has {left} unconsumed turn(s) and {overruns} request(s) past the end"
+        );
     }
 }
 
 impl<Req, Turn> Drop for Inner<Req, Turn> {
-    // The last handle dropping with turns left is a forgotten assertion; it
-    // fails the test unless a panic is already unwinding, which it must not
-    // mask (a panic during unwinding aborts the process).
+    // The last handle dropping with turns left or overruns is a forgotten
+    // assertion; it fails the test unless `assert_exhausted` already reported
+    // or a panic is already unwinding, which it must not mask (a panic
+    // during unwinding aborts the process).
     fn drop(&mut self) {
-        if thread::panicking() {
+        if thread::panicking() || self.checked.load(Ordering::SeqCst) {
             return;
         }
         let left = self.turns.get_mut().map_or(0, |turns| turns.len());
+        let overruns = self.overruns.load(Ordering::SeqCst);
         assert!(
-            left == 0,
-            "script dropped with {left} unconsumed turn(s); assert_exhausted() names them earlier"
+            left == 0 && overruns == 0,
+            "script dropped with {left} unconsumed turn(s) and {overruns} request(s) past the \
+             end; assert_exhausted() names them earlier"
         );
     }
 }
@@ -184,7 +222,7 @@ impl<Req, Turn> Drop for Inner<Req, Turn> {
 /// The union of what guest and host scenarios assert on: the guest
 /// `Scripted` and the host `ScriptedModel` project their own request types
 /// into this record so a scenario reads identically wherever it runs.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Seen {
     /// The system prompt.
     pub system: Option<String>,
@@ -192,11 +230,18 @@ pub struct Seen {
     pub messages: Vec<String>,
     /// The requested output shape.
     pub format: SeenFormat,
-    /// Declared function-tool names, in declaration order.
+    /// Declared tool names — function tools and MCP grants — in declaration
+    /// order.
     pub tools: Vec<String>,
+    /// The sampling temperature, when the request set one.
+    pub temperature: Option<f32>,
     /// The workspace lent to the model, if any.
     pub workspace: Option<String>,
 }
+
+// The temperature is a sampling control copied from the request; NaN is
+// never a meaningful setting, so total equality holds.
+impl Eq for Seen {}
 
 /// The output shape a recorded request asked for.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -217,6 +262,10 @@ pub enum SeenFormat {
 
 /// One tool call a scripted model drove, and the outcome the code under test
 /// answered with.
+///
+/// The host `ScriptedModel` also records the workspace operations it drives
+/// under the host-injected tool names `read`, `write`, and `list`, with the
+/// path as `arguments`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Exchange {
     /// Tool name.

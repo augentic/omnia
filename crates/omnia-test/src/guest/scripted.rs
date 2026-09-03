@@ -208,6 +208,7 @@ impl From<&Request> for Seen {
                     Tool::Mcp(mcp) => mcp.name.clone(),
                 })
                 .collect(),
+            temperature: request.generation.as_ref().and_then(|generation| generation.temperature),
             workspace: request.workspace.clone(),
         }
     }

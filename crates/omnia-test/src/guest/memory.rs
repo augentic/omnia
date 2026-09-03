@@ -9,9 +9,9 @@ use anyhow::{Context, Result, anyhow, bail};
 use omnia_guest::{BlobStore, CasError, ContainerMetadata, ObjectMetadata, StateStore};
 
 /// A state snapshot: key to raw bytes.
-pub type State = BTreeMap<String, Vec<u8>>;
+pub type StateSnapshot = BTreeMap<String, Vec<u8>>;
 /// A blob snapshot: container to object name to bytes.
-pub type Blobs = BTreeMap<String, BTreeMap<String, Vec<u8>>>;
+pub type BlobSnapshot = BTreeMap<String, BTreeMap<String, Vec<u8>>>;
 
 #[derive(Clone, Debug)]
 struct Object {
@@ -27,7 +27,7 @@ struct Container {
 
 #[derive(Debug, Default)]
 struct Inner {
-    state: Mutex<State>,
+    state: Mutex<StateSnapshot>,
     blobs: Mutex<BTreeMap<String, Container>>,
     // Metadata timestamps come from this counter, not the wall clock, so
     // `*_info` reads are deterministic and ordered by creation.
@@ -41,7 +41,8 @@ struct Inner {
 /// 8-byte big-endian encoding of the runtime's in-memory key-value default,
 /// and `get_range` clamps an inclusive `end` the way the blobstore default
 /// does. Reads on a container that was never created see it as empty;
-/// writes create it.
+/// writes create it. The derived `BlobStoreExt` operations (`has`, `clear`,
+/// `copy_object`, ...) compose these primitives.
 ///
 /// ```
 /// use omnia_guest::{BlobStore as _, StateStore as _};
@@ -61,7 +62,7 @@ pub struct Memory {
 }
 
 impl Memory {
-    fn lock_state(&self) -> MutexGuard<'_, State> {
+    fn lock_state(&self) -> MutexGuard<'_, StateSnapshot> {
         self.inner.state.lock().expect("state lock")
     }
 
@@ -141,7 +142,7 @@ impl Memory {
 
     /// A snapshot of both stores for byte-stability comparisons.
     #[must_use]
-    pub fn snapshot(&self) -> (State, Blobs) {
+    pub fn snapshot(&self) -> (StateSnapshot, BlobSnapshot) {
         let blobs = self
             .lock_blobs()
             .iter()
@@ -196,20 +197,6 @@ impl Memory {
         }
     }
 
-    fn delete_objects(&self, container: &str, names: &[String]) {
-        if let Some(container) = self.lock_blobs().get_mut(container) {
-            for name in names {
-                drop(container.objects.remove(name));
-            }
-        }
-    }
-
-    fn clear(&self, container: &str) {
-        if let Some(container) = self.lock_blobs().get_mut(container) {
-            container.objects.clear();
-        }
-    }
-
     fn delete_container(&self, name: &str) {
         drop(self.lock_blobs().remove(name));
     }
@@ -254,24 +241,6 @@ impl Memory {
         });
         drop(blobs);
         info.ok_or_else(|| anyhow!("container not found: {name}"))
-    }
-
-    fn copy(
-        &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
-    ) -> Result<()> {
-        let data = self
-            .object(src_container, src_name)
-            .ok_or_else(|| anyhow!("object not found: {src_container}/{src_name}"))?;
-        self.insert_object(dest_container, dest_name, &data);
-        Ok(())
-    }
-
-    fn rename(
-        &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
-    ) -> Result<()> {
-        self.copy(src_container, src_name, dest_container, dest_name)?;
-        self.delete_object(src_container, src_name);
-        Ok(())
     }
 }
 
@@ -334,10 +303,6 @@ impl BlobStore for Memory {
         ready(Ok(()))
     }
 
-    fn has(&self, container: &str, name: &str) -> impl Future<Output = Result<bool>> + Send {
-        ready(Ok(self.object(container, name).is_some()))
-    }
-
     fn list(&self, container: &str) -> impl Future<Output = Result<Vec<String>>> + Send {
         ready(Ok(self.objects(container)))
     }
@@ -352,18 +317,6 @@ impl BlobStore for Memory {
         &self, container: &str, name: &str,
     ) -> impl Future<Output = Result<ObjectMetadata>> + Send {
         ready(Self::object_info(self, container, name))
-    }
-
-    fn delete_objects(
-        &self, container: &str, names: &[String],
-    ) -> impl Future<Output = Result<()>> + Send {
-        Self::delete_objects(self, container, names);
-        ready(Ok(()))
-    }
-
-    fn clear(&self, container: &str) -> impl Future<Output = Result<()>> + Send {
-        Self::clear(self, container);
-        ready(Ok(()))
     }
 
     fn create_container(&self, name: &str) -> impl Future<Output = Result<()>> + Send {
@@ -384,18 +337,6 @@ impl BlobStore for Memory {
         &self, container: &str,
     ) -> impl Future<Output = Result<ContainerMetadata>> + Send {
         ready(Self::container_info(self, container))
-    }
-
-    fn copy_object(
-        &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
-    ) -> impl Future<Output = Result<()>> + Send {
-        ready(self.copy(src_container, src_name, dest_container, dest_name))
-    }
-
-    fn move_object(
-        &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
-    ) -> impl Future<Output = Result<()>> + Send {
-        ready(self.rename(src_container, src_name, dest_container, dest_name))
     }
 }
 
@@ -491,10 +432,6 @@ impl BlobStore for Namespaced {
         ready(Ok(()))
     }
 
-    fn has(&self, container: &str, name: &str) -> impl Future<Output = Result<bool>> + Send {
-        ready(Ok(self.inner.object(&self.scoped(container), name).is_some()))
-    }
-
     fn list(&self, container: &str) -> impl Future<Output = Result<Vec<String>>> + Send {
         ready(Ok(self.inner.objects(&self.scoped(container))))
     }
@@ -514,18 +451,6 @@ impl BlobStore for Namespaced {
                 ..info
             });
         ready(info)
-    }
-
-    fn delete_objects(
-        &self, container: &str, names: &[String],
-    ) -> impl Future<Output = Result<()>> + Send {
-        self.inner.delete_objects(&self.scoped(container), names);
-        ready(Ok(()))
-    }
-
-    fn clear(&self, container: &str) -> impl Future<Output = Result<()>> + Send {
-        self.inner.clear(&self.scoped(container));
-        ready(Ok(()))
     }
 
     fn create_container(&self, name: &str) -> impl Future<Output = Result<()>> + Send {
@@ -551,27 +476,5 @@ impl BlobStore for Namespaced {
                 ..info
             });
         ready(info)
-    }
-
-    fn copy_object(
-        &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
-    ) -> impl Future<Output = Result<()>> + Send {
-        ready(self.inner.copy(
-            &self.scoped(src_container),
-            src_name,
-            &self.scoped(dest_container),
-            dest_name,
-        ))
-    }
-
-    fn move_object(
-        &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
-    ) -> impl Future<Output = Result<()>> + Send {
-        ready(self.inner.rename(
-            &self.scoped(src_container),
-            src_name,
-            &self.scoped(dest_container),
-            dest_name,
-        ))
     }
 }

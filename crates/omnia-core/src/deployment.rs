@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 pub use manifest::{
-    GuestEntry, GuestRoutes, Manifest, Mount, SourceSpec, Transport, TransportKind,
+    GuestEntry, GuestRoutes, Manifest, Mount, PluginLocation, SourceSpec, Transport, TransportKind,
 };
 use source::ArtifactPolicy;
 pub use source::{ELF_MAGIC, GuestArtifact, LoadedGuest, Source};
@@ -212,6 +212,7 @@ impl<P> DeploymentBuilder<P> {
         let mut deployment = Deployment::from_plan(plan).await?;
         deployment.name = name;
         deployment.command_guest = command_guest;
+        deployment.locations = manifest.locations;
         if let Some(timeout) = self.guest_timeout {
             deployment.options.guest_timeout = timeout;
         }
@@ -316,6 +317,9 @@ pub struct Deployment<T: WasiView + 'static> {
     allow_empty: bool,
     // Command-mode guest identity derived from the manifest's marked entry.
     command_guest: Option<GuestId>,
+    // The manifest's plugin acquisition locations, carried onto the runtime
+    // for the loader capability to install against.
+    locations: Vec<PluginLocation>,
 }
 
 impl<T: WasiView + 'static> Deployment<T> {
@@ -358,6 +362,7 @@ impl<T: WasiView + 'static> Deployment<T> {
             mode: plan.mode,
             allow_empty: plan.allow_empty,
             command_guest: None,
+            locations: Vec::new(),
         })
     }
 }
@@ -413,6 +418,12 @@ impl<T: WasiView> Deployment<T> {
     /// The manifest-marked command guest identity, if any.
     pub(crate) fn command_guest(&self) -> Option<GuestId> {
         self.command_guest.clone()
+    }
+
+    /// The manifest's plugin acquisition locations.
+    #[must_use]
+    pub fn plugin_locations(&self) -> &[PluginLocation] {
+        &self.locations
     }
 
     /// Assemble the guest [`Registry`].

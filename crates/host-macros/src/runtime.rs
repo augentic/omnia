@@ -16,21 +16,32 @@ pub fn expand(config: &Config) -> TokenStream {
     let Codegen {
         mode,
         host_types,
+        ctx_keys,
         backends_ty,
         backends_def,
         main_options,
-        extend_hook,
+        manifest_source,
         link_plugins,
     } = Codegen::from(config);
 
     let mode = mode.tokens();
-    // A declared `plugins:` block opts the deployment into the loader host;
-    // worlds that do not import `omnia:plugins/loader` never see it.
+    // A declared `plugins:` block opts the deployment into the loader host —
+    // worlds that do not import `omnia:plugins/loader` never see it — and
+    // installs whatever locations the manifest carries.
     let plugins_host = link_plugins.then(|| {
         quote! {
-            deployment.host::<omnia::WasiPlugins, #backends_ty>()?;
+            deployment.host::<omnia::WasiPlugins, B>()?;
         }
     });
+    let extend_hook = link_plugins.then(|| {
+        quote! {
+            fn extend(runtime: &omnia::Runtime<B>) -> Result<()> {
+                omnia::Plugins::install_declared(runtime)
+            }
+        }
+    });
+    let manifest_source = manifest_source
+        .unwrap_or_else(|| quote! { omnia::ManifestSource::Inline(omnia::Manifest::new()) });
 
     quote! {
         mod runtime {
@@ -42,20 +53,25 @@ pub fn expand(config: &Config) -> TokenStream {
 
             #backends_def
 
-            struct Hooks;
+            /// This runtime's host wiring, generic over the bundle carrying
+            /// its hosts' contexts: the compiled-in bundle under `main` and
+            /// `run`, any other under `run_with`.
+            pub struct Hooks;
 
-            impl omnia::Wiring<#backends_ty> for Hooks {
-                fn link(deployment: &mut omnia::Deployment<omnia::StoreCtx<#backends_ty>>) -> Result<()> {
+            impl<B> omnia::Wiring<B> for Hooks
+            where
+                B: Clone + Send + Sync + 'static,
+                #(B: omnia::Provides<#ctx_keys>,)*
+            {
+                fn link(deployment: &mut omnia::Deployment<omnia::StoreCtx<B>>) -> Result<()> {
                     #plugins_host
-                    #(deployment.host::<#host_types, #backends_ty>()?;)*
+                    #(deployment.host::<#host_types, B>()?;)*
                     Ok(())
                 }
 
                 #extend_hook
 
-                async fn serve(
-                    runtime: &omnia::Runtime<#backends_ty>,
-                ) -> Result<()> {
+                async fn serve(runtime: &omnia::Runtime<B>) -> Result<()> {
                     // Every host runs uniformly: capability hosts resolve
                     // immediately through `Server`'s no-op default, trigger
                     // servers loop until shutdown.
@@ -67,6 +83,13 @@ pub fn expand(config: &Config) -> TokenStream {
                     future::try_join_all(servers).await?;
                     Ok(())
                 }
+            }
+
+            /// The deployment compiled in here (`config:` or the inline
+            /// manifest keys; empty when neither is declared), for an
+            /// embedder to overlay before `run_with`.
+            pub fn manifest() -> omnia::ManifestSource {
+                #manifest_source
             }
 
             /// Entry point: run the compiled-in deployment through this
@@ -84,10 +107,22 @@ pub fn expand(config: &Config) -> TokenStream {
             pub async fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
                 omnia::run::<#backends_ty, Hooks>(builder.mode(#mode)).await
             }
+
+            /// Run one deployment through this runtime's hosts over a bundle
+            /// already in hand — nothing connects.
+            pub async fn run_with<B>(
+                builder: omnia::DeploymentBuilder, backends: B,
+            ) -> Result<omnia::ExitStatus>
+            where
+                B: Clone + Send + Sync + 'static,
+                Hooks: omnia::Wiring<B>,
+            {
+                omnia::run_with::<B, Hooks>(builder.mode(#mode), backends).await
+            }
         }
 
         #[allow(unused_imports)]
-        pub use runtime::{run, main};
+        pub use runtime::{Hooks, main, manifest, run, run_with};
     }
 }
 
@@ -249,13 +284,11 @@ mod tests {
         })));
     }
 
-    // The declarative locations grammar, cached: path entries fold in
-    // declaration order into one `PathMounts`, the registry entry becomes a
-    // `RegistryClient` cached in the `cache:` backend — which joins the
-    // bundle beside the hosts' backends — each filling its kind's slot in
-    // the slots the generated `Wiring::extend` hook installs.
+    // The declarative locations grammar: each entry lowers into a
+    // `PluginLocation` on the inline manifest, and the declared `plugins:`
+    // block makes the generated `Wiring::extend` install them.
     #[test]
-    fn expand_locations_cached() {
+    fn expand_locations() {
         insta::assert_snapshot!(expand_pretty(quote!({
             plugins: {
                 interfaces: ["emery:adapter/probe"],
@@ -263,7 +296,6 @@ mod tests {
                     { name: ".", path: project_root() },
                     { registry: "ghcr.io" },
                 ],
-                cache: PluginCache,
             },
             guests: [
                 { id: "engine", source: "engine.wasm" },
@@ -274,35 +306,30 @@ mod tests {
         })));
     }
 
-    // Cacheless locations: no store backend joins the bundle and the
-    // registry acquirer fetches fresh on every load.
+    // A bare `plugins: {}` block still links the loader host and installs
+    // whatever locations the manifest carries — here, none.
     #[test]
-    fn expand_locations_cacheless() {
+    fn expand_plugins_without_locations() {
         insta::assert_snapshot!(expand_pretty(quote!({
-            plugins: {
-                interfaces: ["emery:adapter/probe"],
-                locations: [
-                    { name: "adapters", path: adapters_root() },
-                    { registry: "ghcr.io" },
-                ],
-            },
+            plugins: { interfaces: ["emery:adapter/probe"] },
             guests: [
                 { id: "engine", source: "engine.wasm" },
             ],
         })));
     }
 
-    // Locations are acquisition policy, not manifest data, so the block
-    // composes with `config:` — the TOML declares the interfaces, the
-    // binary the locations and cache.
+    // Locations are manifest data, so they conflict with `config:` like
+    // every other inline key; the TOML declares them instead.
     #[test]
-    fn expand_locations_with_config() {
-        insta::assert_snapshot!(expand_pretty(quote!({
+    fn locations_refused_beside_config() {
+        let error = syn::parse2::<Config>(quote!({
             config: concat!(env!("CARGO_MANIFEST_DIR"), "/omnia.toml"),
             plugins: {
                 locations: [{ registry: "ghcr.io" }],
-                cache: PluginCache,
             },
-        })));
+        }))
+        .err()
+        .expect("locations beside config must be refused");
+        assert!(error.to_string().contains("mutually exclusive"), "{error}");
     }
 }

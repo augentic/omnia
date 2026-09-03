@@ -6,7 +6,7 @@ use omnia_guest::model::{Error, Model as _, Request, WasiModel};
 use test_programs::user;
 use wasip3::filesystem::preopens;
 
-test_programs::run!(scenario);
+omnia_guest::command!(scenario);
 
 async fn scenario() {
     assert!(preopens::get_directories().iter().any(|(_, name)| name == "."), "host must mount `.`");

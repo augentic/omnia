@@ -1,15 +1,96 @@
 //! The component rung: real guest components from `crates/test-programs`
 //! driven through `Deployment` over `Backends`.
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
-use omnia::{ExitStatus, GuestId, Runtime};
+use omnia::{ExitStatus, GuestId, PluginLocation, Runtime};
 use omnia_test::host::{Backends, Deployment, ScriptedModel, scratch};
 use omnia_test::{Exchange, SeenFormat};
 use omnia_wasi_blobstore::WasiBlobstoreCtx as _;
+use omnia_wasi_config::WasiConfig;
 use omnia_wasi_keyvalue::WasiKeyValueCtx as _;
 use omnia_wasi_model::WasiModel;
+use omnia_wasi_otel::WasiOtel;
 use serde_json::json;
+
+test_utils::foreach_config!();
+
+// A production `runtime!` as an embedder would write it: the compiled-in
+// deployment and its hosts, connected from the environment under `main`.
+mod production {
+    use omnia_wasi_keyvalue::{KeyValueDefault, WasiKeyValue};
+    use omnia_wasi_model::{ModelDefault, WasiModel};
+    use omnia_wasi_otel::{OtelDefault, WasiOtel};
+
+    omnia::runtime!({
+        mode: command,
+        guests: [{ id: "echo", source: test_utils::MODEL_ECHO_TEXT }],
+        hosts: {
+            WasiModel: ModelDefault,
+            WasiKeyValue: KeyValueDefault,
+            WasiOtel: OtelDefault,
+        },
+    });
+}
+
+// The same shape with a plugin seam and a `.` path location the binary
+// would serve from a directory that does not exist under test.
+mod production_plugins {
+    use omnia_wasi_otel::{OtelDefault, WasiOtel};
+
+    omnia::runtime!({
+        mode: command,
+        plugins: {
+            interfaces: ["omnia-test:link/ops"],
+            locations: [{ name: ".", path: "/nonexistent/adapters" }],
+        },
+        guests: [{ id: "requester", source: test_utils::PLUGINS_LOAD_PATH }],
+        hosts: { WasiOtel: OtelDefault },
+    });
+}
+
+#[tokio::test]
+async fn runtime_overlay_drives_the_production_wiring() {
+    // The generated `main` and `run` stay untouched; the overlay reaches the
+    // same `Hooks` through `run_with`.
+    let _ = (production::main, production::run);
+    let backends = Backends::defaults().await.model(ScriptedModel::answering([json!("second")]));
+    let status = Deployment::from(production::manifest())
+        .run_with::<production::Hooks, _>(backends.clone())
+        .await
+        .expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS);
+
+    let seen = backends.model.seen();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].messages, ["hi", "second"]);
+    backends.model.assert_exhausted();
+}
+
+#[tokio::test]
+async fn path_root_rewrites_the_production_location() {
+    let _ = (production_plugins::main, production_plugins::run);
+    let scratch = scratch();
+    std::fs::copy(test_utils::LINK_ECHOER, scratch.path().join("plugin.wasm"))
+        .expect("staging the loadable echoer");
+
+    let deployment = Deployment::from(production_plugins::manifest())
+        .mount(scratch.mount(false))
+        .path_root(scratch.path());
+    assert_eq!(
+        deployment.manifest().expect("inline base resolves").locations,
+        [PluginLocation::path(".", scratch.path())],
+        "the overlay replaces the binary's `.` root rather than adding a second"
+    );
+
+    let status = deployment
+        .run_with::<production_plugins::Hooks, _>(Backends::defaults().await)
+        .await
+        .expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+}
 
 #[tokio::test]
 async fn scripted_model_answers_a_guest_completion() {
@@ -62,6 +143,10 @@ async fn exhausted_script_fails_the_guest_not_the_test() {
         .await;
     assert!(!matches!(outcome, Ok(ExitStatus::SUCCESS)), "the guest's expect fails: {outcome:?}");
     assert_eq!(backends.model.seen().len(), 1, "the request was still recorded");
+    // The soft answer to the guest is not a soft answer to the test: the
+    // overrun fails the assertion the scenario would normally end with.
+    let asserted = catch_unwind(AssertUnwindSafe(|| backends.model.assert_exhausted()));
+    assert!(asserted.is_err(), "the overrun fails assert_exhausted()");
 }
 
 #[tokio::test]
@@ -102,10 +187,24 @@ async fn path_root_serves_plugin_loads() {
         .guest("requester", test_utils::PLUGINS_LOAD_PATH)
         .mount(scratch.mount(false))
         .path_root(scratch.path())
-        .run(Backends::defaults().await, |_| Ok(()))
+        .run(Backends::defaults().await, |deployment| {
+            deployment.host::<WasiOtel, Backends>()?;
+            Ok(())
+        })
         .await
         .expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+}
+
+#[tokio::test]
+async fn config_seeded() {
+    let backends = Backends::defaults().await.config([("GREETING", "hello")]);
+    let status = Deployment::new()
+        .guest("config", test_utils::CONFIG_SEEDED)
+        .run_host::<WasiConfig, _>(backends)
+        .await
+        .expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the guest saw `GREETING` and not `PATH`");
 }
 
 #[tokio::test]

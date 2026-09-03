@@ -13,18 +13,18 @@ pub use omnia_core::{
     ExitStatus, Extensions, FirstArgSelector, FromEnv, FutureResult, Guest, GuestArtifact,
     GuestEntry, GuestId, GuestRoutes, GuestSelector, HasDispatcher, HasExtensions, HasLimits,
     HasMounts, HasTable, Host, HostCtx, HttpBorrow, HttpCtx, HttpRoutes, LinkClient, LogMode,
-    Manifest, Mode, Mount, MountRegistry, NoOptions, PatternRoutes, Precompiled, Provides, Proxy,
-    Registry, ResolvedPreopen, Routes, Runtime, RuntimeOptions, Server, SourceSpec, StoreBase,
-    StoreConfig, StoreCtx, StoreView, Telemetry, Transport, TransportKind, TriggerRouter, WasmOnly,
-    WeakRuntime, Wiring, WrpcState, as_command_chain, get_cloned, host_error, serve_links,
-    sha256_digest, telemetry, wasi_view,
+    Manifest, Mode, Mount, MountRegistry, NoOptions, PatternRoutes, PluginLocation, Precompiled,
+    Provides, Proxy, Registry, ResolvedPreopen, Routes, Runtime, RuntimeOptions, Server,
+    SourceSpec, StoreBase, StoreConfig, StoreCtx, StoreView, Telemetry, Transport, TransportKind,
+    TriggerRouter, WasmOnly, WeakRuntime, Wiring, WrpcState, as_command_chain, get_cloned,
+    host_error, serve_links, sha256_digest, telemetry, wasi_view,
 };
 #[cfg(feature = "cli")]
 pub use omnia_core::{Cli, Command, Parser};
 #[doc(hidden)]
 pub use omnia_core::{
     MainOptions, ManifestSource, WrpcCtxView, WrpcView, anyhow, futures, main, pastey, run,
-    run_precompiled, tokio, wasmtime, wasmtime_wasi,
+    run_precompiled, run_with, tokio, wasmtime, wasmtime_wasi,
 };
 pub use omnia_host_macros::runtime;
 pub use omnia_plugin::{

@@ -1,6 +1,6 @@
 # Testing Policy
 
-How the Omnia repository tests *itself*. The binding rules are also in the repository `AGENTS.md` (Testing policy); this page is the practical walk-through.
+How the Omnia repository tests *itself*. The binding rules are also in the repository `AGENTS.md` (Testing policy); this page is the practical walk-through. For testing code *built on* omnia — a guest crate or an embedder — see [Testing Omnia-Based Code](testing-omnia-code.md), which covers the published `omnia-test` crate the suites below are built on.
 
 ## The tiers
 
@@ -12,10 +12,10 @@ Guest-instantiating tests exist **only** through the shared pipeline below. Do n
 
 ## The e2e pipeline
 
-Two unpublished crates, patterned on wasmtime's `test-programs`:
+Two unpublished crates, patterned on wasmtime's `test-programs`, over the published `omnia-test`:
 
-- **`crates/test-programs`** holds the guest scenario programs, one `[[example]]` cdylib per scenario (`programs/<capability>/<scenario>.rs`). The example, path constant, and host test identity is `<capability>_<scenario>` (`model_echo_text`). `test-utils`'s build script generates the `[[example]]` stanzas from that tree. Each program asserts what the guest observes across the boundary and traps on failure; shared helpers live in its `src/lib.rs`. Everything is `#![cfg(target_arch = "wasm32")]`; the native build is empty.
-- **`crates/test-utils`** compiles every program to a `wasm32-wasip2` component from its `build.rs` (into `OUT_DIR`, so plain `cargo make test` is self-contained), and generates one `pub const <NAME>: &str` artifact path per program plus a `foreach_<capability>!` macro. It also exports the capability-agnostic harness: `run_host::<H, B>` builds a one-shot `wasi:cli` command deployment from a wasm path, mounts, and a backend bundle, linking the single host under test (`run_command` takes a `link` closure for multi-host suites), and `scratch` mints a per-test workspace directory removed on drop.
+- **`crates/test-programs`** holds the guest scenario programs, one `[[example]]` cdylib per scenario (`programs/<capability>/<scenario>.rs`). The example, path constant, and host test identity is `<capability>_<scenario>` (`model_echo_text`). `test-utils`'s build script generates the `[[example]]` stanzas from that tree. Each program asserts what the guest observes across the boundary and traps on failure, and enters through `omnia_guest::command!(scenario)`; shared helpers live in its `src/lib.rs`. Everything is `#![cfg(target_arch = "wasm32")]`; the native build is empty.
+- **`crates/test-utils`** compiles every program to a `wasm32-wasip2` component from its `build.rs` through `omnia_test::build::Components` (into `OUT_DIR`, so plain `cargo make test` is self-contained), which generates one `pub const <NAME>: &str` artifact path per program plus a `foreach_<capability>!` macro. It also exports the capability-agnostic harness over `omnia_test::host`: `run_host::<H, B>` builds a one-shot `wasi:cli` command deployment from a wasm path, mounts, and a backend bundle, linking the host under test beside `WasiOtel` (which `command!` imports; `run_command` takes a `link` closure for multi-host suites), and `scratch` mints a per-test workspace directory removed on drop.
 
 A host crate's suite is one flat file per interface in its root `tests/` directory (`crates/wasi-model/tests/model.rs`). The file:
 
@@ -25,27 +25,18 @@ A host crate's suite is one flat file per interface in its root `tests/` directo
 
 Assertions split by vantage point: the guest asserts what crosses the boundary to it (a panic traps and fails the host test); the host test asserts wire fidelity and side effects.
 
-## Canned model backends
+## Scenario backends
 
-There is no shared model double: each test defines the backend it needs, inline, next to the test. The in-tree echo `ModelDefault` covers scenarios where the answer does not matter, or where its schema rejection is itself under test. A canned `WasiModelCtx` answering every completion with one fixed value is all the happy path needs — no network, no credentials, fully deterministic, and (unlike an echo) able to satisfy `format::schema`:
+The bundle a suite runs over is `omnia_test::host::Backends`: the in-memory default for every host, deterministic (no environment read, no socket opened), with the model swappable for any `WasiModelCtx`. Most model scenarios script `ScriptedModel` — the answers, the tool calls and workspace steps each completion makes before answering, and the limits — and assert the recorded exchanges afterwards:
 
 ```rust,noplayground
-use std::sync::Arc;
-
-use futures::FutureExt as _;
-use omnia_wasi_model::{Answer, FutureResult, Request, ToolHost, WasiModelCtx};
-use serde_json::Value;
-
-#[derive(Clone, Debug)]
-struct Canned(Value);
-
-impl WasiModelCtx for Canned {
-    fn complete(&self, _request: Request, _tools: Arc<dyn ToolHost>) -> FutureResult<Answer> {
-        let value = self.0.clone();
-        async move { Ok(value.into()) }.boxed()
-    }
-}
+let model = ScriptedModel::answering([json!("42")]).calling(0, [("lookup", "{}")]);
+run_guest(test_utils::MODEL_TOOL_ROUNDTRIP, vec![], model.clone()).await;
+model.assert_exhausted();
+assert_eq!(model.exchanges(), [Exchange { tool: "lookup".into(), arguments: "{}".into(), outcome: Ok("42".into()) }]);
 ```
+
+A behaviour a FIFO script cannot express — two tool calls in flight at once, a backend that ignores a hard failure — is a hand-written `WasiModelCtx` defined inline next to the test, with a comment saying why the script could not do it. The in-tree echo `ModelDefault` covers scenarios where the answer does not matter, or where its schema rejection is itself under test.
 
 ## Running
 

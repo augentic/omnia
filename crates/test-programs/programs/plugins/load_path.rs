@@ -15,7 +15,7 @@ wit_bindgen::generate!({
 use omnia_guest::plugins::{Location, PluginRef, Plugins as _, WasiPlugins};
 use omnia_test::link::ops;
 
-test_programs::run!(scenario);
+omnia_guest::command!(scenario);
 
 fn echoer(digest: Option<omnia_guest::plugins::Digest>) -> PluginRef {
     PluginRef::builder()

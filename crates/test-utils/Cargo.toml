@@ -11,6 +11,7 @@ version.workspace = true
 anyhow.workspace = true
 omnia.workspace = true
 omnia-test = { workspace = true, features = ["host"] }
+omnia-wasi-otel.workspace = true
 
 [build-dependencies]
 omnia-test = { workspace = true, features = ["build"] }

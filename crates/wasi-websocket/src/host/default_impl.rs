@@ -79,6 +79,12 @@ impl Backend for WebSocketDefault {
     }
 }
 
+impl Default for WebSocketDefault {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WasiWebSocketCtx for WebSocketDefault {
     fn connect(&self) -> FutureResult<Arc<dyn Client>> {
         let client = self.clone();
@@ -131,7 +137,11 @@ impl Client for WebSocketDefault {
 /// separate task. It broadcasts incoming messages to all connected peers and
 /// forwards outgoing messages to connected clients.
 impl WebSocketDefault {
-    fn new() -> Self {
+    /// Build the backend without a listener: `connect()` still yields a
+    /// client, but its events come only from in-process senders and its
+    /// sends reach no peer. Tests use this; a server calls `connect_with`.
+    #[must_use]
+    pub fn new() -> Self {
         let (event_tx, _) = broadcast::channel::<Event>(BROADCAST_CAPACITY);
         Self {
             event_tx,

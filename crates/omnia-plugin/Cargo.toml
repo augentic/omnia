@@ -27,6 +27,8 @@ wasmtime = { workspace = true, features = ["runtime"] }
 
 [dev-dependencies]
 omnia.workspace = true
+omnia-test = { workspace = true, features = ["host"] }
+omnia-wasi-otel.workspace = true
 serde = { workspace = true, features = ["derive"] }
 tempfile.workspace = true
 test-utils.workspace = true

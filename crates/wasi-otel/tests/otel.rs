@@ -71,10 +71,15 @@ async fn run_guest(wasm: &str) -> Recording {
     Telemetry::new("otel-e2e").log_mode(LogMode::Progress).build().expect("telemetry installs");
 
     let recording = Recording::default();
+    // Linked by hand: `run_host` would add a second `WasiOtel` beside the
+    // one under test.
     let status = tokio::time::timeout(
         Duration::from_secs(300),
-        test_utils::run_host::<WasiOtel, _>(wasm, vec![], Backends(recording.clone()))
-            .instrument(tracing::info_span!("test-drive")),
+        test_utils::run_command(wasm, vec![], Backends(recording.clone()), |deployment| {
+            deployment.host::<WasiOtel, Backends>()?;
+            Ok(())
+        })
+        .instrument(tracing::info_span!("test-drive")),
     )
     .await
     .expect("guest must not stall on the telemetry flush")

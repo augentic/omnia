@@ -109,11 +109,11 @@ omnia::runtime!({
 - Routes are declared per guest, on the target entry's `routes:` block — one pattern list per trigger (`http` prefixes, `messaging` topics, `websocket` routes), with the declaring guest as the implicit target. There is no top-level `routes:` key.
 - A guest entry also accepts `command: true` (a literal bool), marking it as the command-mode target — see [Command routing](#command-routing-command-true).
 - Host-mediated interfaces are declared once, deployment-wide, in the top-level `plugins:` block's `interfaces:` list — the linker is shared, so there is no per-guest form. `run --plugins` at the CLI unions with the compiled-in list. A bare `plugins: [...]` list is a compile error naming the block shape.
-- Declaring `plugins:` also links the `omnia:plugins/loader` host capability (guest-requested plugin loading); only guests whose world imports it can reach it. The optional [`locations:` list](#plugin-locations-locations-and-cache) is the deployment's acquisition policy — the acquisition seam behind `loader.load`, lowered into the built-in acquirers. Without a `locations:` list, every load refuses typed. Because acquisition policy is compiled-in code rather than manifest data, a policy-only block (`plugins: { locations: [...] }`) composes with `config:` — the TOML declares the interfaces, the binary the policy.
+- Declaring `plugins:` also links the `omnia:plugins/loader` host capability (guest-requested plugin loading); only guests whose world imports it can reach it. The optional [`locations:` list](#plugin-locations-locations) is the deployment's acquisition policy — the acquisition seam behind `loader.load`. Without any location, every load refuses typed. Locations are manifest data (`[[location]]` in `omnia.toml`), so like every inline key they are mutually exclusive with `config:`; a config-file deployment declares them in the TOML.
 
-### Plugin locations (`locations:` and `cache:`)
+### Plugin locations (`locations:`)
 
-The `locations:` list declares the deployment's acquisition roots; the macro lowers them into the built-in acquirers, each filling its location kind's slot on `Plugins` via the generated `Wiring::extend` hook:
+The `locations:` list declares the deployment's acquisition roots. Each entry lowers to an `omnia::PluginLocation` on the compiled-in manifest, and the generated `Wiring::extend` hook installs them through `omnia::Plugins::install_declared`, each filling its location kind's slot on `Plugins`:
 
 ```rust
 omnia::runtime!({
@@ -123,7 +123,6 @@ omnia::runtime!({
             { name: ".", path: project_root() },  // path loads resolve here
             { registry: "ghcr.io" },              // package references fetch here
         ],
-        cache: PluginCache,                       // optional: the registry's store backend
     },
     guests: [
         { id: "engine", source: engine_path() },
@@ -137,13 +136,13 @@ omnia::runtime!({
 An entry takes one of two shapes:
 
 - **`{ name: ..., path: ... }`** — a named root for path loads. All path entries fold, in declaration order, into one `omnia::PathMounts`, whose directories open when the runtime assembles — a missing root fails startup rather than surfacing per load. A guest's `loader.load` names the location it resolves against; guests conventionally write paths relative to their mounts, so keep location names aligned with the mount names guests see.
-- **`{ registry: ... }`** — the deployment's default registry endpoint for exact `namespace:name@version` package references, lowered to `omnia::RegistryClient`. At most one entry; a load's own location may still override the endpoint per load.
+- **`{ registry: ... }`** — the deployment's default registry endpoint for exact `namespace:name@version` package references, lowered to a cacheless `omnia::RegistryClient`. At most one entry; a load's own location may still override the endpoint per load.
 
 Each load routes by its location kind — path loads to the path acquirer, registry loads to the registry acquirer — and a kind with no entry refuses typed. Routing is structural kind selection, never failure recovery.
 
-`cache:` names a backend type: it joins the generated `Backends` bundle exactly like a `hosts:` backend (env-connected, deduplicated — naming a backend a `hosts:` row already connects shares that connection), and its connected value must implement both `omnia::ContentStore` and `omnia::ReleaseStore`. The macro attaches it to the registry acquirer (`RegistryClient::cached`), keeping resolution fresh-release-preferred: a reachable registry stays the authority, while the store answers content by digest and carries loads across registry unavailability.
+The grammar's refusals are all compile-time, spanned to the offending key: an empty `locations:` list and a second `registry` entry are each rejected with a pointed diagnostic. The removed `cache:` key is refused with a migration hint: a store-backed registry acquirer (`RegistryClient::cached`) is installed by hand from a custom `Wiring::extend`.
 
-The grammar's refusals are all compile-time, spanned to the offending key: an empty `locations:` list, a second `registry` entry, and a `cache:` without a `{ registry: ... }` entry to attach to are each rejected with a pointed diagnostic.
+Because locations are deployment data, a test can overlay them without touching the binary's declaration: `omnia_test::host::Deployment::from(runtime::manifest()).path_root(dir)` rewrites the `.` root and `runtime::run_with(...)` drives the same generated wiring over in-memory backends — see [Testing omnia code](../guides/testing-omnia-code.md).
 
 ### Embedding a guest (`source:` bytes)
 
@@ -221,3 +220,17 @@ omnia::runtime!({
     }
 });
 ```
+
+## Generated items
+
+The invocation expands to a private `runtime` module and re-exports five items from it:
+
+| Item | Shape | Use |
+| ---- | ----- | --- |
+| `main` | `#[tokio::main] fn main() -> ExitCode` | The binary's entry point: connects the declared backends from the environment and drives the compiled-in deployment. |
+| `run` | blocking `fn run(DeploymentBuilder) -> Result<ExitStatus>` | Mount the runtime in-process from a binary with its own argument surface. |
+| `Hooks` | `pub struct Hooks` implementing `omnia::Wiring<B>` | The generated wiring — `link`, `extend`, `serve` — generic over any bundle `B` that `Provides` each declared host's context. |
+| `manifest` | `fn manifest() -> ManifestSource` | The compiled-in deployment (`config:` path or inline keys), for a test to overlay. |
+| `run_with` | `async fn run_with<B>(DeploymentBuilder, B) -> Result<ExitStatus>` | Drive the deployment through `Hooks` over a bundle already in hand; nothing connects. |
+
+`main` and `run` use the generated `Backends` bundle. `Hooks`, `manifest`, and `run_with` exist so a test drives the *same* wiring the binary runs — over `omnia_test::host::Backends`, say — without a second `runtime!` declaration in the test tree.

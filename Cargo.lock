@@ -2408,6 +2408,7 @@ dependencies = [
  "http-body",
  "http-body-util",
  "omnia-guest-macros",
+ "omnia-test",
  "omnia-wasi-blobstore",
  "omnia-wasi-config",
  "omnia-wasi-docstore",
@@ -2463,6 +2464,8 @@ dependencies = [
  "futures",
  "omnia",
  "omnia-core",
+ "omnia-test",
+ "omnia-wasi-otel",
  "serde",
  "tempfile",
  "test-utils",
@@ -2633,6 +2636,7 @@ dependencies = [
  "jsonschema",
  "omnia",
  "omnia-core",
+ "omnia-test",
  "serde",
  "serde_json",
  "test-utils",
@@ -4011,6 +4015,7 @@ dependencies = [
  "anyhow",
  "omnia",
  "omnia-test",
+ "omnia-wasi-otel",
 ]
 
 [[package]]

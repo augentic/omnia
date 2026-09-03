@@ -10,5 +10,5 @@ mod scratch;
 
 pub use backends::{Backends, STATE_BUCKET};
 pub use deployment::Deployment;
-pub use model::{ScriptedModel, Turn};
+pub use model::{Completion, ScriptedModel, Step};
 pub use scratch::{Scratch, scratch};

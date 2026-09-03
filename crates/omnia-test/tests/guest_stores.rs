@@ -3,6 +3,7 @@
 use std::future::Future;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::pin;
+use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 use std::thread;
 
@@ -11,8 +12,8 @@ use http::{Method, Request, Response};
 use http_body_util::Full;
 use omnia_guest::document_store::{Document, Filter, QueryOptions, SortField};
 use omnia_guest::{
-    BlobStore, Broadcast, CasError, Config, DocumentStore, HttpRequest, Identity, Message, Publish,
-    StateStore, TableStore,
+    BlobStore, BlobStoreExt, Broadcast, CasError, Config, DocumentStore, HttpRequest, Identity,
+    Message, Publish, StateStore, TableStore,
 };
 use omnia_test::guest::{
     FixedIdentity, MapConfig, MatchedHttp, Memory, MemoryDocs, Namespaced, ScriptedTables, Sink,
@@ -181,6 +182,24 @@ fn namespaced_scopes_keys_and_containers() {
     let (state, blobs) = alpha.memory().snapshot();
     assert_eq!(state.len(), 1);
     assert_eq!(blobs.keys().collect::<Vec<_>>(), ["beta/c"]);
+}
+
+// -- Pointer impls -----------------------------------------------------------
+
+/// A handler-shaped fn: bounded on the capability, not on `Memory`.
+fn bump<P: StateStore>(store: &P) -> i64 {
+    now(store.increment("visits", 1)).expect("increment")
+}
+
+#[test]
+fn a_shared_handle_satisfies_a_capability_bound() {
+    let memory = Memory::default();
+    let shared = Arc::new(memory.clone());
+    assert_eq!(bump(&shared), 1);
+    assert_eq!(bump(&&memory), 2);
+    assert_eq!(bump(&Box::new(memory.clone())), 3);
+    assert_eq!(memory.state("visits"), Some(3_i64.to_be_bytes().to_vec()));
+    assert!(now(Arc::new(memory).has("c", "missing")).is_ok_and(|found| !found));
 }
 
 // -- MemoryDocs --------------------------------------------------------------

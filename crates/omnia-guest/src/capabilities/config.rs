@@ -20,3 +20,9 @@ pub trait Config: Send + Sync {
         }
     }
 }
+
+forward_pointers!(Config {
+    fn get(&self, key: &str) -> impl Future<Output = Result<String>> + Send {
+        (**self).get(key)
+    }
+});

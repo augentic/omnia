@@ -11,8 +11,9 @@
 use std::path::Path;
 
 use anyhow::Result;
-use omnia::{Deployment, ExitStatus, Host, Mount, Server, StoreCtx};
+use omnia::{Deployment, ExitStatus, Host, Mount, Provides, Server, StoreCtx};
 pub use omnia_test::host::Scratch;
+use omnia_wasi_otel::WasiOtel;
 
 include!(concat!(env!("OUT_DIR"), "/gen.rs"));
 
@@ -36,8 +37,8 @@ where
     omnia_test::host::Deployment::new().guest(id, wasm).mounts(mounts).run(backends, link).await
 }
 
-/// [`run_command`] for the common single-host suite: links `H` against the
-/// bundle and runs.
+/// [`run_command`] for the common single-host suite: links `H` plus the
+/// telemetry host every `omnia_guest::command!` guest imports, and runs.
 ///
 /// # Errors
 ///
@@ -45,10 +46,11 @@ where
 pub async fn run_host<H, B>(wasm: &str, mounts: Vec<Mount>, backends: B) -> Result<ExitStatus>
 where
     H: Host<StoreCtx<B>> + Server<B>,
-    B: Clone + Send + Sync + 'static,
+    B: Provides<WasiOtel> + Clone + Send + Sync + 'static,
 {
     run_command(wasm, mounts, backends, |deployment| {
         deployment.host::<H, B>()?;
+        deployment.host::<WasiOtel, B>()?;
         Ok(())
     })
     .await

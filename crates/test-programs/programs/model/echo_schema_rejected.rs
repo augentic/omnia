@@ -5,7 +5,7 @@
 use omnia_guest::model::{Error, Format, Model as _, Request, SchemaFormat, WasiModel};
 use test_programs::{VERDICT_SCHEMA, user};
 
-test_programs::run!(scenario);
+omnia_guest::command!(scenario);
 
 async fn scenario() {
     let request = Request::builder()

@@ -12,12 +12,13 @@
 //! [`Plugins`] load path, and the acquisition seam. Acquisition policy
 //! (endpoints, cache, path reads) is the two slots [`Plugins::install`]
 //! takes — one per [`Location`] kind — from the deployment's
-//! [`Wiring::extend`](omnia_core::Wiring::extend) hook (the `runtime!`
-//! macro's `plugins: { locations: [...] }` list lowers into it). The
-//! built-in acquirers are [`PathMounts`] and [`RegistryClient`]; store
-//! implementors depend on this crate for [`ContentStore`] and
-//! [`ReleaseStore`]. The runtime core keeps zero storage and network
-//! dependencies.
+//! [`Wiring::extend`](omnia_core::Wiring::extend) hook.
+//! [`Plugins::install_declared`] fills them from the deployment's declared
+//! locations (the `runtime!` macro's `plugins: { locations: [...] }` list,
+//! carried as manifest data). The built-in acquirers are [`PathMounts`] and
+//! [`RegistryClient`]; store implementors depend on this crate for
+//! [`ContentStore`] and [`ReleaseStore`]. The runtime core keeps zero
+//! storage and network dependencies.
 
 mod host;
 mod loader;

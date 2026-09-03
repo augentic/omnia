@@ -1,6 +1,6 @@
 ---
 source: crates/host-macros/src/runtime.rs
-expression: "expand_pretty(quote!({\n    config: concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/omnia.toml\"), hosts:\n    { WasiOtel: OtelDefault, },\n}))"
+expression: "expand_pretty(quote!({\n    plugins:\n    {\n        interfaces: [\"emery:adapter/probe\"], locations:\n        [{ name: \".\", path: project_root() }, { registry: \"ghcr.io\" },],\n    }, guests: [{ id: \"engine\", source: \"engine.wasm\" },], hosts:\n    { WasiOtel: OtelDefault, },\n}))"
 ---
 mod runtime {
     use anyhow::Result;
@@ -36,8 +36,12 @@ mod runtime {
         B: omnia::Provides<WasiOtel>,
     {
         fn link(deployment: &mut omnia::Deployment<omnia::StoreCtx<B>>) -> Result<()> {
+            deployment.host::<omnia::WasiPlugins, B>()?;
             deployment.host::<WasiOtel, B>()?;
             Ok(())
+        }
+        fn extend(runtime: &omnia::Runtime<B>) -> Result<()> {
+            omnia::Plugins::install_declared(runtime)
         }
         async fn serve(runtime: &omnia::Runtime<B>) -> Result<()> {
             let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![
@@ -51,10 +55,12 @@ mod runtime {
     /// manifest keys; empty when neither is declared), for an
     /// embedder to overlay before `run_with`.
     pub fn manifest() -> omnia::ManifestSource {
-        omnia::ManifestSource::Path(
-            ::std::path::PathBuf::from(
-                concat!(env!("CARGO_MANIFEST_DIR"), "/omnia.toml"),
-            ),
+        omnia::ManifestSource::Inline(
+            omnia::Manifest::new()
+                .plugins(["emery:adapter/probe"])
+                .locations([omnia::PluginLocation::path(".", project_root())])
+                .locations([omnia::PluginLocation::registry("ghcr.io")])
+                .guest(omnia::GuestEntry::new("engine", "engine.wasm")),
         )
     }
     /// Entry point: run the compiled-in deployment through this

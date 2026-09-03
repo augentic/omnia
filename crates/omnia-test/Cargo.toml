@@ -2,7 +2,6 @@
 name = "omnia-test"
 description = "Test doubles, runtime harness, and wasm fixture pipeline for omnia-based code"
 readme = "README.md"
-publish = false
 authors.workspace = true
 categories.workspace = true
 edition.workspace = true
@@ -17,8 +16,12 @@ version.workspace = true
 workspace = true
 
 [features]
-default = ["guest"]
-# Native doubles for the `omnia_guest` capability traits, plus `doubles!` and `forward!`.
+# No default: a consumer names the rung it uses, and a build-dependency line
+# that forgets `default-features = false` still pulls nothing but `std`.
+default = []
+# Native doubles for the `omnia_guest` capability traits, plus `provider!` and `forward!`.
+# `omnia-guest/orm` already carries the docstore and sql host crates the
+# `MemoryDocs` and `ScriptedTables` doubles wrap.
 guest = [
     "dep:anyhow",
     "dep:bytes",
@@ -26,6 +29,7 @@ guest = [
     "dep:http-body",
     "dep:http-body-util",
     "dep:omnia-guest",
+    "omnia-guest/orm",
     "dep:omnia-wasi-docstore",
     "dep:omnia-wasi-sql",
 ]
@@ -86,8 +90,10 @@ http-body-util.workspace = true
 omnia.workspace = true
 omnia-guest.workspace = true
 omnia-wasi-blobstore.workspace = true
+omnia-wasi-config.workspace = true
 omnia-wasi-keyvalue.workspace = true
 omnia-wasi-model.workspace = true
+omnia-wasi-otel.workspace = true
 omnia-wasi-sql.workspace = true
 serde_json.workspace = true
 test-utils.workspace = true

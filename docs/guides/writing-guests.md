@@ -185,26 +185,18 @@ Typed routes default to JSON: `http::get` and `http::delete` decode path and que
 
 ## Command-mode guests
 
-For run-once workloads (jobs, CLIs, agent tasks), parse argv with clap and call `Client::call` on the same [handler contract](#the-handler-contract). The guest still owns the explicit `wasi:cli/run` export; wrap the clap dispatch in `command::execute_wasi` so guest telemetry is initialized and flushed:
+For run-once workloads (jobs, CLIs, agent tasks), parse argv with clap and call `Client::call` on the same [handler contract](#the-handler-contract). `omnia_guest::command!` wires an `async fn` returning `()` or `Result<(), u8>` as the `wasi:cli/run` export, run through `command::execute_wasi` so guest telemetry is initialized and flushed; a guest that needs its own export writes the `export!` and calls `execute_wasi` itself:
 
 ```rust,noplayground
 use clap::Parser;
-use omnia_guest::api::{Client, Metadata, command};
-use wasip3::exports::cli::run::Guest;
+use omnia_guest::api::{Client, Metadata};
 
 #[derive(Parser)]
 enum App {
     Sync(SyncInput),
 }
 
-struct Cli;
-wasip3::cli::command::export!(Cli);
-
-impl Guest for Cli {
-    async fn run() -> Result<(), ()> {
-        command::execute_wasi(dispatch()).await
-    }
-}
+omnia_guest::command!(dispatch);
 
 async fn dispatch() -> Result<(), u8> {
     let app = App::try_parse_from(wasip3::cli::environment::get_arguments()).map_err(|error| {
@@ -224,6 +216,7 @@ async fn dispatch() -> Result<(), u8> {
 - clap parses argv into handler input; the guest prints output and maps handler failures to an exit code.
 - clap supplies nested help, version, and usage handling.
 - The host runtime must be built with `mode: command` — see [Composing a Runtime](composing-a-runtime.md).
+- The telemetry lifecycle imports `omnia:otel`, so the deployment links `WasiOtel` (the no-op `OtelDefault` suffices).
 
 ## Tracing
 

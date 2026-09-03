@@ -1,4 +1,4 @@
-omnia_test::doubles! {
+omnia_test::provider! {
     struct Provider: Config + StateStore + Config;
 }
 

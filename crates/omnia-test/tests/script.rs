@@ -90,6 +90,44 @@ fn dropping_with_turns_left_panics() {
 }
 
 #[test]
+fn try_next_records_an_overrun_instead_of_panicking() {
+    let script = Script::<&str, i32>::new([1]);
+    assert_eq!(script.try_next("a"), Some(1));
+    assert_eq!(script.try_next("b"), None);
+    assert_eq!(script.seen(), ["a", "b"], "the overrunning request is still recorded");
+    assert_eq!(script.overruns(), 1);
+    let result = catch_unwind(AssertUnwindSafe(|| script.assert_exhausted()));
+    let text = message(&*result.expect_err("an overrun fails the assertion"));
+    assert!(text.contains("1 request(s) past the end"), "{text}");
+}
+
+#[test]
+fn then_answers_try_next_without_an_overrun() {
+    let script = Script::<(), i32>::new([]).then(|| 7);
+    assert_eq!(script.try_next(()), Some(7));
+    assert_eq!(script.overruns(), 0);
+    script.assert_exhausted();
+}
+
+#[test]
+fn dropping_with_an_overrun_panics() {
+    let result = catch_unwind(|| {
+        let script = Script::<(), i32>::new([]);
+        assert_eq!(script.try_next(()), None);
+    });
+    let text = message(&*result.expect_err("the last handle dropping after an overrun panics"));
+    assert!(text.contains("1 request(s) past the end"), "{text}");
+}
+
+#[test]
+fn drop_check_stays_silent_once_asserted() {
+    let script = Script::<(), i32>::new([1, 2]);
+    let result = catch_unwind(AssertUnwindSafe(|| script.assert_exhausted()));
+    assert!(result.is_err(), "the assertion reports the remainder");
+    drop(script);
+}
+
+#[test]
 fn drop_check_stays_silent_under_an_unrelated_panic() {
     let result = catch_unwind(|| {
         let _script = Script::<(), i32>::new([1]);

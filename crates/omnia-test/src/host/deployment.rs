@@ -1,22 +1,23 @@
 //! A manifest-driven command deployment run over a backend bundle.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
-use omnia::wasmtime_wasi::I32Exit;
-use omnia::wasmtime_wasi::p3::bindings::Command;
 use omnia::{
-    DeploymentBuilder, ExitStatus, GuestEntry, GuestId, Host, Manifest, Mode, Mount, PathMounts,
-    Plugins, Runtime, Server, SourceSpec, StoreCtx, WasiPlugins, as_command_chain, serve_links,
+    DeploymentBuilder, ExitStatus, GuestEntry, Host, Manifest, ManifestSource, Mode, Mount,
+    PluginLocation, Plugins, Provides, Runtime, Server, SourceSpec, StoreCtx, WasiPlugins, Wiring,
 };
+use omnia_wasi_otel::WasiOtel;
 
 /// One command-mode deployment: guests, mounts, arguments, the plugin seams
-/// the host mediates, and the directory the path-load slot serves.
+/// the host mediates, and the directory the `.` path location serves.
 ///
-/// `run` assembles what a production `runtime!` declares — build, link,
-/// registry, runtime, plugin loader, link serve side — drives `wasi:cli/run`
-/// once, and shuts the runtime down.
+/// Built from nothing, or as an overlay on the manifest a production
+/// `runtime!` compiled in (`Deployment::from(runtime::manifest())`): the
+/// builder methods add to that base, `command` re-marks its command guest,
+/// `path_root` rewrites its `.` path location. Drive it through the
+/// generated wiring with [`run_with`](Self::run_with), or link hosts by hand
+/// with [`run`](Self::run).
 ///
 /// ```no_run
 /// use omnia::ExitStatus;
@@ -38,12 +39,22 @@ use omnia::{
 /// ```
 #[derive(Clone, Debug, Default)]
 pub struct Deployment {
+    base: Option<ManifestSource>,
     guests: Vec<GuestEntry>,
     command: Option<String>,
     mounts: Vec<Mount>,
     args: Vec<String>,
     plugins: Vec<String>,
     path_root: Option<PathBuf>,
+}
+
+impl From<ManifestSource> for Deployment {
+    fn from(base: ManifestSource) -> Self {
+        Self {
+            base: Some(base),
+            ..Self::default()
+        }
+    }
 }
 
 impl Deployment {
@@ -60,8 +71,8 @@ impl Deployment {
         self
     }
 
-    /// Marks `id` as the `wasi:cli/run` target; without it the sole exporter
-    /// is the catch-all.
+    /// Marks `id` as the `wasi:cli/run` target (unmarking any the base
+    /// manifest marked); without it the sole exporter is the catch-all.
     #[must_use]
     pub fn command(mut self, id: impl Into<String>) -> Self {
         self.command = Some(id.into());
@@ -97,65 +108,93 @@ impl Deployment {
         self
     }
 
-    /// Serves path loads (`Location::Path`) from `dir`, mounted as `.`.
+    /// Serves path loads (`Location::Path`) from `dir` as the `.` location,
+    /// replacing the base manifest's `.` root when it declares one.
     #[must_use]
     pub fn path_root(mut self, dir: impl AsRef<Path>) -> Self {
         self.path_root = Some(dir.as_ref().to_path_buf());
         self
     }
 
-    fn manifest(&self) -> Manifest {
-        let mut manifest = Manifest::new().mounts(self.mounts.iter().cloned());
-        for guest in &self.guests {
-            let mut guest = guest.clone();
-            guest.command = self.command.as_deref() == Some(guest.id.as_str());
-            manifest = manifest.guest(guest);
-        }
-        manifest.plugins(self.plugins.iter().cloned())
-    }
-
-    /// Assembles the runtime: builds the deployment, links the plugin host
-    /// when seams are declared and the caller's hosts through `link`, then
-    /// installs the path loader and wires the link serve side.
+    /// The manifest this overlay describes.
     ///
     /// # Errors
     ///
-    /// Returns an error if the deployment cannot be built or linked, the path
-    /// root cannot be opened, or the link serve side cannot be wired.
+    /// Returns an error if a `config:` base manifest cannot be loaded.
+    pub fn manifest(&self) -> Result<Manifest> {
+        let base = self.base.clone().map(ManifestSource::into_manifest).transpose()?;
+        let mut manifest = base
+            .unwrap_or_default()
+            .mounts(self.mounts.iter().cloned())
+            .plugins(self.plugins.iter().cloned());
+        for guest in &self.guests {
+            manifest = manifest.guest(guest.clone());
+        }
+        if let Some(command) = &self.command {
+            for guest in &mut manifest.guests {
+                guest.command = guest.id == *command;
+            }
+        }
+        if let Some(root) = &self.path_root {
+            let dot = manifest.locations.iter_mut().find_map(|location| match location {
+                PluginLocation::Path { name, path } if name == "." => Some(path),
+                _ => None,
+            });
+            match dot {
+                Some(path) => path.clone_from(root),
+                None => manifest.locations.push(PluginLocation::path(".", root.clone())),
+            }
+        }
+        Ok(manifest)
+    }
+
+    fn builder(&self) -> Result<DeploymentBuilder> {
+        Ok(DeploymentBuilder::new()
+            .manifest(self.manifest()?)
+            .mode(Mode::Command)
+            .args(self.args.clone()))
+    }
+
+    /// Assembles the runtime by hand: builds the deployment, links the
+    /// plugin host when seams or locations are declared and the caller's
+    /// hosts through `link`, installs the declared locations, and wires the
+    /// link serve side.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the deployment cannot be built or linked, a path
+    /// location cannot be opened, or the link serve side cannot be wired.
     pub async fn boot<B>(
         &self, backends: B, link: impl FnOnce(&mut omnia::Deployment<StoreCtx<B>>) -> Result<()>,
     ) -> Result<Runtime<B>>
     where
         B: Clone + Send + Sync + 'static,
     {
-        let mut built = DeploymentBuilder::new()
-            .manifest(self.manifest())
+        let manifest = self.manifest()?;
+        let plugins = !manifest.plugins.is_empty() || !manifest.locations.is_empty();
+        let deployment = DeploymentBuilder::new()
+            .manifest(manifest)
             .mode(Mode::Command)
             .args(self.args.clone())
             .build::<StoreCtx<B>>()
             .await
             .context("building deployment")?;
-        if !self.plugins.is_empty() || self.path_root.is_some() {
-            built.host::<WasiPlugins, B>().context("linking the plugins host")?;
-        }
-        link(&mut built).context("linking hosts")?;
-
-        let mounts = built.mounts();
-        let args = built.args().to_vec();
-        let registry = Arc::new(built.into_registry().context("assembling registry")?);
-        let runtime = Runtime::from_parts(registry, args, mounts, backends);
-
-        if let Some(root) = &self.path_root {
-            let path = PathMounts::new([(".", root.as_path())])
-                .with_context(|| format!("opening {} as the path-load root", root.display()))?;
-            Plugins::install(&runtime, None, Some(Arc::new(path)))
-                .context("installing the plugin loader")?;
-        }
-        serve_links(&runtime).await.context("wiring host-mediated dispatch")?;
-        Ok(runtime)
+        Runtime::with_backends(
+            deployment,
+            backends,
+            |deployment| {
+                if plugins {
+                    deployment.host::<WasiPlugins, B>().context("linking the plugins host")?;
+                }
+                link(deployment).context("linking hosts")
+            },
+            Plugins::install_declared,
+        )
+        .await
     }
 
-    /// Boots, drives the command guest once, and shuts the runtime down.
+    /// Boots by hand, drives the command guest once, and shuts the runtime
+    /// down.
     ///
     /// # Errors
     ///
@@ -167,15 +206,16 @@ impl Deployment {
         B: Clone + Send + Sync + 'static,
     {
         let runtime = self.boot(backends, link).await?;
-        let status = match &self.command {
-            Some(id) => drive(&runtime, &GuestId::from(id.as_str())).await,
-            None => runtime.run_command().await,
-        };
+        let status = runtime.run_command().await;
         runtime.shutdown();
         status
     }
 
-    /// [`Deployment::run`] linking exactly one host.
+    /// [`Deployment::run`] linking the host under test, `H`, plus the
+    /// telemetry host every `omnia_guest::command!` guest imports.
+    ///
+    /// A suite testing `WasiOtel` itself, or a bundle without an otel
+    /// backend, links by hand through [`run`](Self::run).
     ///
     /// # Errors
     ///
@@ -183,40 +223,29 @@ impl Deployment {
     pub async fn run_host<H, B>(&self, backends: B) -> Result<ExitStatus>
     where
         H: Host<StoreCtx<B>> + Server<B>,
-        B: Clone + Send + Sync + 'static,
+        B: Provides<WasiOtel> + Clone + Send + Sync + 'static,
     {
         self.run(backends, |deployment| {
             deployment.host::<H, B>()?;
+            deployment.host::<WasiOtel, B>()?;
             Ok(())
         })
         .await
     }
-}
 
-// The runtime's own command drive resolves an explicitly marked guest only
-// through `Runtime::new`, which connects backends from the environment; a
-// bundle built by hand needs the same drive against a named guest.
-async fn drive<B>(runtime: &Runtime<B>, id: &GuestId) -> Result<ExitStatus>
-where
-    B: Clone + Send + Sync + 'static,
-{
-    let guest = runtime
-        .registry()
-        .get(id)
-        .with_context(|| format!("command guest `{id}` is not registered"))?;
-    let mut store = runtime.build_store(runtime.store());
-    let instance = runtime.instantiate(guest.instance_pre(), &mut store).await?;
-    let command = Command::new(&mut store, &instance)?;
-    let outcome = as_command_chain(
-        store.run_concurrent(async move |store| command.wasi_cli_run().call_run(store).await),
-    )
-    .await;
-    match outcome {
-        Ok(Ok(Ok(()))) => Ok(ExitStatus::SUCCESS),
-        Ok(Ok(Err(()))) => Ok(ExitStatus::from(1)),
-        Ok(Err(error)) | Err(error) => {
-            let exit = error.downcast_ref::<I32Exit>().map(|exit| exit.0);
-            exit.map_or_else(|| Err(error.into()), |code| Ok(ExitStatus::from(code)))
-        }
+    /// Drives the command guest once through a production `runtime!`'s
+    /// wiring (`runtime::Hooks`) over `backends` — the same `link`, `extend`
+    /// and `serve` the binary runs, connecting nothing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the deployment cannot be built or assembled, or
+    /// the guest traps without exiting.
+    pub async fn run_with<H, B>(&self, backends: B) -> Result<ExitStatus>
+    where
+        H: Wiring<B>,
+        B: Clone + Send + Sync + 'static,
+    {
+        omnia::run_with::<B, H>(self.builder()?, backends).await
     }
 }

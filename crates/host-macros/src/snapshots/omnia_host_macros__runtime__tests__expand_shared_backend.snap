@@ -37,17 +37,24 @@ mod runtime {
             &mut self.redis
         }
     }
-    struct Hooks;
-    impl omnia::Wiring<Backends> for Hooks {
-        fn link(
-            deployment: &mut omnia::Deployment<omnia::StoreCtx<Backends>>,
-        ) -> Result<()> {
-            deployment.host::<WasiKeyValue, Backends>()?;
-            deployment.host::<WasiOtel, Backends>()?;
-            deployment.host::<WasiMessaging, Backends>()?;
+    /// This runtime's host wiring, generic over the bundle carrying
+    /// its hosts' contexts: the compiled-in bundle under `main` and
+    /// `run`, any other under `run_with`.
+    pub struct Hooks;
+    impl<B> omnia::Wiring<B> for Hooks
+    where
+        B: Clone + Send + Sync + 'static,
+        B: omnia::Provides<WasiKeyValue>,
+        B: omnia::Provides<WasiOtel>,
+        B: omnia::Provides<WasiMessaging>,
+    {
+        fn link(deployment: &mut omnia::Deployment<omnia::StoreCtx<B>>) -> Result<()> {
+            deployment.host::<WasiKeyValue, B>()?;
+            deployment.host::<WasiOtel, B>()?;
+            deployment.host::<WasiMessaging, B>()?;
             Ok(())
         }
-        async fn serve(runtime: &omnia::Runtime<Backends>) -> Result<()> {
+        async fn serve(runtime: &omnia::Runtime<B>) -> Result<()> {
             let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![
                 Box::pin(WasiKeyValue.run(runtime)), Box::pin(WasiOtel.run(runtime)),
                 Box::pin(WasiMessaging.run(runtime)),
@@ -55,6 +62,12 @@ mod runtime {
             future::try_join_all(servers).await?;
             Ok(())
         }
+    }
+    /// The deployment compiled in here (`config:` or the inline
+    /// manifest keys; empty when neither is declared), for an
+    /// embedder to overlay before `run_with`.
+    pub fn manifest() -> omnia::ManifestSource {
+        omnia::ManifestSource::Inline(omnia::Manifest::new())
     }
     /// Entry point: run the compiled-in deployment through this
     /// runtime's hosts and backends (raw argv passthrough for a
@@ -71,6 +84,18 @@ mod runtime {
     pub async fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
         omnia::run::<Backends, Hooks>(builder.mode(omnia::Mode::Server)).await
     }
+    /// Run one deployment through this runtime's hosts over a bundle
+    /// already in hand — nothing connects.
+    pub async fn run_with<B>(
+        builder: omnia::DeploymentBuilder,
+        backends: B,
+    ) -> Result<omnia::ExitStatus>
+    where
+        B: Clone + Send + Sync + 'static,
+        Hooks: omnia::Wiring<B>,
+    {
+        omnia::run_with::<B, Hooks>(builder.mode(omnia::Mode::Server), backends).await
+    }
 }
 #[allow(unused_imports)]
-pub use runtime::{run, main};
+pub use runtime::{Hooks, main, manifest, run, run_with};

@@ -1,4 +1,4 @@
-error: unknown plugins key `acquire`; expected `interfaces`, `locations`, or `cache`
+error: unknown plugins key `acquire`; expected `interfaces` or `locations`
  --> tests/compile_fail/plugins_acquire_removed.rs:4:9
   |
 4 |         acquire: MountAcquire,
