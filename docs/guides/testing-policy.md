@@ -12,16 +12,16 @@ Guest-instantiating tests exist **only** through the shared pipeline below. Do n
 
 ## The e2e pipeline
 
-Two unpublished crates, patterned on wasmtime's `test-programs` and `test-programs-artifacts`, over the published `omnia-test`:
+One unpublished crate, patterned on wasmtime's `test-programs`, over the published `omnia-test`. **`crates/test-programs`** is both sides of the boundary:
 
-- **`crates/test-programs`** holds the guest scenario programs, one `[[example]]` cdylib per scenario (`programs/<capability>/<scenario>.rs`). The example, path constant, and host test identity is `<capability>_<scenario>` (`model_echo_text`). `test-artifacts`'s build script generates the `[[example]]` stanzas from that tree. Each program asserts what the guest observes across the boundary and traps on failure, and enters through `omnia_guest::command!(scenario)`; shared helpers live in its `src/lib.rs`. Everything is `#![cfg(target_arch = "wasm32")]`; the native build is empty.
-- **`crates/test-artifacts`** compiles every program to a `wasm32-wasip2` component from its `build.rs` through `omnia_test::build::Components` (into `OUT_DIR`, so plain `cargo make test` is self-contained), which generates one `pub const <NAME>: &str` artifact path per program plus a `foreach_<capability>!` macro. That is the whole crate — `build.rs` and the `include!` of what it writes — so it has no runtime dependencies; it exists because a `build.rs` has to live in some crate, and neither the guest package (a nested `wasm32` build of itself would recurse) nor a published crate (whose build script every consumer runs) can be that crate.
+- On `wasm32` it is the guest scenario programs, one `[[example]]` cdylib per scenario (`programs/<capability>/<scenario>.rs`), plus their shared helpers in `src/helpers.rs`. The example, path constant, and host test identity is `<capability>_<scenario>` (`model_echo_text`). Each program asserts what the guest observes across the boundary and traps on failure, and enters through `omnia_guest::command!(scenario)`.
+- Natively it is the compiled artifacts. Its `build.rs` compiles every program to a `wasm32-wasip2` component through `omnia_test::build::Components` (into `OUT_DIR`, so plain `cargo make test` is self-contained), regenerates the `[[example]]` stanzas from the `programs/` tree, and writes `gen.rs`: one `pub const <NAME>: &str` artifact path per program plus a `foreach_<capability>!` macro, which `src/lib.rs` includes. The native side has no dependencies. The nested build compiles this same package for `wasm32` and so runs the script again; `Components` is a no-op under a `wasm32` target, which is what lets the guest package own its own fixture build.
 
 The harness a suite drives the artifacts through is `omnia_test::host`, the same one a downstream consumer uses: `Deployment::new().guest(id, wasm).mounts(..).run_host::<H, B>(backends)` builds a one-shot `wasi:cli` command deployment and links the host under test beside `WasiOtel` (which `command!` imports; `run(backends, link)` takes a `link` closure for suites that link by hand), and `scratch()` mints a per-test workspace directory removed on drop.
 
 A host crate's suite is one flat file per interface in its root `tests/` directory (`crates/wasi-model/tests/model.rs`). The file:
 
-- invokes `test_artifacts::foreach_<capability>!();` so a guest program without a matching, identically named test fails to compile;
+- invokes `test_programs::foreach_<capability>!();` so a guest program without a matching, identically named test fails to compile;
 - defines its scenario backends inline next to the tests (see below);
 - runs each guest with `Deployment::run_host` (via a small local `run_guest` wrapper supplying the `Has<Capability>` bundle and requiring `ExitStatus::SUCCESS`), then asserts any host-side effects (recorded requests, filesystem contents).
 
@@ -33,7 +33,7 @@ The bundle a suite runs over is `omnia_test::host::Backends`: the in-memory defa
 
 ```rust,noplayground
 let model = ScriptedModel::answering([json!("42")]).calling(0, [("lookup", "{}")]);
-run_guest(test_artifacts::MODEL_TOOL_ROUNDTRIP, vec![], model.clone()).await;
+run_guest(test_programs::MODEL_TOOL_ROUNDTRIP, vec![], model.clone()).await;
 model.assert_exhausted();
 assert_eq!(model.exchanges(), [Exchange { tool: "lookup".into(), arguments: "{}".into(), outcome: Ok("42".into()) }]);
 ```
@@ -47,7 +47,7 @@ cargo make test                                   # `cargo nextest run --locked 
 cargo test --doc --all-features --workspace       # doc tests
 ```
 
-`cargo-nextest` must be installed with `--locked` (`cargo install --locked cargo-nextest`). The `wasm32-wasip2` target must be installed (`rust-toolchain.toml` pins it); `test-artifacts`'s build script needs it to compile the guest programs.
+`cargo-nextest` must be installed with `--locked` (`cargo install --locked cargo-nextest`). The `wasm32-wasip2` target must be installed (`rust-toolchain.toml` pins it); `test-programs`'s build script needs it to compile the guest programs.
 
 ## Naming
 
