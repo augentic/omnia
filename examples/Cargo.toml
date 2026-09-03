@@ -26,14 +26,6 @@ omnia.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 
-# Used only by the smoke runner in tests/.
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-bytes.workspace = true
-http-body-util.workspace = true
-hyper = { workspace = true, features = ["http1", "server"] }
-hyper-util = { workspace = true, features = ["tokio"] }
-reqwest.workspace = true
-
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 axum = { workspace = true, features = ["macros", "query"] }
 bytes.workspace = true

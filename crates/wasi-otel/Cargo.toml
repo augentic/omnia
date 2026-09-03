@@ -39,9 +39,3 @@ futures.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 omnia-guest-macros.workspace = true
 wit-bindgen.workspace = true
-
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-omnia.workspace = true
-omnia-test = { workspace = true, features = ["host"] }
-test-programs.workspace = true
-tokio = { workspace = true, features = ["macros", "rt", "time"] }

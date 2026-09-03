@@ -72,7 +72,3 @@ wasmtime-wasi.workspace = true
 wasmtime-wasi-http.workspace = true
 wrpc-transport.workspace = true
 wrpc-wasmtime.workspace = true
-
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-omnia.workspace = true
-test-programs.workspace = true
