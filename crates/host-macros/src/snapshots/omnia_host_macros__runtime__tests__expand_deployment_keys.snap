@@ -3,7 +3,7 @@ source: crates/host-macros/src/runtime.rs
 expression: "expand_pretty(quote!({\n    mode: command, guests:\n    [{ id: \"specify\", source: engine_component_path(), command: true },\n    { id: \"target:mock\", source: mock_target_path() },], mounts:\n    [{ name: \"project\", path: project_root(), writable: true },\n    { name: \"store\", path: store_root(), writable: true },], hosts:\n    { WasiHttp: HttpDefault, WasiOtel: OtelDefault, }\n}))"
 ---
 mod runtime {
-    use anyhow::Result;
+    use omnia::anyhow::Result;
     use omnia::futures::future;
     use omnia::Server;
     use omnia::tokio;

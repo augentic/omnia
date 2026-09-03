@@ -3,7 +3,7 @@ source: crates/host-macros/src/runtime.rs
 expression: "expand_pretty(quote!({\n    plugins:\n    {\n        interfaces: [\"emery:adapter/probe\"], locations:\n        [{ name: \"adapters\", path: adapters_root() },\n        { registry: \"ghcr.io\" },],\n    }, guests: [{ id: \"engine\", source: \"engine.wasm\" },],\n}))"
 ---
 mod runtime {
-    use anyhow::Result;
+    use omnia::anyhow::Result;
     use omnia::futures::future;
     use omnia::Server;
     use omnia::tokio;

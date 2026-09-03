@@ -45,6 +45,7 @@ mpk = ["omnia-core/mpk"]
 gc = ["omnia-core/gc"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+anyhow.workspace = true
 omnia-core.workspace = true
 omnia-host-macros.workspace = true
 omnia-plugin.workspace = true

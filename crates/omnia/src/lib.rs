@@ -5,9 +5,20 @@
 // capability (`omnia-plugin`), and the `runtime!` macro, re-exported under
 // one root. The `runtime!` macro emits `omnia::…` paths, so every name it
 // references must stay reachable from here.
+//
+// `#[doc(inline)]` matters: rustdoc renders a cross-crate `pub use` as a bare
+// re-export line pointing into the source crate, so without it every item
+// page (and every path readers copy) would spell `omnia_core::…`. Inlining
+// keeps the documented surface at `omnia::…`, the only path embedders use.
 
+// `anyhow` is the error vocabulary of `Backend`, `Wiring`, and the generated
+// runtime module, so embedders reach it from here without a direct
+// dependency of their own.
+pub use anyhow;
 #[cfg(feature = "jit")]
+#[doc(inline)]
 pub use omnia_core::compile;
+#[doc(inline)]
 pub use omnia_core::{
     AdmitError, Backend, Backends, CliRoutes, Deployment, DeploymentBuilder, Dispatcher,
     ExitStatus, Extensions, FirstArgSelector, FromEnv, FutureResult, Guest, GuestArtifact,
@@ -20,14 +31,17 @@ pub use omnia_core::{
     sha256_digest, telemetry, wasi_view,
 };
 #[cfg(feature = "cli")]
+#[doc(inline)]
 pub use omnia_core::{Cli, Command, Parser};
 #[doc(hidden)]
 pub use omnia_core::{
-    MainOptions, ManifestSource, WrpcCtxView, WrpcView, anyhow, futures, main, pastey, run,
+    MainOptions, ManifestSource, WrpcCtxView, WrpcView, futures, main, pastey, run,
     run_precompiled, tokio, wasmtime, wasmtime_wasi,
 };
+#[doc(inline)]
 pub use omnia_host_macros::runtime;
+#[doc(inline)]
 pub use omnia_plugin::{
     ContentStore, LoadError, Location, NoStore, PathMounts, PathSource, Plugin, PluginLoader,
-    Plugins, RegistryClient, RegistrySource, ReleaseStore, WasiPlugins,
+    Plugins, RegistryClient, RegistrySource, ReleaseStore, WasiPlugins, WasiPluginsCtxView,
 };

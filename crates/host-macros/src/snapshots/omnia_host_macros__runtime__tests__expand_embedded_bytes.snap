@@ -3,7 +3,7 @@ source: crates/host-macros/src/runtime.rs
 expression: "expand_pretty(quote!({\n    guests:\n    [{\n        id: \"specify\", source:\n        include_bytes!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/specify.wasm\")),\n    },], hosts: { WasiOtel: OtelDefault, },\n}))"
 ---
 mod runtime {
-    use anyhow::Result;
+    use omnia::anyhow::Result;
     use omnia::futures::future;
     use omnia::Server;
     use omnia::tokio;

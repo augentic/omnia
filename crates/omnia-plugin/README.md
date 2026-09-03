@@ -8,7 +8,7 @@ Everything plugin lives here:
 - the `Plugins` load path (pin policy, idempotency, acquisition routing) over `omnia-core`'s privileged `Runtime::admit` seam, reachable host-side through `PluginLoader` on `Runtime`,
 - the acquisition policy — one slot per location kind — with the built-in `PathMounts` and `RegistryClient` policies, installed by `Plugins::install` from the deployment's `Wiring::extend` hook (the `runtime!` macro's `plugins: { locations: [...] }` list lowers into it).
 
-The surface reaches embedders re-exported from the `omnia` facade (`omnia::WasiPlugins`, `omnia::PathMounts`, `omnia::Plugins`, …). Store implementors depend on this crate directly for `ContentStore` and `ReleaseStore`.
+Depend on the `omnia` facade, not on this crate: the whole surface re-exports there (`omnia::WasiPlugins`, `omnia::PathMounts`, `omnia::Plugins`, …), including everything a `cache:` store implements — `omnia::ContentStore` and `omnia::ReleaseStore` from here, `omnia::Backend` and `omnia::NoOptions` from the runtime core. A direct dependency on `omnia-plugin` (or on `omnia-core`) is only for building another capability crate of your own.
 
 ## License
 

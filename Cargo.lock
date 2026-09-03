@@ -1090,6 +1090,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "facade-check"
+version = "0.36.0"
+dependencies = [
+ "omnia",
+ "omnia-wasi-otel",
+]
+
+[[package]]
 name = "fallible-iterator"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2354,6 +2362,7 @@ dependencies = [
 name = "omnia"
 version = "0.36.0"
 dependencies = [
+ "anyhow",
  "omnia-core",
  "omnia-host-macros",
  "omnia-plugin",

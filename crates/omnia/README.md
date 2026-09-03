@@ -47,6 +47,8 @@ The runtime is built around a set of traits that allow services to be plugged in
 - **Trigger routing (host servers):** `RouteTable` + `MatchStrategy` (aliased `HttpRoutes`/`PatternRoutes`/`CliRoutes`), `Routes`, `Resolver`, `TriggerRouter`
 - **Host-mediated linking (advanced):** `serve_links`, `GuestSelector`, `FirstArgSelector`, `LinkClient`, `WrpcState`
 - **Telemetry + CLI:** `Telemetry`, `resource`, `Cli`, `Command`, `Parser`
+- **Plugins (`omnia:plugins/loader`):** `WasiPlugins`, `Plugins`, `PluginLoader`, `Location`, the `PathMounts`/`RegistryClient` acquirers with their `PathSource`/`RegistrySource` seams, and the `ContentStore`/`ReleaseStore` cache traits
+- **Error vocabulary:** `anyhow` is re-exported (`omnia::anyhow::Result`) because `Backend`, `Wiring`, and the generated runtime module speak it
 
 Most deployments only touch the `runtime!` macro; a hand-written runtime instead implements [`Wiring`] and calls `run`.
 
@@ -81,7 +83,7 @@ Initialization is idempotent: the first `build` in the process installs the subs
 
 ## Architecture
 
-`omnia` is a thin facade: the runtime spine lives in `omnia-core` and the `omnia:plugins/loader` capability in `omnia-plugin`, both re-exported here under one root together with the `runtime!` macro — the paths embedders (and the macro's generated code) use never name the underlying crates. Depend on `omnia-core` directly only when building a capability crate of your own.
+`omnia` is a thin facade: the runtime spine lives in `omnia-core` and the `omnia:plugins/loader` capability in `omnia-plugin`, both re-exported here under one root together with the `runtime!` macro — the paths embedders (and the macro's generated code) use never name the underlying crates, and neither should a deployment's `Cargo.toml`. Depend on `omnia-core` (or `omnia-plugin`) directly only when building a capability crate of your own.
 
 See the [workspace documentation](https://github.com/augentic/omnia) for the full architecture guide and list of available WASI interface crates.
 
