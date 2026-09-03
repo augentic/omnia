@@ -5,7 +5,7 @@
 use omnia_guest::model::{Model as _, Request, Usage, WasiModel};
 use test_programs::user;
 
-test_programs::run!(scenario);
+omnia_guest::command!(scenario);
 
 async fn scenario() {
     let reply = WasiModel

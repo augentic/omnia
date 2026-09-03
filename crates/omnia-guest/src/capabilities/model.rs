@@ -328,6 +328,22 @@ pub trait Model: Send + Sync {
     }
 }
 
+delegate_deref!(Model {
+    fn complete(&self, request: Request) -> impl Future<Output = Result<Reply, Error>> + Send {
+        (**self).complete(request)
+    }
+
+    fn complete_with<H, F>(
+        &self, request: Request, handler: H,
+    ) -> impl Future<Output = Result<Reply, Error>> + Send
+    where
+        H: FnMut(ToolCall) -> F + Send,
+        F: Future<Output = Result<String, String>> + Send,
+    {
+        (**self).complete_with(request, handler)
+    }
+});
+
 /// The WASI-backed provider a `wasm32` guest hands its wasm-free core; the
 /// default method body carries the whole delegation.
 #[cfg(target_arch = "wasm32")]

@@ -22,7 +22,7 @@ use wasmtime::component::{Accessor, HasData, Linker};
 
 pub use self::generated::Error;
 use self::generated::omnia::plugins::loader;
-use crate::Location;
+use crate::Origin;
 use crate::loader::Plugins;
 
 /// Host-side service for `omnia:plugins` — the loader capability this crate
@@ -54,7 +54,7 @@ pub struct WasiPluginsCtxView {
     pub plugins: Option<Arc<Plugins>>,
 }
 
-impl From<loader::Location> for Location {
+impl From<loader::Location> for Origin {
     fn from(location: loader::Location) -> Self {
         match location {
             loader::Location::Registry(registry) => Self::Registry(registry),

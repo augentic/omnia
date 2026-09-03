@@ -62,3 +62,4 @@
 # Contributing
 
 - [Testing Policy](guides/testing-policy.md)
+- [Testing Omnia-Based Code](guides/testing-omnia-code.md)

@@ -6,7 +6,7 @@
 use omnia_guest::model::{Error, Format, Model as _, Request, SchemaFormat, WasiModel};
 use test_programs::{REPORT_SCHEMA, user};
 
-test_programs::run!(scenario);
+omnia_guest::command!(scenario);
 
 async fn rejected(marker: &str, format: Format) -> String {
     let request = Request::builder().messages(vec![user(marker)]).format(format).build();

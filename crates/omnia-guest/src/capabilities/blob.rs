@@ -51,10 +51,6 @@ pub trait BlobStore: Send + Sync {
     #[cfg(not(target_arch = "wasm32"))]
     fn delete(&self, container: &str, name: &str) -> impl Future<Output = Result<()>> + Send;
 
-    /// Check whether an object exists in a container.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn has(&self, container: &str, name: &str) -> impl Future<Output = Result<bool>> + Send;
-
     /// List all object names in a container.
     #[cfg(not(target_arch = "wasm32"))]
     fn list(&self, container: &str) -> impl Future<Output = Result<Vec<String>>> + Send;
@@ -73,16 +69,6 @@ pub trait BlobStore: Send + Sync {
         &self, container: &str, name: &str,
     ) -> impl Future<Output = Result<ObjectMetadata>> + Send;
 
-    /// Delete multiple objects from a container.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn delete_objects(
-        &self, container: &str, names: &[String],
-    ) -> impl Future<Output = Result<()>> + Send;
-
-    /// Remove all objects from a container, leaving it empty.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn clear(&self, container: &str) -> impl Future<Output = Result<()>> + Send;
-
     /// Create a new empty container.
     #[cfg(not(target_arch = "wasm32"))]
     fn create_container(&self, name: &str) -> impl Future<Output = Result<()>> + Send;
@@ -100,24 +86,6 @@ pub trait BlobStore: Send + Sync {
     fn container_info(
         &self, container: &str,
     ) -> impl Future<Output = Result<ContainerMetadata>> + Send;
-
-    /// Copy an object to the same or a different container.
-    ///
-    /// Overwrites the destination object if it already exists. Returns an
-    /// error if the destination container does not exist.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn copy_object(
-        &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
-    ) -> impl Future<Output = Result<()>> + Send;
-
-    /// Move or rename an object to the same or a different container.
-    ///
-    /// Overwrites the destination object if it already exists. Returns an
-    /// error if the destination container does not exist.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn move_object(
-        &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
-    ) -> impl Future<Output = Result<()>> + Send;
 
     /// Retrieve an object's data from a container.
     #[cfg(target_arch = "wasm32")]
@@ -190,19 +158,6 @@ pub trait BlobStore: Send + Sync {
         }
     }
 
-    /// Check whether an object exists in a container.
-    #[cfg(target_arch = "wasm32")]
-    fn has(&self, container: &str, name: &str) -> impl Future<Output = Result<bool>> + Send {
-        use anyhow::anyhow;
-
-        async move {
-            let ctr = open_container(container).await?;
-            ctr.has_object(name.to_string())
-                .await
-                .map_err(|e| anyhow!("checking object existence: {e}"))
-        }
-    }
-
     /// List all object names in a container.
     #[cfg(target_arch = "wasm32")]
     fn list(&self, container: &str) -> impl Future<Output = Result<Vec<String>>> + Send {
@@ -270,31 +225,6 @@ pub trait BlobStore: Send + Sync {
         }
     }
 
-    /// Delete multiple objects from a container.
-    #[cfg(target_arch = "wasm32")]
-    fn delete_objects(
-        &self, container: &str, names: &[String],
-    ) -> impl Future<Output = Result<()>> + Send {
-        use anyhow::anyhow;
-
-        let names = names.to_vec();
-        async move {
-            let ctr = open_container(container).await?;
-            ctr.delete_objects(names).await.map_err(|e| anyhow!("deleting objects: {e}"))
-        }
-    }
-
-    /// Remove all objects from a container, leaving it empty.
-    #[cfg(target_arch = "wasm32")]
-    fn clear(&self, container: &str) -> impl Future<Output = Result<()>> + Send {
-        use anyhow::anyhow;
-
-        async move {
-            let ctr = open_container(container).await?;
-            ctr.clear().await.map_err(|e| anyhow!("clearing container: {e}"))
-        }
-    }
-
     /// Create a new empty container.
     #[cfg(target_arch = "wasm32")]
     fn create_container(&self, name: &str) -> impl Future<Output = Result<()>> + Send {
@@ -346,6 +276,114 @@ pub trait BlobStore: Send + Sync {
                 name: info.name,
                 created_at: info.created_at,
             })
+        }
+    }
+}
+
+/// Object operations every [`BlobStore`] derives from its core methods, so
+/// an implementor writes the ten primitives and gets these five for free.
+///
+/// Off `wasm32` the defaults compose `get` / `put` / `delete` / `list`; on
+/// `wasm32` each is one `wasi:blobstore` host call. Implemented for every
+/// `BlobStore` by a blanket impl.
+pub trait BlobStoreExt: BlobStore {
+    /// Check whether an object exists in a container.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn has(&self, container: &str, name: &str) -> impl Future<Output = Result<bool>> + Send {
+        async move { Ok(self.get(container, name).await?.is_some()) }
+    }
+
+    /// Delete multiple objects from a container.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn delete_objects(
+        &self, container: &str, names: &[String],
+    ) -> impl Future<Output = Result<()>> + Send {
+        async move {
+            for name in names {
+                self.delete(container, name).await?;
+            }
+            Ok(())
+        }
+    }
+
+    /// Remove all objects from a container, leaving it empty.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn clear(&self, container: &str) -> impl Future<Output = Result<()>> + Send {
+        async move {
+            for name in self.list(container).await? {
+                self.delete(container, &name).await?;
+            }
+            Ok(())
+        }
+    }
+
+    /// Copy an object to the same or a different container.
+    ///
+    /// Overwrites the destination object if it already exists; fails if the
+    /// source object is missing, or if `put` refuses the destination
+    /// container.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn copy_object(
+        &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
+    ) -> impl Future<Output = Result<()>> + Send {
+        async move {
+            let data = self
+                .get(src_container, src_name)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("object not found: {src_container}/{src_name}"))?;
+            self.put(dest_container, dest_name, &data).await
+        }
+    }
+
+    /// Move or rename an object to the same or a different container.
+    ///
+    /// Overwrites the destination object if it already exists; fails as
+    /// [`copy_object`](Self::copy_object) does, leaving the source in place.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn move_object(
+        &self, src_container: &str, src_name: &str, dest_container: &str, dest_name: &str,
+    ) -> impl Future<Output = Result<()>> + Send {
+        async move {
+            self.copy_object(src_container, src_name, dest_container, dest_name).await?;
+            self.delete(src_container, src_name).await
+        }
+    }
+
+    /// Check whether an object exists in a container.
+    #[cfg(target_arch = "wasm32")]
+    fn has(&self, container: &str, name: &str) -> impl Future<Output = Result<bool>> + Send {
+        use anyhow::anyhow;
+
+        async move {
+            let ctr = open_container(container).await?;
+            ctr.has_object(name.to_string())
+                .await
+                .map_err(|e| anyhow!("checking object existence: {e}"))
+        }
+    }
+
+    /// Delete multiple objects from a container.
+    #[cfg(target_arch = "wasm32")]
+    fn delete_objects(
+        &self, container: &str, names: &[String],
+    ) -> impl Future<Output = Result<()>> + Send {
+        use anyhow::anyhow;
+
+        let names = names.to_vec();
+        async move {
+            let ctr = open_container(container).await?;
+            ctr.delete_objects(names).await.map_err(|e| anyhow!("deleting objects: {e}"))
+        }
+    }
+
+    /// Remove all objects from a container, leaving it empty.
+    #[cfg(target_arch = "wasm32")]
+    fn clear(&self, container: &str) -> impl Future<Output = Result<()>> + Send {
+        use anyhow::anyhow;
+
+        async move {
+            let ctr = open_container(container).await?;
+            ctr.clear().await.map_err(|e| anyhow!("clearing container: {e}"))
         }
     }
 
@@ -401,6 +439,60 @@ pub trait BlobStore: Send + Sync {
         }
     }
 }
+
+impl<T: BlobStore + ?Sized> BlobStoreExt for T {}
+
+delegate_deref!(BlobStore {
+    fn get(
+        &self, container: &str, name: &str,
+    ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send {
+        (**self).get(container, name)
+    }
+
+    fn put(
+        &self, container: &str, name: &str, data: &[u8],
+    ) -> impl Future<Output = Result<()>> + Send {
+        (**self).put(container, name, data)
+    }
+
+    fn delete(&self, container: &str, name: &str) -> impl Future<Output = Result<()>> + Send {
+        (**self).delete(container, name)
+    }
+
+    fn list(&self, container: &str) -> impl Future<Output = Result<Vec<String>>> + Send {
+        (**self).list(container)
+    }
+
+    fn get_range(
+        &self, container: &str, name: &str, start: u64, end: u64,
+    ) -> impl Future<Output = Result<Vec<u8>>> + Send {
+        (**self).get_range(container, name, start, end)
+    }
+
+    fn object_info(
+        &self, container: &str, name: &str,
+    ) -> impl Future<Output = Result<ObjectMetadata>> + Send {
+        (**self).object_info(container, name)
+    }
+
+    fn create_container(&self, name: &str) -> impl Future<Output = Result<()>> + Send {
+        (**self).create_container(name)
+    }
+
+    fn delete_container(&self, name: &str) -> impl Future<Output = Result<()>> + Send {
+        (**self).delete_container(name)
+    }
+
+    fn container_exists(&self, name: &str) -> impl Future<Output = Result<bool>> + Send {
+        (**self).container_exists(name)
+    }
+
+    fn container_info(
+        &self, container: &str,
+    ) -> impl Future<Output = Result<ContainerMetadata>> + Send {
+        (**self).container_info(container)
+    }
+});
 
 /// Open a blobstore container, mapping the WIT error into `anyhow`.
 #[cfg(target_arch = "wasm32")]

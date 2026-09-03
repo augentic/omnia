@@ -21,17 +21,20 @@
   re-bound, and a conflicting re-pin of an active package refuses.
   Acquisition policy is a pair of
   composition-root slots, one per location kind (`RegistrySource`,
-  `PathSource`), installed through `Plugins::install` by
-  the `runtime!` macro's generated `Wiring::extend` hook from the declarative
-  `plugins: { locations: [...] }` list; loads route structurally by kind and
-  an empty slot refuses typed. The built-in acquirers ship
-  in `omnia-plugin` and re-export: `PathMounts` (named directory roots
-  opened fail-fast at startup, read fresh on every load) and
-  `RegistryClient` (exact `namespace:name@version` references
-  from a compiled-in default registry endpoint, verified against the
-  registry's content digest, fresh-release-preferred when the `cache:`
-  backend attaches a store — `ContentStore` for digest-keyed
-  bytes, `ReleaseStore` for per-registry release records). The loader
+  `PathSource`), installed through `Plugins::install` from the
+  `Wiring::extend` hook; the `runtime!` macro's declarative
+  `plugins: { locations: [...] }` list (or a manifest's `[[location]]`
+  entries) carries them as deployment data (`Location`) that the
+  generated hook installs through `Plugins::install_declared`. A load names
+  its `Origin` — a registry endpoint or a location-relative path — and
+  routes structurally by kind; an empty slot refuses typed. The built-in
+  acquirers ship in `omnia-plugin` and re-export: `PathMounts` (named
+  directory roots opened fail-fast at startup, read fresh on every load)
+  and `RegistryClient` (exact `namespace:name@version` references from a
+  declared default registry endpoint, verified against the registry's
+  content digest, fresh-release-preferred when `RegistryClient::cached`
+  attaches a store — `ContentStore` for digest-keyed bytes, `ReleaseStore`
+  for per-registry release records). The loader
   links once on the shared linker when a deployment declares `plugins`;
   wasmtime wires it only
   into guests whose world imports `omnia:plugins/loader`. See
@@ -67,8 +70,77 @@
   }
   ```
 
+- `omnia-test`, published for the first time: test doubles, a component
+  runtime harness, and a `wasm32-wasip2` fixture pipeline for code built on
+  omnia, behind three additive features with no default — a consumer names
+  the rung it uses, and a build-dependency line that forgets
+  `default-features = false` still pulls nothing but `std`.
+  - `guest`: a native double per `omnia_guest` capability trait —
+    `Scripted: Model`, `ScriptedLoader: Plugins`, `Memory: StateStore +
+    BlobStore` (with `Namespaced`; the `BlobStoreExt` operations derive from
+    the primitives), `MemoryDocs` over the docstore default,
+    `ScriptedTables`, `MatchedHttp`, `Sink: Publish + Broadcast`,
+    `MapConfig`, `FixedIdentity` — plus `omnia_test::provider!`, the native
+    twin of `omnia_guest::provider!` (same name, same grammar; a test
+    declaration differs from `src/lib.rs` by the crate path alone, seeded
+    with the default double per capability, `StateStore` and `BlobStore`
+    sharing one `storage` field) and `delegate!` (delegating capability impls
+    to fields, with a bracketed generic header).
+  - `host`: `Deployment`, an overlay on a manifest — built from nothing with
+    `Deployment::new()` or from a `runtime!` module's compiled-in
+    `manifest()` — that rewrites the guest set, mounts, plugin interfaces,
+    the command guest and the `.` path location, and runs through the host
+    list you name (`run_host`, `run`) or the module's generated `Hooks`
+    (`run_with`). `Backends` bundles the twelve in-memory defaults with the
+    model swappable for any `WasiModelCtx` via the generic
+    `Backends::model`; `defaults()` is deterministic — no environment
+    variable read, no socket opened: config answers from the map seeded by
+    `Backends::config([..])` alone, the websocket backend serves no
+    listener, and the HTTP client and `SQLite` connection (one private
+    `:memory:` database per bundle) are built from fixed options.
+    `ScriptedModel` scripts completions whose steps (tool calls and
+    workspace `read`/`write`/`list`) run ahead of the answer, recording
+    every exchange and the `local_path` lent per turn; an overrun answers
+    the guest softly and fails the test at `assert_exhausted()`. `Scratch`
+    gives per-test directories and mounts.
+  - `build`, `std`-only: `Components` runs the nested cargo build a
+    consumer's `build.rs` needs and writes `gen.rs` with one path constant
+    per program and a `foreach_<group>!` completeness macro per group.
+  Both scripted models share one `Script` core, so the same script reads
+  identically at the handler and component rungs. `cargo make ci` now checks
+  each feature alone and in combination (`features`, `hack`) and guards the
+  `build` dependency tree (`tree-guard`).
+
+- `omnia_guest::command!(entry)`: wires an `async fn` returning `()` or
+  `Result<(), u8>` (via the `IntoExit` trait) as the guest's `wasi:cli/run`
+  export, run through `command::execute_wasi` so telemetry is initialized
+  and flushed around it. The e2e scenario programs use it in place of the
+  deleted `test_programs::run!`; because the export now imports
+  `omnia:otel`, `omnia_test::host::Deployment::run_host` links `WasiOtel`
+  beside the host under test and requires `B: Provides<WasiOtel>`.
+
+- `omnia_wasi_websocket::WebSocketDefault::new()` (and `Default`) is public:
+  the backend without a listener, whose `connect()` still yields a client.
+  `omnia_wasi_http::ConnectOptions` and `omnia_wasi_sql::ConnectOptions` are
+  re-exported so `connect_with` can be called with fixed options instead of
+  `connect()` reading `HTTP_CONNECT_TIMEOUT` / `SQL_DATABASE`.
+
 ### Changed
 
+- Every `omnia-guest` capability trait is implemented for `Arc<T>`, `&T`,
+  and `Box<T>` where `T` implements it, forwarding on both targets, so a
+  provider field may hold a double behind a shared handle and a
+  `P: StateStore` bound accepts `Arc<Memory>` with no `delegate!`.
+- `BlobStore` splits: the ten primitives (`get`, `put`, `delete`, `list`,
+  `get_range`, `object_info`, `create_container`, `delete_container`,
+  `container_exists`, `container_info`) stay on `BlobStore`; `has`,
+  `delete_objects`, `clear`, `copy_object`, and `move_object` move to
+  `BlobStoreExt`, a blanket-implemented extension trait whose native bodies
+  compose the primitives and whose `wasm32` bodies remain one host call
+  each. Migration: delete those five methods from any hand-written
+  `BlobStore` impl (they are no longer trait members) and import
+  `omnia_guest::BlobStoreExt` where a call site uses them. `Memory` and
+  `Namespaced` in `omnia-test` drop their overrides accordingly.
 - The `omnia` facade is the whole embedder dependency, in documentation as
   well as in code. Its re-exports are `#[doc(inline)]`, so rustdoc renders
   every runtime and plugin item as `omnia::…` instead of a wall of
@@ -160,22 +232,24 @@
   list and the unread `Server::IS_SERVER` const are deleted; a third-party
   trigger host's `run` is now actually served instead of silently skipped.
 - The `runtime!` macro's `plugins:` key grows from a bracketed list to a
-  block: `plugins: { interfaces: [...], locations: [...], cache: ... }`. The
+  block: `plugins: { interfaces: [...], locations: [...] }`. The
   declarative `locations:` list is the acquisition policy — named path roots
-  and at most one registry endpoint, lowered into the built-in
-  `PathMounts`/`RegistryClient` acquirers slotted by location kind —
-  and the optional `cache:` names the backend that joins the generated
-  bundle as the registry's store. Both keys are optional (a
-  deployment that only does host-mediated dispatch needs no acquirer; loads
-  then refuse typed at run time); an empty `locations:` list, a second
-  `registry` entry, and a `cache:` without a registry entry are spanned
-  compile errors. The bare-list form is a compile error naming the block
-  shape. Declaring the block also links the `omnia::WasiPlugins` loader
-  host. Because acquisition policy is compiled-in code rather than manifest
-  data, a policy-only block composes with `config:` — the TOML declares the
-  interfaces, the binary the acquirer. TOML manifests are unchanged
-  (`plugins = [...]` stays a plain interface list; an acquirer cannot ride a
-  config file).
+  and at most one registry endpoint — carried as manifest data
+  (`Manifest::locations`, `Location`; `[[location]]` in `omnia.toml`)
+  and installed by the generated `Wiring::extend` through
+  `Plugins::install_declared`, which folds path entries into `PathMounts`
+  and the registry entry into a cacheless `RegistryClient`, slotted by
+  location kind. Both keys are optional (a deployment that only does
+  host-mediated dispatch needs no acquirer; loads then refuse typed at run
+  time); an empty `locations:` list and a second `registry` entry are
+  spanned compile errors, and the bare-list form is a compile error naming
+  the block shape. Declaring the block also links the `omnia::WasiPlugins`
+  loader host. Because locations are manifest data they conflict with
+  `config:` like every other inline key; a config-file deployment declares
+  `[[location]]` entries in the TOML. The bundle-carried `cache:` option is
+  gone (a spanned diagnostic names the migration): a store-backed registry
+  acquirer is installed by hand — `Plugins::install` over
+  `RegistryClient::new(..).cached(store)` from a custom `Wiring::extend`.
 
   ```rust
   // before                              // after
@@ -185,8 +259,31 @@
                                                  { name: ".", path: "." },
                                                  { registry: "ghcr.io" },
                                              ],
-                                             cache: Filesystem,  // optional
                                          },
+  ```
+- The `runtime!` macro's wiring is reachable from tests. The generated
+  `Hooks` is now `pub` and generic — `impl<B> Wiring<B> for Hooks where B:
+  Provides<...>` for each declared host — and two items join `main` and
+  `run` in the re-export: `manifest()` returns the compiled-in
+  `ManifestSource`, and `async fn run_with<B>(builder, backends)` drives a
+  deployment through `Hooks` over a bundle already in hand, connecting
+  nothing. Behind them, `Wiring<B>` is bounded on `B: Clone + Send + Sync +
+  'static` instead of `Backends` (a `Backends` bundle still satisfies it),
+  `omnia::run_with` and `Runtime::with_backends` are the connect-free twins
+  of `run` and `Runtime::new`, and `Runtime::plugin_locations` exposes the
+  deployment's declared locations. `omnia_test::host::Deployment` builds on
+  this as an overlay: `Deployment::from(runtime::manifest())` takes the
+  binary's manifest as its base, `path_root` rewrites the `.` location, and
+  `run_with::<runtime::Hooks, _>(backends)` runs the production `link`,
+  `extend`, and `serve` over `omnia_test::host::Backends`.
+
+  ```rust
+  mod runtime { omnia::runtime!({ plugins: { locations: [{ name: ".", path: "adapters" }] }, guests: [...], hosts: {...} }); }
+
+  let status = Deployment::from(runtime::manifest())
+      .path_root(scratch.path())
+      .run_with::<runtime::Hooks, _>(Backends::defaults().await)
+      .await?;
   ```
 - The host-mediated interface list is renamed from `dispatch` to `plugins`:
   a top-level `plugins = [...]` in TOML, a top-level `plugins: [...]` key in

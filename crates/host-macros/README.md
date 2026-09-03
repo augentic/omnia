@@ -84,7 +84,7 @@ omnia::runtime!({
 });
 ```
 
-Every value is a Rust expression; anchor paths with `env!("CARGO_MANIFEST_DIR")` (relative paths resolve against the run-time working directory). `config:` and the inline keys are mutually exclusive — except the `plugins:` block's acquisition policy (`locations:` with its optional `cache:`), which is compiled-in code rather than manifest data, so a policy-only block composes with `config:`. Routes are declared per guest on the target entry's `routes:` block, one pattern list per trigger, with the declaring guest as the implicit target. Host-mediated interfaces are declared once, deployment-wide, in the `plugins:` block's `interfaces:` list (the linker is shared, so there is no per-guest form); `run --plugins` at the CLI unions with it. Declaring `plugins:` also links the `omnia:plugins/loader` host capability; the declarative `locations:` list supplies its acquisition policy, lowering named path roots and one registry endpoint into the built-in `PathMounts`/`RegistryClient` acquirers, each slotted by location kind into `Plugins::install` — `cache:` naming the backend that joins the bundle as the registry's `PluginStore` (see the [`runtime!` reference](../../docs/reference/runtime-macro.md#plugin-locations-locations-and-cache)).
+Every value is a Rust expression; anchor paths with `env!("CARGO_MANIFEST_DIR")` (relative paths resolve against the run-time working directory). `config:` and the inline keys are mutually exclusive — a config-file deployment declares its plugin locations as `[[location]]` entries in the TOML. Routes are declared per guest on the target entry's `routes:` block, one pattern list per trigger, with the declaring guest as the implicit target. Host-mediated interfaces are declared once, deployment-wide, in the `plugins:` block's `interfaces:` list (the linker is shared, so there is no per-guest form); `run --plugins` at the CLI unions with it. Declaring `plugins:` also links the `omnia:plugins/loader` host capability; the declarative `locations:` list is manifest data (`omnia::Location`) the generated `Wiring::extend` installs through `Plugins::install_declared`, folding named path roots into `PathMounts` and one registry endpoint into `RegistryClient`, each slotted by location kind (see the [`runtime!` reference](../../docs/reference/runtime-macro.md#plugin-locations-locations)).
 
 A guest's `source:` also accepts component bytes (`include_bytes!(...)`), embedding the guest in the host binary — the artifact must then exist when the host crate compiles, and it must be raw `.wasm` (embedded pre-compiled bytes are rejected by the safe build, like pre-compiled paths).
 
@@ -114,7 +114,7 @@ For each `hosts:` row, the macro emits one uniform `omnia::Provides<Ctx>` impl e
 
 ### `main` entry point
 
-A `#[tokio::main]` `main` that delegates to `omnia::main::<Backends, Hooks>`, where `Hooks` is a generated `Wiring` impl: `Wiring::link` runs inside `omnia::Runtime::new` to link hosts, connect backends, and assemble the registry; `Wiring::extend` (emitted when the `plugins:` block carries a `locations:` list) installs the plugin acquisition policy — `omnia::Plugins::install` with the compiled-in slots — once backends have connected and the runtime is assembled; `Wiring::serve` launches each trigger host's `run`. The host runtime is the library `omnia::Runtime<Backends>`; the macro does not emit a runtime type of its own.
+A `#[tokio::main]` `main` that delegates to `omnia::main::<Backends, Hooks>`, where `Hooks` is a generated `pub struct` implementing `omnia::Wiring<B>` for every bundle `B` that `Provides` each declared host's context (the generated `Backends` among them): `Wiring::link` runs inside `omnia::Runtime::new` to link hosts before backends connect and the registry assembles; `Wiring::extend` (emitted when a `plugins:` block is declared) installs the manifest's plugin locations through `omnia::Plugins::install_declared` once the runtime is assembled; `Wiring::serve` launches each trigger host's `run`. The host runtime is the library `omnia::Runtime<Backends>`; the macro does not emit a runtime type of its own.
 
 The generated `main` handles the `run` subcommand only; to expose `compile`, write a custom `main` that calls `omnia::compile`.
 
@@ -122,7 +122,11 @@ The generated `main` handles the `run` subcommand only; to expose `compile`, wri
 
 A blocking `pub fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus>` beside `main`, delegating to `omnia::run::<Backends, Hooks>` with the declared mode applied to the builder. A binary with its own argument surface mounts the runtime in-process through `run` instead of being the generated `main` — it supplies the deployment as an `omnia::Manifest` (loaded with `Manifest::from_config(path)?`, synthesized with `Manifest::from_wasm(path)`, or built fluently with `Manifest::new()`, mounts and dispatch interfaces included) via `omnia::DeploymentBuilder::new().manifest(manifest)`, plus argv, and maps the returned `ExitStatus` onto its own exit contract.
 
-Both are re-exported from the generated module as `pub use runtime::{run, main};` (`#[allow(unused_imports)]`, so a nested-module invocation that uses only one stays warning-clean).
+### `manifest` and `run_with`
+
+`pub fn manifest() -> omnia::ManifestSource` returns the compiled-in deployment (`config:` path or inline manifest keys; an empty inline manifest when neither is declared), and `pub async fn run_with<B>(builder, backends: B) -> Result<omnia::ExitStatus>` drives a deployment through `Hooks` over a bundle already in hand, connecting nothing. Together with `Hooks` they let a test run the binary's own wiring over test backends: `omnia_test::host::Deployment::from(runtime::manifest())` overlays the compiled-in manifest, and `run_with::<runtime::Hooks, _>` drives it.
+
+All five are re-exported from the generated module as `pub use runtime::{Hooks, main, manifest, run, run_with};` (`#[allow(unused_imports)]`, so a nested-module invocation that uses only some stays warning-clean).
 
 ## Example: multiple runtime configurations
 

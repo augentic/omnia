@@ -5,12 +5,12 @@ use std::sync::Arc;
 
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
-use omnia_core::{AdmitError, GuestId, Runtime, WeakRuntime, sha256_digest};
+use omnia_core::{AdmitError, GuestId, Location, Runtime, WeakRuntime, sha256_digest};
 
-use crate::Location;
+use crate::Origin;
 use crate::host::Error;
-use crate::path::PathSource;
-use crate::registry::RegistrySource;
+use crate::path::{PathMounts, PathSource};
+use crate::registry::{RegistryClient, RegistrySource};
 
 /// Host-side `omnia:plugins/loader.load` — embedder sugar over the runtime's
 /// installed [`Plugins`] extension.
@@ -23,13 +23,13 @@ pub trait PluginLoader {
     /// `already-active` on an identity conflict, `internal` on registration
     /// failure.
     fn load(
-        &self, package: &str, from: Location, pin: Option<&str>,
+        &self, package: &str, from: Origin, pin: Option<&str>,
     ) -> impl Future<Output = Result<Plugin, Error>> + Send;
 }
 
 impl<B: Clone + Send + Sync + 'static> PluginLoader for Runtime<B> {
     fn load(
-        &self, package: &str, from: Location, pin: Option<&str>,
+        &self, package: &str, from: Origin, pin: Option<&str>,
     ) -> impl Future<Output = Result<Plugin, Error>> + Send {
         let plugins = self.extensions().get::<Plugins>();
         async move {
@@ -102,7 +102,7 @@ pub struct Plugins {
 impl Plugins {
     /// Install the loader capability on `runtime`.
     ///
-    /// `registry` and `path` are the compiled-in slots, one per [`Location`]
+    /// `registry` and `path` are the compiled-in slots, one per [`Origin`]
     /// kind; `None` refuses that kind.
     ///
     /// # Errors
@@ -128,6 +128,44 @@ impl Plugins {
         Ok(())
     }
 
+    /// Install the loader capability over the deployment's declared
+    /// locations ([`Runtime::plugin_locations`]): every path entry folds, in
+    /// declaration order, into one [`PathMounts`] filling the path slot, the
+    /// registry entry into a cacheless [`RegistryClient`] filling the
+    /// registry slot. A deployment declaring no locations installs nothing,
+    /// so a load refuses as loader misconfiguration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a path location cannot be opened or the capability
+    /// is already installed.
+    pub fn install_declared<B>(runtime: &Runtime<B>) -> anyhow::Result<()>
+    where
+        B: Clone + Send + Sync + 'static,
+    {
+        let locations = runtime.plugin_locations();
+        if locations.is_empty() {
+            return Ok(());
+        }
+        let paths: Vec<(&str, &std::path::Path)> = locations
+            .iter()
+            .filter_map(|location| match location {
+                Location::Path { name, path } => Some((name.as_str(), path.as_path())),
+                Location::Registry { .. } => None,
+            })
+            .collect();
+        let path: Option<Arc<dyn PathSource>> =
+            if paths.is_empty() { None } else { Some(Arc::new(PathMounts::new(paths)?)) };
+        let registry: Option<Arc<dyn RegistrySource>> =
+            locations.iter().find_map(|location| match location {
+                Location::Registry { registry } => {
+                    Some(Arc::new(RegistryClient::new(registry.as_str())) as Arc<dyn RegistrySource>)
+                }
+                Location::Path { .. } => None,
+            });
+        Self::install(runtime, registry, path)
+    }
+
     /// Acquire, pin-check, and admit `package` through the runtime's
     /// admission seam. Idempotent on (package, digest).
     ///
@@ -137,7 +175,7 @@ impl Plugins {
     /// failure, `already-active` on an identity conflict, `internal` on
     /// registration failure.
     pub async fn load(
-        &self, package: &str, from: Location, pin: Option<&str>,
+        &self, package: &str, from: Origin, pin: Option<&str>,
     ) -> Result<Plugin, Error> {
         let pin = pin.map(canonicalize).transpose().map_err(Error::Refused)?;
 
@@ -172,16 +210,16 @@ impl Plugins {
         }
     }
 
-    async fn acquire(&self, package: &str, from: &Location) -> Result<Vec<u8>, Error> {
+    async fn acquire(&self, package: &str, from: &Origin) -> Result<Vec<u8>, Error> {
         match from {
-            Location::Registry(endpoint) => match &self.registry {
+            Origin::Registry(endpoint) => match &self.registry {
                 Some(registry) => registry.acquire(package, endpoint.as_deref()).await,
                 None => Err(Error::Refused(format!(
                     "this deployment's locations serve no registry; loading `{package}` needs \
                      a `{{ registry: ... }}` entry"
                 ))),
             },
-            Location::Path(path) => match &self.path {
+            Origin::Path(path) => match &self.path {
                 Some(paths) => paths.acquire(path).await,
                 None => Err(Error::Refused(format!(
                     "this deployment's locations serve no paths; loading `{package}` from \

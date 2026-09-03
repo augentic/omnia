@@ -51,3 +51,9 @@ pub trait Publish: Send + Sync {
         }
     }
 }
+
+delegate_deref!(Publish {
+    fn send(&self, topic: &str, message: &Message) -> impl Future<Output = Result<()>> + Send {
+        (**self).send(topic, message)
+    }
+});

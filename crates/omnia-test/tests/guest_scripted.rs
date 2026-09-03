@@ -1,0 +1,194 @@
+//! The scripted pair at the handler rung: `Scripted` as a `Model`,
+//! `ScriptedLoader` as a `Plugins` loader.
+
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
+use omnia_guest::model::{
+    Error, Format, Function, Message, Model, Request, Role, SchemaFormat, Tool, ToolCall,
+};
+use omnia_guest::plugins::{self, Digest, Location, PluginRef, Plugins};
+use omnia_test::guest::{Scripted, ScriptedLoader, function_tools};
+use omnia_test::{Exchange, SeenFormat};
+
+fn user(content: &str) -> Request {
+    Request::builder()
+        .messages(vec![Message {
+            role: Role::User,
+            content: content.to_owned(),
+        }])
+        .build()
+}
+
+fn call(name: &str, arguments: &str) -> ToolCall {
+    ToolCall {
+        id: format!("call-{name}"),
+        name: name.to_owned(),
+        arguments: arguments.to_owned(),
+    }
+}
+
+fn digest(fill: &str) -> Digest {
+    format!("sha256:{}", fill.repeat(64 / fill.len())).parse().expect("digest")
+}
+
+#[tokio::test]
+async fn answers_in_order_and_records_requests() {
+    let model = Scripted::answering(["first", "second"]);
+    assert_eq!(model.complete(user("a")).await.expect("reply").answer, "first");
+    assert_eq!(model.complete(user("b")).await.expect("reply").answer, "second");
+
+    let requests = model.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[1].messages[0].content, "b");
+    let seen = model.seen();
+    assert_eq!(seen[0].messages, ["a"]);
+    model.assert_exhausted();
+}
+
+#[tokio::test]
+async fn scripted_failures_return_typed_errors() {
+    let model = Scripted::new([Err(Error::BudgetExhausted("cap".into()))]);
+    assert_eq!(model.complete(user("a")).await, Err(Error::BudgetExhausted("cap".into())));
+}
+
+#[tokio::test]
+async fn complete_with_drives_scripted_calls_and_records_exchanges() {
+    let model = Scripted::answering(["done"])
+        .calling(0, [call("lookup", r#"{"id":1}"#), call("write", "{}")]);
+
+    let reply = model
+        .complete_with(user("go"), |call: ToolCall| async move {
+            if call.name == "lookup" { Ok("found".to_owned()) } else { Err("denied".to_owned()) }
+        })
+        .await
+        .expect("reply");
+
+    assert_eq!(reply.answer, "done");
+    assert_eq!(
+        model.exchanges(),
+        [
+            Exchange {
+                tool: "lookup".into(),
+                arguments: r#"{"id":1}"#.into(),
+                outcome: Ok("found".into()),
+            },
+            Exchange {
+                tool: "write".into(),
+                arguments: "{}".into(),
+                outcome: Err("denied".into()),
+            },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn complete_rejects_a_turn_with_scripted_calls() {
+    let model = Scripted::answering(["x"]).calling(0, [call("t", "{}")]);
+    let result = catch_unwind(AssertUnwindSafe(|| model.complete(user("a"))));
+    assert!(result.is_err(), "complete must refuse scripted tool calls");
+}
+
+#[tokio::test]
+async fn then_answers_past_the_script() {
+    let model = Scripted::answering(["one"]).then(|| Err(Error::Backend("offline".into())));
+    assert_eq!(model.complete(user("a")).await.expect("reply").answer, "one");
+    assert_eq!(model.complete(user("b")).await, Err(Error::Backend("offline".into())));
+}
+
+#[test]
+fn unscripted_completion_panics() {
+    let model = Scripted::default();
+    let result = catch_unwind(AssertUnwindSafe(|| drop(model.complete(user("a")))));
+    assert!(result.is_err(), "an empty script panics on first use");
+}
+
+#[tokio::test]
+async fn seen_projects_format_tools_and_workspace() {
+    let model = Scripted::answering(["{}"]);
+    let request = Request::builder()
+        .system("be terse")
+        .messages(vec![Message {
+            role: Role::User,
+            content: "hi".into(),
+        }])
+        .format(Format::Schema(SchemaFormat::builder().name("out").schema("{}").build()))
+        .tools(vec![Tool::Function(
+            Function::builder().name("lookup").description("d").parameters("{}").build(),
+        )])
+        .workspace(".")
+        .build();
+    model.complete(request).await.expect("reply");
+
+    let seen = model.seen().remove(0);
+    assert_eq!(seen.system.as_deref(), Some("be terse"));
+    assert_eq!(seen.messages, ["hi"]);
+    assert_eq!(
+        seen.format,
+        SeenFormat::Schema {
+            name: "out".into(),
+            schema: "{}".into()
+        }
+    );
+    assert_eq!(seen.tools, ["lookup"]);
+    assert_eq!(seen.workspace.as_deref(), Some("."));
+    assert_eq!(function_tools(&model.requests()[0])[0].name, "lookup");
+}
+
+#[tokio::test]
+async fn loader_resolves_scripted_digest_and_records_loads() {
+    let loader = ScriptedLoader::default().digest("acme:tool", digest("ab"));
+    let plugin = loader
+        .load(&PluginRef::builder().package("acme:tool").location(Location::Registry(None)).build())
+        .await
+        .expect("loads");
+    assert_eq!(plugin.id(), "acme:tool");
+    assert_eq!(*plugin.digest(), digest("ab"));
+    assert_eq!(loader.loads().len(), 1);
+}
+
+#[tokio::test]
+async fn loader_honours_the_request_pin_when_unscripted() {
+    let loader = ScriptedLoader::default();
+    let pinned = PluginRef::builder()
+        .package("acme:tool")
+        .location(Location::Path("./plugins".into()))
+        .digest(digest("cd"))
+        .build();
+    let plugin = loader.load(&pinned).await.expect("loads");
+    assert_eq!(*plugin.digest(), digest("cd"));
+
+    let unpinned =
+        PluginRef::builder().package("acme:other").location(Location::Registry(None)).build();
+    let first = loader.load(&unpinned).await.expect("loads");
+    let second = loader.load(&unpinned).await.expect("loads");
+    assert_eq!(first.digest(), second.digest(), "placeholder digests are deterministic");
+}
+
+#[tokio::test]
+async fn loader_refuses_a_disagreeing_pin() {
+    let loader = ScriptedLoader::default().digest("acme:tool", digest("ab"));
+    let pinned = PluginRef::builder()
+        .package("acme:tool")
+        .location(Location::Registry(None))
+        .digest(digest("cd"))
+        .build();
+    match loader.load(&pinned).await {
+        Err(plugins::Error::Refused(reason)) => {
+            assert!(reason.contains("not the pinned"), "{reason}");
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn loader_scripted_refusal_wins() {
+    let loader = ScriptedLoader::default()
+        .digest("acme:tool", digest("ab"))
+        .refuse("acme:tool", plugins::Error::Unavailable("registry down".into()));
+    let unpinned =
+        PluginRef::builder().package("acme:tool").location(Location::Registry(None)).build();
+    assert_eq!(
+        loader.load(&unpinned).await,
+        Err(plugins::Error::Unavailable("registry down".into()))
+    );
+}

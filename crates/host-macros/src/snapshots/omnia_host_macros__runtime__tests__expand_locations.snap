@@ -1,0 +1,98 @@
+---
+source: crates/host-macros/src/runtime.rs
+expression: "expand_pretty(quote!({\n    plugins:\n    {\n        interfaces: [\"emery:adapter/probe\"], locations:\n        [{ name: \".\", path: project_root() }, { registry: \"ghcr.io\" },],\n    }, guests: [{ id: \"engine\", source: \"engine.wasm\" },], hosts:\n    { WasiOtel: OtelDefault, },\n}))"
+---
+mod runtime {
+    use omnia::anyhow::Result;
+    use omnia::futures::future;
+    use omnia::Server;
+    use omnia::tokio;
+    use super::*;
+    use omnia::Backend;
+    #[derive(Clone)]
+    struct Backends {
+        otel_default: OtelDefault,
+    }
+    impl omnia::Backends for Backends {
+        async fn connect() -> Result<Self> {
+            let (otel_default,) = tokio::try_join!(
+                < OtelDefault as Backend > ::connect(),
+            )?;
+            Ok(Self { otel_default })
+        }
+    }
+    impl omnia::Provides<WasiOtel> for Backends {
+        fn borrow(&mut self) -> <WasiOtel as omnia::HostCtx>::Borrow<'_> {
+            &mut self.otel_default
+        }
+    }
+    /// This runtime's host wiring, generic over the bundle carrying
+    /// its hosts' contexts: the compiled-in bundle under `main` and
+    /// `run`, any other under `run_with`.
+    pub struct Hooks;
+    impl<B> omnia::Wiring<B> for Hooks
+    where
+        B: Clone + Send + Sync + 'static,
+        B: omnia::Provides<WasiOtel>,
+    {
+        fn link(deployment: &mut omnia::Deployment<omnia::StoreCtx<B>>) -> Result<()> {
+            deployment.host::<omnia::WasiPlugins, B>()?;
+            deployment.host::<WasiOtel, B>()?;
+            Ok(())
+        }
+        fn extend(runtime: &omnia::Runtime<B>) -> Result<()> {
+            omnia::Plugins::install_declared(runtime)
+        }
+        async fn serve(runtime: &omnia::Runtime<B>) -> Result<()> {
+            let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![
+                Box::pin(WasiOtel.run(runtime)),
+            ];
+            future::try_join_all(servers).await?;
+            Ok(())
+        }
+    }
+    /// The deployment compiled in here (`config:` or the inline
+    /// manifest keys; empty when neither is declared), for an
+    /// embedder to overlay before `run_with`.
+    pub fn manifest() -> omnia::ManifestSource {
+        omnia::ManifestSource::Inline(
+            omnia::Manifest::new()
+                .plugins(["emery:adapter/probe"])
+                .locations([omnia::Location::path(".", project_root())])
+                .locations([omnia::Location::registry("ghcr.io")])
+                .guest(omnia::GuestEntry::new("engine", "engine.wasm")),
+        )
+    }
+    /// Entry point: run the compiled-in deployment through this
+    /// runtime's hosts and backends (raw argv passthrough for a
+    /// command deployment compiled in here, otherwise the standard
+    /// `run` grammar).
+    #[tokio::main]
+    pub async fn main() -> ::std::process::ExitCode {
+        omnia::main::<
+            Backends,
+            Hooks,
+        >(omnia::MainOptions::new(omnia::Mode::Server).manifest(manifest()))
+            .await
+    }
+    /// Run one deployment through this runtime's hosts and backends,
+    /// blocking until the guest completes.
+    #[tokio::main]
+    pub async fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
+        omnia::run::<Backends, Hooks>(builder.mode(omnia::Mode::Server)).await
+    }
+    /// Run one deployment through this runtime's hosts over a bundle
+    /// already in hand — nothing connects.
+    pub async fn run_with<B>(
+        builder: omnia::DeploymentBuilder,
+        backends: B,
+    ) -> Result<omnia::ExitStatus>
+    where
+        B: Clone + Send + Sync + 'static,
+        Hooks: omnia::Wiring<B>,
+    {
+        omnia::run_with::<B, Hooks>(builder.mode(omnia::Mode::Server), backends).await
+    }
+}
+#[allow(unused_imports)]
+pub use runtime::{Hooks, main, manifest, run, run_with};

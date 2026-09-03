@@ -35,7 +35,11 @@ pub enum ManifestSource {
 
 impl ManifestSource {
     /// Resolve into a manifest, loading the file for the path kind.
-    fn into_manifest(self) -> Result<Manifest> {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a path source cannot be read or parsed.
+    pub fn into_manifest(self) -> Result<Manifest> {
         match self {
             Self::Path(path) => Manifest::from_config(path),
             Self::Inline(manifest) => Ok(manifest),

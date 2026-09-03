@@ -30,3 +30,14 @@ pub trait HttpRequest: Send + Sync {
         async move { omnia_wasi_http::handle(request).await }
     }
 }
+
+delegate_deref!(HttpRequest {
+    fn fetch<T>(&self, request: Request<T>) -> impl Future<Output = Result<Response<Bytes>>> + Send
+    where
+        T: Body + Any + Send,
+        T::Data: Into<Vec<u8>>,
+        T::Error: Into<Box<dyn Error + Send + Sync + 'static>>,
+    {
+        (**self).fetch(request)
+    }
+});

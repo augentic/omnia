@@ -5,7 +5,7 @@
 use omnia_guest::model::{Error, Model as _, Request, WasiModel};
 use test_programs::user;
 
-test_programs::run!(scenario);
+omnia_guest::command!(scenario);
 
 async fn scenario() {
     // No tools declared; the host rejects the backend's `lookup` call

@@ -3,6 +3,20 @@
 //! Each capability is a trait whose methods carry WASI-backed default bodies on
 //! `wasm32` (delegating to the matching `omnia-wasi-*` binding) and bare
 //! signatures off `wasm32`, so hosts and tests can supply their own.
+//!
+//! Every capability is also implemented for `Arc<T>`, `&T`, and `Box<T>`
+//! where `T` implements it, so a provider may hold a capability behind a
+//! pointer and a `P: Capability` bound accepts one.
+
+// The pointer impls delegate on both targets: an empty impl would hand a
+// wrapped provider the WASI defaults in place of its own overrides.
+macro_rules! delegate_deref {
+    ($trait:ident { $($body:tt)* }) => {
+        impl<P: $trait + ?Sized> $trait for ::std::sync::Arc<P> { $($body)* }
+        impl<P: $trait + ?Sized> $trait for &P { $($body)* }
+        impl<P: $trait + ?Sized> $trait for ::std::boxed::Box<P> { $($body)* }
+    };
+}
 
 mod blob;
 mod broadcast;
@@ -18,7 +32,7 @@ mod state;
 #[cfg(feature = "orm")]
 mod table;
 
-pub use blob::{BlobStore, ContainerMetadata, ObjectMetadata};
+pub use blob::{BlobStore, BlobStoreExt, ContainerMetadata, ObjectMetadata};
 pub use broadcast::Broadcast;
 pub use config::Config;
 #[cfg(feature = "orm")]

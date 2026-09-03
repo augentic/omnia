@@ -14,7 +14,7 @@ pub use entry::{MainOptions, ManifestSource};
 use wasmtime::component::{Component, Instance, InstancePre, types};
 use wasmtime::{Engine, Store};
 
-use crate::deployment::{ELF_MAGIC, GuestArtifact};
+use crate::deployment::{ELF_MAGIC, GuestArtifact, Location};
 use crate::dispatch::{serve_guest, serve_links};
 use crate::extensions::Extensions;
 use crate::mount::MountRegistry;
@@ -69,7 +69,11 @@ impl Mode {
 
 /// Host linking, extension installation, and trigger-server startup for a
 /// deployment.
-pub trait Wiring<B: Backends> {
+///
+/// Bounded on the bundle's shape rather than on [`Backends`] so one wiring
+/// serves both the connected production bundle and a bundle handed in ready
+/// (see [`run_with`]).
+pub trait Wiring<B: Clone + Send + Sync + 'static> {
     /// Link every declared host into the deployment linker.
     ///
     /// # Errors
@@ -77,10 +81,10 @@ pub trait Wiring<B: Backends> {
     /// Returns an error if a host cannot be added to the linker.
     fn link(deployment: &mut Deployment<StoreCtx<B>>) -> Result<()>;
 
-    /// Install capability extensions into [`Runtime::extensions`]. Invoked by
-    /// [`Runtime::new`] once, after [`Backends::connect`] and runtime
-    /// assembly, so an extension is built against the connected bundle (via
-    /// [`Runtime::backends`]); the default installs nothing.
+    /// Install capability extensions into [`Runtime::extensions`]. Invoked
+    /// once, after the bundle is in hand and the runtime is assembled, so an
+    /// extension is built against the bundle (via [`Runtime::backends`]);
+    /// the default installs nothing.
     ///
     /// # Errors
     ///
@@ -153,6 +157,27 @@ where
     drive::<B, H>(deployment).await
 }
 
+/// [`run`] over a bundle already in hand: nothing connects, `backends` is
+/// threaded in as-is. The shape a test harness uses to drive a production
+/// `runtime!`'s wiring over in-memory backends.
+///
+/// # Errors
+///
+/// Returns an error if the deployment cannot be built, runtime state cannot be
+/// assembled, bootstrap fails, or a trigger server exits with an error.
+pub async fn run_with<B, H>(builder: DeploymentBuilder, backends: B) -> Result<ExitStatus>
+where
+    B: Clone + Send + Sync + 'static,
+    H: Wiring<B>,
+{
+    let deployment = builder.build::<StoreCtx<B>>().await.context("building runtime")?;
+    let mode = deployment.mode();
+    let runtime = Runtime::<B>::with_backends(deployment, backends, H::link, H::extend)
+        .await
+        .context("assembling runtime")?;
+    finish::<B, H>(runtime, mode).await
+}
+
 /// [`run`] for a deployment of trusted pre-compiled artifacts.
 ///
 /// The [`Precompiled`](crate::Precompiled) parameter means a raw/default
@@ -195,7 +220,16 @@ where
 
     let runtime =
         Runtime::<B>::new(deployment, H::link, H::extend).await.context("assembling runtime")?;
+    finish::<B, H>(runtime, mode).await
+}
 
+/// Start background tasks, then run command mode or every trigger server,
+/// releasing the runtime when the drive completes.
+async fn finish<B, H>(runtime: Runtime<B>, mode: Mode) -> Result<ExitStatus>
+where
+    B: Clone + Send + Sync + 'static,
+    H: Wiring<B>,
+{
     // Background tasks hold Engine clones; abort them when the drive
     // completes so a finished deployment releases its engine (and the pooling
     // allocator's large virtual reservation) instead of leaking it into the
@@ -339,6 +373,9 @@ struct RuntimeInner<B: 'static> {
     // Manifest-marked command guest identity; absent, command mode routes to
     // the sole static `wasi:cli/run` exporter.
     command_guest: OnceLock<GuestId>,
+    // The manifest's plugin acquisition locations, read by the loader
+    // capability's install.
+    locations: Vec<Location>,
     // Capability-crate state installed by the `Wiring::extend` hook and
     // shared with every store context.
     extensions: Extensions,
@@ -347,7 +384,7 @@ struct RuntimeInner<B: 'static> {
 impl<B: 'static> RuntimeInner<B> {
     fn new(
         name: Arc<str>, registry: Arc<Registry<StoreCtx<B>>>, args: Arc<Vec<String>>,
-        mounts: Arc<MountRegistry>, backends: B,
+        mounts: Arc<MountRegistry>, backends: B, locations: Vec<Location>,
     ) -> Self {
         Self {
             name,
@@ -356,6 +393,7 @@ impl<B: 'static> RuntimeInner<B> {
             mounts,
             backends,
             command_guest: OnceLock::new(),
+            locations,
             extensions: Extensions::new(),
         }
     }
@@ -448,12 +486,43 @@ impl<B: Backends> Runtime<B> {
         L: FnOnce(&mut Deployment<StoreCtx<B>>) -> Result<()>,
         E: FnOnce(&Self) -> Result<()>,
     {
-        let name = Arc::<str>::from(deployment.name());
-        let args = Arc::new(deployment.args().to_vec());
         link(&mut deployment).context("linking hosts")?;
         let backends = B::connect().await.context("connecting backends")?;
+        Self::assemble(deployment, backends, extend).await
+    }
+}
+
+impl<B: Clone + Send + Sync + 'static> Runtime<B> {
+    /// [`Runtime::new`] over a bundle already in hand: links hosts, assembles
+    /// the guest registry, installs capability extensions, and wires the
+    /// host-mediated link serve side, connecting nothing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if host linking, registry assembly, extension
+    /// installation, or link serve wiring fails.
+    pub async fn with_backends<L, E>(
+        mut deployment: Deployment<StoreCtx<B>>, backends: B, link: L, extend: E,
+    ) -> Result<Self>
+    where
+        L: FnOnce(&mut Deployment<StoreCtx<B>>) -> Result<()>,
+        E: FnOnce(&Self) -> Result<()>,
+    {
+        link(&mut deployment).context("linking hosts")?;
+        Self::assemble(deployment, backends, extend).await
+    }
+
+    async fn assemble<E>(
+        deployment: Deployment<StoreCtx<B>>, backends: B, extend: E,
+    ) -> Result<Self>
+    where
+        E: FnOnce(&Self) -> Result<()>,
+    {
+        let name = Arc::<str>::from(deployment.name());
+        let args = Arc::new(deployment.args().to_vec());
         let mounts = deployment.mounts();
         let command_guest = deployment.command_guest();
+        let locations = deployment.plugin_locations().to_vec();
 
         let runtime = Self::with_inner(Arc::new(RuntimeInner::new(
             name,
@@ -461,6 +530,7 @@ impl<B: Backends> Runtime<B> {
             args,
             mounts,
             backends,
+            locations,
         )));
         if let Some(id) = command_guest {
             runtime.set_command_guest(id);
@@ -506,7 +576,15 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
             Arc::new(args),
             mounts,
             backends,
+            Vec::new(),
         )))
+    }
+
+    /// The deployment's plugin acquisition locations (the manifest's
+    /// `[[location]]` entries), for the loader capability to install against.
+    #[must_use]
+    pub fn plugin_locations(&self) -> &[Location] {
+        &self.inner.locations
     }
 
     /// The deployment name — read by trigger servers and the bootstrap log.

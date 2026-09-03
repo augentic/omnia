@@ -3,8 +3,7 @@
 //! Generates the token stream fragments required to expand the runtime macro.
 
 use proc_macro2::TokenStream;
-use quote::{ToTokens, format_ident, quote, quote_spanned};
-use syn::spanned::Spanned as _;
+use quote::{ToTokens, format_ident, quote};
 use syn::{Expr, Ident, Path};
 
 use crate::runtime::parse::{Config, HostEntry, LocationSpec, ManifestSpec, Mode};
@@ -13,14 +12,18 @@ use crate::runtime::parse::{Config, HostEntry, LocationSpec, ManifestSpec, Mode}
 pub struct Codegen {
     pub mode: Mode,
     pub host_types: Vec<Path>,
+    /// The `Provides` keys the generic `Hooks` impl bounds its bundle on,
+    /// one per `hosts:` row.
+    pub ctx_keys: Vec<TokenStream>,
     pub backends_ty: TokenStream,
     pub backends_def: TokenStream,
     pub main_options: TokenStream,
-    /// The generated `Wiring::extend` hook for the `plugins:` block's
-    /// `locations:` list; absent, the trait's install-nothing default stands.
-    pub extend_hook: Option<TokenStream>,
-    /// Whether to link the `omnia::WasiPlugins` loader host — declared
-    /// plugins mean the deployment opted into the loader capability.
+    /// The compiled-in `omnia::ManifestSource`; absent when the invocation
+    /// declares neither `config:` nor inline manifest keys.
+    pub manifest: Option<TokenStream>,
+    /// Whether to link the `omnia::WasiPlugins` loader host and install the
+    /// declared locations — a `plugins:` block means the deployment opted
+    /// into the loader capability.
     pub link_plugins: bool,
 }
 
@@ -28,30 +31,32 @@ impl From<&Config> for Codegen {
     fn from(config: &Config) -> Self {
         let host_entries = &config.host_entries;
         let host_types: Vec<Path> = host_entries.iter().map(|entry| entry.host.clone()).collect();
+        let ctx_keys = host_types.iter().map(ctx_key).collect();
 
-        let (backends_ty, backends_def) = emit_backends(host_entries, config.cache.as_ref());
+        let (backends_ty, backends_def) = emit_backends(host_entries);
 
-        let main_options = emit_main_options(config);
-        let extend_hook =
-            (!config.locations.is_empty()).then(|| emit_locations_hook(config, &backends_ty));
+        let manifest = emit_manifest(config);
+        let main_options = emit_main_options(config, manifest.is_some());
 
         Self {
             mode: config.mode,
             host_types,
+            ctx_keys,
             backends_ty,
             backends_def,
             main_options,
-            extend_hook,
+            manifest,
             link_plugins: config.plugins_declared,
         }
     }
 }
 
-/// Emit the `omnia::MainOptions` method chain passed to `omnia::main`; keys
+/// Emit the `omnia::MainOptions` method chain passed to `omnia::main`; a
+/// compiled-in manifest rides the generated `manifest()` accessor, and keys
 /// the invocation omits contribute no calls.
-fn emit_main_options(config: &Config) -> TokenStream {
+fn emit_main_options(config: &Config, has_manifest: bool) -> TokenStream {
     let mode = config.mode.tokens();
-    let manifest = emit_manifest_source(config);
+    let manifest = has_manifest.then(|| quote! { .manifest(manifest()) });
 
     quote! {
         omnia::MainOptions::new(#mode)
@@ -59,72 +64,13 @@ fn emit_main_options(config: &Config) -> TokenStream {
     }
 }
 
-/// Emit the `Wiring::extend` hook for the declarative `locations:` list:
-/// path entries fold in declaration order into one `PathMounts` (opened
-/// fail-fast) filling the path slot, the registry entry becomes a
-/// `RegistryClient` — cached in the `cache:` backend when one is declared
-/// — filling the registry slot; a kind with no entry stays `None` and
-/// refuses typed at run time. The slots install through
-/// `omnia::Plugins::install`.
-fn emit_locations_hook(config: &Config, backends_ty: &TokenStream) -> TokenStream {
-    let paths: Vec<TokenStream> = config
-        .locations
-        .iter()
-        .filter_map(|location| match location {
-            LocationSpec::Path { name, path } => Some(quote! { (#name, #path) }),
-            LocationSpec::Registry(_) => None,
-        })
-        .collect();
-    let registry = config.locations.iter().find_map(|location| match location {
-        LocationSpec::Registry(endpoint) => Some(endpoint),
-        LocationSpec::Path { .. } => None,
-    });
-
-    let path_slot = if paths.is_empty() {
-        quote!(None)
-    } else {
-        quote! {
-            Some(::std::sync::Arc::new(omnia::PathMounts::new([#(#paths,)*])?))
-        }
-    };
-    let registry_slot = registry.map_or_else(
-        || quote!(None),
-        |endpoint| {
-            // Spanned to the `cache:` value so a missing store bound lands
-            // on the declaration, not the generated call.
-            let cached = config.cache.as_ref().map(|store| {
-                let field = field_ident(store);
-                quote_spanned! {store.span()=>
-                    .cached(backends.#field.clone())
-                }
-            });
-            quote! {
-                Some(::std::sync::Arc::new(omnia::RegistryClient::new(#endpoint) #cached))
-            }
-        },
-    );
-    // The bundle is only reached for a `cache:` backend to clone out of it.
-    let bind_backends = config.cache.is_some().then(|| {
-        quote! {
-            let backends = runtime.backends();
-        }
-    });
-
-    quote! {
-        fn extend(runtime: &omnia::Runtime<#backends_ty>) -> Result<()> {
-            #bind_backends
-            omnia::Plugins::install(runtime, #registry_slot, #path_slot)
-        }
-    }
-}
-
-/// Emit the `.manifest(omnia::ManifestSource::…)` call for the compiled-in
-/// deployment manifest: `Path` for a `config:` expression, `Inline` for the
-/// inline manifest keys, nothing when neither is declared.
-fn emit_manifest_source(config: &Config) -> Option<TokenStream> {
+/// Emit the `omnia::ManifestSource` for the compiled-in deployment
+/// manifest: `Path` for a `config:` expression, `Inline` for the inline
+/// manifest keys, nothing when neither is declared.
+fn emit_manifest(config: &Config) -> Option<TokenStream> {
     if let Some(expr) = &config.config_file {
         return Some(quote! {
-            .manifest(omnia::ManifestSource::Path(::std::path::PathBuf::from(#expr)))
+            omnia::ManifestSource::Path(::std::path::PathBuf::from(#expr))
         });
     }
     if config.manifest.is_empty() {
@@ -133,7 +79,7 @@ fn emit_manifest_source(config: &Config) -> Option<TokenStream> {
 
     let builder = emit_manifest_builder(&config.manifest);
     Some(quote! {
-        .manifest(omnia::ManifestSource::Inline(#builder))
+        omnia::ManifestSource::Inline(#builder)
     })
 }
 
@@ -143,6 +89,15 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
         quote! {
             .plugins([#interface])
         }
+    });
+
+    let locations = manifest.locations.iter().map(|location| match location {
+        LocationSpec::Path { name, path } => quote! {
+            .locations([omnia::Location::path(#name, #path)])
+        },
+        LocationSpec::Registry(endpoint) => quote! {
+            .locations([omnia::Location::registry(#endpoint)])
+        },
     });
 
     let guests = manifest.guests.iter().map(|guest| {
@@ -180,23 +135,19 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
     quote! {
         omnia::Manifest::new()
             #(#plugins)*
+            #(#locations)*
             #(#guests)*
             #(#mounts)*
     }
 }
 
-fn emit_backends(host_entries: &[HostEntry], cache: Option<&Path>) -> (TokenStream, TokenStream) {
+fn emit_backends(host_entries: &[HostEntry]) -> (TokenStream, TokenStream) {
     // Order-preserving dedup: `Vec::dedup_by` only removes *consecutive*
     // duplicates, so a backend shared by non-adjacent hosts would emit two
     // identically named struct fields. Parse validation guarantees rows
     // sharing a backend agree on connect options, so the first row's
-    // options stand for the shared connection. The `cache:` backend joins
-    // the list last (env-connected, no host row), so a hosts row naming the
-    // same backend keeps its options and shares one connection.
-    let rows = host_entries
-        .iter()
-        .map(|entry| (&entry.backend, entry.options.as_ref()))
-        .chain(cache.map(|cache| (cache, None)));
+    // options stand for the shared connection.
+    let rows = host_entries.iter().map(|entry| (&entry.backend, entry.options.as_ref()));
     let mut seen = std::collections::HashSet::new();
     let backends: Vec<(&Path, Option<&Expr>)> =
         rows.filter(|(backend, _)| seen.insert(path_key(backend))).collect();
@@ -319,7 +270,7 @@ mod tests {
 
     #[test]
     fn empty_host_entries() {
-        let (ty, def) = emit_backends(&[], None);
+        let (ty, def) = emit_backends(&[]);
         assert_eq!(ty.to_string(), "()");
         assert!(def.is_empty());
     }

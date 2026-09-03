@@ -33,22 +33,54 @@ mod runtime {
             &mut self.otel_default
         }
     }
-    struct Hooks;
-    impl omnia::Wiring<Backends> for Hooks {
-        fn link(
-            deployment: &mut omnia::Deployment<omnia::StoreCtx<Backends>>,
-        ) -> Result<()> {
-            deployment.host::<WasiHttp, Backends>()?;
-            deployment.host::<WasiOtel, Backends>()?;
+    /// This runtime's host wiring, generic over the bundle carrying
+    /// its hosts' contexts: the compiled-in bundle under `main` and
+    /// `run`, any other under `run_with`.
+    pub struct Hooks;
+    impl<B> omnia::Wiring<B> for Hooks
+    where
+        B: Clone + Send + Sync + 'static,
+        B: omnia::Provides<omnia::HttpCtx>,
+        B: omnia::Provides<WasiOtel>,
+    {
+        fn link(deployment: &mut omnia::Deployment<omnia::StoreCtx<B>>) -> Result<()> {
+            deployment.host::<WasiHttp, B>()?;
+            deployment.host::<WasiOtel, B>()?;
             Ok(())
         }
-        async fn serve(runtime: &omnia::Runtime<Backends>) -> Result<()> {
+        async fn serve(runtime: &omnia::Runtime<B>) -> Result<()> {
             let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![
                 Box::pin(WasiHttp.run(runtime)), Box::pin(WasiOtel.run(runtime)),
             ];
             future::try_join_all(servers).await?;
             Ok(())
         }
+    }
+    /// The deployment compiled in here (`config:` or the inline
+    /// manifest keys; empty when neither is declared), for an
+    /// embedder to overlay before `run_with`.
+    pub fn manifest() -> omnia::ManifestSource {
+        omnia::ManifestSource::Inline(
+            omnia::Manifest::new()
+                .guest(
+                    omnia::GuestEntry::new("specify", engine_component_path()).command(),
+                )
+                .guest(omnia::GuestEntry::new("target:mock", mock_target_path()))
+                .mounts([
+                    omnia::Mount {
+                        name: ::std::string::String::from("project"),
+                        path: ::std::path::PathBuf::from(project_root()),
+                        writable: true,
+                    },
+                ])
+                .mounts([
+                    omnia::Mount {
+                        name: ::std::string::String::from("store"),
+                        path: ::std::path::PathBuf::from(store_root()),
+                        writable: true,
+                    },
+                ]),
+        )
     }
     /// Entry point: run the compiled-in deployment through this
     /// runtime's hosts and backends (raw argv passthrough for a
@@ -59,35 +91,7 @@ mod runtime {
         omnia::main::<
             Backends,
             Hooks,
-        >(
-                omnia::MainOptions::new(omnia::Mode::Command)
-                    .manifest(
-                        omnia::ManifestSource::Inline(
-                            omnia::Manifest::new()
-                                .guest(
-                                    omnia::GuestEntry::new("specify", engine_component_path())
-                                        .command(),
-                                )
-                                .guest(
-                                    omnia::GuestEntry::new("target:mock", mock_target_path()),
-                                )
-                                .mounts([
-                                    omnia::Mount {
-                                        name: ::std::string::String::from("project"),
-                                        path: ::std::path::PathBuf::from(project_root()),
-                                        writable: true,
-                                    },
-                                ])
-                                .mounts([
-                                    omnia::Mount {
-                                        name: ::std::string::String::from("store"),
-                                        path: ::std::path::PathBuf::from(store_root()),
-                                        writable: true,
-                                    },
-                                ]),
-                        ),
-                    ),
-            )
+        >(omnia::MainOptions::new(omnia::Mode::Command).manifest(manifest()))
             .await
     }
     /// Run one deployment through this runtime's hosts and backends,
@@ -96,6 +100,18 @@ mod runtime {
     pub async fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
         omnia::run::<Backends, Hooks>(builder.mode(omnia::Mode::Command)).await
     }
+    /// Run one deployment through this runtime's hosts over a bundle
+    /// already in hand — nothing connects.
+    pub async fn run_with<B>(
+        builder: omnia::DeploymentBuilder,
+        backends: B,
+    ) -> Result<omnia::ExitStatus>
+    where
+        B: Clone + Send + Sync + 'static,
+        Hooks: omnia::Wiring<B>,
+    {
+        omnia::run_with::<B, Hooks>(builder.mode(omnia::Mode::Command), backends).await
+    }
 }
 #[allow(unused_imports)]
-pub use runtime::{run, main};
+pub use runtime::{Hooks, main, manifest, run, run_with};

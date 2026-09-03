@@ -7,7 +7,7 @@ use omnia_guest::model::{
 };
 use test_programs::user;
 
-test_programs::run!(scenario);
+omnia_guest::command!(scenario);
 
 async fn refused(request: Request) -> String {
     match WasiModel.complete(request).await {

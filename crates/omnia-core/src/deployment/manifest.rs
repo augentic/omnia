@@ -45,6 +45,10 @@ pub struct Manifest {
     /// Interfaces the host mediates between guests (host-mediated dynamic
     /// linking); the runtime core polyfills each on the shared linker.
     pub plugins: Vec<String>,
+    /// Where the `omnia:plugins/loader` acquires packages: named path roots
+    /// and at most one default registry endpoint.
+    #[serde(rename = "location")]
+    pub locations: Vec<Location>,
     /// Transport configuration for host-mediated calls.
     pub transport: Transport,
 }
@@ -111,6 +115,14 @@ impl Manifest {
         self
     }
 
+    /// Append plugin acquisition locations (the manifest's `[[location]]`
+    /// entries).
+    #[must_use]
+    pub fn locations(mut self, locations: impl IntoIterator<Item = Location>) -> Self {
+        self.locations.extend(locations);
+        self
+    }
+
     /// Validate manifest-level invariants surfaced before the registry is
     /// built. An `allow_empty` (dynamic) deployment may define no `[[guest]]`
     /// entries.
@@ -139,6 +151,21 @@ impl Manifest {
                 self.transport.default
             );
         }
+        let registries: Vec<&str> = self
+            .locations
+            .iter()
+            .filter_map(|location| match location {
+                Location::Registry { registry } => Some(registry.as_str()),
+                Location::Path { .. } => None,
+            })
+            .collect();
+        if registries.len() > 1 {
+            bail!(
+                "multiple registry [[location]] entries ({}): a deployment declares one default \
+                 registry (a load's own location may still override the endpoint)",
+                registries.join(", ")
+            );
+        }
         Ok(())
     }
 
@@ -153,6 +180,13 @@ impl Manifest {
         for mount in &mut self.mounts {
             if mount.path.is_relative() {
                 mount.path = base.join(&mount.path);
+            }
+        }
+        for location in &mut self.locations {
+            if let Location::Path { path, .. } = location
+                && path.is_relative()
+            {
+                *path = base.join(&*path);
             }
         }
     }
@@ -222,6 +256,43 @@ impl Manifest {
     #[must_use]
     pub fn preopens(&self) -> Vec<ResolvedPreopen> {
         self.mounts.iter().map(|entry| entry.resolve(Path::new("."))).collect()
+    }
+}
+
+/// One place the plugin loader acquires packages from, discriminated by the
+/// keys present: `{ name, path }` or `{ registry }`.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum Location {
+    /// A named host directory path loads resolve against.
+    Path {
+        /// The location name a load's `path` location names (e.g. `.`).
+        name: String,
+        /// Host directory. [`Manifest::from_config`] resolves relative paths
+        /// against the config file's directory.
+        path: PathBuf,
+    },
+    /// The deployment's default registry endpoint.
+    Registry {
+        /// The registry a load without an explicit endpoint resolves against.
+        registry: String,
+    },
+}
+
+impl Location {
+    /// A named path root.
+    pub fn path(name: impl Into<String>, path: impl Into<PathBuf>) -> Self {
+        Self::Path {
+            name: name.into(),
+            path: path.into(),
+        }
+    }
+
+    /// The default registry endpoint.
+    pub fn registry(registry: impl Into<String>) -> Self {
+        Self::Registry {
+            registry: registry.into(),
+        }
     }
 }
 
@@ -629,6 +700,46 @@ mod tests {
         // An absolute path passes through unchanged, and `writable` grants mutation.
         assert_eq!(resolved[1].host_path, PathBuf::from("/srv/shared"));
         assert!(resolved[1].writable);
+    }
+
+    #[test]
+    fn parse_and_resolve_locations() {
+        let toml = r#"
+            [[guest]]
+            id = "engine"
+            source.path = "./engine.wasm"
+
+            [[location]]
+            name = "."
+            path = "adapters"
+
+            [[location]]
+            registry = "ghcr.io"
+        "#;
+
+        let mut manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
+        manifest.resolve_paths(Path::new("/deploy/app"));
+        assert_eq!(
+            manifest.locations,
+            [Location::path(".", "/deploy/app/adapters"), Location::registry("ghcr.io"),]
+        );
+        manifest.validate(false).expect("one registry is allowed");
+    }
+
+    #[test]
+    fn reject_mixed_location_keys() {
+        let toml = "[[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\n\n\
+             [[location]]\nname = \".\"\npath = \"adapters\"\nregistry = \"ghcr.io\"\n";
+        toml::from_str::<Manifest>(toml).unwrap_err();
+    }
+
+    #[test]
+    fn reject_two_registry_locations() {
+        let manifest = Manifest::new()
+            .guest(GuestEntry::new("a", "./a.wasm"))
+            .locations([Location::registry("ghcr.io"), Location::registry("docker.io")]);
+        let error = manifest.validate(false).expect_err("two registries must be refused");
+        assert!(error.to_string().contains("multiple registry"), "{error}");
     }
 
     #[test]

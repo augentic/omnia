@@ -1,0 +1,9 @@
+error: `Telemetry` is not a capability `provider!` has a double for
+ --> tests/ui/unknown_capability.rs:1:1
+  |
+1 | / omnia_test::provider! {
+2 | |     struct Provider: Config + Telemetry;
+3 | | }
+  | |_^
+  |
+  = note: this error originates in the macro `$crate::__provider` which comes from the expansion of the macro `omnia_test::provider` (in Nightly builds, run with -Z macro-backtrace for more info)

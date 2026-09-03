@@ -1,0 +1,120 @@
+[package]
+name = "omnia-test"
+description = "Test doubles, runtime harness, and wasm fixture pipeline for omnia-based code"
+readme = "README.md"
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# No default: a consumer names the rung it uses, and a build-dependency line
+# that forgets `default-features = false` still pulls nothing but `std`.
+default = []
+# Native doubles for the `omnia_guest` capability traits, plus `provider!` and `delegate!`.
+# `omnia-guest/orm` already carries the docstore and sql host crates the
+# `MemoryDocs` and `ScriptedTables` doubles wrap.
+guest = [
+    "dep:anyhow",
+    "dep:bytes",
+    "dep:http",
+    "dep:http-body",
+    "dep:http-body-util",
+    "dep:omnia-guest",
+    "omnia-guest/orm",
+    "dep:omnia-wasi-docstore",
+    "dep:omnia-wasi-sql",
+]
+# The component runtime harness: `Deployment`, `Backends`, `ScriptedModel`, `Scratch`.
+host = [
+    "dep:anyhow",
+    "dep:futures",
+    "dep:omnia",
+    "dep:omnia-wasi-blobstore",
+    "dep:omnia-wasi-config",
+    "dep:omnia-wasi-docstore",
+    "dep:omnia-wasi-http",
+    "dep:omnia-wasi-identity",
+    "dep:omnia-wasi-keyvalue",
+    "dep:omnia-wasi-messaging",
+    "dep:omnia-wasi-model",
+    "dep:omnia-wasi-otel",
+    "dep:omnia-wasi-sql",
+    "dep:omnia-wasi-vault",
+    "dep:omnia-wasi-websocket",
+    "dep:serde_json",
+    "dep:tempfile",
+]
+# The std-only wasm32 fixture pipeline for a consumer's `build.rs`.
+build = []
+
+# Every dependency is optional so `--no-default-features --features build`
+# resolves to `std` alone on a consumer's build-dependency line.
+[dependencies]
+anyhow = { workspace = true, optional = true }
+bytes = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
+http-body = { workspace = true, optional = true }
+http-body-util = { workspace = true, optional = true }
+omnia = { workspace = true, optional = true }
+omnia-guest = { workspace = true, optional = true }
+omnia-wasi-blobstore = { workspace = true, optional = true }
+omnia-wasi-config = { workspace = true, optional = true }
+omnia-wasi-docstore = { workspace = true, optional = true }
+omnia-wasi-http = { workspace = true, optional = true }
+omnia-wasi-identity = { workspace = true, optional = true }
+omnia-wasi-keyvalue = { workspace = true, optional = true }
+omnia-wasi-messaging = { workspace = true, optional = true }
+omnia-wasi-model = { workspace = true, optional = true }
+omnia-wasi-otel = { workspace = true, optional = true }
+omnia-wasi-sql = { workspace = true, optional = true }
+omnia-wasi-vault = { workspace = true, optional = true }
+omnia-wasi-websocket = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
+
+[dev-dependencies]
+anyhow.workspace = true
+bytes.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+omnia.workspace = true
+omnia-guest.workspace = true
+omnia-wasi-blobstore.workspace = true
+omnia-wasi-config.workspace = true
+omnia-wasi-keyvalue.workspace = true
+omnia-wasi-model.workspace = true
+omnia-wasi-otel.workspace = true
+omnia-wasi-sql.workspace = true
+serde_json.workspace = true
+test-programs.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+trybuild.workspace = true
+
+[[test]]
+name = "script"
+
+[[test]]
+name = "guest_scripted"
+required-features = ["guest"]
+
+[[test]]
+name = "guest_stores"
+required-features = ["guest"]
+
+[[test]]
+name = "macros"
+required-features = ["guest"]
+
+[[test]]
+name = "host"
+required-features = ["host"]

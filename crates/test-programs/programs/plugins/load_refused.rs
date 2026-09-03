@@ -13,7 +13,7 @@ wit_bindgen::generate!({
 
 use omnia::plugins::loader::{self, Error, Location, Plugin};
 
-test_programs::run!(scenario);
+omnia_guest::command!(scenario);
 
 async fn load(package: &str, path: &str, digest: Option<&str>) -> Result<Plugin, Error> {
     loader::load(package.to_owned(), Location::Path(path.to_owned()), digest.map(str::to_owned))

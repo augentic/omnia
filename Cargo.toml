@@ -129,6 +129,7 @@ omnia-guest = { path = "crates/omnia-guest", version = "0.36.0" }
 omnia-guest-macros = { path = "crates/guest-macros", version = "0.36.0" }
 omnia-host-macros = { path = "crates/host-macros", version = "0.36.0" }
 omnia-plugin = { path = "crates/omnia-plugin", version = "0.36.0" }
+omnia-test = { path = "crates/omnia-test", version = "0.36.0", default-features = false }
 omnia-wasi-blobstore = { path = "crates/wasi-blobstore", version = "0.36.0" }
 omnia-wasi-config = { path = "crates/wasi-config", version = "0.36.0" }
 omnia-wasi-docstore = { path = "crates/wasi-docstore", version = "0.36.0" }
@@ -141,7 +142,7 @@ omnia-wasi-otel = { path = "crates/wasi-otel", version = "0.36.0" }
 omnia-wasi-sql = { path = "crates/wasi-sql", version = "0.36.0" }
 omnia-wasi-vault = { path = "crates/wasi-vault", version = "0.36.0" }
 omnia-wasi-websocket = { path = "crates/wasi-websocket", version = "0.36.0" }
-test-utils = { path = "crates/test-utils" }
+test-programs = { path = "crates/test-programs" }
 
 [patch.crates-io]
 wrpc-transport = { git = "https://github.com/bytecodealliance/wrpc" }
@@ -168,8 +169,3 @@ opt-level = 3
 [profile.dev.package.wasmtime-internal-cranelift]
 opt-level = 3
 
-# [package.metadata.cargo-udeps.ignore]
-# normal = ["openssl"]
-
-# [package.metadata.cargo-machete]
-# ignored = ["openssl"]

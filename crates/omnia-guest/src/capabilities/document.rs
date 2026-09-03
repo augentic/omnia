@@ -64,3 +64,27 @@ pub trait DocumentStore: Send + Sync {
         async move { omnia_wasi_docstore::store::query(store, options).await }
     }
 }
+
+delegate_deref!(DocumentStore {
+    fn get(&self, store: &str, id: &str) -> impl Future<Output = Result<Option<Document>>> + Send {
+        (**self).get(store, id)
+    }
+
+    fn insert(&self, store: &str, doc: &Document) -> impl Future<Output = Result<()>> + Send {
+        (**self).insert(store, doc)
+    }
+
+    fn put(&self, store: &str, doc: &Document) -> impl Future<Output = Result<()>> + Send {
+        (**self).put(store, doc)
+    }
+
+    fn delete(&self, store: &str, id: &str) -> impl Future<Output = Result<bool>> + Send {
+        (**self).delete(store, id)
+    }
+
+    fn query(
+        &self, store: &str, options: QueryOptions,
+    ) -> impl Future<Output = Result<QueryResult>> + Send {
+        (**self).query(store, options)
+    }
+});

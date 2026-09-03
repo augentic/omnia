@@ -39,7 +39,7 @@ use wasmtime::component::{HasData, Linker};
 
 use self::generated::wasi::sql::{readwrite, types};
 #[cfg(feature = "sqlite")]
-pub use crate::host::default_impl::SqlDefault;
+pub use crate::host::default_impl::{ConnectOptions, SqlDefault};
 pub use crate::host::generated::wasi::sql::types::{DataType, Field, Row};
 pub use crate::host::resource::*;
 

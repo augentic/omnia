@@ -1,11 +1,12 @@
-//! An instrumented function owning the telemetry lifecycle exports its span
-//! to the host as it returns.
+//! An instrumented function's span reaches the host: `command!` owns the
+//! telemetry lifecycle here, so `traced` records into it and the flush at
+//! the end of the run exports the span.
 
 #![cfg(target_arch = "wasm32")]
 
 use tracing::Level;
 
-test_programs::run!(scenario);
+omnia_guest::command!(scenario);
 
 async fn scenario() {
     traced().await;

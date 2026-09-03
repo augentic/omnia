@@ -20,3 +20,9 @@ pub trait Config: Send + Sync {
         }
     }
 }
+
+delegate_deref!(Config {
+    fn get(&self, key: &str) -> impl Future<Output = Result<String>> + Send {
+        (**self).get(key)
+    }
+});

@@ -2381,7 +2381,7 @@ dependencies = [
  "pastey",
  "serde",
  "sha2 0.10.9",
- "test-utils",
+ "test-programs",
  "tokio",
  "tokio-util",
  "toml",
@@ -2410,6 +2410,7 @@ dependencies = [
  "http-body",
  "http-body-util",
  "omnia-guest-macros",
+ "omnia-test",
  "omnia-wasi-blobstore",
  "omnia-wasi-config",
  "omnia-wasi-docstore",
@@ -2465,13 +2466,46 @@ dependencies = [
  "futures",
  "omnia",
  "omnia-core",
+ "omnia-test",
+ "omnia-wasi-otel",
  "serde",
  "tempfile",
- "test-utils",
+ "test-programs",
  "tokio",
  "tracing",
  "wasm-pkg-client",
  "wasmtime",
+]
+
+[[package]]
+name = "omnia-test"
+version = "0.36.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "futures",
+ "http",
+ "http-body",
+ "http-body-util",
+ "omnia",
+ "omnia-guest",
+ "omnia-wasi-blobstore",
+ "omnia-wasi-config",
+ "omnia-wasi-docstore",
+ "omnia-wasi-http",
+ "omnia-wasi-identity",
+ "omnia-wasi-keyvalue",
+ "omnia-wasi-messaging",
+ "omnia-wasi-model",
+ "omnia-wasi-otel",
+ "omnia-wasi-sql",
+ "omnia-wasi-vault",
+ "omnia-wasi-websocket",
+ "serde_json",
+ "tempfile",
+ "test-programs",
+ "tokio",
+ "trybuild",
 ]
 
 [[package]]
@@ -2604,9 +2638,10 @@ dependencies = [
  "jsonschema",
  "omnia",
  "omnia-core",
+ "omnia-test",
  "serde",
  "serde_json",
- "test-utils",
+ "test-programs",
  "tokio",
  "tracing",
  "wasip3",
@@ -2625,10 +2660,11 @@ dependencies = [
  "omnia",
  "omnia-core",
  "omnia-guest-macros",
+ "omnia-test",
  "opentelemetry",
  "opentelemetry-proto",
  "opentelemetry_sdk",
- "test-utils",
+ "test-programs",
  "tokio",
  "tracing",
  "tracing-opentelemetry",
@@ -3968,19 +4004,12 @@ version = "0.36.0"
 dependencies = [
  "futures",
  "omnia-guest",
+ "omnia-test",
  "omnia-wasi-model",
  "omnia-wasi-otel",
  "tracing",
  "wasip3",
  "wit-bindgen 0.61.1",
-]
-
-[[package]]
-name = "test-utils"
-version = "0.36.0"
-dependencies = [
- "anyhow",
- "omnia",
 ]
 
 [[package]]

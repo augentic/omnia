@@ -3,6 +3,58 @@
 use std::future::Future;
 use std::io::Write as _;
 
+/// Wires an `async fn` as the guest's `wasi:cli/run` export, driven through
+/// [`execute_wasi`] so telemetry is initialized and flushed around it.
+///
+/// The entry returns `()` (a scenario that asserts internally and traps on
+/// failure) or `Result<(), u8>` (a CLI reporting an exit status); see
+/// [`IntoExit`].
+///
+/// ```rust,ignore
+/// omnia_guest::command!(main);
+///
+/// async fn main() -> Result<(), u8> {
+///     println!("hello");
+///     Ok(())
+/// }
+/// ```
+#[macro_export]
+macro_rules! command {
+    ($entry:path) => {
+        struct CliGuest;
+
+        $crate::wasip3::cli::command::export!(CliGuest);
+
+        impl $crate::wasip3::exports::cli::run::Guest for CliGuest {
+            async fn run() -> ::core::result::Result<(), ()> {
+                $crate::api::command::execute_wasi(async {
+                    $crate::api::command::IntoExit::into_exit($entry().await)
+                })
+                .await
+            }
+        }
+    };
+}
+
+/// The exit status a [`command!`](crate::command) entry yields: `()` always
+/// succeeds and `Result<(), u8>` passes its code through.
+pub trait IntoExit {
+    /// The status handed to [`execute_wasi`].
+    fn into_exit(self) -> Result<(), u8>;
+}
+
+impl IntoExit for () {
+    fn into_exit(self) -> Result<(), u8> {
+        Ok(())
+    }
+}
+
+impl IntoExit for Result<(), u8> {
+    fn into_exit(self) -> Result<(), u8> {
+        self
+    }
+}
+
 /// Execute a guest command at the WASI CLI boundary.
 ///
 /// Initializes guest telemetry, awaits `run`, and flushes telemetry and

@@ -35,15 +35,9 @@ pub struct Config {
     pub config_file: Option<Expr>,
     pub manifest: ManifestSpec,
     /// Whether a `plugins:` block was declared — links the `WasiPlugins`
-    /// loader host even when the block carries no interfaces.
+    /// loader host and installs the declared locations even when the block
+    /// carries no interfaces.
     pub plugins_declared: bool,
-    /// The `plugins:` block's `locations:` entries, lowered into the
-    /// generated `Wiring::extend` hook as built-in acquirers slotted by
-    /// location kind.
-    pub locations: Vec<LocationSpec>,
-    /// The `plugins:` block's `cache:` backend, connected in the bundle and
-    /// attached as the registry location's store.
-    pub cache: Option<Path>,
 }
 
 /// One `Host: Backend` wiring from the `hosts: { ... }` block, optionally
@@ -56,24 +50,24 @@ pub struct HostEntry {
     pub options: Option<Expr>,
 }
 
-/// Inline manifest keys (`plugins` interfaces, `guests`, `mounts`) parsed
-/// from `runtime!({ ... })`; mirrors the `omnia::Manifest` schema.
+/// Inline manifest keys (`plugins` interfaces and locations, `guests`,
+/// `mounts`) parsed from `runtime!({ ... })`; mirrors the `omnia::Manifest`
+/// schema.
 #[derive(Default)]
 pub struct ManifestSpec {
     pub plugins: Vec<Expr>,
+    pub locations: Vec<LocationSpec>,
     pub guests: Vec<GuestSpec>,
     pub mounts: Vec<MountSpec>,
 }
 
-/// The `plugins: { interfaces: [...], locations: [...], cache: ... }`
-/// block: the deployment's host-mediated interface set plus its compiled-in
-/// acquisition policy — the declarative `locations:` list with its optional
-/// `cache:` backend.
+/// The `plugins: { interfaces: [...], locations: [...] }` block: the
+/// deployment's host-mediated interface set plus its acquisition
+/// locations, both manifest data.
 #[derive(Default)]
 pub struct PluginsSpec {
     pub interfaces: Vec<Expr>,
     pub locations: Vec<LocationSpec>,
-    pub cache: Option<Path>,
 }
 
 /// One `locations:` entry, discriminated by the keys present.
@@ -92,7 +86,10 @@ pub enum LocationSpec {
 
 impl ManifestSpec {
     pub const fn is_empty(&self) -> bool {
-        self.plugins.is_empty() && self.guests.is_empty() && self.mounts.is_empty()
+        self.plugins.is_empty()
+            && self.locations.is_empty()
+            && self.guests.is_empty()
+            && self.mounts.is_empty()
     }
 }
 
@@ -129,8 +126,6 @@ impl Parse for Config {
         let mut config_file = None;
         let mut manifest = ManifestSpec::default();
         let mut plugins_declared = false;
-        let mut locations = Vec::new();
-        let mut cache = None;
         let mut config_span: Option<Span> = None;
         let mut inline_span: Option<Span> = None;
 
@@ -154,16 +149,14 @@ impl Parse for Config {
                 }
                 OptValue::Plugins(p) => {
                     plugins_declared = true;
-                    locations = p.locations;
-                    cache = p.cache;
-                    // Acquisition policy (`locations:`, `cache:`) is
-                    // compiled-in code, not manifest data: only an
-                    // `interfaces:` list conflicts with `config:`, so a
-                    // config-file deployment may still compile an acquirer in.
-                    if !p.interfaces.is_empty() {
-                        manifest.plugins = p.interfaces;
+                    // Interfaces and locations are both manifest data, so
+                    // either conflicts with `config:`; a bare `plugins: {}`
+                    // only opts into the loader host.
+                    if !p.interfaces.is_empty() || !p.locations.is_empty() {
                         inline_span.get_or_insert(span);
                     }
+                    manifest.plugins = p.interfaces;
+                    manifest.locations = p.locations;
                 }
                 OptValue::Guests(g) => {
                     manifest.guests = g;
@@ -182,8 +175,6 @@ impl Parse for Config {
             config_file,
             manifest,
             plugins_declared,
-            locations,
-            cache,
         };
         config.validate(&KeySpans {
             config: config_span,
@@ -205,8 +196,9 @@ impl Config {
         if let (Some(_), Some(inline)) = (spans.config, spans.inline) {
             return Err(syn::Error::new(
                 inline,
-                "`config:` and inline manifest keys (`plugins`, `guests`, `mounts`) are \
-                 mutually exclusive",
+                "`config:` and inline manifest keys (`plugins` interfaces and locations, \
+                 `guests`, `mounts`) are mutually exclusive; declare `[[location]]` entries in \
+                 the config file",
             ));
         }
 
@@ -484,7 +476,6 @@ impl Parse for PluginsSpec {
     fn parse(input: ParseStream) -> Result<Self> {
         let mut spec = Self::default();
         let mut locations_span = None;
-        let mut cache_span = None;
 
         parse_kv_block(input, |key, value| {
             match key.to_string().as_str() {
@@ -493,16 +484,21 @@ impl Parse for PluginsSpec {
                     spec.locations = parse_bracketed_list(value)?;
                     locations_span = Some(key.span());
                 }
+                // A pointed migration diagnostic for the removed store option.
                 "cache" => {
-                    spec.cache = Some(value.parse()?);
-                    cache_span = Some(key.span());
+                    return Err(syn::Error::new(
+                        key.span(),
+                        "the `cache:` key was removed; a declared registry location reads \
+                         fresh. To cache, assemble the runtime by hand and install \
+                         `omnia::Plugins` over an `omnia::RegistryClient::cached(store)` from \
+                         `Wiring::extend`",
+                    ));
                 }
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
                         format!(
-                            "unknown plugins key `{other}`; expected `interfaces`, `locations`, \
-                             or `cache`"
+                            "unknown plugins key `{other}`; expected `interfaces` or `locations`"
                         ),
                     ));
                 }
@@ -510,14 +506,14 @@ impl Parse for PluginsSpec {
             Ok(())
         })?;
 
-        spec.validate(locations_span, cache_span)?;
+        spec.validate(locations_span)?;
         Ok(spec)
     }
 }
 
 impl PluginsSpec {
     /// The block's cross-key refusals, spanned to the offending key.
-    fn validate(&self, locations_span: Option<Span>, cache_span: Option<Span>) -> Result<()> {
+    fn validate(&self, locations_span: Option<Span>) -> Result<()> {
         if let Some(span) = locations_span
             && self.locations.is_empty()
         {
@@ -532,22 +528,11 @@ impl PluginsSpec {
             LocationSpec::Registry(endpoint) => Some(endpoint.span()),
             LocationSpec::Path { .. } => None,
         });
-        let first_registry = registries.next();
-        if let Some(second) = registries.next() {
+        if let Some(second) = registries.nth(1) {
             return Err(syn::Error::new(
                 second,
-                "more than one `registry` location; a deployment compiles in one default \
+                "more than one `registry` location; a deployment declares one default \
                  registry (a load's own location may still override the endpoint)",
-            ));
-        }
-
-        if let Some(span) = cache_span
-            && first_registry.is_none()
-        {
-            return Err(syn::Error::new(
-                span,
-                "`cache:` requires a `{ registry: ... }` location to attach the store to; \
-                 path locations always read fresh",
             ));
         }
 

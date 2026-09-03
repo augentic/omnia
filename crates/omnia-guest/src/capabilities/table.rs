@@ -71,3 +71,17 @@ async fn prepare(
         .map_err(|e| anyhow::anyhow!("failed to prepare statement: {}", e.trace()))?;
     Ok((conn, stmt))
 }
+
+delegate_deref!(TableStore {
+    fn query(
+        &self, conn_name: String, query: String, params: Vec<DataType>,
+    ) -> impl Future<Output = Result<Vec<Row>>> + Send {
+        (**self).query(conn_name, query, params)
+    }
+
+    fn exec(
+        &self, conn_name: String, query: String, params: Vec<DataType>,
+    ) -> impl Future<Output = Result<u32>> + Send {
+        (**self).exec(conn_name, query, params)
+    }
+});

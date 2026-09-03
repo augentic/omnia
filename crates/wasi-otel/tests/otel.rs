@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use futures::FutureExt as _;
 use omnia::{ExitStatus, FutureResult, LogMode, Provides, Telemetry};
+use omnia_test::host::Deployment;
 use omnia_wasi_otel::{WasiOtel, WasiOtelCtx};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
@@ -17,7 +18,7 @@ use tracing::Instrument as _;
 
 // Every guest program in `crates/test-programs` must have a matching test
 // here; a new program without one fails to compile.
-test_utils::foreach_otel!();
+test_programs::foreach_otel!();
 
 /// The store's backend bundle: just the otel backend under test.
 #[derive(Clone, Debug)]
@@ -71,9 +72,16 @@ async fn run_guest(wasm: &str) -> Recording {
     Telemetry::new("otel-e2e").log_mode(LogMode::Progress).build().expect("telemetry installs");
 
     let recording = Recording::default();
+    // Linked by hand: `run_host` would add a second `WasiOtel` beside the
+    // one under test.
     let status = tokio::time::timeout(
         Duration::from_secs(300),
-        test_utils::run_host::<WasiOtel, _>(wasm, vec![], Backends(recording.clone()))
+        Deployment::new()
+            .guest("guest", wasm)
+            .run(Backends(recording.clone()), |deployment| {
+                deployment.host::<WasiOtel, Backends>()?;
+                Ok(())
+            })
             .instrument(tracing::info_span!("test-drive")),
     )
     .await
@@ -85,7 +93,7 @@ async fn run_guest(wasm: &str) -> Recording {
 
 #[tokio::test]
 async fn otel_instrumented_handler() {
-    let recording = run_guest(test_utils::OTEL_INSTRUMENTED_HANDLER).await;
+    let recording = run_guest(test_programs::OTEL_INSTRUMENTED_HANDLER).await;
     assert_eq!(recording.span_names(), ["traced"]);
     // The scenario records no metrics, so the flush skips the metrics export
     // rather than sending an empty collection.
@@ -94,6 +102,6 @@ async fn otel_instrumented_handler() {
 
 #[tokio::test]
 async fn otel_spawned_task_pending() {
-    let recording = run_guest(test_utils::OTEL_SPAWNED_TASK_PENDING).await;
+    let recording = run_guest(test_programs::OTEL_SPAWNED_TASK_PENDING).await;
     assert_eq!(recording.span_names(), ["traced"]);
 }
