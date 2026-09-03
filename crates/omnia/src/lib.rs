@@ -2,9 +2,10 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 // The embedder facade: the runtime spine (`omnia-core`), the plugins
-// capability (`omnia-plugin`), and the `runtime!` macro, re-exported under
-// one root. The `runtime!` macro emits `omnia::…` paths, so every name it
-// references must stay reachable from here.
+// capability (`omnia-plugin`), the `run` grammar (`omnia-cli`, behind the
+// `cli` feature), and the `runtime!` macro, re-exported under one root. The
+// `runtime!` macro emits `omnia::…` paths, so every name it references must
+// stay reachable from here.
 //
 // `#[doc(inline)]` matters: rustdoc renders a cross-crate `pub use` as a bare
 // re-export line pointing into the source crate, so without it every item
@@ -18,9 +19,18 @@
 // embedders reach them from here without a direct dependency of their own.
 pub use anyhow;
 pub use futures;
+#[cfg(feature = "cli")]
+#[doc(hidden)]
+pub use omnia_cli::main;
+#[cfg(feature = "cli")]
+#[doc(inline)]
+pub use omnia_cli::{Cli, Command, Parser};
 #[cfg(feature = "jit")]
 #[doc(inline)]
 pub use omnia_core::compile;
+#[cfg(not(feature = "cli"))]
+#[doc(hidden)]
+pub use omnia_core::main;
 #[doc(inline)]
 pub use omnia_core::{
     AdmitError, Backend, Backends, CliRoutes, Deployment, DeploymentBuilder, Dispatcher,
@@ -33,13 +43,10 @@ pub use omnia_core::{
     TriggerRouter, WasmOnly, WeakRuntime, Wiring, WrpcState, as_command_chain, get_cloned,
     host_error, serve_links, sha256_digest, telemetry, wasi_view,
 };
-#[cfg(feature = "cli")]
-#[doc(inline)]
-pub use omnia_core::{Cli, Command, Parser};
 #[doc(hidden)]
 pub use omnia_core::{
-    MainOptions, ManifestSource, WrpcCtxView, WrpcView, main, pastey, run, run_precompiled,
-    run_with, tokio, wasmtime, wasmtime_wasi,
+    MainOptions, ManifestSource, WrpcCtxView, WrpcView, pastey, run, run_precompiled, run_with,
+    tokio, wasmtime, wasmtime_wasi,
 };
 #[doc(inline)]
 pub use omnia_host_macros::runtime;

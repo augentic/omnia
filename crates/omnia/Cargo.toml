@@ -22,10 +22,10 @@ default = ["cli", "jit", "otlp"]
 # `clap` re-export. Without it, deployments are direct commands (command mode
 # with a compiled-in deployment) or built programmatically via
 # `DeploymentBuilder`.
-cli = ["omnia-core/cli"]
+cli = ["dep:omnia-cli"]
 
 # Enables just-in-time wasm to machine code compilation.
-jit = ["omnia-core/jit"]
+jit = ["omnia-core/jit", "omnia-cli?/jit"]
 
 # Enables the OTLP (gRPC) span and metric exporters. Without it, `Telemetry`
 # still installs the fmt/`EnvFilter` subscriber, while `telemetry::flush` and
@@ -47,6 +47,7 @@ gc = ["omnia-core/gc"]
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
 futures.workspace = true
+omnia-cli = { workspace = true, optional = true }
 omnia-core.workspace = true
 omnia-host-macros.workspace = true
 omnia-plugin.workspace = true
