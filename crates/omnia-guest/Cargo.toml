@@ -51,3 +51,12 @@ omnia-wasi-websocket.workspace = true
 omnia-wasi-otel.workspace = true
 wasip3.workspace = true
 wit-bindgen.workspace = true
+
+[dev-dependencies]
+http-body-util.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
+tower.workspace = true
+tracing-subscriber.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+omnia-test = { workspace = true, features = ["guest"] }

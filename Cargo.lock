@@ -468,6 +468,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "console"
+version = "0.16.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fe5f465a4f6fee88fad41b85d990f84c835335e85b5d9e6e63e0d06d28cba7c"
+dependencies = [
+ "encode_unicode",
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "const-hex"
 version = "1.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -999,6 +1010,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
 
 [[package]]
+name = "encode_unicode"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
+
+[[package]]
 name = "encoding_rs"
 version = "0.8.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1045,6 +1062,8 @@ dependencies = [
  "clap",
  "http",
  "http-body-util",
+ "hyper",
+ "hyper-util",
  "omnia",
  "omnia-guest",
  "omnia-wasi-blobstore",
@@ -1060,6 +1079,7 @@ dependencies = [
  "omnia-wasi-vault",
  "omnia-wasi-websocket",
  "opentelemetry",
+ "reqwest 0.13.4",
  "serde",
  "serde_json",
  "tokio",
@@ -1368,6 +1388,12 @@ dependencies = [
  "indexmap",
  "stable_deref_trait",
 ]
+
+[[package]]
+name = "glob"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
 name = "h2"
@@ -1735,6 +1761,18 @@ dependencies = [
  "hashbrown 0.17.1",
  "serde",
  "serde_core",
+]
+
+[[package]]
+name = "insta"
+version = "1.48.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86f0f8fee8c926415c58d6ae43a08523a26faccb2323f5e6b644fe7dd4ef6b82"
+dependencies = [
+ "console",
+ "once_cell",
+ "similar",
+ "tempfile",
 ]
 
 [[package]]
@@ -2336,12 +2374,14 @@ dependencies = [
  "fromenv",
  "futures",
  "http",
+ "omnia",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "pastey",
  "serde",
  "sha2 0.10.9",
+ "test-programs",
  "tokio",
  "tokio-util",
  "toml",
@@ -2368,7 +2408,9 @@ dependencies = [
  "futures",
  "http",
  "http-body",
+ "http-body-util",
  "omnia-guest-macros",
+ "omnia-test",
  "omnia-wasi-blobstore",
  "omnia-wasi-config",
  "omnia-wasi-docstore",
@@ -2385,7 +2427,10 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "thiserror 2.0.20",
+ "tokio",
+ "tower",
  "tracing",
+ "tracing-subscriber",
  "wasip3",
  "wit-bindgen 0.61.1",
 ]
@@ -2397,15 +2442,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.4",
+ "trybuild",
 ]
 
 [[package]]
 name = "omnia-host-macros"
 version = "0.36.0"
 dependencies = [
+ "insta",
+ "prettyplease 0.3.0",
  "proc-macro2",
  "quote",
  "syn 3.0.4",
+ "trybuild",
 ]
 
 [[package]]
@@ -2415,7 +2464,13 @@ dependencies = [
  "anyhow",
  "cap-std",
  "futures",
+ "omnia",
  "omnia-core",
+ "omnia-test",
+ "omnia-wasi-otel",
+ "serde",
+ "tempfile",
+ "test-programs",
  "tokio",
  "tracing",
  "wasm-pkg-client",
@@ -2448,6 +2503,9 @@ dependencies = [
  "omnia-wasi-websocket",
  "serde_json",
  "tempfile",
+ "test-programs",
+ "tokio",
+ "trybuild",
 ]
 
 [[package]]
@@ -2531,6 +2589,7 @@ dependencies = [
  "oauth2",
  "omnia-core",
  "serde",
+ "tokio",
  "tracing",
  "wasmtime",
  "wasmtime-wasi",
@@ -2577,9 +2636,12 @@ dependencies = [
  "cap-std",
  "futures",
  "jsonschema",
+ "omnia",
  "omnia-core",
+ "omnia-test",
  "serde",
  "serde_json",
+ "test-programs",
  "tokio",
  "tracing",
  "wasip3",
@@ -2595,11 +2657,15 @@ dependencies = [
  "anyhow",
  "futures",
  "hex",
+ "omnia",
  "omnia-core",
  "omnia-guest-macros",
+ "omnia-test",
  "opentelemetry",
  "opentelemetry-proto",
  "opentelemetry_sdk",
+ "test-programs",
+ "tokio",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
@@ -3721,6 +3787,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
+name = "similar"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3897,6 +3969,12 @@ name = "target-lexicon"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca"
+
+[[package]]
+name = "target-triple"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3a6bfce3d99adfa72d24750a61f782f3036a81e7f86d8841ee1326deaebd171"
 
 [[package]]
 name = "tempfile"
@@ -4325,6 +4403,21 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
+
+[[package]]
+name = "trybuild"
+version = "1.0.120"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e605bf6b39357663d8ba4e984f8be8da8df6bb32e81031d6889024ea8fd68e4"
+dependencies = [
+ "glob",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "target-triple",
+ "termcolor",
+ "toml",
+]
 
 [[package]]
 name = "tungstenite"

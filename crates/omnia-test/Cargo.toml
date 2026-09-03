@@ -82,6 +82,24 @@ omnia-wasi-websocket = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }
 
+[dev-dependencies]
+anyhow.workspace = true
+bytes.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+omnia.workspace = true
+omnia-guest.workspace = true
+omnia-wasi-blobstore.workspace = true
+omnia-wasi-config.workspace = true
+omnia-wasi-keyvalue.workspace = true
+omnia-wasi-model.workspace = true
+omnia-wasi-otel.workspace = true
+omnia-wasi-sql.workspace = true
+serde_json.workspace = true
+test-programs.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+trybuild.workspace = true
+
 [[test]]
 name = "script"
 
