@@ -121,10 +121,20 @@ where
             return ExitCode::FAILURE;
         }
     };
+    drive_main::<B, H>(plan.into_builder()).await
+}
+
+/// Run a planned deployment builder to completion, reporting failures on stderr.
+#[doc(hidden)]
+pub async fn drive_main<B, H>(builder: DeploymentBuilder) -> ExitCode
+where
+    B: Backends,
+    H: Wiring<B>,
+{
     // The generated entry point admits pre-compiled artifacts: manifests and
     // `.bin` paths given to (or compiled into) the binary are trusted
     // operator inputs (docs/security-model.md).
-    let builder = plan.into_builder().precompiled();
+    let builder = builder.precompiled();
     // SAFETY: the operator running this binary chose the manifest and
     // artifact paths; pre-compiled artifacts are documented trusted inputs
     // produced by `omnia compile`.

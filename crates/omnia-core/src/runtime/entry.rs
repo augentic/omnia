@@ -68,6 +68,18 @@ impl MainOptions {
         self.manifest = Some(source);
         self
     }
+
+    /// Whether this is a direct command: command mode with a compiled-in manifest.
+    #[must_use]
+    pub fn is_direct(&self) -> bool {
+        self.mode == Mode::Command && self.manifest.is_some()
+    }
+
+    /// Split into the mode and the compiled-in manifest source.
+    #[must_use]
+    pub fn into_parts(self) -> (Mode, Option<ManifestSource>) {
+        (self.mode, self.manifest)
+    }
 }
 
 /// Why entry planning stopped before a deployment could be built.
@@ -146,25 +158,8 @@ fn peel_log_flags(args: Vec<String>) -> Result<(Vec<String>, LogMode)> {
 pub(super) fn plan(
     options: MainOptions, argv: impl IntoIterator<Item = OsString>, omnia_config: Option<OsString>,
 ) -> Result<EntryPlan, PlanError> {
-    let MainOptions { mode, manifest } = options;
-
-    if mode == Mode::Command && manifest.is_some() {
-        let raw_args = argv
-            .into_iter()
-            .skip(1)
-            .map(|arg| {
-                arg.into_string()
-                    .map_err(|arg| anyhow!("guest argument `{}` is not valid UTF-8", arg.display()))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let (guest_args, log_mode) = peel_log_flags(raw_args)?;
-        let manifest = manifest.map(ManifestSource::into_manifest).transpose()?;
-        return Ok(EntryPlan {
-            mode,
-            manifest,
-            args: guest_args,
-            log_mode: Some(log_mode),
-        });
+    if options.is_direct() {
+        return plan_direct(options, argv).map_err(PlanError::Fatal);
     }
 
     // Without the `cli` feature the standard grammar cannot be parsed; only
@@ -178,43 +173,80 @@ pub(super) fn plan(
         )))
     }
     #[cfg(feature = "cli")]
-    {
-        let cli = Cli::try_parse_from(argv).map_err(PlanError::Usage)?;
-        match cli.command {
-            Command::Run {
-                wasm,
-                config,
-                mounts,
-                plugins,
+    plan_cli(options, argv, omnia_config)
+}
+
+/// Plan a direct command: argv belongs to the guest bar the reserved host log
+/// flags, and the compiled-in manifest is the sole source.
+///
+/// # Errors
+///
+/// Returns an error if argv is not UTF-8, the log flags conflict, or the
+/// compiled-in manifest cannot be loaded.
+pub(super) fn plan_direct(
+    options: MainOptions, argv: impl IntoIterator<Item = OsString>,
+) -> Result<EntryPlan> {
+    let (mode, manifest) = options.into_parts();
+    let raw_args = argv
+        .into_iter()
+        .skip(1)
+        .map(|arg| {
+            arg.into_string()
+                .map_err(|arg| anyhow!("guest argument `{}` is not valid UTF-8", arg.display()))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let (guest_args, log_mode) = peel_log_flags(raw_args)?;
+    let manifest = manifest.map(ManifestSource::into_manifest).transpose()?;
+    Ok(EntryPlan {
+        mode,
+        manifest,
+        args: guest_args,
+        log_mode: Some(log_mode),
+    })
+}
+
+/// Plan the standard `run [wasm] [--config] -- args…` grammar, resolving the
+/// manifest by the `--config` › `OMNIA_CONFIG` › positional wasm › compiled-in
+/// ladder.
+#[cfg(feature = "cli")]
+fn plan_cli(
+    options: MainOptions, argv: impl IntoIterator<Item = OsString>, omnia_config: Option<OsString>,
+) -> Result<EntryPlan, PlanError> {
+    let (mode, manifest) = options.into_parts();
+    let cli = Cli::try_parse_from(argv).map_err(PlanError::Usage)?;
+    match cli.command {
+        Command::Run {
+            wasm,
+            config,
+            mounts,
+            plugins,
+            args,
+        } => {
+            let config = config.or_else(|| omnia_config.map(PathBuf::from));
+            let manifest = match (config, wasm) {
+                (Some(config), _) => Manifest::from_config(config)?,
+                (None, Some(wasm)) => Manifest::from_wasm(wasm),
+                (None, None) => match manifest {
+                    Some(source) => source.into_manifest()?,
+                    None => {
+                        return Err(PlanError::Fatal(anyhow!(
+                            "no guest specified: pass a <wasm> path, or --config <omnia.toml> (or \
+                             set OMNIA_CONFIG)"
+                        )));
+                    }
+                },
+            };
+            Ok(EntryPlan {
+                mode,
+                manifest: Some(manifest.mounts(mounts).plugins(plugins)),
                 args,
-            } => {
-                let config = config.or_else(|| omnia_config.map(PathBuf::from));
-                let manifest = match (config, wasm) {
-                    (Some(config), _) => Manifest::from_config(config)?,
-                    (None, Some(wasm)) => Manifest::from_wasm(wasm),
-                    (None, None) => match manifest {
-                        Some(source) => source.into_manifest()?,
-                        None => {
-                            return Err(PlanError::Fatal(anyhow!(
-                                "no guest specified: pass a <wasm> path, or --config <omnia.toml> \
-                                 (or set OMNIA_CONFIG)"
-                            )));
-                        }
-                    },
-                };
-                Ok(EntryPlan {
-                    mode,
-                    manifest: Some(manifest.mounts(mounts).plugins(plugins)),
-                    args,
-                    log_mode: None,
-                })
-            }
-            #[cfg(feature = "jit")]
-            Command::Compile { .. } => Err(PlanError::Fatal(anyhow!(
-                "the generated `main` only supports `run`; supply a custom `main` for other \
-                 subcommands"
-            ))),
+                log_mode: None,
+            })
         }
+        #[cfg(feature = "jit")]
+        Command::Compile { .. } => Err(PlanError::Fatal(anyhow!(
+            "the generated `main` only supports `run`; supply a custom `main` for other subcommands"
+        ))),
     }
 }
 
