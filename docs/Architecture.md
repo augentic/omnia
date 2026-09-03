@@ -71,7 +71,7 @@ Layers 1 and 2 form the **runtime core** — domain-agnostic infrastructure that
 
 ### Runtime core (`crates/omnia-core`) and the `omnia` facade
 
-The foundation of the runtime is `omnia-core`; embedders depend on the thin `omnia` facade crate, which re-exports core, the `omnia-plugin` capability crate, and the `runtime!` macro under one root (`omnia::…` paths). Capability crates like `omnia-plugin` sit between the two: they build on core's extension seam (`Wiring::extend` + `Extensions`, plus the privileged `Runtime::admit` admission API) and surface through the facade. The facade is meant to be an embedder's *only* omnia dependency — a deployment's `Cargo.toml` never names `omnia-core` or `omnia-plugin`, and neither does any path the `runtime!` macro emits (it imports even its `Result` as `omnia::anyhow::Result`). The facade's re-exports are `#[doc(inline)]` so the rendered documentation shows `omnia::…` paths too, and the unpublished `crates/facade-check` member — `omnia` plus one host crate, nothing else, expanding a `runtime!` with a full `plugins:` block — fails to build if that ever regresses. Depending on `omnia-core` directly is for building another capability crate. The core provides:
+The foundation of the runtime is `omnia-core`; embedders depend on the thin `omnia` facade crate, which re-exports core, the `omnia-plugin` capability crate, and the `runtime!` macro under one root (`omnia::…` paths). Capability crates like `omnia-plugin` sit between the two: they build on core's extension seam (`Wiring::extend` + `Extensions`, plus the privileged `Runtime::admit` admission API) and surface through the facade. The facade is meant to be an embedder's *only* omnia dependency — a deployment's `Cargo.toml` never names `omnia-core` or `omnia-plugin`, and neither does any path the `runtime!` macro emits (it imports even its `Result` as `omnia::anyhow::Result`). The facade's re-exports are `#[doc(inline)]` so the rendered documentation shows `omnia::…` paths too. Depending on `omnia-core` directly is for building another capability crate. The core provides:
 
 - **CLI infrastructure**: the `run` subcommand (and `compile`, with the `jit` feature)
 - **Deployment pipeline**: `DeploymentBuilder` builds a deployment from a `Manifest` (loaded from `omnia.toml`, synthesized from a single `.wasm`, or constructed programmatically), `Registry` holds pre-instantiated guests
@@ -206,7 +206,6 @@ omnia/
 │   ├── guest-macros/       # #[instrument] proc macro
 │   ├── host-macros/        # runtime! proc-macro
 │   ├── omnia-plugin/       # Plugins capability (loader host + acquisition; re-exported by omnia)
-│   ├── facade-check/       # Compile-only proof that `omnia` alone is an embedder's dependency
 │   └── wasi-*/             # WASI interface implementations
 │       ├── src/
 │       │   ├── guest.rs    # Guest bindings (wasm32)

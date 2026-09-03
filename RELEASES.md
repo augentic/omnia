@@ -84,10 +84,7 @@
   implementors to depend on it directly — `ContentStore`/`ReleaseStore` and
   the `Backend`/`NoOptions` a `cache:` store also needs all reach embedders
   through `omnia`; depending on `omnia-core` or `omnia-plugin` is only for
-  building another capability crate. The unpublished `facade-check` workspace
-  member pins this: it declares `omnia` and one host crate as its only
-  dependencies and expands a `runtime!` with a full `plugins:` block, so a
-  future path that resolves only through an underlying crate fails the build.
+  building another capability crate.
 - Plugin loads are lock-free and race-safe. The loader's (package, digest)
   idempotency record now rides the registry entry itself (`Guest::digest`,
   recorded by `Runtime::admit` from the admitted bytes), so the attestation
