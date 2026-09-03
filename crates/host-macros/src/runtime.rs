@@ -285,7 +285,7 @@ mod tests {
     }
 
     // The declarative locations grammar: each entry lowers into a
-    // `PluginLocation` on the inline manifest, and the declared `plugins:`
+    // `Location` on the inline manifest, and the declared `plugins:`
     // block makes the generated `Wiring::extend` install them.
     #[test]
     fn expand_locations() {

@@ -15,8 +15,8 @@ use std::sync::Arc;
 use anyhow::{Context as _, Result};
 use omnia::{
     DeploymentBuilder, ExitStatus, GuestArtifact, GuestEntry, LoadError, Location, Manifest, Mode,
-    PathMounts, PathSource, PluginLoader as _, Plugins, RegistryClient, RegistrySource, Runtime,
-    StoreCtx, WasiPlugins, sha256_digest,
+    Origin, PathMounts, PathSource, PluginLoader as _, Plugins, RegistryClient, RegistrySource,
+    Runtime, StoreCtx, WasiPlugins, sha256_digest,
 };
 use omnia_test::host::{Backends, Scratch, scratch};
 use omnia_wasi_otel::WasiOtel;
@@ -176,8 +176,8 @@ fn locations_grammar_carries_manifest_data() {
     assert_eq!(
         manifest.locations,
         [
-            omnia::PluginLocation::path("adapters", "adapters"),
-            omnia::PluginLocation::registry("ghcr.io"),
+            Location::path("adapters", "adapters"),
+            Location::registry("ghcr.io"),
         ]
     );
 }
@@ -237,9 +237,9 @@ async fn reload_after_deregister_binds_fresh_bytes() {
     )
     .await
     .expect("assembling runtime");
-    let location = || Location::Path("./plugin.wasm".to_owned());
+    let origin = || Origin::Path("./plugin.wasm".to_owned());
 
-    let first = runtime.load("test:echoer", location(), None).await.expect("first load");
+    let first = runtime.load("test:echoer", origin(), None).await.expect("first load");
     runtime.deregister(first.id()).expect("deregistering the loaded plugin");
 
     // Same component, one extra custom section: same behavior, new digest.
@@ -248,7 +248,7 @@ async fn reload_after_deregister_binds_fresh_bytes() {
     std::fs::write(scratch.path().join("plugin.wasm"), &changed).expect("re-staging");
 
     let stale = runtime
-        .load("test:echoer", location(), Some(first.digest()))
+        .load("test:echoer", origin(), Some(first.digest()))
         .await
         .expect_err("the old digest no longer matches the staged bytes");
     match &stale {
@@ -258,7 +258,7 @@ async fn reload_after_deregister_binds_fresh_bytes() {
         other => panic!("expected a digest-mismatch refusal: {other:?}"),
     }
 
-    let fresh = runtime.load("test:echoer", location(), None).await.expect("re-load");
+    let fresh = runtime.load("test:echoer", origin(), None).await.expect("re-load");
     assert_ne!(fresh.digest(), first.digest(), "the re-load bound fresh bytes");
     assert_eq!(fresh.digest(), sha256_digest(&changed));
     runtime.shutdown();
@@ -281,9 +281,9 @@ async fn pinned_reload_refuses_after_external_reregistration() {
     )
     .await
     .expect("assembling runtime");
-    let location = || Location::Path("./plugin.wasm".to_owned());
+    let origin = || Origin::Path("./plugin.wasm".to_owned());
 
-    let first = runtime.load("test:echoer", location(), None).await.expect("first load");
+    let first = runtime.load("test:echoer", origin(), None).await.expect("first load");
     runtime.deregister(first.id()).expect("deregistering the loaded plugin");
 
     // Same component, one extra custom section: same behavior, new digest —
@@ -296,7 +296,7 @@ async fn pinned_reload_refuses_after_external_reregistration() {
         .expect("re-registering externally");
 
     let stale = runtime
-        .load("test:echoer", location(), Some(first.digest()))
+        .load("test:echoer", origin(), Some(first.digest()))
         .await
         .expect_err("a load never attests an externally registered guest");
     assert!(matches!(stale, LoadError::AlreadyActive(_)), "{stale:?}");
@@ -332,7 +332,7 @@ async fn load_without_plugins_installed_refuses() {
     .expect("assembling runtime");
 
     let error = runtime
-        .load("test:echoer", Location::Path("./plugin.wasm".to_owned()), None)
+        .load("test:echoer", Origin::Path("./plugin.wasm".to_owned()), None)
         .await
         .expect_err("a deployment without plugins refuses every load");
     assert!(

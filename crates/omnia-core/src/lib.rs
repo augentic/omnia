@@ -28,8 +28,8 @@ pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 #[cfg(feature = "cli")]
 pub use self::cli::{Cli, Command};
 pub use self::deployment::{
-    Deployment, DeploymentBuilder, GuestArtifact, GuestEntry, GuestRoutes, Manifest, Mount,
-    PluginLocation, Precompiled, SourceSpec, Transport, TransportKind, WasmOnly,
+    Deployment, DeploymentBuilder, GuestArtifact, GuestEntry, GuestRoutes, Location, Manifest,
+    Mount, Precompiled, SourceSpec, Transport, TransportKind, WasmOnly,
 };
 pub use self::digest::sha256_digest;
 pub use self::dispatch::{

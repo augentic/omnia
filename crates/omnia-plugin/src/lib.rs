@@ -11,7 +11,7 @@
 //! Everything plugin lives here: the [`WasiPlugins`] host binding, the
 //! [`Plugins`] load path, and the acquisition seam. Acquisition policy
 //! (endpoints, cache, path reads) is the two slots [`Plugins::install`]
-//! takes — one per [`Location`] kind — from the deployment's
+//! takes — one per [`Origin`] kind — from the deployment's
 //! [`Wiring::extend`](omnia_core::Wiring::extend) hook.
 //! [`Plugins::install_declared`] fills them from the deployment's declared
 //! locations (the `runtime!` macro's `plugins: { locations: [...] }` list,
@@ -32,10 +32,11 @@ pub use self::path::{PathMounts, PathSource};
 pub use self::registry::{RegistryClient, RegistrySource};
 pub use self::store::{ContentStore, NoStore, ReleaseStore};
 
-/// Where an acquirer finds a package's component bytes — the mirror of the
-/// `omnia:plugins/loader` `location` variant.
+/// Where one load's component bytes come from, resolved against the
+/// deployment's declared [`Location`](omnia_core::Location)s — the host mirror
+/// of the `omnia:plugins/loader` `location` variant.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Location {
+pub enum Origin {
     /// A package registry; `None` selects the acquirer's default.
     Registry(Option<String>),
     /// A location-relative component path.

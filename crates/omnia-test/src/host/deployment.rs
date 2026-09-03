@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result};
 use omnia::{
     DeploymentBuilder, ExitStatus, GuestEntry, Host, Manifest, ManifestSource, Mode, Mount,
-    PluginLocation, Plugins, Provides, Runtime, Server, SourceSpec, StoreCtx, WasiPlugins, Wiring,
+    Location, Plugins, Provides, Runtime, Server, SourceSpec, StoreCtx, WasiPlugins, Wiring,
 };
 use omnia_wasi_otel::WasiOtel;
 
@@ -137,12 +137,12 @@ impl Deployment {
         }
         if let Some(root) = &self.path_root {
             let dot = manifest.locations.iter_mut().find_map(|location| match location {
-                PluginLocation::Path { name, path } if name == "." => Some(path),
+                Location::Path { name, path } if name == "." => Some(path),
                 _ => None,
             });
             match dot {
                 Some(path) => path.clone_from(root),
-                None => manifest.locations.push(PluginLocation::path(".", root.clone())),
+                None => manifest.locations.push(Location::path(".", root.clone())),
             }
         }
         Ok(manifest)

@@ -5,9 +5,9 @@ use std::sync::Arc;
 
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
-use omnia_core::{AdmitError, GuestId, PluginLocation, Runtime, WeakRuntime, sha256_digest};
+use omnia_core::{AdmitError, GuestId, Location, Runtime, WeakRuntime, sha256_digest};
 
-use crate::Location;
+use crate::Origin;
 use crate::host::Error;
 use crate::path::{PathMounts, PathSource};
 use crate::registry::{RegistryClient, RegistrySource};
@@ -23,13 +23,13 @@ pub trait PluginLoader {
     /// `already-active` on an identity conflict, `internal` on registration
     /// failure.
     fn load(
-        &self, package: &str, from: Location, pin: Option<&str>,
+        &self, package: &str, from: Origin, pin: Option<&str>,
     ) -> impl Future<Output = Result<Plugin, Error>> + Send;
 }
 
 impl<B: Clone + Send + Sync + 'static> PluginLoader for Runtime<B> {
     fn load(
-        &self, package: &str, from: Location, pin: Option<&str>,
+        &self, package: &str, from: Origin, pin: Option<&str>,
     ) -> impl Future<Output = Result<Plugin, Error>> + Send {
         let plugins = self.extensions().get::<Plugins>();
         async move {
@@ -102,7 +102,7 @@ pub struct Plugins {
 impl Plugins {
     /// Install the loader capability on `runtime`.
     ///
-    /// `registry` and `path` are the compiled-in slots, one per [`Location`]
+    /// `registry` and `path` are the compiled-in slots, one per [`Origin`]
     /// kind; `None` refuses that kind.
     ///
     /// # Errors
@@ -150,18 +150,18 @@ impl Plugins {
         let paths: Vec<(&str, &std::path::Path)> = locations
             .iter()
             .filter_map(|location| match location {
-                PluginLocation::Path { name, path } => Some((name.as_str(), path.as_path())),
-                PluginLocation::Registry { .. } => None,
+                Location::Path { name, path } => Some((name.as_str(), path.as_path())),
+                Location::Registry { .. } => None,
             })
             .collect();
         let path: Option<Arc<dyn PathSource>> =
             if paths.is_empty() { None } else { Some(Arc::new(PathMounts::new(paths)?)) };
         let registry: Option<Arc<dyn RegistrySource>> =
             locations.iter().find_map(|location| match location {
-                PluginLocation::Registry { registry } => {
+                Location::Registry { registry } => {
                     Some(Arc::new(RegistryClient::new(registry.as_str())) as Arc<dyn RegistrySource>)
                 }
-                PluginLocation::Path { .. } => None,
+                Location::Path { .. } => None,
             });
         Self::install(runtime, registry, path)
     }
@@ -175,7 +175,7 @@ impl Plugins {
     /// failure, `already-active` on an identity conflict, `internal` on
     /// registration failure.
     pub async fn load(
-        &self, package: &str, from: Location, pin: Option<&str>,
+        &self, package: &str, from: Origin, pin: Option<&str>,
     ) -> Result<Plugin, Error> {
         let pin = pin.map(canonicalize).transpose().map_err(Error::Refused)?;
 
@@ -210,16 +210,16 @@ impl Plugins {
         }
     }
 
-    async fn acquire(&self, package: &str, from: &Location) -> Result<Vec<u8>, Error> {
+    async fn acquire(&self, package: &str, from: &Origin) -> Result<Vec<u8>, Error> {
         match from {
-            Location::Registry(endpoint) => match &self.registry {
+            Origin::Registry(endpoint) => match &self.registry {
                 Some(registry) => registry.acquire(package, endpoint.as_deref()).await,
                 None => Err(Error::Refused(format!(
                     "this deployment's locations serve no registry; loading `{package}` needs \
                      a `{{ registry: ... }}` entry"
                 ))),
             },
-            Location::Path(path) => match &self.path {
+            Origin::Path(path) => match &self.path {
                 Some(paths) => paths.acquire(path).await,
                 None => Err(Error::Refused(format!(
                     "this deployment's locations serve no paths; loading `{package}` from \

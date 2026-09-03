@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 pub use manifest::{
-    GuestEntry, GuestRoutes, Manifest, Mount, PluginLocation, SourceSpec, Transport, TransportKind,
+    GuestEntry, GuestRoutes, Manifest, Mount, Location, SourceSpec, Transport, TransportKind,
 };
 use source::ArtifactPolicy;
 pub use source::{ELF_MAGIC, GuestArtifact, LoadedGuest, Source};
@@ -319,7 +319,7 @@ pub struct Deployment<T: WasiView + 'static> {
     command_guest: Option<GuestId>,
     // The manifest's plugin acquisition locations, carried onto the runtime
     // for the loader capability to install against.
-    locations: Vec<PluginLocation>,
+    locations: Vec<Location>,
 }
 
 impl<T: WasiView + 'static> Deployment<T> {
@@ -422,7 +422,7 @@ impl<T: WasiView> Deployment<T> {
 
     /// The manifest's plugin acquisition locations.
     #[must_use]
-    pub fn plugin_locations(&self) -> &[PluginLocation] {
+    pub fn plugin_locations(&self) -> &[Location] {
         &self.locations
     }
 

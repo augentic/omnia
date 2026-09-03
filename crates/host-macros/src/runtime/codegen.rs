@@ -93,10 +93,10 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
 
     let locations = manifest.locations.iter().map(|location| match location {
         LocationSpec::Path { name, path } => quote! {
-            .locations([omnia::PluginLocation::path(#name, #path)])
+            .locations([omnia::Location::path(#name, #path)])
         },
         LocationSpec::Registry(endpoint) => quote! {
-            .locations([omnia::PluginLocation::registry(#endpoint)])
+            .locations([omnia::Location::registry(#endpoint)])
         },
     });
 

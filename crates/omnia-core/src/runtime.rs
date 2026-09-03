@@ -14,7 +14,7 @@ pub use entry::{MainOptions, ManifestSource};
 use wasmtime::component::{Component, Instance, InstancePre, types};
 use wasmtime::{Engine, Store};
 
-use crate::deployment::{ELF_MAGIC, GuestArtifact, PluginLocation};
+use crate::deployment::{ELF_MAGIC, GuestArtifact, Location};
 use crate::dispatch::{serve_guest, serve_links};
 use crate::extensions::Extensions;
 use crate::mount::MountRegistry;
@@ -375,7 +375,7 @@ struct RuntimeInner<B: 'static> {
     command_guest: OnceLock<GuestId>,
     // The manifest's plugin acquisition locations, read by the loader
     // capability's install.
-    locations: Vec<PluginLocation>,
+    locations: Vec<Location>,
     // Capability-crate state installed by the `Wiring::extend` hook and
     // shared with every store context.
     extensions: Extensions,
@@ -384,7 +384,7 @@ struct RuntimeInner<B: 'static> {
 impl<B: 'static> RuntimeInner<B> {
     fn new(
         name: Arc<str>, registry: Arc<Registry<StoreCtx<B>>>, args: Arc<Vec<String>>,
-        mounts: Arc<MountRegistry>, backends: B, locations: Vec<PluginLocation>,
+        mounts: Arc<MountRegistry>, backends: B, locations: Vec<Location>,
     ) -> Self {
         Self {
             name,
@@ -583,7 +583,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// The deployment's plugin acquisition locations (the manifest's
     /// `[[location]]` entries), for the loader capability to install against.
     #[must_use]
-    pub fn plugin_locations(&self) -> &[PluginLocation] {
+    pub fn plugin_locations(&self) -> &[Location] {
         &self.inner.locations
     }
 

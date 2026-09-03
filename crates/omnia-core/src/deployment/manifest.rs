@@ -48,7 +48,7 @@ pub struct Manifest {
     /// Where the `omnia:plugins/loader` acquires packages: named path roots
     /// and at most one default registry endpoint.
     #[serde(rename = "location")]
-    pub locations: Vec<PluginLocation>,
+    pub locations: Vec<Location>,
     /// Transport configuration for host-mediated calls.
     pub transport: Transport,
 }
@@ -118,7 +118,7 @@ impl Manifest {
     /// Append plugin acquisition locations (the manifest's `[[location]]`
     /// entries).
     #[must_use]
-    pub fn locations(mut self, locations: impl IntoIterator<Item = PluginLocation>) -> Self {
+    pub fn locations(mut self, locations: impl IntoIterator<Item = Location>) -> Self {
         self.locations.extend(locations);
         self
     }
@@ -155,8 +155,8 @@ impl Manifest {
             .locations
             .iter()
             .filter_map(|location| match location {
-                PluginLocation::Registry { registry } => Some(registry.as_str()),
-                PluginLocation::Path { .. } => None,
+                Location::Registry { registry } => Some(registry.as_str()),
+                Location::Path { .. } => None,
             })
             .collect();
         if registries.len() > 1 {
@@ -183,7 +183,7 @@ impl Manifest {
             }
         }
         for location in &mut self.locations {
-            if let PluginLocation::Path { path, .. } = location
+            if let Location::Path { path, .. } = location
                 && path.is_relative()
             {
                 *path = base.join(&*path);
@@ -263,7 +263,7 @@ impl Manifest {
 /// keys present: `{ name, path }` or `{ registry }`.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(untagged, deny_unknown_fields)]
-pub enum PluginLocation {
+pub enum Location {
     /// A named host directory path loads resolve against.
     Path {
         /// The location name a load's `path` location names (e.g. `.`).
@@ -279,7 +279,7 @@ pub enum PluginLocation {
     },
 }
 
-impl PluginLocation {
+impl Location {
     /// A named path root.
     pub fn path(name: impl Into<String>, path: impl Into<PathBuf>) -> Self {
         Self::Path {
@@ -722,8 +722,8 @@ mod tests {
         assert_eq!(
             manifest.locations,
             [
-                PluginLocation::path(".", "/deploy/app/adapters"),
-                PluginLocation::registry("ghcr.io"),
+                Location::path(".", "/deploy/app/adapters"),
+                Location::registry("ghcr.io"),
             ]
         );
         manifest.validate(false).expect("one registry is allowed");
@@ -739,8 +739,8 @@ mod tests {
     #[test]
     fn reject_two_registry_locations() {
         let manifest = Manifest::new().guest(GuestEntry::new("a", "./a.wasm")).locations([
-            PluginLocation::registry("ghcr.io"),
-            PluginLocation::registry("docker.io"),
+            Location::registry("ghcr.io"),
+            Location::registry("docker.io"),
         ]);
         let error = manifest.validate(false).expect_err("two registries must be refused");
         assert!(error.to_string().contains("multiple registry"), "{error}");

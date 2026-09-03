@@ -24,9 +24,10 @@
   `PathSource`), installed through `Plugins::install` from the
   `Wiring::extend` hook; the `runtime!` macro's declarative
   `plugins: { locations: [...] }` list (or a manifest's `[[location]]`
-  entries) carries them as deployment data (`PluginLocation`) that the
-  generated hook installs through `Plugins::install_declared`. Loads route
-  structurally by kind and an empty slot refuses typed. The built-in
+  entries) carries them as deployment data (`Location`) that the
+  generated hook installs through `Plugins::install_declared`. A load names
+  its `Origin` — a registry endpoint or a location-relative path — and
+  routes structurally by kind; an empty slot refuses typed. The built-in
   acquirers ship in `omnia-plugin` and re-export: `PathMounts` (named
   directory roots opened fail-fast at startup, read fresh on every load)
   and `RegistryClient` (exact `namespace:name@version` references from a
@@ -218,7 +219,7 @@
   block: `plugins: { interfaces: [...], locations: [...] }`. The
   declarative `locations:` list is the acquisition policy — named path roots
   and at most one registry endpoint — carried as manifest data
-  (`Manifest::locations`, `PluginLocation`; `[[location]]` in `omnia.toml`)
+  (`Manifest::locations`, `Location`; `[[location]]` in `omnia.toml`)
   and installed by the generated `Wiring::extend` through
   `Plugins::install_declared`, which folds path entries into `PathMounts`
   and the registry entry into a cacheless `RegistryClient`, slotted by

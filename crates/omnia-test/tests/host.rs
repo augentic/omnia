@@ -5,7 +5,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
-use omnia::{ExitStatus, GuestId, PluginLocation, Runtime};
+use omnia::{ExitStatus, GuestId, Location, Runtime};
 use omnia_test::host::{Backends, Deployment, ScriptedModel, scratch};
 use omnia_test::{Exchange, SeenFormat};
 use omnia_wasi_blobstore::WasiBlobstoreCtx as _;
@@ -81,7 +81,7 @@ async fn path_root_rewrites_the_production_location() {
         .path_root(scratch.path());
     assert_eq!(
         deployment.manifest().expect("inline base resolves").locations,
-        [PluginLocation::path(".", scratch.path())],
+        [Location::path(".", scratch.path())],
         "the overlay replaces the binary's `.` root rather than adding a second"
     );
 

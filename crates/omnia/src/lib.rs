@@ -12,8 +12,8 @@ pub use omnia_core::{
     AdmitError, Backend, Backends, CliRoutes, Deployment, DeploymentBuilder, Dispatcher,
     ExitStatus, Extensions, FirstArgSelector, FromEnv, FutureResult, Guest, GuestArtifact,
     GuestEntry, GuestId, GuestRoutes, GuestSelector, HasDispatcher, HasExtensions, HasLimits,
-    HasMounts, HasTable, Host, HostCtx, HttpBorrow, HttpCtx, HttpRoutes, LinkClient, LogMode,
-    Manifest, Mode, Mount, MountRegistry, NoOptions, PatternRoutes, PluginLocation, Precompiled,
+    HasMounts, HasTable, Host, HostCtx, HttpBorrow, HttpCtx, HttpRoutes, LinkClient, Location,
+    LogMode, Manifest, Mode, Mount, MountRegistry, NoOptions, PatternRoutes, Precompiled,
     Provides, Proxy, Registry, ResolvedPreopen, Routes, Runtime, RuntimeOptions, Server,
     SourceSpec, StoreBase, StoreConfig, StoreCtx, StoreView, Telemetry, Transport, TransportKind,
     TriggerRouter, WasmOnly, WeakRuntime, Wiring, WrpcState, as_command_chain, get_cloned,
@@ -28,6 +28,6 @@ pub use omnia_core::{
 };
 pub use omnia_host_macros::runtime;
 pub use omnia_plugin::{
-    ContentStore, LoadError, Location, NoStore, PathMounts, PathSource, Plugin, PluginLoader,
+    ContentStore, LoadError, NoStore, Origin, PathMounts, PathSource, Plugin, PluginLoader,
     Plugins, RegistryClient, RegistrySource, ReleaseStore, WasiPlugins,
 };

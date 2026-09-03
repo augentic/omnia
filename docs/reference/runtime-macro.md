@@ -113,7 +113,7 @@ omnia::runtime!({
 
 ### Plugin locations (`locations:`)
 
-The `locations:` list declares the deployment's acquisition roots. Each entry lowers to an `omnia::PluginLocation` on the compiled-in manifest, and the generated `Wiring::extend` hook installs them through `omnia::Plugins::install_declared`, each filling its location kind's slot on `Plugins`:
+The `locations:` list declares the deployment's acquisition roots. Each entry lowers to an `omnia::Location` on the compiled-in manifest, and the generated `Wiring::extend` hook installs them through `omnia::Plugins::install_declared`, each filling its location kind's slot on `Plugins`:
 
 ```rust
 omnia::runtime!({
