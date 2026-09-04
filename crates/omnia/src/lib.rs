@@ -38,10 +38,10 @@ pub use omnia_core::{
     GuestEntry, GuestId, GuestRoutes, GuestSelector, HasDispatcher, HasExtensions, HasLimits,
     HasMounts, HasTable, Host, HostCtx, HttpBorrow, HttpCtx, HttpRoutes, LinkClient, Location,
     LogMode, Manifest, Mode, Mount, MountRegistry, NoOptions, PatternRoutes, Provides, Proxy,
-    Registry, ResolvedPreopen, Routes, Runtime, RuntimeOptions, Server, SourceSpec, StoreBase,
-    StoreConfig, StoreCtx, StoreView, Telemetry, Transport, TransportKind, TriggerRouter,
-    WeakRuntime, Wiring, WrpcState, as_command_chain, get_cloned, host_error, serve_links,
-    sha256_digest, telemetry, wasi_view,
+    Registry, ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts, Server, SourceSpec,
+    StoreBase, StoreConfig, StoreCtx, StoreView, Telemetry, Transport, TransportKind,
+    TriggerRouter, WeakRuntime, Wiring, WrpcState, as_command_chain, get_cloned, host_error,
+    serve_links, sha256_digest, telemetry, wasi_view,
 };
 #[doc(hidden)]
 pub use omnia_core::{

@@ -1,11 +1,11 @@
-//! Deployment lifecycle: [`Backends`], [`Wiring`], [`Runtime`], [`run`], and [`ExitStatus`].
+//! Deployment lifecycle: [`Backends`], [`Wiring`], [`Runtime`], [`RuntimeParts`], [`run`], and [`ExitStatus`].
 
 mod command;
 mod entry;
 
 use std::future::Future;
 use std::process::ExitCode;
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 use std::{env, fmt};
 
@@ -15,7 +15,7 @@ use wasmtime::component::{Component, Instance, InstancePre, types};
 use wasmtime::{Engine, Store};
 
 use crate::deployment::{ELF_MAGIC, GuestArtifact, Location};
-use crate::dispatch::{serve_guest, serve_links};
+use crate::dispatch::serve_guest;
 use crate::extensions::Extensions;
 use crate::mount::MountRegistry;
 use crate::registry::{Guest, GuestId, HttpRoutes, PublishError, TriggerRouter};
@@ -28,10 +28,8 @@ use crate::{
 ///
 /// The `runtime!` macro generates the concrete bundle (one field per declared
 /// backend) and this impl, whose [`connect`](Self::connect) connects every
-/// backend concurrently — the work the macro previously inlined as a
-/// `tokio::try_join!` in the generated `Runtime::new`. A deployment that wires
-/// no backends uses the [`()`](unit) bundle below, so [`Runtime`] needs no
-/// special empty case.
+/// backend concurrently. A deployment that wires no backends uses the
+/// [`()`](unit) bundle below, so [`Runtime`] needs no special empty case.
 pub trait Backends: Clone + Send + Sync + 'static {
     /// Connect every backend in the bundle.
     ///
@@ -174,15 +172,17 @@ where
 ///
 /// Returns an error if runtime state cannot be assembled, bootstrap fails, or
 /// a trigger server exits with an error.
-pub async fn run_with<B, H>(deployment: Deployment<StoreCtx<B>>, backends: B) -> Result<ExitStatus>
+pub async fn run_with<B, H>(
+    mut deployment: Deployment<StoreCtx<B>>, backends: B,
+) -> Result<ExitStatus>
 where
     B: Clone + Send + Sync + 'static,
     H: Wiring<B>,
 {
     let mode = deployment.mode();
-    let runtime = Runtime::<B>::with_backends(deployment, backends, H::link, H::extend)
-        .await
-        .context("assembling runtime")?;
+    H::link(&mut deployment).context("linking hosts")?;
+    let runtime = deployment.assemble(backends).await.context("assembling runtime")?;
+    H::extend(&runtime).context("installing runtime extensions")?;
     finish::<B, H>(runtime, mode).await
 }
 
@@ -313,6 +313,24 @@ impl From<ExitStatus> for std::process::ExitCode {
     }
 }
 
+/// Inputs to [`Runtime::from_parts`].
+pub struct RuntimeParts<B: 'static> {
+    /// Deployment name read by trigger servers and the bootstrap log.
+    pub name: Arc<str>,
+    /// Assembled guest registry.
+    pub registry: Arc<Registry<StoreCtx<B>>>,
+    /// Guest argv.
+    pub args: Vec<String>,
+    /// Mount registry opened from the deployment's preopens.
+    pub mounts: Arc<MountRegistry>,
+    /// Connected backend bundle.
+    pub backends: B,
+    /// Plugin acquisition locations from the manifest.
+    pub locations: Vec<Location>,
+    /// Command-mode guest identity, if any.
+    pub command_guest: Option<GuestId>,
+}
+
 /// Connected host runtime: registry, argv, mounts, and backend bundle.
 ///
 /// A thin handle over shared state: `clone()` bumps two reference counts, so
@@ -335,31 +353,13 @@ struct RuntimeInner<B: 'static> {
     backends: B,
     // Manifest-marked command guest identity; absent, command mode routes to
     // the sole static `wasi:cli/run` exporter.
-    command_guest: OnceLock<GuestId>,
+    command_guest: Option<GuestId>,
     // The manifest's plugin acquisition locations, read by the loader
     // capability's install.
     locations: Vec<Location>,
     // Capability-crate state installed by the `Wiring::extend` hook and
     // shared with every store context.
     extensions: Extensions,
-}
-
-impl<B: 'static> RuntimeInner<B> {
-    fn new(
-        name: Arc<str>, registry: Arc<Registry<StoreCtx<B>>>, args: Arc<Vec<String>>,
-        mounts: Arc<MountRegistry>, backends: B, locations: Vec<Location>,
-    ) -> Self {
-        Self {
-            name,
-            registry,
-            args,
-            mounts,
-            backends,
-            command_guest: OnceLock::new(),
-            locations,
-            extensions: Extensions::new(),
-        }
-    }
 }
 
 /// [`Dispatcher`] over the runtime's shared state.
@@ -430,80 +430,6 @@ impl fmt::Display for AdmitError {
 
 impl std::error::Error for AdmitError {}
 
-impl<B: Backends> Runtime<B> {
-    /// Link hosts, connect backends, assemble the guest registry, install
-    /// capability extensions, and wire the host-mediated link serve side.
-    ///
-    /// `extend` is the [`Wiring::extend`] hook: invoked once, after backends
-    /// connect and the runtime is assembled, so an extension is built against
-    /// the connected bundle.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if host linking, backend connection, registry
-    /// assembly, extension installation, or link serve wiring fails.
-    pub async fn new<L, E>(
-        mut deployment: Deployment<StoreCtx<B>>, link: L, extend: E,
-    ) -> Result<Self>
-    where
-        L: FnOnce(&mut Deployment<StoreCtx<B>>) -> Result<()>,
-        E: FnOnce(&Self) -> Result<()>,
-    {
-        link(&mut deployment).context("linking hosts")?;
-        let backends = B::connect().await.context("connecting backends")?;
-        Self::assemble(deployment, backends, extend).await
-    }
-}
-
-impl<B: Clone + Send + Sync + 'static> Runtime<B> {
-    /// [`Runtime::new`] over a bundle already in hand: links hosts, assembles
-    /// the guest registry, installs capability extensions, and wires the
-    /// host-mediated link serve side, connecting nothing.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if host linking, registry assembly, extension
-    /// installation, or link serve wiring fails.
-    pub async fn with_backends<L, E>(
-        mut deployment: Deployment<StoreCtx<B>>, backends: B, link: L, extend: E,
-    ) -> Result<Self>
-    where
-        L: FnOnce(&mut Deployment<StoreCtx<B>>) -> Result<()>,
-        E: FnOnce(&Self) -> Result<()>,
-    {
-        link(&mut deployment).context("linking hosts")?;
-        Self::assemble(deployment, backends, extend).await
-    }
-
-    async fn assemble<E>(
-        deployment: Deployment<StoreCtx<B>>, backends: B, extend: E,
-    ) -> Result<Self>
-    where
-        E: FnOnce(&Self) -> Result<()>,
-    {
-        let name = Arc::<str>::from(deployment.name());
-        let args = Arc::new(deployment.args().to_vec());
-        let mounts = deployment.mounts();
-        let command_guest = deployment.command_guest();
-        let locations = deployment.plugin_locations().to_vec();
-
-        let runtime = Self::with_inner(Arc::new(RuntimeInner::new(
-            name,
-            Arc::new(deployment.into_registry().context("assembling registry")?),
-            args,
-            mounts,
-            backends,
-            locations,
-        )));
-        if let Some(id) = command_guest {
-            runtime.set_command_guest(id);
-        }
-        extend(&runtime).context("installing runtime extensions")?;
-        serve_links(&runtime).await.context("wiring host-mediated link serve side")?;
-        Ok(runtime)
-    }
-}
-
 // Manual: `StoreCtx<B>` is not `Clone`; both fields are `Arc`-backed.
 impl<B: Clone + Send + Sync + 'static> Clone for Runtime<B> {
     fn clone(&self) -> Self {
@@ -522,25 +448,23 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         Self { inner, dispatcher }
     }
 
-    /// Build a runtime from an already-assembled registry and backend bundle.
+    /// Build a runtime from already-assembled parts.
     ///
-    /// Low-level constructor: unlike [`Runtime::new`] it does not wire the
-    /// host-mediated link serve side — a caller whose deployment declares
-    /// link interfaces must run [`serve_links`] itself before dispatching.
-    /// The runtime name defaults to `omnia`.
+    /// Does not wire the host-mediated link serve side — a caller whose
+    /// deployment declares link interfaces must run [`crate::serve_links`]
+    /// itself before dispatching.
     #[must_use]
-    pub fn from_parts(
-        registry: Arc<Registry<StoreCtx<B>>>, args: Vec<String>, mounts: Arc<MountRegistry>,
-        backends: B,
-    ) -> Self {
-        Self::with_inner(Arc::new(RuntimeInner::new(
-            Arc::from("omnia"),
-            registry,
-            Arc::new(args),
-            mounts,
-            backends,
-            Vec::new(),
-        )))
+    pub fn from_parts(parts: RuntimeParts<B>) -> Self {
+        Self::with_inner(Arc::new(RuntimeInner {
+            name: parts.name,
+            registry: parts.registry,
+            args: Arc::new(parts.args),
+            mounts: parts.mounts,
+            backends: parts.backends,
+            command_guest: parts.command_guest,
+            locations: parts.locations,
+            extensions: Extensions::new(),
+        }))
     }
 
     /// The deployment's plugin acquisition locations (the manifest's
@@ -583,13 +507,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// `command = true`), if any.
     #[must_use]
     pub fn command_guest(&self) -> Option<&GuestId> {
-        self.inner.command_guest.get()
-    }
-
-    fn set_command_guest(&self, id: GuestId) {
-        if self.inner.command_guest.set(id).is_err() {
-            tracing::warn!("command guest already installed; ignoring");
-        }
+        self.inner.command_guest.as_ref()
     }
 
     /// Guest registry.

@@ -78,7 +78,7 @@ pub struct DispatchHandle {
 
 impl DispatchHandle {
     /// Create a shared dispatch handle. The transport carrier starts empty;
-    /// [`super::serve_links`] (via [`crate::Runtime::new`]) populates it with
+    /// [`super::serve_links`] (via [`crate::Deployment::assemble`]) populates it with
     /// each target's serve side.
     #[must_use]
     pub fn new(

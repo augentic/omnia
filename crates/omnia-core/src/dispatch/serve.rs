@@ -26,7 +26,7 @@ type HostResources = HashMap<
 /// Each target guest that exports a linked interface runs a wRPC server whose
 /// handlers instantiate the guest *fresh per call* (instance-per-call); each
 /// server is then added to the bound transport carrier so polyfilled imports
-/// can reach it. [`Runtime::new`](crate::Runtime::new) calls this during
+/// can reach it. [`Deployment::assemble`](crate::Deployment::assemble) calls this during
 /// bootstrap; only a runtime assembled through
 /// [`Runtime::from_parts`](crate::Runtime::from_parts) wires it explicitly.
 ///

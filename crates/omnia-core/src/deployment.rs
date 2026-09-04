@@ -19,11 +19,11 @@ use wasmtime::{Config, Engine};
 use wasmtime_wasi::WasiView;
 use wrpc_wasmtime::WrpcView;
 
-use crate::dispatch::{DispatchHandle, FirstArgSelector, GuestSelector};
+use crate::dispatch::{DispatchHandle, FirstArgSelector, GuestSelector, serve_links};
 use crate::mount::MountRegistry;
 use crate::registry::{GuestId, Registry, Routes};
 use crate::telemetry::LogMode;
-use crate::{Host, Mode, RuntimeOptions, Server, Telemetry};
+use crate::{Host, Mode, Runtime, RuntimeOptions, RuntimeParts, Server, StoreCtx, Telemetry};
 
 /// Builds a [`Deployment`] from an optional programmatic [`Manifest`].
 ///
@@ -323,11 +323,6 @@ impl<T: WasiView> Deployment<T> {
         &self.args
     }
 
-    /// The manifest-marked command guest identity, if any.
-    pub(crate) fn command_guest(&self) -> Option<GuestId> {
-        self.command_guest.clone()
-    }
-
     /// The manifest's plugin acquisition locations.
     #[must_use]
     pub fn plugin_locations(&self) -> &[Location] {
@@ -364,6 +359,28 @@ impl<T: WasiView> Deployment<T> {
             dispatch,
             self.allow_empty,
         )
+    }
+}
+
+impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
+    /// Assemble this deployment into a [`Runtime`]: registry, handle, then link serve wiring.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the registry cannot be assembled or the link serve
+    /// side cannot be wired.
+    pub async fn assemble(self, backends: B) -> Result<Runtime<B>> {
+        let runtime = Runtime::from_parts(RuntimeParts {
+            name: Arc::from(self.name.as_str()),
+            args: self.args.to_vec(),
+            mounts: Arc::clone(&self.mounts),
+            locations: self.locations.clone(),
+            command_guest: self.command_guest.clone(),
+            backends,
+            registry: Arc::new(self.into_registry().context("assembling registry")?),
+        });
+        serve_links(&runtime).await.context("wiring host-mediated link serve side")?;
+        Ok(runtime)
     }
 }
 

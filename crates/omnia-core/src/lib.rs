@@ -42,7 +42,9 @@ pub use self::options::compile;
 pub use self::registry::{
     CliRoutes, Guest, GuestId, HttpRoutes, PatternRoutes, Registry, Routes, TriggerRouter,
 };
-pub use self::runtime::{AdmitError, Backends, ExitStatus, Mode, Runtime, WeakRuntime, Wiring};
+pub use self::runtime::{
+    AdmitError, Backends, ExitStatus, Mode, Runtime, RuntimeParts, WeakRuntime, Wiring,
+};
 #[doc(hidden)]
 pub use self::runtime::{MainOptions, ManifestSource, drive_main, main, run, run_with};
 pub use self::store::{

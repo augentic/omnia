@@ -6,7 +6,7 @@
 //! import is unsatisfied by its own component — the deployment names the
 //! interface in its `plugins:` list, so the host polyfills it on the shared
 //! linker and, at bootstrap, wires the serve side of every dispatched
-//! interface (`omnia::serve_links`, run by `Runtime::new`), so a dispatched
+//! interface (`omnia::serve_links`, run by `Deployment::assemble`), so a dispatched
 //! call always finds the responder's in-process wRPC server.
 //!
 //! The router exports a plain `run` rather than an HTTP/messaging trigger;

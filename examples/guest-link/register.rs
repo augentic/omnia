@@ -38,8 +38,8 @@ cfg_if::cfg_if! {
                 .build::<StoreCtx<()>>()
                 .await
                 .context("building deployment")?;
-            // `Runtime::new` also wires the host-mediated link serve side.
-            let runtime = Runtime::<()>::new(deployment, |_| Ok(()), |_| Ok(())).await?;
+            // `assemble` also wires the host-mediated link serve side.
+            let runtime = deployment.assemble(()).await?;
 
             // The extra guest is absent from the manifest. An install pipeline
             // verifies the bytes (digest, signature — deployment policy) before
