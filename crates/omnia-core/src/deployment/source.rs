@@ -29,8 +29,8 @@ const SETTINGS_HINT: &str = "the artifact must be built with the same compile-af
 /// Whether a deployment build may load pre-compiled (native) artifacts.
 ///
 /// Crate-internal on purpose: the only door to `Trust` is an `unsafe`
-/// call site ([`DeploymentBuilder::build`](crate::DeploymentBuilder) in the
-/// `Precompiled` typestate, or [`GuestArtifact::precompiled`]).
+/// call site ([`DeploymentBuilder::build_trusted`](crate::DeploymentBuilder::build_trusted)
+/// or [`GuestArtifact::precompiled`]).
 // `pub` in a private module: crate-internal, never re-exported.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ArtifactPolicy {
@@ -212,8 +212,7 @@ fn load_component(engine: &Engine, wasm: &Path, policy: ArtifactPolicy) -> Resul
         ensure!(
             policy == ArtifactPolicy::Trust,
             "{} is a pre-compiled (native) artifact, which this build rejects; load trusted \
-             pre-compiled artifacts through the `DeploymentBuilder::precompiled()` typestate's \
-             unsafe `build`",
+             pre-compiled artifacts through `DeploymentBuilder`'s unsafe `build_trusted`",
             wasm.display()
         );
         // SAFETY: `policy == Trust` is only reachable through an `unsafe`
@@ -244,8 +243,8 @@ fn load_component_bytes(
         ensure!(
             policy == ArtifactPolicy::Trust,
             "the embedded bytes are a pre-compiled (native) artifact, which this build rejects; \
-             load trusted pre-compiled artifacts through the `DeploymentBuilder::precompiled()` \
-             typestate's unsafe `build`"
+             load trusted pre-compiled artifacts through `DeploymentBuilder`'s unsafe \
+             `build_trusted`"
         );
         // SAFETY: `policy == Trust` is only reachable through an `unsafe`
         // build call whose caller attested every pre-compiled artifact is

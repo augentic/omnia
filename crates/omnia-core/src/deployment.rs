@@ -5,7 +5,6 @@ mod source;
 
 use std::collections::BTreeSet;
 use std::env;
-use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -14,39 +13,26 @@ pub use manifest::{
     GuestEntry, GuestRoutes, Location, Manifest, Mount, SourceSpec, Transport, TransportKind,
 };
 use source::ArtifactPolicy;
-pub use source::{ELF_MAGIC, GuestArtifact, LoadedGuest, Source};
+pub use source::{ELF_MAGIC, GuestArtifact, LoadedGuest};
 use wasmtime::component::Linker;
 use wasmtime::{Config, Engine};
 use wasmtime_wasi::WasiView;
 use wrpc_wasmtime::WrpcView;
 
 use crate::dispatch::{DispatchHandle, FirstArgSelector, GuestSelector};
-use crate::mount::{MountRegistry, ResolvedPreopen};
+use crate::mount::MountRegistry;
 use crate::registry::{GuestId, Registry, Routes};
 use crate::telemetry::LogMode;
 use crate::{Host, Mode, RuntimeOptions, Server, Telemetry};
-
-/// Typestate for [`DeploymentBuilder`]: only raw `.wasm` sources load (the
-/// safe default).
-#[derive(Debug)]
-pub struct WasmOnly;
-
-/// Typestate for [`DeploymentBuilder`]: pre-compiled `.bin` sources are
-/// admitted, so [`build`](DeploymentBuilder::build) is `unsafe` — the call
-/// site attests every pre-compiled artifact is trusted.
-#[derive(Debug)]
-pub struct Precompiled;
 
 /// Builds a [`Deployment`] from an optional programmatic [`Manifest`].
 ///
 /// When no manifest is set, [`build`](Self::build) loads the path in
 /// `OMNIA_CONFIG`.
 ///
-/// The `P` typestate selects the artifact policy: the default
-/// ([`WasmOnly`]) exposes a safe `build` that rejects pre-compiled (native)
-/// artifacts; [`precompiled`](Self::precompiled) transitions to
-/// [`Precompiled`], whose same-named `build` is `unsafe` because a
-/// pre-compiled artifact is native code the caller must trust.
+/// The safe [`build`](Self::build) rejects pre-compiled (native) artifacts;
+/// [`build_trusted`](Self::build_trusted) admits them and is `unsafe` because
+/// a pre-compiled artifact is native code the caller must trust.
 ///
 /// ```ignore
 /// let deployment = DeploymentBuilder::new()
@@ -56,7 +42,8 @@ pub struct Precompiled;
 ///     .build::<StoreCtx>()
 ///     .await?;
 /// ```
-pub struct DeploymentBuilder<P = WasmOnly> {
+#[derive(Debug, Default)]
+pub struct DeploymentBuilder {
     manifest: Option<Manifest>,
     args: Vec<String>,
     mode: Mode,
@@ -65,41 +52,15 @@ pub struct DeploymentBuilder<P = WasmOnly> {
     log_mode: Option<LogMode>,
     guest_timeout: Option<Duration>,
     max_dispatch_depth: Option<usize>,
-    policy: PhantomData<fn() -> P>,
 }
 
-impl<P> std::fmt::Debug for DeploymentBuilder<P> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DeploymentBuilder")
-            .field("manifest", &self.manifest)
-            .field("args", &self.args)
-            .field("mode", &self.mode)
-            .field("allow_empty", &self.allow_empty)
-            .field("program_name", &self.program_name)
-            .field("log_mode", &self.log_mode)
-            .field("guest_timeout", &self.guest_timeout)
-            .field("max_dispatch_depth", &self.max_dispatch_depth)
-            .finish_non_exhaustive()
+impl DeploymentBuilder {
+    /// Start a new builder with no source selected.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
     }
-}
 
-impl Default for DeploymentBuilder<WasmOnly> {
-    fn default() -> Self {
-        Self {
-            manifest: None,
-            args: Vec::new(),
-            mode: Mode::default(),
-            allow_empty: false,
-            program_name: None,
-            log_mode: None,
-            guest_timeout: None,
-            max_dispatch_depth: None,
-            policy: PhantomData,
-        }
-    }
-}
-
-impl<P> DeploymentBuilder<P> {
     /// Set the deployment manifest.
     #[must_use]
     pub fn manifest(mut self, manifest: impl Into<Option<Manifest>>) -> Self {
@@ -186,74 +147,68 @@ impl<P> DeploymentBuilder<P> {
             Manifest::from_config(config)?
         };
         manifest.validate(self.allow_empty)?;
-        let command_guest = manifest.command_guest();
 
-        let plan = Plan {
-            name: self.program_name.unwrap_or_else(|| manifest.name().to_owned()),
-            sources: manifest.sources()?,
-            routes: manifest.routes(),
-            links: manifest.link_interfaces(),
-            preopens: manifest.preopens(),
-            args: self.args,
-            mode: self.mode,
-            allow_empty: self.allow_empty,
-            policy,
-        };
-
+        let program_name = self.program_name.unwrap_or_else(|| manifest.name().to_owned());
         // The runtime-carried name read by telemetry, trigger servers, and
         // the bootstrap log. An operator `COMPONENT` override wins over the
-        // plan name — read once here, never written back to the process
+        // program name — read once here, never written back to the process
         // environment.
-        let name = env::var("COMPONENT").unwrap_or_else(|_| plan.name.clone());
+        let name = env::var("COMPONENT").unwrap_or_else(|_| program_name.clone());
 
         init_telemetry(&name, self.log_mode)?;
         tracing::debug!("initializing runtime");
 
-        let mut deployment = Deployment::from_plan(plan).await?;
-        deployment.name = name;
-        deployment.command_guest = command_guest;
-        deployment.locations = manifest.locations;
+        let (engine, linker, mut options) = engine_and_linker()?;
         if let Some(timeout) = self.guest_timeout {
-            deployment.options.guest_timeout = timeout;
+            options.guest_timeout = timeout;
         }
         if let Some(depth) = self.max_dispatch_depth {
-            deployment.options.max_dispatch_depth = depth;
+            options.max_dispatch_depth = depth;
         }
-        Ok(deployment)
-    }
-}
 
-impl DeploymentBuilder<WasmOnly> {
-    /// Start a new builder with no source selected.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
+        // Open + identity-stamp every preopen once, here, so a misconfigured
+        // mount fails fast at startup rather than per store.
+        let mounts = Arc::new(MountRegistry::open(manifest.preopens())?);
 
-    /// Admit pre-compiled (native) artifacts, making `build` `unsafe`.
-    ///
-    /// Only changes typestate; the trust attestation happens at the
-    /// [`Precompiled`] `build` call site.
-    #[must_use]
-    pub fn precompiled(self) -> DeploymentBuilder<Precompiled> {
-        DeploymentBuilder {
-            manifest: self.manifest,
-            args: self.args,
+        // Guests load (and compile) in parallel through the async
+        // [`Source::load`] seam; order still follows the manifest.
+        let sources = manifest.sources()?;
+        let loaded = futures::future::try_join_all(
+            sources.iter().map(|source| source.load(&engine, policy)),
+        )
+        .await?;
+        let guests = loaded.into_iter().flatten().collect();
+
+        // In command mode the program name is prepended as `argv[0]`.
+        let args = if self.mode.is_command() {
+            std::iter::once(program_name).chain(self.args).collect()
+        } else {
+            self.args
+        };
+
+        Ok(Deployment {
+            name,
+            engine,
+            linker,
+            options,
+            guests,
+            routes: manifest.routes(),
+            links: manifest.link_interfaces(),
+            selector: Arc::new(FirstArgSelector),
+            mounts,
+            args: Arc::new(args),
             mode: self.mode,
             allow_empty: self.allow_empty,
-            program_name: self.program_name,
-            log_mode: self.log_mode,
-            guest_timeout: self.guest_timeout,
-            max_dispatch_depth: self.max_dispatch_depth,
-            policy: PhantomData,
-        }
+            command_guest: manifest.command_guest(),
+            locations: manifest.locations,
+        })
     }
 
     /// Resolve the manifest into a [`Deployment`].
     ///
     /// If no manifest was supplied, the path in `OMNIA_CONFIG` is loaded.
     /// Every guest must be raw component wasm; a pre-compiled (native)
-    /// artifact is rejected — see [`precompiled`](Self::precompiled).
+    /// artifact is rejected — see [`build_trusted`](Self::build_trusted).
     ///
     /// # Errors
     ///
@@ -262,9 +217,7 @@ impl DeploymentBuilder<WasmOnly> {
     pub async fn build<T: WasiView + 'static>(self) -> Result<Deployment<T>> {
         self.build_inner(ArtifactPolicy::Reject).await
     }
-}
 
-impl DeploymentBuilder<Precompiled> {
     /// Resolve the manifest into a [`Deployment`], admitting pre-compiled
     /// artifacts.
     ///
@@ -283,7 +236,7 @@ impl DeploymentBuilder<Precompiled> {
     ///
     /// Returns an error if no manifest resolves, the manifest is invalid, or
     /// the deployment cannot be built.
-    pub async unsafe fn build<T: WasiView + 'static>(self) -> Result<Deployment<T>> {
+    pub async unsafe fn build_trusted<T: WasiView + 'static>(self) -> Result<Deployment<T>> {
         self.build_inner(ArtifactPolicy::Trust).await
     }
 }
@@ -294,8 +247,8 @@ impl DeploymentBuilder<Precompiled> {
 /// [`host`]: Self::host
 pub struct Deployment<T: WasiView + 'static> {
     // Deployment name carried onto the runtime for trigger servers and the
-    // bootstrap log (the plan name, unless `build_inner` honored an operator
-    // `COMPONENT` override).
+    // bootstrap log (the program name, unless `build_inner` honored an
+    // operator `COMPONENT` override).
     name: String,
     engine: Engine,
     linker: Linker<T>,
@@ -306,7 +259,7 @@ pub struct Deployment<T: WasiView + 'static> {
     links: BTreeSet<Box<str>>,
     // Host-mediated dispatch selector.
     selector: Arc<dyn GuestSelector>,
-    // Mount registry from resolved preopens in [`from_plan`](Self::from_plan).
+    // Mount registry opened from the manifest's resolved preopens.
     mounts: Arc<MountRegistry>,
     // Guest argv threaded into every store. Empty for long-lived servers; in
     // command mode the deployment name is prepended as `argv[0]`.
@@ -320,51 +273,6 @@ pub struct Deployment<T: WasiView + 'static> {
     // The manifest's plugin acquisition locations, carried onto the runtime
     // for the loader capability to install against.
     locations: Vec<Location>,
-}
-
-impl<T: WasiView + 'static> Deployment<T> {
-    /// Acquire every guest named in `plan` through its [`Source`] and pair them
-    /// with the shared engine and WASI-linked linker.
-    ///
-    /// Acquisition runs through the async [`Source::load`] seam so a future
-    /// source kind (an OCI pull) slots in without a parallel loading path.
-    async fn from_plan(plan: Plan) -> Result<Self> {
-        let (engine, linker, options) = engine_and_linker()?;
-
-        // Open + identity-stamp every preopen once, here, so a misconfigured
-        // mount fails fast at startup rather than per store.
-        let mounts = Arc::new(MountRegistry::open(plan.preopens)?);
-
-        // Guests load (and compile) in parallel; order still follows the plan.
-        let loaded = futures::future::try_join_all(
-            plan.sources.iter().map(|source| source.load(&engine, plan.policy)),
-        )
-        .await?;
-        let guests = loaded.into_iter().flatten().collect();
-
-        let args = if plan.mode.is_command() {
-            std::iter::once(plan.name.clone()).chain(plan.args).collect()
-        } else {
-            plan.args
-        };
-
-        Ok(Self {
-            name: plan.name,
-            engine,
-            linker,
-            options,
-            guests,
-            routes: plan.routes,
-            links: plan.links,
-            selector: Arc::new(FirstArgSelector),
-            mounts,
-            args: Arc::new(args),
-            mode: plan.mode,
-            allow_empty: plan.allow_empty,
-            command_guest: None,
-            locations: Vec::new(),
-        })
-    }
 }
 
 impl<T: WasiView> Deployment<T> {
@@ -457,19 +365,6 @@ impl<T: WasiView> Deployment<T> {
             self.allow_empty,
         )
     }
-}
-
-// Resolved deployment inputs shared by the manifest and single-file paths.
-struct Plan {
-    name: String,
-    sources: Vec<Source>,
-    routes: Routes,
-    links: BTreeSet<Box<str>>,
-    preopens: Vec<ResolvedPreopen>,
-    args: Vec<String>,
-    mode: Mode,
-    allow_empty: bool,
-    policy: ArtifactPolicy,
 }
 
 // Build the shared engine, WASI-linked linker, and runtime options.

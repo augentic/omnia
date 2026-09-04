@@ -31,9 +31,8 @@ cfg_if::cfg_if! {
                 ))
                 .guest(GuestEntry::new("router", artifacts.join("guest_link_router_wasm.wasm")));
 
-            // Raw `.wasm` sources, so the default (WasmOnly) safe build applies;
-            // a deployment of trusted `omnia compile` output would transition
-            // with `.precompiled()` and call its unsafe `build`.
+            // Raw `.wasm` sources, so the safe `build` applies; a deployment of
+            // trusted `omnia compile` output would call `unsafe build_trusted`.
             let deployment = DeploymentBuilder::new()
                 .manifest(manifest)
                 .build::<StoreCtx<()>>()

@@ -23,7 +23,7 @@ pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
 pub use self::deployment::{
     Deployment, DeploymentBuilder, GuestArtifact, GuestEntry, GuestRoutes, Location, Manifest,
-    Mount, Precompiled, SourceSpec, Transport, TransportKind, WasmOnly,
+    Mount, SourceSpec, Transport, TransportKind,
 };
 pub use self::digest::sha256_digest;
 pub use self::dispatch::{

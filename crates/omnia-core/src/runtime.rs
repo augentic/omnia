@@ -133,7 +133,7 @@ where
     // The generated entry point admits pre-compiled artifacts: manifests and
     // `.bin` paths given to (or compiled into) the binary are trusted
     // operator inputs (docs/security-model.md).
-    let builder = builder.precompiled();
+    //
     // SAFETY: the operator running this binary chose the manifest and
     // artifact paths; pre-compiled artifacts are documented trusted inputs
     // produced by `omnia compile`.
@@ -148,10 +148,10 @@ where
 
 /// Build runtime state, bootstrap it, then run command mode or every trigger server.
 ///
-/// The default ([`WasmOnly`](crate::WasmOnly)) builder only loads raw wasm; a
-/// deployment of trusted pre-compiled artifacts builds its [`Deployment`]
-/// through the [`Precompiled`](crate::Precompiled) typestate's unsafe `build`
-/// (as the generated CLI `main` does).
+/// The safe [`DeploymentBuilder::build`] only loads raw wasm; a deployment of
+/// trusted pre-compiled artifacts builds its [`Deployment`] through
+/// [`unsafe build_trusted`](DeploymentBuilder::build_trusted) (as the
+/// generated CLI `main` does via [`run_precompiled`]).
 ///
 /// # Errors
 ///
@@ -189,32 +189,25 @@ where
 
 /// [`run`] for a deployment of trusted pre-compiled artifacts.
 ///
-/// The [`Precompiled`](crate::Precompiled) parameter means a raw/default
-/// builder cannot select this path by accident — the caller must transition
-/// through [`DeploymentBuilder::precompiled`](crate::DeploymentBuilder::precompiled)
-/// first.
-///
 /// # Safety
 ///
 /// Every pre-compiled path the builder's manifest names must identify
 /// trusted, immutable wasmtime output (`omnia compile`); see
-/// [`DeploymentBuilder::build`](crate::DeploymentBuilder) in the
-/// `Precompiled` typestate.
+/// [`DeploymentBuilder::build_trusted`].
 ///
 /// # Errors
 ///
 /// Returns an error if the deployment cannot be built, runtime state cannot be
 /// assembled, bootstrap fails, or a trigger server exits with an error.
-pub async unsafe fn run_precompiled<B, H>(
-    builder: DeploymentBuilder<crate::Precompiled>,
-) -> Result<ExitStatus>
+pub async unsafe fn run_precompiled<B, H>(builder: DeploymentBuilder) -> Result<ExitStatus>
 where
     B: Backends,
     H: Wiring<B>,
 {
-    // SAFETY: forwarded — this function's own contract is exactly the
-    // typestate build's contract.
-    let deployment = unsafe { builder.build::<StoreCtx<B>>() }.await.context("building runtime")?;
+    // SAFETY: forwarded — this function's own contract is exactly
+    // `build_trusted`'s contract.
+    let deployment =
+        unsafe { builder.build_trusted::<StoreCtx<B>>() }.await.context("building runtime")?;
     drive::<B, H>(deployment).await
 }
 
@@ -817,7 +810,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     pub async fn admit(&self, id: GuestId, bytes: Vec<u8>) -> Result<(), AdmitError> {
         // A native (pre-compiled) artifact is refused before wasmtime sees
         // the bytes: admitted components only ever take the safe validation
-        // path, never the deployment's `Precompiled` trust policy.
+        // path, never the deployment's `build_trusted` trust policy.
         if bytes.get(..ELF_MAGIC.len()) == Some(&ELF_MAGIC) {
             return Err(AdmitError::ArtifactRefused(format!(
                 "`{id}` is a pre-compiled (native) artifact; admission only accepts raw wasm \
