@@ -244,12 +244,11 @@ mod tests {
         assert!(fatal(&error).contains("mutually exclusive"));
     }
 
-    // Hard acceptance criterion: the direct path always carries the
-    // compiled-in manifest, so `DeploymentBuilder::build` can never fall
-    // through to its own `OMNIA_CONFIG` lookup — the planner never reads the
-    // environment at all.
+    // Hard acceptance criterion: the direct plan always carries the compiled-in
+    // manifest, so `DeploymentBuilder::build` can never fall through to its own
+    // `OMNIA_CONFIG` lookup.
     #[test]
-    fn direct_command_ignores_omnia_config() {
+    fn direct_command_carries_compiled_manifest() {
         let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
         let plan = plan(options, argv(&["bin", "greet"]))
             .unwrap_or_else(|error| panic!("{}", fatal(&error)));
