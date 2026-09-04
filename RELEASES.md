@@ -134,6 +134,25 @@
 
 ### Changed
 
+- `omnia` is the composition root (deployment assembly, process
+  lifecycle, optional-crate composition); `omnia-core` is the
+  live-runtime SDK a capability crate targets; `omnia-cli` is a leaf
+  grammar crate with no `omnia-*` dependencies. `DeploymentBuilder` is
+  no longer typestate-parameterized: `build` is the safe wasm path and
+  `unsafe build_trusted` replaces the `Precompiled` typestate's unsafe
+  `build` (`WasmOnly` / `Precompiled` and `precompiled()` are deleted).
+  `omnia::run` / `run_with` take a built `Deployment` (the
+  `runtime!`-generated wrappers still take a `DeploymentBuilder` and
+  build first); `run_precompiled` is deleted. `Runtime::new` /
+  `with_backends` and their link/extend closures are deleted:
+  `Deployment::assemble` builds a `Runtime` from `RuntimeParts` via
+  `Runtime::from_parts`. Artifact loading is one `GuestArtifact::load`;
+  `Source` decides trust by content (native bytes never reach wasmtime
+  on the safe path), and `Runtime::admit` no longer sniffs ELF itself.
+  `Manifest`, `DeploymentBuilder`, `Deployment`, `Wiring`, `Backends`,
+  `Mode`, `run` / `run_with`, `main`, and `compile` live in `omnia`;
+  `omnia-core` keeps the live handle (`Runtime`, `Registry`, `admit`,
+  `Extensions`, dispatch, telemetry).
 - The `run` command-line grammar moves out of `omnia-core` into a new
   `omnia-cli` crate, which the `omnia` facade's `cli` feature now selects
   (`cli = ["dep:omnia-cli"]`). `omnia-core` no longer has a `cli` feature or

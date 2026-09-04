@@ -60,25 +60,36 @@ This separation allows the same guest to run with different backends — swap th
 │  Abstract service capabilities defined by WIT interfaces        │
 │  Examples: wasi-keyvalue, wasi-messaging, wasi-model            │
 ├─────────────────────────────────────────────────────────────────┤
-│  Layer 1: Runtime core (crates/omnia-core + capability crates) │
-│  wasmtime engine, deployment/registry, dispatch, traits         │
+│  Layer 1: Composition root + live-runtime SDK                   │
+│  omnia — assembly, lifecycle, optional-crate composition        │
+│  omnia-core — wasmtime engine, registry, dispatch, traits       │
+│  capability crates (omnia-plugin, …) target omnia-core          │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-Layers 1 and 2 form the **runtime core** — domain-agnostic infrastructure that routes opaque identities and satisfies typed effects. Which backend serves an interface is deployment configuration the core never parses (the glossary's **Law 2**).
+Layers 1 and 2 form the **runtime core** — domain-agnostic infrastructure that routes opaque identities and satisfies typed effects. Within Layer 1, `omnia` is the composition root and `omnia-core` is the live-runtime SDK a capability crate targets. Which backend serves an interface is deployment configuration the core never parses (the glossary's **Law 2**).
 
 ## Crate Organization
 
-### Runtime core (`crates/omnia-core`) and the `omnia` facade
+### Composition root (`omnia`) and live-runtime SDK (`omnia-core`)
 
-The foundation of the runtime is `omnia-core`; embedders depend on the thin `omnia` facade crate, which re-exports core, the `omnia-plugin` capability crate, the `omnia-cli` grammar crate (behind the `cli` feature), and the `runtime!` macro under one root (`omnia::…` paths). Crates like `omnia-plugin` and `omnia-cli` sit between the two: `omnia-plugin` builds on core's extension seam (`Wiring::extend` + `Extensions`, plus the privileged `Runtime::admit` admission API), `omnia-cli` owns the `run` command-line grammar, and both surface through the facade. The facade is meant to be an embedder's *only* omnia dependency — a deployment's `Cargo.toml` never names `omnia-core`, `omnia-plugin`, or `omnia-cli`, and neither does any path the `runtime!` macro emits (it imports even its `Result` as `omnia::anyhow::Result`). The facade's re-exports are `#[doc(inline)]` so the rendered documentation shows `omnia::…` paths too. Depending on `omnia-core` directly is for building another capability crate. The core provides:
+`omnia` is the composition root: it owns deployment assembly, process lifecycle, and composition of the optional crates. Embedders depend on it alone (`omnia::…` paths). A deployment's `Cargo.toml` never names `omnia-core`, `omnia-plugin`, or `omnia-cli`, and neither does any path the `runtime!` macro emits (it imports even its `Result` as `omnia::anyhow::Result`). Re-exports are `#[doc(inline)]` so the rendered documentation shows `omnia::…` paths too.
 
-- **Deployment pipeline**: `DeploymentBuilder` builds a deployment from a `Manifest` (loaded from `omnia.toml`, synthesized from a single `.wasm`, or constructed programmatically), `Registry` holds pre-instantiated guests
-- **Core traits**: `Host`, `Server`, `Backend`, `Wiring`, plus the concrete `Runtime<B>` over `StoreCtx<B>`
+`omnia` provides:
+
+- **Deployment pipeline**: `DeploymentBuilder` builds a `Deployment` from a `Manifest` (loaded from `omnia.toml`, synthesized from a single `.wasm`, or constructed programmatically)
+- **Lifecycle**: `Wiring`, `Backends`, `Mode`; `run` / `run_with` take a built `Deployment`, call `Deployment::assemble`, then drive command mode or the trigger servers
+- **Optional-crate composition**: `omnia-plugin` (the `omnia:plugins/loader` capability), `omnia-cli` (the `run` grammar, behind the `cli` feature), and the `runtime!` macro
+
+`omnia-core` is the live-runtime SDK a capability crate targets. Depend on it directly only when building another capability crate. It provides:
+
+- **Runtime handle**: `Runtime<B>` over `StoreCtx<B>`, assembled from `RuntimeParts`; `Registry` holds pre-instantiated guests
+- **Core traits**: `Host`, `Server`, `Backend`
 - **Host-mediated dispatch**: guest-to-guest linking over an in-process wRPC carrier
 - **Telemetry**: `tracing` + OpenTelemetry bootstrap
+- **Admission seam**: `Runtime::admit` and `Extensions`, which `omnia-plugin` uses to install acquisition policy from the `Wiring::extend` hook
 
-The `run` command-line grammar (and `compile`, with the `jit` feature) is not in core: it lives in `omnia-cli`, which the facade's `cli` feature selects. Core's own entry point serves only direct commands.
+`omnia-cli` is a leaf grammar crate: clap plus argv-precedence over paths and strings, with no `omnia-*` dependencies. `omnia` materializes a `RunPlan` into a `Manifest` and drives the runtime. `compile` (with the `jit` feature) also lives in `omnia`.
 
 Key traits:
 
@@ -151,7 +162,7 @@ omnia::runtime!({
 });
 ```
 
-The macro generates a `Backends` bundle (one connected backend per `Host: Backend` pair, with one uniform `omnia::Provides` impl per row wiring each backend into the library's generic `StoreView` blanket on `StoreCtx`), a `Wiring` implementation whose `link` runs inside `Runtime::new` and whose `serve` runs every host (capability hosts resolve immediately through `Server`'s no-op default; trigger servers loop until shutdown), and a `main` that delegates to `omnia::main`. The runtime itself is always the library type `omnia::Runtime<Backends>` over `omnia::StoreCtx<Backends>` — the macro emits wiring, not a runtime.
+The macro generates a `Backends` bundle (one connected backend per `Host: Backend` pair, with one uniform `omnia::Provides` impl per row wiring each backend into the library's generic `StoreView` blanket on `StoreCtx`), a `Wiring` implementation whose `link` runs on the `Deployment` before `assemble`, whose `extend` runs after, and whose `serve` runs every host (capability hosts resolve immediately through `Server`'s no-op default; trigger servers loop until shutdown), and a `main` that delegates to `omnia::main`. The runtime itself is always the library type `omnia::Runtime<Backends>` over `omnia::StoreCtx<Backends>` — the macro emits wiring, not a runtime.
 
 ## The Guest Registry
 
@@ -165,17 +176,17 @@ All of this is declared in the `omnia.toml` manifest ([reference](reference/conf
 
 ## Runtime Execution Flow
 
-1. **CLI parsing** — the generated `main` delegates to `omnia::main`, which parses the `run` subcommand, resolves the deployment source into a `Manifest` (`--config`, then `OMNIA_CONFIG`, then a positional `<wasm>` via `Manifest::from_wasm`, then the compiled-in default), and appends CLI `--mount`/`--plugins` entries onto it.
-2. **Build** — `DeploymentBuilder` validates the manifest, resolves mounts, compiles guests, and returns a `Deployment` ready for host linking.
-3. **Assemble** — `Runtime::new` runs `Wiring::link` (each host's `add_to_linker`), connects backends (`Backends::connect`), builds the `Registry` (pre-instantiating every guest), then runs the `Wiring::extend` hook to install capability extensions (such as the plugin acquisition policy).
-4. **Bootstrap** — starts epoch interruption and pool-metric sampling, wires host-mediated link servers, then logs **`omnia ready`**.
+1. **CLI parsing** — the generated `main` delegates to `omnia::main`, which parses the `run` subcommand (`omnia-cli` decides the source over `--config` / `OMNIA_CONFIG` / positional `<wasm>` / compiled-in), materializes a `Manifest`, and appends CLI `--mount`/`--plugins` entries onto it.
+2. **Build** — `DeploymentBuilder` validates the manifest, resolves mounts, loads guests, and returns a `Deployment` ready for host linking (`build` is the safe wasm path; `unsafe build_trusted` is the pre-compiled path).
+3. **Assemble** — `run` connects backends, `Wiring::link` adds each host to the linker, `Deployment::assemble` builds the `Runtime` from `RuntimeParts` and wires host-mediated link servers, then `Wiring::extend` installs capability extensions (such as the plugin acquisition policy).
+4. **Bootstrap** — starts epoch interruption and pool-metric sampling, then logs **`omnia ready`**.
 5. **Drive** — command mode invokes the guest's `wasi:cli/run` once and exits with its status; server mode awaits every trigger server.
 6. **Request handling** (server mode) — trigger hosts (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`) accept requests, route to a guest, instantiate it in a fresh store, and return the response.
 
 ```text
-CLI → Build → Runtime::new → bootstrap → run
-                                            ├─ command mode → wasi:cli/run → ExitStatus
-                                            └─ server mode  → trigger servers → per-request instantiate
+CLI → Build → assemble → bootstrap → drive
+                                       ├─ command mode → wasi:cli/run → ExitStatus
+                                       └─ server mode  → trigger servers → per-request instantiate
 ```
 
 ### Isolation and pooling
@@ -201,13 +212,13 @@ The consolidated list is in [Configuration](reference/configuration.md); individ
 ```text
 omnia/
 ├── crates/
-│   ├── omnia/              # Embedder facade (re-exports omnia-core + omnia-plugin + omnia-cli + runtime!)
-│   ├── omnia-core/         # Runtime core (engine, deployment, registry, dispatch)
+│   ├── omnia/              # Composition root (assembly, lifecycle, optional crates, runtime!)
+│   ├── omnia-core/         # Live-runtime SDK (engine, registry, dispatch, stores, telemetry)
 │   ├── omnia-guest/        # Guest SDK (Handler/Client/Context, HTTP/messaging routers, errors, ORM, MCP)
 │   ├── guest-macros/       # #[instrument] proc macro
 │   ├── host-macros/        # runtime! proc-macro
 │   ├── omnia-plugin/       # Plugins capability (loader host + acquisition; re-exported by omnia)
-│   ├── omnia-cli/          # `run` command-line grammar (re-exported by omnia behind the `cli` feature)
+│   ├── omnia-cli/          # Leaf `run` grammar (selected by omnia's `cli` feature)
 │   └── wasi-*/             # WASI interface implementations
 │       ├── src/
 │       │   ├── guest.rs    # Guest bindings (wasm32)

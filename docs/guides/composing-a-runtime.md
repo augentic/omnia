@@ -145,6 +145,6 @@ let manifest = Manifest::new()
 host::run(DeploymentBuilder::new().manifest(manifest))?;
 ```
 
-The [`guest-link-dynamic`](../../examples/guest-link/dynamic.rs) example is a complete host built this way. For still deeper control, implement the `omnia::Wiring` trait yourself, build a `Deployment`, and call `omnia::run`, or assemble an `omnia::Runtime<B>` directly from a `DeploymentBuilder`. The [`crates/omnia` README](../../crates/omnia/README.md) lists the public API surface; [Architecture](../Architecture.md) explains how the pieces fit together.
+The [`guest-link-dynamic`](../../examples/guest-link/dynamic.rs) example is a complete host built this way. For still deeper control, implement the `omnia::Wiring` trait yourself, build a `Deployment`, and call `omnia::run(deployment)`, or `deployment.assemble(backends)` to obtain an `omnia::Runtime<B>`. The [`crates/omnia` README](../../crates/omnia/README.md) lists the public API surface; [Architecture](../Architecture.md) explains how the pieces fit together.
 
 One case that requires this today: the generated `main` handles only the `run` subcommand. To expose ahead-of-time compilation (`compile`, available with the default `jit` feature), call `omnia::compile` from your own `main`. Parsing the standard grammar yourself with `omnia::Cli` requires the default `cli` feature (it re-exports the `omnia-cli` crate); `omnia::compile` does not.

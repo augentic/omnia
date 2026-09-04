@@ -56,13 +56,13 @@ How the loader turns a package name and location into component bytes. Declared 
 
 ### Runtime core
 
-The domain-agnostic in-tree platform: the `omnia` kernel, WASI host crates (`wasi-*`), WIT contracts, guest registry, and host-mediated dispatch. It routes opaque identities and satisfies typed effects; it does not embed adapter names, workflow policy, vendor model ids, or other consumer-specific knowledge.
+The domain-agnostic in-tree platform: the `omnia` composition root, the `omnia-core` live-runtime SDK a capability crate targets, WASI host crates (`wasi-*`), WIT contracts, guest registry, and host-mediated dispatch. It routes opaque identities and satisfies typed effects; it does not embed adapter names, workflow policy, vendor model ids, or other consumer-specific knowledge.
 
-Same layer as **Layers 1 + 2 (runtime core + WASI interfaces)** in [Architecture.md](Architecture.md). In Specify this is also called the **Omnia runtime core**.
+Same layer as **Layers 1 + 2 (composition root + live-runtime SDK + WASI interfaces)** in [Architecture.md](Architecture.md). In Specify this is also called the **Omnia runtime core**.
 
 ### Facade
 
-The `omnia` crate, an embedder's only omnia dependency: it re-exports `omnia-core`, the two crates built between core and itself — `omnia-plugin` (plugin loader capability) and `omnia-cli` (the `run` grammar, behind the `cli` feature) — and the `runtime!` macro under `omnia::…` paths.
+The `omnia` crate, the **composition root** and an embedder's only omnia dependency: it owns deployment assembly and process lifecycle, composes the optional crates — `omnia-plugin` (plugin loader capability) and `omnia-cli` (the `run` grammar, a leaf crate behind the `cli` feature) — and re-exports the `omnia-core` live-runtime SDK and the `runtime!` macro under `omnia::…` paths.
 
 ### Runtime contract
 

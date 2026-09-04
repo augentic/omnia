@@ -20,7 +20,7 @@ omnia::runtime!({
 });
 ```
 
-Each `Host: Backend` pair links a WASI interface and binds it to a host backend. The macro always generates the `main` entry point; for a custom entry point, implement [`Wiring`], build a [`Deployment`], and call `omnia::run` (or build an `omnia::Runtime<B>` directly) instead.
+Each `Host: Backend` pair links a WASI interface and binds it to a host backend. The macro always generates the `main` entry point; for a custom entry point, implement [`Wiring`], build a [`Deployment`], and call `omnia::run(deployment)` (or `deployment.assemble(backends)` to obtain an `omnia::Runtime<B>`) instead.
 
 [`Wiring`]: Wiring
 [`Deployment`]: Deployment
@@ -39,11 +39,11 @@ The runtime is built around a set of traits that allow services to be plugged in
 
 ## Public API
 
-`omnia` exposes only what a deployment author, a host-server crate, or a hand-written runtime needs; lifecycle, dispatch, and transport-carrier internals are crate-private.
+`omnia` exposes the composition-root surface a deployment author, a host-server crate, or a hand-written runtime needs; dispatch and transport-carrier internals stay crate-private.
 
 - **Macros:** `runtime!`
 - **Lifecycle:** `run` — takes a built `Deployment`, assembles the `Runtime` (installing epoch interruption, pool-metric sampling, and host-mediated link serving), then drives command mode or the trigger servers
-- **Runtime + store:** `Runtime`, `Wiring`, `StoreCtx`, `StoreBase`, `Host`, `Server`, `Backend`, `FromEnv`, `HasLimits`, `Dispatcher`, `FutureResult`
+- **Runtime + store:** `Runtime`, `RuntimeParts`, `Wiring`, `StoreCtx`, `StoreBase`, `Host`, `Server`, `Backend`, `FromEnv`, `HasLimits`, `Dispatcher`, `FutureResult`
 - **Registry pipeline:** `Manifest` (with `GuestEntry`, `Mount`, `SourceSpec`, route/transport types), `DeploymentBuilder`, `Deployment`, `Registry`, `Guest`, `GuestId`, `RuntimeOptions`
 - **Trigger routing (host servers):** `RouteTable` + `MatchStrategy` (aliased `HttpRoutes`/`PatternRoutes`/`CliRoutes`), `Routes`, `Resolver`, `TriggerRouter`
 - **Host-mediated linking (advanced):** `serve_links`, `GuestSelector`, `FirstArgSelector`, `LinkClient`, `WrpcState`
@@ -51,7 +51,7 @@ The runtime is built around a set of traits that allow services to be plugged in
 - **Plugins (`omnia:plugins/loader`):** `WasiPlugins`, `Plugins`, `PluginLoader`, `Location`, the `PathMounts`/`RegistryClient` acquirers with their `PathSource`/`RegistrySource` seams, and the `ContentStore`/`ReleaseStore` cache traits
 - **Signature vocabulary:** `anyhow` (`omnia::anyhow::Result`) because `Backend`, `Wiring`, and the generated runtime module speak it, and `futures` (`omnia::futures::future::BoxFuture`) because the plugin store and acquirer seams return it
 
-Most deployments only touch the `runtime!` macro; a hand-written runtime instead implements [`Wiring`] and calls `run`.
+Most deployments only touch the `runtime!` macro; a hand-written runtime instead implements [`Wiring`], builds a `Deployment`, and calls `run`.
 
 ## Features
 
@@ -85,7 +85,7 @@ Initialization is idempotent: the first `build` in the process installs the subs
 
 ## Architecture
 
-`omnia` is a thin facade: the runtime spine lives in `omnia-core` and the `omnia:plugins/loader` capability in `omnia-plugin`, both re-exported here under one root together with the `runtime!` macro — the paths embedders (and the macro's generated code) use never name the underlying crates, and neither should a deployment's `Cargo.toml`. Depend on `omnia-core` (or `omnia-plugin`) directly only when building a capability crate of your own.
+`omnia` is the composition root: it owns deployment assembly, process lifecycle, and composition of the optional crates (`omnia-plugin`, `omnia-cli` behind `cli`, the `runtime!` macro), and re-exports the `omnia-core` live-runtime SDK under one root — the paths embedders (and the macro's generated code) use never name the underlying crates, and neither should a deployment's `Cargo.toml`. Depend on `omnia-core` (or `omnia-plugin`) directly only when building a capability crate of your own. `omnia-cli` is a leaf grammar crate with no `omnia-*` dependencies.
 
 See the [workspace documentation](https://github.com/augentic/omnia) for the full architecture guide and list of available WASI interface crates.
 
