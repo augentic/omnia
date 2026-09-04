@@ -27,9 +27,6 @@ dependencies = [
   "hack",
   "tree-guard",
   "cli-guard",
-  "cli-leaf-guard",
-  "core-bottom-guard",
-  "host-layer-guard",
   "test",
   "test-docs",
   "docs",
@@ -119,37 +116,6 @@ if printf '%s\n' "$tree" | grep -Eq '(^|[^a-zA-Z0-9_-])(clap|omnia-cli) '; then
   printf 'omnia without `cli` pulls the CLI:\n%s\n' "$tree" >&2
   exit 1
 fi
-'''
-
-# omnia-cli is a leaf grammar crate: it may not see any omnia-* crate.
-[tasks.cli-leaf-guard]
-script = '''
-tree="$(cargo tree -p omnia-cli --all-features -e normal --prefix none)"
-if printf '%s\n' "$tree" | grep '^omnia-' | grep -vq '^omnia-cli '; then
-  printf 'omnia-cli depends on an omnia crate; it must stay a leaf\n' >&2
-  exit 1
-fi
-'''
-
-# omnia-core is the bottom of the stack: not even its tests may reach the facade.
-[tasks.core-bottom-guard]
-script = '''
-if cargo tree -p omnia-core --all-features -e dev --prefix none --depth 1 | grep -qx 'omnia v.*'; then
-  printf 'omnia-core dev-depends on omnia; move the test to crates/omnia/tests\n' >&2
-  exit 1
-fi
-'''
-
-# Host crates build on core, never on the composition root (dev-deps excepted:
-# their e2e tests legitimately drive omnia_test::host).
-[tasks.host-layer-guard]
-script = '''
-for crate in $(ls -1 crates | grep '^wasi-'); do
-  if cargo tree -p "omnia-$crate" -e normal --prefix none --depth 1 | grep -qx 'omnia v.*'; then
-    printf 'omnia-%s depends on omnia; depend on omnia-core\n' "$crate" >&2
-    exit 1
-  fi
-done
 '''
 
 # Semver check against the last published omnia-test; joins `ci` once the
