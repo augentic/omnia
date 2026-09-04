@@ -31,16 +31,15 @@ cfg_if::cfg_if! {
                 ))
                 .guest(GuestEntry::new("router", artifacts.join("guest_link_router_wasm.wasm")));
 
-            // Raw `.wasm` sources, so the default (WasmOnly) safe build applies;
-            // a deployment of trusted `omnia compile` output would transition
-            // with `.precompiled()` and call its unsafe `build`.
+            // Raw `.wasm` sources, so the safe `build` applies; a deployment of
+            // trusted `omnia compile` output would call `unsafe build_trusted`.
             let deployment = DeploymentBuilder::new()
                 .manifest(manifest)
                 .build::<StoreCtx<()>>()
                 .await
                 .context("building deployment")?;
-            // `Runtime::new` also wires the host-mediated link serve side.
-            let runtime = Runtime::<()>::new(deployment, |_| Ok(()), |_| Ok(())).await?;
+            // `assemble` also wires the host-mediated link serve side.
+            let runtime = deployment.assemble(()).await?;
 
             // The extra guest is absent from the manifest. An install pipeline
             // verifies the bytes (digest, signature — deployment policy) before

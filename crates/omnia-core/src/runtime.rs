@@ -1,329 +1,22 @@
-//! Deployment lifecycle: [`Backends`], [`Wiring`], [`Runtime`], [`run`], and [`ExitStatus`].
+//! Connected runtime: [`Runtime`], [`RuntimeParts`], [`WeakRuntime`], and [`ExitStatus`].
 
 mod command;
-mod entry;
 
-use std::future::Future;
-use std::process::ExitCode;
-use std::sync::{Arc, OnceLock, Weak};
-use std::time::Duration;
-use std::{env, fmt};
+use std::fmt;
+use std::sync::{Arc, Weak};
 
 use anyhow::{Context as _, Result};
-pub use entry::{MainOptions, ManifestSource};
+use wasmtime::Store;
 use wasmtime::component::{Component, Instance, InstancePre, types};
-use wasmtime::{Engine, Store};
 
-use crate::deployment::{ELF_MAGIC, GuestArtifact, Location};
-use crate::dispatch::{serve_guest, serve_links};
+use crate::artifact::GuestArtifact;
+use crate::dispatch::serve_guest;
 use crate::extensions::Extensions;
+use crate::location::Location;
 use crate::mount::MountRegistry;
 use crate::registry::{Guest, GuestId, HttpRoutes, PublishError, TriggerRouter};
 use crate::store::HasLimits;
-use crate::{
-    Deployment, DeploymentBuilder, Dispatcher, Registry, RuntimeOptions, StoreBase, StoreCtx,
-};
-
-/// A deployment's connected backend bundle, threaded into [`Runtime`].
-///
-/// The `runtime!` macro generates the concrete bundle (one field per declared
-/// backend) and this impl, whose [`connect`](Self::connect) connects every
-/// backend concurrently — the work the macro previously inlined as a
-/// `tokio::try_join!` in the generated `Runtime::new`. A deployment that wires
-/// no backends uses the [`()`](unit) bundle below, so [`Runtime`] needs no
-/// special empty case.
-pub trait Backends: Clone + Send + Sync + 'static {
-    /// Connect every backend in the bundle.
-    ///
-    /// # Errors
-    ///
-    /// Returns the first backend connection error.
-    fn connect() -> impl Future<Output = Result<Self>>;
-}
-
-/// The zero-backend bundle: a deployment that links only backend-less hosts
-/// (such as a `mode: command` `wasi:cli` deployment) connects nothing.
-impl Backends for () {
-    fn connect() -> impl Future<Output = Result<Self>> {
-        std::future::ready(Ok(()))
-    }
-}
-
-/// How a deployment is driven after bootstrap.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Mode {
-    /// Await trigger servers until shutdown.
-    #[default]
-    Server,
-    /// Drive `wasi:cli/run` once; trigger servers run in the background.
-    Command,
-}
-
-impl Mode {
-    /// Whether guest argv is shaped for a one-shot `wasi:cli` command.
-    #[must_use]
-    pub const fn is_command(self) -> bool {
-        matches!(self, Self::Command)
-    }
-}
-
-/// Host linking, extension installation, and trigger-server startup for a
-/// deployment.
-///
-/// Bounded on the bundle's shape rather than on [`Backends`] so one wiring
-/// serves both the connected production bundle and a bundle handed in ready
-/// (see [`run_with`]).
-pub trait Wiring<B: Clone + Send + Sync + 'static> {
-    /// Link every declared host into the deployment linker.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if a host cannot be added to the linker.
-    fn link(deployment: &mut Deployment<StoreCtx<B>>) -> Result<()>;
-
-    /// Install capability extensions into [`Runtime::extensions`]. Invoked
-    /// once, after the bundle is in hand and the runtime is assembled, so an
-    /// extension is built against the bundle (via [`Runtime::backends`]);
-    /// the default installs nothing.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if an extension cannot be built or installed.
-    fn extend(runtime: &Runtime<B>) -> Result<()> {
-        let _ = runtime;
-        Ok(())
-    }
-
-    /// Run every declared long-lived trigger server concurrently.
-    fn serve(runtime: &Runtime<B>) -> impl std::future::Future<Output = Result<()>> + Send;
-}
-
-/// Entry point for generated `main` functions.
-///
-/// `options` carries the deployment the `runtime!` macro compiled in: mode
-/// and manifest source. Command mode with a compiled-in deployment is a
-/// direct command: argv passes to the guest verbatim except the reserved host
-/// log flags (`--debug` / `--quiet`), which select the telemetry
-/// [`LogMode`](crate::LogMode). Every other shape needs the standard
-/// `run [wasm] [--config] -- args…` grammar, served by `omnia-cli`'s `main`;
-/// this one refuses it.
-#[doc(hidden)]
-pub async fn main<B, H>(options: MainOptions) -> ExitCode
-where
-    B: Backends,
-    H: Wiring<B>,
-{
-    let plan = match entry::plan(options, env::args_os()) {
-        Ok(plan) => plan,
-        Err(error) => {
-            eprintln!("{error:#}");
-            return ExitCode::FAILURE;
-        }
-    };
-    drive_main::<B, H>(plan.into_builder()).await
-}
-
-/// Run a planned deployment builder to completion, reporting failures on stderr.
-#[doc(hidden)]
-pub async fn drive_main<B, H>(builder: DeploymentBuilder) -> ExitCode
-where
-    B: Backends,
-    H: Wiring<B>,
-{
-    // The generated entry point admits pre-compiled artifacts: manifests and
-    // `.bin` paths given to (or compiled into) the binary are trusted
-    // operator inputs (docs/security-model.md).
-    let builder = builder.precompiled();
-    // SAFETY: the operator running this binary chose the manifest and
-    // artifact paths; pre-compiled artifacts are documented trusted inputs
-    // produced by `omnia compile`.
-    match unsafe { run_precompiled::<B, H>(builder) }.await {
-        Ok(status) => status.into(),
-        Err(error) => {
-            eprintln!("{error:#}");
-            ExitCode::FAILURE
-        }
-    }
-}
-
-/// Build runtime state, bootstrap it, then run command mode or every trigger server.
-///
-/// The default ([`WasmOnly`](crate::WasmOnly)) builder only loads raw wasm; a
-/// deployment of trusted pre-compiled artifacts builds its [`Deployment`]
-/// through the [`Precompiled`](crate::Precompiled) typestate's unsafe `build`
-/// (as the generated CLI `main` does).
-///
-/// # Errors
-///
-/// Returns an error if the deployment cannot be built, runtime state cannot be
-/// assembled, bootstrap fails, or a trigger server exits with an error.
-pub async fn run<B, H>(builder: DeploymentBuilder) -> Result<ExitStatus>
-where
-    B: Backends,
-    H: Wiring<B>,
-{
-    let deployment = builder.build::<StoreCtx<B>>().await.context("building runtime")?;
-    drive::<B, H>(deployment).await
-}
-
-/// [`run`] over a bundle already in hand: nothing connects, `backends` is
-/// threaded in as-is. The shape a test harness uses to drive a production
-/// `runtime!`'s wiring over in-memory backends.
-///
-/// # Errors
-///
-/// Returns an error if the deployment cannot be built, runtime state cannot be
-/// assembled, bootstrap fails, or a trigger server exits with an error.
-pub async fn run_with<B, H>(builder: DeploymentBuilder, backends: B) -> Result<ExitStatus>
-where
-    B: Clone + Send + Sync + 'static,
-    H: Wiring<B>,
-{
-    let deployment = builder.build::<StoreCtx<B>>().await.context("building runtime")?;
-    let mode = deployment.mode();
-    let runtime = Runtime::<B>::with_backends(deployment, backends, H::link, H::extend)
-        .await
-        .context("assembling runtime")?;
-    finish::<B, H>(runtime, mode).await
-}
-
-/// [`run`] for a deployment of trusted pre-compiled artifacts.
-///
-/// The [`Precompiled`](crate::Precompiled) parameter means a raw/default
-/// builder cannot select this path by accident — the caller must transition
-/// through [`DeploymentBuilder::precompiled`](crate::DeploymentBuilder::precompiled)
-/// first.
-///
-/// # Safety
-///
-/// Every pre-compiled path the builder's manifest names must identify
-/// trusted, immutable wasmtime output (`omnia compile`); see
-/// [`DeploymentBuilder::build`](crate::DeploymentBuilder) in the
-/// `Precompiled` typestate.
-///
-/// # Errors
-///
-/// Returns an error if the deployment cannot be built, runtime state cannot be
-/// assembled, bootstrap fails, or a trigger server exits with an error.
-pub async unsafe fn run_precompiled<B, H>(
-    builder: DeploymentBuilder<crate::Precompiled>,
-) -> Result<ExitStatus>
-where
-    B: Backends,
-    H: Wiring<B>,
-{
-    // SAFETY: forwarded — this function's own contract is exactly the
-    // typestate build's contract.
-    let deployment = unsafe { builder.build::<StoreCtx<B>>() }.await.context("building runtime")?;
-    drive::<B, H>(deployment).await
-}
-
-/// Drive an already-built deployment: assemble the runtime, start background
-/// tasks, then run command mode or every trigger server.
-async fn drive<B, H>(deployment: Deployment<StoreCtx<B>>) -> Result<ExitStatus>
-where
-    B: Backends,
-    H: Wiring<B>,
-{
-    let mode = deployment.mode();
-
-    let runtime =
-        Runtime::<B>::new(deployment, H::link, H::extend).await.context("assembling runtime")?;
-    finish::<B, H>(runtime, mode).await
-}
-
-/// Start background tasks, then run command mode or every trigger server,
-/// releasing the runtime when the drive completes.
-async fn finish<B, H>(runtime: Runtime<B>, mode: Mode) -> Result<ExitStatus>
-where
-    B: Clone + Send + Sync + 'static,
-    H: Wiring<B>,
-{
-    // Background tasks hold Engine clones; abort them when the drive
-    // completes so a finished deployment releases its engine (and the pooling
-    // allocator's large virtual reservation) instead of leaking it into the
-    // host process.
-    let epoch = drive_epoch(runtime.registry().engine().clone(), runtime.options().epoch_tick);
-    let pool =
-        sample_pool(runtime.registry().engine().clone(), runtime.options().pool_metrics_interval);
-
-    log_ready(&runtime, mode);
-
-    let outcome = match mode {
-        Mode::Command => {
-            let servers_runtime = runtime.clone();
-            tokio::spawn(async move {
-                if let Err(error) = H::serve(&servers_runtime).await {
-                    tracing::error!(%error, "trigger server exited with error");
-                }
-            });
-            command::drive(&runtime).await
-        }
-        Mode::Server => H::serve(&runtime).await.map(|()| ExitStatus::SUCCESS),
-    };
-
-    epoch.abort();
-    if let Some(pool) = pool {
-        pool.abort();
-    }
-    // Drop every link-serve endpoint: the drain tasks hold Runtime clones, so
-    // leaving them running would pin the engine past the deployment's life.
-    runtime.shutdown();
-    // Push batch-queued spans and metrics to the exporters so they survive
-    // fast command-mode exits.
-    crate::telemetry::flush();
-    outcome
-}
-
-fn log_ready<B>(runtime: &Runtime<B>, mode: Mode)
-where
-    B: Clone + Send + Sync + 'static,
-{
-    if mode.is_command() {
-        tracing::debug!(component = runtime.name(), "omnia ready");
-    } else {
-        tracing::info!(component = runtime.name(), "omnia ready");
-    }
-}
-
-fn drive_epoch(engine: Engine, tick: Duration) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(tick);
-        loop {
-            interval.tick().await;
-            engine.increment_epoch();
-        }
-    })
-}
-
-fn sample_pool(engine: Engine, interval: Duration) -> Option<tokio::task::JoinHandle<()>> {
-    if interval.is_zero() {
-        return None;
-    }
-
-    let handle = tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(interval);
-        loop {
-            ticker.tick().await;
-
-            let Some(metrics) = engine.pooling_allocator_metrics() else {
-                break;
-            };
-
-            tracing::debug!(
-                gauge.pool_core_instances = metrics.core_instances(),
-                gauge.pool_component_instances = metrics.component_instances(),
-                gauge.pool_memories = metrics.memories() as u64,
-                gauge.pool_tables = metrics.tables() as u64,
-                gauge.pool_stacks = metrics.stacks() as u64,
-                gauge.pool_unused_warm_memories = u64::from(metrics.unused_warm_memories()),
-                gauge.pool_unused_memory_bytes_resident =
-                    metrics.unused_memory_bytes_resident() as u64,
-            );
-        }
-    });
-    Some(handle)
-}
+use crate::{Dispatcher, Registry, RuntimeOptions, StoreBase, StoreCtx};
 
 /// Guest exit code. [`code_u8`](Self::code_u8) and [`ExitCode`](std::process::ExitCode)
 /// keep only the low byte (POSIX semantics).
@@ -359,6 +52,24 @@ impl From<ExitStatus> for std::process::ExitCode {
     }
 }
 
+/// Inputs to [`Runtime::from_parts`].
+pub struct RuntimeParts<B: 'static> {
+    /// Deployment name read by trigger servers and the bootstrap log.
+    pub name: Arc<str>,
+    /// Assembled guest registry.
+    pub registry: Arc<Registry<StoreCtx<B>>>,
+    /// Guest argv.
+    pub args: Vec<String>,
+    /// Mount registry opened from the deployment's preopens.
+    pub mounts: Arc<MountRegistry>,
+    /// Connected backend bundle.
+    pub backends: B,
+    /// Plugin acquisition locations from the manifest.
+    pub locations: Vec<Location>,
+    /// Command-mode guest identity, if any.
+    pub command_guest: Option<GuestId>,
+}
+
 /// Connected host runtime: registry, argv, mounts, and backend bundle.
 ///
 /// A thin handle over shared state: `clone()` bumps two reference counts, so
@@ -379,33 +90,15 @@ struct RuntimeInner<B: 'static> {
     args: Arc<Vec<String>>,
     mounts: Arc<MountRegistry>,
     backends: B,
-    // Manifest-marked command guest identity; absent, command mode routes to
+    // Command-mode guest identity; absent, command mode routes to
     // the sole static `wasi:cli/run` exporter.
-    command_guest: OnceLock<GuestId>,
+    command_guest: Option<GuestId>,
     // The manifest's plugin acquisition locations, read by the loader
     // capability's install.
     locations: Vec<Location>,
-    // Capability-crate state installed by the `Wiring::extend` hook and
+    // Capability-crate state installed by the extend hook and
     // shared with every store context.
     extensions: Extensions,
-}
-
-impl<B: 'static> RuntimeInner<B> {
-    fn new(
-        name: Arc<str>, registry: Arc<Registry<StoreCtx<B>>>, args: Arc<Vec<String>>,
-        mounts: Arc<MountRegistry>, backends: B, locations: Vec<Location>,
-    ) -> Self {
-        Self {
-            name,
-            registry,
-            args,
-            mounts,
-            backends,
-            command_guest: OnceLock::new(),
-            locations,
-            extensions: Extensions::new(),
-        }
-    }
 }
 
 /// [`Dispatcher`] over the runtime's shared state.
@@ -476,80 +169,6 @@ impl fmt::Display for AdmitError {
 
 impl std::error::Error for AdmitError {}
 
-impl<B: Backends> Runtime<B> {
-    /// Link hosts, connect backends, assemble the guest registry, install
-    /// capability extensions, and wire the host-mediated link serve side.
-    ///
-    /// `extend` is the [`Wiring::extend`] hook: invoked once, after backends
-    /// connect and the runtime is assembled, so an extension is built against
-    /// the connected bundle.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if host linking, backend connection, registry
-    /// assembly, extension installation, or link serve wiring fails.
-    pub async fn new<L, E>(
-        mut deployment: Deployment<StoreCtx<B>>, link: L, extend: E,
-    ) -> Result<Self>
-    where
-        L: FnOnce(&mut Deployment<StoreCtx<B>>) -> Result<()>,
-        E: FnOnce(&Self) -> Result<()>,
-    {
-        link(&mut deployment).context("linking hosts")?;
-        let backends = B::connect().await.context("connecting backends")?;
-        Self::assemble(deployment, backends, extend).await
-    }
-}
-
-impl<B: Clone + Send + Sync + 'static> Runtime<B> {
-    /// [`Runtime::new`] over a bundle already in hand: links hosts, assembles
-    /// the guest registry, installs capability extensions, and wires the
-    /// host-mediated link serve side, connecting nothing.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if host linking, registry assembly, extension
-    /// installation, or link serve wiring fails.
-    pub async fn with_backends<L, E>(
-        mut deployment: Deployment<StoreCtx<B>>, backends: B, link: L, extend: E,
-    ) -> Result<Self>
-    where
-        L: FnOnce(&mut Deployment<StoreCtx<B>>) -> Result<()>,
-        E: FnOnce(&Self) -> Result<()>,
-    {
-        link(&mut deployment).context("linking hosts")?;
-        Self::assemble(deployment, backends, extend).await
-    }
-
-    async fn assemble<E>(
-        deployment: Deployment<StoreCtx<B>>, backends: B, extend: E,
-    ) -> Result<Self>
-    where
-        E: FnOnce(&Self) -> Result<()>,
-    {
-        let name = Arc::<str>::from(deployment.name());
-        let args = Arc::new(deployment.args().to_vec());
-        let mounts = deployment.mounts();
-        let command_guest = deployment.command_guest();
-        let locations = deployment.plugin_locations().to_vec();
-
-        let runtime = Self::with_inner(Arc::new(RuntimeInner::new(
-            name,
-            Arc::new(deployment.into_registry().context("assembling registry")?),
-            args,
-            mounts,
-            backends,
-            locations,
-        )));
-        if let Some(id) = command_guest {
-            runtime.set_command_guest(id);
-        }
-        extend(&runtime).context("installing runtime extensions")?;
-        serve_links(&runtime).await.context("wiring host-mediated link serve side")?;
-        Ok(runtime)
-    }
-}
-
 // Manual: `StoreCtx<B>` is not `Clone`; both fields are `Arc`-backed.
 impl<B: Clone + Send + Sync + 'static> Clone for Runtime<B> {
     fn clone(&self) -> Self {
@@ -568,25 +187,23 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         Self { inner, dispatcher }
     }
 
-    /// Build a runtime from an already-assembled registry and backend bundle.
+    /// Build a runtime from already-assembled parts.
     ///
-    /// Low-level constructor: unlike [`Runtime::new`] it does not wire the
-    /// host-mediated link serve side — a caller whose deployment declares
-    /// link interfaces must run [`serve_links`] itself before dispatching.
-    /// The runtime name defaults to `omnia`.
+    /// Does not wire the host-mediated link serve side — a caller whose
+    /// deployment declares link interfaces must run [`crate::serve_links`]
+    /// itself before dispatching.
     #[must_use]
-    pub fn from_parts(
-        registry: Arc<Registry<StoreCtx<B>>>, args: Vec<String>, mounts: Arc<MountRegistry>,
-        backends: B,
-    ) -> Self {
-        Self::with_inner(Arc::new(RuntimeInner::new(
-            Arc::from("omnia"),
-            registry,
-            Arc::new(args),
-            mounts,
-            backends,
-            Vec::new(),
-        )))
+    pub fn from_parts(parts: RuntimeParts<B>) -> Self {
+        Self::with_inner(Arc::new(RuntimeInner {
+            name: parts.name,
+            registry: parts.registry,
+            args: Arc::new(parts.args),
+            mounts: parts.mounts,
+            backends: parts.backends,
+            command_guest: parts.command_guest,
+            locations: parts.locations,
+            extensions: Extensions::new(),
+        }))
     }
 
     /// The deployment's plugin acquisition locations (the manifest's
@@ -629,13 +246,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// `command = true`), if any.
     #[must_use]
     pub fn command_guest(&self) -> Option<&GuestId> {
-        self.inner.command_guest.get()
-    }
-
-    fn set_command_guest(&self, id: GuestId) {
-        if self.inner.command_guest.set(id).is_err() {
-            tracing::warn!("command guest already installed; ignoring");
-        }
+        self.inner.command_guest.as_ref()
     }
 
     /// Guest registry.
@@ -650,7 +261,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         &self.inner.backends
     }
 
-    /// The capability-crate state installed by the [`Wiring::extend`] hook —
+    /// The capability-crate state installed by the extend hook —
     /// the same set every store context carries.
     #[must_use]
     pub fn extensions(&self) -> &Extensions {
@@ -815,16 +426,6 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// missing seam export, an identity already registered (an earlier or
     /// racing registration), or an internal serve/publication failure.
     pub async fn admit(&self, id: GuestId, bytes: Vec<u8>) -> Result<(), AdmitError> {
-        // A native (pre-compiled) artifact is refused before wasmtime sees
-        // the bytes: admitted components only ever take the safe validation
-        // path, never the deployment's `Precompiled` trust policy.
-        if bytes.get(..ELF_MAGIC.len()) == Some(&ELF_MAGIC) {
-            return Err(AdmitError::ArtifactRefused(format!(
-                "`{id}` is a pre-compiled (native) artifact; admission only accepts raw wasm \
-                 components"
-            )));
-        }
-
         let digest: std::sync::Arc<str> = std::sync::Arc::from(crate::sha256_digest(&bytes));
 
         // Safe validation plus sandboxed JIT — the explicitly safe constructor.

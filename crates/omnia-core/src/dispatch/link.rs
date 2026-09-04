@@ -17,7 +17,7 @@ use wrpc_wasmtime::{ValEncoder, WrpcView, read_value};
 use super::handle::DispatchHandle;
 use super::transport::LinkTransport as _;
 use super::value::read_plain_value;
-use crate::deployment::LoadedGuest;
+use crate::artifact::LoadedGuest;
 use crate::registry::GuestId;
 
 /// The functions polyfilled onto a linker — the union across guests at

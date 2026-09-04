@@ -37,24 +37,18 @@ async fn requester_runtime(
         .plugins(["omnia-test:link/ops"])
         .guest(GuestEntry::new("requester", wasm))
         .mounts([scratch.mount(false)]);
-    let deployment = DeploymentBuilder::new()
+    let mut deployment = DeploymentBuilder::new()
         .manifest(manifest)
         .mode(Mode::Command)
         .build::<StoreCtx<Backends>>()
         .await
         .context("building deployment")?;
-    Runtime::with_backends(
-        deployment,
-        Backends::defaults().await,
-        |deployment| {
-            deployment.host::<WasiPlugins, Backends>()?;
-            deployment.host::<WasiOtel, Backends>()?;
-            Ok(())
-        },
-        move |runtime| Plugins::install(runtime, registry, path),
-    )
-    .await
-    .context("assembling runtime")
+    deployment.host::<WasiPlugins, Backends>()?;
+    deployment.host::<WasiOtel, Backends>()?;
+    let runtime =
+        deployment.assemble(Backends::defaults().await).await.context("assembling runtime")?;
+    Plugins::install(&runtime, registry, path)?;
+    Ok(runtime)
 }
 
 /// Drive `wasm` as the `requester` command guest under the given slots.
@@ -309,24 +303,16 @@ async fn load_without_plugins_installed_refuses() {
         .plugins(["omnia-test:link/ops"])
         .guest(GuestEntry::new("requester", test_programs::PLUGINS_LOAD_PATH))
         .mounts([scratch.mount(false)]);
-    let deployment = DeploymentBuilder::new()
+    let mut deployment = DeploymentBuilder::new()
         .manifest(manifest)
         .mode(Mode::Command)
         .build::<StoreCtx<Backends>>()
         .await
         .expect("building deployment");
-    let runtime = Runtime::with_backends(
-        deployment,
-        Backends::defaults().await,
-        |deployment| {
-            deployment.host::<WasiPlugins, Backends>()?;
-            deployment.host::<WasiOtel, Backends>()?;
-            Ok(())
-        },
-        |_| Ok(()),
-    )
-    .await
-    .expect("assembling runtime");
+    deployment.host::<WasiPlugins, Backends>().expect("linking the plugins host");
+    deployment.host::<WasiOtel, Backends>().expect("linking the otel host");
+    let runtime =
+        deployment.assemble(Backends::defaults().await).await.expect("assembling runtime");
 
     let error = runtime
         .load("test:echoer", Origin::Path("./plugin.wasm".to_owned()), None)

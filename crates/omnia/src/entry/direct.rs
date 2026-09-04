@@ -10,10 +10,9 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
+use omnia_core::LogMode;
 
-use crate::runtime::Mode;
-use crate::telemetry::LogMode;
-use crate::{DeploymentBuilder, Manifest};
+use crate::{DeploymentBuilder, Manifest, Mode};
 
 /// How a runtime's compiled-in deployment manifest is supplied.
 ///
@@ -184,7 +183,7 @@ pub(super) fn plan_direct(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::deployment::GuestEntry;
+    use crate::GuestEntry;
 
     fn argv(args: &[&str]) -> Vec<OsString> {
         args.iter().map(OsString::from).collect()

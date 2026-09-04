@@ -172,25 +172,20 @@ impl Deployment {
     {
         let manifest = self.manifest()?;
         let plugins = !manifest.plugins.is_empty() || !manifest.locations.is_empty();
-        let deployment = DeploymentBuilder::new()
+        let mut deployment = DeploymentBuilder::new()
             .manifest(manifest)
             .mode(Mode::Command)
             .args(self.args.clone())
             .build::<StoreCtx<B>>()
             .await
             .context("building deployment")?;
-        Runtime::with_backends(
-            deployment,
-            backends,
-            |deployment| {
-                if plugins {
-                    deployment.host::<WasiPlugins, B>().context("linking the plugins host")?;
-                }
-                link(deployment).context("linking hosts")
-            },
-            Plugins::install_declared,
-        )
-        .await
+        if plugins {
+            deployment.host::<WasiPlugins, B>().context("linking the plugins host")?;
+        }
+        link(&mut deployment).context("linking hosts")?;
+        let runtime = deployment.assemble(backends).await?;
+        Plugins::install_declared(&runtime)?;
+        Ok(runtime)
     }
 
     /// Boots by hand, drives the command guest once, and shuts the runtime
@@ -246,6 +241,7 @@ impl Deployment {
         H: Wiring<B>,
         B: Clone + Send + Sync + 'static,
     {
-        omnia::run_with::<B, H>(self.builder()?, backends).await
+        let deployment = self.builder()?.build::<StoreCtx<B>>().await?;
+        omnia::run_with::<B, H>(deployment, backends).await
     }
 }

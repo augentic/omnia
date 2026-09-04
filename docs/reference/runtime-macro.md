@@ -164,7 +164,7 @@ omnia::runtime!({
 Two things to know:
 
 - **The guest artifact must exist when the host crate compiles** — `include_bytes!` reads it at build time, so the two-step build order (guest first, then host) becomes a hard requirement rather than a run-time one. This is why the repository's own examples stay path-based.
-- **Embed raw `.wasm`, not `omnia compile` output.** Raw wasm is safe and JIT-compiles at startup (the `jit` feature is on by default). Embedded pre-compiled bytes are native code and are rejected by the safe build, same as pre-compiled paths; they require the programmatic `DeploymentBuilder::precompiled()` unsafe build — see the [security model](../security-model.md).
+- **Embed raw `.wasm`, not `omnia compile` output.** Raw wasm is safe and JIT-compiles at startup (the `jit` feature is on by default). Embedded pre-compiled bytes are native code and are rejected by the safe build, same as pre-compiled paths; they require the programmatic `DeploymentBuilder`'s `unsafe build_trusted` — see the [security model](../security-model.md).
 
 The [`guest-link`](../../examples/guest-link/runtime.rs) example is built this way; its [`omnia.toml`](../../examples/guest-link/omnia.toml) expresses the same deployment as a file for `--config`.
 
@@ -228,9 +228,9 @@ The invocation expands to a private `runtime` module and re-exports five items f
 | Item | Shape | Use |
 | ---- | ----- | --- |
 | `main` | `#[tokio::main] fn main() -> ExitCode` | The binary's entry point: connects the declared backends from the environment and drives the compiled-in deployment. |
-| `run` | blocking `fn run(DeploymentBuilder) -> Result<ExitStatus>` | Mount the runtime in-process from a binary with its own argument surface. |
+| `run` | blocking `fn run(DeploymentBuilder) -> Result<ExitStatus>` | Build the builder, then mount the runtime in-process from a binary with its own argument surface. |
 | `Hooks` | `pub struct Hooks` implementing `omnia::Wiring<B>` | The generated wiring — `link`, `extend`, `serve` — generic over any bundle `B` that `Provides` each declared host's context. |
 | `manifest` | `fn manifest() -> ManifestSource` | The compiled-in deployment (`config:` path or inline keys), for a test to overlay. |
-| `run_with` | `async fn run_with<B>(DeploymentBuilder, B) -> Result<ExitStatus>` | Drive the deployment through `Hooks` over a bundle already in hand; nothing connects. |
+| `run_with` | `async fn run_with<B>(DeploymentBuilder, B) -> Result<ExitStatus>` | Build the builder, then drive the deployment through `Hooks` over a bundle already in hand; nothing connects. |
 
 `main` and `run` use the generated `Backends` bundle. `Hooks`, `manifest`, and `run_with` exist so a test drives the *same* wiring the binary runs — over `omnia_test::host::Backends`, say — without a second `runtime!` declaration in the test tree.

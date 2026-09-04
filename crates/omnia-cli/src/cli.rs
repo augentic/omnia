@@ -1,9 +1,10 @@
 //! Command-line interface for omnia.
 
 use std::path::PathBuf;
+use std::str::FromStr;
 
+use anyhow::{Context as _, Result, bail};
 use clap::{Parser, Subcommand};
-use omnia_core::Mount;
 
 /// Command line interface for omnia.
 #[derive(Parser, PartialEq, Eq)]
@@ -35,7 +36,7 @@ pub enum Command {
         /// `--config` is also given; a matching guest-visible name overrides the
         /// manifest mount (last-wins).
         #[arg(long = "mount")]
-        mounts: Vec<Mount>,
+        mounts: Vec<MountArg>,
 
         /// Host-mediated interface to dispatch on a guest's behalf
         /// (repeatable). Unioned with the manifest's `plugins` list when
@@ -61,4 +62,95 @@ pub enum Command {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+}
+
+/// A `--mount` argument: a host directory preopened under a guest-visible name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MountArg {
+    /// Guest-visible name `preopens.get-directories()` returns (e.g. `.`).
+    pub name: String,
+    /// Host path; a relative path resolves against the process working directory.
+    pub host_path: PathBuf,
+    /// Read+write when `true`; read-only otherwise.
+    pub writable: bool,
+}
+
+impl FromStr for MountArg {
+    type Err = anyhow::Error;
+
+    /// Parse a CLI `--mount` spec: comma-separated `path=<host-path>`,
+    /// `name=<guest-name>`, and a bare `writable` (or `writable=<bool>`) flag. A
+    /// lone token without `=` is taken as the path, so `workspace` and
+    /// `workspace,writable` are shorthands; `name` defaults to `.` and the mount
+    /// is read-only unless `writable` is present.
+    fn from_str(spec: &str) -> Result<Self> {
+        let mut path: Option<PathBuf> = None;
+        let mut name: Option<String> = None;
+        let mut writable = false;
+
+        for token in spec.split(',').map(str::trim).filter(|token| !token.is_empty()) {
+            match token.split_once('=') {
+                Some(("path", value)) => path = Some(PathBuf::from(value)),
+                Some(("name", value)) => name = Some(value.to_owned()),
+                Some(("writable", value)) => {
+                    writable = value.parse().with_context(|| {
+                        format!("mount `writable` expects a bool, got `{value}`")
+                    })?;
+                }
+                Some((key, _)) => bail!("unknown mount key `{key}` in `--mount {spec}`"),
+                None if token == "writable" => writable = true,
+                None => {
+                    if path.replace(PathBuf::from(token)).is_some() {
+                        bail!("mount `--mount {spec}` sets the path more than once");
+                    }
+                }
+            }
+        }
+
+        let path =
+            path.with_context(|| format!("mount `--mount {spec}` is missing `path=<host-path>`"))?;
+        Ok(Self {
+            name: name.unwrap_or_else(|| ".".to_owned()),
+            host_path: path,
+            writable,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_mount_full_spec() {
+        let entry: MountArg = "path=workspace,name=.,writable".parse().expect("spec parses");
+        assert_eq!(entry.host_path, PathBuf::from("workspace"));
+        assert_eq!(entry.name, ".");
+        assert!(entry.writable);
+    }
+
+    #[test]
+    fn parse_mount_bare_path_shorthand() {
+        let entry: MountArg = "workspace".parse().expect("bare path parses");
+        assert_eq!(entry.host_path, PathBuf::from("workspace"));
+        assert_eq!(entry.name, ".", "name defaults to `.`");
+        assert!(!entry.writable, "a mount is read-only unless `writable` is given");
+    }
+
+    #[test]
+    fn parse_mount_bare_writable_shorthand() {
+        let entry: MountArg = "workspace,writable".parse().expect("shorthand parses");
+        assert_eq!(entry.host_path, PathBuf::from("workspace"));
+        assert!(entry.writable);
+    }
+
+    #[test]
+    fn parse_mount_requires_path() {
+        assert!("name=.,writable".parse::<MountArg>().is_err(), "a mount must name a path");
+    }
+
+    #[test]
+    fn parse_mount_rejects_unknown_key() {
+        assert!("path=x,bogus=1".parse::<MountArg>().is_err(), "unknown keys are rejected");
+    }
 }

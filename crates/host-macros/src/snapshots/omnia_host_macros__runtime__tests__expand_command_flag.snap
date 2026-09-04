@@ -51,7 +51,11 @@ mod runtime {
     /// blocking until the guest completes.
     #[tokio::main]
     pub async fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
-        omnia::run::<(), Hooks>(builder.mode(omnia::Mode::Command)).await
+        let deployment = builder
+            .mode(omnia::Mode::Command)
+            .build::<omnia::StoreCtx<()>>()
+            .await?;
+        omnia::run::<(), Hooks>(deployment).await
     }
     /// Run one deployment through this runtime's hosts over a bundle
     /// already in hand — nothing connects.
@@ -63,7 +67,11 @@ mod runtime {
         B: Clone + Send + Sync + 'static,
         Hooks: omnia::Wiring<B>,
     {
-        omnia::run_with::<B, Hooks>(builder.mode(omnia::Mode::Command), backends).await
+        let deployment = builder
+            .mode(omnia::Mode::Command)
+            .build::<omnia::StoreCtx<B>>()
+            .await?;
+        omnia::run_with::<B, Hooks>(deployment, backends).await
     }
 }
 #[allow(unused_imports)]

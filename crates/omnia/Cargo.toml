@@ -51,3 +51,12 @@ omnia-cli = { workspace = true, optional = true }
 omnia-core.workspace = true
 omnia-host-macros.workspace = true
 omnia-plugin.workspace = true
+serde.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "time"] }
+toml.workspace = true
+tracing.workspace = true
+wasmtime = { workspace = true, features = ["runtime"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+test-programs.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }

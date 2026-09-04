@@ -5,8 +5,8 @@
 //!
 //! Building the compile-time [`Config`] in one place (the
 //! `From<&RuntimeOptions>` conversion) guarantees that the engine used to
-//! pre-compile a component and the engine used to load it
-//! ([`crate::DeploymentBuilder`]) agree on every code-affecting setting. This
+//! pre-compile a component and the engine used to load it agree on every
+//! code-affecting setting. This
 //! parity is required for [`wasmtime::component::Component::deserialize_file`]
 //! to accept a pre-compiled artifact.
 
@@ -15,14 +15,9 @@
 // otherwise trip `missing_docs`.
 #![allow(missing_docs)]
 
-#[cfg(feature = "jit")]
-mod compile;
-
 use std::time::Duration;
 
 use anyhow::{Result, bail};
-#[cfg(feature = "jit")]
-pub use compile::compile;
 use fromenv::{FromEnv, ParseResult};
 use wasmtime::{Config, Enabled, InstanceAllocationStrategy, PoolingAllocationConfig};
 
@@ -161,7 +156,7 @@ pub struct RuntimeOptions {
     pub branch_hinting: bool,
 }
 
-/// Build the [`Config`] shared by [`crate::compile`] and [`crate::DeploymentBuilder`].
+/// Build the [`Config`] shared by the ahead-of-time compiler and the load path.
 ///
 /// Centralising it guarantees the compile-affecting settings (fuel metering,
 /// branch hinting, memory reservation/guard size, and copy-on-write heap init)

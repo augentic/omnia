@@ -53,7 +53,6 @@ opentelemetry_sdk = { workspace = true, features = ["rt-tokio"] }
 pastey.workspace = true
 serde.workspace = true
 sha2.workspace = true
-toml.workspace = true
 tracing.workspace = true
 tracing-opentelemetry = { workspace = true, optional = true }
 tracing-subscriber.workspace = true
@@ -65,7 +64,3 @@ wasmtime-wasi.workspace = true
 wasmtime-wasi-http.workspace = true
 wrpc-transport.workspace = true
 wrpc-wasmtime.workspace = true
-
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-omnia.workspace = true
-test-programs.workspace = true

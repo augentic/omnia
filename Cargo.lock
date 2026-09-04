@@ -2360,6 +2360,12 @@ dependencies = [
  "omnia-core",
  "omnia-host-macros",
  "omnia-plugin",
+ "serde",
+ "test-programs",
+ "tokio",
+ "toml",
+ "tracing",
+ "wasmtime",
 ]
 
 [[package]]
@@ -2368,7 +2374,6 @@ version = "0.36.0"
 dependencies = [
  "anyhow",
  "clap",
- "omnia-core",
 ]
 
 [[package]]
@@ -2383,17 +2388,14 @@ dependencies = [
  "fromenv",
  "futures",
  "http",
- "omnia",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "pastey",
  "serde",
  "sha2 0.10.9",
- "test-programs",
  "tokio",
  "tokio-util",
- "toml",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",

@@ -18,14 +18,14 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 
 use anyhow::{Context as _, Result, bail};
+use omnia_core::{
+    CliRoutes, GuestId, HttpRoutes, Location, PatternRoutes, ResolvedPreopen, Routes,
+};
 use serde::Deserialize;
 
 use super::source::Source;
-use crate::mount::ResolvedPreopen;
-use crate::registry::{CliRoutes, GuestId, HttpRoutes, PatternRoutes, Routes};
 
 /// The deployment manifest: which guests load and how host-mediated calls
 /// travel.
@@ -259,43 +259,6 @@ impl Manifest {
     }
 }
 
-/// One place the plugin loader acquires packages from, discriminated by the
-/// keys present: `{ name, path }` or `{ registry }`.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-#[serde(untagged, deny_unknown_fields)]
-pub enum Location {
-    /// A named host directory path loads resolve against.
-    Path {
-        /// The location name a load's `path` location names (e.g. `.`).
-        name: String,
-        /// Host directory. [`Manifest::from_config`] resolves relative paths
-        /// against the config file's directory.
-        path: PathBuf,
-    },
-    /// The deployment's default registry endpoint.
-    Registry {
-        /// The registry a load without an explicit endpoint resolves against.
-        registry: String,
-    },
-}
-
-impl Location {
-    /// A named path root.
-    pub fn path(name: impl Into<String>, path: impl Into<PathBuf>) -> Self {
-        Self::Path {
-            name: name.into(),
-            path: path.into(),
-        }
-    }
-
-    /// The default registry endpoint.
-    pub fn registry(registry: impl Into<String>) -> Self {
-        Self::Registry {
-            registry: registry.into(),
-        }
-    }
-}
-
 /// A single workspace mount: a host directory preopened into the guest
 /// sandbox under a guest-visible name.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -319,48 +282,6 @@ impl Mount {
         let host_path =
             if self.path.is_absolute() { self.path.clone() } else { base.join(&self.path) };
         ResolvedPreopen::new(self.name.clone(), host_path, self.writable)
-    }
-}
-
-impl FromStr for Mount {
-    type Err = anyhow::Error;
-
-    /// Parse a CLI `--mount` spec: comma-separated `path=<host-path>`,
-    /// `name=<guest-name>`, and a bare `writable` (or `writable=<bool>`) flag. A
-    /// lone token without `=` is taken as the path, so `workspace` and
-    /// `workspace,writable` are shorthands; `name` defaults to `.` and the mount
-    /// is read-only unless `writable` is present.
-    fn from_str(spec: &str) -> Result<Self> {
-        let mut path: Option<PathBuf> = None;
-        let mut name: Option<String> = None;
-        let mut writable = false;
-
-        for token in spec.split(',').map(str::trim).filter(|token| !token.is_empty()) {
-            match token.split_once('=') {
-                Some(("path", value)) => path = Some(PathBuf::from(value)),
-                Some(("name", value)) => name = Some(value.to_owned()),
-                Some(("writable", value)) => {
-                    writable = value.parse().with_context(|| {
-                        format!("mount `writable` expects a bool, got `{value}`")
-                    })?;
-                }
-                Some((key, _)) => bail!("unknown mount key `{key}` in `--mount {spec}`"),
-                None if token == "writable" => writable = true,
-                None => {
-                    if path.replace(PathBuf::from(token)).is_some() {
-                        bail!("mount `--mount {spec}` sets the path more than once");
-                    }
-                }
-            }
-        }
-
-        let path =
-            path.with_context(|| format!("mount `--mount {spec}` is missing `path=<host-path>`"))?;
-        Ok(Self {
-            name: name.unwrap_or_else(|| ".".to_owned()),
-            path,
-            writable,
-        })
     }
 }
 
@@ -550,8 +471,9 @@ pub enum TransportKind {
 // Unit tests by design: manifest parsing/validation is pure translation.
 #[cfg(test)]
 mod tests {
+    use omnia_core::Resolver as _;
+
     use super::*;
-    use crate::registry::Resolver as _;
 
     #[test]
     fn parse_multi_guest() {
@@ -743,41 +665,12 @@ mod tests {
     }
 
     #[test]
-    fn parse_mount_full_spec() {
-        let entry: Mount = "path=workspace,name=.,writable".parse().expect("spec parses");
-        assert_eq!(entry.path, PathBuf::from("workspace"));
-        assert_eq!(entry.name, ".");
-        assert!(entry.writable);
-    }
-
-    #[test]
-    fn parse_mount_bare_path_shorthand() {
-        let entry: Mount = "workspace".parse().expect("bare path parses");
-        assert_eq!(entry.path, PathBuf::from("workspace"));
-        assert_eq!(entry.name, ".", "name defaults to `.`");
-        assert!(!entry.writable, "a mount is read-only unless `writable` is given");
-    }
-
-    #[test]
-    fn parse_mount_bare_writable_shorthand() {
-        let entry: Mount = "workspace,writable".parse().expect("shorthand parses");
-        assert_eq!(entry.path, PathBuf::from("workspace"));
-        assert!(entry.writable);
-    }
-
-    #[test]
-    fn parse_mount_requires_path() {
-        assert!("name=.,writable".parse::<Mount>().is_err(), "a mount must name a path");
-    }
-
-    #[test]
-    fn parse_mount_rejects_unknown_key() {
-        assert!("path=x,bogus=1".parse::<Mount>().is_err(), "unknown keys are rejected");
-    }
-
-    #[test]
     fn cli_mount_resolves_relative_to_base() {
-        let entry: Mount = "path=workspace,writable".parse().expect("spec parses");
+        let entry = Mount {
+            name: ".".to_owned(),
+            path: PathBuf::from("workspace"),
+            writable: true,
+        };
         // CLI mounts resolve against the process working directory, unlike
         // manifest mounts which resolve against the manifest's directory.
         let resolved = entry.resolve(Path::new("/cwd"));
@@ -898,7 +791,11 @@ mod tests {
                     .route_messaging("jobs.>"),
             )
             .guest(GuestEntry::new("responder", "responder.wasm").route_websocket("events.*"))
-            .mounts(["workspace,writable".parse().expect("mount should parse")])
+            .mounts([Mount {
+                name: ".".to_owned(),
+                path: PathBuf::from("workspace"),
+                writable: true,
+            }])
             .plugins(["omnia:link/echo"])
             .plugins(["omnia:shared/log"]);
 
