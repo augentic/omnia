@@ -46,7 +46,7 @@ The runtime is built around a set of traits that allow services to be plugged in
 - **Registry pipeline:** `Manifest` (with `GuestEntry`, `Mount`, `SourceSpec`, route/transport types), `DeploymentBuilder`, `Deployment`, `Registry`, `Guest`, `GuestId`, `RuntimeOptions`
 - **Trigger routing (host servers):** `RouteTable` + `MatchStrategy` (aliased `HttpRoutes`/`PatternRoutes`/`CliRoutes`), `Routes`, `Resolver`, `TriggerRouter`
 - **Host-mediated linking (advanced):** `serve_links`, `GuestSelector`, `FirstArgSelector`, `LinkClient`, `WrpcState`
-- **Telemetry + CLI:** `Telemetry`, `resource`, `Cli`, `Command`, `Parser`
+- **Telemetry + CLI:** `Telemetry`, `resource`, `Cli`, `Command`, `Parser` (`cli` feature)
 - **Plugins (`omnia:plugins/loader`):** `WasiPlugins`, `Plugins`, `PluginLoader`, `Location`, the `PathMounts`/`RegistryClient` acquirers with their `PathSource`/`RegistrySource` seams, and the `ContentStore`/`ReleaseStore` cache traits
 - **Signature vocabulary:** `anyhow` (`omnia::anyhow::Result`) because `Backend`, `Wiring`, and the generated runtime module speak it, and `futures` (`omnia::futures::future::BoxFuture`) because the plugin store and acquirer seams return it
 
@@ -54,6 +54,7 @@ Most deployments only touch the `runtime!` macro; a hand-written runtime instead
 
 ## Features
 
+- **`cli`** (default): Enables the `run` command-line grammar (the `omnia-cli` crate) and the `Cli`, `Command`, and `Parser` re-exports. Disable it for a direct-command binary that owns its whole argv; no `clap` is linked.
 - **`jit`** (default): Enables Cranelift JIT compilation, allowing you to run `.wasm` files directly. Disable this to only support pre-compiled `.bin` components (useful for faster startup in production).
 
 ## Configuration
