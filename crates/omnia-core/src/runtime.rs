@@ -1,16 +1,14 @@
 //! Deployment lifecycle: [`Backends`], [`Wiring`], [`Runtime`], [`RuntimeParts`], [`run`], and [`ExitStatus`].
 
 mod command;
-mod entry;
 
+use std::fmt;
 use std::future::Future;
 use std::process::ExitCode;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
-use std::{env, fmt};
 
 use anyhow::{Context as _, Result};
-pub use entry::{MainOptions, ManifestSource};
 use wasmtime::component::{Component, Instance, InstancePre, types};
 use wasmtime::{Engine, Store};
 
@@ -95,31 +93,6 @@ pub trait Wiring<B: Clone + Send + Sync + 'static> {
 
     /// Run every declared long-lived trigger server concurrently.
     fn serve(runtime: &Runtime<B>) -> impl std::future::Future<Output = Result<()>> + Send;
-}
-
-/// Entry point for generated `main` functions.
-///
-/// `options` carries the deployment the `runtime!` macro compiled in: mode
-/// and manifest source. Command mode with a compiled-in deployment is a
-/// direct command: argv passes to the guest verbatim except the reserved host
-/// log flags (`--debug` / `--quiet`), which select the telemetry
-/// [`LogMode`](crate::LogMode). Every other shape needs the standard
-/// `run [wasm] [--config] -- args…` grammar, served by `omnia-cli`'s `main`;
-/// this one refuses it.
-#[doc(hidden)]
-pub async fn main<B, H>(options: MainOptions) -> ExitCode
-where
-    B: Backends,
-    H: Wiring<B>,
-{
-    let plan = match entry::plan(options, env::args_os()) {
-        Ok(plan) => plan,
-        Err(error) => {
-            eprintln!("{error:#}");
-            return ExitCode::FAILURE;
-        }
-    };
-    drive_main::<B, H>(plan.into_builder()).await
 }
 
 /// Run a planned deployment builder to completion, reporting failures on stderr.

@@ -10,10 +10,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
-
-use crate::runtime::Mode;
-use crate::telemetry::LogMode;
-use crate::{DeploymentBuilder, Manifest};
+use omnia_core::{DeploymentBuilder, LogMode, Manifest, Mode};
 
 /// How a runtime's compiled-in deployment manifest is supplied.
 ///
@@ -183,8 +180,9 @@ pub(super) fn plan_direct(
 // precisely so argv policy is testable without spawning a binary.
 #[cfg(test)]
 mod tests {
+    use omnia_core::GuestEntry;
+
     use super::*;
-    use crate::deployment::GuestEntry;
 
     fn argv(args: &[&str]) -> Vec<OsString> {
         args.iter().map(OsString::from).collect()

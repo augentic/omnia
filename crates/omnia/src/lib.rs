@@ -19,17 +19,12 @@
 // embedders reach them from here without a direct dependency of their own.
 #[cfg(feature = "jit")]
 pub mod compile;
+mod entry;
 pub use anyhow;
 pub use futures;
 #[cfg(feature = "cli")]
-#[doc(hidden)]
-pub use omnia_cli::main;
-#[cfg(feature = "cli")]
 #[doc(inline)]
 pub use omnia_cli::{Cli, Command, Parser};
-#[cfg(not(feature = "cli"))]
-#[doc(hidden)]
-pub use omnia_core::main;
 #[doc(inline)]
 pub use omnia_core::{
     AdmitError, Backend, Backends, CliRoutes, Deployment, DeploymentBuilder, Dispatcher,
@@ -44,8 +39,7 @@ pub use omnia_core::{
 };
 #[doc(hidden)]
 pub use omnia_core::{
-    MainOptions, ManifestSource, WrpcCtxView, WrpcView, pastey, run, run_with, tokio, wasmtime,
-    wasmtime_wasi,
+    WrpcCtxView, WrpcView, pastey, run, run_with, tokio, wasmtime, wasmtime_wasi,
 };
 #[doc(inline)]
 pub use omnia_host_macros::runtime;
@@ -54,3 +48,6 @@ pub use omnia_plugin::{
     ContentStore, LoadError, NoStore, Origin, PathMounts, PathSource, Plugin, PluginLoader,
     Plugins, RegistryClient, RegistrySource, ReleaseStore, WasiPlugins, WasiPluginsCtxView,
 };
+
+#[doc(hidden)]
+pub use self::entry::{MainOptions, ManifestSource, main};

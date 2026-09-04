@@ -17,9 +17,8 @@ workspace = true
 
 [features]
 # Enables the `compile` subcommand alongside `run`.
-jit = ["omnia-core/jit"]
+jit = []
 
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-omnia-core.workspace = true
