@@ -134,6 +134,15 @@
 
 ### Changed
 
+- The `run` command-line grammar moves out of `omnia-core` into a new
+  `omnia-cli` crate, which the `omnia` facade's `cli` feature now selects
+  (`cli = ["dep:omnia-cli"]`). `omnia-core` no longer has a `cli` feature or
+  a `clap` dependency; its entry point serves direct commands only.
+  `omnia_core::{Cli, Command, Parser}` are now `omnia_cli::{Cli, Command,
+  Parser}` — the facade paths `omnia::Cli`, `omnia::Command`, and
+  `omnia::Parser` are unchanged, as is everything the `runtime!` macro emits.
+  A direct-command binary built with `--no-default-features` now links no
+  `clap`.
 - Every `omnia-guest` capability trait is implemented for `Arc<T>`, `&T`,
   and `Box<T>` where `T` implements it, forwarding on both targets, so a
   provider field may hold a double behind a shared handle and a

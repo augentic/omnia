@@ -2,8 +2,6 @@
 #![cfg(not(target_arch = "wasm32"))]
 #![allow(unsafe_code)] // wasmtime component deserialization and deployment hooks
 
-#[cfg(feature = "cli")]
-mod cli;
 mod deployment;
 mod digest;
 mod dispatch;
@@ -16,8 +14,6 @@ mod runtime;
 mod store;
 pub mod telemetry;
 
-#[cfg(feature = "cli")]
-pub use clap::Parser;
 #[doc(hidden)]
 pub use pastey;
 #[doc(hidden)]
@@ -25,8 +21,6 @@ pub use wrpc_wasmtime::{WrpcCtxView, WrpcView};
 #[doc(hidden)]
 pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
-#[cfg(feature = "cli")]
-pub use self::cli::{Cli, Command};
 pub use self::deployment::{
     Deployment, DeploymentBuilder, GuestArtifact, GuestEntry, GuestRoutes, Location, Manifest,
     Mount, Precompiled, SourceSpec, Transport, TransportKind, WasmOnly,
@@ -50,7 +44,9 @@ pub use self::registry::{
 };
 pub use self::runtime::{AdmitError, Backends, ExitStatus, Mode, Runtime, WeakRuntime, Wiring};
 #[doc(hidden)]
-pub use self::runtime::{MainOptions, ManifestSource, main, run, run_precompiled, run_with};
+pub use self::runtime::{
+    MainOptions, ManifestSource, drive_main, main, run, run_precompiled, run_with,
+};
 pub use self::store::{
     HasDispatcher, HasExtensions, HasLimits, HasMounts, HttpBorrow, HttpCtx, StoreBase,
     StoreConfig, StoreCtx, StoreView,

@@ -60,6 +60,10 @@ The domain-agnostic in-tree platform: the `omnia` kernel, WASI host crates (`was
 
 Same layer as **Layers 1 + 2 (runtime core + WASI interfaces)** in [Architecture.md](Architecture.md). In Specify this is also called the **Omnia runtime core**.
 
+### Facade
+
+The `omnia` crate, an embedder's only omnia dependency: it re-exports `omnia-core`, the two crates built between core and itself — `omnia-plugin` (plugin loader capability) and `omnia-cli` (the `run` grammar, behind the `cli` feature) — and the `runtime!` macro under `omnia::…` paths.
+
 ### Runtime contract
 
 The stable WIT boundary and host behavior guests depend on — what must stay generic under **Law 2**. Often used when contrasting with pluggable backends (“vendor detail, never part of the runtime contract”).

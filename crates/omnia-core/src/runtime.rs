@@ -104,27 +104,36 @@ pub trait Wiring<B: Clone + Send + Sync + 'static> {
 /// and manifest source. Command mode with a compiled-in deployment is a
 /// direct command: argv passes to the guest verbatim except the reserved host
 /// log flags (`--debug` / `--quiet`), which select the telemetry
-/// [`LogMode`](crate::LogMode). Every other shape parses the standard
-/// `run [wasm] [--config] -- args…` grammar.
+/// [`LogMode`](crate::LogMode). Every other shape needs the standard
+/// `run [wasm] [--config] -- args…` grammar, served by `omnia-cli`'s `main`;
+/// this one refuses it.
 #[doc(hidden)]
 pub async fn main<B, H>(options: MainOptions) -> ExitCode
 where
     B: Backends,
     H: Wiring<B>,
 {
-    let plan = match entry::plan(options, env::args_os(), env::var_os("OMNIA_CONFIG")) {
+    let plan = match entry::plan(options, env::args_os()) {
         Ok(plan) => plan,
-        #[cfg(feature = "cli")]
-        Err(entry::PlanError::Usage(error)) => error.exit(),
-        Err(entry::PlanError::Fatal(error)) => {
+        Err(error) => {
             eprintln!("{error:#}");
             return ExitCode::FAILURE;
         }
     };
+    drive_main::<B, H>(plan.into_builder()).await
+}
+
+/// Run a planned deployment builder to completion, reporting failures on stderr.
+#[doc(hidden)]
+pub async fn drive_main<B, H>(builder: DeploymentBuilder) -> ExitCode
+where
+    B: Backends,
+    H: Wiring<B>,
+{
     // The generated entry point admits pre-compiled artifacts: manifests and
     // `.bin` paths given to (or compiled into) the binary are trusted
     // operator inputs (docs/security-model.md).
-    let builder = plan.into_builder().precompiled();
+    let builder = builder.precompiled();
     // SAFETY: the operator running this binary chose the manifest and
     // artifact paths; pre-compiled artifacts are documented trusted inputs
     // produced by `omnia compile`.

@@ -61,7 +61,7 @@ This separation allows the same guest to run with different backends — swap th
 │  Examples: wasi-keyvalue, wasi-messaging, wasi-model            │
 ├─────────────────────────────────────────────────────────────────┤
 │  Layer 1: Runtime core (crates/omnia-core + capability crates) │
-│  wasmtime engine, CLI, deployment/registry, dispatch, traits    │
+│  wasmtime engine, deployment/registry, dispatch, traits         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -71,13 +71,14 @@ Layers 1 and 2 form the **runtime core** — domain-agnostic infrastructure that
 
 ### Runtime core (`crates/omnia-core`) and the `omnia` facade
 
-The foundation of the runtime is `omnia-core`; embedders depend on the thin `omnia` facade crate, which re-exports core, the `omnia-plugin` capability crate, and the `runtime!` macro under one root (`omnia::…` paths). Capability crates like `omnia-plugin` sit between the two: they build on core's extension seam (`Wiring::extend` + `Extensions`, plus the privileged `Runtime::admit` admission API) and surface through the facade. The facade is meant to be an embedder's *only* omnia dependency — a deployment's `Cargo.toml` never names `omnia-core` or `omnia-plugin`, and neither does any path the `runtime!` macro emits (it imports even its `Result` as `omnia::anyhow::Result`). The facade's re-exports are `#[doc(inline)]` so the rendered documentation shows `omnia::…` paths too. Depending on `omnia-core` directly is for building another capability crate. The core provides:
+The foundation of the runtime is `omnia-core`; embedders depend on the thin `omnia` facade crate, which re-exports core, the `omnia-plugin` capability crate, the `omnia-cli` grammar crate (behind the `cli` feature), and the `runtime!` macro under one root (`omnia::…` paths). Crates like `omnia-plugin` and `omnia-cli` sit between the two: `omnia-plugin` builds on core's extension seam (`Wiring::extend` + `Extensions`, plus the privileged `Runtime::admit` admission API), `omnia-cli` owns the `run` command-line grammar, and both surface through the facade. The facade is meant to be an embedder's *only* omnia dependency — a deployment's `Cargo.toml` never names `omnia-core`, `omnia-plugin`, or `omnia-cli`, and neither does any path the `runtime!` macro emits (it imports even its `Result` as `omnia::anyhow::Result`). The facade's re-exports are `#[doc(inline)]` so the rendered documentation shows `omnia::…` paths too. Depending on `omnia-core` directly is for building another capability crate. The core provides:
 
-- **CLI infrastructure**: the `run` subcommand (and `compile`, with the `jit` feature)
 - **Deployment pipeline**: `DeploymentBuilder` builds a deployment from a `Manifest` (loaded from `omnia.toml`, synthesized from a single `.wasm`, or constructed programmatically), `Registry` holds pre-instantiated guests
 - **Core traits**: `Host`, `Server`, `Backend`, `Wiring`, plus the concrete `Runtime<B>` over `StoreCtx<B>`
 - **Host-mediated dispatch**: guest-to-guest linking over an in-process wRPC carrier
 - **Telemetry**: `tracing` + OpenTelemetry bootstrap
+
+The `run` command-line grammar (and `compile`, with the `jit` feature) is not in core: it lives in `omnia-cli`, which the facade's `cli` feature selects. Core's own entry point serves only direct commands.
 
 Key traits:
 
@@ -200,12 +201,13 @@ The consolidated list is in [Configuration](reference/configuration.md); individ
 ```text
 omnia/
 ├── crates/
-│   ├── omnia/              # Embedder facade (re-exports omnia-core + omnia-plugin + runtime!)
-│   ├── omnia-core/         # Runtime core (engine, CLI, deployment, registry, dispatch)
+│   ├── omnia/              # Embedder facade (re-exports omnia-core + omnia-plugin + omnia-cli + runtime!)
+│   ├── omnia-core/         # Runtime core (engine, deployment, registry, dispatch)
 │   ├── omnia-guest/        # Guest SDK (Handler/Client/Context, HTTP/messaging routers, errors, ORM, MCP)
 │   ├── guest-macros/       # #[instrument] proc macro
 │   ├── host-macros/        # runtime! proc-macro
 │   ├── omnia-plugin/       # Plugins capability (loader host + acquisition; re-exported by omnia)
+│   ├── omnia-cli/          # `run` command-line grammar (re-exported by omnia behind the `cli` feature)
 │   └── wasi-*/             # WASI interface implementations
 │       ├── src/
 │       │   ├── guest.rs    # Guest bindings (wasm32)

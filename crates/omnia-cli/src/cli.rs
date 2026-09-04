@@ -3,8 +3,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-
-use crate::Mount;
+use omnia_core::Mount;
 
 /// Command line interface for omnia.
 #[derive(Parser, PartialEq, Eq)]

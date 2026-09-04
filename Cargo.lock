@@ -2356,9 +2356,19 @@ version = "0.36.0"
 dependencies = [
  "anyhow",
  "futures",
+ "omnia-cli",
  "omnia-core",
  "omnia-host-macros",
  "omnia-plugin",
+]
+
+[[package]]
+name = "omnia-cli"
+version = "0.36.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "omnia-core",
 ]
 
 [[package]]
@@ -2370,7 +2380,6 @@ dependencies = [
  "cap-fs-ext",
  "cap-std",
  "cfg-if",
- "clap",
  "fromenv",
  "futures",
  "http",
