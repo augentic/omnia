@@ -173,11 +173,10 @@ impl DeploymentBuilder {
         // Guests load (and compile) in parallel through the async
         // [`Source::load`] seam; order still follows the manifest.
         let sources = manifest.sources()?;
-        let loaded = futures::future::try_join_all(
+        let guests = futures::future::try_join_all(
             sources.iter().map(|source| source.load(&engine, policy)),
         )
         .await?;
-        let guests = loaded.into_iter().flatten().collect();
 
         // In command mode the program name is prepended as `argv[0]`.
         let args = if self.mode.is_command() {

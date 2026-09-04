@@ -15,9 +15,7 @@ use wasmtime::component::Component;
 
 use crate::registry::GuestId;
 
-// Wasmtime-serialized artifacts are native ELF images; raw components carry
-// the `\0asm` wasm magic. The distinction gates the unsafe deserialization
-// path, so it is sniffed from content, never inferred from a file extension.
+/// Magic of a wasmtime-serialized (native ELF) artifact, sniffed from content.
 pub const ELF_MAGIC: [u8; 4] = [0x7f, b'E', b'L', b'F'];
 
 // Appended to every pre-compiled deserialization failure: the usual cause is a
@@ -88,59 +86,87 @@ impl Source {
         &self.id
     }
 
-    /// Load the component(s) this source registers, under the build's
-    /// artifact policy.
+    /// Load the component this source registers, under the build's artifact
+    /// policy.
     ///
     /// Async so a future source kind (an OCI pull) fits the same signature.
     /// Compilation is CPU-bound, so it runs on a blocking thread — loading
     /// several guests concurrently compiles them in parallel.
     pub(crate) async fn load(
         &self, engine: &Engine, policy: ArtifactPolicy,
-    ) -> Result<Vec<LoadedGuest>> {
-        let engine = engine.clone();
-        let id = self.id.clone();
-        let component = match &self.kind {
+    ) -> Result<LoadedGuest> {
+        let artifact = match &self.kind {
             SourceKind::Path(path) => {
-                let path = path.clone();
-                tokio::task::spawn_blocking(move || {
-                    load_component(&engine, &path, policy)
-                        .with_context(|| format!("loading guest from {}", path.display()))
-                })
+                if is_precompiled(path)? {
+                    ensure!(
+                        policy == ArtifactPolicy::Trust,
+                        "{} is a pre-compiled (native) artifact, which this build rejects; load \
+                         trusted pre-compiled artifacts through `DeploymentBuilder`'s unsafe \
+                         `build_trusted`",
+                        path.display()
+                    );
+                    // SAFETY: `policy == Trust` is only reachable through an
+                    // `unsafe` build call whose caller attested every
+                    // pre-compiled path names unmodified trusted wasmtime
+                    // output — the contract `precompiled_file` requires.
+                    unsafe { GuestArtifact::precompiled_file(path.clone()) }
+                } else {
+                    GuestArtifact::wasm(
+                        std::fs::read(path)
+                            .with_context(|| format!("loading guest from {}", path.display()))?,
+                    )
+                }
             }
             SourceKind::Bytes(bytes) => {
-                let bytes = bytes.clone();
-                let context_id = id.clone();
-                tokio::task::spawn_blocking(move || {
-                    load_component_bytes(&engine, &bytes, policy)
-                        .with_context(|| format!("loading embedded guest `{context_id}`"))
-                })
+                if bytes.get(..ELF_MAGIC.len()) == Some(&ELF_MAGIC) {
+                    ensure!(
+                        policy == ArtifactPolicy::Trust,
+                        "the embedded bytes are a pre-compiled (native) artifact, which this \
+                         build rejects; load trusted pre-compiled artifacts through \
+                         `DeploymentBuilder`'s unsafe `build_trusted`"
+                    );
+                    // SAFETY: `policy == Trust` is only reachable through an
+                    // `unsafe` build call whose caller attested every
+                    // pre-compiled artifact is unmodified trusted wasmtime
+                    // output — the contract `precompiled` requires.
+                    unsafe { GuestArtifact::precompiled(bytes.to_vec()) }
+                } else {
+                    GuestArtifact::wasm(bytes.to_vec())
+                }
             }
-        }
-        .await
-        .context("guest load task panicked")??;
-        Ok(vec![LoadedGuest { id, component }])
+        };
+        let component = artifact.load(engine).await.with_context(|| match &self.kind {
+            SourceKind::Path(path) => format!("loading guest from {}", path.display()),
+            SourceKind::Bytes(_) => format!("loading embedded guest `{}`", self.id),
+        })?;
+        Ok(LoadedGuest {
+            id: self.id.clone(),
+            component,
+        })
     }
 }
 
 /// Component bytes for dynamic registration
 /// ([`Runtime::register`](crate::Runtime::register)).
 ///
-/// The two constructors carry different trust: [`wasm`](Self::wasm) is safe
-/// (the bytes are validated and compiled inside the sandbox), while
-/// [`precompiled`](Self::precompiled) is `unsafe` (the bytes are native code
-/// the caller attests came from a trusted build pipeline). Verification
-/// (digest, signature, provenance) is deployment policy and happens before
-/// the runtime sees the bytes.
+/// [`wasm`](Self::wasm) is safe (the bytes are validated and compiled inside
+/// the sandbox). [`precompiled`](Self::precompiled) and
+/// [`precompiled_file`](Self::precompiled_file) are `unsafe` (the bytes are
+/// native code the caller attests came from a trusted build pipeline).
+/// Verification (digest, signature, provenance) is deployment policy and
+/// happens before the runtime sees the bytes.
 pub struct GuestArtifact(ArtifactKind);
 
 enum ArtifactKind {
     /// Raw component wasm, JIT-compiled at registration. Without `jit` the
     /// bytes are never read — loading bails before compilation.
-    #[cfg_attr(not(feature = "jit"), allow(dead_code))]
     Wasm(Vec<u8>),
     /// A settings-matched pre-compiled artifact (`omnia compile` output),
     /// loaded via native deserialization with no runtime codegen.
     Precompiled(Vec<u8>),
+    /// A settings-matched pre-compiled artifact on disk (`omnia compile`
+    /// output), loaded via native file deserialization with no runtime codegen.
+    PrecompiledFile(PathBuf),
 }
 
 impl GuestArtifact {
@@ -168,9 +194,30 @@ impl GuestArtifact {
         Self(ArtifactKind::Precompiled(bytes))
     }
 
+    /// A settings-matched pre-compiled artifact (`omnia compile` output) on
+    /// disk, loaded via file deserialization with no runtime codegen.
+    ///
+    /// # Safety
+    ///
+    /// The file at `path` must be the unmodified output of wasmtime component
+    /// serialization (`omnia compile` / [`Component::serialize`]) produced by
+    /// a trusted build pipeline. A pre-compiled artifact is native code:
+    /// wasmtime's compatibility check (rejecting mismatched compile-affecting
+    /// settings) is *not* an authenticity check, and tampered bytes can
+    /// execute arbitrary code with host privileges.
+    #[must_use]
+    pub const unsafe fn precompiled_file(path: PathBuf) -> Self {
+        Self(ArtifactKind::PrecompiledFile(path))
+    }
+
     /// Load the artifact into a [`Component`] on a blocking thread
     /// (deserialization and compilation are CPU-bound).
-    pub(crate) async fn load(self, engine: &Engine) -> Result<Component> {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the bytes are a native artifact on the wasm path,
+    /// compilation or deserialization fails, or the blocking load task panics.
+    pub async fn load(self, engine: &Engine) -> Result<Component> {
         let engine = engine.clone();
         tokio::task::spawn_blocking(move || {
             let component = match self.0 {
@@ -185,15 +232,38 @@ impl GuestArtifact {
                             format!("deserializing pre-compiled guest: {SETTINGS_HINT}")
                         })?
                 }
-                #[cfg(feature = "jit")]
-                ArtifactKind::Wasm(bytes) => Component::new(&engine, &bytes)
-                    .map_err(anyhow::Error::from)
-                    .context("compiling guest component")?,
-                #[cfg(not(feature = "jit"))]
-                ArtifactKind::Wasm(_) => anyhow::bail!(
-                    "registering raw wasm requires the `jit` feature; pre-compile with `omnia \
-                     compile` and register the artifact instead"
-                ),
+                ArtifactKind::PrecompiledFile(path) => {
+                    // SAFETY: the `GuestArtifact::precompiled_file`
+                    // constructor is `unsafe`; its caller attested this file
+                    // is unmodified trusted wasmtime output, which is exactly
+                    // the contract `Component::deserialize_file` requires.
+                    unsafe { Component::deserialize_file(&engine, &path) }
+                        .map_err(anyhow::Error::from)
+                        .with_context(|| {
+                            format!(
+                                "deserializing pre-compiled component {}: {SETTINGS_HINT}",
+                                path.display()
+                            )
+                        })?
+                }
+                ArtifactKind::Wasm(bytes) => {
+                    ensure!(
+                        bytes.get(..ELF_MAGIC.len()) != Some(&ELF_MAGIC),
+                        "the bytes are a pre-compiled (native) artifact; GuestArtifact::wasm \
+                         only accepts raw wasm"
+                    );
+                    #[cfg(feature = "jit")]
+                    {
+                        Component::new(&engine, &bytes)
+                            .map_err(anyhow::Error::from)
+                            .context("compiling guest component")?
+                    }
+                    #[cfg(not(feature = "jit"))]
+                    anyhow::bail!(
+                        "registering raw wasm requires the `jit` feature; pre-compile with `omnia \
+                         compile` and register the artifact instead"
+                    )
+                }
             };
             // Build the copy-on-write heap image now rather than lazily on the
             // first instantiation, moving that one-time cost off the first call.
@@ -203,99 +273,6 @@ impl GuestArtifact {
         .await
         .context("guest load task panicked")?
     }
-}
-
-/// Load a component from a file: raw wasm compiles (under `jit`); a
-/// pre-compiled artifact deserializes only when `policy` trusts it.
-fn load_component(engine: &Engine, wasm: &Path, policy: ArtifactPolicy) -> Result<Component> {
-    let component = if is_precompiled(wasm)? {
-        ensure!(
-            policy == ArtifactPolicy::Trust,
-            "{} is a pre-compiled (native) artifact, which this build rejects; load trusted \
-             pre-compiled artifacts through `DeploymentBuilder`'s unsafe `build_trusted`",
-            wasm.display()
-        );
-        // SAFETY: `policy == Trust` is only reachable through an `unsafe`
-        // build call whose caller attested every pre-compiled path names
-        // unmodified trusted wasmtime output — the contract
-        // `Component::deserialize_file` requires.
-        unsafe { Component::deserialize_file(engine, wasm) }
-            .map_err(anyhow::Error::from)
-            .with_context(|| {
-                format!("deserializing pre-compiled component {}: {SETTINGS_HINT}", wasm.display())
-            })?
-    } else {
-        compile_wasm(engine, wasm)?
-    };
-
-    // Build the copy-on-write heap image now (startup) rather than lazily on the
-    // first instantiation, moving that one-time cost off the first request.
-    component.initialize_copy_on_write_image()?;
-    Ok(component)
-}
-
-/// Load a component from embedded bytes: raw wasm compiles (under `jit`); a
-/// pre-compiled artifact deserializes only when `policy` trusts it.
-fn load_component_bytes(
-    engine: &Engine, bytes: &[u8], policy: ArtifactPolicy,
-) -> Result<Component> {
-    let component = if bytes.get(..ELF_MAGIC.len()) == Some(&ELF_MAGIC) {
-        ensure!(
-            policy == ArtifactPolicy::Trust,
-            "the embedded bytes are a pre-compiled (native) artifact, which this build rejects; \
-             load trusted pre-compiled artifacts through `DeploymentBuilder`'s unsafe \
-             `build_trusted`"
-        );
-        // SAFETY: `policy == Trust` is only reachable through an `unsafe`
-        // build call whose caller attested every pre-compiled artifact is
-        // unmodified trusted wasmtime output — the contract
-        // `Component::deserialize` requires.
-        unsafe { Component::deserialize(engine, bytes) }.map_err(anyhow::Error::from).with_context(
-            || format!("deserializing embedded pre-compiled component: {SETTINGS_HINT}"),
-        )?
-    } else {
-        compile_wasm_bytes(engine, bytes)?
-    };
-
-    // Build the copy-on-write heap image now (startup) rather than lazily on the
-    // first instantiation, moving that one-time cost off the first request.
-    component.initialize_copy_on_write_image()?;
-    Ok(component)
-}
-
-/// Compile a raw wasm component from a file.
-#[cfg(feature = "jit")]
-fn compile_wasm(engine: &Engine, wasm: &Path) -> Result<Component> {
-    Component::from_file(engine, wasm)
-        .map_err(anyhow::Error::from)
-        .with_context(|| format!("compiling component {}", wasm.display()))
-}
-
-/// Raw wasm cannot compile without the `jit` feature.
-#[cfg(not(feature = "jit"))]
-fn compile_wasm(_engine: &Engine, wasm: &Path) -> Result<Component> {
-    anyhow::bail!(
-        "{} is a raw wasm component and this build has no `jit` feature; pre-compile it with \
-         `omnia compile` or rebuild the host with `jit`",
-        wasm.display()
-    )
-}
-
-/// Compile a raw wasm component from embedded bytes.
-#[cfg(feature = "jit")]
-fn compile_wasm_bytes(engine: &Engine, bytes: &[u8]) -> Result<Component> {
-    Component::new(engine, bytes)
-        .map_err(anyhow::Error::from)
-        .context("compiling embedded component")
-}
-
-/// Raw wasm cannot compile without the `jit` feature.
-#[cfg(not(feature = "jit"))]
-fn compile_wasm_bytes(_engine: &Engine, _bytes: &[u8]) -> Result<Component> {
-    anyhow::bail!(
-        "the embedded bytes are a raw wasm component and this build has no `jit` feature; \
-         pre-compile with `omnia compile` and embed the artifact, or rebuild the host with `jit`"
-    )
 }
 
 /// Whether `path` holds a wasmtime-serialized (native ELF) artifact, sniffed

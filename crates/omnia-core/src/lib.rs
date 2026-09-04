@@ -22,8 +22,8 @@ pub use wrpc_wasmtime::{WrpcCtxView, WrpcView};
 pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
 pub use self::deployment::{
-    Deployment, DeploymentBuilder, GuestArtifact, GuestEntry, GuestRoutes, Location, Manifest,
-    Mount, SourceSpec, Transport, TransportKind,
+    Deployment, DeploymentBuilder, ELF_MAGIC, GuestArtifact, GuestEntry, GuestRoutes, LoadedGuest,
+    Location, Manifest, Mount, SourceSpec, Transport, TransportKind,
 };
 pub use self::digest::sha256_digest;
 pub use self::dispatch::{

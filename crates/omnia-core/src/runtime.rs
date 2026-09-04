@@ -14,7 +14,7 @@ pub use entry::{MainOptions, ManifestSource};
 use wasmtime::component::{Component, Instance, InstancePre, types};
 use wasmtime::{Engine, Store};
 
-use crate::deployment::{ELF_MAGIC, GuestArtifact, Location};
+use crate::deployment::{GuestArtifact, Location};
 use crate::dispatch::serve_guest;
 use crate::extensions::Extensions;
 use crate::mount::MountRegistry;
@@ -687,16 +687,6 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// missing seam export, an identity already registered (an earlier or
     /// racing registration), or an internal serve/publication failure.
     pub async fn admit(&self, id: GuestId, bytes: Vec<u8>) -> Result<(), AdmitError> {
-        // A native (pre-compiled) artifact is refused before wasmtime sees
-        // the bytes: admitted components only ever take the safe validation
-        // path, never the deployment's `build_trusted` trust policy.
-        if bytes.get(..ELF_MAGIC.len()) == Some(&ELF_MAGIC) {
-            return Err(AdmitError::ArtifactRefused(format!(
-                "`{id}` is a pre-compiled (native) artifact; admission only accepts raw wasm \
-                 components"
-            )));
-        }
-
         let digest: std::sync::Arc<str> = std::sync::Arc::from(crate::sha256_digest(&bytes));
 
         // Safe validation plus sandboxed JIT — the explicitly safe constructor.
