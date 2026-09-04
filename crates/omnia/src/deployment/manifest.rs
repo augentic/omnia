@@ -20,12 +20,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
+use omnia_core::{
+    CliRoutes, GuestId, HttpRoutes, Location, PatternRoutes, ResolvedPreopen, Routes,
+};
 use serde::Deserialize;
 
 use super::source::Source;
-use crate::location::Location;
-use crate::mount::ResolvedPreopen;
-use crate::registry::{CliRoutes, GuestId, HttpRoutes, PatternRoutes, Routes};
 
 /// The deployment manifest: which guests load and how host-mediated calls
 /// travel.
@@ -471,8 +471,9 @@ pub enum TransportKind {
 // Unit tests by design: manifest parsing/validation is pure translation.
 #[cfg(test)]
 mod tests {
+    use omnia_core::Resolver as _;
+
     use super::*;
-    use crate::registry::Resolver as _;
 
     #[test]
     fn parse_multi_guest() {

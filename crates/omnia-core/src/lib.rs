@@ -1,9 +1,8 @@
 #![doc = include_str!("../README.md")]
 #![cfg(not(target_arch = "wasm32"))]
-#![allow(unsafe_code)] // wasmtime component deserialization and deployment hooks
+#![allow(unsafe_code)] // wasmtime component deserialization
 
 mod artifact;
-mod deployment;
 mod digest;
 mod dispatch;
 mod extensions;
@@ -23,15 +22,11 @@ pub use wrpc_wasmtime::{WrpcCtxView, WrpcView};
 #[doc(hidden)]
 pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
-pub use self::artifact::{ELF_MAGIC, GuestArtifact, LoadedGuest};
-pub use self::deployment::{
-    Deployment, DeploymentBuilder, GuestEntry, GuestRoutes, Manifest, Mount, SourceSpec, Transport,
-    TransportKind,
-};
+pub use self::artifact::{ELF_MAGIC, GuestArtifact, LoadedGuest, is_precompiled};
 pub use self::digest::sha256_digest;
 pub use self::dispatch::{
-    Dispatcher, FirstArgSelector, GuestSelector, LinkClient, WrpcState, as_command_chain,
-    serve_links,
+    DispatchHandle, Dispatcher, FirstArgSelector, GuestSelector, LinkClient, WrpcState,
+    as_command_chain, serve_links,
 };
 pub use self::extensions::Extensions;
 pub use self::host::{
@@ -42,13 +37,9 @@ pub use self::location::Location;
 pub use self::mount::{MountRegistry, ResolvedPreopen};
 pub use self::options::RuntimeOptions;
 pub use self::registry::{
-    CliRoutes, Guest, GuestId, HttpRoutes, PatternRoutes, Registry, Routes, TriggerRouter,
+    CliRoutes, Guest, GuestId, HttpRoutes, PatternRoutes, Registry, Resolver, Routes, TriggerRouter,
 };
-pub use self::runtime::{
-    AdmitError, Backends, ExitStatus, Mode, Runtime, RuntimeParts, WeakRuntime, Wiring,
-};
-#[doc(hidden)]
-pub use self::runtime::{drive_main, run, run_with};
+pub use self::runtime::{AdmitError, ExitStatus, Runtime, RuntimeParts, WeakRuntime};
 pub use self::store::{
     HasDispatcher, HasExtensions, HasLimits, HasMounts, HttpBorrow, HttpCtx, StoreBase,
     StoreConfig, StoreCtx, StoreView,

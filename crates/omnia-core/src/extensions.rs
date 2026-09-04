@@ -1,5 +1,5 @@
 //! Runtime extensions: the type-keyed state slot capability crates install
-//! into through the [`Wiring::extend`](crate::Wiring) hook.
+//! into through the runtime extend hook.
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 /// builds.
 ///
 /// A capability crate installs its state once — from the deployment's
-/// [`Wiring::extend`](crate::Wiring) hook — and reads it back from the
+/// extend hook — and reads it back from the
 /// [`Runtime`](crate::Runtime) or, inside a host binding, from the store's
 /// [`HasExtensions`](crate::HasExtensions) view. `clone()` is a handle clone:
 /// every copy observes the same set.

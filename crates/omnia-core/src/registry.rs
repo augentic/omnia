@@ -16,10 +16,7 @@ use std::fmt;
 use std::sync::{Arc, PoisonError, RwLock};
 
 use anyhow::{Context as _, Result, bail, ensure};
-// Test-only: lets manifest unit tests resolve against the aggregated tables.
-#[cfg(test)]
-pub use routing::Resolver;
-pub use routing::{CliRoutes, HttpRoutes, PatternRoutes, Routes, TriggerRouter};
+pub use routing::{CliRoutes, HttpRoutes, PatternRoutes, Resolver, Routes, TriggerRouter};
 use wasmtime::Engine;
 use wasmtime::component::{Component, InstancePre, Linker};
 use wasmtime_wasi::WasiView;
@@ -164,8 +161,6 @@ impl<T: WasiView + 'static> Registry<T> {
     /// Assemble a registry from a linked deployment's parts: polyfill
     /// host-mediated imports, pre-instantiate every loaded guest, validate that
     /// routes name registered guests, and freeze the static set.
-    ///
-    /// [`DeploymentBuilder::build`](crate::DeploymentBuilder::build) is the usual entry point.
     ///
     /// # Errors
     ///

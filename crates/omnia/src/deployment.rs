@@ -12,19 +12,17 @@ use anyhow::{Context, Result};
 pub use manifest::{
     GuestEntry, GuestRoutes, Manifest, Mount, SourceSpec, Transport, TransportKind,
 };
+use omnia_core::wasmtime::component::Linker;
+use omnia_core::wasmtime::{Config, Engine};
+use omnia_core::wasmtime_wasi::WasiView;
+use omnia_core::{
+    DispatchHandle, FirstArgSelector, GuestId, GuestSelector, Host, LoadedGuest, Location, LogMode,
+    MountRegistry, Registry, Routes, Runtime, RuntimeOptions, RuntimeParts, Server, StoreCtx,
+    Telemetry, WrpcView, serve_links,
+};
 use source::ArtifactPolicy;
-use wasmtime::component::Linker;
-use wasmtime::{Config, Engine};
-use wasmtime_wasi::WasiView;
-use wrpc_wasmtime::WrpcView;
 
-use crate::artifact::LoadedGuest;
-use crate::dispatch::{DispatchHandle, FirstArgSelector, GuestSelector, serve_links};
-use crate::location::Location;
-use crate::mount::MountRegistry;
-use crate::registry::{GuestId, Registry, Routes};
-use crate::telemetry::LogMode;
-use crate::{Host, Mode, Runtime, RuntimeOptions, RuntimeParts, Server, StoreCtx, Telemetry};
+use crate::Mode;
 
 /// Builds a [`Deployment`] from an optional programmatic [`Manifest`].
 ///
@@ -85,12 +83,12 @@ impl DeploymentBuilder {
 
     /// Mark the deployment as dynamically populated: the guest set may start
     /// empty and grow at run time via
-    /// [`Runtime::register`](crate::Runtime::register).
+    /// [`Runtime::register`](omnia_core::Runtime::register).
     ///
     /// This only relaxes the "at least one guest" check — static trigger
     /// routing (HTTP/messaging/websocket/CLI) is built at boot; registered
     /// guests are reachable via host-mediated link dispatch and host→guest
-    /// [`Dispatcher::invoke`](crate::Dispatcher::invoke).
+    /// [`Dispatcher::invoke`](omnia_core::Dispatcher::invoke).
     #[must_use]
     pub const fn dynamic(mut self) -> Self {
         self.allow_empty = true;
@@ -391,8 +389,8 @@ fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, Runt
 
     // register services with runtime's Linker
     let mut linker = Linker::new(&engine);
-    wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
-    wasmtime_wasi::p3::add_to_linker(&mut linker)?;
+    omnia_core::wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
+    omnia_core::wasmtime_wasi::p3::add_to_linker(&mut linker)?;
 
     Ok((engine, linker, options))
 }
@@ -417,9 +415,8 @@ fn init_telemetry(name: &str, log_mode: Option<LogMode>) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use wasmtime::{Config, Engine};
-
-    use crate::RuntimeOptions;
+    use omnia_core::RuntimeOptions;
+    use omnia_core::wasmtime::{Config, Engine};
 
     #[test]
     fn builds_pooling() {

@@ -13,8 +13,7 @@ pub enum Location {
     Path {
         /// The location name a load's `path` location names (e.g. `.`).
         name: String,
-        /// Host directory. [`crate::Manifest::from_config`] resolves relative paths
-        /// against the config file's directory.
+        /// Host directory. Relative paths resolve against the config file's directory.
         path: PathBuf,
     },
     /// The deployment's default registry endpoint.

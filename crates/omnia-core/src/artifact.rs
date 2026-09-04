@@ -157,6 +157,11 @@ impl GuestArtifact {
 
 /// Whether `path` holds a wasmtime-serialized (native ELF) artifact, sniffed
 /// from the leading magic bytes.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be opened or its leading bytes cannot
+/// be read.
 pub fn is_precompiled(path: &Path) -> Result<bool> {
     let mut magic = [0u8; 4];
     let mut file = std::fs::File::open(path)

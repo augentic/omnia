@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 #![cfg(not(target_arch = "wasm32"))]
+#![allow(unsafe_code)] // `DeploymentBuilder::build_trusted` and `Source::load`
 
 // The embedder facade: the runtime spine (`omnia-core`), the plugins
 // capability (`omnia-plugin`), the `run` grammar (`omnia-cli`, behind the
@@ -19,7 +20,9 @@
 // embedders reach them from here without a direct dependency of their own.
 #[cfg(feature = "jit")]
 pub mod compile;
+mod deployment;
 mod entry;
+mod lifecycle;
 pub use anyhow;
 pub use futures;
 #[cfg(feature = "cli")]
@@ -27,20 +30,16 @@ pub use futures;
 pub use omnia_cli::{Cli, Command, Parser};
 #[doc(inline)]
 pub use omnia_core::{
-    AdmitError, Backend, Backends, CliRoutes, Deployment, DeploymentBuilder, Dispatcher,
-    ExitStatus, Extensions, FirstArgSelector, FromEnv, FutureResult, Guest, GuestArtifact,
-    GuestEntry, GuestId, GuestRoutes, GuestSelector, HasDispatcher, HasExtensions, HasLimits,
-    HasMounts, HasTable, Host, HostCtx, HttpBorrow, HttpCtx, HttpRoutes, LinkClient, Location,
-    LogMode, Manifest, Mode, Mount, MountRegistry, NoOptions, PatternRoutes, Provides, Proxy,
-    Registry, ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts, Server, SourceSpec,
-    StoreBase, StoreConfig, StoreCtx, StoreView, Telemetry, Transport, TransportKind,
-    TriggerRouter, WeakRuntime, Wiring, WrpcState, as_command_chain, get_cloned, host_error,
-    serve_links, sha256_digest, telemetry, wasi_view,
+    AdmitError, Backend, CliRoutes, Dispatcher, ExitStatus, Extensions, FirstArgSelector, FromEnv,
+    FutureResult, Guest, GuestArtifact, GuestId, GuestSelector, HasDispatcher, HasExtensions,
+    HasLimits, HasMounts, HasTable, Host, HostCtx, HttpBorrow, HttpCtx, HttpRoutes, LinkClient,
+    Location, LogMode, MountRegistry, NoOptions, PatternRoutes, Provides, Proxy, Registry,
+    ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts, Server, StoreBase, StoreConfig,
+    StoreCtx, StoreView, Telemetry, TriggerRouter, WeakRuntime, WrpcState, as_command_chain,
+    get_cloned, host_error, serve_links, sha256_digest, telemetry, wasi_view,
 };
 #[doc(hidden)]
-pub use omnia_core::{
-    WrpcCtxView, WrpcView, pastey, run, run_with, tokio, wasmtime, wasmtime_wasi,
-};
+pub use omnia_core::{WrpcCtxView, WrpcView, pastey, tokio, wasmtime, wasmtime_wasi};
 #[doc(inline)]
 pub use omnia_host_macros::runtime;
 #[doc(inline)]
@@ -49,5 +48,12 @@ pub use omnia_plugin::{
     Plugins, RegistryClient, RegistrySource, ReleaseStore, WasiPlugins, WasiPluginsCtxView,
 };
 
+pub use self::deployment::{
+    Deployment, DeploymentBuilder, GuestEntry, GuestRoutes, Manifest, Mount, SourceSpec, Transport,
+    TransportKind,
+};
 #[doc(hidden)]
 pub use self::entry::{MainOptions, ManifestSource, main};
+pub use self::lifecycle::{Backends, Mode, Wiring};
+#[doc(hidden)]
+pub use self::lifecycle::{run, run_with};

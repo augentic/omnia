@@ -5,9 +5,8 @@ mod direct;
 use std::env;
 use std::process::ExitCode;
 
-use omnia_core::{Backends, DeploymentBuilder, Wiring};
-
 pub use self::direct::{MainOptions, ManifestSource};
+use crate::{Backends, DeploymentBuilder, Wiring};
 
 /// Entry point for generated `main` functions.
 ///
@@ -49,7 +48,7 @@ where
             }
         }
     };
-    omnia_core::drive_main::<B, H>(builder).await
+    crate::lifecycle::drive_main::<B, H>(builder).await
 }
 
 #[cfg(feature = "cli")]
@@ -71,7 +70,8 @@ fn materialize(
     omnia_config: Option<std::ffi::OsString>,
 ) -> Result<DeploymentBuilder, omnia_cli::PlanError> {
     use omnia_cli::RunSource;
-    use omnia_core::{Manifest, Mount};
+
+    use crate::{Manifest, Mount};
 
     let (mode, compiled_in) = options.into_parts();
     let plan = omnia_cli::plan(argv, omnia_config, compiled_in.is_some())?;
@@ -96,9 +96,8 @@ mod tests {
     use std::ffi::OsString;
     use std::path::PathBuf;
 
-    use omnia_core::Mode;
-
     use super::*;
+    use crate::Mode;
 
     fn argv(args: &[&str]) -> Vec<OsString> {
         args.iter().map(OsString::from).collect()

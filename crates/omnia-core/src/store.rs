@@ -141,7 +141,7 @@ impl StoreBase {
 /// The per-guest store context every deployment shares.
 ///
 /// `StoreCtx<B>` pairs the fixed [`StoreBase`] with the deployment's connected
-/// backend bundle `B` — the `runtime!`-generated `Backends`, or [`()`](unit) for
+/// backend bundle `B` — the `runtime!`-generated bundle, or [`()`](unit) for
 /// a backend-less deployment (such as a `mode: command` `wasi:cli` runtime). The
 /// three fixed views (`WasiView`, `WrpcView`, `HasLimits`) are implemented below
 /// against [`base`](Self::base); the generic [`StoreView`] blanket covers every
@@ -266,7 +266,7 @@ impl<B: Send + 'static> HasDispatcher for StoreCtx<B> {
 /// Clone-on-read access to a store's runtime extensions.
 ///
 /// Lets a capability crate's host binding reach the state its
-/// [`Wiring::extend`](crate::Wiring) hook installed without carrying it on
+/// extend hook installed without carrying it on
 /// its own view.
 pub trait HasExtensions: Send {
     /// Clone a handle to the store's runtime extensions.

@@ -9,16 +9,14 @@ use std::borrow::Cow;
 use std::path::PathBuf;
 
 use anyhow::{Context as _, Result, ensure};
-use wasmtime::Engine;
-
-use crate::artifact::{ELF_MAGIC, GuestArtifact, LoadedGuest, is_precompiled};
-use crate::registry::GuestId;
+use omnia_core::wasmtime::Engine;
+use omnia_core::{ELF_MAGIC, GuestArtifact, GuestId, LoadedGuest, is_precompiled};
 
 /// Whether a deployment build may load pre-compiled (native) artifacts.
 ///
 /// Crate-internal on purpose: the only door to `Trust` is an `unsafe`
 /// call site ([`DeploymentBuilder::build_trusted`](crate::DeploymentBuilder::build_trusted)
-/// or [`GuestArtifact::precompiled`]).
+/// or [`GuestArtifact::precompiled`](omnia_core::GuestArtifact::precompiled)).
 // `pub` in a private module: crate-internal, never re-exported.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ArtifactPolicy {

@@ -2360,8 +2360,11 @@ dependencies = [
  "omnia-core",
  "omnia-host-macros",
  "omnia-plugin",
+ "serde",
  "test-programs",
  "tokio",
+ "toml",
+ "tracing",
  "wasmtime",
 ]
 
@@ -2393,7 +2396,6 @@ dependencies = [
  "sha2 0.10.9",
  "tokio",
  "tokio-util",
- "toml",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
