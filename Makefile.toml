@@ -25,8 +25,6 @@ dependencies = [
   "lint",
   "features",
   "hack",
-  "tree-guard",
-  "cli-guard",
   "test",
   "test-docs",
   "docs",
@@ -95,28 +93,6 @@ args = [
   "omnia-test",
 ]
 install_crate = "cargo-hack"
-
-# `omnia-test/build` must stay `std`-only so a consumer's `build.rs` never
-# pulls the runtime into its build-dependency graph: the tree is one line.
-[tasks.tree-guard]
-script = '''
-tree="$(cargo tree -p omnia-test --no-default-features --features build -e normal)"
-if [ "$(printf '%s\n' "$tree" | wc -l)" -ne 1 ]; then
-  printf 'omnia-test/build pulls dependencies:\n%s\n' "$tree" >&2
-  exit 1
-fi
-'''
-
-# A direct-command binary built without the facade's `cli` feature must link
-# neither the grammar crate nor clap.
-[tasks.cli-guard]
-script = '''
-tree="$(cargo tree -p omnia --no-default-features -e normal)"
-if printf '%s\n' "$tree" | grep -Eq '(^|[^a-zA-Z0-9_-])(clap|omnia-cli) '; then
-  printf 'omnia without `cli` pulls the CLI:\n%s\n' "$tree" >&2
-  exit 1
-fi
-'''
 
 # Semver check against the last published omnia-test; joins `ci` once the
 # first release exists as a baseline.

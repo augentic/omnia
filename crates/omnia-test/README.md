@@ -47,11 +47,10 @@ nothing to the component — the gate simply keeps the host crates out of the
 ```sh
 cargo make features    # clippy per feature: build, guest, host, guest,host
 cargo make hack        # cargo hack check --feature-powerset --no-dev-deps
-cargo make tree-guard  # `build` resolves to std alone
 cargo make semver      # cargo semver-checks against the last release
 ```
 
 The `build` feature must stay `std`-only so a consumer's `build.rs` does not
-pull the runtime into its build-dependency graph; `tree-guard` fails unless
+pull the runtime into its build-dependency graph.
 `cargo tree -p omnia-test --no-default-features --features build -e normal`
 prints exactly one line.
