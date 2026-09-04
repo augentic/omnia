@@ -246,6 +246,7 @@ impl Deployment {
         H: Wiring<B>,
         B: Clone + Send + Sync + 'static,
     {
-        omnia::run_with::<B, H>(self.builder()?, backends).await
+        let deployment = self.builder()?.build::<StoreCtx<B>>().await?;
+        omnia::run_with::<B, H>(deployment, backends).await
     }
 }

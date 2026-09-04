@@ -107,7 +107,8 @@ pub fn expand(config: &Config) -> TokenStream {
             /// blocking until the guest completes.
             #[tokio::main]
             pub async fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
-                omnia::run::<#backends_ty, Hooks>(builder.mode(#mode)).await
+                let deployment = builder.mode(#mode).build::<omnia::StoreCtx<#backends_ty>>().await?;
+                omnia::run::<#backends_ty, Hooks>(deployment).await
             }
 
             /// Run one deployment through this runtime's hosts over a bundle
@@ -119,7 +120,8 @@ pub fn expand(config: &Config) -> TokenStream {
                 B: Clone + Send + Sync + 'static,
                 Hooks: omnia::Wiring<B>,
             {
-                omnia::run_with::<B, Hooks>(builder.mode(#mode), backends).await
+                let deployment = builder.mode(#mode).build::<omnia::StoreCtx<B>>().await?;
+                omnia::run_with::<B, Hooks>(deployment, backends).await
             }
         }
 

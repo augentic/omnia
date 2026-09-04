@@ -45,8 +45,8 @@ pub use omnia_core::{
 };
 #[doc(hidden)]
 pub use omnia_core::{
-    MainOptions, ManifestSource, WrpcCtxView, WrpcView, pastey, run, run_precompiled, run_with,
-    tokio, wasmtime, wasmtime_wasi,
+    MainOptions, ManifestSource, WrpcCtxView, WrpcView, pastey, run, run_with, tokio, wasmtime,
+    wasmtime_wasi,
 };
 #[doc(inline)]
 pub use omnia_host_macros::runtime;

@@ -44,9 +44,7 @@ pub use self::registry::{
 };
 pub use self::runtime::{AdmitError, Backends, ExitStatus, Mode, Runtime, WeakRuntime, Wiring};
 #[doc(hidden)]
-pub use self::runtime::{
-    MainOptions, ManifestSource, drive_main, main, run, run_precompiled, run_with,
-};
+pub use self::runtime::{MainOptions, ManifestSource, drive_main, main, run, run_with};
 pub use self::store::{
     HasDispatcher, HasExtensions, HasLimits, HasMounts, HttpBorrow, HttpCtx, StoreBase,
     StoreConfig, StoreCtx, StoreView,

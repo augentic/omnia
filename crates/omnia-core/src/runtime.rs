@@ -133,11 +133,16 @@ where
     // The generated entry point admits pre-compiled artifacts: manifests and
     // `.bin` paths given to (or compiled into) the binary are trusted
     // operator inputs (docs/security-model.md).
-    //
-    // SAFETY: the operator running this binary chose the manifest and
-    // artifact paths; pre-compiled artifacts are documented trusted inputs
-    // produced by `omnia compile`.
-    match unsafe { run_precompiled::<B, H>(builder) }.await {
+    match async {
+        // SAFETY: the operator running this binary chose the manifest and
+        // artifact paths; pre-compiled artifacts are documented trusted inputs
+        // produced by `omnia compile`.
+        let deployment =
+            unsafe { builder.build_trusted::<StoreCtx<B>>() }.await.context("building runtime")?;
+        run::<B, H>(deployment).await
+    }
+    .await
+    {
         Ok(status) => status.into(),
         Err(error) => {
             eprintln!("{error:#}");
@@ -146,24 +151,19 @@ where
     }
 }
 
-/// Build runtime state, bootstrap it, then run command mode or every trigger server.
-///
-/// The safe [`DeploymentBuilder::build`] only loads raw wasm; a deployment of
-/// trusted pre-compiled artifacts builds its [`Deployment`] through
-/// [`unsafe build_trusted`](DeploymentBuilder::build_trusted) (as the
-/// generated CLI `main` does via [`run_precompiled`]).
+/// Connect backends, bootstrap the runtime, then run command mode or every trigger server.
 ///
 /// # Errors
 ///
-/// Returns an error if the deployment cannot be built, runtime state cannot be
+/// Returns an error if backends cannot connect, runtime state cannot be
 /// assembled, bootstrap fails, or a trigger server exits with an error.
-pub async fn run<B, H>(builder: DeploymentBuilder) -> Result<ExitStatus>
+pub async fn run<B, H>(deployment: Deployment<StoreCtx<B>>) -> Result<ExitStatus>
 where
     B: Backends,
     H: Wiring<B>,
 {
-    let deployment = builder.build::<StoreCtx<B>>().await.context("building runtime")?;
-    drive::<B, H>(deployment).await
+    let backends = B::connect().await.context("connecting backends")?;
+    run_with::<B, H>(deployment, backends).await
 }
 
 /// [`run`] over a bundle already in hand: nothing connects, `backends` is
@@ -172,56 +172,17 @@ where
 ///
 /// # Errors
 ///
-/// Returns an error if the deployment cannot be built, runtime state cannot be
-/// assembled, bootstrap fails, or a trigger server exits with an error.
-pub async fn run_with<B, H>(builder: DeploymentBuilder, backends: B) -> Result<ExitStatus>
+/// Returns an error if runtime state cannot be assembled, bootstrap fails, or
+/// a trigger server exits with an error.
+pub async fn run_with<B, H>(deployment: Deployment<StoreCtx<B>>, backends: B) -> Result<ExitStatus>
 where
     B: Clone + Send + Sync + 'static,
     H: Wiring<B>,
 {
-    let deployment = builder.build::<StoreCtx<B>>().await.context("building runtime")?;
     let mode = deployment.mode();
     let runtime = Runtime::<B>::with_backends(deployment, backends, H::link, H::extend)
         .await
         .context("assembling runtime")?;
-    finish::<B, H>(runtime, mode).await
-}
-
-/// [`run`] for a deployment of trusted pre-compiled artifacts.
-///
-/// # Safety
-///
-/// Every pre-compiled path the builder's manifest names must identify
-/// trusted, immutable wasmtime output (`omnia compile`); see
-/// [`DeploymentBuilder::build_trusted`].
-///
-/// # Errors
-///
-/// Returns an error if the deployment cannot be built, runtime state cannot be
-/// assembled, bootstrap fails, or a trigger server exits with an error.
-pub async unsafe fn run_precompiled<B, H>(builder: DeploymentBuilder) -> Result<ExitStatus>
-where
-    B: Backends,
-    H: Wiring<B>,
-{
-    // SAFETY: forwarded — this function's own contract is exactly
-    // `build_trusted`'s contract.
-    let deployment =
-        unsafe { builder.build_trusted::<StoreCtx<B>>() }.await.context("building runtime")?;
-    drive::<B, H>(deployment).await
-}
-
-/// Drive an already-built deployment: assemble the runtime, start background
-/// tasks, then run command mode or every trigger server.
-async fn drive<B, H>(deployment: Deployment<StoreCtx<B>>) -> Result<ExitStatus>
-where
-    B: Backends,
-    H: Wiring<B>,
-{
-    let mode = deployment.mode();
-
-    let runtime =
-        Runtime::<B>::new(deployment, H::link, H::extend).await.context("assembling runtime")?;
     finish::<B, H>(runtime, mode).await
 }
 
@@ -250,7 +211,7 @@ where
                     tracing::error!(%error, "trigger server exited with error");
                 }
             });
-            command::drive(&runtime).await
+            runtime.run_command().await
         }
         Mode::Server => H::serve(&runtime).await.map(|()| ExitStatus::SUCCESS),
     };
