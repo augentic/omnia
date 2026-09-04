@@ -14,9 +14,10 @@ pub use entry::{MainOptions, ManifestSource};
 use wasmtime::component::{Component, Instance, InstancePre, types};
 use wasmtime::{Engine, Store};
 
-use crate::deployment::{GuestArtifact, Location};
+use crate::artifact::GuestArtifact;
 use crate::dispatch::serve_guest;
 use crate::extensions::Extensions;
+use crate::location::Location;
 use crate::mount::MountRegistry;
 use crate::registry::{Guest, GuestId, HttpRoutes, PublishError, TriggerRouter};
 use crate::store::HasLimits;

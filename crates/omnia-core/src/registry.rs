@@ -26,7 +26,7 @@ use wasmtime_wasi::WasiView;
 use wrpc_wasmtime::WrpcView;
 
 use crate::RuntimeOptions;
-use crate::deployment::LoadedGuest;
+use crate::artifact::LoadedGuest;
 use crate::dispatch::{self, DispatchHandle, Endpoint};
 
 /// Opaque guest identity.

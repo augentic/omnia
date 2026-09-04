@@ -15,14 +15,9 @@
 // otherwise trip `missing_docs`.
 #![allow(missing_docs)]
 
-#[cfg(feature = "jit")]
-mod compile;
-
 use std::time::Duration;
 
 use anyhow::{Result, bail};
-#[cfg(feature = "jit")]
-pub use compile::compile;
 use fromenv::{FromEnv, ParseResult};
 use wasmtime::{Config, Enabled, InstanceAllocationStrategy, PoolingAllocationConfig};
 
@@ -161,7 +156,7 @@ pub struct RuntimeOptions {
     pub branch_hinting: bool,
 }
 
-/// Build the [`Config`] shared by [`crate::compile`] and [`crate::DeploymentBuilder`].
+/// Build the [`Config`] shared by the ahead-of-time compiler and [`crate::DeploymentBuilder`].
 ///
 /// Centralising it guarantees the compile-affecting settings (fuel metering,
 /// branch hinting, memory reservation/guard size, and copy-on-write heap init)

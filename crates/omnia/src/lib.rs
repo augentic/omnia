@@ -17,6 +17,8 @@
 // acquirer seams (`ContentStore`, `ReleaseStore`, `PathSource`,
 // `RegistrySource`). Both are part of the facade's public signatures, so
 // embedders reach them from here without a direct dependency of their own.
+#[cfg(feature = "jit")]
+pub mod compile;
 pub use anyhow;
 pub use futures;
 #[cfg(feature = "cli")]
@@ -25,9 +27,6 @@ pub use omnia_cli::main;
 #[cfg(feature = "cli")]
 #[doc(inline)]
 pub use omnia_cli::{Cli, Command, Parser};
-#[cfg(feature = "jit")]
-#[doc(inline)]
-pub use omnia_core::compile;
 #[cfg(not(feature = "cli"))]
 #[doc(hidden)]
 pub use omnia_core::main;

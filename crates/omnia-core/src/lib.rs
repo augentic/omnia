@@ -2,11 +2,13 @@
 #![cfg(not(target_arch = "wasm32"))]
 #![allow(unsafe_code)] // wasmtime component deserialization and deployment hooks
 
+mod artifact;
 mod deployment;
 mod digest;
 mod dispatch;
 mod extensions;
 mod host;
+mod location;
 mod mount;
 mod options;
 mod registry;
@@ -21,9 +23,10 @@ pub use wrpc_wasmtime::{WrpcCtxView, WrpcView};
 #[doc(hidden)]
 pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
+pub use self::artifact::{ELF_MAGIC, GuestArtifact, LoadedGuest};
 pub use self::deployment::{
-    Deployment, DeploymentBuilder, ELF_MAGIC, GuestArtifact, GuestEntry, GuestRoutes, LoadedGuest,
-    Location, Manifest, Mount, SourceSpec, Transport, TransportKind,
+    Deployment, DeploymentBuilder, GuestEntry, GuestRoutes, Manifest, Mount, SourceSpec, Transport,
+    TransportKind,
 };
 pub use self::digest::sha256_digest;
 pub use self::dispatch::{
@@ -35,10 +38,9 @@ pub use self::host::{
     Backend, FromEnv, FutureResult, HasTable, Host, HostCtx, NoOptions, Provides, Proxy, Server,
     get_cloned,
 };
+pub use self::location::Location;
 pub use self::mount::{MountRegistry, ResolvedPreopen};
 pub use self::options::RuntimeOptions;
-#[cfg(feature = "jit")]
-pub use self::options::compile;
 pub use self::registry::{
     CliRoutes, Guest, GuestId, HttpRoutes, PatternRoutes, Registry, Routes, TriggerRouter,
 };

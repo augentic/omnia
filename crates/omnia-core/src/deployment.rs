@@ -10,16 +10,17 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 pub use manifest::{
-    GuestEntry, GuestRoutes, Location, Manifest, Mount, SourceSpec, Transport, TransportKind,
+    GuestEntry, GuestRoutes, Manifest, Mount, SourceSpec, Transport, TransportKind,
 };
 use source::ArtifactPolicy;
-pub use source::{ELF_MAGIC, GuestArtifact, LoadedGuest};
 use wasmtime::component::Linker;
 use wasmtime::{Config, Engine};
 use wasmtime_wasi::WasiView;
 use wrpc_wasmtime::WrpcView;
 
+use crate::artifact::LoadedGuest;
 use crate::dispatch::{DispatchHandle, FirstArgSelector, GuestSelector, serve_links};
+use crate::location::Location;
 use crate::mount::MountRegistry;
 use crate::registry::{GuestId, Registry, Routes};
 use crate::telemetry::LogMode;

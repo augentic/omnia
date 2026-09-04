@@ -5,10 +5,9 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
+use omnia_core::RuntimeOptions;
 use wasmtime::component::Component;
 use wasmtime::{Config, Engine};
-
-use crate::RuntimeOptions;
 
 /// Compile `wasm32-wasip2` component.
 ///
