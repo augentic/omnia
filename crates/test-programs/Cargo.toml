@@ -272,6 +272,11 @@ path = "programs/otel/instrumented_handler.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "otel_metrics_counter"
+path = "programs/otel/metrics_counter.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "otel_spawned_task_pending"
 path = "programs/otel/spawned_task_pending.rs"
 crate-type = ["cdylib"]

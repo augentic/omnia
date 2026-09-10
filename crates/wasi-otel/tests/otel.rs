@@ -14,6 +14,8 @@ use omnia_test::host::Deployment;
 use omnia_wasi_otel::{WasiOtel, WasiOtelCtx};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+use opentelemetry_proto::tonic::metrics::v1::metric::Data;
+use opentelemetry_proto::tonic::metrics::v1::number_data_point::Value;
 use tracing::Instrument as _;
 
 // Every guest program in `crates/test-programs` must have a matching test
@@ -104,4 +106,26 @@ async fn otel_instrumented_handler() {
 async fn otel_spawned_task_pending() {
     let recording = run_guest(test_programs::OTEL_SPAWNED_TASK_PENDING).await;
     assert_eq!(recording.span_names(), ["traced"]);
+}
+
+#[tokio::test]
+async fn otel_metrics_counter() {
+    let recording = run_guest(test_programs::OTEL_METRICS_COUNTER).await;
+
+    let exports = recording.metrics.lock().expect("metrics lock").clone();
+    assert_eq!(exports.len(), 1, "one flush exports one metrics collection");
+    let hits = exports
+        .iter()
+        .flat_map(|request| &request.resource_metrics)
+        .flat_map(|resource| &resource.scope_metrics)
+        .flat_map(|scope| &scope.metrics)
+        .find(|metric| metric.name == "hits")
+        .expect("`hits` metric exported");
+
+    let Some(Data::Sum(sum)) = &hits.data else {
+        panic!("`hits` must be a sum, got {:?}", hits.data);
+    };
+    assert!(sum.is_monotonic);
+    assert_eq!(sum.data_points.len(), 1, "both increments land on one data point");
+    assert_eq!(sum.data_points[0].value, Some(Value::AsInt(2)));
 }

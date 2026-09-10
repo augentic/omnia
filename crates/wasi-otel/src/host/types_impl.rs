@@ -181,3 +181,37 @@ pub fn datetime_nanos(dt: types::Datetime) -> u64 {
     // (release) into a bogus time.
     dt.seconds.saturating_mul(1_000_000_000).saturating_add(u64::from(dt.nanoseconds))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_id_hex() {
+        assert_eq!(decode_id("0af7651916cd43dd"), [0x0a, 0xf7, 0x65, 0x19, 0x16, 0xcd, 0x43, 0xdd]);
+    }
+
+    #[test]
+    fn decode_id_malformed() {
+        assert!(decode_id("not-hex").is_empty());
+        assert!(decode_id("abc").is_empty());
+    }
+
+    #[test]
+    fn datetime_nanos_combines() {
+        let dt = types::Datetime {
+            seconds: 3,
+            nanoseconds: 7,
+        };
+        assert_eq!(datetime_nanos(dt), 3_000_000_007);
+    }
+
+    #[test]
+    fn datetime_nanos_saturates() {
+        let dt = types::Datetime {
+            seconds: u64::MAX,
+            nanoseconds: 999_999_999,
+        };
+        assert_eq!(datetime_nanos(dt), u64::MAX);
+    }
+}
