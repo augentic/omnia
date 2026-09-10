@@ -1,8 +1,11 @@
-//! End-to-end tests for outgoing `wasi:http`: every scenario runs a real
-//! guest component from `crates/test-programs` through the omnia runtime
-//! against a test-owned loopback origin. The guest asserts what it observes
+//! End-to-end tests for `wasi:http`: every scenario runs a real guest
+//! component from `crates/test-programs` through the omnia runtime. Outgoing
+//! scenarios are command guests against a test-owned loopback origin; the
+//! incoming scenario is a handler guest driven in-process through
+//! [`HttpHandler`], bypassing the socket. The guest asserts what it observes
 //! across the boundary (and traps on failure); the host side asserts what
-//! reached the origin and what the guest-side cache persisted.
+//! reached the origin, what the guest-side cache persisted, and what the
+//! handler answered.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -11,19 +14,19 @@ use std::future::ready;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
-use http::header::IF_NONE_MATCH;
-use http::{HeaderMap, Request, Response};
-use http_body_util::Full;
+use http::header::{HOST, IF_NONE_MATCH};
+use http::{HeaderMap, Request, Response, StatusCode};
+use http_body_util::{BodyExt as _, Full};
 use hyper::body::Incoming;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use omnia::ExitStatus;
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_config::WasiConfig;
-use omnia_wasi_http::WasiHttp;
+use omnia_wasi_http::{HttpHandler, WasiHttp};
 use omnia_wasi_keyvalue::{WasiKeyValue, WasiKeyValueCtx as _};
 use omnia_wasi_otel::WasiOtel;
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use wasmtime_wasi_http::io::TokioIo;
 
@@ -159,4 +162,51 @@ async fn http_cache_hit() {
         serde_json::from_slice(&bytes(&envelope["value"])).expect("serialized response");
     assert_eq!(cached["status"], 200);
     assert_eq!(bytes(&cached["body"]), BODY);
+}
+
+#[tokio::test]
+async fn http_incoming_echo() {
+    // The handler guest exports no `wasi:cli/run`: boot without driving it
+    // and dispatch requests through the trigger's in-process handler.
+    let runtime = Deployment::new()
+        .guest("guest", test_programs::HTTP_INCOMING_ECHO)
+        .boot(Backends::defaults().await, |deployment| {
+            deployment.host::<WasiHttp, Backends>()?;
+            deployment.host::<WasiOtel, Backends>()?;
+            Ok(())
+        })
+        .await
+        .expect("runtime boots");
+    let handler = HttpHandler::new(&runtime)
+        .expect("http routes consistent")
+        .expect("the guest exports the http handler");
+
+    // GET: the message is the query parameter; the transport's request id
+    // header comes back as the guest saw it in its metadata.
+    let request = Request::get("/echo?message=hi")
+        .header(HOST, "echo.test")
+        .header("x-request-id", "req-get")
+        .body(Full::new(Bytes::new()))
+        .expect("request");
+    let response = handler.handle(request).await.expect("handled");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(collect(response).await, json!({ "message": "hi", "request_id": "req-get" }));
+
+    // POST: the message is the JSON body.
+    let request = Request::post("/echo")
+        .header(HOST, "echo.test")
+        .header("x-request-id", "req-post")
+        .body(Full::new(Bytes::from_static(br#"{"message":"posted"}"#)))
+        .expect("request");
+    let response = handler.handle(request).await.expect("handled");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(collect(response).await, json!({ "message": "posted", "request_id": "req-post" }));
+
+    runtime.shutdown();
+}
+
+/// The handler's response body, read to the end as JSON.
+async fn collect(response: Response<omnia_wasi_http::OutgoingBody>) -> Value {
+    let body = response.into_body().collect().await.expect("body streams").to_bytes();
+    serde_json::from_slice(&body).expect("JSON body")
 }

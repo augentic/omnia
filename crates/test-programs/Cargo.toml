@@ -13,9 +13,10 @@ autoexamples = false
 # `wasm32-wasip2`. The native side has no dependencies: it is the generated
 # artifact paths alone.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+axum.workspace = true
 clap.workspace = true
 futures.workspace = true
-omnia-guest = { workspace = true, features = ["command"] }
+omnia-guest = { workspace = true, features = ["command", "http"] }
 omnia-wasi-blobstore.workspace = true
 omnia-wasi-config.workspace = true
 omnia-wasi-docstore.workspace = true
@@ -71,6 +72,11 @@ crate-type = ["cdylib"]
 [[example]]
 name = "http_cache_hit"
 path = "programs/http/cache_hit.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "http_incoming_echo"
+path = "programs/http/incoming_echo.rs"
 crate-type = ["cdylib"]
 
 [[example]]

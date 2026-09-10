@@ -3855,6 +3855,7 @@ dependencies = [
 name = "test-programs"
 version = "0.36.0"
 dependencies = [
+ "axum",
  "clap",
  "futures",
  "omnia-guest",
