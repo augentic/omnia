@@ -28,6 +28,7 @@ omnia-wasi-model.workspace = true
 omnia-wasi-otel.workspace = true
 omnia-wasi-sql.workspace = true
 omnia-wasi-vault.workspace = true
+omnia-wasi-websocket.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -313,4 +314,9 @@ crate-type = ["cdylib"]
 [[example]]
 name = "vault_locker"
 path = "programs/vault/locker.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "websocket_handler_echo"
+path = "programs/websocket/handler_echo.rs"
 crate-type = ["cdylib"]
