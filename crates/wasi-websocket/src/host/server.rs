@@ -15,27 +15,11 @@ where
     B: Clone + Send + Sync + 'static,
     StoreCtx<B>: StoreView<WasiWebSocket>,
 {
-    let component = state.name().to_owned();
-    tracing::info!("starting websocket server for: {component}");
+    tracing::info!("starting websocket server for: {}", state.name());
 
-    // Capability probe: a guest exports the websocket handler exactly when its
-    // typed indices resolve. Build the per-guest indices and the route router
-    // that selects among them once, up front.
-    let routing = TriggerRouter::build(
-        state.registry(),
-        "websocket",
-        state.registry().routes().websocket().clone(),
-        DuplexIndices::new,
-    )?;
-    if routing.is_inert() {
+    let Some(handler) = WebSocketHandler::new(state)? else {
         tracing::info!("no guest exports the websocket handler; websocket trigger inert");
         return Ok(());
-    }
-
-    let handler = Handler {
-        state: state.clone(),
-        component,
-        routing: Arc::new(routing),
     };
 
     // Subscribe once: a fresh subscription per iteration would drop events
@@ -62,8 +46,13 @@ where
     Ok(())
 }
 
+/// In-process `omnia:websocket/handler` dispatcher: routes an event to a
+/// guest, instantiates it, and invokes the export.
+///
+/// The server loop drives one over the backend event stream; tests drive it
+/// directly with a constructed [`Event`], bypassing the socket.
 #[derive(Clone)]
-struct Handler<B>
+pub struct WebSocketHandler<B>
 where
     B: Clone + Send + Sync + 'static,
     StoreCtx<B>: StoreView<WasiWebSocket>,
@@ -73,13 +62,48 @@ where
     routing: Arc<TriggerRouter<DuplexIndices, PatternRoutes>>,
 }
 
-impl<B> Handler<B>
+impl<B> WebSocketHandler<B>
 where
     B: Clone + Send + Sync + 'static,
     StoreCtx<B>: StoreView<WasiWebSocket>,
 {
-    /// Forward event to the wasm guest.
-    async fn handle(&self, event: Event) -> Result<()> {
+    /// Build the handler over `runtime`'s registry; `None` when no guest
+    /// exports the websocket handler (the trigger is inert).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the deployment's websocket routes are inconsistent
+    /// with the guests' exports.
+    pub fn new(runtime: &Runtime<B>) -> Result<Option<Self>> {
+        // Capability probe: a guest exports the websocket handler exactly when
+        // its typed indices resolve. Build the per-guest indices and the route
+        // router that selects among them once, up front.
+        let routing = TriggerRouter::build(
+            runtime.registry(),
+            "websocket",
+            runtime.registry().routes().websocket().clone(),
+            DuplexIndices::new,
+        )?;
+        if routing.is_inert() {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            state: runtime.clone(),
+            component: runtime.name().to_owned(),
+            routing: Arc::new(routing),
+        }))
+    }
+
+    /// Forward an event to the guest routed by its route key (or the
+    /// catch-all guest when it carries none).
+    ///
+    /// An event with no matching route is dropped silently.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the guest cannot be instantiated, traps, or times
+    /// out.
+    pub async fn handle(&self, event: Event) -> Result<()> {
         // Resolve the guest by the event's route; an event with no route falls
         // into the catch-all (sole exporter). A miss is dropped, not an error.
         let routed = event
