@@ -13,7 +13,7 @@ use http::StatusCode;
 use http::uri::{PathAndQuery, Uri};
 use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::{BodyExt, Full};
-use hyper::body::{Body, Frame, Incoming, SizeHint};
+use hyper::body::{Body, Frame, SizeHint};
 use hyper::header::{FORWARDED, HOST};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
@@ -28,7 +28,8 @@ use wasmtime_wasi_http::p3::bindings::ServiceIndices;
 use wasmtime_wasi_http::p3::bindings::http::types as wasi;
 use wasmtime_wasi_http::{FieldMap, WasiHttpView};
 
-type OutgoingBody = UnsyncBoxBody<Bytes, anyhow::Error>;
+/// The streaming body of a response produced by [`HttpHandler::handle`].
+pub type OutgoingBody = UnsyncBoxBody<Bytes, anyhow::Error>;
 
 const HTTP_ADDR: &str = "0.0.0.0:8080";
 
@@ -38,28 +39,15 @@ where
     B: Clone + Send + Sync + 'static,
     StoreCtx<B>: WasiHttpView,
 {
-    let component = state.name().to_owned();
-
-    // Capability probe: a guest exports `wasi:http/incoming-handler` exactly
-    // when its typed `ServiceIndices` resolve. The runtime builds the
-    // per-guest indices and the router that selects among them once, up
-    // front.
-    let routing = state.http_trigger_router(ServiceIndices::new)?;
-    if routing.is_inert() {
+    let Some(handler) = HttpHandler::new(state)? else {
         tracing::info!("no guest exports the http handler; http trigger inert");
         return Ok(());
-    }
+    };
 
     let addr = env::var("HTTP_ADDR").unwrap_or_else(|_| HTTP_ADDR.into());
     let listener = TcpListener::bind(&addr).await.with_context(|| format!("binding {addr}"))?;
     let addr = listener.local_addr().context("reading http listener address")?;
-    tracing::info!("{component} http server listening on: {addr}");
-
-    let handler = Handler {
-        state: state.clone(),
-        component: Arc::from(component),
-        routing: Arc::new(routing),
-    };
+    tracing::info!("{} http server listening on: {addr}", handler.component);
 
     // `keep_alive` defaults to true; build the connection builder once and
     // clone it cheaply per accepted connection.
@@ -115,8 +103,13 @@ where
     }
 }
 
+/// In-process `wasi:http/incoming-handler` dispatcher: routes a request to a
+/// guest, instantiates it, and invokes the export.
+///
+/// The server loop drives one over accepted connections; tests drive it
+/// directly with a constructed request, bypassing the socket.
 #[derive(Clone)]
-struct Handler<B>
+pub struct HttpHandler<B>
 where
     B: Clone + Send + Sync + 'static,
     StoreCtx<B>: WasiHttpView,
@@ -126,16 +119,52 @@ where
     routing: Arc<TriggerRouter<ServiceIndices, HttpRoutes>>,
 }
 
-impl<B> Handler<B>
+impl<B> HttpHandler<B>
 where
     B: Clone + Send + Sync + 'static,
     StoreCtx<B>: WasiHttpView,
 {
-    // Forward request to the wasm Guest.
-    async fn handle(
-        &self, request: hyper::Request<Incoming>,
-    ) -> Result<hyper::Response<OutgoingBody>> {
-        tracing::debug!("handling request: {request:?}");
+    /// Build the handler over `runtime`'s registry; `None` when no guest
+    /// exports the http handler (the trigger is inert).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the deployment's http routes are inconsistent with
+    /// the guests' exports.
+    pub fn new(runtime: &Runtime<B>) -> Result<Option<Self>> {
+        // Capability probe: a guest exports `wasi:http/incoming-handler`
+        // exactly when its typed `ServiceIndices` resolve. The runtime builds
+        // the per-guest indices and the router that selects among them once,
+        // up front.
+        let routing = runtime.http_trigger_router(ServiceIndices::new)?;
+        if routing.is_inert() {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            state: runtime.clone(),
+            component: Arc::from(runtime.name()),
+            routing: Arc::new(routing),
+        }))
+    }
+
+    /// Forward a request to the routed guest and return its response.
+    ///
+    /// The request is normalised first (scheme and authority from `Host` or
+    /// `Forwarded`). Outcomes the handler can answer itself come back as
+    /// responses: a request without either header `400`, an unrouted path
+    /// `404`, and a guest that times out or is no longer registered `500`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the guest cannot be instantiated, traps, returns an
+    /// error, or yields a response that cannot be converted. In-process
+    /// callers see these as `Err`; only the server loop maps them to `500`.
+    pub async fn handle<T>(&self, request: http::Request<T>) -> Result<http::Response<OutgoingBody>>
+    where
+        T: Body<Data = Bytes> + Send + 'static,
+        T::Error: Into<wasmtime_wasi_http::Error>,
+    {
+        tracing::debug!(method = %request.method(), uri = %request.uri(), "handling request");
 
         // Normalise the request (scheme/authority); a request we cannot
         // normalise (e.g. a missing `Host` header) is a client error, not a 500.
@@ -269,7 +298,7 @@ where
 }
 
 // Prepare the request for the guest.
-fn fix_request(mut request: hyper::Request<Incoming>) -> Result<hyper::Request<Incoming>> {
+fn fix_request<T>(mut request: http::Request<T>) -> Result<http::Request<T>> {
     // rebuild Uri with scheme and authority explicitly set so they are passed to the Guest
     let uri = request.uri_mut();
     let p_and_q = uri.path_and_query().map_or_else(|| PathAndQuery::from_static("/"), Clone::clone);
@@ -308,7 +337,7 @@ fn fix_request(mut request: hyper::Request<Incoming>) -> Result<hyper::Request<I
     // update the uri with the new scheme and authority
     let (mut parts, body) = request.into_parts();
     parts.uri = uri_builder.build()?;
-    let request = hyper::Request::from_parts(parts, body);
+    let request = http::Request::from_parts(parts, body);
 
     Ok(request)
 }

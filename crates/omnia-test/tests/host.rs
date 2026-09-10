@@ -9,12 +9,9 @@ use omnia::{ExitStatus, GuestId, Location, Runtime};
 use omnia_test::host::{Backends, Deployment, ScriptedModel, scratch};
 use omnia_test::{Exchange, SeenFormat};
 use omnia_wasi_blobstore::WasiBlobstoreCtx as _;
-use omnia_wasi_config::WasiConfig;
 use omnia_wasi_keyvalue::WasiKeyValueCtx as _;
 use omnia_wasi_model::WasiModel;
 use omnia_wasi_otel::WasiOtel;
-
-test_programs::foreach_config!();
 
 // A production `runtime!` as an embedder would write it: the compiled-in
 // deployment and its hosts, connected from the environment under `main`.
@@ -193,17 +190,6 @@ async fn path_root_plugins() {
         .await
         .expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
-}
-
-#[tokio::test]
-async fn config_seeded() {
-    let backends = Backends::defaults().await.config([("GREETING", "hello")]);
-    let status = Deployment::new()
-        .guest("config", test_programs::CONFIG_SEEDED)
-        .run_host::<WasiConfig, _>(backends)
-        .await
-        .expect("deployment runs");
-    assert_eq!(status, ExitStatus::SUCCESS, "the guest saw `GREETING` and not `PATH`");
 }
 
 #[tokio::test]

@@ -45,6 +45,7 @@ pub use self::generated::Duplex;
 pub use self::generated::omnia::websocket::types::Error;
 use self::generated::omnia::websocket::{client, types as generated_types};
 pub use self::resource::*;
+pub use self::server::WebSocketHandler;
 
 /// Result type for WebSocket operations.
 pub type Result<T> = std::result::Result<T, Error>;

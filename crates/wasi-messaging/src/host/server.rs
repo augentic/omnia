@@ -15,27 +15,11 @@ where
     B: Clone + Send + Sync + 'static,
     StoreCtx<B>: StoreView<WasiMessaging>,
 {
-    let component = state.name().to_owned();
-    tracing::info!("starting messaging server for: {component}");
+    tracing::info!("starting messaging server for: {}", state.name());
 
-    // Capability probe: a guest exports the messaging handler exactly when its
-    // typed indices resolve. Build the per-guest indices and the topic router
-    // that selects among them once, up front.
-    let routing = TriggerRouter::build(
-        state.registry(),
-        "messaging",
-        state.registry().routes().messaging().clone(),
-        MessagingRequestReplyIndices::new,
-    )?;
-    if routing.is_inert() {
+    let Some(handler) = MessagingHandler::new(state)? else {
         tracing::info!("no guest exports the messaging handler; messaging trigger inert");
         return Ok(());
-    }
-
-    let handler = Handler {
-        state: state.clone(),
-        component,
-        routing: Arc::new(routing),
     };
     let mut stream = handler.subscriptions().await?;
 
@@ -60,8 +44,13 @@ where
     Ok(())
 }
 
+/// In-process `wasi:messaging/incoming-handler` dispatcher: routes a message
+/// to a guest by topic, instantiates it, and invokes the export.
+///
+/// The server loop drives one over the backend subscription; tests drive it
+/// directly with a constructed [`Message`], bypassing the broker.
 #[derive(Clone)]
-struct Handler<B>
+pub struct MessagingHandler<B>
 where
     B: Clone + Send + Sync + 'static,
     StoreCtx<B>: StoreView<WasiMessaging>,
@@ -71,13 +60,48 @@ where
     routing: Arc<TriggerRouter<MessagingRequestReplyIndices, PatternRoutes>>,
 }
 
-impl<B> Handler<B>
+impl<B> MessagingHandler<B>
 where
     B: Clone + Send + Sync + 'static,
     StoreCtx<B>: StoreView<WasiMessaging>,
 {
-    // Forward message to the wasm guest.
-    async fn handle(&self, message: Message) -> Result<()> {
+    /// Build the handler over `runtime`'s registry; `None` when no guest
+    /// exports the messaging handler (the trigger is inert).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the deployment's messaging routes are inconsistent
+    /// with the guests' exports.
+    pub fn new(runtime: &Runtime<B>) -> Result<Option<Self>> {
+        // Capability probe: a guest exports the messaging handler exactly when
+        // its typed indices resolve. Build the per-guest indices and the topic
+        // router that selects among them once, up front.
+        let routing = TriggerRouter::build(
+            runtime.registry(),
+            "messaging",
+            runtime.registry().routes().messaging().clone(),
+            MessagingRequestReplyIndices::new,
+        )?;
+        if routing.is_inert() {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            state: runtime.clone(),
+            component: runtime.name().to_owned(),
+            routing: Arc::new(routing),
+        }))
+    }
+
+    /// Forward a message to the guest routed by its topic.
+    ///
+    /// A topic with no route is dropped silently; the message has no handler
+    /// in this deployment.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the guest cannot be instantiated, traps, or times
+    /// out.
+    pub async fn handle(&self, message: Message) -> Result<()> {
         // Resolve the guest by topic; an unmatched topic is dropped, not an
         // error (the message simply has no handler in this deployment).
         let topic = message.topic.clone();

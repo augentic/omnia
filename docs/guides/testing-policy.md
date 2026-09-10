@@ -10,6 +10,15 @@ How the Omnia repository tests *itself*. The binding rules are also in the repos
 
 Guest-instantiating tests exist **only** through the shared pipeline below. Do not compile, deserialize, or instantiate a WASM guest ad hoc inside an individual test.
 
+## Principles
+
+- **Test Omnia code only.** A wrapped library (wasmtime-wasi-http, SQLite, tungstenite, the OpenTelemetry SDK) is never the subject of a guest or a unit test. If an assertion would still hold with Omnia's binding replaced by a pass-through, it is testing the library, not us.
+- **One `test-programs` crate.** Every guest lives under `crates/test-programs/programs/<capability>/`; there is no second fixture crate and no per-host artifact split. A capability's guests and its host suite are the only two places its e2e coverage exists.
+- **Chain, then stop.** One guest walks a flow end to end with several asserts along the way (open → write → read → list → delete). A store host gets one or two guests, not one per WIT method; a guest is minted for a *scenario*, not a function.
+- **One owner per outcome.** Each observable outcome — a value crossing the boundary, a persisted side effect, a recorded backend call — is asserted in exactly one place. When a guest uniquely observes an outcome, the unit test that used to cover it goes. What remains as unit tests is leftover pure logic no boundary reaches: parsers, codecs, filter evaluation, header rules.
+- **Triggers are driven in-process.** The [trigger](../glossary.md#trigger) hosts (HTTP incoming, messaging incoming-handler, websocket handler) are tested by `Deployment::boot` plus the trigger crate's public in-process handler (`HttpHandler`, `MessagingHandler`, `WebSocketHandler`), which does the route → instantiate → invoke-export step the server loop does; no server-mode boot, no sockets. Outgoing HTTP is a command guest against a test-owned loopback mock. Model stays fine-grained (one guest per protocol behaviour) by decision, because each of its scenarios pins a distinct host-side rule.
+- **Unimplemented WIT is out of scope.** An interface Omnia does not implement (for example the keyvalue watcher) has no guest and is not a coverage hole.
+
 ## The e2e pipeline
 
 One unpublished crate, patterned on wasmtime's `test-programs`, over the published `omnia-test`. **`crates/test-programs`** is both sides of the boundary:
@@ -21,11 +30,11 @@ The harness a suite drives the artifacts through is `omnia_test::host`, the same
 
 A host crate's suite is one flat file per interface in its root `tests/` directory (`crates/wasi-model/tests/model.rs`). The file:
 
-- invokes `test_programs::foreach_<capability>!();` so a guest program without a matching, identically named test fails to compile;
+- invokes `test_programs::foreach_<capability>!();` so a guest program without a matching, identically named test fails to compile — this completeness check is the orphan guard: a guest under `programs/<capability>/` cannot exist without a host test exercising it, and a `programs/<capability>/` directory cannot exist without a suite invoking its macro;
 - defines its scenario backends inline next to the tests (see below);
-- runs each guest with `Deployment::run_host` (via a small local `run_guest` wrapper supplying the `Has<Capability>` bundle and requiring `ExitStatus::SUCCESS`), then asserts any host-side effects (recorded requests, filesystem contents).
+- runs each guest with `Deployment::run_host` (via a small local `run_guest` wrapper supplying the `Has<Capability>` bundle and requiring `ExitStatus::SUCCESS`), then asserts any host-side effects (recorded requests, persisted state read back through the `Backends` handles, filesystem contents). Suites that need more than one host, or a hand-written scenario backend in a custom bundle, link by hand with `Deployment::run`; trigger suites use `Deployment::boot` and the crate's in-process handler instead of a `wasi:cli/run` entry point.
 
-Assertions split by vantage point: the guest asserts what crosses the boundary to it (a panic traps and fails the host test); the host test asserts wire fidelity and side effects.
+Assertions split by vantage point: the guest asserts what crosses the boundary to it (a panic traps and fails the host test); the host test asserts wire fidelity and side effects. A side effect is asserted from one vantage point only, per "one owner per outcome" above.
 
 One group tests the guest SDK's own boundary rather than a `wasi-*` host: `programs/command/` holds `command!` guests built on the command façade (`command/exit_map`), and `crates/omnia-test/tests/command.rs` drives them with `Deployment::run` over the default bundle, asserting the `ExitStatus` the host observes for each verb — the exit map (`ok` 0, `bad` 1, `missing` 2, `upstream` 4) and `USAGE_EXIT` (64) for an unknown verb. These programs do not trap; the exit status *is* the behaviour under test, so the guest returns a `Response` and the host test reads `code_u8()`.
 
@@ -41,6 +50,8 @@ assert_eq!(model.exchanges(), [Exchange { tool: "lookup".into(), arguments: "{}"
 ```
 
 A behaviour a FIFO script cannot express — two tool calls in flight at once, a backend that ignores a hard failure — is a hand-written `WasiModelCtx` defined inline next to the test, with a comment saying why the script could not do it. The in-tree echo `ModelDefault` covers scenarios where the answer does not matter, or where its schema rejection is itself under test.
+
+The same inline pattern serves hosts whose default backend records nothing observable: `wasi-identity`, `wasi-websocket`, and `wasi-otel` each define a recording `WasiXxxCtx` next to their tests, wrapped in a local bundle providing that host plus `WasiOtel`, and assert the recorded calls after the run.
 
 ## Running
 

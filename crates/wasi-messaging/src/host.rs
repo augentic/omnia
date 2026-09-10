@@ -44,6 +44,7 @@ pub use self::generated::MessagingRequestReply;
 pub use self::generated::wasi::messaging::types::Error;
 use self::generated::wasi::messaging::{producer, request_reply, types};
 pub use self::resource::*;
+pub use self::server::MessagingHandler;
 
 /// Result type for messaging operations.
 pub type Result<T> = std::result::Result<T, Error>;

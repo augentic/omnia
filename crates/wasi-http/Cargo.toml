@@ -49,3 +49,16 @@ serde_json.workspace = true
 tower.workspace = true
 wasip3.workspace = true
 omnia-wasi-keyvalue.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# The loopback origin the outgoing suite serves; `hyper` itself is a host
+# dependency above, only its server side is test-only.
+hyper = { workspace = true, features = ["http1", "server"] }
+omnia.workspace = true
+omnia-test = { workspace = true, features = ["host"] }
+omnia-wasi-config.workspace = true
+omnia-wasi-keyvalue.workspace = true
+omnia-wasi-otel.workspace = true
+serde_json.workspace = true
+test-programs.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt"] }

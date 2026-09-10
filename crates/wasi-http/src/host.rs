@@ -8,6 +8,7 @@ mod server;
 use anyhow::Result;
 pub use default_impl::{ConnectOptions, HttpDefault};
 use omnia_core::{Host, Runtime, Server, StoreCtx};
+pub use server::{HttpHandler, OutgoingBody};
 use wasmtime::component::Linker;
 pub use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpCtxView, WasiHttpView};
 
