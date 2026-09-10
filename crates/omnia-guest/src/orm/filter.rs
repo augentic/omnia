@@ -177,46 +177,62 @@ impl Filter {
     }
 }
 
-macro_rules! cmp_ctor {
-    ($name:ident, $op:ident, $doc:literal) => {
-        #[doc = $doc]
-        #[must_use]
-        pub fn $name(col: &'static str, val: impl Into<Value>) -> Self {
-            Self(FilterKind::Compare(ColRef::unqualified(col), CmpOp::$op, val.into()))
-        }
-    };
-}
-
-macro_rules! list_ctor {
-    ($name:ident, $negated:literal, $doc:literal) => {
-        #[doc = $doc]
-        #[must_use]
-        pub fn $name(col: &'static str, vals: impl IntoIterator<Item = impl Into<Value>>) -> Self {
-            Self(FilterKind::In(
-                ColRef::unqualified(col),
-                vals.into_iter().map(Into::into).collect(),
-                $negated,
-            ))
-        }
-    };
-}
-
 impl Filter {
-    cmp_ctor!(eq, Eq, "Creates an equality filter (column = value).");
+    /// Creates an equality filter (column = value).
+    #[must_use]
+    pub fn eq(col: &'static str, val: impl Into<Value>) -> Self {
+        Self(FilterKind::Compare(ColRef::unqualified(col), CmpOp::Eq, val.into()))
+    }
 
-    cmp_ctor!(ne, Ne, "Creates an inequality filter (column != value).");
+    /// Creates an inequality filter (column != value).
+    #[must_use]
+    pub fn ne(col: &'static str, val: impl Into<Value>) -> Self {
+        Self(FilterKind::Compare(ColRef::unqualified(col), CmpOp::Ne, val.into()))
+    }
 
-    cmp_ctor!(gt, Gt, "Creates a greater-than filter (column > value).");
+    /// Creates a greater-than filter (column > value).
+    #[must_use]
+    pub fn gt(col: &'static str, val: impl Into<Value>) -> Self {
+        Self(FilterKind::Compare(ColRef::unqualified(col), CmpOp::Gt, val.into()))
+    }
 
-    cmp_ctor!(gte, Gte, "Creates a greater-than-or-equal filter (column >= value).");
+    /// Creates a greater-than-or-equal filter (column >= value).
+    #[must_use]
+    pub fn gte(col: &'static str, val: impl Into<Value>) -> Self {
+        Self(FilterKind::Compare(ColRef::unqualified(col), CmpOp::Gte, val.into()))
+    }
 
-    cmp_ctor!(lt, Lt, "Creates a less-than filter (column < value).");
+    /// Creates a less-than filter (column < value).
+    #[must_use]
+    pub fn lt(col: &'static str, val: impl Into<Value>) -> Self {
+        Self(FilterKind::Compare(ColRef::unqualified(col), CmpOp::Lt, val.into()))
+    }
 
-    cmp_ctor!(lte, Lte, "Creates a less-than-or-equal filter (column <= value).");
+    /// Creates a less-than-or-equal filter (column <= value).
+    #[must_use]
+    pub fn lte(col: &'static str, val: impl Into<Value>) -> Self {
+        Self(FilterKind::Compare(ColRef::unqualified(col), CmpOp::Lte, val.into()))
+    }
 
-    list_ctor!(r#in, false, "Creates an IN filter (column IN (values)).");
+    /// Creates an IN filter (column IN (values)).
+    #[must_use]
+    pub fn r#in(col: &'static str, vals: impl IntoIterator<Item = impl Into<Value>>) -> Self {
+        Self(FilterKind::In(
+            ColRef::unqualified(col),
+            vals.into_iter().map(Into::into).collect(),
+            false,
+        ))
+    }
 
-    list_ctor!(not_in, true, "Creates a NOT IN filter (column NOT IN (values)).");
+    /// Creates a NOT IN filter (column NOT IN (values)).
+    #[must_use]
+    pub fn not_in(col: &'static str, vals: impl IntoIterator<Item = impl Into<Value>>) -> Self {
+        Self(FilterKind::In(
+            ColRef::unqualified(col),
+            vals.into_iter().map(Into::into).collect(),
+            true,
+        ))
+    }
 
     /// Creates an IS NULL filter.
     #[must_use]

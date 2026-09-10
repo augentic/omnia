@@ -14,19 +14,10 @@ pub async fn serve(
     tracing::debug!("serving request: {:?}", http_req.headers());
 
     // forward request to axum router to handle
-    let http_resp =
-        router.oneshot(http_req).await.map_err(|e| error!("issue processing request: {e}"))?;
+    let http_resp = router.oneshot(http_req).await.map_err(|e| {
+        p3::ErrorCode::InternalError(Some(format!("issue processing request: {e}")))
+    })?;
 
     tracing::debug!("guest response: {http_resp:?}");
     http_into_wasi_response(http_resp)
 }
-
-macro_rules! error {
-    ($fmt:literal $($arg:tt)*) => {
-        p3::ErrorCode::InternalError(Some(format!($fmt $($arg)*)))
-    };
-    ($err:expr $(,)?) => {
-        p3::ErrorCode::InternalError(Some($err.to_string()))
-    };
-}
-pub(crate) use error;

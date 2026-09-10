@@ -151,13 +151,17 @@ where
 
 Every fn of that shape is a `Handler<P, I>` through a blanket impl, as is any `Clone` closure of it — so a closure can carry configuration into a route. Implementing `Handler<P, I>` by hand on a local non-fn type is the escape hatch for the rare case a fn cannot express. A mis-shaped fn is reported by rustc's own diagnostics at the route or `Client::call` site. To unit-test a handler without a `Client`, build its context with `Context::new(owner, provider, metadata)`.
 
-For a guest that runs on the WASI-backed capability defaults, declare the provider with `omnia_guest::provider!` instead of writing one empty impl per capability (the expansion compiles on `wasm32` only; native tests supply mock providers):
+For a guest that runs on the WASI-backed capability defaults, the provider is a unit struct with one empty impl per capability. The default method bodies exist on `wasm32` only, so the empty impls compile there and nowhere else; native handler tests run the same handlers against a test provider such as `omnia_test::guest::Provider` instead (see [Testing Omnia-Based Code](testing-omnia-code.md)). This is the form `examples/sql` and `examples/docstore` use:
 
 ```rust,noplayground
-omnia_guest::provider! {
-    /// Bare provider backed by the default WASI capability implementations.
-    pub struct Provider: Config + HttpRequest + Identity + Publish + StateStore;
-}
+/// Bare provider backed by the default WASI capability implementations.
+struct Provider;
+
+impl Config for Provider {}
+impl HttpRequest for Provider {}
+impl Identity for Provider {}
+impl Publish for Provider {}
+impl StateStore for Provider {}
 ```
 
 Routers then map transport events onto handlers: HTTP routes are plain `axum::routing::MethodRouter`s registered on an `axum::Router` whose state is one provider-owning `Client`, and a messaging router maps exact topics. Your WASI export stays visible application code — it just hands the event to the router:

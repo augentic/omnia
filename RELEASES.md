@@ -83,12 +83,12 @@
     BlobStore` (with `Namespaced`; the `BlobStoreExt` operations derive from
     the primitives), `MemoryDocs` over the docstore default,
     `ScriptedTables`, `MatchedHttp`, `Sink: Publish + Broadcast`,
-    `MapConfig`, `FixedIdentity` — plus `omnia_test::provider!`, the native
-    twin of `omnia_guest::provider!` (same name, same grammar; a test
-    declaration differs from `src/lib.rs` by the crate path alone, seeded
-    with the default double per capability, `StateStore` and `BlobStore`
-    sharing one `storage` field) and `delegate!` (delegating capability impls
-    to fields, with a bracketed generic header).
+    `MapConfig`, `FixedIdentity` — plus `guest::Provider`, one struct
+    implementing every capability trait over ten `pub` fields holding those
+    doubles, each replaced through a consuming builder of the same name
+    (`Provider::default().config(..).model(..)`), with `StateStore` and
+    `BlobStore` sharing one `storage` field so a handler bounded on both
+    sees the single backend a production provider has.
   - `host`: `Deployment`, an overlay on a manifest — built from nothing with
     `Deployment::new()` or from a `runtime!` module's compiled-in
     `manifest()` — that rewrites the guest set, mounts, plugin interfaces,
@@ -348,7 +348,7 @@
 - Every `omnia-guest` capability trait is implemented for `Arc<T>`, `&T`,
   and `Box<T>` where `T` implements it, forwarding on both targets, so a
   provider field may hold a double behind a shared handle and a
-  `P: StateStore` bound accepts `Arc<Memory>` with no `delegate!`.
+  `P: StateStore` bound accepts `Arc<Memory>` with no wrapper struct.
 - `BlobStore` splits: the ten primitives (`get`, `put`, `delete`, `list`,
   `get_range`, `object_info`, `create_container`, `delete_container`,
   `container_exists`, `container_info`) stay on `BlobStore`; `has`,
