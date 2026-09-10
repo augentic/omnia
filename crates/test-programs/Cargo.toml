@@ -20,6 +20,7 @@ omnia-wasi-config.workspace = true
 omnia-wasi-keyvalue.workspace = true
 omnia-wasi-model.workspace = true
 omnia-wasi-otel.workspace = true
+omnia-wasi-vault.workspace = true
 schemars.workspace = true
 serde.workspace = true
 tracing.workspace = true
@@ -244,4 +245,9 @@ crate-type = ["cdylib"]
 [[example]]
 name = "plugins_load_unlinked"
 path = "programs/plugins/load_unlinked.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "vault_locker"
+path = "programs/vault/locker.rs"
 crate-type = ["cdylib"]
