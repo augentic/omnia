@@ -16,6 +16,7 @@ autoexamples = false
 clap.workspace = true
 futures.workspace = true
 omnia-guest = { workspace = true, features = ["command"] }
+omnia-wasi-config.workspace = true
 omnia-wasi-model.workspace = true
 omnia-wasi-otel.workspace = true
 schemars.workspace = true

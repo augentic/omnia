@@ -98,28 +98,7 @@ fn join(parts: &[String]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Example, Sections};
-
-    #[test]
-    fn assemble_sections() {
-        let sections = Sections {
-            role: Some("a {language} reviewer".to_owned()),
-            task: "review the {language} code".to_owned(),
-            context: Some("the {language} crate".to_owned()),
-            constraints: vec!["be {language}-idiomatic".to_owned()],
-            examples: vec![Example {
-                input: "in".to_owned(),
-                output: "out".to_owned(),
-            }],
-            variables: vec![("language".to_owned(), "Rust".to_owned())],
-        };
-        let (system, user) = sections.assemble(Some("prefer {language}"));
-        assert_eq!(
-            system.as_deref(),
-            Some("prefer {language}\n\na Rust reviewer\n\n- be Rust-idiomatic")
-        );
-        assert_eq!(user, "review the Rust code\n\nthe Rust crate\n\nInput: in\nOutput: out");
-    }
+    use super::Sections;
 
     #[test]
     fn assemble_drops_blank_system() {

@@ -2358,7 +2358,11 @@ name = "omnia-wasi-config"
 version = "0.36.0"
 dependencies = [
  "anyhow",
+ "omnia",
  "omnia-core",
+ "omnia-test",
+ "test-programs",
+ "tokio",
  "tracing",
  "wasmtime",
  "wasmtime-wasi-config",
@@ -3827,6 +3831,7 @@ dependencies = [
  "futures",
  "omnia-guest",
  "omnia-test",
+ "omnia-wasi-config",
  "omnia-wasi-model",
  "omnia-wasi-otel",
  "schemars",
