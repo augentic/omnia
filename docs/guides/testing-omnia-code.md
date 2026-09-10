@@ -28,29 +28,25 @@ omnia-test = { version = "0.36", features = ["build"] }
 
 The target gate on the dev line is the canonical shape for a guest crate: handler tests compile natively, and the component never sees the crate. The crate is also empty on `wasm32` (`#![cfg(not(target_arch = "wasm32"))]`), so an ungated line resolves on both targets and contributes nothing to the component; the gate simply keeps the host crates out of the `wasm32` dependency graph. The `build` line stays `std`-only by contract (omnia's CI guards its dependency tree), so it never pulls the runtime into a `build.rs`.
 
-## Handler rung: `provider!` and `delegate!`
+## Handler rung: `omnia_test::guest::Provider`
 
-A guest declares its production provider with `omnia_guest::provider!`: one struct, the capabilities it needs, and empty impls that pick up the WASI-backed default bodies on `wasm32`.
+A guest declares its production provider as one struct with an empty impl per capability it needs; on `wasm32` each impl picks up the WASI-backed default bodies.
 
 ```rust,ignore
-omnia_guest::provider! {
-    /// The connector's capabilities, on the WASI defaults.
-    pub struct Provider: Config + Publish;
-}
+/// The connector's capabilities, on the WASI defaults.
+struct Provider;
+
+impl Config for Provider {}
+impl Publish for Provider {}
 ```
 
-`omnia_test::provider!` deliberately shares that name and grammar. A test declares the same struct with the crate path changed, and each capability becomes a `pub` field holding the default double for it, seeded through a consuming builder of the same name:
+A test runs the same handler against `omnia_test::guest::Provider`, which implements every capability trait over one `pub` field per double, each seeded through a consuming builder of the same name:
 
 ```rust,ignore
-use omnia_test::guest::MapConfig;
+use omnia_test::guest::{MapConfig, Provider};
 
-omnia_test::provider! {
-    /// The handler's capability pair, as doubles.
-    pub struct TestProvider: Config + Publish;
-}
-
-fn provider() -> TestProvider {
-    TestProvider::default().config(MapConfig::default().with([("ENV", "dev")]))
+fn provider() -> Provider {
+    Provider::default().config(MapConfig::default().with([("ENV", "dev")]))
 }
 
 #[tokio::test]
@@ -63,26 +59,11 @@ async fn device_site_header() {
 }
 ```
 
-The two declarations differ by the crate path alone, so a reader compares the test's capability list against `src/lib.rs` at a glance, and a capability added to production without a double in the test is a visible diff rather than a silently missing field. `StateStore` and `BlobStore` share one `storage` field — one `Memory` serves both, the shape a production provider's single storage backend has. The full field/double table is on the macro's rustdoc: `MapConfig`, `MatchedHttp`, `FixedIdentity`, `Sink` (for `Publish` and `Broadcast`), `Memory`, `MemoryDocs`, `ScriptedTables`, `Scripted` (for `Model`), `ScriptedLoader` (for `Plugins`).
+The handler's own bounds pick out the capabilities it touches, so a test seeds only those fields and leaves the rest at their defaults. `StateStore` and `BlobStore` share one `storage` field — one `Memory` serves both, the shape a production provider's single storage backend has. The full field/double table is on the struct's rustdoc: `MapConfig`, `MatchedHttp`, `FixedIdentity`, `Sink` (for `Publish` and `Broadcast`), `Memory`, `MemoryDocs`, `ScriptedTables`, `Scripted` (for `Model`), `ScriptedLoader` (for `Plugins`).
 
 Every capability trait is also implemented for `Arc<T>`, `&T`, and `Box<T>`, so a handler bounded on `P: StateStore` accepts `Arc<Memory>` directly.
 
-When the provider is hand-written — generic over a storage type, say, or holding a double behind an `Arc` — `delegate!` writes the delegating impls instead of a struct:
-
-```rust,ignore
-#[derive(Clone)]
-struct Provider<S> {
-    model: Scripted,
-    storage: Arc<S>,
-}
-
-omnia_test::delegate!(impl[S: StateStore + BlobStore + Send + Sync + 'static] Provider<S> {
-    Model => model,
-    StateStore + BlobStore => storage,
-});
-```
-
-The generic header goes in square brackets so the macro can find the type that follows it. Use `provider!` for the common case and `delegate!` when the struct itself carries meaning.
+That covers the two other shapes a test provider takes. A handler bounded on a single capability needs no struct at all: pass `Arc<Memory>` (or `&Memory`) where the provider goes. A bespoke struct — generic over a storage type, say, or holding a double behind an `Arc` — hand-writes its impls, each method forwarding to the field that carries the double, exactly as a production provider over a custom backend would.
 
 ## Component rung: `Deployment` over `Backends`
 
@@ -140,6 +121,6 @@ fn main() {
 
 ## Examples to read
 
-- Handler rung: [`crates/tally-connector/tests/static.rs`](https://github.com/augentic/omnia-exemplar/blob/main/crates/tally-connector/tests/static.rs) in the exemplar — `provider!` over `Config + Publish`, seeded config, published records asserted.
+- Handler rung: [`crates/tally-connector/tests/static.rs`](https://github.com/augentic/omnia-exemplar/blob/main/crates/tally-connector/tests/static.rs) in the exemplar — a `Config + Publish` handler run against `omnia_test::guest::Provider`, seeded config, published records asserted.
 - Component rung and the overlay: [`crates/omnia-test/tests/host.rs`](../../crates/omnia-test/tests/host.rs) — `runtime_overlay` and `path_root` drive a `runtime!` module's `Hooks` through `Deployment::from(manifest())`.
 - Fixture rung: [`crates/test-programs/build.rs`](../../crates/test-programs/build.rs), the build that feeds omnia's own e2e suites — in the guest package itself, which the `wasm32` no-op makes safe.
