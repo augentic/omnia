@@ -18,6 +18,7 @@ futures.workspace = true
 omnia-guest = { workspace = true, features = ["command"] }
 omnia-wasi-blobstore.workspace = true
 omnia-wasi-config.workspace = true
+omnia-wasi-docstore.workspace = true
 omnia-wasi-identity.workspace = true
 omnia-wasi-keyvalue.workspace = true
 omnia-wasi-model.workspace = true
@@ -26,6 +27,7 @@ omnia-wasi-sql.workspace = true
 omnia-wasi-vault.workspace = true
 schemars.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
 wasip3.workspace = true
 wit-bindgen.workspace = true
@@ -53,6 +55,16 @@ crate-type = ["cdylib"]
 [[example]]
 name = "config_seeded"
 path = "programs/config/seeded.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "docstore_crud_query"
+path = "programs/docstore/crud_query.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "docstore_insert_conflict"
+path = "programs/docstore/insert_conflict.rs"
 crate-type = ["cdylib"]
 
 [[example]]
