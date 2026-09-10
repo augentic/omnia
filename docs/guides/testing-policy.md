@@ -16,7 +16,7 @@ Guest-instantiating tests exist **only** through the shared pipeline below. Do n
 - **One `test-programs` crate.** Every guest lives under `crates/test-programs/programs/<capability>/`; there is no second fixture crate and no per-host artifact split. A capability's guests and its host suite are the only two places its e2e coverage exists.
 - **Chain, then stop.** One guest walks a flow end to end with several asserts along the way (open → write → read → list → delete). A store host gets one or two guests, not one per WIT method; a guest is minted for a *scenario*, not a function.
 - **One owner per outcome.** Each observable outcome — a value crossing the boundary, a persisted side effect, a recorded backend call — is asserted in exactly one place. When a guest uniquely observes an outcome, the unit test that used to cover it goes. What remains as unit tests is leftover pure logic no boundary reaches: parsers, codecs, filter evaluation, header rules.
-- **Triggers are driven in-process.** The [trigger](../glossary.md#trigger) hosts (HTTP incoming, messaging incoming-handler, websocket handler) are tested by `Deployment::boot` plus the trigger crate's public in-process handler, which does the route → instantiate → invoke-export step the server loop does; no server-mode boot, no sockets. Outgoing HTTP is a command guest against a test-owned loopback mock. Model stays fine-grained (one guest per protocol behaviour) by decision, because each of its scenarios pins a distinct host-side rule.
+- **Triggers are driven in-process.** The [trigger](../glossary.md#trigger) hosts (HTTP incoming, messaging incoming-handler, websocket handler) are tested by `Deployment::boot` plus the trigger crate's public in-process handler (`HttpHandler`, `MessagingHandler`, `WebSocketHandler`), which does the route → instantiate → invoke-export step the server loop does; no server-mode boot, no sockets. Outgoing HTTP is a command guest against a test-owned loopback mock. Model stays fine-grained (one guest per protocol behaviour) by decision, because each of its scenarios pins a distinct host-side rule.
 - **Unimplemented WIT is out of scope.** An interface Omnia does not implement (for example the keyvalue watcher) has no guest and is not a coverage hole.
 
 ## The e2e pipeline
@@ -50,6 +50,8 @@ assert_eq!(model.exchanges(), [Exchange { tool: "lookup".into(), arguments: "{}"
 ```
 
 A behaviour a FIFO script cannot express — two tool calls in flight at once, a backend that ignores a hard failure — is a hand-written `WasiModelCtx` defined inline next to the test, with a comment saying why the script could not do it. The in-tree echo `ModelDefault` covers scenarios where the answer does not matter, or where its schema rejection is itself under test.
+
+The same inline pattern serves hosts whose default backend records nothing observable: `wasi-identity`, `wasi-websocket`, and `wasi-otel` each define a recording `WasiXxxCtx` next to their tests, wrapped in a local bundle providing that host plus `WasiOtel`, and assert the recorded calls after the run.
 
 ## Running
 
