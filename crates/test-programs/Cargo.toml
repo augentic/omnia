@@ -23,6 +23,7 @@ omnia-wasi-docstore.workspace = true
 omnia-wasi-http.workspace = true
 omnia-wasi-identity.workspace = true
 omnia-wasi-keyvalue.workspace = true
+omnia-wasi-messaging.workspace = true
 omnia-wasi-model.workspace = true
 omnia-wasi-otel.workspace = true
 omnia-wasi-sql.workspace = true
@@ -107,6 +108,16 @@ crate-type = ["cdylib"]
 [[example]]
 name = "link_partial"
 path = "programs/link/partial.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "messaging_produce_handle"
+path = "programs/messaging/produce_handle.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "messaging_request_reply"
+path = "programs/messaging/request_reply.rs"
 crate-type = ["cdylib"]
 
 [[example]]
