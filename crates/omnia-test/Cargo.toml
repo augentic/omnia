@@ -115,6 +115,10 @@ name = "macros"
 required-features = ["guest"]
 
 [[test]]
+name = "provider"
+required-features = ["guest"]
+
+[[test]]
 name = "host"
 required-features = ["host"]
 
