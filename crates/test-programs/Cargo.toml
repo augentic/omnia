@@ -17,6 +17,7 @@ clap.workspace = true
 futures.workspace = true
 omnia-guest = { workspace = true, features = ["command"] }
 omnia-wasi-config.workspace = true
+omnia-wasi-identity.workspace = true
 omnia-wasi-keyvalue.workspace = true
 omnia-wasi-model.workspace = true
 omnia-wasi-otel.workspace = true
@@ -40,6 +41,11 @@ crate-type = ["cdylib"]
 [[example]]
 name = "config_seeded"
 path = "programs/config/seeded.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "identity_stub_token"
+path = "programs/identity/stub_token.rs"
 crate-type = ["cdylib"]
 
 [[example]]
