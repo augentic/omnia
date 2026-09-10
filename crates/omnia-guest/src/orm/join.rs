@@ -55,24 +55,30 @@ impl Join {
     }
 }
 
-macro_rules! join_ctor {
-    ($name:ident, $kind:ident, $doc:literal) => {
-        #[doc = $doc]
-        #[must_use]
-        pub const fn $name(table: &'static str, on: Filter) -> Self {
-            Self::new(table, JoinKind::$kind, on)
-        }
-    };
-}
-
 impl Join {
-    join_ctor!(inner, Inner, "Creates an INNER JOIN.");
+    /// Creates an INNER JOIN.
+    #[must_use]
+    pub const fn inner(table: &'static str, on: Filter) -> Self {
+        Self::new(table, JoinKind::Inner, on)
+    }
 
-    join_ctor!(left, Left, "Creates a LEFT JOIN.");
+    /// Creates a LEFT JOIN.
+    #[must_use]
+    pub const fn left(table: &'static str, on: Filter) -> Self {
+        Self::new(table, JoinKind::Left, on)
+    }
 
-    join_ctor!(right, Right, "Creates a RIGHT JOIN.");
+    /// Creates a RIGHT JOIN.
+    #[must_use]
+    pub const fn right(table: &'static str, on: Filter) -> Self {
+        Self::new(table, JoinKind::Right, on)
+    }
 
-    join_ctor!(full, Full, "Creates a FULL OUTER JOIN.");
+    /// Creates a FULL OUTER JOIN.
+    #[must_use]
+    pub const fn full(table: &'static str, on: Filter) -> Self {
+        Self::new(table, JoinKind::Full, on)
+    }
 }
 
 impl JoinKind {

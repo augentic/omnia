@@ -142,29 +142,74 @@ fn config_from(vars: WasiConfigVariables) -> ConfigDefault {
     }
 }
 
-macro_rules! provides {
-    ($($host:ty => $field:ident),* $(,)?) => {
-        $(
-            impl<M: WasiModelCtx + Clone> Provides<$host> for Backends<M> {
-                fn borrow(&mut self) -> <$host as HostCtx>::Borrow<'_> {
-                    &mut self.$field
-                }
-            }
-        )*
-    };
+impl<M: WasiModelCtx + Clone> Provides<WasiBlobstore> for Backends<M> {
+    fn borrow(&mut self) -> <WasiBlobstore as HostCtx>::Borrow<'_> {
+        &mut self.blobstore
+    }
 }
 
-provides! {
-    WasiBlobstore => blobstore,
-    WasiConfig => config,
-    WasiDocStore => docstore,
-    HttpCtx => http,
-    WasiIdentity => identity,
-    WasiKeyValue => keyvalue,
-    WasiMessaging => messaging,
-    WasiModel => model,
-    WasiOtel => otel,
-    WasiSql => sql,
-    WasiVault => vault,
-    WasiWebSocket => websocket,
+impl<M: WasiModelCtx + Clone> Provides<WasiConfig> for Backends<M> {
+    fn borrow(&mut self) -> <WasiConfig as HostCtx>::Borrow<'_> {
+        &mut self.config
+    }
+}
+
+impl<M: WasiModelCtx + Clone> Provides<WasiDocStore> for Backends<M> {
+    fn borrow(&mut self) -> <WasiDocStore as HostCtx>::Borrow<'_> {
+        &mut self.docstore
+    }
+}
+
+impl<M: WasiModelCtx + Clone> Provides<HttpCtx> for Backends<M> {
+    fn borrow(&mut self) -> <HttpCtx as HostCtx>::Borrow<'_> {
+        &mut self.http
+    }
+}
+
+impl<M: WasiModelCtx + Clone> Provides<WasiIdentity> for Backends<M> {
+    fn borrow(&mut self) -> <WasiIdentity as HostCtx>::Borrow<'_> {
+        &mut self.identity
+    }
+}
+
+impl<M: WasiModelCtx + Clone> Provides<WasiKeyValue> for Backends<M> {
+    fn borrow(&mut self) -> <WasiKeyValue as HostCtx>::Borrow<'_> {
+        &mut self.keyvalue
+    }
+}
+
+impl<M: WasiModelCtx + Clone> Provides<WasiMessaging> for Backends<M> {
+    fn borrow(&mut self) -> <WasiMessaging as HostCtx>::Borrow<'_> {
+        &mut self.messaging
+    }
+}
+
+impl<M: WasiModelCtx + Clone> Provides<WasiModel> for Backends<M> {
+    fn borrow(&mut self) -> <WasiModel as HostCtx>::Borrow<'_> {
+        &mut self.model
+    }
+}
+
+impl<M: WasiModelCtx + Clone> Provides<WasiOtel> for Backends<M> {
+    fn borrow(&mut self) -> <WasiOtel as HostCtx>::Borrow<'_> {
+        &mut self.otel
+    }
+}
+
+impl<M: WasiModelCtx + Clone> Provides<WasiSql> for Backends<M> {
+    fn borrow(&mut self) -> <WasiSql as HostCtx>::Borrow<'_> {
+        &mut self.sql
+    }
+}
+
+impl<M: WasiModelCtx + Clone> Provides<WasiVault> for Backends<M> {
+    fn borrow(&mut self) -> <WasiVault as HostCtx>::Borrow<'_> {
+        &mut self.vault
+    }
+}
+
+impl<M: WasiModelCtx + Clone> Provides<WasiWebSocket> for Backends<M> {
+    fn borrow(&mut self) -> <WasiWebSocket as HostCtx>::Borrow<'_> {
+        &mut self.websocket
+    }
 }
