@@ -21,6 +21,7 @@ omnia-wasi-identity.workspace = true
 omnia-wasi-keyvalue.workspace = true
 omnia-wasi-model.workspace = true
 omnia-wasi-otel.workspace = true
+omnia-wasi-sql.workspace = true
 omnia-wasi-vault.workspace = true
 schemars.workspace = true
 serde.workspace = true
@@ -251,6 +252,11 @@ crate-type = ["cdylib"]
 [[example]]
 name = "plugins_load_unlinked"
 path = "programs/plugins/load_unlinked.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "sql_query_exec"
+path = "programs/sql/query_exec.rs"
 crate-type = ["cdylib"]
 
 [[example]]
