@@ -150,13 +150,15 @@ where
     /// Forward a request to the routed guest and return its response.
     ///
     /// The request is normalised first (scheme and authority from `Host` or
-    /// `Forwarded`); a request without either is answered `400`, an unrouted
-    /// path `404`, and a guest that fails or times out `500`.
+    /// `Forwarded`). Outcomes the handler can answer itself come back as
+    /// responses: a request without either header `400`, an unrouted path
+    /// `404`, and a guest that times out or is no longer registered `500`.
     ///
     /// # Errors
     ///
-    /// Returns an error if the guest cannot be instantiated or produces no
-    /// response.
+    /// Returns an error if the guest cannot be instantiated, traps, returns an
+    /// error, or yields a response that cannot be converted. In-process
+    /// callers see these as `Err`; only the server loop maps them to `500`.
     pub async fn handle<T>(&self, request: http::Request<T>) -> Result<http::Response<OutgoingBody>>
     where
         T: Body<Data = Bytes> + Send + 'static,
