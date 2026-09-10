@@ -19,6 +19,7 @@ omnia-guest = { workspace = true, features = ["command"] }
 omnia-wasi-blobstore.workspace = true
 omnia-wasi-config.workspace = true
 omnia-wasi-docstore.workspace = true
+omnia-wasi-http.workspace = true
 omnia-wasi-identity.workspace = true
 omnia-wasi-keyvalue.workspace = true
 omnia-wasi-model.workspace = true
@@ -65,6 +66,16 @@ crate-type = ["cdylib"]
 [[example]]
 name = "docstore_insert_conflict"
 path = "programs/docstore/insert_conflict.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "http_cache_hit"
+path = "programs/http/cache_hit.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "http_outgoing_get"
+path = "programs/http/outgoing_get.rs"
 crate-type = ["cdylib"]
 
 [[example]]
