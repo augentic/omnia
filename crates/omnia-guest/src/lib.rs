@@ -7,7 +7,6 @@ mod error;
 pub mod mcp;
 #[cfg(feature = "orm")]
 pub mod orm;
-mod provider;
 
 /// Document store types and helpers (from `omnia-wasi-docstore`).
 #[cfg(feature = "orm")]

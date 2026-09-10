@@ -6,7 +6,7 @@ features.
 
 | Feature | Carries | Depends on |
 | ------- | ------- | ---------- |
-| `guest` | Native doubles for every `omnia_guest` capability trait, the `provider!` and `delegate!` macros | `omnia-guest` (with `orm`) |
+| `guest` | Native doubles for every `omnia_guest` capability trait and the `Provider` that bundles them | `omnia-guest` (with `orm`) |
 | `host` | `Deployment`, `Backends`, `ScriptedModel`, `Scratch` — the component runtime harness | `omnia` and the `wasi-*` host crates |
 | `build` | `Components` — the nested wasm32 build and `gen.rs` generator for a `build.rs` | `std` only |
 
@@ -14,11 +14,6 @@ There is no default feature: a consumer names the rung it uses. All three
 share one `Script` core, so a scripted model reads the same at the handler
 rung (`guest::Scripted`) and the component rung (`host::ScriptedModel`). The
 walk-through is [Testing Omnia-Based Code](https://github.com/augentic/omnia/blob/main/docs/guides/testing-omnia-code.md).
-
-`omnia_test::provider!` deliberately shares its name and grammar with
-`omnia_guest::provider!`: the production declaration expands to WASI-backed
-impls for `wasm32`, the test declaration to native doubles, and the two differ
-by the crate path alone.
 
 ## Depending on it
 
