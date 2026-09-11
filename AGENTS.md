@@ -40,6 +40,7 @@ The practical walk-through is [docs/guides/testing-policy.md](docs/guides/testin
 - **Guest-instantiating tests exist only through the `test-programs` pipeline.** Never compile, deserialize, or instantiate a WASM guest ad hoc inside an individual test.
 - **Consolidate, and drive triggers in-process.** One guest chains a whole flow (not one guest per WIT method), each outcome is asserted in exactly one place, only Omnia code is under test (never a wrapped library), and trigger hosts are exercised via `Deployment::boot` plus the trigger crate's public in-process handler rather than a server-mode boot; see the Principles section of the guide.
 - **Production backends** (the `omnia-backends` repo) are accepted by `#[ignore]`-gated live tests against the real service, not by mapping unit tests alone.
+- **Examples are gated by `examples/tests/examples.rs`**, which builds the guests for `wasm32-wasip2` and runs `cargo run --example` from the workspace root for the run-to-completion examples, asserting exit 0. Examples assume the default `target/` directory (wasmtime's stance; a redirected `CARGO_TARGET_DIR` is unsupported here) — hermetic guest builds belong to the `test-programs` pipeline. The gate instantiates no guest itself and asserts no behaviour (that lives in the e2e suites); server examples are build-only.
 - **Names identify, comments explain.** A test name is the scenario (`set_then_get`), not a restated expectation (`set_then_get_round_trips`).
 
 ### Gotchas
