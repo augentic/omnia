@@ -12,6 +12,10 @@
 //! The router exports a plain `run` rather than an HTTP/messaging trigger;
 //! running this binary starts the host and wires the link. See `README.md`.
 
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "../artifacts.rs"]
+mod artifacts;
+
 cfg_if::cfg_if! {
     if #[cfg(not(target_arch = "wasm32"))] {
         use omnia_wasi_http::{WasiHttp, HttpDefault};
@@ -20,20 +24,8 @@ cfg_if::cfg_if! {
         omnia::runtime!({
             link: { interfaces: ["omnia:link/echo"] },
             guests: [
-                {
-                    id: "responder",
-                    source: concat!(
-                        env!("CARGO_MANIFEST_DIR"),
-                        "/../target/wasm32-wasip2/debug/examples/guest_link_responder_wasm.wasm",
-                    ),
-                },
-                {
-                    id: "router",
-                    source: concat!(
-                        env!("CARGO_MANIFEST_DIR"),
-                        "/../target/wasm32-wasip2/debug/examples/guest_link_router_wasm.wasm",
-                    ),
-                },
+                { id: "responder", source: artifacts::artifact("guest_link_responder_wasm.wasm") },
+                { id: "router", source: artifacts::artifact("guest_link_router_wasm.wasm") },
             ],
             hosts: {
                 WasiHttp: HttpDefault,

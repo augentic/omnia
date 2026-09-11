@@ -6,7 +6,7 @@ Proves the deterministic side of the `wasi-model` boundary: a guest calls `creat
 
 - `guest` ([`guest.rs`](guest.rs)) **imports** `omnia:model/completion` and exposes an async `run`. In its default scenario it builds a `json-schema` prompt, assembling the `system` / `messages` channels with the guest-side `Sections` builder (role / task / context), reads the preopen table via `wasi:filesystem/preopens` and lends the workspace named `.` through `grants.workspace`, then completes the request.
 - [`runtime.rs`](runtime.rs) binds the `WasiModel` host to the example-local `CannedVerdict` backend — an inline `WasiModelCtx` impl that answers every completion with one fixed schema answer.
-- [`omnia.toml`](omnia.toml)'s `[[mount]]` preopens the repo root as a read-only workspace named `.`. The host resolves the lent descriptor back to that mount by directory identity; the canned backend ignores it (it never runs tools).
+- The `runtime!` inline manifest's `mounts:` entry preopens the repo root as a read-only workspace named `.` (the Rust equivalent of an `omnia.toml` `[[mount]]`). The host resolves the lent descriptor back to that mount by directory identity; the canned backend ignores it (it never runs tools).
 
 ```mermaid
 flowchart LR
@@ -31,14 +31,14 @@ Or, more manually, for debugging:
 cargo build -p examples --example model-wasm --target wasm32-wasip2
 ```
 
-This emits `target/wasm32-wasip2/debug/examples/model_wasm.wasm` (the underscored name the manifest points at).
+This emits `target/wasm32-wasip2/debug/examples/model_wasm.wasm` (the underscored name the runtime resolves, honouring `CARGO_TARGET_DIR`).
 
 ## Run
 
 The answer is canned in the runtime binary, so no configuration is needed.
-The manifest is compiled in via `runtime!`'s `config:` key, which makes this
-command-mode binary a direct command — no `run` subcommand, argv passes to the
-guest verbatim:
+The manifest is compiled in via `runtime!`'s inline `guests:`/`mounts:` keys,
+which makes this command-mode binary a direct command — no `run` subcommand,
+argv passes to the guest verbatim:
 
 ```bash
 export RUST_LOG=info,opentelemetry_sdk=off

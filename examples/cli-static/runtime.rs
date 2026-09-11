@@ -8,6 +8,10 @@
 //! runs as `cli-static greet Ada`, not
 //! `cli-static run -- greet Ada`; see `README.md`.
 
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "../artifacts.rs"]
+mod artifacts;
+
 cfg_if::cfg_if! {
     if #[cfg(not(target_arch = "wasm32"))] {
         use omnia_wasi_otel::{WasiOtel, OtelDefault};
@@ -18,10 +22,7 @@ cfg_if::cfg_if! {
                 WasiOtel: OtelDefault,
             },
             guests: [
-                { id: "cli", source: concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../target/wasm32-wasip2/debug/examples/cli_wasm.wasm",
-                ) },
+                { id: "cli", source: artifacts::artifact("cli_wasm.wasm") },
             ],
         });
     } else {
