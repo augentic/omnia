@@ -1,82 +1,66 @@
-//! Wasmtime-style gate over the examples: build every example (guests for
-//! `wasm32-wasip2`, hosts natively) with the same cargo commands the READMEs
-//! document, then run each run-to-completion host and require exit status 0.
-//! Nothing else is asserted — behaviour lives in the `crates/wasi-*/tests`
-//! suites — and the server examples are intentionally build-only.
+//! Wasmtime's `create_rust_wasm` + `create_rust_test` pattern over the
+//! examples: build the guests for `wasm32-wasip2`, then `cargo run --example`
+//! each run-to-completion host from the workspace root and require exit
+//! status 0. Examples assume the default `target/` directory — a redirected
+//! `CARGO_TARGET_DIR` is unsupported for this tier, unlike `test-programs` —
+//! and nothing else is asserted: behaviour lives in the `crates/wasi-*/tests`
+//! suites, and the server examples are intentionally build-only.
 
-use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus};
+use std::path::Path;
+use std::process::Command;
 
 fn root() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("workspace root")
 }
 
-fn target() -> PathBuf {
-    std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| root().join("target"), PathBuf::from)
-}
-
-fn cargo_build(args: &[&str]) {
-    let output = Command::new(env!("CARGO"))
-        .args(["build", "--locked", "-p", "examples", "--examples"])
+fn cargo(args: &[&str]) {
+    let status = Command::new(env!("CARGO"))
+        .arg("--locked")
         .args(args)
         .current_dir(root())
-        .output()
+        .status()
         .expect("spawn cargo");
-    assert!(
-        output.status.success(),
-        "cargo build {} failed:\n{}",
-        args.join(" "),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert!(status.success(), "cargo {} failed", args.join(" "));
 }
 
 /// Idempotent: nextest runs every test in its own process, so each one builds
 /// first; concurrent invocations serialise on cargo's lock and the rest are
 /// no-ops.
-fn build_examples() {
-    cargo_build(&["--target", "wasm32-wasip2"]);
-    cargo_build(&[]);
+fn build_guests() {
+    cargo(&["build", "-p", "examples", "--examples", "--target", "wasm32-wasip2"]);
 }
 
-fn run(host: &str, args: &[&str]) -> ExitStatus {
-    build_examples();
-    Command::new(target().join("debug/examples").join(host))
-        .args(args)
-        .current_dir(root())
-        .status()
-        .unwrap_or_else(|err| panic!("spawn {host}: {err}"))
-}
-
-fn wasm(guest: &str) -> String {
-    target().join("wasm32-wasip2/debug/examples").join(guest).display().to_string()
+fn run(example: &str, args: &[&str]) {
+    build_guests();
+    cargo(&[&["run", "-p", "examples", "--example", example, "--"], args].concat());
 }
 
 #[test]
 fn build() {
-    build_examples();
+    cargo(&["build", "-p", "examples", "--examples"]);
 }
 
 #[test]
 fn model() {
-    assert!(run("model", &[]).success());
+    run("model", &[]);
 }
 
 #[test]
 fn cli() {
-    assert!(run("cli", &["run", &wasm("cli_wasm.wasm"), "--", "greet", "Ada"]).success());
+    run("cli", &["run", "target/wasm32-wasip2/debug/examples/cli_wasm.wasm", "--", "greet", "Ada"]);
 }
 
 #[test]
 fn cli_static() {
-    assert!(run("cli-static", &["greet", "Ada"]).success());
+    run("cli-static", &["greet", "Ada"]);
 }
 
 #[test]
 fn guest_link_dynamic() {
-    assert!(run("guest-link-dynamic", &[]).success());
+    run("guest-link-dynamic", &[]);
 }
 
 #[test]
 fn guest_link_register() {
-    assert!(run("guest-link-register", &[]).success());
+    run("guest-link-register", &[]);
 }

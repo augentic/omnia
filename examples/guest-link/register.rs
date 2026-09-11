@@ -8,12 +8,10 @@
 //!
 //!   cargo run --example guest-link-register
 
-#[cfg(not(target_arch = "wasm32"))]
-#[path = "../artifacts.rs"]
-mod artifacts;
-
 cfg_if::cfg_if! {
     if #[cfg(not(target_arch = "wasm32"))] {
+        use std::path::Path;
+
         use anyhow::{Context as _, Result, bail};
         use omnia::wasmtime::component::Val;
         use omnia::{
@@ -22,16 +20,16 @@ cfg_if::cfg_if! {
 
         #[tokio::main]
         async fn main() -> Result<()> {
+            let artifacts = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../target/wasm32-wasip2/debug/examples");
+
             let manifest = Manifest::new()
                 .link(["omnia:link/echo"])
                 .guest(GuestEntry::new(
                     "responder",
-                    artifacts::artifact("guest_link_responder_wasm.wasm"),
+                    artifacts.join("guest_link_responder_wasm.wasm"),
                 ))
-                .guest(GuestEntry::new(
-                    "router",
-                    artifacts::artifact("guest_link_router_wasm.wasm"),
-                ));
+                .guest(GuestEntry::new("router", artifacts.join("guest_link_router_wasm.wasm")));
 
             // Raw `.wasm` sources, so the safe `build` applies; a deployment of
             // trusted `omnia compile` output would call `unsafe build_trusted`.
@@ -48,7 +46,7 @@ cfg_if::cfg_if! {
             // handing them to the runtime; here the "install" is a file read.
             // Raw wasm is the safe constructor; `GuestArtifact::precompiled` is
             // `unsafe` because pre-compiled bytes are native code.
-            let wasm = std::fs::read(artifacts::artifact("guest_link_extra_wasm.wasm")).context(
+            let wasm = std::fs::read(artifacts.join("guest_link_extra_wasm.wasm")).context(
                 "extra guest not built: cargo build -p examples --example \
                  guest-link-extra-wasm --target wasm32-wasip2",
             )?;

@@ -3,15 +3,7 @@
 //! Registers the `WasiModel` host backed by an example-local backend serving
 //! a fixed schema answer, so the run is deterministic with no live model, no
 //! network, and no configuration. Command mode drives the `create` guest's
-//! `wasi:cli/run` export once. The inline manifest also preopens the
-//! repository root into the guest sandbox as a read-only workspace named
-//! `.`, which the guest reads via `wasi:filesystem/preopens` and lends
-//! through `grants.workspace`; the canned backend ignores it (it never runs
-//! tools). See `README.md`.
-
-#[cfg(not(target_arch = "wasm32"))]
-#[path = "../artifacts.rs"]
-mod artifacts;
+//! `wasi:cli/run` export once. See `README.md`.
 
 cfg_if::cfg_if! {
     if #[cfg(not(target_arch = "wasm32"))] {
@@ -45,16 +37,11 @@ cfg_if::cfg_if! {
 
         omnia::runtime!({
             mode: command,
+            config: concat!(env!("CARGO_MANIFEST_DIR"), "/model/omnia.toml"),
             hosts: {
                 WasiOtel: OtelDefault,
                 WasiModel: CannedVerdict,
-            },
-            guests: [
-                { id: "model", source: artifacts::artifact("model_wasm.wasm") },
-            ],
-            mounts: [
-                { name: ".", path: concat!(env!("CARGO_MANIFEST_DIR"), "/..") },
-            ],
+            }
         });
     } else {
         fn main() {}

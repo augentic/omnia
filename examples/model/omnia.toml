@@ -1,0 +1,29 @@
+# Model completion example.
+#
+# The `model` guest imports `omnia:model/completion` and calls `create`.
+# The host serves it with an example-local backend (runtime.rs answers every
+# completion with a fixed schema answer), so `create` returns a
+# deterministic answer with no live model, no network, and no configuration.
+#
+# The `[[mount]]` preopens the repository root into every guest sandbox as a
+# read-only workspace named `.`. The `model` guest reads it via
+# `wasi:filesystem/preopens` and lends it through `grants.workspace`. The
+# canned backend ignores the workspace (it never runs tools).
+#
+# Build the guest first (see README.md), then run (this path is compiled in
+# via runtime! `config:`, so the binary is a direct command — no `run`
+# subcommand):
+#
+#   cargo run --example model
+
+[[guest]]
+id = "model"
+source.path = "../../target/wasm32-wasip2/debug/examples/model_wasm.wasm"
+
+# Read-only workspace the `model` guest lends through `grants.workspace`.
+# `path` resolves relative to this manifest's directory, so `../..` is the repo
+# root; `name = "."` is what `preopens.get-directories()` returns and the guest
+# selects on.
+[[mount]]
+name = "."
+path = "../.."
