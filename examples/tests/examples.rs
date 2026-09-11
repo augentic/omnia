@@ -31,6 +31,13 @@ fn build_guests() {
 }
 
 fn run(example: &str, args: &[&str]) {
+    // The example manifests and hosts hardcode `../target/...`, so a redirected
+    // target dir would run a stale default-dir guest (or none) rather than the
+    // one just built: refuse up front instead of passing or failing spuriously.
+    assert!(
+        std::env::var_os("CARGO_TARGET_DIR").is_none(),
+        "examples assume the default target/ directory; unset CARGO_TARGET_DIR"
+    );
     build_guests();
     cargo(&[&["run", "-p", "examples", "--example", example, "--"], args].concat());
 }
