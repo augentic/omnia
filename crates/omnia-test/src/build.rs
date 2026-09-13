@@ -19,15 +19,21 @@
 //! [`Components::examples`] or discovered with [`Components::scan`] — or
 //! `cdylib` packages compiled as the components they ship as, listed with
 //! [`Components::packages`] or discovered with [`Components::scan_packages`];
-//! [`Components::extra_package`] builds a driver guest beside them:
+//! [`Components::extra_package`] builds a driver guest beside them. One build
+//! may draw from several sources, so the shipped components and the programs
+//! that drive them land in one `gen.rs`; [`Components::group`] names the
+//! source added just before it:
 //!
 //! ```no_run
 //! // build.rs — every crate under sources/ is a component under test,
-//! // named SOURCE_<NAME> with a foreach_source! arm; the caller drives them.
+//! // named ADAPTER_<NAME> with a foreach_adapter! arm; the programs under
+//! // crates/test-programs/programs/<group>/ drive them.
 //! omnia_test::build::Components::in_workspace("../..")
 //!     .scan_packages("sources")
-//!     .group("source")
-//!     .extra_package("caller")
+//!     .group("adapter")
+//!     .package("test-programs")
+//!     .scan("crates/test-programs/programs")
+//!     .sync_examples("crates/test-programs/Cargo.toml")
 //!     .build()
 //!     .write_gen("gen.rs");
 //! ```

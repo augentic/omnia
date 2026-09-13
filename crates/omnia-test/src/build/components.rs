@@ -23,24 +23,31 @@ pub struct Program {
     /// An example's source path relative to the package manifest, or a
     /// package's name as the nested build is told it.
     pub source: String,
+    /// Whether the program is an `[[example]]` target — its artifact
+    /// uplifted under `debug/examples/` — rather than a `cdylib` package in
+    /// the profile directory itself.
+    pub example: bool,
 }
 
 /// Where programs come from: an explicit example list, a scanned
 /// `<group>/<scenario>.rs` tree, or `cdylib` packages — listed, or every
-/// crate directory under one parent.
-#[derive(Clone, Debug)]
+/// crate directory under one parent. A build may draw from several.
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Source {
-    Examples(Vec<String>),
+    Examples { names: Vec<String>, group: String },
     Scan(PathBuf),
-    Packages(Vec<String>),
-    ScanPackages(PathBuf),
+    Packages { names: Vec<String>, group: String },
+    ScanPackages { dir: PathBuf, group: String },
 }
+
+/// The group a listed source starts in.
+const DEFAULT_GROUP: &str = "examples";
 
 impl Source {
     /// Whether the artifacts are `[[example]]` targets, uplifted under
     /// `debug/examples/` rather than `debug/`.
     const fn is_examples(&self) -> bool {
-        matches!(self, Self::Examples(_) | Self::Scan(_))
+        matches!(self, Self::Examples { .. } | Self::Scan(_))
     }
 }
 
@@ -50,10 +57,9 @@ impl Source {
 pub struct Components {
     root: PathBuf,
     package: Option<String>,
-    source: Source,
+    sources: Vec<Source>,
     extras: Vec<String>,
     sync: Option<PathBuf>,
-    group: String,
     tracked: Vec<PathBuf>,
 }
 
@@ -65,10 +71,9 @@ impl Components {
         Self {
             root: root.as_ref().to_path_buf(),
             package: None,
-            source: Source::Examples(Vec::new()),
+            sources: Vec::new(),
             extras: Vec::new(),
             sync: None,
-            group: "examples".to_owned(),
             tracked: Vec::new(),
         }
     }
@@ -81,10 +86,14 @@ impl Components {
         self
     }
 
-    /// An explicit list of `[[example]]` names, all in the current group.
+    /// An explicit list of `[[example]]` names, one source in the default
+    /// group until [`group`](Self::group) renames it.
     #[must_use]
     pub fn examples<S: Into<String>>(mut self, names: impl IntoIterator<Item = S>) -> Self {
-        self.source = Source::Examples(names.into_iter().map(Into::into).collect());
+        self.sources.push(Source::Examples {
+            names: names.into_iter().map(Into::into).collect(),
+            group: DEFAULT_GROUP.to_owned(),
+        });
         self
     }
 
@@ -92,17 +101,21 @@ impl Components {
     /// workspace root), named `<group>_<scenario>`.
     #[must_use]
     pub fn scan(mut self, dir: impl AsRef<Path>) -> Self {
-        self.source = Source::Scan(dir.as_ref().to_path_buf());
+        self.sources.push(Source::Scan(dir.as_ref().to_path_buf()));
         self
     }
 
     /// An explicit list of workspace `cdylib` packages compiled as
     /// components in their own right — the shipped components, not example
-    /// stand-ins — all in the current group. Each is named by its crate name
+    /// stand-ins — one source in the default group until
+    /// [`group`](Self::group) renames it. Each is named by its crate name
     /// (`-` becomes `_`) and its constant is `<GROUP>_<NAME>`.
     #[must_use]
     pub fn packages<S: Into<String>>(mut self, names: impl IntoIterator<Item = S>) -> Self {
-        self.source = Source::Packages(names.into_iter().map(Into::into).collect());
+        self.sources.push(Source::Packages {
+            names: names.into_iter().map(Into::into).collect(),
+            group: DEFAULT_GROUP.to_owned(),
+        });
         self
     }
 
@@ -111,7 +124,10 @@ impl Components {
     /// directory is a layout error. Otherwise as [`packages`](Self::packages).
     #[must_use]
     pub fn scan_packages(mut self, dir: impl AsRef<Path>) -> Self {
-        self.source = Source::ScanPackages(dir.as_ref().to_path_buf());
+        self.sources.push(Source::ScanPackages {
+            dir: dir.as_ref().to_path_buf(),
+            group: DEFAULT_GROUP.to_owned(),
+        });
         self
     }
 
@@ -134,10 +150,28 @@ impl Components {
         self
     }
 
-    /// The group name for an explicit [`examples`](Self::examples) list.
+    /// Names the group of the source added just before it — an
+    /// [`examples`](Self::examples), [`packages`](Self::packages), or
+    /// [`scan_packages`](Self::scan_packages) call; a scanned tree takes its
+    /// groups from its directories.
+    ///
+    /// # Panics
+    ///
+    /// Panics when no source precedes it, or the preceding one is a
+    /// [`scan`](Self::scan).
     #[must_use]
     pub fn group(mut self, name: impl Into<String>) -> Self {
-        self.group = name.into();
+        match self.sources.last_mut() {
+            Some(
+                Source::Examples { group, .. }
+                | Source::Packages { group, .. }
+                | Source::ScanPackages { group, .. },
+            ) => *group = name.into(),
+            Some(Source::Scan(_)) => {
+                panic!("a scanned tree is grouped by its directories; `group` cannot rename it")
+            }
+            None => panic!("`group` names the source added before it; add one first"),
+        }
         self
     }
 
@@ -158,8 +192,9 @@ impl Components {
     /// # Panics
     ///
     /// Panics when a cargo build-script variable is missing, discovery finds
-    /// an unexpected layout, the manifest to sync lacks the marker, the
-    /// nested build fails, or an artifact is missing afterwards.
+    /// an unexpected layout, the manifest to sync lacks the marker or no
+    /// example source feeds it, the nested build fails, or an artifact is
+    /// missing afterwards.
     #[must_use]
     pub fn build(self) -> Built {
         let header = format!(
@@ -172,7 +207,6 @@ impl Components {
                 programs: Vec::new(),
                 extras: Vec::new(),
                 artifacts_dir: PathBuf::new(),
-                examples: self.source.is_examples(),
             };
         }
 
@@ -187,22 +221,25 @@ impl Components {
         let programs = self.programs(&root);
         if let Some(manifest) = &self.sync {
             assert!(
-                self.source.is_examples(),
+                self.sources.iter().any(Source::is_examples),
                 "sync_examples refreshes an [[example]] list; packages have none"
             );
-            sync(&root.join(manifest), &programs);
+            let examples: Vec<Program> =
+                programs.iter().filter(|program| program.example).cloned().collect();
+            sync(&root.join(manifest), &examples);
         }
 
         let target_dir = env::path_var("OUT_DIR").join("fixtures");
-        let status = self
-            .nested_build(&root, &target_dir, &programs)
-            .status()
-            .unwrap_or_else(|err| panic!("spawning the {WASM_TARGET} fixture build: {err}"));
-        assert!(
-            status.success(),
-            "the fixture components could not be built; install the target with `rustup target \
-             add {WASM_TARGET}` and retry"
-        );
+        for mut command in self.nested_builds(&root, &target_dir, &programs) {
+            let status = command
+                .status()
+                .unwrap_or_else(|err| panic!("spawning the {WASM_TARGET} fixture build: {err}"));
+            assert!(
+                status.success(),
+                "the fixture components could not be built; install the target with `rustup \
+                 target add {WASM_TARGET}` and retry"
+            );
+        }
 
         // Always `debug`: the nested build uses the dev profile regardless of
         // the outer profile.
@@ -211,64 +248,77 @@ impl Components {
             programs,
             extras: self.extras.iter().map(|package| extra_program(package)).collect(),
             artifacts_dir: target_dir.join(WASM_TARGET).join("debug"),
-            examples: self.source.is_examples(),
         };
         built.register_inputs();
         built
     }
 
-    /// The programs the source names, discovering and registering scanned
-    /// directories.
+    /// The programs every source names, in source order, discovering and
+    /// registering scanned directories.
     fn programs(&self, root: &Path) -> Vec<Program> {
-        match &self.source {
-            Source::Examples(names) => names
-                .iter()
-                .map(|name| Program {
-                    name: name.clone(),
-                    constant: name.to_uppercase(),
-                    group: self.group.clone(),
-                    source: format!("examples/{name}.rs"),
-                })
-                .collect(),
-            Source::Scan(dir) => {
-                let dir = root.join(dir);
-                rerun_if_changed(&dir);
-                scan(&dir)
-            }
-            Source::Packages(names) => package_programs(&self.group, names.clone()),
-            Source::ScanPackages(dir) => {
-                let dir = root.join(dir);
-                rerun_if_changed(&dir);
-                package_programs(&self.group, scan_packages(&dir))
-            }
-        }
+        self.sources
+            .iter()
+            .flat_map(|source| match source {
+                Source::Examples { names, group } => names
+                    .iter()
+                    .map(|name| Program {
+                        name: name.clone(),
+                        constant: name.to_uppercase(),
+                        group: group.clone(),
+                        source: format!("examples/{name}.rs"),
+                        example: true,
+                    })
+                    .collect(),
+                Source::Scan(dir) => {
+                    let dir = root.join(dir);
+                    rerun_if_changed(&dir);
+                    scan(&dir)
+                }
+                Source::Packages { names, group } => package_programs(group, names.clone()),
+                Source::ScanPackages { dir, group } => {
+                    let dir = root.join(dir);
+                    rerun_if_changed(&dir);
+                    package_programs(group, scan_packages(&dir))
+                }
+            })
+            .collect()
     }
 
-    /// The nested cargo invocation selecting the programs and extras.
-    fn nested_build(&self, root: &Path, target_dir: &Path, programs: &[Program]) -> Command {
-        let mut command = env::nested_build(root, target_dir);
-        if let Some(package) = &self.package {
-            command.arg(format!("--package={package}"));
-        }
-        match &self.source {
-            Source::Examples(names) => {
-                for name in names {
-                    command.args(["--example", name]);
+    /// The nested cargo invocations: one per example source, selecting that
+    /// source's targets of the package, then one for every `cdylib` package
+    /// — the package sources' programs and the extras together.
+    fn nested_builds(&self, root: &Path, target_dir: &Path, programs: &[Program]) -> Vec<Command> {
+        let mut commands = Vec::new();
+        for source in &self.sources {
+            let targets: Vec<&str> = match source {
+                Source::Examples { names, .. } => {
+                    names.iter().flat_map(|name| ["--example", name.as_str()]).collect()
                 }
+                Source::Scan(_) => vec!["--examples"],
+                Source::Packages { .. } | Source::ScanPackages { .. } => continue,
+            };
+            let mut command = env::nested_build(root, target_dir);
+            if let Some(package) = &self.package {
+                command.arg(format!("--package={package}"));
             }
-            Source::Scan(_) => {
-                command.arg("--examples");
-            }
-            Source::Packages(_) | Source::ScanPackages(_) => {
-                for program in programs {
-                    command.args(["--package", &program.source]);
-                }
-            }
+            command.args(targets);
+            commands.push(command);
         }
-        for package in &self.extras {
-            command.args(["--package", package]);
+
+        let packages: Vec<&str> = programs
+            .iter()
+            .filter(|program| !program.example)
+            .map(|program| program.source.as_str())
+            .chain(self.extras.iter().map(String::as_str))
+            .collect();
+        if !packages.is_empty() {
+            let mut command = env::nested_build(root, target_dir);
+            for package in packages {
+                command.args(["--package", package]);
+            }
+            commands.push(command);
         }
-        command
+        commands
     }
 }
 
@@ -286,11 +336,11 @@ pub struct Built {
     extras: Vec<Program>,
     // The profile directory; examples are uplifted one level below it.
     artifacts_dir: PathBuf,
-    examples: bool,
 }
 
 impl Built {
-    /// The programs built, sorted by name; empty under a `wasm32` outer target.
+    /// The programs built, each source's sorted by name in source order;
+    /// empty under a `wasm32` outer target.
     #[must_use]
     pub fn programs(&self) -> &[Program] {
         &self.programs
@@ -307,7 +357,7 @@ impl Built {
     #[must_use]
     pub fn artifact(&self, program: &Program) -> PathBuf {
         let file = format!("{}.wasm", program.name);
-        if self.examples && !program.group.is_empty() {
+        if program.example {
             self.artifacts_dir.join("examples").join(file)
         } else {
             self.artifacts_dir.join(file)
@@ -325,7 +375,7 @@ impl Built {
                 "no artifact for `{}` at {}: is it {}?",
                 program.name,
                 artifact.display(),
-                if self.examples && !program.group.is_empty() {
+                if program.example {
                     "an `[[example]]` of the package"
                 } else {
                     "a `cdylib` package of the workspace"
@@ -456,6 +506,7 @@ fn programs_from(
                     name,
                     source: format!("{programs_dir}/{group}/{scenario}.rs"),
                     group: group.clone(),
+                    example: true,
                 }
             })
         })
@@ -472,6 +523,7 @@ fn extra_program(package: &str) -> Program {
         name,
         group: String::new(),
         source: package.to_owned(),
+        example: false,
     }
 }
 
@@ -489,6 +541,7 @@ fn package_programs(group: &str, packages: Vec<String>) -> Vec<Program> {
                 name,
                 group: group.to_owned(),
                 source: package,
+                example: false,
             }
         })
         .collect();
@@ -535,18 +588,21 @@ mod tests {
                     constant: "LINK_ECHO".into(),
                     group: "link".into(),
                     source: "programs/link/echo.rs".into(),
+                    example: true,
                 },
                 Program {
                     name: "model_echo_text".into(),
                     constant: "MODEL_ECHO_TEXT".into(),
                     group: "model".into(),
                     source: "programs/model/echo_text.rs".into(),
+                    example: true,
                 },
                 Program {
                     name: "model_tools".into(),
                     constant: "MODEL_TOOLS".into(),
                     group: "model".into(),
                     source: "programs/model/tools.rs".into(),
+                    example: true,
                 },
             ]
         );
@@ -566,12 +622,14 @@ mod tests {
                     constant: "SOURCE_GTFS_ADAPTER".into(),
                     group: "source".into(),
                     source: "gtfs-adapter".into(),
+                    example: false,
                 },
                 Program {
                     name: "typescript".into(),
                     constant: "SOURCE_TYPESCRIPT".into(),
                     group: "source".into(),
                     source: "typescript".into(),
+                    example: false,
                 },
             ]
         );
@@ -581,27 +639,28 @@ mod tests {
     // in the profile directory itself.
     #[test]
     fn artifact_layout() {
-        let program = |name: &str, group: &str| Program {
+        let program = |name: &str, group: &str, example: bool| Program {
             name: name.into(),
             constant: name.to_uppercase(),
             group: group.into(),
             source: name.into(),
+            example,
         };
-        let mut built = Built {
+        let built = Built {
             header: String::new(),
-            programs: vec![program("adapter", "examples")],
-            extras: vec![program("caller", "")],
+            programs: vec![
+                program("adapter", "examples", true),
+                program("intent", "source", false),
+            ],
+            extras: vec![program("caller", "", false)],
             artifacts_dir: PathBuf::from("/out/debug"),
-            examples: true,
         };
         assert_eq!(
             built.artifact(&built.programs[0]),
             Path::new("/out/debug/examples/adapter.wasm")
         );
+        assert_eq!(built.artifact(&built.programs[1]), Path::new("/out/debug/intent.wasm"));
         assert_eq!(built.artifact(&built.extras[0]), Path::new("/out/debug/caller.wasm"));
-
-        built.examples = false;
-        assert_eq!(built.artifact(&built.programs[0]), Path::new("/out/debug/adapter.wasm"));
     }
 
     #[test]
@@ -612,24 +671,69 @@ mod tests {
             .sync_examples("crates/test-programs/Cargo.toml")
             .track(["wit", "Cargo.lock"]);
         assert_eq!(components.package.as_deref(), Some("test-programs"));
-        assert!(
-            matches!(&components.source, Source::Scan(dir) if dir == Path::new("crates/test-programs/programs"))
-        );
+        assert_eq!(components.sources, [Source::Scan("crates/test-programs/programs".into())]);
         assert_eq!(components.sync.as_deref(), Some(Path::new("crates/test-programs/Cargo.toml")));
         assert_eq!(components.tracked, [PathBuf::from("wit"), PathBuf::from("Cargo.lock")]);
 
         let explicit = Components::in_workspace(".").examples(["adapter"]).group("mock");
-        assert!(matches!(&explicit.source, Source::Examples(names) if names == &["adapter"]));
-        assert_eq!(explicit.group, "mock");
+        assert_eq!(
+            explicit.sources,
+            [Source::Examples {
+                names: vec!["adapter".to_owned()],
+                group: "mock".to_owned(),
+            }]
+        );
 
         let packages = Components::in_workspace("../..")
             .scan_packages("sources")
             .group("source")
             .extra_package("caller");
-        assert!(
-            matches!(&packages.source, Source::ScanPackages(dir) if dir == Path::new("sources"))
+        assert_eq!(
+            packages.sources,
+            [Source::ScanPackages {
+                dir: "sources".into(),
+                group: "source".to_owned(),
+            }]
         );
-        assert!(!packages.source.is_examples());
+        assert!(!packages.sources[0].is_examples());
         assert_eq!(packages.extras, ["caller"]);
+    }
+
+    // One build draws from several sources: `group` names the one added just
+    // before it, and each keeps its own.
+    #[test]
+    fn mixed_sources() {
+        let components = Components::in_workspace("../..")
+            .scan_packages("sources")
+            .group("adapter")
+            .package("test-programs")
+            .scan("crates/test-programs/programs")
+            .packages(["caller"]);
+        assert_eq!(
+            components.sources,
+            [
+                Source::ScanPackages {
+                    dir: "sources".into(),
+                    group: "adapter".to_owned(),
+                },
+                Source::Scan("crates/test-programs/programs".into()),
+                Source::Packages {
+                    names: vec!["caller".to_owned()],
+                    group: DEFAULT_GROUP.to_owned(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "grouped by its directories")]
+    fn group_after_scan() {
+        let _ = Components::in_workspace(".").scan("programs").group("model");
+    }
+
+    #[test]
+    #[should_panic(expected = "add one first")]
+    fn group_before_source() {
+        let _ = Components::in_workspace(".").group("model");
     }
 }

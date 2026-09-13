@@ -1,4 +1,4 @@
-# Configuration for automatically generated release notes 
+# Configuration for automatically generated release notes
 #
 # Customizes the content of automatically generated release notes
 # by referencing PR labels and authors.
@@ -10,10 +10,4 @@ changelog:
   exclude:
     authors:
       - dependabot
-  # categories:
-  #   - title: Bugfixes
-  #     labels:
-  #       - bugfix
-  #   - title: Features
-  #     labels:
-  #       - enhancement
+      - dependabot[bot]

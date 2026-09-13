@@ -98,6 +98,7 @@ mod tests {
             constant: name.to_uppercase(),
             group: group.into(),
             source: source.into(),
+            example: true,
         }
     }
 
@@ -110,12 +111,14 @@ mod tests {
             constant: "SOURCE_INTENT".into(),
             group: "source".into(),
             source: "intent".into(),
+            example: false,
         };
         let caller = Program {
             name: "caller".into(),
             constant: "CALLER".into(),
             group: String::new(),
             source: "caller".into(),
+            example: false,
         };
         let artifacts = [
             Artifact {

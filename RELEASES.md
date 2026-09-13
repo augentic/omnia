@@ -113,7 +113,10 @@
     `cdylib` packages themselves (`packages`, `scan_packages` over a
     directory of crates — constants read `<GROUP>_<NAME>`, arms are the
     crate name), and `extra_package` builds a driver guest beside them with
-    a constant but no arm; `Program` gains a `constant` field.
+    a constant but no arm. One build draws from any number of sources —
+    the shipped components and the programs that drive them land in one
+    `gen.rs` — with `group` naming the source added just before it;
+    `Program` gains `constant` and `example` fields.
   Both scripted models share one `Script` core, so the same script reads
   identically at the handler and component rungs. `cargo make ci` now checks
   each feature alone and in combination (`features`, `hack`) and guards the
