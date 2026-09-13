@@ -117,7 +117,7 @@ fn main() {
 }
 ```
 
-`Components` runs the nested `wasm32-wasip2` build into `OUT_DIR` (so plain `cargo test` is self-contained), and `write_gen` emits one `pub const <GROUP>_<SCENARIO>: &str` artifact path per program plus a `foreach_<group>!` macro that fails to compile unless an identically named test exists at the invocation site. `scan` discovers programs from a `<group>/<scenario>.rs` tree and `sync_examples` keeps the `[[example]]` stanzas in step; `examples([..])` names them explicitly instead.
+`Components` runs the nested `wasm32-wasip2` build into `OUT_DIR` (so plain `cargo test` is self-contained), and `write_gen` emits one `pub const <GROUP>_<SCENARIO>: &str` artifact path per program plus a `foreach_<group>!` macro that fails to compile unless an identically named test exists at the invocation site. `scan` discovers programs from a `<group>/<scenario>.rs` tree and `sync_examples` keeps the `[[example]]` stanzas in step; `examples([..])` names them explicitly instead. A repository whose components under test are shipped `cdylib` packages adds them to the same build with `scan_packages(dir).group(name)` (or `packages([..])`), so one `gen.rs` carries the components and the programs that drive them.
 
 ## Examples to read
 
