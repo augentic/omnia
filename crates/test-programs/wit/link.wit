@@ -26,6 +26,12 @@ world relay {
     export ops;
 }
 
+/// Serves `ops` but sleeps past any sane guest timeout when asked to, so the
+/// caller-side bound and callee abort can be exercised.
+world sleeper {
+    export ops;
+}
+
 /// Imports only `ping` — a strict subset of `full`'s imports.
 world partial {
     import ops;

@@ -7,6 +7,8 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+use std::time::Duration;
+
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
 use omnia::{DeploymentBuilder, GuestArtifact, GuestEntry, GuestId, Manifest, Runtime, StoreCtx};
@@ -155,6 +157,26 @@ async fn link_relay() {
     // serve drain's log and the caller only sees the closed stream; tightened
     // in Step 6.
     assert!(call(&runtime, "full", "poke", "5").await.is_err(), "chain exceeds the bound");
+}
+
+// The sleeper takes the id `echoer` for the same reason as the relay. Only
+// the caller is awaited, so the test finishes well inside the 2 s the sleeper
+// would otherwise hold its store.
+#[tokio::test]
+async fn link_sleeper() {
+    let runtime = boot_with(
+        &[("echoer", test_programs::LINK_SLEEPER), ("full", test_programs::LINK_FULL)],
+        |builder| builder.guest_timeout(Duration::from_millis(50)),
+    )
+    .await
+    .expect("deployment boots");
+
+    let err = call(&runtime, "full", "poke", "sleep").await.expect_err("callee outlives the bound");
+    assert!(format!("{err:#}").contains("timed out"), "unexpected error: {err:#}");
+
+    // The target is still reachable after the timed-out call was abandoned.
+    let answer = call(&runtime, "full", "poke", "awake").await.expect("dispatch after timeout");
+    assert_eq!(answer, "echoer woke: awake");
 }
 
 #[tokio::test]
