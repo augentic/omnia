@@ -179,8 +179,10 @@ async fn link_sleeper() {
     assert_eq!(answer, "echoer woke: awake");
 }
 
+// The host→guest hop is depth 1, so with a bound of 3 the relay may hop twice
+// more: `2` lands exactly on the bound, `3` would need depth 4. Were the
+// dispatcher to restart the chain at 0, `3` would succeed.
 #[tokio::test]
-#[ignore = "host→guest dispatch drops the chain context; fixed in Step 5"]
 async fn dispatcher_depth_propagates() {
     let runtime = boot_with(
         &[("echoer", test_programs::LINK_RELAY), ("full", test_programs::LINK_FULL)],
@@ -189,15 +191,20 @@ async fn dispatcher_depth_propagates() {
     .await
     .expect("deployment boots");
 
-    let err = runtime
-        .dispatcher()
-        .invoke(
+    let dispatch = |hops: &str| {
+        runtime.dispatcher().invoke(
             GuestId::from("echoer"),
             Some("omnia-test:link/ops".into()),
             "ping".into(),
-            vec![Val::String("echoer".into()), Val::String("5".into())],
+            vec![Val::String("echoer".into()), Val::String(hops.to_owned())],
         )
-        .await
-        .expect_err("chain exceeds the bound");
-    assert!(format!("{err:#}").contains("exceeds maximum"), "unexpected error: {err:#}");
+    };
+
+    let answer = dispatch("2").await.expect("chain within the bound");
+    assert_eq!(answer, vec![Val::String("echoer relayed to the end".into())]);
+
+    // The over-bound hop fails inside a guest polyfill, whose `exceeds
+    // maximum` text the wRPC carrier keeps in the serve drain's log; the caller
+    // only sees the closed stream. Tightened in Step 6.
+    assert!(dispatch("3").await.is_err(), "chain exceeds the bound");
 }

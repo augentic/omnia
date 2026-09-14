@@ -1,8 +1,9 @@
 //! Host-originated dynamic dispatch into guest exports.
 //!
 //! The host→guest counterpart of guest→guest linking: a host binding invokes a
-//! *known* guest's export by identity, with no selector, transport, or
-//! declared link interface involved.
+//! *known* guest's export by identity, with no selector or declared link
+//! interface involved. The hop is depth-counted and wall-clock-bounded exactly
+//! like a guest→guest hop, and is driven by the same [`call_fresh`] primitive.
 
 use anyhow::{Context as _, Result, bail};
 use futures::FutureExt as _;
@@ -10,6 +11,7 @@ use wasmtime::component::{Val, types};
 
 use crate::chain::ChainPolicy;
 use crate::host::FutureResult;
+use crate::invoke::{FreshCall, call_fresh};
 use crate::registry::GuestId;
 use crate::runtime::Runtime;
 use crate::value::contains_handle;
@@ -17,19 +19,21 @@ use crate::value::contains_handle;
 /// Host-originated dynamic dispatch into a *known* guest export — the host→guest
 /// counterpart of the selector-driven guest→guest `dispatch`.
 ///
-/// Shares the depth bound (`ChainPolicy::enter`) and resource rejection with
-/// guest→guest dispatch. The target is instantiated *fresh* on a new store and
-/// the matching export invoked directly, so the callee can never re-enter its
-/// caller and needs no declared link interface for `interface`.
+/// Shares the depth bound (`ChainPolicy::enter`), the wall-clock bound on
+/// server-rooted chains and the handle rejection with guest→guest dispatch. The
+/// target is instantiated *fresh* on a new store and the matching export
+/// invoked directly, so the callee can never re-enter its caller and needs no
+/// declared link interface for `interface`.
 ///
-/// `args` and the returned values are plain `Val`s; a live resource handle on
+/// `args` and the returned values are plain `Val`s; a store-bound handle on
 /// either side is rejected.
 ///
 /// # Errors
 ///
 /// Returns an error if the depth bound is exceeded, an argument or result carries
-/// a resource handle, the target is not registered, the named `interface`/`func`
-/// export is absent or is not a function, or the guest call traps.
+/// a store-bound handle, the target is not registered, the named
+/// `interface`/`func` export is absent or is not a function, the call exceeds
+/// the wall-clock bound, or the guest call traps.
 pub async fn dispatch<B>(
     runtime: &Runtime<B>, target: &GuestId, interface: &str, func: &str, args: Vec<Val>,
 ) -> Result<Vec<Val>>
@@ -55,74 +59,31 @@ where
         .instance_pre()
         .clone();
 
-    // Depth-count this hop exactly like a guest→guest dispatch.
-    let _guard = ChainPolicy::from(runtime.options()).enter(target)?;
+    // Resolve the export on the component so no store is touched before the
+    // callee task owns one.
+    let component = instance_pre.component();
+    let iface_idx = component
+        .get_export_index(None, interface)
+        .with_context(|| format!("guest `{target}` exports no interface `{interface}`"))?;
+    let (item, func_idx) = component.get_export(Some(&iface_idx), func).with_context(|| {
+        format!("interface `{interface}` (guest `{target}`) exports no `{func}`")
+    })?;
+    let types::ComponentItem::ComponentFunc(func_ty) = item else {
+        bail!("`{interface}/{func}` (guest `{target}`) is not a function");
+    };
 
-    // Run the callee on its own task. A host binding invokes this from *within*
-    // the caller guest's concurrent event loop (awaited inside a host call),
-    // and wasmtime forbids a recursive `StoreContextMut::run_concurrent` on the
-    // same thread. Spawning gives the callee a fresh event loop: when the
-    // caller's loop parks awaiting this task, its ambient store clears, so the
-    // callee's call runs unnested. The task owns the whole store lifecycle
-    // (build → instantiate → call → drop), so the callee is a fresh instance
-    // that cannot re-enter its caller (instance-per-call) and needs no declared
-    // link interface for `interface`.
-    let task_runtime = (*runtime).clone();
-    let target_owned = target.clone();
-    let interface_owned = interface.to_owned();
-    let func_owned = func.to_owned();
-    let results = tokio::spawn(async move {
-        let mut store = task_runtime.build_store(task_runtime.store());
-        let instance = task_runtime
-            .instantiate(&instance_pre, &mut store)
-            .await
-            .with_context(|| format!("instantiating dispatch target `{target_owned}`"))?;
-
-        let interface_idx =
-            instance.get_export_index(&mut store, None, &interface_owned).with_context(|| {
-                format!("guest `{target_owned}` exports no interface `{interface_owned}`")
-            })?;
-        let (item, func_idx) = instance
-            .get_export(&mut store, Some(&interface_idx), &func_owned)
-            .with_context(|| {
-            format!(
-                "interface `{interface_owned}` (guest `{target_owned}`) exports no \
-                     `{func_owned}`"
-            )
-        })?;
-        let types::ComponentItem::ComponentFunc(func_ty) = item else {
-            bail!("`{interface_owned}/{func_owned}` (guest `{target_owned}`) is not a function");
-        };
-        let result_count = func_ty.results().count();
-        let function = instance.get_func(&mut store, func_idx).with_context(|| {
-            format!("resolving `{interface_owned}/{func_owned}` on guest `{target_owned}`")
-        })?;
-
-        let mut results = vec![Val::Bool(false); result_count];
-        function
-            .call_async(&mut store, &args, &mut results)
-            .await
-            .map_err(anyhow::Error::from)
-            .with_context(|| {
-                format!("calling `{interface_owned}/{func_owned}` on guest `{target_owned}`")
-            })?;
-        Ok::<Vec<Val>, anyhow::Error>(results)
-    })
-    .await
-    .with_context(|| format!("joining dispatch target `{target}` task"))?
-    .with_context(|| format!("dispatching `{interface}/{func}` to guest `{target}`"))?;
-
-    // A target must not hand back a resource handle either.
-    for value in &results {
-        if contains_handle(value) {
-            bail!(
-                "a resource handle cannot cross the link seam \
-                 (result of `{interface}/{func}`, target `{target}`)"
-            );
-        }
-    }
-
-    Ok(results)
+    let policy = ChainPolicy::from(runtime.options());
+    let ctx = policy.enter(target)?;
+    let bound = (!ctx.uncapped).then_some(policy.timeout);
+    let call = FreshCall {
+        factory: runtime.store_factory(),
+        instance_pre,
+        export: func_idx,
+        results: func_ty.results().count(),
+    };
+    call_fresh(call, args, ctx, bound)
+        .await
+        .with_context(|| format!("dispatching `{interface}/{func}` to guest `{target}`"))
 }
 
 /// A host→guest call capability, type-erased so a host binding can invoke a
