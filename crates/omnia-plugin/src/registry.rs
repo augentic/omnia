@@ -6,7 +6,9 @@ use anyhow::{Context as _, Result, bail};
 use futures::future::BoxFuture;
 use futures::{FutureExt as _, TryStreamExt as _};
 use omnia_core::sha256_digest;
-use wasm_pkg_client::{Client, Config, ContentStream, PackageRef, Registry, Release, Version};
+use wasm_pkg_client::{
+    Client, Config, ContentStream, PackageRef, Registry, RegistryMapping, Release, Version,
+};
 
 use crate::error::LoadError;
 use crate::source::RegistrySource;
@@ -15,9 +17,12 @@ use crate::store::{ContentStore, NoStore, ReleaseStore};
 /// Registry acquisition using [wasm-pkg-client].
 ///
 /// Fetches exact `namespace:name@version` references only, verifying every
-/// result against the registry's content digest. The attached store is a
-/// byte cache and offline fallback — never the authority while the registry
-/// is reachable — so a failing store degrades a load, never refuses it.
+/// result against the registry's content digest. A package resolves to the
+/// load's explicit endpoint if it names one, else to whatever the client
+/// configuration routes the package or its namespace to, else to the
+/// default endpoint. The attached store is a byte cache and offline
+/// fallback — never the authority while the registry is reachable — so a
+/// failing store degrades a load, never refuses it.
 ///
 /// [wasm-pkg-client]: https://github.com/bytecodealliance/wasm-pkg-tools
 pub struct RegistryClient<S = NoStore> {
@@ -43,8 +48,9 @@ impl RegistryClient<NoStore> {
 }
 
 impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
-    /// Replaces the client configuration (per-registry backend and
-    /// credential settings).
+    /// Replaces the client configuration: namespace and package routing
+    /// beyond the default endpoint, and per-registry backend and credential
+    /// settings.
     #[must_use]
     pub fn with_config(mut self, config: Config) -> Self {
         self.config = config;
@@ -61,27 +67,45 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
         }
     }
 
-    /// A client routed at `registry`; loads are rare, so a fresh client per
-    /// fetch beats caching machinery.
-    fn client(&self, registry: Registry) -> Client {
+    /// The registry `package` resolves against: `endpoint` when the load
+    /// names one, else the configuration's routing, else the default.
+    fn registry(
+        &self, package: &PackageRef, endpoint: Option<&str>,
+    ) -> Result<Registry, LoadError> {
+        let endpoint = match endpoint {
+            Some(endpoint) => endpoint,
+            None => match self.config.resolve_registry(package) {
+                Some(registry) => return Ok(registry.clone()),
+                None => &self.default_registry,
+            },
+        };
+        endpoint.parse().map_err(|error| {
+            LoadError::Refused(format!("registry `{endpoint}` is not a valid name: {error}"))
+        })
+    }
+
+    /// A client that fetches `package` from `registry`, whatever the
+    /// configuration routes the package or its namespace to; loads are rare,
+    /// so a fresh client per fetch beats caching machinery.
+    fn client(&self, package: &PackageRef, registry: &Registry) -> Client {
         let mut config = self.config.clone();
-        config.set_default_registry(Some(registry));
+        config.set_package_registry_override(
+            package.clone(),
+            RegistryMapping::Registry(registry.clone()),
+        );
         Client::new(config)
     }
 
     /// Resolve and fetch `package`, serving verified bytes from the store
     /// when possible.
-    async fn fetch(&self, package: &str, registry: Option<&str>) -> Result<Vec<u8>, LoadError> {
+    async fn fetch(&self, package: &str, endpoint: Option<&str>) -> Result<Vec<u8>, LoadError> {
         let (package_ref, version) =
             parse_package(package).map_err(|error| LoadError::Refused(format!("{error:#}")))?;
-        let registry = registry.unwrap_or(&self.default_registry);
-        let parsed: Registry = registry.parse().map_err(|error| {
-            LoadError::Refused(format!("registry `{registry}` is not a valid name: {error}"))
-        })?;
-
-        let client = self.client(parsed);
+        let registry = self.registry(&package_ref, endpoint)?;
+        let client = self.client(&package_ref, &registry);
+        let registry = registry.to_string();
         let release =
-            self.resolve_release(&client, registry, package, &package_ref, &version).await?;
+            self.resolve_release(&client, &registry, package, &package_ref, &version).await?;
         let digest = release.content_digest.to_string();
 
         if let Some(bytes) = self.stored(package, &digest).await {

@@ -88,8 +88,15 @@ pub enum LocationSpec {
         /// The host directory backing the location.
         path: Expr,
     },
-    /// `{ registry: ... }` — the deployment's default registry endpoint.
-    Registry(Expr),
+    /// `{ registry: ..., config: ... }` — the deployment's default registry
+    /// endpoint and, optionally, the wasm-pkg client configuration (TOML)
+    /// routing namespaces and packages to other registries.
+    Registry {
+        /// The default endpoint.
+        registry: Expr,
+        /// The wasm-pkg configuration, typically an `include_str!`.
+        config: Option<Expr>,
+    },
 }
 
 impl ManifestSpec {
@@ -610,7 +617,7 @@ impl PluginSpec {
         }
 
         let mut registries = self.locations.iter().filter_map(|location| match location {
-            LocationSpec::Registry(endpoint) => Some(endpoint.span()),
+            LocationSpec::Registry { registry, .. } => Some(registry.span()),
             LocationSpec::Path { .. } => None,
         });
         if let Some(second) = registries.nth(1) {
@@ -630,18 +637,20 @@ impl Parse for LocationSpec {
         let mut name = None;
         let mut path = None;
         let mut registry = None;
+        let mut config = None;
 
         let span = parse_kv_block(input, |key, value| {
             match key.to_string().as_str() {
                 "name" => name = Some(value.parse()?),
                 "path" => path = Some(value.parse()?),
                 "registry" => registry = Some(value.parse()?),
+                "config" => config = Some(value.parse()?),
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
                         format!(
                             "unknown location key `{other}`; expected `name` and `path`, or \
-                             `registry`"
+                             `registry` with an optional `config`"
                         ),
                     ));
                 }
@@ -649,21 +658,26 @@ impl Parse for LocationSpec {
             Ok(())
         })?;
 
-        match (name, path, registry) {
-            (None, None, Some(registry)) => Ok(Self::Registry(registry)),
-            (Some(name), Some(path), None) => Ok(Self::Path { name, path }),
-            (_, _, Some(_)) => Err(syn::Error::new(
+        match (name, path, registry, config) {
+            (None, None, Some(registry), config) => Ok(Self::Registry { registry, config }),
+            (Some(name), Some(path), None, None) => Ok(Self::Path { name, path }),
+            (_, _, Some(_), _) => Err(syn::Error::new(
                 span,
-                "a `registry` location carries no other keys; declare paths as their own \
-                 `{ name, path }` entries",
+                "a `registry` location carries only `config` beside it; declare paths as their \
+                 own `{ name, path }` entries",
             )),
-            (name, _, None) => {
+            (_, _, None, Some(_)) => Err(syn::Error::new(
+                span,
+                "`config` is the wasm-pkg configuration of a `registry` location; a path \
+                 location carries none",
+            )),
+            (name, _, None, None) => {
                 let missing = if name.is_none() { "name" } else { "path" };
                 Err(syn::Error::new(
                     span,
                     format!(
                         "location entry is missing `{missing}`; a location is `{{ name, path }}` \
-                         or `{{ registry: ... }}`"
+                         or `{{ registry: ..., config: ... }}`"
                     ),
                 ))
             }

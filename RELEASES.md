@@ -201,6 +201,31 @@
 
 ### Changed
 
+- The registry location carries the deployment's routing policy. A
+  `{ registry: ..., config: ... }` entry (or `[[plugin.location]]` with a
+  `config` key) pairs the default endpoint with a wasm-pkg client
+  configuration as TOML — `namespace_registries`,
+  `package_registry_overrides`, per-registry backend settings — typically
+  `include_str!("wasm-pkg.toml")`, so the compiled binary alone attests every
+  registry a package may resolve to. `Location::Registry` gains the optional
+  `config` field and `Location::registry_config(registry, config)` beside
+  `Location::registry(registry)`; `Plugins::install_declared` parses the
+  configuration when the runtime assembles, refusing malformed TOML or a
+  `default_registry` that disagrees with `registry`. `RegistryClient` resolves
+  a package to the load's explicit endpoint, else its package override, else
+  its namespace's registry, else the default, and pins the wasm-pkg client to
+  that registry per fetch; `RegistryClient::with_config` is how a hand-built
+  acquirer supplies the same routing.
+
+  ```rust
+  plugin: {
+      locations: [
+          { name: ".", path: "." },
+          { registry: "omnia.host", config: include_str!("wasm-pkg.toml") },
+      ],
+  },
+  ```
+
 - Every invocation is observable. `Metadata::from_lookup` mints a request id
   when the transport carries none — 32 lowercase hex chars from
   `wasi:random` on `wasm32` (a `std::hash::RandomState`-derived id natively,

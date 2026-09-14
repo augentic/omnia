@@ -95,8 +95,17 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
         LocationSpec::Path { name, path } => quote! {
             .locations([omnia::Location::path(#name, #path)])
         },
-        LocationSpec::Registry(endpoint) => quote! {
-            .locations([omnia::Location::registry(#endpoint)])
+        LocationSpec::Registry {
+            registry,
+            config: None,
+        } => quote! {
+            .locations([omnia::Location::registry(#registry)])
+        },
+        LocationSpec::Registry {
+            registry,
+            config: Some(config),
+        } => quote! {
+            .locations([omnia::Location::registry_config(#registry, #config)])
         },
     });
 

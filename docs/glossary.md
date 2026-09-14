@@ -62,7 +62,7 @@ The `omnia:plugins/loader` host capability: a guest names a package (location pl
 
 ### Acquisition policy
 
-How the loader turns a package name and location into component bytes. Declared at the composition root as deployment data (the macro's `plugin: { locations: [...] }` list, or `[[plugin.location]]` in `omnia.toml`, carried as `Location`s) and installed through `Plugins::install_declared` from the `Wiring::extend` hook, never runtime-core machinery. One slot per location kind, filled by the built-in acquirers `PathMounts` (named directory roots, read fresh on every load) and `RegistryClient` (exact package references, optionally cached by hand in a `ContentStore` + `ReleaseStore` backend); a load names its `Origin` (a registry endpoint or a location-relative path), routes structurally by kind, and an empty slot refuses typed.
+How the loader turns a package name and location into component bytes. Declared at the composition root as deployment data (the macro's `plugin: { locations: [...] }` list, or `[[plugin.location]]` in `omnia.toml`, carried as `Location`s) and installed through `Plugins::install_declared` from the `Wiring::extend` hook, never runtime-core machinery. One slot per location kind, filled by the built-in acquirers `PathMounts` (named directory roots, read fresh on every load) and `RegistryClient` (exact package references, routed by namespace or package through the registry location's wasm-pkg configuration when it carries one, optionally cached by hand in a `ContentStore` + `ReleaseStore` backend); a load names its `Origin` (a registry endpoint or a location-relative path), routes structurally by kind, and an empty slot refuses typed.
 
 ## Guest SDK (`omnia-guest`)
 
