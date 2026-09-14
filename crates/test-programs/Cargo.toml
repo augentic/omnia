@@ -112,6 +112,11 @@ path = "programs/link/partial.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "link_relay"
+path = "programs/link/relay.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "messaging_produce_handle"
 path = "programs/messaging/produce_handle.rs"
 crate-type = ["cdylib"]

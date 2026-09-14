@@ -18,6 +18,14 @@ world echoer {
     export ops;
 }
 
+/// Re-exports and re-imports `ops`: each call consumes one hop from the
+/// message and dispatches onward through the host, so one inbound call
+/// produces a chain of arbitrary depth.
+world relay {
+    import ops;
+    export ops;
+}
+
 /// Imports only `ping` — a strict subset of `full`'s imports.
 world partial {
     import ops;

@@ -18,12 +18,18 @@ test_programs::foreach_link!();
 /// Boot a runtime over `guests` (assembled in order) with
 /// `omnia-test:link/ops` dispatched.
 async fn boot(guests: &[(&str, &str)]) -> Result<Runtime<()>> {
+    boot_with(guests, |builder| builder).await
+}
+
+/// `boot` with `configure` applied to the builder (dispatch depth, timeout).
+async fn boot_with(
+    guests: &[(&str, &str)], configure: impl FnOnce(DeploymentBuilder) -> DeploymentBuilder,
+) -> Result<Runtime<()>> {
     let mut manifest = Manifest::new().link(["omnia-test:link/ops"]);
     for (id, wasm) in guests {
         manifest = manifest.guest(GuestEntry::new(*id, *wasm));
     }
-    let deployment = DeploymentBuilder::new()
-        .manifest(manifest)
+    let deployment = configure(DeploymentBuilder::new().manifest(manifest))
         .build::<StoreCtx<()>>()
         .await
         .context("building deployment")?;
@@ -127,4 +133,49 @@ async fn link_full_registered_late() {
     // The bootstrap guest is untouched by the late wiring.
     let subset = call(&runtime, "partial", "poke", "still").await.expect("subset dispatch");
     assert_eq!(subset, "echoer pong: still");
+}
+
+// The relay takes the id `echoer` because `full` hard-codes `ping("echoer",
+// ..)` and the default selector routes on that argument; every relay hop then
+// re-dispatches to itself, consuming one depth unit per hop.
+#[tokio::test]
+async fn link_relay() {
+    let runtime = boot_with(
+        &[("echoer", test_programs::LINK_RELAY), ("full", test_programs::LINK_FULL)],
+        |builder| builder.max_dispatch_depth(3),
+    )
+    .await
+    .expect("deployment boots");
+
+    // `full` → relay (depth 1) → relay (depth 2): within the bound.
+    let answer = call(&runtime, "full", "poke", "1").await.expect("two-hop chain");
+    assert_eq!(answer, "echoer relayed to the end");
+
+    // On the wRPC carrier the callee's `exceeds maximum` text stays in the
+    // serve drain's log and the caller only sees the closed stream; tightened
+    // in Step 6.
+    assert!(call(&runtime, "full", "poke", "5").await.is_err(), "chain exceeds the bound");
+}
+
+#[tokio::test]
+#[ignore = "host→guest dispatch drops the chain context; fixed in Step 5"]
+async fn dispatcher_depth_propagates() {
+    let runtime = boot_with(
+        &[("echoer", test_programs::LINK_RELAY), ("full", test_programs::LINK_FULL)],
+        |builder| builder.max_dispatch_depth(3),
+    )
+    .await
+    .expect("deployment boots");
+
+    let err = runtime
+        .dispatcher()
+        .invoke(
+            GuestId::from("echoer"),
+            Some("omnia-test:link/ops".into()),
+            "ping".into(),
+            vec![Val::String("echoer".into()), Val::String("5".into())],
+        )
+        .await
+        .expect_err("chain exceeds the bound");
+    assert!(format!("{err:#}").contains("exceeds maximum"), "unexpected error: {err:#}");
 }
