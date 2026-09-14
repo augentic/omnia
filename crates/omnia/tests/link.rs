@@ -179,6 +179,23 @@ async fn link_sleeper() {
     assert_eq!(answer, "echoer woke: awake");
 }
 
+// The skewed exporter takes the id `echoer` so `full`'s wired import of
+// `ping` is the one it is checked against; the mismatch is refused when the
+// exporter is served, so assembly fails before any call.
+#[tokio::test]
+async fn link_skewed() {
+    let Err(err) =
+        boot(&[("echoer", test_programs::LINK_SKEWED), ("full", test_programs::LINK_FULL)]).await
+    else {
+        panic!("skewed exporter was served");
+    };
+
+    let text = format!("{err:#}");
+    for needle in ["echoer", "full", "omnia-test:link/ops", "ping"] {
+        assert!(text.contains(needle), "`{needle}` missing from: {text}");
+    }
+}
+
 // The host→guest hop is depth 1, so with a bound of 3 the relay may hop twice
 // more: `2` lands exactly on the bound, `3` would need depth 4. Were the
 // dispatcher to restart the chain at 0, `3` would succeed.

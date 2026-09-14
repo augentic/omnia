@@ -145,10 +145,13 @@ impl<T: Send + 'static> LinkSeam<T> for InProcessLinks {
 
     fn serve(&self, factory: StoreFactory<T>, guest: &Guest<T>) -> FutureResult<()> {
         // Pure introspection, so the route is built here and the future only
-        // carries its outcome.
+        // carries its outcome. The bootstrap wiring is snapshotted so the
+        // exporter's signatures are checked against what its importers wired.
+        let wired = self.wired.lock().unwrap_or_else(PoisonError::into_inner).clone();
         let parked = serve::serve_guest(
             &self.routes,
             &self.interfaces,
+            &wired,
             factory,
             guest.id(),
             guest.instance_pre().clone(),

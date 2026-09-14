@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
-use omnia_core::{ChainPolicy, GuestId, InvokeError, contains_handle};
+use omnia_core::{ChainPolicy, GuestId, InvokeError, contains_handle, plain_signature};
 use wasmtime::Engine;
 use wasmtime::component::{Linker, Val, types};
 
@@ -16,10 +16,20 @@ use super::selector::GuestSelector;
 /// The functions polyfilled onto a linker — the union across guests at
 /// function granularity, since components import only the functions they use
 /// and so per-guest imports of one interface are arbitrary subsets. Keyed by
-/// interface then function name; the value is the function's type-level
-/// asyncness, so a later guest whose import disagrees is rejected instead of
-/// failing wasmtime's pre-instantiation typecheck with no cross-guest context.
-pub type WiredLinks = BTreeMap<Box<str>, BTreeMap<Box<str>, bool>>;
+/// interface then function name; the value records how the first importer
+/// declared the function, so a later guest whose import disagrees on
+/// asyncness is rejected instead of failing wasmtime's pre-instantiation
+/// typecheck with no cross-guest context, and an exporter's signature can be
+/// checked against the importer's when it is served.
+pub type WiredLinks = BTreeMap<Box<str>, BTreeMap<Box<str>, Wired>>;
+
+/// One polyfilled function as its first importer declared it.
+#[derive(Clone)]
+pub struct Wired {
+    pub is_async: bool,
+    pub ty: types::ComponentFunc,
+    pub importer: GuestId,
+}
 
 /// The caller-side state every polyfilled import shares: the selector
 /// strategy, the chain policy, and the live route table.
@@ -47,12 +57,15 @@ pub struct Caller {
 /// pre-instantiation asyncness typecheck. Both share one body ([`relay`]),
 /// which never touches the caller's store. A function an earlier guest wired
 /// with the *other* asyncness is a cross-guest interface disagreement,
-/// rejected here with both views named.
+/// rejected here with both views named. A signature carrying a store-bound
+/// handle (resource, future, stream, error-context) is refused before it is
+/// wired: only plain values cross the seam.
 ///
 /// # Errors
 ///
-/// Returns an error if a named link target is not an interface import, or if a
-/// function cannot be defined on the linker.
+/// Returns an error if a named link target is not an interface import, a
+/// function's signature is not plain, or a function cannot be defined on the
+/// linker.
 pub fn polyfill_component<T: 'static>(
     engine: &Engine, linker: &mut Linker<T>, id: &GuestId,
     component: &wasmtime::component::Component, interfaces: &BTreeSet<Box<str>>,
@@ -71,21 +84,29 @@ pub fn polyfill_component<T: 'static>(
         // borrowing the linker, skipping functions an earlier guest wired.
         let wired_funcs = wired.entry(Box::from(name)).or_default();
         let describe = |is_async: bool| if is_async { "an async func" } else { "a plain func" };
-        let mut funcs: Vec<(Arc<str>, bool)> = Vec::new();
+        let mut funcs: Vec<(Arc<str>, types::ComponentFunc)> = Vec::new();
         for (func, types::ComponentExtern { ty, .. }) in instance_ty.exports(engine) {
             let types::ComponentItem::ComponentFunc(ty) = ty else {
                 continue;
             };
             let is_async = ty.async_();
             match wired_funcs.get(func) {
-                Some(&earlier) if earlier == is_async => {}
-                Some(&earlier) => bail!(
+                Some(earlier) if earlier.is_async == is_async => {}
+                Some(earlier) => bail!(
                     "guest `{id}` imports `{name}/{func}` as {}, but an earlier guest wired it \
                      as {}; every importer of a host-mediated function must agree on asyncness",
                     describe(is_async),
-                    describe(earlier),
+                    describe(earlier.is_async),
                 ),
-                None => funcs.push((Arc::from(func), is_async)),
+                None => {
+                    if let Err(kind) = plain_signature(&ty) {
+                        bail!(
+                            "guest `{id}` imports `{name}/{func}` whose signature carries a \
+                             {kind}; only plain values cross the link seam"
+                        );
+                    }
+                    funcs.push((Arc::from(func), ty));
+                }
             }
         }
 
@@ -99,11 +120,11 @@ pub fn polyfill_component<T: 'static>(
             .with_context(|| format!("defining host-mediated interface `{name}`"))?;
         let iface_name: Arc<str> = Arc::from(name);
 
-        for (func, is_async) in &funcs {
+        for (func, ty) in &funcs {
             let caller = Arc::clone(caller);
             let iface_name = Arc::clone(&iface_name);
             let func_name = Arc::clone(func);
-            let registered = if *is_async {
+            let registered = if ty.async_() {
                 interface.func_new_concurrent(func, move |_accessor, ty, params, results| {
                     let caller = Arc::clone(&caller);
                     let iface_name = Arc::clone(&iface_name);
@@ -130,7 +151,14 @@ pub fn polyfill_component<T: 'static>(
                 .map_err(anyhow::Error::from)
                 .with_context(|| format!("polyfilling `{name}` function `{func}`"))?;
         }
-        wired_funcs.extend(funcs.iter().map(|(func, is_async)| (Box::from(&**func), *is_async)));
+        wired_funcs.extend(funcs.into_iter().map(|(func, ty)| {
+            let wired = Wired {
+                is_async: ty.async_(),
+                ty,
+                importer: id.clone(),
+            };
+            (Box::from(&*func), wired)
+        }));
     }
     Ok(())
 }

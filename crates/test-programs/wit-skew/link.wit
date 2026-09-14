@@ -1,0 +1,17 @@
+// A skewed copy of `omnia-test:link/ops`: the same package and interface
+// name, so the export resolves as the linked interface, but a different
+// result type from what every importer in `wit/link.wit` expects. Kept in
+// its own directory because one WIT package cannot define `ops` twice.
+package omnia-test:link;
+
+interface ops {
+    ping: func(target: string, message: string) -> u32;
+
+    ping-async: async func(target: string, message: string) -> u32;
+}
+
+/// Serves the skewed `ops`, so serving it against a `wit/link.wit` importer
+/// must be refused.
+world skewed {
+    export ops;
+}

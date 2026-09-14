@@ -16,6 +16,7 @@ fn main() {
         // (proc macros don't track file reads), so watch it explicitly.
         .track([
             "crates/test-programs/wit",
+            "crates/test-programs/wit-skew",
             "crates/test-programs/src",
             "crates/test-programs/Cargo.toml",
         ])

@@ -117,6 +117,11 @@ path = "programs/link/relay.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "link_skewed"
+path = "programs/link/skewed.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "link_sleeper"
 path = "programs/link/sleeper.rs"
 crate-type = ["cdylib"]
