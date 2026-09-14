@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail, ensure};
 use bytes::BytesMut;
-use omnia_core::{ChainPolicy, GuestId, LinkClient, contains_resource};
+use omnia_core::{ChainPolicy, GuestId, LinkClient, contains_handle};
 use tokio_util::codec::Encoder as _;
 use wasmtime::component::{Accessor, Linker, Type, Val, types};
 use wasmtime::{AsContextMut as _, Engine, StoreContextMut};
@@ -179,7 +179,7 @@ fn prepare<'a>(
 
     // Plain records cross by value; a live resource handle never crosses.
     for value in &*forwarded {
-        if contains_resource(value) {
+        if contains_handle(value) {
             bail!(
                 "a resource handle cannot cross the link seam (call to `{interface}/{func}`, \
                  target `{target}`)"

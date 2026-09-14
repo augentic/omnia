@@ -12,7 +12,7 @@ use crate::chain::ChainPolicy;
 use crate::host::FutureResult;
 use crate::registry::GuestId;
 use crate::runtime::Runtime;
-use crate::value::contains_resource;
+use crate::value::contains_handle;
 
 /// Host-originated dynamic dispatch into a *known* guest export — the host→guest
 /// counterpart of the selector-driven guest→guest `dispatch`.
@@ -38,7 +38,7 @@ where
 {
     // Plain records cross by value; a live resource handle never crosses.
     for value in &args {
-        if contains_resource(value) {
+        if contains_handle(value) {
             bail!(
                 "a resource handle cannot cross the link seam \
                  (host→guest `{interface}/{func}`, target `{target}`)"
@@ -114,7 +114,7 @@ where
 
     // A target must not hand back a resource handle either.
     for value in &results {
-        if contains_resource(value) {
+        if contains_handle(value) {
             bail!(
                 "a resource handle cannot cross the link seam \
                  (result of `{interface}/{func}`, target `{target}`)"

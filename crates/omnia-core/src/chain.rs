@@ -8,9 +8,8 @@ use crate::RuntimeOptions;
 use crate::registry::GuestId;
 
 tokio::task_local! {
-    // The context of the dispatch chain the current task is serving. Carried
-    // across the in-process carrier via the wRPC accept context and
-    // re-established around each served invocation, so concurrent, unrelated
+    // The context of the dispatch chain the current task is serving,
+    // re-established around each spawned callee task, so concurrent, unrelated
     // chains never share a depth budget or a wall-clock policy.
     static CHAIN_CTX: ChainCtx;
 }
@@ -28,7 +27,6 @@ pub struct ChainCtx {
 /// Run `fut` with the chain context carried over from an incoming dispatch, so
 /// nested host-mediated calls made while serving it count against the same
 /// chain and inherit its wall-clock policy.
-#[cfg(feature = "wrpc")]
 pub fn with_chain<F>(ctx: ChainCtx, fut: F) -> impl Future<Output = F::Output>
 where
     F: Future,
