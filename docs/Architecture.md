@@ -87,7 +87,7 @@ Layers 1 and 2 form the **runtime core** — domain-agnostic infrastructure that
 - **Runtime handle**: `Runtime<B>` over `StoreCtx<B>`, assembled from `RuntimeParts`; `Registry` holds pre-instantiated guests
 - **Core traits**: `Host`, `Server`, `Backend`
 - **Link seam**: the `LinkSeam` trait and `NoLinks` no-op the registry drives; guest→guest linking itself lives in `omnia-link` (`InProcessLinks`)
-- **Host→guest dispatch**: `Dispatcher`, a direct call with no carrier
+- **Host→guest dispatch**: `Dispatcher`, a named-target call through `call_fresh` (the same primitive guest→guest links use)
 - **Telemetry**: `tracing` + OpenTelemetry bootstrap
 - **Admission seam**: `Runtime::admit` and `Extensions`, which `omnia-plugin` uses to install acquisition policy from the `Wiring::extend` hook
 
@@ -172,7 +172,7 @@ A deployment can hold many guests. All of them share one wasmtime `Engine` and o
 
 - **Route tables** — per-trigger routing (each guest's `routes.http` by longest prefix, `routes.messaging`/`routes.websocket` by NATS-style pattern) selects which guest handles an inbound request.
 - **Mounts** — `[[mount]]` entries preopen host directories into every guest sandbox (read-only unless marked writable).
-- **Link seam** — the deployment-wide `[link] interfaces` list names interfaces the host polyfills onto the shared linker; calls dispatch to whichever guest exports the interface, over an in-process carrier, with nesting bounded by `MAX_DISPATCH_DEPTH`. The registry always holds a `LinkSeam`: `NoLinks` when the list is empty (every method a no-op), `InProcessLinks` (in `omnia-link`, reached only through omnia's `link` feature) otherwise.
+- **Link seam** — the deployment-wide `[link] interfaces` list names interfaces the host polyfills onto the shared linker; calls dispatch to whichever guest exports the interface, by in-memory routing to a fresh callee instance on its own task, with nesting bounded by `MAX_DISPATCH_DEPTH`. The registry always holds a `LinkSeam`: `NoLinks` when the list is empty (every method a no-op), `InProcessLinks` (in `omnia-link`, reached only through omnia's `link` feature) otherwise.
 
 Endpoints move through two stages inside the seam. `serve` runs *outside* the registry's lifecycle gate and writes only pending state; `publish`, `discard`, and `remove` run *under* the gate's write guard, so a guest's registry entry and its live endpoint change as one step. A call path never reads pending state and reads live state under the seam's own lock, not the gate: a call racing a deregister may complete against the departing instance, exactly as an in-flight invocation does.
 

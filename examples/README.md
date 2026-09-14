@@ -55,7 +55,7 @@ Each example directory has a `README.md` with test commands and example-specific
 | ------- | ------------ |
 | [`http-proxy`](http-proxy) | Outbound HTTP from a guest, with a keyvalue caching layer |
 | [`http-routing`](http-routing) | Two HTTP guests behind path prefixes via a deployment manifest |
-| [`guest-link`](guest-link) | Host-mediated guest-to-guest linking over in-process wRPC |
+| [`guest-link`](guest-link) | Host-mediated guest-to-guest linking by in-memory routing |
 | [`cli-static`](cli-static) | A compiled-in command deployment: inline guests, direct-command argv |
 | [`mcp`](mcp) | A guest serving MCP tools and resources to AI agents over HTTP |
 

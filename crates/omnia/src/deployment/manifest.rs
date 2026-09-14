@@ -522,7 +522,7 @@ pub struct Transport {
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum TransportKind {
-    /// In-process byte pipe — the co-located default (the only implemented kind).
+    /// In-process in-memory routing — the co-located default (the only implemented kind).
     #[default]
     InProcess,
     /// Unix-domain socket (same node, separate processes).

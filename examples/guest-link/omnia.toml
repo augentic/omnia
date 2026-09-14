@@ -4,7 +4,7 @@
 # does not satisfy that import natively, so it is named in the deployment's
 # `[link] interfaces` and the runtime core polyfills it onto the shared linker.
 # At startup the host wires the serve side of every dispatched interface, so
-# calling the import dispatches over the in-process wRPC carrier to
+# calling the import dispatches by in-memory routing to
 # `responder`, which exports it.
 #
 # The runtime core stays domain-agnostic: `[link] interfaces` and the selector

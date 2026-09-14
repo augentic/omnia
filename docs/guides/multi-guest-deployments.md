@@ -118,13 +118,13 @@ id = "router"
 source.path = "./router.wasm"           # imports omnia:link/echo
 ```
 
-At startup, the runtime polyfills each dispatched interface onto the shared linker and dispatches calls to whichever guest exports it, over an in-process channel. The runtime sees only opaque interface strings and guest identities — no domain knowledge lives in the core (this is the glossary's [Law 2](../glossary.md#law-2)).
+At startup, the runtime polyfills each dispatched interface onto the shared linker and dispatches calls to whichever guest exports it, by in-memory routing to a fresh callee instance on its own task. The runtime sees only opaque interface strings and guest identities — no domain knowledge lives in the core (this is the glossary's [Law 2](../glossary.md#law-2)).
 
 Notes:
 
 - `[link] interfaces` is deployment-wide: the linker is shared, so a dispatched interface is wired for the whole deployment, and any guest importing it may call it. `--link <interface>` on the command line unions with the manifest's list. An exporter need not be loaded at startup — a guest registered later can serve the interface. A runtime built without the `link` feature refuses a non-empty list at startup.
 - Nested dispatch depth is bounded by `MAX_DISPATCH_DEPTH` (default 8) to catch accidental recursion.
-- Only the in-process transport is implemented; declaring `unix`, `nats`, or `quic` under `[transport]` is rejected at load.
+- Only the in-process transport is implemented (in-memory routing); declaring `unix`, `nats`, or `quic` under `[transport]` is rejected at load.
 
 The [`guest-link`](../../examples/guest-link/) example is a complete router/responder pair.
 

@@ -201,6 +201,21 @@
 
 ### Changed
 
+- Guest→guest link dispatch now hands lifted `Val`s to a fresh callee
+  task in memory — no encode, decode, or pipe. Importer and exporter
+  signatures are type-checked structurally by name, so a WIT skew
+  between them is refused at serve time or at lower time instead of
+  being positionally mis-decoded. Handle-carrying signatures
+  (`own` / `borrow` / `future` / `stream` / `error-context`) are
+  refused when the import is polyfilled. Host→guest
+  `Dispatcher::invoke` now propagates dispatch depth into the callee
+  and is bounded by `GUEST_TIMEOUT_MS` on server-rooted chains; a
+  timed-out or cancelled caller aborts the callee. A 1 MiB `string`
+  round trip `full → echoer → full` (fresh instances per call) went
+  from ~1.52 ms p50 / ~1.57 ms mean on wRPC to ~1.12 ms p50 /
+  ~1.15 ms mean on in-memory routing, about 26 % less per call
+  (p99 ~1.93 ms → ~1.36 ms).
+
 - Every invocation is observable. `Metadata::from_lookup` mints a request id
   when the transport carries none — 32 lowercase hex chars from
   `wasi:random` on `wasm32` (a `std::hash::RandomState`-derived id natively,
@@ -600,6 +615,20 @@
   and `DeploymentBuilder::dynamic()` are the way a registry grows after
   boot, with registered guests reachable via host-mediated link dispatch
   and `Dispatcher::invoke`
+
+### Removed
+
+- The `wrpc-transport` / `wrpc-wasmtime` dependencies and the
+  `[patch.crates-io]` git override that unpublished `wrpc-wasmtime`
+  required. The `omnia-core` `wrpc` feature is gone, as are the
+  `omnia::{LinkClient, WrpcState, WrpcView, WrpcCtxView}` and
+  `omnia_link::{LinkTransport, InProcess}` types. `LinkStore` is
+  relaxed to `WasiView + 'static`. Downstream consumers
+  (omnia-exemplar and its guest template, emery-adapters,
+  omnia-backends, sample-cli): on the next omnia bump drop the
+  `wrpc-*` `[patch.crates-io]` entries, the `deny.toml` `allow-git`
+  for `bytecodealliance/wrpc`, and the `cargo vet` git policies for
+  `wrpc-introspect` / `wrpc-transport`.
 
 ## 0.35.0
 

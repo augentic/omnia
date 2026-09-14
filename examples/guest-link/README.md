@@ -1,6 +1,6 @@
 # Guest link (host-mediated dynamic linking)
 
-Proves host-mediated dynamic linking: one guest reaches another through an interface the *host* satisfies at runtime, carried over in-process [wRPC](https://github.com/bytecodealliance/wrpc).
+Proves host-mediated dynamic linking: one guest reaches another through an interface the *host* satisfies at runtime, routed in memory to a fresh callee instance on its own task.
 
 ## What it shows
 
@@ -14,7 +14,7 @@ When `router.run("hello")` calls the imported `echo("responder", "hello")`:
 flowchart LR
   router["router.run<br/>(imports echo)"] -->|"echo(\"responder\", \"hello\")"| sel["FirstArgSelector<br/>target = responder"]
   sel --> guard["reject resources (§4.5)<br/>depth bound (§6.6)"]
-  guard -->|"in-process wRPC"| resp["responder.echo<br/>(fresh instance per call)"]
+  guard -->|"in-memory routing"| resp["responder.echo<br/>(fresh instance per call)"]
   resp -->|"\"responder echoes: hello\""| router
 ```
 

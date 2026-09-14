@@ -39,14 +39,14 @@ The runtime is built around a set of traits that allow services to be plugged in
 
 ## Public API
 
-`omnia` exposes the composition-root surface a deployment author, a host-server crate, or a hand-written runtime needs; dispatch and transport-carrier internals stay crate-private.
+`omnia` exposes the composition-root surface a deployment author, a host-server crate, or a hand-written runtime needs; dispatch and routing internals stay crate-private.
 
 - **Macros:** `runtime!`
 - **Lifecycle:** `run` — takes a built `Deployment`, assembles the `Runtime` (installing epoch interruption, pool-metric sampling, and host-mediated link serving), then drives command mode or the trigger servers
 - **Runtime + store:** `Runtime`, `RuntimeParts`, `Wiring`, `StoreCtx`, `StoreBase`, `Host`, `Server`, `Backend`, `FromEnv`, `HasLimits`, `Dispatcher`, `FutureResult`
 - **Registry pipeline:** `Manifest` (with `GuestEntry`, `Mount`, `SourceSpec`, route/transport types), `DeploymentBuilder`, `Deployment`, `Registry`, `Guest`, `GuestId`, `RuntimeOptions`
 - **Trigger routing (host servers):** `RouteTable` + `MatchStrategy` (aliased `HttpRoutes`/`PatternRoutes`/`CliRoutes`), `Routes`, `Resolver`, `TriggerRouter`
-- **Host-mediated linking (`link` feature):** `GuestSelector`, `FirstArgSelector`, `InProcessLinks`, `LinkClient`, `WrpcState`; a `runtime!` invocation declaring `link: { interfaces: [...] }` requires the feature
+- **Host-mediated linking (`link` feature):** `GuestSelector`, `FirstArgSelector`, `InProcessLinks`; a `runtime!` invocation declaring `link: { interfaces: [...] }` requires the feature
 - **Telemetry + CLI:** `Telemetry`, `resource`, `Cli`, `Command`, `Parser` (`cli` feature)
 - **Plugins (`omnia:plugins/loader`, `plugin` feature):** `WasiPlugins`, `Plugins`, `PluginLoader`, the `PathMounts`/`RegistryClient` acquirers with their `PathSource`/`RegistrySource` seams, and the `ContentStore`/`ReleaseStore` cache traits; `Location` is always available as manifest data, and a `runtime!` invocation declaring `plugin: { locations: [...] }` requires the feature
 - **Signature vocabulary:** `anyhow` (`omnia::anyhow::Result`) because `Backend`, `Wiring`, and the generated runtime module speak it, and `futures` (`omnia::futures::future::BoxFuture`) because the plugin store and acquirer seams return it
@@ -57,7 +57,7 @@ Most deployments only touch the `runtime!` macro; a hand-written runtime instead
 
 - **`cli`** (default): Enables the `run` command-line grammar (the `omnia-cli` crate) and the `Cli`, `Command`, and `Parser` re-exports. Disable it for a direct-command binary that owns its whole argv; no `clap` is linked.
 - **`jit`** (default): Enables Cranelift JIT compilation, allowing you to run `.wasm` files directly. Disable this to only support pre-compiled `.bin` components (useful for faster startup in production).
-- **`link`:** Enables host-mediated guest→guest linking (the `omnia-link` crate and the wRPC store view). A deployment that names `[link] interfaces` requires it.
+- **`link`:** Enables host-mediated guest→guest linking (the `omnia-link` crate). A deployment that names `[link] interfaces` requires it.
 - **`plugin`:** Enables the `omnia:plugins/loader` capability. A `runtime!` invocation declaring `plugin: { locations: [...] }` requires it.
 
 ## Configuration

@@ -38,7 +38,7 @@ A host directory preopened into every guest sandbox (`[[mount]]` in the manifest
 
 ### Dispatch (host-mediated)
 
-Guest-to-guest calls carried through the host: a guest imports an interface named in the deployment's `[link] interfaces`, and the host routes the call to whichever guest exports it. Nesting is bounded by `MAX_DISPATCH_DEPTH`. Distinct from the host→guest `Dispatcher`, which names its target explicitly and uses no carrier.
+Guest-to-guest calls carried through the host: a guest imports an interface named in the deployment's `[link] interfaces`, and the host routes the call to whichever guest exports it. Nesting is bounded by `MAX_DISPATCH_DEPTH`. Distinct from the host→guest `Dispatcher`, which names its target explicitly. Both paths drive a fresh callee through `call_fresh`.
 
 ### Link interfaces
 
@@ -50,7 +50,7 @@ The `LinkSeam` trait the registry drives for guest→guest linking: polyfill dec
 
 ### Link feature
 
-Omnia's off-by-default `link` cargo feature: guest→guest linking via the `omnia-link` crate and the `omnia-core` wRPC store view. Independent of the [`plugin` feature](#plugin-feature) — static guests may link; loaded guests may be host-only.
+Omnia's off-by-default `link` cargo feature: guest→guest linking via the `omnia-link` crate. Independent of the [`plugin` feature](#plugin-feature) — static guests may link; loaded guests may be host-only.
 
 ### Plugin feature
 
