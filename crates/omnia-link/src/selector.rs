@@ -5,10 +5,10 @@
 //! the runtime core must not hardcode, so it exposes a pluggable [`GuestSelector`]
 //! strategy and ships one default.
 //!
-//! The strategy runs on the typed call (interface, function, and the decoded
-//! [`Val`] parameters) *before* the invocation is encoded onto the wRPC carrier.
-//! It returns the chosen [`GuestId`] and the parameter list to forward — so a
-//! strategy may strip the identity argument or pass it through.
+//! The strategy runs on the typed call (interface, function, and the lifted
+//! [`Val`] parameters) *before* the call is routed to a target. It returns the
+//! chosen [`GuestId`] and the parameter list to forward — so a strategy may
+//! strip the identity argument or pass it through.
 
 use std::borrow::Cow;
 

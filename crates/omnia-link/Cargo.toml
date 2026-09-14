@@ -17,18 +17,7 @@ workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
-bytes.workspace = true
 futures.workspace = true
-omnia-core = { workspace = true, features = ["wrpc"] }
-tokio = { workspace = true, features = ["io-util", "macros", "rt", "sync", "time"] }
-tokio-util = { workspace = true, features = ["codec"] }
+omnia-core.workspace = true
 tracing.workspace = true
-wasm-tokio.workspace = true
 wasmtime = { workspace = true, features = ["runtime"] }
-wasmtime-wasi.workspace = true
-wrpc-transport.workspace = true
-wrpc-wasmtime.workspace = true
-
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-tokio = { workspace = true, features = ["io-util", "macros", "rt"] }
-wasmtime = { workspace = true, features = ["cranelift", "wat"] }

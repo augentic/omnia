@@ -2271,17 +2271,10 @@ name = "omnia-link"
 version = "0.36.0"
 dependencies = [
  "anyhow",
- "bytes",
  "futures",
  "omnia-core",
- "tokio",
- "tokio-util",
  "tracing",
- "wasm-tokio",
  "wasmtime",
- "wasmtime-wasi",
- "wrpc-transport",
- "wrpc-wasmtime",
 ]
 
 [[package]]

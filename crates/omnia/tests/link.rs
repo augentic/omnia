@@ -153,10 +153,10 @@ async fn link_relay() {
     let answer = call(&runtime, "full", "poke", "1").await.expect("two-hop chain");
     assert_eq!(answer, "echoer relayed to the end");
 
-    // On the wRPC carrier the callee's `exceeds maximum` text stays in the
-    // serve drain's log and the caller only sees the closed stream; tightened
-    // in Step 6.
-    assert!(call(&runtime, "full", "poke", "5").await.is_err(), "chain exceeds the bound");
+    // The relay's own hop trips the bound, and the callee's trap propagates
+    // through the caller's polyfill with its text intact.
+    let err = call(&runtime, "full", "poke", "5").await.expect_err("chain exceeds the bound");
+    assert!(format!("{err:#}").contains("exceeds maximum"), "unexpected error: {err:#}");
 }
 
 // The sleeper takes the id `echoer` for the same reason as the relay. Only
@@ -203,8 +203,8 @@ async fn dispatcher_depth_propagates() {
     let answer = dispatch("2").await.expect("chain within the bound");
     assert_eq!(answer, vec![Val::String("echoer relayed to the end".into())]);
 
-    // The over-bound hop fails inside a guest polyfill, whose `exceeds
-    // maximum` text the wRPC carrier keeps in the serve drain's log; the caller
-    // only sees the closed stream. Tightened in Step 6.
-    assert!(dispatch("3").await.is_err(), "chain exceeds the bound");
+    // The over-bound hop fails inside a guest polyfill; its trap propagates
+    // back through every fresh callee to the dispatcher's caller.
+    let err = dispatch("3").await.expect_err("chain exceeds the bound");
+    assert!(format!("{err:#}").contains("exceeds maximum"), "unexpected error: {err:#}");
 }

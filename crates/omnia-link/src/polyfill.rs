@@ -2,22 +2,16 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::iter::zip;
-use std::pin::pin;
 use std::sync::Arc;
+use std::time::Instant;
 
-use anyhow::{Context as _, Result, bail, ensure};
-use bytes::BytesMut;
-use omnia_core::{ChainPolicy, GuestId, LinkClient, contains_handle};
-use tokio_util::codec::Encoder as _;
-use wasmtime::component::{Accessor, Linker, Type, Val, types};
-use wasmtime::{AsContextMut as _, Engine, StoreContextMut};
-use wasmtime_wasi::WasiView;
-use wrpc_transport::Invoke;
-use wrpc_wasmtime::{ValEncoder, WrpcView, read_value};
+use anyhow::{Context as _, Result, anyhow, bail, ensure};
+use omnia_core::{ChainPolicy, GuestId, InvokeError, contains_handle};
+use wasmtime::Engine;
+use wasmtime::component::{Linker, Val, types};
 
-use super::decode::read_plain_value;
+use super::route::Routes;
 use super::selector::GuestSelector;
-use super::transport::{InProcess, LinkTransport as _};
 
 /// The functions polyfilled onto a linker — the union across guests at
 /// function granularity, since components import only the functions they use
@@ -28,11 +22,11 @@ use super::transport::{InProcess, LinkTransport as _};
 pub type WiredLinks = BTreeMap<Box<str>, BTreeMap<Box<str>, bool>>;
 
 /// The caller-side state every polyfilled import shares: the selector
-/// strategy, the chain policy, and the bound transport carrier.
+/// strategy, the chain policy, and the live route table.
 pub struct Caller {
     pub selector: Arc<dyn GuestSelector>,
     pub policy: ChainPolicy,
-    pub transport: InProcess,
+    pub routes: Routes,
 }
 
 /// Polyfill one component's imports of the declared `interfaces` not already
@@ -48,24 +42,22 @@ pub struct Caller {
 /// `instantiate_pre`.
 ///
 /// Registration matches the import's type-level asyncness: a plain `func` is
-/// polyfilled with `func_new_async` ([`send`]), an `async func` with
-/// `func_new_concurrent` ([`send_concurrent`]) — the sync-typed registration
-/// would fail the pre-instantiation asyncness typecheck. A function an
-/// earlier guest wired with the *other* asyncness is a cross-guest interface
-/// disagreement, rejected here with both views named.
+/// polyfilled with `func_new_async`, an `async func` with
+/// `func_new_concurrent` — the sync-typed registration would fail the
+/// pre-instantiation asyncness typecheck. Both share one body ([`relay`]),
+/// which never touches the caller's store. A function an earlier guest wired
+/// with the *other* asyncness is a cross-guest interface disagreement,
+/// rejected here with both views named.
 ///
 /// # Errors
 ///
 /// Returns an error if a named link target is not an interface import, or if a
 /// function cannot be defined on the linker.
-pub fn polyfill_component<T>(
+pub fn polyfill_component<T: 'static>(
     engine: &Engine, linker: &mut Linker<T>, id: &GuestId,
     component: &wasmtime::component::Component, interfaces: &BTreeSet<Box<str>>,
     caller: &Arc<Caller>, wired: &mut WiredLinks,
-) -> Result<()>
-where
-    T: WasiView + WrpcView + 'static,
-{
+) -> Result<()> {
     let component_ty = component.component_type();
     for (name, types::ComponentExtern { ty, .. }) in component_ty.imports(engine) {
         if !interfaces.contains(name) {
@@ -112,31 +104,23 @@ where
             let iface_name = Arc::clone(&iface_name);
             let func_name = Arc::clone(func);
             let registered = if *is_async {
-                interface.func_new_concurrent(func, move |accessor, ty, params, results| {
+                interface.func_new_concurrent(func, move |_accessor, ty, params, results| {
                     let caller = Arc::clone(&caller);
                     let iface_name = Arc::clone(&iface_name);
                     let func_name = Arc::clone(&func_name);
                     Box::pin(async move {
-                        send_concurrent(
-                            accessor,
-                            &caller,
-                            &iface_name,
-                            &func_name,
-                            &ty,
-                            params,
-                            results,
-                        )
-                        .await
-                        .map_err(wasmtime::Error::from_anyhow)
+                        relay(&caller, &iface_name, &func_name, &ty, params, results)
+                            .await
+                            .map_err(wasmtime::Error::from_anyhow)
                     })
                 })
             } else {
-                interface.func_new_async(func, move |store, ty, params, results| {
+                interface.func_new_async(func, move |_store, ty, params, results| {
                     let caller = Arc::clone(&caller);
                     let iface_name = Arc::clone(&iface_name);
                     let func_name = Arc::clone(&func_name);
                     Box::new(async move {
-                        send(store, &caller, &iface_name, &func_name, &ty, params, results)
+                        relay(&caller, &iface_name, &func_name, &ty, params, results)
                             .await
                             .map_err(wasmtime::Error::from_anyhow)
                     })
@@ -151,26 +135,14 @@ where
     Ok(())
 }
 
-/// A prepared dispatch: everything [`send`] and [`send_concurrent`] share
-/// before they diverge on store threading.
-struct Call<'a> {
-    start: std::time::Instant,
-    target: GuestId,
-    forwarded: std::borrow::Cow<'a, [Val]>,
-    param_types: Vec<Type>,
-    result_types: Vec<Type>,
-    client: LinkClient,
-    // Whether this call's chain root runs uncapped (command mode): the
-    // round-trip then skips the `guest_timeout` wall-clock bound.
-    uncapped: bool,
-}
-
-/// Shared per-call preamble: select the target, reject crossing resources,
-/// take a depth slot, and open the client connection.
-fn prepare<'a>(
-    caller: &Caller, interface: &str, func: &str, ty: &types::ComponentFunc, params: &'a [Val],
-) -> Result<Call<'a>> {
-    let start = std::time::Instant::now();
+/// The per-call dispatch: select the target, reject crossing handles, take a
+/// depth slot, resolve the live route, and move the lifted parameters to a
+/// fresh callee instance on its own task, writing its results back.
+async fn relay(
+    caller: &Caller, interface: &str, func: &str, ty: &types::ComponentFunc, params: &[Val],
+    results: &mut [Val],
+) -> Result<()> {
+    let start = Instant::now();
 
     let (target, forwarded) = caller
         .selector
@@ -189,159 +161,40 @@ fn prepare<'a>(
 
     let ctx = caller.policy.enter(&target)?;
 
-    let param_types: Vec<Type> = ty.params().map(|(_, ty)| ty).collect();
-    let result_types: Vec<Type> = ty.results().collect();
+    let expected = ty.params().len();
     ensure!(
-        forwarded.len() == param_types.len(),
-        "selector forwarded {} arguments but `{interface}/{func}` expects {}",
+        forwarded.len() == expected,
+        "selector forwarded {} arguments but `{interface}/{func}` expects {expected}",
         forwarded.len(),
-        param_types.len()
     );
 
-    let client = caller.transport.connect(&target, interface, ctx)?;
-
-    Ok(Call {
-        start,
-        target,
-        forwarded,
-        param_types,
-        result_types,
-        client,
-        uncapped: ctx.uncapped,
-    })
-}
-
-/// Encode the forwarded parameters with wRPC's value codec.
-fn encode_params<T: WrpcView + 'static>(
-    mut store: StoreContextMut<'_, T>, call: &Call<'_>, interface: &str, func: &str,
-) -> Result<BytesMut> {
-    let mut buf = BytesMut::new();
-    for (value, ty) in zip(&*call.forwarded, &call.param_types) {
-        let mut encoder = ValEncoder::new(store.as_context_mut(), ty, &[], &[]);
-        encoder
-            .encode(value, &mut buf)
-            .map_err(anyhow::Error::from)
-            .with_context(|| format!("encoding parameter for `{interface}/{func}`"))?;
-        ensure!(
-            encoder.deferred.is_none(),
-            "async/stream parameters cannot cross the link seam (`{interface}/{func}`)"
-        );
+    let route = caller.routes.resolve(&target, interface)?;
+    // A server-rooted chain is wall-clock bounded so a hung target cannot stall
+    // the caller; a command-rooted chain runs uncapped.
+    let bound = (!ctx.uncapped).then_some(caller.policy.timeout);
+    let out =
+        route.invoke(interface, func, forwarded.into_owned(), ctx, bound).await.map_err(|err| {
+            match err.downcast_ref::<InvokeError>() {
+                Some(InvokeError::Timeout(bound)) => anyhow!(
+                    "link dispatch to `{target}` for `{interface}/{func}` timed out after {bound:?}"
+                ),
+                _ => err,
+            }
+        })?;
+    for (slot, value) in zip(results, out) {
+        *slot = value;
     }
-    Ok(buf)
-}
 
-fn timeout_error(caller: &Caller, target: &GuestId, interface: &str, func: &str) -> anyhow::Error {
-    anyhow::anyhow!(
-        "link dispatch to `{target}` for `{interface}/{func}` timed out after {:?}",
-        caller.policy.timeout
-    )
-}
-
-/// Await the dispatch round-trip, bounded by `guest_timeout` unless the call's
-/// chain root runs uncapped (a command-mode `wasi:cli/run` drive).
-async fn bounded<F>(
-    caller: &Caller, call: &Call<'_>, interface: &str, func: &str, fut: F,
-) -> Result<()>
-where
-    F: Future<Output = Result<()>>,
-{
-    if call.uncapped {
-        return fut.await;
-    }
-    tokio::time::timeout(caller.policy.timeout, fut)
-        .await
-        .map_err(|_elapsed| timeout_error(caller, &call.target, interface, func))?
-}
-
-fn log_dispatch(call: &Call<'_>, interface: &str, func: &str) {
-    let elapsed_us = u64::try_from(call.start.elapsed().as_micros()).unwrap_or(u64::MAX);
+    let elapsed_us = u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX);
     tracing::debug!(
-        target = %call.target,
+        target = %target,
         interface,
         func,
-        transport = "in-process",
+        depth = ctx.depth,
+        carrier = "in-memory",
         histogram.link_dispatch_duration_us = elapsed_us,
         monotonic_counter.link_dispatches = 1_u64,
         "dispatched host-mediated call",
     );
-}
-
-/// The per-call dispatch: select the target, reject crossing resources, bound
-/// depth, then round-trip the call over the in-process wRPC carrier to a
-/// freshly-instantiated target export.
-async fn send<T>(
-    mut store: StoreContextMut<'_, T>, caller: &Caller, interface: &str, func: &str,
-    ty: &types::ComponentFunc, params: &[Val], results: &mut [Val],
-) -> Result<()>
-where
-    T: WrpcView + 'static,
-{
-    let call = prepare(caller, interface, func, ty, params)?;
-    let buf = encode_params(store.as_context_mut(), &call, interface, func)?;
-
-    // Invoke over the carrier; the request is written and flushed here, the
-    // results stream back on `incoming`. No deferred (async) parameters, so the
-    // outgoing half carries nothing further and is dropped. On a server-rooted
-    // chain the round-trip is bounded by `guest_timeout` so a hung target
-    // cannot stall the caller; a command-rooted chain runs uncapped.
-    let target = &call.target;
-    let round_trip = async {
-        let (_outgoing, incoming) =
-            call.client.invoke((), interface, func, buf.freeze(), &[[]; 0]).await.with_context(
-                || format!("invoking link target `{target}` for `{interface}/{func}`"),
-            )?;
-
-        let mut incoming = pin!(incoming);
-        for (index, (value, ty)) in zip(results.iter_mut(), &call.result_types).enumerate() {
-            read_value(&mut store, &mut incoming, &[], &[], value, ty, &[index])
-                .await
-                .map_err(anyhow::Error::from)
-                .with_context(|| format!("decoding result {index} from `{target}`"))?;
-        }
-        anyhow::Ok(())
-    };
-    bounded(caller, &call, interface, func, round_trip).await?;
-
-    log_dispatch(&call, interface, func);
-    Ok(())
-}
-
-/// The concurrent dual of [`send`], for async-typed imports.
-///
-/// The store threading is the whole difference: a concurrent host task only
-/// reaches the store synchronously via [`Accessor::with`], so parameters are
-/// encoded inside a single `with` (the encoder never awaits) and results are
-/// decoded store-free — sound because resources, the only values
-/// `wrpc_wasmtime::read_value` needs the store for, never cross the link seam.
-async fn send_concurrent<T>(
-    accessor: &Accessor<T>, caller: &Caller, interface: &str, func: &str,
-    ty: &types::ComponentFunc, params: &[Val], results: &mut [Val],
-) -> Result<()>
-where
-    T: WrpcView + 'static,
-{
-    let call = prepare(caller, interface, func, ty, params)?;
-    let buf = accessor
-        .with(|mut access| encode_params(access.as_context_mut(), &call, interface, func))?;
-
-    // Invoke over the carrier; see `send` for the streaming/timeout contract.
-    let target = &call.target;
-    let round_trip = async {
-        let (_outgoing, incoming) =
-            call.client.invoke((), interface, func, buf.freeze(), &[[]; 0]).await.with_context(
-                || format!("invoking link target `{target}` for `{interface}/{func}`"),
-            )?;
-
-        let mut incoming = pin!(incoming);
-        for (index, (value, ty)) in zip(results.iter_mut(), &call.result_types).enumerate() {
-            read_plain_value(&mut incoming, value, ty)
-                .await
-                .with_context(|| format!("decoding result {index} from `{target}`"))?;
-        }
-        anyhow::Ok(())
-    };
-    bounded(caller, &call, interface, func, round_trip).await?;
-
-    log_dispatch(&call, interface, func);
     Ok(())
 }

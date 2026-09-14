@@ -7,56 +7,58 @@
 //! 1. extracts a target identity from the call via a [`GuestSelector`],
 //! 2. rejects any resource handle attempting to cross the seam,
 //! 3. enforces a dispatch-depth bound,
-//! 4. instantiates the target *fresh* on a new store and invokes the matching
-//!    export over the bound wRPC transport, and
-//! 5. returns the typed result, discarding the callee instance.
+//! 4. resolves the target from the live route table and instantiates it
+//!    *fresh* on a new store, driving the matching export on its own task
+//!    through `omnia_core::call_fresh`, and
+//! 5. moves the typed results back into the caller, discarding the callee
+//!    instance.
 //!
 //! Because step 4 is always a fresh instance, a dispatched call cannot
 //! recursively re-enter its caller. The runtime core stays generic: it links whatever
 //! interfaces the manifest names, by opaque string, and resolves opaque
-//! [`GuestId`]s — it never parses a consumer scheme. The selector runs in the
-//! polyfill *before* the call is encoded onto wRPC, so it sees typed
-//! parameters. Sync-typed functions are registered with `func_new_async`;
-//! async-typed (`async func`) ones with `func_new_concurrent`, whose
-//! store-scoped access rules the decode path is built around. See
-//! `docs/Architecture.md` (The Guest Registry) for the full design.
+//! [`GuestId`]s — it never parses a consumer scheme. Arguments and results
+//! travel as wasmtime [`Val`](wasmtime::component::Val)s lifted from the
+//! caller and lowered into the callee, with no codec in between; the selector
+//! runs in the polyfill on those lifted values, so it sees typed parameters.
+//! Sync-typed functions are registered with `func_new_async`; async-typed
+//! (`async func`) ones with `func_new_concurrent`; both share one body that
+//! never touches the caller's store. See `docs/Architecture.md` (The Guest
+//! Registry) for the full design.
 //!
 //! [`InProcessLinks`] is the [`LinkSeam`] the registry drives when a
 //! deployment declares link interfaces.
 
 #![cfg(not(target_arch = "wasm32"))]
 
-mod decode;
 mod polyfill;
+mod route;
 mod selector;
 mod serve;
-mod transport;
 
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use anyhow::Result;
 use futures::FutureExt as _;
+use futures::future::ready;
 use omnia_core::{ChainPolicy, FutureResult, Guest, GuestId, LinkSeam, LoadedGuest, StoreFactory};
 use wasmtime::Engine;
 use wasmtime::component::{Component, Linker};
-use wasmtime_wasi::WasiView;
-use wrpc_wasmtime::WrpcView;
 
 use self::polyfill::{Caller, WiredLinks};
+use self::route::Routes;
 pub use self::selector::{FirstArgSelector, GuestSelector};
-pub use self::transport::{InProcess, LinkTransport};
 
-/// Guest→guest linking over the in-process wRPC carrier.
+/// Guest→guest linking by in-memory routing to a fresh callee instance.
 ///
 /// Holds the selector strategy, the deployment's declared link interfaces, the
-/// chain policy (depth and wall-clock bounds), the bound transport, and the
+/// chain policy (depth and wall-clock bounds), the route table, and the
 /// functions the bootstrap polyfilled onto the shared linker.
 pub struct InProcessLinks {
     selector: Arc<dyn GuestSelector>,
     interfaces: BTreeSet<Box<str>>,
     policy: ChainPolicy,
-    transport: InProcess,
+    routes: Routes,
     // Link functions polyfilled onto the shared linker at bootstrap, per
     // interface; a late guest's remaining imports are polyfilled on a linker
     // clone against a copy of this map.
@@ -65,8 +67,8 @@ pub struct InProcessLinks {
 
 impl InProcessLinks {
     /// Create the seam for a deployment linking `interfaces` under `policy`.
-    /// The transport starts empty; the registry serves and publishes each
-    /// guest's endpoint through the [`LinkSeam`] methods.
+    /// The route table starts empty; the registry serves and publishes each
+    /// guest's route through the [`LinkSeam`] methods.
     #[must_use]
     pub fn new(
         selector: Arc<dyn GuestSelector>, interfaces: BTreeSet<Box<str>>, policy: ChainPolicy,
@@ -75,7 +77,7 @@ impl InProcessLinks {
             selector,
             interfaces,
             policy,
-            transport: InProcess::default(),
+            routes: Routes::default(),
             wired: Mutex::new(WiredLinks::new()),
         }
     }
@@ -92,12 +94,12 @@ impl InProcessLinks {
         Arc::new(Caller {
             selector: Arc::clone(&self.selector),
             policy: self.policy,
-            transport: self.transport.clone(),
+            routes: self.routes.clone(),
         })
     }
 }
 
-impl<T: WasiView + WrpcView + 'static> LinkSeam<T> for InProcessLinks {
+impl<T: Send + 'static> LinkSeam<T> for InProcessLinks {
     fn polyfill(
         &self, engine: &Engine, linker: &mut Linker<T>, guests: &[LoadedGuest],
     ) -> Result<()> {
@@ -142,27 +144,31 @@ impl<T: WasiView + WrpcView + 'static> LinkSeam<T> for InProcessLinks {
     }
 
     fn serve(&self, factory: StoreFactory<T>, guest: &Guest<T>) -> FutureResult<()> {
-        let transport = self.transport.clone();
-        let interfaces = self.interfaces.clone();
-        let id = guest.id().clone();
-        let instance_pre = guest.instance_pre().clone();
-        async move { serve::serve_guest(&transport, &interfaces, factory, &id, instance_pre).await }
-            .boxed()
+        // Pure introspection, so the route is built here and the future only
+        // carries its outcome.
+        let parked = serve::serve_guest(
+            &self.routes,
+            &self.interfaces,
+            factory,
+            guest.id(),
+            guest.instance_pre().clone(),
+        );
+        ready(parked).boxed()
     }
 
     fn publish(&self, id: &GuestId) -> Result<()> {
-        self.transport.publish(id)
+        self.routes.publish(id)
     }
 
     fn discard(&self, id: &GuestId) {
-        self.transport.discard(id);
+        self.routes.discard(id);
     }
 
     fn remove(&self, id: &GuestId) {
-        self.transport.remove(id);
+        self.routes.remove(id);
     }
 
     fn shutdown(&self) {
-        self.transport.clear();
+        self.routes.clear();
     }
 }
