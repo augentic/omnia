@@ -2,14 +2,8 @@
 
 use wasmtime::component::{Type, Val, types};
 
-/// Recursively reports whether a value carries a store-bound handle (a
-/// resource, future, stream, or error-context).
-#[must_use]
-pub fn contains_handle(value: &Val) -> bool {
-    handle_kind(value).is_some()
-}
-
 /// Names the kind of the first store-bound handle a value carries, if any.
+/// Recursive.
 #[must_use]
 pub fn handle_kind(value: &Val) -> Option<&'static str> {
     match value {

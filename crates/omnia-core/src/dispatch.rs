@@ -14,7 +14,7 @@ use crate::host::FutureResult;
 use crate::invoke::{FreshCall, call_fresh};
 use crate::registry::GuestId;
 use crate::runtime::Runtime;
-use crate::value::contains_handle;
+use crate::value::handle_kind;
 
 /// Host-originated dynamic dispatch into a *known* guest export — the host→guest
 /// counterpart of the selector-driven guest→guest `dispatch`.
@@ -42,7 +42,7 @@ where
 {
     // Plain records cross by value; a live resource handle never crosses.
     for value in &args {
-        if contains_handle(value) {
+        if handle_kind(value).is_some() {
             bail!(
                 "a resource handle cannot cross the link seam \
                  (host→guest `{interface}/{func}`, target `{target}`)"

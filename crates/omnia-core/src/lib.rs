@@ -47,7 +47,7 @@ pub use self::store::{
     StoreConfig, StoreCtx, StoreView,
 };
 pub use self::telemetry::{LogMode, Telemetry};
-pub use self::value::{contains_handle, plain_signature};
+pub use self::value::{handle_kind, plain_signature};
 
 /// Generates the standard host-error conversions every `omnia` WASI host
 /// crate repeats.

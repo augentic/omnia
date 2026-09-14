@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
-use omnia_core::{ChainPolicy, GuestId, InvokeError, contains_handle, plain_signature};
+use omnia_core::{ChainPolicy, GuestId, InvokeError, handle_kind, plain_signature};
 use wasmtime::Engine;
 use wasmtime::component::{Linker, Val, types};
 
@@ -179,7 +179,7 @@ async fn relay(
 
     // Plain records cross by value; a live resource handle never crosses.
     for value in &*forwarded {
-        if contains_handle(value) {
+        if handle_kind(value).is_some() {
             bail!(
                 "a resource handle cannot cross the link seam (call to `{interface}/{func}`, \
                  target `{target}`)"
