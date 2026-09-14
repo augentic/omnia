@@ -21,9 +21,6 @@ mod value;
 
 #[doc(hidden)]
 pub use pastey;
-#[cfg(feature = "wrpc")]
-#[doc(hidden)]
-pub use wrpc_wasmtime::{WrpcCtxView, WrpcView};
 #[doc(hidden)]
 pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
@@ -49,8 +46,6 @@ pub use self::store::{
     HasDispatcher, HasExtensions, HasLimits, HasMounts, HttpBorrow, HttpCtx, StoreBase,
     StoreConfig, StoreCtx, StoreView,
 };
-#[cfg(feature = "wrpc")]
-pub use self::store::{LinkClient, WrpcState};
 pub use self::telemetry::{LogMode, Telemetry};
 pub use self::value::{contains_handle, plain_signature};
 

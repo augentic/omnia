@@ -114,15 +114,12 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 trybuild = "1.0.120"
 wasip3 = { version = "0.8.0", features = ["http-compat"] }
 wasm-pkg-client = "0.16.1"
-wasm-tokio = { version = "0.6.1", default-features = false }
 wasmtime = { version = "48.0.1", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation", "pooling-allocator"] }
 wasmtime-wasi = { version = "48.0.1", features = ["p3"] }
 wasmtime-wasi-config = "48.0.1"
 wasmtime-wasi-http = { version = "48.0.1", default-features = false, features = ["p3"] }
 wasmtime-wasi-io = "48.0.1"
 wit-bindgen = { version = "0.61.1", features = ["async-spawn"] }
-wrpc-transport = "0.29.0"
-wrpc-wasmtime = "0.1.0"
 
 # internally referenced crates
 omnia = { path = "crates/omnia", version = "0.36.0" }
@@ -147,10 +144,6 @@ omnia-wasi-sql = { path = "crates/wasi-sql", version = "0.36.0" }
 omnia-wasi-vault = { path = "crates/wasi-vault", version = "0.36.0" }
 omnia-wasi-websocket = { path = "crates/wasi-websocket", version = "0.36.0" }
 test-programs = { path = "crates/test-programs" }
-
-[patch.crates-io]
-wrpc-transport = { git = "https://github.com/bytecodealliance/wrpc" }
-wrpc-wasmtime = { git = "https://github.com/bytecodealliance/wrpc" }
 
 [profile.release]
 lto = true

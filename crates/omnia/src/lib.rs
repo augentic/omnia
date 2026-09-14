@@ -43,12 +43,6 @@ pub use omnia_core::{
     StoreCtx, StoreFactory, StoreView, Telemetry, TriggerRouter, WeakRuntime, as_command_chain,
     get_cloned, host_error, serve_links, sha256_digest, telemetry, wasi_view,
 };
-#[cfg(feature = "link")]
-#[doc(inline)]
-pub use omnia_core::{LinkClient, WrpcState};
-#[cfg(feature = "link")]
-#[doc(hidden)]
-pub use omnia_core::{WrpcCtxView, WrpcView};
 #[doc(hidden)]
 pub use omnia_core::{pastey, tokio, wasmtime, wasmtime_wasi};
 #[doc(inline)]

@@ -31,7 +31,7 @@ allow = [
 ignore = true
 
 [sources]
-allow-git = ["https://github.com/bytecodealliance/wrpc"]
+allow-git = []
 
 [bans]
 deny = [

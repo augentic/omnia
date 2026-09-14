@@ -14,11 +14,11 @@ pub use manifest::{
     GuestEntry, GuestRoutes, LinkConfig, Manifest, Mount, PluginConfig, SourceSpec, Transport,
     TransportKind,
 };
+#[cfg(feature = "link")]
+use omnia_core::ChainPolicy;
 use omnia_core::wasmtime::component::Linker;
 use omnia_core::wasmtime::{Config, Engine};
 use omnia_core::wasmtime_wasi::WasiView;
-#[cfg(feature = "link")]
-use omnia_core::{ChainPolicy, WrpcView};
 use omnia_core::{
     GuestId, Host, LinkSeam, LoadedGuest, Location, LogMode, MountRegistry, NoLinks, Registry,
     Routes, Runtime, RuntimeOptions, RuntimeParts, Server, StoreCtx, Telemetry,
@@ -282,18 +282,10 @@ pub struct Deployment<T: WasiView + 'static> {
     locations: Vec<Location>,
 }
 
-/// Store bound that carries wRPC only when the `link` feature is enabled.
-#[cfg(feature = "link")]
-pub trait LinkStore: WasiView + WrpcView + 'static {}
-
-/// Store bound that carries wRPC only when the `link` feature is enabled.
-#[cfg(not(feature = "link"))]
+/// Store bound every deployment store context satisfies; kept as a named bound
+/// for source compatibility with embedders that spell it.
 pub trait LinkStore: WasiView + 'static {}
 
-#[cfg(feature = "link")]
-impl<T: WasiView + WrpcView + 'static> LinkStore for T {}
-
-#[cfg(not(feature = "link"))]
 impl<T: WasiView + 'static> LinkStore for T {}
 
 impl<T: WasiView> Deployment<T> {

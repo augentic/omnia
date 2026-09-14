@@ -55,12 +55,6 @@ audit-as-crates-io = false
 [policy.omnia-wasi-websocket]
 audit-as-crates-io = false
 
-[policy."wrpc-introspect:0.7.0@git:f58109eda90fabcb4085787e30db6d7899d0ce96"]
-audit-as-crates-io = false
-
-[policy."wrpc-transport:0.29.0@git:f58109eda90fabcb4085787e30db6d7899d0ce96"]
-audit-as-crates-io = false
-
 [[exemptions.addr2line]]
 version = "0.26.1"
 criteria = "safe-to-deploy"
@@ -497,10 +491,6 @@ criteria = "safe-to-deploy"
 version = "0.2.7"
 criteria = "safe-to-deploy"
 
-[[exemptions.leb128-tokio]]
-version = "0.1.7"
-criteria = "safe-to-deploy"
-
 [[exemptions.libsqlite3-sys]]
 version = "0.38.2"
 criteria = "safe-to-deploy"
@@ -925,10 +915,6 @@ criteria = "safe-to-deploy"
 version = "0.9.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.utf8-tokio]]
-version = "0.2.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.uuid]]
 version = "1.26.0"
 criteria = "safe-to-deploy"
@@ -971,10 +957,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.wasm-streams]]
 version = "0.5.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.wasm-tokio]]
-version = "0.6.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.web-sys]]

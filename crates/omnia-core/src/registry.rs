@@ -61,7 +61,7 @@ impl From<String> for GuestId {
 
 /// A registry entry's resolution target.
 ///
-/// Only [`Target::Local`] exists today; a remote wRPC-endpoint variant will land
+/// Only [`Target::Local`] exists today; a remote variant will land
 /// with distributed transport.
 enum Target<T: 'static> {
     /// A locally pre-instantiated component.
