@@ -1,8 +1,10 @@
 # Multi-Guest Deployments
 
-A single runtime can host many guests, route inbound traffic between them, preopen host directories into their sandboxes, and let one guest call another through the host. All of this is deployment configuration in a TOML manifest — no host or guest code changes.
+One Omnia runtime can run many guests at once. You can split inbound HTTP (or messaging, or WebSocket) across them, give them a host directory to work in, and let one guest call another. All of that is declared in a TOML manifest — you do not change guest or host code to add a second guest.
 
-Come here once a single-guest runtime works ([Composing a Runtime](composing-a-runtime.md)): passing a single `.wasm` path to `run` remains the zero-config shorthand, and the manifest takes over when you need more than one guest, routes, or mounts. This page is the canonical walk-through of the manifest and its concepts; the field-by-field schema is in [Configuration](../reference/configuration.md#deployment-manifest-omniatoml).
+Start here once a single-guest runtime works ([Composing a Runtime](composing-a-runtime.md)). Passing one `.wasm` path to `run` is still the zero-config case. Use a manifest when you have more than one guest, or when you need routes or mounts.
+
+This page walks through the manifest and the ideas behind it. The field-by-field schema is in [Configuration](../reference/configuration.md#deployment-manifest-omniatoml).
 
 ## The deployment manifest (`omnia.toml`)
 
@@ -12,13 +14,13 @@ Point the runtime at a manifest with `--config` (or the `OMNIA_CONFIG` environme
 cargo run --example http-routing -- run --config examples/http-routing/omnia.toml
 ```
 
-A runtime can also compile in a default deployment with the `runtime!` macro — a manifest path via the `config:` field, or the manifest itself via the inline `link`/`plugin`/`guests`/`mounts` keys (each guest entry carries its own `routes`) — used only when the command line supplies no source (see [Composing a Runtime](composing-a-runtime.md#default-manifest-config)).
+The `runtime!` macro can also compile a default deployment into the binary: a path via `config:`, or the manifest itself via the inline `link` / `plugin` / `guests` / `mounts` keys (each guest carries its own `routes`). That default is used only when the command line supplies no source. See [Composing a Runtime](composing-a-runtime.md#default-manifest-config).
 
 A manifest declares guests, mounts, routes, and (eventually) transports. Every field is optional except at least one `[[guest]]`. Paths resolve relative to the manifest's own directory.
 
 ```toml
 [[guest]]
-id = "api"                              # opaque identity; the runtime never parses it
+id = "api"                              # a name you choose; the runtime treats it as a string
 source.path = "./guests/api.wasm"       # .wasm or pre-compiled .bin
 routes.http = ["/"]
 
@@ -32,7 +34,7 @@ The full field reference lives in [Configuration](../reference/configuration.md#
 
 ## Programmatic manifests
 
-Everything the TOML expresses can also be assembled in Rust: `omnia::Manifest` is the same schema as a value, with fluent setters for guests, mounts, link interfaces, and routes. Pass it to the deployment builder (or the `runtime!`-generated `run(builder)`) instead of a file path:
+Everything the TOML expresses can also be assembled in Rust. `omnia::Manifest` is the same schema as a value, with fluent setters for guests, mounts, link interfaces, and routes. Pass it to the deployment builder (or the `runtime!`-generated `run(builder)`) instead of a file path:
 
 ```rust,ignore
 use omnia::{DeploymentBuilder, GuestEntry, Manifest};
@@ -45,21 +47,23 @@ let manifest = Manifest::new()
 host::run(DeploymentBuilder::new().manifest(manifest))?;
 ```
 
-`Manifest::from_config(path)?` loads a TOML file into the same value (resolving its relative paths against the file's directory), and `Manifest::from_wasm(path)` synthesizes the one-guest shorthand. Relative paths in a programmatic manifest resolve against the process working directory. The [`guest-link-dynamic`](../../examples/guest-link/dynamic.rs) example is a complete host built this way.
+`Manifest::from_config(path)?` loads a TOML file into the same value, resolving relative paths against the file's directory. `Manifest::from_wasm(path)` is the one-guest shorthand (what you get from `run guest.wasm`). Relative paths in a programmatic manifest resolve against the process working directory.
+
+The [`guest-link-dynamic`](../../examples/guest-link/dynamic.rs) example builds a host this way.
 
 ## Routing inbound traffic
 
-Each guest declares the routes that target it, one optional list per trigger; the runtime aggregates them into per-trigger route tables at load:
+This is the analogue of putting two services behind one reverse proxy. Each guest declares the routes that should reach it, one optional list per trigger. The runtime builds those into a route table per trigger at load:
 
-- **`routes.http`** — path prefixes matched by longest prefix. One HTTP server fronts all guests.
+- **`routes.http`** — path prefixes, longest prefix wins. One HTTP server fronts all guests.
 - **`routes.messaging`** — topics matched by NATS-style pattern (`.`-separated tokens, `*` matches one token, `>` matches the rest).
 - **`routes.websocket`** — same pattern syntax, for WebSocket routes.
 
-If a trigger has no routes and exactly one guest exports its handler, that guest is the catch-all — so single-guest deployments need no routes at all.
+If a trigger has no routes and exactly one guest exports its handler, that guest is the catch-all — so a single-guest deployment needs no routes at all.
 
 The [`http-routing`](../../examples/http-routing/) example runs two HTTP guests behind `/a` and `/b` prefixes.
 
-A messaging deployment works the same way: the host backend subscribes to topics (broker configuration such as `KAFKA_TOPICS`/`NATS_TOPICS`, or everything for the in-memory default), and each guest's route list picks which delivered messages it handles:
+A messaging deployment works the same way. The host backend subscribes to topics (broker configuration such as `KAFKA_TOPICS`/`NATS_TOPICS`, or everything for the in-memory default). Each guest's route list then picks which of those delivered messages it handles:
 
 ```toml
 [[guest]]
@@ -73,11 +77,11 @@ source.path = "./guests/billing.wasm"    # exports the messaging handler
 routes.messaging = ["invoices.*"]        # exactly one token after `invoices.`
 ```
 
-Each matched message instantiates a fresh instance of the routed guest, exactly like an HTTP request. Inside the guest, topic-to-handler matching stays exact — see [Messaging](messaging.md#handling-incoming-messages).
+Each matched message starts a fresh instance of the routed guest, exactly like an HTTP request. Inside the guest, topic-to-handler matching stays exact — see [Messaging](messaging.md#handling-incoming-messages).
 
 ## Mounts: giving guests a workspace
 
-Guests run in a sandbox with no filesystem access by default. A **mount** preopens a host directory into every guest's sandbox under a guest-visible name:
+Guests cannot see the host filesystem unless you say so. A **mount** takes a host directory and makes it visible inside every guest, under a name the guest can look up:
 
 ```toml
 [[mount]]
@@ -103,7 +107,7 @@ The [`model`](../../examples/model/) example lends a mounted workspace to a mode
 
 ## Guest-to-guest linking
 
-One guest can import an interface that another guest exports, with the host mediating the call. The deployment names the interface in its `[link] interfaces`:
+Two guests can talk without going out over the network. One guest **imports** an interface; another **exports** it; the host sits in the middle and copies the call across. Name the interface in `[link] interfaces` so the host knows to wire it:
 
 ```toml
 [link]
@@ -118,16 +122,18 @@ id = "router"
 source.path = "./router.wasm"           # imports omnia:link/echo
 ```
 
-At startup, the runtime polyfills each dispatched interface onto the shared linker and dispatches calls to whichever guest exports it, by in-memory routing to a fresh callee instance on its own task. The runtime sees only opaque interface strings and guest identities — no domain knowledge lives in the core (this is the glossary's [Law 2](../glossary.md#law-2)).
+When `router` calls `echo`, the host starts a fresh `responder` instance, runs the export, and copies the result back. The two guests never share memory. The host does not understand what `echo` means — it only sees the interface name and the guest ids.
 
-Notes:
+A few constraints:
 
-- `[link] interfaces` is deployment-wide: the linker is shared, so a dispatched interface is wired for the whole deployment, and any guest importing it may call it. `--link <interface>` on the command line unions with the manifest's list. An exporter need not be loaded at startup — a guest registered later can serve the interface. A runtime built without the `link` feature refuses a non-empty list at startup.
-- Nested dispatch depth is bounded by `MAX_DISPATCH_DEPTH` (default 8) to catch accidental recursion.
-- Only the in-process transport is implemented (in-memory routing); declaring `unix`, `nats`, or `quic` under `[transport]` is rejected at load.
+- The allow-list is deployment-wide. Any guest that imports a listed interface can call any guest that exports it. `--link <interface>` on the command line is added to the manifest's list. The exporter does not have to be present at startup; a guest registered later can still serve the call. A runtime built without Omnia's `link` feature refuses a non-empty list.
+- Calls can nest (A calls B calls C) up to `MAX_DISPATCH_DEPTH` (default 8), so accidental recursion cannot run forever.
+- Today the call stays in-process. Declaring `unix`, `nats`, or `quic` under `[transport]` is rejected at load.
 
-The [`guest-link`](../../examples/guest-link/) example is a complete router/responder pair.
+The [`guest-link`](../../examples/guest-link/) example is a complete caller/callee pair.
 
 ## How execution scales
 
-All guests share one wasmtime engine and linker, and each is pre-instantiated once at startup. Every inbound request or dispatched call then instantiates a fresh instance in its own store, so guests never share state within or across requests. The pooling allocator (on by default) recycles instance slots to keep per-request cost low — tunables are listed in [Configuration](../reference/configuration.md#instance-pooling).
+All guests share one wasmtime engine (the compiler/runtime) and one linker (the table of host functions). Each guest is prepared once at startup. Every inbound request — and every guest-to-guest call — then gets a **new instance**, discarded afterwards. Guests never keep state in memory across calls; put durable state behind a capability such as key-value or SQL.
+
+The pooling allocator (on by default) reuses the instance slots so this stays cheap. Tunables are in [Configuration](../reference/configuration.md#instance-pooling).
