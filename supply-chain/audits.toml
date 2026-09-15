@@ -611,7 +611,7 @@ end = "2026-09-11"
 
 [[trusted.smallvec]]
 criteria = "safe-to-deploy"
-user-id = 2017 # Matt Brubeck (mbrubeck)
+user-id = 2017
 start = "2019-10-28"
 end = "2026-09-11"
 
