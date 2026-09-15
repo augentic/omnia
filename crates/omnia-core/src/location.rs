@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 
 /// One place the plugin loader acquires packages from, discriminated by the
-/// keys present: `{ name, path }` or `{ registry }`.
+/// keys present: `{ name, path }` or `{ registry, config? }`.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum Location {
@@ -16,10 +16,19 @@ pub enum Location {
         /// Host directory. Relative paths resolve against the config file's directory.
         path: PathBuf,
     },
-    /// The deployment's default registry endpoint.
+    /// The deployment's registry policy: a default endpoint and, optionally,
+    /// a wasm-pkg client configuration routing namespaces and packages to
+    /// other registries.
     Registry {
-        /// The registry a load without an explicit endpoint resolves against.
+        /// The registry a package resolves against when nothing routes it
+        /// elsewhere.
         registry: String,
+        /// wasm-pkg client configuration, as TOML: `namespace_registries`,
+        /// `package_registry_overrides`, and per-registry backend settings.
+        /// The reachable registries are fixed by the deployment, so the
+        /// configuration is compiled in rather than read from a user file.
+        #[serde(default)]
+        config: Option<String>,
     },
 }
 
@@ -36,6 +45,16 @@ impl Location {
     pub fn registry(registry: impl Into<String>) -> Self {
         Self::Registry {
             registry: registry.into(),
+            config: None,
+        }
+    }
+
+    /// The default registry endpoint with wasm-pkg client configuration
+    /// routing namespaces and packages to other registries.
+    pub fn registry_config(registry: impl Into<String>, config: impl Into<String>) -> Self {
+        Self::Registry {
+            registry: registry.into(),
+            config: Some(config.into()),
         }
     }
 }

@@ -202,7 +202,7 @@ impl Manifest {
             .locations
             .iter()
             .filter_map(|location| match location {
-                Location::Registry { registry } => Some(registry.as_str()),
+                Location::Registry { registry, .. } => Some(registry.as_str()),
                 Location::Path { .. } => None,
             })
             .collect();
@@ -719,13 +719,26 @@ mod tests {
 
             [[plugin.location]]
             registry = "ghcr.io"
+            config = """
+            [namespace_registries]
+            wasi = "wasi.dev"
+            """
         "#;
 
         let mut manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
         manifest.resolve_paths(Path::new("/deploy/app"));
-        assert_eq!(
-            manifest.plugin.locations,
-            [Location::path(".", "/deploy/app/adapters"), Location::registry("ghcr.io"),]
+        let [path, registry] = manifest.plugin.locations.as_slice() else {
+            panic!("two locations, got {:?}", manifest.plugin.locations);
+        };
+        assert_eq!(*path, Location::path(".", "/deploy/app/adapters"));
+        let Location::Registry { registry, config } = registry else {
+            panic!("a registry location, got {registry:?}");
+        };
+        assert_eq!(registry, "ghcr.io");
+        // The wasm-pkg configuration rides the entry verbatim; the acquirer parses it.
+        assert!(
+            config.as_deref().is_some_and(|config| config.contains("wasi = \"wasi.dev\"")),
+            "{config:?}"
         );
         #[cfg(feature = "plugin")]
         manifest.validate(false).expect("one registry is allowed");

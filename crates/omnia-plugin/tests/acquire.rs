@@ -215,6 +215,43 @@ async fn release_scoped() {
     assert_eq!(override_bytes, b"override registry bytes");
 }
 
+// The configuration's routing decides a package's registry when the load
+// names none: a package override first, then its namespace, then the
+// default; an explicit endpoint beats all three.
+#[tokio::test]
+async fn config_routing() {
+    let default_root = TempDir::new().expect("default registry dir");
+    stage(default_root.path(), PACKAGE, b"default registry bytes");
+    stage(default_root.path(), "acme:ledger@2.1.0", b"default ledger bytes");
+    let acme_root = TempDir::new().expect("acme registry dir");
+    stage(acme_root.path(), "acme:ledger@2.1.0", b"acme registry bytes");
+    stage(acme_root.path(), "acme:pinned@1.0.0", b"acme pinned bytes");
+    let pinned_root = TempDir::new().expect("pinned registry dir");
+    stage(pinned_root.path(), "acme:pinned@1.0.0", b"pinned registry bytes");
+
+    let mut config = Config::from_toml(
+        "[namespace_registries]\nacme = \"acme.test\"\n\n\
+         [package_registry_overrides]\n\"acme:pinned\" = \"pinned.test\"\n",
+    )
+    .expect("routing config parses");
+    add_local_registry(&mut config, DEFAULT_REGISTRY, default_root.path());
+    add_local_registry(&mut config, "acme.test", acme_root.path());
+    add_local_registry(&mut config, "pinned.test", pinned_root.path());
+    let acquirer = RegistryClient::new(DEFAULT_REGISTRY).with_config(config);
+
+    let unmapped = acquirer.acquire(PACKAGE, None).await.expect("default acquires");
+    assert_eq!(unmapped, b"default registry bytes", "an unmapped namespace falls to the default");
+    let namespaced = acquirer.acquire("acme:ledger@2.1.0", None).await.expect("acme acquires");
+    assert_eq!(namespaced, b"acme registry bytes", "a mapped namespace routes past the default");
+    let pinned = acquirer.acquire("acme:pinned@1.0.0", None).await.expect("pinned acquires");
+    assert_eq!(pinned, b"pinned registry bytes", "a package override beats its namespace");
+    let explicit = acquirer
+        .acquire("acme:ledger@2.1.0", Some(DEFAULT_REGISTRY))
+        .await
+        .expect("explicit endpoint acquires");
+    assert_eq!(explicit, b"default ledger bytes", "an explicit endpoint beats the routing");
+}
+
 #[tokio::test]
 async fn cacheless() {
     let registry = TempDir::new().expect("registry dir");

@@ -291,9 +291,9 @@ mod tests {
     }
 
     // The declarative locations grammar: each entry lowers into a
-    // `Location` on the inline manifest, and the declared `locations:`
-    // list links the loader host and makes the generated `Wiring::extend`
-    // install them.
+    // `Location` on the inline manifest — the registry entry with its
+    // wasm-pkg configuration — and the declared `locations:` list links the
+    // loader host and makes the generated `Wiring::extend` install them.
     #[test]
     fn expand_locations() {
         insta::assert_snapshot!(expand_pretty(quote!({
@@ -301,7 +301,7 @@ mod tests {
             plugin: {
                 locations: [
                     { name: ".", path: project_root() },
-                    { registry: "ghcr.io" },
+                    { registry: "ghcr.io", config: include_str!("wasm-pkg.toml") },
                 ],
             },
             guests: [
@@ -338,6 +338,21 @@ mod tests {
                 WasiOtel: OtelDefault,
             },
         })));
+    }
+
+    // A location's `config` is the registry acquirer's wasm-pkg
+    // configuration, so it has no meaning on a path entry.
+    #[test]
+    fn config_on_path_location() {
+        let error = syn::parse2::<Config>(quote!({
+            plugin: {
+                locations: [{ name: ".", path: project_root(), config: "" }],
+            },
+            guests: [{ id: "api", source: "api.wasm" }],
+        }))
+        .err()
+        .expect("config on a path location must be refused");
+        assert!(error.to_string().contains("a path location carries none"), "{error}");
     }
 
     // Locations are manifest data, so they conflict with `config:` like

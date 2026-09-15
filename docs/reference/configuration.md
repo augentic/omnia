@@ -106,6 +106,10 @@ path = "./adapters"                 # host directory, opened at startup
 
 [[plugin.location]]
 registry = "ghcr.io"                # default registry for package loads (at most one)
+config = """                        # optional wasm-pkg client configuration (TOML)
+[namespace_registries]
+wasi = "wasi.dev"
+"""
 
 # --- Transport (optional) ----------------------------------------------
 [transport]
@@ -119,6 +123,6 @@ Field notes:
 - **`[link] interfaces`** — deployment-wide host-mediated interfaces, unioned with CLI `--link` values. The host polyfills each onto the shared linker and dispatches calls to whichever guest exports it — including a guest registered after startup. There is no per-guest form: the linker is shared, so a dispatched interface is wired for the whole deployment. A runtime built without the `link` feature refuses a non-empty list at startup; a top-level `plugins = [...]` is a parse error naming `[link] interfaces`.
 - **`guest.command`** — marks the guest command mode drives (its `wasi:cli/run`); at most one guest may carry it. Without a mark, the sole `wasi:cli/run` exporter is the catch-all — several unmarked exporters fail the run as ambiguous.
 - **`mount`** — preopened into *every* guest sandbox. CLI `--mount` entries layer on top; a duplicate guest-visible name wins over the manifest.
-- **`[[plugin.location]]`** — where the `omnia:plugins/loader` acquires packages: `{ name, path }` entries are named roots for path loads (all fold into one `PathMounts`, opened when the runtime assembles), `{ registry }` the default endpoint for package references (at most one); an entry mixing the two shapes is a parse error. Only a runtime whose `runtime!` declares a `plugin:` block beside `config:` installs them, and it must be built with omnia's `plugin` feature — a runtime without it refuses a manifest carrying any `[[plugin.location]]` entry at startup; with no entries every load refuses typed. A top-level `[[location]]` is a parse error naming `[[plugin.location]]`.
+- **`[[plugin.location]]`** — where the `omnia:plugins/loader` acquires packages: `{ name, path }` entries are named roots for path loads (all fold into one `PathMounts`, opened when the runtime assembles), `{ registry, config? }` the registry policy for package references (at most one): the default endpoint and, optionally, a wasm-pkg client configuration as TOML routing namespaces and packages to other registries; an entry mixing the two shapes is a parse error. Only a runtime whose `runtime!` declares a `plugin:` block beside `config:` installs them, and it must be built with omnia's `plugin` feature — a runtime without it refuses a manifest carrying any `[[plugin.location]]` entry at startup; with no entries every load refuses typed. A top-level `[[location]]` is a parse error naming `[[plugin.location]]`.
 - **`guest.routes`** — inbound routes targeting the declaring guest, one list per trigger: `http` prefixes (longest prefix wins), `messaging` topics and `websocket` routes (NATS-style: `*` one token, `>` the rest). Route tables are aggregated across guests at load. If a trigger has no routes and exactly one guest exports its handler, that guest is the catch-all. CLI routes are not yet parsed; a sole `wasi:cli/run` exporter receives command-mode invocations.
 - **`transport`** — `in-process` (the default) is in-memory routing of lifted values to a fresh callee task. `unix`, `nats`, and `quic` are reserved for distributed dispatch and rejected at load today.
