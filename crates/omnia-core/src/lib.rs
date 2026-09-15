@@ -25,7 +25,7 @@ pub use pastey;
 pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
 pub use self::artifact::{ELF_MAGIC, GuestArtifact, LoadedGuest, is_precompiled};
-pub use self::chain::{ChainCtx, ChainPolicy, as_command_chain, with_chain};
+pub use self::chain::{ChainCtx, ChainPolicy, as_command_chain};
 pub use self::digest::sha256_digest;
 pub use self::dispatch::Dispatcher;
 pub use self::extensions::Extensions;
@@ -47,7 +47,7 @@ pub use self::store::{
     StoreConfig, StoreCtx, StoreView,
 };
 pub use self::telemetry::{LogMode, Telemetry};
-pub use self::value::{handle_kind, plain_signature};
+pub use self::value::handle_kind;
 
 /// Generates the standard host-error conversions every `omnia` WASI host
 /// crate repeats.

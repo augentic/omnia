@@ -21,3 +21,6 @@ futures.workspace = true
 omnia-core.workspace = true
 tracing.workspace = true
 wasmtime = { workspace = true, features = ["runtime"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+wasmtime = { workspace = true, features = ["cranelift", "wat"] }
