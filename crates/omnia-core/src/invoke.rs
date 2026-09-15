@@ -42,7 +42,10 @@ impl fmt::Display for InvokeError {
         match self {
             Self::Timeout(bound) => write!(f, "timed out after {bound:?}"),
             Self::Handle(kind) => write!(f, "a {kind} handle cannot cross the link seam"),
-            Self::Trap(err) => write!(f, "{err:#}"),
+            // Trap and Join are transparent — display shows the top of the
+            // inner chain and `source` exposes the rest — so an `anyhow` wrap
+            // renders the chain exactly once under `{:#}`.
+            Self::Trap(err) => write!(f, "{err}"),
             Self::Join(err) => write!(f, "{err}"),
         }
     }
@@ -51,8 +54,8 @@ impl fmt::Display for InvokeError {
 impl std::error::Error for InvokeError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Trap(err) => Some(err.as_ref()),
-            Self::Join(err) => Some(err),
+            Self::Trap(err) => err.chain().nth(1),
+            Self::Join(err) => std::error::Error::source(err),
             Self::Timeout(_) | Self::Handle(_) => None,
         }
     }

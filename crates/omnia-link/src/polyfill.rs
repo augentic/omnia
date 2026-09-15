@@ -26,7 +26,6 @@ pub type WiredLinks = BTreeMap<Box<str>, BTreeMap<Box<str>, Wired>>;
 /// One polyfilled function as its first importer declared it.
 #[derive(Clone)]
 pub struct Wired {
-    pub is_async: bool,
     pub ty: types::ComponentFunc,
     pub importer: GuestId,
 }
@@ -91,12 +90,12 @@ pub fn polyfill_component<T: 'static>(
             };
             let is_async = ty.async_();
             match wired_funcs.get(func) {
-                Some(earlier) if earlier.is_async == is_async => {}
+                Some(earlier) if earlier.ty.async_() == is_async => {}
                 Some(earlier) => bail!(
                     "guest `{id}` imports `{name}/{func}` as {}, but an earlier guest wired it \
                      as {}; every importer of a host-mediated function must agree on asyncness",
                     describe(is_async),
-                    describe(earlier.is_async),
+                    describe(earlier.ty.async_()),
                 ),
                 None => {
                     if let Err(kind) = plain_signature(&ty) {
@@ -153,7 +152,6 @@ pub fn polyfill_component<T: 'static>(
         }
         wired_funcs.extend(funcs.into_iter().map(|(func, ty)| {
             let wired = Wired {
-                is_async: ty.async_(),
                 ty,
                 importer: id.clone(),
             };

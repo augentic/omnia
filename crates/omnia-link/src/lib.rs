@@ -82,13 +82,6 @@ impl InProcessLinks {
         }
     }
 
-    /// The deployment's host-mediated link interface names — the set of
-    /// interfaces to polyfill (caller side) and serve (callee side).
-    #[must_use]
-    pub const fn interfaces(&self) -> &BTreeSet<Box<str>> {
-        &self.interfaces
-    }
-
     // What every polyfilled import captures for its per-call dispatch.
     fn caller(&self) -> Arc<Caller> {
         Arc::new(Caller {

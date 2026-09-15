@@ -7,7 +7,7 @@ use anyhow::{Context as _, Result, ensure};
 use omnia_core::{GuestId, StoreFactory};
 use wasmtime::component::{InstancePre, types};
 
-use super::polyfill::{Wired, WiredLinks};
+use super::polyfill::WiredLinks;
 use super::route::{Linked, Route, RouteInvoke, Routes};
 
 /// Resolve one guest's exports of the declared `interfaces` into a route and
@@ -53,9 +53,21 @@ pub fn serve_guest<T: Send + 'static>(
             };
             // Only the bootstrap importers are in the snapshot; a skew a late
             // importer introduces is still refused at lower time by
-            // wasmtime's name-checked `Val` typing.
+            // wasmtime's name-checked `Val` typing. `types::Type` compares
+            // structurally across components; `ComponentFunc` does not, hence
+            // element-wise.
             if let Some(import) = wired.get(interface).and_then(|funcs| funcs.get(func)) {
-                check_signature(id, interface, func, &func_ty, import)?;
+                let same = func_ty.async_() == import.ty.async_()
+                    && func_ty.params().eq(import.ty.params())
+                    && func_ty.results().eq(import.ty.results());
+                ensure!(
+                    same,
+                    "guest `{id}` exports `{interface}/{func}` with a signature that differs \
+                     from what guest `{}` imports: exported `{}`, imported `{}`",
+                    import.importer,
+                    render(&func_ty),
+                    render(&import.ty),
+                );
             }
             let (_, export) = component
                 .get_export(Some(&iface_idx), func)
@@ -78,25 +90,6 @@ pub fn serve_guest<T: Send + 'static>(
         }) as Arc<dyn RouteInvoke>
     });
     routes.park(id, route)
-}
-
-// `types::Type` compares structurally across components; `ComponentFunc` does
-// not, hence element-wise.
-fn check_signature(
-    exporter: &GuestId, interface: &str, func: &str, export: &types::ComponentFunc, import: &Wired,
-) -> Result<()> {
-    let same = export.async_() == import.ty.async_()
-        && export.params().eq(import.ty.params())
-        && export.results().eq(import.ty.results());
-    ensure!(
-        same,
-        "guest `{exporter}` exports `{interface}/{func}` with a signature that differs from what \
-         guest `{}` imports: exported `{}`, imported `{}`",
-        import.importer,
-        render(export),
-        render(&import.ty),
-    );
-    Ok(())
 }
 
 fn render(ty: &types::ComponentFunc) -> String {

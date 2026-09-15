@@ -200,7 +200,7 @@ async fn link_skewed() {
 // more: `2` lands exactly on the bound, `3` would need depth 4. Were the
 // dispatcher to restart the chain at 0, `3` would succeed.
 #[tokio::test]
-async fn dispatcher_depth_propagates() {
+async fn relay_via_dispatcher() {
     let runtime = boot_with(
         &[("echoer", test_programs::LINK_RELAY), ("full", test_programs::LINK_FULL)],
         |builder| builder.max_dispatch_depth(3),

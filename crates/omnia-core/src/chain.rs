@@ -49,12 +49,6 @@ where
     )
 }
 
-/// The context of the dispatch chain currently being served (a capped root
-/// outside any scope).
-fn current_chain() -> ChainCtx {
-    CHAIN_CTX.try_with(|ctx| *ctx).unwrap_or_default()
-}
-
 /// The deployment-wide bounds on a dispatch chain: its maximum nesting depth
 /// and the wall-clock cap on each server-rooted hop.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,7 +72,8 @@ impl ChainPolicy {
     ///
     /// Returns an error if the hop would exceed `max_depth`.
     pub fn enter(&self, target: &GuestId) -> Result<ChainCtx> {
-        let current = current_chain();
+        // The chain currently being served; a capped root outside any scope.
+        let current = CHAIN_CTX.try_with(|ctx| *ctx).unwrap_or_default();
         let depth = current.depth + 1;
         if depth > self.max_depth {
             bail!(
