@@ -175,14 +175,12 @@ async fn relay(
         .select(interface, func, params)
         .with_context(|| format!("selecting target for `{interface}/{func}`"))?;
 
-    // Plain records cross by value; a live resource handle never crosses.
-    for value in &*forwarded {
-        if handle_kind(value).is_some() {
-            bail!(
-                "a resource handle cannot cross the link seam (call to `{interface}/{func}`, \
-                 target `{target}`)"
-            );
-        }
+    // Plain records cross by value; a live handle never crosses.
+    if let Some(kind) = forwarded.iter().find_map(handle_kind) {
+        bail!(
+            "a {kind} handle cannot cross the link seam (call to `{interface}/{func}`, \
+             target `{target}`)"
+        );
     }
 
     let ctx = caller.policy.enter(&target)?;

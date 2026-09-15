@@ -40,14 +40,12 @@ pub async fn dispatch<B>(
 where
     B: Clone + Send + Sync + 'static,
 {
-    // Plain records cross by value; a live resource handle never crosses.
-    for value in &args {
-        if handle_kind(value).is_some() {
-            bail!(
-                "a resource handle cannot cross the link seam \
-                 (host→guest `{interface}/{func}`, target `{target}`)"
-            );
-        }
+    // Plain records cross by value; a live handle never crosses.
+    if let Some(kind) = args.iter().find_map(handle_kind) {
+        bail!(
+            "a {kind} handle cannot cross the link seam \
+             (host→guest `{interface}/{func}`, target `{target}`)"
+        );
     }
 
     let instance_pre = runtime
