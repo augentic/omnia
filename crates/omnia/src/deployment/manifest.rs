@@ -46,16 +46,14 @@ pub struct PluginConfig {
 
 /// The deployment manifest: which guests load and how host-mediated calls
 /// travel.
-///
-/// `deny_unknown_fields` turns a stale top-level section (for example the
-/// removed `[[route.*]]` tables — routes now live on each `[[guest]]`) into a
-/// loud parse error rather than a silent no-op.
 #[derive(Clone, Debug, Default, Deserialize)]
-#[serde(try_from = "ManifestDe")]
+#[serde(default, deny_unknown_fields)]
 pub struct Manifest {
     /// Registry population: each entry maps an identity to a source.
+    #[serde(rename = "guest")]
     pub guests: Vec<GuestEntry>,
     /// Working-tree mounts preopened into the guest sandbox.
+    #[serde(rename = "mount")]
     pub mounts: Vec<Mount>,
     /// Host-mediated link interfaces polyfilled onto the shared linker.
     pub link: LinkConfig,
@@ -63,41 +61,6 @@ pub struct Manifest {
     pub plugin: PluginConfig,
     /// Transport configuration for host-mediated calls.
     pub transport: Transport,
-}
-
-#[derive(Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct ManifestDe {
-    #[serde(rename = "guest")]
-    guests: Vec<GuestEntry>,
-    #[serde(rename = "mount")]
-    mounts: Vec<Mount>,
-    link: LinkConfig,
-    plugin: PluginConfig,
-    transport: Transport,
-    plugins: Option<toml::Value>,
-    #[serde(rename = "location")]
-    location: Option<toml::Value>,
-}
-
-impl TryFrom<ManifestDe> for Manifest {
-    type Error = &'static str;
-
-    fn try_from(de: ManifestDe) -> Result<Self, Self::Error> {
-        if de.plugins.is_some() {
-            return Err("link interfaces moved to `[link] interfaces`");
-        }
-        if de.location.is_some() {
-            return Err("moved to `[[plugin.location]]`");
-        }
-        Ok(Self {
-            guests: de.guests,
-            mounts: de.mounts,
-            link: de.link,
-            plugin: de.plugin,
-            transport: de.transport,
-        })
-    }
 }
 
 impl Manifest {
@@ -351,10 +314,6 @@ impl Mount {
 }
 
 /// A single registry population entry.
-///
-/// `deny_unknown_fields` turns a stale per-guest key (for example the removed
-/// `link` list — plugin interfaces are deployment-wide now) into a loud
-/// parse error rather than a silent no-op.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GuestEntry {
@@ -508,9 +467,7 @@ pub struct GuestRoutes {
 /// Transport configuration for host-mediated calls.
 ///
 /// Only the in-process default is implemented; manifest validation rejects any
-/// other value, and `#[serde(deny_unknown_fields)]` turns a stale distributed
-/// `[transport.target.*]` section into a loud parse error rather than a silent
-/// no-op.
+/// other value.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Transport {
@@ -568,42 +525,15 @@ mod tests {
     }
 
     #[test]
-    fn reject_stale_link_keys() {
-        // The removed top-level `link` array must fail loudly now that `link`
-        // is a table (`[link] interfaces`).
-        let toml = "link = [\"omnia:shared/log\"]\n\n\
-             [[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\n";
+    fn reject_unknown_keys() {
+        let toml = "bogus = 1\n\n[[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\n";
         toml::from_str::<Manifest>(toml).unwrap_err();
 
-        // So must the renamed top-level `dispatch` list.
-        let toml = "dispatch = [\"omnia:shared/log\"]\n\n\
-             [[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\n";
+        let toml = "[[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\nbogus = 1\n";
         toml::from_str::<Manifest>(toml).unwrap_err();
 
-        // So must the removed per-guest form (link interfaces are deployment-wide).
-        let toml = "[[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\n\
-             link = [\"omnia:link/echo\"]\n";
+        let toml = "[[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\n\n[transport]\nbogus = 1\n";
         toml::from_str::<Manifest>(toml).unwrap_err();
-
-        // And `plugins` misplaced on a guest entry.
-        let toml = "[[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\n\
-             plugins=[\"omnia:link/echo\"]\n";
-        toml::from_str::<Manifest>(toml).unwrap_err();
-
-        // A top-level plugins array names the new `[link] interfaces` table.
-        let toml = "plugins=[\"omnia:shared/log\"]\n\n\
-             [[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\n";
-        let error = toml::from_str::<Manifest>(toml).unwrap_err();
-        assert!(
-            error.to_string().contains("link interfaces moved to `[link] interfaces`"),
-            "{error}"
-        );
-
-        // Top-level `[[location]]` names the nested table.
-        let toml = "[[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\n\n\
-             [[location]]\nname = \".\"\npath = \"adapters\"\n";
-        let error = toml::from_str::<Manifest>(toml).unwrap_err();
-        assert!(error.to_string().contains("moved to `[[plugin.location]]`"), "{error}");
     }
 
     #[test]
@@ -647,21 +577,6 @@ mod tests {
         // Longest-prefix matching is preserved across guest-owned lists.
         assert_eq!(routes.http().resolve("/a/x"), Some(&GuestId::from("a")));
         assert_eq!(routes.http().resolve("/a/b/x"), Some(&GuestId::from("b")));
-    }
-
-    #[test]
-    fn reject_top_level_route_tables() {
-        // The removed `[[route.*]]` schema must fail loudly, not be ignored.
-        let toml = r#"
-            [[guest]]
-            id = "mcp"
-            source.path = "./guests/mcp.wasm"
-
-            [[route.http]]
-            prefix = "/mcp"
-            guest = "mcp"
-        "#;
-        toml::from_str::<Manifest>(toml).unwrap_err();
     }
 
     #[test]
@@ -810,14 +725,6 @@ mod tests {
              [transport]\ndefault = \"unix\"\n";
         let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
         assert!(manifest.validate(false).is_err(), "distributed transport is not yet implemented");
-    }
-
-    #[test]
-    fn reject_stale_target_section() {
-        // A leftover distributed-transport target must fail loudly, not be ignored.
-        let toml = "[[guest]]\nid = \"only\"\nsource.path = \"./only.wasm\"\n\n\
-             [transport.target.remote]\nkind = \"unix\"\n";
-        toml::from_str::<Manifest>(toml).unwrap_err();
     }
 
     #[test]

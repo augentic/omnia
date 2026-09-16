@@ -58,7 +58,7 @@ Omnia's off-by-default `plugin` cargo feature: the `omnia:plugins/loader` capabi
 
 ### Plugin loader
 
-The `omnia:plugins/loader` host capability: a guest names a package (location plus optional sha256 pin) and the host acquires, verifies, validates, and registers it, returning a typed handle. Request-only — component bytes never cross the interface, and the requester gains no lifecycle authority. Ships behind omnia's `plugin` feature; linked when the deployment declares plugin locations (the macro's `plugin: { locations: [...] }` list, or a bare `plugin: {}` beside `config:` over the TOML's `[[plugin.location]]` entries); reachable only from worlds that import it. The requester surface — the `Plugins` capability trait, shared `PluginRef`/`Digest` types, and ensure-once handle memoization — ships in `omnia-sdk`'s `plugins` module.
+The `omnia:plugins/loader` host capability: a guest names a package (location plus optional sha256 pin) and the host acquires, verifies, validates, and registers it, returning a typed handle. Request-only — component bytes never cross the interface, and the requester gains no lifecycle authority. Ships behind omnia's `plugin` feature; linked when the deployment declares plugin locations (the macro's `plugin: { locations: [...] }` list, or a bare `plugin: {}` beside `config:` over the TOML's `[[plugin.location]]` entries); reachable only from worlds that import it. The requester surface — the `Plugins` capability trait and shared `PluginRef`/`Digest` types — ships in `omnia-sdk`'s `plugins` module.
 
 ### Acquisition policy
 

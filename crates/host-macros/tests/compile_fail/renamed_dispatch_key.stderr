@@ -1,5 +1,0 @@
-error: the `dispatch:` key was renamed; declare host-mediated interfaces with the top-level `link: { interfaces: [...] }` block
- --> tests/compile_fail/renamed_dispatch_key.rs:2:5
-  |
-2 |     dispatch: ["omnia:shared/log"],
-  |     ^^^^^^^^

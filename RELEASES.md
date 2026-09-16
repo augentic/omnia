@@ -49,11 +49,8 @@
   refusals mirroring the WIT error variant with kebab-case `code()`
   discriminants and a conversion into the guest `Error` taxonomy
   (`unavailable` → `BadGateway`, `internal` → `ServerError`, every other
-  refusal → `BadRequest`), and `PluginCache` — ensure-once memoization of
-  handles by package identity (never bytes; a conflicting re-pin refuses
-  `already-active`, mirroring the host), itself a `Plugins` provider so a
-  caller bounded on the capability memoizes without naming the cache. No
-  consumer vocabulary anywhere: any requester-class world can use it.
+  refusal → `BadRequest`). No consumer vocabulary anywhere: any
+  requester-class world can use it.
 
 - `hosts:` rows accept compiled-in connect options: `Host: Backend(options)`
   lowers to `Backend::connect_with(options)` instead of the env-sourced
@@ -513,8 +510,7 @@
   loader host. Because locations are manifest data they conflict with
   `config:` like every other inline key; a config-file deployment declares
   `[[location]]` entries in the TOML. The bundle-carried `cache:` option is
-  gone (a spanned diagnostic names the migration): a store-backed registry
-  acquirer is installed by hand — `Plugins::install` over
+  gone: a store-backed registry acquirer is installed by hand — `Plugins::install` over
   `RegistryClient::new(..).cached(store)` from a custom `Wiring::extend`.
 
   ```rust
@@ -555,10 +551,9 @@
   a top-level `plugins = [...]` in TOML, a top-level `plugins: [...]` key in
   the `runtime!` macro, the fluent `Manifest::plugins(...)` setter (with the
   `Manifest.plugins` field and the `Manifest::link_interfaces()` accessor),
-  and the CLI flag `--plugins` (replacing `--dispatch`, no alias). Stale keys
-  fail loudly: a leftover top-level `dispatch` (or `link`) is a parse/compile
-  error, and `plugins` misplaced on a guest entry is rejected with a pointed
-  diagnostic. Behavior is unchanged: listed interfaces are polyfilled onto
+  and the CLI flag `--plugins` (replacing `--dispatch`, no alias). A
+  leftover top-level `dispatch` (or `link`), or `plugins` misplaced on a
+  guest entry, is a parse/compile error. Behavior is unchanged: listed interfaces are polyfilled onto
   the shared linker at assemble (an exporter may arrive later via
   `Runtime::register`), and the selector still picks the target guest by
   routing id at call time. The dispatch *mechanism* keeps its names —
@@ -576,9 +571,9 @@
   `--link`, no alias). The per-guest form (`GuestEntry.link` in TOML,
   `link:` on a macro guest entry, `GuestEntry::link()`) is removed — the
   linker is shared, so per-guest lists always flattened into one
-  deployment-level grant and never enforced a per-guest ACL. Stale keys
-  fail loudly: a leftover `link` (top-level or per-guest) or a `dispatch`
-  misplaced on a guest entry is a parse/compile error. Behavior is
+  deployment-level grant and never enforced a per-guest ACL. A leftover
+  `link` (top-level or per-guest) or a `dispatch` misplaced on a guest
+  entry is a parse/compile error. Behavior is
   unchanged: listed interfaces are polyfilled onto the shared linker at
   assemble (an exporter may arrive later via `Runtime::register`), and the
   selector still picks the target guest by routing id at call time. WIT

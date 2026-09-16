@@ -6,10 +6,8 @@
 //! validates, and registers it, handing back a typed [`Plugin`] handle.
 //! Component bytes never cross the interface in either direction.
 
-use std::collections::BTreeMap;
 use std::future::Future;
 use std::str::FromStr;
-use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use serde::{Deserialize, Serialize};
 
@@ -257,65 +255,6 @@ mod wire {
                 loader::Error::Internal(detail) => Self::Internal(detail),
             }
         }
-    }
-}
-
-/// Ensure-once memoization over a [`Plugins`] provider: handles are memoized
-/// by package identity for the instance's lifetime — never bytes, whose
-/// caching stays inside the host's acquirer.
-pub struct PluginCache<P: Plugins> {
-    provider: P,
-    loaded: Mutex<BTreeMap<String, Plugin>>,
-}
-
-impl<P: Plugins> PluginCache<P> {
-    /// An empty memo over `provider`.
-    #[must_use]
-    pub const fn new(provider: P) -> Self {
-        Self {
-            provider,
-            loaded: Mutex::new(BTreeMap::new()),
-        }
-    }
-
-    /// Load `plugin` at most once per package: a memo hit returns the held
-    /// handle without touching the host.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::AlreadyActive`] when a memoized package is re-pinned
-    /// to a different digest (mirroring the host's refusal), or the
-    /// provider's own [`Error`] on a cold load.
-    pub async fn ensure(&self, plugin: &PluginRef) -> Result<Plugin, Error> {
-        let held = self.lock().get(&plugin.package).cloned();
-        if let Some(held) = held {
-            return match &plugin.digest {
-                Some(pin) if pin != held.digest() => Err(Error::AlreadyActive(format!(
-                    "`{}` is active with digest {}",
-                    plugin.package,
-                    held.digest()
-                ))),
-                _ => Ok(held),
-            };
-        }
-        // The lock is never held across the await: a racing duplicate load
-        // is harmless because the host load is idempotent.
-        let handle = self.provider.load(plugin).await?;
-        self.lock().insert(plugin.package.clone(), handle.clone());
-        Ok(handle)
-    }
-
-    fn lock(&self) -> MutexGuard<'_, BTreeMap<String, Plugin>> {
-        self.loaded.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-}
-
-/// A cache is itself a [`Plugins`] provider, so a caller bounded on the
-/// capability memoizes without naming the cache: every `load` is an
-/// [`ensure`](PluginCache::ensure).
-impl<P: Plugins> Plugins for PluginCache<P> {
-    fn load(&self, plugin: &PluginRef) -> impl Future<Output = Result<Plugin, Error>> + Send {
-        self.ensure(plugin)
     }
 }
 

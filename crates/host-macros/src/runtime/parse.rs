@@ -302,12 +302,9 @@ mod kw {
     syn::custom_keyword!(hosts);
     syn::custom_keyword!(config);
     syn::custom_keyword!(plugin);
-    syn::custom_keyword!(plugins);
     syn::custom_keyword!(guests);
     syn::custom_keyword!(mounts);
-    syn::custom_keyword!(routes);
     syn::custom_keyword!(link);
-    syn::custom_keyword!(dispatch);
 }
 
 /// One `key: value` setting, tagged with its key name and span so
@@ -373,29 +370,6 @@ impl Parse for Opt {
             let key = input.parse::<kw::mounts>()?;
             input.parse::<Token![:]>()?;
             ("mounts", key.span, OptValue::Mounts(parse_bracketed_list(input)?))
-        } else if input.peek(kw::routes) {
-            // A pointed migration diagnostic, deliberately outside the
-            // lookahead set so unrelated unknown keys don't suggest `routes`.
-            let key = input.parse::<kw::routes>()?;
-            return Err(syn::Error::new(
-                key.span,
-                "the top-level `routes:` key was removed; declare routes on each guest entry \
-                 (`guests: [{ id: ..., source: ..., routes: { http: [...] } }]`)",
-            ));
-        } else if input.peek(kw::plugins) {
-            let key = input.parse::<kw::plugins>()?;
-            return Err(syn::Error::new(
-                key.span,
-                "the `plugins:` key was split; declare host-mediated interfaces with `link: { \
-                 interfaces: [...] }` and plugin locations with `plugin: { locations: [...] }`",
-            ));
-        } else if input.peek(kw::dispatch) {
-            let key = input.parse::<kw::dispatch>()?;
-            return Err(syn::Error::new(
-                key.span,
-                "the `dispatch:` key was renamed; declare host-mediated interfaces with the \
-                 top-level `link: { interfaces: [...] }` block",
-            ));
         } else {
             return Err(l.error());
         };
@@ -500,15 +474,6 @@ impl Parse for GuestSpec {
                     command = lit.value();
                     command_span = command.then(|| key.span());
                 }
-                // A pointed migration diagnostic: the per-guest `link:` list
-                // was removed — plugin interfaces are deployment-wide.
-                "link" | "dispatch" | "plugins" => {
-                    return Err(syn::Error::new(
-                        key.span(),
-                        "host-mediated interfaces are deployment-wide; declare them with the \
-                         top-level `link: { interfaces: [...] }` block, not on a guest entry",
-                    ));
-                }
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
@@ -540,13 +505,6 @@ impl Parse for LinkSpec {
         parse_kv_block(input, |key, value| {
             match key.to_string().as_str() {
                 "interfaces" => spec.interfaces = parse_bracketed_list(value)?,
-                "locations" => {
-                    return Err(syn::Error::new(
-                        key.span(),
-                        "plugin locations belong in `plugin: { locations: [...] }`, not in \
-                         `link:`",
-                    ));
-                }
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
@@ -571,22 +529,6 @@ impl Parse for PluginSpec {
                 "locations" => {
                     spec.locations = parse_bracketed_list(value)?;
                     locations_span = Some(key.span());
-                }
-                "interfaces" => {
-                    return Err(syn::Error::new(
-                        key.span(),
-                        "host-mediated interfaces belong in `link: { interfaces: [...] }`, not \
-                         in `plugin:`",
-                    ));
-                }
-                "cache" => {
-                    return Err(syn::Error::new(
-                        key.span(),
-                        "the `cache:` key was removed; a declared registry location reads \
-                         fresh. To cache, assemble the runtime by hand and install \
-                         `omnia::Plugins` over an `omnia::RegistryClient::cached(store)` from \
-                         `Wiring::extend`",
-                    ));
                 }
                 other => {
                     return Err(syn::Error::new(

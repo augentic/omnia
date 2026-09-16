@@ -1,5 +1,0 @@
-error: unknown plugin key `acquire`; expected `locations`
- --> tests/compile_fail/plugins_acquire_removed.rs:3:9
-  |
-3 |         acquire: MountAcquire,
-  |         ^^^^^^^
