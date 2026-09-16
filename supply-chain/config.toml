@@ -379,10 +379,6 @@ criteria = "safe-to-deploy"
 version = "0.33.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.glob]]
-version = "0.3.4"
-criteria = "safe-to-run"
-
 [[exemptions.hashbrown]]
 version = "0.14.2"
 criteria = "safe-to-deploy"
@@ -846,10 +842,6 @@ criteria = "safe-to-deploy"
 [[exemptions.tagptr]]
 version = "0.2.0"
 criteria = "safe-to-deploy"
-
-[[exemptions.target-tuple]]
-version = "1.0.2"
-criteria = "safe-to-run"
 
 [[exemptions.tempfile]]
 version = "3.3.0"
