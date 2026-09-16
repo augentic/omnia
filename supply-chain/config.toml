@@ -927,10 +927,6 @@ criteria = "safe-to-deploy"
 version = "0.3.23"
 criteria = "safe-to-deploy"
 
-[[exemptions.trybuild]]
-version = "1.0.121"
-criteria = "safe-to-run"
-
 [[exemptions.tungstenite]]
 version = "0.30.0"
 criteria = "safe-to-deploy"

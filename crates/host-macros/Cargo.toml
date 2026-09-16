@@ -25,4 +25,3 @@ syn.workspace = true
 [dev-dependencies]
 insta.workspace = true
 prettyplease.workspace = true
-trybuild.workspace = true
