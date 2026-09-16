@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Result type used across the crate.
-pub type Result<T> = anyhow::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// Domain level error type returned by the adapter.
 #[derive(Error, Debug, Clone, Serialize, Deserialize)]
