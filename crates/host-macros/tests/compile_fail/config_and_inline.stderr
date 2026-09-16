@@ -1,5 +1,0 @@
-error: `config:` and inline manifest keys (`link` interfaces, `plugin` locations, `guests`, `mounts`) are mutually exclusive; declare `[[plugin.location]]` entries in the config file
- --> tests/compile_fail/config_and_inline.rs:3:5
-  |
-3 |     guests: [
-  |     ^^^^^^

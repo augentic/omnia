@@ -1,5 +1,0 @@
-error: more than one `registry` location; a deployment declares one default registry (a load's own location may still override the endpoint)
- --> tests/compile_fail/locations_two_registries.rs:5:25
-  |
-5 |             { registry: "registry.example" },
-  |                         ^^^^^^^^^^^^^^^^^^

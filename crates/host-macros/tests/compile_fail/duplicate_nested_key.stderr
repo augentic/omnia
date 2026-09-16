@@ -1,5 +1,0 @@
-error: duplicate `source:` key
- --> tests/compile_fail/duplicate_nested_key.rs:3:42
-  |
-3 |         { id: "api", source: "api.wasm", source: "again.wasm" },
-  |                                          ^^^^^^

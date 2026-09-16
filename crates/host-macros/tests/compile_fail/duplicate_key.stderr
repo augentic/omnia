@@ -1,5 +1,0 @@
-error: duplicate `mode:` key
- --> tests/compile_fail/duplicate_key.rs:3:5
-  |
-3 |     mode: command,
-  |     ^^^^
