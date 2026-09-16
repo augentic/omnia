@@ -1,4 +1,4 @@
-//! A `wasi:http/incoming-handler` guest behind an `omnia_guest::api::http`
+//! A `wasi:http/incoming-handler` guest behind an `omnia_sdk::api::http`
 //! router: the one route echoes a `message` taken from the JSON body (POST)
 //! or the query string (GET), alongside the request id the transport
 //! metadata carried in. The handler first asserts the host's request
@@ -7,9 +7,9 @@
 #![cfg(target_arch = "wasm32")]
 
 use axum::Router;
-use omnia_guest::Error;
-use omnia_guest::api::http::{get, post};
-use omnia_guest::api::{Client, Context};
+use omnia_sdk::Error;
+use omnia_sdk::api::http::{get, post};
+use omnia_sdk::api::{Client, Context};
 use serde::{Deserialize, Serialize};
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response, Scheme};

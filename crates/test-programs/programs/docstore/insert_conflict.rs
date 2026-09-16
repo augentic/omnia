@@ -7,7 +7,7 @@
 use omnia_wasi_docstore::document_store::Document;
 use omnia_wasi_docstore::store;
 
-omnia_guest::command!(scenario);
+omnia_sdk::command!(scenario);
 
 const CONFLICT: &str = "conflict";
 

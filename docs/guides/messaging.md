@@ -29,8 +29,8 @@ Metadata and content type travel with the message; on Kafka, `add_metadata("key"
 Messaging is a **trigger**: the host (`WasiMessaging`) subscribes to topics and delivers each message to the guest's exported handler, instantiating a fresh guest instance per message:
 
 ```rust,noplayground
-use omnia_guest::api::messaging::{Router, consume};
-use omnia_guest::api::{Client, Context};
+use omnia_sdk::api::messaging::{Router, consume};
+use omnia_sdk::api::{Client, Context};
 use omnia_wasi_messaging::types::{Error, Message};
 
 pub struct Messaging;
@@ -38,7 +38,7 @@ omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
 
 async fn create_order(
     input: CreateOrder, context: Context<MyProvider>,
-) -> Result<(), omnia_guest::Error> {
+) -> Result<(), omnia_sdk::Error> {
     // ...
 }
 
@@ -49,7 +49,7 @@ fn router() -> Router<MyProvider> {
 
 impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
     async fn handle(message: Message) -> anyhow::Result<(), Error> {
-        omnia_guest::api::messaging::handle(&router(), message).await
+        omnia_sdk::api::messaging::handle(&router(), message).await
     }
 }
 ```

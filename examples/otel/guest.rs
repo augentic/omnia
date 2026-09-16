@@ -9,7 +9,7 @@
 use axum::routing::post;
 use axum::{Json, Router};
 use http::Method;
-use omnia_guest::HttpResult;
+use omnia_sdk::HttpResult;
 use opentelemetry::trace::{TraceContextExt, Tracer};
 use opentelemetry::{KeyValue, global};
 use serde_json::{Value, json};

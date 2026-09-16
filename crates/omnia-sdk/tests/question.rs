@@ -2,7 +2,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use omnia_guest::model::{Error, Question, ToolCall, Tools};
+use omnia_sdk::model::{Error, Question, ToolCall, Tools};
 use omnia_test::guest::Scripted;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -165,22 +165,22 @@ async fn refuse_tool_call() {
 /// A model that strips `check` before delegating: a backend ignoring the flag.
 struct Unchecked(Scripted);
 
-impl omnia_guest::Model for Unchecked {
+impl omnia_sdk::Model for Unchecked {
     fn complete(
-        &self, request: omnia_guest::model::Request,
-    ) -> impl Future<Output = Result<omnia_guest::model::Reply, Error>> + Send {
+        &self, request: omnia_sdk::model::Request,
+    ) -> impl Future<Output = Result<omnia_sdk::model::Reply, Error>> + Send {
         self.0.complete(request)
     }
 
     fn complete_with<H, F>(
-        &self, request: omnia_guest::model::Request, handler: H,
-    ) -> impl Future<Output = Result<omnia_guest::model::Reply, Error>> + Send
+        &self, request: omnia_sdk::model::Request, handler: H,
+    ) -> impl Future<Output = Result<omnia_sdk::model::Reply, Error>> + Send
     where
         H: FnMut(ToolCall) -> F + Send,
         F: Future<Output = Result<String, String>> + Send,
     {
         self.0.complete_with(
-            omnia_guest::model::Request {
+            omnia_sdk::model::Request {
                 check: false,
                 ..request
             },
@@ -193,16 +193,16 @@ impl omnia_guest::Model for Unchecked {
 /// the verdict: a backend that ignores the rejection.
 struct Heedless(&'static str);
 
-impl omnia_guest::Model for Heedless {
+impl omnia_sdk::Model for Heedless {
     fn complete(
-        &self, _request: omnia_guest::model::Request,
-    ) -> impl Future<Output = Result<omnia_guest::model::Reply, Error>> + Send {
+        &self, _request: omnia_sdk::model::Request,
+    ) -> impl Future<Output = Result<omnia_sdk::model::Reply, Error>> + Send {
         std::future::ready(Ok(self.reply()))
     }
 
     async fn complete_with<H, F>(
-        &self, _request: omnia_guest::model::Request, mut handler: H,
-    ) -> Result<omnia_guest::model::Reply, Error>
+        &self, _request: omnia_sdk::model::Request, mut handler: H,
+    ) -> Result<omnia_sdk::model::Reply, Error>
     where
         H: FnMut(ToolCall) -> F + Send,
         F: Future<Output = Result<String, String>> + Send,
@@ -219,8 +219,8 @@ impl omnia_guest::Model for Heedless {
 }
 
 impl Heedless {
-    fn reply(&self) -> omnia_guest::model::Reply {
-        omnia_guest::model::Reply {
+    fn reply(&self) -> omnia_sdk::model::Reply {
+        omnia_sdk::model::Reply {
             answer: self.0.to_owned(),
             usage: None,
         }

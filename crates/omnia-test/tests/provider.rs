@@ -1,7 +1,7 @@
 //! `omnia_test::guest::Provider` delegation and shared storage.
 
-use omnia_guest::model::{Message, Model, Request, Role};
-use omnia_guest::{BlobStore, Config, Identity, Publish, StateStore};
+use omnia_sdk::model::{Message, Model, Request, Role};
+use omnia_sdk::{BlobStore, Config, Identity, Publish, StateStore};
 use omnia_test::guest::{FixedIdentity, MapConfig, Provider, Scripted};
 
 fn user(content: &str) -> Request {
@@ -31,7 +31,7 @@ async fn provider_seeds() {
         "StateStore and BlobStore share the one storage double"
     );
     assert_eq!(provider.complete(user("q")).await.expect("reply").answer, "hi");
-    Publish::send(&provider, "t", &omnia_guest::Message::new(b"m")).await.expect("publish");
+    Publish::send(&provider, "t", &omnia_sdk::Message::new(b"m")).await.expect("publish");
     assert_eq!(provider.publish.sent().len(), 1);
     assert!(provider.broadcast.broadcasts().is_empty(), "Publish and Broadcast are separate sinks");
     provider.model.assert_exhausted();

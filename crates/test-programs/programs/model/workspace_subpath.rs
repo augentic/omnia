@@ -2,11 +2,11 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_guest::model::{Model as _, Request, WasiModel};
+use omnia_sdk::model::{Model as _, Request, WasiModel};
 use test_programs::user;
 use wasip3::filesystem::preopens;
 
-omnia_guest::command!(scenario);
+omnia_sdk::command!(scenario);
 
 async fn scenario() {
     assert!(preopens::get_directories().iter().any(|(_, name)| name == "."), "host must mount `.`");

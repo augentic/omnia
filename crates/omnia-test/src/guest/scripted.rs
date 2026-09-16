@@ -5,10 +5,10 @@ use std::future::{Future, ready};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
-use omnia_guest::model::{
+use omnia_sdk::model::{
     CHECK_TOOL, Error, Format, Function, Model, Reply, Request, Tool, ToolCall,
 };
-use omnia_guest::plugins::{self, Digest, Plugin, PluginRef, Plugins};
+use omnia_sdk::plugins::{self, Digest, Plugin, PluginRef, Plugins};
 
 use crate::{Exchange, Script, Seen, SeenFormat};
 
@@ -46,7 +46,7 @@ impl Turn {
 /// carrying the correction — one scripted answer per attempt.
 ///
 /// ```
-/// use omnia_guest::model::{Message, Model as _, Request, Role};
+/// use omnia_sdk::model::{Message, Model as _, Request, Role};
 /// use omnia_test::guest::Scripted;
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
@@ -280,7 +280,7 @@ pub fn function_tools(request: &Request) -> Vec<&Function> {
 /// [`defaulting`]: Self::defaulting
 ///
 /// ```
-/// use omnia_guest::plugins::{Error, Location, PluginRef, Plugins as _};
+/// use omnia_sdk::plugins::{Error, Location, PluginRef, Plugins as _};
 /// use omnia_test::guest::ScriptedLoader;
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {

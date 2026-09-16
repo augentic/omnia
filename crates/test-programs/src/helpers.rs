@@ -1,6 +1,6 @@
 //! Shared helpers for the guest scenario programs in `programs/<capability>/`.
 
-use omnia_guest::model::{Function, Message, Role, Tool};
+use omnia_sdk::model::{Function, Message, Role, Tool};
 use omnia_wasi_model::completion;
 use schemars::JsonSchema;
 use serde::Deserialize;

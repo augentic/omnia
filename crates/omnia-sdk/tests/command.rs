@@ -8,11 +8,11 @@ use std::fmt;
 use std::future::{Ready, ready};
 
 use clap::{Parser, Subcommand};
-use omnia_guest::api::command::{
+use omnia_sdk::api::command::{
     Command, Failure, IntoExit, Parsed, Response, Shell, USAGE_EXIT, completions, parse,
 };
-use omnia_guest::api::{Client, Context, Format, Metadata};
-use omnia_guest::{bad_request, not_found};
+use omnia_sdk::api::{Client, Context, Format, Metadata};
+use omnia_sdk::{bad_request, not_found};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
@@ -160,7 +160,7 @@ struct Greeting {
     text: String,
 }
 
-fn greet(input: Greet, _context: Context<()>) -> Ready<Result<Greeting, omnia_guest::Error>> {
+fn greet(input: Greet, _context: Context<()>) -> Ready<Result<Greeting, omnia_sdk::Error>> {
     let Greet { name } = input;
     ready(Ok(Greeting {
         text: format!("hello, {name}"),
@@ -176,7 +176,7 @@ struct Lookup {
     id: String,
 }
 
-fn lookup(input: Lookup, _context: Context<()>) -> Ready<Result<Greeting, omnia_guest::Error>> {
+fn lookup(input: Lookup, _context: Context<()>) -> Ready<Result<Greeting, omnia_sdk::Error>> {
     let Lookup { id } = input;
     ready(Err(not_found!("no item {id}")))
 }
@@ -290,8 +290,8 @@ async fn hints_apply_by_error() {
 mod http_parity {
     use axum::body::{Body, to_bytes};
     use http::{Request, StatusCode};
-    use omnia_guest::api::ErrorBody;
-    use omnia_guest::api::http::get;
+    use omnia_sdk::api::ErrorBody;
+    use omnia_sdk::api::http::get;
     use tower::ServiceExt as _;
 
     use super::*;

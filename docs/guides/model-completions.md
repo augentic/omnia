@@ -11,7 +11,7 @@ This page covers the guest API, the grants model, the available backends, and ho
 A model guest is typically a command-mode guest (see [Writing Guests](writing-guests.md#command-mode-guests)). It builds a `Request` and calls `Model::complete` on the `WasiModel` handle:
 
 ```rust,noplayground
-use omnia_guest::model::{Format, Message, Model as _, Request, Role, SchemaFormat, WasiModel};
+use omnia_sdk::model::{Format, Message, Model as _, Request, Role, SchemaFormat, WasiModel};
 
 let (system, user) = Sections {
     role: Some("a terse code reviewer".to_string()),
@@ -65,10 +65,10 @@ The closure's `Err` is model-visible failure text the model may repair from; har
 
 The type a guest wants back cannot cross the WIT boundary, but a callback can. A request built with `.check(true)` asks the backend to offer every candidate answer to the guest before finishing: the candidate arrives at the `complete_with` handler as a `ToolCall` named `check` whose `arguments` are the candidate text. Returning `Ok` accepts it as the reply; returning `Err(text)` sends `text` back verbatim as the correction turn and the backend goes round again (bounded by its own round budget — a final rejection surfaces as `Error::BudgetExhausted` carrying the guest's last correction). The check needs no declaration in `tools` and does not count against the tool-call budget.
 
-`omnia_guest::model::Question<T>` runs that exchange for a typed answer. `T` derives `Deserialize` and `JsonSchema` (the guest depends on `schemars` 1.x, the version `omnia-guest` builds against); the question steers the provider with `T`'s schema, deserializes each candidate, hands it to the guest's closure, and returns the accepted `T`:
+`omnia_sdk::model::Question<T>` runs that exchange for a typed answer. `T` derives `Deserialize` and `JsonSchema` (the guest depends on `schemars` 1.x, the version `omnia-sdk` builds against); the question steers the provider with `T`'s schema, deserializes each candidate, hands it to the guest's closure, and returns the accepted `T`:
 
 ```rust,noplayground
-use omnia_guest::model::{Question, WasiModel};
+use omnia_sdk::model::{Question, WasiModel};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -146,7 +146,7 @@ The end-to-end demo lives at [`omnia-backends/examples/cursor`](https://github.c
 
 ## Serving MCP tools from a guest
 
-Guests can also sit on the other side of the protocol: exposing tools and resources to model backends as a stateless MCP server over HTTP. Implement `omnia_guest::mcp::McpServer` and serve `mcp::router` from the guest's HTTP handler:
+Guests can also sit on the other side of the protocol: exposing tools and resources to model backends as a stateless MCP server over HTTP. Implement `omnia_sdk::mcp::McpServer` and serve `mcp::router` from the guest's HTTP handler:
 
 ```rust,noplayground
 struct HttpGuest;

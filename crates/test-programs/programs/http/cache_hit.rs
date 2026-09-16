@@ -5,11 +5,11 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_guest::Config;
-use omnia_guest::http::header::{CACHE_CONTROL, ETAG, IF_NONE_MATCH};
-use omnia_guest::http::{Method, Request, StatusCode};
+use omnia_sdk::Config;
+use omnia_sdk::http::header::{CACHE_CONTROL, ETAG, IF_NONE_MATCH};
+use omnia_sdk::http::{Method, Request, StatusCode};
 
-omnia_guest::command!(scenario);
+omnia_sdk::command!(scenario);
 
 struct WasiConfig;
 

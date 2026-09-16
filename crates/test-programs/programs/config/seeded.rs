@@ -4,9 +4,9 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_guest::Config;
+use omnia_sdk::Config;
 
-omnia_guest::command!(scenario);
+omnia_sdk::command!(scenario);
 
 struct WasiConfig;
 
@@ -16,7 +16,7 @@ async fn scenario() {
     assert_eq!(WasiConfig.get("GREETING").await.expect("seeded key"), "hello");
     assert!(WasiConfig.get("PATH").await.is_err(), "the process environment does not leak");
 
-    // `omnia_guest::Config` has no `get-all`; go through the raw binding.
+    // `omnia_sdk::Config` has no `get-all`; go through the raw binding.
     let all = omnia_wasi_config::store::get_all().expect("get-all");
     assert_eq!(all, [("GREETING".to_owned(), "hello".to_owned())]);
 }

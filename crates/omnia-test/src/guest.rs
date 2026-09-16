@@ -1,4 +1,4 @@
-//! Native doubles for the `omnia_guest` capability traits.
+//! Native doubles for the `omnia_sdk` capability traits.
 //!
 //! One double per capability, each a plain `Clone + Default` value a
 //! handler-level test seeds, hands to the provider under test, and reads

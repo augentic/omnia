@@ -8,7 +8,7 @@ A guest is a handler compiled to a `wasm32-wasip2` component and run by a host r
 
 | Rung | Feature | What runs | Against |
 | ---- | ------- | --------- | ------- |
-| Handler | `guest` | The handler's own logic, compiled natively | One in-memory double per `omnia_guest` capability trait |
+| Handler | `guest` | The handler's own logic, compiled natively | One in-memory double per `omnia_sdk` capability trait |
 | Component | `host` | The compiled component, through omnia's own runtime | `Backends`, the twelve in-memory host defaults with the model scripted |
 | Fixture | `build` | The nested cargo build a `build.rs` runs to produce those components | `std` only |
 

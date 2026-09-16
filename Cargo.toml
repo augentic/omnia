@@ -125,11 +125,11 @@ wit-bindgen = { version = "0.61.1", features = ["async-spawn"] }
 omnia = { path = "crates/omnia", version = "0.36.0" }
 omnia-cli = { path = "crates/omnia-cli", version = "0.36.0" }
 omnia-core = { path = "crates/omnia-core", version = "0.36.0", default-features = false }
-omnia-guest = { path = "crates/omnia-guest", version = "0.36.0", default-features = false }
 omnia-guest-macros = { path = "crates/guest-macros", version = "0.36.0" }
 omnia-host-macros = { path = "crates/host-macros", version = "0.36.0" }
 omnia-link = { path = "crates/omnia-link", version = "0.36.0" }
 omnia-plugin = { path = "crates/omnia-plugin", version = "0.36.0" }
+omnia-sdk = { path = "crates/omnia-sdk", version = "0.36.0", default-features = false }
 omnia-test = { path = "crates/omnia-test", version = "0.36.0", default-features = false }
 omnia-wasi-blobstore = { path = "crates/wasi-blobstore", version = "0.36.0" }
 omnia-wasi-config = { path = "crates/wasi-config", version = "0.36.0" }

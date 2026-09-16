@@ -3,10 +3,10 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use omnia_guest::model::{
+use omnia_sdk::model::{
     Error, Format, Function, Message, Model, Request, Role, SchemaFormat, Tool, ToolCall,
 };
-use omnia_guest::plugins::{self, Digest, Location, PluginRef, Plugins};
+use omnia_sdk::plugins::{self, Digest, Location, PluginRef, Plugins};
 use omnia_test::guest::{Scripted, ScriptedLoader, function_tools};
 use omnia_test::{Exchange, SeenFormat};
 

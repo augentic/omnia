@@ -33,7 +33,7 @@ chrono.workspace = true
 clap.workspace = true
 http.workspace = true
 http-body-util.workspace = true
-omnia-guest = { workspace = true, features = ["orm", "http", "command"] }
+omnia-sdk = { workspace = true, features = ["orm", "http", "command"] }
 opentelemetry.workspace = true
 serde.workspace = true
 serde_json.workspace = true

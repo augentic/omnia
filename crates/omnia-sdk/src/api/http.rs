@@ -158,8 +158,8 @@ impl<S: Send + Sync> FromRequestParts<S> for Metadata {
 ///
 /// ```rust,ignore
 /// use axum::response::IntoResponse;
-/// use omnia_guest::api::{Client, Context};
-/// use omnia_guest::api::http::{DecodeError, MethodFilter, RawRequest, handle_with};
+/// use omnia_sdk::api::{Client, Context};
+/// use omnia_sdk::api::http::{DecodeError, MethodFilter, RawRequest, handle_with};
 ///
 /// async fn import_text(input: ImportText, context: Context<Provider>) -> Result<String, Error> {
 ///     // ...

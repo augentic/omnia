@@ -11,7 +11,7 @@ use omnia_wasi_blobstore::blobstore;
 use omnia_wasi_blobstore::container::Container;
 use omnia_wasi_blobstore::types::{IncomingValue, OutgoingValue};
 
-omnia_guest::command!(scenario);
+omnia_sdk::command!(scenario);
 
 /// Longer than one `blocking-write-and-flush` budget so the write spans
 /// several stream chunks the host must accumulate into one value.

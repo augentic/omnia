@@ -7,7 +7,7 @@
 //! ```rust,ignore
 //! use std::convert::Infallible;
 //!
-//! use omnia_guest::api::{Client, Context, Metadata};
+//! use omnia_sdk::api::{Client, Context, Metadata};
 //!
 //! struct Provider;
 //!

@@ -186,9 +186,9 @@ async fn plugins_load_registry() {
 fn wit_copies_stay_identical() {
     let canonical = include_str!("../wit/plugins.wit");
     assert_eq!(
-        include_str!("../../omnia-guest/wit/plugins.wit"),
+        include_str!("../../omnia-sdk/wit/plugins.wit"),
         canonical,
-        "omnia-guest's plugins.wit copy drifted from crates/omnia-plugin/wit/plugins.wit"
+        "omnia-sdk's plugins.wit copy drifted from crates/omnia-plugin/wit/plugins.wit"
     );
     assert_eq!(
         include_str!("../../test-programs/wit/deps/plugins/plugins.wit"),

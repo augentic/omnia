@@ -1,13 +1,13 @@
 //! # MCP example — docs guest
 //!
 //! Serves a few compiled-in documents to agent backends as a stateless MCP
-//! server: it implements [`omnia_guest::mcp::McpServer`] and calls
-//! [`omnia_wasi_http::serve`] with [`omnia_guest::mcp::router`] from its
+//! server: it implements [`omnia_sdk::mcp::McpServer`] and calls
+//! [`omnia_wasi_http::serve`] with [`omnia_sdk::mcp::router`] from its
 //! `wasi:http` handler. `omnia.toml` routes `/mcp/docs` here.
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_guest::mcp::{
+use omnia_sdk::mcp::{
     self, CallToolResult, Implementation, McpError, McpServer, Resource, ResourceContents, Tool,
 };
 use serde::Deserialize;

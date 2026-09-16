@@ -3,10 +3,10 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_guest::model::{Format, Model as _, Request, SchemaFormat, WasiModel};
+use omnia_sdk::model::{Format, Model as _, Request, SchemaFormat, WasiModel};
 use test_programs::{VERDICT_SCHEMA, user};
 
-omnia_guest::command!(scenario);
+omnia_sdk::command!(scenario);
 
 async fn scenario() {
     let request = Request::builder()

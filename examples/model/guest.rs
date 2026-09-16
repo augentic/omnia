@@ -3,13 +3,13 @@
 //! A `wasi:cli/command` reactor that **imports** `omnia:model/completion` and
 //! drives one completion session when the host calls `wasi:cli/run`.
 //!
-//! The happy path uses the `omnia-guest` sugar: a tool-less schema completion
+//! The happy path uses the `omnia-sdk` sugar: a tool-less schema completion
 //! whose prompt is assembled with `Sections`, lending the `.` mount through
 //! `grants.workspace` when the host preopened one.
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_guest::model::{Format, Message, Model as _, Request, Role, SchemaFormat, WasiModel};
+use omnia_sdk::model::{Format, Message, Model as _, Request, Role, SchemaFormat, WasiModel};
 use omnia_wasi_model::prompt::Sections;
 use wasip3::exports::cli::run::Guest;
 use wasip3::filesystem::preopens;
@@ -25,7 +25,7 @@ impl Guest for CliGuest {
     }
 }
 
-fn render(outcome: Result<omnia_guest::model::Reply, omnia_guest::model::Error>) -> String {
+fn render(outcome: Result<omnia_sdk::model::Reply, omnia_sdk::model::Error>) -> String {
     match outcome {
         Ok(reply) => reply.answer,
         Err(error) => format!("error: {error:?}"),

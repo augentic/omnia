@@ -12,14 +12,14 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-use omnia_guest::plugins::{Location, PluginRef, Plugins as _, WasiPlugins};
+use omnia_sdk::plugins::{Location, PluginRef, Plugins as _, WasiPlugins};
 use omnia_test::link::ops;
 
-omnia_guest::command!(scenario);
+omnia_sdk::command!(scenario);
 
 const PACKAGE: &str = "test:echoer@1.0.0";
 
-fn echoer(digest: Option<omnia_guest::plugins::Digest>) -> PluginRef {
+fn echoer(digest: Option<omnia_sdk::plugins::Digest>) -> PluginRef {
     PluginRef::builder()
         .package(PACKAGE)
         .location(Location::Registry(None))

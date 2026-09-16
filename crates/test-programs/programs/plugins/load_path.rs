@@ -1,4 +1,4 @@
-//! Happy path through the omnia-guest requester SDK: load a mounted
+//! Happy path through the omnia-sdk plugin requester: load a mounted
 //! component unpinned (trust-on-first-use — the resolved digest returns),
 //! dispatch through the returned handle's identity, then prove idempotency
 //! by re-loading pinned with that digest. The loader import arrives through
@@ -12,12 +12,12 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-use omnia_guest::plugins::{Location, PluginRef, Plugins as _, WasiPlugins};
+use omnia_sdk::plugins::{Location, PluginRef, Plugins as _, WasiPlugins};
 use omnia_test::link::ops;
 
-omnia_guest::command!(scenario);
+omnia_sdk::command!(scenario);
 
-fn echoer(digest: Option<omnia_guest::plugins::Digest>) -> PluginRef {
+fn echoer(digest: Option<omnia_sdk::plugins::Digest>) -> PluginRef {
     PluginRef::builder()
         .package("test:echoer")
         .location(Location::Path("./plugin.wasm".to_owned()))

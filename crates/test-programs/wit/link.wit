@@ -54,7 +54,7 @@ world requester {
 }
 
 /// Imports only `ops` — for requesters whose loader import arrives through
-/// the omnia-guest SDK bindings rather than this world.
+/// the omnia-sdk bindings rather than this world.
 world caller {
     import ops;
 }

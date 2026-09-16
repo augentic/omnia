@@ -58,13 +58,13 @@ Omnia's off-by-default `plugin` cargo feature: the `omnia:plugins/loader` capabi
 
 ### Plugin loader
 
-The `omnia:plugins/loader` host capability: a guest names a package (location plus optional sha256 pin) and the host acquires, verifies, validates, and registers it, returning a typed handle. Request-only — component bytes never cross the interface, and the requester gains no lifecycle authority. Ships behind omnia's `plugin` feature; linked when the deployment declares plugin locations (the macro's `plugin: { locations: [...] }` list, or a bare `plugin: {}` beside `config:` over the TOML's `[[plugin.location]]` entries); reachable only from worlds that import it. The requester surface — the `Plugins` capability trait, shared `PluginRef`/`Digest` types, and ensure-once handle memoization — ships in `omnia-guest`'s `plugins` module.
+The `omnia:plugins/loader` host capability: a guest names a package (location plus optional sha256 pin) and the host acquires, verifies, validates, and registers it, returning a typed handle. Request-only — component bytes never cross the interface, and the requester gains no lifecycle authority. Ships behind omnia's `plugin` feature; linked when the deployment declares plugin locations (the macro's `plugin: { locations: [...] }` list, or a bare `plugin: {}` beside `config:` over the TOML's `[[plugin.location]]` entries); reachable only from worlds that import it. The requester surface — the `Plugins` capability trait, shared `PluginRef`/`Digest` types, and ensure-once handle memoization — ships in `omnia-sdk`'s `plugins` module.
 
 ### Acquisition policy
 
 How the loader turns a package name and location into component bytes. Declared at the composition root as deployment data (the macro's `plugin: { locations: [...] }` list, or `[[plugin.location]]` in `omnia.toml`, carried as `Location`s) and installed through `Plugins::install_declared` from the `Wiring::extend` hook, never runtime-core machinery. One slot per location kind, filled by the built-in acquirers `PathMounts` (named directory roots, read fresh on every load) and `RegistryClient` (exact package references, routed by namespace or package through the registry location's wasm-pkg configuration when it carries one, optionally cached by hand in a `ContentStore` + `ReleaseStore` backend); a load names its `Origin` (a registry endpoint or a location-relative path), routes structurally by kind, and an empty slot refuses typed.
 
-## Guest SDK (`omnia-guest`)
+## Guest SDK (`omnia-sdk`)
 
 ### Handler contract
 
@@ -72,15 +72,15 @@ The transport-neutral unit of guest application logic: an `async fn(I, Context<P
 
 ### Command façade
 
-`omnia_guest::api::command`, the command-line adapter over the handler contract: `parse` classifies argv into the clap grammar or one of clap's own responses (`Parsed`), `Command::new(&client, &metadata, format).call(handler, decode, render)` projects one verb (decode → `Client::call` → encode) onto a `Response { stdout, stderr, exit }`, and `command!(main)` binds the entry as the `wasi:cli/run` export, writing the channels at that boundary. The clap-backed parts ship behind the `command` cargo feature. Distinct from the host-side **`omnia-cli`** crate, which is the `run` grammar of a host binary.
+`omnia_sdk::api::command`, the command-line adapter over the handler contract: `parse` classifies argv into the clap grammar or one of clap's own responses (`Parsed`), `Command::new(&client, &metadata, format).call(handler, decode, render)` projects one verb (decode → `Client::call` → encode) onto a `Response { stdout, stderr, exit }`, and `command!(main)` binds the entry as the `wasi:cli/run` export, writing the channels at that boundary. The clap-backed parts ship behind the `command` cargo feature. Distinct from the host-side **`omnia-cli`** crate, which is the `run` grammar of a host binary.
 
 ### Failure envelope
 
-What a command reports on stderr when a verb fails: the `Failure` type wrapping an `omnia_guest::Error` plus an optional remedy hint. As text, `error[<code>]: <message>` then `hint: <hint>`; as JSON, flat `{"error","message","exit-code","hint"?}`. Its `error` and `message` are the transport-neutral `api::ErrorBody` that `HttpError::from(Error)` also emits as a JSON body, so one discriminant identifies a failure over HTTP and over a shell.
+What a command reports on stderr when a verb fails: the `Failure` type wrapping an `omnia_sdk::Error` plus an optional remedy hint. As text, `error[<code>]: <message>` then `hint: <hint>`; as JSON, flat `{"error","message","exit-code","hint"?}`. Its `error` and `message` are the transport-neutral `api::ErrorBody` that `HttpError::from(Error)` also emits as a JSON body, so one discriminant identifies a failure over HTTP and over a shell.
 
 ### Exit map
 
-The fixed mapping from an `omnia_guest::Error` variant to a process exit status, `Error::exit_code()`: `BadRequest` 1, `NotFound` 2, `ServerError` 3, `BadGateway` 4 — the exit-code twin of `Error::status()` (400 / 404 / 500 / 502). A clap usage error exits `USAGE_EXIT` (64, `EX_USAGE`) rather than clap's default 2, so exit 2 always means a `NotFound` envelope. A guest never chooses an exit code; the error class does.
+The fixed mapping from an `omnia_sdk::Error` variant to a process exit status, `Error::exit_code()`: `BadRequest` 1, `NotFound` 2, `ServerError` 3, `BadGateway` 4 — the exit-code twin of `Error::status()` (400 / 404 / 500 / 502). A clap usage error exits `USAGE_EXIT` (64, `EX_USAGE`) rather than clap's default 2, so exit 2 always means a `NotFound` envelope. A guest never chooses an exit code; the error class does.
 
 ## Runtime platform
 
@@ -110,7 +110,7 @@ Work done inside Omnia host crates (validation, dispatch, workspace resolution) 
 
 ### Guest check
 
-The `omnia:model/completion` request flag (`check`) under which the backend offers each candidate answer to the guest before finishing, as a tool call named `check` over the session. The guest's `ok` ends the completion; its `err(text)` is appended verbatim as the correction turn and the backend goes round again. The host validates nothing about the answer — `format` only steers the provider — so acceptance lives with the guest that knows the type (`omnia_guest::model::Question<T>` runs the exchange for a typed answer).
+The `omnia:model/completion` request flag (`check`) under which the backend offers each candidate answer to the guest before finishing, as a tool call named `check` over the session. The guest's `ok` ends the completion; its `err(text)` is appended verbatim as the correction turn and the backend goes round again. The host validates nothing about the answer — `format` only steers the provider — so acceptance lives with the guest that knows the type (`omnia_sdk::model::Question<T>` runs the exchange for a typed answer).
 
 ### Host-injected tools
 

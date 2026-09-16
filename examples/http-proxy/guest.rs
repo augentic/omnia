@@ -11,7 +11,7 @@ use bytes::Bytes;
 use http::Method;
 use http::header::{CACHE_CONTROL, IF_NONE_MATCH};
 use http_body_util::Empty;
-use omnia_guest::HttpResult;
+use omnia_sdk::HttpResult;
 use omnia_wasi_http::CacheOptions;
 use serde_json::Value;
 use tracing::Level;

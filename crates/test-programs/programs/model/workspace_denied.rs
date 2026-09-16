@@ -2,10 +2,10 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_guest::model::{Error, Model as _, Request, WasiModel};
+use omnia_sdk::model::{Error, Model as _, Request, WasiModel};
 use test_programs::user;
 
-omnia_guest::command!(scenario);
+omnia_sdk::command!(scenario);
 
 async fn scenario() {
     let error = WasiModel

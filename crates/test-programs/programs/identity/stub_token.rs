@@ -7,7 +7,7 @@
 
 use omnia_wasi_identity::credentials::{self, Error};
 
-omnia_guest::command!(scenario);
+omnia_sdk::command!(scenario);
 
 async fn scenario() {
     let identity = credentials::get_identity("default".to_owned()).await.expect("get-identity");

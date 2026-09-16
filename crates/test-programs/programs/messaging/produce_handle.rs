@@ -9,7 +9,7 @@ use omnia_wasi_messaging::incoming_handler::Guest;
 use omnia_wasi_messaging::types::{Client, Error, Message};
 use omnia_wasi_messaging::{producer, request_reply};
 
-omnia_guest::command!(scenario);
+omnia_sdk::command!(scenario);
 
 async fn scenario() {
     let client = Client::connect("default".to_owned()).await.expect("connect");

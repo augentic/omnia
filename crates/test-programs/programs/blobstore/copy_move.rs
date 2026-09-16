@@ -10,7 +10,7 @@ use omnia_wasi_blobstore::blobstore;
 use omnia_wasi_blobstore::container::Container;
 use omnia_wasi_blobstore::types::{IncomingValue, ObjectId, OutgoingValue};
 
-omnia_guest::command!(scenario);
+omnia_sdk::command!(scenario);
 
 async fn scenario() {
     let a = blobstore::create_container("a".to_owned()).await.expect("create a");

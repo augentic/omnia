@@ -2,10 +2,10 @@
 
 use std::future::{Ready, ready};
 
-use omnia_guest::api::messaging::{
+use omnia_sdk::api::messaging::{
     Delivery, DeliveryError, Router as MessagingRouter, consume, consume_with,
 };
-use omnia_guest::api::{Client, Context, DecodeError};
+use omnia_sdk::api::{Client, Context, DecodeError};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
@@ -24,7 +24,7 @@ struct EchoOutput {
 
 fn echo<P: Send + Sync + 'static>(
     input: EchoInput, context: Context<P>,
-) -> Ready<Result<EchoOutput, omnia_guest::Error>> {
+) -> Ready<Result<EchoOutput, omnia_sdk::Error>> {
     ready(Ok(EchoOutput {
         name: input.name,
         count: input.count.unwrap_or(1),
@@ -86,7 +86,7 @@ struct RawText {
 
 fn raw_text<P: Send + Sync + 'static>(
     input: RawText, _context: Context<P>,
-) -> Ready<Result<String, omnia_guest::Error>> {
+) -> Ready<Result<String, omnia_sdk::Error>> {
     ready(Ok(input.text))
 }
 

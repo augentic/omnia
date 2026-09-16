@@ -24,7 +24,7 @@ A guest is a `cdylib` crate targeting `wasm32-wasip2`. Guest code is guarded wit
 Typical guest dependencies:
 
 - `wasip3` — WASI Preview 3 bindings (exports, HTTP types, CLI, filesystem preopens)
-- `omnia-guest` — guest SDK: the handler contract, HTTP/messaging routers and the command façade, error types, ORM helpers, MCP support
+- `omnia-sdk` — guest SDK: the handler contract, HTTP/messaging routers and the command façade, error types, ORM helpers, MCP support
 - `omnia-wasi-*` — the guest side of each capability you use (`omnia-wasi-keyvalue`, `omnia-wasi-messaging`, ...). These crates compile to guest bindings on `wasm32` and to the host implementation on native, so hosts and guests share one dependency name.
 
 A minimal HTTP guest crate looks like this (align `wasip3`/`wit-bindgen` with the versions the omnia workspace pins — a mismatch causes executor deadlocks, see [Troubleshooting](../troubleshooting.md#outbound-http-or-spawned-work-inside-a-handler-deadlocks)):
@@ -40,8 +40,8 @@ crate-type = ["cdylib"]
 [dependencies]
 anyhow = "1"
 axum = { version = "0.8", default-features = false, features = ["json"] }
-omnia-guest = "0.35"
-omnia-wasi-http = "0.35"
+omnia-sdk = "0.36"
+omnia-wasi-http = "0.36"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 wasip3 = { version = "0.7", features = ["http-compat"] }
@@ -72,7 +72,7 @@ impl Guest for HttpGuest {
 }
 ```
 
-Handlers are ordinary Axum handlers. Return `omnia_guest::HttpResult<T>` to map errors to HTTP responses; `anyhow::Context` works as usual.
+Handlers are ordinary Axum handlers. Return `omnia_sdk::HttpResult<T>` to map errors to HTTP responses; `anyhow::Context` works as usual.
 
 For **outbound** HTTP requests, use `omnia_wasi_http::handle` with a standard `http::Request` (see `examples/http-proxy` and the messaging example's upstream call).
 
@@ -123,7 +123,7 @@ omnia_wasi_messaging::export!(Messaging with_types_in omnia_wasi_messaging);
 
 impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
     async fn handle(message: Message) -> anyhow::Result<(), Error> {
-        omnia_guest::api::messaging::handle(&router(), message).await
+        omnia_sdk::api::messaging::handle(&router(), message).await
     }
 }
 ```
@@ -132,7 +132,7 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
 
 ## The handler contract
 
-`omnia-guest` keeps application logic independent of how it is invoked. Three pieces, defined once and reused by every transport:
+`omnia-sdk` keeps application logic independent of how it is invoked. Three pieces, defined once and reused by every transport:
 
 - A **handler** is one unit of application work: an `async fn(I, Context<P>) -> Result<O, E>` named for the operation (e.g. `create_item`), taking the input DTO by value (e.g. `CreateItem`).
 - A **provider** is the struct your handlers run against — it carries their capabilities (implement `DocumentStore`, `Config`, etc. on it).
@@ -175,26 +175,26 @@ fn router() -> axum::Router {
 
 impl Guest for Http {
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
-        omnia_guest::api::http::serve(router(), request).await
+        omnia_sdk::api::http::serve(router(), request).await
     }
 }
 ```
 
 Messaging uses `api::messaging::Router` and `consume(create_item)`; topic matching is exact. The export remains visible application code and calls `api::messaging::handle`. Because the same handler fns register in any router, one guest can expose the same logic over HTTP, messaging, and a CLI without duplicating it.
 
-Typed routes default to JSON: `http::get` and `http::delete` decode path and query parameters, while `http::post`, `http::put`, and `http::patch` merge a JSON body with path parameters. Routes that speak another wire format (or need other methods) use the general constructors instead: `http::handle_with(filter, handler, decode, encode)` pairs a `MethodFilter` (unions work, e.g. `MethodFilter::POST.or(MethodFilter::PUT)`) with a decoder `Fn(RawRequest<'_>) -> Result<I, E>` (any `E: Into<HttpError>`, so a decoder can classify its refusal — a `not_found!` path parameter answers 404) over a raw-request view (path parameters, query, headers, body) plus an encoder `Fn(F::Output) -> Response`, and `messaging::consume_with(handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole `Delivery`. Errors keep flowing through `Into<HttpError>`: an `omnia_guest::Error` becomes the JSON `api::ErrorBody` (`{"error","message"}`) at the variant's status, and `HttpError::with_body` carries a preformatted error body (e.g. an XML document) with its content type.
+Typed routes default to JSON: `http::get` and `http::delete` decode path and query parameters, while `http::post`, `http::put`, and `http::patch` merge a JSON body with path parameters. Routes that speak another wire format (or need other methods) use the general constructors instead: `http::handle_with(filter, handler, decode, encode)` pairs a `MethodFilter` (unions work, e.g. `MethodFilter::POST.or(MethodFilter::PUT)`) with a decoder `Fn(RawRequest<'_>) -> Result<I, E>` (any `E: Into<HttpError>`, so a decoder can classify its refusal — a `not_found!` path parameter answers 404) over a raw-request view (path parameters, query, headers, body) plus an encoder `Fn(F::Output) -> Response`, and `messaging::consume_with(handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole `Delivery`. Errors keep flowing through `Into<HttpError>`: an `omnia_sdk::Error` becomes the JSON `api::ErrorBody` (`{"error","message"}`) at the variant's status, and `HttpError::with_body` carries a preformatted error body (e.g. an XML document) with its content type.
 
 ## Command-mode guests
 
-For run-once workloads (jobs, CLIs, agent tasks), `omnia_guest::api::command` is the command-line mirror of the HTTP router over the same [handler contract](#the-handler-contract): argv is decoded into handler input, the handler runs through `Client::call`, and the output is encoded onto the process channels. The clap-backed parts (`parse`, `completions`, the `clap::ValueEnum` derive on `Format`) sit behind the `command` cargo feature (`omnia-guest = { version = "...", features = ["command"] }`); the projector itself needs no feature.
+For run-once workloads (jobs, CLIs, agent tasks), `omnia_sdk::api::command` is the command-line mirror of the HTTP router over the same [handler contract](#the-handler-contract): argv is decoded into handler input, the handler runs through `Client::call`, and the output is encoded onto the process channels. The clap-backed parts (`parse`, `completions`, the `clap::ValueEnum` derive on `Format`) sit behind the `command` cargo feature (`omnia-sdk = { version = "...", features = ["command"] }`); the projector itself needs no feature.
 
 ```rust,noplayground
 use std::fmt;
 
 use clap::{Args, Parser, Subcommand};
-use omnia_guest::Error;
-use omnia_guest::api::command::{Command, Parsed, Response, parse};
-use omnia_guest::api::{Client, Context, Format, Metadata};
+use omnia_sdk::Error;
+use omnia_sdk::api::command::{Command, Parsed, Response, parse};
+use omnia_sdk::api::{Client, Context, Format, Metadata};
 use serde::Serialize;
 
 #[derive(Parser)]
@@ -230,7 +230,7 @@ fn render_synced(synced: &Synced, out: &mut dyn fmt::Write) -> fmt::Result {
     writeln!(out, "synced {} items", synced.count)
 }
 
-omnia_guest::command!(main);
+omnia_sdk::command!(main);
 
 async fn main() -> Response {
     let app = match parse::<App>(wasip3::cli::environment::get_arguments()) {
@@ -286,4 +286,4 @@ async fn handle(request: Request) -> Result<Response, ErrorCode> { /* ... */ }
 
 ## Serving MCP tools
 
-A guest can act as an [MCP](https://modelcontextprotocol.io) (Model Context Protocol) server — exposing tools and resources to AI agents over HTTP. Implement `omnia_guest::mcp::McpServer` and serve `mcp::router` from your HTTP handler; see [Model Completions and MCP](model-completions.md#serving-mcp-tools-from-a-guest).
+A guest can act as an [MCP](https://modelcontextprotocol.io) (Model Context Protocol) server — exposing tools and resources to AI agents over HTTP. Implement `omnia_sdk::mcp::McpServer` and serve `mcp::router` from your HTTP handler; see [Model Completions and MCP](model-completions.md#serving-mcp-tools-from-a-guest).

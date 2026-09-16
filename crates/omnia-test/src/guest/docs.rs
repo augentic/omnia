@@ -3,8 +3,8 @@
 use std::future::Future;
 
 use anyhow::Result;
-use omnia_guest::DocumentStore;
-use omnia_guest::document_store::{
+use omnia_sdk::DocumentStore;
+use omnia_sdk::document_store::{
     ComparisonOp, Document, Filter, QueryOptions, QueryResult, ScalarValue,
 };
 use omnia_wasi_docstore::{DocStoreDefault, FilterTree, QueryOpts, WasiDocStoreCtx};
@@ -23,8 +23,8 @@ mod host {
 /// backend.
 ///
 /// ```
-/// use omnia_guest::DocumentStore as _;
-/// use omnia_guest::document_store::{Document, Filter, QueryOptions};
+/// use omnia_sdk::DocumentStore as _;
+/// use omnia_sdk::document_store::{Document, Filter, QueryOptions};
 /// use omnia_test::guest::MemoryDocs;
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {

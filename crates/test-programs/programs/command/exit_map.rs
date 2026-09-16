@@ -8,9 +8,9 @@
 use std::fmt;
 
 use clap::{Parser, Subcommand};
-use omnia_guest::api::command::{Command, Parsed, Response, parse};
-use omnia_guest::api::{Client, Context, Format, Metadata};
-use omnia_guest::{Error, bad_gateway, bad_request, not_found};
+use omnia_sdk::api::command::{Command, Parsed, Response, parse};
+use omnia_sdk::api::{Client, Context, Format, Metadata};
+use omnia_sdk::{Error, bad_gateway, bad_request, not_found};
 
 #[derive(Parser)]
 #[command(name = "exit-map", bin_name = "exit-map", subcommand_required = true)]
@@ -56,7 +56,7 @@ fn render_nothing((): &(), _out: &mut dyn fmt::Write) -> fmt::Result {
     Ok(())
 }
 
-omnia_guest::command!(main);
+omnia_sdk::command!(main);
 
 async fn main() -> Response {
     match parse::<App>(wasip3::cli::environment::get_arguments()) {

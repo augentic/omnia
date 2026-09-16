@@ -8,11 +8,11 @@ The [`docstore`](../../examples/docstore/) example is a minimal GTFS-flavoured s
 
 ## The provider
 
-Guest access goes through the `DocumentStore` trait from `omnia-guest` — implement it on a unit struct and call its methods:
+Guest access goes through the `DocumentStore` trait from `omnia-sdk` — implement it on a unit struct and call its methods:
 
 ```rust
-use omnia_guest::DocumentStore;
-use omnia_guest::document_store::{Document, Filter, QueryOptions, ScalarValue, SortField};
+use omnia_sdk::DocumentStore;
+use omnia_sdk::document_store::{Document, Filter, QueryOptions, ScalarValue, SortField};
 
 struct Provider;
 impl DocumentStore for Provider {}

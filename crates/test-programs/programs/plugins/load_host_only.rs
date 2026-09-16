@@ -4,9 +4,9 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_guest::plugins::{Location, PluginRef, Plugins as _, WasiPlugins};
+use omnia_sdk::plugins::{Location, PluginRef, Plugins as _, WasiPlugins};
 
-omnia_guest::command!(scenario);
+omnia_sdk::command!(scenario);
 
 async fn scenario() {
     let plugin = WasiPlugins

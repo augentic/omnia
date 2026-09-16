@@ -7,9 +7,9 @@ Shared traits, error types, and abstractions for building WASI guest components.
 A handler is an `async fn(I, Context<P>) -> Result<O, E>`. Write one, then register it with an explicit transport router.
 
 ```rust,ignore
-use omnia_guest::api::http::post;
-use omnia_guest::api::{Client, Context};
-use omnia_guest::Error;
+use omnia_sdk::api::http::post;
+use omnia_sdk::api::{Client, Context};
+use omnia_sdk::Error;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
@@ -51,7 +51,7 @@ wasip3::http::service::export!(Http);
 
 impl wasip3::exports::http::handler::Guest for Http {
     async fn handle(request: Request) -> Result<Response, ErrorCode> {
-        omnia_guest::api::http::serve(router(), request).await
+        omnia_sdk::api::http::serve(router(), request).await
     }
 }
 ```
@@ -61,7 +61,7 @@ Omnia creates one WASI component instance per HTTP request. Construct the `axum:
 Messaging routes use the same handlers with exact topic registration:
 
 ```rust,ignore
-use omnia_guest::api::messaging::{Router, consume};
+use omnia_sdk::api::messaging::{Router, consume};
 
 let router = Router::new(Client::new("my-org", MyProvider))
     .route("items.created", consume(create_item));
@@ -71,17 +71,17 @@ let router = Router::new(Client::new("my-org", MyProvider))
 
 ### Custom codecs
 
-`get`/`post`/`put`/`patch`/`delete`/`consume` are JSON defaults: `get` and `delete` decode path and query parameters, while `post`/`put`/`patch` merge a JSON body with path parameters. When a route speaks another wire format (or needs other methods), supply the codec yourself: `handle_with(filter, handler, decode, encode)` pairs a `MethodFilter` (unions work, e.g. `MethodFilter::POST.or(MethodFilter::PUT)`) with a decoder `Fn(RawRequest<'_>) -> Result<I, E>` (any `E: Into<HttpError>`, so a decoder can classify its refusal) over the raw request (path parameters, query, headers, body) and an encoder `Fn(F::Output) -> Response` (reuse `axum::Json` for JSON output); `consume_with(handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole delivery. Errors keep flowing through `Into<HttpError>`: an `omnia_guest::Error` becomes the JSON `api::ErrorBody` (`{"error","message"}`) at its status, and `HttpError::with_body` carries a preformatted error body (e.g. an XML document) with its content type.
+`get`/`post`/`put`/`patch`/`delete`/`consume` are JSON defaults: `get` and `delete` decode path and query parameters, while `post`/`put`/`patch` merge a JSON body with path parameters. When a route speaks another wire format (or needs other methods), supply the codec yourself: `handle_with(filter, handler, decode, encode)` pairs a `MethodFilter` (unions work, e.g. `MethodFilter::POST.or(MethodFilter::PUT)`) with a decoder `Fn(RawRequest<'_>) -> Result<I, E>` (any `E: Into<HttpError>`, so a decoder can classify its refusal) over the raw request (path parameters, query, headers, body) and an encoder `Fn(F::Output) -> Response` (reuse `axum::Json` for JSON output); `consume_with(handler, decode)` takes a decoder `Fn(&Delivery) -> Result<I, DecodeError>` over the whole delivery. Errors keep flowing through `Into<HttpError>`: an `omnia_sdk::Error` becomes the JSON `api::ErrorBody` (`{"error","message"}`) at its status, and `HttpError::with_body` carries a preformatted error body (e.g. an XML document) with its content type.
 
 ### Command-mode guests
 
-`api::command` is the command-line mirror of `api::http` over the same handlers (`command` feature for the clap-backed parts): `parse::<App>(argv)` classifies argv into the grammar or one of clap's own responses (`Parsed::{App, Display, Usage}`), and `Command::new(&client, &metadata, format).call(handler, decode, render)` projects one verb — decode → `Client::call` → encode — onto a `Response { stdout, stderr, exit }`. `omnia_guest::command!(main)` binds an `async fn main() -> Response` as the `wasi:cli/run` export and writes the channels at that boundary (`IntoExit`; `Result<(), u8>` and `()` entries are accepted too). Omnia creates a fresh component instance for each command invocation.
+`api::command` is the command-line mirror of `api::http` over the same handlers (`command` feature for the clap-backed parts): `parse::<App>(argv)` classifies argv into the grammar or one of clap's own responses (`Parsed::{App, Display, Usage}`), and `Command::new(&client, &metadata, format).call(handler, decode, render)` projects one verb — decode → `Client::call` → encode — onto a `Response { stdout, stderr, exit }`. `omnia_sdk::command!(main)` binds an `async fn main() -> Response` as the `wasi:cli/run` export and writes the channels at that boundary (`IntoExit`; `Result<(), u8>` and `()` entries are accepted too). Omnia creates a fresh component instance for each command invocation.
 
 ```rust,ignore
-use omnia_guest::api::command::{Command, Parsed, Response, parse};
-use omnia_guest::api::{Client, Metadata};
+use omnia_sdk::api::command::{Command, Parsed, Response, parse};
+use omnia_sdk::api::{Client, Metadata};
 
-omnia_guest::command!(main);
+omnia_sdk::command!(main);
 
 async fn main() -> Response {
     let app = match parse::<App>(wasip3::cli::environment::get_arguments()) {
@@ -123,7 +123,7 @@ Every trait is also implemented for `Arc<T>`, `&T`, and `Box<T>` where `T` imple
 ### Example: Using Capabilities
 
 ```rust,ignore
-use omnia_guest::{StateStore, Publish, Message};
+use omnia_sdk::{StateStore, Publish, Message};
 
 async fn process(provider: &impl StateStore + Publish) -> anyhow::Result<()> {
     // Store some state
@@ -142,9 +142,9 @@ async fn process(provider: &impl StateStore + Publish) -> anyhow::Result<()> {
 The crate provides an `Error` enum with four variants (`BadRequest`, `NotFound`, `ServerError`, `BadGateway`), each mapped to an HTTP status (`Error::status()`) and a process exit code (`Error::exit_code()`: 1 / 2 / 3 / 4), and helper macros for ergonomic error creation. Every transport reports a failure as the same `api::ErrorBody { error, message }` (`code()` and `description()`).
 
 ```rust,ignore
-use omnia_guest::{bad_request, server_error, not_found};
+use omnia_sdk::{bad_request, server_error, not_found};
 
-fn validate(name: &str) -> Result<(), omnia_guest::Error> {
+fn validate(name: &str) -> Result<(), omnia_sdk::Error> {
     if name.is_empty() {
         return Err(bad_request!("name cannot be empty"));
     }

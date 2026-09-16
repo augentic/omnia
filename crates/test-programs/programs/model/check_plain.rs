@@ -5,10 +5,10 @@
 
 use std::future::ready;
 
-use omnia_guest::model::{CHECK_TOOL, Model as _, Request, WasiModel};
+use omnia_sdk::model::{CHECK_TOOL, Model as _, Request, WasiModel};
 use test_programs::user;
 
-omnia_guest::command!(scenario);
+omnia_sdk::command!(scenario);
 
 async fn scenario() {
     let request = Request::builder().messages(vec![user("hi")]).check(true).build();

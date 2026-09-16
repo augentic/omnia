@@ -9,11 +9,11 @@ use axum::body::{Body, to_bytes};
 use axum::response::{IntoResponse, Response};
 use http::header::CONTENT_TYPE;
 use http::{HeaderMap, HeaderValue, Method, Request, StatusCode};
-use omnia_guest::api::http::{
+use omnia_sdk::api::http::{
     HttpError, MethodFilter, RawRequest, delete, get, handle_with, patch, post, put,
 };
-use omnia_guest::api::{Client, Context, DecodeError, ErrorBody, Format, Metadata};
-use omnia_guest::not_found;
+use omnia_sdk::api::{Client, Context, DecodeError, ErrorBody, Format, Metadata};
+use omnia_sdk::not_found;
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt as _;
 
@@ -33,7 +33,7 @@ struct EchoOutput {
 
 fn echo<P: Send + Sync + 'static>(
     input: EchoInput, context: Context<P>,
-) -> Ready<Result<EchoOutput, omnia_guest::Error>> {
+) -> Ready<Result<EchoOutput, omnia_sdk::Error>> {
     ready(Ok(EchoOutput {
         name: input.name,
         count: input.count.unwrap_or(1),
@@ -267,7 +267,7 @@ async fn unregistered_method() {
 #[tokio::test]
 async fn route_state_clones() {
     let observe = |input: ObserveInput, context: Context<StatefulProvider>| {
-        ready(Ok::<_, omnia_guest::Error>(ProviderObservation {
+        ready(Ok::<_, omnia_sdk::Error>(ProviderObservation {
             name: input.name,
             address: std::ptr::from_ref(context.provider()).addr(),
             call: context.provider().calls.fetch_add(1, Ordering::SeqCst) + 1,
@@ -327,7 +327,7 @@ async fn closure_handler() {
         .route(
             "/welcome",
             get(move |input: Welcome, _context: Context<()>| async move {
-                Ok::<_, omnia_guest::Error>(format!("{greeting}, {}", input.name))
+                Ok::<_, omnia_sdk::Error>(format!("{greeting}, {}", input.name))
             }),
         )
         .with_state(Client::new("test", ()));
@@ -351,7 +351,7 @@ struct JoinNames {
 
 fn join_names<P: Send + Sync + 'static>(
     input: JoinNames, _context: Context<P>,
-) -> Ready<Result<String, omnia_guest::Error>> {
+) -> Ready<Result<String, omnia_sdk::Error>> {
     let JoinNames { names } = input;
     ready(Ok(names.join(" & ")))
 }
@@ -364,7 +364,7 @@ struct Greet {
 
 fn greet<P: Send + Sync + 'static>(
     input: Greet, _context: Context<P>,
-) -> Ready<Result<String, omnia_guest::Error>> {
+) -> Ready<Result<String, omnia_sdk::Error>> {
     let Greet { name, greeting } = input;
     ready(Ok(format!("{greeting}, {name}")))
 }
@@ -609,7 +609,7 @@ struct Lookup {
 
 fn lookup<P: Send + Sync + 'static>(
     input: Lookup, _context: Context<P>,
-) -> Ready<Result<String, omnia_guest::Error>> {
+) -> Ready<Result<String, omnia_sdk::Error>> {
     let Lookup { id } = input;
     ready(Err(not_found!("no item {id}")))
 }
@@ -672,7 +672,7 @@ struct Summarize {
 
 fn summarize<P: Send + Sync + 'static>(
     input: Summarize, _context: Context<P>,
-) -> Ready<Result<Summary, omnia_guest::Error>> {
+) -> Ready<Result<Summary, omnia_sdk::Error>> {
     ready(Ok(Summary {
         name: input.name,
         count: input.count,
@@ -769,7 +769,7 @@ struct Fetch {
 
 fn fetch<P: Send + Sync + 'static>(
     input: Fetch, _context: Context<P>,
-) -> Ready<Result<String, omnia_guest::Error>> {
+) -> Ready<Result<String, omnia_sdk::Error>> {
     let Fetch { id } = input;
     ready(Ok(format!("item {id}")))
 }
@@ -782,7 +782,7 @@ async fn decoder_not_found() {
             handle_with(
                 MethodFilter::GET,
                 fetch,
-                |raw: RawRequest<'_>| -> Result<Fetch, omnia_guest::Error> {
+                |raw: RawRequest<'_>| -> Result<Fetch, omnia_sdk::Error> {
                     let id = raw
                         .path_params
                         .iter()

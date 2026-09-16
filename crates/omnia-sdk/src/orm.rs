@@ -35,7 +35,7 @@ pub mod __private {
 /// # Examples
 ///
 /// ```ignore
-/// use omnia_guest::entity;
+/// use omnia_sdk::entity;
 ///
 /// entity! {
 ///     table = "posts",

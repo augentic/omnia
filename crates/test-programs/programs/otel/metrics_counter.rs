@@ -5,7 +5,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-omnia_guest::command!(scenario);
+omnia_sdk::command!(scenario);
 
 async fn scenario() {
     // ERROR-level: the events must pass the guest's default `EnvFilter` (the

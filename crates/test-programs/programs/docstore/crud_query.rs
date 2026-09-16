@@ -11,7 +11,7 @@ use omnia_wasi_docstore::document_store::{Document, Filter, QueryOptions, SortFi
 use omnia_wasi_docstore::store;
 use serde_json::{Value, json};
 
-omnia_guest::command!(scenario);
+omnia_sdk::command!(scenario);
 
 const ITEMS: &str = "items";
 

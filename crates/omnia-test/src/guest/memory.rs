@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use anyhow::{Context, Result, anyhow, bail};
-use omnia_guest::{BlobStore, CasError, ContainerMetadata, ObjectMetadata, StateStore};
+use omnia_sdk::{BlobStore, CasError, ContainerMetadata, ObjectMetadata, StateStore};
 
 /// A state snapshot: key to raw bytes.
 pub type StateSnapshot = BTreeMap<String, Vec<u8>>;
@@ -45,7 +45,7 @@ struct Inner {
 /// `copy_object`, ...) compose these primitives.
 ///
 /// ```
-/// use omnia_guest::{BlobStore as _, StateStore as _};
+/// use omnia_sdk::{BlobStore as _, StateStore as _};
 /// use omnia_test::guest::Memory;
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
@@ -344,7 +344,7 @@ impl BlobStore for Memory {
 /// scoped under a prefix, modelling a tenant- or project-keyed host binding.
 ///
 /// ```
-/// use omnia_guest::StateStore as _;
+/// use omnia_sdk::StateStore as _;
 /// use omnia_test::guest::{Memory, Namespaced};
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {

@@ -6,7 +6,7 @@
 
 use tracing::Level;
 
-omnia_guest::command!(scenario);
+omnia_sdk::command!(scenario);
 
 async fn scenario() {
     traced().await;

@@ -201,6 +201,11 @@
 
 ### Changed
 
+- `omnia-guest` renamed to `omnia-sdk`: the crate lives at
+  `crates/omnia-sdk` and guest code imports `omnia_sdk::…`.
+  `omnia-guest-macros` and the `omnia-test` `guest` feature keep their
+  names.
+
 - Guest→guest link dispatch now hands lifted `Val`s to a fresh callee
   task in memory — no encode, decode, or pipe. Importer and exporter
   signatures are type-checked structurally by name, so a WIT skew

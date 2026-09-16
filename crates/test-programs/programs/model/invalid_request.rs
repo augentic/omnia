@@ -2,12 +2,12 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_guest::model::{
+use omnia_sdk::model::{
     Error, Format, Function, Model as _, Request, SchemaFormat, Tool, WasiModel,
 };
 use test_programs::user;
 
-omnia_guest::command!(scenario);
+omnia_sdk::command!(scenario);
 
 async fn refused(request: Request) -> String {
     match WasiModel.complete(request).await {

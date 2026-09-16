@@ -10,8 +10,8 @@ use std::thread;
 use bytes::Bytes;
 use http::{Method, Request, Response};
 use http_body_util::Full;
-use omnia_guest::document_store::{Document, Filter, QueryOptions, SortField};
-use omnia_guest::{
+use omnia_sdk::document_store::{Document, Filter, QueryOptions, SortField};
+use omnia_sdk::{
     BlobStore, BlobStoreExt, Broadcast, CasError, Config, DocumentStore, HttpRequest, Identity,
     Message, Publish, StateStore, TableStore,
 };

@@ -6,7 +6,7 @@
 use omnia_wasi_model::{completion, wit_stream};
 use test_programs::{raw_lookup, raw_request};
 
-omnia_guest::command!(scenario);
+omnia_sdk::command!(scenario);
 
 async fn scenario() {
     let request = raw_request(vec![raw_lookup()], completion::Grants { workspace: None });

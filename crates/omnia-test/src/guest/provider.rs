@@ -7,9 +7,9 @@ use std::future::Future;
 use anyhow::Result;
 use bytes::Bytes;
 use http_body::Body;
-use omnia_guest::document_store::{Document, QueryOptions, QueryResult};
-use omnia_guest::orm::{DataType, Row};
-use omnia_guest::{
+use omnia_sdk::document_store::{Document, QueryOptions, QueryResult};
+use omnia_sdk::orm::{DataType, Row};
+use omnia_sdk::{
     BlobStore, Broadcast, CasError, Config, ContainerMetadata, DocumentStore, HttpRequest,
     Identity, Message, Model, ObjectMetadata, Plugins, Publish, StateStore, TableStore, model,
     plugins,
@@ -28,8 +28,8 @@ use crate::guest::{
 /// production provider's single storage backend has.
 ///
 /// ```rust
-/// use omnia_guest::model::{Model as _, Request};
-/// use omnia_guest::{Config, StateStore as _};
+/// use omnia_sdk::model::{Model as _, Request};
+/// use omnia_sdk::{Config, StateStore as _};
 /// use omnia_test::guest::{MapConfig, Provider, Scripted};
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {

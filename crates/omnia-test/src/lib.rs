@@ -3,7 +3,7 @@
 //! # The three rungs
 //!
 //! - **Handler rung** ([`guest`]) — a handler's own logic, compiled natively,
-//!   against one double per `omnia_guest` capability, bundled by
+//!   against one double per `omnia_sdk` capability, bundled by
 //!   `guest::Provider` or handed to a hand-written provider directly.
 //! - **Component rung** ([`host`]) — the compiled `wasm32-wasip2` component
 //!   driven through omnia's own runtime over `Backends`, the twelve in-memory

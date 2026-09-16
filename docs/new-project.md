@@ -52,8 +52,8 @@ crate-type = ["cdylib"]
 [dependencies]
 anyhow = "1"
 axum = { version = "0.8", default-features = false, features = ["json"] }
-omnia-guest = "0.35"
-omnia-wasi-http = "0.35"
+omnia-sdk = "0.36"
+omnia-wasi-http = "0.36"
 serde_json = "1"
 wasip3 = { version = "0.7", features = ["http-compat"] }
 wit-bindgen = { version = "0.60", features = ["async-spawn"] }
@@ -65,7 +65,7 @@ wit-bindgen = { version = "0.60", features = ["async-spawn"] }
 
 use axum::routing::get;
 use axum::{Json, Router};
-use omnia_guest::HttpResult;
+use omnia_sdk::HttpResult;
 use serde_json::{Value, json};
 use wasip3::exports::http::handler::Guest;
 use wasip3::http::types::{ErrorCode, Request, Response};
@@ -103,9 +103,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-omnia = "0.35"
-omnia-wasi-http = "0.35"
-omnia-wasi-otel = "0.35"
+omnia = "0.36"
+omnia-wasi-http = "0.36"
+omnia-wasi-otel = "0.36"
 ```
 
 ```rust
@@ -148,7 +148,7 @@ Keep every `omnia*` dependency on the same release line (all `0.35`, for example
 ```toml
 [patch.crates-io]
 omnia = { git = "https://github.com/augentic/omnia.git" }
-omnia-guest = { git = "https://github.com/augentic/omnia.git" }
+omnia-sdk = { git = "https://github.com/augentic/omnia.git" }
 omnia-wasi-http = { git = "https://github.com/augentic/omnia.git" }
 omnia-wasi-otel = { git = "https://github.com/augentic/omnia.git" }
 ```

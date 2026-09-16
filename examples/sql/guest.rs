@@ -12,10 +12,10 @@ use axum::extract::Path;
 use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use chrono::Utc;
-use omnia_guest::orm::{
+use omnia_sdk::orm::{
     DeleteBuilder, Entity, Filter, InsertBuilder, Join, SelectBuilder, UpdateBuilder,
 };
-use omnia_guest::{HttpResult, TableStore, entity};
+use omnia_sdk::{HttpResult, TableStore, entity};
 use omnia_wasi_sql::readwrite;
 use omnia_wasi_sql::types::{Connection, Statement};
 use serde::{Deserialize, Serialize};

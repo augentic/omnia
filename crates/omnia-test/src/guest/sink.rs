@@ -6,7 +6,7 @@ use std::future::{Future, ready};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Result, anyhow};
-use omnia_guest::{Broadcast, Config, Identity, Message, Publish};
+use omnia_sdk::{Broadcast, Config, Identity, Message, Publish};
 
 /// One broadcast the code under test sent.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -28,7 +28,7 @@ struct SinkInner {
 /// Records every published message and broadcast; clones share one log.
 ///
 /// ```
-/// use omnia_guest::{Message, Publish as _};
+/// use omnia_sdk::{Message, Publish as _};
 /// use omnia_test::guest::Sink;
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
@@ -88,7 +88,7 @@ impl Broadcast for Sink {
 /// runtime.
 ///
 /// ```
-/// use omnia_guest::Config as _;
+/// use omnia_sdk::Config as _;
 /// use omnia_test::guest::MapConfig;
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
@@ -123,7 +123,7 @@ impl Config for MapConfig {
 /// recording the identities asked for.
 ///
 /// ```
-/// use omnia_guest::Identity as _;
+/// use omnia_sdk::Identity as _;
 /// use omnia_test::guest::FixedIdentity;
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {

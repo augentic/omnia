@@ -1040,7 +1040,7 @@ dependencies = [
  "http",
  "http-body-util",
  "omnia",
- "omnia-guest",
+ "omnia-sdk",
  "omnia-wasi-blobstore",
  "omnia-wasi-config",
  "omnia-wasi-docstore",
@@ -2231,47 +2231,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "omnia-guest"
-version = "0.36.0"
-dependencies = [
- "anyhow",
- "axum",
- "bon",
- "bytes",
- "chrono",
- "clap",
- "clap_complete",
- "futures",
- "http",
- "http-body",
- "http-body-util",
- "omnia-test",
- "omnia-wasi-blobstore",
- "omnia-wasi-config",
- "omnia-wasi-docstore",
- "omnia-wasi-http",
- "omnia-wasi-identity",
- "omnia-wasi-keyvalue",
- "omnia-wasi-messaging",
- "omnia-wasi-model",
- "omnia-wasi-otel",
- "omnia-wasi-sql",
- "omnia-wasi-websocket",
- "schemars",
- "sea-query",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "thiserror 2.0.20",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
- "wasip3",
- "wit-bindgen 0.61.1",
-]
-
-[[package]]
 name = "omnia-guest-macros"
 version = "0.36.0"
 dependencies = [
@@ -2324,6 +2283,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "omnia-sdk"
+version = "0.36.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "bon",
+ "bytes",
+ "chrono",
+ "clap",
+ "clap_complete",
+ "futures",
+ "http",
+ "http-body",
+ "http-body-util",
+ "omnia-test",
+ "omnia-wasi-blobstore",
+ "omnia-wasi-config",
+ "omnia-wasi-docstore",
+ "omnia-wasi-http",
+ "omnia-wasi-identity",
+ "omnia-wasi-keyvalue",
+ "omnia-wasi-messaging",
+ "omnia-wasi-model",
+ "omnia-wasi-otel",
+ "omnia-wasi-sql",
+ "omnia-wasi-websocket",
+ "schemars",
+ "sea-query",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "thiserror 2.0.20",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "wasip3",
+ "wit-bindgen 0.61.1",
+]
+
+[[package]]
 name = "omnia-test"
 version = "0.36.0"
 dependencies = [
@@ -2334,7 +2334,7 @@ dependencies = [
  "http-body",
  "http-body-util",
  "omnia",
- "omnia-guest",
+ "omnia-sdk",
  "omnia-wasi-blobstore",
  "omnia-wasi-config",
  "omnia-wasi-docstore",
@@ -3880,7 +3880,7 @@ dependencies = [
  "axum",
  "clap",
  "futures",
- "omnia-guest",
+ "omnia-sdk",
  "omnia-test",
  "omnia-wasi-blobstore",
  "omnia-wasi-config",

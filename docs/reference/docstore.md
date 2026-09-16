@@ -29,7 +29,7 @@ query: async func(collection: string, options: query-options) -> result<query-re
 
 Collections are named by string and created implicitly on first write; there is no open/close handshake and no collection resource.
 
-Guests normally call these through the `omnia_guest::DocumentStore` trait (implement it on a unit struct; the `wasm32` default methods delegate to `omnia_wasi_docstore::store`). The underlying guest functions are `omnia_wasi_docstore::store::{get, insert, put, delete, query}`.
+Guests normally call these through the `omnia_sdk::DocumentStore` trait (implement it on a unit struct; the `wasm32` default methods delegate to `omnia_wasi_docstore::store`). The underlying guest functions are `omnia_wasi_docstore::store::{get, insert, put, delete, query}`.
 
 ## Types
 
@@ -60,7 +60,7 @@ Guests normally call these through the `omnia_guest::DocumentStore` trait (imple
 
 ## Filters
 
-Filters reference fields *inside* the document JSON and compose into trees. On the guest side, build them with the `Filter` constructors from `omnia_guest::document_store` (defined in [`crates/wasi-docstore/src/document_store.rs`](../../crates/wasi-docstore/src/document_store.rs)):
+Filters reference fields *inside* the document JSON and compose into trees. On the guest side, build them with the `Filter` constructors from `omnia_sdk::document_store` (defined in [`crates/wasi-docstore/src/document_store.rs`](../../crates/wasi-docstore/src/document_store.rs)):
 
 | Constructor | Predicate |
 | ----------- | --------- |

@@ -2,8 +2,8 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use omnia_guest::Plugins;
-use omnia_guest::plugins::{Digest, Error, Location, Plugin, PluginCache, PluginRef};
+use omnia_sdk::Plugins;
+use omnia_sdk::plugins::{Digest, Error, Location, Plugin, PluginCache, PluginRef};
 use omnia_test::guest::ScriptedLoader;
 
 fn digest(hex_pair: &str) -> Digest {

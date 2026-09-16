@@ -11,10 +11,10 @@
 //! [`IntoExit`] writes the channels at that boundary.
 //!
 //! ```rust,ignore
-//! use omnia_guest::api::command::{Command, Parsed, Response, parse};
-//! use omnia_guest::api::{Client, Metadata};
+//! use omnia_sdk::api::command::{Command, Parsed, Response, parse};
+//! use omnia_sdk::api::{Client, Metadata};
 //!
-//! omnia_guest::command!(main);
+//! omnia_sdk::command!(main);
 //!
 //! async fn main() -> Response {
 //!     let app = match parse::<App>(wasip3::cli::environment::get_arguments()) {
@@ -75,9 +75,9 @@ fn env_key(prefix: &str, name: &str) -> String {
 /// traps on failure); see [`IntoExit`].
 ///
 /// ```rust,ignore
-/// use omnia_guest::api::command::{Parsed, Response, parse};
+/// use omnia_sdk::api::command::{Parsed, Response, parse};
 ///
-/// omnia_guest::command!(main);
+/// omnia_sdk::command!(main);
 ///
 /// async fn main() -> Response {
 ///     match parse::<App>(wasip3::cli::environment::get_arguments()) {

@@ -1,6 +1,6 @@
 # SQL and the Guest ORM
 
-The `wasi:sql` interface gives guests parameterized SQL access to whatever database the host configures — SQLite in development (`SqlDefault`), PostgreSQL in production (`omnia-postgres`). On top of the raw interface, `omnia-guest` provides a small ORM: an `entity!` macro that maps structs to tables and typed builders for select/insert/update/delete.
+The `wasi:sql` interface gives guests parameterized SQL access to whatever database the host configures — SQLite in development (`SqlDefault`), PostgreSQL in production (`omnia-postgres`). On top of the raw interface, `omnia-sdk` provides a small ORM: an `entity!` macro that maps structs to tables and typed builders for select/insert/update/delete.
 
 The [`sql`](../../examples/sql/) example is a minimal CRUD service (agencies and feeds, with a JOIN endpoint) touching each builder once; the snippets below follow its patterns and extend them.
 

@@ -11,7 +11,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use http::{HeaderMap, Method, Request, Response, StatusCode, Uri};
 use http_body::{Body, Frame};
-use omnia_guest::HttpRequest;
+use omnia_sdk::HttpRequest;
 
 type BodyPredicate = Arc<dyn Fn(&[u8]) -> bool + Send + Sync>;
 
@@ -74,7 +74,7 @@ struct Inner {
 /// use bytes::Bytes;
 /// use http::{Method, Request, Response};
 /// use http_body_util::Full;
-/// use omnia_guest::HttpRequest as _;
+/// use omnia_sdk::HttpRequest as _;
 /// use omnia_test::guest::MatchedHttp;
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {

@@ -5,7 +5,7 @@ use std::future::{Future, ready};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use omnia_guest::TableStore;
+use omnia_sdk::TableStore;
 use omnia_wasi_sql::{DataType, Row};
 
 /// A statement predicate over the SQL text and its bound parameters.
@@ -38,7 +38,7 @@ struct Inner {
 /// statement is recorded and an unmatched one panics naming it.
 ///
 /// ```
-/// use omnia_guest::TableStore as _;
+/// use omnia_sdk::TableStore as _;
 /// use omnia_test::guest::ScriptedTables;
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {

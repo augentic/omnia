@@ -11,10 +11,10 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-use omnia_guest::plugins::{Location, PluginRef, Plugins as _, WasiPlugins};
+use omnia_sdk::plugins::{Location, PluginRef, Plugins as _, WasiPlugins};
 use omnia_test::link::ops;
 
-omnia_guest::command!(scenario);
+omnia_sdk::command!(scenario);
 
 fn plugin(package: &str, path: &str) -> PluginRef {
     PluginRef::builder().package(package).location(Location::Path(path.to_owned())).build()

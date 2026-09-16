@@ -8,7 +8,7 @@
 use omnia_wasi_messaging::request_reply::{self, RequestOptions};
 use omnia_wasi_messaging::types::{Client, Message};
 
-omnia_guest::command!(scenario);
+omnia_sdk::command!(scenario);
 
 async fn scenario() {
     let client = Client::connect("default".to_owned()).await.expect("connect");

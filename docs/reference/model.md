@@ -19,7 +19,7 @@ record session {
 
 Tool calls stream host-to-guest on `calls`; the guest answers each on `results` by `id` (calls may arrive in parallel and results are unordered). When the request sets `check`, each candidate answer also arrives on `calls` as a tool call named `check` (see below). The `reply` future resolves when the backend finishes — the host always resolves it, so budget and deadline failures arrive as typed `error` values, never as a dropped writer. When the completion finishes (or its call budget is exhausted) the host closes `calls`, ending the guest's tool loop.
 
-Most guests never touch this machinery: the `omnia-guest` `Model::complete` / `Model::complete_with` sugar runs the session dance and hands tool calls to a closure — see the [guide](../guides/model-completions.md).
+Most guests never touch this machinery: the `omnia-sdk` `Model::complete` / `Model::complete_with` sugar runs the session dance and hands tool calls to a closure — see the [guide](../guides/model-completions.md).
 
 ### Session limits
 
@@ -61,7 +61,7 @@ When `check` is set, the backend does not finish on the model's final text. It o
 | `ok(_)` | The candidate is the reply; the completion ends. |
 | `err(text)` | The backend appends `text` verbatim as the next user turn (after the rejected candidate as an assistant turn) and goes round again. |
 
-The check rides the same streams as function tools but outside their budget: it never counts against `max-tool-calls` and needs no declaration in `tools`. The per-call timeout does apply, and the per-result size cap bounds the correction text (`tool-failed` when exceeded). A backend that runs out of rounds on a rejection fails the completion with `budget-exhausted` whose detail is the last correction. Guests using `omnia-guest` reach this through `Request::check` and a `complete_with` handler matching `call.name == "check"`, or through `model::Question<T>`, which derives the steering schema from `T`, deserializes each candidate, runs the guest's closure, and returns the accepted `T`.
+The check rides the same streams as function tools but outside their budget: it never counts against `max-tool-calls` and needs no declaration in `tools`. The per-call timeout does apply, and the per-result size cap bounds the correction text (`tool-failed` when exceeded). A backend that runs out of rounds on a rejection fails the completion with `budget-exhausted` whose detail is the last correction. Guests using `omnia-sdk` reach this through `Request::check` and a `complete_with` handler matching `call.name == "check"`, or through `model::Question<T>`, which derives the steering schema from `T`, deserializes each candidate, runs the guest's closure, and returns the accepted `T`.
 
 ### `generation`
 
