@@ -87,7 +87,8 @@ impl Components {
     }
 
     /// An explicit list of `[[example]]` names, one source in the default
-    /// group until [`group`](Self::group) renames it.
+    /// group until [`group`](Self::group) renames it. Each program is named
+    /// by its artifact stem (`-` becomes `_`), as cargo uplifts it.
     #[must_use]
     pub fn examples<S: Into<String>>(mut self, names: impl IntoIterator<Item = S>) -> Self {
         self.sources.push(Source::Examples {
@@ -261,12 +262,19 @@ impl Components {
             .flat_map(|source| match source {
                 Source::Examples { names, group } => names
                     .iter()
-                    .map(|name| Program {
-                        name: name.clone(),
-                        constant: name.to_uppercase(),
-                        group: group.clone(),
-                        source: format!("examples/{name}.rs"),
-                        example: true,
+                    .map(|name| {
+                        // Cargo uplifts a cdylib example under its crate
+                        // name, so a hyphenated `[[example]]` lands (and is
+                        // named) as its underscored stem; the nested build
+                        // is still told the manifest spelling.
+                        let stem = name.replace('-', "_");
+                        Program {
+                            constant: stem.to_uppercase(),
+                            name: stem,
+                            group: group.clone(),
+                            source: format!("examples/{name}.rs"),
+                            example: true,
+                        }
                     })
                     .collect(),
                 Source::Scan(dir) => {
@@ -697,6 +705,34 @@ mod tests {
         );
         assert!(!packages.sources[0].is_examples());
         assert_eq!(packages.extras, ["caller"]);
+    }
+
+    // A hyphenated `[[example]]` is found under the underscored stem cargo
+    // uplifts it as, and that stem is the constant and macro arm; the nested
+    // build still selects the target by its manifest name.
+    #[test]
+    fn hyphenated_examples() {
+        let components =
+            Components::in_workspace("..").package("examples").examples(["http-cache-wasm"]);
+        let programs = components.programs(Path::new("/workspace"));
+        assert_eq!(
+            programs,
+            [Program {
+                name: "http_cache_wasm".into(),
+                constant: "HTTP_CACHE_WASM".into(),
+                group: DEFAULT_GROUP.into(),
+                source: "examples/http-cache-wasm.rs".into(),
+                example: true,
+            }]
+        );
+
+        let builds =
+            components.nested_builds(Path::new("/workspace"), Path::new("/out"), &programs);
+        assert_eq!(builds.len(), 1);
+        let args: Vec<_> = builds[0].get_args().map(|arg| arg.to_string_lossy()).collect();
+        assert!(args.contains(&"--package=examples".into()));
+        assert!(args.contains(&"--example".into()));
+        assert!(args.contains(&"http-cache-wasm".into()));
     }
 
     // One build draws from several sources: `group` names the one added just
