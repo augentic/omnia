@@ -2,7 +2,6 @@
 //!
 //! Wasm component (guest) HTTP SDK.
 
-mod cache;
 mod incoming;
 mod outgoing;
 

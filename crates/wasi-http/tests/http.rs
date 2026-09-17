@@ -4,8 +4,7 @@
 //! incoming scenario is a handler guest driven in-process through
 //! [`HttpHandler`], bypassing the socket. The guest asserts what it observes
 //! across the boundary (and traps on failure); the host side asserts what
-//! reached the origin, what the guest-side cache persisted, and what the
-//! handler answered.
+//! reached the origin and what the handler answered.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -14,7 +13,7 @@ use std::future::ready;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
-use http::header::{HOST, IF_NONE_MATCH};
+use http::header::HOST;
 use http::{HeaderMap, Request, Response, StatusCode};
 use http_body_util::{BodyExt as _, Full};
 use hyper::body::Incoming;
@@ -24,7 +23,6 @@ use omnia::ExitStatus;
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_config::WasiConfig;
 use omnia_wasi_http::{HttpHandler, WasiHttp};
-use omnia_wasi_keyvalue::{WasiKeyValue, WasiKeyValueCtx as _};
 use omnia_wasi_otel::WasiOtel;
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
@@ -36,9 +34,6 @@ test_programs::foreach_http!();
 
 /// The body the origin answers every request with.
 const BODY: &[u8] = b"hello from origin";
-
-/// The bucket `omnia_wasi_http`'s guest-side cache opens by default.
-const CACHE_BUCKET: &str = "default-cache";
 
 /// One request as the origin saw it.
 #[derive(Clone, Debug)]
@@ -97,30 +92,19 @@ impl Origin {
 
 /// Run one guest program against `backends`, requiring a clean exit.
 async fn run_guest(wasm: &str, backends: Backends) {
-    // Linked by hand: the guest reads the origin from `wasi:config` and its
-    // cache lives in `wasi:keyvalue`, alongside the host under test.
+    // Linked by hand: the guest reads the origin from `wasi:config`,
+    // alongside the host under test.
     let status = Deployment::new()
         .guest("guest", wasm)
         .run(backends, |deployment| {
             deployment.host::<WasiHttp, Backends>()?;
             deployment.host::<WasiConfig, Backends>()?;
-            deployment.host::<WasiKeyValue, Backends>()?;
             deployment.host::<WasiOtel, Backends>()?;
             Ok(())
         })
         .await
         .expect("guest runs");
     assert_eq!(status, ExitStatus::SUCCESS, "guest `{wasm}` failed");
-}
-
-/// A JSON array of byte values as bytes.
-fn bytes(value: &Value) -> Vec<u8> {
-    value
-        .as_array()
-        .expect("byte array")
-        .iter()
-        .map(|byte| u8::try_from(byte.as_u64().expect("byte")).expect("byte range"))
-        .collect()
 }
 
 #[tokio::test]
@@ -136,32 +120,6 @@ async fn http_outgoing_get() {
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].path, "/resource");
     assert_eq!(hits[0].headers.get("x-probe").and_then(|v| v.to_str().ok()), Some("1"));
-}
-
-#[tokio::test]
-async fn http_cache_hit() {
-    let (origin, url) = Origin::serve().await;
-    let backends = Backends::defaults().await.config([("ORIGIN", url)]);
-
-    run_guest(test_programs::HTTP_CACHE_HIT, backends.clone()).await;
-
-    // The second GET never left the guest, and the one that did carried no
-    // conditional header: the guest-side cache owns those semantics.
-    let hits = origin.hits();
-    assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].path, "/cached");
-    assert!(hits[0].headers.get(IF_NONE_MATCH).is_none(), "If-None-Match is not forwarded");
-
-    // Persisted state: the cache bucket holds the origin's response under
-    // the etag, wrapped in the keyvalue `Cacheable` envelope.
-    let bucket = backends.keyvalue.open_bucket(CACHE_BUCKET.to_owned()).await.expect("bucket");
-    assert_eq!(bucket.keys().await.expect("keys"), ["\"v1\""]);
-    let entry = bucket.get("\"v1\"".to_owned()).await.expect("get").expect("cached entry");
-    let envelope: Value = serde_json::from_slice(&entry).expect("Cacheable JSON");
-    let cached: Value =
-        serde_json::from_slice(&bytes(&envelope["value"])).expect("serialized response");
-    assert_eq!(cached["status"], 200);
-    assert_eq!(bytes(&cached["body"]), BODY);
 }
 
 #[tokio::test]

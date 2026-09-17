@@ -53,7 +53,7 @@ Each example directory has a `README.md` with test commands and example-specific
 
 | Example | Demonstrates |
 | ------- | ------------ |
-| [`http-proxy`](http-proxy) | Outbound HTTP from a guest, with a keyvalue caching layer |
+| [`http-proxy`](http-proxy) | Outbound HTTP from a guest, including mTLS client certificates |
 | [`http-routing`](http-routing) | Two HTTP guests behind path prefixes via a deployment manifest |
 | [`guest-link`](guest-link) | Host-mediated guest-to-guest linking by in-memory routing |
 | [`cli-static`](cli-static) | A compiled-in command deployment: inline guests, direct-command argv |
