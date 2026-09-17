@@ -230,7 +230,7 @@ impl Components {
             sync(&root.join(manifest), &examples);
         }
 
-        let target_dir = env::path_var("OUT_DIR").join("fixtures");
+        let target_dir = env::nested_dir(&env::path_var("OUT_DIR"));
         for mut command in self.nested_builds(&root, &target_dir, &programs) {
             let status = command
                 .status()

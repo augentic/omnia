@@ -117,7 +117,7 @@ fn main() {
 }
 ```
 
-`Components` runs the nested `wasm32-wasip2` build into `OUT_DIR` (so plain `cargo test` is self-contained), and `write_gen` emits one `pub const <GROUP>_<SCENARIO>: &str` artifact path per program plus a `foreach_<group>!` macro that fails to compile unless an identically named test exists at the invocation site. `scan` discovers programs from a `<group>/<scenario>.rs` tree and `sync_examples` keeps the `[[example]]` stanzas in step; `examples([..])` names them explicitly instead. A repository whose components under test are shipped `cdylib` packages adds them to the same build with `scan_packages(dir).group(name)` (or `packages([..])`), so one `gen.rs` carries the components and the programs that drive them.
+`Components` runs the nested `wasm32-wasip2` build into `target/wasm32-fixtures` — a sibling of the outer profile directory shared by every outer configuration, so plain `cargo test` is self-contained and a version or toolchain bump rebuilds the tree incrementally instead of leaving the last one behind under a per-hash `OUT_DIR` — and `write_gen` emits one `pub const <GROUP>_<SCENARIO>: &str` artifact path per program plus a `foreach_<group>!` macro that fails to compile unless an identically named test exists at the invocation site. `scan` discovers programs from a `<group>/<scenario>.rs` tree and `sync_examples` keeps the `[[example]]` stanzas in step; `examples([..])` names them explicitly instead. A repository whose components under test are shipped `cdylib` packages adds them to the same build with `scan_packages(dir).group(name)` (or `packages([..])`), so one `gen.rs` carries the components and the programs that drive them.
 
 ## Examples to read
 
