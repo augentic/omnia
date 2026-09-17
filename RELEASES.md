@@ -198,6 +198,14 @@
 
 ### Changed
 
+- `omnia_test::build::Components` runs its nested `wasm32-wasip2` build into
+  `target/wasm32-fixtures`, a sibling of the outer profile directory shared by
+  every outer feature set, profile, and build-script hash, rather than under
+  the consumer's per-hash `OUT_DIR`, whose hash — and with it the fixture tree
+  — changed on every package version bump, toolchain update, and build
+  dependency change, leaving the previous tree behind for nothing to reuse or
+  remove. The nested build also sets `CARGO_PROFILE_DEV_DEBUG=0`: wasmtime
+  reads no guest DWARF unless asked, so the fixtures carry none.
 - `omnia-guest` renamed to `omnia-sdk`: the crate lives at
   `crates/omnia-sdk` and guest code imports `omnia_sdk::…`.
   `omnia-guest-macros` and the `omnia-test` `guest` feature keep their

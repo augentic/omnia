@@ -4,6 +4,12 @@
 //! cargo build, then `gen.rs` is generated with one path constant per
 //! program plus a `foreach_<group>!` completeness macro per group.
 //!
+//! The nested build lands in `target/wasm32-fixtures`, a sibling of the outer
+//! profile directory shared by every outer feature set, profile, and
+//! build-script hash, so a version or toolchain bump rebuilds the fixtures
+//! incrementally rather than leaving the previous tree behind under a
+//! per-hash `OUT_DIR`.
+//!
 //! ```no_run
 //! // build.rs
 //! omnia_test::build::Components::in_workspace("../..")
