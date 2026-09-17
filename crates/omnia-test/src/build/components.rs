@@ -713,15 +713,15 @@ mod tests {
     #[test]
     fn hyphenated_examples() {
         let components =
-            Components::in_workspace("..").package("examples").examples(["http-cache-wasm"]);
+            Components::in_workspace("..").package("examples").examples(["http-proxy-wasm"]);
         let programs = components.programs(Path::new("/workspace"));
         assert_eq!(
             programs,
             [Program {
-                name: "http_cache_wasm".into(),
-                constant: "HTTP_CACHE_WASM".into(),
+                name: "http_proxy_wasm".into(),
+                constant: "HTTP_PROXY_WASM".into(),
                 group: DEFAULT_GROUP.into(),
-                source: "examples/http-cache-wasm.rs".into(),
+                source: "examples/http-proxy-wasm.rs".into(),
                 example: true,
             }]
         );
@@ -732,7 +732,7 @@ mod tests {
         let args: Vec<_> = builds[0].get_args().map(|arg| arg.to_string_lossy()).collect();
         assert!(args.contains(&"--package=examples".into()));
         assert!(args.contains(&"--example".into()));
-        assert!(args.contains(&"http-cache-wasm".into()));
+        assert!(args.contains(&"http-proxy-wasm".into()));
     }
 
     // One build draws from several sources: `group` names the one added just
