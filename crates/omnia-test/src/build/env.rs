@@ -37,18 +37,24 @@ pub fn denies_warnings(rustflags: Option<&str>) -> bool {
 /// Where the nested build lands, given the consumer's `OUT_DIR`.
 ///
 /// Cargo lays a build script's `OUT_DIR` out as
-/// `<target>/<profile>/build/<package>-<hash>/out`, and the hash changes with
-/// the package version, the toolchain, and the build dependencies — each
-/// change would leave the previous fixture tree behind, never reused and
-/// never removed. The nested build therefore goes to `<target>/wasm32-fixtures`,
-/// one directory shared by every outer configuration, with its own lock so
-/// it never waits on the outer build. An `OUT_DIR` of another shape falls
-/// back to `<out_dir>/fixtures`.
+/// `<target>/<profile>/build/<package>-<hash>/out` (layout v1) or
+/// `<target>/<profile>/build/<package>/<hash>/out` (layout v2), and the hash
+/// changes with the package version, the toolchain, and the build
+/// dependencies — each change would leave the previous fixture tree behind,
+/// never reused and never removed. The nested build therefore goes to
+/// `<target>/wasm32-fixtures`, one directory shared by every outer
+/// configuration, with its own lock so it never waits on the outer build.
+/// An `OUT_DIR` of another shape falls back to `<out_dir>/fixtures`.
 pub fn nested_dir(out_dir: &Path) -> PathBuf {
-    out_dir
-        .ancestors()
-        .nth(2)
-        .filter(|build| build.file_name().is_some_and(|name| name == "build"))
+    // v1: `build` is two levels above `out`; v2 inserts `<package>/<hash>`.
+    [2usize, 3]
+        .into_iter()
+        .find_map(|n| {
+            out_dir
+                .ancestors()
+                .nth(n)
+                .filter(|dir| dir.file_name().is_some_and(|name| name == "build"))
+        })
         .and_then(|build| build.parent()?.parent())
         .map_or_else(|| out_dir.join("fixtures"), |target| target.join(NESTED_TARGET))
 }
@@ -115,9 +121,10 @@ mod tests {
         assert!(!denies_warnings(None));
     }
 
-    // The sibling is chosen from cargo's layout alone, under the default
-    // `target/` and a redirected one alike; a layout that is not cargo's
-    // keeps the build under `OUT_DIR`.
+    // The sibling is chosen from cargo's layout alone — v1
+    // (`build/<pkg>-<hash>/out`) and v2 (`build/<pkg>/<hash>/out`) — under
+    // the default `target/` and a redirected one alike; a layout that is
+    // not cargo's keeps the build under `OUT_DIR`.
     #[test]
     fn nested_target() {
         assert_eq!(
@@ -132,7 +139,23 @@ mod tests {
             nested_dir(Path::new("/repo/target/x86_64-unknown-linux-gnu/debug/build/p-1/out")),
             Path::new("/repo/target/x86_64-unknown-linux-gnu/wasm32-fixtures")
         );
+        assert_eq!(
+            nested_dir(Path::new("/repo/target/debug/build/test-programs/0a1b/out")),
+            Path::new("/repo/target/wasm32-fixtures")
+        );
+        assert_eq!(
+            nested_dir(Path::new("/tmp/cache/cargo-target/release/build/probe/ff/out")),
+            Path::new("/tmp/cache/cargo-target/wasm32-fixtures")
+        );
+        assert_eq!(
+            nested_dir(Path::new("/repo/target/x86_64-unknown-linux-gnu/debug/build/p/1/out")),
+            Path::new("/repo/target/x86_64-unknown-linux-gnu/wasm32-fixtures")
+        );
         assert_eq!(nested_dir(Path::new("/elsewhere/out")), Path::new("/elsewhere/out/fixtures"));
+        assert_eq!(
+            nested_dir(Path::new("/repo/build/a/b/c/out")),
+            Path::new("/repo/build/a/b/c/out/fixtures")
+        );
     }
 
     #[test]
