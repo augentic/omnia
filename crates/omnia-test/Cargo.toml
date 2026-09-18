@@ -20,8 +20,8 @@ workspace = true
 # that forgets `default-features = false` still pulls nothing but `std`.
 default = []
 # Native doubles for the `omnia_sdk` capability traits, plus the `Provider` that bundles them.
-# `omnia-sdk/orm` already carries the docstore and sql host crates the
-# `MemoryDocs` and `ScriptedTables` doubles wrap.
+# `omnia-sdk/sql` and `omnia-sdk/docstore` carry the `TableStore` and
+# `DocumentStore` traits the `ScriptedTables` and `MemoryDocs` doubles implement.
 guest = [
     "dep:anyhow",
     "dep:bytes",
@@ -29,7 +29,8 @@ guest = [
     "dep:http-body",
     "dep:http-body-util",
     "dep:omnia-sdk",
-    "omnia-sdk/orm",
+    "omnia-sdk/sql",
+    "omnia-sdk/docstore",
     "dep:omnia-wasi-docstore",
     "dep:omnia-wasi-sql",
 ]

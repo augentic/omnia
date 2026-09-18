@@ -111,7 +111,7 @@ The guest crate exposes trait-based abstractions for host capabilities. When com
 | `Publish` | Publish messages to a topic. |
 | `StateStore` | Get/set/delete key-value state with optional TTL, plus one-shot `cas` (conflict is a typed `CasError::Conflict`) and atomic `increment`. |
 | `Identity` | Obtain access tokens from an identity provider. |
-| `TableStore` | Execute SQL queries and statements via the ORM layer. |
+| `TableStore` | Execute parameterized SQL queries and statements over `wasi:sql`. |
 | `Broadcast` | Send events over WebSocket channels. |
 | `Plugins` | Request plugin loads through `omnia:plugins/loader`: name a package, a location, and an optional sha256 pin; receive a typed `Plugin` handle. The `plugins` module carries the shared `PluginRef`/`Digest` types and typed refusals convertible into `Error`. |
 | `BlobStore` / `BlobStoreExt` | Object storage. `BlobStore` is the ten primitives an implementor writes; `BlobStoreExt` (`has`, `delete_objects`, `clear`, `copy_object`, `move_object`) is derived for every `BlobStore` — one host call each on `wasm32`, composed from the primitives natively. |
@@ -158,11 +158,12 @@ See the [workspace documentation](https://github.com/augentic/omnia) for the ful
 
 ## Cargo features
 
-- `orm` *(default)*: the SQL ORM, table/document capabilities, and document-store re-exports.
+- `sql` *(default)*: the `TableStore` capability over `wasi:sql`.
+- `docstore` *(default)*: the `DocumentStore` capability and the `document_store` re-exports.
 - `http` *(default)*: the axum-backed `api::http` routing, the `mcp` server, and the `HttpError` / `HttpResult` root re-exports. The outbound `HttpRequest` capability and `Error::status()` need no feature.
 - `command`: the clap-backed parts of `api::command` (`parse`, `completions`, `Response::usage`, the `clap_complete::Shell` re-export, and the `clap::ValueEnum` derive on `api::Format`). The `Command` projector, `Response`, `Failure`, and `command!` need no feature.
 
-Guests that do not use SQL, documents, or inbound HTTP can disable defaults to shrink wasm build time and size; a command-only guest is `default-features = false, features = ["command"]`.
+Guests that do not use SQL, documents, or inbound HTTP can disable defaults to shrink wasm build time and size, naming only the capabilities they use (`features = ["sql"]` for `TableStore` alone); a command-only guest is `default-features = false, features = ["command"]`.
 
 ## License
 
