@@ -57,7 +57,7 @@ unused_result_ok = "warn"
 anyhow = "1.0.104"
 axum = { version = "0.8.9", default-features = false, features = ["json"] }
 base64ct = { version = "1.8.3", features = ["std"] }
-bon = "3.10.0"
+bon = "3.10.1"
 bytes = "1.12.1"
 # cap-std backs omnia's own mount registry and workspace tools (bounded
 # directory handles). Since wasmtime-wasi 48 dropped cap-std from its public
@@ -65,10 +65,10 @@ bytes = "1.12.1"
 # to wasmtime's.
 cap-fs-ext = "4.0.3"
 cap-std = "4.0.3"
-cfg-if = "1.0.4"
+cfg-if = "1.0.5"
 chrono = "0.4.45"
-clap = { version = "4.6.6", default-features = false, features = ["derive", "error-context", "help", "std", "usage"] }
-clap_complete = { version = "4.6.9", default-features = false }
+clap = { version = "4.6.7", default-features = false, features = ["derive", "error-context", "help", "std", "usage"] }
+clap_complete = { version = "4.6.11", default-features = false }
 dashmap = "6.2.1"
 fromenv = "0.1.0"
 futures = "0.3.34"
@@ -77,13 +77,13 @@ futures-util = "0.3.34"
 http = "1.5.0"
 http-body = "1.1.0"
 http-body-util = "0.1.5"
-hyper = "1.11.0"
+hyper = "1.11.1"
 hyper-util = "0.1.20"
 insta = "1.48.0"
 moka = { version = "0.12.16", features = ["sync"] }
-opentelemetry = "0.32.0"
-opentelemetry-proto = "0.32.0"
-opentelemetry_sdk = "0.32.1"
+opentelemetry = "0.33.0"
+opentelemetry-proto = "0.33.0"
+opentelemetry_sdk = "0.33.0"
 parking_lot = "0.12.5"
 pastey = "0.2.3"
 prettyplease = "0.3.0"
@@ -91,34 +91,34 @@ proc-macro2 = "1.0.107"
 quote = "1.0.47"
 rand = "0.10.2"
 regex = "1.13.1"
-reqwest = { version = "0.13.4", default-features = false }
+reqwest = { version = "0.13.5", default-features = false }
 rustls = { version = "0.23.45", default-features = false, features = ["ring", "std"] }
 schemars = "1.2.2"
 sea-query = { version = "1.0.2", default-features = false, features = ["thread-safe", "with-chrono"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 serde_urlencoded = "0.7.1"
-sha2 = "0.10.9"
-syn = { version = "3.0.4", features = ["full"] }
-tempfile = "3.24.0"
+sha2 = "0.11.0"
+syn = { version = "3.0.6", features = ["full"] }
+tempfile = "3.27.0"
 thiserror = "2.0.20"
 tokio = { version = "1.53.1", default-features = false }
 tokio-stream = { version = "0.1.19", features = ["sync"] }
 tokio-tungstenite = "0.30.0"
 tokio-util = { version = "0.7.19", features = ["codec"] }
-toml = { version = "1.1.4", default-features = false, features = ["parse", "serde", "std"] }
+toml = { version = "1.1.6", default-features = false, features = ["parse", "serde", "std"] }
 tower = "0.5.3"
 tracing = "0.1.44"
 tracing-opentelemetry = "0.33.0"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
-wasip3 = { version = "0.8.0", features = ["http-compat"] }
+wasip3 = { version = "0.9.0", features = ["http-compat"] }
 wasm-pkg-client = "0.16.1"
-wasmtime = { version = "48.0.1", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation", "pooling-allocator"] }
-wasmtime-wasi = { version = "48.0.1", features = ["p3"] }
-wasmtime-wasi-config = "48.0.1"
-wasmtime-wasi-http = { version = "48.0.1", default-features = false, features = ["p3"] }
-wasmtime-wasi-io = "48.0.1"
-wit-bindgen = { version = "0.61.1", features = ["async-spawn"] }
+wasmtime = { version = "48.0.2", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation", "pooling-allocator"] }
+wasmtime-wasi = { version = "48.0.2", features = ["p3"] }
+wasmtime-wasi-config = "48.0.2"
+wasmtime-wasi-http = { version = "48.0.2", default-features = false, features = ["p3"] }
+wasmtime-wasi-io = "48.0.2"
+wit-bindgen = { version = "0.62.0", features = ["async-spawn"] }
 
 # internally referenced crates
 omnia = { path = "crates/omnia", version = "0.36.0" }
