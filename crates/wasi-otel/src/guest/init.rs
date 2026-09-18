@@ -19,7 +19,6 @@ use crate::guest::{metrics, tracing};
 
 static TRACING: OnceLock<SdkTracerProvider> = OnceLock::new();
 static METRICS: OnceLock<SdkMeterProvider> = OnceLock::new();
-// The handle `set_filter` swaps the installed filter through.
 static FILTER: OnceLock<reload::Handle<EnvFilter, Registry>> = OnceLock::new();
 
 /// Initialize OpenTelemetry SDK and tracing subscriber.
@@ -40,7 +39,7 @@ pub fn init() -> Result<Option<ExitGuard>> {
     let resource: Resource = resource::resource().into();
 
     let (filter_layer, filter_handle) = reload::Layer::new(filter(None)?);
-    let fmt_layer = tracing_subscriber::fmt::layer();
+    let fmt_layer = tracing_subscriber::fmt::layer().with_current_span(false);
     let registry = Registry::default().with(filter_layer).with(fmt_layer);
 
     let tracer_provider = tracing::init(resource.clone());
