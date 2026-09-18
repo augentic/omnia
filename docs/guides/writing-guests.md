@@ -24,7 +24,7 @@ A guest is a `cdylib` crate targeting `wasm32-wasip2`. Guest code is guarded wit
 Typical guest dependencies:
 
 - `wasip3` — WASI Preview 3 bindings (exports, HTTP types, CLI, filesystem preopens)
-- `omnia-sdk` — guest SDK: the handler contract, HTTP/messaging routers and the command façade, error types, ORM helpers, MCP support
+- `omnia-sdk` — guest SDK: the handler contract, HTTP/messaging routers and the command façade, error types, capability traits, MCP support
 - `omnia-wasi-*` — the guest side of each capability you use (`omnia-wasi-keyvalue`, `omnia-wasi-messaging`, ...). These crates compile to guest bindings on `wasm32` and to the host implementation on native, so hosts and guests share one dependency name.
 
 A minimal HTTP guest crate looks like this (align `wasip3`/`wit-bindgen` with the versions the omnia workspace pins — a mismatch causes executor deadlocks, see [Troubleshooting](../troubleshooting.md#outbound-http-or-spawned-work-inside-a-handler-deadlocks)):
@@ -104,7 +104,7 @@ The other capabilities follow the same shape; each has a full example:
 | ---------- | ------------ | ------- | --------- |
 | Key-value | `omnia_wasi_keyvalue::store` | `examples/keyvalue` | — |
 | Messaging | `omnia_wasi_messaging::{producer, request_reply}` | `examples/messaging` | [Messaging](messaging.md) |
-| SQL + ORM | `omnia_wasi_sql` (with `entity!`) | `examples/sql` | [SQL and the ORM](sql-and-orm.md) |
+| SQL | `omnia_wasi_sql` (with `TableStore`) | `examples/sql` | [SQL](sql.md) |
 | Document store | `omnia_wasi_docstore` | `examples/docstore` | [Document Store](document-store.md) |
 | Blob store | `omnia_wasi_blobstore` | `examples/blobstore` | — |
 | Secrets | `omnia_wasi_vault` | `examples/vault` | — |

@@ -21,7 +21,7 @@
 
 ## Capabilities in depth
 
-- [SQL and the Guest ORM](guides/sql-and-orm.md)
+- [SQL](guides/sql.md)
 - [Document Store](guides/document-store.md)
 - [Messaging](guides/messaging.md)
 - [Model Completions and MCP](guides/model-completions.md)

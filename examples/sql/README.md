@@ -45,5 +45,5 @@ curl -X DELETE http://localhost:8080/agencies/1
 - **Parameterized filters** — `$1`, `$2`, ... placeholders bound from `DataType` values
 - **Row mapping** — reading `Row` fields by name into a `Serialize` struct
 
-See the [SQL and ORM guide](../../docs/guides/sql-and-orm.md) for raw
-`wasi:sql` usage and backend selection.
+See the [SQL guide](../../docs/guides/sql.md) for raw `wasi:sql` usage,
+the `TableStore` capability, and backend selection.
