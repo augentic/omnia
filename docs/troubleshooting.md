@@ -106,11 +106,7 @@ A `runtime!` binary with `mode: command` and a compiled-in deployment is a [dire
 
 ### A direct-command binary logs nothing (or too much)
 
-`--debug` and `--quiet` are the only host flags on this path; they are peeled anywhere in argv and win over `RUST_LOG` (see [Host log flags](reference/configuration.md#host-log-flags-direct-command-binaries)). Combining them is a startup failure. Without either flag, the `RUST_LOG` filter applies as usual.
-
-### The guest never sees `--debug` / `--quiet`
-
-By design — these two flags are reserved for the host log presets and removed from the guest's argv. Pick different flag names for guest-facing options.
+Nothing in argv is a host flag on this path; the host console filter is `RUST_LOG` alone, and unset means `warn` (see [Configuration](reference/configuration.md#general)). Guest tracing is the guest's own subscriber: `omnia_wasi_otel` reads the inherited `RUST_LOG` too (`error` when unset), and a guest that owns a verbosity flag reloads its filter with `omnia_wasi_otel::set_filter` after parsing argv.
 
 ## Model completions
 

@@ -12,11 +12,9 @@ use crate::{Backends, DeploymentBuilder, Wiring};
 ///
 /// `options` carries the deployment the `runtime!` macro compiled in: mode
 /// and manifest source. Command mode with a compiled-in deployment is a
-/// direct command: argv passes to the guest verbatim except the reserved host
-/// log flags (`--debug` / `--quiet`), which select the telemetry
-/// [`LogMode`](omnia_core::LogMode). Every other shape needs the standard
-/// `run [wasm] [--config] -- args…` grammar, served when omnia is built with
-/// the `cli` feature.
+/// direct command: argv passes to the guest verbatim. Every other shape needs
+/// the standard `run [wasm] [--config] -- args…` grammar, served when omnia
+/// is built with the `cli` feature.
 #[doc(hidden)]
 pub async fn main<B, H>(options: MainOptions) -> ExitCode
 where

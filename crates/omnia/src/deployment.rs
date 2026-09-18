@@ -20,8 +20,8 @@ use omnia_core::wasmtime::component::Linker;
 use omnia_core::wasmtime::{Config, Engine};
 use omnia_core::wasmtime_wasi::WasiView;
 use omnia_core::{
-    GuestId, Host, LinkSeam, LoadedGuest, Location, LogMode, MountRegistry, NoLinks, Registry,
-    Routes, Runtime, RuntimeOptions, RuntimeParts, Server, StoreCtx, Telemetry,
+    GuestId, Host, LinkSeam, LoadedGuest, Location, MountRegistry, NoLinks, Registry, Routes,
+    Runtime, RuntimeOptions, RuntimeParts, Server, StoreCtx, Telemetry,
 };
 #[cfg(feature = "link")]
 use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks};
@@ -53,7 +53,6 @@ pub struct DeploymentBuilder {
     mode: Mode,
     allow_empty: bool,
     program_name: Option<String>,
-    log_mode: Option<LogMode>,
     guest_timeout: Option<Duration>,
     max_dispatch_depth: Option<usize>,
 }
@@ -111,15 +110,6 @@ impl DeploymentBuilder {
         self
     }
 
-    /// Select the host [`LogMode`] preset installed with telemetry (the
-    /// generated direct-command entry peels `--debug` / `--quiet` into this).
-    /// Unset defers to `RUST_LOG` alone.
-    #[must_use]
-    pub const fn log_mode(mut self, mode: LogMode) -> Self {
-        self.log_mode = Some(mode);
-        self
-    }
-
     /// Override the wall-clock cap on server and server-rooted link-dispatch
     /// invocations for this deployment. Unset defers to `GUEST_TIMEOUT_MS`.
     #[must_use]
@@ -159,7 +149,7 @@ impl DeploymentBuilder {
         // environment.
         let name = env::var("COMPONENT").unwrap_or_else(|_| program_name.clone());
 
-        init_telemetry(&name, self.log_mode)?;
+        init_telemetry(&name)?;
         tracing::debug!("initializing runtime");
 
         let (engine, linker, mut options) = engine_and_linker()?;
@@ -422,15 +412,12 @@ fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, Runt
 // Telemetry initialization is idempotent (`Telemetry::build`): the first call
 // in the process — here or in an embedder — installs the subscriber and
 // providers, and later deployments reuse them.
-fn init_telemetry(name: &str, log_mode: Option<LogMode>) -> Result<()> {
+fn init_telemetry(name: &str) -> Result<()> {
     let mut builder = Telemetry::new(name);
     if let Ok(endpoint) = env::var("OTEL_GRPC_URL") {
         builder = builder.endpoint(endpoint);
     } else {
         tracing::debug!("OTEL_GRPC_URL unset; using OpenTelemetry defaults");
-    }
-    if let Some(mode) = log_mode {
-        builder = builder.log_mode(mode);
     }
     builder.build().context("initializing telemetry")
 }

@@ -196,7 +196,30 @@
   re-exported so `connect_with` can be called with fixed options instead of
   `connect()` reading `HTTP_CONNECT_TIMEOUT` / `SQL_DATABASE`.
 
+- `omnia_wasi_otel::set_filter(directives)`: a guest replaces its tracing
+  filter with a `RUST_LOG` string after its subscriber is installed, so a
+  guest-owned verbosity flag (`--debug`, `--quiet`) parsed from argv can
+  drive the guest's own tracing. The subscriber `init` installs now holds
+  its `EnvFilter` in a `reload::Layer`; events after the call follow the
+  new filter, and the always-on transport mutes stay in force.
+
+- `Telemetry::filter(directives)`: an embedder filters the host console
+  subscriber by an explicit `RUST_LOG` string instead of the environment
+  (the always-on dependency mutes still apply).
+
 ### Changed
+
+- The host console filter is `RUST_LOG` alone, on every entry path, and an
+  unset `RUST_LOG` now means `warn` rather than `error`, so host warnings
+  (a mount that failed to preopen) reach stderr without a hand-written
+  filter. A failed telemetry flush — every exit of a collectorless
+  command-mode run — reports at `debug` instead of `warn`. The
+  direct-command host log flags (`--debug` / `--quiet` peeled from argv)
+  and the `LogMode` presets behind them (`omnia::LogMode`,
+  `Telemetry::log_mode`, `DeploymentBuilder::log_mode`) are gone: a
+  direct-command guest sees every argument, and a product that wants those
+  flags defines them in its own grammar and applies them through
+  `omnia_wasi_otel::set_filter`.
 
 - `omnia_test::build::Components` runs its nested `wasm32-wasip2` build into
   `target/wasm32-fixtures`, a sibling of the outer profile directory shared by
@@ -621,11 +644,11 @@
   ```
 - Removed the `runtime!` macro's `program:` key: `mode: command` with a
   compiled-in deployment (`config:` or inline manifest keys) is now a
-  direct command by default — raw argv passthrough with the reserved
-  `--debug` / `--quiet` host log flags, no host `run` grammar. The program
-  name (telemetry and guest `argv[0]`) defaults to the manifest name (first
-  `[[guest]]` id). Command-mode binaries without a compiled-in deployment
-  keep the `run` grammar
+  direct command by default — raw argv passthrough, nothing reserved for
+  the host, no host `run` grammar. The program name (telemetry and guest
+  `argv[0]`) defaults to the manifest name (first `[[guest]]` id).
+  Command-mode binaries without a compiled-in deployment keep the `run`
+  grammar
 - Removed the `command_guest:` key and its plumbing
   (`DeploymentBuilder::command_guest`, `Runtime::with_command_guest`,
   `MainOptions::command_guest`): command mode routes to the sole static

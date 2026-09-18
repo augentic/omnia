@@ -9,17 +9,23 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use tracing_opentelemetry::{MetricsLayer, layer as tracing_layer};
+use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{EnvFilter, Registry};
+use tracing_subscriber::{EnvFilter, Registry, reload};
 
 use crate::guest::generated::omnia::otel::{resource, types};
 use crate::guest::{metrics, tracing};
 
 static TRACING: OnceLock<SdkTracerProvider> = OnceLock::new();
 static METRICS: OnceLock<SdkMeterProvider> = OnceLock::new();
+// The handle `set_filter` swaps the installed filter through.
+static FILTER: OnceLock<reload::Handle<EnvFilter, Registry>> = OnceLock::new();
 
 /// Initialize OpenTelemetry SDK and tracing subscriber.
+///
+/// The subscriber filters by `RUST_LOG`, defaulting to `error`, until
+/// [`set_filter`] replaces the filter.
 ///
 /// # Errors
 ///
@@ -33,14 +39,7 @@ pub fn init() -> Result<Option<ExitGuard>> {
 
     let resource: Resource = resource::resource().into();
 
-    // Default to ERROR when `RUST_LOG` is unset so error telemetry is never
-    // silently dropped (an empty `EnvFilter` disables everything).
-    let filter_layer = EnvFilter::builder()
-        .with_default_directive(tracing_subscriber::filter::LevelFilter::ERROR.into())
-        .from_env_lossy()
-        .add_directive("hyper=off".parse()?)
-        .add_directive("h2=off".parse()?)
-        .add_directive("tonic=off".parse()?);
+    let (filter_layer, filter_handle) = reload::Layer::new(filter(None)?);
     let fmt_layer = tracing_subscriber::fmt::layer();
     let registry = Registry::default().with(filter_layer).with(fmt_layer);
 
@@ -60,8 +59,40 @@ pub fn init() -> Result<Option<ExitGuard>> {
 
     TRACING.set(tracer_provider).map_err(|_e| anyhow!("failed to set tracing provider"))?;
     METRICS.set(meter_provider).map_err(|_e| anyhow!("failed to set metrics provider"))?;
+    FILTER.set(filter_handle).map_err(|_e| anyhow!("failed to set filter handle"))?;
 
     Ok(Some(ExitGuard))
+}
+
+/// Replace the guest's tracing filter with `directives`, a `RUST_LOG` string.
+///
+/// Events after the call follow the new filter. A span already open keeps
+/// the verdict it entered under. The noisy-dependency mutes [`init`]
+/// installs stay in force.
+///
+/// # Errors
+///
+/// Returns an error if telemetry is not initialized or `directives` do not
+/// parse.
+pub fn set_filter(directives: &str) -> Result<()> {
+    let handle = FILTER.get().context("telemetry is not initialized")?;
+    handle.reload(filter(Some(directives))?).context("issue reloading the filter")
+}
+
+// The guest filter: `directives` when given, else `RUST_LOG`. The env arm
+// defaults to ERROR so error telemetry is never silently dropped (an empty
+// `EnvFilter` disables everything). Both arms carry the transport mutes.
+fn filter(directives: Option<&str>) -> Result<EnvFilter> {
+    let base = match directives {
+        Some(directives) => EnvFilter::builder().parse(directives)?,
+        None => {
+            EnvFilter::builder().with_default_directive(LevelFilter::ERROR.into()).from_env_lossy()
+        }
+    };
+    Ok(base
+        .add_directive("hyper=off".parse()?)
+        .add_directive("h2=off".parse()?)
+        .add_directive("tonic=off".parse()?))
 }
 
 /// Export buffered spans and recorded metrics to the host.
