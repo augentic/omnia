@@ -1,7 +1,9 @@
 //! Initialise OpenTelemetry
 
+use std::fmt;
 use std::sync::OnceLock;
 
+use ::tracing::{Event, Subscriber};
 use anyhow::{Context, Result, anyhow};
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::{KeyValue, Value};
@@ -10,7 +12,11 @@ use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use tracing_opentelemetry::{MetricsLayer, layer as tracing_layer};
 use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::fmt::FmtContext;
+use tracing_subscriber::fmt::format::{FormatEvent, FormatFields, Writer};
+use tracing_subscriber::fmt::time::{FormatTime, SystemTime};
 use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry, reload};
 
@@ -39,7 +45,9 @@ pub fn init() -> Result<Option<ExitGuard>> {
     let resource: Resource = resource::resource().into();
 
     let (filter_layer, filter_handle) = reload::Layer::new(filter(None)?);
-    let fmt_layer = tracing_subscriber::fmt::layer().with_current_span(false); // <- no correlation_id in logs
+    // Default fmt prefixes every line with the current span, repeating
+    // `correlation_id` on every guest log.
+    let fmt_layer = tracing_subscriber::fmt::layer().event_format(WithoutCurrentSpan);
     let registry = Registry::default().with(filter_layer).with(fmt_layer);
 
     let tracer_provider = tracing::init(resource.clone());
@@ -92,6 +100,26 @@ fn filter(directives: Option<&str>) -> Result<EnvFilter> {
         .add_directive("hyper=off".parse()?)
         .add_directive("h2=off".parse()?)
         .add_directive("tonic=off".parse()?))
+}
+
+struct WithoutCurrentSpan;
+
+impl<S, N> FormatEvent<S, N> for WithoutCurrentSpan
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+    N: for<'a> FormatFields<'a> + 'static,
+{
+    fn format_event(
+        &self, ctx: &FmtContext<'_, S, N>, mut writer: Writer<'_>, event: &Event<'_>,
+    ) -> fmt::Result {
+        if SystemTime.format_time(&mut writer).is_err() {
+            writer.write_str("<unknown time>")?;
+        }
+        let meta = event.metadata();
+        write!(writer, " {} {}: ", meta.level(), meta.target())?;
+        ctx.format_fields(writer.by_ref(), event)?;
+        writeln!(writer)
+    }
 }
 
 /// Export buffered spans and recorded metrics to the host.
