@@ -39,7 +39,7 @@ pub fn init() -> Result<Option<ExitGuard>> {
     let resource: Resource = resource::resource().into();
 
     let (filter_layer, filter_handle) = reload::Layer::new(filter(None)?);
-    let fmt_layer = tracing_subscriber::fmt::layer().with_current_span(false);
+    let fmt_layer = tracing_subscriber::fmt::layer().with_current_span(false); // <- no correlation_id in logs
     let registry = Registry::default().with(filter_layer).with(fmt_layer);
 
     let tracer_provider = tracing::init(resource.clone());
