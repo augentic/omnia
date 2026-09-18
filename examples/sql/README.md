@@ -1,9 +1,9 @@
 # SQL Example
 
 Demonstrates `wasi-sql` using the default (in-memory) implementation: raw
-prepared statements for schema creation, then one endpoint per guest ORM
-builder — `SelectBuilder`, `InsertBuilder`, `UpdateBuilder`, `DeleteBuilder` —
-plus an `entity!` JOIN mapping across a two-table agency/feed schema.
+prepared statements for schema creation, then CRUD over a single `agency`
+table with hand-written parameterized SQL executed through the `TableStore`
+capability, mapping result `Row`s back into a Rust struct.
 
 ## Quick Start
 
@@ -26,37 +26,24 @@ cargo run --example sql -- run ./target/wasm32-wasip2/debug/examples/sql_wasm.wa
 ## Test
 
 ```bash
-# create an agency (InsertBuilder)
+# create an agency (INSERT)
 curl -X POST http://localhost:8080/agencies \
   -H 'Content-Type: application/json' \
   -d '{"agency_id":1,"name":"Ritchies Transport","url":"https://ritchies.co.nz","timezone":"Pacific/Auckland"}'
 
-# list agencies (SelectBuilder)
+# list agencies, newest first (SELECT ... ORDER BY)
 curl http://localhost:8080/agencies
 
-# update an agency (UpdateBuilder)
-curl -X PATCH http://localhost:8080/agencies/1 \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"Ritchies Transport Agency","timezone":"Pacific/Auckland"}'
-
-# create a feed for the agency (InsertBuilder + existence check)
-curl -X POST http://localhost:8080/agencies/1/feeds \
-  -H 'Content-Type: application/json' \
-  -d '{"feed_id":1,"description":"Bus routes and schedules"}'
-
-# list all feeds with agency info (entity! JOIN)
-curl http://localhost:8080/feeds
-
-# delete a feed (DeleteBuilder)
-curl -X DELETE http://localhost:8080/feeds/1
+# delete an agency (DELETE; errors when no row matched)
+curl -X DELETE http://localhost:8080/agencies/1
 ```
 
 ## Features Demonstrated
 
 - **Prepared statements** — schema creation via `Statement::prepare` + `readwrite::exec`
-- **ORM entities** — the `entity!` macro, including a JOIN entity with column aliasing
-- **Query builders** — `SelectBuilder` (with `order_by_desc`, `limit`), `InsertBuilder`, `UpdateBuilder`, `DeleteBuilder`
-- **Parameterized filters** — `Filter::eq` WHERE clauses (`$1`, `$2`, ... placeholders)
+- **`TableStore`** — a unit `Provider` implementing the capability, executing SQL with `query` / `exec`
+- **Parameterized filters** — `$1`, `$2`, ... placeholders bound from `DataType` values
+- **Row mapping** — reading `Row` fields by name into a `Serialize` struct
 
-See the [SQL and ORM guide](../../docs/guides/sql-and-orm.md) for the full
-builder and filter vocabulary.
+See the [SQL and ORM guide](../../docs/guides/sql-and-orm.md) for raw
+`wasi:sql` usage and backend selection.
