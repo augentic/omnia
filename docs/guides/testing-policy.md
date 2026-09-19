@@ -7,9 +7,9 @@ How the Omnia repository tests *itself*. The binding rules are also in the repos
 - **End-to-end tests** are the primary tier for `wasi-*` host crates: a real guest component driven through omnia's own runtime against an inline scenario backend, pinning the whole boundary (guest bindings → linker → host binding → backend and back). The exemplar is `crates/wasi-model/tests/model.rs`.
 - **Unit tests** cover deterministic logic wherever it lives: parsers, codecs, filter/type translation, route matching, macro token expansion, guest-side library code. If a behavior is a pure function no guest boundary reaches (e.g. `Format::candidate` extraction, which backends drive directly), it is a unit test next to that logic.
 - **Live tests** (in the `omnia-backends` repo) are the acceptance tier for production backends: `#[ignore]`-gated, credential-gated, driving the backend's `WasiXxxCtx` against the real service.
-- **The examples gate** (`examples/tests/examples.rs`) builds the guests for `wasm32-wasip2` and runs `cargo run --example` from the workspace root for the run-to-completion examples, asserting exit status 0. Examples assume the default `target/` directory (wasmtime's stance; a redirected `CARGO_TARGET_DIR` is unsupported for this tier) — hermetic guest builds belong to the `test-programs` pipeline. The gate instantiates no guest of its own and asserts no behaviour — that lives in the e2e suites — so server examples are build-only.
+- **The examples gate** (`examples/tests/examples.rs`) builds the guests for `wasm32-wasip2` and runs `cargo run --example` from the workspace root for the run-to-completion examples, asserting exit status 0. Examples assume the default `target/` directory (wasmtime's stance; a redirected `CARGO_TARGET_DIR` is unsupported for this tier) — hermetic guest builds belong to the `test-programs` pipeline. The gate instantiates no guest of its own and asserts no behaviour — that lives in the e2e suites — so server examples are build-only. It is CI's tier: minutes per example, and never a local verification step.
 
-Guest-instantiating tests exist **only** through the shared pipeline below. Do not compile, deserialize, or instantiate a WASM guest ad hoc inside an individual test.
+Guest-instantiating tests exist **only** through the shared pipeline below. Do not compile, deserialize, or instantiate a WASM guest ad hoc inside an individual test, and do not build or run an example to check that something works from a guest — an example is a demo, and a passing one confirms neither a behaviour nor a trait bound. That question is always answered by [adding a guest program](#adding-a-guest-program).
 
 ## Principles
 
@@ -39,6 +39,14 @@ Assertions split by vantage point: the guest asserts what crosses the boundary t
 
 One group tests the guest SDK's own boundary rather than a `wasi-*` host: `programs/command/` holds `command!` guests built on the command façade (`command/exit_map`), and `crates/omnia-test/tests/command.rs` drives them with `Deployment::run` over the default bundle, asserting the `ExitStatus` the host observes for each verb — the exit map (`ok` 0, `bad` 1, `missing` 2, `upstream` 4) and `USAGE_EXIT` (64) for an unknown verb. These programs do not trap; the exit status *is* the behaviour under test, so the guest returns a `Response` and the host test reads `code_u8()`.
 
+## Adding a guest program
+
+The pipeline is also how a change is *verified* when the question is "does this work from a real guest?" — whether the change is to a `wasi-*` host, to `omnia-sdk`, to `guest-macros`, or to a guest-side library, and whether the property is a runtime behaviour or a compile-time one (`programs/otel/axum_handler.rs` pins an instrumented `async fn` against axum's `Send` `Handler` bound; if the future ever stops being `Send`, the guest stops compiling and the suite fails to build).
+
+1. **Write the program**: `crates/test-programs/programs/<capability>/<scenario>.rs`, starting with `#![cfg(target_arch = "wasm32")]` and entering through `omnia_sdk::command!(scenario)`. It asserts what the guest observes across the boundary and panics (traps) on failure. On `wasm32` the crate already depends on what a guest needs (`axum`, `futures`, `omnia-wasi-*`, `tracing`, `wit-bindgen`, ...); add a workspace dependency only if a scenario genuinely needs one. The `[[example]]` stanza is generated: the build script regenerates the list from the `programs/` tree, so the file is the only thing to add.
+2. **Write the test**: `async fn <capability>_<scenario>()` in the suite that invokes `test_programs::foreach_<capability>!()` (`crates/wasi-<capability>/tests/<capability>.rs` for a `wasi-*` host; `command`, `plugins`, and `link` live in `crates/omnia-test`, `crates/omnia-plugin`, and `crates/omnia` respectively). It runs `test_programs::<CAPABILITY>_<SCENARIO>` through the suite's `run_guest` and asserts the host-side effects. Until the program and the test pair up, the macro fails to compile.
+3. **Run the suite**: `cargo nextest run -p <host crate> --all-features`. The build script compiles the guest for `wasm32-wasip2` as part of that command — no separate build, no `--target` flag, no example.
+
 ## Scenario backends
 
 The bundle a suite runs over is `omnia_test::host::Backends`: the in-memory default for every host, deterministic (no environment read, no socket opened), with the model swappable for any `WasiModelCtx`. Most model scenarios script `ScriptedModel` — the answers, the tool calls and workspace steps each completion makes before answering, and the limits — and assert the recorded exchanges afterwards:
@@ -57,9 +65,12 @@ The same inline pattern serves hosts whose default backend records nothing obser
 ## Running
 
 ```bash
-cargo make test                                   # `cargo nextest run --locked --all --all-features`
+cargo nextest run -p <crate> --all-features       # the crate you changed: unit tests plus its e2e suite
+cargo make test                                   # everything (`cargo nextest run --locked --all --all-features`), examples gate included
 cargo test --doc --all-features --workspace       # doc tests
 ```
+
+Verify locally per crate; the full run is CI's, because `examples` is a workspace member and its gate builds every example guest.
 
 `cargo-nextest` must be installed with `--locked` (`cargo install --locked cargo-nextest`). The `wasm32-wasip2` target must be installed (`rust-toolchain.toml` pins it); `test-programs`'s build script needs it to compile the guest programs.
 
