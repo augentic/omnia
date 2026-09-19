@@ -17,20 +17,11 @@ use crate::guest::{metrics, tracing};
 
 static TELEMETRY: OnceLock<Option<Telemetry>> = OnceLock::new();
 
-const MUTES: [&str; 2] = ["opentelemetry=off", "opentelemetry_sdk=off"];
-
-struct Telemetry {
-    filter: reload::Handle<EnvFilter, Registry>,
-    spans: tracing::SpanBuffer,
-    reader: metrics::Reader,
-}
-
-/// Run `f` inside the guest's telemetry lifecycle.
+/// Wrap the provided `inner` function with telemetry support.
 ///
-/// The first `scope` in an instance initializes telemetry before calling `f`
-/// and exports every buffered span and recorded metric once the returned
-/// future completes; nested calls are pass-throughs. `#[instrument]` and
-/// `command!` route through it, so guests rarely call it directly.
+/// The first `scope` in an instance initializes telemetry before calling the
+/// wrapped `inner` function. Exports every span and metric once the returned
+/// future completes.
 pub async fn scope<F: Future>(inner: impl FnOnce() -> F) -> F::Output {
     let mut owner = false;
     TELEMETRY.get_or_init(|| {
@@ -44,6 +35,37 @@ pub async fn scope<F: Future>(inner: impl FnOnce() -> F) -> F::Output {
     }
 
     output
+}
+
+/// Export buffered spans and recorded metrics to the host.
+///
+/// Export failures are logged, not propagated. Telemetry must not affect
+/// application logic. Safe to call when telemetry was never initialized.
+pub async fn flush() {
+    let Some(telemetry) = telemetry() else { return };
+    tracing::export(&telemetry.spans).await;
+    metrics::export(&telemetry.reader).await;
+}
+
+/// Set tracing filter `directives`.
+///
+/// `directives` is a `RUST_LOG` string (`info`, `my_guest=debug`). Valid
+/// environment directives are applied after it and so win where both select
+/// the same target.
+///
+/// # Errors
+///
+/// Returns an error if telemetry is not initialized, `directives` do not
+/// parse, or the filter cannot be reloaded.
+pub fn set_filter(directives: &str) -> Result<()> {
+    let telemetry = telemetry().context("telemetry is not initialized")?;
+    telemetry.filter.reload(compose(directives)?).context("issue reloading the filter")
+}
+
+struct Telemetry {
+    filter: reload::Handle<EnvFilter, Registry>,
+    spans: tracing::SpanBuffer,
+    reader: metrics::Reader,
 }
 
 fn init() -> Result<Telemetry> {
@@ -79,40 +101,11 @@ fn init() -> Result<Telemetry> {
     })
 }
 
-/// Export buffered spans and recorded metrics to the host.
-///
-/// Export failures are logged, never propagated: telemetry must not affect
-/// application logic. Safe to call when telemetry was never initialized.
-pub async fn flush() {
-    let Some(telemetry) = telemetry() else { return };
-    tracing::export(&telemetry.spans).await;
-    metrics::export(&telemetry.reader).await;
-}
-
-/// Replace the guest's tracing filter with `directives` refined by `RUST_LOG`.
-///
-/// `directives` is a `RUST_LOG` string (`info`, `my_guest=debug`). Valid
-/// environment directives are applied after it and so win where both select
-/// the same target; invalid ones are reported to standard error and ignored.
-/// Events after the call follow the new filter, a span already open keeps
-/// the verdict it entered under, and the always-on mutes stay in force.
-///
-/// # Errors
-///
-/// Returns an error if telemetry is not initialized, `directives` do not
-/// parse, or the filter cannot be reloaded.
-pub fn set_filter(directives: &str) -> Result<()> {
-    let telemetry = telemetry().context("telemetry is not initialized")?;
-    telemetry.filter.reload(compose(directives)?).context("issue reloading the filter")
-}
-
 fn telemetry() -> Option<&'static Telemetry> {
     TELEMETRY.get()?.as_ref()
 }
 
-// The guest's filter: `directives` refined by the valid `RUST_LOG` directives
-// (an environment directive replaces a guest directive for the same target),
-// with the transport mutes applied last so no directive can reopen them.
+// Compose filter `directives` with `RUST_LOG` directives.
 fn compose(directives: &str) -> Result<EnvFilter> {
     let rust_log = std::env::var("RUST_LOG").unwrap_or_default();
     let env = rust_log.split(',').filter(|value| !value.is_empty()).filter_map(|value| {
@@ -121,7 +114,9 @@ fn compose(directives: &str) -> Result<EnvFilter> {
             .inspect_err(|error| eprintln!("ignoring `{value}`: {error}"))
             .ok()
     });
-    let mutes = MUTES.into_iter().map(|mute| mute.parse().expect("constant directives parse"));
 
-    Ok(env.chain(mutes).fold(EnvFilter::builder().parse(directives)?, EnvFilter::add_directive))
+    Ok(env
+        .fold(EnvFilter::builder().parse(directives)?, EnvFilter::add_directive)
+        .add_directive("opentelemetry=off".parse()?)
+        .add_directive("opentelemetry_sdk=off".parse()?))
 }
