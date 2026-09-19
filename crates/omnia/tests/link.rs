@@ -137,6 +137,32 @@ async fn link_full_registered_late() {
     assert_eq!(subset, "echoer pong: still");
 }
 
+#[tokio::test]
+async fn link_target_deregistered_and_registered_again() {
+    let runtime = boot(&[("full", test_programs::LINK_FULL)]).await.expect("deployment boots");
+
+    let wasm = std::fs::read(test_programs::LINK_ECHOER).expect("reading echoer guest artifact");
+
+    runtime.register("echoer", GuestArtifact::wasm(wasm.clone())).await.expect("late registration");
+
+    let first = call(&runtime, "full", "poke", "before").await.expect("dispatch before deregister");
+    assert_eq!(first, "echoer pong: before");
+
+    let id = GuestId::from("echoer");
+    runtime.deregister(&id).expect("deregister dynamic target");
+
+    let err = call(&runtime, "full", "poke", "gone")
+        .await
+        .expect_err("dispatch to deregistered target must fail");
+
+    assert!(format!("{err:#}").contains("not registered"), "unexpected error: {err:#}");
+
+    runtime.register("echoer", GuestArtifact::wasm(wasm)).await.expect("re-register target");
+
+    let second = call(&runtime, "full", "poke", "after").await.expect("dispatch after re-register");
+    assert_eq!(second, "echoer pong: after");
+}
+
 // The relay takes the id `echoer` because `full` hard-codes `ping("echoer",
 // ..)` and the default selector routes on that argument; every relay hop then
 // re-dispatches to itself, consuming one depth unit per hop.
