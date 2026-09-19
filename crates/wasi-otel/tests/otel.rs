@@ -108,6 +108,13 @@ async fn otel_spawned_task_pending() {
     assert_eq!(recording.span_names(), ["traced"]);
 }
 
+// The `Handler` bound itself is checked when the guest compiles.
+#[tokio::test]
+async fn otel_axum_handler() {
+    let recording = run_guest(test_programs::OTEL_AXUM_HANDLER).await;
+    assert_eq!(recording.span_names(), ["traced"]);
+}
+
 #[tokio::test]
 async fn otel_metrics_counter() {
     let recording = run_guest(test_programs::OTEL_METRICS_COUNTER).await;

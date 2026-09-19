@@ -277,6 +277,11 @@ path = "programs/model/workspace_unauthorized.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "otel_axum_handler"
+path = "programs/otel/axum_handler.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "otel_instrumented_handler"
 path = "programs/otel/instrumented_handler.rs"
 crate-type = ["cdylib"]
