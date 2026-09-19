@@ -284,6 +284,8 @@ Annotate functions with `#[omnia_wasi_otel::instrument]` to wrap them in an Open
 async fn handle(request: Request) -> Result<Response, ErrorCode> { /* ... */ }
 ```
 
+The outermost instrumented `async fn` (or `command!`, which does the same for a CLI entry) runs inside `omnia_wasi_otel::scope`: it initializes the guest's telemetry on entry and exports every span and metric as it returns, so put the attribute on the export's `handle` and on any handler beneath it. A sync function only opens a span.
+
 ## Serving MCP tools
 
 A guest can act as an [MCP](https://modelcontextprotocol.io) (Model Context Protocol) server — exposing tools and resources to AI agents over HTTP. Implement `omnia_sdk::mcp::McpServer` and serve `mcp::router` from your HTTP handler; see [Model Completions and MCP](model-completions.md#serving-mcp-tools-from-a-guest).

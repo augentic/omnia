@@ -398,11 +398,9 @@ pub fn completions<A: clap::CommandFactory>(shell: Shell, name: &str) -> Respons
 #[cfg(target_arch = "wasm32")]
 #[doc(hidden)]
 pub async fn execute_wasi<E: IntoExit>(entry: impl Future<Output = E>) {
-    let guard = omnia_wasi_otel::init();
-    let result = entry.await.into_exit();
-    // `exit-with-code` does not return (analogous to a trap), so no
-    // `Drop` runs past it: flush telemetry as soon as the run completes.
-    omnia_wasi_otel::flush_guard(guard).await;
+    // `scope` exports telemetry before returning, ahead of an
+    // `exit-with-code` that (like a trap) never returns.
+    let result = omnia_wasi_otel::scope(|| entry).await.into_exit();
     // Rust's exit-time stdout flush never runs here (`exit-with-code` traps
     // out, and a reactor export has no `main`), so flush the line buffer
     // explicitly; stderr is unbuffered by contract.

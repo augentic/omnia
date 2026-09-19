@@ -209,6 +209,22 @@
 
 ### Changed
 
+- Guest telemetry has one lifecycle entry point: `omnia_wasi_otel::scope(f)`
+  initializes telemetry (once per instance), awaits the future `f` builds,
+  and exports every buffered span and recorded metric before returning; a
+  nested `scope` is a pass-through. `#[instrument]` on an `async fn` and
+  `command!` both route through it, so the export completes ahead of an
+  `exit-with-code`. `init`, `flush_guard`, and the `ExitGuard` drop guard
+  are gone; `flush()` stays for a guest that exports mid-run. `#[instrument]`
+  on a sync `fn` now only opens the span (a sync function is never an
+  export). Guest console log lines carry no span prefix: the fmt layer
+  receives events only, so fields such as `correlation_id` are not repeated
+  on every line and the default coloured format is otherwise unchanged. The
+  guest filter's always-on mutes now match the host's, adding
+  `opentelemetry=off` and `opentelemetry_sdk=off` so the SDK's
+  self-diagnostics (`TracerProvider.GlobalSet` and friends) stay out of
+  guest output.
+
 - The host console filter is `RUST_LOG` alone, on every entry path, and an
   unset `RUST_LOG` now means `warn` rather than `error`, so host warnings
   (a mount that failed to preopen) reach stderr without a hand-written
