@@ -8,6 +8,7 @@ pub fn join(pairs: &[(String, String)]) -> String {
 
 /// Parse a `tracestate` header into key/value pairs, skipping malformed
 /// entries.
+#[cfg(any(target_arch = "wasm32", test))]
 pub fn parse(header: &str) -> Vec<(String, String)> {
     header
         .split(',')

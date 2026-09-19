@@ -91,12 +91,6 @@ impl From<(&Key, &Value)> for wasi::KeyValue {
     }
 }
 
-impl From<&Value> for wasi::Value {
-    fn from(value: &Value) -> Self {
-        value.clone().into()
-    }
-}
-
 impl From<InstrumentationScope> for wasi::InstrumentationScope {
     fn from(scope: InstrumentationScope) -> Self {
         Self {

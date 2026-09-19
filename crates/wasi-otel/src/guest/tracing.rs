@@ -70,22 +70,6 @@ impl SpanProcessor for Processor {
     fn set_resource(&mut self, _: &Resource) {}
 }
 
-impl From<wasi::SpanContext> for otel::SpanContext {
-    fn from(value: wasi::SpanContext) -> Self {
-        let trace_id = otel::TraceId::from_hex(&value.trace_id).unwrap_or(otel::TraceId::INVALID);
-        let span_id = otel::SpanId::from_hex(&value.span_id).unwrap_or(otel::SpanId::INVALID);
-        let trace_state = otel::TraceState::from_key_value(value.trace_state)
-            .unwrap_or_else(|_| otel::TraceState::default());
-        Self::new(trace_id, span_id, value.trace_flags.into(), value.is_remote, trace_state)
-    }
-}
-
-impl From<wasi::TraceFlags> for otel::TraceFlags {
-    fn from(value: wasi::TraceFlags) -> Self {
-        if value.contains(wasi::TraceFlags::SAMPLED) { Self::SAMPLED } else { Self::default() }
-    }
-}
-
 impl From<SpanData> for wasi::SpanData {
     fn from(sd: SpanData) -> Self {
         Self {

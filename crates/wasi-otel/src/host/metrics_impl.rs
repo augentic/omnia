@@ -15,7 +15,6 @@ use opentelemetry_proto::tonic::metrics::v1::{
     Histogram, HistogramDataPoint, Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, Sum,
 };
 use opentelemetry_proto::tonic::resource::v1::Resource;
-use opentelemetry_sdk::error::OTelSdkError;
 use wasmtime::component::Accessor;
 
 use crate::host::generated::omnia::otel::metrics::{self as wasi, HostWithStore};
@@ -41,16 +40,6 @@ impl<T> HostWithStore<T> for WasiOtel {
 
 impl wasi::Host for WasiOtelCtxView<'_> {}
 
-impl From<OTelSdkError> for wasi::Error {
-    fn from(err: OTelSdkError) -> Self {
-        match err {
-            OTelSdkError::AlreadyShutdown => Self::AlreadyShutdown,
-            OTelSdkError::Timeout(duration) => Self::Timeout(duration.as_secs()),
-            OTelSdkError::InternalFailure(msg) => Self::InternalFailure(msg),
-        }
-    }
-}
-
 omnia_core::host_error!(wasi::Error, InternalFailure);
 
 impl From<wasi::ResourceMetrics> for ExportMetricsServiceRequest {
@@ -67,19 +56,11 @@ impl From<wasi::ResourceMetrics> for ExportMetricsServiceRequest {
     }
 }
 
+// The schema URL travels on the enclosing `ResourceMetrics`, not as an attribute.
 impl From<wasi::Resource> for Resource {
     fn from(resource: wasi::Resource) -> Self {
-        let mut attributes = resource.attributes.into_iter().map(Into::into).collect::<Vec<_>>();
-        attributes.push(KeyValue {
-            key: "schema_url".to_string(),
-            value: resource.schema_url.as_ref().map(|s| AnyValue {
-                value: Some(Value::StringValue(s.clone())),
-            }),
-            ..KeyValue::default()
-        });
-
         Self {
-            attributes,
+            attributes: resource.attributes.into_iter().map(Into::into).collect(),
             dropped_attributes_count: 0,
             entity_refs: vec![],
         }
@@ -98,47 +79,30 @@ impl From<wasi::KeyValue> for KeyValue {
 
 impl From<wasi::Value> for AnyValue {
     fn from(value: wasi::Value) -> Self {
-        let v: Value = match value {
+        let value = match value {
             wasi::Value::Bool(v) => Value::BoolValue(v),
             wasi::Value::S64(v) => Value::IntValue(v),
             wasi::Value::F64(v) => Value::DoubleValue(v),
             wasi::Value::String(v) => Value::StringValue(v),
-            wasi::Value::BoolArray(items) => Value::ArrayValue(ArrayValue {
-                values: items
-                    .into_iter()
-                    .map(|v| Self {
-                        value: Some(Value::BoolValue(v)),
-                    })
-                    .collect(),
-            }),
-            wasi::Value::S64Array(items) => Value::ArrayValue(ArrayValue {
-                values: items
-                    .into_iter()
-                    .map(|v| Self {
-                        value: Some(Value::IntValue(v)),
-                    })
-                    .collect(),
-            }),
-            wasi::Value::F64Array(items) => Value::ArrayValue(ArrayValue {
-                values: items
-                    .into_iter()
-                    .map(|v| Self {
-                        value: Some(Value::DoubleValue(v)),
-                    })
-                    .collect(),
-            }),
-            wasi::Value::StringArray(items) => Value::ArrayValue(ArrayValue {
-                values: items
-                    .into_iter()
-                    .map(|v| Self {
-                        value: Some(Value::StringValue(v)),
-                    })
-                    .collect(),
-            }),
+            wasi::Value::BoolArray(items) => array_value(items, Value::BoolValue),
+            wasi::Value::S64Array(items) => array_value(items, Value::IntValue),
+            wasi::Value::F64Array(items) => array_value(items, Value::DoubleValue),
+            wasi::Value::StringArray(items) => array_value(items, Value::StringValue),
         };
-
-        Self { value: Some(v) }
+        Self { value: Some(value) }
     }
+}
+
+// A homogeneous array: each element wrapped as its own `AnyValue`.
+fn array_value<T>(items: Vec<T>, value: fn(T) -> Value) -> Value {
+    Value::ArrayValue(ArrayValue {
+        values: items
+            .into_iter()
+            .map(|item| AnyValue {
+                value: Some(value(item)),
+            })
+            .collect(),
+    })
 }
 
 impl From<wasi::ScopeMetrics> for ScopeMetrics {
@@ -230,7 +194,7 @@ impl From<wasi::Sum> for Sum {
                 .into_iter()
                 .map(|dp| number_dp(dp.attributes, dp.value, dp.exemplars, start, time))
                 .collect(),
-            aggregation_temporality: AggregationTemporality::from(sum.temporality).into(),
+            aggregation_temporality: sum.temporality.into(),
             is_monotonic: sum.is_monotonic,
         }
     }
@@ -308,7 +272,7 @@ impl From<wasi::Exemplar> for Exemplar {
 }
 
 #[expect(clippy::cast_possible_wrap)]
-impl From<wasi::DataValue> for ExemplarValue {
+impl From<wasi::DataValue> for NumberValue {
     fn from(dv: wasi::DataValue) -> Self {
         match dv {
             wasi::DataValue::U64(v) => Self::AsInt(v as i64),
@@ -318,13 +282,13 @@ impl From<wasi::DataValue> for ExemplarValue {
     }
 }
 
-#[expect(clippy::cast_possible_wrap)]
-impl From<wasi::DataValue> for NumberValue {
+// The proto exemplar value has the same shape as a data point's; one route
+// keeps the `u64` narrowing in one place.
+impl From<wasi::DataValue> for ExemplarValue {
     fn from(dv: wasi::DataValue) -> Self {
-        match dv {
-            wasi::DataValue::U64(v) => Self::AsInt(v as i64),
-            wasi::DataValue::S64(v) => Self::AsInt(v),
-            wasi::DataValue::F64(v) => Self::AsDouble(v),
+        match NumberValue::from(dv) {
+            NumberValue::AsInt(v) => Self::AsInt(v),
+            NumberValue::AsDouble(v) => Self::AsDouble(v),
         }
     }
 }
@@ -358,3 +322,34 @@ impl From<wasi::Temporality> for i32 {
 
 // The proto `DataPointFlags` default (`FLAG_NONE` / "do not use").
 const DATA_POINT_FLAGS_DO_NOT_USE: u32 = 0;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn export_request_carries_schema_url_once() {
+        let rm = wasi::ResourceMetrics {
+            resource: wasi::Resource {
+                attributes: vec![wasi::KeyValue {
+                    key: "service.name".to_string(),
+                    value: wasi::Value::String("guest".to_string()),
+                }],
+                schema_url: Some("https://resource".to_string()),
+            },
+            scope_metrics: Vec::new(),
+        };
+
+        let request = ExportMetricsServiceRequest::from(rm);
+        let [resource_metrics] = request.resource_metrics.as_slice() else {
+            panic!("one resource, got {}", request.resource_metrics.len());
+        };
+        assert_eq!(resource_metrics.schema_url, "https://resource");
+        // The URL is not doubled as a resource attribute.
+        let attributes = &resource_metrics.resource.as_ref().expect("resource").attributes;
+        assert_eq!(
+            attributes.iter().map(|kv| kv.key.as_str()).collect::<Vec<_>>(),
+            ["service.name"]
+        );
+    }
+}

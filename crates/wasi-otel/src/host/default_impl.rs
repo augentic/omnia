@@ -2,7 +2,7 @@
 //!
 //! This is a lightweight implementation for development use only.
 //! It logs telemetry data but doesn't export it anywhere.
-//! For production use, use the `be-opentelemetry` backend.
+//! For production use, use the `omnia-opentelemetry` backend.
 
 use anyhow::Result;
 use futures::FutureExt;

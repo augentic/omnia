@@ -15,7 +15,9 @@ use tracing_subscriber::{EnvFilter, Layer as _, Registry, reload};
 use crate::guest::generated::omnia::otel::resource;
 use crate::guest::{metrics, tracing};
 
-static TELEMETRY: OnceLock<Telemetry> = OnceLock::new();
+// `None` records an attempt that failed: a global subscriber can never be
+// replaced, so a retry by every nested `scope` could only fail again.
+static TELEMETRY: OnceLock<Option<Telemetry>> = OnceLock::new();
 
 struct Telemetry {
     filter: reload::Handle<EnvFilter, Registry>,
@@ -30,9 +32,10 @@ struct Telemetry {
 /// future completes; nested calls are pass-throughs. `#[instrument]` and
 /// `command!` route through it, so guests rarely call it directly.
 pub async fn scope<F: Future>(f: impl FnOnce() -> F) -> F::Output {
-    let owner = init().unwrap_or_else(|error| {
-        eprintln!("telemetry not initialized: {error:#}");
-        false
+    let mut owner = false;
+    TELEMETRY.get_or_init(|| {
+        owner = true;
+        init().inspect_err(|error| eprintln!("telemetry not initialized: {error:#}")).ok()
     });
     // `f` runs after `init` so `span!` sees a live dispatcher; awaited by
     // value so the instrumented future (and its span) drops before the export.
@@ -48,7 +51,7 @@ pub async fn scope<F: Future>(f: impl FnOnce() -> F) -> F::Output {
 /// Export failures are logged, never propagated: telemetry must not affect
 /// application logic. Safe to call when telemetry was never initialized.
 pub async fn flush() {
-    let Some(telemetry) = TELEMETRY.get() else { return };
+    let Some(Some(telemetry)) = TELEMETRY.get() else { return };
     tracing::export(&telemetry.spans).await;
     metrics::export(&telemetry.reader).await;
 }
@@ -63,26 +66,30 @@ pub async fn flush() {
 /// Returns an error if telemetry is not initialized or `directives` do not
 /// parse.
 pub fn set_filter(directives: &str) -> Result<()> {
-    let telemetry = TELEMETRY.get().context("telemetry is not initialized")?;
+    let telemetry =
+        TELEMETRY.get().and_then(Option::as_ref).context("telemetry is not initialized")?;
     telemetry.filter.reload(filter(Some(directives))?).context("issue reloading the filter")
 }
 
-// Install the subscriber and providers; `Ok(true)` when this call did so.
-fn init() -> Result<bool> {
-    if TELEMETRY.get().is_some() {
-        return Ok(false);
-    }
-
+// Install the subscriber and providers.
+fn init() -> Result<Telemetry> {
     let resource: Resource = resource::resource().into();
 
     let (filter_layer, filter) = reload::Layer::new(filter(None)?);
-    // Hide spans from the console layer: one that never sees them prints no
+    // Console tracing goes to stderr: stdout is the guest's semantic output
+    // (command-mode pipes and JSON envelopes must stay clean of log lines).
+    // Spans are hidden from this layer: one that never sees them prints no
     // span prefix, which would repeat fields such as `correlation_id` on
     // every line. The OpenTelemetry layers below still receive every span.
-    let fmt_layer = tracing_subscriber::fmt::layer().with_filter(filter_fn(|meta| !meta.is_span()));
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .with_writer(std::io::stderr)
+        .with_filter(filter_fn(|meta| !meta.is_span()));
 
     let (tracer_provider, spans) = tracing::init(resource.clone());
-    let tracing_layer = tracing_layer().with_tracer(tracer_provider.tracer("global"));
+    // A guest is single-threaded: `thread.id` / `thread.name` attributes
+    // would only pad every exported span.
+    let tracing_layer =
+        tracing_layer().with_tracer(tracer_provider.tracer("global")).with_threads(false);
 
     let (meter_provider, reader) = metrics::init(resource);
     let metrics_layer = MetricsLayer::new(meter_provider.clone());
@@ -99,19 +106,17 @@ fn init() -> Result<bool> {
     // the guest already set a global subscriber) must leave nothing behind.
     global::set_tracer_provider(tracer_provider);
     global::set_meter_provider(meter_provider);
-    Ok(TELEMETRY
-        .set(Telemetry {
-            filter,
-            spans,
-            reader,
-        })
-        .is_ok())
+    Ok(Telemetry {
+        filter,
+        spans,
+        reader,
+    })
 }
 
 // The guest filter: `directives` when given, else `RUST_LOG`. The env arm
 // defaults to ERROR so error telemetry is never silently dropped (an empty
-// `EnvFilter` disables everything). Both arms carry the host's always-on
-// mutes: transports and the OpenTelemetry SDK's self-diagnostics.
+// `EnvFilter` disables everything). Both arms mute the OpenTelemetry SDK's
+// self-diagnostics, which would otherwise echo through the console layer.
 fn filter(directives: Option<&str>) -> Result<EnvFilter> {
     let base = match directives {
         Some(directives) => EnvFilter::builder().parse(directives)?,
@@ -120,9 +125,6 @@ fn filter(directives: Option<&str>) -> Result<EnvFilter> {
         }
     };
     Ok(base
-        .add_directive("hyper=off".parse()?)
-        .add_directive("h2=off".parse()?)
-        .add_directive("tonic=off".parse()?)
         .add_directive("opentelemetry=off".parse()?)
         .add_directive("opentelemetry_sdk=off".parse()?))
 }
