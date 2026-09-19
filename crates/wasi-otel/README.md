@@ -46,7 +46,7 @@ async fn handle(request: Request) -> Response {
 }
 ```
 
-Console output (events only, to stderr) follows `RUST_LOG`, defaulting to `error`; `set_filter` replaces that filter at run time and `flush` exports on demand.
+Console output (events only, to stderr) follows `RUST_LOG`, defaulting to `error`; `set_filter` replaces those defaults at run time (valid `RUST_LOG` directives still apply on top) and `flush` exports on demand.
 
 ## License
 

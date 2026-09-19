@@ -199,9 +199,12 @@
 - `omnia_wasi_otel::set_filter(directives)`: a guest replaces its tracing
   filter with a `RUST_LOG` string after its subscriber is installed, so a
   guest-owned verbosity flag (`--debug`, `--quiet`) parsed from argv can
-  drive the guest's own tracing. The subscriber `init` installs now holds
-  its `EnvFilter` in a `reload::Layer`; events after the call follow the
-  new filter, and the always-on transport mutes stay in force.
+  drive the guest's own tracing. The supplied directives are refined by the
+  guest's `RUST_LOG`: valid environment directives are applied after them
+  and win for the same target, invalid ones are reported to stderr and
+  ignored. The subscriber `init` installs now holds its `EnvFilter` in a
+  `reload::Layer`; events after the call follow the new filter, and the
+  always-on transport mutes stay in force.
 
 - `Telemetry::filter(directives)`: an embedder filters the host console
   subscriber by an explicit `RUST_LOG` string instead of the environment
@@ -261,7 +264,7 @@
   `Telemetry::log_mode`, `DeploymentBuilder::log_mode`) are gone: a
   direct-command guest sees every argument, and a product that wants those
   flags defines them in its own grammar and applies them through
-  `omnia_wasi_otel::set_filter`.
+  `omnia_wasi_otel`'s filter reload APIs.
 
 - `omnia_test::build::Components` runs its nested `wasm32-wasip2` build into
   `target/wasm32-fixtures`, a sibling of the outer profile directory shared by
@@ -289,7 +292,11 @@
   round trip `full → echoer → full` (fresh instances per call) went
   from ~1.52 ms p50 / ~1.57 ms mean on wRPC to ~1.12 ms p50 /
   ~1.15 ms mean on in-memory routing, about 26 % less per call
-  (p99 ~1.93 ms → ~1.36 ms).
+  (p99 ~1.93 ms → ~1.36 ms). The callee task keeps the dispatcher's
+  `tracing` span current, so a linked guest's telemetry export grafts
+  onto the live host span the way an inline drive's does; before, the
+  spawned task had no current span and the host dropped every span a
+  callee exported.
 
 - The registry location carries the deployment's routing policy. A
   `{ registry: ..., config: ... }` entry (or `[[plugin.location]]` with a

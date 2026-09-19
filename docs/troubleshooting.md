@@ -106,7 +106,7 @@ A `runtime!` binary with `mode: command` and a compiled-in deployment is a [dire
 
 ### A direct-command binary logs nothing (or too much)
 
-Nothing in argv is a host flag on this path; the host console filter is `RUST_LOG` alone, and unset means `warn` (see [Configuration](reference/configuration.md#general)). Guest tracing is the guest's own subscriber: `omnia_wasi_otel` reads the inherited `RUST_LOG` too (`error` when unset), and a guest that owns a verbosity flag reloads its filter with `omnia_wasi_otel::set_filter` after parsing argv.
+Nothing in argv is a host flag on this path; the host console filter is `RUST_LOG` alone, and unset means `warn` (see [Configuration](reference/configuration.md#general)). Guest tracing is the guest's own subscriber: `omnia_wasi_otel` reads the inherited `RUST_LOG` too (`error` when unset), and a guest that owns a verbosity flag reloads its defaults with `omnia_wasi_otel::set_filter` after parsing argv. `RUST_LOG` still refines the reloaded defaults, so a bare `RUST_LOG=warn` in the environment overrides a bare `set_filter("debug")`; target the guest's own crate (`set_filter("my_guest=debug")`) when the flag must bite regardless.
 
 ## Model completions
 
