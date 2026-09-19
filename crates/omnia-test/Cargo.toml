@@ -82,7 +82,7 @@ omnia-wasi-vault = { workspace = true, optional = true }
 omnia-wasi-websocket = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }
 
-[dev-dependencies]
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 anyhow.workspace = true
 bytes.workspace = true
 http.workspace = true

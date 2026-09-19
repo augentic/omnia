@@ -15,7 +15,7 @@ version.workspace = true
 [lints]
 workspace = true
 
-[dependencies]
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
 cap-std.workspace = true
 futures.workspace = true
@@ -25,7 +25,7 @@ tracing.workspace = true
 wasm-pkg-client.workspace = true
 wasmtime = { workspace = true, features = ["runtime"] }
 
-[dev-dependencies]
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 omnia = { workspace = true, features = ["plugin", "link"] }
 omnia-test = { workspace = true, features = ["host"] }
 omnia-wasi-otel.workspace = true

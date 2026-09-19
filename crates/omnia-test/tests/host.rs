@@ -1,6 +1,8 @@
 //! The component rung: real guest components from `crates/test-programs`
 //! driven through `Deployment` over `Backends`.
 
+#![cfg(not(target_arch = "wasm32"))]
+
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use anyhow::{Context as _, Result, bail};

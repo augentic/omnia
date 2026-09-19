@@ -28,6 +28,10 @@ cargo = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 
+# `wit_bindgen::generate!` lifts every `list<T>` via `Vec::from_raw_parts(ptr, len, len)`;
+# `unsafe_code = "deny"` above rules out a hand-written instance.
+same_length_and_capacity = "allow"
+
 # Cherry-picked lints are from the `restriction` lint group in order to drive up
 # consistency, quality, and brevity
 # See https://microsoft.github.io/rust-guidelines/guidelines/universal/index.html

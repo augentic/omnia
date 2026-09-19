@@ -42,7 +42,7 @@ pub(super) fn to_wit_filter(filter: sdk::Filter) -> WitFilterHandle {
 }
 
 #[must_use]
-pub(super) fn to_wit_op(op: sdk::ComparisonOp) -> WitComparisonOp {
+pub(super) const fn to_wit_op(op: sdk::ComparisonOp) -> WitComparisonOp {
     match op {
         sdk::ComparisonOp::Eq => WitComparisonOp::Eq,
         sdk::ComparisonOp::Ne => WitComparisonOp::Ne,

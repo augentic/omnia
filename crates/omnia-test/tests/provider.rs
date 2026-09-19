@@ -1,5 +1,7 @@
 //! `omnia_test::guest::Provider` delegation and shared storage.
 
+#![cfg(not(target_arch = "wasm32"))]
+
 use omnia_sdk::model::{Message, Model, Request, Role};
 use omnia_sdk::{BlobStore, Config, Identity, Publish, StateStore};
 use omnia_test::guest::{FixedIdentity, MapConfig, Provider, Scripted};

@@ -28,11 +28,15 @@ pub fn init(resource: Resource) -> SdkTracerProvider {
 }
 
 /// Export all buffered spans to the host.
-pub(crate) async fn flush() {
+pub async fn flush() {
     let Some(buffer) = SPANS.get() else { return };
-    let Ok(mut guard) = buffer.lock() else { return };
-    let spans = std::mem::take(&mut *guard);
-    drop(guard);
+    // Scoped rather than `drop`ped: a guard that was ever borrowed stays
+    // live to the end of its scope for the coroutine, which would make this
+    // future `!Send` across the `export` await.
+    let spans = {
+        let Ok(mut guard) = buffer.lock() else { return };
+        std::mem::take(&mut *guard)
+    };
     if spans.is_empty() {
         return;
     }

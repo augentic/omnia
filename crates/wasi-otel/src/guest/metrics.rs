@@ -33,7 +33,7 @@ pub fn init(resource: Resource) -> SdkMeterProvider {
 
 /// Export all recorded metrics to the host; a collection with no data
 /// points is skipped rather than exported empty.
-pub(crate) async fn flush() {
+pub async fn flush() {
     let Some(reader) = READER.get() else { return };
     let mut rm = ResourceMetrics::default();
     if let Err(e) = reader.0.collect(&mut rm) {

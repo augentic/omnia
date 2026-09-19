@@ -1,6 +1,8 @@
 //! The command façade's exit plumbing through the real runtime: the status a
 //! `command!` guest's `Response` carries is the status the host observes.
 
+#![cfg(not(target_arch = "wasm32"))]
+
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_otel::WasiOtel;
 

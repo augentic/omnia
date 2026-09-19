@@ -24,6 +24,8 @@
 //! or on `omnia-core` directly; those are dependencies for building another
 //! capability crate.
 
+#![cfg(not(target_arch = "wasm32"))]
+
 mod admission;
 mod declared;
 mod error;
