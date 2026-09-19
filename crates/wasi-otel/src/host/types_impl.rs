@@ -60,9 +60,7 @@ pub fn decode_id(id: &str) -> Vec<u8> {
 }
 
 pub fn datetime_nanos(dt: types::Datetime) -> u64 {
-    // Saturate rather than overflow: a guest-supplied timestamp past the year
-    // 2554 clamps to `u64::MAX` instead of panicking (debug) or wrapping
-    // (release) into a bogus time.
+    // Saturate: a timestamp past the year 2554 clamps instead of panicking or wrapping.
     dt.seconds.saturating_mul(1_000_000_000).saturating_add(u64::from(dt.nanoseconds))
 }
 

@@ -25,7 +25,6 @@ impl<T> HostWithStore<T> for WasiOtel {
     async fn export(
         accessor: &Accessor<T, Self>, rm: wasi::ResourceMetrics,
     ) -> Result<(), wasi::Error> {
-        // return if opentelemetry is not initialized
         if omnia_core::telemetry::resource().is_none() {
             tracing::warn!("otel resource not initialized, skipping metrics export");
             return Ok(());
@@ -56,7 +55,6 @@ impl From<wasi::ResourceMetrics> for ExportMetricsServiceRequest {
     }
 }
 
-// The schema URL travels on the enclosing `ResourceMetrics`, not as an attribute.
 impl From<wasi::Resource> for Resource {
     fn from(resource: wasi::Resource) -> Self {
         Self {
@@ -93,7 +91,6 @@ impl From<wasi::Value> for AnyValue {
     }
 }
 
-// A homogeneous array: each element wrapped as its own `AnyValue`.
 fn array_value<T>(items: Vec<T>, value: fn(T) -> Value) -> Value {
     Value::ArrayValue(ArrayValue {
         values: items
@@ -282,8 +279,7 @@ impl From<wasi::DataValue> for NumberValue {
     }
 }
 
-// The proto exemplar value has the same shape as a data point's; one route
-// keeps the `u64` narrowing in one place.
+// Same shape as a data point's value; one route for the `u64` narrowing.
 impl From<wasi::DataValue> for ExemplarValue {
     fn from(dv: wasi::DataValue) -> Self {
         match NumberValue::from(dv) {

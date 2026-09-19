@@ -393,17 +393,13 @@ pub fn completions<A: clap::CommandFactory>(shell: Shell, name: &str) -> Respons
 /// Execute a guest command entry at the WASI CLI boundary.
 ///
 /// Initializes guest telemetry, awaits `entry`, and flushes telemetry and
-/// stdout. The entry yields any [`IntoExit`] outcome; a non-zero status then
-/// exits with that exact code through `wasi:cli/exit` and does not return.
+/// stdout.
 #[cfg(target_arch = "wasm32")]
 #[doc(hidden)]
 pub async fn execute_wasi<E: IntoExit>(entry: impl Future<Output = E>) {
-    // `scope` exports telemetry before returning, ahead of an
-    // `exit-with-code` that (like a trap) never returns.
+    // `scope` exports telemetry before an `exit-with-code`, which never returns.
     let result = omnia_wasi_otel::scope(|| entry).await.into_exit();
-    // Rust's exit-time stdout flush never runs here (`exit-with-code` traps
-    // out, and a reactor export has no `main`), so flush the line buffer
-    // explicitly; stderr is unbuffered by contract.
+    // `exit-with-code` exits immediately, meaning stdout never flushes
     let _ = std::io::stdout().flush();
     if let Err(code) = result
         && code != 0

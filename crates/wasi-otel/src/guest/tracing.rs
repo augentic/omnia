@@ -25,13 +25,7 @@ pub fn init(resource: Resource) -> (SdkTracerProvider, SpanBuffer) {
 
 /// Export all buffered spans to the host.
 pub async fn export(buffer: &SpanBuffer) {
-    // Scoped rather than `drop`ped: a guard that was ever borrowed stays
-    // live to the end of its scope for the coroutine, which would make this
-    // future `!Send` across the `export` await.
-    let spans = {
-        let Ok(mut guard) = buffer.lock() else { return };
-        std::mem::take(&mut *guard)
-    };
+    let spans = take(buffer);
     if spans.is_empty() {
         return;
     }
@@ -40,6 +34,11 @@ pub async fn export(buffer: &SpanBuffer) {
     if let Err(e) = wasi::export(spans).await {
         tracing::error!("failed to export spans: {e}");
     }
+}
+
+// A `MutexGuard` binding inside `export` would make its future `!Send`.
+fn take(buffer: &SpanBuffer) -> Vec<SpanData> {
+    buffer.lock().map(|mut spans| std::mem::take(&mut *spans)).unwrap_or_default()
 }
 
 #[derive(Debug)]

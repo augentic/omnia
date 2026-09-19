@@ -21,7 +21,6 @@ impl<T> HostWithStore<T> for WasiOtel {
     async fn export(
         accessor: &Accessor<T, Self>, mut span_data: Vec<wasi::SpanData>,
     ) -> Result<(), wasi::Error> {
-        // return if opentelemetry is not initialized
         let Some(resource) = omnia_core::telemetry::resource() else {
             tracing::warn!("otel resource not initialized, skipping trace export");
             return Ok(());
@@ -30,8 +29,7 @@ impl<T> HostWithStore<T> for WasiOtel {
         let ctx = tracing::Span::current().context();
         let parent_ctx = ctx.span().span_context().clone();
         if !parent_ctx.is_valid() {
-            // Once per process: every export in this state loses its spans,
-            // and a message per export would drown the console.
+            // Once per process: a warning per export would drown the console.
             static WARNED: Once = Once::new();
             WARNED.call_once(|| {
                 tracing::warn!(
@@ -67,8 +65,7 @@ impl wasi::Host for WasiOtelCtxView<'_> {}
 pub fn resource_spans(
     spans: Vec<wasi::SpanData>, resource: &opentelemetry_sdk::Resource,
 ) -> Vec<ResourceSpans> {
-    // Group by instrumentation scope with a linear scan: an export carries a
-    // handful of scopes, and the generated types have no `Hash`.
+    // Linear scan: an export carries a handful of scopes, and the generated types have no `Hash`.
     let mut scope_spans: Vec<ScopeSpans> = Vec::new();
     for span in spans {
         let schema_url = span.instrumentation_scope.schema_url.clone().unwrap_or_default();

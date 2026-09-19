@@ -10,15 +10,12 @@ pub fn body(attrs: Attributes, item_fn: &ItemFn) -> proc_macro2::TokenStream {
     let block = item_fn.block.clone();
 
     let span_name = attrs.name.unwrap_or_else(|| LitStr::new(&name.to_string(), name.span()));
-    // All emitted paths route through `omnia_wasi_otel` (the crate the macro
-    // is re-exported from), so callers need no direct `tracing` dependency.
+    // Routed through `omnia_wasi_otel` so callers need no direct `tracing` dependency.
     let tracing = quote! { ::omnia_wasi_otel::__private::tracing };
     let level =
         attrs.level.map_or_else(|| quote! { #tracing::Level::INFO }, |level| quote! {#level});
 
-    // An async function runs inside `scope`: the outermost one initializes
-    // telemetry and exports it as this call returns, nested ones only open a
-    // span. The closure defers `span!` until after that initialization.
+    // The closure defers `span!` until `scope` has initialized telemetry.
     if item_fn.sig.asyncness.is_some() {
         quote! {
             ::omnia_wasi_otel::scope(move || #tracing::Instrument::instrument(
@@ -27,8 +24,7 @@ pub fn body(attrs: Attributes, item_fn: &ItemFn) -> proc_macro2::TokenStream {
             )).await
         }
     } else {
-        // A sync function is never an export, so it only opens a span; the
-        // enclosing async frame owns the lifecycle.
+        // A sync function is never an export: it only opens a span.
         quote! {
             #tracing::span!(#level, #span_name).in_scope(|| {
                 #block

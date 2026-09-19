@@ -18,10 +18,6 @@ use opentelemetry_sdk::metrics::{
 use crate::guest::generated::omnia::otel::metrics as wasi;
 
 pub fn init(resource: Resource) -> (SdkMeterProvider, Reader) {
-    // Delta: every invocation is a fresh instance, so a cumulative export
-    // would report a total since an instance start the backend cannot tell
-    // apart, and equal counts from successive invocations would read as
-    // "no change" rather than as increments.
     let reader =
         Reader(Arc::new(ManualReader::builder().with_temporality(Temporality::Delta).build()));
     let provider =

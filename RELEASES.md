@@ -217,13 +217,39 @@
   `exit-with-code`. `init`, `flush_guard`, and the `ExitGuard` drop guard
   are gone; `flush()` stays for a guest that exports mid-run. `#[instrument]`
   on a sync `fn` now only opens the span (a sync function is never an
-  export). Guest console log lines carry no span prefix: the fmt layer
-  receives events only, so fields such as `correlation_id` are not repeated
-  on every line and the default coloured format is otherwise unchanged. The
-  guest filter's always-on mutes now match the host's, adding
-  `opentelemetry=off` and `opentelemetry_sdk=off` so the SDK's
-  self-diagnostics (`TracerProvider.GlobalSet` and friends) stay out of
-  guest output.
+  export). Guest console log lines go to stderr, as the host's do, so
+  stdout stays the guest's own output (command-mode pipes and JSON
+  envelopes); they carry no span prefix, because the fmt layer receives
+  events only, so fields such as `correlation_id` are not repeated on every
+  line and the default coloured format is otherwise unchanged. The guest
+  filter's always-on mutes are the OpenTelemetry SDK's own targets
+  (`opentelemetry=off`, `opentelemetry_sdk=off`), keeping its
+  self-diagnostics (`TracerProvider.GlobalSet` and friends) out of guest
+  output; the host-transport mutes (`hyper`, `h2`, `tonic`), which no guest
+  links, are gone. Exported guest spans no longer carry `thread.id` /
+  `thread.name` attributes (a guest is single-threaded), and a subscriber
+  install that fails (the guest set its own) is attempted once per instance
+  rather than by every nested `scope`.
+
+- Guest metrics export with delta temporality (`ManualReader` built with
+  `Temporality::Delta`): every invocation is a fresh instance, so a
+  cumulative total restarted on each export and equal counts from successive
+  invocations read as "no change" rather than as increments. Up-down
+  counters stay cumulative, as the SDK's delta preference prescribes; a
+  collector needing cumulative series converts with `deltatocumulative`.
+
+- Host-side `wasi:otel` export fixes: each `ScopeSpans.schema_url` now
+  carries the instrumentation scope's schema URL rather than the resource's
+  (the metrics path already did); the exported metrics resource no longer
+  gains a `schema_url` attribute (with a null value when unset) beside the
+  `ResourceMetrics.schema_url` that already carries it; and guest spans
+  dropped because no host span is live (the trigger hosts open theirs at
+  DEBUG) are reported by one `warn!` per process instead of a `debug!` per
+  export. Spans are grouped per scope by a linear scan over the handful an
+  export carries; the hand-written `Hash` / `Eq` impls on the generated
+  types (whose `f64` arms broke the `Eq` contract on NaN and signed zero)
+  are gone, along with the unused conversions for the never-implemented
+  `context()` import on both sides of the boundary.
 
 - The host console filter is `RUST_LOG` alone, on every entry path, and an
   unset `RUST_LOG` now means `warn` rather than `error`, so host warnings
