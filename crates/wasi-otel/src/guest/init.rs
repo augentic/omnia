@@ -26,7 +26,7 @@ pub async fn scope<F: Future>(inner: impl FnOnce() -> F) -> F::Output {
     let mut owner = false;
     TELEMETRY.get_or_init(|| {
         owner = true;
-        init().inspect_err(|error| eprintln!("telemetry not initialized: {error:#}")).ok()
+        init().inspect_err(|err| eprintln!("initialization issue: {err:#}")).ok()
     });
 
     let output = inner().await;
@@ -35,16 +35,6 @@ pub async fn scope<F: Future>(inner: impl FnOnce() -> F) -> F::Output {
     }
 
     output
-}
-
-/// Export buffered spans and recorded metrics to the host.
-///
-/// Export failures are logged, not propagated. Telemetry must not affect
-/// application logic. Safe to call when telemetry was never initialized.
-pub async fn flush() {
-    let Some(telemetry) = telemetry() else { return };
-    tracing::export(&telemetry.spans).await;
-    metrics::export(&telemetry.reader).await;
 }
 
 /// Set tracing filter `directives`.
@@ -60,6 +50,16 @@ pub async fn flush() {
 pub fn set_filter(directives: &str) -> Result<()> {
     let telemetry = telemetry().context("telemetry is not initialized")?;
     telemetry.filter.reload(compose(directives)?).context("issue reloading the filter")
+}
+
+/// Export buffered spans and recorded metrics to the host.
+///
+/// Export failures are logged, not propagated. Telemetry must not affect
+/// application logic. Safe to call when telemetry was never initialized.
+pub async fn flush() {
+    let Some(telemetry) = telemetry() else { return };
+    tracing::export(&telemetry.spans).await;
+    metrics::export(&telemetry.reader).await;
 }
 
 struct Telemetry {
@@ -101,22 +101,19 @@ fn init() -> Result<Telemetry> {
     })
 }
 
-fn telemetry() -> Option<&'static Telemetry> {
-    TELEMETRY.get()?.as_ref()
-}
-
 // Compose filter `directives` with `RUST_LOG` directives.
 fn compose(directives: &str) -> Result<EnvFilter> {
     let rust_log = std::env::var("RUST_LOG").unwrap_or_default();
-    let env = rust_log.split(',').filter(|value| !value.is_empty()).filter_map(|value| {
-        value
-            .parse::<Directive>()
-            .inspect_err(|error| eprintln!("ignoring `{value}`: {error}"))
-            .ok()
+    let env = rust_log.split(',').filter(|val| !val.is_empty()).filter_map(|val| {
+        val.parse::<Directive>().inspect_err(|err| eprintln!("ignoring `{val}`: {err}")).ok()
     });
 
     Ok(env
         .fold(EnvFilter::builder().parse(directives)?, EnvFilter::add_directive)
         .add_directive("opentelemetry=off".parse()?)
         .add_directive("opentelemetry_sdk=off".parse()?))
+}
+
+fn telemetry() -> Option<&'static Telemetry> {
+    TELEMETRY.get()?.as_ref()
 }
