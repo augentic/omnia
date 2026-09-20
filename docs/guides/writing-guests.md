@@ -104,7 +104,7 @@ The other capabilities follow the same shape; each has a full example:
 | ---------- | ------------ | ------- | --------- |
 | Key-value | `omnia_wasi_keyvalue::store` | `examples/keyvalue` | — |
 | Messaging | `omnia_wasi_messaging::{producer, request_reply}` | `examples/messaging` | [Messaging](messaging.md) |
-| SQL | `omnia_wasi_sql` (with `TableStore`) | `examples/sql` | [SQL](sql.md) |
+| SQL | `omnia_wasi_sql`, `omnia_sdk::TableStore` (feature `sql`) | `examples/sql` | [SQL](sql.md) |
 | Document store | `omnia_wasi_docstore` | `examples/docstore` | [Document Store](document-store.md) |
 | Blob store | `omnia_wasi_blobstore` | `examples/blobstore` | — |
 | Secrets | `omnia_wasi_vault` | `examples/vault` | — |
