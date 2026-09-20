@@ -286,6 +286,8 @@ async fn handle(request: Request) -> Result<Response, ErrorCode> { /* ... */ }
 
 The outermost instrumented `async fn` (or `command!`, which does the same for a CLI entry) runs inside `omnia_wasi_otel::scope`: it initializes the guest's telemetry on entry and exports every span and metric as it returns, so put the attribute on the export's `handle` and on any handler beneath it. A sync function only opens a span.
 
+The OpenTelemetry API works directly too: `global::tracer(..)` and `global::meter(..)` return Omnia's own providers, which record straight into the `omnia:otel` records the flush exports — no OpenTelemetry SDK is linked into the guest. Counters, histograms, and gauges export delta series (one instance per invocation); up-down counters are cumulative. Observable (callback) instruments are no-ops: record through a synchronous instrument instead.
+
 Console output (events, never a span prefix) goes to stderr, so stdout stays the guest's own; it follows the guest's `RUST_LOG`, defaulting to `error`, and `omnia_wasi_otel::set_filter` replaces those defaults at run time — valid `RUST_LOG` directives are applied on top and win for the same target, invalid ones are reported to stderr and ignored. Spans and metrics are exported whatever the filter admits: a span below the filter's level is never created, so an `#[instrument]` at `INFO` needs `RUST_LOG=info` (or a `set_filter` call) to reach the host.
 
 ## Serving MCP tools

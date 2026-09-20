@@ -29,6 +29,7 @@ omnia-wasi-otel.workspace = true
 omnia-wasi-sql.workspace = true
 omnia-wasi-vault.workspace = true
 omnia-wasi-websocket.workspace = true
+opentelemetry = { workspace = true, features = ["metrics", "trace"] }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -294,6 +295,16 @@ crate-type = ["cdylib"]
 [[example]]
 name = "otel_metrics_counter"
 path = "programs/otel/metrics_counter.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "otel_metrics_instruments"
+path = "programs/otel/metrics_instruments.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "otel_span_tree"
+path = "programs/otel/span_tree.rs"
 crate-type = ["cdylib"]
 
 [[example]]

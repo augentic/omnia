@@ -462,9 +462,7 @@ interface tracing {
     /// Number of links dropped by the span due to limits being reached.
     dropped-links: u32,
   }
-
-  /// /// Returns the current span context of the host.
-  /// context: func() -> span-context;
+  
   /// Called by the guest to export spans.
   %export: async func(span-data: list<span-data>) -> result<_, error>;
 }

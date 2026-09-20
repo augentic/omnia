@@ -31,15 +31,14 @@ tracing-opentelemetry.workspace = true
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true
 
-# guest dependencies
+# guest dependencies: the guest implements the `opentelemetry` API traits the
+# `tracing-opentelemetry` bridge drives directly over the WIT records, so the
+# OpenTelemetry SDK is not linked. `getrandom` draws the trace and span ids
+# (`wasi:random` on `wasm32-wasip2`).
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = "0.3"
 omnia-guest-macros.workspace = true
 opentelemetry = { workspace = true, features = ["metrics", "trace"] }
-opentelemetry_sdk = { workspace = true, features = [
-    "experimental_metrics_custom_reader",
-    "metrics",
-    "trace",
-] }
 tracing-opentelemetry = { workspace = true, features = ["metrics"] }
 tracing-subscriber.workspace = true
 wit-bindgen.workspace = true

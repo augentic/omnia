@@ -231,21 +231,44 @@
   envelopes); they carry no span prefix, because the fmt layer receives
   events only, so fields such as `correlation_id` are not repeated on every
   line and the default coloured format is otherwise unchanged. The guest
-  filter's always-on mutes are the OpenTelemetry SDK's own targets
-  (`opentelemetry=off`, `opentelemetry_sdk=off`), keeping its
-  self-diagnostics (`TracerProvider.GlobalSet` and friends) out of guest
-  output; the host-transport mutes (`hyper`, `h2`, `tonic`), which no guest
-  links, are gone. Exported guest spans no longer carry `thread.id` /
+  filter's one always-on mute is the OpenTelemetry API's own target
+  (`opentelemetry=off`), keeping its self-diagnostics out of guest output
+  should a guest dependency enable them; the host-transport mutes (`hyper`,
+  `h2`, `tonic`), which no guest links, are gone. Exported guest spans no
+  longer carry `thread.id` /
   `thread.name` attributes (a guest is single-threaded), and a subscriber
   install that fails (the guest set its own) is attempted once per instance
   rather than by every nested `scope`.
 
-- Guest metrics export with delta temporality (`ManualReader` built with
-  `Temporality::Delta`): every invocation is a fresh instance, so a
-  cumulative total restarted on each export and equal counts from successive
-  invocations read as "no change" rather than as increments. Up-down
-  counters stay cumulative, as the SDK's delta preference prescribes; a
-  collector needing cumulative series converts with `deltatocumulative`.
+- Guest metrics export with delta temporality: every invocation is a fresh
+  instance, so a cumulative total restarted on each export and equal counts
+  from successive invocations read as "no change" rather than as
+  increments. Up-down counters stay cumulative, as the OpenTelemetry SDK's
+  delta preference prescribes; a collector needing cumulative series
+  converts with `deltatocumulative`.
+
+- Guest telemetry no longer links the OpenTelemetry SDK. On `wasm32`,
+  `omnia-wasi-otel` implements the `opentelemetry` API traits that the
+  `tracing-opentelemetry` bridge and the `global::tracer` / `global::meter`
+  registries drive (`TracerProvider`, `Tracer`, `Span`, `MeterProvider`,
+  `InstrumentProvider`) directly over the `omnia:otel` records: a span
+  becomes a `span-data` record as it ends, and the synchronous instruments
+  aggregate into per-scope series that the flush collects into one
+  `resource-metrics` record. Retained: the API and the bridge (a guest's
+  `opentelemetry` and `tracing` code compiles unchanged), delta counters /
+  histograms / gauges with cumulative up-down counters, the default
+  histogram bounds and `with_boundaries`, and the wire protocol (the WIT
+  and the host crates are untouched). Changed: observable (callback)
+  instruments record nothing (the API's no-op defaults); spans have no
+  attribute / event / link limits, so the dropped counts are always zero;
+  no exemplars; a second build of an instrument shares the first's series,
+  description, and unit; histogram bounds that are not finite and strictly
+  increasing yield an instrument that records nothing and reports once at
+  `error`; and the `opentelemetry_sdk=off` mute leaves the guest filter
+  with its target. The SDK and its `rand` / `rand_chacha` / `rand_core`
+  tail leave every guest's dependency graph (trace and span ids are drawn
+  from `getrandom`, over `wasi:random`); the release `otel_metrics_counter`
+  guest shrinks from 1,085,552 to 865,767 bytes (−20%).
 
 - Host-side `wasi:otel` export fixes: each `ScopeSpans.schema_url` now
   carries the instrumentation scope's schema URL rather than the resource's

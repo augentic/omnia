@@ -3,6 +3,7 @@
 //! The guest half of `omnia:otel`: a `tracing` subscriber whose spans and
 //! metrics reach the host through the crate's private `wasi:otel` bindings.
 
+mod aggregate;
 mod convert;
 mod init;
 mod metrics;

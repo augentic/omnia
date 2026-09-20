@@ -2519,6 +2519,7 @@ version = "0.36.0"
 dependencies = [
  "anyhow",
  "futures",
+ "getrandom 0.3.4",
  "hex",
  "omnia",
  "omnia-core",
@@ -3869,6 +3870,7 @@ dependencies = [
  "omnia-wasi-sql",
  "omnia-wasi-vault",
  "omnia-wasi-websocket",
+ "opentelemetry",
  "schemars",
  "serde",
  "serde_json",

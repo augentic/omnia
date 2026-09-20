@@ -4,15 +4,14 @@ use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 use opentelemetry::global;
-use opentelemetry::trace::TracerProvider;
-use opentelemetry_sdk::Resource;
+use opentelemetry::trace::TracerProvider as _;
 use tracing_opentelemetry::{MetricsLayer, layer as tracing_layer};
 use tracing_subscriber::filter::{Directive, filter_fn};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer as _, Registry, reload};
 
-use crate::guest::generated::omnia::otel::resource;
+use crate::guest::generated::omnia::otel::{resource, types};
 use crate::guest::{metrics, tracing};
 
 static TELEMETRY: OnceLock<Option<Telemetry>> = OnceLock::new();
@@ -59,28 +58,31 @@ pub fn set_filter(directives: &str) -> Result<()> {
 pub async fn flush() {
     let Some(telemetry) = telemetry() else { return };
     tracing::export(&telemetry.spans).await;
-    metrics::export(&telemetry.reader).await;
+    metrics::export(&telemetry.meters, &telemetry.resource).await;
 }
 
 struct Telemetry {
     filter: reload::Handle<EnvFilter, Registry>,
     spans: tracing::SpanBuffer,
-    reader: metrics::Reader,
+    meters: metrics::MeterProvider,
+    // The host's telemetry resource, fetched once and sent with every
+    // metrics export.
+    resource: types::Resource,
 }
 
 fn init() -> Result<Telemetry> {
-    let resource: Resource = resource::resource().into();
+    let resource = resource::resource();
 
     let (filter_layer, filter) = reload::Layer::new(compose("error")?);
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_writer(std::io::stderr)
         .with_filter(filter_fn(|meta| !meta.is_span()));
 
-    let (tracer_provider, spans) = tracing::init(resource.clone());
+    let (tracer_provider, spans) = tracing::TracerProvider::new();
     let tracing_layer =
         tracing_layer().with_tracer(tracer_provider.tracer("global")).with_threads(false);
 
-    let (meter_provider, reader) = metrics::init(resource);
+    let meter_provider = metrics::MeterProvider::default();
     let metrics_layer = MetricsLayer::new(meter_provider.clone());
 
     Registry::default()
@@ -92,12 +94,13 @@ fn init() -> Result<Telemetry> {
         .context("issue initializing subscriber")?;
 
     global::set_tracer_provider(tracer_provider);
-    global::set_meter_provider(meter_provider);
+    global::set_meter_provider(meter_provider.clone());
 
     Ok(Telemetry {
         filter,
         spans,
-        reader,
+        meters: meter_provider,
+        resource,
     })
 }
 
@@ -108,10 +111,11 @@ fn compose(directives: &str) -> Result<EnvFilter> {
         val.parse::<Directive>().inspect_err(|err| eprintln!("ignoring `{val}`: {err}")).ok()
     });
 
+    // The API's self-diagnostics (`internal-logs`, should a guest dependency
+    // enable the feature) stay out of guest output.
     Ok(env
         .fold(EnvFilter::builder().parse(directives)?, EnvFilter::add_directive)
-        .add_directive("opentelemetry=off".parse()?)
-        .add_directive("opentelemetry_sdk=off".parse()?))
+        .add_directive("opentelemetry=off".parse()?))
 }
 
 fn telemetry() -> Option<&'static Telemetry> {
