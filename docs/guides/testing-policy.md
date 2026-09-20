@@ -49,7 +49,7 @@ The pipeline is also how a change is *verified* when the question is "does this 
 
 ## Scenario backends
 
-The bundle a suite runs over is `omnia_test::host::Backends`: the in-memory default for every host, deterministic (no environment read, no socket opened), with the model swappable for any `WasiModelCtx`. Most model scenarios script `ScriptedModel` — the answers, the tool calls and workspace steps each completion makes before answering, and the limits — and assert the recorded exchanges afterwards:
+The bundle a suite runs over is `omnia_test::host::Backends`: the in-memory default for every host, deterministic (no environment read, no socket opened), with each host swappable through a setter of its name (`model`, `keyvalue`, `blobstore`, `docstore`, `sql`, `vault`, `messaging`, `identity`, `otel`) for any backend implementing its `Wasi*Ctx` — the seam a production backend crate's own e2e suite runs its guests through. Most model scenarios script `ScriptedModel` — the answers, the tool calls and workspace steps each completion makes before answering, and the limits — and assert the recorded exchanges afterwards:
 
 ```rust,noplayground
 let model = ScriptedModel::answering(["42"]).calling(0, [("lookup", "{}")]);

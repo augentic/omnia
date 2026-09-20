@@ -91,9 +91,15 @@
     `manifest()` — that rewrites the guest set, mounts, plugin interfaces,
     the command guest and the `.` path location, and runs through the host
     list you name (`run_host`, `run`) or the module's generated `Hooks`
-    (`run_with`). `Backends` bundles the twelve in-memory defaults with the
-    model swappable for any `WasiModelCtx` via the generic
-    `Backends::model`; `defaults()` is deterministic — no environment
+    (`run_with`). `Backends` bundles the twelve in-memory defaults, each
+    swappable host a type parameter defaulting to its in-memory backend
+    (`Backends` alone is the all-default bundle) with a consuming setter of
+    the same name — `model(m)` for any `WasiModelCtx`, and `keyvalue`,
+    `blobstore`, `docstore`, `sql`, `vault`, `messaging`, `identity`,
+    `otel` for their `Wasi*Ctx` — so a production backend or a recording
+    wrapper runs under the same guests the defaults do; the bundle
+    implements `Provides` for every host whatever it carries. `defaults()`
+    is deterministic — no environment
     variable read, no socket opened: config answers from the map seeded by
     `Backends::config([..])` alone, the websocket backend serves no
     listener, and the HTTP client and `SQLite` connection (one private
