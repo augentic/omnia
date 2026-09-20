@@ -1,11 +1,11 @@
-//! Relational (SQL) table capability backing the ORM.
+//! Relational (SQL) table capability over `wasi:sql`.
 
 use std::future::Future;
 
 use anyhow::Result;
 use omnia_wasi_sql::{DataType, Row};
 
-/// Types that provide ORM database access.
+/// Types that execute parameterized SQL against a named connection.
 ///
 /// Default WASM implementations use the WASI SQL bindings to execute queries.
 pub trait TableStore: Send + Sync {

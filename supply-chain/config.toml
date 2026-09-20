@@ -771,10 +771,6 @@ criteria = "safe-to-deploy"
 version = "1.2.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.sea-query]]
-version = "1.0.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.secrecy]]
 version = "0.10.3"
 criteria = "safe-to-deploy"

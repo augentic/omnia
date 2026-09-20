@@ -8,12 +8,12 @@ use anyhow::Result;
 use bytes::Bytes;
 use http_body::Body;
 use omnia_sdk::document_store::{Document, QueryOptions, QueryResult};
-use omnia_sdk::orm::{DataType, Row};
 use omnia_sdk::{
     BlobStore, Broadcast, CasError, Config, ContainerMetadata, DocumentStore, HttpRequest,
     Identity, Message, Model, ObjectMetadata, Plugins, Publish, StateStore, TableStore, model,
     plugins,
 };
+use omnia_wasi_sql::{DataType, Row};
 
 use crate::guest::{
     FixedIdentity, MapConfig, MatchedHttp, Memory, MemoryDocs, Scripted, ScriptedLoader,

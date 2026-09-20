@@ -42,7 +42,7 @@ omnia::runtime!({
 **[Start with the documentation index](docs/README.md)** — a graduated path from first run to full deployments:
 
 - [Getting Started](docs/getting-started.md) — first build and run, ~10 minutes
-- How-to guides — [writing guests](docs/guides/writing-guests.md), [composing a runtime](docs/guides/composing-a-runtime.md), [multi-guest deployments](docs/guides/multi-guest-deployments.md), capability deep dives ([SQL](docs/guides/sql-and-orm.md), [documents](docs/guides/document-store.md), [messaging](docs/guides/messaging.md), [model/MCP](docs/guides/model-completions.md)), [production backends](docs/guides/production-backends.md), [deployment](docs/guides/deployment.md), [tuning](docs/guides/performance-tuning.md)
+- How-to guides — [writing guests](docs/guides/writing-guests.md), [composing a runtime](docs/guides/composing-a-runtime.md), [multi-guest deployments](docs/guides/multi-guest-deployments.md), capability deep dives ([SQL](docs/guides/sql.md), [documents](docs/guides/document-store.md), [messaging](docs/guides/messaging.md), [model/MCP](docs/guides/model-completions.md)), [production backends](docs/guides/production-backends.md), [deployment](docs/guides/deployment.md), [tuning](docs/guides/performance-tuning.md)
 - [Architecture](docs/Architecture.md), [Security Model](docs/security-model.md), and [Glossary](docs/glossary.md)
 - Reference — [WASI interfaces](docs/reference/wasi-interfaces.md), [model interface](docs/reference/model.md), [CLI](docs/reference/cli.md), [configuration](docs/reference/configuration.md)
 - [Troubleshooting](docs/troubleshooting.md)
@@ -57,7 +57,7 @@ The [`examples/`](examples/README.md) directory contains a complete working gues
 | [`omnia-core`](crates/omnia-core)               | Live-runtime SDK — wasmtime engine, registry, dispatch, stores, and telemetry |
 | [`omnia-plugin`](crates/omnia-plugin)           | `omnia:plugins/loader` capability — loader host, acquisition policies, and plugin stores; selected by omnia's `plugin` feature |
 | [`omnia-cli`](crates/omnia-cli)                 | Leaf `run` grammar — clap plus argv-precedence; selected by omnia's `cli` feature |
-| [`omnia-sdk`](crates/omnia-sdk)                 | Guest SDK — `Handler`/`Client`/`Context`, HTTP/messaging routers and the command façade, errors, ORM, and MCP support |
+| [`omnia-sdk`](crates/omnia-sdk)                 | Guest SDK — `Handler`/`Client`/`Context`, HTTP/messaging routers and the command façade, errors, capabilities, and MCP support |
 | [`omnia-guest-macros`](crates/guest-macros)     | `#[instrument]` observability attribute for guests                                         |
 | [`omnia-host-macros`](crates/host-macros)       | `runtime!` proc-macro for host runtime generation                                          |
 | [`omnia-wasi-blobstore`](crates/wasi-blobstore) | wasi:blobstore host and guest bindings                                                     |
@@ -69,7 +69,7 @@ The [`examples/`](examples/README.md) directory contains a complete working gues
 | [`omnia-wasi-messaging`](crates/wasi-messaging) | Messaging host and guest bindings                                                          |
 | [`omnia-wasi-model`](crates/wasi-model)         | omnia:model completion host and guest bindings                                             |
 | [`omnia-wasi-otel`](crates/wasi-otel)           | OpenTelemetry host and guest bindings                                                      |
-| [`omnia-wasi-sql`](crates/wasi-sql)             | wasi:sql host and guest bindings, with guest ORM                                           |
+| [`omnia-wasi-sql`](crates/wasi-sql)             | wasi:sql host and guest bindings                                                           |
 | [`omnia-wasi-vault`](crates/wasi-vault)         | Secrets-vault host and guest bindings                                                      |
 | [`omnia-wasi-websocket`](crates/wasi-websocket) | WebSocket host and guest bindings                                                          |
 

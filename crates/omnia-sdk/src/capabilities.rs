@@ -21,7 +21,7 @@ macro_rules! delegate_deref {
 mod blob;
 mod broadcast;
 mod config;
-#[cfg(feature = "orm")]
+#[cfg(feature = "docstore")]
 mod document;
 mod http;
 mod identity;
@@ -29,13 +29,13 @@ mod messaging;
 pub mod model;
 pub mod plugins;
 mod state;
-#[cfg(feature = "orm")]
+#[cfg(feature = "sql")]
 mod table;
 
 pub use blob::{BlobStore, BlobStoreExt, ContainerMetadata, ObjectMetadata};
 pub use broadcast::Broadcast;
 pub use config::Config;
-#[cfg(feature = "orm")]
+#[cfg(feature = "docstore")]
 pub use document::DocumentStore;
 pub use http::HttpRequest;
 pub use identity::Identity;
@@ -49,5 +49,5 @@ pub use plugins::Plugins;
 #[cfg(target_arch = "wasm32")]
 pub use plugins::WasiPlugins;
 pub use state::{CasError, StateStore};
-#[cfg(feature = "orm")]
+#[cfg(feature = "sql")]
 pub use table::TableStore;

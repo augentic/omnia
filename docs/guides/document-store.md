@@ -173,4 +173,4 @@ The result carries `documents` plus an opaque `continuation` token when more pag
 
 - **keyvalue** — opaque bytes by key; no querying.
 - **docstore** — schemaless JSON documents, filtered and paginated; no joins or transactions.
-- **[SQL](sql-and-orm.md)** — relational schema, joins, typed columns.
+- **[SQL](sql.md)** — relational schema, joins, typed columns.

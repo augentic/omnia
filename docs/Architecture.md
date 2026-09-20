@@ -125,7 +125,7 @@ Each interface crate provides guest bindings, a host implementation, and a defau
 | `wasi-keyvalue`  | `wasi:keyvalue`  | Key-value storage                | `KeyValueDefault` — in-memory cache       |
 | `wasi-messaging` | `wasi:messaging` | Pub/sub messaging (trigger)      | `MessagingDefault` — in-process broadcast |
 | `wasi-blobstore` | `wasi:blobstore` | Object/blob storage              | `BlobstoreDefault` — in-memory            |
-| `wasi-sql`       | `wasi:sql`       | SQL access + guest ORM           | `SqlDefault` — SQLite                     |
+| `wasi-sql`       | `wasi:sql`       | Parameterized SQL access         | `SqlDefault` — SQLite                     |
 | `wasi-docstore`  | Custom           | JSON document store with filters | `DocStoreDefault` — in-memory             |
 | `wasi-config`    | `wasi:config`    | Runtime configuration            | `ConfigDefault` — process environment     |
 | `wasi-vault`     | Custom           | Secrets management               | `VaultDefault` — in-memory                |
@@ -147,7 +147,7 @@ Each crate's `wit/` directory holds the [WIT](https://component-model.bytecodeal
 
 ### Guest SDK (`crates/omnia-sdk`, `crates/guest-macros`)
 
-`omnia-sdk` defines transport-neutral `Handler`, `Client`, and `Context` plus three transport adapters under `omnia_sdk::api`: the axum-backed HTTP router (`http`, behind the default `http` feature), the exact-topic messaging router (`messaging`), and the command façade (`command`: `parse` → `Command::call` → `Response`, with `command!` binding the `wasi:cli/run` export; clap-backed parts behind the `command` feature). Applications own their WASI exports and call the matching adapter. Failures share one vocabulary across transports: `Error` maps to an HTTP status and to an exit code (1/2/3/4; clap usage errors exit 64), and both HTTP and the command line emit the same `api::ErrorBody` discriminant. Every transport carrier (`x-request-id` headers, messaging metadata, `Metadata::from_env`) mints a request id when none arrives, and `Client::call` runs the handler in a span carrying it. ORM query builders (`orm` feature) and the MCP server module (`mcp::McpServer`, `mcp::router`) remain in `omnia-sdk`; `guest-macros` provides only the independent `#[instrument]` tracing attribute.
+`omnia-sdk` defines transport-neutral `Handler`, `Client`, and `Context` plus three transport adapters under `omnia_sdk::api`: the axum-backed HTTP router (`http`, behind the default `http` feature), the exact-topic messaging router (`messaging`), and the command façade (`command`: `parse` → `Command::call` → `Response`, with `command!` binding the `wasi:cli/run` export; clap-backed parts behind the `command` feature). Applications own their WASI exports and call the matching adapter. Failures share one vocabulary across transports: `Error` maps to an HTTP status and to an exit code (1/2/3/4; clap usage errors exit 64), and both HTTP and the command line emit the same `api::ErrorBody` discriminant. Every transport carrier (`x-request-id` headers, messaging metadata, `Metadata::from_env`) mints a request id when none arrives, and `Client::call` runs the handler in a span carrying it. The capability traits (`TableStore` behind the `sql` feature, `DocumentStore` behind `docstore`, both default) and the MCP server module (`mcp::McpServer`, `mcp::router`) remain in `omnia-sdk`; `guest-macros` provides only the independent `#[instrument]` tracing attribute.
 
 ### Host macro (`crates/host-macros`)
 
@@ -219,7 +219,7 @@ omnia/
 │   ├── omnia/              # Composition root (assembly, lifecycle, optional crates, runtime!)
 │   ├── omnia-core/         # Live-runtime SDK (engine, registry, dispatch, stores, telemetry)
 │   ├── omnia-link/         # Guest→guest linking (InProcessLinks; re-exported by omnia behind `link`)
-│   ├── omnia-sdk/          # Guest SDK (Handler/Client/Context, HTTP/messaging/command adapters, errors, ORM, MCP)
+│   ├── omnia-sdk/          # Guest SDK (Handler/Client/Context, HTTP/messaging/command adapters, errors, capabilities, MCP)
 │   ├── guest-macros/       # #[instrument] proc macro
 │   ├── host-macros/        # runtime! proc-macro
 │   ├── omnia-plugin/       # Plugins capability (loader host + acquisition; re-exported by omnia)
