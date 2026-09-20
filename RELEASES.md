@@ -91,9 +91,15 @@
     `manifest()` — that rewrites the guest set, mounts, plugin interfaces,
     the command guest and the `.` path location, and runs through the host
     list you name (`run_host`, `run`) or the module's generated `Hooks`
-    (`run_with`). `Backends` bundles the twelve in-memory defaults with the
-    model swappable for any `WasiModelCtx` via the generic
-    `Backends::model`; `defaults()` is deterministic — no environment
+    (`run_with`). `Backends` bundles the twelve in-memory defaults, each
+    swappable host a type parameter defaulting to its in-memory backend
+    (`Backends` alone is the all-default bundle) with a consuming setter of
+    the same name — `model(m)` for any `WasiModelCtx`, and `keyvalue`,
+    `blobstore`, `docstore`, `sql`, `vault`, `messaging`, `identity`,
+    `otel` for their `Wasi*Ctx` — so a production backend or a recording
+    wrapper runs under the same guests the defaults do; the bundle
+    implements `Provides` for every host whatever it carries. `defaults()`
+    is deterministic — no environment
     variable read, no socket opened: config answers from the map seeded by
     `Backends::config([..])` alone, the websocket backend serves no
     listener, and the HTTP client and `SQLite` connection (one private
@@ -196,6 +202,20 @@
   re-exported so `connect_with` can be called with fixed options instead of
   `connect()` reading `HTTP_CONNECT_TIMEOUT` / `SQL_DATABASE`.
 
+- `omnia_wasi_otel::set_filter(directives)`: a guest replaces its tracing
+  filter with a `RUST_LOG` string after its subscriber is installed, so a
+  guest-owned verbosity flag (`--debug`, `--quiet`) parsed from argv can
+  drive the guest's own tracing. The supplied directives are refined by the
+  guest's `RUST_LOG`: valid environment directives are applied after them
+  and win for the same target, invalid ones are reported to stderr and
+  ignored. The subscriber `init` installs now holds its `EnvFilter` in a
+  `reload::Layer`; events after the call follow the new filter, and the
+  always-on transport mutes stay in force.
+
+- `Telemetry::filter(directives)`: an embedder filters the host console
+  subscriber by an explicit `RUST_LOG` string instead of the environment
+  (the always-on dependency mutes still apply).
+
 ### Changed
 
 - The `omnia-sdk` `orm` feature is split into `sql` (the `TableStore`
@@ -205,6 +225,61 @@
   uses; a default build is unchanged. In-repo consumers follow (`examples`:
   `sql`, `docstore`, `http`, `command`; `omnia-test/guest`: `sql`,
   `docstore`), and `cargo make features` gates each new feature alone.
+
+- Guest telemetry has one lifecycle entry point: `omnia_wasi_otel::scope(f)`
+  initializes telemetry (once per instance), awaits the future `f` builds,
+  and exports every buffered span and recorded metric before returning; a
+  nested `scope` is a pass-through. `#[instrument]` on an `async fn` and
+  `command!` both route through it, so the export completes ahead of an
+  `exit-with-code`. `init`, `flush_guard`, and the `ExitGuard` drop guard
+  are gone; `flush()` stays for a guest that exports mid-run. `#[instrument]`
+  on a sync `fn` now only opens the span (a sync function is never an
+  export). Guest console log lines go to stderr, as the host's do, so
+  stdout stays the guest's own output (command-mode pipes and JSON
+  envelopes); they carry no span prefix, because the fmt layer receives
+  events only, so fields such as `correlation_id` are not repeated on every
+  line and the default coloured format is otherwise unchanged. The guest
+  filter's always-on mutes are the OpenTelemetry SDK's own targets
+  (`opentelemetry=off`, `opentelemetry_sdk=off`), keeping its
+  self-diagnostics (`TracerProvider.GlobalSet` and friends) out of guest
+  output; the host-transport mutes (`hyper`, `h2`, `tonic`), which no guest
+  links, are gone. Exported guest spans no longer carry `thread.id` /
+  `thread.name` attributes (a guest is single-threaded), and a subscriber
+  install that fails (the guest set its own) is attempted once per instance
+  rather than by every nested `scope`.
+
+- Guest metrics export with delta temporality (`ManualReader` built with
+  `Temporality::Delta`): every invocation is a fresh instance, so a
+  cumulative total restarted on each export and equal counts from successive
+  invocations read as "no change" rather than as increments. Up-down
+  counters stay cumulative, as the SDK's delta preference prescribes; a
+  collector needing cumulative series converts with `deltatocumulative`.
+
+- Host-side `wasi:otel` export fixes: each `ScopeSpans.schema_url` now
+  carries the instrumentation scope's schema URL rather than the resource's
+  (the metrics path already did); the exported metrics resource no longer
+  gains a `schema_url` attribute (with a null value when unset) beside the
+  `ResourceMetrics.schema_url` that already carries it; and guest spans
+  dropped because no host span is live (the trigger hosts open theirs at
+  DEBUG) are reported by one `warn!` per process instead of a `debug!` per
+  export. Spans are grouped per scope by a linear scan over the handful an
+  export carries; the hand-written `Hash` / `Eq` impls on the generated
+  types (whose `f64` arms broke the `Eq` contract on NaN and signed zero)
+  are gone, along with the unused conversions for the never-implemented
+  `context()` import on both sides of the boundary.
+
+- The host console filter is `RUST_LOG` alone, on every entry path, and an
+  unset `RUST_LOG` now means `warn` rather than `error`, so host warnings
+  (a mount that failed to preopen) reach stderr without a hand-written
+  filter. A failed telemetry flush — every exit of a collectorless
+  command-mode run — reports at `debug` instead of `warn`. The
+  direct-command host log flags (`--debug` / `--quiet` peeled from argv)
+  and the `LogMode` presets behind them (`omnia::LogMode`,
+  `Telemetry::log_mode`, `DeploymentBuilder::log_mode`) are gone: a
+  direct-command guest sees every argument, and a product that wants those
+  flags defines them in its own grammar and applies them through
+  `omnia_wasi_otel`'s filter reload APIs.
+
 - `omnia_test::build::Components` runs its nested `wasm32-wasip2` build into
   `target/wasm32-fixtures`, a sibling of the outer profile directory shared by
   every outer feature set, profile, and build-script hash, rather than under
@@ -231,7 +306,11 @@
   round trip `full → echoer → full` (fresh instances per call) went
   from ~1.52 ms p50 / ~1.57 ms mean on wRPC to ~1.12 ms p50 /
   ~1.15 ms mean on in-memory routing, about 26 % less per call
-  (p99 ~1.93 ms → ~1.36 ms).
+  (p99 ~1.93 ms → ~1.36 ms). The callee task keeps the dispatcher's
+  `tracing` span current, so a linked guest's telemetry export grafts
+  onto the live host span the way an inline drive's does; before, the
+  spawned task had no current span and the host dropped every span a
+  callee exported.
 
 - The registry location carries the deployment's routing policy. A
   `{ registry: ..., config: ... }` entry (or `[[plugin.location]]` with a
@@ -628,11 +707,11 @@
   ```
 - Removed the `runtime!` macro's `program:` key: `mode: command` with a
   compiled-in deployment (`config:` or inline manifest keys) is now a
-  direct command by default — raw argv passthrough with the reserved
-  `--debug` / `--quiet` host log flags, no host `run` grammar. The program
-  name (telemetry and guest `argv[0]`) defaults to the manifest name (first
-  `[[guest]]` id). Command-mode binaries without a compiled-in deployment
-  keep the `run` grammar
+  direct command by default — raw argv passthrough, nothing reserved for
+  the host, no host `run` grammar. The program name (telemetry and guest
+  `argv[0]`) defaults to the manifest name (first `[[guest]]` id).
+  Command-mode binaries without a compiled-in deployment keep the `run`
+  grammar
 - Removed the `command_guest:` key and its plumbing
   (`DeploymentBuilder::command_guest`, `Runtime::with_command_guest`,
   `MainOptions::command_guest`): command mode routes to the sole static

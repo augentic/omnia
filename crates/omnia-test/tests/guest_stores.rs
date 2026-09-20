@@ -1,5 +1,7 @@
 //! The store and trivial doubles at the handler rung.
 
+#![cfg(not(target_arch = "wasm32"))]
+
 use std::future::Future;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::pin;

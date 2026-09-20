@@ -1,6 +1,8 @@
 //! Contract of the shared `Script` core: FIFO order, recording, and the
 //! three exhaustion behaviours (panic, fallback, drop check).
 
+#![cfg(not(target_arch = "wasm32"))]
+
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use omnia_test::Script;

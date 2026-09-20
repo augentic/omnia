@@ -15,9 +15,9 @@ struct CliGuest;
 
 wasip3::cli::command::export!(CliGuest);
 
-// Not `omnia_sdk::command!`: that initializes telemetry before the scenario
-// and flushes after it, so `traced` would neither own the guard nor flush
-// while the receiver is pending — the exact condition this regression needs.
+// Not `omnia_sdk::command!`: that opens the telemetry scope around the whole
+// scenario, so `traced` would neither own the lifecycle nor flush while the
+// receiver is pending — the exact condition this regression needs.
 impl wasip3::exports::cli::run::Guest for CliGuest {
     async fn run() -> Result<(), ()> {
         scenario().await;
@@ -30,8 +30,8 @@ async fn scenario() {
     wit_bindgen::spawn_local(async move {
         let _ = rx.await;
     });
-    // Owns the guard, so telemetry flushes as this call returns — while the
-    // spawned receiver is still pending.
+    // The outermost instrumented call owns the lifecycle, so telemetry
+    // flushes as it returns — while the spawned receiver is still pending.
     traced().await;
     // Never reached when the flush deadlocks.
     let _ = tx.send(());

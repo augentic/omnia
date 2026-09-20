@@ -46,7 +46,7 @@ pub use self::store::{
     HasDispatcher, HasExtensions, HasLimits, HasMounts, HttpBorrow, HttpCtx, StoreBase,
     StoreConfig, StoreCtx, StoreView,
 };
-pub use self::telemetry::{LogMode, Telemetry};
+pub use self::telemetry::Telemetry;
 pub use self::value::handle_kind;
 
 /// Generates the standard host-error conversions every `omnia` WASI host

@@ -1,38 +1,31 @@
 //! # Tracing
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use opentelemetry::{Context, global, trace as otel};
+use opentelemetry::{Context, trace as otel};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::{SdkTracerProvider, Span, SpanData, SpanProcessor};
 
 use crate::guest::generated::omnia::otel::tracing as wasi;
 
-/// The processor's span buffer, reachable without the provider so
-/// [`flush`] can drain it from any point in the guest.
-static SPANS: OnceLock<Arc<Mutex<Vec<SpanData>>>> = OnceLock::new();
+/// Ended spans awaiting export, shared between the processor and [`export`].
+pub type SpanBuffer = Arc<Mutex<Vec<SpanData>>>;
 
-pub fn init(resource: Resource) -> SdkTracerProvider {
-    // Reuse the shared buffer if a previous `init` attempt already set it,
-    // so a retried initialization never orphans buffered spans.
-    let spans = SPANS.get_or_init(|| Arc::new(Mutex::new(Vec::new())));
+pub fn init(resource: Resource) -> (SdkTracerProvider, SpanBuffer) {
+    let spans = SpanBuffer::default();
     let processor = Processor {
-        spans: Arc::clone(spans),
+        spans: Arc::clone(&spans),
     };
     let provider =
         SdkTracerProvider::builder().with_resource(resource).with_span_processor(processor).build();
-    global::set_tracer_provider(provider.clone());
-    provider
+    (provider, spans)
 }
 
 /// Export all buffered spans to the host.
-pub(crate) async fn flush() {
-    let Some(buffer) = SPANS.get() else { return };
-    let Ok(mut guard) = buffer.lock() else { return };
-    let spans = std::mem::take(&mut *guard);
-    drop(guard);
+pub async fn export(buffer: &SpanBuffer) {
+    let spans = take(buffer);
     if spans.is_empty() {
         return;
     }
@@ -43,9 +36,14 @@ pub(crate) async fn flush() {
     }
 }
 
+// A `MutexGuard` binding inside `export` would make its future `!Send`.
+fn take(buffer: &SpanBuffer) -> Vec<SpanData> {
+    buffer.lock().map(|mut spans| std::mem::take(&mut *spans)).unwrap_or_default()
+}
+
 #[derive(Debug)]
 struct Processor {
-    spans: Arc<Mutex<Vec<SpanData>>>,
+    spans: SpanBuffer,
 }
 
 impl SpanProcessor for Processor {
@@ -65,31 +63,10 @@ impl SpanProcessor for Processor {
     }
 
     fn shutdown_with_timeout(&self, _: Duration) -> OTelSdkResult {
-        // Never block here: shutdown can run inside a live component-model
-        // task (e.g. a guard dropping as an async export completes), where a
-        // blocking wait steals and then deadlocks against spawned work only
-        // the surrounding task can finish. Defer the export onto that task.
-        wit_bindgen::spawn_local(flush());
         Ok(())
     }
 
     fn set_resource(&mut self, _: &Resource) {}
-}
-
-impl From<wasi::SpanContext> for otel::SpanContext {
-    fn from(value: wasi::SpanContext) -> Self {
-        let trace_id = otel::TraceId::from_hex(&value.trace_id).unwrap_or(otel::TraceId::INVALID);
-        let span_id = otel::SpanId::from_hex(&value.span_id).unwrap_or(otel::SpanId::INVALID);
-        let trace_state = otel::TraceState::from_key_value(value.trace_state)
-            .unwrap_or_else(|_| otel::TraceState::default());
-        Self::new(trace_id, span_id, value.trace_flags.into(), value.is_remote, trace_state)
-    }
-}
-
-impl From<wasi::TraceFlags> for otel::TraceFlags {
-    fn from(value: wasi::TraceFlags) -> Self {
-        if value.contains(wasi::TraceFlags::SAMPLED) { Self::SAMPLED } else { Self::default() }
-    }
 }
 
 impl From<SpanData> for wasi::SpanData {

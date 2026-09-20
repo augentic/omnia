@@ -1,7 +1,10 @@
 //! The component rung: real guest components from `crates/test-programs`
 //! driven through `Deployment` over `Backends`.
 
+#![cfg(not(target_arch = "wasm32"))]
+
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
@@ -9,7 +12,7 @@ use omnia::{ExitStatus, GuestId, Location, Runtime};
 use omnia_test::host::{Backends, Deployment, ScriptedModel, scratch};
 use omnia_test::{Exchange, SeenFormat};
 use omnia_wasi_blobstore::WasiBlobstoreCtx as _;
-use omnia_wasi_keyvalue::WasiKeyValueCtx as _;
+use omnia_wasi_keyvalue::{Bucket, FutureResult, KeyValueDefault, WasiKeyValue, WasiKeyValueCtx};
 use omnia_wasi_model::WasiModel;
 use omnia_wasi_otel::WasiOtel;
 
@@ -190,6 +193,51 @@ async fn path_root_plugins() {
         .await
         .expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+}
+
+/// A keyvalue backend that notes every bucket opened through it, then hands
+/// the call to the in-memory default it wraps.
+#[derive(Clone, Debug)]
+struct RecordingKeyValue {
+    inner: KeyValueDefault,
+    opened: Arc<Mutex<Vec<String>>>,
+}
+
+impl WasiKeyValueCtx for RecordingKeyValue {
+    fn open_bucket(&self, identifier: String) -> FutureResult<Arc<dyn Bucket>> {
+        self.opened.lock().expect("opened buckets").push(identifier.clone());
+        self.inner.open_bucket(identifier)
+    }
+}
+
+#[tokio::test]
+async fn swapped_keyvalue() {
+    let defaults = Backends::defaults().await;
+    let recording = RecordingKeyValue {
+        inner: defaults.keyvalue.clone(),
+        opened: Arc::default(),
+    };
+    // The guest's atomics start from a host-seeded counter.
+    let bucket = recording.inner.open_bucket("bucket".to_owned()).await.expect("bucket");
+    bucket.set("counter".to_owned(), 37_i64.to_be_bytes().to_vec()).await.expect("seed");
+
+    let backends = defaults.keyvalue(recording);
+    let status = Deployment::new()
+        .guest("guest", test_programs::KEYVALUE_BUCKET)
+        .run_host::<WasiKeyValue, _>(backends.clone())
+        .await
+        .expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS);
+
+    // The guest reached the swapped-in backend, and its writes landed in
+    // the store behind it.
+    let opened = backends.keyvalue.opened.lock().expect("opened buckets").clone();
+    assert_eq!(opened, ["bucket"]);
+    let bucket = backends.keyvalue.inner.open_bucket("bucket".to_owned()).await.expect("bucket");
+    assert_eq!(
+        bucket.get("counter".to_owned()).await.expect("get"),
+        Some(42_i64.to_be_bytes().to_vec())
+    );
 }
 
 #[tokio::test]

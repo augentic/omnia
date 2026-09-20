@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use tokio::task::JoinHandle;
+use tracing::Instrument as _;
 use wasmtime::component::{ComponentExportIndex, InstancePre, Val};
 
 use crate::chain::{ChainCtx, with_chain};
@@ -85,11 +86,11 @@ impl<T> Drop for AbortOnDrop<T> {
 pub async fn call_fresh<T: Send + 'static>(
     call: FreshCall<T>, args: Vec<Val>, ctx: ChainCtx, bound: Option<Duration>,
 ) -> Result<Vec<Val>, InvokeError> {
-    // Own task: wasmtime 48 forbids `call_async` on a concurrency-enabled store
-    // while another store is in thread-local storage (i.e. inside any host
-    // function), and a dropped or timed-out caller must abort the callee so
-    // its store and pooling slot are released (`AbortOnDrop`).
-    let mut callee = AbortOnDrop(tokio::spawn(with_chain(ctx, async move {
+    // Own task: wasmtime 48 forbids nested `call_async` on concurrency-enabled
+    // stores, and an abandoned caller must abort the callee (`AbortOnDrop`).
+    // `spawn` drops the caller's span; re-enter it so guest otel export parents
+    // onto the host span.
+    let callee = with_chain(ctx, async move {
         let mut store = (call.factory)();
         let instance = call.instance_pre.instantiate_async(&mut store).await?;
         let func = instance
@@ -98,16 +99,22 @@ pub async fn call_fresh<T: Send + 'static>(
         let mut out = vec![Val::Bool(false); call.results];
         func.call_async(&mut store, &args, &mut out).await?;
         Ok::<_, anyhow::Error>(out)
-    })));
-    let joined = match bound {
+    });
+
+    let mut callee = AbortOnDrop(tokio::spawn(callee.in_current_span()));
+
+    let out = match bound {
         Some(limit) => tokio::time::timeout(limit, &mut callee.0)
             .await
             .map_err(|_elapsed| InvokeError::Timeout(limit))?,
         None => (&mut callee.0).await,
-    };
-    let out = joined.map_err(InvokeError::Join)?.map_err(InvokeError::Trap)?;
+    }
+    .map_err(InvokeError::Join)?
+    .map_err(InvokeError::Trap)?;
+
     if let Some(kind) = out.iter().find_map(handle_kind) {
         return Err(InvokeError::Handle(kind));
     }
+
     Ok(out)
 }

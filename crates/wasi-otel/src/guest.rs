@@ -1,10 +1,7 @@
-//! # WASI Bindings
+//! # Guest
 //!
-//! This module generates and exports WASI Guest bindings for local wit worlds.
-//! The bindings are exported in as similar a manner to those in the Bytecode
-//! Alliance's [wasi] crate.
-//!
-//! [wasi]: https://github.com/bytecodealliance/wasi
+//! The guest half of `omnia:otel`: a `tracing` subscriber whose spans and
+//! metrics reach the host through the crate's private `wasi:otel` bindings.
 
 mod convert;
 mod init;

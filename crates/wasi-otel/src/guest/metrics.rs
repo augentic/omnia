@@ -1,9 +1,8 @@
 //! # Metrics
 
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use opentelemetry::global;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::metrics::data::{
@@ -18,25 +17,19 @@ use opentelemetry_sdk::metrics::{
 
 use crate::guest::generated::omnia::otel::metrics as wasi;
 
-/// The manual reader, reachable without the provider so [`flush`] can
-/// collect from any point in the guest.
-static READER: OnceLock<Reader> = OnceLock::new();
-
-pub fn init(resource: Resource) -> SdkMeterProvider {
-    // Reuse the shared reader if a previous `init` attempt already set it,
-    // so a retried initialization never orphans recorded metrics.
-    let reader = READER.get_or_init(Reader::new).clone();
-    let provider = SdkMeterProvider::builder().with_resource(resource).with_reader(reader).build();
-    global::set_meter_provider(provider.clone());
-    provider
+pub fn init(resource: Resource) -> (SdkMeterProvider, Reader) {
+    let reader =
+        Reader(Arc::new(ManualReader::builder().with_temporality(Temporality::Delta).build()));
+    let provider =
+        SdkMeterProvider::builder().with_resource(resource).with_reader(reader.clone()).build();
+    (provider, reader)
 }
 
 /// Export all recorded metrics to the host; a collection with no data
 /// points is skipped rather than exported empty.
-pub(crate) async fn flush() {
-    let Some(reader) = READER.get() else { return };
+pub async fn export(reader: &Reader) {
     let mut rm = ResourceMetrics::default();
-    if let Err(e) = reader.0.collect(&mut rm) {
+    if let Err(e) = reader.collect(&mut rm) {
         tracing::error!("failed to collect metrics: {e}");
         return;
     }
@@ -50,15 +43,10 @@ pub(crate) async fn flush() {
     }
 }
 
+/// A shared handle to the provider's [`ManualReader`], which is neither
+/// `Clone` nor reachable through the provider once registered.
 #[derive(Debug, Clone)]
-struct Reader(Arc<ManualReader>);
-
-impl Reader {
-    #[must_use]
-    fn new() -> Self {
-        Self(Arc::new(ManualReader::default()))
-    }
-}
+pub struct Reader(Arc<ManualReader>);
 
 impl MetricReader for Reader {
     fn register_pipeline(&self, pipeline: Weak<Pipeline>) {
@@ -77,10 +65,8 @@ impl MetricReader for Reader {
         self.0.temporality(kind)
     }
 
-    fn shutdown_with_timeout(&self, _: Duration) -> OTelSdkResult {
-        // Never block here: see `tracing::Processor::shutdown_with_timeout`.
-        wit_bindgen::spawn_local(flush());
-        Ok(())
+    fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+        self.0.shutdown_with_timeout(timeout)
     }
 }
 

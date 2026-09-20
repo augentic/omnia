@@ -1,6 +1,6 @@
 # omnia-guest-macros
 
-Procedural attributes for Omnia guests. The crate provides one attribute, `#[instrument]`, which wraps a function in an OpenTelemetry span and initializes the guest subscriber on entry. Guests reach it as `omnia_wasi_otel::instrument`. Handlers, routing, and WASI exports are ordinary Rust APIs in `omnia-sdk`.
+Procedural attributes for Omnia guests. The crate provides one attribute, `#[instrument]`, which wraps a function in an OpenTelemetry span. On an async function it also runs the body inside `omnia_wasi_otel::scope`, so the outermost instrumented async function initializes the guest's telemetry and exports it as it returns; a sync function only opens the span. Guests reach it as `omnia_wasi_otel::instrument`. Handlers, routing, and WASI exports are ordinary Rust APIs in `omnia-sdk`.
 
 ## Instrumentation
 

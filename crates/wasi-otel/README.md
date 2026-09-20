@@ -18,6 +18,8 @@ Uses `opentelemetry` and `tracing` crates to export telemetry data.
 
 ## Usage
 
+### Host
+
 Add this crate to your `Cargo.toml` and use it in your runtime configuration:
 
 ```rust,ignore
@@ -29,6 +31,22 @@ omnia::runtime!({
     }
 });
 ```
+
+Guest spans are grafted onto the host trace: the host span live when the guest exports becomes their parent, so drive a guest inside an enabled `tracing` span (the trigger hosts open one per request at `DEBUG`).
+
+### Guest
+
+On `wasm32` the same crate is the guest's telemetry runtime. `#[instrument]` on an `async fn` opens a span, and the outermost one runs the lifecycle (`scope`): it installs a `tracing` subscriber on first use and exports every buffered span and recorded metric to the host as the function returns. `command!` does the same for a CLI entry.
+
+```rust,ignore
+#[omnia_wasi_otel::instrument(name = "http_guest_handle")]
+async fn handle(request: Request) -> Response {
+    tracing::info!("handling");
+    // ...
+}
+```
+
+Console output (events only, to stderr) follows `RUST_LOG`, defaulting to `error`; `set_filter` replaces those defaults at run time (valid `RUST_LOG` directives still apply on top) and `flush` exports on demand.
 
 ## License
 

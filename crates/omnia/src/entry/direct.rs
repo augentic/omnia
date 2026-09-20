@@ -10,7 +10,6 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
-use omnia_core::LogMode;
 
 use crate::{DeploymentBuilder, Manifest, Mode};
 
@@ -83,55 +82,23 @@ pub(super) struct EntryPlan {
     mode: Mode,
     manifest: Option<Manifest>,
     args: Vec<String>,
-    log_mode: Option<LogMode>,
 }
 
 impl EntryPlan {
     /// Assemble the deployment builder this plan describes.
     pub(super) fn into_builder(self) -> DeploymentBuilder {
-        let mut builder =
-            DeploymentBuilder::new().manifest(self.manifest).args(self.args).mode(self.mode);
-        if let Some(mode) = self.log_mode {
-            builder = builder.log_mode(mode);
-        }
-        builder
+        DeploymentBuilder::new().manifest(self.manifest).args(self.args).mode(self.mode)
     }
-}
-
-/// Peel the reserved host log flags (`--debug` / `--quiet`) out of
-/// direct-command argv, returning the guest arguments and the resolved
-/// [`LogMode`] (the flagless default is [`LogMode::Progress`]).
-///
-/// The flags are host-reserved anywhere in argv — a direct-command guest
-/// never sees them — and mutually exclusive; repeating one is idempotent.
-fn peel_log_flags(args: Vec<String>) -> Result<(Vec<String>, LogMode)> {
-    let mut mode = None;
-    let mut guest_args = Vec::with_capacity(args.len());
-    for arg in args {
-        let flag = match arg.as_str() {
-            "--debug" => LogMode::Debug,
-            "--quiet" => LogMode::Quiet,
-            _ => {
-                guest_args.push(arg);
-                continue;
-            }
-        };
-        if mode.is_some_and(|current| current != flag) {
-            return Err(anyhow!("`--debug` and `--quiet` are mutually exclusive"));
-        }
-        mode = Some(flag);
-    }
-    Ok((guest_args, mode.unwrap_or(LogMode::Progress)))
 }
 
 /// Resolve [`MainOptions`] plus process argv into an [`EntryPlan`].
 ///
 /// Command mode with a compiled-in manifest is a *direct command*: no host
-/// CLI grammar, argv belongs to the guest. The direct plan always carries
-/// the compiled-in manifest, so the builder never falls through to its own
-/// `OMNIA_CONFIG` lookup — the environment is untouched by design. Every
-/// other shape needs the standard `run` grammar, which only `omnia-cli`
-/// provides.
+/// CLI grammar, argv belongs to the guest verbatim. The direct plan always
+/// carries the compiled-in manifest, so the builder never falls through to
+/// its own `OMNIA_CONFIG` lookup — the environment is untouched by design.
+/// Every other shape needs the standard `run` grammar, which only
+/// `omnia-cli` provides.
 ///
 /// # Errors
 ///
@@ -149,18 +116,18 @@ pub(super) fn plan(
     ))
 }
 
-/// Plan a direct command: argv belongs to the guest bar the reserved host log
-/// flags, and the compiled-in manifest is the sole source.
+/// Plan a direct command: argv belongs to the guest verbatim, and the
+/// compiled-in manifest is the sole source.
 ///
 /// # Errors
 ///
-/// Returns an error if argv is not UTF-8, the log flags conflict, or the
-/// compiled-in manifest cannot be loaded.
+/// Returns an error if argv is not UTF-8 or the compiled-in manifest cannot
+/// be loaded.
 pub(super) fn plan_direct(
     options: MainOptions, argv: impl IntoIterator<Item = OsString>,
 ) -> Result<EntryPlan> {
     let (mode, manifest) = options.into_parts();
-    let raw_args = argv
+    let guest_args = argv
         .into_iter()
         .skip(1)
         .map(|arg| {
@@ -168,13 +135,11 @@ pub(super) fn plan_direct(
                 .map_err(|arg| anyhow!("guest argument `{}` is not valid UTF-8", arg.display()))
         })
         .collect::<Result<Vec<_>>>()?;
-    let (guest_args, log_mode) = peel_log_flags(raw_args)?;
     let manifest = manifest.map(ManifestSource::into_manifest).transpose()?;
     Ok(EntryPlan {
         mode,
         manifest,
         args: guest_args,
-        log_mode: Some(log_mode),
     })
 }
 
@@ -205,42 +170,13 @@ mod tests {
 
     #[test]
     fn direct_argv() {
-        // `--config` and `run` are guest arguments, not host CLI options.
+        // `--config`, `run`, and `--debug` are guest arguments, not host CLI
+        // options: nothing in argv is reserved for the host.
         let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
-        let plan = plan(options, argv(&["bin", "--config", "foo.toml", "run", "greet"]))
+        let plan = plan(options, argv(&["bin", "--config", "foo.toml", "run", "--debug", "greet"]))
             .unwrap_or_else(|error| panic!("{}", fatal(&error)));
-        assert_eq!(plan.args, ["--config", "foo.toml", "run", "greet"]);
-        assert_eq!(plan.log_mode, Some(LogMode::Progress), "flagless default is progress");
+        assert_eq!(plan.args, ["--config", "foo.toml", "run", "--debug", "greet"]);
         assert_eq!(first_guest(&plan), "app");
-    }
-
-    #[test]
-    fn direct_log_flags() {
-        // The reserved flags are host-only wherever they sit in argv; the
-        // guest arguments are otherwise untouched.
-        let cases: &[(&[&str], LogMode, &[&str])] = &[
-            (&["bin", "--debug", "plan", "author"], LogMode::Debug, &["plan", "author"]),
-            (&["bin", "plan", "author", "--debug"], LogMode::Debug, &["plan", "author"]),
-            (&["bin", "plan", "--quiet", "status"], LogMode::Quiet, &["plan", "status"]),
-            (&["bin", "--debug", "run", "--debug"], LogMode::Debug, &["run"]),
-            (&["bin"], LogMode::Progress, &[]),
-        ];
-        for (args, mode, guest_args) in cases {
-            let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
-            let plan =
-                plan(options, argv(args)).unwrap_or_else(|error| panic!("{}", fatal(&error)));
-            assert_eq!(plan.log_mode, Some(*mode), "argv: {args:?}");
-            assert_eq!(plan.args, *guest_args, "argv: {args:?}");
-        }
-    }
-
-    #[test]
-    fn direct_debug_quiet() {
-        let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
-        let error = plan(options, argv(&["bin", "--debug", "greet", "--quiet"]))
-            .err()
-            .expect("conflicting log flags must fail");
-        assert!(fatal(&error).contains("mutually exclusive"));
     }
 
     // Hard acceptance criterion: the direct plan always carries the compiled-in

@@ -1,6 +1,8 @@
 //! The scripted pair at the handler rung: `Scripted` as a `Model`,
 //! `ScriptedLoader` as a `Plugins` loader.
 
+#![cfg(not(target_arch = "wasm32"))]
+
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use omnia_sdk::model::{

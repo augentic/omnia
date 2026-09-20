@@ -1,5 +1,3 @@
-use std::hash::{Hash, Hasher};
-
 use opentelemetry::{Array, Key, Value};
 use opentelemetry_sdk::Resource;
 
@@ -52,120 +50,6 @@ impl From<Value> for types::Value {
     }
 }
 
-impl From<types::KeyValue> for opentelemetry::KeyValue {
-    fn from(value: types::KeyValue) -> Self {
-        Self::new(value.key, value.value)
-    }
-}
-
-impl From<&types::KeyValue> for opentelemetry::KeyValue {
-    fn from(value: &types::KeyValue) -> Self {
-        Self::new(value.key.clone(), value.value.clone())
-    }
-}
-
-impl PartialEq for types::KeyValue {
-    fn eq(&self, other: &Self) -> bool {
-        self.key == other.key && self.value == other.value
-    }
-}
-
-impl Hash for types::KeyValue {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.key.hash(state);
-        self.value.hash(state);
-    }
-}
-
-impl From<types::Value> for opentelemetry::Value {
-    fn from(value: types::Value) -> Self {
-        match value {
-            types::Value::Bool(v) => Self::Bool(v),
-            types::Value::S64(v) => Self::I64(v),
-            types::Value::F64(v) => Self::F64(v),
-            types::Value::String(v) => Self::String(v.into()),
-            types::Value::BoolArray(items) => Self::Array(opentelemetry::Array::Bool(items)),
-            types::Value::S64Array(items) => Self::Array(opentelemetry::Array::I64(items)),
-            types::Value::F64Array(items) => Self::Array(opentelemetry::Array::F64(items)),
-            types::Value::StringArray(items) => Self::Array(opentelemetry::Array::String(
-                items.into_iter().map(Into::into).collect(),
-            )),
-        }
-    }
-}
-
-impl PartialEq for types::Value {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Bool(a), Self::Bool(b)) => a == b,
-            (Self::S64(a), Self::S64(b)) => a == b,
-            (Self::F64(a), Self::F64(b)) => a == b,
-            (Self::String(a), Self::String(b)) => a == b,
-            (Self::BoolArray(a), Self::BoolArray(b)) => a == b,
-            (Self::S64Array(a), Self::S64Array(b)) => a == b,
-            (Self::F64Array(a), Self::F64Array(b)) => a == b,
-            (Self::StringArray(a), Self::StringArray(b)) => a == b,
-            _ => false,
-        }
-    }
-}
-
-impl Hash for types::Value {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        match self {
-            Self::Bool(v) => v.hash(state),
-            Self::S64(v) => v.hash(state),
-            Self::F64(v) => v.to_bits().hash(state),
-            Self::String(v) => v.hash(state),
-            Self::BoolArray(items) => items.hash(state),
-            Self::S64Array(items) => items.hash(state),
-            Self::F64Array(items) => {
-                // Hash like `<[u64]>::hash` (length prefix then elements),
-                // using the same bit representation as the scalar `F64` arm.
-                items.len().hash(state);
-                for v in items {
-                    v.to_bits().hash(state);
-                }
-            }
-            Self::StringArray(items) => items.hash(state),
-        }
-    }
-}
-
-impl From<types::InstrumentationScope> for opentelemetry::InstrumentationScope {
-    fn from(scope: types::InstrumentationScope) -> Self {
-        let mut builder = Self::builder(scope.name);
-        if let Some(version) = scope.version {
-            builder = builder.with_version(version);
-        }
-        if let Some(schema_url) = scope.schema_url {
-            builder = builder.with_schema_url(schema_url);
-        }
-        builder = builder.with_attributes(scope.attributes.iter().map(Into::into));
-        builder.build()
-    }
-}
-
-impl Eq for types::InstrumentationScope {}
-
-impl PartialEq for types::InstrumentationScope {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
-            && self.version == other.version
-            && self.schema_url == other.schema_url
-            && self.attributes == other.attributes
-    }
-}
-
-impl Hash for types::InstrumentationScope {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.name.hash(state);
-        self.version.hash(state);
-        self.schema_url.hash(state);
-        self.attributes.hash(state);
-    }
-}
-
 /// Hex-decode a guest-supplied trace/span id, warning (rather than silently
 /// substituting an empty id) when the id is malformed.
 pub fn decode_id(id: &str) -> Vec<u8> {
@@ -176,9 +60,7 @@ pub fn decode_id(id: &str) -> Vec<u8> {
 }
 
 pub fn datetime_nanos(dt: types::Datetime) -> u64 {
-    // Saturate rather than overflow: a guest-supplied timestamp past the year
-    // 2554 clamps to `u64::MAX` instead of panicking (debug) or wrapping
-    // (release) into a bogus time.
+    // Saturate: a timestamp past the year 2554 clamps instead of panicking or wrapping.
     dt.seconds.saturating_mul(1_000_000_000).saturating_add(u64::from(dt.nanoseconds))
 }
 

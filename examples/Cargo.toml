@@ -37,7 +37,7 @@ omnia-sdk = { workspace = true, features = ["sql", "docstore", "http", "command"
 opentelemetry.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tower-http = { version = "0.7.0", features = ["cors", "trace"] }
+tower-http = { version = "0.7.1", features = ["cors", "trace"] }
 tracing.workspace = true
 wasip3.workspace = true
 wit-bindgen.workspace = true

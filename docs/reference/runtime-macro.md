@@ -198,7 +198,7 @@ The same mark is available in `omnia.toml` (`command = true` on a `[[guest]]` en
 
 A direct command has no host `run` grammar: the binary's argv belongs to the guest. There is no `run` subcommand and no `--config`/`OMNIA_CONFIG`/positional-wasm override — the deployment compiled into the binary is the only source, by design. The program name used for telemetry and prepended to guest argv as `argv[0]` is the manifest name — the first `[[guest]]` id — unless overridden programmatically with `DeploymentBuilder::program_name`.
 
-Two host log flags are reserved on this path: `--debug` and `--quiet`, anywhere in argv, are peeled before the guest sees them and select the host log preset (see [Host log flags](configuration.md#host-log-flags-direct-command-binaries)). Everything else passes through untouched.
+Nothing in argv is reserved for the host: every argument passes through untouched, so a guest-facing `--debug` or `--quiet` is the guest's to define. Host console verbosity is `RUST_LOG` alone (see [Configuration](configuration.md#general)); a guest that wants a flag to set its own tracing defaults reloads with `omnia_wasi_otel::set_filter` once it has parsed argv; the guest's `RUST_LOG` still refines whatever it sets.
 
 A `mode: command` runtime *without* a compiled-in deployment keeps the `run` grammar byte-for-byte — with no other way to name the guest, the positional wasm path and `--config` remain the entry surface.
 

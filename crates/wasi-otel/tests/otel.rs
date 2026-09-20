@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::FutureExt as _;
-use omnia::{ExitStatus, FutureResult, LogMode, Provides, Telemetry};
+use omnia::{ExitStatus, FutureResult, Provides, Telemetry};
 use omnia_test::host::Deployment;
 use omnia_wasi_otel::{WasiOtel, WasiOtelCtx};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
@@ -71,7 +71,7 @@ async fn run_guest(wasm: &str) -> Recording {
     // Guest telemetry grafts onto the host trace: the host-side `export`
     // impls skip unless host telemetry is initialized and a host span is
     // live, so install providers and drive the guest inside a span.
-    Telemetry::new("otel-e2e").log_mode(LogMode::Progress).build().expect("telemetry installs");
+    Telemetry::new("otel-e2e").filter("info").build().expect("telemetry installs");
 
     let recording = Recording::default();
     // Linked by hand: `run_host` would add a second `WasiOtel` beside the
@@ -103,8 +103,21 @@ async fn otel_instrumented_handler() {
 }
 
 #[tokio::test]
+async fn otel_filter_reload() {
+    let recording = run_guest(test_programs::OTEL_FILTER_RELOAD).await;
+    assert_eq!(recording.span_names(), ["traced"]);
+}
+
+#[tokio::test]
 async fn otel_spawned_task_pending() {
     let recording = run_guest(test_programs::OTEL_SPAWNED_TASK_PENDING).await;
+    assert_eq!(recording.span_names(), ["traced"]);
+}
+
+// The `Handler` bound itself is checked when the guest compiles.
+#[tokio::test]
+async fn otel_axum_handler() {
+    let recording = run_guest(test_programs::OTEL_AXUM_HANDLER).await;
     assert_eq!(recording.span_names(), ["traced"]);
 }
 

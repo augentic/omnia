@@ -9,6 +9,7 @@
 //! exporters queue telemetry, so call [`flush`] before a fast process exit;
 //! the runtime does this at the end of every drive.
 
+#[cfg(feature = "otlp")]
 use std::env;
 #[cfg(feature = "otlp")]
 use std::sync::OnceLock;
@@ -32,6 +33,7 @@ use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 #[cfg(feature = "otlp")]
 use tracing_opentelemetry::MetricsLayer;
+use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry};
@@ -49,23 +51,6 @@ static INIT: Mutex<()> = Mutex::new(());
 #[cfg(feature = "otlp")]
 const UNKNOWN: &str = "unknown";
 
-/// Log preset selecting the subscriber's filter.
-///
-/// Direct-command deployments peel the reserved `--debug` / `--quiet` host
-/// flags from argv into one of these; every preset carries the always-on
-/// noisy-dependency mutes. [`Progress`](Self::Progress) is the flagless
-/// default and the only preset that defers to an ambient `RUST_LOG`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LogMode {
-    /// INFO-level progress; an ambient `RUST_LOG` wins when set.
-    Progress,
-    /// Everything off, ignoring any ambient `RUST_LOG`.
-    Quiet,
-    /// INFO-level progress plus backend and HTTP debug directives, ignoring
-    /// any ambient `RUST_LOG`.
-    Debug,
-}
-
 /// Telemetry initializer.
 pub struct Telemetry {
     /// The name of the application to for the purposes of identifying the
@@ -78,8 +63,9 @@ pub struct Telemetry {
     #[cfg_attr(not(feature = "otlp"), allow(dead_code))]
     endpoint: Option<String>,
 
-    /// Log preset for the subscriber's filter; unset defers to `RUST_LOG`.
-    log_mode: Option<LogMode>,
+    /// Explicit filter directives for the console subscriber; unset defers
+    /// to `RUST_LOG`.
+    filter: Option<String>,
 }
 
 impl Telemetry {
@@ -89,7 +75,7 @@ impl Telemetry {
         Self {
             app_name: name.into(),
             endpoint: None,
-            log_mode: None,
+            filter: None,
         }
     }
 
@@ -100,11 +86,14 @@ impl Telemetry {
         self
     }
 
-    /// Select a [`LogMode`] preset for the subscriber's filter instead of
-    /// deferring to `RUST_LOG` alone.
+    /// Filters the console subscriber by `directives` instead of the
+    /// environment.
+    ///
+    /// `directives` is a `RUST_LOG` string (`info`, `omnia_core=debug`).
+    /// The always-on noisy-dependency mutes still apply.
     #[must_use]
-    pub const fn log_mode(mut self, mode: LogMode) -> Self {
-        self.log_mode = Some(mode);
+    pub fn filter(mut self, directives: impl Into<String>) -> Self {
+        self.filter = Some(directives.into());
         self
     }
 
@@ -133,7 +122,7 @@ impl Telemetry {
             let meter_provider = self.build_metrics(resource.clone())?;
             let tracer_provider = self.build_traces(resource.clone())?;
 
-            let filter_layer = filter(self.log_mode)?;
+            let filter_layer = filter(self.filter.as_deref())?;
 
             // Console tracing goes to stderr: stdout belongs to the guest's
             // semantic output (command mode pipes and JSON envelopes must stay
@@ -175,7 +164,7 @@ impl Telemetry {
         // subscriber (filter + fmt) is the whole initialization.
         #[cfg(not(feature = "otlp"))]
         {
-            let filter_layer = filter(self.log_mode)?;
+            let filter_layer = filter(self.filter.as_deref())?;
             let fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
             if let Err(error) = Registry::default().with(filter_layer).with(fmt_layer).try_init() {
                 tracing::warn!(%error, "a tracing subscriber is already set; omnia telemetry skipped");
@@ -228,37 +217,25 @@ impl Telemetry {
     }
 }
 
-// The subscriber's filter for a log preset. `Quiet` and `Debug` ignore any
-// ambient `RUST_LOG` (an explicit flag wins over the environment); `Progress`
-// defers to `RUST_LOG` when set, else INFO. `None` keeps the historical
-// env-only behavior. Every non-quiet filter carries the noisy-dependency
-// mutes so bare INFO output stays readable without a hand-written suffix;
-// the presets also mute the flush-failure warnings a collectorless CLI run
-// would otherwise print at every exit.
-fn filter(mode: Option<LogMode>) -> Result<EnvFilter> {
-    let base = match mode {
-        Some(LogMode::Quiet) => return Ok(EnvFilter::new("off")),
-        Some(LogMode::Debug) => EnvFilter::new("info")
-            .add_directive("omnia_core=debug".parse()?)
-            .add_directive("omnia_plugin=debug".parse()?)
-            .add_directive("omnia_cursor=debug".parse()?)
-            .add_directive("omnia_wasi_http=debug".parse()?),
-        Some(LogMode::Progress) if env::var_os(EnvFilter::DEFAULT_ENV).is_none() => {
-            EnvFilter::new("info")
+// The subscriber's filter: explicit `directives` when given, else `RUST_LOG`
+// with WARN as the level an unset environment falls back to, so host
+// warnings (a mount that failed to preopen) reach the console without a
+// hand-written filter. Every filter carries the noisy-dependency mutes so
+// the output stays readable without a hand-written suffix.
+fn filter(directives: Option<&str>) -> Result<EnvFilter> {
+    let base = match directives {
+        Some(directives) => EnvFilter::builder().parse(directives)?,
+        None => {
+            EnvFilter::builder().with_default_directive(LevelFilter::WARN.into()).from_env_lossy()
         }
-        Some(LogMode::Progress) | None => EnvFilter::from_default_env(),
     };
-    let mut base = base
+    Ok(base
         .add_directive("hyper=off".parse()?)
         .add_directive("h2=off".parse()?)
         .add_directive("tonic=off".parse()?)
         .add_directive("opentelemetry=off".parse()?)
         .add_directive("opentelemetry_sdk=off".parse()?)
-        .add_directive("omnia_wasi_otel=off".parse()?);
-    if mode.is_some() {
-        base = base.add_directive("omnia_core::telemetry=off".parse()?);
-    }
-    Ok(base)
+        .add_directive("omnia_wasi_otel=off".parse()?))
 }
 
 // The process's resource and provider handles.
@@ -278,12 +255,14 @@ fn flush_providers(tracer: &SdkTracerProvider, meter: &SdkMeterProvider) {
 }
 
 // Report a flush failure without panicking; a provider that is already shut
-// down has nothing left to flush.
+// down has nothing left to flush. The report is DEBUG, not WARN: a
+// collectorless command-mode run fails its flush at every exit, and that is
+// a deployment fact, not a warning for the console.
 #[cfg(feature = "otlp")]
 fn settle(signal: &str, result: OTelSdkResult) {
     match result {
         Ok(()) | Err(OTelSdkError::AlreadyShutdown) => {}
-        Err(error) => tracing::warn!(%error, "telemetry: {signal} flush failed"),
+        Err(error) => tracing::debug!(%error, "telemetry: {signal} flush failed"),
     }
 }
 
@@ -372,49 +351,50 @@ mod tests {
         )
     }
 
-    // Filter presets are pure over their `LogMode`; the `Progress`/`None`
-    // env-sensitive arms are exercised via directive membership rather than
-    // mutating the process environment (other tests run in parallel).
+    // The explicit arm is pure over its directives; the env arm is exercised
+    // via directive membership rather than mutating the process environment
+    // (other tests run in parallel).
     mod filter {
-        use super::super::{LogMode, filter};
+        use super::super::filter;
 
-        fn directives(mode: Option<LogMode>) -> String {
-            filter(mode).expect("filter directives parse").to_string()
+        const MUTES: [&str; 6] = [
+            "hyper=off",
+            "h2=off",
+            "tonic=off",
+            "opentelemetry=off",
+            "opentelemetry_sdk=off",
+            "omnia_wasi_otel=off",
+        ];
+
+        fn rendered(directives: Option<&str>) -> String {
+            filter(directives).expect("filter directives parse").to_string()
         }
 
         #[test]
-        fn quiet_is_off() {
-            assert_eq!(directives(Some(LogMode::Quiet)), "off");
-        }
-
-        #[test]
-        fn debug_filter() {
-            let rendered = directives(Some(LogMode::Debug));
-            for directive in [
-                "info",
-                "omnia_core=debug",
-                "omnia_plugin=debug",
-                "omnia_cursor=debug",
-                "omnia_wasi_http=debug",
-                "opentelemetry=off",
-                "opentelemetry_sdk=off",
-                "omnia_wasi_otel=off",
-                "omnia_core::telemetry=off",
-            ] {
+        fn explicit_directives() {
+            let rendered = rendered(Some("info,omnia_core=debug"));
+            for directive in ["info", "omnia_core=debug"].into_iter().chain(MUTES) {
                 assert!(rendered.contains(directive), "missing `{directive}` in `{rendered}`");
             }
+        }
+
+        #[test]
+        fn explicit_off() {
+            let rendered = rendered(Some("off"));
+            assert!(rendered.split(',').any(|directive| directive == "off"), "{rendered}");
         }
 
         #[test]
         fn env_default() {
-            let rendered = directives(None);
-            for directive in ["hyper=off", "opentelemetry=off", "omnia_wasi_otel=off"] {
+            let rendered = rendered(None);
+            for directive in MUTES {
                 assert!(rendered.contains(directive), "missing `{directive}` in `{rendered}`");
             }
-            assert!(
-                !rendered.contains("omnia_core::telemetry=off"),
-                "the env-only path keeps flush warnings visible: `{rendered}`"
-            );
+        }
+
+        #[test]
+        fn unparsable_directives() {
+            assert!(filter(Some("omnia_core=loud")).is_err(), "an unknown level must not parse");
         }
     }
 
