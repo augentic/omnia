@@ -119,11 +119,15 @@ tracing-opentelemetry = { version = "0.33.0", default-features = false }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["env-filter", "fmt"] }
 wasip3 = { version = "0.9.0", features = ["http-compat"] }
 wasm-pkg-client = "0.16.1"
-wasmtime = { version = "48.0.2", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation", "pooling-allocator"] }
-wasmtime-wasi = { version = "48.0.2", features = ["p3"] }
-wasmtime-wasi-config = "48.0.2"
-wasmtime-wasi-http = { version = "48.0.2", default-features = false, features = ["p3"] }
-wasmtime-wasi-io = "48.0.2"
+wasmtime = { version = "49.0.0", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation", "pooling-allocator"] }
+# Omnia links `p2::add_to_linker_async` + `p3::add_to_linker` only; the `p1`
+# default would pull the wiggle/witx stack into the graph for nothing.
+wasmtime-wasi = { version = "49.0.0", default-features = false, features = ["p2", "p3"] }
+wasmtime-wasi-config = "49.0.0"
+# The defaults would add `default-send-request` (rustls + webpki-roots) and
+# `p2`; outbound is omnia's own reqwest `send_request` hook and `wasi:http` is
+# served as p3 only.
+wasmtime-wasi-http = { version = "49.0.0", default-features = false, features = ["p3"] }
 wit-bindgen = { version = "0.62.0", features = ["async-spawn"] }
 x509-cert = { version = "0.3.0", default-features = false, features = ["std"] }
 
@@ -167,8 +171,8 @@ opt-level = 3
 opt-level = 3
 
 # Wasm-to-CLIF translation and trampoline generation. Crate name is
-# version-coupled: wasmtime 48 renamed `wasmtime-cranelift` to this; cargo
-# silently ignores the entry if a future bump renames it again.
+# version-coupled: `wasmtime-cranelift` has been named this since wasmtime 48;
+# cargo silently ignores the entry if a future bump renames it again.
 [profile.dev.package.wasmtime-internal-cranelift]
 opt-level = 3
 
