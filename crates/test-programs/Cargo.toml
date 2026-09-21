@@ -73,6 +73,11 @@ path = "programs/docstore/insert_conflict.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "http_baggage"
+path = "programs/http/baggage.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "http_incoming_echo"
 path = "programs/http/incoming_echo.rs"
 crate-type = ["cdylib"]
@@ -280,6 +285,16 @@ crate-type = ["cdylib"]
 [[example]]
 name = "otel_axum_handler"
 path = "programs/otel/axum_handler.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "otel_baggage"
+path = "programs/otel/baggage.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "otel_baggage_echoer"
+path = "programs/otel/baggage_echoer.rs"
 crate-type = ["cdylib"]
 
 [[example]]

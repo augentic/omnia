@@ -216,7 +216,30 @@
   subscriber by an explicit `RUST_LOG` string instead of the environment
   (the always-on dependency mutes still apply).
 
+- Baggage over the dispatch chain. A guest sets W3C Baggage entries through
+  `omnia_wasi_otel::set_baggage(entries)` (the new `omnia:otel/baggage`
+  interface) and every guest dispatched beneath it is dispatched with them;
+  `omnia_wasi_otel::baggage()` reads what the chain currently carries, with
+  or without telemetry initialised. An entry replaces the value under its
+  name and leaves other names in place; a name that is not an RFC 7230
+  token, or an entry over the W3C limits, is dropped with a warning. Each
+  hop's context is a snapshot taken at `ChainPolicy::enter`, so entries set
+  after a dispatch never reach it. The trigger hosts now root a chain as the
+  command driver does, so a served guest can set baggage too.
+- `Chained::in_chain(ctx)` scopes a future to a dispatch chain the way
+  `tracing::Instrument::instrument` scopes one to a span, with
+  `ChainCtx::command()` and `ChainCtx::server()` as the two root contexts;
+  `omnia` re-exports all three for embedders writing a trigger.
+
 ### Changed
+
+- `ChainCtx` is `Clone`, not `Copy`, and no longer `Default`: it now
+  carries the chain's baggage, and a root is `ChainCtx::server()` or
+  `ChainCtx::command()`; code that relied on the implicit copy clones or
+  borrows. `as_command_chain(fut)` is `fut.in_chain(ChainCtx::command())`.
+  A guest that calls `omnia_wasi_otel::{baggage, set_baggage}` imports
+  `omnia:otel/baggage` and needs a runtime that carries it; every other
+  guest links unchanged, the componentizer having pruned the import.
 
 - Guest telemetry has one lifecycle entry point: `omnia_wasi_otel::scope(f)`
   initializes telemetry (once per instance), awaits the future `f` builds,

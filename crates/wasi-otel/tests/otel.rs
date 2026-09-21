@@ -127,9 +127,14 @@ impl WasiOtelCtx for Recording {
     }
 }
 
-/// Run one guest program against a fresh recording backend; the deadline
-/// turns a telemetry-flush deadlock into a failure instead of a hung suite.
+/// Run one guest program against a fresh recording backend.
 async fn run_guest(wasm: &str) -> Recording {
+    run(Deployment::new().guest("guest", wasm), wasm).await
+}
+
+/// Run `deployment` against a fresh recording backend; the deadline turns a
+/// telemetry-flush deadlock into a failure instead of a hung suite.
+async fn run(deployment: Deployment, label: &str) -> Recording {
     // Guest telemetry grafts onto the host trace: the host-side `export`
     // impls skip unless host telemetry is initialized and a host span is
     // live, so install providers and drive the guest inside a span.
@@ -140,8 +145,7 @@ async fn run_guest(wasm: &str) -> Recording {
     // one under test.
     let status = tokio::time::timeout(
         Duration::from_secs(300),
-        Deployment::new()
-            .guest("guest", wasm)
+        deployment
             .run(Backends(recording.clone()), |deployment| {
                 deployment.host::<WasiOtel, Backends>()?;
                 Ok(())
@@ -151,8 +155,31 @@ async fn run_guest(wasm: &str) -> Recording {
     .await
     .expect("guest must not stall on the telemetry flush")
     .expect("guest runs");
-    assert_eq!(status, ExitStatus::SUCCESS, "guest `{wasm}` failed");
+    assert_eq!(status, ExitStatus::SUCCESS, "guest `{label}` failed");
     recording
+}
+
+/// The baggage root and the echoer it dispatches to, linked over
+/// `omnia-test:link/ops`.
+fn baggage_pair() -> Deployment {
+    Deployment::new()
+        .link(["omnia-test:link/ops"])
+        .guest("root", test_programs::OTEL_BAGGAGE)
+        .guest("echoer", test_programs::OTEL_BAGGAGE_ECHOER)
+        .command("root")
+}
+
+// Baggage set at the root reaches the linked echoer; the root asserts the
+// answer and traps on a mismatch.
+#[tokio::test]
+async fn otel_baggage() {
+    run(baggage_pair(), "baggage").await;
+}
+
+// A root that sets nothing dispatches an echoer that inherits none.
+#[tokio::test]
+async fn otel_baggage_echoer() {
+    run(baggage_pair().args(["unset"]), "baggage_echoer").await;
 }
 
 #[tokio::test]

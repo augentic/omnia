@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
-use omnia_core::{PatternRoutes, Runtime, StoreCtx, StoreView, TriggerRouter};
+use omnia_core::{
+    ChainCtx, Chained as _, PatternRoutes, Runtime, StoreCtx, StoreView, TriggerRouter,
+};
 use tracing::{Instrument, debug_span, instrument};
 
 use crate::host::WasiMessaging;
@@ -139,7 +141,8 @@ where
                     .map_err(anyhow::Error::from)
                     .context("issue sending message")
             })
-            .instrument(debug_span!("messaging-handle"));
+            .instrument(debug_span!("messaging-handle"))
+            .in_chain(ChainCtx::server());
 
         tokio::time::timeout(self.state.options().guest_timeout, run)
             .await

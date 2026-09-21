@@ -9,7 +9,7 @@ use tokio::task::JoinHandle;
 use tracing::Instrument as _;
 use wasmtime::component::{ComponentExportIndex, InstancePre, Val};
 
-use crate::chain::{ChainCtx, with_chain};
+use crate::chain::{ChainCtx, Chained as _};
 use crate::seam::StoreFactory;
 use crate::value::handle_kind;
 
@@ -90,7 +90,7 @@ pub async fn call_fresh<T: Send + 'static>(
     // stores, and an abandoned caller must abort the callee (`AbortOnDrop`).
     // `spawn` drops the caller's span; re-enter it so guest otel export parents
     // onto the host span.
-    let callee = with_chain(ctx, async move {
+    let callee = async move {
         let mut store = (call.factory)();
         let instance = call.instance_pre.instantiate_async(&mut store).await?;
         let func = instance
@@ -99,9 +99,11 @@ pub async fn call_fresh<T: Send + 'static>(
         let mut out = vec![Val::Bool(false); call.results];
         func.call_async(&mut store, &args, &mut out).await?;
         Ok::<_, anyhow::Error>(out)
-    });
+    }
+    .in_chain(ctx)
+    .in_current_span();
 
-    let mut callee = AbortOnDrop(tokio::spawn(callee.in_current_span()));
+    let mut callee = AbortOnDrop(tokio::spawn(callee));
 
     let out = match bound {
         Some(limit) => tokio::time::timeout(limit, &mut callee.0)
