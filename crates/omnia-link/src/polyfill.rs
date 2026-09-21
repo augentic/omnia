@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
-use omnia_core::{ChainPolicy, GuestId, InvokeError, handle_kind};
+use omnia_core::{ChainCtx, ChainPolicy, GuestId, HasChain, InvokeError, handle_kind};
 use wasmtime::Engine;
 use wasmtime::component::{Linker, Type, Val, types};
 
@@ -54,18 +54,19 @@ pub struct Caller {
 /// polyfilled with `func_new_async`, an `async func` with
 /// `func_new_concurrent` — the sync-typed registration would fail the
 /// pre-instantiation asyncness typecheck. Both share one body ([`relay`]),
-/// which never touches the caller's store. A function an earlier guest wired
-/// with the *other* asyncness is a cross-guest interface disagreement,
-/// rejected here with both views named. A signature carrying a store-bound
-/// handle (resource, future, stream, error-context) is refused before it is
-/// wired: only plain values cross the seam.
+/// whose only read of the caller's store is a snapshot of its chain context,
+/// taken before the dispatch. A function an earlier guest wired with the
+/// *other* asyncness is a cross-guest interface disagreement, rejected here
+/// with both views named. A signature carrying a store-bound handle
+/// (resource, future, stream, error-context) is refused before it is wired:
+/// only plain values cross the seam.
 ///
 /// # Errors
 ///
 /// Returns an error if a named link target is not an interface import, a
 /// function's signature is not plain, or a function cannot be defined on the
 /// linker.
-pub fn polyfill_component<T: 'static>(
+pub fn polyfill_component<T: HasChain + 'static>(
     engine: &Engine, linker: &mut Linker<T>, id: &GuestId,
     component: &wasmtime::component::Component, interfaces: &BTreeSet<Box<str>>,
     caller: &Arc<Caller>, wired: &mut WiredLinks,
@@ -123,24 +124,28 @@ pub fn polyfill_component<T: 'static>(
             let caller = Arc::clone(caller);
             let iface_name = Arc::clone(&iface_name);
             let func_name = Arc::clone(func);
+            // The caller's chain context is snapshotted here, before the
+            // future is built, so no store borrow crosses the dispatch.
             let registered = if ty.async_() {
-                interface.func_new_concurrent(func, move |_accessor, ty, params, results| {
+                interface.func_new_concurrent(func, move |accessor, ty, params, results| {
                     let caller = Arc::clone(&caller);
                     let iface_name = Arc::clone(&iface_name);
                     let func_name = Arc::clone(&func_name);
+                    let chain = accessor.with(|mut access| access.data_mut().chain().clone());
                     Box::pin(async move {
-                        relay(&caller, &iface_name, &func_name, &ty, params, results)
+                        relay(&caller, chain, &iface_name, &func_name, &ty, params, results)
                             .await
                             .map_err(wasmtime::Error::from_anyhow)
                     })
                 })
             } else {
-                interface.func_new_async(func, move |_store, ty, params, results| {
+                interface.func_new_async(func, move |store, ty, params, results| {
                     let caller = Arc::clone(&caller);
                     let iface_name = Arc::clone(&iface_name);
                     let func_name = Arc::clone(&func_name);
+                    let chain = store.data().chain().clone();
                     Box::new(async move {
-                        relay(&caller, &iface_name, &func_name, &ty, params, results)
+                        relay(&caller, chain, &iface_name, &func_name, &ty, params, results)
                             .await
                             .map_err(wasmtime::Error::from_anyhow)
                     })
@@ -162,11 +167,12 @@ pub fn polyfill_component<T: 'static>(
 }
 
 /// The per-call dispatch: select the target, reject crossing handles, take a
-/// depth slot, resolve the live route, and move the lifted parameters to a
-/// fresh callee instance on its own task, writing its results back.
+/// depth slot beneath the calling guest's `chain`, resolve the live route, and
+/// move the lifted parameters to a fresh callee instance on its own task,
+/// writing its results back.
 async fn relay(
-    caller: &Caller, interface: &str, func: &str, ty: &types::ComponentFunc, params: &[Val],
-    results: &mut [Val],
+    caller: &Caller, chain: ChainCtx, interface: &str, func: &str, ty: &types::ComponentFunc,
+    params: &[Val], results: &mut [Val],
 ) -> Result<()> {
     let start = Instant::now();
 
@@ -183,7 +189,7 @@ async fn relay(
         );
     }
 
-    let ctx = caller.policy.enter(&target)?;
+    let ctx = caller.policy.enter(&chain, &target)?;
 
     let expected = ty.params().len();
     ensure!(

@@ -21,8 +21,9 @@
 //! caller and lowered into the callee, with no codec in between; the selector
 //! runs in the polyfill on those lifted values, so it sees typed parameters.
 //! Sync-typed functions are registered with `func_new_async`; async-typed
-//! (`async func`) ones with `func_new_concurrent`; both share one body that
-//! never touches the caller's store. See `docs/Architecture.md` (The Guest
+//! (`async func`) ones with `func_new_concurrent`; both share one body whose
+//! only read of the caller's store is a snapshot of its chain context, which
+//! the callee's store is built from. See `docs/Architecture.md` (The Guest
 //! Registry) for the full design.
 //!
 //! [`InProcessLinks`] is the [`LinkSeam`] the registry drives when a
@@ -41,7 +42,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 use anyhow::Result;
 use futures::FutureExt as _;
 use futures::future::ready;
-use omnia_core::{ChainPolicy, FutureResult, Guest, GuestId, LinkSeam, LoadedGuest, StoreFactory};
+use omnia_core::{
+    ChainPolicy, FutureResult, Guest, GuestId, HasChain, LinkSeam, LoadedGuest, StoreFactory,
+};
 use wasmtime::Engine;
 use wasmtime::component::{Component, Linker};
 
@@ -92,7 +95,7 @@ impl InProcessLinks {
     }
 }
 
-impl<T: Send + 'static> LinkSeam<T> for InProcessLinks {
+impl<T: HasChain + 'static> LinkSeam<T> for InProcessLinks {
     fn polyfill(
         &self, engine: &Engine, linker: &mut Linker<T>, guests: &[LoadedGuest],
     ) -> Result<()> {

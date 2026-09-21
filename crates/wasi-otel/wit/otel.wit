@@ -475,9 +475,7 @@ interface baggage {
   baggage: func() -> list<tuple<string, string>>;
 
   /// Sets entries for the guests dispatched beneath this one from now on. An
-  /// entry replaces the value under its name and leaves other names in place;
-  /// a name that is not an RFC 7230 token, or an entry over the W3C limits, is
-  /// dropped with a warning.
+  /// entry replaces the value under its name and leaves other names in place.
   set-baggage: func(entries: list<tuple<string, string>>);
 }
 

@@ -15,7 +15,7 @@ use crate::location::Location;
 use crate::mount::MountRegistry;
 use crate::registry::{Guest, GuestId, HttpRoutes, PublishError, TriggerRouter};
 use crate::store::HasLimits;
-use crate::{Dispatcher, Registry, RuntimeOptions, StoreBase, StoreCtx};
+use crate::{ChainCtx, Dispatcher, Registry, RuntimeOptions, StoreBase, StoreCtx};
 
 /// Guest exit code. [`code_u8`](Self::code_u8) and [`ExitCode`](std::process::ExitCode)
 /// keep only the low byte (POSIX semantics).
@@ -286,13 +286,22 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         self.registry().options()
     }
 
-    /// Fresh per-guest store context.
+    /// Fresh per-guest store context at the root of a server chain
+    /// ([`ChainCtx::server`]): what a trigger builds for the guest it serves.
     #[must_use]
     pub fn store(&self) -> StoreCtx<B> {
+        self.store_in(ChainCtx::server())
+    }
+
+    /// Fresh per-guest store context at `chain`: a root for the command
+    /// driver, the snapshot a link dispatch derived for its callee.
+    #[must_use]
+    pub fn store_in(&self, chain: ChainCtx) -> StoreCtx<B> {
         StoreCtx {
             base: StoreBase::new(crate::StoreConfig {
                 options: self.options(),
                 dispatcher: Arc::clone(&self.dispatcher),
+                chain,
                 args: Some(Arc::clone(&self.inner.args)),
                 mounts: Some(Arc::clone(&self.inner.mounts)),
                 env: None,
@@ -329,13 +338,13 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         store
     }
 
-    /// A shareable factory for fresh, fully configured guest stores — what the
-    /// link serve side hands to each served function to instantiate the
-    /// target per call.
+    /// A shareable factory for fresh, fully configured guest stores at a given
+    /// chain context — what the link serve side hands to each served function
+    /// to instantiate the target per call.
     #[must_use]
-    pub fn store_factory(&self) -> Arc<dyn Fn() -> Store<StoreCtx<B>> + Send + Sync> {
+    pub fn store_factory(&self) -> Arc<dyn Fn(ChainCtx) -> Store<StoreCtx<B>> + Send + Sync> {
         let runtime = self.clone();
-        Arc::new(move || runtime.build_store(runtime.store()))
+        Arc::new(move |chain| runtime.build_store(runtime.store_in(chain)))
     }
 
     /// Instantiate a guest component into `store`.

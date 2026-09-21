@@ -17,7 +17,7 @@ use hyper::body::{Body, Frame, SizeHint};
 use hyper::header::{FORWARDED, HOST};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use omnia_core::{ChainCtx, Chained as _, HttpRoutes, Runtime, StoreCtx, TriggerRouter};
+use omnia_core::{HttpRoutes, Runtime, StoreCtx, TriggerRouter};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
@@ -197,7 +197,7 @@ where
 
         let (sender, receiver) = oneshot::channel::<Result<hyper::Response<OutgoingBody>>>();
 
-        let serve = async move {
+        let guest_task = tokio::spawn(async move {
             let result = store
                 .run_concurrent(async |store| {
                     // Build the guest's response, routing every failure (a trap,
@@ -278,10 +278,7 @@ where
                 Ok(Err(e)) => tracing::error!("http guest task error: {e:#}"),
                 Err(e) => tracing::error!("run_concurrent error: {e:?}"),
             }
-        };
-
-        // A server-rooted chain: link dispatches the guest makes run capped.
-        let guest_task = tokio::spawn(serve.in_chain(ChainCtx::server()));
+        });
 
         // bound time-to-response (not the streaming body); cancel a hung guest
         let response = match timeout(self.state.options().guest_timeout, receiver).await {

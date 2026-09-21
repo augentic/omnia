@@ -13,11 +13,8 @@ pub fn baggage() -> Baggage {
 }
 
 /// Sets baggage `entries` for the guests dispatched beneath this one from now
-/// on.
-///
-/// An entry replaces the value under its name and leaves other names in
-/// place; the host drops, with a warning, a name that is not an RFC 7230
-/// token or an entry over the W3C limits.
+/// on; an entry replaces the value under its name and leaves other names in
+/// place.
 pub fn set_baggage<K: Into<String>, V: Into<String>>(entries: impl IntoIterator<Item = (K, V)>) {
     let entries: Vec<(String, String)> =
         entries.into_iter().map(|(name, value)| (name.into(), value.into())).collect();

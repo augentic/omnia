@@ -9,7 +9,7 @@ use anyhow::{Context as _, Result, bail};
 use futures::FutureExt as _;
 use wasmtime::component::{Val, types};
 
-use crate::chain::ChainPolicy;
+use crate::chain::{ChainCtx, ChainPolicy};
 use crate::host::FutureResult;
 use crate::invoke::{FreshCall, call_fresh};
 use crate::registry::GuestId;
@@ -20,10 +20,11 @@ use crate::value::handle_kind;
 /// counterpart of the selector-driven guest→guest `dispatch`.
 ///
 /// Shares the depth bound (`ChainPolicy::enter`), the wall-clock bound on
-/// server-rooted chains and the handle rejection with guest→guest dispatch. The
-/// target is instantiated *fresh* on a new store and the matching export
-/// invoked directly, so the callee can never re-enter its caller and needs no
-/// declared link interface for `interface`.
+/// server-rooted chains and the handle rejection with guest→guest dispatch: the
+/// hop is entered from `caller`, the chain context of the store the host
+/// binding serves. The target is instantiated *fresh* on a new store and the
+/// matching export invoked directly, so the callee can never re-enter its
+/// caller and needs no declared link interface for `interface`.
 ///
 /// `args` and the returned values are plain `Val`s; a store-bound handle on
 /// either side is rejected.
@@ -35,7 +36,8 @@ use crate::value::handle_kind;
 /// `interface`/`func` export is absent or is not a function, the call exceeds
 /// the wall-clock bound, or the guest call traps.
 pub async fn dispatch<B>(
-    runtime: &Runtime<B>, target: &GuestId, interface: &str, func: &str, args: Vec<Val>,
+    runtime: &Runtime<B>, caller: &ChainCtx, target: &GuestId, interface: &str, func: &str,
+    args: Vec<Val>,
 ) -> Result<Vec<Val>>
 where
     B: Clone + Send + Sync + 'static,
@@ -71,7 +73,7 @@ where
     };
 
     let policy = ChainPolicy::from(runtime.options());
-    let ctx = policy.enter(target)?;
+    let ctx = policy.enter(caller, target)?;
     let bound = (!ctx.uncapped).then_some(policy.timeout);
     let call = FreshCall {
         factory: runtime.store_factory(),
@@ -94,20 +96,23 @@ where
 pub trait Dispatcher: Send + Sync + 'static {
     /// Invoke `target`'s `interface`/`func` with `args`, returning the typed
     /// results. The target is instantiated *fresh* (instance-per-call), the hop
-    /// is depth-bounded like any host-mediated call, and a live resource handle
-    /// on either side is rejected.
+    /// is depth-bounded like any host-mediated call, entered from `caller` —
+    /// the chain context of the store the host binding serves — and a live
+    /// resource handle on either side is rejected.
     ///
     /// A `None` `interface` discovers the unique exported interface carrying a
     /// function named `func` — a structural component-model query that names no
     /// consumer scheme.
     fn invoke(
-        &self, target: GuestId, interface: Option<String>, func: String, args: Vec<Val>,
+        &self, caller: ChainCtx, target: GuestId, interface: Option<String>, func: String,
+        args: Vec<Val>,
     ) -> FutureResult<Vec<Val>>;
 }
 
 impl<B: Clone + Send + Sync + 'static> Dispatcher for crate::runtime::RuntimeDispatcher<B> {
     fn invoke(
-        &self, target: GuestId, interface: Option<String>, func: String, args: Vec<Val>,
+        &self, caller: ChainCtx, target: GuestId, interface: Option<String>, func: String,
+        args: Vec<Val>,
     ) -> FutureResult<Vec<Val>> {
         let runtime = self.runtime();
         async move {
@@ -115,7 +120,7 @@ impl<B: Clone + Send + Sync + 'static> Dispatcher for crate::runtime::RuntimeDis
                 Some(name) => Box::from(name),
                 None => find_interface(&runtime, &target, &func)?,
             };
-            dispatch(&runtime, &target, &interface, &func, args).await
+            dispatch(&runtime, &caller, &target, &interface, &func, args).await
         }
         .boxed()
     }

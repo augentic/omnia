@@ -13,7 +13,6 @@ mod generated {
         world: "imports",
         path: "wit",
         imports: {
-            "omnia:otel/baggage": tracing | trappable,
             "omnia:otel/resource.resource": tracing | trappable,
             default: store | tracing | trappable,
         },
@@ -28,7 +27,7 @@ mod generated {
 
 use std::fmt::Debug;
 
-use omnia_core::{FutureResult, Host, Server, StoreView};
+use omnia_core::{FutureResult, HasChain, Host, Server, StoreView};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use wasmtime::component::{HasData, Linker};
@@ -46,7 +45,7 @@ impl HasData for WasiOtel {
 
 impl<T> Host<T> for WasiOtel
 where
-    T: StoreView<Self> + 'static,
+    T: StoreView<Self> + HasChain + 'static,
 {
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
         tracing::add_to_linker::<_, Self>(linker, T::view)?;

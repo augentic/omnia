@@ -35,8 +35,8 @@ pub use futures;
 pub use omnia_cli::{Cli, Command, Parser};
 #[doc(inline)]
 pub use omnia_core::{
-    AdmitError, Backend, ChainCtx, ChainPolicy, Chained, CliRoutes, Dispatcher, ExitStatus,
-    Extensions, FromEnv, FutureResult, Guest, GuestArtifact, GuestId, HasDispatcher, HasExtensions,
+    AdmitError, Backend, ChainCtx, ChainPolicy, CliRoutes, Dispatcher, ExitStatus, Extensions,
+    FromEnv, FutureResult, Guest, GuestArtifact, GuestId, HasChain, HasDispatcher, HasExtensions,
     HasLimits, HasMounts, HasTable, Host, HostCtx, HttpBorrow, HttpCtx, HttpRoutes, LinkSeam,
     Location, MountRegistry, NoLinks, NoOptions, PatternRoutes, Provides, Proxy, Registry,
     ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts, Server, StoreBase, StoreConfig,

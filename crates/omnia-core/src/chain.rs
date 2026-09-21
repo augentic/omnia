@@ -1,6 +1,5 @@
 //! Per-chain dispatch context and the policy that bounds it.
 
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,26 +9,25 @@ use anyhow::{Result, bail};
 use crate::RuntimeOptions;
 use crate::registry::GuestId;
 
-tokio::task_local! {
-    // The context of the dispatch chain the current task is serving,
-    // re-established around each spawned callee task, so concurrent, unrelated
-    // chains never share a depth budget, a wall-clock policy, or baggage. A
-    // hop may replace the baggage it hands on, hence the cell.
-    static CHAIN_CTX: RefCell<ChainCtx>;
-}
-
 /// Per-chain dispatch context: nesting depth, wall-clock policy, and the
-/// baggage carried to each hop dispatched beneath.
+/// metadata carried to each hop dispatched beneath.
+///
+/// Every guest store is built at a context (see
+/// [`StoreBase::chain`](crate::StoreBase::chain)): a trigger or the command
+/// driver builds the root at [`server`](Self::server) or
+/// [`command`](Self::command), and a link dispatch builds the callee at the
+/// snapshot [`ChainPolicy::enter`] derives from the caller's.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChainCtx {
     /// Nesting depth of the current hop (0 at a chain root).
     pub depth: usize,
     /// Whether the chain root runs without the wall-clock cap.
     pub uncapped: bool,
-    // Name/value entries the chain carries, opaque here: a capability sets
-    // them through `set_baggage` and every hop beneath reads them through
-    // `baggage`. Shared, since every `enter` snapshots the context.
-    baggage: Arc<BTreeMap<String, String>>,
+    // Name/value entries the chain carries, opaque here: a capability's host
+    // binding writes them (`omnia:otel/baggage` shows them to a guest as its
+    // baggage) and every hop beneath reads them. Shared, since every `enter`
+    // snapshots the context.
+    metadata: Arc<BTreeMap<String, String>>,
 }
 
 impl ChainCtx {
@@ -52,39 +50,23 @@ impl ChainCtx {
         Self {
             depth: 0,
             uncapped,
-            baggage: Arc::default(),
+            metadata: Arc::default(),
         }
     }
-}
 
-/// Scopes a future to a dispatch chain, as `tracing::Instrument` scopes one to
-/// a span.
-pub trait Chained: Future + Sized {
-    /// Run `self` at `ctx` in its dispatch chain, so nested host-mediated
-    /// calls made while it runs count against that chain and inherit its
-    /// wall-clock policy and baggage.
-    fn in_chain(self, ctx: ChainCtx) -> impl Future<Output = Self::Output>;
-}
-
-impl<F: Future> Chained for F {
-    fn in_chain(self, ctx: ChainCtx) -> impl Future<Output = Self::Output> {
-        CHAIN_CTX.scope(RefCell::new(ctx), self)
+    /// The name/value metadata this hop was dispatched with, plus what it has
+    /// set since.
+    #[must_use]
+    pub fn metadata(&self) -> &BTreeMap<String, String> {
+        &self.metadata
     }
-}
 
-/// The baggage of the chain the current task serves; empty outside any chain.
-#[must_use]
-pub fn baggage() -> Arc<BTreeMap<String, String>> {
-    CHAIN_CTX.try_with(|ctx| Arc::clone(&ctx.borrow().baggage)).unwrap_or_default()
-}
-
-/// Replace the baggage of the chain the current task serves, for the hops
-/// dispatched beneath it from now on.
-///
-/// A hop already dispatched keeps the snapshot it was given. A no-op outside
-/// any chain.
-pub fn set_baggage(baggage: BTreeMap<String, String>) {
-    let _ = CHAIN_CTX.try_with(|ctx| ctx.borrow_mut().baggage = Arc::new(baggage));
+    /// The metadata, for a host binding that extends it for the hops
+    /// dispatched beneath this one from now on; a hop already dispatched
+    /// keeps the snapshot it was given.
+    pub fn metadata_mut(&mut self) -> &mut BTreeMap<String, String> {
+        Arc::make_mut(&mut self.metadata)
+    }
 }
 
 /// The deployment-wide bounds on a dispatch chain: its maximum nesting depth
@@ -98,22 +80,21 @@ pub struct ChainPolicy {
 }
 
 impl ChainPolicy {
-    /// Enter a dispatch, bounding the current chain's nesting depth; returns
-    /// the context the dispatched call runs at (depth plus the inherited
-    /// wall-clock policy and baggage), to be carried to the serve side.
+    /// Enter a dispatch from `caller`, bounding the chain's nesting depth;
+    /// returns the context the dispatched call runs at (depth plus the
+    /// inherited wall-clock policy and metadata), to be carried to the serve
+    /// side.
     ///
     /// Depth is per call chain (A->B->C, each awaited to completion before the
     /// caller returns), so concurrent, unrelated chains never contend for the
-    /// same budget. The returned context is a snapshot: baggage the caller
+    /// same budget. The returned context is a snapshot: metadata the caller
     /// sets after entering never reaches this hop.
     ///
     /// # Errors
     ///
     /// Returns an error if the hop would exceed `max_depth`.
-    pub fn enter(&self, target: &GuestId) -> Result<ChainCtx> {
-        let current =
-            CHAIN_CTX.try_with(|ctx| ctx.borrow().clone()).unwrap_or_else(|_| ChainCtx::server());
-        let depth = current.depth + 1;
+    pub fn enter(&self, caller: &ChainCtx, target: &GuestId) -> Result<ChainCtx> {
+        let depth = caller.depth + 1;
 
         if depth > self.max_depth {
             bail!(
@@ -123,7 +104,10 @@ impl ChainPolicy {
             );
         }
 
-        Ok(ChainCtx { depth, ..current })
+        Ok(ChainCtx {
+            depth,
+            ..caller.clone()
+        })
     }
 }
 
@@ -142,7 +126,7 @@ mod tests {
 
     fn policy() -> ChainPolicy {
         ChainPolicy {
-            max_depth: 4,
+            max_depth: 2,
             timeout: Duration::from_secs(1),
         }
     }
@@ -155,76 +139,40 @@ mod tests {
         pairs.iter().map(|(name, value)| ((*name).to_owned(), (*value).to_owned())).collect()
     }
 
-    // Baggage set at a hop reaches both the context `enter` hands the callee
-    // and the callee's own reads, one and two hops down without resetting.
-    #[tokio::test]
-    async fn inherited() {
-        async {
-            set_baggage(entries(&[("k", "v")]));
-            let child = policy().enter(&callee()).expect("within depth");
-            assert_eq!(*child.baggage, entries(&[("k", "v")]));
-            assert_eq!((child.depth, child.uncapped), (1, true));
+    // Metadata set at a hop reaches the context `enter` hands the callee, one
+    // and two hops down, with the depth counting up and the root's wall-clock
+    // policy carried; what a hop sets afterwards stays out of the snapshot.
+    #[test]
+    fn inherited() {
+        let mut root = ChainCtx::command();
+        root.metadata_mut().extend(entries(&[("k", "v"), ("tenant", "acme")]));
 
-            async {
-                assert_eq!(*baggage(), entries(&[("k", "v")]));
-                let grandchild = policy().enter(&callee()).expect("within depth");
-                assert_eq!(*grandchild.baggage, entries(&[("k", "v")]));
-                assert_eq!(grandchild.depth, 2);
-            }
-            .in_chain(child)
-            .await;
-        }
-        .in_chain(ChainCtx::command())
-        .await;
+        let child = policy().enter(&root, &callee()).expect("within depth");
+        assert_eq!((child.depth, child.uncapped), (1, true));
+        assert_eq!(*child.metadata(), entries(&[("k", "v"), ("tenant", "acme")]));
+
+        root.metadata_mut().extend(entries(&[("k", "later")]));
+        assert_eq!(*root.metadata(), entries(&[("k", "later"), ("tenant", "acme")]));
+        assert_eq!(*child.metadata(), entries(&[("k", "v"), ("tenant", "acme")]));
+
+        let grandchild = policy().enter(&child, &callee()).expect("within depth");
+        assert_eq!((grandchild.depth, grandchild.uncapped), (2, true));
+        assert_eq!(*grandchild.metadata(), entries(&[("k", "v"), ("tenant", "acme")]));
     }
 
-    // A callee's context is a snapshot taken at `enter`: what its caller or a
-    // sibling sets afterwards never reaches it, and what it sets never
-    // reaches them.
-    #[tokio::test]
-    async fn snapshot() {
-        async {
-            set_baggage(entries(&[("k", "first")]));
-            let first = policy().enter(&callee()).expect("within depth");
-            set_baggage(entries(&[("k", "second")]));
-            let second = policy().enter(&callee()).expect("within depth");
-            assert_eq!(*first.baggage, entries(&[("k", "first")]));
-            assert_eq!(*second.baggage, entries(&[("k", "second")]));
+    // A server root's hops run capped, and the hop past the bound is refused
+    // naming the target and the option that raises it.
+    #[test]
+    fn over_depth() {
+        let root = ChainCtx::server();
+        let child = policy().enter(&root, &callee()).expect("within depth");
+        assert!(!child.uncapped);
+        let grandchild = policy().enter(&child, &callee()).expect("at the bound");
 
-            async {
-                set_baggage(entries(&[("k", "child")]));
-                assert_eq!(*baggage(), entries(&[("k", "child")]));
-            }
-            .in_chain(first)
-            .await;
-            assert_eq!(*baggage(), entries(&[("k", "second")]));
+        let error = policy().enter(&grandchild, &callee()).expect_err("over the bound");
+        let text = error.to_string();
+        for needle in ["depth 3", "maximum 2", "`callee`", "MAX_DISPATCH_DEPTH"] {
+            assert!(text.contains(needle), "`{needle}` missing from: {text}");
         }
-        .in_chain(ChainCtx::command())
-        .await;
-    }
-
-    // A server root is capped at depth 0 and carries baggage like a command
-    // root.
-    #[tokio::test]
-    async fn server_rooted() {
-        async {
-            set_baggage(entries(&[("k", "v")]));
-            let child = policy().enter(&callee()).expect("within depth");
-            assert_eq!((child.depth, child.uncapped), (1, false));
-            assert_eq!(*child.baggage, entries(&[("k", "v")]));
-        }
-        .in_chain(ChainCtx::server())
-        .await;
-    }
-
-    // Outside any chain there is nothing to carry baggage on: the write is
-    // inert and a hop entered there roots a capped chain with none.
-    #[tokio::test]
-    async fn unscoped() {
-        set_baggage(entries(&[("k", "v")]));
-        assert!(baggage().is_empty());
-        let child = policy().enter(&callee()).expect("within depth");
-        assert!(child.baggage.is_empty());
-        assert_eq!((child.depth, child.uncapped), (1, false));
     }
 }
