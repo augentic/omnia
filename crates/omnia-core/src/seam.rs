@@ -13,11 +13,13 @@ use wasmtime::component::{Component, Linker};
 use wasmtime::{Engine, Store};
 
 use crate::artifact::LoadedGuest;
+use crate::chain::ChainCtx;
 use crate::host::FutureResult;
 use crate::registry::{Guest, GuestId};
 
-/// Builds a fresh, fully configured guest store per served invocation.
-pub type StoreFactory<T> = Arc<dyn Fn() -> Store<T> + Send + Sync>;
+/// Builds a fresh, fully configured guest store per served invocation, at the
+/// chain context the invocation runs at.
+pub type StoreFactory<T> = Arc<dyn Fn(ChainCtx) -> Store<T> + Send + Sync>;
 
 /// Guest→guest linking as the registry drives it.
 ///

@@ -15,9 +15,9 @@ use std::sync::Arc;
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
 use omnia::{
-    DeploymentBuilder, ExitStatus, GuestArtifact, GuestEntry, GuestId, LoadError, Location,
-    Manifest, Mode, Origin, PathMounts, PathSource, PluginLoader as _, Plugins, RegistryClient,
-    RegistrySource, Runtime, StoreCtx, WasiPlugins, sha256_digest,
+    ChainCtx, DeploymentBuilder, ExitStatus, GuestArtifact, GuestEntry, GuestId, LoadError,
+    Location, Manifest, Mode, Origin, PathMounts, PathSource, PluginLoader as _, Plugins,
+    RegistryClient, RegistrySource, Runtime, StoreCtx, WasiPlugins, sha256_digest,
 };
 use omnia_test::host::{Backends, Scratch, scratch};
 use omnia_wasi_otel::WasiOtel;
@@ -61,11 +61,13 @@ async fn requester_runtime(
     requester_runtime_with(wasm, scratch, registry, path, &["omnia-test:link/ops"]).await
 }
 
-/// Host→guest `omnia-test:link/ops` `ping` through the [`Dispatcher`].
+/// Host→guest `omnia-test:link/ops` `ping` through the [`Dispatcher`], from a
+/// server root.
 async fn invoke_ping(runtime: &Runtime<Backends>, target: &str, message: &str) -> Result<String> {
     let results = runtime
         .dispatcher()
         .invoke(
+            ChainCtx::server(),
             GuestId::from(target),
             Some("omnia-test:link/ops".to_owned()),
             "ping".to_owned(),

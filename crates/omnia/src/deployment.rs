@@ -20,8 +20,8 @@ use omnia_core::wasmtime::component::Linker;
 use omnia_core::wasmtime::{Config, Engine};
 use omnia_core::wasmtime_wasi::WasiView;
 use omnia_core::{
-    GuestId, Host, LinkSeam, LoadedGuest, Location, MountRegistry, NoLinks, Registry, Routes,
-    Runtime, RuntimeOptions, RuntimeParts, Server, StoreCtx, Telemetry,
+    GuestId, HasChain, Host, LinkSeam, LoadedGuest, Location, MountRegistry, NoLinks, Registry,
+    Routes, Runtime, RuntimeOptions, RuntimeParts, Server, StoreCtx, Telemetry,
 };
 #[cfg(feature = "link")]
 use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks};
@@ -274,9 +274,9 @@ pub struct Deployment<T: WasiView + 'static> {
 
 /// Store bound every deployment store context satisfies; kept as a named bound
 /// for source compatibility with embedders that spell it.
-pub trait LinkStore: WasiView + 'static {}
+pub trait LinkStore: WasiView + HasChain + 'static {}
 
-impl<T: WasiView + 'static> LinkStore for T {}
+impl<T: WasiView + HasChain + 'static> LinkStore for T {}
 
 impl<T: WasiView> Deployment<T> {
     /// Link a WASI host's interfaces into the shared Linker.

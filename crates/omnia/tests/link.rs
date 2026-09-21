@@ -11,7 +11,9 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
-use omnia::{DeploymentBuilder, GuestArtifact, GuestEntry, GuestId, Manifest, Runtime, StoreCtx};
+use omnia::{
+    ChainCtx, DeploymentBuilder, GuestArtifact, GuestEntry, GuestId, Manifest, Runtime, StoreCtx,
+};
 
 // Every guest program in `crates/test-programs` must have a matching test
 // here; a new program without one fails to compile.
@@ -196,9 +198,10 @@ async fn link_skewed() {
     }
 }
 
-// The host→guest hop is depth 1, so with a bound of 3 the relay may hop twice
-// more: `2` lands exactly on the bound, `3` would need depth 4. Were the
-// dispatcher to restart the chain at 0, `3` would succeed.
+// The host→guest hop is entered from a root, so it is depth 1 and with a bound
+// of 3 the relay may hop twice more: `2` lands exactly on the bound, `3` would
+// need depth 4. Were the dispatcher to restart the chain at 0, `3` would
+// succeed.
 #[tokio::test]
 async fn relay_via_dispatcher() {
     let runtime = boot_with(
@@ -210,6 +213,7 @@ async fn relay_via_dispatcher() {
 
     let dispatch = |hops: &str| {
         runtime.dispatcher().invoke(
+            ChainCtx::server(),
             GuestId::from("echoer"),
             Some("omnia-test:link/ops".into()),
             "ping".into(),

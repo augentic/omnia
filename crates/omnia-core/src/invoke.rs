@@ -9,7 +9,7 @@ use tokio::task::JoinHandle;
 use tracing::Instrument as _;
 use wasmtime::component::{ComponentExportIndex, InstancePre, Val};
 
-use crate::chain::{ChainCtx, Chained as _};
+use crate::chain::ChainCtx;
 use crate::seam::StoreFactory;
 use crate::value::handle_kind;
 
@@ -70,12 +70,13 @@ impl<T> Drop for AbortOnDrop<T> {
     }
 }
 
-/// Instantiate `call`'s component on a fresh store and invoke its export with
-/// `args`, returning the results.
+/// Instantiate `call`'s component on a fresh store built at `ctx` and invoke
+/// its export with `args`, returning the results.
 ///
-/// The callee runs at `ctx` (so nested hops count against the same chain) and,
-/// when `bound` is given, must finish within it. The store is dropped when the
-/// call completes (instance-per-call).
+/// The callee's store carries `ctx` (so nested hops count against the same
+/// chain and read its metadata) and, when `bound` is given, the call must
+/// finish within it. The store is dropped when the call completes
+/// (instance-per-call).
 ///
 /// # Errors
 ///
@@ -91,7 +92,7 @@ pub async fn call_fresh<T: Send + 'static>(
     // `spawn` drops the caller's span; re-enter it so guest otel export parents
     // onto the host span.
     let callee = async move {
-        let mut store = (call.factory)();
+        let mut store = (call.factory)(ctx);
         let instance = call.instance_pre.instantiate_async(&mut store).await?;
         let func = instance
             .get_func(&mut store, call.export)
@@ -100,7 +101,6 @@ pub async fn call_fresh<T: Send + 'static>(
         func.call_async(&mut store, &args, &mut out).await?;
         Ok::<_, anyhow::Error>(out)
     }
-    .in_chain(ctx)
     .in_current_span();
 
     let mut callee = AbortOnDrop(tokio::spawn(callee));

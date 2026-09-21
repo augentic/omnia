@@ -12,7 +12,7 @@ use wasmtime::{StoreLimits, StoreLimitsBuilder};
 use wasmtime_wasi::{FsPerms, ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::{WasiHttpCtxView, WasiHttpView};
 
-use crate::{Dispatcher, Extensions, HostCtx, MountRegistry, Provides, RuntimeOptions};
+use crate::{ChainCtx, Dispatcher, Extensions, HostCtx, MountRegistry, Provides, RuntimeOptions};
 
 /// Exposes a store context's [`StoreLimits`] so the runtime can install a
 /// per-guest resource limiter on every [`Store`](wasmtime::Store) it creates.
@@ -23,9 +23,9 @@ pub trait HasLimits {
 
 /// The per-store construction inputs for [`StoreBase::new`].
 ///
-/// `options` and `dispatcher` are required; the rest default sensibly (empty
-/// argv, no mounts, host env inheritance) so hand-written test runtimes build
-/// unchanged.
+/// `options`, `dispatcher`, and `chain` are required; the rest default
+/// sensibly (empty argv, no mounts, host env inheritance) so hand-written test
+/// runtimes build unchanged.
 pub struct StoreConfig<'a> {
     /// Runtime options; caps linear-memory growth at
     /// [`RuntimeOptions::max_memory_bytes`].
@@ -34,6 +34,12 @@ pub struct StoreConfig<'a> {
     /// [`Runtime`](crate::Runtime) so any host->guest call lands a new
     /// instance.
     pub dispatcher: Arc<dyn Dispatcher>,
+    /// The dispatch-chain context the guest runs at: a root for a trigger or
+    /// the command driver, the snapshot [`ChainPolicy::enter`] derived for a
+    /// dispatched callee.
+    ///
+    /// [`ChainPolicy::enter`]: crate::ChainPolicy::enter
+    pub chain: ChainCtx,
     /// Guest argv (`args[0]` is the program name); `None` for reactor
     /// deployments that do not model a CLI invocation.
     pub args: Option<Arc<Vec<String>>>,
@@ -65,6 +71,10 @@ pub struct StoreBase {
     /// Type-erased host->guest dispatcher; a fresh handle to the owning
     /// runtime. Inert unless a host binding reaches for it.
     pub dispatcher: Arc<dyn Dispatcher>,
+    /// The dispatch-chain context this store's guest runs at. A link relay
+    /// snapshots it for the callee it dispatches; a capability's host binding
+    /// reads or extends its metadata.
+    pub chain: ChainCtx,
     /// Mount registry: the startup-validated mounts also preopened into
     /// [`wasi`](Self::wasi). A consuming host crate reads it to match a lent
     /// `descriptor` back to its mount by directory identity. Empty unless the
@@ -124,6 +134,7 @@ impl StoreBase {
             wasi: wasi_builder.build(),
             limits: StoreLimitsBuilder::new().memory_size(config.options.max_memory_bytes).build(),
             dispatcher: config.dispatcher,
+            chain: config.chain,
             mounts,
             extensions: config.extensions,
         }
@@ -260,5 +271,27 @@ pub trait HasExtensions: Send {
 impl<B: Send + 'static> HasExtensions for StoreCtx<B> {
     fn extensions(&self) -> Extensions {
         self.base.extensions.clone()
+    }
+}
+
+/// Access to the dispatch-chain context a store's guest runs at.
+///
+/// The link relay reads it to derive the callee's context; a capability's
+/// host binding reads or extends its metadata.
+pub trait HasChain: Send {
+    /// The chain context this store's guest runs at.
+    fn chain(&self) -> &ChainCtx;
+
+    /// The chain context, for a host binding that extends its metadata.
+    fn chain_mut(&mut self) -> &mut ChainCtx;
+}
+
+impl<B: Send + 'static> HasChain for StoreCtx<B> {
+    fn chain(&self) -> &ChainCtx {
+        &self.base.chain
+    }
+
+    fn chain_mut(&mut self) -> &mut ChainCtx {
+        &mut self.base.chain
     }
 }
