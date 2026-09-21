@@ -11,6 +11,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer as _, Registry, reload};
 
+use crate::guest::baggage::level;
 use crate::guest::generated::omnia::otel::{resource, types};
 use crate::guest::{metrics, tracing};
 
@@ -19,8 +20,10 @@ static TELEMETRY: OnceLock<Option<Telemetry>> = OnceLock::new();
 /// Wrap the provided `inner` function with telemetry support.
 ///
 /// The first `scope` in an instance initializes telemetry before calling the
-/// wrapped `inner` function. Exports every span and metric once the returned
-/// future completes.
+/// wrapped `inner` function: the subscriber opens at the level the dispatch
+/// chain carries ([`level`](crate::level); `error` at a root that names
+/// none), with valid `RUST_LOG` directives applied on top. Exports every span
+/// and metric once the returned future completes.
 pub async fn scope<F: Future>(inner: impl FnOnce() -> F) -> F::Output {
     let mut owner = false;
     TELEMETRY.get_or_init(|| {
@@ -73,7 +76,9 @@ struct Telemetry {
 fn init() -> Result<Telemetry> {
     let resource = resource::resource();
 
-    let (filter_layer, filter) = reload::Layer::new(compose("error")?);
+    // A span keeps the verdict of the filter it opened under, so a dispatched
+    // guest's boundary span is decided here, by the level its caller named.
+    let (filter_layer, filter) = reload::Layer::new(compose(&level().to_string())?);
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_writer(std::io::stderr)
         .with_filter(filter_fn(|meta| !meta.is_span()));

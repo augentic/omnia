@@ -290,6 +290,15 @@ The OpenTelemetry API works directly too: `global::tracer(..)` and `global::mete
 
 Console output (events, never a span prefix) goes to stderr, so stdout stays the guest's own; it follows the guest's `RUST_LOG`, defaulting to `error`, and `omnia_wasi_otel::set_filter` replaces those defaults at run time — valid `RUST_LOG` directives are applied on top and win for the same target, invalid ones are reported to stderr and ignored. Spans and metrics are exported whatever the filter admits: a span below the filter's level is never created, so an `#[instrument]` at `INFO` needs `RUST_LOG=info` (or a `set_filter` call) to reach the host.
 
+A guest dispatched by another over the link seam opens where its caller asked. The caller names the level on the chain's baggage under `omnia_wasi_otel::LEVEL`, beside the reload of its own filter — a CLI does both once it has parsed its verbosity flags:
+
+```rust
+omnia_wasi_otel::set_filter("info")?;
+omnia_wasi_otel::set_baggage([(omnia_wasi_otel::LEVEL, "info")]);
+```
+
+Every guest dispatched beneath it then opens its subscriber at that level as its telemetry initializes, before its outermost `#[instrument]` span, so that span is admitted at the level the caller asked for with no reload of the callee's own; `RUST_LOG` still applies on top, and a chain that names none opens the callee at `error` like any root. A level crosses, never directives: a callee that filters per crate reads `omnia_wasi_otel::level()` and composes its own `set_filter` directives over it, which its already-open boundary span keeps clear of.
+
 ## Serving MCP tools
 
 A guest can act as an [MCP](https://modelcontextprotocol.io) (Model Context Protocol) server — exposing tools and resources to AI agents over HTTP. Implement `omnia_sdk::mcp::McpServer` and serve `mcp::router` from your HTTP handler; see [Model Completions and MCP](model-completions.md#serving-mcp-tools-from-a-guest).

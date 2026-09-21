@@ -308,6 +308,16 @@ path = "programs/otel/instrumented_handler.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "otel_level"
+path = "programs/otel/level.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "otel_level_echoer"
+path = "programs/otel/level_echoer.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "otel_metrics_counter"
 path = "programs/otel/metrics_counter.rs"
 crate-type = ["cdylib"]
