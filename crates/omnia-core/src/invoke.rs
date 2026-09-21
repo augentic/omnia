@@ -87,10 +87,15 @@ impl<T> Drop for AbortOnDrop<T> {
 pub async fn call_fresh<T: Send + 'static>(
     call: FreshCall<T>, args: Vec<Val>, ctx: ChainCtx, bound: Option<Duration>,
 ) -> Result<Vec<Val>, InvokeError> {
-    // Own task: wasmtime 48 forbids nested `call_async` on concurrency-enabled
-    // stores, and an abandoned caller must abort the callee (`AbortOnDrop`).
-    // `spawn` drops the caller's span; re-enter it so guest otel export parents
-    // onto the host span.
+    // Own task: a caller that keeps executing wasm after an `async func`
+    // import cannot starve the callee, and the two guests run in parallel;
+    // an abandoned caller aborts the callee (`AbortOnDrop`); and the
+    // wall-clock bound wraps the whole callee call, the placement wasmtime's
+    // `run_concurrent` docs recommend over in-closure timeouts. Driving the
+    // callee inline on the caller's event loop (which wasmtime's per-store
+    // recursion guard permits) would serialise the two and regress
+    // concurrent link dispatch. `spawn` drops the caller's span; re-enter it
+    // so guest otel export parents onto the host span.
     let callee = async move {
         let mut store = (call.factory)(ctx);
         let instance = call.instance_pre.instantiate_async(&mut store).await?;

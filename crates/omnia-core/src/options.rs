@@ -221,9 +221,9 @@ impl From<&RuntimeOptions> for Config {
         }
 
         // SECURITY: the pooling allocator + CoW is exactly the configuration
-        // historical Wasmtime advisories target, so keeping the `46.0.x` pins
-        // current matters most here (see the maintenance note in the workspace
-        // `Cargo.toml`).
+        // historical Wasmtime advisories target, so the workspace `wasmtime`
+        // pin tracks upstream releases promptly; this is where a lagging pin
+        // matters most.
         let mut pool = PoolingAllocationConfig::new();
 
         // Totals are kept independent of the component-instance count: a single
