@@ -12,6 +12,7 @@ use std::convert::Infallible;
 use std::future::ready;
 use std::sync::{Arc, Mutex};
 
+use base64ct::{Base64, Encoding};
 use bytes::Bytes;
 use http::header::HOST;
 use http::{HeaderMap, Request, Response, StatusCode};
@@ -24,6 +25,7 @@ use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_config::WasiConfig;
 use omnia_wasi_http::{HttpHandler, WasiHttp};
 use omnia_wasi_otel::WasiOtel;
+use rcgen::{CertificateParams, ExtendedKeyUsagePurpose, KeyPair, KeyUsagePurpose};
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use wasmtime_wasi_http::io::TokioIo;
@@ -120,6 +122,38 @@ async fn http_outgoing_get() {
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].path, "/resource");
     assert_eq!(hits[0].headers.get("x-probe").and_then(|v| v.to_str().ok()), Some("1"));
+}
+
+/// A base64 `Client-Cert` bundle — throwaway self-signed P-256 certificate
+/// with the given extended key usage, then its PKCS#8 key — minted per run
+/// so no private key is ever checked in.
+fn client_cert(purpose: ExtendedKeyUsagePurpose) -> String {
+    let key = KeyPair::generate().expect("key pair");
+    let mut params = CertificateParams::new(Vec::<String>::new()).expect("parameters");
+    params.extended_key_usages = vec![purpose];
+    params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
+    let certificate = params.self_signed(&key).expect("certificate");
+    Base64::encode_string(format!("{}{}", certificate.pem(), key.serialize_pem()).as_bytes())
+}
+
+#[tokio::test]
+async fn http_outgoing_client_cert() {
+    let (origin, url) = Origin::serve().await;
+    let backends = Backends::defaults().await.config([
+        ("ORIGIN", url),
+        ("CLIENT_CERT_OK", client_cert(ExtendedKeyUsagePurpose::ClientAuth)),
+        ("CLIENT_CERT_SERVER", client_cert(ExtendedKeyUsagePurpose::ServerAuth)),
+    ]);
+
+    run_guest(test_programs::HTTP_OUTGOING_CLIENT_CERT, backends).await;
+
+    // Only the client-auth request reached the origin — the server-auth
+    // bundle was refused before connecting — and the bundle itself never
+    // left the host.
+    let hits = origin.hits();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "/mtls");
+    assert!(hits[0].headers.get("client-cert").is_none(), "Client-Cert header stripped");
 }
 
 #[tokio::test]

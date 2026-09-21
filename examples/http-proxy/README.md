@@ -59,3 +59,13 @@ let response = omnia_wasi_http::handle(request).await?;
 Keep the private key out of guest source: load it from `wasi:vault` or
 configuration at runtime. An invalid or malformed bundle fails the request
 with an internal error before any connection is attempted.
+
+Before the bundle becomes a TLS identity the host validates its **first
+certificate** — the identity presented to the server. It is rejected if its
+Extended Key Usage excludes `clientAuth` (a server-only certificate), if it is
+itself a CA certificate, if its Key Usage does not permit signing, or if it is
+outside its validity window. A certificate with no Extended Key Usage
+extension is accepted, per RFC 5280. Chain certificates following it
+(intermediate and root CAs) are **not inspected**: a bundle of
+`leaf + intermediate CA + root CA` passes; only a CA certificate placed
+*first*, where the identity certificate belongs, fails.

@@ -2,6 +2,14 @@
 
 ### Added
 
+- The default `wasi:http` outbound backend validates the `Client-Cert`
+  bundle's first certificate — the TLS identity presented to the server —
+  before it is used: a leaf whose Extended Key Usage excludes `clientAuth`
+  (a server-only certificate), a CA certificate in the leaf position, a Key
+  Usage that does not permit signing, or a certificate outside its validity
+  window fails the request with an internal error before any connection is
+  attempted. Per RFC 5280 a leaf with no Extended Key Usage extension is
+  accepted; chain certificates after the leaf are not inspected.
 - Guest-requested plugin loading: the `omnia:plugins/loader` host capability.
   A guest whose world imports it can ask the host to load a component at run
   time — `load(package, location, digest?)` returns a plain `plugin` record

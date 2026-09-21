@@ -18,6 +18,8 @@ use wasmtime_wasi_http::{
     Error as HttpError, RequestOptions, WasiBody, WasiHttpCtx, WasiHttpCtxView, WasiHttpHooks,
 };
 
+use super::client_cert;
+
 pub type FutureResult<T> = Box<dyn Future<Output = Result<T, HttpError>> + Send>;
 
 /// Options for the default outbound `wasi:http` client.
@@ -132,6 +134,7 @@ impl WasiHttpHooks for HttpHooks {
                         tracing::debug!("using client certificate");
                         let encoded = encoded_cert.to_str().map_err(internal_err)?;
                         let bytes = Base64::decode_vec(encoded).map_err(internal_err)?;
+                        client_cert::validate_bundle(&bytes).map_err(internal_err)?;
                         let identity = reqwest::Identity::from_pem(&bytes).map_err(internal_err)?;
                         builder.identity(identity)
                     }
