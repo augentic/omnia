@@ -234,6 +234,19 @@
   replacing the value under its name and leaving other names in place, and
   `omnia_wasi_otel::baggage()` reads what the chain currently carries, with
   or without telemetry initialised.
+- The tracing level crosses the dispatch chain. `omnia_wasi_otel::LEVEL` is
+  the baggage entry (`tracing.level`) naming the level the chain's guests
+  open at; a guest that has chosen its level names it for the guests it
+  dispatches with `set_baggage([(LEVEL, "info")])`, beside the `set_filter`
+  reload of its own subscriber. Every guest dispatched beneath it opens its
+  subscriber at that level as its telemetry initializes — before its
+  outermost `#[instrument]` span, so a callee's boundary span is admitted at
+  the level its caller asked for with no reload of the callee's own — with
+  valid `RUST_LOG` directives applied on top as before. A chain that names
+  none opens the callee at `error`, as a root opens; an entry that is not a
+  level is reported to stderr and read as `error`. `omnia_wasi_otel::level()`
+  reads the level the chain carries, so a callee that filters per crate
+  composes its own directives over it. A level crosses, never directives.
 - The dispatch-chain context lives on the guest store. Every store is built
   at a `ChainCtx` (`StoreConfig::chain`, `StoreBase::chain`):
   `Runtime::store()` builds a server root, `Runtime::store_in(chain)` any
@@ -253,11 +266,13 @@
   `ChainCtx::command()`; code that relied on the implicit copy clones or
   borrows. `as_command_chain(fut)` is now a store built at the command
   root, `runtime.build_store(runtime.store_in(ChainCtx::command()))`, and
-  `Dispatcher::invoke` takes the caller's `ChainCtx` before the target. A
-  guest that calls
-  `omnia_wasi_otel::{baggage, set_baggage}` imports `omnia:otel/baggage`
-  and needs a runtime that carries it; every other guest links unchanged,
-  the componentizer having pruned the import.
+  `Dispatcher::invoke` takes the caller's `ChainCtx` before the target.
+  Every guest that runs the telemetry lifecycle — an `#[instrument]`ed
+  export, a `command!` entry — imports `omnia:otel/baggage`, since its
+  subscriber opens at the level the chain carries, and so needs a runtime
+  that carries it; `WasiOtel` does, as does the no-op `OtelDefault` bundle
+  beneath it. A guest with no telemetry links unchanged, the componentizer
+  having pruned the import.
 
 - The `omnia-sdk` `orm` feature is split into `sql` (the `TableStore`
   capability over `wasi:sql`) and `docstore` (the `DocumentStore` capability

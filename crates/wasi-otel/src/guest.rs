@@ -25,7 +25,7 @@ mod generated {
 /// Re-exported `instrument` macro for use in guest code.
 pub use omnia_guest_macros::instrument;
 
-pub use crate::guest::baggage::{Baggage, baggage, set_baggage};
+pub use crate::guest::baggage::{Baggage, LEVEL, baggage, level, set_baggage};
 pub use crate::guest::init::*;
 
 // Implementation detail of the `#[instrument]` expansion: the macro emits

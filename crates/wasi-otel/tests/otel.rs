@@ -182,6 +182,40 @@ async fn otel_baggage_echoer() {
     run(baggage_pair().args(["unset"]), "baggage_echoer").await;
 }
 
+/// The level root and the echoer it dispatches to, linked over
+/// `omnia-test:link/ops`.
+fn level_pair() -> Deployment {
+    Deployment::new()
+        .link(["omnia-test:link/ops"])
+        .guest("root", test_programs::OTEL_LEVEL)
+        .guest("echoer", test_programs::OTEL_LEVEL_ECHOER)
+        .command("root")
+}
+
+// The level the root names opens the linked echoer's subscriber ahead of its
+// INFO span, which reaches the host with no reload of the echoer's own; the
+// root asserts the level the echoer answers and traps on a mismatch.
+#[tokio::test]
+async fn otel_level() {
+    let recording = run(level_pair(), "level").await;
+    assert_eq!(recording.span_names(), ["opened"]);
+}
+
+// A root that names no level dispatches an echoer that opens at `error`, as
+// the root itself did, so its INFO span is never created.
+#[tokio::test]
+async fn otel_level_echoer() {
+    let recording = run(level_pair().args(["unset"]), "level_echoer").await;
+    assert!(recording.span_names().is_empty(), "spans: {:?}", recording.span_names());
+}
+
+// An entry that is not a level is reported and read as `error`.
+#[tokio::test]
+async fn otel_level_invalid() {
+    let recording = run(level_pair().args(["invalid"]), "level_invalid").await;
+    assert!(recording.span_names().is_empty(), "spans: {:?}", recording.span_names());
+}
+
 #[tokio::test]
 async fn otel_instrumented_handler() {
     let recording = run_guest(test_programs::OTEL_INSTRUMENTED_HANDLER).await;

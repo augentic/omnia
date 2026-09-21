@@ -46,7 +46,7 @@ async fn handle(request: Request) -> Response {
 }
 ```
 
-Console output (events only, to stderr) follows `RUST_LOG`, defaulting to `error`; `set_filter` replaces those defaults at run time (valid `RUST_LOG` directives still apply on top) and `flush` exports on demand. `set_baggage` sets W3C Baggage entries for the guests this one dispatches; `baggage()` reads what the chain carries.
+Console output (events only, to stderr) follows `RUST_LOG`, defaulting to the level the dispatch chain carries — `error` at a root that names none; `set_filter` replaces those defaults at run time (valid `RUST_LOG` directives still apply on top) and `flush` exports on demand. `set_baggage` sets W3C Baggage entries for the guests this one dispatches; `baggage()` reads what the chain carries. The `LEVEL` entry is the one this crate reads for itself: a guest that names a level under it (`set_baggage([(LEVEL, "info")])`, beside its own `set_filter`) has every guest it dispatches open its subscriber at that level before its outermost `#[instrument]` span, and `level()` reads it.
 
 ## License
 
