@@ -114,7 +114,7 @@ impl ChainPolicy {
         let current =
             CHAIN_CTX.try_with(|ctx| ctx.borrow().clone()).unwrap_or_else(|_| ChainCtx::server());
         let depth = current.depth + 1;
-        
+
         if depth > self.max_depth {
             bail!(
                 "link dispatch depth {depth} exceeds maximum {} (target `{target}`); raise \
