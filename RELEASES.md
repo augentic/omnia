@@ -241,6 +241,14 @@
   `omnia:otel/baggage` and needs a runtime that carries it; every other
   guest links unchanged, the componentizer having pruned the import.
 
+- The `omnia-sdk` `orm` feature is split into `sql` (the `TableStore`
+  capability over `wasi:sql`) and `docstore` (the `DocumentStore` capability
+  and the `document_store` re-exports), both default alongside `http`. A
+  guest that disabled defaults and named `orm` now names the capability it
+  uses; a default build is unchanged. In-repo consumers follow (`examples`:
+  `sql`, `docstore`, `http`, `command`; `omnia-test/guest`: `sql`,
+  `docstore`), and `cargo make features` gates each new feature alone.
+
 - Guest telemetry has one lifecycle entry point: `omnia_wasi_otel::scope(f)`
   initializes telemetry (once per instance), awaits the future `f` builds,
   and exports every buffered span and recorded metric before returning; a
@@ -775,6 +783,14 @@
 
 ### Removed
 
+- The guest ORM: the `omnia_sdk::orm` module (`Entity`, the `Select` /
+  `Insert` / `Update` / `Delete` builders, `Filter`, `Join`, `FetchValue`)
+  and the `entity!` macro, with the `sea-query` and `chrono` dependencies
+  they carried. The layer now lives in `omnia-orm`
+  ([augentic/omnia-extensions](https://github.com/augentic/omnia-extensions)),
+  which builds on `omnia_sdk::TableStore` under the `sql` feature; the
+  `examples/sql` guest executes parameterized SQL through `TableStore`
+  directly.
 - The `wrpc-transport` / `wrpc-wasmtime` dependencies and the
   `[patch.crates-io]` git override that unpublished `wrpc-wasmtime`
   required. The `omnia-core` `wrpc` feature is gone, as are the

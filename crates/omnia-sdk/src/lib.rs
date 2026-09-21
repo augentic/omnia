@@ -5,11 +5,9 @@ mod capabilities;
 mod error;
 #[cfg(feature = "http")]
 pub mod mcp;
-#[cfg(feature = "orm")]
-pub mod orm;
 
 /// Document store types and helpers (from `omnia-wasi-docstore`).
-#[cfg(feature = "orm")]
+#[cfg(feature = "docstore")]
 pub mod document_store {
     pub use omnia_wasi_docstore::document_store::*;
 }

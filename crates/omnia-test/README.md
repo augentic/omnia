@@ -6,7 +6,7 @@ features.
 
 | Feature | Carries | Depends on |
 | ------- | ------- | ---------- |
-| `guest` | Native doubles for every `omnia_sdk` capability trait and the `Provider` that bundles them | `omnia-sdk` (with `orm`) |
+| `guest` | Native doubles for every `omnia_sdk` capability trait and the `Provider` that bundles them | `omnia-sdk` (with `sql`, `docstore`) |
 | `host` | `Deployment`, `Backends`, `ScriptedModel`, `Scratch` — the component runtime harness | `omnia` and the `wasi-*` host crates |
 | `build` | `Components` — the nested wasm32 build and `gen.rs` generator for a `build.rs` | `std` only |
 
