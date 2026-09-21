@@ -7,6 +7,7 @@ use wasmtime_wasi::I32Exit;
 use wasmtime_wasi::p3::bindings::{Command, CommandPre};
 
 use super::{ExitStatus, Runtime};
+use crate::chain::{ChainCtx, Chained as _};
 use crate::registry::{Guest, GuestId, TriggerRouter};
 use crate::store::StoreCtx;
 
@@ -71,10 +72,10 @@ where
     // A command chain root: link dispatches the guest makes (and their nested
     // hops) run without the `GUEST_TIMEOUT_MS` wall-clock cap, matching the
     // uncapped `wasi:cli/run` drive itself.
-    let outcome = crate::chain::as_command_chain(
-        store.run_concurrent(async move |store| command.wasi_cli_run().call_run(store).await),
-    )
-    .await;
+    let outcome = store
+        .run_concurrent(async move |store| command.wasi_cli_run().call_run(store).await)
+        .in_chain(ChainCtx::command())
+        .await;
 
     let status = match outcome {
         Ok(Ok(Ok(()))) => ExitStatus::SUCCESS,

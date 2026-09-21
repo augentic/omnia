@@ -25,7 +25,7 @@ pub use pastey;
 pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
 pub use self::artifact::{ELF_MAGIC, GuestArtifact, LoadedGuest, is_precompiled};
-pub use self::chain::{ChainCtx, ChainPolicy, as_command_chain};
+pub use self::chain::{ChainCtx, ChainPolicy, Chained, baggage, set_baggage};
 pub use self::digest::sha256_digest;
 pub use self::dispatch::Dispatcher;
 pub use self::extensions::Extensions;

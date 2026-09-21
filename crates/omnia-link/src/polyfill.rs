@@ -214,10 +214,7 @@ async fn relay(
         target = %target,
         interface,
         func,
-        depth = ctx.depth,
-        carrier = "in-memory",
-        histogram.link_dispatch_duration_us = elapsed_us,
-        monotonic_counter.link_dispatches = 1_u64,
+        elapsed_us,
         "dispatched host-mediated call",
     );
     Ok(())

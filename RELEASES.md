@@ -224,7 +224,30 @@
   subscriber by an explicit `RUST_LOG` string instead of the environment
   (the always-on dependency mutes still apply).
 
+- Baggage over the dispatch chain. A guest sets W3C Baggage entries through
+  `omnia_wasi_otel::set_baggage(entries)` (the new `omnia:otel/baggage`
+  interface) and every guest dispatched beneath it is dispatched with them;
+  `omnia_wasi_otel::baggage()` reads what the chain currently carries, with
+  or without telemetry initialised. An entry replaces the value under its
+  name and leaves other names in place; a name that is not an RFC 7230
+  token, or an entry over the W3C limits, is dropped with a warning. Each
+  hop's context is a snapshot taken at `ChainPolicy::enter`, so entries set
+  after a dispatch never reach it. The trigger hosts now root a chain as the
+  command driver does, so a served guest can set baggage too.
+- `Chained::in_chain(ctx)` scopes a future to a dispatch chain the way
+  `tracing::Instrument::instrument` scopes one to a span, with
+  `ChainCtx::command()` and `ChainCtx::server()` as the two root contexts;
+  `omnia` re-exports all three for embedders writing a trigger.
+
 ### Changed
+
+- `ChainCtx` is `Clone`, not `Copy`, and no longer `Default`: it now
+  carries the chain's baggage, and a root is `ChainCtx::server()` or
+  `ChainCtx::command()`; code that relied on the implicit copy clones or
+  borrows. `as_command_chain(fut)` is `fut.in_chain(ChainCtx::command())`.
+  A guest that calls `omnia_wasi_otel::{baggage, set_baggage}` imports
+  `omnia:otel/baggage` and needs a runtime that carries it; every other
+  guest links unchanged, the componentizer having pruned the import.
 
 - The `omnia-sdk` `orm` feature is split into `sql` (the `TableStore`
   capability over `wasi:sql`) and `docstore` (the `DocumentStore` capability
@@ -247,21 +270,44 @@
   envelopes); they carry no span prefix, because the fmt layer receives
   events only, so fields such as `correlation_id` are not repeated on every
   line and the default coloured format is otherwise unchanged. The guest
-  filter's always-on mutes are the OpenTelemetry SDK's own targets
-  (`opentelemetry=off`, `opentelemetry_sdk=off`), keeping its
-  self-diagnostics (`TracerProvider.GlobalSet` and friends) out of guest
-  output; the host-transport mutes (`hyper`, `h2`, `tonic`), which no guest
-  links, are gone. Exported guest spans no longer carry `thread.id` /
+  filter's one always-on mute is the OpenTelemetry API's own target
+  (`opentelemetry=off`), keeping its self-diagnostics out of guest output
+  should a guest dependency enable them; the host-transport mutes (`hyper`,
+  `h2`, `tonic`), which no guest links, are gone. Exported guest spans no
+  longer carry `thread.id` /
   `thread.name` attributes (a guest is single-threaded), and a subscriber
   install that fails (the guest set its own) is attempted once per instance
   rather than by every nested `scope`.
 
-- Guest metrics export with delta temporality (`ManualReader` built with
-  `Temporality::Delta`): every invocation is a fresh instance, so a
-  cumulative total restarted on each export and equal counts from successive
-  invocations read as "no change" rather than as increments. Up-down
-  counters stay cumulative, as the SDK's delta preference prescribes; a
-  collector needing cumulative series converts with `deltatocumulative`.
+- Guest metrics export with delta temporality: every invocation is a fresh
+  instance, so a cumulative total restarted on each export and equal counts
+  from successive invocations read as "no change" rather than as
+  increments. Up-down counters stay cumulative, as the OpenTelemetry SDK's
+  delta preference prescribes; a collector needing cumulative series
+  converts with `deltatocumulative`.
+
+- Guest telemetry no longer links the OpenTelemetry SDK. On `wasm32`,
+  `omnia-wasi-otel` implements the `opentelemetry` API traits that the
+  `tracing-opentelemetry` bridge and the `global::tracer` / `global::meter`
+  registries drive (`TracerProvider`, `Tracer`, `Span`, `MeterProvider`,
+  `InstrumentProvider`) directly over the `omnia:otel` records: a span
+  becomes a `span-data` record as it ends, and the synchronous instruments
+  aggregate into per-scope series that the flush collects into one
+  `resource-metrics` record. Retained: the API and the bridge (a guest's
+  `opentelemetry` and `tracing` code compiles unchanged), delta counters /
+  histograms / gauges with cumulative up-down counters, the default
+  histogram bounds and `with_boundaries`, and the wire protocol (the WIT
+  and the host crates are untouched). Changed: observable (callback)
+  instruments record nothing (the API's no-op defaults); spans have no
+  attribute / event / link limits, so the dropped counts are always zero;
+  no exemplars; a second build of an instrument shares the first's series,
+  description, and unit; histogram bounds that are not finite and strictly
+  increasing yield an instrument that records nothing and reports once at
+  `error`; and the `opentelemetry_sdk=off` mute leaves the guest filter
+  with its target. The SDK and its `rand` / `rand_chacha` / `rand_core`
+  tail leave every guest's dependency graph (trace and span ids are drawn
+  from `getrandom`, over `wasi:random`); the release `otel_metrics_counter`
+  guest shrinks from 1,085,552 to 865,767 bytes (−20%).
 
 - Host-side `wasi:otel` export fixes: each `ScopeSpans.schema_url` now
   carries the instrumentation scope's schema URL rather than the resource's

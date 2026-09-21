@@ -462,11 +462,23 @@ interface tracing {
     /// Number of links dropped by the span due to limits being reached.
     dropped-links: u32,
   }
-
-  /// /// Returns the current span context of the host.
-  /// context: func() -> span-context;
+  
   /// Called by the guest to export spans.
   %export: async func(span-data: list<span-data>) -> result<_, error>;
+}
+
+/// W3C Baggage carried down the dispatch chain: every guest dispatched
+/// beneath the one that set an entry is dispatched with it.
+interface baggage {
+  /// The baggage the chain currently carries; empty at a chain root that has
+  /// set none.
+  baggage: func() -> list<tuple<string, string>>;
+
+  /// Sets entries for the guests dispatched beneath this one from now on. An
+  /// entry replaces the value under its name and leaves other names in place;
+  /// a name that is not an RFC 7230 token, or an entry over the W3C limits, is
+  /// dropped with a warning.
+  set-baggage: func(entries: list<tuple<string, string>>);
 }
 
 world imports {
@@ -475,4 +487,5 @@ world imports {
   import tracing;
   import metrics;
   import %resource;
+  import baggage;
 }

@@ -29,6 +29,7 @@ omnia-wasi-otel.workspace = true
 omnia-wasi-sql.workspace = true
 omnia-wasi-vault.workspace = true
 omnia-wasi-websocket.workspace = true
+opentelemetry = { workspace = true, features = ["metrics", "trace"] }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -69,6 +70,11 @@ crate-type = ["cdylib"]
 [[example]]
 name = "docstore_insert_conflict"
 path = "programs/docstore/insert_conflict.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "http_baggage"
+path = "programs/http/baggage.rs"
 crate-type = ["cdylib"]
 
 [[example]]
@@ -287,6 +293,16 @@ path = "programs/otel/axum_handler.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "otel_baggage"
+path = "programs/otel/baggage.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "otel_baggage_echoer"
+path = "programs/otel/baggage_echoer.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "otel_filter_reload"
 path = "programs/otel/filter_reload.rs"
 crate-type = ["cdylib"]
@@ -299,6 +315,16 @@ crate-type = ["cdylib"]
 [[example]]
 name = "otel_metrics_counter"
 path = "programs/otel/metrics_counter.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "otel_metrics_instruments"
+path = "programs/otel/metrics_instruments.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "otel_span_tree"
+path = "programs/otel/span_tree.rs"
 crate-type = ["cdylib"]
 
 [[example]]

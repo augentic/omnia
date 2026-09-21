@@ -1,3 +1,4 @@
+mod baggage_impl;
 mod default_impl;
 mod metrics_impl;
 mod resource_impl;
@@ -12,6 +13,7 @@ mod generated {
         world: "imports",
         path: "wit",
         imports: {
+            "omnia:otel/baggage": tracing | trappable,
             "omnia:otel/resource.resource": tracing | trappable,
             default: store | tracing | trappable,
         },
@@ -32,7 +34,7 @@ use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use wasmtime::component::{HasData, Linker};
 
 pub use self::default_impl::OtelDefault;
-use self::generated::omnia::otel::{metrics, resource, tracing, types};
+use self::generated::omnia::otel::{baggage, metrics, resource, tracing, types};
 
 /// Host-side service for `wasi:otel`.
 #[derive(Debug)]
@@ -50,7 +52,8 @@ where
         tracing::add_to_linker::<_, Self>(linker, T::view)?;
         metrics::add_to_linker::<_, Self>(linker, T::view)?;
         types::add_to_linker::<_, Self>(linker, T::view)?;
-        Ok(resource::add_to_linker::<_, Self>(linker, T::view)?)
+        resource::add_to_linker::<_, Self>(linker, T::view)?;
+        Ok(baggage::add_to_linker::<_, Self>(linker, T::view)?)
     }
 }
 

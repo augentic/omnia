@@ -46,15 +46,15 @@ cfg-if.workspace = true
 fromenv.workspace = true
 futures.workspace = true
 http.workspace = true
-opentelemetry.workspace = true
+opentelemetry = { workspace = true, features = ["metrics", "trace"] }
 opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["grpc-tonic", "metrics", "trace"], optional = true }
-opentelemetry_sdk = { workspace = true, features = ["rt-tokio"] }
+opentelemetry_sdk = { workspace = true, features = ["metrics", "rt-tokio", "trace"] }
 pastey.workspace = true
 serde.workspace = true
 sha2.workspace = true
 tracing.workspace = true
-tracing-opentelemetry = { workspace = true, optional = true }
-tracing-subscriber.workspace = true
+tracing-opentelemetry = { workspace = true, features = ["metrics"], optional = true }
+tracing-subscriber = { workspace = true, features = ["ansi", "smallvec"] }
 tokio = { workspace = true, features = ["io-util", "macros", "rt", "sync", "time"] }
 wasmtime = { workspace = true, features = ["runtime"] }
 wasmtime-wasi.workspace = true

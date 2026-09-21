@@ -2666,6 +2666,7 @@ version = "0.36.0"
 dependencies = [
  "anyhow",
  "futures",
+ "getrandom 0.3.4",
  "hex",
  "omnia",
  "omnia-core",
@@ -4067,6 +4068,7 @@ dependencies = [
  "omnia-wasi-sql",
  "omnia-wasi-vault",
  "omnia-wasi-websocket",
+ "opentelemetry",
  "schemars",
  "serde",
  "serde_json",
@@ -4458,17 +4460,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tracing-log"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee855f1f400bd0e5c02d150ae5de3840039a3f54b025156404e34c23c03f47c3"
-dependencies = [
- "log",
- "once_cell",
- "tracing-core",
-]
-
-[[package]]
 name = "tracing-opentelemetry"
 version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4479,7 +4470,6 @@ dependencies = [
  "smallvec",
  "tracing",
  "tracing-core",
- "tracing-log",
  "tracing-subscriber",
  "web-time",
 ]
@@ -4499,7 +4489,6 @@ dependencies = [
  "thread_local",
  "tracing",
  "tracing-core",
- "tracing-log",
 ]
 
 [[package]]

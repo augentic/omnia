@@ -197,6 +197,37 @@ async fn http_incoming_echo() {
     runtime.shutdown();
 }
 
+// A trigger-served guest roots a chain of its own: baggage the handler sets
+// reaches the echoer it dispatches to over `omnia-test:link/ops`.
+#[tokio::test]
+async fn http_baggage() {
+    let runtime = Deployment::new()
+        .link(["omnia-test:link/ops"])
+        .guest("handler", test_programs::HTTP_BAGGAGE)
+        .guest("echoer", test_programs::OTEL_BAGGAGE_ECHOER)
+        .boot(Backends::defaults().await, |deployment| {
+            deployment.host::<WasiHttp, Backends>()?;
+            deployment.host::<WasiOtel, Backends>()?;
+            Ok(())
+        })
+        .await
+        .expect("runtime boots");
+    let handler = HttpHandler::new(&runtime)
+        .expect("http routes consistent")
+        .expect("the handler exports the http handler");
+
+    let request = Request::get("/baggage")
+        .header(HOST, "baggage.test")
+        .body(Full::new(Bytes::new()))
+        .expect("request");
+    let response = handler.handle(request).await.expect("handled");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.expect("body streams").to_bytes();
+    assert_eq!(body, "acme");
+
+    runtime.shutdown();
+}
+
 /// The handler's response body, read to the end as JSON.
 async fn collect(response: Response<omnia_wasi_http::OutgoingBody>) -> Value {
     let body = response.into_body().collect().await.expect("body streams").to_bytes();

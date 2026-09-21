@@ -3,6 +3,8 @@
 //! The guest half of `omnia:otel`: a `tracing` subscriber whose spans and
 //! metrics reach the host through the crate's private `wasi:otel` bindings.
 
+mod aggregate;
+mod baggage;
 mod convert;
 mod init;
 mod metrics;
@@ -23,6 +25,7 @@ mod generated {
 /// Re-exported `instrument` macro for use in guest code.
 pub use omnia_guest_macros::instrument;
 
+pub use crate::guest::baggage::{Baggage, baggage, set_baggage};
 pub use crate::guest::init::*;
 
 // Implementation detail of the `#[instrument]` expansion: the macro emits
