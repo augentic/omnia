@@ -2,6 +2,7 @@
 //!
 //! This module implements a host-side service for `wasi:http`
 
+mod client_cert;
 mod default_impl;
 mod server;
 
