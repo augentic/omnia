@@ -38,6 +38,9 @@ tokio = { workspace = true, features = ["time"] }
 wasmtime = { workspace = true, features = ["component-model-async"] }
 wasmtime-wasi.workspace = true
 wasmtime-wasi-http.workspace = true
+# Inspects the `Client-Cert` leaf (EKU, key usage, basic constraints,
+# validity) before it becomes a TLS identity.
+x509-cert.workspace = true
 omnia-core.workspace = true
 
 # guest dependencies
@@ -55,6 +58,9 @@ omnia.workspace = true
 omnia-test = { workspace = true, features = ["host"] }
 omnia-wasi-config.workspace = true
 omnia-wasi-otel.workspace = true
+# Mints the throwaway `Client-Cert` bundles the tests feed the validator, so
+# no private key is ever checked in.
+rcgen.workspace = true
 serde_json.workspace = true
 test-programs.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt"] }
