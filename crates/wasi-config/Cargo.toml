@@ -30,7 +30,7 @@ wasmtime-wasi-config.workspace = true
 wit-bindgen.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-omnia.workspace = true
-omnia-test = { workspace = true, features = ["host"] }
+omnia = { path = "../omnia" }
+omnia-test = { path = "../omnia-test", default-features = false, features = ["host"] }
 test-programs.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }

@@ -42,7 +42,12 @@ skip = []
 skip-tree = []
 wildcards = "allow"
 
+# Path (in-workspace) crates are excluded from the duplicate check: the
+# workspace entries carry a `version` for publishing, but dev-deps on members
+# that depend back on the declaring crate must be path-only so the published
+# manifest drops them (see crates/wasi-blobstore/Cargo.toml). Every crates.io
+# dependency is still required to go through `[workspace.dependencies]`.
 [bans.workspace-dependencies]
 duplicates = "deny"
-include-path-dependencies = true
+include-path-dependencies = false
 unused = "warn"

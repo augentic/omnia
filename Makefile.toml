@@ -165,6 +165,8 @@ cargo vet --locked
 '''
 install_crate = "cargo-vet"
 
+# Dry run of what the `Publish Release` workflow's crates job executes; the
+# only pre-release check that every publishable member packages and verifies.
 [tasks.publish]
 command = "cargo"
-args = ["publish", "--registry=augentic", "--allow-dirty", "--dry-run"]
+args = ["publish", "--workspace", "--locked", "--dry-run"]
