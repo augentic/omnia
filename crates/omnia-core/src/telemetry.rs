@@ -66,6 +66,10 @@ pub struct Telemetry {
     /// Explicit filter directives for the console subscriber; unset defers
     /// to `RUST_LOG`.
     filter: Option<String>,
+
+    /// The level the console subscriber falls back to when `RUST_LOG` is
+    /// unset and no explicit directives are given.
+    fallback: LevelFilter,
 }
 
 impl Telemetry {
@@ -76,6 +80,7 @@ impl Telemetry {
             app_name: name.into(),
             endpoint: None,
             filter: None,
+            fallback: LevelFilter::WARN,
         }
     }
 
@@ -94,6 +99,17 @@ impl Telemetry {
     #[must_use]
     pub fn filter(mut self, directives: impl Into<String>) -> Self {
         self.filter = Some(directives.into());
+        self
+    }
+
+    /// Sets the level the console subscriber falls back to when the
+    /// environment sets no `RUST_LOG`.
+    ///
+    /// `WARN` when not called. Explicit [`filter`](Self::filter) directives
+    /// take precedence over both.
+    #[must_use]
+    pub const fn fallback(mut self, level: LevelFilter) -> Self {
+        self.fallback = level;
         self
     }
 
@@ -122,7 +138,8 @@ impl Telemetry {
             let meter_provider = self.build_metrics(resource.clone())?;
             let tracer_provider = self.build_traces(resource.clone())?;
 
-            let filter_layer = filter(self.filter.as_deref())?;
+            let filter_layer =
+                filter(self.filter.as_deref(), self.fallback, rust_log().as_deref())?;
 
             // Console tracing goes to stderr: stdout belongs to the guest's
             // semantic output (command mode pipes and JSON envelopes must stay
@@ -164,7 +181,8 @@ impl Telemetry {
         // subscriber (filter + fmt) is the whole initialization.
         #[cfg(not(feature = "otlp"))]
         {
-            let filter_layer = filter(self.filter.as_deref())?;
+            let filter_layer =
+                filter(self.filter.as_deref(), self.fallback, rust_log().as_deref())?;
             let fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
             if let Err(error) = Registry::default().with(filter_layer).with(fmt_layer).try_init() {
                 tracing::warn!(%error, "a tracing subscriber is already set; omnia telemetry skipped");
@@ -217,17 +235,26 @@ impl Telemetry {
     }
 }
 
-// The subscriber's filter: explicit `directives` when given, else `RUST_LOG`
-// with WARN as the level an unset environment falls back to, so host
-// warnings (a mount that failed to preopen) reach the console without a
-// hand-written filter. Every filter carries the noisy-dependency mutes so
-// the output stays readable without a hand-written suffix.
-fn filter(directives: Option<&str>) -> Result<EnvFilter> {
+// The process's `RUST_LOG`, read once per build so `filter` stays pure over
+// its inputs.
+fn rust_log() -> Option<String> {
+    std::env::var("RUST_LOG").ok()
+}
+
+// The subscriber's filter: explicit `directives` when given, else the
+// `rust_log` directives with `fallback` as the level an unset variable falls
+// back to, so host warnings (a mount that failed to preopen) reach the
+// console without a hand-written filter. Every filter carries the
+// noisy-dependency mutes so the output stays readable without a hand-written
+// suffix.
+fn filter(
+    directives: Option<&str>, fallback: LevelFilter, rust_log: Option<&str>,
+) -> Result<EnvFilter> {
     let base = match directives {
         Some(directives) => EnvFilter::builder().parse(directives)?,
-        None => {
-            EnvFilter::builder().with_default_directive(LevelFilter::WARN.into()).from_env_lossy()
-        }
+        None => EnvFilter::builder()
+            .with_default_directive(fallback.into())
+            .parse_lossy(rust_log.unwrap_or_default()),
     };
     Ok(base
         .add_directive("hyper=off".parse()?)
@@ -351,11 +378,10 @@ mod tests {
         )
     }
 
-    // The explicit arm is pure over its directives; the env arm is exercised
-    // via directive membership rather than mutating the process environment
+    // Pure over its inputs: the process `RUST_LOG` is handed in, never read
     // (other tests run in parallel).
     mod filter {
-        use super::super::filter;
+        use super::super::{LevelFilter, filter};
 
         const MUTES: [&str; 6] = [
             "hyper=off",
@@ -366,35 +392,54 @@ mod tests {
             "omnia_wasi_otel=off",
         ];
 
-        fn rendered(directives: Option<&str>) -> String {
-            filter(directives).expect("filter directives parse").to_string()
+        fn rendered(
+            directives: Option<&str>, fallback: LevelFilter, rust_log: Option<&str>,
+        ) -> String {
+            filter(directives, fallback, rust_log).expect("filter directives parse").to_string()
+        }
+
+        fn has(rendered: &str, directive: &str) -> bool {
+            rendered.split(',').any(|candidate| candidate == directive)
         }
 
         #[test]
         fn explicit_directives() {
-            let rendered = rendered(Some("info,omnia_core=debug"));
+            let rendered =
+                rendered(Some("info,omnia_core=debug"), LevelFilter::WARN, Some("trace"));
             for directive in ["info", "omnia_core=debug"].into_iter().chain(MUTES) {
-                assert!(rendered.contains(directive), "missing `{directive}` in `{rendered}`");
+                assert!(has(&rendered, directive), "missing `{directive}` in `{rendered}`");
             }
+            assert!(!has(&rendered, "trace"), "explicit directives replace `RUST_LOG`: {rendered}");
         }
 
         #[test]
         fn explicit_off() {
-            let rendered = rendered(Some("off"));
-            assert!(rendered.split(',').any(|directive| directive == "off"), "{rendered}");
+            let rendered = rendered(Some("off"), LevelFilter::WARN, None);
+            assert!(has(&rendered, "off"), "{rendered}");
         }
 
         #[test]
-        fn env_default() {
-            let rendered = rendered(None);
+        fn fallback_level() {
+            let rendered = rendered(None, LevelFilter::INFO, None);
+            assert!(has(&rendered, "info"), "an unset `RUST_LOG` falls back: {rendered}");
             for directive in MUTES {
-                assert!(rendered.contains(directive), "missing `{directive}` in `{rendered}`");
+                assert!(has(&rendered, directive), "missing `{directive}` in `{rendered}`");
             }
         }
 
         #[test]
+        fn rust_log_over_fallback() {
+            let rendered = rendered(None, LevelFilter::INFO, Some("omnia_core=debug"));
+            assert!(has(&rendered, "omnia_core=debug"), "{rendered}");
+            assert!(!has(&rendered, "info"), "a set `RUST_LOG` displaces the fallback: {rendered}");
+        }
+
+        #[test]
         fn unparsable_directives() {
-            assert!(filter(Some("omnia_core=loud")).is_err(), "an unknown level must not parse");
+            assert!(
+                filter(Some("omnia_core=loud"), LevelFilter::WARN, None).is_err(),
+                "an unknown level must not parse"
+            );
         }
     }
 

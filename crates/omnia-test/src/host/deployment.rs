@@ -4,14 +4,15 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
 use omnia::{
-    DeploymentBuilder, ExitStatus, GuestEntry, Host, Location, Manifest, ManifestSource, Mode,
-    Mount, Plugins, Provides, Runtime, Server, SourceSpec, StoreCtx, WasiPlugins, Wiring,
+    DeploymentBuilder, ExitStatus, GuestEntry, Host, LevelFilter, Location, Manifest,
+    ManifestSource, Mode, Mount, Plugins, Provides, Runtime, Server, SourceSpec, StoreCtx,
+    WasiPlugins, Wiring,
 };
 use omnia_wasi_otel::WasiOtel;
 
 /// One command-mode deployment: guests, mounts, arguments, the link
-/// interfaces the host mediates, plugin locations, guest environment
-/// defaults, and the directory the `.` path location serves.
+/// interfaces the host mediates, plugin locations, the tracing level, and
+/// the directory the `.` path location serves.
 ///
 /// Built from nothing, or as an overlay on the manifest a production
 /// `runtime!` compiled in (`Deployment::from(runtime::manifest())`): the
@@ -47,7 +48,7 @@ pub struct Deployment {
     args: Vec<String>,
     link: Vec<String>,
     locations: Vec<Location>,
-    env: Vec<(String, String)>,
+    level: Option<LevelFilter>,
     path_root: Option<PathBuf>,
 }
 
@@ -117,16 +118,15 @@ impl Deployment {
         self
     }
 
-    /// Guest environment defaults (the manifest's `[env]` table): what every
-    /// guest carries when the test process does not set it, so a suite
-    /// scripts a guest's environment without touching its own.
+    /// The tracing level for the run: every guest's `RUST_LOG`, whatever the
+    /// test process sets, so a suite scripts a guest's level without
+    /// touching its own environment.
+    ///
+    /// Unset, a guest keeps the process `RUST_LOG` and falls back to the
+    /// command-mode `info` when it sets none.
     #[must_use]
-    pub fn env<K, V>(mut self, entries: impl IntoIterator<Item = (K, V)>) -> Self
-    where
-        K: Into<String>,
-        V: Into<String>,
-    {
-        self.env.extend(entries.into_iter().map(|(name, value)| (name.into(), value.into())));
+    pub const fn level(mut self, level: LevelFilter) -> Self {
+        self.level = Some(level);
         self
     }
 
@@ -149,8 +149,7 @@ impl Deployment {
             .unwrap_or_default()
             .mounts(self.mounts.iter().cloned())
             .link(self.link.iter().cloned())
-            .locations(self.locations.iter().cloned())
-            .env(self.env.iter().cloned());
+            .locations(self.locations.iter().cloned());
         for guest in &self.guests {
             manifest = manifest.guest(guest.clone());
         }
@@ -172,11 +171,13 @@ impl Deployment {
         Ok(manifest)
     }
 
-    fn builder(&self) -> Result<DeploymentBuilder> {
-        Ok(DeploymentBuilder::new()
-            .manifest(self.manifest()?)
-            .mode(Mode::Command)
-            .args(self.args.clone()))
+    fn builder(&self, manifest: Manifest) -> DeploymentBuilder {
+        let builder =
+            DeploymentBuilder::new().manifest(manifest).mode(Mode::Command).args(self.args.clone());
+        match self.level {
+            Some(level) => builder.level(level),
+            None => builder,
+        }
     }
 
     /// Assembles the runtime by hand: builds the deployment, links the
@@ -196,13 +197,8 @@ impl Deployment {
     {
         let manifest = self.manifest()?;
         let link_loader = !manifest.plugin.locations.is_empty();
-        let mut deployment = DeploymentBuilder::new()
-            .manifest(manifest)
-            .mode(Mode::Command)
-            .args(self.args.clone())
-            .build::<StoreCtx<B>>()
-            .await
-            .context("building deployment")?;
+        let mut deployment =
+            self.builder(manifest).build::<StoreCtx<B>>().await.context("building deployment")?;
         if link_loader {
             deployment.host::<WasiPlugins, B>().context("linking the plugins host")?;
         }
@@ -265,7 +261,7 @@ impl Deployment {
         H: Wiring<B>,
         B: Clone + Send + Sync + 'static,
     {
-        let deployment = self.builder()?.build::<StoreCtx<B>>().await?;
+        let deployment = self.builder(self.manifest()?).build::<StoreCtx<B>>().await?;
         omnia::run_with::<B, H>(deployment, backends).await
     }
 }

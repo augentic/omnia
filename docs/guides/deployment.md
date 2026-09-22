@@ -77,7 +77,7 @@ Everything is environment variables — backend connection strings, runtime limi
 
 Two variables deserve attention in production:
 
-- `RUST_LOG` — set at least `info` so startup, readiness, and trigger-server logs are emitted.
+- `RUST_LOG` — a server defaults to `warn`; set at least `info` (or start the binary with `-v`) so startup, readiness, and trigger-server logs are emitted.
 - `OTEL_GRPC_URL` — point at your collector; the host exports traces and metrics (including pool-occupancy gauges) with no further wiring.
 
 ## Readiness and health

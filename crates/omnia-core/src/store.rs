@@ -12,7 +12,9 @@ use wasmtime::{StoreLimits, StoreLimitsBuilder};
 use wasmtime_wasi::{FsPerms, ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::{WasiHttpCtxView, WasiHttpView};
 
-use crate::{ChainCtx, Dispatcher, Extensions, HostCtx, MountRegistry, Provides, RuntimeOptions};
+use crate::{
+    ChainCtx, Dispatcher, Extensions, HostCtx, LevelFilter, MountRegistry, Provides, RuntimeOptions,
+};
 
 /// Exposes a store context's [`StoreLimits`] so the runtime can install a
 /// per-guest resource limiter on every [`Store`](wasmtime::Store) it creates.
@@ -287,22 +289,25 @@ impl<B: Send + 'static> HasChain for StoreCtx<B> {
     }
 }
 
-/// The complete guest environment: every `host` pair, then each default whose
-/// name the host lacks.
+const RUST_LOG: &str = "RUST_LOG";
+
+/// The complete guest environment: every `host` pair, with `RUST_LOG` at the
+/// deployment's tracing level.
 ///
-/// A variable the host process sets wins over the deployment's default under
-/// the same name, so an operator's `RUST_LOG=off` still silences a guest
-/// whose deployment defaults it to `info`.
-pub fn merge_env(
-    host: impl IntoIterator<Item = (String, String)>, defaults: &[(String, String)],
+/// A selected `level` replaces whatever `RUST_LOG` the host carries. With
+/// none selected, `fallback` fills the variable only when the host lacks it,
+/// so an operator's own `RUST_LOG` stands on a bare run.
+pub fn guest_env(
+    host: impl IntoIterator<Item = (String, String)>, level: Option<LevelFilter>,
+    fallback: LevelFilter,
 ) -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = host.into_iter().collect();
-    let missing = defaults
-        .iter()
-        .filter(|(name, _)| env.iter().all(|(set, _)| set != name))
-        .cloned()
-        .collect::<Vec<_>>();
-    env.extend(missing);
+    match (level, env.iter_mut().find(|(name, _)| name == RUST_LOG)) {
+        (Some(level), Some((_, value))) => *value = level.to_string(),
+        (None, Some(_)) => {}
+        (Some(level), None) => env.push((RUST_LOG.to_owned(), level.to_string())),
+        (None, None) => env.push((RUST_LOG.to_owned(), fallback.to_string())),
+    }
     env
 }
 
@@ -314,26 +319,36 @@ mod tests {
         entries.iter().map(|(name, value)| ((*name).to_owned(), (*value).to_owned())).collect()
     }
 
-    // A default fills a name the host lacks and yields to one the host sets;
-    // the host's own pairs come through untouched and first.
+    // A selected level replaces the host's `RUST_LOG` in place, or is
+    // appended when the host has none; every other pair comes through
+    // untouched.
     #[test]
-    fn host_wins() {
+    fn level_overrides() {
         let host = pairs(&[("RUST_LOG", "off"), ("HOME", "/home/op")]);
-        let defaults = pairs(&[("RUST_LOG", "my_sdk=info"), ("OTEL_SERVICE_NAME", "adapters")]);
-
-        let env = merge_env(host, &defaults);
-
         assert_eq!(
-            env,
-            pairs(&[("RUST_LOG", "off"), ("HOME", "/home/op"), ("OTEL_SERVICE_NAME", "adapters"),])
+            guest_env(host, Some(LevelFilter::DEBUG), LevelFilter::INFO),
+            pairs(&[("RUST_LOG", "debug"), ("HOME", "/home/op")])
+        );
+
+        let host = pairs(&[("HOME", "/home/op")]);
+        assert_eq!(
+            guest_env(host, Some(LevelFilter::TRACE), LevelFilter::INFO),
+            pairs(&[("HOME", "/home/op"), ("RUST_LOG", "trace")])
         );
     }
 
-    // No host environment at all leaves the defaults as the whole guest
-    // environment, in the order the deployment declared them.
     #[test]
-    fn empty_host() {
-        let defaults = pairs(&[("B", "2"), ("A", "1")]);
-        assert_eq!(merge_env(Vec::new(), &defaults), defaults);
+    fn bare_fills_fallback() {
+        let host = pairs(&[("HOME", "/home/op")]);
+        assert_eq!(
+            guest_env(host, None, LevelFilter::WARN),
+            pairs(&[("HOME", "/home/op"), ("RUST_LOG", "warn")])
+        );
+    }
+
+    #[test]
+    fn bare_keeps_process() {
+        let host = pairs(&[("RUST_LOG", "my_sdk=debug"), ("HOME", "/home/op")]);
+        assert_eq!(guest_env(host.clone(), None, LevelFilter::INFO), host);
     }
 }

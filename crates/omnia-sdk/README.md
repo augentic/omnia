@@ -100,6 +100,8 @@ async fn main() -> Response {
 
 A success body is encoded in the selected `api::Format` (`Text` through the `render` closure, `Json` pretty-printed) onto stdout at exit 0. A decode or handler error is a `Failure` envelope on stderr at `Error::exit_code()` — `BadRequest` 1, `NotFound` 2, `ServerError` 3, `BadGateway` 4 — rendered as `error[<code>]: <message>` (plus `hint: …` when `.hints(..)` or `with_hint` attached one) or as flat JSON `{"error","message","exit-code","hint"?}`; `error` and `message` are the same `ErrorBody` HTTP emits. A clap usage error exits `USAGE_EXIT` (64), so exit 2 always means `NotFound`. `Metadata::from_env(prefix)` reads `<PREFIX>_REQUEST_ID` / `_CORRELATION_ID` / `_CAUSATION_ID`, minting a request id when absent as every transport does.
 
+The runtime's verbosity flags — `-v`/`--verbose` and `-q`/`--quiet`, each repetition one level from the command's default of `info` — are read by the host out of argv and set the guest's `RUST_LOG` before it runs; argv still arrives verbatim, so a grammar declares them with `#[command(flatten)] verbosity: omnia_sdk::api::command::Verbosity` to list them in help and completions and to refuse `-v` beside `-q`. The command never acts on the parsed values.
+
 ## Capabilities
 
 The guest crate exposes trait-based abstractions for host capabilities. When compiled to `wasm32`, these delegate to WASI host calls.

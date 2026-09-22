@@ -41,7 +41,8 @@ pub enum RunSource {
     CompiledIn,
 }
 
-/// The planner's outcome: source, CLI mounts, link interfaces, and guest argv.
+/// The planner's outcome: source, CLI mounts, link interfaces, verbosity, and
+/// guest argv.
 #[derive(Debug, PartialEq, Eq)]
 pub struct RunPlan {
     /// Which source the precedence ladder selected.
@@ -50,6 +51,13 @@ pub struct RunPlan {
     pub mounts: Vec<MountArg>,
     /// `--link` arguments, in argv order.
     pub link: Vec<String>,
+    /// How many `-v` flags were given; each raises the process tracing level
+    /// one step.
+    pub verbose: u8,
+    /// How many `-q` flags were given; each lowers the process tracing level
+    /// one step. Never non-zero together with `verbose`: clap refuses the
+    /// pair.
+    pub quiet: u8,
     /// Arguments forwarded to the guest as its argv (everything after `--`).
     pub args: Vec<String>,
 }
@@ -68,8 +76,12 @@ pub struct RunPlan {
 pub fn plan(
     argv: impl IntoIterator<Item = OsString>, omnia_config: Option<OsString>, has_compiled_in: bool,
 ) -> Result<RunPlan, PlanError> {
-    let cli = Cli::try_parse_from(argv).map_err(PlanError::Usage)?;
-    match cli.command {
+    let Cli {
+        command,
+        verbose,
+        quiet,
+    } = Cli::try_parse_from(argv).map_err(PlanError::Usage)?;
+    match command {
         Command::Run {
             wasm,
             config,
@@ -93,6 +105,8 @@ pub fn plan(
                 source,
                 mounts,
                 link,
+                verbose,
+                quiet,
                 args,
             })
         }
@@ -177,5 +191,41 @@ mod tests {
         let error = plan(argv(&["bin", "bogus"]), None, false)
             .expect_err("an unknown subcommand is a usage error");
         assert!(matches!(error, PlanError::Usage(_)));
+    }
+
+    // The flags are global: they parse before and after `run`, and every
+    // repetition counts.
+    #[test]
+    fn run_verbose() {
+        let before = plan(argv(&["bin", "-vv", "run", "guest.wasm"]), None, false)
+            .unwrap_or_else(|error| panic!("{}", fatal(error)));
+        assert_eq!((before.verbose, before.quiet), (2, 0));
+
+        let after = plan(argv(&["bin", "run", "guest.wasm", "--verbose", "-v"]), None, false)
+            .unwrap_or_else(|error| panic!("{}", fatal(error)));
+        assert_eq!((after.verbose, after.quiet), (2, 0));
+    }
+
+    #[test]
+    fn run_quiet() {
+        let plan = plan(argv(&["bin", "run", "-qq", "guest.wasm"]), None, false)
+            .unwrap_or_else(|error| panic!("{}", fatal(error)));
+        assert_eq!((plan.verbose, plan.quiet), (0, 2));
+    }
+
+    #[test]
+    fn run_verbose_quiet_conflict() {
+        let error = plan(argv(&["bin", "run", "-v", "-q", "guest.wasm"]), None, false)
+            .expect_err("`-v` with `-q` is a usage error");
+        assert!(matches!(error, PlanError::Usage(_)));
+    }
+
+    // Past `--` the flags belong to the guest.
+    #[test]
+    fn run_guest_flags() {
+        let plan = plan(argv(&["bin", "run", "guest.wasm", "--", "-v", "-q"]), None, false)
+            .unwrap_or_else(|error| panic!("{}", fatal(error)));
+        assert_eq!((plan.verbose, plan.quiet), (0, 0));
+        assert_eq!(plan.args, ["-v", "-q"]);
     }
 }
