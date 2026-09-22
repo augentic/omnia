@@ -48,8 +48,14 @@ pub async fn scope<F: Future>(inner: impl FnOnce() -> F) -> F::Output {
 /// Returns an error if telemetry is not initialized, `directives` do not
 /// parse, or the filter cannot be reloaded.
 pub fn set_filter(directives: &str) -> Result<()> {
+    let rust_log = std::env::var("RUST_LOG").unwrap_or_default();
+    let env = rust_log.split(',').filter(|val| !val.is_empty()).filter_map(|val| {
+        val.parse::<Directive>().inspect_err(|err| eprintln!("ignoring `{val}`: {err}")).ok()
+    });
+    let filter = mute(env.fold(EnvFilter::builder().parse(directives)?, EnvFilter::add_directive))?;
+
     let telemetry = telemetry().context("telemetry is not initialized")?;
-    telemetry.filter.reload(compose(directives)?).context("issue reloading the filter")
+    telemetry.filter.reload(filter).context("issue reloading the filter")
 }
 
 /// Export buffered spans and recorded metrics to the host.
@@ -66,8 +72,6 @@ struct Telemetry {
     filter: reload::Handle<EnvFilter, Registry>,
     spans: tracing::SpanBuffer,
     meters: metrics::MeterProvider,
-    // The host's telemetry resource, fetched once and sent with every
-    // metrics export.
     resource: types::Resource,
 }
 
@@ -105,18 +109,6 @@ fn init() -> Result<Telemetry> {
     })
 }
 
-// Compose filter `directives` with `RUST_LOG` directives.
-fn compose(directives: &str) -> Result<EnvFilter> {
-    let rust_log = std::env::var("RUST_LOG").unwrap_or_default();
-    let env = rust_log.split(',').filter(|val| !val.is_empty()).filter_map(|val| {
-        val.parse::<Directive>().inspect_err(|err| eprintln!("ignoring `{val}`: {err}")).ok()
-    });
-
-    mute(env.fold(EnvFilter::builder().parse(directives)?, EnvFilter::add_directive))
-}
-
-// The API's self-diagnostics (`internal-logs`, should a guest dependency
-// enable the feature) stay out of guest output.
 fn mute(filter: EnvFilter) -> Result<EnvFilter> {
     Ok(filter.add_directive("opentelemetry=off".parse()?))
 }
