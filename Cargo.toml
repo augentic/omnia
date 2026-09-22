@@ -11,7 +11,7 @@ keywords = ["runtime", "wasi", "wasm", "wasmtime", "component-model"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/augentic/omnia"
 rust-version = "1.97"
-version = "0.36.0"
+version = "0.37.0"
 
 [workspace.lints.rust]
 # https://dirname.github.io/rust-std-doc/rustc/lints/listing/allowed-by-default.html
@@ -132,27 +132,27 @@ wit-bindgen = { version = "0.62.0", features = ["async-spawn"] }
 x509-cert = { version = "0.3.0", default-features = false, features = ["std"] }
 
 # internally referenced crates
-omnia = { path = "crates/omnia", version = "0.36.0" }
-omnia-cli = { path = "crates/omnia-cli", version = "0.36.0" }
-omnia-core = { path = "crates/omnia-core", version = "0.36.0", default-features = false }
-omnia-guest-macros = { path = "crates/guest-macros", version = "0.36.0" }
-omnia-host-macros = { path = "crates/host-macros", version = "0.36.0" }
-omnia-link = { path = "crates/omnia-link", version = "0.36.0" }
-omnia-plugin = { path = "crates/omnia-plugin", version = "0.36.0" }
-omnia-sdk = { path = "crates/omnia-sdk", version = "0.36.0", default-features = false }
-omnia-test = { path = "crates/omnia-test", version = "0.36.0", default-features = false }
-omnia-wasi-blobstore = { path = "crates/wasi-blobstore", version = "0.36.0" }
-omnia-wasi-config = { path = "crates/wasi-config", version = "0.36.0" }
-omnia-wasi-docstore = { path = "crates/wasi-docstore", version = "0.36.0" }
-omnia-wasi-http = { path = "crates/wasi-http", version = "0.36.0" }
-omnia-wasi-identity = { path = "crates/wasi-identity", version = "0.36.0" }
-omnia-wasi-keyvalue = { path = "crates/wasi-keyvalue", version = "0.36.0" }
-omnia-wasi-messaging = { path = "crates/wasi-messaging", version = "0.36.0" }
-omnia-wasi-model = { path = "crates/wasi-model", version = "0.36.0" }
-omnia-wasi-otel = { path = "crates/wasi-otel", version = "0.36.0" }
-omnia-wasi-sql = { path = "crates/wasi-sql", version = "0.36.0" }
-omnia-wasi-vault = { path = "crates/wasi-vault", version = "0.36.0" }
-omnia-wasi-websocket = { path = "crates/wasi-websocket", version = "0.36.0" }
+omnia = { path = "crates/omnia", version = "0.37.0" }
+omnia-cli = { path = "crates/omnia-cli", version = "0.37.0" }
+omnia-core = { path = "crates/omnia-core", version = "0.37.0", default-features = false }
+omnia-guest-macros = { path = "crates/guest-macros", version = "0.37.0" }
+omnia-host-macros = { path = "crates/host-macros", version = "0.37.0" }
+omnia-link = { path = "crates/omnia-link", version = "0.37.0" }
+omnia-plugin = { path = "crates/omnia-plugin", version = "0.37.0" }
+omnia-sdk = { path = "crates/omnia-sdk", version = "0.37.0", default-features = false }
+omnia-test = { path = "crates/omnia-test", version = "0.37.0", default-features = false }
+omnia-wasi-blobstore = { path = "crates/wasi-blobstore", version = "0.37.0" }
+omnia-wasi-config = { path = "crates/wasi-config", version = "0.37.0" }
+omnia-wasi-docstore = { path = "crates/wasi-docstore", version = "0.37.0" }
+omnia-wasi-http = { path = "crates/wasi-http", version = "0.37.0" }
+omnia-wasi-identity = { path = "crates/wasi-identity", version = "0.37.0" }
+omnia-wasi-keyvalue = { path = "crates/wasi-keyvalue", version = "0.37.0" }
+omnia-wasi-messaging = { path = "crates/wasi-messaging", version = "0.37.0" }
+omnia-wasi-model = { path = "crates/wasi-model", version = "0.37.0" }
+omnia-wasi-otel = { path = "crates/wasi-otel", version = "0.37.0" }
+omnia-wasi-sql = { path = "crates/wasi-sql", version = "0.37.0" }
+omnia-wasi-vault = { path = "crates/wasi-vault", version = "0.37.0" }
+omnia-wasi-websocket = { path = "crates/wasi-websocket", version = "0.37.0" }
 test-programs = { path = "crates/test-programs" }
 
 [profile.release]
