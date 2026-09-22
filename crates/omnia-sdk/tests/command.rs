@@ -16,7 +16,13 @@ use omnia_sdk::{bad_request, not_found};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
-#[command(name = "app", bin_name = "app", version = "1.2.3", subcommand_required = true)]
+#[command(
+    name = "app",
+    bin_name = "app",
+    version = "1.2.3",
+    about = "Greets people",
+    subcommand_required = true
+)]
 struct App {
     #[arg(long, default_value = "text", global = true)]
     format: Format,
@@ -75,6 +81,10 @@ fn help_display() {
     assert!(text.contains("greet"));
     assert!(text.contains("-v, --verbose"), "{text}");
     assert!(text.contains("-q, --quiet"), "{text}");
+
+    // The flattened `Verbosity` docs stay out of the grammar's own about text.
+    assert!(text.starts_with("Greets people"), "{text}");
+    assert!(<App as clap::CommandFactory>::command().get_long_about().is_none());
 }
 
 #[test]

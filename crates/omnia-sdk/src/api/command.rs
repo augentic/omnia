@@ -393,6 +393,9 @@ pub enum Parsed<A> {
 /// ```
 #[cfg(feature = "command")]
 #[derive(clap::Args, Clone, Copy, Debug, Default, Eq, PartialEq)]
+// A flattened struct's doc comment would otherwise become the parent command's `about` and
+// `long_about`; clearing both here leaves the grammar's own text in place.
+#[command(about = None, long_about = None)]
 pub struct Verbosity {
     /// Show more detail, once per level.
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
