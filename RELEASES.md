@@ -261,6 +261,17 @@
 
 ### Changed
 
+- Upgraded `wasmtime` and the matching `wasmtime-wasi*` crates to 49.0.0.
+  `wasmtime-wasi` is linked with the `p2` and `p3` features only, so
+  `omnia::wasmtime_wasi::p1` no longer exists, and `wasmtime-wasi-io` is
+  dropped from the workspace. Pre-compiled `.bin` artifacts must be rebuilt
+  with `omnia compile`: the engine version and the now-default
+  wide-arithmetic flag both change the compatibility check, so a 48-built
+  artifact is rejected at load. The `wasi:http` server builds the guest
+  request through upstream `Request::from_http` rather than a hand-mirrored
+  copy of it (the `+ use<T>` capture fix in 49 made the mirror unnecessary);
+  behaviour is unchanged.
+
 - `ChainCtx` is `Clone`, not `Copy`, and no longer `Default`: it now
   carries the chain's metadata, and a root is `ChainCtx::server()` or
   `ChainCtx::command()`; code that relied on the implicit copy clones or
