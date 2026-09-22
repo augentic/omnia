@@ -88,14 +88,14 @@ anyhow.workspace = true
 bytes.workspace = true
 http.workspace = true
 http-body-util.workspace = true
-omnia.workspace = true
-omnia-sdk.workspace = true
-omnia-wasi-blobstore.workspace = true
-omnia-wasi-config.workspace = true
-omnia-wasi-keyvalue.workspace = true
-omnia-wasi-model.workspace = true
-omnia-wasi-otel.workspace = true
-omnia-wasi-sql.workspace = true
+omnia = { path = "../omnia" }
+omnia-sdk = { path = "../omnia-sdk", default-features = false }
+omnia-wasi-blobstore = { path = "../wasi-blobstore" }
+omnia-wasi-config = { path = "../wasi-config" }
+omnia-wasi-keyvalue = { path = "../wasi-keyvalue" }
+omnia-wasi-model = { path = "../wasi-model" }
+omnia-wasi-otel = { path = "../wasi-otel" }
+omnia-wasi-sql = { path = "../wasi-sql" }
 test-programs.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 

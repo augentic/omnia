@@ -31,7 +31,11 @@ wasmtime-wasi.workspace = true
 wit-bindgen.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-omnia.workspace = true
-omnia-test = { workspace = true, features = ["host"] }
+# Path-only, not `workspace = true`: the workspace entries carry a `version`,
+# which cargo keeps in the published manifest, and these crates depend back
+# on this one, so a versioned dev-dep would make the first publish of a
+# fresh version unresolvable. Path-only dev-deps are stripped on publish.
+omnia = { path = "../omnia" }
+omnia-test = { path = "../omnia-test", default-features = false, features = ["host"] }
 test-programs.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
