@@ -15,7 +15,7 @@
 //! implemented: only the in-process default is accepted.
 
 use std::borrow::Cow;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -55,6 +55,9 @@ pub struct Manifest {
     /// Working-tree mounts preopened into the guest sandbox.
     #[serde(rename = "mount")]
     pub mounts: Vec<Mount>,
+    /// Guest environment defaults: variables every guest carries when the
+    /// host process does not set them.
+    pub env: BTreeMap<String, String>,
     /// Host-mediated link interfaces polyfilled onto the shared linker.
     pub link: LinkConfig,
     /// Plugin-loader acquisition locations.
@@ -111,6 +114,19 @@ impl Manifest {
     #[must_use]
     pub fn mounts(mut self, mounts: impl IntoIterator<Item = Mount>) -> Self {
         self.mounts.extend(mounts);
+        self
+    }
+
+    /// Append guest environment defaults (the manifest's `[env]` table); a
+    /// later entry replaces an earlier one under the same name.
+    #[must_use]
+    pub fn env<I, K, V>(mut self, entries: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<String>,
+    {
+        self.env.extend(entries.into_iter().map(|(name, value)| (name.into(), value.into())));
         self
     }
 
@@ -582,6 +598,33 @@ mod tests {
     #[test]
     fn reject_unknown_route_trigger() {
         let toml = "[[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\nroutes.grpc = [\"/a\"]\n";
+        toml::from_str::<Manifest>(toml).unwrap_err();
+    }
+
+    #[test]
+    fn parse_env() {
+        let toml = r#"
+            [env]
+            RUST_LOG = "my_sdk=info"
+            OTEL_SERVICE_NAME = "adapters"
+
+            [[guest]]
+            id = "a"
+            source.path = "./a.wasm"
+        "#;
+
+        let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
+        assert_eq!(manifest.env["RUST_LOG"], "my_sdk=info");
+        assert_eq!(manifest.env["OTEL_SERVICE_NAME"], "adapters");
+
+        let manifest = manifest.env([("RUST_LOG", "my_sdk=debug")]);
+        assert_eq!(manifest.env["RUST_LOG"], "my_sdk=debug", "a later entry replaces");
+        assert_eq!(manifest.env.len(), 2);
+    }
+
+    #[test]
+    fn reject_non_string_env() {
+        let toml = "[env]\nPORT = 8080\n\n[[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\n";
         toml::from_str::<Manifest>(toml).unwrap_err();
     }
 

@@ -288,16 +288,7 @@ The outermost instrumented `async fn` (or `command!`, which does the same for a 
 
 The OpenTelemetry API works directly too: `global::tracer(..)` and `global::meter(..)` return Omnia's own providers, which record straight into the `omnia:otel` records the flush exports — no OpenTelemetry SDK is linked into the guest. Counters, histograms, and gauges export delta series (one instance per invocation); up-down counters are cumulative. Observable (callback) instruments are no-ops: record through a synchronous instrument instead.
 
-Console output (events, never a span prefix) goes to stderr, so stdout stays the guest's own; it follows the guest's `RUST_LOG`, defaulting to `error`, and `omnia_wasi_otel::set_filter` replaces those defaults at run time — valid `RUST_LOG` directives are applied on top and win for the same target, invalid ones are reported to stderr and ignored. Spans and metrics are exported whatever the filter admits: a span below the filter's level is never created, so an `#[instrument]` at `INFO` needs `RUST_LOG=info` (or a `set_filter` call) to reach the host.
-
-A guest dispatched by another over the link seam opens where its caller asked. The caller names the level on the chain's baggage under `omnia_wasi_otel::LEVEL`, beside the reload of its own filter — a CLI does both once it has parsed its verbosity flags:
-
-```rust
-omnia_wasi_otel::set_filter("info")?;
-omnia_wasi_otel::set_baggage([(omnia_wasi_otel::LEVEL, "info")]);
-```
-
-Every guest dispatched beneath it then opens its subscriber at that level as its telemetry initializes, before its outermost `#[instrument]` span, so that span is admitted at the level the caller asked for with no reload of the callee's own; `RUST_LOG` still applies on top, and a chain that names none opens the callee at `error` like any root. A level crosses, never directives: a callee that filters per crate reads `omnia_wasi_otel::level()` and composes its own `set_filter` directives over it, which its already-open boundary span keeps clear of.
+Console output (events, never a span prefix) goes to stderr, so stdout stays the guest's own; it follows the guest's `RUST_LOG`, defaulting to `error`, and `omnia_wasi_otel::set_filter` replaces those defaults at run time — valid `RUST_LOG` directives are applied on top and win for the same target, invalid ones are reported to stderr and ignored. Spans and metrics are exported whatever the filter admits: a span below the filter's level is never created, so an `#[instrument]` at `INFO` needs `RUST_LOG=info` (or a `set_filter` call) to reach the host. A guest's `RUST_LOG` is the one its WASI environment carries: the host's, filled in by the deployment's `[env]` defaults for every variable the host does not set (see the [configuration reference](../reference/configuration.md#deployment-manifest-omniatoml)), so a runtime can open every guest it dispatches at a chosen filter without any guest naming another.
 
 ## Serving MCP tools
 

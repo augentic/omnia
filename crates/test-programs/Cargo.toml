@@ -53,6 +53,11 @@ path = "programs/blobstore/objects.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "cli_env"
+path = "programs/cli/env.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "command_exit_map"
 path = "programs/command/exit_map.rs"
 crate-type = ["cdylib"]
@@ -288,16 +293,6 @@ path = "programs/otel/axum_handler.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "otel_baggage"
-path = "programs/otel/baggage.rs"
-crate-type = ["cdylib"]
-
-[[example]]
-name = "otel_baggage_echoer"
-path = "programs/otel/baggage_echoer.rs"
-crate-type = ["cdylib"]
-
-[[example]]
 name = "otel_filter_reload"
 path = "programs/otel/filter_reload.rs"
 crate-type = ["cdylib"]
@@ -305,16 +300,6 @@ crate-type = ["cdylib"]
 [[example]]
 name = "otel_instrumented_handler"
 path = "programs/otel/instrumented_handler.rs"
-crate-type = ["cdylib"]
-
-[[example]]
-name = "otel_level"
-path = "programs/otel/level.rs"
-crate-type = ["cdylib"]
-
-[[example]]
-name = "otel_level_echoer"
-path = "programs/otel/level_echoer.rs"
 crate-type = ["cdylib"]
 
 [[example]]

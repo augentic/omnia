@@ -196,6 +196,7 @@ impl DeploymentBuilder {
             allow_empty: self.allow_empty,
             command_guest: manifest.command_guest(),
             locations: manifest.plugin.locations,
+            env: manifest.env.into_iter().collect(),
         })
     }
 
@@ -270,6 +271,9 @@ pub struct Deployment<T: WasiView + 'static> {
     // The manifest's plugin acquisition locations, carried onto the runtime
     // for the loader capability to install against.
     locations: Vec<Location>,
+    // The manifest's guest environment defaults, carried onto the runtime to
+    // fill what the host environment lacks in every store it builds.
+    env: Vec<(String, String)>,
 }
 
 /// Store bound every deployment store context satisfies; kept as a named bound
@@ -333,6 +337,12 @@ impl<T: WasiView> Deployment<T> {
         &self.locations
     }
 
+    /// The manifest's guest environment defaults.
+    #[must_use]
+    pub fn env(&self) -> &[(String, String)] {
+        &self.env
+    }
+
     /// Assemble the guest [`Registry`].
     ///
     /// Consumes the deployment: pre-instantiation happens once, here, after all
@@ -385,6 +395,7 @@ impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
             args: self.args.to_vec(),
             mounts: Arc::clone(&self.mounts),
             locations: self.locations.clone(),
+            env: self.env.clone(),
             command_guest: self.command_guest.clone(),
             backends,
             registry: Arc::new(self.into_registry().context("assembling registry")?),
