@@ -849,6 +849,114 @@ Unreleased
   for `bytecodealliance/wrpc`, and the `cargo vet` git policies for
   `wrpc-introspect` / `wrpc-transport`.
 
+<!-- Release notes generated using configuration in .github/release.yaml at main -->
+
+## What's Changed
+* Bump to 0.35.0 by @augentic-releases[bot] in https://github.com/augentic/omnia/pull/202
+* Instrumentation fix by @andrewweston in https://github.com/augentic/omnia/pull/203
+* Instance pooling by @andrewweston in https://github.com/augentic/omnia/pull/204
+* Guest registry by @andrewweston in https://github.com/augentic/omnia/pull/205
+* Implement wasi model by @andrewweston in https://github.com/augentic/omnia/pull/206
+* Specify readiness testing by @andrewweston in https://github.com/augentic/omnia/pull/207
+* MCP server for cursor-agent by @andrewweston in https://github.com/augentic/omnia/pull/208
+* Post-upgrade testing and code review by @andrewweston in https://github.com/augentic/omnia/pull/209
+* Async guest-2-guest linking by @andrewweston in https://github.com/augentic/omnia/pull/210
+* style fenced code by @andrewweston in https://github.com/augentic/omnia/pull/211
+* Specify-driven refactoring by @andrewweston in https://github.com/augentic/omnia/pull/212
+* Streamline testing by @andrewweston in https://github.com/augentic/omnia/pull/213
+* Replay by @andrewweston in https://github.com/augentic/omnia/pull/214
+* MCP grants by @andrewweston in https://github.com/augentic/omnia/pull/215
+* Runtime flexibility by @andrewweston in https://github.com/augentic/omnia/pull/216
+* improve runtime config by @andrewweston in https://github.com/augentic/omnia/pull/217
+* Dynamic guest resolver by @andrewweston in https://github.com/augentic/omnia/pull/218
+* Dynamic guest resolver in runtime! by @andrewweston in https://github.com/augentic/omnia/pull/219
+* Embed guest bytes by @andrewweston in https://github.com/augentic/omnia/pull/220
+* Update to wasmtime 47.0.2 by @andrewweston in https://github.com/augentic/omnia/pull/221
+* Bump to 0.36.0 by @augentic-releases[bot] in https://github.com/augentic/omnia/pull/222
+* Release 0.35.0 by @andrewweston in https://github.com/augentic/omnia/pull/223
+* Improve telemetry by @andrewweston in https://github.com/augentic/omnia/pull/224
+* Simplify telemetry by @andrewweston in https://github.com/augentic/omnia/pull/225
+* Model answer by @andrewweston in https://github.com/augentic/omnia/pull/226
+* Add model helpers by @andrewweston in https://github.com/augentic/omnia/pull/227
+* Http routing by @andrewweston in https://github.com/augentic/omnia/pull/228
+* remove timeout wrapper on CLI by @andrewweston in https://github.com/augentic/omnia/pull/229
+* Refactor by @andrewweston in https://github.com/augentic/omnia/pull/230
+* Add CLI debug flag by @andrewweston in https://github.com/augentic/omnia/pull/231
+* No timeout for CLI by @andrewweston in https://github.com/augentic/omnia/pull/232
+* Add feature flags by @andrewweston in https://github.com/augentic/omnia/pull/233
+* unit -> integration tests by @andrewweston in https://github.com/augentic/omnia/pull/234
+* Refactor docs by @andrewweston in https://github.com/augentic/omnia/pull/235
+* Workspace grants by @andrewweston in https://github.com/augentic/omnia/pull/236
+* wasi:model workspace grants by @andrewweston in https://github.com/augentic/omnia/pull/237
+* Improve answer extraction by @andrewweston in https://github.com/augentic/omnia/pull/238
+* Fix extraction fence bug by @andrewweston in https://github.com/augentic/omnia/pull/239
+* Add operator macro by @andrewweston in https://github.com/augentic/omnia/pull/240
+* remove unecessary test and fix deny warnings by @andrew-goldie in https://github.com/augentic/omnia/pull/241
+* Runtime macro by @andrewweston in https://github.com/augentic/omnia/pull/242
+* Simplify command router by @andrewweston in https://github.com/augentic/omnia/pull/243
+* KeyValue CAS by @andrewweston in https://github.com/augentic/omnia/pull/244
+* Error enum by @andrew-goldie in https://github.com/augentic/omnia/pull/245
+* Model stream by @andrewweston in https://github.com/augentic/omnia/pull/246
+* Seamless by @andrew-goldie in https://github.com/augentic/omnia/pull/247
+* Curate wasi-model by @andrewweston in https://github.com/augentic/omnia/pull/248
+* Simplify Guest API by @andrew-goldie in https://github.com/augentic/omnia/pull/249
+* wasi-model tweaks by @andrewweston in https://github.com/augentic/omnia/pull/250
+* wasi-model testing by @andrewweston in https://github.com/augentic/omnia/pull/251
+* Wasmtime 48 by @andrewweston in https://github.com/augentic/omnia/pull/252
+* Plugin support by @andrewweston in https://github.com/augentic/omnia/pull/253
+* Address runtime! macro fragility by @andrewweston in https://github.com/augentic/omnia/pull/254
+* Guest api tidy by @andrew-goldie in https://github.com/augentic/omnia/pull/255
+* Remove docker by @andrew-goldie in https://github.com/augentic/omnia/pull/256
+* Relocate plugins by @andrewweston in https://github.com/augentic/omnia/pull/257
+* Remove legacy code by @andrewweston in https://github.com/augentic/omnia/pull/258
+* Example tidy by @andrew-goldie in https://github.com/augentic/omnia/pull/259
+* Fully separate omnia-plugin by @andrewweston in https://github.com/augentic/omnia/pull/260
+* Example runs by @andrew-goldie in https://github.com/augentic/omnia/pull/261
+* Plugin simplification by @andrewweston in https://github.com/augentic/omnia/pull/262
+* remove allow lint added by agent in PR #257 by @andrew-goldie in https://github.com/augentic/omnia/pull/263
+* Smoke tests for examples by @andrew-goldie in https://github.com/augentic/omnia/pull/264
+* Remove core from docs by @andrew-goldie in https://github.com/augentic/omnia/pull/265
+* Public omnia-test crate by @andrewweston in https://github.com/augentic/omnia/pull/266
+* omnia-test fixes by @andrewweston in https://github.com/augentic/omnia/pull/267
+* Cli crate by @andrew-goldie in https://github.com/augentic/omnia/pull/268
+* Fix boundary between omnia and omnia-core by @andrew-goldie in https://github.com/augentic/omnia/pull/269
+* Tidy plugin module organization and create feature flag by @andrew-goldie in https://github.com/augentic/omnia/pull/270
+* Function-bound handlers by @andrew-goldie in https://github.com/augentic/omnia/pull/271
+* Emery fixes by @andrewweston in https://github.com/augentic/omnia/pull/272
+* More ergonomic SDK for CLI guests by @andrew-goldie in https://github.com/augentic/omnia/pull/273
+* Guest callbacks for model answer verification by @andrewweston in https://github.com/augentic/omnia/pull/274
+* omnia-link crate and feature flag for wRPC comms between guests by @andrew-goldie in https://github.com/augentic/omnia/pull/275
+* Model answer fixes by @andrewweston in https://github.com/augentic/omnia/pull/276
+* Wasi tests by @andrew-goldie in https://github.com/augentic/omnia/pull/277
+* Macro trim by @andrew-goldie in https://github.com/augentic/omnia/pull/278
+* Replace examples smoke test with minimal alternative by @andrew-goldie in https://github.com/augentic/omnia/pull/279
+* Modify omnia-test to support other repos by @andrewweston in https://github.com/augentic/omnia/pull/280
+* Use wasm-pkg registry configuration by @andrewweston in https://github.com/augentic/omnia/pull/282
+* Remove wrpc by @andrew-goldie in https://github.com/augentic/omnia/pull/283
+* rename omnia-guest crate to omnia-sdk by @andrew-goldie in https://github.com/augentic/omnia/pull/284
+* Remove plugin cache from guest sdk by @andrew-goldie in https://github.com/augentic/omnia/pull/285
+* No macro tests by @andrew-goldie in https://github.com/augentic/omnia/pull/286
+* Optimise test build by @andrewweston in https://github.com/augentic/omnia/pull/287
+* Bugbot build fix by @andrewweston in https://github.com/augentic/omnia/pull/288
+* Cache to extensions by @andrew-goldie in https://github.com/augentic/omnia/pull/289
+* Remove --debug flag peeling by @andrewweston in https://github.com/augentic/omnia/pull/290
+* Remove span from traces by @andrewweston in https://github.com/augentic/omnia/pull/291
+* Improve async guest support in otel by @andrewweston in https://github.com/augentic/omnia/pull/292
+* Simplify otel filter directives by @andrewweston in https://github.com/augentic/omnia/pull/294
+* Clarify wasi-otel comments by @andrewweston in https://github.com/augentic/omnia/pull/295
+* Backend testing changes by @andrewweston in https://github.com/augentic/omnia/pull/296
+* Orm to extension by @andrew-goldie in https://github.com/augentic/omnia/pull/297
+* validate client-cert leaf certificate before use by @andrew-goldie in https://github.com/augentic/omnia/pull/298
+* Propagate trace level between linked guests by @andrewweston in https://github.com/augentic/omnia/pull/299
+* Simplify guest-to-guest context passing by @andrewweston in https://github.com/augentic/omnia/pull/300
+* Fix missing trace color by @andrewweston in https://github.com/augentic/omnia/pull/301
+* Set baggage in new guests by @andrewweston in https://github.com/augentic/omnia/pull/302
+* Wasmtime 49 by @andrew-goldie in https://github.com/augentic/omnia/pull/303
+* Repair release toolchain assumptions for 0.36.0 by @andrew-goldie in https://github.com/augentic/omnia/pull/304
+
+
+**Full Changelog**: https://github.com/augentic/omnia/compare/v0.34.0...v0.36.0
+
 ---
 
 Release notes for previous releases can be found on the respective release branches of the repository.
