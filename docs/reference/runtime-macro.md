@@ -9,7 +9,7 @@ Every key the `omnia::runtime!` macro accepts, with exact semantics. The task-or
 | `hosts:` | The `Host: Backend` map — which WASI interfaces are linked and what implements them | Always (except a backend-less command runtime) |
 | `mode:` | `server` (default) or `command` | Running jobs/CLIs instead of servers |
 | `config:` | Compile in a default manifest *path* | You want `run` with no arguments to work |
-| `link:`, `plugin:`, `guests:`, `mounts:` | Compile in a default manifest *value* (inline) | Same as `config:`, but self-contained — no TOML file at run time |
+| `link:`, `plugin:`, `guests:`, `mounts:`, `env:` | Compile in a default manifest *value* (inline) | Same as `config:`, but self-contained — no TOML file at run time |
 
 There is no key for raw argv passthrough: a command-mode runtime with a compiled-in deployment is a [direct command](#direct-commands-raw-argv-passthrough) automatically.
 
@@ -66,7 +66,7 @@ The value is any expression evaluating to a path. Anchoring it with `env!("CARGO
 
 `config:` and the inline manifest keys are mutually exclusive — a runtime compiles in a manifest path or a manifest value, not both.
 
-## Inline manifest keys (`link:`, `plugin:`, `guests:`, `mounts:`)
+## Inline manifest keys (`link:`, `plugin:`, `guests:`, `mounts:`, `env:`)
 
 The deployment `omnia.toml` expresses can also be written directly in the macro, mirroring the `omnia::Manifest` schema. The macro expands the keys to a `Manifest` value compiled into the generated `main` as the same lowest-precedence fallback as `config:`:
 
@@ -100,16 +100,20 @@ omnia::runtime!({
     mounts: [
         { name: ".", path: concat!(env!("CARGO_MANIFEST_DIR"), "/workspace"), writable: true },
     ],
+    env: {
+        RUST_LOG: "my_sdk=info",                 // guest environment defaults (deployment-wide)
+    },
     hosts: {
         WasiHttp: HttpDefault,
     }
 });
 ```
 
-- Each value is any Rust expression evaluating to the field's type (strings for ids, interfaces, and route patterns; paths or embedded bytes for `source`, paths for mount `path`; a bool for `writable`, which defaults to `false`).
+- Each value is any Rust expression evaluating to the field's type (strings for ids, interfaces, route patterns, and `env` values; paths or embedded bytes for `source`, paths for mount `path`; a bool for `writable`, which defaults to `false`).
 - Relative paths resolve against the process working directory at run time, so anchor them with `env!("CARGO_MANIFEST_DIR")` as with `config:`.
 - Routes are declared per guest, on the target entry's `routes:` block — one pattern list per trigger (`http` prefixes, `messaging` topics, `websocket` routes), with the declaring guest as the implicit target. There is no top-level `routes:` key.
 - A guest entry also accepts `command: true` (a literal bool), marking it as the command-mode target — see [Command routing](#command-routing-command-true).
+- The `env:` block is the manifest's `[env]` table: each `NAME: value` entry (the name an identifier or a string literal, the value a string expression) is a default every guest's WASI environment carries when the host process does not set it — the operator's variable wins, and the process environment is never written. It is the way a runtime opens the guests it dispatches at a chosen tracing filter without any guest naming another's level: `env: { RUST_LOG: "my_sdk=info" }` names the SDK crate so the default reaches only the spans it owns, where a bare level would also govern every other guest. A bare `env: [...]` list, an empty `env: {}`, and a name given twice are compile errors.
 - Host-mediated interfaces are declared once, deployment-wide, in the top-level `link:` block's `interfaces:` list — the linker is shared, so there is no per-guest form. `run --link` at the CLI unions with the compiled-in list. A bare `link: [...]` list is a compile error naming the block shape; a bare `link: {}` is a compile error because it would declare nothing. Declaring `link: { interfaces: [...] }` requires omnia's `link` feature; a runtime without it refuses a non-empty interface list at `Manifest::validate`.
 - Declaring a [`locations:` list](#plugin-locations-locations) also links the `omnia:plugins/loader` host capability (guest-requested plugin loading), which ships behind `omnia`'s non-default `plugin` feature; only guests whose world imports it can reach it. The list is the deployment's acquisition policy — the acquisition seam behind `loader.load`. A `link:`-only invocation never references the loader and builds without the feature, so a guest importing `omnia:plugins/loader` in such a deployment fails at instantiation; a bare `plugin: {}` beside `config:` does link it, over the TOML's `[[plugin.location]]` entries (without `config:` a bare block is a compile error, since it would declare nothing). Locations are manifest data (`[[plugin.location]]` in `omnia.toml`), so like every inline key they are mutually exclusive with `config:`; a config-file deployment declares them in the TOML. The two features are independent: neither block implies the other.
 

@@ -1,4 +1,3 @@
-mod baggage_impl;
 mod default_impl;
 mod metrics_impl;
 mod resource_impl;
@@ -27,13 +26,13 @@ mod generated {
 
 use std::fmt::Debug;
 
-use omnia_core::{FutureResult, HasChain, Host, Server, StoreView};
+use omnia_core::{FutureResult, Host, Server, StoreView};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use wasmtime::component::{HasData, Linker};
 
 pub use self::default_impl::OtelDefault;
-use self::generated::omnia::otel::{baggage, metrics, resource, tracing, types};
+use self::generated::omnia::otel::{metrics, resource, tracing, types};
 
 /// Host-side service for `wasi:otel`.
 #[derive(Debug)]
@@ -45,14 +44,13 @@ impl HasData for WasiOtel {
 
 impl<T> Host<T> for WasiOtel
 where
-    T: StoreView<Self> + HasChain + 'static,
+    T: StoreView<Self> + 'static,
 {
     fn add_to_linker(linker: &mut Linker<T>) -> anyhow::Result<()> {
         tracing::add_to_linker::<_, Self>(linker, T::view)?;
         metrics::add_to_linker::<_, Self>(linker, T::view)?;
         types::add_to_linker::<_, Self>(linker, T::view)?;
-        resource::add_to_linker::<_, Self>(linker, T::view)?;
-        Ok(baggage::add_to_linker::<_, Self>(linker, T::view)?)
+        Ok(resource::add_to_linker::<_, Self>(linker, T::view)?)
     }
 }
 

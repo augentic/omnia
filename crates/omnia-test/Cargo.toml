@@ -121,3 +121,7 @@ required-features = ["host"]
 [[test]]
 name = "command"
 required-features = ["host"]
+
+[[test]]
+name = "cli"
+required-features = ["host"]

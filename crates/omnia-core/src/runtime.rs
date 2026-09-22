@@ -65,6 +65,10 @@ pub struct RuntimeParts<B: 'static> {
     pub backends: B,
     /// Plugin acquisition locations from the manifest.
     pub locations: Vec<Location>,
+    /// Guest environment defaults from the manifest: variables every guest
+    /// carries when the host process does not set them. Empty inherits the
+    /// host environment unchanged.
+    pub env: Vec<(String, String)>,
     /// Command-mode guest identity, if any.
     pub command_guest: Option<GuestId>,
 }
@@ -95,6 +99,9 @@ struct RuntimeInner<B: 'static> {
     // The manifest's plugin acquisition locations, read by the loader
     // capability's install.
     locations: Vec<Location>,
+    // The manifest's guest environment defaults; `None` when it declares
+    // none, so every store inherits the host environment as WASI does.
+    env: Option<Arc<Vec<(String, String)>>>,
     // Capability-crate state installed by the extend hook and
     // shared with every store context.
     extensions: Extensions,
@@ -197,6 +204,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
             backends: parts.backends,
             command_guest: parts.command_guest,
             locations: parts.locations,
+            env: (!parts.env.is_empty()).then(|| Arc::new(parts.env)),
             extensions: Extensions::new(),
         }))
     }
@@ -294,9 +302,20 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     }
 
     /// Fresh per-guest store context at `chain`: a root for the command
-    /// driver, the snapshot a link dispatch derived for its callee.
+    /// driver, the context a link dispatch derived for its callee.
+    ///
+    /// The guest's environment is the host's, with the deployment's declared
+    /// defaults filling what it lacks; a deployment that declares none
+    /// inherits the host environment unchanged.
     #[must_use]
     pub fn store_in(&self, chain: ChainCtx) -> StoreCtx<B> {
+        // Read at store build, as `inherit_env` reads it, so both shapes see
+        // the same process environment.
+        let env = self
+            .inner
+            .env
+            .as_ref()
+            .map(|defaults| Arc::new(crate::store::merge_env(std::env::vars(), defaults)));
         StoreCtx {
             base: StoreBase::new(crate::StoreConfig {
                 options: self.options(),
@@ -304,7 +323,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
                 chain,
                 args: Some(Arc::clone(&self.inner.args)),
                 mounts: Some(Arc::clone(&self.inner.mounts)),
-                env: None,
+                env,
                 extensions: self.inner.extensions.clone(),
             }),
             backends: self.inner.backends.clone(),

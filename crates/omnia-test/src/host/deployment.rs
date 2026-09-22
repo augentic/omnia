@@ -10,8 +10,8 @@ use omnia::{
 use omnia_wasi_otel::WasiOtel;
 
 /// One command-mode deployment: guests, mounts, arguments, the link
-/// interfaces the host mediates, plugin locations, and the directory the `.`
-/// path location serves.
+/// interfaces the host mediates, plugin locations, guest environment
+/// defaults, and the directory the `.` path location serves.
 ///
 /// Built from nothing, or as an overlay on the manifest a production
 /// `runtime!` compiled in (`Deployment::from(runtime::manifest())`): the
@@ -47,6 +47,7 @@ pub struct Deployment {
     args: Vec<String>,
     link: Vec<String>,
     locations: Vec<Location>,
+    env: Vec<(String, String)>,
     path_root: Option<PathBuf>,
 }
 
@@ -116,6 +117,19 @@ impl Deployment {
         self
     }
 
+    /// Guest environment defaults (the manifest's `[env]` table): what every
+    /// guest carries when the test process does not set it, so a suite
+    /// scripts a guest's environment without touching its own.
+    #[must_use]
+    pub fn env<K, V>(mut self, entries: impl IntoIterator<Item = (K, V)>) -> Self
+    where
+        K: Into<String>,
+        V: Into<String>,
+    {
+        self.env.extend(entries.into_iter().map(|(name, value)| (name.into(), value.into())));
+        self
+    }
+
     /// Serves path loads (`Location::Path`) from `dir` as the `.` location,
     /// replacing the base manifest's `.` root when it declares one.
     #[must_use]
@@ -135,7 +149,8 @@ impl Deployment {
             .unwrap_or_default()
             .mounts(self.mounts.iter().cloned())
             .link(self.link.iter().cloned())
-            .locations(self.locations.iter().cloned());
+            .locations(self.locations.iter().cloned())
+            .env(self.env.iter().cloned());
         for guest in &self.guests {
             manifest = manifest.guest(guest.clone());
         }

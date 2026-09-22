@@ -35,7 +35,7 @@ pub struct StoreConfig<'a> {
     /// instance.
     pub dispatcher: Arc<dyn Dispatcher>,
     /// The dispatch-chain context the guest runs at: a root for a trigger or
-    /// the command driver, the snapshot [`ChainPolicy::enter`] derived for a
+    /// the command driver, the context [`ChainPolicy::enter`] derived for a
     /// dispatched callee.
     ///
     /// [`ChainPolicy::enter`]: crate::ChainPolicy::enter
@@ -72,8 +72,7 @@ pub struct StoreBase {
     /// runtime. Inert unless a host binding reaches for it.
     pub dispatcher: Arc<dyn Dispatcher>,
     /// The dispatch-chain context this store's guest runs at. A link relay
-    /// snapshots it for the callee it dispatches; a capability's host binding
-    /// reads or extends its metadata.
+    /// reads it to derive the callee's.
     pub chain: ChainCtx,
     /// Mount registry: the startup-validated mounts also preopened into
     /// [`wasi`](Self::wasi). A consuming host crate reads it to match a lent
@@ -276,22 +275,65 @@ impl<B: Send + 'static> HasExtensions for StoreCtx<B> {
 
 /// Access to the dispatch-chain context a store's guest runs at.
 ///
-/// The link relay reads it to derive the callee's context; a capability's
-/// host binding reads or extends its metadata.
+/// The link relay reads it to derive the callee's context.
 pub trait HasChain: Send {
     /// The chain context this store's guest runs at.
-    fn chain(&self) -> &ChainCtx;
-
-    /// The chain context, for a host binding that extends its metadata.
-    fn chain_mut(&mut self) -> &mut ChainCtx;
+    fn chain(&self) -> ChainCtx;
 }
 
 impl<B: Send + 'static> HasChain for StoreCtx<B> {
-    fn chain(&self) -> &ChainCtx {
-        &self.base.chain
+    fn chain(&self) -> ChainCtx {
+        self.base.chain
+    }
+}
+
+/// The complete guest environment: every `host` pair, then each default whose
+/// name the host lacks.
+///
+/// A variable the host process sets wins over the deployment's default under
+/// the same name, so an operator's `RUST_LOG=off` still silences a guest
+/// whose deployment defaults it to `info`.
+pub fn merge_env(
+    host: impl IntoIterator<Item = (String, String)>, defaults: &[(String, String)],
+) -> Vec<(String, String)> {
+    let mut env: Vec<(String, String)> = host.into_iter().collect();
+    let missing = defaults
+        .iter()
+        .filter(|(name, _)| env.iter().all(|(set, _)| set != name))
+        .cloned()
+        .collect::<Vec<_>>();
+    env.extend(missing);
+    env
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pairs(entries: &[(&str, &str)]) -> Vec<(String, String)> {
+        entries.iter().map(|(name, value)| ((*name).to_owned(), (*value).to_owned())).collect()
     }
 
-    fn chain_mut(&mut self) -> &mut ChainCtx {
-        &mut self.base.chain
+    // A default fills a name the host lacks and yields to one the host sets;
+    // the host's own pairs come through untouched and first.
+    #[test]
+    fn host_wins() {
+        let host = pairs(&[("RUST_LOG", "off"), ("HOME", "/home/op")]);
+        let defaults = pairs(&[("RUST_LOG", "my_sdk=info"), ("OTEL_SERVICE_NAME", "adapters")]);
+
+        let env = merge_env(host, &defaults);
+
+        assert_eq!(
+            env,
+            pairs(&[("RUST_LOG", "off"), ("HOME", "/home/op"), ("OTEL_SERVICE_NAME", "adapters"),])
+        );
+    }
+
+    // No host environment at all leaves the defaults as the whole guest
+    // environment, in the order the deployment declared them.
+    #[test]
+    fn empty_host() {
+        let defaults = pairs(&[("B", "2"), ("A", "1")]);
+        assert_eq!(merge_env(Vec::new(), &defaults), defaults);
     }
 }

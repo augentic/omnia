@@ -4,7 +4,6 @@
 //! metrics reach the host through the crate's private `wasi:otel` bindings.
 
 mod aggregate;
-mod baggage;
 mod convert;
 mod init;
 mod metrics;
@@ -25,7 +24,6 @@ mod generated {
 /// Re-exported `instrument` macro for use in guest code.
 pub use omnia_guest_macros::instrument;
 
-pub use crate::guest::baggage::{Baggage, LEVEL, baggage, level, set_baggage};
 pub use crate::guest::init::*;
 
 // Implementation detail of the `#[instrument]` expansion: the macro emits

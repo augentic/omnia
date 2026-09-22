@@ -17,7 +17,7 @@ use crate::{DeploymentBuilder, Manifest, Mode};
 ///
 /// The `runtime!` macro emits [`Path`](Self::Path) for its `config:` key and
 /// [`Inline`](Self::Inline) for its inline manifest keys (`guests`,
-/// `mounts`). On the standard CLI path (`omnia-cli`) it is the
+/// `mounts`, `env`). On the standard CLI path (`omnia-cli`) it is the
 /// lowest-priority source (behind `--config`/`OMNIA_CONFIG` and a positional
 /// wasm path); on the direct-command path it is the sole source.
 #[derive(Clone, Debug)]

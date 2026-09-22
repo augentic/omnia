@@ -60,7 +60,7 @@ Production backend variables (Redis, Kafka, Azure, ...) are listed in [Productio
 
 Selected by `--config <path>` or `OMNIA_CONFIG`, or compiled in as a default via the `runtime!` macro's `config:` field or inline manifest keys (see [Composing a Runtime](../guides/composing-a-runtime.md#default-manifest-config)). The manifest is sparse: every section is optional except at least one `[[guest]]`, and omitted fields fall back to defaults. All relative paths resolve against the manifest's directory.
 
-The same schema is constructible programmatically as an `omnia::Manifest` value (`Manifest::new()` with the fluent `guest`/`mounts`/`link`/`locations` setters, or `Manifest::from_wasm` for the one-guest shorthand; routes are set on each `GuestEntry` with its `route_http`/`route_messaging`/`route_websocket` builders) and passed to `DeploymentBuilder::new().manifest(...)` — see [Multi-Guest Deployments](../guides/multi-guest-deployments.md#programmatic-manifests). Either way, the invariants (at least one guest, unique ids, in-process transport) are validated when the deployment is built.
+The same schema is constructible programmatically as an `omnia::Manifest` value (`Manifest::new()` with the fluent `guest`/`mounts`/`env`/`link`/`locations` setters, or `Manifest::from_wasm` for the one-guest shorthand; routes are set on each `GuestEntry` with its `route_http`/`route_messaging`/`route_websocket` builders) and passed to `DeploymentBuilder::new().manifest(...)` — see [Multi-Guest Deployments](../guides/multi-guest-deployments.md#programmatic-manifests). Either way, the invariants (at least one guest, unique ids, in-process transport) are validated when the deployment is built.
 
 ```toml
 # --- Host-mediated interfaces (optional, deployment-wide) --------------
@@ -86,6 +86,10 @@ name = "."                          # guest-visible preopen name
 path = "../workspace"               # host path
 writable = true                     # omit for read-only (default)
 
+# --- Guest environment defaults (optional) ----------------------------
+[env]
+RUST_LOG = "my_sdk=info"            # what every guest carries when the host does not set it
+
 # --- Plugin locations (optional, repeatable) --------------------------
 [[plugin.location]]
 name = "."                          # where guest path loads resolve
@@ -110,6 +114,7 @@ Field notes:
 - **`[link] interfaces`** — deployment-wide host-mediated interfaces, unioned with CLI `--link` values. The host polyfills each onto the shared linker and dispatches calls to whichever guest exports it — including a guest registered after startup. There is no per-guest form: the linker is shared, so a dispatched interface is wired for the whole deployment. A runtime built without the `link` feature refuses a non-empty list at startup.
 - **`guest.command`** — marks the guest command mode drives (its `wasi:cli/run`); at most one guest may carry it. Without a mark, the sole `wasi:cli/run` exporter is the catch-all — several unmarked exporters fail the run as ambiguous.
 - **`mount`** — preopened into *every* guest sandbox. CLI `--mount` entries layer on top; a duplicate guest-visible name wins over the manifest.
+- **`[env]`** — guest environment defaults, string-valued. Every guest store is built over the host process's environment with these filling the names it lacks: a variable the operator sets wins over the manifest's value under the same name (`RUST_LOG=off` still silences a guest the table defaults to `info`), and the host process's own environment is never written. The table is deployment-wide — there is no per-guest form — and a manifest without it inherits the host environment unchanged. The host console subscriber reads the real process `RUST_LOG`, not this table.
 - **`[[plugin.location]]`** — where the `omnia:plugins/loader` acquires packages: `{ name, path }` entries are named roots for path loads (all fold into one `PathMounts`, opened when the runtime assembles), `{ registry, config? }` the registry policy for package references (at most one): the default endpoint and, optionally, a wasm-pkg client configuration as TOML routing namespaces and packages to other registries; an entry mixing the two shapes is a parse error. Only a runtime whose `runtime!` declares a `plugin:` block beside `config:` installs them, and it must be built with omnia's `plugin` feature — a runtime without it refuses a manifest carrying any `[[plugin.location]]` entry at startup; with no entries every load refuses typed.
 - **`guest.routes`** — inbound routes targeting the declaring guest, one list per trigger: `http` prefixes (longest prefix wins), `messaging` topics and `websocket` routes (NATS-style: `*` one token, `>` the rest). Route tables are aggregated across guests at load. If a trigger has no routes and exactly one guest exports its handler, that guest is the catch-all. CLI routes are not yet parsed; a sole `wasi:cli/run` exporter receives command-mode invocations.
 - **`transport`** — `in-process` (the default) is in-memory routing of lifted values to a fresh callee task. `unix`, `nats`, and `quic` are reserved for distributed dispatch and rejected at load today.

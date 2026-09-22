@@ -1,7 +1,5 @@
 //! Per-chain dispatch context and the policy that bounds it.
 
-use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Result, bail};
@@ -9,25 +7,20 @@ use anyhow::{Result, bail};
 use crate::RuntimeOptions;
 use crate::registry::GuestId;
 
-/// Per-chain dispatch context: nesting depth, wall-clock policy, and the
-/// metadata carried to each hop dispatched beneath.
+/// Per-chain dispatch context: nesting depth and the wall-clock policy carried
+/// to each hop dispatched beneath.
 ///
 /// Every guest store is built at a context (see
 /// [`StoreBase::chain`](crate::StoreBase::chain)): a trigger or the command
 /// driver builds the root at [`server`](Self::server) or
 /// [`command`](Self::command), and a link dispatch builds the callee at the
-/// snapshot [`ChainPolicy::enter`] derives from the caller's.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// context [`ChainPolicy::enter`] derives from the caller's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChainCtx {
     /// Nesting depth of the current hop (0 at a chain root).
     pub depth: usize,
     /// Whether the chain root runs without the wall-clock cap.
     pub uncapped: bool,
-    // Name/value entries the chain carries, opaque here: a capability's host
-    // binding writes them (`omnia:otel/baggage` shows them to a guest as its
-    // baggage) and every hop beneath reads them. Shared, since every `enter`
-    // snapshots the context.
-    metadata: Arc<BTreeMap<String, String>>,
 }
 
 impl ChainCtx {
@@ -35,37 +28,19 @@ impl ChainCtx {
     /// dispatches (and their nested hops) run without the `GUEST_TIMEOUT_MS`
     /// wall-clock cap.
     #[must_use]
-    pub fn command() -> Self {
+    pub const fn command() -> Self {
         Self::root(true)
     }
 
     /// The root of a server chain: a trigger-served guest, whose link
     /// dispatches (and their nested hops) run under the wall-clock cap.
     #[must_use]
-    pub fn server() -> Self {
+    pub const fn server() -> Self {
         Self::root(false)
     }
 
-    fn root(uncapped: bool) -> Self {
-        Self {
-            depth: 0,
-            uncapped,
-            metadata: Arc::default(),
-        }
-    }
-
-    /// The name/value metadata this hop was dispatched with, plus what it has
-    /// set since.
-    #[must_use]
-    pub fn metadata(&self) -> &BTreeMap<String, String> {
-        &self.metadata
-    }
-
-    /// The metadata, for a host binding that extends it for the hops
-    /// dispatched beneath this one from now on; a hop already dispatched
-    /// keeps the snapshot it was given.
-    pub fn metadata_mut(&mut self) -> &mut BTreeMap<String, String> {
-        Arc::make_mut(&mut self.metadata)
+    const fn root(uncapped: bool) -> Self {
+        Self { depth: 0, uncapped }
     }
 }
 
@@ -82,13 +57,11 @@ pub struct ChainPolicy {
 impl ChainPolicy {
     /// Enter a dispatch from `caller`, bounding the chain's nesting depth;
     /// returns the context the dispatched call runs at (depth plus the
-    /// inherited wall-clock policy and metadata), to be carried to the serve
-    /// side.
+    /// inherited wall-clock policy), to be carried to the serve side.
     ///
     /// Depth is per call chain (A->B->C, each awaited to completion before the
     /// caller returns), so concurrent, unrelated chains never contend for the
-    /// same budget. The returned context is a snapshot: metadata the caller
-    /// sets after entering never reaches this hop.
+    /// same budget.
     ///
     /// # Errors
     ///
@@ -104,10 +77,7 @@ impl ChainPolicy {
             );
         }
 
-        Ok(ChainCtx {
-            depth,
-            ..caller.clone()
-        })
+        Ok(ChainCtx { depth, ..*caller })
     }
 }
 
@@ -135,29 +105,17 @@ mod tests {
         GuestId::from("callee")
     }
 
-    fn entries(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs.iter().map(|(name, value)| ((*name).to_owned(), (*value).to_owned())).collect()
-    }
-
-    // Metadata set at a hop reaches the context `enter` hands the callee, one
-    // and two hops down, with the depth counting up and the root's wall-clock
-    // policy carried; what a hop sets afterwards stays out of the snapshot.
+    // The depth counts up one and two hops down from a command root, with the
+    // root's wall-clock policy carried to each.
     #[test]
     fn inherited() {
-        let mut root = ChainCtx::command();
-        root.metadata_mut().extend(entries(&[("k", "v"), ("tenant", "acme")]));
+        let root = ChainCtx::command();
 
         let child = policy().enter(&root, &callee()).expect("within depth");
         assert_eq!((child.depth, child.uncapped), (1, true));
-        assert_eq!(*child.metadata(), entries(&[("k", "v"), ("tenant", "acme")]));
-
-        root.metadata_mut().extend(entries(&[("k", "later")]));
-        assert_eq!(*root.metadata(), entries(&[("k", "later"), ("tenant", "acme")]));
-        assert_eq!(*child.metadata(), entries(&[("k", "v"), ("tenant", "acme")]));
 
         let grandchild = policy().enter(&child, &callee()).expect("within depth");
         assert_eq!((grandchild.depth, grandchild.uncapped), (2, true));
-        assert_eq!(*grandchild.metadata(), entries(&[("k", "v"), ("tenant", "acme")]));
     }
 
     // A server root's hops run capped, and the hop past the bound is refused

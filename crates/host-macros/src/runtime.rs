@@ -340,6 +340,51 @@ mod tests {
         })));
     }
 
+    // The `env:` block: each `NAME: value` entry lowers to an `.env([..])`
+    // call on the inline manifest, a bare identifier and a string literal
+    // both naming a variable, and the value any string expression.
+    #[test]
+    fn expand_env() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            mode: command,
+            env: {
+                RUST_LOG: "emery_sdk=info",
+                "OTEL_SERVICE_NAME": concat!("emery-", env!("CARGO_PKG_VERSION")),
+            },
+            guests: [
+                { id: "engine", source: "engine.wasm", command: true },
+            ],
+            hosts: {
+                WasiOtel: OtelDefault,
+            },
+        })));
+    }
+
+    // An `env:` block declares defaults for every guest, so it is manifest
+    // data and conflicts with `config:` like every other inline key.
+    #[test]
+    fn env_refused_beside_config() {
+        let error = syn::parse2::<Config>(quote!({
+            config: concat!(env!("CARGO_MANIFEST_DIR"), "/omnia.toml"),
+            env: { RUST_LOG: "info" },
+        }))
+        .err()
+        .expect("env beside config must be refused");
+        assert!(error.to_string().contains("mutually exclusive"), "{error}");
+    }
+
+    // A variable named twice in one block is a conflict, not a replacement.
+    #[test]
+    fn env_duplicate_name() {
+        let error = syn::parse2::<Config>(quote!({
+            env: { RUST_LOG: "info", "RUST_LOG": "debug" },
+            guests: [{ id: "api", source: "api.wasm" }],
+        }))
+        .err()
+        .expect("a repeated env name must be refused");
+        assert!(error.to_string().contains("duplicate `RUST_LOG:` entry"), "{error}");
+    }
+
     // A location's `config` is the registry acquirer's wasm-pkg
     // configuration, so it has no meaning on a path entry.
     #[test]

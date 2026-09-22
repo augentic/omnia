@@ -4,6 +4,7 @@
 
 use proc_macro2::Span;
 use quote::ToTokens;
+use syn::ext::IdentExt as _;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
@@ -54,14 +55,23 @@ pub struct HostEntry {
 }
 
 /// Inline manifest keys (`link` interfaces, `plugin` locations, `guests`,
-/// `mounts`) parsed from `runtime!({ ... })`; mirrors the `omnia::Manifest`
-/// schema.
+/// `mounts`, `env`) parsed from `runtime!({ ... })`; mirrors the
+/// `omnia::Manifest` schema.
 #[derive(Default)]
 pub struct ManifestSpec {
     pub interfaces: Vec<Expr>,
     pub locations: Vec<LocationSpec>,
     pub guests: Vec<GuestSpec>,
     pub mounts: Vec<MountSpec>,
+    pub env: Vec<EnvSpec>,
+}
+
+/// One `NAME: value` entry of the `env: { ... }` block: a guest environment
+/// default. The name is written as an identifier or a string literal and
+/// lowered to a string literal; the value is any expression yielding a string.
+pub struct EnvSpec {
+    pub name: syn::LitStr,
+    pub value: Expr,
 }
 
 /// The `link: { interfaces: [...] }` block: the deployment's host-mediated
@@ -105,6 +115,7 @@ impl ManifestSpec {
             && self.locations.is_empty()
             && self.guests.is_empty()
             && self.mounts.is_empty()
+            && self.env.is_empty()
     }
 }
 
@@ -189,6 +200,10 @@ impl Parse for Config {
                     manifest.mounts = m;
                     inline_span.get_or_insert(span);
                 }
+                OptValue::Env(e) => {
+                    manifest.env = e;
+                    inline_span.get_or_insert(span);
+                }
             }
         }
 
@@ -250,7 +265,7 @@ impl Config {
             return Err(syn::Error::new(
                 inline,
                 "`config:` and inline manifest keys (`link` interfaces, `plugin` locations, \
-                 `guests`, `mounts`) are mutually exclusive; declare `[[plugin.location]]` \
+                 `guests`, `mounts`, `env`) are mutually exclusive; declare `[[plugin.location]]` \
                  entries in the config file",
             ));
         }
@@ -305,6 +320,7 @@ mod kw {
     syn::custom_keyword!(guests);
     syn::custom_keyword!(mounts);
     syn::custom_keyword!(link);
+    syn::custom_keyword!(env);
 }
 
 /// One `key: value` setting, tagged with its key name and span so
@@ -323,6 +339,7 @@ enum OptValue {
     Plugin(PluginSpec),
     Guests(Vec<GuestSpec>),
     Mounts(Vec<MountSpec>),
+    Env(Vec<EnvSpec>),
 }
 
 impl Parse for Opt {
@@ -370,11 +387,57 @@ impl Parse for Opt {
             let key = input.parse::<kw::mounts>()?;
             input.parse::<Token![:]>()?;
             ("mounts", key.span, OptValue::Mounts(parse_bracketed_list(input)?))
+        } else if l.peek(kw::env) {
+            let key = input.parse::<kw::env>()?;
+            input.parse::<Token![:]>()?;
+            if input.peek(syn::token::Bracket) {
+                return Err(syn::Error::new(
+                    key.span,
+                    "the `env:` key takes a block: `env: { RUST_LOG: \"my_sdk=info\" }`",
+                ));
+            }
+            ("env", key.span, OptValue::Env(parse_env(input, key.span)?))
         } else {
             return Err(l.error());
         };
         Ok(Self { name, span, value })
     }
+}
+
+/// Parse the `env: { NAME: value, ... }` block: each name an identifier or a
+/// string literal, each value an expression; a repeated name and an empty
+/// block are refused.
+fn parse_env(input: ParseStream, key_span: Span) -> Result<Vec<EnvSpec>> {
+    let content;
+    syn::braced!(content in input);
+    let mut entries: Vec<EnvSpec> = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+    while !content.is_empty() {
+        let name: syn::LitStr = if content.peek(syn::LitStr) {
+            content.parse()?
+        } else {
+            let ident: Ident = content.call(Ident::parse_any)?;
+            syn::LitStr::new(&ident.to_string(), ident.span())
+        };
+        let text = name.value();
+        if seen.contains(&text) {
+            return Err(syn::Error::new(name.span(), format!("duplicate `{text}:` entry")));
+        }
+        seen.push(text);
+        content.parse::<Token![:]>()?;
+        let value: Expr = content.parse()?;
+        entries.push(EnvSpec { name, value });
+        if !content.is_empty() {
+            content.parse::<Token![,]>()?;
+        }
+    }
+    if entries.is_empty() {
+        return Err(syn::Error::new(
+            key_span,
+            "`env: {}` declares nothing; add `NAME: \"value\"` entries",
+        ));
+    }
+    Ok(entries)
 }
 
 fn parse_mode(input: ParseStream) -> Result<Mode> {

@@ -124,14 +124,14 @@ pub fn polyfill_component<T: HasChain + 'static>(
             let caller = Arc::clone(caller);
             let iface_name = Arc::clone(&iface_name);
             let func_name = Arc::clone(func);
-            // The caller's chain context is snapshotted here, before the
-            // future is built, so no store borrow crosses the dispatch.
+            // The caller's chain context is read here, before the future is
+            // built, so no store borrow crosses the dispatch.
             let registered = if ty.async_() {
                 interface.func_new_concurrent(func, move |accessor, ty, params, results| {
                     let caller = Arc::clone(&caller);
                     let iface_name = Arc::clone(&iface_name);
                     let func_name = Arc::clone(&func_name);
-                    let chain = accessor.with(|mut access| access.data_mut().chain().clone());
+                    let chain = accessor.with(|mut access| access.data_mut().chain());
                     Box::pin(async move {
                         relay(&caller, chain, &iface_name, &func_name, &ty, params, results)
                             .await
@@ -143,7 +143,7 @@ pub fn polyfill_component<T: HasChain + 'static>(
                     let caller = Arc::clone(&caller);
                     let iface_name = Arc::clone(&iface_name);
                     let func_name = Arc::clone(&func_name);
-                    let chain = store.data().chain().clone();
+                    let chain = store.data().chain();
                     Box::new(async move {
                         relay(&caller, chain, &iface_name, &func_name, &ty, params, results)
                             .await

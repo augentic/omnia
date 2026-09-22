@@ -74,9 +74,8 @@ impl<T> Drop for AbortOnDrop<T> {
 /// its export with `args`, returning the results.
 ///
 /// The callee's store carries `ctx` (so nested hops count against the same
-/// chain and read its metadata) and, when `bound` is given, the call must
-/// finish within it. The store is dropped when the call completes
-/// (instance-per-call).
+/// chain) and, when `bound` is given, the call must finish within it. The
+/// store is dropped when the call completes (instance-per-call).
 ///
 /// # Errors
 ///
