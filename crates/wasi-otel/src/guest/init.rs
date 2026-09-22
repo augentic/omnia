@@ -19,9 +19,9 @@ static TELEMETRY: OnceLock<Option<Telemetry>> = OnceLock::new();
 /// Wrap the provided `inner` function with telemetry support.
 ///
 /// The first `scope` in an instance initializes telemetry before calling the
-/// wrapped `inner` function: the subscriber opens at `error`, with valid
-/// `RUST_LOG` directives applied on top. Exports every span and metric once
-/// the returned future completes.
+/// wrapped `inner` function: the subscriber follows `RUST_LOG`, falling back
+/// to `error` when it is unset. Exports every span and metric once the
+/// returned future completes.
 pub async fn scope<F: Future>(inner: impl FnOnce() -> F) -> F::Output {
     let mut owner = false;
     TELEMETRY.get_or_init(|| {
@@ -74,7 +74,7 @@ struct Telemetry {
 fn init() -> Result<Telemetry> {
     let resource = resource::resource();
 
-    let (filter_layer, filter) = reload::Layer::new(compose("error")?);
+    let (filter_layer, filter) = reload::Layer::new(mute(EnvFilter::from_default_env())?);
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_writer(std::io::stderr)
         .with_filter(filter_fn(|meta| !meta.is_span()));
@@ -112,11 +112,13 @@ fn compose(directives: &str) -> Result<EnvFilter> {
         val.parse::<Directive>().inspect_err(|err| eprintln!("ignoring `{val}`: {err}")).ok()
     });
 
-    // The API's self-diagnostics (`internal-logs`, should a guest dependency
-    // enable the feature) stay out of guest output.
-    Ok(env
-        .fold(EnvFilter::builder().parse(directives)?, EnvFilter::add_directive)
-        .add_directive("opentelemetry=off".parse()?))
+    mute(env.fold(EnvFilter::builder().parse(directives)?, EnvFilter::add_directive))
+}
+
+// The API's self-diagnostics (`internal-logs`, should a guest dependency
+// enable the feature) stay out of guest output.
+fn mute(filter: EnvFilter) -> Result<EnvFilter> {
+    Ok(filter.add_directive("opentelemetry=off".parse()?))
 }
 
 fn telemetry() -> Option<&'static Telemetry> {
