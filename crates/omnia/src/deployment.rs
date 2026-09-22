@@ -20,8 +20,8 @@ use omnia_core::wasmtime::component::Linker;
 use omnia_core::wasmtime::{Config, Engine};
 use omnia_core::wasmtime_wasi::WasiView;
 use omnia_core::{
-    GuestId, HasChain, Host, LinkSeam, LoadedGuest, Location, MountRegistry, NoLinks, Registry,
-    Routes, Runtime, RuntimeOptions, RuntimeParts, Server, StoreCtx, Telemetry,
+    GuestId, HasChain, Host, LevelFilter, LinkSeam, LoadedGuest, Location, MountRegistry, NoLinks,
+    Registry, Routes, Runtime, RuntimeOptions, RuntimeParts, Server, StoreCtx, Telemetry,
 };
 #[cfg(feature = "link")]
 use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks};
@@ -51,6 +51,7 @@ pub struct DeploymentBuilder {
     manifest: Option<Manifest>,
     args: Vec<String>,
     mode: Mode,
+    level: Option<LevelFilter>,
     allow_empty: bool,
     program_name: Option<String>,
     guest_timeout: Option<Duration>,
@@ -82,6 +83,20 @@ impl DeploymentBuilder {
     #[must_use]
     pub const fn mode(mut self, mode: Mode) -> Self {
         self.mode = mode;
+        self
+    }
+
+    /// Select the tracing level for the whole process: the host console and
+    /// every guest's `RUST_LOG` alike.
+    ///
+    /// A selected level replaces whatever `RUST_LOG` the process carries.
+    /// Unset, a run keeps the process `RUST_LOG` and falls back to the
+    /// [mode's level](Mode::level) when it sets none. The process environment
+    /// is never written: guests read the level through their WASI
+    /// environment, the host through its subscriber.
+    #[must_use]
+    pub const fn level(mut self, level: LevelFilter) -> Self {
+        self.level = Some(level);
         self
     }
 
@@ -149,7 +164,8 @@ impl DeploymentBuilder {
         // environment.
         let name = env::var("COMPONENT").unwrap_or_else(|_| program_name.clone());
 
-        init_telemetry(&name)?;
+        let fallback = self.mode.level();
+        init_telemetry(&name, self.level, fallback)?;
         tracing::debug!("initializing runtime");
 
         let (engine, linker, mut options) = engine_and_linker()?;
@@ -196,7 +212,8 @@ impl DeploymentBuilder {
             allow_empty: self.allow_empty,
             command_guest: manifest.command_guest(),
             locations: manifest.plugin.locations,
-            env: manifest.env.into_iter().collect(),
+            level: self.level,
+            fallback,
         })
     }
 
@@ -271,9 +288,10 @@ pub struct Deployment<T: WasiView + 'static> {
     // The manifest's plugin acquisition locations, carried onto the runtime
     // for the loader capability to install against.
     locations: Vec<Location>,
-    // The manifest's guest environment defaults, carried onto the runtime to
-    // fill what the host environment lacks in every store it builds.
-    env: Vec<(String, String)>,
+    // The selected tracing level and the mode's fallback, carried onto the
+    // runtime to set `RUST_LOG` in every store it builds.
+    level: Option<LevelFilter>,
+    fallback: LevelFilter,
 }
 
 /// Store bound every deployment store context satisfies; kept as a named bound
@@ -337,10 +355,10 @@ impl<T: WasiView> Deployment<T> {
         &self.locations
     }
 
-    /// The manifest's guest environment defaults.
+    /// The tracing level selected for this run, if any.
     #[must_use]
-    pub fn env(&self) -> &[(String, String)] {
-        &self.env
+    pub const fn level(&self) -> Option<LevelFilter> {
+        self.level
     }
 
     /// Assemble the guest [`Registry`].
@@ -395,7 +413,8 @@ impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
             args: self.args.to_vec(),
             mounts: Arc::clone(&self.mounts),
             locations: self.locations.clone(),
-            env: self.env.clone(),
+            level: self.level,
+            fallback: self.fallback,
             command_guest: self.command_guest.clone(),
             backends,
             registry: Arc::new(self.into_registry().context("assembling registry")?),
@@ -418,13 +437,18 @@ fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, Runt
     Ok((engine, linker, options))
 }
 
-// Initialize telemetry for the runtime.
+// Initialize telemetry for the runtime at the run's level: a selected level
+// is the console filter outright; otherwise the process `RUST_LOG` stands
+// and `fallback` fills its absence.
 //
 // Telemetry initialization is idempotent (`Telemetry::build`): the first call
 // in the process — here or in an embedder — installs the subscriber and
 // providers, and later deployments reuse them.
-fn init_telemetry(name: &str) -> Result<()> {
-    let mut builder = Telemetry::new(name);
+fn init_telemetry(name: &str, level: Option<LevelFilter>, fallback: LevelFilter) -> Result<()> {
+    let mut builder = Telemetry::new(name).fallback(fallback);
+    if let Some(level) = level {
+        builder = builder.filter(level.to_string());
+    }
     if let Ok(endpoint) = env::var("OTEL_GRPC_URL") {
         builder = builder.endpoint(endpoint);
     } else {

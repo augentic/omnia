@@ -64,7 +64,7 @@ Most deployments only touch the `runtime!` macro; a hand-written runtime instead
 
 The runtime and its included services are configured via environment variables:
 
-- **`RUST_LOG`**: Controls host console verbosity (e.g., `info`, `debug`, `omnia_core=trace`); unset means `warn`. Noisy dependencies (`hyper`, `h2`, `tonic`, `opentelemetry`, `opentelemetry_sdk`, `omnia_wasi_otel`) are always muted.
+- **`RUST_LOG`**: The tracing filter for the whole process, host console and guests alike (e.g., `info`, `debug`, `omnia_core=trace`), when no `-v`/`-q` flag selects a level; unset means `info` for a command runtime and `warn` for a server. Each `-v` steps the level up from that default and each `-q` down, replacing `RUST_LOG` for the run. Noisy dependencies (`hyper`, `h2`, `tonic`, `opentelemetry`, `opentelemetry_sdk`, `omnia_wasi_otel`) are always muted.
 - **`OTEL_GRPC_URL`**: OTLP gRPC endpoint for exporting host traces and metrics. Unset uses OpenTelemetry defaults (`http://localhost:4317`).
 
 ## Telemetry

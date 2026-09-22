@@ -1,6 +1,7 @@
 //! Generated `main`: direct-command planning and optional `run` grammar.
 
 mod direct;
+mod verbosity;
 
 use std::env;
 use std::process::ExitCode;
@@ -83,10 +84,14 @@ fn materialize(
         path: arg.host_path,
         writable: arg.writable,
     });
-    Ok(DeploymentBuilder::new()
+    let builder = DeploymentBuilder::new()
         .manifest(manifest.mounts(mounts).link(plan.link))
         .args(plan.args)
-        .mode(mode))
+        .mode(mode);
+    Ok(match verbosity::level(mode.level(), plan.verbose, plan.quiet) {
+        Some(level) => builder.level(level),
+        None => builder,
+    })
 }
 
 #[cfg(all(test, feature = "cli"))]

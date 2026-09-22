@@ -1,33 +1,38 @@
-//! The guest's `wasi:cli` environment through the real runtime: the
-//! deployment's `[env]` defaults fill what the host process lacks and yield
-//! to what it sets.
+//! The guest's `wasi:cli` environment through the real runtime: `RUST_LOG`
+//! is the deployment's tracing level — the level selected for the run, else
+//! the process's own, else the command-mode default.
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use omnia::ExitStatus;
+use omnia::{ExitStatus, LevelFilter};
 use omnia_test::host::{Backends, Deployment};
 use omnia_wasi_otel::WasiOtel;
 
 test_programs::foreach_cli!();
 
-// The shadowed variable is one the test process already has, read rather
-// than set, so the suite never writes its own environment.
-#[tokio::test]
-async fn cli_env() {
-    let (shadowed, host_value) = std::env::vars()
-        .find(|(name, _)| name != "OMNIA_TEST_DEFAULT")
-        .expect("the test process has an environment");
-
-    let status = Deployment::new()
-        .guest("cli", test_programs::CLI_ENV)
-        .env([("OMNIA_TEST_DEFAULT", "from-manifest"), (shadowed.as_str(), "from-manifest")])
-        .args([shadowed, host_value])
+async fn run(deployment: Deployment, expected: String) -> ExitStatus {
+    deployment
+        .guest("cli", test_programs::CLI_RUST_LOG)
+        .args([expected])
         .run(Backends::defaults().await, |deployment| {
             deployment.host::<WasiOtel, Backends>()?;
             Ok(())
         })
         .await
-        .expect("deployment runs");
+        .expect("deployment runs")
+}
 
-    assert_eq!(status, ExitStatus::SUCCESS);
+// The test process's `RUST_LOG` is read, never set, so the suite never
+// writes its own environment: a set variable stands, an unset one falls
+// back to the command-mode `info`.
+#[tokio::test]
+async fn cli_rust_log() {
+    let expected = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_owned());
+    assert_eq!(run(Deployment::new(), expected).await, ExitStatus::SUCCESS);
+}
+
+#[tokio::test]
+async fn cli_rust_log_level() {
+    let deployment = Deployment::new().level(LevelFilter::DEBUG);
+    assert_eq!(run(deployment, "debug".to_owned()).await, ExitStatus::SUCCESS);
 }

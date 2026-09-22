@@ -52,7 +52,7 @@ pub fn set_filter(directives: &str) -> Result<()> {
     let env = rust_log.split(',').filter(|val| !val.is_empty()).filter_map(|val| {
         val.parse::<Directive>().inspect_err(|err| eprintln!("ignoring `{val}`: {err}")).ok()
     });
-    let filter = mute(env.fold(EnvFilter::builder().parse(directives)?, EnvFilter::add_directive))?;
+    let filter = mute(env.fold(EnvFilter::builder().parse(directives)?, EnvFilter::add_directive));
 
     let telemetry = telemetry().context("telemetry is not initialized")?;
     telemetry.filter.reload(filter).context("issue reloading the filter")
@@ -78,7 +78,7 @@ struct Telemetry {
 fn init() -> Result<Telemetry> {
     let resource = resource::resource();
 
-    let (filter_layer, filter) = reload::Layer::new(mute(EnvFilter::from_default_env())?);
+    let (filter_layer, filter) = reload::Layer::new(mute(EnvFilter::from_default_env()));
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_writer(std::io::stderr)
         .with_filter(filter_fn(|meta| !meta.is_span()));
@@ -109,8 +109,8 @@ fn init() -> Result<Telemetry> {
     })
 }
 
-fn mute(filter: EnvFilter) -> Result<EnvFilter> {
-    Ok(filter.add_directive("opentelemetry=off".parse()?))
+fn mute(filter: EnvFilter) -> EnvFilter {
+    filter.add_directive("opentelemetry=off".parse().expect("opentelemetry=off"))
 }
 
 fn telemetry() -> Option<&'static Telemetry> {

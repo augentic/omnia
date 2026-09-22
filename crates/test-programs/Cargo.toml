@@ -53,8 +53,8 @@ path = "programs/blobstore/objects.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "cli_env"
-path = "programs/cli/env.rs"
+name = "cli_rust_log"
+path = "programs/cli/rust_log.rs"
 crate-type = ["cdylib"]
 
 [[example]]

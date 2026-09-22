@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result};
 use omnia_core::wasmtime::Engine;
-use omnia_core::{ExitStatus, Runtime, StoreCtx};
+use omnia_core::{ExitStatus, LevelFilter, Runtime, StoreCtx};
 
 use crate::{Deployment, DeploymentBuilder};
 
@@ -48,6 +48,21 @@ impl Mode {
     #[must_use]
     pub const fn is_command(self) -> bool {
         matches!(self, Self::Command)
+    }
+
+    /// The tracing level a run in this mode falls back to when no level is
+    /// selected and the process sets no `RUST_LOG`.
+    ///
+    /// A command shows its progress, so [`Command`](Self::Command) is `INFO`;
+    /// a server is quiet until something is wrong, so [`Server`](Self::Server)
+    /// is `WARN`. The verbosity flags step from here, one rung per `-v` up and
+    /// per `-q` down.
+    #[must_use]
+    pub const fn level(self) -> LevelFilter {
+        match self {
+            Self::Server => LevelFilter::WARN,
+            Self::Command => LevelFilter::INFO,
+        }
     }
 }
 

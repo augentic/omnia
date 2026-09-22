@@ -8,7 +8,7 @@ The boundary sits between the **guest** (WebAssembly, untrusted) and the **host*
 
 - **No ambient filesystem.** A guest sees only the directories the host preopened via mounts, read-only unless marked writable.
 - **No ambient network.** A guest cannot open sockets. Outbound HTTP exists only if the host linked `WasiHttp`, and then only through the host's client.
-- **No process, clock, or environment escape.** Environment variables reach the guest only through `wasi:cli` argv/env the host chooses to forward — the process environment, with the manifest's `[env]` defaults filling what it lacks — or `wasi:config`.
+- **No process, clock, or environment escape.** Environment variables reach the guest only through `wasi:cli` argv/env the host chooses to forward — the process environment, with `RUST_LOG` set to the runtime's tracing level — or `wasi:config`.
 - **Memory isolation.** WebAssembly linear memory is bounds-checked; a guest cannot read host memory or another guest's.
 
 Capability granting is therefore the host author's main security decision: the `hosts:` map in `runtime!` *is* the guest's permission set. A guest that only needs key-value storage should run in a host that links only `WasiKeyValue` (plus a trigger).

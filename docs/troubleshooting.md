@@ -106,7 +106,7 @@ A `runtime!` binary with `mode: command` and a compiled-in deployment is a [dire
 
 ### A direct-command binary logs nothing (or too much)
 
-Nothing in argv is a host flag on this path; the host console filter is `RUST_LOG` alone, and unset means `warn` (see [Configuration](reference/configuration.md#general)). Guest tracing is the guest's own subscriber: `omnia_wasi_otel` reads the inherited `RUST_LOG` too (`error` when unset), and a guest that owns a verbosity flag reloads its defaults with `omnia_wasi_otel::set_filter` after parsing argv. `RUST_LOG` still refines the reloaded defaults, so a bare `RUST_LOG=warn` in the environment overrides a bare `set_filter("debug")`; target the guest's own crate (`set_filter("my_guest=debug")`) when the flag must bite regardless.
+One level governs the host console and every guest: a `-v`/`-q` flag in argv, else `RUST_LOG`, else the command-mode default `info` (see [Verbosity flags](reference/configuration.md#verbosity-flags)). Argv still reaches the guest verbatim, so a guest whose grammar does not flatten `omnia_sdk::api::command::Verbosity` rejects `-v` as an unknown flag *after* the host has applied the level — declare the flags. A bare run that logs too much has a process `RUST_LOG` set: `-q` overrides it, as does any flag. Guest tracing is the guest's own subscriber reading the `RUST_LOG` its WASI environment carries — the decided level; a guest that owns a flag of its own reloads its defaults with `omnia_wasi_otel::set_filter` after parsing argv, and that `RUST_LOG` still refines the reloaded defaults, so target the guest's own crate (`set_filter("my_guest=debug")`) when the flag must bite regardless.
 
 ## Model completions
 

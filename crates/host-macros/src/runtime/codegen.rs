@@ -141,21 +141,12 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
         }
     });
 
-    let env = manifest.env.iter().map(|entry| {
-        let name = &entry.name;
-        let value = &entry.value;
-        quote! {
-            .env([(#name, #value)])
-        }
-    });
-
     quote! {
         omnia::Manifest::new()
             #(#interfaces)*
             #(#locations)*
             #(#guests)*
             #(#mounts)*
-            #(#env)*
     }
 }
 

@@ -370,6 +370,39 @@ pub enum Parsed<A> {
     Usage(clap::Error),
 }
 
+/// The runtime's verbosity flags, declared in a command's grammar by
+/// flattening.
+///
+/// The runtime reads `-v`/`--verbose` and `-q`/`--quiet` out of argv before
+/// the command runs and sets its `RUST_LOG` from them — each `-v` one level
+/// more detail, each `-q` one less, from the command's default of `info` — so
+/// the command never acts on these values. Declaring them keeps the parser
+/// accepting what the runtime already honoured, lists them in `--help` and
+/// completions, and refuses `-v` beside `-q` as a usage error (the runtime
+/// applies no level for that pair however argv splits it).
+///
+/// ```rust,ignore
+/// #[derive(clap::Parser)]
+/// struct App {
+///     #[command(flatten)]
+///     verbosity: omnia_sdk::api::command::Verbosity,
+///
+///     #[command(subcommand)]
+///     verb: Verb,
+/// }
+/// ```
+#[cfg(feature = "command")]
+#[derive(clap::Args, Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct Verbosity {
+    /// Show more detail, once per level.
+    #[arg(short, long, action = clap::ArgAction::Count, global = true)]
+    pub verbose: u8,
+
+    /// Show less detail, once per level.
+    #[arg(short, long, action = clap::ArgAction::Count, global = true, conflicts_with = "verbose")]
+    pub quiet: u8,
+}
+
 /// Parse argv into the grammar `A`, classifying clap's own outcomes.
 #[cfg(feature = "command")]
 #[must_use]

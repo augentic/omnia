@@ -8,10 +8,26 @@ Omnia is configured entirely through environment variables (runtime options and 
 
 | Variable        | Default                                                    | Meaning                                                                                                                                          |
 | --------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `RUST_LOG`      | unset (`warn`)                                             | Log filter (e.g. `info`, `debug`, `omnia=trace`) for the host console. Unset means `warn`: host warnings (a mount that failed to preopen) reach stderr, nothing else does. The server-mode `omnia ready` readiness line is at `info`; the rest of the runtime plumbing (initializing, command-mode ready, guest lifecycle, `wasi:cli/run` bracketing) is at `debug` so bare command runs show only semantic guest progress. Noisy dependencies (`hyper`, `h2`, `tonic`, `opentelemetry`, `opentelemetry_sdk`, `omnia_wasi_otel`) are always muted, and a failed telemetry flush (no collector listening) reports at `debug`. The variable is inherited by every guest, whose own subscriber reads it independently (`omnia_wasi_otel`: `error` when unset). |
+| `RUST_LOG`      | unset (command `info`, server `warn`)                      | Log filter (e.g. `info`, `debug`, `omnia=trace`) for the whole process — the host console and every guest alike. The level is decided once per run: a verbosity flag (below), else this variable, else the mode's default — `info` for a command, `warn` for a server. Unset, a bare server run shows host warnings (a mount that failed to preopen) and nothing else; a bare command run shows the guests' progress too. The server-mode `omnia ready` readiness line is at `info`; the rest of the runtime plumbing (initializing, command-mode ready, guest lifecycle, `wasi:cli/run` bracketing) is at `debug`. Noisy dependencies (`hyper`, `h2`, `tonic`, `opentelemetry`, `opentelemetry_sdk`, `omnia_wasi_otel`) are always muted, and a failed telemetry flush (no collector listening) reports at `debug`. Every guest's WASI environment carries the decided level as its `RUST_LOG` — a flag replaces this variable there, a bare run fills it only when unset — and the process environment itself is never written. See [Verbosity flags](#verbosity-flags). |
 | `OTEL_GRPC_URL` | unset (`http://localhost:4317` via OpenTelemetry defaults) | OTLP gRPC endpoint for exporting host traces and metrics. Export errors from a missing collector never reach the console — the filter always mutes `opentelemetry` / `opentelemetry_sdk`. |
 | `OMNIA_CONFIG`  | unset                                                      | Path to the deployment manifest; the `--config` flag takes precedence.                                                                           |
 | `COMPONENT`     | unset                                                      | Overrides the deployment name everywhere it appears — the OpenTelemetry service name, server logs, and the `omnia ready` line; defaults to the deployment name (first guest id). Read once at startup, never written back to the environment. |
+
+### Verbosity flags
+
+`-v`/`--verbose` and `-q`/`--quiet` select the process tracing level relative to the mode's default: each `-v` is one step up the scale `off`, `error`, `warn`, `info`, `debug`, `trace`, each `-q` one step down, clamped at the ends. The flags repeat (`-vv`, `-qq`); `-v` beside `-q` is a usage error. A flag replaces whatever `RUST_LOG` the process carries, for the host console and every guest; no flag keeps the process variable and falls back to the mode's default only when it is unset, so any filter stays reachable as `RUST_LOG=<filter>` on a bare run.
+
+| Flags   | Command (default `info`) | Server (default `warn`) |
+| ------- | ------------------------ | ----------------------- |
+| `-qqq`  | `off`                    | `off`                   |
+| `-qq`   | `error`                  | `off`                   |
+| `-q`    | `warn`                   | `error`                 |
+| *(none)* | `info`                  | `warn`                  |
+| `-v`    | `debug`                  | `info`                  |
+| `-vv`   | `trace`                  | `debug`                 |
+| `-vvv`  | `trace`                  | `trace`                 |
+
+On the `run` grammar the flags are the host's, global to the command (`bin -v run …` and `bin run -v …` both parse); past `--` they belong to the guest. On the direct-command path (a `runtime!` in `mode: command` with a compiled-in manifest) argv belongs to the guest verbatim: the host reads `-v`, `-q`, `--verbose`, `--quiet`, and their repetitions (`-vv`) out of argv before `--` to decide the level, and removes nothing, so the guest declares the same flags in its own grammar — `omnia_sdk::api::command::Verbosity`, flattened — for its help and completions to list them and its parser to accept them. An embedder selects the level in code with `DeploymentBuilder::level`.
 
 ### Guest limits
 
@@ -86,10 +102,6 @@ name = "."                          # guest-visible preopen name
 path = "../workspace"               # host path
 writable = true                     # omit for read-only (default)
 
-# --- Guest environment defaults (optional) ----------------------------
-[env]
-RUST_LOG = "my_sdk=info"            # what every guest carries when the host does not set it
-
 # --- Plugin locations (optional, repeatable) --------------------------
 [[plugin.location]]
 name = "."                          # where guest path loads resolve
@@ -114,7 +126,6 @@ Field notes:
 - **`[link] interfaces`** — deployment-wide host-mediated interfaces, unioned with CLI `--link` values. The host polyfills each onto the shared linker and dispatches calls to whichever guest exports it — including a guest registered after startup. There is no per-guest form: the linker is shared, so a dispatched interface is wired for the whole deployment. A runtime built without the `link` feature refuses a non-empty list at startup.
 - **`guest.command`** — marks the guest command mode drives (its `wasi:cli/run`); at most one guest may carry it. Without a mark, the sole `wasi:cli/run` exporter is the catch-all — several unmarked exporters fail the run as ambiguous.
 - **`mount`** — preopened into *every* guest sandbox. CLI `--mount` entries layer on top; a duplicate guest-visible name wins over the manifest.
-- **`[env]`** — guest environment defaults, string-valued. Every guest store is built over the host process's environment with these filling the names it lacks: a variable the operator sets wins over the manifest's value under the same name (`RUST_LOG=off` still silences a guest the table defaults to `info`), and the host process's own environment is never written. The table is deployment-wide — there is no per-guest form — and a manifest without it inherits the host environment unchanged. The host console subscriber reads the real process `RUST_LOG`, not this table.
 - **`[[plugin.location]]`** — where the `omnia:plugins/loader` acquires packages: `{ name, path }` entries are named roots for path loads (all fold into one `PathMounts`, opened when the runtime assembles), `{ registry, config? }` the registry policy for package references (at most one): the default endpoint and, optionally, a wasm-pkg client configuration as TOML routing namespaces and packages to other registries; an entry mixing the two shapes is a parse error. Only a runtime whose `runtime!` declares a `plugin:` block beside `config:` installs them, and it must be built with omnia's `plugin` feature — a runtime without it refuses a manifest carrying any `[[plugin.location]]` entry at startup; with no entries every load refuses typed.
 - **`guest.routes`** — inbound routes targeting the declaring guest, one list per trigger: `http` prefixes (longest prefix wins), `messaging` topics and `websocket` routes (NATS-style: `*` one token, `>` the rest). Route tables are aggregated across guests at load. If a trigger has no routes and exactly one guest exports its handler, that guest is the catch-all. CLI routes are not yet parsed; a sole `wasi:cli/run` exporter receives command-mode invocations.
 - **`transport`** — `in-process` (the default) is in-memory routing of lifted values to a fresh callee task. `unix`, `nats`, and `quic` are reserved for distributed dispatch and rejected at load today.

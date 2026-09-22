@@ -9,7 +9,7 @@ use std::future::{Ready, ready};
 
 use clap::{Parser, Subcommand};
 use omnia_sdk::api::command::{
-    Command, Failure, IntoExit, Parsed, Response, Shell, USAGE_EXIT, completions, parse,
+    Command, Failure, IntoExit, Parsed, Response, Shell, USAGE_EXIT, Verbosity, completions, parse,
 };
 use omnia_sdk::api::{Client, Context, Format, Metadata};
 use omnia_sdk::{bad_request, not_found};
@@ -20,6 +20,9 @@ use serde::{Deserialize, Serialize};
 struct App {
     #[arg(long, default_value = "text", global = true)]
     format: Format,
+
+    #[command(flatten)]
+    verbosity: Verbosity,
 
     #[command(subcommand)]
     verb: Verb,
@@ -38,7 +41,28 @@ fn parse_app() {
     };
 
     assert_eq!(app.format, Format::Json);
+    assert_eq!(app.verbosity, Verbosity::default());
     assert!(matches!(app.verb, Verb::Greet { name } if name == "ada"));
+}
+
+// The flags are global: they parse before and after the verb, every
+// repetition counts, and the pair is refused.
+#[test]
+fn parse_verbosity() {
+    let Parsed::App(verbose) = parse::<App>(["app", "-vv", "greet", "ada"]) else {
+        panic!("`-vv` parses");
+    };
+    assert_eq!(verbose.verbosity, Verbosity { verbose: 2, quiet: 0 });
+
+    let Parsed::App(quiet) = parse::<App>(["app", "greet", "ada", "--quiet", "-q"]) else {
+        panic!("`--quiet -q` parses after the verb");
+    };
+    assert_eq!(quiet.verbosity, Verbosity { verbose: 0, quiet: 2 });
+
+    let Parsed::Usage(error) = parse::<App>(["app", "greet", "ada", "-v", "-q"]) else {
+        panic!("`-v` beside `-q` is a usage error");
+    };
+    assert_eq!(Response::usage(&error).exit, USAGE_EXIT);
 }
 
 #[test]
@@ -49,6 +73,8 @@ fn help_display() {
 
     assert!(text.contains("Usage: app"));
     assert!(text.contains("greet"));
+    assert!(text.contains("-v, --verbose"), "{text}");
+    assert!(text.contains("-q, --quiet"), "{text}");
 }
 
 #[test]
@@ -129,6 +155,8 @@ fn completions_bash() {
     let script = String::from_utf8(response.stdout).expect("completion script is utf-8");
     assert!(script.contains("_app"));
     assert!(script.contains("greet"));
+    assert!(script.contains("--verbose"), "the flattened verbosity flags complete");
+    assert!(script.contains("--quiet"));
 }
 
 #[test]

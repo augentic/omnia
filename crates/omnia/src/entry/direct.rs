@@ -11,13 +11,14 @@ use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
 
-use crate::{DeploymentBuilder, Manifest, Mode};
+use super::verbosity;
+use crate::{DeploymentBuilder, LevelFilter, Manifest, Mode};
 
 /// How a runtime's compiled-in deployment manifest is supplied.
 ///
 /// The `runtime!` macro emits [`Path`](Self::Path) for its `config:` key and
 /// [`Inline`](Self::Inline) for its inline manifest keys (`guests`,
-/// `mounts`, `env`). On the standard CLI path (`omnia-cli`) it is the
+/// `mounts`). On the standard CLI path (`omnia-cli`) it is the
 /// lowest-priority source (behind `--config`/`OMNIA_CONFIG` and a positional
 /// wasm path); on the direct-command path it is the sole source.
 #[derive(Clone, Debug)]
@@ -82,12 +83,18 @@ pub(super) struct EntryPlan {
     mode: Mode,
     manifest: Option<Manifest>,
     args: Vec<String>,
+    level: Option<LevelFilter>,
 }
 
 impl EntryPlan {
     /// Assemble the deployment builder this plan describes.
     pub(super) fn into_builder(self) -> DeploymentBuilder {
-        DeploymentBuilder::new().manifest(self.manifest).args(self.args).mode(self.mode)
+        let builder =
+            DeploymentBuilder::new().manifest(self.manifest).args(self.args).mode(self.mode);
+        match self.level {
+            Some(level) => builder.level(level),
+            None => builder,
+        }
     }
 }
 
@@ -119,6 +126,11 @@ pub(super) fn plan(
 /// Plan a direct command: argv belongs to the guest verbatim, and the
 /// compiled-in manifest is the sole source.
 ///
+/// The host reads the verbosity flags (`-v`, `-q`, and their long forms) out
+/// of argv to select the process level, but removes nothing: the guest
+/// declares the same flags in its own grammar, so its help lists them and
+/// its parser refuses `-v` with `-q`.
+///
 /// # Errors
 ///
 /// Returns an error if argv is not UTF-8 or the compiled-in manifest cannot
@@ -135,11 +147,14 @@ pub(super) fn plan_direct(
                 .map_err(|arg| anyhow!("guest argument `{}` is not valid UTF-8", arg.display()))
         })
         .collect::<Result<Vec<_>>>()?;
+    let (verbose, quiet) = verbosity::scan(&guest_args);
+    let level = verbosity::level(mode.level(), verbose, quiet);
     let manifest = manifest.map(ManifestSource::into_manifest).transpose()?;
     Ok(EntryPlan {
         mode,
         manifest,
         args: guest_args,
+        level,
     })
 }
 
@@ -177,6 +192,24 @@ mod tests {
             .unwrap_or_else(|error| panic!("{}", fatal(&error)));
         assert_eq!(plan.args, ["--config", "foo.toml", "run", "--debug", "greet"]);
         assert_eq!(first_guest(&plan), "app");
+        assert_eq!(plan.level, None, "no flag leaves the process `RUST_LOG` standing");
+    }
+
+    // The verbosity flags are read for the level and stay in the guest's
+    // argv, where its own grammar declares them.
+    #[test]
+    fn direct_argv_verbatim() {
+        let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
+        let verbose = plan(options, argv(&["bin", "-v", "greet"]))
+            .unwrap_or_else(|error| panic!("{}", fatal(&error)));
+        assert_eq!(verbose.args, ["-v", "greet"]);
+        assert_eq!(verbose.level, Some(LevelFilter::DEBUG), "one rung up from command `info`");
+
+        let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
+        let conflict = plan(options, argv(&["bin", "-v", "greet", "--quiet"]))
+            .unwrap_or_else(|error| panic!("{}", fatal(&error)));
+        assert_eq!(conflict.args, ["-v", "greet", "--quiet"]);
+        assert_eq!(conflict.level, None, "the guest refuses the pair; the host applies nothing");
     }
 
     // Hard acceptance criterion: the direct plan always carries the compiled-in

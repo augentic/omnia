@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use anyhow::{Context as _, Result, bail};
-use clap::{Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand};
 
 /// Command line interface for omnia.
 #[derive(Parser, PartialEq, Eq)]
@@ -12,6 +12,17 @@ pub struct Cli {
     /// The command to execute.
     #[command(subcommand)]
     pub command: Command,
+
+    /// Show more detail, once per level. Each `-v` raises the process
+    /// tracing level one step from the mode's default: a command starts at
+    /// `info`, a server at `warn`.
+    #[arg(short, long, action = ArgAction::Count, global = true, conflicts_with = "quiet")]
+    pub verbose: u8,
+
+    /// Show less detail, once per level. Each `-q` lowers the process tracing
+    /// level one step from the mode's default.
+    #[arg(short, long, action = ArgAction::Count, global = true)]
+    pub quiet: u8,
 }
 
 /// Subcommands for the omnia CLI.

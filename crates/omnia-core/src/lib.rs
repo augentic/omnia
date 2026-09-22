@@ -21,6 +21,7 @@ mod value;
 
 #[doc(hidden)]
 pub use pastey;
+pub use tracing_subscriber::filter::LevelFilter;
 #[doc(hidden)]
 pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 

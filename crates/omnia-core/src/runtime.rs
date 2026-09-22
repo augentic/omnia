@@ -15,7 +15,7 @@ use crate::location::Location;
 use crate::mount::MountRegistry;
 use crate::registry::{Guest, GuestId, HttpRoutes, PublishError, TriggerRouter};
 use crate::store::HasLimits;
-use crate::{ChainCtx, Dispatcher, Registry, RuntimeOptions, StoreBase, StoreCtx};
+use crate::{ChainCtx, Dispatcher, LevelFilter, Registry, RuntimeOptions, StoreBase, StoreCtx};
 
 /// Guest exit code. [`code_u8`](Self::code_u8) and [`ExitCode`](std::process::ExitCode)
 /// keep only the low byte (POSIX semantics).
@@ -65,10 +65,12 @@ pub struct RuntimeParts<B: 'static> {
     pub backends: B,
     /// Plugin acquisition locations from the manifest.
     pub locations: Vec<Location>,
-    /// Guest environment defaults from the manifest: variables every guest
-    /// carries when the host process does not set them. Empty inherits the
-    /// host environment unchanged.
-    pub env: Vec<(String, String)>,
+    /// The tracing level selected for this run, if any; it replaces every
+    /// guest's `RUST_LOG`.
+    pub level: Option<LevelFilter>,
+    /// The level a guest's `RUST_LOG` falls back to when none is selected and
+    /// the host process sets none.
+    pub fallback: LevelFilter,
     /// Command-mode guest identity, if any.
     pub command_guest: Option<GuestId>,
 }
@@ -99,9 +101,10 @@ struct RuntimeInner<B: 'static> {
     // The manifest's plugin acquisition locations, read by the loader
     // capability's install.
     locations: Vec<Location>,
-    // The manifest's guest environment defaults; `None` when it declares
-    // none, so every store inherits the host environment as WASI does.
-    env: Option<Arc<Vec<(String, String)>>>,
+    // The run's selected tracing level and the level it falls back to; what
+    // every store's `RUST_LOG` is built from.
+    level: Option<LevelFilter>,
+    fallback: LevelFilter,
     // Capability-crate state installed by the extend hook and
     // shared with every store context.
     extensions: Extensions,
@@ -204,7 +207,8 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
             backends: parts.backends,
             command_guest: parts.command_guest,
             locations: parts.locations,
-            env: (!parts.env.is_empty()).then(|| Arc::new(parts.env)),
+            level: parts.level,
+            fallback: parts.fallback,
             extensions: Extensions::new(),
         }))
     }
@@ -304,18 +308,18 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// Fresh per-guest store context at `chain`: a root for the command
     /// driver, the context a link dispatch derived for its callee.
     ///
-    /// The guest's environment is the host's, with the deployment's declared
-    /// defaults filling what it lacks; a deployment that declares none
-    /// inherits the host environment unchanged.
+    /// The guest's environment is the host's with `RUST_LOG` at the
+    /// deployment's tracing level: a selected level replaces the variable,
+    /// otherwise the fallback fills it when the host process sets none.
     #[must_use]
     pub fn store_in(&self, chain: ChainCtx) -> StoreCtx<B> {
-        // Read at store build, as `inherit_env` reads it, so both shapes see
-        // the same process environment.
-        let env = self
-            .inner
-            .env
-            .as_ref()
-            .map(|defaults| Arc::new(crate::store::merge_env(std::env::vars(), defaults)));
+        // Read at store build so every store sees the process environment as
+        // it stands. A pair that is not UTF-8 cannot cross `wasi:cli` as a
+        // string; it is left out rather than failing the store.
+        let host = std::env::vars_os().filter_map(|(name, value)| {
+            Some((name.into_string().ok()?, value.into_string().ok()?))
+        });
+        let env = crate::store::guest_env(host, self.inner.level, self.inner.fallback);
         StoreCtx {
             base: StoreBase::new(crate::StoreConfig {
                 options: self.options(),
@@ -323,7 +327,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
                 chain,
                 args: Some(Arc::clone(&self.inner.args)),
                 mounts: Some(Arc::clone(&self.inner.mounts)),
-                env,
+                env: Some(Arc::new(env)),
                 extensions: self.inner.extensions.clone(),
             }),
             backends: self.inner.backends.clone(),
