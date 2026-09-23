@@ -27,6 +27,24 @@ use serde::Deserialize;
 
 use super::source::Source;
 
+/// The optional capabilities this build compiled in; a manifest may only
+/// declare what the build serves.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Features {
+    /// The `plugin` feature (`[[plugin.location]]` entries).
+    pub plugin: bool,
+    /// The `link` feature (`[link] interfaces`).
+    pub link: bool,
+}
+
+impl Features {
+    /// The features this build was compiled with.
+    pub(super) const COMPILED: Self = Self {
+        plugin: cfg!(feature = "plugin"),
+        link: cfg!(feature = "link"),
+    };
+}
+
 /// Host-mediated interfaces the runtime polyfills onto the shared linker.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -134,8 +152,8 @@ impl Manifest {
 
     /// Validate manifest-level invariants surfaced before the registry is
     /// built. An `allow_empty` (dynamic) deployment may define no `[[guest]]`
-    /// entries.
-    pub(super) fn validate(&self, allow_empty: bool) -> Result<()> {
+    /// entries; `features` is what the manifest may declare.
+    pub(super) fn validate(&self, allow_empty: bool, features: Features) -> Result<()> {
         if self.guests.is_empty() && !allow_empty {
             bail!("manifest defines no [[guest]] entries");
         }
@@ -178,16 +196,14 @@ impl Manifest {
         }
         // A config file can declare locations the compiled runtime cannot
         // serve; refuse up front rather than silently never installing them.
-        #[cfg(not(feature = "plugin"))]
-        if !self.plugin.locations.is_empty() {
+        if !features.plugin && !self.plugin.locations.is_empty() {
             bail!(
                 "this runtime was built without the `plugin` feature; remove the \
                  [[plugin.location]] entries or enable the feature on the `omnia` dependency \
                  (`features = [\"plugin\"]`)"
             );
         }
-        #[cfg(not(feature = "link"))]
-        if !self.link.interfaces.is_empty() {
+        if !features.link && !self.link.interfaces.is_empty() {
             bail!(
                 "this runtime was built without the `link` feature; remove the [link] \
                  interfaces or enable the feature on the `omnia` dependency (`features = \
@@ -655,26 +671,48 @@ mod tests {
             config.as_deref().is_some_and(|config| config.contains("wasi = \"wasi.dev\"")),
             "{config:?}"
         );
-        #[cfg(feature = "plugin")]
-        manifest.validate(false).expect("one registry is allowed");
-        #[cfg(not(feature = "plugin"))]
-        {
-            let error = manifest.validate(false).expect_err("locations need the plugin feature");
-            assert!(error.to_string().contains("without the `plugin` feature"), "{error}");
-        }
+        manifest
+            .validate(
+                false,
+                Features {
+                    plugin: true,
+                    link: false,
+                },
+            )
+            .expect("one registry is allowed");
+    }
+
+    #[test]
+    fn locations_without_plugin_feature() {
+        let manifest = Manifest::new()
+            .guest(GuestEntry::new("a", "./a.wasm"))
+            .locations([Location::path(".", "adapters")]);
+        let error = manifest
+            .validate(
+                false,
+                Features {
+                    plugin: false,
+                    link: false,
+                },
+            )
+            .expect_err("locations need the plugin feature");
+        assert!(error.to_string().contains("without the `plugin` feature"), "{error}");
     }
 
     #[test]
     fn interfaces_without_link_feature() {
         let manifest =
             Manifest::new().guest(GuestEntry::new("a", "./a.wasm")).link(["omnia:link/echo"]);
-        #[cfg(feature = "link")]
-        manifest.validate(false).expect("interfaces are allowed with the link feature");
-        #[cfg(not(feature = "link"))]
-        {
-            let error = manifest.validate(false).expect_err("interfaces need the link feature");
-            assert!(error.to_string().contains("without the `link` feature"), "{error}");
-        }
+        let error = manifest
+            .validate(
+                false,
+                Features {
+                    plugin: false,
+                    link: false,
+                },
+            )
+            .expect_err("interfaces need the link feature");
+        assert!(error.to_string().contains("without the `link` feature"), "{error}");
     }
 
     #[test]
@@ -689,7 +727,9 @@ mod tests {
         let manifest = Manifest::new()
             .guest(GuestEntry::new("a", "./a.wasm"))
             .locations([Location::registry("ghcr.io"), Location::registry("docker.io")]);
-        let error = manifest.validate(false).expect_err("two registries must be refused");
+        let error = manifest
+            .validate(false, Features::COMPILED)
+            .expect_err("two registries must be refused");
         assert!(error.to_string().contains("multiple registry"), "{error}");
     }
 
@@ -724,7 +764,10 @@ mod tests {
         let toml = "[[guest]]\nid = \"only\"\nsource.path = \"./only.wasm\"\n\n\
              [transport]\ndefault = \"unix\"\n";
         let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
-        assert!(manifest.validate(false).is_err(), "distributed transport is not yet implemented");
+        assert!(
+            manifest.validate(false, Features::COMPILED).is_err(),
+            "distributed transport is not yet implemented"
+        );
     }
 
     #[test]
@@ -750,7 +793,7 @@ mod tests {
         let toml = "[[guest]]\nid = \"helper\"\nsource.path = \"./helper.wasm\"\n\n\
              [[guest]]\nid = \"app\"\nsource.path = \"./app.wasm\"\ncommand = true\n";
         let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
-        manifest.validate(false).expect("one marked guest validates");
+        manifest.validate(false, Features::COMPILED).expect("one marked guest validates");
         assert!(!manifest.guests[0].command, "the flag defaults to false");
         assert_eq!(manifest.command_guest(), Some(GuestId::from("app")));
     }
@@ -760,7 +803,9 @@ mod tests {
         let manifest = Manifest::new()
             .guest(GuestEntry::new("a", "./a.wasm").command())
             .guest(GuestEntry::new("b", "./b.wasm").command());
-        let error = manifest.validate(false).expect_err("two marked guests must be rejected");
+        let error = manifest
+            .validate(false, Features::COMPILED)
+            .expect_err("two marked guests must be rejected");
         assert!(error.to_string().contains("at most one guest may be the command guest"));
     }
 
@@ -769,7 +814,9 @@ mod tests {
         let toml = "[[guest]]\nid = \"same\"\nsource.path = \"./a.wasm\"\n\n\
              [[guest]]\nid = \"same\"\nsource.path = \"./b.wasm\"\n";
         let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
-        let error = manifest.validate(false).expect_err("duplicate guest ids must be rejected");
+        let error = manifest
+            .validate(false, Features::COMPILED)
+            .expect_err("duplicate guest ids must be rejected");
         assert!(error.to_string().contains("duplicate [[guest]] id `same`"), "{error}");
     }
 
@@ -778,11 +825,11 @@ mod tests {
         let manifest: Manifest =
             toml::from_str("[transport]\ndefault = \"unix\"\n").expect("manifest should parse");
         assert!(
-            manifest.validate(false).is_err(),
+            manifest.validate(false, Features::COMPILED).is_err(),
             "a static manifest with no guests must be rejected"
         );
         assert!(
-            Manifest::new().validate(true).is_ok(),
+            Manifest::new().validate(true, Features::COMPILED).is_ok(),
             "a dynamic deployment may start with no guests"
         );
     }
@@ -820,8 +867,15 @@ mod tests {
             .link(["omnia:link/echo"])
             .link(["omnia:shared/log"]);
 
-        #[cfg(feature = "link")]
-        manifest.validate(false).expect("manifest should validate");
+        manifest
+            .validate(
+                false,
+                Features {
+                    plugin: false,
+                    link: true,
+                },
+            )
+            .expect("manifest should validate");
         assert_eq!(manifest.guests.len(), 2);
         assert_eq!(manifest.mounts.len(), 1);
         assert_eq!(manifest.guests[0].routes.http, ["/router"]);

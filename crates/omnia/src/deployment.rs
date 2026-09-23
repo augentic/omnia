@@ -155,7 +155,7 @@ impl DeploymentBuilder {
                 .context("no deployment manifest supplied and OMNIA_CONFIG is unset")?;
             Manifest::from_config(config)?
         };
-        manifest.validate(self.allow_empty)?;
+        manifest.validate(self.allow_empty, manifest::Features::COMPILED)?;
 
         let program_name = self.program_name.unwrap_or_else(|| manifest.name().to_owned());
         // The runtime-carried name read by telemetry, trigger servers, and
