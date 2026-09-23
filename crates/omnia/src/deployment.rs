@@ -375,9 +375,12 @@ impl<T: WasiView> Deployment<T> {
     where
         T: LinkStore,
     {
+        // Shadowing rather than `let mut` + reassignment: a mutable binding
+        // would trip `unused_mut` when the `link` feature is off.
+        let seam: Arc<dyn LinkSeam<T>> = Arc::new(NoLinks);
         #[cfg(feature = "link")]
         let seam: Arc<dyn LinkSeam<T>> = if self.links.is_empty() {
-            Arc::new(NoLinks)
+            seam
         } else {
             Arc::new(InProcessLinks::new(
                 self.selector,
@@ -385,8 +388,6 @@ impl<T: WasiView> Deployment<T> {
                 ChainPolicy::from(&self.options),
             ))
         };
-        #[cfg(not(feature = "link"))]
-        let seam: Arc<dyn LinkSeam<T>> = Arc::new(NoLinks);
 
         Registry::assemble(
             self.engine,
