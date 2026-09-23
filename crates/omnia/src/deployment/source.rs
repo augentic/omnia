@@ -75,46 +75,7 @@ impl Source {
     pub(crate) async fn load(
         &self, engine: &Engine, policy: ArtifactPolicy,
     ) -> Result<LoadedGuest> {
-        let artifact = match &self.kind {
-            SourceKind::Path(path) => {
-                if is_precompiled(path)? {
-                    ensure!(
-                        policy == ArtifactPolicy::Trust,
-                        "{} is a pre-compiled (native) artifact, which this build rejects; load \
-                         trusted pre-compiled artifacts through `DeploymentBuilder`'s unsafe \
-                         `build_trusted`",
-                        path.display()
-                    );
-                    // SAFETY: `policy == Trust` is only reachable through an
-                    // `unsafe` build call whose caller attested every
-                    // pre-compiled path names unmodified trusted wasmtime
-                    // output — the contract `precompiled_file` requires.
-                    unsafe { GuestArtifact::precompiled_file(path.clone()) }
-                } else {
-                    GuestArtifact::wasm(
-                        std::fs::read(path)
-                            .with_context(|| format!("loading guest from {}", path.display()))?,
-                    )
-                }
-            }
-            SourceKind::Bytes(bytes) => {
-                if bytes.get(..ELF_MAGIC.len()) == Some(&ELF_MAGIC) {
-                    ensure!(
-                        policy == ArtifactPolicy::Trust,
-                        "the embedded bytes are a pre-compiled (native) artifact, which this \
-                         build rejects; load trusted pre-compiled artifacts through \
-                         `DeploymentBuilder`'s unsafe `build_trusted`"
-                    );
-                    // SAFETY: `policy == Trust` is only reachable through an
-                    // `unsafe` build call whose caller attested every
-                    // pre-compiled artifact is unmodified trusted wasmtime
-                    // output — the contract `precompiled` requires.
-                    unsafe { GuestArtifact::precompiled(bytes.to_vec()) }
-                } else {
-                    GuestArtifact::wasm(bytes.to_vec())
-                }
-            }
-        };
+        let artifact = self.artifact(policy)?;
         let component = artifact.load(engine).await.with_context(|| match &self.kind {
             SourceKind::Path(path) => format!("loading guest from {}", path.display()),
             SourceKind::Bytes(_) => format!("loading embedded guest `{}`", self.id),
@@ -123,5 +84,62 @@ impl Source {
             id: self.id.clone(),
             component,
         })
+    }
+
+    // Select the artifact under `policy`. The base build serves pre-compiled
+    // artifacts only; the `jit` feature adds the raw-wasm branch ahead of it.
+    fn artifact(&self, policy: ArtifactPolicy) -> Result<GuestArtifact> {
+        match &self.kind {
+            SourceKind::Path(path) => {
+                let precompiled = is_precompiled(path)?;
+                #[cfg(feature = "jit")]
+                if !precompiled {
+                    let bytes = std::fs::read(path)
+                        .with_context(|| format!("loading guest from {}", path.display()))?;
+                    return Ok(GuestArtifact::wasm(bytes));
+                }
+                ensure!(
+                    precompiled,
+                    "{} is raw wasm, which this build cannot compile (no `jit` feature); \
+                     pre-compile it with `omnia compile`",
+                    path.display()
+                );
+                ensure!(
+                    policy == ArtifactPolicy::Trust,
+                    "{} is a pre-compiled (native) artifact, which this build rejects; load \
+                     trusted pre-compiled artifacts through `DeploymentBuilder`'s unsafe \
+                     `build_trusted`",
+                    path.display()
+                );
+                // SAFETY: `policy == Trust` is only reachable through an
+                // `unsafe` build call whose caller attested every
+                // pre-compiled path names unmodified trusted wasmtime
+                // output — the contract `precompiled_file` requires.
+                Ok(unsafe { GuestArtifact::precompiled_file(path.clone()) })
+            }
+            SourceKind::Bytes(bytes) => {
+                let precompiled = bytes.get(..ELF_MAGIC.len()) == Some(&ELF_MAGIC);
+                #[cfg(feature = "jit")]
+                if !precompiled {
+                    return Ok(GuestArtifact::wasm(bytes.to_vec()));
+                }
+                ensure!(
+                    precompiled,
+                    "the embedded bytes are raw wasm, which this build cannot compile (no `jit` \
+                     feature); pre-compile them with `omnia compile`"
+                );
+                ensure!(
+                    policy == ArtifactPolicy::Trust,
+                    "the embedded bytes are a pre-compiled (native) artifact, which this build \
+                     rejects; load trusted pre-compiled artifacts through `DeploymentBuilder`'s \
+                     unsafe `build_trusted`"
+                );
+                // SAFETY: `policy == Trust` is only reachable through an
+                // `unsafe` build call whose caller attested every
+                // pre-compiled artifact is unmodified trusted wasmtime
+                // output — the contract `precompiled` requires.
+                Ok(unsafe { GuestArtifact::precompiled(bytes.to_vec()) })
+            }
+        }
     }
 }

@@ -1,6 +1,6 @@
 #![doc = include_str!("../README.md")]
 #![cfg(not(target_arch = "wasm32"))]
-#![allow(unsafe_code)] // `DeploymentBuilder::build_trusted` and `Source::load`
+#![allow(unsafe_code)] // `DeploymentBuilder::build_trusted` and `Source::artifact`
 
 // The embedder facade: the runtime spine (`omnia-core`), host-mediated linking
 // (`omnia-link`, behind the `link` feature), the plugins capability
