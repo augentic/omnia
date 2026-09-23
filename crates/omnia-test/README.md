@@ -40,7 +40,6 @@ nothing to the component — the gate simply keeps the host crates out of the
 `cargo make ci` checks the shapes a consumer sees, not just `--all-features`:
 
 ```sh
-cargo make features    # clippy per feature: build, guest, host, guest,host
 cargo make hack        # cargo hack check --feature-powerset --no-dev-deps
 cargo make semver      # cargo semver-checks against the last release
 ```
