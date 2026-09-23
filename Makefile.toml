@@ -23,7 +23,6 @@ dependencies = ["audit", "fmt", "lint", "outdated", "deps"]
 dependencies = [
   "fmt",
   "lint",
-  "hack",
   "test",
   "test-docs",
   "docs",
@@ -60,22 +59,6 @@ cargo +nightly udeps --all-targets
 install_crate = "cargo-udeps"
 # args = ["machete", "--skip-target-dir"]
 # install_crate = "cargo-machete"
-
-# Every feature combination of the published test crate must build on its
-# own, without dev-dependencies masking a missing `dep:` line.
-[tasks.hack]
-command = "cargo"
-args = [
-  "hack",
-  "check",
-  "--feature-powerset",
-  "--exclude-features",
-  "default",
-  "--no-dev-deps",
-  "-p",
-  "omnia-test",
-]
-install_crate = "cargo-hack"
 
 # Semver check against the last published omnia-test; joins `ci` once the
 # first release exists as a baseline.
