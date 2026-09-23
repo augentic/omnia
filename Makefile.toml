@@ -121,10 +121,15 @@ install_crate = "cargo-semver-checks"
 [tasks.fmt]
 script = "cargo +nightly fmt --all"
 
-# Lint
+# Lint, natively and for `wasm32-wasip2`. The second pass reaches the
+# guest-only code (`omnia-sdk`, `guest-macros`, the `wasi-*` guest bindings,
+# `test-programs` guests, `*-wasm` examples) that is `cfg`'d out of the native
+# pass; host-only items are gated the other way and compile to nothing there.
 [tasks.lint]
-command = "cargo"
-args = ["clippy", "--workspace", "--all-targets", "--all-features", "--", "-D", "warnings"]
+script = '''
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo clippy --workspace --all-targets --all-features --target wasm32-wasip2 -- -D warnings
+'''
 install_crate = { rustup_component_name = "clippy" }
 
 # Miri
