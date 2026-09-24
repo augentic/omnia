@@ -74,13 +74,13 @@ Layers 1 and 2 form the **runtime core** — domain-agnostic infrastructure that
 
 ### Composition root (`omnia`) and live-runtime SDK (`omnia-core`)
 
-`omnia` is the composition root: it owns deployment assembly, process lifecycle, and composition of the optional crates. Embedders depend on it alone (`omnia::…` paths). A deployment's `Cargo.toml` never names `omnia-core`, `omnia-link`, `omnia-plugin`, or `omnia-cli`, and neither does any path the `runtime!` macro emits (it imports even its `Result` as `omnia::anyhow::Result`). Re-exports are `#[doc(inline)]` so the rendered documentation shows `omnia::…` paths too.
+`omnia` is the composition root: it owns deployment assembly, process lifecycle, and composition of the optional crates. Embedders depend on it alone (`omnia::…` paths). A deployment's `Cargo.toml` never names `omnia-core`, `omnia-link`, `omnia-plugin`, `omnia-otlp`, or `omnia-cli`, and neither does any path the `runtime!` macro emits (it imports even its `Result` as `omnia::anyhow::Result`). Re-exports are `#[doc(inline)]` so the rendered documentation shows `omnia::…` paths too.
 
 `omnia` provides:
 
 - **Deployment pipeline**: `DeploymentBuilder` builds a `Deployment` from a `Manifest` (loaded from `omnia.toml`, synthesized from a single `.wasm`, or constructed programmatically)
 - **Lifecycle**: `Wiring`, `Backends`, `Mode`; `run` / `run_with` take a built `Deployment`, call `Deployment::assemble`, then drive command mode or the trigger servers
-- **Optional-crate composition**: `omnia-link` (guest→guest linking, behind the `link` feature — a `runtime!` invocation declaring `link: { interfaces: [...] }` requires it), `omnia-plugin` (the `omnia:plugins/loader` capability, behind the `plugin` feature — a `runtime!` invocation declaring `plugin: { locations: [...] }` requires it), `omnia-cli` (the `run` grammar, behind the `cli` feature), and the `runtime!` macro. The two features are independent: static guests may link; loaded guests may be host-only.
+- **Optional-crate composition**: `omnia-link` (guest→guest linking, behind the `link` feature — a `runtime!` invocation declaring `link: { interfaces: [...] }` requires it), `omnia-plugin` (the `omnia:plugins/loader` capability, behind the `plugin` feature — a `runtime!` invocation declaring `plugin: { locations: [...] }` requires it, and the feature implies `jit` because loaded plugins are raw wasm), `omnia-otlp` (OTLP exporters for host telemetry, behind the `otlp` feature), `omnia-cli` (the `run` grammar, behind the `cli` feature), and the `runtime!` macro. `link` and `plugin` are independent: static guests may link; loaded guests may be host-only.
 
 `omnia-core` is the live-runtime SDK a capability crate targets. Depend on it directly only when building another capability crate. It provides:
 
@@ -88,7 +88,7 @@ Layers 1 and 2 form the **runtime core** — domain-agnostic infrastructure that
 - **Core traits**: `Host`, `Server`, `Backend`
 - **Link seam**: the `LinkSeam` trait and `NoLinks` no-op the registry drives; guest→guest linking itself lives in `omnia-link` (`InProcessLinks`)
 - **Host→guest dispatch**: `Dispatcher`, a named-target call through `call_fresh` (the same primitive guest→guest links use)
-- **Telemetry**: `tracing` + OpenTelemetry bootstrap
+- **Telemetry**: the console `tracing` subscriber and the layer seam exporters attach through (`Telemetry::layer`)
 - **Admission seam**: `Runtime::admit` and `Extensions`, which `omnia-plugin` uses to install acquisition policy from the `Wiring::extend` hook
 
 `omnia-cli` is a leaf grammar crate: clap plus argv-precedence over paths and strings, with no `omnia-*` dependencies. `omnia` materializes a `RunPlan` into a `Manifest` and drives the runtime. `compile` (with the `jit` feature) also lives in `omnia`.
