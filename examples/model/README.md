@@ -36,7 +36,7 @@ This emits `target/wasm32-wasip2/debug/examples/model_wasm.wasm` (the underscore
 ## Run
 
 The answer is canned in the runtime binary, so no configuration is needed.
-The manifest is compiled in via `runtime!`'s `config:` key, which makes this
+The manifest is compiled in via `runtime!`'s `manifest:` key, which makes this
 command-mode binary a direct command — no `run` subcommand, argv passes to the
 guest verbatim:
 

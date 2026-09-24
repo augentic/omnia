@@ -261,9 +261,8 @@ impl<B: Send + 'static> HasDispatcher for StoreCtx<B> {
 
 /// Clone-on-read access to a store's runtime extensions.
 ///
-/// Lets a capability crate's host binding reach the state its
-/// extend hook installed without carrying it on
-/// its own view.
+/// Lets a capability crate's host binding reach the state installed at
+/// assembly without carrying it on its own view.
 pub trait HasExtensions: Send {
     /// Clone a handle to the store's runtime extensions.
     fn extensions(&self) -> Extensions;

@@ -16,11 +16,11 @@ use crate::{DeploymentBuilder, LevelFilter, Manifest, Mode};
 
 /// How a runtime's compiled-in deployment manifest is supplied.
 ///
-/// The `runtime!` macro emits [`Path`](Self::Path) for its `config:` key and
-/// [`Inline`](Self::Inline) for its inline manifest keys (`guests`,
+/// The `runtime!` macro emits [`Path`](Self::Path) for its `manifest:` key
+/// and [`Inline`](Self::Inline) for its inline manifest keys (`guests`,
 /// `mounts`). On the standard CLI path (`omnia-cli`) it is the
-/// lowest-priority source (behind `--config`/`OMNIA_CONFIG` and a positional
-/// wasm path); on the direct-command path it is the sole source.
+/// lowest-priority source (behind `--manifest`/`OMNIA_MANIFEST` and a
+/// positional wasm path); on the direct-command path it is the sole source.
 #[derive(Clone, Debug)]
 pub enum ManifestSource {
     /// A manifest path, loaded only when this source is selected.
@@ -37,7 +37,7 @@ impl ManifestSource {
     /// Returns an error if a path source cannot be read or parsed.
     pub fn into_manifest(self) -> Result<Manifest> {
         match self {
-            Self::Path(path) => Manifest::from_config(path),
+            Self::Path(path) => Manifest::load(path),
             Self::Inline(manifest) => Ok(manifest),
         }
     }
@@ -48,20 +48,34 @@ impl ManifestSource {
 pub struct MainOptions {
     mode: Mode,
     manifest: Option<ManifestSource>,
+    program_name: Option<String>,
 }
 
 impl MainOptions {
     /// Start options for a deployment driven in `mode`.
     #[must_use]
     pub const fn new(mode: Mode) -> Self {
-        Self { mode, manifest: None }
+        Self {
+            mode,
+            manifest: None,
+            program_name: None,
+        }
     }
 
-    /// Set the compiled-in manifest source (the macro's `config:` key or
+    /// Set the compiled-in manifest source (the macro's `manifest:` key or
     /// inline manifest keys).
     #[must_use]
     pub fn manifest(mut self, source: ManifestSource) -> Self {
         self.manifest = Some(source);
+        self
+    }
+
+    /// Set the program name (the macro passes the invoking crate's
+    /// `CARGO_PKG_NAME`): telemetry's component name and, in command mode,
+    /// the guest's `argv[0]`.
+    #[must_use]
+    pub fn program_name(mut self, name: impl Into<String>) -> Self {
+        self.program_name = Some(name.into());
         self
     }
 
@@ -71,10 +85,10 @@ impl MainOptions {
         self.mode == Mode::Command && self.manifest.is_some()
     }
 
-    /// Split into the mode and the compiled-in manifest source.
+    /// Split into the mode, the compiled-in manifest source, and the program name.
     #[must_use]
-    pub fn into_parts(self) -> (Mode, Option<ManifestSource>) {
-        (self.mode, self.manifest)
+    pub fn into_parts(self) -> (Mode, Option<ManifestSource>, Option<String>) {
+        (self.mode, self.manifest, self.program_name)
     }
 }
 
@@ -82,6 +96,7 @@ impl MainOptions {
 pub(super) struct EntryPlan {
     mode: Mode,
     manifest: Option<Manifest>,
+    program_name: Option<String>,
     args: Vec<String>,
     level: Option<LevelFilter>,
 }
@@ -91,6 +106,10 @@ impl EntryPlan {
     pub(super) fn into_builder(self) -> DeploymentBuilder {
         let builder =
             DeploymentBuilder::new().manifest(self.manifest).args(self.args).mode(self.mode);
+        let builder = match self.program_name {
+            Some(name) => builder.program_name(name),
+            None => builder,
+        };
         match self.level {
             Some(level) => builder.level(level),
             None => builder,
@@ -103,7 +122,7 @@ impl EntryPlan {
 /// Command mode with a compiled-in manifest is a *direct command*: no host
 /// CLI grammar, argv belongs to the guest verbatim. The direct plan always
 /// carries the compiled-in manifest, so the builder never falls through to
-/// its own `OMNIA_CONFIG` lookup — the environment is untouched by design.
+/// its own `OMNIA_MANIFEST` lookup — the environment is untouched by design.
 /// Every other shape needs the standard `run` grammar, which only
 /// `omnia-cli` provides.
 ///
@@ -138,7 +157,7 @@ pub(super) fn plan(
 pub(super) fn plan_direct(
     options: MainOptions, argv: impl IntoIterator<Item = OsString>,
 ) -> Result<EntryPlan> {
-    let (mode, manifest) = options.into_parts();
+    let (mode, manifest, program_name) = options.into_parts();
     let guest_args = argv
         .into_iter()
         .skip(1)
@@ -153,6 +172,7 @@ pub(super) fn plan_direct(
     Ok(EntryPlan {
         mode,
         manifest,
+        program_name,
         args: guest_args,
         level,
     })
@@ -176,7 +196,7 @@ mod tests {
     }
 
     fn first_guest(plan: &EntryPlan) -> &str {
-        plan.manifest.as_ref().expect("plan carries a manifest").guests[0].id.as_str()
+        plan.manifest.as_ref().expect("plan carries a manifest").guests[0].name.as_str()
     }
 
     fn fatal(error: &anyhow::Error) -> String {
@@ -185,12 +205,13 @@ mod tests {
 
     #[test]
     fn direct_argv() {
-        // `--config`, `run`, and `--debug` are guest arguments, not host CLI
-        // options: nothing in argv is reserved for the host.
+        // `--manifest`, `run`, and `--debug` are guest arguments, not host
+        // CLI options: nothing in argv is reserved for the host.
         let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
-        let plan = plan(options, argv(&["bin", "--config", "foo.toml", "run", "--debug", "greet"]))
-            .unwrap_or_else(|error| panic!("{}", fatal(&error)));
-        assert_eq!(plan.args, ["--config", "foo.toml", "run", "--debug", "greet"]);
+        let plan =
+            plan(options, argv(&["bin", "--manifest", "foo.toml", "run", "--debug", "greet"]))
+                .unwrap_or_else(|error| panic!("{}", fatal(&error)));
+        assert_eq!(plan.args, ["--manifest", "foo.toml", "run", "--debug", "greet"]);
         assert_eq!(first_guest(&plan), "app");
         assert_eq!(plan.level, None, "no flag leaves the process `RUST_LOG` standing");
     }
@@ -214,7 +235,7 @@ mod tests {
 
     // Hard acceptance criterion: the direct plan always carries the compiled-in
     // manifest, so `DeploymentBuilder::build` can never fall through to its own
-    // `OMNIA_CONFIG` lookup.
+    // `OMNIA_MANIFEST` lookup.
     #[test]
     fn direct_compiled_manifest() {
         let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));

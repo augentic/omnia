@@ -66,12 +66,12 @@ impl Mode {
     }
 }
 
-/// Host linking, extension installation, and trigger-server startup for a
-/// deployment.
+/// Host linking and trigger-server startup for a deployment.
 ///
 /// Bounded on the bundle's shape rather than on [`Backends`] so one wiring
 /// serves both the connected production bundle and a bundle handed in ready
-/// (see [`run_with`]).
+/// (see [`run_with`]). The guest loader is not wired here: assembly links
+/// its host and installs its policy for every deployment alike.
 pub trait Wiring<B: Clone + Send + Sync + 'static> {
     /// Link every declared host into the deployment linker.
     ///
@@ -79,19 +79,6 @@ pub trait Wiring<B: Clone + Send + Sync + 'static> {
     ///
     /// Returns an error if a host cannot be added to the linker.
     fn link(deployment: &mut Deployment<StoreCtx<B>>) -> Result<()>;
-
-    /// Install capability extensions into [`Runtime::extensions`]. Invoked
-    /// once, after the bundle is in hand and the runtime is assembled, so an
-    /// extension is built against the bundle (via [`Runtime::backends`]);
-    /// the default installs nothing.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if an extension cannot be built or installed.
-    fn extend(runtime: &Runtime<B>) -> Result<()> {
-        let _ = runtime;
-        Ok(())
-    }
 
     /// Run every declared long-lived trigger server concurrently.
     fn serve(runtime: &Runtime<B>) -> impl std::future::Future<Output = Result<()>> + Send;
@@ -157,7 +144,6 @@ where
     let mode = deployment.mode();
     H::link(&mut deployment).context("linking hosts")?;
     let runtime = deployment.assemble(backends).await.context("assembling runtime")?;
-    H::extend(&runtime).context("installing runtime extensions")?;
     finish::<B, H>(runtime, mode).await
 }
 

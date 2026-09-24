@@ -12,27 +12,28 @@ use crate::source::{Origin, PathSource, RegistrySource};
 /// Host-side `omnia:plugins/loader.load` — embedder sugar over the runtime's
 /// installed [`Plugins`] extension.
 pub trait PluginLoader {
-    /// Acquire, pin-check, and admit `package`. Idempotent on (package, digest).
+    /// Acquire, pin-check, and admit the guest `from` names. Idempotent on
+    /// (name, digest).
     ///
     /// # Errors
     ///
-    /// `refused` on a bad request or pin, `unavailable` on acquisition failure,
-    /// `already-active` on an identity conflict, `internal` on registration
-    /// failure.
+    /// `refused` on a bad request, an undeclared name, or a pin,
+    /// `unavailable` on acquisition failure, `already-active` on an identity
+    /// conflict, `internal` on registration failure.
     fn load(
-        &self, package: &str, from: Origin, pin: Option<&str>,
+        &self, from: Origin, pin: Option<&str>,
     ) -> impl Future<Output = Result<Plugin, LoadError>> + Send;
 }
 
 impl<B: Clone + Send + Sync + 'static> PluginLoader for Runtime<B> {
     fn load(
-        &self, package: &str, from: Origin, pin: Option<&str>,
+        &self, from: Origin, pin: Option<&str>,
     ) -> impl Future<Output = Result<Plugin, LoadError>> + Send {
         let plugins = self.extensions().get::<Plugins>();
         async move {
             match plugins {
-                Some(plugins) => plugins.load(package, from, pin).await,
-                None => Err(LoadError::no_plugins(package)),
+                Some(plugins) => plugins.load(from, pin).await,
+                None => Err(LoadError::no_plugins(from.label())),
             }
         }
     }
@@ -46,10 +47,15 @@ pub struct Plugins {
 }
 
 impl Plugins {
-    /// Install the loader capability on `runtime`.
+    /// Install the loader capability on `runtime` over a custom policy.
     ///
-    /// `registry` and `path` are the compiled-in slots, one per [`Origin`]
-    /// kind; `None` refuses that kind.
+    /// `registry` and `path` are the acquisition slots, one per acquiring
+    /// [`Origin`] kind; `None` refuses that kind. The declared policy —
+    /// [`install_declared`](Self::install_declared) — fills them from the
+    /// deployment's mounts and `registries` configuration, and is what
+    /// assembly installs unless an embedder selects custom sources. A
+    /// declared name acquires nothing and is answered from the registry
+    /// under either policy.
     ///
     /// # Errors
     ///
@@ -74,66 +80,87 @@ impl Plugins {
         Ok(())
     }
 
-    /// Acquire, pin-check, and admit `package` through the runtime's
-    /// admission seam. Idempotent on (package, digest).
+    /// Acquire, pin-check, and admit the guest `from` names through the
+    /// runtime's admission seam, registering it under the name the origin
+    /// derives ([`Origin::id`]). Idempotent on (name, digest). A declared
+    /// name acquires nothing: the handle attests the registration, carrying
+    /// whatever digest it recorded.
     ///
     /// # Errors
     ///
-    /// `refused` on a bad request or pin, `unavailable` on acquisition
-    /// failure, `already-active` on an identity conflict, `internal` on
-    /// registration failure.
-    pub async fn load(
-        &self, package: &str, from: Origin, pin: Option<&str>,
-    ) -> Result<Plugin, LoadError> {
+    /// `refused` on a bad request, an undeclared name, or a pin,
+    /// `unavailable` on acquisition failure, `already-active` on an identity
+    /// conflict, `internal` on registration failure.
+    pub async fn load(&self, from: Origin, pin: Option<&str>) -> Result<Plugin, LoadError> {
         let pin = pin.map(canonicalize).transpose().map_err(LoadError::Refused)?;
+        let id = from.id();
 
-        let id = GuestId::from(package);
-        if let Registration::Active(recorded) = self.admission.registration(&id)? {
-            return attest_active(package, id, recorded.as_deref(), pin.as_deref());
+        if let Origin::Declared(name) = &from {
+            if pin.is_some() {
+                return Err(LoadError::Refused(format!(
+                    "`{name}` is declared by the deployment; it takes no pin"
+                )));
+            }
+            return match self.admission.registration(&id)? {
+                Registration::Active(recorded) => Ok(Plugin {
+                    id,
+                    digest: recorded.map(Arc::from),
+                }),
+                Registration::Absent => Err(LoadError::Refused(format!(
+                    "no guest `{name}` is declared by this deployment"
+                ))),
+            };
         }
 
-        let bytes = self.acquire(package, &from).await?;
+        let label = from.label();
+        if let Registration::Active(recorded) = self.admission.registration(&id)? {
+            return attest_active(label, id, recorded.as_deref(), pin.as_deref());
+        }
+
+        let bytes = self.acquire(&from).await?;
 
         // The operator's pin binds name to bytes before any validation work.
         let hash = sha256_digest(&bytes);
         if pin.is_some_and(|pin| pin != hash) {
             return Err(LoadError::Refused(format!(
-                "resolved package `{package}` digest {hash} does not match the pinned digest"
+                "resolved `{label}` digest {hash} does not match the pinned digest"
             )));
         }
 
         match self.admission.admit(id.clone(), bytes).await {
             Ok(()) => {
-                tracing::debug!(package, "plugin loaded");
+                tracing::debug!(%id, "plugin loaded");
                 Ok(Plugin {
                     id,
-                    digest: Arc::from(hash),
+                    digest: Some(Arc::from(hash)),
                 })
             }
             Err(AdmitError::AlreadyRegistered(_)) => {
                 let recorded = self.admission.registration(&id)?.digest();
-                attest_active(package, id, recorded.as_deref(), Some(&hash))
+                attest_active(label, id, recorded.as_deref(), Some(&hash))
             }
             Err(error) => Err(error.into()),
         }
     }
 
-    async fn acquire(&self, package: &str, from: &Origin) -> Result<Vec<u8>, LoadError> {
+    async fn acquire(&self, from: &Origin) -> Result<Vec<u8>, LoadError> {
         match from {
-            Origin::Registry(endpoint) => match &self.registry {
+            Origin::Registry { package, endpoint } => match &self.registry {
                 Some(registry) => registry.acquire(package, endpoint.as_deref()).await,
                 None => Err(LoadError::Refused(format!(
-                    "this deployment's locations serve no registry; loading `{package}` needs \
-                     a `{{ registry: ... }}` entry"
+                    "this deployment refuses registry loads; `{package}` cannot be fetched"
                 ))),
             },
             Origin::Path(path) => match &self.path {
                 Some(paths) => paths.acquire(path).await,
                 None => Err(LoadError::Refused(format!(
-                    "this deployment's locations serve no paths; loading `{package}` from \
-                     `{path}` needs a `{{ name: ..., path: ... }}` entry"
+                    "this deployment mounts no directories; loading `{path}` needs a `mounts:` \
+                     entry"
                 ))),
             },
+            Origin::Declared(name) => {
+                Err(LoadError::Internal(format!("declared guest `{name}` reached acquisition")))
+            }
         }
     }
 }
@@ -152,17 +179,17 @@ fn canonicalize(digest: &str) -> Result<String, String> {
     Ok(format!("{SCHEME}{}", hex.to_ascii_lowercase()))
 }
 
-/// Attest an active registration as the requested (package, digest), or
+/// Attest an active registration as the requested (name, digest), or
 /// refuse: an active identity never re-binds.
 fn attest_active(
-    package: &str, id: GuestId, recorded: Option<&str>, wanted: Option<&str>,
+    label: &str, id: GuestId, recorded: Option<&str>, wanted: Option<&str>,
 ) -> Result<Plugin, LoadError> {
     match recorded {
         Some(digest) if wanted == Some(digest) => Ok(Plugin {
             id,
-            digest: Arc::from(digest),
+            digest: Some(Arc::from(digest)),
         }),
-        _ => Err(LoadError::AlreadyActive(format!("`{package}` is already active"))),
+        _ => Err(LoadError::AlreadyActive(format!("`{label}` is already active"))),
     }
 }
 
@@ -170,7 +197,7 @@ fn attest_active(
 #[derive(Clone, Debug)]
 pub struct Plugin {
     id: GuestId,
-    digest: Arc<str>,
+    digest: Option<Arc<str>>,
 }
 
 impl Plugin {
@@ -180,9 +207,10 @@ impl Plugin {
         &self.id
     }
 
-    /// Resolved `sha256:<hex>` of the loaded bytes.
+    /// Resolved `sha256:<hex>` of the loaded bytes; `None` for a declared
+    /// guest the registry recorded no digest for.
     #[must_use]
-    pub fn digest(&self) -> &str {
-        &self.digest
+    pub fn digest(&self) -> Option<&str> {
+        self.digest.as_deref()
     }
 }

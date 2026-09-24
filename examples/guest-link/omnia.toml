@@ -1,32 +1,29 @@
 # Host-mediated dynamic linking.
 #
-# Two guests share one runtime. `router` imports `omnia:link/echo`; the host
-# does not satisfy that import natively, so it is named in the deployment's
-# `[link] interfaces` and the runtime core polyfills it onto the shared linker.
-# At startup the host wires the serve side of every dispatched interface, so
-# calling the import dispatches by in-memory routing to
-# `responder`, which exports it.
+# Two guests share one runtime. `router` imports `example:link/echo`, an
+# interface outside the runtime's own `wasi:` and `omnia:` namespaces, so the
+# host does not satisfy it natively: the runtime core polyfills it onto the
+# shared linker and, at startup, serves every guest's linked exports, so
+# calling the import dispatches by in-memory routing to `responder`, which
+# exports it. Nothing declares the seam — each component says what it
+# imports and exports.
 #
-# The runtime core stays domain-agnostic: `[link] interfaces` and the selector
-# see only the opaque interface string `omnia:link/echo` and opaque guest ids.
+# The runtime core stays domain-agnostic: the selector sees only the opaque
+# interface string `example:link/echo` and opaque guest names.
 #
 # Build the guests first (see README.md), then run (this path is the runtime's
-# compiled-in default, so `--config` is optional):
+# compiled-in default, so `--manifest` is optional):
 #
 #   cargo run --example guest-link -- run
 
-# The host-mediated interfaces this deployment mediates. The runtime core
-# wires each named interface onto the shared linker and dispatches calls to
-# whichever guest exports it (here, `responder`).
-[link]
-interfaces = ["omnia:link/echo"]
-
+# The file's stem would name each guest (`guest_link_responder_wasm`); the
+# router dispatches to `responder`, so the name is given.
 [[guest]]
-id = "responder"
+name = "responder"
 source.path = "../../target/wasm32-wasip2/debug/examples/guest_link_responder_wasm.wasm"
 
 [[guest]]
-id = "router"
+name = "router"
 source.path = "../../target/wasm32-wasip2/debug/examples/guest_link_router_wasm.wasm"
 
 # In-process is the default transport; named here for clarity. UDS / NATS / QUIC

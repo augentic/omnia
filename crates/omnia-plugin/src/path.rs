@@ -8,12 +8,17 @@ use cap_std::ambient_authority;
 use cap_std::fs::Dir;
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
+use omnia_core::MountRegistry;
 
 use crate::error::LoadError;
 use crate::source::PathSource;
 
 /// Path acquisition over named `(name, directory)` roots, resolved like guest
 /// preopens and read fresh on every load.
+///
+/// The deployment's own mounts are the roots the declared policy installs
+/// ([`From<&MountRegistry>`](Self::from)); [`new`](Self::new) opens roots of
+/// a custom policy's choosing.
 #[derive(Debug)]
 pub struct PathMounts {
     entries: Vec<Mount>,
@@ -26,7 +31,7 @@ struct Mount {
 }
 
 impl PathMounts {
-    /// Opens every `(name, path)` entry now, surfacing a bad location as a
+    /// Opens every `(name, path)` entry now, surfacing a bad root as a
     /// configuration error before any load.
     ///
     /// # Errors
@@ -41,9 +46,8 @@ impl PathMounts {
         for (name, path) in entries {
             let name = name.into();
             let path = path.as_ref();
-            let dir = Dir::open_ambient_dir(path, ambient_authority()).with_context(|| {
-                format!("opening plugins location `{name}` at {}", path.display())
-            })?;
+            let dir = Dir::open_ambient_dir(path, ambient_authority())
+                .with_context(|| format!("opening load root `{name}` at {}", path.display()))?;
 
             opened.push(Mount {
                 name,
@@ -52,6 +56,22 @@ impl PathMounts {
         }
 
         Ok(Self { entries: opened })
+    }
+}
+
+// The mounts are already open: borrow their directory handles rather than
+// opening each path a second time.
+impl From<&MountRegistry> for PathMounts {
+    fn from(mounts: &MountRegistry) -> Self {
+        let entries = mounts
+            .entries()
+            .iter()
+            .map(|mount| Mount {
+                name: mount.name.clone(),
+                dir: Arc::clone(&mount.dir),
+            })
+            .collect();
+        Self { entries }
     }
 }
 
@@ -76,17 +96,17 @@ impl PathSource for PathMounts {
     }
 }
 
-// Resolve `path` to a location's capability handle plus the subpath within
-// it, longest location-name prefix first. The subpath must be plain and
-// relative — cap-std then refuses any escape at open time.
+// Resolve `path` to a mount's capability handle plus the subpath within it,
+// longest mount-name prefix first. The subpath must be plain and relative —
+// cap-std then refuses any escape at open time.
 fn resolve(path: &str, entries: &[Mount]) -> Result<(Arc<Dir>, String)> {
     let best = entries
         .iter()
         .filter_map(|entry| {
             if path == entry.name {
-                // Naming a location itself yields an empty subpath, which
+                // Naming a mount itself yields an empty subpath, which
                 // `check_subpath` refuses — kept so the refusal names the
-                // location rather than "under no location".
+                // mount rather than "under no mount".
                 return Some((entry, ""));
             }
             let subpath = path.strip_prefix(&entry.name)?.strip_prefix('/')?;
@@ -98,7 +118,7 @@ fn resolve(path: &str, entries: &[Mount]) -> Result<(Arc<Dir>, String)> {
         .or_else(|| entries.iter().find(|entry| entry.name == ".").map(|entry| (entry, path)));
 
     let (entry, subpath) =
-        best.ok_or_else(|| anyhow!("path `{path}` is not under any location of this deployment"))?;
+        best.ok_or_else(|| anyhow!("path `{path}` is not under any mount of this deployment"))?;
     check_subpath(path, subpath)?;
 
     Ok((Arc::clone(&entry.dir), subpath.to_owned()))
@@ -109,6 +129,6 @@ fn check_subpath(path: &str, subpath: &str) -> Result<()> {
     // also refuses absolute paths.
     let plain = !subpath.contains('\\')
         && subpath.split('/').all(|part| !part.is_empty() && part != "." && part != "..");
-    ensure!(plain, "component path `{path}` is not a plain relative path within a location");
+    ensure!(plain, "component path `{path}` is not a plain relative path within a mount");
     Ok(())
 }

@@ -19,8 +19,8 @@ use omnia::{
 // here; a new program without one fails to compile.
 test_programs::foreach_link!();
 
-/// Boot a runtime over `guests` (assembled in order) with
-/// `omnia-test:link/ops` dispatched.
+/// Boot a runtime over `guests` (assembled in order); nothing declares the
+/// `omnia-test:link/ops` seam, which is read off the components.
 async fn boot(guests: &[(&str, &str)]) -> Result<Runtime<()>> {
     boot_with(guests, |builder| builder).await
 }
@@ -29,9 +29,9 @@ async fn boot(guests: &[(&str, &str)]) -> Result<Runtime<()>> {
 async fn boot_with(
     guests: &[(&str, &str)], configure: impl FnOnce(DeploymentBuilder) -> DeploymentBuilder,
 ) -> Result<Runtime<()>> {
-    let mut manifest = Manifest::new().link(["omnia-test:link/ops"]);
-    for (id, wasm) in guests {
-        manifest = manifest.guest(GuestEntry::new(*id, *wasm));
+    let mut manifest = Manifest::new();
+    for (name, wasm) in guests {
+        manifest = manifest.guest(GuestEntry::new(*name, *wasm));
     }
     let deployment = configure(DeploymentBuilder::new().manifest(manifest))
         .build::<StoreCtx<()>>()
@@ -93,6 +93,33 @@ async fn link_partial() {
     // An interface wired with only one of its functions still resolves.
     let answer = call(&runtime, "partial", "poke", "hi").await.expect("subset dispatch");
     assert_eq!(answer, "echoer pong: hi");
+}
+
+// Nothing declares the seam, so an import no guest exports is relayed rather
+// than left unresolved: the deployment boots, and the call fails when the
+// relay finds no target.
+#[tokio::test]
+async fn link_unserved() {
+    let runtime = boot(&[("full", test_programs::LINK_FULL)]).await.expect("deployment boots");
+
+    let err = call(&runtime, "full", "poke", "hi").await.expect_err("no guest serves `ops`");
+    assert!(format!("{err:#}").contains("`echoer` is not registered"), "unexpected error: {err:#}");
+}
+
+// A guest that exports no interface outside the host's namespaces parks no
+// route, so a call dispatched to it names the missing export rather than a
+// missing guest.
+#[tokio::test]
+async fn link_unlinked_target() {
+    let runtime = boot(&[("echoer", test_programs::LINK_FULL), ("full", test_programs::LINK_FULL)])
+        .await
+        .expect("deployment boots");
+
+    let err = call(&runtime, "full", "poke", "hi").await.expect_err("`echoer` exports no `ops`");
+    assert!(
+        format!("{err:#}").contains("registered but exports no linked interface"),
+        "unexpected error: {err:#}"
+    );
 }
 
 // The union regression: `partial` assembles first and wires only `ping`, so

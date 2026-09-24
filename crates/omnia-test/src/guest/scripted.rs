@@ -1,6 +1,6 @@
 //! The scripted pair: a FIFO `Model` and a keyed `Plugins` loader.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::{Future, ready};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Mutex};
@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use omnia_sdk::model::{
     CHECK_TOOL, Error, Format, Function, Model, Reply, Request, Tool, ToolCall,
 };
-use omnia_sdk::plugins::{self, Digest, Plugin, PluginRef, Plugins};
+use omnia_sdk::plugins::{self, Digest, Location, Plugin, PluginRef, Plugins};
 
 use crate::{Exchange, Script, Seen, SeenFormat};
 
@@ -267,16 +267,19 @@ pub fn function_tools(request: &Request) -> Vec<&Function> {
         .collect()
 }
 
-/// A keyed `Plugins` loader: per-package digests and refusals, every load
-/// recorded.
+/// A keyed `Plugins` loader: per-name digests, refusals, and declarations,
+/// every load recorded.
 ///
-/// Keyed rather than FIFO because the loader contract is per package: a
-/// request for a package with a scripted refusal fails with it; otherwise
-/// the load resolves, in order, to the digest scripted for the package, the
-/// request's own pin, the loader-wide default set by [`defaulting`], or a
-/// deterministic per-package placeholder. A pin that disagrees with the
-/// resolved digest is refused before anything else, as the host would.
+/// Keyed rather than FIFO because the loader contract is per name — the one
+/// each [`Location`] registers under ([`Location::name`]): a request whose
+/// name has a scripted refusal fails with it; a [`Location::Declared`] load
+/// attests a name [`declare`]d with no digest and refuses any other, as the
+/// host would; otherwise the load resolves, in order, to the digest scripted
+/// for the name, the request's own pin, the loader-wide default set by
+/// [`defaulting`], or a deterministic per-name placeholder. A pin that
+/// disagrees with the resolved digest is refused before anything else.
 ///
+/// [`declare`]: Self::declare
 /// [`defaulting`]: Self::defaulting
 ///
 /// ```
@@ -284,11 +287,17 @@ pub fn function_tools(request: &Request) -> Vec<&Function> {
 /// use omnia_test::guest::ScriptedLoader;
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
-/// let loader = ScriptedLoader::default().refuse("acme:bad", Error::Refused("banned".into()));
-/// let bad = PluginRef::builder().package("acme:bad").location(Location::Registry(None)).build();
-/// assert!(matches!(loader.load(&bad).await, Err(Error::Refused(_))));
-/// let ok = PluginRef::builder().package("acme:ok").location(Location::Registry(None)).build();
-/// assert_eq!(loader.load(&ok).await.unwrap().id(), "acme:ok");
+/// let loader =
+///     ScriptedLoader::default().refuse("acme:bad@1.0.0", Error::Refused("banned".into()));
+/// let registry = |package: &str| PluginRef {
+///     location: Location::Registry {
+///         package: package.into(),
+///         endpoint: None,
+///     },
+///     digest: None,
+/// };
+/// assert!(matches!(loader.load(&registry("acme:bad@1.0.0")).await, Err(Error::Refused(_))));
+/// assert_eq!(loader.load(&registry("acme:ok@1.0.0")).await.unwrap().id(), "acme:ok@1.0.0");
 /// assert_eq!(loader.loads().len(), 2);
 /// # });
 /// ```
@@ -302,23 +311,24 @@ struct LoaderInner {
     digests: Mutex<BTreeMap<String, Digest>>,
     default: Mutex<Option<Digest>>,
     refusals: Mutex<BTreeMap<String, plugins::Error>>,
+    declared: Mutex<BTreeSet<String>>,
     loads: Mutex<Vec<PluginRef>>,
 }
 
 impl ScriptedLoader {
-    /// Resolves `package` to `digest`.
+    /// Resolves the name `name` to `digest`.
     ///
     /// # Panics
     ///
     /// Panics if a lock is poisoned.
     #[must_use]
-    pub fn digest(self, package: impl Into<String>, digest: Digest) -> Self {
-        self.inner.digests.lock().expect("digests lock").insert(package.into(), digest);
+    pub fn digest(self, name: impl Into<String>, digest: Digest) -> Self {
+        self.inner.digests.lock().expect("digests lock").insert(name.into(), digest);
         self
     }
 
-    /// Resolves every package without a scripted digest or a pin of its own
-    /// to `digest`, in place of the per-package placeholder — for suites that
+    /// Resolves every name without a scripted digest or a pin of its own to
+    /// `digest`, in place of the per-name placeholder — for suites that
     /// assert one fixed digest in their envelopes.
     ///
     /// # Panics
@@ -330,14 +340,26 @@ impl ScriptedLoader {
         self
     }
 
-    /// Fails every load of `package` with `error`.
+    /// Fails every load of the name `name` with `error`.
     ///
     /// # Panics
     ///
     /// Panics if a lock is poisoned.
     #[must_use]
-    pub fn refuse(self, package: impl Into<String>, error: plugins::Error) -> Self {
-        self.inner.refusals.lock().expect("refusals lock").insert(package.into(), error);
+    pub fn refuse(self, name: impl Into<String>, error: plugins::Error) -> Self {
+        self.inner.refusals.lock().expect("refusals lock").insert(name.into(), error);
+        self
+    }
+
+    /// Declares the guest `name`, so a [`Location::Declared`] load of it
+    /// attests with no digest; an undeclared name refuses.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a lock is poisoned.
+    #[must_use]
+    pub fn declare(self, name: impl Into<String>) -> Self {
+        self.inner.declared.lock().expect("declared lock").insert(name.into());
         self
     }
 
@@ -353,27 +375,39 @@ impl ScriptedLoader {
 
     fn resolve(&self, plugin: &PluginRef) -> Result<Plugin, plugins::Error> {
         self.inner.loads.lock().expect("loads lock").push(plugin.clone());
-        if let Some(refusal) =
-            self.inner.refusals.lock().expect("refusals lock").get(&plugin.package)
-        {
+        let name = plugin.location.name();
+        if let Some(refusal) = self.inner.refusals.lock().expect("refusals lock").get(name) {
             return Err(refusal.clone());
+        }
+        if let Location::Declared(name) = &plugin.location {
+            if plugin.digest.is_some() {
+                return Err(plugins::Error::Refused(format!(
+                    "`{name}` is declared by the deployment; it takes no pin"
+                )));
+            }
+            return if self.inner.declared.lock().expect("declared lock").contains(name) {
+                Ok(Plugin::new(name.clone(), None))
+            } else {
+                Err(plugins::Error::Refused(format!(
+                    "no guest `{name}` is declared by this deployment"
+                )))
+            };
         }
         let resolved = self
             .inner
             .digests
             .lock()
             .expect("digests lock")
-            .get(&plugin.package)
+            .get(name)
             .cloned()
             .or_else(|| plugin.digest.clone())
             .or_else(|| self.inner.default.lock().expect("default lock").clone())
-            .unwrap_or_else(|| placeholder_digest(&plugin.package));
+            .unwrap_or_else(|| placeholder_digest(name));
         match &plugin.digest {
             Some(pin) if *pin != resolved => Err(plugins::Error::Refused(format!(
-                "package `{}` resolved to {resolved}, which is not the pinned {pin}",
-                plugin.package
+                "`{name}` resolved to {resolved}, which is not the pinned {pin}"
             ))),
-            _ => Ok(Plugin::new(plugin.package.clone(), resolved)),
+            _ => Ok(Plugin::new(name, Some(resolved))),
         }
     }
 }
@@ -386,11 +420,11 @@ impl Plugins for ScriptedLoader {
     }
 }
 
-// A well-formed, package-specific pin for loads no scenario scripted, so two
-// such packages never look like the same content.
-fn placeholder_digest(package: &str) -> Digest {
+// A well-formed, name-specific pin for loads no scenario scripted, so two
+// such names never look like the same content.
+fn placeholder_digest(name: &str) -> Digest {
     let mut hasher = DefaultHasher::new();
-    package.hash(&mut hasher);
+    name.hash(&mut hasher);
     let word = format!("{:016x}", hasher.finish());
     format!("sha256:{}", word.repeat(4)).parse().expect("64 hex characters form a digest")
 }

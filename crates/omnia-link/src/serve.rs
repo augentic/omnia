@@ -1,19 +1,20 @@
 //! Route construction for a guest's host-mediated exports.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, ensure};
 use omnia_core::{GuestId, StoreFactory};
 use wasmtime::component::{InstancePre, types};
 
+use super::is_host;
 use super::polyfill::WiredLinks;
 use super::route::{Linked, Route, RouteInvoke, Routes};
 
-/// Resolve one guest's exports of the declared `interfaces` into a route and
-/// park it as pending on `routes` — with no route when the guest exports none
-/// of them, so a later call to it is diagnosed as "registered but unlinked"
-/// rather than "not registered".
+/// Resolve one guest's exports outside the runtime's own namespaces
+/// ([`is_host`]) into a route and park it as pending on `routes` — with no
+/// route when the guest exports none, so a later call to it is diagnosed as
+/// "registered but unlinked" rather than "not registered".
 ///
 /// Pure introspection: every export index is resolved on the component here,
 /// once, and each call then instantiates the guest fresh on a store from
@@ -28,8 +29,8 @@ use super::route::{Linked, Route, RouteInvoke, Routes};
 /// its signature differs from what an importer wired, or the guest already
 /// has a pending route.
 pub fn serve_guest<T: Send + 'static>(
-    routes: &Routes, interfaces: &BTreeSet<Box<str>>, wired: &WiredLinks, factory: StoreFactory<T>,
-    id: &GuestId, instance_pre: InstancePre<T>,
+    routes: &Routes, wired: &WiredLinks, factory: StoreFactory<T>, id: &GuestId,
+    instance_pre: InstancePre<T>,
 ) -> Result<()> {
     let engine = instance_pre.engine();
     let component = instance_pre.component();
@@ -37,7 +38,7 @@ pub fn serve_guest<T: Send + 'static>(
     let mut funcs: HashMap<Box<str>, HashMap<Box<str>, Linked>> = HashMap::new();
 
     for (interface, types::ComponentExtern { ty, .. }) in component_ty.exports(engine) {
-        if !interfaces.contains(interface) {
+        if is_host(interface) {
             continue;
         }
         let types::ComponentItem::ComponentInstance(instance_ty) = ty else {

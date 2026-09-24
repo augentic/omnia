@@ -21,26 +21,9 @@ pub fn expand(config: &Config) -> TokenStream {
         backends_def,
         main_options,
         manifest,
-        link_loader,
     } = Codegen::from(config);
 
     let mode = mode.tokens();
-    // A declared `locations:` list opts the deployment into the loader host —
-    // worlds that do not import `omnia:plugins/loader` never see it — and
-    // installs those locations. `link:`-only deployments emit no plugin
-    // path at all, so they build without `omnia`'s `plugin` feature.
-    let plugins_host = link_loader.then(|| {
-        quote! {
-            deployment.host::<omnia::WasiPlugins, B>()?;
-        }
-    });
-    let extend_hook = link_loader.then(|| {
-        quote! {
-            fn extend(runtime: &omnia::Runtime<B>) -> Result<()> {
-                omnia::Plugins::install_declared(runtime)
-            }
-        }
-    });
     let manifest = manifest
         .unwrap_or_else(|| quote! { omnia::ManifestSource::Inline(omnia::Manifest::new()) });
 
@@ -67,12 +50,9 @@ pub fn expand(config: &Config) -> TokenStream {
                 #(B: omnia::Provides<#ctx_keys>,)*
             {
                 fn link(deployment: &mut omnia::Deployment<omnia::StoreCtx<B>>) -> Result<()> {
-                    #plugins_host
                     #(deployment.host::<#host_types, B>()?;)*
                     Ok(())
                 }
-
-                #extend_hook
 
                 async fn serve(runtime: &omnia::Runtime<B>) -> Result<()> {
                     // Every host runs uniformly: capability hosts resolve
@@ -88,7 +68,7 @@ pub fn expand(config: &Config) -> TokenStream {
                 }
             }
 
-            /// The deployment compiled in here (`config:` or the inline
+            /// The deployment compiled in here (`manifest:` or the inline
             /// manifest keys; empty when neither is declared), for an
             /// embedder to overlay before `run_with`.
             pub fn manifest() -> omnia::ManifestSource {
@@ -194,9 +174,9 @@ mod tests {
     }
 
     #[test]
-    fn expand_config_file() {
+    fn expand_manifest_file() {
         insta::assert_snapshot!(expand_pretty(quote!({
-            config: concat!(env!("CARGO_MANIFEST_DIR"), "/omnia.toml"),
+            manifest: concat!(env!("CARGO_MANIFEST_DIR"), "/omnia.toml"),
             hosts: {
                 WasiOtel: OtelDefault,
             },
@@ -204,27 +184,28 @@ mod tests {
     }
 
     // A `command: true` guest entry marks the command-mode target; the flag
-    // expands to `.command()` on its `GuestEntry`.
+    // expands to `.command()` on its `GuestEntry`, and a guest without a
+    // `name:` is named by its path's stem.
     #[test]
     fn expand_command_flag() {
         insta::assert_snapshot!(expand_pretty(quote!({
             mode: command,
             guests: [
-                { id: "app", source: "app.wasm", command: true },
-                { id: "helper", source: "helper.wasm" },
+                { path: "app.wasm", command: true },
+                { path: "helper.wasm" },
             ],
         })));
     }
 
-    // The composed deployment shape: static guests, mounts, and explicit
-    // command routing.
+    // The composed deployment shape: named and stem-named guests, mounts,
+    // and explicit command routing.
     #[test]
     fn expand_deployment_keys() {
         insta::assert_snapshot!(expand_pretty(quote!({
             mode: command,
             guests: [
-                { id: "specify", source: engine_component_path(), command: true },
-                { id: "target:mock", source: mock_target_path() },
+                { name: "specify", path: "engine.wasm", command: true },
+                { name: "target:mock", path: "mock.wasm" },
             ],
             mounts: [
                 { name: "project", path: project_root(), writable: true },
@@ -237,16 +218,14 @@ mod tests {
         })));
     }
 
-    // A bytes-valued `source:` (the `include_bytes!` embedding shape) passes
-    // through to `GuestEntry::new` unchanged.
+    // A macro-valued `path:` (the `concat!(env!(..), ..)` anchoring shape)
+    // passes through to both `GuestEntry::embedded` and `include_bytes!`
+    // unchanged; the stem of the path it names is the guest's name.
     #[test]
     fn expand_embedded_bytes() {
         insta::assert_snapshot!(expand_pretty(quote!({
             guests: [
-                {
-                    id: "specify",
-                    source: include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/specify.wasm")),
-                },
+                { path: concat!(env!("CARGO_MANIFEST_DIR"), "/specify.wasm") },
             ],
             hosts: {
                 WasiOtel: OtelDefault,
@@ -254,28 +233,24 @@ mod tests {
         })));
     }
 
-    // Guest-owned routes and the deployment-wide `link:` block: every trigger
-    // list expands to `route_*` builder calls on the owning `GuestEntry` (the
-    // guest id is the implicit target), the `link:` block's `interfaces:`
-    // list to `.link(...)` calls on the `Manifest` — and, with no
-    // `plugin:` locations, no loader host link — and patterns/interfaces are
-    // arbitrary expressions.
+    // Guest-owned routes: every trigger list expands to `route_*` builder
+    // calls on the owning `GuestEntry` (the guest is the implicit target),
+    // and patterns are arbitrary expressions.
     #[test]
-    fn expand_inline_manifest() {
+    fn expand_routes() {
         insta::assert_snapshot!(expand_pretty(quote!({
-            link: { interfaces: ["omnia:link/echo"] },
             guests: [
                 {
-                    id: "responder",
-                    source: concat!(env!("CARGO_MANIFEST_DIR"), "/responder.wasm"),
+                    name: "responder",
+                    path: concat!(env!("CARGO_MANIFEST_DIR"), "/responder.wasm"),
                     routes: {
                         messaging: ["orders.>"],
                         websocket: ["chat.*"],
                     },
                 },
                 {
-                    id: "router",
-                    source: concat!(env!("CARGO_MANIFEST_DIR"), "/router.wasm"),
+                    name: "router",
+                    path: concat!(env!("CARGO_MANIFEST_DIR"), "/router.wasm"),
                     routes: {
                         http: ["/", concat!("/", "api")],
                     },
@@ -290,22 +265,20 @@ mod tests {
         })));
     }
 
-    // The declarative locations grammar: each entry lowers into a
-    // `Location` on the inline manifest — the registry entry with its
-    // wasm-pkg configuration — and the declared `locations:` list links the
-    // loader host and makes the generated `Wiring::extend` install them.
+    // The full inline deployment: `registries` lowers to
+    // `.registries(RegistryConfig::contents(..))` with the expression
+    // compiled in, and each guest to `.guest(..)`. Nothing else is emitted
+    // for them — assembly links the loader host and installs the declared
+    // policy, so the expansion never names a loader path.
     #[test]
-    fn expand_locations() {
+    fn expand_guests_block() {
         insta::assert_snapshot!(expand_pretty(quote!({
-            link: { interfaces: ["emery:adapter/probe"] },
-            plugin: {
-                locations: [
-                    { name: ".", path: project_root() },
-                    { registry: "ghcr.io", config: include_str!("wasm-pkg.toml") },
-                ],
-            },
             guests: [
-                { id: "engine", source: "engine.wasm" },
+                { path: "engine.wasm" },
+            ],
+            registries: include_str!("wasm-pkg.toml"),
+            mounts: [
+                { name: ".", path: project_root() },
             ],
             hosts: {
                 WasiOtel: OtelDefault,
@@ -313,71 +286,48 @@ mod tests {
         })));
     }
 
-    // A `link:` block without `plugin:` is interfaces-only: no loader
-    // host link, no `extend` hook, so the expansion never names a plugin
-    // path and builds without `omnia`'s `plugin` feature.
+    // A `registries`-only deployment is valid: the guests arrive at run
+    // time (or over the CLI), and the manifest carries only the routing
+    // their package loads fall back on.
     #[test]
-    fn expand_link() {
+    fn expand_registries_only() {
         insta::assert_snapshot!(expand_pretty(quote!({
-            link: { interfaces: ["emery:adapter/probe"] },
-            guests: [
-                { id: "engine", source: "engine.wasm" },
-            ],
+            registries: include_str!("wasm-pkg.toml"),
         })));
     }
 
-    // A bare `plugin: {}` beside `config:` is the config-file deployment's
-    // opt-in: its locations live in the TOML's `[[plugin.location]]` entries,
-    // so the loader host links and `extend` installs whatever they declare.
+    // `include_bytes!` takes a literal or a macro, so a path computed at run
+    // time is refused where the key is named rather than deep in the expansion.
     #[test]
-    fn expand_config_plugin() {
-        insta::assert_snapshot!(expand_pretty(quote!({
-            config: concat!(env!("CARGO_MANIFEST_DIR"), "/omnia.toml"),
-            plugin: {},
-            hosts: {
-                WasiOtel: OtelDefault,
-            },
-        })));
-    }
-
-    // A location's `config` is the registry acquirer's wasm-pkg
-    // configuration, so it has no meaning on a path entry.
-    #[test]
-    fn config_on_path_location() {
+    fn guest_path_not_embeddable() {
         let error = syn::parse2::<Config>(quote!({
-            plugin: {
-                locations: [{ name: ".", path: project_root(), config: "" }],
-            },
-            guests: [{ id: "api", source: "api.wasm" }],
+            guests: [{ path: engine_component_path() }],
         }))
         .err()
-        .expect("config on a path location must be refused");
-        assert!(error.to_string().contains("a path location carries none"), "{error}");
+        .expect("a computed path must be refused");
+        assert!(error.to_string().contains("string literal or a macro"), "{error}");
     }
 
-    // Locations are manifest data, so they conflict with `config:` like
-    // every other inline key; the TOML declares them instead.
     #[test]
-    fn locations_refused_beside_config() {
+    fn guest_path_missing() {
         let error = syn::parse2::<Config>(quote!({
-            config: concat!(env!("CARGO_MANIFEST_DIR"), "/omnia.toml"),
-            plugin: {
-                locations: [{ registry: "ghcr.io" }],
-            },
+            guests: [{ name: "api" }],
         }))
         .err()
-        .expect("locations beside config must be refused");
+        .expect("a guest without a path must be refused");
+        assert!(error.to_string().contains("missing `path`"), "{error}");
+    }
+
+    // `registries` is manifest data, so it conflicts with `manifest:` like
+    // every other inline key; the file declares `[registries]`.
+    #[test]
+    fn registries_refused_beside_manifest() {
+        let error = syn::parse2::<Config>(quote!({
+            manifest: concat!(env!("CARGO_MANIFEST_DIR"), "/omnia.toml"),
+            registries: include_str!("wasm-pkg.toml"),
+        }))
+        .err()
+        .expect("registries beside manifest must be refused");
         assert!(error.to_string().contains("mutually exclusive"), "{error}");
-    }
-
-    #[test]
-    fn empty_link_block_refused() {
-        let error = syn::parse2::<Config>(quote!({
-            link: {},
-            guests: [{ id: "api", source: "api.wasm" }],
-        }))
-        .err()
-        .expect("empty link block must be refused");
-        assert!(error.to_string().contains("`link: {}` declares nothing"), "{error}");
     }
 }

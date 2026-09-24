@@ -17,70 +17,63 @@ use crate::store::{ContentStore, NoStore, ReleaseStore};
 /// Registry acquisition using [wasm-pkg-client].
 ///
 /// Fetches exact `namespace:name@version` references only, verifying every
-/// result against the registry's content digest. A package resolves to the
-/// load's explicit endpoint if it names one, else to whatever the client
-/// configuration routes the package or its namespace to, else to the
-/// default endpoint. The attached store is a byte cache and offline
-/// fallback — never the authority while the registry is reachable — so a
-/// failing store degrades a load, never refuses it.
+/// result against the registry's content digest. A load that names its
+/// registry fetches from it; one that names none takes the client
+/// configuration's routing — its `package_registry_overrides` entry, its
+/// namespace's `namespace_registries` entry, or the `default_registry` — and
+/// a package the configuration routes nowhere is refused. The attached store
+/// is a byte cache and offline fallback — never the authority while the
+/// registry is reachable — so a failing store degrades a load, never refuses
+/// it.
 ///
 /// [wasm-pkg-client]: https://github.com/bytecodealliance/wasm-pkg-tools
 pub struct RegistryClient<S = NoStore> {
-    default_registry: String,
     config: Config,
     store: S,
 }
 
 impl RegistryClient<NoStore> {
-    /// Cacheless acquirer whose default endpoint is `default_registry`.
+    /// Cacheless acquirer routing every unaddressed package through `config`.
     ///
-    /// Starts from an empty client configuration — no user-global wasm-pkg
-    /// config file and no hard-coded fallback registries — so the compiled
-    /// binary alone attests which endpoints the deployment may reach.
+    /// The configuration is exactly what the deployment declares — no
+    /// user-global wasm-pkg config file and no hard-coded fallback registries
+    /// are consulted. It routes the loads that name no registry; a load that
+    /// names one fetches from it whatever the configuration says.
     #[must_use]
-    pub fn new(default_registry: impl Into<String>) -> Self {
+    pub const fn new(config: Config) -> Self {
         Self {
-            default_registry: default_registry.into(),
-            config: Config::empty(),
+            config,
             store: NoStore,
         }
     }
 }
 
 impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
-    /// Replaces the client configuration: namespace and package routing
-    /// beyond the default endpoint, and per-registry backend and credential
-    /// settings.
-    #[must_use]
-    pub fn with_config(mut self, config: Config) -> Self {
-        self.config = config;
-        self
-    }
-
     /// Attaches a store as byte cache and offline fallback.
     #[must_use]
     pub fn cached<S2: ContentStore + ReleaseStore>(self, store: S2) -> RegistryClient<S2> {
         RegistryClient {
-            default_registry: self.default_registry,
             config: self.config,
             store,
         }
     }
 
     /// The registry `package` resolves against: `endpoint` when the load
-    /// names one, else the configuration's routing, else the default.
+    /// names one, else the configuration's routing.
     fn registry(
         &self, package: &PackageRef, endpoint: Option<&str>,
     ) -> Result<Registry, LoadError> {
-        let endpoint = match endpoint {
-            Some(endpoint) => endpoint,
-            None => match self.config.resolve_registry(package) {
-                Some(registry) => return Ok(registry.clone()),
-                None => &self.default_registry,
-            },
-        };
-        endpoint.parse().map_err(|error| {
-            LoadError::Refused(format!("registry `{endpoint}` is not a valid name: {error}"))
+        if let Some(endpoint) = endpoint {
+            return endpoint.parse().map_err(|error| {
+                LoadError::Refused(format!("registry `{endpoint}` is not a valid name: {error}"))
+            });
+        }
+        self.config.resolve_registry(package).cloned().ok_or_else(|| {
+            LoadError::Refused(format!(
+                "no registry routes `{package}`: the load names none, and the deployment's \
+                 `registries` routes neither the `{}` namespace nor a default",
+                package.namespace()
+            ))
         })
     }
 

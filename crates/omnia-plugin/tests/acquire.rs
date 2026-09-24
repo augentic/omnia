@@ -1,6 +1,6 @@
 //! Acquisition over wasm-pkg-client's `local` backend: fresh-release-preferred
 //! resolution, the store as fallback and byte cache, poisoned entries,
-//! endpoint overrides, and path locations — all offline.
+//! endpoint overrides, unrouted packages, and path mounts — all offline.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -51,11 +51,18 @@ fn add_local_registry(config: &mut Config, name: &str, root: &Path) {
         .expect("local backend config serializes");
 }
 
+/// An empty configuration whose default registry is `name`.
+fn defaulting_to(name: &str) -> Config {
+    let mut config = Config::empty();
+    config.set_default_registry(Some(name.parse().expect("test registry name parses")));
+    config
+}
+
 /// A cacheless acquirer whose default registry is a local backend at `root`.
 fn registry_acquirer(root: &Path) -> RegistryClient {
-    let mut config = Config::empty();
+    let mut config = defaulting_to(DEFAULT_REGISTRY);
     add_local_registry(&mut config, DEFAULT_REGISTRY, root);
-    RegistryClient::new(DEFAULT_REGISTRY).with_config(config)
+    RegistryClient::new(config)
 }
 
 type ReleaseKey = (String, String, String);
@@ -157,25 +164,44 @@ async fn network_failure_fallback() {
 
     // Warm the store under the unroutable registry *name*, served by a
     // local backend mapping.
-    let mut config = Config::empty();
+    let mut config = defaulting_to(UNROUTABLE_REGISTRY);
     add_local_registry(&mut config, UNROUTABLE_REGISTRY, registry.path());
-    let warm = RegistryClient::new(UNROUTABLE_REGISTRY).with_config(config).cached(store.clone());
+    let warm = RegistryClient::new(config).cached(store.clone());
     warm.acquire(PACKAGE, None).await.expect("warms the store");
 
     // Same registry name and store, no backend mapping: resolution now dials
     // the closed port and fails as a network error, so the stored record and
     // content serve the load.
-    let offline = RegistryClient::new(UNROUTABLE_REGISTRY).cached(store);
+    let offline = RegistryClient::new(defaulting_to(UNROUTABLE_REGISTRY)).cached(store);
     let bytes = offline.acquire(PACKAGE, None).await.expect("falls back");
     assert_eq!(bytes, b"component bytes");
 }
 
 #[tokio::test]
 async fn network_failure_no_record() {
-    let acquirer = RegistryClient::new(UNROUTABLE_REGISTRY).cached(MemStore::default());
+    let acquirer =
+        RegistryClient::new(defaulting_to(UNROUTABLE_REGISTRY)).cached(MemStore::default());
 
     let error = acquirer.acquire(PACKAGE, None).await.expect_err("nothing stored to fall back to");
     assert!(format!("{error:#}").contains("resolving"), "resolution failure: {error:?}");
+}
+
+// A configuration that routes the package nowhere — no default, no mapping
+// for its namespace — refuses before any registry is dialled; an explicit
+// endpoint still serves it.
+#[tokio::test]
+async fn unrouted_package() {
+    let registry = TempDir::new().expect("registry dir");
+    stage(registry.path(), PACKAGE, b"component bytes");
+    let mut config = Config::empty();
+    add_local_registry(&mut config, DEFAULT_REGISTRY, registry.path());
+    let acquirer = RegistryClient::new(config);
+
+    let error = acquirer.acquire(PACKAGE, None).await.expect_err("nothing routes the package");
+    assert!(format!("{error:#}").contains("no registry routes"), "refusal: {error:?}");
+    assert!(format!("{error:#}").contains("`test` namespace"), "names the namespace: {error:?}");
+    let explicit = acquirer.acquire(PACKAGE, Some(DEFAULT_REGISTRY)).await.expect("explicit");
+    assert_eq!(explicit, b"component bytes");
 }
 
 #[tokio::test]
@@ -202,11 +228,10 @@ async fn release_scoped() {
     let override_root = TempDir::new().expect("override registry dir");
     stage(override_root.path(), PACKAGE, b"override registry bytes");
 
-    let mut config = Config::empty();
+    let mut config = defaulting_to(DEFAULT_REGISTRY);
     add_local_registry(&mut config, DEFAULT_REGISTRY, default_root.path());
     add_local_registry(&mut config, "override.test", override_root.path());
-    let acquirer =
-        RegistryClient::new(DEFAULT_REGISTRY).with_config(config).cached(MemStore::default());
+    let acquirer = RegistryClient::new(config).cached(MemStore::default());
 
     let default_bytes = acquirer.acquire(PACKAGE, None).await.expect("default acquires");
     assert_eq!(default_bytes, b"default registry bytes");
@@ -231,15 +256,16 @@ async fn config_routing() {
     let pinned_root = TempDir::new().expect("pinned registry dir");
     stage(pinned_root.path(), "acme:pinned@1.0.0", b"pinned registry bytes");
 
-    let mut config = Config::from_toml(
-        "[namespace_registries]\nacme = \"acme.test\"\n\n\
+    let mut config = Config::from_toml(&format!(
+        "default_registry = \"{DEFAULT_REGISTRY}\"\n\n\
+         [namespace_registries]\nacme = \"acme.test\"\n\n\
          [package_registry_overrides]\n\"acme:pinned\" = \"pinned.test\"\n",
-    )
+    ))
     .expect("routing config parses");
     add_local_registry(&mut config, DEFAULT_REGISTRY, default_root.path());
     add_local_registry(&mut config, "acme.test", acme_root.path());
     add_local_registry(&mut config, "pinned.test", pinned_root.path());
-    let acquirer = RegistryClient::new(DEFAULT_REGISTRY).with_config(config);
+    let acquirer = RegistryClient::new(config);
 
     let unmapped = acquirer.acquire(PACKAGE, None).await.expect("default acquires");
     assert_eq!(unmapped, b"default registry bytes", "an unmapped namespace falls to the default");
@@ -281,10 +307,10 @@ async fn unversioned_and_missing() {
 }
 
 #[tokio::test]
-async fn path_locations() {
-    let root = TempDir::new().expect("location dir");
+async fn path_mounts() {
+    let root = TempDir::new().expect("mount dir");
     std::fs::write(root.path().join("plugin.wasm"), b"located bytes").expect("staging component");
-    let acquirer = PathMounts::new([(".", root.path())]).expect("locations open at construction");
+    let acquirer = PathMounts::new([(".", root.path())]).expect("mounts open at construction");
 
     let prefixed = acquirer.acquire("./plugin.wasm").await.expect("prefixed path reads");
     assert_eq!(prefixed, b"located bytes");
@@ -298,31 +324,31 @@ async fn path_locations() {
 }
 
 #[tokio::test]
-async fn longest_location() {
-    let outer = TempDir::new().expect("outer location");
-    let inner = TempDir::new().expect("inner location");
+async fn longest_mount() {
+    let outer = TempDir::new().expect("outer mount");
+    let inner = TempDir::new().expect("inner mount");
     std::fs::write(inner.path().join("p.wasm"), b"inner").expect("staging component");
     std::fs::create_dir_all(outer.path().join("inner")).expect("creating decoy");
     std::fs::write(outer.path().join("inner").join("p.wasm"), b"outer").expect("staging decoy");
     let acquirer = PathMounts::new([("adapters", outer.path()), ("adapters/inner", inner.path())])
-        .expect("locations open");
+        .expect("mounts open");
 
     let bytes = acquirer.acquire("adapters/inner/p.wasm").await.expect("longest prefix reads");
-    assert_eq!(bytes, b"inner", "the more specific location serves the path");
+    assert_eq!(bytes, b"inner", "the more specific mount serves the path");
 }
 
 #[tokio::test]
-async fn unlocated_and_missing() {
-    let root = TempDir::new().expect("location dir");
-    let acquirer = PathMounts::new([("adapters", root.path())]).expect("location opens");
+async fn unmounted_and_missing() {
+    let root = TempDir::new().expect("mount dir");
+    let acquirer = PathMounts::new([("adapters", root.path())]).expect("mount opens");
 
-    acquirer.acquire("elsewhere/p.wasm").await.expect_err("no location matches");
+    acquirer.acquire("elsewhere/p.wasm").await.expect_err("no mount matches");
     acquirer.acquire("adapters/absent.wasm").await.expect_err("file is absent");
 }
 
 #[tokio::test]
 async fn path_fail_fast() {
     let error = PathMounts::new([("adapters", "/no/such/directory")])
-        .expect_err("a missing location refuses at construction");
-    assert!(format!("{error:#}").contains("adapters"), "the refusal names the location: {error}");
+        .expect_err("a missing root refuses at construction");
+    assert!(format!("{error:#}").contains("adapters"), "the refusal names the mount: {error}");
 }

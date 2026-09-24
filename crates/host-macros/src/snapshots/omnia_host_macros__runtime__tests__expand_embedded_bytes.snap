@@ -1,6 +1,6 @@
 ---
 source: crates/host-macros/src/runtime.rs
-expression: "expand_pretty(quote!({\n    guests:\n    [{\n        id: \"specify\", source:\n        include_bytes!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/specify.wasm\")),\n    },], hosts: { WasiOtel: OtelDefault, },\n}))"
+expression: "expand_pretty(quote!({\n    guests: [{ path: concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/specify.wasm\") },],\n    hosts: { WasiOtel: OtelDefault, },\n}))"
 ---
 mod runtime {
     use omnia::anyhow::Result;
@@ -47,15 +47,15 @@ mod runtime {
             Ok(())
         }
     }
-    /// The deployment compiled in here (`config:` or the inline
+    /// The deployment compiled in here (`manifest:` or the inline
     /// manifest keys; empty when neither is declared), for an
     /// embedder to overlay before `run_with`.
     pub fn manifest() -> omnia::ManifestSource {
         omnia::ManifestSource::Inline(
             omnia::Manifest::new()
                 .guest(
-                    omnia::GuestEntry::new(
-                        "specify",
+                    omnia::GuestEntry::embedded(
+                        concat!(env!("CARGO_MANIFEST_DIR"), "/specify.wasm"),
                         include_bytes!(
                             concat!(env!("CARGO_MANIFEST_DIR"), "/specify.wasm")
                         ),
@@ -72,7 +72,11 @@ mod runtime {
         omnia::main::<
             Backends,
             Hooks,
-        >(omnia::MainOptions::new(omnia::Mode::Server).manifest(manifest()))
+        >(
+                omnia::MainOptions::new(omnia::Mode::Server)
+                    .program_name(env!("CARGO_PKG_NAME"))
+                    .manifest(manifest()),
+            )
             .await
     }
     /// Run one deployment through this runtime's hosts and backends,

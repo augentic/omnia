@@ -73,7 +73,7 @@ mod tests {
     fn first_arg() {
         let params = vec![Val::String("responder".to_owned()), Val::String("hello".to_owned())];
         let (id, forwarded) =
-            FirstArgSelector.select("omnia:link/echo", "echo", &params).expect("should select");
+            FirstArgSelector.select("example:link/echo", "echo", &params).expect("should select");
 
         assert_eq!(id, GuestId::from("responder"));
         // The default forwards every parameter (including the identity) through.
@@ -84,13 +84,13 @@ mod tests {
     fn first_arg_invalid() {
         // A non-string leading argument is rejected.
         let error = FirstArgSelector
-            .select("omnia:link/echo", "echo", &[Val::U32(7)])
+            .select("example:link/echo", "echo", &[Val::U32(7)])
             .expect_err("a non-string identity must fail");
         assert!(error.to_string().contains("leading string identity"));
 
         // An empty parameter list is rejected too.
         FirstArgSelector
-            .select("omnia:link/echo", "echo", &[])
+            .select("example:link/echo", "echo", &[])
             .expect_err("a missing identity must fail");
     }
 }
