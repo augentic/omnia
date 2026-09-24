@@ -88,7 +88,7 @@ Layers 1 and 2 form the **runtime core** — domain-agnostic infrastructure that
 - **Core traits**: `Host`, `Server`, `Backend`
 - **Link seam**: the `LinkSeam` trait and `NoLinks` no-op the registry drives; guest→guest linking itself lives in `omnia-link` (`InProcessLinks`)
 - **Host→guest dispatch**: `Dispatcher`, a named-target call through `call_fresh` (the same primitive guest→guest links use)
-- **Telemetry**: the console `tracing` subscriber and the layer seam exporters attach through (`Telemetry::layer`)
+- **Tracing subscriber**: `SubscriberBuilder`, the host's console logging plus the layer seam telemetry exporters attach through (`SubscriberBuilder::layer`); export itself is `omnia-otlp`'s
 - **Admission seam**: `Runtime::admit` and `Extensions`, which `omnia-plugin` uses to install the on-demand guest table `Deployment::assemble` builds from the manifest
 
 `omnia-cli` is a leaf grammar crate: clap plus argv-precedence over paths and strings, with no `omnia-*` dependencies. `omnia` materializes a `RunPlan` into a `Manifest` and drives the runtime. `compile` (with the `jit` feature) also lives in `omnia`.
@@ -217,7 +217,7 @@ The consolidated list is in [Configuration](reference/configuration.md); individ
 omnia/
 ├── crates/
 │   ├── omnia/              # Composition root (assembly, lifecycle, optional crates, runtime!)
-│   ├── omnia-core/         # Live-runtime SDK (engine, registry, dispatch, stores, telemetry)
+│   ├── omnia-core/         # Live-runtime SDK (engine, registry, dispatch, stores, subscriber)
 │   ├── omnia-link/         # Guest-to-guest dispatch (InProcessLinks; re-exported by omnia behind `link`)
 │   ├── omnia-sdk/          # Guest SDK (Handler/Client/Context, HTTP/messaging/command adapters, errors, capabilities, MCP)
 │   ├── guest-macros/       # #[instrument] proc macro

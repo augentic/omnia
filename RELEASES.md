@@ -23,7 +23,7 @@ Unreleased
   lists them in help and completions, accepts them, and refuses the pair with
   its own usage error — the guest never acts on the values. Embedders select
   the level in code with `DeploymentBuilder::level(LevelFilter)` (`omnia`
-  re-exports `LevelFilter`), `Telemetry::fallback(level)` sets the console's
+  re-exports `LevelFilter`), `SubscriberBuilder::fallback(level)` sets the console's
   fallback for an unset `RUST_LOG` (`WARN` when not called, as before), and
   the test host's `Deployment::level` scripts a guest's `RUST_LOG` without
   touching the suite's environment. A bare command run's host console now
@@ -41,6 +41,13 @@ Unreleased
 
 ### Changed
 
+- `omnia::Telemetry` is `omnia::SubscriberBuilder`, and `omnia_core::telemetry`
+  is `omnia_core::subscriber`. The type builds the host's `tracing`
+  subscriber — console logging with a layer seam telemetry exporters attach
+  through (`SubscriberBuilder::layer`) — and knows nothing of spans,
+  metrics, or export; that is `omnia-otlp`'s (`omnia::otlp::Exporters`
+  attaches to the seam). Its methods (`new`, `layer`, `filter`, `fallback`,
+  `build`) and `Installed` are unchanged.
 - `ChainCtx` is no longer `Default`: a root is `ChainCtx::server()` or
   `ChainCtx::command()`. `as_command_chain(fut)` is now a store built at the
   command root, `runtime.build_store(runtime.store_in(ChainCtx::command()))`,

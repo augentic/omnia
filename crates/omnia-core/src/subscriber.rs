@@ -1,12 +1,16 @@
-//! # Telemetry
+//! # Subscriber
 //!
-//! The host's console `tracing` subscriber (`EnvFilter` + `fmt` to stderr)
-//! and the layer seam exporters attach through ([`Telemetry::layer`]). OTLP
-//! export lives in `omnia-otlp`.
+//! The host's `tracing` subscriber: an initializer for console logging
+//! (`EnvFilter` + `fmt` to stderr) with a layer seam telemetry exporters
+//! attach through when a deployment wants them ([`SubscriberBuilder::layer`]).
+//! Nothing here knows about spans, metrics, or export — that is telemetry,
+//! and it lives in `omnia-otlp`, which builds on this seam. The subscriber is
+//! the root of the host's whole observability stack, telemetry included, but
+//! on its own it is console logging.
 //!
-//! The subscriber is process-global: the first [`Telemetry::build`] installs
-//! it, and later builds in the same process are no-ops that reuse the first
-//! initialization.
+//! The subscriber is process-global: the first [`SubscriberBuilder::build`]
+//! installs it, and later builds in the same process are no-ops that reuse
+//! the first initialization.
 
 use std::sync::{Mutex, PoisonError};
 
@@ -20,7 +24,7 @@ use tracing_subscriber::{EnvFilter, Registry};
 // two racers cannot both pass the check and race on `try_init`.
 static INSTALLED: Mutex<bool> = Mutex::new(false);
 
-/// Outcome of [`Telemetry::build`].
+/// Outcome of [`SubscriberBuilder::build`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Installed {
     /// This call installed omnia's subscriber.
@@ -30,28 +34,30 @@ pub enum Installed {
     Already,
 }
 
-/// Telemetry initializer.
-pub struct Telemetry {
-    /// Layers installed beneath the console layers (exporters attach here).
+/// Builder for the host's `tracing` subscriber: console logging, plus any
+/// telemetry layers attached through [`layer`](Self::layer).
+pub struct SubscriberBuilder {
+    /// Layers installed beneath the console layers (telemetry exporters
+    /// attach here).
     layers: Vec<Box<dyn Layer<Registry> + Send + Sync>>,
 
-    /// Explicit filter directives for the console subscriber; unset defers
-    /// to `RUST_LOG`.
+    /// Explicit filter directives for the console; unset defers to
+    /// `RUST_LOG`.
     filter: Option<String>,
 
-    /// The level the console subscriber falls back to when `RUST_LOG` is
-    /// unset and no explicit directives are given.
+    /// The level the console falls back to when `RUST_LOG` is unset and no
+    /// explicit directives are given.
     fallback: LevelFilter,
 }
 
-impl Default for Telemetry {
+impl Default for SubscriberBuilder {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Telemetry {
-    /// Create a new telemetry initializer.
+impl SubscriberBuilder {
+    /// Create a builder for a console-only subscriber at the `WARN` fallback.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -61,16 +67,15 @@ impl Telemetry {
         }
     }
 
-    /// Adds a subscriber layer beneath the console layers (an exporter
-    /// attaches here).
+    /// Adds a layer beneath the console layers; this is where a telemetry
+    /// exporter (a span or metrics layer) attaches.
     #[must_use]
     pub fn layer(mut self, layer: impl Layer<Registry> + Send + Sync + 'static) -> Self {
         self.layers.push(Box::new(layer));
         self
     }
 
-    /// Filters the console subscriber by `directives` instead of the
-    /// environment.
+    /// Filters the subscriber by `directives` instead of the environment.
     ///
     /// `directives` is a `RUST_LOG` string (`info`, `omnia_core=debug`).
     /// The always-on noisy-dependency mutes still apply.
@@ -80,8 +85,8 @@ impl Telemetry {
         self
     }
 
-    /// Sets the level the console subscriber falls back to when the
-    /// environment sets no `RUST_LOG`.
+    /// Sets the level the subscriber falls back to when the environment sets
+    /// no `RUST_LOG`.
     ///
     /// `WARN` when not called. Explicit [`filter`](Self::filter) directives
     /// take precedence over both.
@@ -91,10 +96,10 @@ impl Telemetry {
         self
     }
 
-    /// Initializes telemetry using the provided configuration.
+    /// Installs the subscriber as the process's global `tracing` subscriber.
     ///
-    /// The first call in the process installs the global subscriber and
-    /// returns [`Installed::Now`]; later calls are no-ops that reuse it (this
+    /// The first call in the process installs it and returns
+    /// [`Installed::Now`]; later calls are no-ops that reuse it (this
     /// builder's configuration is ignored) and return [`Installed::Already`],
     /// so embedders and the runtime can each initialize without coordinating.
     ///
@@ -123,7 +128,7 @@ impl Telemetry {
             .with(fmt_layer)
             .try_init()
         {
-            tracing::warn!(%error, "a tracing subscriber is already set; omnia telemetry skipped");
+            tracing::warn!(%error, "a tracing subscriber is already set; omnia's skipped");
             return Ok(Installed::Already);
         }
         *installed = true;

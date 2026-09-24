@@ -15,7 +15,7 @@ mod registry;
 mod runtime;
 mod seam;
 mod store;
-pub mod telemetry;
+pub mod subscriber;
 mod value;
 
 #[doc(hidden)]
@@ -45,7 +45,7 @@ pub use self::store::{
     HasChain, HasDispatcher, HasExtensions, HasLimits, HasMounts, HttpBorrow, HttpCtx, StoreBase,
     StoreConfig, StoreCtx, StoreView,
 };
-pub use self::telemetry::Telemetry;
+pub use self::subscriber::SubscriberBuilder;
 pub use self::value::handle_kind;
 
 /// Generates the standard host-error conversions every `omnia` WASI host

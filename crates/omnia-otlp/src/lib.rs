@@ -5,7 +5,7 @@ use std::env;
 use std::sync::OnceLock;
 
 use anyhow::{Result, anyhow};
-use omnia_core::telemetry::{Installed, Telemetry};
+use omnia_core::subscriber::{Installed, SubscriberBuilder};
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::{KeyValue, global};
 use opentelemetry_otlp::{MetricExporter, SpanExporter, WithExportConfig};
@@ -49,21 +49,21 @@ impl Exporters {
         self
     }
 
-    /// Attaches the exporters to a console `Telemetry`; [`Exporting::build`]
-    /// installs both.
+    /// Attaches the exporters to the console `SubscriberBuilder`;
+    /// [`Exporting::build`] installs both.
     #[must_use]
-    pub const fn attach(self, telemetry: Telemetry) -> Exporting {
+    pub const fn attach(self, subscriber: SubscriberBuilder) -> Exporting {
         Exporting {
             exporters: self,
-            telemetry,
+            subscriber,
         }
     }
 }
 
-/// A `Telemetry` with OTLP exporters attached.
+/// A `SubscriberBuilder` with OTLP exporters attached.
 pub struct Exporting {
     exporters: Exporters,
-    telemetry: Telemetry,
+    subscriber: SubscriberBuilder,
 }
 
 impl Exporting {
@@ -86,7 +86,7 @@ impl Exporting {
         let providers = Providers::build(&self.exporters)?;
         let tracer = providers.tracer.tracer(self.exporters.name);
         let installed = self
-            .telemetry
+            .subscriber
             .layer(tracing_opentelemetry::layer().with_tracer(tracer))
             .layer(MetricsLayer::new(providers.meter.clone()))
             .build()?;

@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::FutureExt as _;
-use omnia::{ExitStatus, FutureResult, Provides, Telemetry};
+use omnia::{ExitStatus, FutureResult, Provides, SubscriberBuilder};
 use omnia_test::host::Deployment;
 use omnia_wasi_otel::{WasiOtel, WasiOtelCtx};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
@@ -139,7 +139,7 @@ async fn run(deployment: Deployment, label: &str) -> Recording {
     // impls skip unless host telemetry is initialized and a host span is
     // live, so install providers and drive the guest inside a span.
     omnia::otlp::Exporters::new("otel-e2e")
-        .attach(Telemetry::new().filter("info"))
+        .attach(SubscriberBuilder::new().filter("info"))
         .build()
         .expect("telemetry installs");
 

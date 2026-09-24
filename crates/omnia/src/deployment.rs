@@ -18,7 +18,7 @@ use omnia_core::wasmtime::{Config, Engine};
 use omnia_core::wasmtime_wasi::WasiView;
 use omnia_core::{
     GuestId, HasChain, Host, LevelFilter, LinkSeam, LoadedGuest, MountRegistry, NoLinks, Registry,
-    Routes, Runtime, RuntimeOptions, RuntimeParts, Server, StoreCtx, Telemetry,
+    Routes, Runtime, RuntimeOptions, RuntimeParts, Server, StoreCtx, SubscriberBuilder,
 };
 #[cfg(feature = "link")]
 use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks};
@@ -166,19 +166,21 @@ impl DeploymentBuilder {
         // environment.
         let name = env::var("COMPONENT").unwrap_or_else(|_| program_name.clone());
 
-        // Telemetry at the run's level: a selected level is the console
-        // filter outright; otherwise the process `RUST_LOG` stands and the
-        // mode's level fills its absence. Initialization is idempotent
-        // (`Telemetry::build`): the first call in the process — here or in an
-        // embedder — installs the subscriber, and later deployments reuse it.
+        // The tracing subscriber at the run's level: a selected level is the
+        // console filter outright; otherwise the process `RUST_LOG` stands and
+        // the mode's level fills its absence. With the `otlp` feature the OTLP
+        // exporters attach as layers beneath the console. Initialization is
+        // idempotent (`SubscriberBuilder::build`): the first call in the
+        // process — here or in an embedder — installs the subscriber, and
+        // later deployments reuse it.
         let fallback = self.mode.level();
-        let mut telemetry = Telemetry::new().fallback(fallback);
+        let mut subscriber = SubscriberBuilder::new().fallback(fallback);
         if let Some(level) = self.level {
-            telemetry = telemetry.filter(level.to_string());
+            subscriber = subscriber.filter(level.to_string());
         }
         #[cfg(feature = "otlp")]
-        let telemetry = otlp_exporters(&name).attach(telemetry);
-        telemetry.build().context("initializing telemetry")?;
+        let subscriber = otlp_exporters(&name).attach(subscriber);
+        subscriber.build().context("initializing tracing subscriber")?;
         tracing::debug!("initializing runtime");
 
         let (engine, linker, mut options) = engine_and_linker()?;

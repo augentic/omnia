@@ -2,7 +2,7 @@
 
 OTLP span and metric exporters for the [omnia](https://github.com/augentic/omnia)
 runtime's host telemetry: [`Exporters`] attaches a gRPC span exporter and a
-periodic metric exporter to omnia's console `Telemetry`, publishes the
+periodic metric exporter to omnia's console `SubscriberBuilder`, publishes the
 OpenTelemetry providers process-wide once the subscriber is installed, and
 exposes `flush` (batched telemetry survives a fast exit) and `resource` (the
 process's OpenTelemetry resource, for hosts that report it to guests).

@@ -47,7 +47,7 @@ The runtime is built around a set of traits that allow services to be plugged in
 - **Registry pipeline:** `Manifest` (with `GuestEntry`, `Mount`, `RegistryConfig`, `SourceSpec`, route/transport types), `DeploymentBuilder`, `Deployment`, `Registry`, `Guest`, `GuestId`, `RuntimeOptions`
 - **Trigger routing (host servers):** `RouteTable` + `MatchStrategy` (aliased `HttpRoutes`/`PatternRoutes`/`CliRoutes`), `Routes`, `Resolver`, `TriggerRouter`
 - **Guest-to-guest dispatch (`link` feature):** `GuestSelector`, `FirstArgSelector`, `InProcessLinks`, and the `is_host` namespace predicate; every import a guest makes outside the runtime's own `wasi:`/`omnia:` namespaces is relayed to the guest exporting it, nothing declaring the seam
-- **Telemetry:** `Telemetry` (console); `otlp::Exporters`, `otlp::flush`, `otlp::resource` (`otlp` feature)
+- **Tracing subscriber:** `SubscriberBuilder` (console logging, plus the layer seam exporters attach through); `otlp::Exporters`, `otlp::flush`, `otlp::resource` (`otlp` feature)
 - **CLI:** `Cli`, `Command`, `Parser` (`cli` feature)
 - **Guest loader (`omnia:plugins/loader`, `loader` feature):** `WasiPlugins`, `Plugins`, `PluginLoader`, the `OnDemand`/`Origin` table of declared guests, the `RegistryClient` acquirer with its `RegistrySource` seam, the `ContentStore`/`ReleaseStore` cache traits, and `Deployment::registry_source` for a custom registry; `RegistryConfig` is always available as manifest data, and a deployment declaring `registries` requires the feature
 - **Signature vocabulary:** `anyhow` (`omnia::anyhow::Result`) because `Backend`, `Wiring`, and the generated runtime module speak it, and `futures` (`omnia::futures::future::BoxFuture`) because the loader store and acquirer seams return it
@@ -69,25 +69,25 @@ The runtime and its included services are configured via environment variables:
 - **`RUST_LOG`**: The tracing filter for the whole process, host console and guests alike (e.g., `info`, `debug`, `omnia_core=trace`), when no `-v`/`-q` flag selects a level; unset means `info` for a command runtime and `warn` for a server. Each `-v` steps the level up from that default and each `-q` down, replacing `RUST_LOG` for the run. Noisy dependencies (`hyper`, `h2`, `tonic`, `opentelemetry`, `opentelemetry_sdk`, `omnia_wasi_otel`) are always muted.
 - **`OTEL_GRPC_URL`**: OTLP gRPC endpoint for exporting host traces and metrics (with the `otlp` feature). Unset uses OpenTelemetry defaults (`http://localhost:4317`).
 
-## Telemetry
+## Logging and telemetry
 
-The runtime reports OpenTelemetry tracing and metrics out-of-the-box. During startup, `omnia` installs the console `tracing-subscriber` via the `Telemetry` builder and, with the `otlp` feature, attaches OTLP span exporters and metric readers through `omnia::otlp::Exporters`, so host runtimes emit telemetry without extra wiring. Most applications never need to call this directly:
+During startup, `omnia` installs the host's `tracing` subscriber via `SubscriberBuilder`: console logging (`EnvFilter` + `fmt` to stderr) with a layer seam telemetry exporters attach through. With the `otlp` feature, `omnia::otlp::Exporters` attaches OTLP span exporters and metric readers to that seam, so host runtimes emit OpenTelemetry traces and metrics without extra wiring. Most applications never need to call this directly:
 
 ```rust,ignore
-use omnia::Telemetry;
+use omnia::SubscriberBuilder;
 
-// Console subscriber only
-Telemetry::new().build()?;
+// Console logging only
+SubscriberBuilder::new().build()?;
 
-// Console subscriber plus OTLP exporters (`otlp` feature); omit `endpoint`
+// Console logging plus OTLP exporters (`otlp` feature); omit `endpoint`
 // for OpenTelemetry's own endpoint resolution
 omnia::otlp::Exporters::new("my-service")
     .endpoint("http://localhost:4317")
-    .attach(Telemetry::new())
+    .attach(SubscriberBuilder::new())
     .build()?;
 ```
 
-Initialization is idempotent: the first `build` in the process installs the subscriber and providers, and later calls are no-ops that reuse them, so an embedder initializing telemetry itself and the runtime's own startup never conflict. Telemetry is batch-exported; the runtime flushes it at the end of every run so it survives fast command-mode exits, and embedders driving work themselves can call `omnia::otlp::flush()` before the process exits. The `OTEL_GRPC_URL` environment variable is respected when set; when unset, OpenTelemetry defaults apply. Export errors from a missing collector never reach the console: the subscriber's filter always mutes the `opentelemetry` and `opentelemetry_sdk` targets.
+Initialization is idempotent: the first `build` in the process installs the subscriber and providers, and later calls are no-ops that reuse them, so an embedder installing a subscriber itself and the runtime's own startup never conflict. Telemetry is batch-exported; the runtime flushes it at the end of every run so it survives fast command-mode exits, and embedders driving work themselves can call `omnia::otlp::flush()` before the process exits. The `OTEL_GRPC_URL` environment variable is respected when set; when unset, OpenTelemetry defaults apply. Export errors from a missing collector never reach the console: the subscriber's filter always mutes the `opentelemetry` and `opentelemetry_sdk` targets.
 
 ## Architecture
 

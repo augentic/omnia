@@ -40,8 +40,8 @@ pub use omnia_core::{
     HasExtensions, HasLimits, HasMounts, HasTable, Host, HostCtx, HttpBorrow, HttpCtx, HttpRoutes,
     LevelFilter, LinkSeam, MountRegistry, NoLinks, NoOptions, PatternRoutes, Provides, Proxy,
     Registry, ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts, Server, StoreBase,
-    StoreConfig, StoreCtx, StoreFactory, StoreView, Telemetry, TriggerRouter, WeakRuntime,
-    get_cloned, host_error, serve_links, telemetry, wasi_view,
+    StoreConfig, StoreCtx, StoreFactory, StoreView, SubscriberBuilder, TriggerRouter, WeakRuntime,
+    get_cloned, host_error, serve_links, subscriber, wasi_view,
 };
 #[doc(hidden)]
 pub use omnia_core::{pastey, tokio, wasmtime, wasmtime_wasi};

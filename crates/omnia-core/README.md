@@ -3,7 +3,8 @@
 The live-runtime SDK of [omnia](https://github.com/augentic/omnia): the
 multi-guest registry, host→guest dispatch, the [`LinkSeam`] trait
 guest→guest linking implements against, per-store contexts, and the
-console telemetry subscriber (OTLP export lives in `omnia-otlp`).
+host's `tracing` subscriber — console logging with a layer seam telemetry
+exporters attach through (OTLP export lives in `omnia-otlp`).
 
 The registry always holds a `LinkSeam`. This crate owns the trait and
 the [`NoLinks`] no-op; the in-process implementation (`InProcessLinks`)

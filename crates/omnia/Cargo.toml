@@ -45,9 +45,9 @@ link = ["dep:omnia-link"]
 jit = ["omnia-core/jit", "omnia-cli?/jit"]
 
 # Enables the OTLP (gRPC) span and metric exporters for host telemetry (the
-# `omnia-otlp` crate, re-exported as `omnia::otlp`). Without it, `Telemetry`
-# still installs the fmt/`EnvFilter` subscriber and `OTEL_GRPC_URL` is
-# ignored.
+# `omnia-otlp` crate, re-exported as `omnia::otlp`). Without it,
+# `SubscriberBuilder` still installs the console fmt/`EnvFilter` subscriber
+# and `OTEL_GRPC_URL` is ignored.
 otlp = ["dep:omnia-otlp"]
 
 # Enables memory protection keys (MPK) support in the pooling allocator. MPK
