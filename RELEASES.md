@@ -80,6 +80,17 @@ Unreleased
   - The repository's `examples` package compiles the guests `cli-static` and
     `guest-link` embed in a `build.rs` through
     `omnia_test::build::Components`, so those run with no guest build first.
+  - The generated `run` and `run_with` build the deployment they are handed
+    as `main` builds the one it plans: admitting pre-compiled artifacts,
+    since what a binary's own `main` passes them is the binary's trusted
+    input as much as argv is (`docs/security-model.md`). A composed host
+    that embeds `omnia compile` output through `path:` and overlays the
+    manifest at run time therefore starts from the pre-compiled engine,
+    where before the safe build refused the embedded bytes and only the
+    generated `main` could run them. A programmatic
+    `DeploymentBuilder::build` still rejects them; `build_trusted` is still
+    the one `unsafe` door. The shared build is `omnia::run_builder` /
+    `omnia::run_builder_with`, `doc(hidden)` beside `run` / `run_with`.
 - A guest entry's identity is its `name`.
   - `[[guest]] name = ".."` replaces `id`; it may be omitted, in which case
     the `source.path` file's stem names the guest (`./guests/echo.wasm` is

@@ -1,4 +1,6 @@
-//! Deployment lifecycle: [`Backends`], [`Wiring`], [`run`], and [`run_with`].
+//! Deployment lifecycle: [`Backends`], [`Wiring`], [`run`], and [`run_with`],
+//! and the build the generated entry points share ([`run_builder`],
+//! [`run_builder_with`]).
 
 use std::future::Future;
 use std::process::ExitCode;
@@ -90,25 +92,62 @@ where
     B: Backends,
     H: Wiring<B>,
 {
-    // The generated entry point admits pre-compiled artifacts: manifests and
-    // `.bin` paths given to (or compiled into) the binary are trusted
-    // operator inputs (docs/security-model.md).
-    match async {
-        // SAFETY: the operator running this binary chose the manifest and
-        // artifact paths; pre-compiled artifacts are documented trusted inputs
-        // produced by `omnia compile`.
-        let deployment =
-            unsafe { builder.build_trusted::<StoreCtx<B>>() }.await.context("building runtime")?;
-        run::<B, H>(deployment).await
-    }
-    .await
-    {
+    match run_builder::<B, H>(builder).await {
         Ok(status) => status.into(),
         Err(error) => {
             eprintln!("{error:#}");
             ExitCode::FAILURE
         }
     }
+}
+
+/// Build the deployment a generated entry point was handed, then [`run`] it.
+///
+/// The generated `main` and `run` both come here, so a builder handed to
+/// `run` by an embedder's own `main` builds as the one `main` plans from
+/// argv does: admitting pre-compiled artifacts, since a manifest or `.bin`
+/// given to the binary, or compiled into it, is a trusted operator input
+/// (docs/security-model.md).
+///
+/// # Errors
+///
+/// Returns an error if the deployment cannot be built, or as [`run`].
+#[doc(hidden)]
+pub async fn run_builder<B, H>(builder: DeploymentBuilder) -> Result<ExitStatus>
+where
+    B: Backends,
+    H: Wiring<B>,
+{
+    let deployment = build_entry::<B>(builder).await?;
+    run::<B, H>(deployment).await
+}
+
+/// [`run_builder`] over a bundle already in hand: the build the generated
+/// `run_with` shares with `main` and `run`, then [`run_with`].
+///
+/// # Errors
+///
+/// Returns an error if the deployment cannot be built, or as [`run_with`].
+#[doc(hidden)]
+pub async fn run_builder_with<B, H>(builder: DeploymentBuilder, backends: B) -> Result<ExitStatus>
+where
+    B: Clone + Send + Sync + 'static,
+    H: Wiring<B>,
+{
+    let deployment = build_entry::<B>(builder).await?;
+    run_with::<B, H>(deployment, backends).await
+}
+
+// The build every generated entry point shares.
+async fn build_entry<B>(builder: DeploymentBuilder) -> Result<Deployment<StoreCtx<B>>>
+where
+    B: Clone + Send + Sync + 'static,
+{
+    // SAFETY: the operator running this binary chose the manifest and
+    // artifact paths — planned from argv by the generated `main`, or handed
+    // to the generated `run` / `run_with` by the embedder's own; pre-compiled
+    // artifacts are documented trusted inputs produced by `omnia compile`.
+    unsafe { builder.build_trusted::<StoreCtx<B>>() }.await.context("building runtime")
 }
 
 /// Connect backends, bootstrap the runtime, then run command mode or every trigger server.

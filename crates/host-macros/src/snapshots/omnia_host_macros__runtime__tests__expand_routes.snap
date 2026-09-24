@@ -101,17 +101,16 @@ mod runtime {
             .await
     }
     /// Run one deployment through this runtime's hosts and backends,
-    /// blocking until the guest completes.
+    /// blocking until the guest completes. The build is `main`'s:
+    /// what the builder names is this binary's trusted input,
+    /// pre-compiled guests included.
     #[tokio::main]
     pub async fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
-        let deployment = builder
-            .mode(omnia::Mode::Server)
-            .build::<omnia::StoreCtx<Backends>>()
-            .await?;
-        omnia::run::<Backends, Hooks>(deployment).await
+        omnia::run_builder::<Backends, Hooks>(builder.mode(omnia::Mode::Server)).await
     }
     /// Run one deployment through this runtime's hosts over a bundle
-    /// already in hand — nothing connects.
+    /// already in hand — nothing connects. The build is `main`'s, as
+    /// under `run`.
     pub async fn run_with<B>(
         builder: omnia::DeploymentBuilder,
         backends: B,
@@ -120,11 +119,8 @@ mod runtime {
         B: Clone + Send + Sync + 'static,
         Hooks: omnia::Wiring<B>,
     {
-        let deployment = builder
-            .mode(omnia::Mode::Server)
-            .build::<omnia::StoreCtx<B>>()
-            .await?;
-        omnia::run_with::<B, Hooks>(deployment, backends).await
+        omnia::run_builder_with::<B, Hooks>(builder.mode(omnia::Mode::Server), backends)
+            .await
     }
 }
 #[allow(unused_imports)]

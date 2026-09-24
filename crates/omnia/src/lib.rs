@@ -64,4 +64,4 @@ pub use self::deployment::{
 pub use self::entry::{MainOptions, ManifestSource, main};
 pub use self::lifecycle::{Backends, Mode, Wiring};
 #[doc(hidden)]
-pub use self::lifecycle::{run, run_with};
+pub use self::lifecycle::{run, run_builder, run_builder_with, run_with};

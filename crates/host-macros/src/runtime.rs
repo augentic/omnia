@@ -85,15 +85,17 @@ pub fn expand(config: &Config) -> TokenStream {
             }
 
             /// Run one deployment through this runtime's hosts and backends,
-            /// blocking until the guest completes.
+            /// blocking until the guest completes. The build is `main`'s:
+            /// what the builder names is this binary's trusted input,
+            /// pre-compiled guests included.
             #[tokio::main]
             pub async fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
-                let deployment = builder.mode(#mode).build::<omnia::StoreCtx<#backends_ty>>().await?;
-                omnia::run::<#backends_ty, Hooks>(deployment).await
+                omnia::run_builder::<#backends_ty, Hooks>(builder.mode(#mode)).await
             }
 
             /// Run one deployment through this runtime's hosts over a bundle
-            /// already in hand — nothing connects.
+            /// already in hand — nothing connects. The build is `main`'s, as
+            /// under `run`.
             pub async fn run_with<B>(
                 builder: omnia::DeploymentBuilder, backends: B,
             ) -> Result<omnia::ExitStatus>
@@ -101,8 +103,7 @@ pub fn expand(config: &Config) -> TokenStream {
                 B: Clone + Send + Sync + 'static,
                 Hooks: omnia::Wiring<B>,
             {
-                let deployment = builder.mode(#mode).build::<omnia::StoreCtx<B>>().await?;
-                omnia::run_with::<B, Hooks>(deployment, backends).await
+                omnia::run_builder_with::<B, Hooks>(builder.mode(#mode), backends).await
             }
         }
 
