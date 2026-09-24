@@ -14,9 +14,7 @@ cfg_if::cfg_if! {
 
         use anyhow::{Context as _, Result, bail};
         use omnia::wasmtime::component::Val;
-        use omnia::{
-            DeploymentBuilder, GuestArtifact, GuestEntry, GuestId, Manifest, Runtime, StoreCtx,
-        };
+        use omnia::{DeploymentBuilder, GuestEntry, GuestId, Manifest, Runtime, StoreCtx};
 
         #[tokio::main]
         async fn main() -> Result<()> {
@@ -45,7 +43,7 @@ cfg_if::cfg_if! {
                 "extra guest not built: cargo build -p examples --example \
                  guest-link-extra-wasm --target wasm32-wasip2",
             )?;
-            runtime.register("extra", GuestArtifact::bytes(wasm)).await?;
+            runtime.register("extra", wasm).await?;
 
             // The static router dispatches to the registered guest exactly as it
             // would to a static one.

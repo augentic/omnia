@@ -100,10 +100,10 @@ You should see two lines: one reply tagged `from extra`, and one from `responder
 
 ```rust
 let bytes = std::fs::read(extra_wasm)?;
-runtime.register("extra", GuestArtifact::bytes(bytes)).await?;
+runtime.register("extra", bytes).await?;
 ```
 
-The bytes may be a raw `.wasm`, compiled at registration, or `omnia compile` output, deserialized as native code — the runtime tells them apart by their leading bytes. Verifying them (digest, signature, provenance) is the install pipeline's job, before they reach the runtime.
+The bytes may be a raw `.wasm`, compiled at registration, or `omnia compile` output, deserialized as native code — the runtime tells them apart the way wasmtime does. Verifying them (digest, signature, provenance) is the install pipeline's job, before they reach the runtime; the registry records their digest either way.
 
 ## Also in this directory
 

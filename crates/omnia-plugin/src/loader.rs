@@ -5,11 +5,11 @@ use std::future::Future;
 use std::sync::Arc;
 
 use anyhow::ensure;
-use omnia_core::{AdmitError, Digest, GuestId, Runtime};
+use omnia_core::{AdmitError, Digest, GuestId, Runtime, Source, SourceSpec};
 
 use crate::admission::{Admission, Registration};
 use crate::error::LoadError;
-use crate::source::{OnDemand, Origin, RegistrySource};
+use crate::source::RegistrySource;
 
 /// Host-side `omnia:plugins/loader.load` — embedder sugar over the runtime's
 /// installed [`Plugins`] extension.
@@ -44,35 +44,36 @@ impl<B: Clone + Send + Sync + 'static> PluginLoader for Runtime<B> {
 /// or admitted earlier), and refuses every other name. Nothing a caller
 /// passes chooses code.
 pub struct Plugins {
-    guests: HashMap<GuestId, OnDemand>,
+    guests: HashMap<GuestId, Source>,
     registry: Arc<dyn RegistrySource>,
     admission: Box<dyn Admission>,
 }
 
 impl Plugins {
-    /// Install the loader capability on `runtime`: `guests` is every entry the
-    /// deployment declares for on-demand loading, and `registry` fetches the
-    /// [`Origin::Package`] sources among them.
+    /// Install the loader capability on `runtime`: `guests` is every source
+    /// the deployment declares for on-demand loading, and `registry` fetches
+    /// the [`SourceSpec::Package`] sources among them.
     ///
     /// # Errors
     ///
     /// Returns an error if an on-demand name repeats or is already registered
     /// at boot, or the capability is already installed.
     pub fn install<B>(
-        runtime: &Runtime<B>, guests: impl IntoIterator<Item = (GuestId, OnDemand)>,
+        runtime: &Runtime<B>, guests: impl IntoIterator<Item = Source>,
         registry: Arc<dyn RegistrySource>,
     ) -> anyhow::Result<()>
     where
         B: Clone + Send + Sync + 'static,
     {
         let mut table = HashMap::new();
-        for (id, guest) in guests {
+        for source in guests {
+            let id = source.id().clone();
             ensure!(
                 runtime.registry().get(&id).is_none(),
                 "on-demand guest `{id}` is already registered at boot"
             );
             ensure!(
-                table.insert(id.clone(), guest).is_none(),
+                table.insert(id.clone(), source).is_none(),
                 "on-demand guest `{id}` is declared twice"
             );
         }
@@ -90,46 +91,43 @@ impl Plugins {
     }
 
     /// Ensure the guest the deployment declares as `name` is active and
-    /// return its handle: acquired from its declared source, checked against
-    /// its declared digest, and admitted through the runtime's admission
+    /// return its handle: acquired from its declared source, verified against
+    /// what the source declares, and admitted through the runtime's admission
     /// seam if it loads on demand and is not active yet; attested with the
     /// digest the registry recorded otherwise. Idempotent.
     ///
     /// # Errors
     ///
-    /// `refused` on an undeclared name, a digest mismatch, or bytes that are
-    /// not a loadable component; `unavailable` when the source could not
-    /// produce the bytes; `internal` on registration failure.
+    /// `refused` on an undeclared name, a digest mismatch, a pre-compiled
+    /// artifact where the source admits raw wasm alone, or bytes that are not
+    /// a loadable component; `unavailable` when the source could not produce
+    /// the bytes; `internal` on registration failure.
     pub async fn load(&self, name: &str) -> Result<Plugin, LoadError> {
         let id = GuestId::from(name);
         if let Registration::Active(digest) = self.admission.registration(&id)? {
             return Ok(Plugin { id, digest });
         }
-        let Some(guest) = self.guests.get(&id) else {
+        let Some(source) = self.guests.get(&id) else {
             return Err(LoadError::Refused(format!(
                 "no guest `{name}` is declared by this deployment"
             )));
         };
 
-        let bytes = self.acquire(name, &guest.origin).await?;
+        let bytes = match source.spec() {
+            SourceSpec::Package(package) => self.registry.acquire(package).await?,
+            SourceSpec::Path(_) | SourceSpec::Bytes(_) => {
+                source.read().await.map_err(|error| LoadError::Unavailable(format!("{error:#}")))?
+            }
+        };
 
-        // The declared digest binds name to bytes before any validation work.
-        let digest = Digest::of(&bytes);
-        if let Some(declared) = guest.digest
-            && declared != digest
-        {
-            return Err(LoadError::Refused(format!(
-                "`{name}` resolved to {digest}, not its declared digest {declared}"
-            )));
-        }
+        // What the source declares binds name to bytes before any validation work.
+        let digest =
+            source.verified(&bytes).map_err(|error| LoadError::Refused(format!("{error:#}")))?;
 
-        match self.admission.admit(id.clone(), bytes).await {
+        match self.admission.admit(id.clone(), bytes, digest).await {
             Ok(()) => {
                 tracing::debug!(%id, %digest, "guest loaded on demand");
-                Ok(Plugin {
-                    id,
-                    digest: Some(digest),
-                })
+                Ok(Plugin { id, digest })
             }
             // A racing load admitted the same declared entry first; the
             // winner's registration is the one to attest.
@@ -144,26 +142,13 @@ impl Plugins {
             Err(AdmitError::Internal(reason)) => Err(LoadError::Internal(reason)),
         }
     }
-
-    async fn acquire(&self, name: &str, origin: &Origin) -> Result<Vec<u8>, LoadError> {
-        match origin {
-            Origin::Path(path) => tokio::fs::read(path).await.map_err(|error| {
-                LoadError::Unavailable(format!(
-                    "reading `{}` for `{name}`: {error}",
-                    path.display()
-                ))
-            }),
-            Origin::Bytes(bytes) => Ok(bytes.to_vec()),
-            Origin::Package(package) => self.registry.acquire(package).await,
-        }
-    }
 }
 
 /// Loaded plugin: routed identity plus content digest.
 #[derive(Clone, Debug)]
 pub struct Plugin {
     id: GuestId,
-    digest: Option<Digest>,
+    digest: Digest,
 }
 
 impl Plugin {
@@ -173,10 +158,9 @@ impl Plugin {
         &self.id
     }
 
-    /// The content digest of the guest's bytes; `None` for a guest whose
-    /// bytes the runtime never hashed.
+    /// The content digest of the bytes the guest was loaded from.
     #[must_use]
-    pub const fn digest(&self) -> Option<Digest> {
+    pub const fn digest(&self) -> Digest {
         self.digest
     }
 }

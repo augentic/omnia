@@ -57,7 +57,7 @@ Further tunables mirror wasmtime's pooling configuration one-to-one: `POOL_TOTAL
 
 ### Memory layout and artifacts (compile-affecting)
 
-`MEMORY_RESERVATION`, `MEMORY_GUARD_SIZE`, `MEMORY_RESERVATION_FOR_GROWTH`, and `BRANCH_HINTING` affect compilation and must be identical when a component is pre-compiled (`compile`) and later run.
+`MAX_FUEL`, `MEMORY_RESERVATION`, `MEMORY_GUARD_SIZE`, and `BRANCH_HINTING` affect compilation and must be identical when a component is pre-compiled (`compile`) and later run. Together with the two artifact options below they are the runtime's `CompileOptions` (`RuntimeOptions::compile_options()`), the value the compiler takes explicitly: `CompileOptions::default()` is these defaults, so an artifact compiled with it loads into a runtime whose environment sets none of them. `MEMORY_RESERVATION_FOR_GROWTH` is a runtime-only setting.
 
 Two further compile-affecting options trade artifact size against introspection: `DEBUG_SYMBOLS` (default `false`) emits ELF symbol tables in compiled artifacts for profilers and `wasmtime objdump`, and `GENERATE_ADDRESS_MAP` (default `true`) records the machine-code-to-wasm-offset map that gives traps and backtraces their wasm offsets. Set `DEBUG_SYMBOLS=true` when profiling; set `GENERATE_ADDRESS_MAP=false` for the smallest artifacts if you can live without wasm offsets in trap messages.
 
@@ -96,6 +96,7 @@ name = "tool"                       # admitted when a guest first `load`s "tool"
 source.path = "./tool.wasm"         # not at boot; takes no routes or command
 on_demand = true
 digest = "sha256:…"                 # optional pin the bytes must hash to
+wasm_only = true                    # optional: refuse a pre-compiled artifact
 
 [[guest]]
 name = "adapter"                    # a package source always loads on demand,
@@ -123,6 +124,7 @@ Field notes:
 - **`guest.source`** — `source.path` is a local `.wasm` (or pre-compiled `.bin`) relative to the manifest; `source.package` is an exact `namespace:name@version` fetched through `[registries]` on first load, and must be marked `on_demand`. A `runtime!` invocation's inline guest embeds its component instead (`path:` — see the [macro reference](runtime-macro.md#guest-entries-pathpackage-name-routes-command-on_demand-digest)).
 - **`guest.on_demand`** — the guest is admitted when a guest first `loader.load`s it by name (`omnia:plugins/loader`) rather than at boot. It is still a `[[guest]]` entry — the loader admits no name the manifest does not declare, and a guest can name neither a path nor a package of its own — but it takes no `routes` and cannot be the `command` guest, since trigger routing is built at boot. Requires a runtime built with the `loader` feature to be loadable.
 - **`guest.digest`** — the `sha256:<hex>` the source's bytes must hash to, checked before wasmtime sees them wherever they become a guest, at boot or on demand. Pin every on-demand `source.path` whose file could change between boot and first load — in particular one under a directory the deployment also mounts `writable`.
+- **`guest.wasm_only`** — the entry admits raw `.wasm` alone: a pre-compiled artifact is refused however it hashes, at boot or on demand. A pin proves the bytes are the ones the deployment named, not that they are safe to run as native code, so mark every entry whose path and pin the deployment reads from input it does not author (a project's own configuration, say). Defaults to `false`: an unmarked entry loads either format.
 - **What guests call between themselves** is declared nowhere. Each component says what it imports and exports; every interface outside the runtime's own `wasi:` and `omnia:` namespaces is relayed by the host to whichever guest exports it — including a guest registered after startup — and an import no guest exports fails at boot. A runtime built without the `link` feature leaves such imports unsatisfied. A `services` key is an unknown key.
 - **`guest.command`** — marks the guest command mode drives (its `wasi:cli/run`); at most one guest may carry it. Without a mark, the sole `wasi:cli/run` exporter is the catch-all — several unmarked exporters fail the run as ambiguous.
 - **`mount`** — preopened into *every* guest sandbox. A mount is a data grant only: the `omnia:plugins/loader` never reads code through one, so a writable mount is not a code-admission root. CLI `--mount` entries layer on top; a duplicate guest-visible name wins over the manifest, before any directory opens.

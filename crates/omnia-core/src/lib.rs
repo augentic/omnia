@@ -14,6 +14,7 @@ mod options;
 mod registry;
 mod runtime;
 mod seam;
+mod source;
 mod store;
 pub mod telemetry;
 mod value;
@@ -24,7 +25,6 @@ pub use tracing_subscriber::filter::LevelFilter;
 #[doc(hidden)]
 pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
-pub use self::artifact::{GuestArtifact, LoadedGuest};
 pub use self::chain::{ChainCtx, ChainPolicy};
 pub use self::digest::Digest;
 pub use self::dispatch::Dispatcher;
@@ -35,12 +35,13 @@ pub use self::host::{
 };
 pub use self::invoke::{FreshCall, InvokeError, call_fresh};
 pub use self::mount::{MountRegistry, ResolvedPreopen};
-pub use self::options::RuntimeOptions;
+pub use self::options::{CompileOptions, RuntimeOptions};
 pub use self::registry::{
     CliRoutes, Guest, GuestId, HttpRoutes, PatternRoutes, Registry, Resolver, Routes, TriggerRouter,
 };
 pub use self::runtime::{AdmitError, ExitStatus, Runtime, RuntimeParts, WeakRuntime, serve_links};
 pub use self::seam::{LinkSeam, NoLinks, StoreFactory};
+pub use self::source::{LoadedGuest, Source, SourceSpec};
 pub use self::store::{
     HasChain, HasDispatcher, HasExtensions, HasLimits, HasMounts, HttpBorrow, HttpCtx, StoreBase,
     StoreConfig, StoreCtx, StoreView,

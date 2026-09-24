@@ -33,7 +33,7 @@ By default the host JIT-compiles `.wasm` at startup. For faster cold starts, pre
 
 Three constraints:
 
-- Compile-affecting options (`MAX_FUEL`, `MEMORY_RESERVATION`, `MEMORY_GUARD_SIZE`, `BRANCH_HINTING`, `DEBUG_SYMBOLS`, `GENERATE_ADDRESS_MAP`) must be identical at compile time and run time.
+- Compile-affecting options (`MAX_FUEL`, `MEMORY_RESERVATION`, `MEMORY_GUARD_SIZE`, `BRANCH_HINTING`, `DEBUG_SYMBOLS`, `GENERATE_ADDRESS_MAP`) must be identical at compile time and run time. The compiler takes them explicitly as a `CompileOptions` value rather than reading its own environment — `CompileOptions::default()` is the runtime's environment defaults; `RuntimeOptions::load_env()?.compile_options()` is the current environment's — so a `build.rs` that compiles a guest is not steered by whatever the build shell exports. The artifact is for the host's target unless the compile names another (`--target <triple>` on the CLI, the `target` argument in code); a guest compiled into a binary is compiled for the binary's target.
 - The generated `runtime!` `main` only handles `run`; expose `compile` from a custom `main` (see [CLI reference](../reference/cli.md#compile-jit-feature)). A host built with `--no-default-features` (dropping `jit`) can *only* load pre-compiled `.bin` files — useful for minimizing the production binary.
 - A `.bin` is native code and a **trusted operator input**: the runtime loads whichever format a declared guest turns out to be, and the settings check above is a compatibility check, not an authenticity check — see the [security model](../security-model.md).
 

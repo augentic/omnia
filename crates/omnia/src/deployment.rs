@@ -1,7 +1,6 @@
 //! # WebAssembly Initiator
 
 mod manifest;
-mod source;
 
 use std::env;
 use std::sync::Arc;
@@ -9,12 +8,14 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 pub use manifest::{
-    GuestEntry, GuestRoutes, Manifest, Mount, RegistryConfig, SourceSpec, Transport, TransportKind,
+    GuestEntry, GuestRoutes, Manifest, Mount, RegistryConfig, Transport, TransportKind,
 };
 #[cfg(feature = "link")]
 use omnia_core::ChainPolicy;
 #[cfg(not(feature = "link"))]
 use omnia_core::NoLinks;
+#[cfg(feature = "loader")]
+use omnia_core::Source;
 use omnia_core::wasmtime::component::Linker;
 use omnia_core::wasmtime::{Config, Engine};
 use omnia_core::wasmtime_wasi::WasiView;
@@ -25,7 +26,7 @@ use omnia_core::{
 #[cfg(feature = "link")]
 use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks};
 #[cfg(feature = "loader")]
-use omnia_plugin::{OnDemand, Plugins, RegistryClient, RegistrySource, WasiPlugins};
+use omnia_plugin::{Plugins, RegistryClient, RegistrySource, WasiPlugins};
 
 use crate::Mode;
 
@@ -163,7 +164,7 @@ impl DeploymentBuilder {
         // startup rather than the first package load.
         let registry_config = manifest.registry_config()?;
         #[cfg(feature = "loader")]
-        let on_demand = manifest.on_demand();
+        let on_demand = manifest.on_demand_sources();
 
         let program_name = self.program_name.unwrap_or_else(|| "omnia".to_owned());
         // The runtime-carried name read by telemetry, trigger servers, and
@@ -190,7 +191,7 @@ impl DeploymentBuilder {
 
         // Boot guests load (and compile) in parallel through the async
         // [`Source::load`] seam; order still follows the manifest.
-        let sources = manifest.sources()?;
+        let sources = manifest.boot_sources()?;
         let guests =
             futures::future::try_join_all(sources.iter().map(|source| source.load(&engine)))
                 .await?;
@@ -272,7 +273,7 @@ pub struct Deployment<T: WasiView + 'static> {
 #[derive(Default)]
 struct Loader {
     // The manifest's on-demand guests.
-    on_demand: Vec<(GuestId, OnDemand)>,
+    on_demand: Vec<Source>,
     // The embedder's registry source; `None` installs a cacheless
     // `RegistryClient` over the deployment's `registries` configuration.
     registry: Option<Arc<dyn RegistrySource>>,

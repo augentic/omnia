@@ -9,7 +9,8 @@ interface loader {
     variant error {
         /// The request or deployment is wrong and a retry cannot succeed:
         /// the deployment declares no guest of that name, its bytes do not
-        /// hash to the declared digest, or they are not a loadable component.
+        /// hash to the declared digest, they are not a loadable component, or
+        /// they are pre-compiled where the entry admits raw wasm alone.
         refused(string),
         /// The guest's source could not produce its bytes; the source may
         /// recover, so a retry can succeed.
@@ -24,9 +25,9 @@ interface loader {
         /// The registered guest identity (routes both link dispatch and the
         /// host Dispatcher).
         id: string,
-        /// The `sha256:<hex>` content digest of the guest's bytes; `none` for
-        /// a guest whose bytes the runtime never hashed.
-        digest: option<string>,
+        /// The `sha256:<hex>` content digest of the bytes the guest was
+        /// loaded from.
+        digest: string,
     }
 
     /// Ensure the guest the deployment declares as `name` is active and

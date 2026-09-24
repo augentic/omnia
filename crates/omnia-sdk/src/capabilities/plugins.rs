@@ -88,14 +88,14 @@ impl std::fmt::Display for Digest {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Plugin {
     id: String,
-    digest: Option<Digest>,
+    digest: Digest,
 }
 
 impl Plugin {
     /// A handle over a routed identity and its content digest — the
     /// constructor native suites use to script loads.
     #[must_use]
-    pub fn new(id: impl Into<String>, digest: Option<Digest>) -> Self {
+    pub fn new(id: impl Into<String>, digest: Digest) -> Self {
         Self {
             id: id.into(),
             digest,
@@ -108,11 +108,10 @@ impl Plugin {
         &self.id
     }
 
-    /// The content digest of the guest's bytes; `None` for a guest whose
-    /// bytes the runtime never hashed.
+    /// The content digest of the bytes the guest was loaded from.
     #[must_use]
-    pub const fn digest(&self) -> Option<&Digest> {
-        self.digest.as_ref()
+    pub const fn digest(&self) -> &Digest {
+        &self.digest
     }
 }
 
@@ -121,7 +120,8 @@ impl Plugin {
 pub enum Error {
     /// The request or deployment is wrong and a retry cannot succeed: the
     /// deployment declares no guest of that name, its bytes miss the
-    /// declared digest, or they are not a valid raw component.
+    /// declared digest, they are not a loadable component, or they are
+    /// pre-compiled where the entry admits raw wasm alone.
     #[error("refused: {0}")]
     Refused(String),
     /// The guest's source could not produce its bytes; the source may
@@ -187,11 +187,9 @@ pub trait Plugins: Send + Sync {
         let name = name.to_owned();
         async move {
             let loaded = loader::load(name).await?;
-            let digest = loaded.digest.map(|digest| digest.parse()).transpose().map_err(
-                |error: Error| {
-                    Error::Internal(format!("host reported a malformed digest: {error}"))
-                },
-            )?;
+            let digest = loaded.digest.parse().map_err(|error: Error| {
+                Error::Internal(format!("host reported a malformed digest: {error}"))
+            })?;
             Ok(Plugin::new(loaded.id, digest))
         }
     }

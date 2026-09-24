@@ -34,10 +34,10 @@ async fn scenario() {
     let second = second.expect("the racing load succeeds");
     assert_eq!(first.id(), name, "a guest registers under its declared name");
     assert_eq!(second.id(), name);
-    let digest = first.digest().cloned().expect("an admitted guest reports its digest");
-    assert_eq!(second.digest(), Some(&digest), "both handles attest one registration");
+    let digest = first.digest();
+    assert_eq!(second.digest(), digest, "both handles attest one registration");
     if let Some(declared) = &declared {
-        assert_eq!(&digest, declared, "the reported digest is the declared one");
+        assert_eq!(digest, declared, "the reported digest is the declared one");
     }
 
     // The handle's identity routes host-mediated dispatch to the exporter.
@@ -46,5 +46,5 @@ async fn scenario() {
 
     let again = WasiPlugins.load(name).await.expect("a later load attests");
     assert_eq!(again.id(), name);
-    assert_eq!(again.digest(), Some(&digest));
+    assert_eq!(again.digest(), digest);
 }

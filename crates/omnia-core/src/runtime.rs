@@ -5,11 +5,12 @@ mod command;
 use std::fmt;
 use std::sync::{Arc, Weak};
 
-use anyhow::{Context as _, Result};
+use anyhow::Result;
 use wasmtime::Store;
-use wasmtime::component::{Component, Instance, InstancePre};
+use wasmtime::component::{Instance, InstancePre};
 
-use crate::artifact::GuestArtifact;
+use crate::artifact::component;
+use crate::digest::Digest;
 use crate::extensions::Extensions;
 use crate::mount::MountRegistry;
 use crate::registry::{Guest, GuestId, HttpRoutes, PublishError, TriggerRouter};
@@ -405,92 +406,73 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         command::drive(self).await
     }
 
-    /// Register a guest at run time: load `artifact`, pre-instantiate it
-    /// against the shared host set, wire its host-mediated link serve side,
-    /// then publish entry and endpoint as one atomic lifecycle transition —
-    /// no dispatch can ever resolve the entry and miss the endpoint, or vice
-    /// versa.
+    /// Register a guest at run time from its component bytes — a raw wasm
+    /// component or `omnia compile` output — under `id`.
     ///
     /// The identity is opaque and must not already be registered; an upgrade
     /// is [`deregister`](Self::deregister) + `register` (or a new id). A
-    /// failed registration leaves no partial state.
+    /// failed registration leaves no partial state. The registry entry
+    /// records the content digest of `bytes`, as it does for every guest.
     ///
     /// # Errors
     ///
-    /// Returns an error if `id` is already registered, the artifact cannot be
+    /// Returns an error if `id` is already registered, the bytes cannot be
     /// loaded, the component's imports exceed the deployment's linked host set
     /// and declared link interfaces, or its linked exports cannot be served.
-    pub async fn register(&self, id: impl Into<GuestId>, artifact: GuestArtifact) -> Result<()> {
-        let id = id.into();
-        let registry = self.registry();
-
-        // Early occupancy check to skip the load/serve work; the publish below
-        // re-checks transactionally, so a racing registration cannot slip in.
-        anyhow::ensure!(registry.get(&id).is_none(), "guest `{id}` is already registered");
-
-        let component = artifact
-            .load(registry.engine())
-            .await
-            .with_context(|| format!("loading guest `{id}`"))?;
-        self.register_component(id, component).await
+    pub async fn register(&self, id: impl Into<GuestId>, bytes: Vec<u8>) -> Result<()> {
+        let digest = Digest::of(&bytes);
+        self.admit(id.into(), bytes, digest).await.map_err(anyhow::Error::from)
     }
 
-    /// [`register`](Self::register) internals over an already-loaded
-    /// component.
-    async fn register_component(&self, id: GuestId, component: Component) -> Result<()> {
-        let registry = self.registry();
-        let instance_pre = registry.instantiate_late(&id, &component)?;
-        let guest = Guest::local(id.clone(), instance_pre);
-
-        // Serve the guest's linked exports (if any) as a pending endpoint;
-        // publish then makes the endpoint and the registry entry observable in
-        // one atomic step, discarding the endpoint if a racing registration won.
-        registry
-            .seam()
-            .serve(self.store_factory(), &guest)
-            .await
-            .with_context(|| format!("serving guest `{id}` link exports"))?;
-        registry.publish(guest).map_err(PublishError::into_anyhow)?;
-
-        tracing::debug!(guest = %id, "guest registered");
-        Ok(())
-    }
-
-    /// Admit component bytes as a late guest: load them as a boot guest's
-    /// are loaded, then register and serve the component under `id` — the
-    /// privileged registration half behind the `omnia:plugins/loader`
-    /// capability.
-    /// Acquisition, digest policy, and idempotency live with the loader
-    /// (`omnia-plugin`). Whether the component exports a linked interface is
-    /// not checked here: a guest that exports none is still reachable through
-    /// the host [`Dispatcher`], and a link call to it fails at the call site.
+    /// Admit component bytes as a late guest under `id`: load them as a boot
+    /// guest's are loaded, pre-instantiate against the shared host set, wire
+    /// the host-mediated link serve side, then publish entry and endpoint as
+    /// one atomic lifecycle transition — no dispatch can ever resolve the
+    /// entry and miss the endpoint, or vice versa.
     ///
-    /// The registry entry records the content digest of `bytes`, so the
-    /// attestation lives exactly as long as the entry —
-    /// [`Guest::digest`](crate::Guest::digest) reads it back.
+    /// `digest` is the content digest of `bytes`, hashed by the caller, and
+    /// is recorded on the registry entry, so the attestation lives exactly as
+    /// long as the entry — [`Guest::digest`](crate::Guest::digest) reads it
+    /// back. Acquisition, digest policy, and idempotency live with the guest
+    /// loader (`omnia-plugin`), the privileged caller behind the
+    /// `omnia:plugins/loader` capability. Whether the component exports a
+    /// linked interface is not checked here: a guest that exports none is
+    /// still reachable through the host [`Dispatcher`], and a link call to it
+    /// fails at the call site.
     ///
     /// # Errors
     ///
     /// Returns a typed [`AdmitError`] naming the refusal: refused artifact,
     /// an identity already registered (an earlier or racing registration), or
     /// an internal serve/publication failure.
-    pub async fn admit(&self, id: GuestId, bytes: Vec<u8>) -> Result<(), AdmitError> {
-        let digest = crate::Digest::of(&bytes);
-        let component =
-            GuestArtifact::bytes(bytes).load(self.registry().engine()).await.map_err(|error| {
-                AdmitError::ArtifactRefused(format!("validating `{id}`: {error:#}"))
-            })?;
+    pub async fn admit(
+        &self, id: GuestId, bytes: Vec<u8>, digest: Digest,
+    ) -> Result<(), AdmitError> {
+        let registry = self.registry();
 
-        // The same publish sequence as `Runtime::register`: pre-instantiate
-        // against the shared host set, wire seam exports, publish atomically.
-        let instance_pre = self.registry().instantiate_late(&id, &component).map_err(|error| {
+        // Early occupancy check to skip the load/serve work; the publish below
+        // re-checks transactionally, so a racing registration cannot slip in.
+        if registry.get(&id).is_some() {
+            return Err(AdmitError::AlreadyRegistered(format!(
+                "guest `{id}` is already registered"
+            )));
+        }
+
+        let component = component(registry.engine(), bytes).await.map_err(|error| {
+            AdmitError::ArtifactRefused(format!("validating `{id}`: {error:#}"))
+        })?;
+        let instance_pre = registry.instantiate_late(&id, &component).map_err(|error| {
             AdmitError::ArtifactRefused(format!("pre-instantiating `{id}`: {error:#}"))
         })?;
-        let guest = Guest::local(id.clone(), instance_pre).with_digest(digest);
-        self.registry().seam().serve(self.store_factory(), &guest).await.map_err(|error| {
+        let guest = Guest::local(id.clone(), instance_pre, digest);
+
+        // Serve the guest's linked exports (if any) as a pending endpoint;
+        // publish then makes the endpoint and the registry entry observable in
+        // one atomic step, discarding the endpoint if a racing registration won.
+        registry.seam().serve(self.store_factory(), &guest).await.map_err(|error| {
             AdmitError::Internal(format!("serving `{id}` seam exports: {error:#}"))
         })?;
-        self.registry().publish(guest).map_err(|error| match error {
+        registry.publish(guest).map_err(|error| match error {
             PublishError::Occupied(id) => {
                 AdmitError::AlreadyRegistered(format!("guest `{id}` is already registered"))
             }
@@ -499,7 +481,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
             }
         })?;
 
-        tracing::debug!(guest = %id, "late guest admitted");
+        tracing::debug!(guest = %id, "guest registered");
         Ok(())
     }
 
