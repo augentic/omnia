@@ -41,6 +41,24 @@ Unreleased
 
 ### Changed
 
+- One loader for either artifact format, everywhere a guest loads. The
+  bytes a declared guest resolves to — a manifest `source.path`, the
+  macro's compiled-in `path:`, a loader entry's file or registry package —
+  are deserialized when they are `omnia compile` output and compiled when
+  they are raw wasm, told apart by their leading bytes; a settings-mismatched
+  pre-compiled artifact still fails with the compile-settings hint. What
+  the deployment names is the operator's trusted input in either format
+  (`docs/security-model.md`), so the raw-wasm/pre-compiled trust split is
+  gone with its API: `DeploymentBuilder::build_trusted` (`build` is the one
+  build, and the generated `run` / `run_with` load a pre-compiled guest as
+  `main` does), `GuestArtifact::{wasm, precompiled, precompiled_file}`
+  (`GuestArtifact::bytes` takes either format), `is_precompiled`, and
+  `ELF_MAGIC`. The loader admits a pre-compiled on-demand guest instead of
+  refusing it, so the `omnia:plugins/loader` `refused` variant no longer
+  names that case. Every boot guest's bytes now pass through omnia's hands,
+  so `LoadedGuest::digest` is a `Digest`, not an `Option` — a pre-compiled
+  file is read and hashed rather than deserialized in place — and a load
+  of a boot guest always attests its digest.
 - `ChainCtx` is no longer `Default`: a root is `ChainCtx::server()` or
   `ChainCtx::command()`. `as_command_chain(fut)` is now a store built at the
   command root, `runtime.build_store(runtime.store_in(ChainCtx::command()))`,

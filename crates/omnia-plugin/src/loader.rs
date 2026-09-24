@@ -20,7 +20,7 @@ pub trait PluginLoader {
     /// # Errors
     ///
     /// `refused` on an undeclared name, a digest mismatch, or bytes that are
-    /// not a valid raw component; `unavailable` when the source could not
+    /// not a loadable component; `unavailable` when the source could not
     /// produce the bytes; `internal` on registration failure.
     fn load(&self, name: &str) -> impl Future<Output = Result<Plugin, LoadError>> + Send;
 }
@@ -98,7 +98,7 @@ impl Plugins {
     /// # Errors
     ///
     /// `refused` on an undeclared name, a digest mismatch, or bytes that are
-    /// not a valid raw component; `unavailable` when the source could not
+    /// not a loadable component; `unavailable` when the source could not
     /// produce the bytes; `internal` on registration failure.
     pub async fn load(&self, name: &str) -> Result<Plugin, LoadError> {
         let id = GuestId::from(name);

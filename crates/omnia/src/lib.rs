@@ -1,6 +1,5 @@
 #![doc = include_str!("../README.md")]
 #![cfg(not(target_arch = "wasm32"))]
-#![allow(unsafe_code)] // `DeploymentBuilder::build_trusted` and `Source::load`
 
 // The embedder facade: the runtime spine (`omnia-core`), guest→guest dispatch
 // (`omnia-link`, behind the `link` feature), the guest loader

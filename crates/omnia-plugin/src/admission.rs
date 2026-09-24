@@ -14,7 +14,7 @@ pub trait Admission: Send + Sync + 'static {
     /// The registration state of `id`, with any recorded digest.
     fn registration(&self, id: &GuestId) -> Result<Registration, LoadError>;
 
-    /// Admit raw wasm bytes as the late guest `id`.
+    /// Admit component bytes as the late guest `id`.
     fn admit(&self, id: GuestId, bytes: Vec<u8>) -> BoxFuture<'static, Result<(), AdmitError>>;
 }
 

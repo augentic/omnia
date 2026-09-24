@@ -24,7 +24,7 @@ pub use tracing_subscriber::filter::LevelFilter;
 #[doc(hidden)]
 pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
-pub use self::artifact::{ELF_MAGIC, GuestArtifact, LoadedGuest, is_precompiled};
+pub use self::artifact::{GuestArtifact, LoadedGuest};
 pub use self::chain::{ChainCtx, ChainPolicy};
 pub use self::digest::Digest;
 pub use self::dispatch::Dispatcher;

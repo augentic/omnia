@@ -26,7 +26,6 @@ use omnia_core::{
 use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks};
 #[cfg(feature = "loader")]
 use omnia_plugin::{OnDemand, Plugins, RegistryClient, RegistrySource, WasiPlugins};
-use source::ArtifactPolicy;
 
 use crate::Mode;
 
@@ -34,10 +33,6 @@ use crate::Mode;
 ///
 /// When no manifest is set, [`build`](Self::build) loads the path in
 /// `OMNIA_MANIFEST`.
-///
-/// The safe [`build`](Self::build) rejects pre-compiled (native) artifacts;
-/// [`build_trusted`](Self::build_trusted) admits them and is `unsafe` because
-/// a pre-compiled artifact is native code the caller must trust.
 ///
 /// ```ignore
 /// let deployment = DeploymentBuilder::new()
@@ -142,10 +137,17 @@ impl DeploymentBuilder {
         self
     }
 
-    /// Resolve the manifest and build the deployment under `policy`.
-    async fn build_inner<T: WasiView + 'static>(
-        self, policy: ArtifactPolicy,
-    ) -> Result<Deployment<T>> {
+    /// Resolve the manifest into a [`Deployment`].
+    ///
+    /// If no manifest was supplied, the path in `OMNIA_MANIFEST` is loaded.
+    /// A guest is a raw wasm component or `omnia compile` output; either
+    /// loads.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no manifest resolves, the manifest is invalid, or
+    /// the deployment cannot be built.
+    pub async fn build<T: WasiView + 'static>(self) -> Result<Deployment<T>> {
         let manifest = if let Some(manifest) = self.manifest {
             manifest
         } else if self.allow_empty {
@@ -189,10 +191,9 @@ impl DeploymentBuilder {
         // Boot guests load (and compile) in parallel through the async
         // [`Source::load`] seam; order still follows the manifest.
         let sources = manifest.sources()?;
-        let guests = futures::future::try_join_all(
-            sources.iter().map(|source| source.load(&engine, policy)),
-        )
-        .await?;
+        let guests =
+            futures::future::try_join_all(sources.iter().map(|source| source.load(&engine)))
+                .await?;
 
         // In command mode the program name is prepended as `argv[0]`.
         let args = if self.mode.is_command() {
@@ -225,42 +226,6 @@ impl DeploymentBuilder {
             fallback,
         })
     }
-
-    /// Resolve the manifest into a [`Deployment`].
-    ///
-    /// If no manifest was supplied, the path in `OMNIA_MANIFEST` is loaded.
-    /// Every guest must be raw component wasm; a pre-compiled (native)
-    /// artifact is rejected — see [`build_trusted`](Self::build_trusted).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if no manifest resolves, the manifest is invalid, a
-    /// guest names a pre-compiled artifact, or the deployment cannot be built.
-    pub async fn build<T: WasiView + 'static>(self) -> Result<Deployment<T>> {
-        self.build_inner(ArtifactPolicy::Reject).await
-    }
-
-    /// Resolve the manifest into a [`Deployment`], admitting pre-compiled
-    /// artifacts.
-    ///
-    /// If no manifest was supplied, the path in `OMNIA_MANIFEST` is loaded.
-    ///
-    /// # Safety
-    ///
-    /// Every pre-compiled path this builder's manifest names must identify
-    /// trusted, immutable wasmtime output (`omnia compile` /
-    /// [`wasmtime::component::Component::serialize`]). A pre-compiled
-    /// artifact is native code: wasmtime's compatibility check is not an
-    /// authenticity check, and tampered bytes can execute arbitrary code
-    /// with host privileges.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if no manifest resolves, the manifest is invalid, or
-    /// the deployment cannot be built.
-    pub async unsafe fn build_trusted<T: WasiView + 'static>(self) -> Result<Deployment<T>> {
-        self.build_inner(ArtifactPolicy::Trust).await
-    }
 }
 
 /// A compiled set of WebAssembly components with their shared Linker, ready to
@@ -269,8 +234,8 @@ impl DeploymentBuilder {
 /// [`host`]: Self::host
 pub struct Deployment<T: WasiView + 'static> {
     // Deployment name carried onto the runtime for trigger servers and the
-    // bootstrap log (the program name, unless `build_inner` honored an
-    // operator `COMPONENT` override).
+    // bootstrap log (the program name, unless `build` honored an operator
+    // `COMPONENT` override).
     name: String,
     engine: Engine,
     linker: Linker<T>,

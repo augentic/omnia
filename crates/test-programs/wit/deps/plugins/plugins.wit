@@ -9,9 +9,7 @@ interface loader {
     variant error {
         /// The request or deployment is wrong and a retry cannot succeed:
         /// the deployment declares no guest of that name, its bytes do not
-        /// hash to the declared digest, or they are not a raw wasm component
-        /// (a pre-compiled native artifact is always refused) or failed
-        /// validation.
+        /// hash to the declared digest, or they are not a loadable component.
         refused(string),
         /// The guest's source could not produce its bytes; the source may
         /// recover, so a retry can succeed.

@@ -155,8 +155,8 @@ impl<B: Clone + Send + Sync + 'static> WeakRuntime<B> {
 /// refusal's description.
 #[derive(Clone, Debug)]
 pub enum AdmitError {
-    /// The bytes are a native artifact, not a valid raw wasm component, or
-    /// failed pre-instantiation against the deployment's host set.
+    /// The bytes are not a loadable component, or failed pre-instantiation
+    /// against the deployment's host set.
     ArtifactRefused(String),
     /// The identity is already registered — an earlier or racing
     /// registration holds it.
@@ -456,10 +456,10 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         Ok(())
     }
 
-    /// Admit raw wasm bytes as a late guest: refuse a native (pre-compiled)
-    /// artifact before wasmtime sees the bytes, validate on the safe path,
-    /// then register and serve the component under `id` — the privileged
-    /// registration half behind the `omnia:plugins/loader` capability.
+    /// Admit component bytes as a late guest: load them as a boot guest's
+    /// are loaded, then register and serve the component under `id` — the
+    /// privileged registration half behind the `omnia:plugins/loader`
+    /// capability.
     /// Acquisition, digest policy, and idempotency live with the loader
     /// (`omnia-plugin`). Whether the component exports a linked interface is
     /// not checked here: a guest that exports none is still reachable through
@@ -476,10 +476,8 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// an internal serve/publication failure.
     pub async fn admit(&self, id: GuestId, bytes: Vec<u8>) -> Result<(), AdmitError> {
         let digest = crate::Digest::of(&bytes);
-
-        // Safe validation plus sandboxed JIT — the explicitly safe constructor.
         let component =
-            GuestArtifact::wasm(bytes).load(self.registry().engine()).await.map_err(|error| {
+            GuestArtifact::bytes(bytes).load(self.registry().engine()).await.map_err(|error| {
                 AdmitError::ArtifactRefused(format!("validating `{id}`: {error:#}"))
             })?;
 

@@ -181,7 +181,7 @@ All of this is declared in the `omnia.toml` manifest ([reference](reference/conf
 ## Runtime Execution Flow
 
 1. **CLI parsing** — the generated `main` delegates to `omnia::main`, which parses the `run` subcommand (`omnia-cli` decides the source over `--manifest` / `OMNIA_MANIFEST` / positional `<wasm>` / compiled-in), materializes a `Manifest`, and appends CLI `--mount` entries onto it.
-2. **Build** — `DeploymentBuilder` validates the manifest, resolves mounts, reads the `registries` configuration, loads guests, and returns a `Deployment` ready for host linking (`build` is the safe wasm path; `unsafe build_trusted` is the pre-compiled path).
+2. **Build** — `DeploymentBuilder` validates the manifest, resolves mounts, reads the `registries` configuration, loads guests, and returns a `Deployment` ready for host linking (a guest is raw wasm or `omnia compile` output; either loads).
 3. **Assemble** — `run` connects backends, `Wiring::link` adds each host to the linker, `Deployment::assemble` links the guest loader host (with the `loader` feature), builds the `Runtime` from `RuntimeParts`, installs the loader's table — the manifest's `on_demand` guests, their package sources fetched through `registries` unless `Deployment::registry_source` selected a registry — and serves every guest's linked exports.
 4. **Bootstrap** — starts epoch interruption and pool-metric sampling, then logs **`omnia ready`**.
 5. **Drive** — command mode invokes the guest's `wasi:cli/run` once and exits with its status; server mode awaits every trigger server.

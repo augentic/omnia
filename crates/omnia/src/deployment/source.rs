@@ -1,34 +1,19 @@
 //! # Guest acquisition at boot
 //!
 //! Where a boot guest's component bytes come from. The deployment manifest's
-//! `source` field selects a kind per guest: a local `.wasm` / pre-compiled
-//! `.bin` path, or component bytes embedded in the host binary. A package
-//! source is fetched by the guest loader on first load, never here.
+//! `source` field selects a kind per guest: a local path — a raw `.wasm` or
+//! `omnia compile` output — or component bytes embedded in the host binary. A
+//! package source is fetched by the guest loader on first load, never here.
 
 use std::borrow::Cow;
 use std::path::PathBuf;
 
 use anyhow::{Context as _, Result, ensure};
 use omnia_core::wasmtime::Engine;
-use omnia_core::{Digest, ELF_MAGIC, GuestArtifact, GuestId, LoadedGuest, is_precompiled};
+use omnia_core::{Digest, GuestArtifact, GuestId, LoadedGuest};
 
-/// Whether a deployment build may load pre-compiled (native) artifacts.
-///
-/// Crate-internal on purpose: the only door to `Trust` is an `unsafe`
-/// call site ([`DeploymentBuilder::build_trusted`](crate::DeploymentBuilder::build_trusted)
-/// or [`GuestArtifact::precompiled`](omnia_core::GuestArtifact::precompiled)).
-// `pub` in a private module: crate-internal, never re-exported.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum ArtifactPolicy {
-    /// Only raw wasm components load; a pre-compiled artifact is rejected.
-    Reject,
-    /// Pre-compiled artifacts load via native deserialization; the caller has
-    /// attested trust through an `unsafe` API.
-    Trust,
-}
-
-/// A guest loaded from a local `.wasm` (or pre-compiled `.bin`) file, or from
-/// component bytes embedded in the host binary.
+/// A guest loaded from a local component file, or from component bytes
+/// embedded in the host binary.
 pub struct Source {
     id: GuestId,
     kind: SourceKind,
@@ -77,72 +62,23 @@ impl Source {
         &self.id
     }
 
-    /// Load the component this source registers, under the build's artifact
-    /// policy, recording the digest of every byte sequence that passed
-    /// through omnia's hands.
+    /// Load the component this source registers, recording the digest of the
+    /// bytes it was loaded from.
     ///
     /// Compilation is CPU-bound, so it runs on a blocking thread — loading
     /// several guests concurrently compiles them in parallel.
-    pub(crate) async fn load(
-        &self, engine: &Engine, policy: ArtifactPolicy,
-    ) -> Result<LoadedGuest> {
-        let (artifact, digest) = match &self.kind {
-            SourceKind::Path(path) => {
-                let read = || {
-                    std::fs::read(path)
-                        .with_context(|| format!("loading guest from {}", path.display()))
-                };
-                if is_precompiled(path)? {
-                    ensure!(
-                        policy == ArtifactPolicy::Trust,
-                        "{} is a pre-compiled (native) artifact, which this build rejects; load \
-                         trusted pre-compiled artifacts through `DeploymentBuilder`'s unsafe \
-                         `build_trusted`",
-                        path.display()
-                    );
-                    if self.digest.is_some() {
-                        // A pinned artifact is read here so the pin can be
-                        // checked; wasmtime reads an unpinned one itself.
-                        let bytes = read()?;
-                        let digest = self.verified(&bytes)?;
-                        // SAFETY: `policy == Trust` is only reachable through
-                        // an `unsafe` build call whose caller attested every
-                        // pre-compiled path names unmodified trusted wasmtime
-                        // output — the contract `precompiled` requires.
-                        (unsafe { GuestArtifact::precompiled(bytes) }, Some(digest))
-                    } else {
-                        // SAFETY: as above, for `precompiled_file`.
-                        (unsafe { GuestArtifact::precompiled_file(path.clone()) }, None)
-                    }
-                } else {
-                    let bytes = read()?;
-                    let digest = self.verified(&bytes)?;
-                    (GuestArtifact::wasm(bytes), Some(digest))
-                }
-            }
-            SourceKind::Bytes(bytes) => {
-                let digest = self.verified(bytes)?;
-                if bytes.get(..ELF_MAGIC.len()) == Some(&ELF_MAGIC) {
-                    ensure!(
-                        policy == ArtifactPolicy::Trust,
-                        "the embedded bytes are a pre-compiled (native) artifact, which this \
-                         build rejects; load trusted pre-compiled artifacts through \
-                         `DeploymentBuilder`'s unsafe `build_trusted`"
-                    );
-                    // SAFETY: `policy == Trust` is only reachable through an
-                    // `unsafe` build call whose caller attested every
-                    // pre-compiled artifact is unmodified trusted wasmtime
-                    // output — the contract `precompiled` requires.
-                    (unsafe { GuestArtifact::precompiled(bytes.to_vec()) }, Some(digest))
-                } else {
-                    (GuestArtifact::wasm(bytes.to_vec()), Some(digest))
-                }
-            }
+    pub(crate) async fn load(&self, engine: &Engine) -> Result<LoadedGuest> {
+        let bytes = match &self.kind {
+            SourceKind::Path(path) => std::fs::read(path)
+                .with_context(|| format!("loading guest from {}", path.display()))?,
+            SourceKind::Bytes(bytes) => bytes.to_vec(),
         };
-        let component = artifact.load(engine).await.with_context(|| match &self.kind {
-            SourceKind::Path(path) => format!("loading guest from {}", path.display()),
-            SourceKind::Bytes(_) => format!("loading embedded guest `{}`", self.id),
-        })?;
+        let digest = self.verified(&bytes)?;
+        let component =
+            GuestArtifact::bytes(bytes).load(engine).await.with_context(|| match &self.kind {
+                SourceKind::Path(path) => format!("loading guest from {}", path.display()),
+                SourceKind::Bytes(_) => format!("loading embedded guest `{}`", self.id),
+            })?;
         Ok(LoadedGuest {
             id: self.id.clone(),
             component,

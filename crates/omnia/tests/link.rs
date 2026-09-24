@@ -155,7 +155,7 @@ async fn link_full_registered_late() {
             .expect("deployment boots");
 
     let wasm = std::fs::read(test_programs::LINK_FULL).expect("reading full guest artifact");
-    runtime.register("full", GuestArtifact::wasm(wasm)).await.expect("late registration");
+    runtime.register("full", GuestArtifact::bytes(wasm)).await.expect("late registration");
 
     let sync = call(&runtime, "full", "poke", "late").await.expect("sync dispatch");
     assert_eq!(sync, "echoer pong: late");

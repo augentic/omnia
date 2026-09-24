@@ -94,9 +94,8 @@ enum Target<T: 'static> {
 pub struct Guest<T: 'static> {
     id: GuestId,
     target: Target<T>,
-    // Content digest of the guest's bytes; `None` when the runtime never had
-    // them in hand — a pre-compiled file wasmtime read itself, or a
-    // `register`-path artifact.
+    // Content digest of the guest's bytes; `None` for a `register`-path
+    // artifact, which nothing hashed.
     digest: Option<Digest>,
 }
 
@@ -211,10 +210,7 @@ impl<T: WasiView + 'static> Registry<T> {
                 .instantiate_pre(&component)
                 .map_err(anyhow::Error::from)
                 .with_context(|| format!("pre-instantiating guest `{id}`"))?;
-            let mut guest = Guest::local(id.clone(), instance_pre);
-            if let Some(digest) = digest {
-                guest = guest.with_digest(digest);
-            }
+            let guest = Guest::local(id.clone(), instance_pre).with_digest(digest);
             if guests.insert(id.clone(), Arc::new(guest)).is_some() {
                 bail!("duplicate guest id `{id}`: guest identities must be unique");
             }

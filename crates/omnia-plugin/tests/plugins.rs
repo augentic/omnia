@@ -152,6 +152,15 @@ fn stage(scratch: &Scratch, name: &str, wasm: &str) -> PathBuf {
     target
 }
 
+/// Compile `wasm` ahead of time into the scratch dir under `name` — what
+/// `omnia compile` writes — returning the artifact's path.
+fn precompile(scratch: &Scratch, name: &str, wasm: &str) -> PathBuf {
+    let target = scratch.path().join(name);
+    omnia::compile::compile(Path::new(wasm), Some(target.clone()))
+        .unwrap_or_else(|error| panic!("compiling {wasm}: {error:#}"));
+    target
+}
+
 /// Stage `wasm` as `package` in a wasm-pkg `local` backend rooted at `root`,
 /// served by the registry `registry.test`.
 fn stage_package(root: &Path, package: &str, wasm: &str) {
@@ -209,6 +218,30 @@ async fn embedded_source() {
     let manifest = requester(test_programs::PLUGINS_LOAD).guest(on_demand("plugin", bytes));
     let status = run(manifest, &["plugin"]).await.expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+}
+
+// `omnia compile` output loads wherever raw wasm does — a boot guest and an
+// on-demand one alike — and the registry records its bytes' digest the same
+// way.
+#[tokio::test]
+async fn precompiled_sources() {
+    let scratch = scratch();
+    let requester_bin = precompile(&scratch, "requester.bin", test_programs::PLUGINS_LOAD);
+    let plugin_bin = precompile(&scratch, "plugin.bin", test_programs::LINK_ECHOER);
+    let digest = Digest::of(&std::fs::read(&plugin_bin).expect("reading the compiled echoer"));
+
+    let manifest = Manifest::new()
+        .guest(GuestEntry::new("requester", requester_bin))
+        .guest(on_demand("plugin", plugin_bin));
+    let runtime = boot(manifest, &["plugin"]).await.expect("assembling runtime");
+    let status = runtime.run_command().await.expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+    assert_eq!(
+        recorded(&runtime, "plugin"),
+        Registered::Active(Some(digest)),
+        "the load recorded the compiled bytes' digest"
+    );
+    runtime.shutdown();
 }
 
 // A declared digest binds the name to exactly those bytes; the handle
@@ -298,16 +331,11 @@ async fn package_not_found() {
 #[tokio::test]
 async fn plugins_refused() {
     let scratch = scratch();
-    // Leading ELF magic is exactly what the loader sniffs; the tail is junk,
-    // proving refusal happens before any wasmtime parsing.
-    let native = scratch.path().join("native.bin");
-    std::fs::write(&native, [0x7f, b'E', b'L', b'F', 0, 0, 0, 0]).expect("staging native bytes");
     let junk = scratch.path().join("junk.wasm");
     std::fs::write(&junk, b"not a component").expect("staging junk");
     let absent = scratch.path().join("absent.wasm");
 
-    let rows: [(&str, GuestEntry, &str, &str); 5] = [
-        ("native", on_demand("native", native), "refused", "pre-compiled"),
+    let rows: [(&str, GuestEntry, &str, &str); 4] = [
         ("junk", on_demand("junk", junk), "refused", "validating `junk`"),
         ("absent", on_demand("absent", absent), "unavailable", "reading"),
         // No `registries` at all: nothing routes any package.
@@ -510,7 +538,7 @@ async fn reregister_attests() {
     assert!(first.digest().is_some());
     runtime.deregister(first.id()).expect("deregistering the loaded plugin");
     runtime
-        .register("plugin", GuestArtifact::wasm(changed_echoer(b"reregister")))
+        .register("plugin", GuestArtifact::bytes(changed_echoer(b"reregister")))
         .await
         .expect("re-registering externally");
 

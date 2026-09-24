@@ -90,15 +90,8 @@ where
     B: Backends,
     H: Wiring<B>,
 {
-    // The generated entry point admits pre-compiled artifacts: manifests and
-    // `.bin` paths given to (or compiled into) the binary are trusted
-    // operator inputs (docs/security-model.md).
     match async {
-        // SAFETY: the operator running this binary chose the manifest and
-        // artifact paths; pre-compiled artifacts are documented trusted inputs
-        // produced by `omnia compile`.
-        let deployment =
-            unsafe { builder.build_trusted::<StoreCtx<B>>() }.await.context("building runtime")?;
+        let deployment = builder.build::<StoreCtx<B>>().await.context("building runtime")?;
         run::<B, H>(deployment).await
     }
     .await
