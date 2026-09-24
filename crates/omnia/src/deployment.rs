@@ -455,7 +455,8 @@ fn init_telemetry(name: &str, level: Option<LevelFilter>, fallback: LevelFilter)
     } else {
         tracing::debug!("OTEL_GRPC_URL unset; using OpenTelemetry defaults");
     }
-    builder.build().context("initializing telemetry")
+    builder.build().context("initializing telemetry")?;
+    Ok(())
 }
 
 #[cfg(test)]

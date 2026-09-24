@@ -34,14 +34,14 @@ use opentelemetry_sdk::trace::SdkTracerProvider;
 #[cfg(feature = "otlp")]
 use tracing_opentelemetry::MetricsLayer;
 use tracing_subscriber::filter::LevelFilter;
-use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::layer::{Layer, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry};
 
 // The process's telemetry state. Like the global subscriber that references
 // the providers, it lives for the rest of the process.
 #[cfg(feature = "otlp")]
-static INSTALLED: OnceLock<Installed> = OnceLock::new();
+static INSTALLED: OnceLock<Providers> = OnceLock::new();
 
 // Serializes first-time initialization. The `OnceLock` alone cannot: `build`
 // is fallible (ruling out `get_or_init`), and without this two racers could
@@ -51,12 +51,25 @@ static INIT: Mutex<()> = Mutex::new(());
 #[cfg(feature = "otlp")]
 const UNKNOWN: &str = "unknown";
 
+/// Outcome of [`Telemetry::build`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Installed {
+    /// This call installed omnia's subscriber.
+    Now,
+    /// A subscriber was already set (omnia's own earlier build or an
+    /// embedder's); nothing was installed.
+    Already,
+}
+
 /// Telemetry initializer.
 pub struct Telemetry {
     /// The name of the application to for the purposes of identifying the
     /// service in telemetry data.
     #[cfg_attr(not(feature = "otlp"), allow(dead_code))]
     app_name: String,
+
+    /// Layers installed beneath the console layers (exporters attach here).
+    layers: Vec<Box<dyn Layer<Registry> + Send + Sync>>,
 
     /// OTLP gRPC endpoint override; unset defers to OpenTelemetry endpoint
     /// resolution (`OTEL_EXPORTER_OTLP_*` env vars, then `http://localhost:4317`).
@@ -78,6 +91,7 @@ impl Telemetry {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             app_name: name.into(),
+            layers: Vec::new(),
             endpoint: None,
             filter: None,
             fallback: LevelFilter::WARN,
@@ -88,6 +102,14 @@ impl Telemetry {
     #[must_use]
     pub fn endpoint(mut self, endpoint: impl Into<String>) -> Self {
         self.endpoint = Some(endpoint.into());
+        self
+    }
+
+    /// Adds a subscriber layer beneath the console layers (an exporter
+    /// attaches here).
+    #[must_use]
+    pub fn layer(mut self, layer: impl Layer<Registry> + Send + Sync + 'static) -> Self {
+        self.layers.push(Box::new(layer));
         self
     }
 
@@ -116,8 +138,9 @@ impl Telemetry {
     /// Initializes telemetry using the provided configuration.
     ///
     /// The first call in the process installs the global subscriber and
-    /// providers; later calls are no-ops that reuse them (this builder's
-    /// configuration is ignored), so embedders and the runtime can each
+    /// providers and returns [`Installed::Now`]; later calls are no-ops that
+    /// reuse them (this builder's configuration is ignored) and return
+    /// [`Installed::Already`], so embedders and the runtime can each
     /// initialize without coordinating.
     ///
     /// # Errors
@@ -125,13 +148,13 @@ impl Telemetry {
     /// Returns an error if the telemetry system fails to initialize, such as if
     /// the OpenTelemetry exporter cannot be created or if setting the global
     /// subscriber fails.
-    pub fn build(self) -> Result<()> {
+    pub fn build(self) -> Result<Installed> {
         let _init = INIT.lock().unwrap_or_else(PoisonError::into_inner);
 
         #[cfg(feature = "otlp")]
         {
             if INSTALLED.get().is_some() {
-                return Ok(());
+                return Ok(Installed::Already);
             }
 
             let resource = self.resource();
@@ -155,6 +178,7 @@ impl Telemetry {
             // tracing setup) is tolerated: their subscriber stays, omnia's
             // exporters are skipped, and the runtime keeps running.
             if let Err(error) = Registry::default()
+                .with(self.layers)
                 .with(filter_layer)
                 .with(fmt_layer)
                 .with(tracing_layer)
@@ -162,19 +186,20 @@ impl Telemetry {
                 .try_init()
             {
                 tracing::warn!(%error, "a tracing subscriber is already set; omnia telemetry skipped");
-                return Ok(());
+                return Ok(Installed::Already);
             }
 
             global::set_meter_provider(meter_provider.clone());
             global::set_tracer_provider(tracer_provider.clone());
 
             INSTALLED
-                .set(Installed {
+                .set(Providers {
                     resource,
                     tracer: tracer_provider,
                     meter: meter_provider,
                 })
-                .map_err(|_installed| anyhow!("telemetry providers already installed"))
+                .map_err(|_providers| anyhow!("telemetry providers already installed"))?;
+            Ok(Installed::Now)
         }
 
         // Without the `otlp` feature there are no providers to install: the
@@ -184,10 +209,13 @@ impl Telemetry {
             let filter_layer =
                 filter(self.filter.as_deref(), self.fallback, rust_log().as_deref())?;
             let fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
-            if let Err(error) = Registry::default().with(filter_layer).with(fmt_layer).try_init() {
+            if let Err(error) =
+                Registry::default().with(self.layers).with(filter_layer).with(fmt_layer).try_init()
+            {
                 tracing::warn!(%error, "a tracing subscriber is already set; omnia telemetry skipped");
+                return Ok(Installed::Already);
             }
-            Ok(())
+            Ok(Installed::Now)
         }
     }
 
@@ -267,7 +295,7 @@ fn filter(
 
 // The process's resource and provider handles.
 #[cfg(feature = "otlp")]
-struct Installed {
+struct Providers {
     resource: Resource,
     tracer: SdkTracerProvider,
     meter: SdkMeterProvider,
@@ -303,8 +331,8 @@ fn settle(signal: &str, result: OTelSdkResult) {
 #[cfg_attr(not(feature = "otlp"), allow(clippy::missing_const_for_fn))]
 pub fn flush() {
     #[cfg(feature = "otlp")]
-    if let Some(installed) = INSTALLED.get() {
-        flush_providers(&installed.tracer, &installed.meter);
+    if let Some(providers) = INSTALLED.get() {
+        flush_providers(&providers.tracer, &providers.meter);
     }
 }
 
@@ -317,7 +345,7 @@ pub fn flush() {
 pub fn resource() -> Option<&'static Resource> {
     #[cfg(feature = "otlp")]
     {
-        INSTALLED.get().map(|installed| &installed.resource)
+        INSTALLED.get().map(|providers| &providers.resource)
     }
     #[cfg(not(feature = "otlp"))]
     {
