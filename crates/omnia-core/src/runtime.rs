@@ -59,15 +59,14 @@ pub struct RuntimeParts<B: 'static> {
     /// Guest argv.
     pub args: Vec<String>,
     /// Mount registry opened from the deployment's preopens — the WASI
-    /// preopens of every store, and the roots the guest loader resolves path
-    /// loads against.
+    /// preopens of every store.
     pub mounts: Arc<MountRegistry>,
     /// Connected backend bundle.
     pub backends: B,
     /// The deployment's wasm-pkg client configuration (TOML), resolved to its
-    /// contents: the routing of a package load that names no registry.
-    /// `None` when the deployment declares none, where such a load refuses
-    /// and one naming its registry still fetches.
+    /// contents: how the guest loader routes an on-demand guest's package
+    /// source to a registry. `None` when the deployment declares none, where
+    /// every package source is refused.
     pub registry_config: Option<String>,
     /// The tracing level selected for this run, if any; it replaces every
     /// guest's `RUST_LOG`.
@@ -217,16 +216,15 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         }))
     }
 
-    /// The mounts preopened into every store — also the roots the guest
-    /// loader resolves path loads against.
+    /// The mounts preopened into every store.
     #[must_use]
     pub fn mounts(&self) -> &MountRegistry {
         &self.inner.mounts
     }
 
     /// The deployment's wasm-pkg client configuration (TOML), resolved to its
-    /// contents, for the guest loader to route package loads through; `None`
-    /// when the deployment declares none.
+    /// contents, for the guest loader to route package sources through;
+    /// `None` when the deployment declares none.
     #[must_use]
     pub fn registry_config(&self) -> Option<&str> {
         self.inner.registry_config.as_deref()
@@ -477,7 +475,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// an identity already registered (an earlier or racing registration), or
     /// an internal serve/publication failure.
     pub async fn admit(&self, id: GuestId, bytes: Vec<u8>) -> Result<(), AdmitError> {
-        let digest: std::sync::Arc<str> = std::sync::Arc::from(crate::sha256_digest(&bytes));
+        let digest = crate::Digest::of(&bytes);
 
         // Safe validation plus sandboxed JIT — the explicitly safe constructor.
         let component =

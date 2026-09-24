@@ -51,12 +51,11 @@ pub struct HostEntry {
 /// `runtime!({ ... })`; mirrors the `omnia::Manifest` schema.
 #[derive(Default)]
 pub struct ManifestSpec {
-    /// The `guests:` list — the components compiled into the deployment.
+    /// The `guests:` list — every component the deployment may run.
     pub guests: Vec<GuestSpec>,
     pub mounts: Vec<MountSpec>,
-    /// The `registries:` expression — the wasm-pkg configuration (TOML) a
-    /// package load naming no registry routes through, typically an
-    /// `include_str!`.
+    /// The `registries:` expression — the wasm-pkg configuration (TOML) that
+    /// routes on-demand package sources, typically an `include_str!`.
     pub registries: Option<Expr>,
 }
 
@@ -66,18 +65,31 @@ impl ManifestSpec {
     }
 }
 
-/// One `{ path: ..., name: ..., routes: { ... }, command: true }` guest entry.
+/// One `{ path: ..., name: ..., routes: { ... }, command: true }` (or
+/// `{ name: ..., package: ..., on_demand: true }`) guest entry.
 pub struct GuestSpec {
-    /// The component's path, embedded with `include_bytes!` — a string
-    /// literal or a macro such as `concat!(env!(..), ..)`.
-    pub path: Expr,
-    /// The guest's name; absent, the path's file stem names it.
-    pub name: Option<Expr>,
+    pub source: GuestSource,
     pub routes: GuestRoutesSpec,
     pub command: bool,
     /// Span of the `command:` key, for cross-key diagnostics.
     pub command_span: Option<Span>,
+    pub on_demand: bool,
+    /// The `digest:` pin, decoded from its `sha256:<hex>` literal.
+    pub digest: Option<[u8; DIGEST_LEN]>,
 }
+
+/// Where a guest entry's component comes from.
+pub enum GuestSource {
+    /// A `path:` embedded with `include_bytes!` — a string literal or a macro
+    /// such as `concat!(env!(..), ..)`; the file's stem names the guest
+    /// unless `name:` does.
+    Embedded { path: Expr, name: Option<Expr> },
+    /// A `package:` reference the guest loader fetches on first load; named
+    /// by `name:`, since no path stem is at hand.
+    Package { reference: Expr, name: Expr },
+}
+
+const DIGEST_LEN: usize = 32;
 
 /// One `{ name: ..., path: ..., writable: ... }` mount entry.
 pub struct MountSpec {
@@ -93,6 +105,12 @@ pub struct GuestRoutesSpec {
     pub http: Vec<Expr>,
     pub messaging: Vec<Expr>,
     pub websocket: Vec<Expr>,
+}
+
+impl GuestRoutesSpec {
+    pub const fn is_empty(&self) -> bool {
+        self.http.is_empty() && self.messaging.is_empty() && self.websocket.is_empty()
+    }
 }
 
 impl Parse for Config {
@@ -353,28 +371,38 @@ fn parse_kv_block(
 
 impl Parse for GuestSpec {
     fn parse(input: ParseStream) -> Result<Self> {
-        let mut path = None;
+        let mut path: Option<Expr> = None;
+        let mut package: Option<(Expr, Span)> = None;
         let mut name = None;
         let mut routes = GuestRoutesSpec::default();
+        let mut routes_span = None;
         let mut command = false;
         let mut command_span = None;
+        let mut on_demand = false;
+        let mut digest = None;
 
         let span = parse_kv_block(input, |key, value| {
             match key.to_string().as_str() {
                 "path" => path = Some(parse_embeddable(value)?),
+                "package" => package = Some((value.parse()?, key.span())),
                 "name" => name = Some(value.parse()?),
-                "routes" => routes = value.parse()?,
+                "routes" => {
+                    routes = value.parse()?;
+                    routes_span = Some(key.span());
+                }
                 "command" => {
                     let lit: syn::LitBool = value.parse()?;
                     command = lit.value();
                     command_span = command.then(|| key.span());
                 }
+                "on_demand" => on_demand = value.parse::<syn::LitBool>()?.value(),
+                "digest" => digest = Some(parse_digest(value)?),
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
                         format!(
-                            "unknown guest key `{other}`; expected `path`, `name`, `routes`, \
-                             or `command`"
+                            "unknown guest key `{other}`; expected `path` or `package`, `name`, \
+                             `routes`, `command`, `on_demand`, or `digest`"
                         ),
                     ));
                 }
@@ -382,14 +410,88 @@ impl Parse for GuestSpec {
             Ok(())
         })?;
 
+        let source = match (path, package) {
+            (Some(_), Some((_, span))) => {
+                return Err(syn::Error::new(
+                    span,
+                    "`path:` and `package:` are mutually exclusive; a guest has one source",
+                ));
+            }
+            (Some(path), None) => GuestSource::Embedded { path, name },
+            (None, Some((reference, span))) => {
+                let Some(name) = name else {
+                    return Err(syn::Error::new(
+                        span,
+                        "a `package:` guest has no file stem to be named by; add `name:`",
+                    ));
+                };
+                if !on_demand {
+                    return Err(syn::Error::new(
+                        span,
+                        "a `package:` guest is fetched on first load; add `on_demand: true`",
+                    ));
+                }
+                GuestSource::Package { reference, name }
+            }
+            (None, None) => {
+                return Err(syn::Error::new(span, "guest entry is missing `path` (or `package`)"));
+            }
+        };
+
+        if on_demand {
+            if let Some(span) = command_span {
+                return Err(syn::Error::new(
+                    span,
+                    "an on-demand guest cannot be the command guest: the command guest runs at \
+                     boot",
+                ));
+            }
+            if let Some(span) = routes_span.filter(|_| !routes.is_empty()) {
+                return Err(syn::Error::new(
+                    span,
+                    "an on-demand guest cannot take routes: trigger routing is built at boot",
+                ));
+            }
+        }
+
         Ok(Self {
-            path: path.ok_or_else(|| syn::Error::new(span, "guest entry is missing `path`"))?,
-            name,
+            source,
             routes,
             command,
             command_span,
+            on_demand,
+            digest,
         })
     }
+}
+
+/// Parse a `digest:` value — a `sha256:<64 hex>` string literal — into the
+/// bytes the expansion hands to `omnia::Digest::from`, so a malformed pin
+/// is refused here, pointed at the key, rather than at start-up.
+fn parse_digest(input: ParseStream) -> Result<[u8; DIGEST_LEN]> {
+    let lit: syn::LitStr = input.parse()?;
+    let value = lit.value();
+    let malformed = |detail: &str| {
+        syn::Error::new(
+            lit.span(),
+            format!("`digest:` must be `sha256:<{} hex characters>`: {detail}", DIGEST_LEN * 2),
+        )
+    };
+    let hex = value.strip_prefix("sha256:").ok_or_else(|| malformed("missing `sha256:`"))?;
+    if !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(malformed("not hexadecimal"));
+    }
+    if hex.len() != DIGEST_LEN * 2 {
+        return Err(malformed(&format!("got {} hex characters", hex.len())));
+    }
+    let mut bytes = [0; DIGEST_LEN];
+    for (byte, pair) in bytes.iter_mut().zip(hex.as_bytes().chunks_exact(2)) {
+        // Both characters are ASCII hex digits, so the pair is valid UTF-8
+        // and parses.
+        *byte = u8::from_str_radix(std::str::from_utf8(pair).map_err(|_| malformed("not hexadecimal"))?, 16)
+            .map_err(|_| malformed("not hexadecimal"))?;
+    }
+    Ok(bytes)
 }
 
 /// Parse a `path:` value the expansion hands to `include_bytes!`, which

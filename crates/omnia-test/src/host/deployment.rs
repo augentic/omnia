@@ -10,8 +10,8 @@ use omnia_wasi_otel::WasiOtel;
 /// One command-mode deployment: guests, mounts, arguments, registries, and the tracing level.
 ///
 /// What guests call between themselves is read off their components,
-/// declared nowhere; `registries` is the routing a package load naming no
-/// registry falls back on.
+/// declared nowhere; `registries` is the routing an on-demand guest's
+/// package source is fetched through.
 ///
 /// Built from nothing, or as an overlay on the manifest a production
 /// `runtime!` compiled in (`Deployment::from(runtime::manifest())`): the
@@ -20,18 +20,17 @@ use omnia_wasi_otel::WasiOtel;
 /// test serves the binary's `.` root from a scratch directory. Drive it
 /// through the generated wiring with [`run_with`](Self::run_with), or link
 /// hosts by hand with [`run`](Self::run); either way the guest loader is
-/// assembly's, resolving path loads against the mounts.
+/// assembly's, serving the deployment's [`on_demand`](Self::on_demand)
+/// guests.
 ///
 /// ```no_run
 /// use omnia::ExitStatus;
-/// use omnia_test::host::{Backends, Deployment, scratch};
+/// use omnia_test::host::{Backends, Deployment};
 ///
 /// # async fn example(requester: &'static str, plugin: &'static str) -> anyhow::Result<()> {
-/// let scratch = scratch();
-/// std::fs::copy(plugin, scratch.path().join("plugin.wasm"))?;
 /// let status = Deployment::new()
 ///     .guest("requester", requester)
-///     .mount(scratch.mount(false))
+///     .on_demand("plugin", plugin)
 ///     .run(Backends::defaults().await, |_| Ok(()))
 ///     .await?;
 /// assert_eq!(status, ExitStatus::SUCCESS);
@@ -68,7 +67,20 @@ impl Deployment {
     /// Adds a guest under `name` from a component path or embedded bytes.
     #[must_use]
     pub fn guest(mut self, name: impl Into<String>, source: impl Into<SourceSpec>) -> Self {
-        self.guests.push(GuestEntry::new(name, source));
+        self.entry(GuestEntry::new(name, source))
+    }
+
+    /// Declares `name` for on-demand loading from a component path or
+    /// embedded bytes: admitted when a guest first `load`s it, not at boot.
+    #[must_use]
+    pub fn on_demand(self, name: impl Into<String>, source: impl Into<SourceSpec>) -> Self {
+        self.entry(GuestEntry::new(name, source).on_demand())
+    }
+
+    /// Adds a `[[guest]]` entry as built — a pinned or package source, say.
+    #[must_use]
+    pub fn entry(mut self, entry: GuestEntry) -> Self {
+        self.guests.push(entry);
         self
     }
 
@@ -103,8 +115,8 @@ impl Deployment {
         self
     }
 
-    /// The wasm-pkg configuration package loads route through, replacing the
-    /// base manifest's.
+    /// The wasm-pkg configuration on-demand package sources are fetched
+    /// through, replacing the base manifest's.
     #[must_use]
     pub fn registries(mut self, config: impl Into<RegistryConfig>) -> Self {
         self.registries = Some(config.into());
@@ -156,8 +168,8 @@ impl Deployment {
 
     /// Assembles the runtime by hand: builds the deployment, links the
     /// caller's hosts through `link`, and assembles — which links the guest
-    /// loader, installs the mounts and registries as its policy, and serves
-    /// every guest's linked exports.
+    /// loader, installs the on-demand guests as its table, and serves every
+    /// guest's linked exports.
     ///
     /// # Errors
     ///

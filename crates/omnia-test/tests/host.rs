@@ -36,8 +36,8 @@ mod production {
     });
 }
 
-// The same shape with a `.` mount the binary would serve path loads from —
-// a directory that does not exist under test.
+// The same shape with a `.` mount the binary would preopen — a directory
+// that does not exist under test.
 mod production_plugins {
     use omnia_wasi_otel::{OtelDefault, WasiOtel};
 
@@ -69,16 +69,17 @@ async fn runtime_overlay() {
 
 // The overlay's `.` mount stands in for the binary's: mounts dedup by name,
 // last wins, before any directory is opened, so the nonexistent production
-// root is never touched and path loads resolve against the scratch directory.
+// root is never touched (opening it would fail the boot) and the overlaid
+// deployment — an on-demand guest included — runs through the binary's hooks.
 #[tokio::test]
 async fn overlay_mount() {
     let _ = (production_plugins::main, production_plugins::run);
     let scratch = scratch();
-    std::fs::copy(test_programs::LINK_ECHOER, scratch.path().join("plugin.wasm"))
-        .expect("staging the loadable echoer");
 
     let deployment = Deployment::from(production_plugins::manifest())
-        .guest("requester", test_programs::PLUGINS_LOAD_PATH)
+        .guest("requester", test_programs::PLUGINS_LOAD)
+        .on_demand("plugin", test_programs::LINK_ECHOER)
+        .args(["plugin"])
         .mount(scratch.mount(false));
     let manifest = deployment.manifest().expect("inline base resolves");
     assert_eq!(
@@ -177,17 +178,14 @@ async fn link_pair() {
     runtime.shutdown();
 }
 
-// The `.` mount is the root path loads resolve against; nothing else opts
-// the deployment into the loader.
+// An on-demand guest is admitted on its first `load`; nothing else opts the
+// deployment into the loader.
 #[tokio::test]
-async fn mount_plugins() {
-    let scratch = scratch();
-    std::fs::copy(test_programs::LINK_ECHOER, scratch.path().join("plugin.wasm"))
-        .expect("staging the loadable echoer");
-
+async fn on_demand_guest() {
     let status = Deployment::new()
-        .guest("requester", test_programs::PLUGINS_LOAD_PATH)
-        .mount(scratch.mount(false))
+        .guest("requester", test_programs::PLUGINS_LOAD)
+        .on_demand("plugin", test_programs::LINK_ECHOER)
+        .args(["plugin"])
         .run(Backends::defaults().await, |deployment| {
             deployment.host::<WasiOtel, Backends>()?;
             Ok(())

@@ -7,6 +7,7 @@ use anyhow::{Context as _, Result, ensure};
 use wasmtime::Engine;
 use wasmtime::component::Component;
 
+use crate::digest::Digest;
 use crate::registry::GuestId;
 
 /// Magic of a wasmtime-serialized (native ELF) artifact, sniffed from content.
@@ -18,12 +19,15 @@ const SETTINGS_HINT: &str = "the artifact must be built with the same compile-af
                              used by `omnia compile` (MAX_FUEL, BRANCH_HINTING, \
                              MEMORY_RESERVATION, MEMORY_GUARD_SIZE)";
 
-/// Raw component bytes paired with the identity to register them under.
+/// A compiled component paired with the identity to register it under.
 pub struct LoadedGuest {
     /// The identity the component is registered under.
     pub id: GuestId,
     /// The compiled component.
     pub component: Component,
+    /// The digest of the bytes it was compiled from; `None` when wasmtime
+    /// read them itself (a pre-compiled file), so nothing hashed them.
+    pub digest: Option<Digest>,
 }
 
 /// Component bytes for dynamic registration

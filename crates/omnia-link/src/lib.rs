@@ -109,7 +109,7 @@ impl<T: HasChain + 'static> LinkSeam<T> for InProcessLinks {
     ) -> Result<()> {
         let caller = self.caller();
         let mut wired = WiredLinks::new();
-        for LoadedGuest { id, component } in guests {
+        for LoadedGuest { id, component, .. } in guests {
             polyfill::polyfill_component(engine, linker, id, component, &caller, &mut wired)?;
         }
         *self.wired.lock().unwrap_or_else(PoisonError::into_inner) = wired;

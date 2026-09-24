@@ -17,8 +17,8 @@
 
 // `anyhow` is the error vocabulary of `Backend`, `Wiring`, and the generated
 // runtime module; `futures` supplies the `BoxFuture` in the loader store and
-// acquirer seams (`ContentStore`, `ReleaseStore`, `PathSource`,
-// `RegistrySource`) and the generated `serve` hook. Both are part of the
+// registry seams (`ContentStore`, `ReleaseStore`, `RegistrySource`) and the
+// generated `serve` hook. Both are part of the
 // facade's public signatures, so embedders reach them from here without a
 // direct dependency of their own; `futures` stays unconditional because the
 // macro output uses it whether or not the loader surface is enabled.
@@ -34,13 +34,13 @@ pub use futures;
 pub use omnia_cli::{Cli, Command, Parser};
 #[doc(inline)]
 pub use omnia_core::{
-    AdmitError, Backend, ChainCtx, ChainPolicy, CliRoutes, Dispatcher, ExitStatus, Extensions,
-    FromEnv, FutureResult, Guest, GuestArtifact, GuestId, HasChain, HasDispatcher, HasExtensions,
-    HasLimits, HasMounts, HasTable, Host, HostCtx, HttpBorrow, HttpCtx, HttpRoutes, LevelFilter,
-    LinkSeam, MountRegistry, NoLinks, NoOptions, PatternRoutes, Provides, Proxy, Registry,
-    ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts, Server, StoreBase, StoreConfig,
-    StoreCtx, StoreFactory, StoreView, Telemetry, TriggerRouter, WeakRuntime, get_cloned,
-    host_error, serve_links, sha256_digest, telemetry, wasi_view,
+    AdmitError, Backend, ChainCtx, ChainPolicy, CliRoutes, Digest, Dispatcher, ExitStatus,
+    Extensions, FromEnv, FutureResult, Guest, GuestArtifact, GuestId, HasChain, HasDispatcher,
+    HasExtensions, HasLimits, HasMounts, HasTable, Host, HostCtx, HttpBorrow, HttpCtx, HttpRoutes,
+    LevelFilter, LinkSeam, MountRegistry, NoLinks, NoOptions, PatternRoutes, Provides, Proxy,
+    Registry, ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts, Server, StoreBase,
+    StoreConfig, StoreCtx, StoreFactory, StoreView, Telemetry, TriggerRouter, WeakRuntime,
+    get_cloned, host_error, serve_links, telemetry, wasi_view,
 };
 #[doc(hidden)]
 pub use omnia_core::{pastey, tokio, wasmtime, wasmtime_wasi};
@@ -52,8 +52,8 @@ pub use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks, is_host};
 #[cfg(feature = "loader")]
 #[doc(inline)]
 pub use omnia_plugin::{
-    ContentStore, LoadError, NoStore, Origin, PathMounts, PathSource, Plugin, PluginLoader,
-    Plugins, RegistryClient, RegistrySource, ReleaseStore, WasiPlugins, WasiPluginsCtxView,
+    ContentStore, LoadError, NoStore, OnDemand, Origin, Plugin, PluginLoader, Plugins,
+    RegistryClient, RegistrySource, ReleaseStore, WasiPlugins, WasiPluginsCtxView,
 };
 
 pub use self::deployment::{

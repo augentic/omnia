@@ -25,7 +25,7 @@ use omnia_core::{
 #[cfg(feature = "link")]
 use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks};
 #[cfg(feature = "loader")]
-use omnia_plugin::{PathSource, Plugins, RegistrySource, WasiPlugins};
+use omnia_plugin::{OnDemand, Plugins, RegistryClient, RegistrySource, WasiPlugins};
 use source::ArtifactPolicy;
 
 use crate::Mode;
@@ -160,6 +160,8 @@ impl DeploymentBuilder {
         // Read once, here, so a missing or unreadable configuration fails
         // startup rather than the first package load.
         let registry_config = manifest.registry_config()?;
+        #[cfg(feature = "loader")]
+        let on_demand = manifest.on_demand();
 
         let program_name = self.program_name.unwrap_or_else(|| "omnia".to_owned());
         // The runtime-carried name read by telemetry, trigger servers, and
@@ -184,7 +186,7 @@ impl DeploymentBuilder {
         // mount fails fast at startup rather than per store.
         let mounts = Arc::new(MountRegistry::open(manifest.preopens())?);
 
-        // Guests load (and compile) in parallel through the async
+        // Boot guests load (and compile) in parallel through the async
         // [`Source::load`] seam; order still follows the manifest.
         let sources = manifest.sources()?;
         let guests = futures::future::try_join_all(
@@ -215,7 +217,10 @@ impl DeploymentBuilder {
             command_guest: manifest.command_guest(),
             registry_config,
             #[cfg(feature = "loader")]
-            loader: LoaderPolicy::Declared,
+            loader: Loader {
+                on_demand,
+                registry: None,
+            },
             level: self.level,
             fallback,
         })
@@ -289,24 +294,23 @@ pub struct Deployment<T: WasiView + 'static> {
     // The manifest's wasm-pkg configuration, resolved to one document despite
     // the public plural key, carried onto the runtime for the guest loader.
     registry_config: Option<String>,
-    // Which acquisition policy assembly installs: the declared one unless an
-    // embedder selected custom sources through `Deployment::loader`.
+    // What `assemble` installs on the guest loader.
     #[cfg(feature = "loader")]
-    loader: LoaderPolicy,
+    loader: Loader,
     // The selected tracing level and the mode's fallback, carried onto the
     // runtime to set `RUST_LOG` in every store it builds.
     level: Option<LevelFilter>,
     fallback: LevelFilter,
 }
 
-// The acquisition policy `assemble` installs on the guest loader.
 #[cfg(feature = "loader")]
-#[derive(Clone)]
-enum LoaderPolicy {
-    // The deployment's mounts and `registries` configuration.
-    Declared,
-    // Sources of the embedder's choosing, one per origin kind.
-    Custom { registry: Option<Arc<dyn RegistrySource>>, path: Option<Arc<dyn PathSource>> },
+#[derive(Default)]
+struct Loader {
+    // The manifest's on-demand guests.
+    on_demand: Vec<(GuestId, OnDemand)>,
+    // The embedder's registry source; `None` installs a cacheless
+    // `RegistryClient` over the deployment's `registries` configuration.
+    registry: Option<Arc<dyn RegistrySource>>,
 }
 
 /// Store bound every deployment store context satisfies; kept as a named bound
@@ -339,17 +343,15 @@ impl<T: WasiView> Deployment<T> {
         self
     }
 
-    /// Select a custom acquisition policy for the guest loader, one source
-    /// per origin kind; `None` refuses that kind.
+    /// Select the registry the guest loader fetches on-demand package sources
+    /// from — typically a [`RegistryClient`] with a cache store attached.
     ///
-    /// Without this call, [`assemble`](Self::assemble) installs the declared
-    /// policy: the deployment's mounts serve path loads and its `registries`
-    /// configuration routes package loads. Chainable.
+    /// Without this call, [`assemble`](Self::assemble) installs a cacheless
+    /// [`RegistryClient`] routed by the deployment's `registries`
+    /// configuration. Chainable.
     #[cfg(feature = "loader")]
-    pub fn loader(
-        &mut self, registry: Option<Arc<dyn RegistrySource>>, path: Option<Arc<dyn PathSource>>,
-    ) -> &mut Self {
-        self.loader = LoaderPolicy::Custom { registry, path };
+    pub fn registry_source(&mut self, registry: impl RegistrySource) -> &mut Self {
+        self.loader.registry = Some(Arc::new(registry));
         self
     }
 
@@ -421,15 +423,16 @@ impl<T: WasiView> Deployment<T> {
 
 impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
     /// Assemble this deployment into a [`Runtime`]: the guest loader host
-    /// joins the linked hosts, the registry pre-instantiates, the loader's
-    /// acquisition policy installs, then the serve side of every guest's
-    /// linked exports is wired.
+    /// joins the linked hosts, the registry pre-instantiates the boot guests,
+    /// the loader's on-demand table installs, then the serve side of every
+    /// guest's linked exports is wired.
     ///
     /// The loader host is linked here, beside WASI, whenever omnia is built
     /// with the `loader` feature; wasmtime wires it only into worlds that
-    /// import `omnia:plugins/loader`. The policy installed is the declared
-    /// one — the deployment's mounts and `registries` configuration — unless
-    /// [`loader`](Self::loader) selected custom sources.
+    /// import `omnia:plugins/loader`. The table it serves is the manifest's
+    /// `on_demand` guests; their package sources are fetched through the
+    /// deployment's `registries` configuration unless
+    /// [`registry_source`](Self::registry_source) selected a registry.
     ///
     /// # Errors
     ///
@@ -447,7 +450,15 @@ impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
         #[cfg(feature = "loader")]
         self.host::<WasiPlugins, B>().context("linking the guest loader host")?;
         #[cfg(feature = "loader")]
-        let loader = self.loader.clone();
+        let Loader { on_demand, registry } = std::mem::take(&mut self.loader);
+        #[cfg(feature = "loader")]
+        let registry = match registry {
+            Some(registry) => registry,
+            None => Arc::new(match &self.registry_config {
+                Some(config) => RegistryClient::from_toml(config)?,
+                None => RegistryClient::default(),
+            }),
+        };
 
         let runtime = Runtime::from_parts(RuntimeParts {
             name: Arc::from(self.name.as_str()),
@@ -462,11 +473,7 @@ impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
         });
 
         #[cfg(feature = "loader")]
-        match loader {
-            LoaderPolicy::Declared => Plugins::install_declared(&runtime),
-            LoaderPolicy::Custom { registry, path } => Plugins::install(&runtime, registry, path),
-        }
-        .context("installing the guest loader")?;
+        Plugins::install(&runtime, on_demand, registry).context("installing the guest loader")?;
 
         runtime.serve_links().await.context("serving the guests' linked exports")?;
         Ok(runtime)

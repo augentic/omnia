@@ -17,10 +17,9 @@ workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
-cap-std.workspace = true
 futures.workspace = true
 omnia-core.workspace = true
-tokio = { workspace = true, features = ["rt"] }
+tokio = { workspace = true, features = ["fs", "rt"] }
 tracing.workspace = true
 wasm-pkg-client.workspace = true
 wasmtime = { workspace = true, features = ["runtime"] }
