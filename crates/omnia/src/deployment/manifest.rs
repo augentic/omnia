@@ -115,9 +115,6 @@ impl Manifest {
     /// built. An `allow_empty` (dynamic) deployment may define no `[[guest]]`
     /// entry that loads at boot.
     pub(super) fn validate(&self, allow_empty: bool) -> Result<()> {
-        if !allow_empty && self.guests.iter().all(|entry| entry.on_demand) {
-            bail!("manifest defines no [[guest]] entry that loads at boot");
-        }
         let mut names = BTreeSet::new();
         for entry in &self.guests {
             if entry.name.is_empty() {
@@ -131,6 +128,9 @@ impl Manifest {
                 bail!("duplicate [[guest]] name `{}`: guest names must be unique", entry.name);
             }
             entry.validate()?;
+        }
+        if !allow_empty && self.guests.iter().all(|entry| entry.on_demand) {
+            bail!("manifest defines no [[guest]] entry that loads at boot");
         }
         let marked: Vec<&str> =
             self.guests.iter().filter(|e| e.command).map(|e| e.name.as_str()).collect();
