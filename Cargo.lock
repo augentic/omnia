@@ -2397,6 +2397,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "omnia-otlp"
+version = "0.37.0"
+dependencies = [
+ "anyhow",
+ "omnia-core",
+ "opentelemetry",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
+ "tracing",
+ "tracing-opentelemetry",
+]
+
+[[package]]
 name = "omnia-plugin"
 version = "0.37.0"
 dependencies = [

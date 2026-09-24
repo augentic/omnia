@@ -88,6 +88,7 @@ moka = { version = "0.12.16", features = ["sync"] }
 # The OpenTelemetry stack is compiled into every guest, so the shared entries
 # carry no defaults and each consumer names the signals it uses.
 opentelemetry = { version = "0.33.0", default-features = false }
+opentelemetry-otlp = { version = "0.33.0", default-features = false }
 opentelemetry-proto = "0.33.0"
 opentelemetry_sdk = { version = "0.33.0", default-features = false }
 parking_lot = "0.12.5"
@@ -138,6 +139,7 @@ omnia-core = { path = "crates/omnia-core", version = "0.37.0", default-features 
 omnia-guest-macros = { path = "crates/guest-macros", version = "0.37.0" }
 omnia-host-macros = { path = "crates/host-macros", version = "0.37.0" }
 omnia-link = { path = "crates/omnia-link", version = "0.37.0" }
+omnia-otlp = { path = "crates/omnia-otlp", version = "0.37.0" }
 omnia-plugin = { path = "crates/omnia-plugin", version = "0.37.0" }
 omnia-sdk = { path = "crates/omnia-sdk", version = "0.37.0", default-features = false }
 omnia-test = { path = "crates/omnia-test", version = "0.37.0", default-features = false }
