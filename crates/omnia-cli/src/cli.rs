@@ -32,28 +32,22 @@ pub enum Command {
     Run {
         /// The path to the wasm file to run. The file can either be a
         /// serialized (pre-compiled) wasmtime `Component` or standard
-        /// WASI component. Optional when `--config` (or `OMNIA_CONFIG`) names a
-        /// deployment manifest instead.
+        /// WASI component. Optional when `--manifest` (or `OMNIA_MANIFEST`)
+        /// names a deployment manifest instead.
         wasm: Option<PathBuf>,
 
         /// Path to a deployment manifest (`omnia.toml`) describing a multi-guest
-        /// deployment. Falls back to the `OMNIA_CONFIG` environment variable.
+        /// deployment. Falls back to the `OMNIA_MANIFEST` environment variable.
         #[arg(short, long)]
-        config: Option<PathBuf>,
+        manifest: Option<PathBuf>,
 
         /// Preopen a host directory into the guest sandbox (repeatable).
         /// Format: `path=<host-path>[,name=<guest-name>][,writable]`; `name`
         /// defaults to `.`. Layered on top of the manifest's mounts when
-        /// `--config` is also given; a matching guest-visible name overrides the
-        /// manifest mount (last-wins).
+        /// `--manifest` is also given; a matching guest-visible name overrides
+        /// the manifest mount (last-wins).
         #[arg(long = "mount")]
         mounts: Vec<MountArg>,
-
-        /// Host-mediated interface to dispatch on a guest's behalf
-        /// (repeatable). Unioned with the manifest's `[link] interfaces` when
-        /// `--config` is also given.
-        #[arg(long = "link")]
-        link: Vec<String>,
 
         /// Arguments forwarded to the guest as its argv (everything after
         /// `--`). Empty for a long-lived server; a `wasi:cli` command reads

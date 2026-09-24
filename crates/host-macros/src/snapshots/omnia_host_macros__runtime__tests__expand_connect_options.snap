@@ -65,7 +65,7 @@ mod runtime {
             Ok(())
         }
     }
-    /// The deployment compiled in here (`config:` or the inline
+    /// The deployment compiled in here (`manifest:` or the inline
     /// manifest keys; empty when neither is declared), for an
     /// embedder to overlay before `run_with`.
     pub fn manifest() -> omnia::ManifestSource {
@@ -77,7 +77,13 @@ mod runtime {
     /// `run` grammar).
     #[tokio::main]
     pub async fn main() -> ::std::process::ExitCode {
-        omnia::main::<Backends, Hooks>(omnia::MainOptions::new(omnia::Mode::Server))
+        omnia::main::<
+            Backends,
+            Hooks,
+        >(
+                omnia::MainOptions::new(omnia::Mode::Server)
+                    .program_name(env!("CARGO_PKG_NAME")),
+            )
             .await
     }
     /// Run one deployment through this runtime's hosts and backends,

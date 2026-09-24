@@ -323,6 +323,11 @@ path = "programs/otel/spawned_task_pending.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "plugins_load_declared"
+path = "programs/plugins/load_declared.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "plugins_load_host_only"
 path = "programs/plugins/load_host_only.rs"
 crate-type = ["cdylib"]

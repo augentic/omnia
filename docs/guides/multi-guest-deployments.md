@@ -8,46 +8,46 @@ This page walks through the manifest and the ideas behind it. The field-by-field
 
 ## The deployment manifest (`omnia.toml`)
 
-Point the runtime at a manifest with `--config` (or the `OMNIA_CONFIG` environment variable):
+Point the runtime at a manifest with `--manifest` (or the `OMNIA_MANIFEST` environment variable):
 
 ```bash
-cargo run --example http-routing -- run --config examples/http-routing/omnia.toml
+cargo run --example http-routing -- run --manifest examples/http-routing/omnia.toml
 ```
 
-The `runtime!` macro can also compile a default deployment into the binary: a path via `config:`, or the manifest itself via the inline `link` / `plugin` / `guests` / `mounts` keys (each guest carries its own `routes`). That default is used only when the command line supplies no source. See [Composing a Runtime](composing-a-runtime.md#default-manifest-config).
+The `runtime!` macro can also compile a default deployment into the binary: a path via `manifest:`, or the manifest itself via the inline `guests` / `registries` / `mounts` keys, where each guest's component is embedded in the binary and carries its own `routes`. That default is used only when the command line supplies no source. See [Composing a Runtime](composing-a-runtime.md#default-manifest-manifest).
 
-A manifest declares guests, mounts, routes, and (eventually) transports. Every field is optional except at least one `[[guest]]`. Paths resolve relative to the manifest's own directory.
+A manifest declares guests, mounts, routes, registries, and (eventually) transports. Every field is optional except at least one `[[guest]]`. Paths resolve relative to the manifest's own directory.
 
 ```toml
 [[guest]]
-id = "api"                              # a name you choose; the runtime treats it as a string
+name = "api"                            # the guest's name; the runtime treats it as a string
 source.path = "./guests/api.wasm"       # .wasm or pre-compiled .bin
 routes.http = ["/"]
 
 [[guest]]
-id = "admin"
-source.path = "./guests/admin.wasm"
+source.path = "./guests/admin.wasm"     # no `name`: the file's stem, `admin`, names it
 routes.http = ["/admin"]
 ```
+
+A guest's name is its identity: what routes address, what another guest dispatches to, and what a guest's `loader.load` of `declared("api")` answers with. Leave it out when the file is called what callers dispatch to; give it when the file is not, or when two files share a stem. Names are unique within a deployment.
 
 The full field reference lives in [Configuration](../reference/configuration.md#deployment-manifest-omniatoml).
 
 ## Programmatic manifests
 
-Everything the TOML expresses can also be assembled in Rust. `omnia::Manifest` is the same schema as a value, with fluent setters for guests, mounts, link interfaces, and routes. Pass it to the deployment builder (or the `runtime!`-generated `run(builder)`) instead of a file path:
+Everything the TOML expresses can also be assembled in Rust. `omnia::Manifest` is the same schema as a value, with fluent setters for guests, mounts, registries, and routes. Pass it to the deployment builder (or the `runtime!`-generated `run(builder)`) instead of a file path:
 
 ```rust,ignore
 use omnia::{DeploymentBuilder, GuestEntry, Manifest};
 
 let manifest = Manifest::new()
-    .link(["omnia:link/audit"])
     .guest(GuestEntry::new("api", "./guests/api.wasm").route_http("/"))
     .guest(GuestEntry::new("admin", "./guests/admin.wasm").route_http("/admin"));
 
 host::run(DeploymentBuilder::new().manifest(manifest))?;
 ```
 
-`Manifest::from_config(path)?` loads a TOML file into the same value, resolving relative paths against the file's directory. `Manifest::from_wasm(path)` is the one-guest shorthand (what you get from `run guest.wasm`). Relative paths in a programmatic manifest resolve against the process working directory.
+`Manifest::load(path)?` loads a TOML file into the same value, resolving relative paths against the file's directory. `Manifest::from_wasm(path)` is the one-guest shorthand (what you get from `run guest.wasm`). Relative paths in a programmatic manifest resolve against the process working directory.
 
 The [`guest-link-dynamic`](../../examples/guest-link/dynamic.rs) example builds a host this way.
 
@@ -67,13 +67,11 @@ A messaging deployment works the same way. The host backend subscribes to topics
 
 ```toml
 [[guest]]
-id = "orders"
-source.path = "./guests/orders.wasm"     # exports the messaging handler
+source.path = "./guests/orders.wasm"     # exports the messaging handler; named `orders`
 routes.messaging = ["orders.>"]          # orders.created, orders.cancelled, ...
 
 [[guest]]
-id = "billing"
-source.path = "./guests/billing.wasm"    # exports the messaging handler
+source.path = "./guests/billing.wasm"    # exports the messaging handler; named `billing`
 routes.messaging = ["invoices.*"]        # exactly one token after `invoices.`
 ```
 
@@ -105,28 +103,25 @@ let workspace = directories.iter().find_map(|(dir, name)| (name == ".").then_som
 
 The [`model`](../../examples/model/) example lends a mounted workspace to a model backend this way.
 
-## Guest-to-guest linking
+## Guests calling guests
 
-Two guests can talk without going out over the network. One guest **imports** an interface; another **exports** it; the host sits in the middle and copies the call across. Name the interface in `[link] interfaces` so the host knows to wire it:
+Two guests can talk without going out over the network. One guest **imports** an interface; another **exports** it; the host sits in the middle and copies the call across. Nothing in the manifest declares this — each component already says what it imports and exports:
 
 ```toml
-[link]
-interfaces = ["omnia:link/echo"]
-
 [[guest]]
-id = "responder"
-source.path = "./responder.wasm"        # exports omnia:link/echo
-
+source.path = "./responder.wasm"        # exports example:link/echo
+                                        # (named `responder` by its file)
 [[guest]]
-id = "router"
-source.path = "./router.wasm"           # imports omnia:link/echo
+source.path = "./router.wasm"           # imports example:link/echo
 ```
 
-When `router` calls `echo`, the host starts a fresh `responder` instance, runs the export, and copies the result back. The two guests never share memory. The host does not understand what `echo` means — it only sees the interface name and the guest ids.
+The host decides what crosses by namespace: an interface under `wasi:` or `omnia:` is the host's own (WASI, and omnia's capability hosts), and every other interface a guest imports is relayed to whichever guest exports it. So `example:link/echo` — a package the guests' author owns — is wired between them without being named anywhere, and a guest package can never collide with the host's.
+
+When `router` calls `echo`, the host starts a fresh `responder` instance, runs the export, and copies the result back. The two guests never share memory. The host does not understand what `echo` means — it only sees the interface name and the guest names.
 
 A few constraints:
 
-- The allow-list is deployment-wide. Any guest that imports a listed interface can call any guest that exports it. `--link <interface>` on the command line is added to the manifest's list. The exporter does not have to be present at startup; a guest registered later can still serve the call. A runtime built without Omnia's `link` feature refuses a non-empty list.
+- Dispatch is deployment-wide. Any guest that imports an interface can call any guest that exports it; what a guest may reach is bounded by which guests the deployment runs, not by a list. An import no guest exports fails when the deployment boots, not at the first call. The exporter does not have to be present at startup: a guest registered later — or loaded through `omnia:plugins/loader` — can still serve the call. A runtime built without Omnia's `link` feature leaves such imports unsatisfied, so the deployment fails at boot.
 - Calls can nest (A calls B calls C) up to `MAX_DISPATCH_DEPTH` (default 8), so accidental recursion cannot run forever.
 - Today the call stays in-process. Declaring `unix`, `nats`, or `quic` under `[transport]` is rejected at load.
 

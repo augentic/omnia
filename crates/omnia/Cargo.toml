@@ -24,17 +24,19 @@ default = ["cli", "jit", "otlp"]
 # `DeploymentBuilder`.
 cli = ["dep:omnia-cli"]
 
-# Enables the `omnia:plugins/loader` capability: the `WasiPlugins` host, the
-# `Plugins` load path, and the built-in acquirers (`PathMounts`,
-# `RegistryClient`) with their HTTP/OCI registry stack. A `runtime!`
-# invocation declaring `plugin: { locations: [...] }` requires it; without it,
-# deployments are interfaces-only and never link the loader. Implies `jit`:
-# loaded plugins are raw wasm.
-plugin = ["dep:omnia-plugin", "jit"]
+# Enables the guest loader (`omnia:plugins/loader`): the `WasiPlugins` host,
+# the `Plugins` load path, and the built-in acquirers (`PathMounts`,
+# `RegistryClient`) with their HTTP/OCI registry stack. With it, assembly
+# links the loader host beside WASI — reachable only from worlds that import
+# it — and installs the deployment's mounts and `registries` as its policy;
+# without it, a manifest declaring `registries` is refused at startup.
+# Implies `jit`: loaded guests are raw wasm.
+loader = ["dep:omnia-plugin", "jit"]
 
-# Enables host-mediated guest→guest linking (the `omnia-link` crate). A
-# deployment whose manifest names link interfaces requires it; without it,
-# `Manifest::validate` refuses a non-empty interface list.
+# Enables guest→guest dispatch (the `omnia-link` crate): every import a guest
+# makes outside the runtime's own namespaces (`wasi:`, `omnia:`) is relayed to
+# the guest exporting it. Without it, such an import is unresolved and the
+# deployment fails at boot.
 link = ["dep:omnia-link"]
 
 # Enables just-in-time wasm to machine code compilation. Raw `.wasm` guests,

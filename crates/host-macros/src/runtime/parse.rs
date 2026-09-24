@@ -31,16 +31,10 @@ impl Mode {
 pub struct Config {
     pub mode: Mode,
     pub host_entries: Vec<HostEntry>,
-    #[allow(clippy::struct_field_names)]
-    pub config_file: Option<Expr>,
+    /// The `manifest:` path expression, when the deployment is a manifest
+    /// file rather than inline keys.
+    pub manifest_file: Option<Expr>,
     pub manifest: ManifestSpec,
-    /// Whether the deployment declares plugin locations — inline through the
-    /// `plugin:` block's `locations:` list, or in the config file when a
-    /// bare `plugin:` block accompanies `config:`. Either links the
-    /// `WasiPlugins` loader host and installs the locations, which requires
-    /// `omnia`'s `plugin` feature; a `link:`-only invocation never references
-    /// the loader.
-    pub link_loader: bool,
 }
 
 /// One `Host: Backend` wiring from the `hosts: { ... }` block, optionally
@@ -53,65 +47,32 @@ pub struct HostEntry {
     pub options: Option<Expr>,
 }
 
-/// Inline manifest keys (`link` interfaces, `plugin` locations, `guests`,
-/// `mounts`) parsed from `runtime!({ ... })`; mirrors the `omnia::Manifest`
-/// schema.
+/// Inline manifest keys (`guests`, `registries`, `mounts`) parsed from
+/// `runtime!({ ... })`; mirrors the `omnia::Manifest` schema.
 #[derive(Default)]
 pub struct ManifestSpec {
-    pub interfaces: Vec<Expr>,
-    pub locations: Vec<LocationSpec>,
+    /// The `guests:` list — the components compiled into the deployment.
     pub guests: Vec<GuestSpec>,
     pub mounts: Vec<MountSpec>,
-}
-
-/// The `link: { interfaces: [...] }` block: the deployment's host-mediated
-/// interface set.
-#[derive(Default)]
-pub struct LinkSpec {
-    pub interfaces: Vec<Expr>,
-}
-
-/// The `plugin: { locations: [...] }` block: the deployment's loader
-/// acquisition locations.
-#[derive(Default)]
-pub struct PluginSpec {
-    pub locations: Vec<LocationSpec>,
-}
-
-/// One `locations:` entry, discriminated by the keys present.
-pub enum LocationSpec {
-    /// `{ name: ..., path: ... }` — one named root the deployment opens at
-    /// startup for path loads.
-    Path {
-        /// The location name path loads resolve against.
-        name: Expr,
-        /// The host directory backing the location.
-        path: Expr,
-    },
-    /// `{ registry: ..., config: ... }` — the deployment's default registry
-    /// endpoint and, optionally, the wasm-pkg client configuration (TOML)
-    /// routing namespaces and packages to other registries.
-    Registry {
-        /// The default endpoint.
-        registry: Expr,
-        /// The wasm-pkg configuration, typically an `include_str!`.
-        config: Option<Expr>,
-    },
+    /// The `registries:` expression — the wasm-pkg configuration (TOML) a
+    /// package load naming no registry routes through, typically an
+    /// `include_str!`.
+    pub registries: Option<Expr>,
 }
 
 impl ManifestSpec {
     pub const fn is_empty(&self) -> bool {
-        self.interfaces.is_empty()
-            && self.locations.is_empty()
-            && self.guests.is_empty()
-            && self.mounts.is_empty()
+        self.guests.is_empty() && self.mounts.is_empty() && self.registries.is_none()
     }
 }
 
-/// One `{ id: ..., source: ..., routes: { ... }, command: true }` guest entry.
+/// One `{ path: ..., name: ..., routes: { ... }, command: true }` guest entry.
 pub struct GuestSpec {
-    pub id: Expr,
-    pub source: Expr,
+    /// The component's path, embedded with `include_bytes!` — a string
+    /// literal or a macro such as `concat!(env!(..), ..)`.
+    pub path: Expr,
+    /// The guest's name; absent, the path's file stem names it.
+    pub name: Option<Expr>,
     pub routes: GuestRoutesSpec,
     pub command: bool,
     /// Span of the `command:` key, for cross-key diagnostics.
@@ -138,11 +99,9 @@ impl Parse for Config {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut mode = Mode::default();
         let mut host_entries = Vec::new();
-        let mut config_file = None;
+        let mut manifest_file = None;
         let mut manifest = ManifestSpec::default();
-        let mut plugin_span: Option<Span> = None;
-        let mut link_span: Option<Span> = None;
-        let mut config_span: Option<Span> = None;
+        let mut manifest_span: Option<Span> = None;
         let mut inline_span: Option<Span> = None;
 
         let settings;
@@ -159,30 +118,16 @@ impl Parse for Config {
             match value {
                 OptValue::Mode(m) => mode = m,
                 OptValue::Hosts(h) => host_entries = h,
-                OptValue::Config(c) => {
-                    config_file = Some(c);
-                    config_span = Some(span);
-                }
-                OptValue::Link(p) => {
-                    link_span = Some(span);
-                    if !p.interfaces.is_empty() {
-                        inline_span.get_or_insert(span);
-                    }
-                    manifest.interfaces = p.interfaces;
-                }
-                OptValue::Plugin(p) => {
-                    plugin_span = Some(span);
-                    // Locations are manifest data, so they conflict with
-                    // `config:`; a bare `plugin: {}` is only meaningful beside
-                    // `config:`, where it opts into the loader over the TOML's
-                    // `[[plugin.location]]` entries.
-                    if !p.locations.is_empty() {
-                        inline_span.get_or_insert(span);
-                    }
-                    manifest.locations = p.locations;
+                OptValue::Manifest(m) => {
+                    manifest_file = Some(m);
+                    manifest_span = Some(span);
                 }
                 OptValue::Guests(g) => {
                     manifest.guests = g;
+                    inline_span.get_or_insert(span);
+                }
+                OptValue::Registries(r) => {
+                    manifest.registries = Some(r);
                     inline_span.get_or_insert(span);
                 }
                 OptValue::Mounts(m) => {
@@ -192,45 +137,14 @@ impl Parse for Config {
             }
         }
 
-        // A bare `link: {}` declares nothing: the seam needs no host linking,
-        // so an empty block would expand to nothing at all.
-        if let Some(span) = link_span
-            && manifest.interfaces.is_empty()
-        {
-            return Err(syn::Error::new(
-                span,
-                "`link: {}` declares nothing; add `interfaces: [\"ns:pkg/iface\"]`",
-            ));
-        }
-
-        // A bare `plugin: {}` declares nothing inline and, without `config:`,
-        // has no TOML to defer to — it would expand to nothing at all.
-        if let Some(span) = plugin_span
-            && manifest.locations.is_empty()
-            && config_file.is_none()
-        {
-            return Err(syn::Error::new(
-                span,
-                "`plugin: {}` declares nothing; add `locations:`, or pair it with `config:` to \
-                 install the config file's `[[plugin.location]]` entries",
-            ));
-        }
-
-        // Only declared locations opt into the loader: inline ones
-        // (`PluginSpec::validate` already refuses an empty list), or the
-        // config file's when a `plugin:` block accompanies `config:`. A
-        // `link:`-only invocation is plain manifest data.
-        let link_loader =
-            !manifest.locations.is_empty() || (plugin_span.is_some() && config_file.is_some());
         let config = Self {
             mode,
             host_entries,
-            config_file,
+            manifest_file,
             manifest,
-            link_loader,
         };
         config.validate(&KeySpans {
-            config: config_span,
+            manifest: manifest_span,
             inline: inline_span,
         })?;
         Ok(config)
@@ -240,18 +154,17 @@ impl Parse for Config {
 /// Spans of the keys that participate in cross-key validation, kept out of
 /// [`Config`] itself since they matter only for diagnostics.
 struct KeySpans {
-    config: Option<Span>,
+    manifest: Option<Span>,
     inline: Option<Span>,
 }
 
 impl Config {
     fn validate(&self, spans: &KeySpans) -> syn::Result<()> {
-        if let (Some(_), Some(inline)) = (spans.config, spans.inline) {
+        if let (Some(_), Some(inline)) = (spans.manifest, spans.inline) {
             return Err(syn::Error::new(
                 inline,
-                "`config:` and inline manifest keys (`link` interfaces, `plugin` locations, \
-                 `guests`, `mounts`) are mutually exclusive; declare `[[plugin.location]]` \
-                 entries in the config file",
+                "`manifest:` and the inline keys (`guests`, `registries`, `mounts`) are mutually \
+                 exclusive; declare the deployment in the manifest file",
             ));
         }
 
@@ -300,11 +213,10 @@ impl Config {
 mod kw {
     syn::custom_keyword!(mode);
     syn::custom_keyword!(hosts);
-    syn::custom_keyword!(config);
-    syn::custom_keyword!(plugin);
+    syn::custom_keyword!(manifest);
     syn::custom_keyword!(guests);
+    syn::custom_keyword!(registries);
     syn::custom_keyword!(mounts);
-    syn::custom_keyword!(link);
 }
 
 /// One `key: value` setting, tagged with its key name and span so
@@ -318,10 +230,9 @@ struct Opt {
 enum OptValue {
     Mode(Mode),
     Hosts(Vec<HostEntry>),
-    Config(Expr),
-    Link(LinkSpec),
-    Plugin(PluginSpec),
+    Manifest(Expr),
     Guests(Vec<GuestSpec>),
+    Registries(Expr),
     Mounts(Vec<MountSpec>),
 }
 
@@ -338,34 +249,18 @@ impl Parse for Opt {
             let list;
             syn::braced!(list in input);
             ("hosts", key.span, OptValue::Hosts(parse_host_entries(&list)?))
-        } else if l.peek(kw::config) {
-            let key = input.parse::<kw::config>()?;
+        } else if l.peek(kw::manifest) {
+            let key = input.parse::<kw::manifest>()?;
             input.parse::<Token![:]>()?;
-            ("config", key.span, OptValue::Config(input.parse()?))
-        } else if l.peek(kw::link) {
-            let key = input.parse::<kw::link>()?;
-            input.parse::<Token![:]>()?;
-            if input.peek(syn::token::Bracket) {
-                return Err(syn::Error::new(
-                    key.span,
-                    "the `link:` key takes a block: `link: { interfaces: [\"ns:pkg/iface\"] }`",
-                ));
-            }
-            ("link", key.span, OptValue::Link(input.parse()?))
-        } else if l.peek(kw::plugin) {
-            let key = input.parse::<kw::plugin>()?;
-            input.parse::<Token![:]>()?;
-            if input.peek(syn::token::Bracket) {
-                return Err(syn::Error::new(
-                    key.span,
-                    "the `plugin:` key takes a block: `plugin: { locations: [...] }`",
-                ));
-            }
-            ("plugin", key.span, OptValue::Plugin(input.parse()?))
+            ("manifest", key.span, OptValue::Manifest(input.parse()?))
         } else if l.peek(kw::guests) {
             let key = input.parse::<kw::guests>()?;
             input.parse::<Token![:]>()?;
             ("guests", key.span, OptValue::Guests(parse_bracketed_list(input)?))
+        } else if l.peek(kw::registries) {
+            let key = input.parse::<kw::registries>()?;
+            input.parse::<Token![:]>()?;
+            ("registries", key.span, OptValue::Registries(input.parse()?))
         } else if l.peek(kw::mounts) {
             let key = input.parse::<kw::mounts>()?;
             input.parse::<Token![:]>()?;
@@ -458,16 +353,16 @@ fn parse_kv_block(
 
 impl Parse for GuestSpec {
     fn parse(input: ParseStream) -> Result<Self> {
-        let mut id = None;
-        let mut source = None;
+        let mut path = None;
+        let mut name = None;
         let mut routes = GuestRoutesSpec::default();
         let mut command = false;
         let mut command_span = None;
 
         let span = parse_kv_block(input, |key, value| {
             match key.to_string().as_str() {
-                "id" => id = Some(value.parse()?),
-                "source" => source = Some(value.parse()?),
+                "path" => path = Some(parse_embeddable(value)?),
+                "name" => name = Some(value.parse()?),
                 "routes" => routes = value.parse()?,
                 "command" => {
                     let lit: syn::LitBool = value.parse()?;
@@ -478,7 +373,7 @@ impl Parse for GuestSpec {
                     return Err(syn::Error::new(
                         key.span(),
                         format!(
-                            "unknown guest key `{other}`; expected `id`, `source`, `routes`, \
+                            "unknown guest key `{other}`; expected `path`, `name`, `routes`, \
                              or `command`"
                         ),
                     ));
@@ -487,10 +382,9 @@ impl Parse for GuestSpec {
             Ok(())
         })?;
 
-        let missing = |key| syn::Error::new(span, format!("guest entry is missing `{key}`"));
         Ok(Self {
-            id: id.ok_or_else(|| missing("id"))?,
-            source: source.ok_or_else(|| missing("source"))?,
+            path: path.ok_or_else(|| syn::Error::new(span, "guest entry is missing `path`"))?,
+            name,
             routes,
             command,
             command_span,
@@ -498,132 +392,22 @@ impl Parse for GuestSpec {
     }
 }
 
-impl Parse for LinkSpec {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let mut spec = Self::default();
-
-        parse_kv_block(input, |key, value| {
-            match key.to_string().as_str() {
-                "interfaces" => spec.interfaces = parse_bracketed_list(value)?,
-                other => {
-                    return Err(syn::Error::new(
-                        key.span(),
-                        format!("unknown link key `{other}`; expected `interfaces`"),
-                    ));
-                }
-            }
-            Ok(())
-        })?;
-
-        Ok(spec)
-    }
-}
-
-impl Parse for PluginSpec {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let mut spec = Self::default();
-        let mut locations_span = None;
-
-        parse_kv_block(input, |key, value| {
-            match key.to_string().as_str() {
-                "locations" => {
-                    spec.locations = parse_bracketed_list(value)?;
-                    locations_span = Some(key.span());
-                }
-                other => {
-                    return Err(syn::Error::new(
-                        key.span(),
-                        format!("unknown plugin key `{other}`; expected `locations`"),
-                    ));
-                }
-            }
-            Ok(())
-        })?;
-
-        spec.validate(locations_span)?;
-        Ok(spec)
-    }
-}
-
-impl PluginSpec {
-    /// The block's cross-key refusals, spanned to the offending key.
-    fn validate(&self, locations_span: Option<Span>) -> Result<()> {
-        if let Some(span) = locations_span
-            && self.locations.is_empty()
-        {
-            return Err(syn::Error::new(
-                span,
-                "`locations:` is empty; declare at least one `{ name, path }` or \
-                 `{ registry: ... }` entry",
-            ));
-        }
-
-        let mut registries = self.locations.iter().filter_map(|location| match location {
-            LocationSpec::Registry { registry, .. } => Some(registry.span()),
-            LocationSpec::Path { .. } => None,
-        });
-        if let Some(second) = registries.nth(1) {
-            return Err(syn::Error::new(
-                second,
-                "more than one `registry` location; a deployment declares one default \
-                 registry (a load's own location may still override the endpoint)",
-            ));
-        }
-
-        Ok(())
-    }
-}
-
-impl Parse for LocationSpec {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let mut name = None;
-        let mut path = None;
-        let mut registry = None;
-        let mut config = None;
-
-        let span = parse_kv_block(input, |key, value| {
-            match key.to_string().as_str() {
-                "name" => name = Some(value.parse()?),
-                "path" => path = Some(value.parse()?),
-                "registry" => registry = Some(value.parse()?),
-                "config" => config = Some(value.parse()?),
-                other => {
-                    return Err(syn::Error::new(
-                        key.span(),
-                        format!(
-                            "unknown location key `{other}`; expected `name` and `path`, or \
-                             `registry` with an optional `config`"
-                        ),
-                    ));
-                }
-            }
-            Ok(())
-        })?;
-
-        match (name, path, registry, config) {
-            (None, None, Some(registry), config) => Ok(Self::Registry { registry, config }),
-            (Some(name), Some(path), None, None) => Ok(Self::Path { name, path }),
-            (_, _, Some(_), _) => Err(syn::Error::new(
-                span,
-                "a `registry` location carries only `config` beside it; declare paths as their \
-                 own `{ name, path }` entries",
-            )),
-            (_, _, None, Some(_)) => Err(syn::Error::new(
-                span,
-                "`config` is the wasm-pkg configuration of a `registry` location; a path \
-                 location carries none",
-            )),
-            (name, _, None, None) => {
-                let missing = if name.is_none() { "name" } else { "path" };
-                Err(syn::Error::new(
-                    span,
-                    format!(
-                        "location entry is missing `{missing}`; a location is `{{ name, path }}` \
-                         or `{{ registry: ..., config: ... }}`"
-                    ),
-                ))
-            }
-        }
+/// Parse a `path:` value the expansion hands to `include_bytes!`, which
+/// takes a string literal or a macro it expands to one — anything else is
+/// refused here, where the diagnostic can name the key.
+fn parse_embeddable(input: ParseStream) -> Result<Expr> {
+    let expr: Expr = input.parse()?;
+    match &expr {
+        Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(_),
+            ..
+        })
+        | Expr::Macro(_) => Ok(expr),
+        other => Err(syn::Error::new(
+            other.span(),
+            "`path:` is embedded with `include_bytes!`, so it must be a string literal or a \
+             macro such as `concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/guest.wasm\")`",
+        )),
     }
 }
 

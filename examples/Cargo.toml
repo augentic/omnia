@@ -26,6 +26,10 @@ omnia = { workspace = true, features = ["link"] }
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 
+# `build.rs` compiles the guests `cli-static` and `guest-link` embed.
+[build-dependencies]
+omnia-test = { workspace = true, features = ["build"] }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 axum = { workspace = true, features = ["macros", "query"] }
 bytes.workspace = true

@@ -1,6 +1,6 @@
 //! # Host-mediated dynamic linking
 //!
-//! A caller guest imports an interface (say `omnia:link/echo`) whose
+//! A caller guest imports an interface (say `example:link/echo`) whose
 //! implementation the host satisfies at runtime. The host polyfills that import
 //! on the shared `Linker` so invoking it:
 //!
@@ -14,20 +14,23 @@
 //!    instance.
 //!
 //! Because step 4 is always a fresh instance, a dispatched call cannot
-//! recursively re-enter its caller. The runtime core stays generic: it links whatever
-//! interfaces the manifest names, by opaque string, and resolves opaque
-//! [`GuestId`]s — it never parses a consumer scheme. Arguments and results
-//! travel as wasmtime [`Val`](wasmtime::component::Val)s lifted from the
-//! caller and lowered into the callee, with no codec in between; the selector
-//! runs in the polyfill on those lifted values, so it sees typed parameters.
-//! Sync-typed functions are registered with `func_new_async`; async-typed
-//! (`async func`) ones with `func_new_concurrent`; both share one body whose
-//! only read of the caller's store is a snapshot of its chain context, which
-//! the callee's store is built from. See `docs/Architecture.md` (The Guest
-//! Registry) for the full design.
+//! recursively re-enter its caller. The runtime core stays generic: nothing
+//! declares the seam. Each component says what it imports and what it
+//! exports; every import outside the runtime's own namespaces
+//! ([`is_host`]) is relayed and every export outside them is routed, by
+//! opaque string, resolving opaque [`GuestId`]s — the seam never parses a
+//! consumer scheme. Arguments and results travel as wasmtime
+//! [`Val`](wasmtime::component::Val)s lifted from the caller and lowered into
+//! the callee, with no codec in between; the selector runs in the polyfill on
+//! those lifted values, so it sees typed parameters. Sync-typed functions are
+//! registered with `func_new_async`; async-typed (`async func`) ones with
+//! `func_new_concurrent`; both share one body whose only read of the caller's
+//! store is a snapshot of its chain context, which the callee's store is
+//! built from. See `docs/Architecture.md` (The Guest Registry) for the full
+//! design.
 //!
-//! [`InProcessLinks`] is the [`LinkSeam`] the registry drives when a
-//! deployment declares link interfaces.
+//! [`InProcessLinks`] is the [`LinkSeam`] the registry drives when omnia is
+//! built with its `link` feature.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -36,7 +39,6 @@ mod route;
 mod selector;
 mod serve;
 
-use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use anyhow::Result;
@@ -52,14 +54,23 @@ use self::polyfill::{Caller, WiredLinks};
 use self::route::Routes;
 pub use self::selector::{FirstArgSelector, GuestSelector};
 
+/// The runtime's own namespaces.
+///
+/// An import under one is a host capability, linked before any guest; an
+/// export under one is a trigger the host drives. Everything else crosses
+/// between guests: the seam relays the import and routes the export.
+#[must_use]
+pub fn is_host(interface: &str) -> bool {
+    ["wasi:", "omnia:"].iter().any(|namespace| interface.starts_with(namespace))
+}
+
 /// Guest→guest linking by in-memory routing to a fresh callee instance.
 ///
-/// Holds the selector strategy, the deployment's declared link interfaces, the
-/// chain policy (depth and wall-clock bounds), the route table, and the
-/// functions the bootstrap polyfilled onto the shared linker.
+/// Holds the selector strategy, the chain policy (depth and wall-clock
+/// bounds), the route table, and the functions the bootstrap polyfilled onto
+/// the shared linker.
 pub struct InProcessLinks {
     selector: Arc<dyn GuestSelector>,
-    interfaces: BTreeSet<Box<str>>,
     policy: ChainPolicy,
     routes: Routes,
     // Link functions polyfilled onto the shared linker at bootstrap, per
@@ -69,16 +80,13 @@ pub struct InProcessLinks {
 }
 
 impl InProcessLinks {
-    /// Create the seam for a deployment linking `interfaces` under `policy`.
-    /// The route table starts empty; the registry serves and publishes each
-    /// guest's route through the [`LinkSeam`] methods.
+    /// Create the seam under `policy`. The route table starts empty; the
+    /// registry serves and publishes each guest's route through the
+    /// [`LinkSeam`] methods.
     #[must_use]
-    pub fn new(
-        selector: Arc<dyn GuestSelector>, interfaces: BTreeSet<Box<str>>, policy: ChainPolicy,
-    ) -> Self {
+    pub fn new(selector: Arc<dyn GuestSelector>, policy: ChainPolicy) -> Self {
         Self {
             selector,
-            interfaces,
             policy,
             routes: Routes::default(),
             wired: Mutex::new(WiredLinks::new()),
@@ -99,21 +107,10 @@ impl<T: HasChain + 'static> LinkSeam<T> for InProcessLinks {
     fn polyfill(
         &self, engine: &Engine, linker: &mut Linker<T>, guests: &[LoadedGuest],
     ) -> Result<()> {
-        if self.interfaces.is_empty() {
-            return Ok(());
-        }
         let caller = self.caller();
         let mut wired = WiredLinks::new();
         for LoadedGuest { id, component } in guests {
-            polyfill::polyfill_component(
-                engine,
-                linker,
-                id,
-                component,
-                &self.interfaces,
-                &caller,
-                &mut wired,
-            )?;
+            polyfill::polyfill_component(engine, linker, id, component, &caller, &mut wired)?;
         }
         *self.wired.lock().unwrap_or_else(PoisonError::into_inner) = wired;
         Ok(())
@@ -122,21 +119,10 @@ impl<T: HasChain + 'static> LinkSeam<T> for InProcessLinks {
     fn polyfill_late(
         &self, engine: &Engine, linker: &mut Linker<T>, id: &GuestId, component: &Component,
     ) -> Result<()> {
-        if self.interfaces.is_empty() {
-            return Ok(());
-        }
         // A copy: the functions wired here live on a linker clone and must not
         // leak into the bootstrap record.
         let mut wired = self.wired.lock().unwrap_or_else(PoisonError::into_inner).clone();
-        polyfill::polyfill_component(
-            engine,
-            linker,
-            id,
-            component,
-            &self.interfaces,
-            &self.caller(),
-            &mut wired,
-        )
+        polyfill::polyfill_component(engine, linker, id, component, &self.caller(), &mut wired)
     }
 
     fn serve(&self, factory: StoreFactory<T>, guest: &Guest<T>) -> FutureResult<()> {
@@ -146,7 +132,6 @@ impl<T: HasChain + 'static> LinkSeam<T> for InProcessLinks {
         let wired = self.wired.lock().unwrap_or_else(PoisonError::into_inner).clone();
         let parked = serve::serve_guest(
             &self.routes,
-            &self.interfaces,
             &wired,
             factory,
             guest.id(),
@@ -169,5 +154,24 @@ impl<T: HasChain + 'static> LinkSeam<T> for InProcessLinks {
 
     fn shutdown(&self) {
         self.routes.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_host;
+
+    #[test]
+    fn host_namespaces() {
+        for interface in ["wasi:cli/run@0.2.0", "wasi:http/types", "omnia:plugins/loader@0.1.0"] {
+            assert!(is_host(interface), "{interface}");
+        }
+    }
+
+    #[test]
+    fn guest_namespaces() {
+        for interface in ["omnia-test:link/ops", "emery:adapter/source@0.1.0", "acme:ledger/ops"] {
+            assert!(!is_host(interface), "{interface}");
+        }
     }
 }

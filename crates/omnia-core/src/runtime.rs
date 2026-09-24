@@ -11,7 +11,6 @@ use wasmtime::component::{Component, Instance, InstancePre};
 
 use crate::artifact::GuestArtifact;
 use crate::extensions::Extensions;
-use crate::location::Location;
 use crate::mount::MountRegistry;
 use crate::registry::{Guest, GuestId, HttpRoutes, PublishError, TriggerRouter};
 use crate::store::HasLimits;
@@ -59,12 +58,17 @@ pub struct RuntimeParts<B: 'static> {
     pub registry: Arc<Registry<StoreCtx<B>>>,
     /// Guest argv.
     pub args: Vec<String>,
-    /// Mount registry opened from the deployment's preopens.
+    /// Mount registry opened from the deployment's preopens — the WASI
+    /// preopens of every store, and the roots the guest loader resolves path
+    /// loads against.
     pub mounts: Arc<MountRegistry>,
     /// Connected backend bundle.
     pub backends: B,
-    /// Plugin acquisition locations from the manifest.
-    pub locations: Vec<Location>,
+    /// The deployment's wasm-pkg client configuration (TOML), resolved to its
+    /// contents: the routing of a package load that names no registry.
+    /// `None` when the deployment declares none, where such a load refuses
+    /// and one naming its registry still fetches.
+    pub registry_config: Option<String>,
     /// The tracing level selected for this run, if any; it replaces every
     /// guest's `RUST_LOG`.
     pub level: Option<LevelFilter>,
@@ -98,15 +102,15 @@ struct RuntimeInner<B: 'static> {
     // Command-mode guest identity; absent, command mode routes to
     // the sole static `wasi:cli/run` exporter.
     command_guest: Option<GuestId>,
-    // The manifest's plugin acquisition locations, read by the loader
+    // The deployment's resolved wasm-pkg configuration, read by the loader
     // capability's install.
-    locations: Vec<Location>,
+    registry_config: Option<String>,
     // The run's selected tracing level and the level it falls back to; what
     // every store's `RUST_LOG` is built from.
     level: Option<LevelFilter>,
     fallback: LevelFilter,
-    // Capability-crate state installed by the extend hook and
-    // shared with every store context.
+    // Capability-crate state installed at assembly and shared with every
+    // store context.
     extensions: Extensions,
 }
 
@@ -206,18 +210,26 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
             mounts: parts.mounts,
             backends: parts.backends,
             command_guest: parts.command_guest,
-            locations: parts.locations,
+            registry_config: parts.registry_config,
             level: parts.level,
             fallback: parts.fallback,
             extensions: Extensions::new(),
         }))
     }
 
-    /// The deployment's plugin acquisition locations (the manifest's
-    /// `[[plugin.location]]` entries), for the loader capability to install against.
+    /// The mounts preopened into every store — also the roots the guest
+    /// loader resolves path loads against.
     #[must_use]
-    pub fn plugin_locations(&self) -> &[Location] {
-        &self.inner.locations
+    pub fn mounts(&self) -> &MountRegistry {
+        &self.inner.mounts
+    }
+
+    /// The deployment's wasm-pkg client configuration (TOML), resolved to its
+    /// contents, for the guest loader to route package loads through; `None`
+    /// when the deployment declares none.
+    #[must_use]
+    pub fn registry_config(&self) -> Option<&str> {
+        self.inner.registry_config.as_deref()
     }
 
     /// The deployment name — read by trigger servers and the bootstrap log.
@@ -268,8 +280,8 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         &self.inner.backends
     }
 
-    /// The capability-crate state installed by the extend hook —
-    /// the same set every store context carries.
+    /// The capability-crate state installed at assembly — the same set every
+    /// store context carries.
     #[must_use]
     pub fn extensions(&self) -> &Extensions {
         &self.inner.extensions

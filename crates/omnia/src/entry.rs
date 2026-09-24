@@ -14,7 +14,7 @@ use crate::{Backends, DeploymentBuilder, Wiring};
 /// `options` carries the deployment the `runtime!` macro compiled in: mode
 /// and manifest source. Command mode with a compiled-in deployment is a
 /// direct command: argv passes to the guest verbatim. Every other shape needs
-/// the standard `run [wasm] [--config] -- args…` grammar, served when omnia
+/// the standard `run [wasm] [--manifest] -- args…` grammar, served when omnia
 /// is built with the `cli` feature.
 #[doc(hidden)]
 pub async fn main<B, H>(options: MainOptions) -> ExitCode
@@ -35,7 +35,7 @@ where
 fn builder(options: MainOptions) -> anyhow::Result<DeploymentBuilder> {
     #[cfg(feature = "cli")]
     if !options.is_direct() {
-        return match materialize(options, env::args_os(), env::var_os("OMNIA_CONFIG")) {
+        return match materialize(options, env::args_os(), env::var_os("OMNIA_MANIFEST")) {
             Ok(builder) => Ok(builder),
             Err(omnia_cli::PlanError::Usage(error)) => error.exit(),
             Err(omnia_cli::PlanError::Fatal(error)) => Err(error),
@@ -47,16 +47,16 @@ fn builder(options: MainOptions) -> anyhow::Result<DeploymentBuilder> {
 #[cfg(feature = "cli")]
 fn materialize(
     options: MainOptions, argv: impl IntoIterator<Item = std::ffi::OsString>,
-    omnia_config: Option<std::ffi::OsString>,
+    omnia_manifest: Option<std::ffi::OsString>,
 ) -> Result<DeploymentBuilder, omnia_cli::PlanError> {
     use omnia_cli::RunSource;
 
     use crate::{Manifest, Mount};
 
-    let (mode, compiled_in) = options.into_parts();
-    let plan = omnia_cli::plan(argv, omnia_config, compiled_in.is_some())?;
+    let (mode, compiled_in, program_name) = options.into_parts();
+    let plan = omnia_cli::plan(argv, omnia_manifest, compiled_in.is_some())?;
     let manifest = match plan.source {
-        RunSource::Config(path) => Manifest::from_config(path)?,
+        RunSource::Manifest(path) => Manifest::load(path)?,
         RunSource::Wasm(path) => Manifest::from_wasm(path),
         RunSource::CompiledIn => compiled_in.expect("planner checked").into_manifest()?,
     };
@@ -65,10 +65,12 @@ fn materialize(
         path: arg.host_path,
         writable: arg.writable,
     });
-    let builder = DeploymentBuilder::new()
-        .manifest(manifest.mounts(mounts).link(plan.link))
-        .args(plan.args)
-        .mode(mode);
+    let builder =
+        DeploymentBuilder::new().manifest(manifest.mounts(mounts)).args(plan.args).mode(mode);
+    let builder = match program_name {
+        Some(name) => builder.program_name(name),
+        None => builder,
+    };
     Ok(match verbosity::level(mode.level(), plan.verbose, plan.quiet) {
         Some(level) => builder.level(level),
         None => builder,

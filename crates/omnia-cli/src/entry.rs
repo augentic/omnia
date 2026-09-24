@@ -1,8 +1,8 @@
 //! Entry planning for the `run` grammar: process argv and environment resolve
 //! into a [`RunPlan`] over paths and strings.
 //!
-//! [`plan`] is pure with respect to the process — argv and `OMNIA_CONFIG` are
-//! parameters — so source precedence is unit-testable without spawning a
+//! [`plan`] is pure with respect to the process — argv and `OMNIA_MANIFEST`
+//! are parameters — so source precedence is unit-testable without spawning a
 //! binary.
 
 use std::ffi::OsString;
@@ -29,28 +29,25 @@ impl From<anyhow::Error> for PlanError {
     }
 }
 
-/// Where the deployment comes from — the `--config` › `OMNIA_CONFIG` › `<wasm>`
-/// › compiled-in ladder, decided over plain data.
+/// Where the deployment comes from — the `--manifest` › `OMNIA_MANIFEST` ›
+/// `<wasm>` › compiled-in ladder, decided over plain data.
 #[derive(Debug, PartialEq, Eq)]
 pub enum RunSource {
-    /// A `--config` / `OMNIA_CONFIG` manifest path.
-    Config(PathBuf),
+    /// A `--manifest` / `OMNIA_MANIFEST` manifest path.
+    Manifest(PathBuf),
     /// A positional wasm path.
     Wasm(PathBuf),
     /// The generated `main`'s compiled-in manifest, not loaded here.
     CompiledIn,
 }
 
-/// The planner's outcome: source, CLI mounts, link interfaces, verbosity, and
-/// guest argv.
+/// The planner's outcome: source, CLI mounts, verbosity, and guest argv.
 #[derive(Debug, PartialEq, Eq)]
 pub struct RunPlan {
     /// Which source the precedence ladder selected.
     pub source: RunSource,
     /// `--mount` arguments, in argv order.
     pub mounts: Vec<MountArg>,
-    /// `--link` arguments, in argv order.
-    pub link: Vec<String>,
     /// How many `-v` flags were given; each raises the process tracing level
     /// one step.
     pub verbose: u8,
@@ -62,9 +59,9 @@ pub struct RunPlan {
     pub args: Vec<String>,
 }
 
-/// Plan the standard `run [wasm] [--config] -- args…` grammar, resolving the
-/// source by the `--config` › `OMNIA_CONFIG` › positional wasm › compiled-in
-/// ladder.
+/// Plan the standard `run [wasm] [--manifest] -- args…` grammar, resolving
+/// the source by the `--manifest` › `OMNIA_MANIFEST` › positional wasm ›
+/// compiled-in ladder.
 ///
 /// `has_compiled_in` is whether the generated `main` compiled a manifest in;
 /// this function does not load it.
@@ -74,7 +71,8 @@ pub struct RunPlan {
 /// Returns [`PlanError::Usage`] when clap rejects argv, or [`PlanError::Fatal`]
 /// when no source is available or the subcommand is not `run`.
 pub fn plan(
-    argv: impl IntoIterator<Item = OsString>, omnia_config: Option<OsString>, has_compiled_in: bool,
+    argv: impl IntoIterator<Item = OsString>, omnia_manifest: Option<OsString>,
+    has_compiled_in: bool,
 ) -> Result<RunPlan, PlanError> {
     let Cli {
         command,
@@ -84,27 +82,25 @@ pub fn plan(
     match command {
         Command::Run {
             wasm,
-            config,
+            manifest,
             mounts,
-            link,
             args,
         } => {
-            let config = config.or_else(|| omnia_config.map(PathBuf::from));
-            let source = match (config, wasm) {
-                (Some(config), _) => RunSource::Config(config),
+            let manifest = manifest.or_else(|| omnia_manifest.map(PathBuf::from));
+            let source = match (manifest, wasm) {
+                (Some(manifest), _) => RunSource::Manifest(manifest),
                 (None, Some(wasm)) => RunSource::Wasm(wasm),
                 (None, None) if has_compiled_in => RunSource::CompiledIn,
                 (None, None) => {
                     return Err(PlanError::Fatal(anyhow!(
-                        "no guest specified: pass a <wasm> path, or --config <omnia.toml> (or \
-                         set OMNIA_CONFIG)"
+                        "no guest specified: pass a <wasm> path, or --manifest <omnia.toml> (or \
+                         set OMNIA_MANIFEST)"
                     )));
                 }
             };
             Ok(RunPlan {
                 source,
                 mounts,
-                link,
                 verbose,
                 quiet,
                 args,
@@ -117,9 +113,9 @@ pub fn plan(
     }
 }
 
-// Unit tests by design: `plan` is factored pure (argv and `OMNIA_CONFIG` are
-// parameters) precisely so source precedence is testable without spawning a
-// binary.
+// Unit tests by design: `plan` is factored pure (argv and `OMNIA_MANIFEST`
+// are parameters) precisely so source precedence is testable without spawning
+// a binary.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,18 +132,23 @@ mod tests {
     }
 
     #[test]
-    fn config_beats_positional() {
-        let plan = plan(argv(&["bin", "run", "guest.wasm", "--config", "omnia.toml"]), None, true)
+    fn manifest_beats_positional() {
+        let long =
+            plan(argv(&["bin", "run", "guest.wasm", "--manifest", "omnia.toml"]), None, true)
+                .unwrap_or_else(|error| panic!("{}", fatal(error)));
+        assert_eq!(long.source, RunSource::Manifest(PathBuf::from("omnia.toml")));
+
+        let short = plan(argv(&["bin", "run", "-m", "omnia.toml"]), None, false)
             .unwrap_or_else(|error| panic!("{}", fatal(error)));
-        assert_eq!(plan.source, RunSource::Config(PathBuf::from("omnia.toml")));
+        assert_eq!(short.source, RunSource::Manifest(PathBuf::from("omnia.toml")));
     }
 
     #[test]
-    fn omnia_config_env() {
+    fn omnia_manifest_env() {
         let plan =
             plan(argv(&["bin", "run", "guest.wasm"]), Some(OsString::from("from_env.toml")), false)
                 .unwrap_or_else(|error| panic!("{}", fatal(error)));
-        assert_eq!(plan.source, RunSource::Config(PathBuf::from("from_env.toml")));
+        assert_eq!(plan.source, RunSource::Manifest(PathBuf::from("from_env.toml")));
     }
 
     #[test]
@@ -169,14 +170,6 @@ mod tests {
         let error = plan(argv(&["bin", "run"]), None, false)
             .expect_err("a sourceless deployment must fail");
         assert!(fatal(error).contains("no guest specified"));
-    }
-
-    #[test]
-    fn link_flag() {
-        let plan =
-            plan(argv(&["bin", "run", "guest.wasm", "--link", "omnia:link/echo"]), None, false)
-                .unwrap_or_else(|error| panic!("{}", fatal(error)));
-        assert_eq!(plan.link, ["omnia:link/echo"]);
     }
 
     #[test]

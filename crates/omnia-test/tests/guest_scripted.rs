@@ -208,31 +208,57 @@ async fn seen() {
     assert_eq!(function_tools(&model.requests()[0])[0].name, "lookup");
 }
 
+fn registry(package: &str, digest: Option<Digest>) -> PluginRef {
+    PluginRef {
+        location: Location::Registry {
+            package: package.to_owned(),
+            endpoint: None,
+        },
+        digest,
+    }
+}
+
+fn path(path: &str, digest: Option<Digest>) -> PluginRef {
+    PluginRef {
+        location: Location::Path(path.to_owned()),
+        digest,
+    }
+}
+
+fn declared(name: &str, digest: Option<Digest>) -> PluginRef {
+    PluginRef {
+        location: Location::Declared(name.to_owned()),
+        digest,
+    }
+}
+
 #[tokio::test]
 async fn loader_digest() {
-    let loader = ScriptedLoader::default().digest("acme:tool", digest("ab"));
-    let plugin = loader
-        .load(&PluginRef::builder().package("acme:tool").location(Location::Registry(None)).build())
-        .await
-        .expect("loads");
-    assert_eq!(plugin.id(), "acme:tool");
-    assert_eq!(*plugin.digest(), digest("ab"));
+    let loader = ScriptedLoader::default().digest("acme:tool@1.0.0", digest("ab"));
+    let plugin = loader.load(&registry("acme:tool@1.0.0", None)).await.expect("loads");
+    assert_eq!(plugin.id(), "acme:tool@1.0.0");
+    assert_eq!(plugin.digest(), Some(&digest("ab")));
     assert_eq!(loader.loads().len(), 1);
+}
+
+// A path load is keyed by the name it registers under — the file stem — so
+// a digest scripted for the stem answers it.
+#[tokio::test]
+async fn loader_path_stem() {
+    let loader = ScriptedLoader::default().digest("tool", digest("ab"));
+    let plugin = loader.load(&path("./plugins/tool.wasm", None)).await.expect("loads");
+    assert_eq!(plugin.id(), "tool");
+    assert_eq!(plugin.digest(), Some(&digest("ab")));
 }
 
 #[tokio::test]
 async fn loader_request_pin() {
     let loader = ScriptedLoader::default();
-    let pinned = PluginRef::builder()
-        .package("acme:tool")
-        .location(Location::Path("./plugins".into()))
-        .digest(digest("cd"))
-        .build();
-    let plugin = loader.load(&pinned).await.expect("loads");
-    assert_eq!(*plugin.digest(), digest("cd"));
+    let plugin =
+        loader.load(&path("./plugins/tool.wasm", Some(digest("cd")))).await.expect("loads");
+    assert_eq!(plugin.digest(), Some(&digest("cd")));
 
-    let unpinned =
-        PluginRef::builder().package("acme:other").location(Location::Registry(None)).build();
+    let unpinned = registry("acme:other@1.0.0", None);
     let first = loader.load(&unpinned).await.expect("loads");
     let second = loader.load(&unpinned).await.expect("loads");
     assert_eq!(first.digest(), second.digest(), "placeholder digests are deterministic");
@@ -240,13 +266,8 @@ async fn loader_request_pin() {
 
 #[tokio::test]
 async fn loader_disagreeing_pin() {
-    let loader = ScriptedLoader::default().digest("acme:tool", digest("ab"));
-    let pinned = PluginRef::builder()
-        .package("acme:tool")
-        .location(Location::Registry(None))
-        .digest(digest("cd"))
-        .build();
-    match loader.load(&pinned).await {
+    let loader = ScriptedLoader::default().digest("acme:tool@1.0.0", digest("ab"));
+    match loader.load(&registry("acme:tool@1.0.0", Some(digest("cd")))).await {
         Err(plugins::Error::Refused(reason)) => {
             assert!(reason.contains("not the pinned"), "{reason}");
         }
@@ -261,24 +282,15 @@ async fn loader_disagreeing_pin() {
 #[tokio::test]
 async fn loader_defaulting() {
     let loader =
-        ScriptedLoader::default().digest("acme:tool", digest("ab")).defaulting(digest("ef"));
+        ScriptedLoader::default().digest("acme:tool@1.0.0", digest("ab")).defaulting(digest("ef"));
 
-    let unpinned =
-        PluginRef::builder().package("acme:other").location(Location::Registry(None)).build();
-    assert_eq!(*loader.load(&unpinned).await.expect("loads").digest(), digest("ef"));
+    let unpinned = registry("acme:other@1.0.0", None);
+    assert_eq!(loader.load(&unpinned).await.expect("loads").digest(), Some(&digest("ef")));
 
-    let pinned = PluginRef::builder()
-        .package("acme:other")
-        .location(Location::Path("./plugins".into()))
-        .digest(digest("cd"))
-        .build();
-    assert_eq!(*loader.load(&pinned).await.expect("loads").digest(), digest("cd"));
+    let pinned = path("./plugins/other.wasm", Some(digest("cd")));
+    assert_eq!(loader.load(&pinned).await.expect("loads").digest(), Some(&digest("cd")));
 
-    let disagreeing = PluginRef::builder()
-        .package("acme:tool")
-        .location(Location::Registry(None))
-        .digest(digest("ef"))
-        .build();
+    let disagreeing = registry("acme:tool@1.0.0", Some(digest("ef")));
     assert!(matches!(loader.load(&disagreeing).await, Err(plugins::Error::Refused(_))));
     assert_eq!(loader.loads().len(), 3);
 }
@@ -286,12 +298,36 @@ async fn loader_defaulting() {
 #[tokio::test]
 async fn loader_scripted_refusal_wins() {
     let loader = ScriptedLoader::default()
-        .digest("acme:tool", digest("ab"))
-        .refuse("acme:tool", plugins::Error::Unavailable("registry down".into()));
-    let unpinned =
-        PluginRef::builder().package("acme:tool").location(Location::Registry(None)).build();
+        .digest("acme:tool@1.0.0", digest("ab"))
+        .refuse("acme:tool@1.0.0", plugins::Error::Unavailable("registry down".into()));
     assert_eq!(
-        loader.load(&unpinned).await,
+        loader.load(&registry("acme:tool@1.0.0", None)).await,
         Err(plugins::Error::Unavailable("registry down".into()))
     );
+}
+
+// A declared name attests with no digest when declared and refuses
+// otherwise; a pin on it is refused before the declaration is consulted.
+#[tokio::test]
+async fn loader_declared() {
+    let loader = ScriptedLoader::default().declare("intent").defaulting(digest("ef"));
+
+    let plugin = loader.load(&declared("intent", None)).await.expect("attests");
+    assert_eq!(plugin.id(), "intent");
+    assert_eq!(plugin.digest(), None, "the default digest is for acquired loads");
+
+    match loader.load(&declared("nonesuch", None)).await {
+        Err(plugins::Error::Refused(reason)) => {
+            assert_eq!(reason, "no guest `nonesuch` is declared by this deployment");
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+
+    match loader.load(&declared("intent", Some(digest("ab")))).await {
+        Err(plugins::Error::Refused(reason)) => {
+            assert_eq!(reason, "`intent` is declared by the deployment; it takes no pin");
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+    assert_eq!(loader.loads().len(), 3);
 }

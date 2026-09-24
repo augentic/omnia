@@ -1132,6 +1132,7 @@ dependencies = [
  "http-body-util",
  "omnia",
  "omnia-sdk",
+ "omnia-test",
  "omnia-wasi-blobstore",
  "omnia-wasi-config",
  "omnia-wasi-docstore",

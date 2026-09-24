@@ -2,15 +2,14 @@
 #![cfg(not(target_arch = "wasm32"))]
 #![allow(unsafe_code)] // `DeploymentBuilder::build_trusted` and `Source::artifact`
 
-// The embedder facade: the runtime spine (`omnia-core`), host-mediated linking
-// (`omnia-link`, behind the `link` feature), the plugins capability
-// (`omnia-plugin`, behind the `plugin` feature), the OTLP exporters
+// The embedder facade: the runtime spine (`omnia-core`), guest→guest dispatch
+// (`omnia-link`, behind the `link` feature), the guest loader
+// (`omnia-plugin`, behind the `loader` feature), the OTLP exporters
 // (`omnia-otlp`, behind the `otlp` feature), the `run` grammar
 // (`omnia-cli`, behind the `cli` feature), and the `runtime!` macro,
 // re-exported under one root. The `runtime!` macro emits `omnia::…` paths, so
-// every name it references must stay reachable from here — the plugin names
-// only when the invocation declares `locations:`, which is what the feature
-// gates.
+// every name it references must stay reachable from here — `RegistryConfig`
+// among them, which a `guests.registries` key lowers to.
 //
 // `#[doc(inline)]` matters: rustdoc renders a cross-crate `pub use` as a bare
 // re-export line pointing into the source crate, so without it every item
@@ -18,12 +17,12 @@
 // keeps the documented surface at `omnia::…`, the only path embedders use.
 
 // `anyhow` is the error vocabulary of `Backend`, `Wiring`, and the generated
-// runtime module; `futures` supplies the `BoxFuture` in the plugin store and
+// runtime module; `futures` supplies the `BoxFuture` in the loader store and
 // acquirer seams (`ContentStore`, `ReleaseStore`, `PathSource`,
 // `RegistrySource`) and the generated `serve` hook. Both are part of the
 // facade's public signatures, so embedders reach them from here without a
 // direct dependency of their own; `futures` stays unconditional because the
-// macro output uses it whether or not the plugin surface is enabled.
+// macro output uses it whether or not the loader surface is enabled.
 #[cfg(feature = "jit")]
 pub mod compile;
 mod deployment;
@@ -39,10 +38,10 @@ pub use omnia_core::{
     AdmitError, Backend, ChainCtx, ChainPolicy, CliRoutes, Dispatcher, ExitStatus, Extensions,
     FromEnv, FutureResult, Guest, GuestArtifact, GuestId, HasChain, HasDispatcher, HasExtensions,
     HasLimits, HasMounts, HasTable, Host, HostCtx, HttpBorrow, HttpCtx, HttpRoutes, LevelFilter,
-    LinkSeam, Location, MountRegistry, NoLinks, NoOptions, PatternRoutes, Provides, Proxy,
-    Registry, ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts, Server, StoreBase,
-    StoreConfig, StoreCtx, StoreFactory, StoreView, Telemetry, TriggerRouter, WeakRuntime,
-    get_cloned, host_error, serve_links, sha256_digest, telemetry, wasi_view,
+    LinkSeam, MountRegistry, NoLinks, NoOptions, PatternRoutes, Provides, Proxy, Registry,
+    ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts, Server, StoreBase, StoreConfig,
+    StoreCtx, StoreFactory, StoreView, Telemetry, TriggerRouter, WeakRuntime, get_cloned,
+    host_error, serve_links, sha256_digest, telemetry, wasi_view,
 };
 #[doc(hidden)]
 pub use omnia_core::{pastey, tokio, wasmtime, wasmtime_wasi};
@@ -50,11 +49,11 @@ pub use omnia_core::{pastey, tokio, wasmtime, wasmtime_wasi};
 pub use omnia_host_macros::runtime;
 #[cfg(feature = "link")]
 #[doc(inline)]
-pub use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks};
+pub use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks, is_host};
 #[cfg(feature = "otlp")]
 #[doc(inline)]
 pub use omnia_otlp as otlp;
-#[cfg(feature = "plugin")]
+#[cfg(feature = "loader")]
 #[doc(inline)]
 pub use omnia_plugin::{
     ContentStore, LoadError, NoStore, Origin, PathMounts, PathSource, Plugin, PluginLoader,
@@ -62,8 +61,8 @@ pub use omnia_plugin::{
 };
 
 pub use self::deployment::{
-    Deployment, DeploymentBuilder, GuestEntry, GuestRoutes, LinkConfig, LinkStore, Manifest, Mount,
-    PluginConfig, SourceSpec, Transport, TransportKind,
+    Deployment, DeploymentBuilder, GuestEntry, GuestRoutes, LinkStore, Manifest, Mount,
+    RegistryConfig, SourceSpec, Transport, TransportKind,
 };
 #[doc(hidden)]
 pub use self::entry::{MainOptions, ManifestSource, main};

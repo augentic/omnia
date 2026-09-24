@@ -7,7 +7,7 @@
 // guest *exports* `echo` (`responder`). Caller and callee share one interface —
 // the adapter pattern — so the leading `target` argument the default
 // `FirstArgSelector` reads is forwarded straight through to the export.
-package omnia:link;
+package example:link;
 
 /// The host-mediated interface. Resource-free by design: resource handles
 /// never cross the link seam.

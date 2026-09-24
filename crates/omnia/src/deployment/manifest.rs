@@ -1,18 +1,20 @@
 //! # Deployment manifest (`omnia.toml`)
 //!
-//! Registry population, routing, linking, and transport are *deployment*
-//! decisions, not build-time ones. A manifest may be loaded from a startup
-//! configuration file or assembled programmatically before the registry is
-//! built.
+//! Registry population, routing, and transport are *deployment* decisions,
+//! not build-time ones. A manifest may be loaded from a startup file or
+//! assembled programmatically before the registry is built.
 //!
-//! The manifest is parsed **generically** — Omnia sees opaque [`GuestId`]s and
-//! interface *strings*, never `source:`/`target:`/`mcp`. Consumers write the
-//! concrete file; the runtime core stays domain-agnostic.
+//! The manifest is parsed **generically** — Omnia sees opaque [`GuestId`]s,
+//! never `source:`/`target:`/`mcp`. Consumers write the concrete file; the
+//! runtime core stays domain-agnostic. What crosses between guests is not
+//! declared here at all: each component says what it imports and exports,
+//! and the runtime links every interface outside its own namespaces.
 //!
-//! The `[[guest]]` population (file or embedded-bytes sources), each guest's
-//! `routes` tables, and the deployment-wide `[link] interfaces` list (which
-//! drives host-mediated dynamic linking) are all consumed. Distributed `[transport]` is not yet
-//! implemented: only the in-process default is accepted.
+//! The `[[guest]]` population (file or embedded-bytes sources, each named
+//! by its `name` or, absent one, by its file's stem), each guest's `routes`
+//! tables, and the `[registries]` configuration the guest loader routes
+//! package loads through are all consumed. Distributed `[transport]` is not
+//! yet implemented: only the in-process default is accepted.
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
@@ -20,9 +22,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
-use omnia_core::{
-    CliRoutes, GuestId, HttpRoutes, Location, PatternRoutes, ResolvedPreopen, Routes,
-};
+use omnia_core::{CliRoutes, GuestId, HttpRoutes, PatternRoutes, ResolvedPreopen, Routes};
 use serde::Deserialize;
 
 use super::source::Source;
@@ -31,52 +31,34 @@ use super::source::Source;
 /// declare what the build serves.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Features {
-    /// The `plugin` feature (`[[plugin.location]]` entries).
-    pub plugin: bool,
-    /// The `link` feature (`[link] interfaces`).
-    pub link: bool,
+    /// The `loader` feature (the `[registries]` configuration).
+    pub loader: bool,
 }
 
 impl Features {
     /// The features this build was compiled with.
     pub(super) const COMPILED: Self = Self {
-        plugin: cfg!(feature = "plugin"),
-        link: cfg!(feature = "link"),
+        loader: cfg!(feature = "loader"),
     };
 }
 
-/// Host-mediated interfaces the runtime polyfills onto the shared linker.
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct LinkConfig {
-    /// Interface names the host dispatches between guests.
-    pub interfaces: Vec<String>,
-}
-
-/// Where the plugin loader acquires packages (`[[plugin.location]]`).
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct PluginConfig {
-    /// Named path roots and at most one default registry endpoint.
-    #[serde(rename = "location")]
-    pub locations: Vec<Location>,
-}
-
-/// The deployment manifest: which guests load and how host-mediated calls
-/// travel.
+/// The deployment manifest: which guests load, what they mount, and where
+/// later guests may come from.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Manifest {
     /// Registry population: each entry maps an identity to a source.
     #[serde(rename = "guest")]
     pub guests: Vec<GuestEntry>,
-    /// Working-tree mounts preopened into the guest sandbox.
+    /// Working-tree mounts preopened into the guest sandbox — also the roots
+    /// the guest loader resolves path loads against.
     #[serde(rename = "mount")]
     pub mounts: Vec<Mount>,
-    /// Host-mediated link interfaces polyfilled onto the shared linker.
-    pub link: LinkConfig,
-    /// Plugin-loader acquisition locations.
-    pub plugin: PluginConfig,
+    /// Where the wasm-pkg client configuration the guest loader routes
+    /// package loads through comes from — the default routing a load may
+    /// name a registry past; absent, a package load names its registry or
+    /// refuses.
+    pub registries: Option<RegistryConfig>,
     /// Transport configuration for host-mediated calls.
     pub transport: Transport,
 }
@@ -88,13 +70,13 @@ impl Manifest {
         Self::default()
     }
 
-    /// Load a manifest and resolve its relative paths against the config directory.
+    /// Load a manifest and resolve its relative paths against its directory.
     ///
     /// # Errors
     ///
     /// Returns an error if the current directory cannot be read, or the file
     /// cannot be read or parsed as TOML.
-    pub fn from_config(path: impl AsRef<Path>) -> Result<Self> {
+    pub fn load(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let path = if path.is_absolute() {
             path.to_path_buf()
@@ -106,16 +88,18 @@ impl Manifest {
         let mut manifest: Self = toml::from_str(&text)
             .with_context(|| format!("parsing manifest {}", path.display()))?;
         let base = path.parent().unwrap_or_else(|| Path::new("."));
+        manifest.resolve_names();
         manifest.resolve_paths(base);
         Ok(manifest)
     }
 
-    /// Create a single-guest manifest from a component path.
+    /// Create a single-guest manifest from a component path, named by the
+    /// file's stem.
     #[must_use]
     pub fn from_wasm(path: impl Into<PathBuf>) -> Self {
         let path = path.into();
-        let id = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("default").to_owned();
-        Self::new().guest(GuestEntry::new(id, path))
+        let name = GuestId::from_path(&path.to_string_lossy());
+        Self::new().guest(GuestEntry::new(name.as_str(), path))
     }
 
     /// Append a guest.
@@ -132,21 +116,11 @@ impl Manifest {
         self
     }
 
-    /// Append host-mediated link interfaces (the manifest's `[link] interfaces`).
+    /// Set where the wasm-pkg client configuration comes from (the manifest's
+    /// `[registries]` table): the default routing of a package load.
     #[must_use]
-    pub fn link<I, S>(mut self, interfaces: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        self.link.interfaces.extend(interfaces.into_iter().map(Into::into));
-        self
-    }
-
-    /// Append plugin acquisition locations (the manifest's `[[plugin.location]]` entries).
-    #[must_use]
-    pub fn locations(mut self, locations: impl IntoIterator<Item = Location>) -> Self {
-        self.plugin.locations.extend(locations);
+    pub fn registries(mut self, config: impl Into<RegistryConfig>) -> Self {
+        self.registries = Some(config.into());
         self
     }
 
@@ -157,14 +131,21 @@ impl Manifest {
         if self.guests.is_empty() && !allow_empty {
             bail!("manifest defines no [[guest]] entries");
         }
-        let mut ids = BTreeSet::new();
+        let mut names = BTreeSet::new();
         for entry in &self.guests {
-            if !ids.insert(entry.id.as_str()) {
-                bail!("duplicate [[guest]] id `{}`: guest identities must be unique", entry.id);
+            if entry.name.is_empty() {
+                bail!(
+                    "a [[guest]] entry names no guest ({:?}): set `name`, or give a `source.path` \
+                     whose file stem names it",
+                    entry.source
+                );
+            }
+            if !names.insert(entry.name.as_str()) {
+                bail!("duplicate [[guest]] name `{}`: guest names must be unique", entry.name);
             }
         }
         let marked: Vec<&str> =
-            self.guests.iter().filter(|e| e.command).map(|e| e.id.as_str()).collect();
+            self.guests.iter().filter(|e| e.command).map(|e| e.name.as_str()).collect();
         if marked.len() > 1 {
             bail!(
                 "multiple [[guest]] entries marked `command = true` ({}): at most one guest may \
@@ -178,39 +159,27 @@ impl Manifest {
                 self.transport.default
             );
         }
-        let registries: Vec<&str> = self
-            .plugin
-            .locations
-            .iter()
-            .filter_map(|location| match location {
-                Location::Registry { registry, .. } => Some(registry.as_str()),
-                Location::Path { .. } => None,
-            })
-            .collect();
-        if registries.len() > 1 {
+        // A manifest can declare policy the compiled runtime cannot serve;
+        // refuse up front rather than silently never installing it.
+        if !features.loader && self.registries.is_some() {
             bail!(
-                "multiple registry [[plugin.location]] entries ({}): a deployment declares one \
-                 default registry (a load's own location may still override the endpoint)",
-                registries.join(", ")
-            );
-        }
-        // A config file can declare locations the compiled runtime cannot
-        // serve; refuse up front rather than silently never installing them.
-        if !features.plugin && !self.plugin.locations.is_empty() {
-            bail!(
-                "this runtime was built without the `plugin` feature; remove the \
-                 [[plugin.location]] entries or enable the feature on the `omnia` dependency \
-                 (`features = [\"plugin\"]`)"
-            );
-        }
-        if !features.link && !self.link.interfaces.is_empty() {
-            bail!(
-                "this runtime was built without the `link` feature; remove the [link] \
-                 interfaces or enable the feature on the `omnia` dependency (`features = \
-                 [\"link\"]`)"
+                "this runtime was built without the `loader` feature; remove `registries` or \
+                 enable the feature on the `omnia` dependency (`features = [\"loader\"]`)"
             );
         }
         Ok(())
+    }
+
+    // A `[[guest]]` that names no guest is named by its file's stem, the way a
+    // path load registers.
+    fn resolve_names(&mut self) {
+        for guest in &mut self.guests {
+            if guest.name.is_empty()
+                && let SourceSpec::Path(path) = &guest.source
+            {
+                guest.name = GuestId::from_path(&path.to_string_lossy()).as_str().into();
+            }
+        }
     }
 
     fn resolve_paths(&mut self, base: &Path) {
@@ -226,21 +195,25 @@ impl Manifest {
                 mount.path = base.join(&mount.path);
             }
         }
-        for location in &mut self.plugin.locations {
-            if let Location::Path { path, .. } = location
-                && path.is_relative()
-            {
-                *path = base.join(&*path);
-            }
+        if let Some(RegistryConfig::Path(path)) = &mut self.registries
+            && path.is_relative()
+        {
+            *path = base.join(&*path);
         }
     }
 
-    /// Telemetry/component name for this deployment.
-    ///
-    /// The first `[[guest]]` entry doubles as the name for now.
-    #[must_use]
-    pub fn name(&self) -> &str {
-        self.guests.first().map_or("omnia", |entry| entry.id.as_str())
+    /// The wasm-pkg client configuration as TOML text: a `Path` read now, or
+    /// the `Contents` as carried; `None` when the manifest declares none.
+    pub(super) fn registry_config(&self) -> Result<Option<String>> {
+        self.registries
+            .as_ref()
+            .map(|config| match config {
+                RegistryConfig::Path(path) => fs::read_to_string(path).with_context(|| {
+                    format!("reading the `registries` configuration {}", path.display())
+                }),
+                RegistryConfig::Contents(contents) => Ok(contents.to_string()),
+            })
+            .transpose()
     }
 
     /// Resolve every `[[guest]]` source into a loadable source.
@@ -251,7 +224,7 @@ impl Manifest {
     pub fn sources(&self) -> Result<Vec<Source>> {
         let mut sources = Vec::with_capacity(self.guests.len());
         for entry in &self.guests {
-            let id = GuestId::from(entry.id.as_str());
+            let id = GuestId::from(entry.name.as_str());
             match &entry.source {
                 SourceSpec::Path(path) => sources.push(Source::with_id(id, path)),
                 SourceSpec::Bytes(bytes) => sources.push(Source::embedded(id, bytes.clone())),
@@ -263,13 +236,6 @@ impl Manifest {
         Ok(sources)
     }
 
-    /// The host-mediated link interfaces (the `[link] interfaces` list) as an
-    /// ordered set.
-    #[must_use]
-    pub fn link_interfaces(&self) -> BTreeSet<Box<str>> {
-        self.link.interfaces.iter().map(|interface| Box::from(interface.as_str())).collect()
-    }
-
     /// Per-trigger route tables aggregated from each guest's `routes` lists,
     /// in guest declaration order.
     #[must_use]
@@ -278,7 +244,7 @@ impl Manifest {
             self.guests.iter().flat_map(move |guest| {
                 select(&guest.routes)
                     .iter()
-                    .map(|pattern| (pattern.clone(), GuestId::from(guest.id.as_str())))
+                    .map(|pattern| (pattern.clone(), GuestId::from(guest.name.as_str())))
             })
         };
         let http = HttpRoutes::new(pairs(|routes| &routes.http));
@@ -293,7 +259,7 @@ impl Manifest {
     /// The identity of the guest marked `command = true`, if any.
     #[must_use]
     pub fn command_guest(&self) -> Option<GuestId> {
-        self.guests.iter().find(|e| e.command).map(|e| GuestId::from(e.id.as_str()))
+        self.guests.iter().find(|e| e.command).map(|e| GuestId::from(e.name.as_str()))
     }
 
     /// Resolve every `[[mount]]` into a [`ResolvedPreopen`].
@@ -303,14 +269,69 @@ impl Manifest {
     }
 }
 
+/// Where the wasm-pkg client configuration comes from: the `[registries]`
+/// table of a manifest names a `path`; the `runtime!` macro and the
+/// programmatic API carry the `contents`.
+///
+/// The configuration is the schema of `wkg`'s own `config.toml`: a
+/// `default_registry`, `namespace_registries` and `package_registry_overrides`
+/// routing past it, and per-registry backend settings. It routes the package
+/// loads that name no registry of their own — one it routes nowhere is
+/// refused — while a load that names its registry fetches from it.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RegistryConfig {
+    /// A TOML file. [`Manifest::load`] resolves a relative path against the
+    /// manifest's directory; a relative path set programmatically resolves
+    /// against the process working directory.
+    Path(PathBuf),
+    /// The TOML text itself (typically an `include_str!`). TOML cannot
+    /// express this variant; it is set through the `runtime!` macro or the
+    /// programmatic API.
+    #[serde(skip)]
+    Contents(Cow<'static, str>),
+}
+
+impl RegistryConfig {
+    /// The configuration as TOML text.
+    pub fn contents(value: impl Into<Cow<'static, str>>) -> Self {
+        Self::Contents(value.into())
+    }
+}
+
+impl From<&'static str> for RegistryConfig {
+    fn from(contents: &'static str) -> Self {
+        Self::Contents(Cow::Borrowed(contents))
+    }
+}
+
+impl From<String> for RegistryConfig {
+    fn from(contents: String) -> Self {
+        Self::Contents(Cow::Owned(contents))
+    }
+}
+
+impl From<PathBuf> for RegistryConfig {
+    fn from(path: PathBuf) -> Self {
+        Self::Path(path)
+    }
+}
+
+impl From<&Path> for RegistryConfig {
+    fn from(path: &Path) -> Self {
+        Self::Path(path.to_path_buf())
+    }
+}
+
 /// A single workspace mount: a host directory preopened into the guest
-/// sandbox under a guest-visible name.
+/// sandbox under a guest-visible name, and a root the guest loader resolves
+/// path loads against.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct Mount {
     /// Guest-visible name `preopens.get-directories()` returns (e.g. `.`).
     pub name: String,
-    /// Host path. [`Manifest::from_config`] resolves relative paths against the
-    /// config file's directory; a relative path set programmatically resolves
+    /// Host path. [`Manifest::load`] resolves relative paths against the
+    /// manifest's directory; a relative path set programmatically resolves
     /// against the process working directory.
     pub path: PathBuf,
     /// Read+write when `true`; read-only (the review-flow default) otherwise.
@@ -333,8 +354,11 @@ impl Mount {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GuestEntry {
-    /// Opaque guest identity (the runtime core never parses it).
-    pub id: String,
+    /// The guest's name: the [`GuestId`] it registers under, dispatches by,
+    /// and is loaded as. Absent in a manifest file, the source path's file
+    /// stem names the guest (`./guests/echo.wasm` is `echo`).
+    #[serde(default)]
+    pub name: String,
     /// Where the guest's component bytes come from.
     pub source: SourceSpec,
     /// Inbound routes targeting this guest, one list per trigger.
@@ -347,15 +371,25 @@ pub struct GuestEntry {
 }
 
 impl GuestEntry {
-    /// Create a guest from a local component path or embedded component bytes.
+    /// Create a named guest from a local component path or embedded component bytes.
     #[must_use]
-    pub fn new(id: impl Into<String>, source: impl Into<SourceSpec>) -> Self {
+    pub fn new(name: impl Into<String>, source: impl Into<SourceSpec>) -> Self {
         Self {
-            id: id.into(),
+            name: name.into(),
             source: source.into(),
             routes: GuestRoutes::default(),
             command: false,
         }
+    }
+
+    /// Create a guest from component bytes embedded in the host binary, named
+    /// by the stem of the file they were read from.
+    ///
+    /// The `runtime!` macro's `guests: [{ path: .. }]` lowers to this call,
+    /// `include_bytes!` supplying the bytes.
+    #[must_use]
+    pub fn embedded(path: &str, bytes: &'static [u8]) -> Self {
+        Self::new(GuestId::from_path(path).as_str(), bytes)
     }
 
     /// Append an HTTP prefix route targeting this guest.
@@ -394,8 +428,8 @@ impl GuestEntry {
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SourceSpec {
-    /// A local `.wasm` / pre-compiled `.bin` path. [`Manifest::from_config`]
-    /// resolves relative paths against the config file's directory; a relative
+    /// A local `.wasm` / pre-compiled `.bin` path. [`Manifest::load`]
+    /// resolves relative paths against the manifest's directory; a relative
     /// path set programmatically resolves against the process working directory.
     Path(PathBuf),
     /// Component bytes embedded in the host binary (typically an
@@ -516,15 +550,12 @@ mod tests {
     #[test]
     fn parse_multi_guest() {
         let toml = r#"
-            [link]
-            interfaces = ["omnia:shared/log", "augentic:specify/source"]
-
             [[guest]]
-            id = "workflow"
+            name = "workflow"
             source.path = "./guests/workflow.wasm"
 
             [[guest]]
-            id = "mcp"
+            name = "mcp"
             source.path = "./guests/mcp.wasm"
 
             [transport]
@@ -533,22 +564,34 @@ mod tests {
 
         let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
         assert_eq!(manifest.guests.len(), 2);
-        assert_eq!(manifest.guests[0].id, "workflow");
+        assert_eq!(manifest.guests[0].name, "workflow");
         assert!(matches!(manifest.guests[1].source, SourceSpec::Path(_)));
         assert_eq!(manifest.transport.default, TransportKind::InProcess);
-        assert!(manifest.link_interfaces().contains("omnia:shared/log"));
-        assert!(manifest.link_interfaces().contains("augentic:specify/source"));
+    }
+
+    // Nothing declares what crosses between guests; a `services` list is an
+    // unknown key like any other.
+    #[test]
+    fn reject_services_key() {
+        let toml = "services = [\"omnia:shared/log\"]\n\n\
+             [[guest]]\nname = \"a\"\nsource.path = \"./a.wasm\"\n";
+        toml::from_str::<Manifest>(toml).unwrap_err();
     }
 
     #[test]
     fn reject_unknown_keys() {
-        let toml = "bogus = 1\n\n[[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\n";
+        let toml = "bogus = 1\n\n[[guest]]\nname = \"a\"\nsource.path = \"./a.wasm\"\n";
         toml::from_str::<Manifest>(toml).unwrap_err();
 
-        let toml = "[[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\nbogus = 1\n";
+        // The retired `id` is an unknown key like any other.
+        let toml = "[[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\n";
         toml::from_str::<Manifest>(toml).unwrap_err();
 
-        let toml = "[[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\n\n[transport]\nbogus = 1\n";
+        let toml = "[[guest]]\nname = \"a\"\nsource.path = \"./a.wasm\"\nbogus = 1\n";
+        toml::from_str::<Manifest>(toml).unwrap_err();
+
+        let toml =
+            "[[guest]]\nname = \"a\"\nsource.path = \"./a.wasm\"\n\n[transport]\nbogus = 1\n";
         toml::from_str::<Manifest>(toml).unwrap_err();
     }
 
@@ -556,7 +599,7 @@ mod tests {
     fn parse_guest_routes() {
         let toml = r#"
             [[guest]]
-            id = "mcp"
+            name = "mcp"
             source.path = "./guests/mcp.wasm"
             routes.http = ["/mcp"]
             routes.messaging = ["specify.build.>"]
@@ -578,12 +621,12 @@ mod tests {
     fn routes_aggregate() {
         let toml = r#"
             [[guest]]
-            id = "a"
+            name = "a"
             source.path = "./a.wasm"
             routes.http = ["/a"]
 
             [[guest]]
-            id = "b"
+            name = "b"
             source.path = "./b.wasm"
             routes.http = ["/a/b"]
         "#;
@@ -597,7 +640,7 @@ mod tests {
 
     #[test]
     fn reject_unknown_route_trigger() {
-        let toml = "[[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\nroutes.grpc = [\"/a\"]\n";
+        let toml = "[[guest]]\nname = \"a\"\nsource.path = \"./a.wasm\"\nroutes.grpc = [\"/a\"]\n";
         toml::from_str::<Manifest>(toml).unwrap_err();
     }
 
@@ -605,7 +648,7 @@ mod tests {
     fn parse_and_resolve_mounts() {
         let toml = r#"
             [[guest]]
-            id = "model"
+            name = "model"
             source.path = "./model.wasm"
 
             [[mount]]
@@ -638,99 +681,69 @@ mod tests {
     }
 
     #[test]
-    fn parse_and_resolve_locations() {
+    fn parse_and_resolve_registries() {
         let toml = r#"
             [[guest]]
-            id = "engine"
+            name = "engine"
             source.path = "./engine.wasm"
 
-            [[plugin.location]]
-            name = "."
-            path = "adapters"
-
-            [[plugin.location]]
-            registry = "ghcr.io"
-            config = """
-            [namespace_registries]
-            wasi = "wasi.dev"
-            """
+            [registries]
+            path = "wasm-pkg.toml"
         "#;
 
         let mut manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
         manifest.resolve_paths(Path::new("/deploy/app"));
-        let [path, registry] = manifest.plugin.locations.as_slice() else {
-            panic!("two locations, got {:?}", manifest.plugin.locations);
-        };
-        assert_eq!(*path, Location::path(".", "/deploy/app/adapters"));
-        let Location::Registry { registry, config } = registry else {
-            panic!("a registry location, got {registry:?}");
-        };
-        assert_eq!(registry, "ghcr.io");
-        // The wasm-pkg configuration rides the entry verbatim; the acquirer parses it.
-        assert!(
-            config.as_deref().is_some_and(|config| config.contains("wasi = \"wasi.dev\"")),
-            "{config:?}"
+        // A relative path resolves against the manifest's directory, like a
+        // guest source or a mount.
+        assert_eq!(
+            manifest.registries,
+            Some(RegistryConfig::Path(PathBuf::from("/deploy/app/wasm-pkg.toml")))
         );
         manifest
-            .validate(
-                false,
-                Features {
-                    plugin: true,
-                    link: false,
-                },
-            )
-            .expect("one registry is allowed");
+            .validate(false, Features { loader: true })
+            .expect("a registries configuration is allowed");
     }
 
     #[test]
-    fn locations_without_plugin_feature() {
+    fn registries_without_loader_feature() {
         let manifest = Manifest::new()
             .guest(GuestEntry::new("a", "./a.wasm"))
-            .locations([Location::path(".", "adapters")]);
+            .registries("default_registry = \"ghcr.io\"\n");
         let error = manifest
-            .validate(
-                false,
-                Features {
-                    plugin: false,
-                    link: false,
-                },
-            )
-            .expect_err("locations need the plugin feature");
-        assert!(error.to_string().contains("without the `plugin` feature"), "{error}");
+            .validate(false, Features { loader: false })
+            .expect_err("registries need the loader feature");
+        assert!(error.to_string().contains("without the `loader` feature"), "{error}");
     }
 
+    // A `[registries]` table names a path; the contents variant is the
+    // macro's and the programmatic API's alone.
     #[test]
-    fn interfaces_without_link_feature() {
-        let manifest =
-            Manifest::new().guest(GuestEntry::new("a", "./a.wasm")).link(["omnia:link/echo"]);
-        let error = manifest
-            .validate(
-                false,
-                Features {
-                    plugin: false,
-                    link: false,
-                },
-            )
-            .expect_err("interfaces need the link feature");
-        assert!(error.to_string().contains("without the `link` feature"), "{error}");
-    }
-
-    #[test]
-    fn reject_mixed_location_keys() {
-        let toml = "[[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\n\n\
-             [[plugin.location]]\nname = \".\"\npath = \"adapters\"\nregistry = \"ghcr.io\"\n";
+    fn reject_registries_contents_in_toml() {
+        let toml = "[[guest]]\nname = \"a\"\nsource.path = \"./a.wasm\"\n\n\
+             [registries]\ncontents = \"default_registry = 'ghcr.io'\"\n";
         toml::from_str::<Manifest>(toml).unwrap_err();
     }
 
+    // The two carriers materialize the same way: a path is read, contents
+    // are handed on as carried.
     #[test]
-    fn reject_two_registry_locations() {
-        let manifest = Manifest::new()
-            .guest(GuestEntry::new("a", "./a.wasm"))
-            .locations([Location::registry("ghcr.io"), Location::registry("docker.io")]);
-        let error = manifest
-            .validate(false, Features::COMPILED)
-            .expect_err("two registries must be refused");
-        assert!(error.to_string().contains("multiple registry"), "{error}");
+    fn registry_config_carriers() {
+        let contents = "default_registry = \"ghcr.io\"\n";
+        let inline = Manifest::new().registries(contents);
+        assert_eq!(
+            inline.registry_config().expect("contents materialize").as_deref(),
+            Some(contents)
+        );
+
+        let path =
+            std::env::temp_dir().join(format!("omnia_registries_{}.toml", std::process::id()));
+        std::fs::write(&path, contents).expect("temp configuration should write");
+        let file = Manifest::new().registries(path.clone());
+        let read = file.registry_config();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(read.expect("path materializes").as_deref(), Some(contents));
+
+        assert_eq!(Manifest::new().registry_config().expect("none is fine"), None);
     }
 
     #[test]
@@ -751,7 +764,7 @@ mod tests {
     fn defaults_to_in_process() {
         let toml = r#"
             [[guest]]
-            id = "only"
+            name = "only"
             source.path = "./only.wasm"
         "#;
 
@@ -761,7 +774,7 @@ mod tests {
 
     #[test]
     fn reject_non_default_transport() {
-        let toml = "[[guest]]\nid = \"only\"\nsource.path = \"./only.wasm\"\n\n\
+        let toml = "[[guest]]\nname = \"only\"\nsource.path = \"./only.wasm\"\n\n\
              [transport]\ndefault = \"unix\"\n";
         let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
         assert!(
@@ -774,14 +787,14 @@ mod tests {
     fn parse_file() {
         let path =
             std::env::temp_dir().join(format!("omnia_manifest_ok_{}.toml", std::process::id()));
-        std::fs::write(&path, "[[guest]]\nid = \"only\"\nsource.path = \"./only.wasm\"\n")
+        std::fs::write(&path, "[[guest]]\nsource.path = \"./only.wasm\"\n")
             .expect("temp manifest should write");
 
-        let manifest = Manifest::from_config(&path).expect("manifest should load");
+        let manifest = Manifest::load(&path).expect("manifest should load");
         let _ = std::fs::remove_file(&path);
 
         assert_eq!(manifest.guests.len(), 1);
-        assert_eq!(manifest.guests[0].id, "only");
+        assert_eq!(manifest.guests[0].name, "only", "the file's stem names the guest");
         let SourceSpec::Path(source) = &manifest.guests[0].source else {
             panic!("expected path source");
         };
@@ -790,8 +803,8 @@ mod tests {
 
     #[test]
     fn parse_command_flag() {
-        let toml = "[[guest]]\nid = \"helper\"\nsource.path = \"./helper.wasm\"\n\n\
-             [[guest]]\nid = \"app\"\nsource.path = \"./app.wasm\"\ncommand = true\n";
+        let toml = "[[guest]]\nname = \"helper\"\nsource.path = \"./helper.wasm\"\n\n\
+             [[guest]]\nname = \"app\"\nsource.path = \"./app.wasm\"\ncommand = true\n";
         let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
         manifest.validate(false, Features::COMPILED).expect("one marked guest validates");
         assert!(!manifest.guests[0].command, "the flag defaults to false");
@@ -810,14 +823,68 @@ mod tests {
     }
 
     #[test]
-    fn reject_duplicate_guest_ids() {
-        let toml = "[[guest]]\nid = \"same\"\nsource.path = \"./a.wasm\"\n\n\
-             [[guest]]\nid = \"same\"\nsource.path = \"./b.wasm\"\n";
+    fn reject_duplicate_guest_names() {
+        let toml = "[[guest]]\nname = \"same\"\nsource.path = \"./a.wasm\"\n\n\
+             [[guest]]\nname = \"same\"\nsource.path = \"./b.wasm\"\n";
         let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
         let error = manifest
             .validate(false, Features::COMPILED)
-            .expect_err("duplicate guest ids must be rejected");
-        assert!(error.to_string().contains("duplicate [[guest]] id `same`"), "{error}");
+            .expect_err("duplicate guest names must be rejected");
+        assert!(error.to_string().contains("duplicate [[guest]] name `same`"), "{error}");
+    }
+
+    // Two entries reading files of the same stem collide on the derived
+    // name, and a `name` on one of them resolves it.
+    #[test]
+    fn name_from_stem() {
+        let toml = "[[guest]]\nsource.path = \"./a/echo.wasm\"\n\n\
+             [[guest]]\nsource.path = \"./b/echo.wasm\"\n";
+        let mut manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
+        assert_eq!(manifest.guests[0].name, "", "the parser derives nothing");
+        manifest.resolve_names();
+        assert_eq!(manifest.guests[0].name, "echo");
+        assert_eq!(manifest.guests[1].name, "echo");
+        let error = manifest
+            .validate(false, Features::COMPILED)
+            .expect_err("two `echo` guests must be rejected");
+        assert!(error.to_string().contains("duplicate [[guest]] name `echo`"), "{error}");
+
+        let toml = "[[guest]]\nsource.path = \"./a/echo.wasm\"\n\n\
+             [[guest]]\nname = \"other\"\nsource.path = \"./b/echo.wasm\"\n";
+        let mut manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
+        manifest.resolve_names();
+        manifest.validate(false, Features::COMPILED).expect("distinct names validate");
+        assert_eq!(manifest.command_guest(), None);
+        assert_eq!(manifest.guests[1].name, "other", "a given name is kept");
+    }
+
+    // Only a path derives a name; an entry nothing names is refused, not
+    // registered under the empty identity.
+    #[test]
+    fn reject_unnamed_guest() {
+        let toml = "[[guest]]\nsource.oci = \"ghcr.io/acme/echo@sha256:00\"\n";
+        let mut manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
+        manifest.resolve_names();
+        let error = manifest
+            .validate(false, Features::COMPILED)
+            .expect_err("an unnamed guest must be rejected");
+        assert!(error.to_string().contains("names no guest"), "{error}");
+
+        let error = Manifest::new()
+            .guest(GuestEntry::new("", b"\0asm"))
+            .validate(false, Features::COMPILED)
+            .expect_err("an unnamed embedded guest must be rejected");
+        assert!(error.to_string().contains("names no guest"), "{error}");
+    }
+
+    #[test]
+    fn embedded_named_by_stem() {
+        let entry = GuestEntry::embedded(
+            "/build/target/wasm32-wasip2/release/examples/engine.wasm",
+            b"\0asm",
+        );
+        assert_eq!(entry.name, "engine");
+        assert!(matches!(entry.source, SourceSpec::Bytes(_)));
     }
 
     #[test]
@@ -863,25 +930,13 @@ mod tests {
                 name: ".".to_owned(),
                 path: PathBuf::from("workspace"),
                 writable: true,
-            }])
-            .link(["omnia:link/echo"])
-            .link(["omnia:shared/log"]);
+            }]);
 
-        manifest
-            .validate(
-                false,
-                Features {
-                    plugin: false,
-                    link: true,
-                },
-            )
-            .expect("manifest should validate");
+        manifest.validate(false, Features::COMPILED).expect("manifest should validate");
         assert_eq!(manifest.guests.len(), 2);
         assert_eq!(manifest.mounts.len(), 1);
         assert_eq!(manifest.guests[0].routes.http, ["/router"]);
         assert_eq!(manifest.guests[0].routes.messaging, ["jobs.>"]);
         assert_eq!(manifest.guests[1].routes.websocket, ["events.*"]);
-        assert!(manifest.link_interfaces().contains("omnia:link/echo"));
-        assert!(manifest.link_interfaces().contains("omnia:shared/log"));
     }
 }

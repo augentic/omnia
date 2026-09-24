@@ -1,25 +1,26 @@
 //! A manifest-driven command deployment run over a backend bundle.
 
-use std::path::{Path, PathBuf};
-
 use anyhow::{Context as _, Result};
 use omnia::{
-    DeploymentBuilder, ExitStatus, GuestEntry, Host, LevelFilter, Location, Manifest,
-    ManifestSource, Mode, Mount, Plugins, Provides, Runtime, Server, SourceSpec, StoreCtx,
-    WasiPlugins, Wiring,
+    DeploymentBuilder, ExitStatus, GuestEntry, Host, LevelFilter, Manifest, ManifestSource, Mode,
+    Mount, Provides, RegistryConfig, Runtime, Server, SourceSpec, StoreCtx, Wiring,
 };
 use omnia_wasi_otel::WasiOtel;
 
-/// One command-mode deployment: guests, mounts, arguments, the link
-/// interfaces the host mediates, plugin locations, the tracing level, and
-/// the directory the `.` path location serves.
+/// One command-mode deployment: guests, mounts, arguments, registries, and the tracing level.
+///
+/// What guests call between themselves is read off their components,
+/// declared nowhere; `registries` is the routing a package load naming no
+/// registry falls back on.
 ///
 /// Built from nothing, or as an overlay on the manifest a production
 /// `runtime!` compiled in (`Deployment::from(runtime::manifest())`): the
 /// builder methods add to that base, `command` re-marks its command guest,
-/// `path_root` rewrites its `.` path location. Drive it through the
-/// generated wiring with [`run_with`](Self::run_with), or link hosts by hand
-/// with [`run`](Self::run).
+/// and a `mount` sharing a base mount's name replaces it (last wins), so a
+/// test serves the binary's `.` root from a scratch directory. Drive it
+/// through the generated wiring with [`run_with`](Self::run_with), or link
+/// hosts by hand with [`run`](Self::run); either way the guest loader is
+/// assembly's, resolving path loads against the mounts.
 ///
 /// ```no_run
 /// use omnia::ExitStatus;
@@ -29,10 +30,8 @@ use omnia_wasi_otel::WasiOtel;
 /// let scratch = scratch();
 /// std::fs::copy(plugin, scratch.path().join("plugin.wasm"))?;
 /// let status = Deployment::new()
-///     .link(["acme:tools/ops"])
 ///     .guest("requester", requester)
 ///     .mount(scratch.mount(false))
-///     .path_root(scratch.path())
 ///     .run(Backends::defaults().await, |_| Ok(()))
 ///     .await?;
 /// assert_eq!(status, ExitStatus::SUCCESS);
@@ -46,10 +45,8 @@ pub struct Deployment {
     command: Option<String>,
     mounts: Vec<Mount>,
     args: Vec<String>,
-    link: Vec<String>,
-    locations: Vec<Location>,
+    registries: Option<RegistryConfig>,
     level: Option<LevelFilter>,
-    path_root: Option<PathBuf>,
 }
 
 impl From<ManifestSource> for Deployment {
@@ -68,22 +65,24 @@ impl Deployment {
         Self::default()
     }
 
-    /// Adds a guest under `id` from a component path or embedded bytes.
+    /// Adds a guest under `name` from a component path or embedded bytes.
     #[must_use]
-    pub fn guest(mut self, id: impl Into<String>, source: impl Into<SourceSpec>) -> Self {
-        self.guests.push(GuestEntry::new(id, source));
+    pub fn guest(mut self, name: impl Into<String>, source: impl Into<SourceSpec>) -> Self {
+        self.guests.push(GuestEntry::new(name, source));
         self
     }
 
-    /// Marks `id` as the `wasi:cli/run` target (unmarking any the base
-    /// manifest marked); without it the sole exporter is the catch-all.
+    /// Marks the guest `name` as the `wasi:cli/run` target (unmarking any
+    /// the base manifest marked); without it the sole exporter is the
+    /// catch-all.
     #[must_use]
-    pub fn command(mut self, id: impl Into<String>) -> Self {
-        self.command = Some(id.into());
+    pub fn command(mut self, name: impl Into<String>) -> Self {
+        self.command = Some(name.into());
         self
     }
 
-    /// Preopens `mount` into the guest sandbox.
+    /// Preopens `mount` into the guest sandbox, replacing a base mount of
+    /// the same name.
     #[must_use]
     pub fn mount(mut self, mount: Mount) -> Self {
         self.mounts.push(mount);
@@ -104,17 +103,11 @@ impl Deployment {
         self
     }
 
-    /// Interfaces the host mediates between guests.
+    /// The wasm-pkg configuration package loads route through, replacing the
+    /// base manifest's.
     #[must_use]
-    pub fn link<S: Into<String>>(mut self, interfaces: impl IntoIterator<Item = S>) -> Self {
-        self.link.extend(interfaces.into_iter().map(Into::into));
-        self
-    }
-
-    /// Plugin acquisition locations (`[[plugin.location]]`).
-    #[must_use]
-    pub fn locations(mut self, locations: impl IntoIterator<Item = Location>) -> Self {
-        self.locations.extend(locations);
+    pub fn registries(mut self, config: impl Into<RegistryConfig>) -> Self {
+        self.registries = Some(config.into());
         self
     }
 
@@ -130,42 +123,23 @@ impl Deployment {
         self
     }
 
-    /// Serves path loads (`Location::Path`) from `dir` as the `.` location,
-    /// replacing the base manifest's `.` root when it declares one.
-    #[must_use]
-    pub fn path_root(mut self, dir: impl AsRef<Path>) -> Self {
-        self.path_root = Some(dir.as_ref().to_path_buf());
-        self
-    }
-
     /// The manifest this overlay describes.
     ///
     /// # Errors
     ///
-    /// Returns an error if a `config:` base manifest cannot be loaded.
+    /// Returns an error if a `manifest:` base manifest cannot be loaded.
     pub fn manifest(&self) -> Result<Manifest> {
         let base = self.base.clone().map(ManifestSource::into_manifest).transpose()?;
-        let mut manifest = base
-            .unwrap_or_default()
-            .mounts(self.mounts.iter().cloned())
-            .link(self.link.iter().cloned())
-            .locations(self.locations.iter().cloned());
+        let mut manifest = base.unwrap_or_default().mounts(self.mounts.iter().cloned());
+        if let Some(registries) = &self.registries {
+            manifest = manifest.registries(registries.clone());
+        }
         for guest in &self.guests {
             manifest = manifest.guest(guest.clone());
         }
         if let Some(command) = &self.command {
             for guest in &mut manifest.guests {
-                guest.command = guest.id == *command;
-            }
-        }
-        if let Some(root) = &self.path_root {
-            let dot = manifest.plugin.locations.iter_mut().find_map(|location| match location {
-                Location::Path { name, path } if name == "." => Some(path),
-                _ => None,
-            });
-            match dot {
-                Some(path) => path.clone_from(root),
-                None => manifest.plugin.locations.push(Location::path(".", root.clone())),
+                guest.command = guest.name == *command;
             }
         }
         Ok(manifest)
@@ -181,31 +155,27 @@ impl Deployment {
     }
 
     /// Assembles the runtime by hand: builds the deployment, links the
-    /// plugin host when locations are declared and the caller's hosts
-    /// through `link`, installs the declared locations, and wires the
-    /// link serve side.
+    /// caller's hosts through `link`, and assembles — which links the guest
+    /// loader, installs the mounts and registries as its policy, and serves
+    /// every guest's linked exports.
     ///
     /// # Errors
     ///
-    /// Returns an error if the deployment cannot be built or linked, a path
-    /// location cannot be opened, or the link serve side cannot be wired.
+    /// Returns an error if the deployment cannot be built, linked, or
+    /// assembled.
     pub async fn boot<B>(
         &self, backends: B, link: impl FnOnce(&mut omnia::Deployment<StoreCtx<B>>) -> Result<()>,
     ) -> Result<Runtime<B>>
     where
         B: Clone + Send + Sync + 'static,
     {
-        let manifest = self.manifest()?;
-        let link_loader = !manifest.plugin.locations.is_empty();
-        let mut deployment =
-            self.builder(manifest).build::<StoreCtx<B>>().await.context("building deployment")?;
-        if link_loader {
-            deployment.host::<WasiPlugins, B>().context("linking the plugins host")?;
-        }
+        let mut deployment = self
+            .builder(self.manifest()?)
+            .build::<StoreCtx<B>>()
+            .await
+            .context("building deployment")?;
         link(&mut deployment).context("linking hosts")?;
-        let runtime = deployment.assemble(backends).await?;
-        Plugins::install_declared(&runtime)?;
-        Ok(runtime)
+        deployment.assemble(backends).await
     }
 
     /// Boots by hand, drives the command guest once, and shuts the runtime
@@ -249,8 +219,8 @@ impl Deployment {
     }
 
     /// Drives the command guest once through a production `runtime!`'s
-    /// wiring (`runtime::Hooks`) over `backends` — the same `link`, `extend`
-    /// and `serve` the binary runs, connecting nothing.
+    /// wiring (`runtime::Hooks`) over `backends` — the same `link` and
+    /// `serve` the binary runs, connecting nothing.
     ///
     /// # Errors
     ///

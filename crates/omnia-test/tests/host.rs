@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
-use omnia::{ExitStatus, GuestId, Location, Runtime};
+use omnia::{ExitStatus, GuestId, Runtime};
 use omnia_test::host::{Backends, Deployment, ScriptedModel, scratch};
 use omnia_test::{Exchange, SeenFormat};
 use omnia_wasi_blobstore::WasiBlobstoreCtx as _;
@@ -17,7 +17,10 @@ use omnia_wasi_model::WasiModel;
 use omnia_wasi_otel::WasiOtel;
 
 // A production `runtime!` as an embedder would write it: the compiled-in
-// deployment and its hosts, connected from the environment under `main`.
+// hosts, connected from the environment under `main`. The macro embeds a
+// `guests:` entry with `include_bytes!`, which takes a literal path, so the
+// guest a suite names by its `test_programs` path constant joins through
+// the overlay instead.
 mod production {
     use omnia_wasi_keyvalue::{KeyValueDefault, WasiKeyValue};
     use omnia_wasi_model::{ModelDefault, WasiModel};
@@ -25,7 +28,6 @@ mod production {
 
     omnia::runtime!({
         mode: command,
-        guests: [{ id: "echo", source: test_programs::MODEL_ECHO_TEXT }],
         hosts: {
             WasiModel: ModelDefault,
             WasiKeyValue: KeyValueDefault,
@@ -34,18 +36,14 @@ mod production {
     });
 }
 
-// The same shape with a plugin seam and a `.` path location the binary
-// would serve from a directory that does not exist under test.
+// The same shape with a `.` mount the binary would serve path loads from —
+// a directory that does not exist under test.
 mod production_plugins {
     use omnia_wasi_otel::{OtelDefault, WasiOtel};
 
     omnia::runtime!({
         mode: command,
-        link: { interfaces: ["omnia-test:link/ops"] },
-        plugin: {
-            locations: [{ name: ".", path: "/nonexistent/adapters" }],
-        },
-        guests: [{ id: "requester", source: test_programs::PLUGINS_LOAD_PATH }],
+        mounts: [{ name: ".", path: "/nonexistent/adapters" }],
         hosts: { WasiOtel: OtelDefault },
     });
 }
@@ -57,6 +55,7 @@ async fn runtime_overlay() {
     let _ = (production::main, production::run);
     let backends = Backends::defaults().await.model(ScriptedModel::answering(["second"]));
     let status = Deployment::from(production::manifest())
+        .guest("echo", test_programs::MODEL_ECHO_TEXT)
         .run_with::<production::Hooks, _>(backends.clone())
         .await
         .expect("deployment runs");
@@ -68,20 +67,24 @@ async fn runtime_overlay() {
     backends.model.assert_exhausted();
 }
 
+// The overlay's `.` mount stands in for the binary's: mounts dedup by name,
+// last wins, before any directory is opened, so the nonexistent production
+// root is never touched and path loads resolve against the scratch directory.
 #[tokio::test]
-async fn path_root() {
+async fn overlay_mount() {
     let _ = (production_plugins::main, production_plugins::run);
     let scratch = scratch();
     std::fs::copy(test_programs::LINK_ECHOER, scratch.path().join("plugin.wasm"))
         .expect("staging the loadable echoer");
 
     let deployment = Deployment::from(production_plugins::manifest())
-        .mount(scratch.mount(false))
-        .path_root(scratch.path());
+        .guest("requester", test_programs::PLUGINS_LOAD_PATH)
+        .mount(scratch.mount(false));
+    let manifest = deployment.manifest().expect("inline base resolves");
     assert_eq!(
-        deployment.manifest().expect("inline base resolves").plugin.locations,
-        [Location::path(".", scratch.path())],
-        "the overlay replaces the binary's `.` root rather than adding a second"
+        manifest.mounts.iter().map(|mount| mount.path.as_path()).collect::<Vec<_>>(),
+        [std::path::Path::new("/nonexistent/adapters"), scratch.path()],
+        "the overlay's `.` mount follows the binary's, so it wins the dedup"
     );
 
     let status = deployment
@@ -163,7 +166,6 @@ async fn then_answers() {
 #[tokio::test]
 async fn link_pair() {
     let runtime = Deployment::new()
-        .link(["omnia-test:link/ops"])
         .guest("echoer", test_programs::LINK_ECHOER)
         .guest("full", test_programs::LINK_FULL)
         .boot(Backends::defaults().await, |_| Ok(()))
@@ -175,17 +177,17 @@ async fn link_pair() {
     runtime.shutdown();
 }
 
+// The `.` mount is the root path loads resolve against; nothing else opts
+// the deployment into the loader.
 #[tokio::test]
-async fn path_root_plugins() {
+async fn mount_plugins() {
     let scratch = scratch();
     std::fs::copy(test_programs::LINK_ECHOER, scratch.path().join("plugin.wasm"))
         .expect("staging the loadable echoer");
 
     let status = Deployment::new()
-        .link(["omnia-test:link/ops"])
         .guest("requester", test_programs::PLUGINS_LOAD_PATH)
         .mount(scratch.mount(false))
-        .path_root(scratch.path())
         .run(Backends::defaults().await, |deployment| {
             deployment.host::<WasiOtel, Backends>()?;
             Ok(())

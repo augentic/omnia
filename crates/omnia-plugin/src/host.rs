@@ -58,8 +58,11 @@ pub struct WasiPluginsCtxView {
 impl From<loader::Location> for Origin {
     fn from(location: loader::Location) -> Self {
         match location {
-            loader::Location::Registry(registry) => Self::Registry(registry),
+            loader::Location::Registry(loader::RegistryRef { package, endpoint }) => {
+                Self::Registry { package, endpoint }
+            }
             loader::Location::Path(path) => Self::Path(path),
+            loader::Location::Declared(name) => Self::Declared(name),
         }
     }
 }
@@ -77,16 +80,16 @@ impl From<LoadError> for Error {
 
 impl<T> loader::HostWithStore<T> for WasiPlugins {
     async fn load(
-        accessor: &Accessor<T, Self>, package: String, from: loader::Location,
-        digest: Option<String>,
+        accessor: &Accessor<T, Self>, from: loader::Location, digest: Option<String>,
     ) -> Result<loader::Plugin, Error> {
+        let from = Origin::from(from);
         let plugins = accessor
             .with(|mut store| store.get().plugins)
-            .ok_or_else(|| LoadError::no_plugins(&package))?;
-        let plugin = plugins.load(&package, from.into(), digest.as_deref()).await?;
+            .ok_or_else(|| LoadError::no_plugins(from.label()))?;
+        let plugin = plugins.load(from, digest.as_deref()).await?;
         Ok(loader::Plugin {
             id: plugin.id().to_string(),
-            digest: plugin.digest().to_owned(),
+            digest: plugin.digest().map(str::to_owned),
         })
     }
 }
