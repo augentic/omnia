@@ -47,7 +47,7 @@ fromenv.workspace = true
 futures.workspace = true
 http.workspace = true
 opentelemetry = { workspace = true, features = ["metrics", "trace"] }
-opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["grpc-tonic", "metrics", "trace"], optional = true }
+opentelemetry-otlp = { version = "0.33.0", default-features = false, features = ["grpc-tonic", "metrics", "trace"], optional = true }
 opentelemetry_sdk = { workspace = true, features = ["metrics", "rt-tokio", "trace"] }
 pastey.workspace = true
 serde.workspace = true
