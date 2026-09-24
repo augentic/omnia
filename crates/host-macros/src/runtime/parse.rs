@@ -478,20 +478,27 @@ fn parse_digest(input: ParseStream) -> Result<[u8; DIGEST_LEN]> {
         )
     };
     let hex = value.strip_prefix("sha256:").ok_or_else(|| malformed("missing `sha256:`"))?;
-    if !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(malformed("not hexadecimal"));
-    }
     if hex.len() != DIGEST_LEN * 2 {
         return Err(malformed(&format!("got {} hex characters", hex.len())));
     }
     let mut bytes = [0; DIGEST_LEN];
-    for (byte, pair) in bytes.iter_mut().zip(hex.as_bytes().chunks_exact(2)) {
-        // Both characters are ASCII hex digits, so the pair is valid UTF-8
-        // and parses.
-        *byte = u8::from_str_radix(std::str::from_utf8(pair).map_err(|_| malformed("not hexadecimal"))?, 16)
-            .map_err(|_| malformed("not hexadecimal"))?;
+    let (pairs, _) = hex.as_bytes().as_chunks::<2>();
+    for (byte, &[high, low]) in bytes.iter_mut().zip(pairs) {
+        let (Some(high), Some(low)) = (nibble(high), nibble(low)) else {
+            return Err(malformed("not hexadecimal"));
+        };
+        *byte = (high << 4) | low;
     }
     Ok(bytes)
+}
+
+const fn nibble(digit: u8) -> Option<u8> {
+    match digit {
+        b'0'..=b'9' => Some(digit - b'0'),
+        b'a'..=b'f' => Some(digit - b'a' + 10),
+        b'A'..=b'F' => Some(digit - b'A' + 10),
+        _ => None,
+    }
 }
 
 /// Parse a `path:` value the expansion hands to `include_bytes!`, which

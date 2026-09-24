@@ -42,8 +42,9 @@ impl FromStr for Digest {
         };
         ensure!(hex.len() == HEX_LEN, "digest `{digest}` is not {HEX_LEN} hex characters");
         let mut hash = [0u8; 32];
-        for (byte, pair) in hash.iter_mut().zip(hex.as_bytes().chunks_exact(2)) {
-            let (Some(high), Some(low)) = (nibble(pair[0]), nibble(pair[1])) else {
+        let (pairs, _) = hex.as_bytes().as_chunks::<2>();
+        for (byte, &[high, low]) in hash.iter_mut().zip(pairs) {
+            let (Some(high), Some(low)) = (nibble(high), nibble(low)) else {
                 bail!("digest `{digest}` is not {HEX_LEN} hex characters");
             };
             *byte = (high << 4) | low;
@@ -100,7 +101,8 @@ mod tests {
 
     #[test]
     fn parse_canonicalizes_case() {
-        let parsed: Digest = EMPTY.to_ascii_uppercase().replace("SHA256", "sha256").parse().expect("uppercase hex");
+        let parsed: Digest =
+            EMPTY.to_ascii_uppercase().replace("SHA256", "sha256").parse().expect("uppercase hex");
         assert_eq!(parsed, Digest::of(b""));
         assert_eq!(parsed.to_string(), EMPTY, "the spelling is lowercase whatever was parsed");
     }

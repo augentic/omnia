@@ -2,6 +2,8 @@
 //!
 //! [wasm-pkg-client]: https://github.com/bytecodealliance/wasm-pkg-tools
 
+use std::io;
+
 use anyhow::{Context as _, Result, bail};
 use futures::future::BoxFuture;
 use futures::{FutureExt as _, TryStreamExt as _};
@@ -93,7 +95,9 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
         let release =
             self.resolve_release(&client, &registry, package, &package_ref, &version).await?;
         let expected: Digest = release.content_digest.to_string().parse().map_err(|error| {
-            LoadError::Refused(format!("the registry digest for `{package}` is unsupported: {error}"))
+            LoadError::Refused(format!(
+                "the registry digest for `{package}` is unsupported: {error}"
+            ))
         })?;
 
         if let Some(bytes) = self.stored(package, expected).await {
@@ -227,13 +231,22 @@ impl<S: ContentStore + ReleaseStore> RegistrySource for RegistryClient<S> {
 /// registry misbehaving — rather than an authoritative registry answer
 /// (not found, yanked, malformed input), which must never be papered over
 /// by a stored record.
-const fn is_network_failure(error: &wasm_pkg_client::Error) -> bool {
-    matches!(
-        error,
-        wasm_pkg_client::Error::RegistryError(_)
-            | wasm_pkg_client::Error::RegistryMetadataError(_)
-            | wasm_pkg_client::Error::IoError(_)
-    )
+fn is_network_failure(error: &wasm_pkg_client::Error) -> bool {
+    match error {
+        wasm_pkg_client::Error::RegistryError(source)
+        | wasm_pkg_client::Error::RegistryMetadataError(source) => !is_not_found(source),
+        wasm_pkg_client::Error::IoError(source) => source.kind() != io::ErrorKind::NotFound,
+        _ => false,
+    }
+}
+
+// A backend that serves releases from storage (wasm-pkg-client's `local`)
+// reports a version it lacks as an I/O `NotFound` inside a registry error;
+// that is the registry's answer, not a fault on the way to it.
+fn is_not_found(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause.downcast_ref::<io::Error>().is_some_and(|io| io.kind() == io::ErrorKind::NotFound)
+    })
 }
 
 /// Drain `stream` into memory; callers hash the whole buffer anyway.
@@ -304,7 +317,9 @@ mod tests {
     // Malformed TOML fails the install, not the first load.
     #[test]
     fn malformed_config() {
-        let error = RegistryClient::from_toml("[namespace_registries").expect_err("refused");
+        let Err(error) = RegistryClient::from_toml("[namespace_registries") else {
+            panic!("malformed TOML must be refused");
+        };
         assert!(error.to_string().contains("`registries` configuration"), "{error}");
     }
 
@@ -313,8 +328,8 @@ mod tests {
         let (package_ref, version) = parse_package("acme:tool@1.2.3").expect("exact reference");
         assert_eq!(package_ref.to_string(), "acme:tool");
         assert_eq!(version.to_string(), "1.2.3");
-        assert!(parse_package("acme:tool").is_err());
-        assert!(parse_package("acme:tool@latest").is_err());
-        assert!(parse_package("tool@1.2.3").is_err());
+        for malformed in ["acme:tool", "acme:tool@latest", "tool@1.2.3"] {
+            parse_package(malformed).expect_err("refused");
+        }
     }
 }

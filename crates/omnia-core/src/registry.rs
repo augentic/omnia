@@ -201,7 +201,12 @@ impl<T: WasiView + 'static> Registry<T> {
         seam.polyfill(&engine, &mut linker, &loaded)?;
 
         let mut guests = BTreeMap::new();
-        for LoadedGuest { id, component, digest } in loaded {
+        for LoadedGuest {
+            id,
+            component,
+            digest,
+        } in loaded
+        {
             let instance_pre = linker
                 .instantiate_pre(&component)
                 .map_err(anyhow::Error::from)

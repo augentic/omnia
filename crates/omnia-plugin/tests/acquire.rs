@@ -248,11 +248,8 @@ async fn release_scoped() {
 
     let mut second = defaulting_to("second.test");
     add_local_registry(&mut second, "second.test", second_root.path());
-    let bytes = RegistryClient::new(second)
-        .cached(store)
-        .acquire(PACKAGE)
-        .await
-        .expect("second acquires");
+    let bytes =
+        RegistryClient::new(second).cached(store).acquire(PACKAGE).await.expect("second acquires");
     assert_eq!(bytes, b"second registry bytes");
 }
 

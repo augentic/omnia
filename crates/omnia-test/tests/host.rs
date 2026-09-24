@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
-use omnia::{ExitStatus, GuestId, Runtime};
+use omnia::{Digest, ExitStatus, GuestEntry, GuestId, Runtime, StoreCtx};
 use omnia_test::host::{Backends, Deployment, ScriptedModel, scratch};
 use omnia_test::{Exchange, SeenFormat};
 use omnia_wasi_blobstore::WasiBlobstoreCtx as _;
@@ -193,6 +193,34 @@ async fn on_demand_guest() {
         .await
         .expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+}
+
+// A boot guest's `digest` pin is checked as the deployment builds: the
+// bytes' own digest runs, any other fails startup before the guest loads.
+#[tokio::test]
+async fn pinned_boot_guest() {
+    fn otel_only(deployment: &mut omnia::Deployment<StoreCtx<Backends>>) -> Result<()> {
+        deployment.host::<WasiOtel, Backends>()?;
+        Ok(())
+    }
+    let bytes = std::fs::read(test_programs::COMMAND_EXIT_MAP).expect("reading the guest");
+    let pinned = |digest: Digest| {
+        Deployment::new()
+            .entry(GuestEntry::new("cli", test_programs::COMMAND_EXIT_MAP).digest(digest))
+            .args(["ok"])
+    };
+
+    let status = pinned(Digest::of(&bytes))
+        .run(Backends::defaults().await, otel_only)
+        .await
+        .expect("the pin matches the guest's bytes");
+    assert_eq!(status, ExitStatus::SUCCESS);
+
+    let error = pinned(Digest::of(b"some other component"))
+        .run(Backends::defaults().await, otel_only)
+        .await
+        .expect_err("the pin names other bytes");
+    assert!(format!("{error:#}").contains("not its declared digest"), "{error:#}");
 }
 
 /// A keyvalue backend that notes every bucket opened through it, then hands

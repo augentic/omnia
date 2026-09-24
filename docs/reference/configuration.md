@@ -91,15 +91,26 @@ source.path = "./responder.wasm"    # named by the file's stem: `responder`
 routes.messaging = ["events.build.>"]
 command = true                      # command-mode target (at most one guest)
 
+[[guest]]
+name = "tool"                       # admitted when a guest first `load`s "tool",
+source.path = "./tool.wasm"         # not at boot; takes no routes or command
+on_demand = true
+digest = "sha256:…"                 # optional pin the bytes must hash to
+
+[[guest]]
+name = "adapter"                    # a package source always loads on demand,
+source.package = "acme:adapter@1.2.0"   # fetched through [registries]
+on_demand = true
+
 # --- Mounts (optional, repeatable) ------------------------------------
 [[mount]]
-name = "."                          # guest-visible preopen name; also the root
-path = "../workspace"               # guest path loads of `./x.wasm` resolve against
+name = "."                          # guest-visible preopen name
+path = "../workspace"
 writable = true                     # omit for read-only (default)
 
 # --- Registries (optional) --------------------------------------------
 [registries]
-path = "./wasm-pkg.toml"            # wasm-pkg client configuration routing package loads
+path = "./wasm-pkg.toml"            # wasm-pkg client configuration routing package sources
 
 # --- Transport (optional) ----------------------------------------------
 [transport]
@@ -108,11 +119,13 @@ default = "in-process"              # in-memory routing; the only implemented ki
 
 Field notes:
 
-- **`guest.name`** — the guest's identity (`GuestId`), opaque to the runtime core; routing, link dispatch, and a guest's `loader.load` of `declared("name")` refer to it. Omitted, the `source.path` file's stem names the guest (`./guests/echo.wasm` is `echo`), the rule a path load applies too; give a name when the file is not called what callers dispatch to, or two files share a stem. Names are unique, and an entry nothing names (an `oci` source without `name`) is refused at startup. The retired `id` key is an unknown key.
-- **`guest.source`** — `source.path` is implemented; `source.oci` parses but is rejected with "not yet supported". A `runtime!` invocation's inline guest embeds its component instead (`path:` — see the [macro reference](runtime-macro.md#guest-entries-path-name-routes-command)).
+- **`guest.name`** — the guest's identity (`GuestId`), opaque to the runtime core; routing, link dispatch, and a guest's `loader.load("name")` refer to it. Omitted, the `source.path` file's stem names the guest (`./guests/echo.wasm` is `echo`); give a name when the file is not called what callers dispatch to, or two files share a stem. Names are unique, and an entry nothing names (a `package` source without `name`) is refused at startup. The retired `id` key is an unknown key.
+- **`guest.source`** — `source.path` is a local `.wasm` (or pre-compiled `.bin`) relative to the manifest; `source.package` is an exact `namespace:name@version` fetched through `[registries]` on first load, and must be marked `on_demand`. A `runtime!` invocation's inline guest embeds its component instead (`path:` — see the [macro reference](runtime-macro.md#guest-entries-pathpackage-name-routes-command-on_demand-digest)).
+- **`guest.on_demand`** — the guest is admitted when a guest first `loader.load`s it by name (`omnia:plugins/loader`) rather than at boot. It is still a `[[guest]]` entry — the loader admits no name the manifest does not declare, and a guest can name neither a path nor a package of its own — but it takes no `routes` and cannot be the `command` guest, since trigger routing is built at boot. Requires a runtime built with the `loader` feature to be loadable.
+- **`guest.digest`** — the `sha256:<hex>` the source's bytes must hash to, checked before wasmtime sees them wherever they become a guest, at boot or on demand. Pin every on-demand `source.path` whose file could change between boot and first load — in particular one under a directory the deployment also mounts `writable`.
 - **What guests call between themselves** is declared nowhere. Each component says what it imports and exports; every interface outside the runtime's own `wasi:` and `omnia:` namespaces is relayed by the host to whichever guest exports it — including a guest registered after startup — and an import no guest exports fails at boot. A runtime built without the `link` feature leaves such imports unsatisfied. A `services` key is an unknown key.
 - **`guest.command`** — marks the guest command mode drives (its `wasi:cli/run`); at most one guest may carry it. Without a mark, the sole `wasi:cli/run` exporter is the catch-all — several unmarked exporters fail the run as ambiguous.
-- **`mount`** — preopened into *every* guest sandbox, and the roots the `omnia:plugins/loader` resolves a guest's path loads against: `./plugin.wasm` and a bare `plugin.wasm` read from the `.` mount, `adapters/x.wasm` from the mount named `adapters` (longest name wins). CLI `--mount` entries layer on top; a duplicate guest-visible name wins over the manifest, before any directory opens. A deployment mounting no directories refuses every path load, typed.
-- **`[registries]`** — the [wasm-pkg client configuration](https://github.com/bytecodealliance/wasm-pkg-tools) (`default_registry`, `namespace_registries`, `package_registry_overrides`, per-registry `[registry."..."]` backend settings) an exact `namespace:name@version` package load routes through when it names no registry of its own, as a `path` relative to the manifest. A package resolves to its package override, else its namespace's registry, else `default_registry`; a package routed nowhere, by a load naming no `endpoint`, is refused, naming its namespace, before any registry is dialled. A load that names its `endpoint` fetches from that registry regardless. The file is read and parsed when the deployment builds, so a missing or malformed one fails startup, not the first load. A runtime built without the `loader` feature refuses a manifest carrying `[registries]` at startup; a manifest without it refuses every endpoint-less package load, typed.
+- **`mount`** — preopened into *every* guest sandbox. A mount is a data grant only: the `omnia:plugins/loader` never reads code through one, so a writable mount is not a code-admission root. CLI `--mount` entries layer on top; a duplicate guest-visible name wins over the manifest, before any directory opens.
+- **`[registries]`** — the [wasm-pkg client configuration](https://github.com/bytecodealliance/wasm-pkg-tools) (`default_registry`, `namespace_registries`, `package_registry_overrides`, per-registry `[registry."..."]` backend settings) an on-demand `source.package` guest is fetched through, as a `path` relative to the manifest. A package resolves to its package override, else its namespace's registry, else `default_registry`; a package routed nowhere is refused, naming its namespace, before any registry is dialled. Nothing a loading guest passes names a registry — the manifest chooses both the package and where it comes from. The file is read and parsed when the deployment builds, so a missing or malformed one fails startup, not the first load. A runtime built without the `loader` feature refuses a manifest carrying `[registries]` at startup; a manifest without it refuses every package guest's load, typed.
 - **`guest.routes`** — inbound routes targeting the declaring guest, one list per trigger: `http` prefixes (longest prefix wins), `messaging` topics and `websocket` routes (NATS-style: `*` one token, `>` the rest). Route tables are aggregated across guests at load. If a trigger has no routes and exactly one guest exports its handler, that guest is the catch-all. CLI routes are not yet parsed; a sole `wasi:cli/run` exporter receives command-mode invocations.
 - **`transport`** — `in-process` (the default) is in-memory routing of lifted values to a fresh callee task. `unix`, `nats`, and `quic` are reserved for distributed dispatch and rejected at load today.

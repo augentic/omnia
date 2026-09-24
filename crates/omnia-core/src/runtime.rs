@@ -101,8 +101,8 @@ struct RuntimeInner<B: 'static> {
     // Command-mode guest identity; absent, command mode routes to
     // the sole static `wasi:cli/run` exporter.
     command_guest: Option<GuestId>,
-    // The deployment's resolved wasm-pkg configuration, read by the loader
-    // capability's install.
+    // The deployment's resolved wasm-pkg configuration, carried for an
+    // embedder that installs the loader capability on a runtime by hand.
     registry_config: Option<String>,
     // The run's selected tracing level and the level it falls back to; what
     // every store's `RUST_LOG` is built from.

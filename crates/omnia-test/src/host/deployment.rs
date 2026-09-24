@@ -66,7 +66,7 @@ impl Deployment {
 
     /// Adds a guest under `name` from a component path or embedded bytes.
     #[must_use]
-    pub fn guest(mut self, name: impl Into<String>, source: impl Into<SourceSpec>) -> Self {
+    pub fn guest(self, name: impl Into<String>, source: impl Into<SourceSpec>) -> Self {
         self.entry(GuestEntry::new(name, source))
     }
 

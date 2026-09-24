@@ -324,7 +324,10 @@ mod tests {
         for (literal, needle) in [
             ("md5:00", "missing `sha256:`"),
             ("sha256:abc", "got 3 hex characters"),
-            ("sha256:zz00000000000000000000000000000000000000000000000000000000000000", "not hexadecimal"),
+            (
+                "sha256:zz00000000000000000000000000000000000000000000000000000000000000",
+                "not hexadecimal",
+            ),
         ] {
             let error = syn::parse2::<Config>(quote!({
                 guests: [{ path: "app.wasm", digest: #literal }],

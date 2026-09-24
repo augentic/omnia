@@ -244,10 +244,7 @@ async fn loader_scripted_refusal_wins() {
     let loader = ScriptedLoader::default()
         .digest("tool", digest("ab"))
         .refuse("tool", plugins::Error::Unavailable("registry down".into()));
-    assert_eq!(
-        loader.load("tool").await,
-        Err(plugins::Error::Unavailable("registry down".into()))
-    );
+    assert_eq!(loader.load("tool").await, Err(plugins::Error::Unavailable("registry down".into())));
 }
 
 // An unhashed name attests with no digest whatever the default says.

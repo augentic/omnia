@@ -25,9 +25,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
-use omnia_core::{
-    CliRoutes, Digest, GuestId, HttpRoutes, PatternRoutes, ResolvedPreopen, Routes,
-};
+use omnia_core::{CliRoutes, Digest, GuestId, HttpRoutes, PatternRoutes, ResolvedPreopen, Routes};
 #[cfg(feature = "loader")]
 use omnia_plugin::{OnDemand, Origin};
 use serde::Deserialize;
@@ -171,8 +169,7 @@ impl Manifest {
         Ok(())
     }
 
-    // A `[[guest]]` that names no guest is named by its file's stem, the way a
-    // path load registers.
+    // A `[[guest]]` that names no guest is named by its file's stem.
     fn resolve_names(&mut self) {
         for guest in &mut self.guests {
             if guest.name.is_empty()
@@ -252,10 +249,13 @@ impl Manifest {
             .iter()
             .filter(|entry| entry.on_demand)
             .map(|entry| {
-                (GuestId::from(entry.name.as_str()), OnDemand {
-                    origin: Origin::from(&entry.source),
-                    digest: entry.digest,
-                })
+                (
+                    GuestId::from(entry.name.as_str()),
+                    OnDemand {
+                        origin: Origin::from(&entry.source),
+                        digest: entry.digest,
+                    },
+                )
             })
             .collect()
     }
@@ -613,7 +613,7 @@ pub struct GuestRoutes {
 impl GuestRoutes {
     /// Whether no trigger routes to the guest.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.http.is_empty() && self.messaging.is_empty() && self.websocket.is_empty()
     }
 }
@@ -1005,7 +1005,9 @@ mod tests {
         assert_eq!(manifest.guests[0].digest, DIGEST.parse().ok());
         assert!(manifest.guests[1].on_demand);
         assert_eq!(manifest.guests[1].digest, None);
-        assert!(matches!(&manifest.guests[2].source, SourceSpec::Package(p) if p == "acme:tool@1.2.3"));
+        assert!(
+            matches!(&manifest.guests[2].source, SourceSpec::Package(p) if p == "acme:tool@1.2.3")
+        );
 
         // Boot sources carry the boot guests alone.
         let sources = manifest.sources().expect("boot sources resolve");

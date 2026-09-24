@@ -98,7 +98,10 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
             GuestSource::Embedded { path, name: None } => {
                 quote! { omnia::GuestEntry::embedded(#path, include_bytes!(#path)) }
             }
-            GuestSource::Embedded { path, name: Some(name) } => {
+            GuestSource::Embedded {
+                path,
+                name: Some(name),
+            } => {
                 quote! { omnia::GuestEntry::new(#name, include_bytes!(#path)) }
             }
             GuestSource::Package { reference, name } => {

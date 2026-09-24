@@ -30,7 +30,7 @@ The `omnia.toml` file (or equivalent programmatic `omnia::Manifest`) declaring g
 
 ### Guest entry
 
-One guest a deployment declares: a `[[guest]]` table, a `runtime!` `guests:` entry, or an `omnia::GuestEntry`. Its `name` is the guest's identity (`GuestId`) — what routes and link dispatch address, and what a `declared("name")` load answers with; omitted, the component file's stem names it (`echo.wasm` is `echo`), the rule a path load applies too. A manifest file's entry reads its component at start (`source.path`); the macro's embeds it (`path:`).
+One guest a deployment declares: a `[[guest]]` table, a `runtime!` `guests:` entry, or an `omnia::GuestEntry`. Its `name` is the guest's identity (`GuestId`) — what routes and link dispatch address, and what a `load("name")` answers with; omitted, the component file's stem names it (`echo.wasm` is `echo`). A manifest file's entry reads its component from a file (`source.path`) or fetches a package (`source.package`); the macro's embeds it (`path:`) or names a package (`package:`). An entry loads at boot unless it is an [on-demand guest](#on-demand-guest).
 
 ### Registry
 
@@ -38,7 +38,7 @@ The runtime's map from each opaque guest identity (`GuestId`) to a pre-instantia
 
 ### Mount
 
-A host directory preopened into every guest sandbox (`[[mount]]` in the manifest, the macro's `mounts:` list, or `--mount` on the CLI). Read-only unless marked writable; the guest sees it under its guest-visible name via `wasi:filesystem` preopens. Mounts are also the roots the [guest loader](#guest-loader) resolves a guest's path loads against: `./plugin.wasm` reads from the `.` mount, `adapters/x.wasm` from the mount named `adapters`. Mounts dedup by name, last wins, before any directory opens — how a test overlays a binary's `.` root.
+A host directory preopened into every guest sandbox (`[[mount]]` in the manifest, the macro's `mounts:` list, or `--mount` on the CLI). Read-only unless marked writable; the guest sees it under its guest-visible name via `wasi:filesystem` preopens. A mount is a data grant only: the [guest loader](#guest-loader) never reads code through one. Mounts dedup by name, last wins, before any directory opens — how a test overlays a binary's `.` root.
 
 ### Dispatch (host-mediated)
 
@@ -58,15 +58,15 @@ Omnia's off-by-default `link` cargo feature: guest-to-guest dispatch via the `om
 
 ### Loader feature
 
-Omnia's off-by-default `loader` cargo feature: the [guest loader](#guest-loader) (`omnia-plugin`). Independent of the [`link` feature](#link-feature). With it, `Deployment::assemble` links the loader host and installs the deployment's [acquisition policy](#acquisition-policy); a deployment declaring `registries` is refused at startup without it.
+Omnia's off-by-default `loader` cargo feature: the [guest loader](#guest-loader) (`omnia-plugin`). Independent of the [`link` feature](#link-feature). With it, `Deployment::assemble` links the loader host and installs the deployment's [on-demand guests](#on-demand-guest) as the loader's table; a deployment declaring `registries` is refused at startup without it.
 
 ### Guest loader
 
-The `omnia:plugins/loader` host capability: a guest names a location — a registry package (with the registry to fetch from, or the deployment's default routing), a mount-relative path, or a guest the deployment `declared` — plus an optional sha256 pin, and the host acquires, verifies, validates, and registers it, returning a typed handle; a declared guest is attested, not fetched, and takes no pin. Request-only — component bytes never cross the interface, and the requester gains no lifecycle authority. A path load registers under its file's stem, as a [guest entry](#guest-entry) does. Ships behind omnia's `loader` feature; linked at assembly for every deployment alike, reachable only from worlds that import it. The requester surface — the `Plugins` capability trait and shared `Location`/`PluginRef`/`Digest` types — ships in `omnia-sdk`'s `plugins` module.
+The `omnia:plugins/loader` host capability: a guest names one of the deployment's declared guests — `load(name)` — and the host admits it from the source its `[[guest]]` entry declares if it is an [on-demand guest](#on-demand-guest) not yet active, or attests it if it is already active, returning a typed handle carrying the identity and content digest. An undeclared name is refused. Name-only — component bytes, paths, and registry endpoints never cross the interface, and the requester gains no lifecycle authority. Ships behind omnia's `loader` feature; linked at assembly for every deployment alike, reachable only from worlds that import it. The requester surface — the `Plugins` capability trait and the `Plugin`/`Digest`/`Error` types — ships in `omnia-sdk`'s `plugins` module.
 
-### Acquisition policy
+### On-demand guest
 
-How the loader turns a location into component bytes. The declared policy is deployment data — the [mounts](#mount) serve path loads and the `registries` configuration (the macro's `registries: include_str!(..)`, a manifest's `[registries] path`) is the default routing of a package load that names no registry — installed by `Deployment::assemble` through `Plugins::install_declared`; an embedder selects custom sources with `Deployment::loader(registry, path)` before assembly, never through runtime-core machinery. One slot per origin kind, filled by the built-in acquirers `PathMounts` (the mounts, read fresh on every load) and `RegistryClient` (exact package references, fetched from the registry the load names or routed by package override, namespace, then `default_registry` through the wasm-pkg configuration — a package routed nowhere is refused naming its namespace — optionally cached by hand in a `ContentStore` + `ReleaseStore` backend); a load names its `Origin` (a registry package, a mount-relative path, or a declared guest), routes structurally by kind, and an empty slot refuses typed.
+A [guest entry](#guest-entry) marked `on_demand` (`on_demand = true` in a manifest, `on_demand: true` in the macro): part of the deployment's allow-list like any other, but admitted when the [guest loader](#guest-loader) first names it rather than at boot. Its source is a file path (read fresh at that first load), embedded bytes, or an exact `namespace:name@version` package — a package source is always on demand — and its optional `digest` pin is checked before wasmtime sees the bytes. It takes no routes and is never the command guest, since trigger routing is built at boot. `Deployment::assemble` installs every on-demand entry as the loader's table (`Plugins::install`); a package source is fetched by the `RegistryClient` the deployment's `registries` configuration routes it through — package override, namespace, then `default_registry`; a package routed nowhere is refused naming its namespace — or by the custom `RegistrySource` an embedder selected with `Deployment::registry_source`, optionally cached in a `ContentStore` + `ReleaseStore` backend.
 
 ## Guest SDK (`omnia-sdk`)
 

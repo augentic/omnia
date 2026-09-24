@@ -15,9 +15,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
 use omnia::{
-    ChainCtx, DeploymentBuilder, Digest, ExitStatus, GuestArtifact, GuestEntry, GuestId,
-    LoadError, Manifest, Mode, PluginLoader as _, RegistryClient, RegistryConfig, RegistrySource,
-    Runtime, SourceSpec, StoreCtx,
+    ChainCtx, DeploymentBuilder, Digest, ExitStatus, GuestArtifact, GuestEntry, GuestId, LoadError,
+    Manifest, Mode, PluginLoader as _, RegistryClient, RegistryConfig, RegistrySource, Runtime,
+    SourceSpec, StoreCtx,
 };
 use omnia_test::host::{Backends, Scratch, scratch};
 use omnia_wasi_otel::WasiOtel;
@@ -123,9 +123,19 @@ async fn call_export(
     }
 }
 
-/// The digest the registry recorded for `guest`, if it is registered.
-fn recorded(runtime: &Runtime<Backends>, guest: &str) -> Option<Option<Digest>> {
-    runtime.registry().get(&GuestId::from(guest)).map(|entry| entry.digest())
+/// What the registry holds for a guest name.
+#[derive(Debug, PartialEq, Eq)]
+enum Registered {
+    Absent,
+    /// Active, with the digest recorded at admission (`None` if never hashed).
+    Active(Option<Digest>),
+}
+
+fn recorded(runtime: &Runtime<Backends>, guest: &str) -> Registered {
+    runtime
+        .registry()
+        .get(&GuestId::from(guest))
+        .map_or(Registered::Absent, |entry| Registered::Active(entry.digest()))
 }
 
 fn digest_of(path: &str) -> Digest {
@@ -173,16 +183,20 @@ fn echoer_package() -> GuestEntry {
 // bytes' digest.
 #[tokio::test]
 async fn plugins_load() {
-    let manifest =
-        requester(test_programs::PLUGINS_LOAD).guest(on_demand("plugin", test_programs::LINK_ECHOER));
+    let manifest = requester(test_programs::PLUGINS_LOAD)
+        .guest(on_demand("plugin", test_programs::LINK_ECHOER));
     let runtime = boot(manifest, &["plugin"]).await.expect("assembling runtime");
-    assert_eq!(recorded(&runtime, "plugin"), None, "an on-demand guest is absent until loaded");
+    assert_eq!(
+        recorded(&runtime, "plugin"),
+        Registered::Absent,
+        "an on-demand guest is absent until loaded"
+    );
 
     let status = runtime.run_command().await.expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
     assert_eq!(
         recorded(&runtime, "plugin"),
-        Some(Some(digest_of(test_programs::LINK_ECHOER))),
+        Registered::Active(Some(digest_of(test_programs::LINK_ECHOER))),
         "the load recorded the admitted bytes' digest"
     );
     runtime.shutdown();
@@ -217,7 +231,7 @@ async fn pin_mismatch() {
         .expect("assembling runtime");
     let status = runtime.run_command().await.expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
-    assert_eq!(recorded(&runtime, "plugin"), None, "nothing was admitted");
+    assert_eq!(recorded(&runtime, "plugin"), Registered::Absent, "nothing was admitted");
     runtime.shutdown();
 }
 
@@ -237,10 +251,10 @@ async fn plugins_load_package() {
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
     assert_eq!(
         recorded(&runtime, "plugin"),
-        Some(Some(digest_of(test_programs::LINK_ECHOER))),
+        Registered::Active(Some(digest_of(test_programs::LINK_ECHOER))),
         "the package registered under its declared name"
     );
-    assert_eq!(recorded(&runtime, ECHOER_PACKAGE), None);
+    assert_eq!(recorded(&runtime, ECHOER_PACKAGE), Registered::Absent);
     runtime.shutdown();
 }
 
@@ -300,14 +314,23 @@ async fn plugins_refused() {
         ("plugin", echoer_package(), "refused", "no registry routes `test:echoer`"),
         // A boot guest declared on demand under another name is still just
         // a name; the undeclared one refuses, naming it.
-        ("nonesuch", on_demand("other", test_programs::LINK_ECHOER), "refused", "no guest `nonesuch` is declared"),
+        (
+            "nonesuch",
+            on_demand("other", test_programs::LINK_ECHOER),
+            "refused",
+            "no guest `nonesuch` is declared",
+        ),
     ];
     for (name, entry, variant, needle) in rows {
         let manifest = requester(test_programs::PLUGINS_REFUSED).guest(entry);
         let runtime = boot(manifest, &[name, variant, needle]).await.expect("assembling runtime");
         let status = runtime.run_command().await.expect("deployment runs");
         assert_eq!(status, ExitStatus::SUCCESS, "row `{name}`: the requester's assertions held");
-        assert_eq!(recorded(&runtime, name), None, "row `{name}`: nothing was admitted");
+        assert_eq!(
+            recorded(&runtime, name),
+            Registered::Absent,
+            "row `{name}`: nothing was admitted"
+        );
         runtime.shutdown();
     }
 }
@@ -348,7 +371,7 @@ async fn plugins_unlinked() {
 
     let error = runtime.run_command().await.expect_err("the link call traps the requester");
     assert!(
-        recorded(&runtime, "noseam").is_some(),
+        recorded(&runtime, "noseam") != Registered::Absent,
         "the load succeeded before the call failed: {error:#}"
     );
     let detail = format!("{error:#}");
@@ -369,7 +392,11 @@ async fn plugins_host_only() {
 
     let status = runtime.run_command().await.expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's load held");
-    assert!(recorded(&runtime, "plugin").is_some(), "the host-only handler is registered");
+    assert_ne!(
+        recorded(&runtime, "plugin"),
+        Registered::Absent,
+        "the host-only handler is registered"
+    );
 
     let answer = invoke_ping(&runtime, "plugin", "hi").await.expect("host dispatch");
     assert_eq!(answer, "plugin pong: hi");
@@ -388,8 +415,12 @@ async fn plugins_mixed() {
 
     let status = runtime.run_command().await.expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
-    assert!(recorded(&runtime, "echoer").is_some(), "the link target is registered");
-    assert!(recorded(&runtime, "handler").is_some(), "the host-only handler is registered");
+    assert_ne!(recorded(&runtime, "echoer"), Registered::Absent, "the link target is registered");
+    assert_ne!(
+        recorded(&runtime, "handler"),
+        Registered::Absent,
+        "the host-only handler is registered"
+    );
 
     let answer =
         call_export(&runtime, "handler", "poke", "hi").await.expect("host dispatch of the handler");
@@ -426,19 +457,20 @@ async fn reload_after_deregister() {
     let scratch = scratch();
     let staged = stage(&scratch, "plugin.wasm", test_programs::LINK_ECHOER);
     // The requester guest is manifest ballast: these loads are host-driven.
-    let manifest = requester(test_programs::PLUGINS_LOAD).guest(on_demand("plugin", staged.clone()));
+    let manifest =
+        requester(test_programs::PLUGINS_LOAD).guest(on_demand("plugin", staged.clone()));
     let runtime = boot(manifest, &[]).await.expect("assembling runtime");
 
     let first = runtime.load("plugin").await.expect("first load");
     runtime.deregister(first.id()).expect("deregistering the loaded plugin");
-    assert_eq!(recorded(&runtime, "plugin"), None);
+    assert_eq!(recorded(&runtime, "plugin"), Registered::Absent);
 
     let changed = changed_echoer(b"reload");
     std::fs::write(&staged, &changed).expect("re-staging");
     let fresh = runtime.load("plugin").await.expect("re-load");
     assert_ne!(fresh.digest(), first.digest(), "the re-load bound fresh bytes");
     assert_eq!(fresh.digest(), Some(Digest::of(&changed)));
-    assert_eq!(recorded(&runtime, "plugin"), Some(fresh.digest()));
+    assert_eq!(recorded(&runtime, "plugin"), Registered::Active(fresh.digest()));
     runtime.shutdown();
 }
 
@@ -448,9 +480,8 @@ async fn reload_after_deregister() {
 async fn pinned_reload() {
     let scratch = scratch();
     let staged = stage(&scratch, "plugin.wasm", test_programs::LINK_ECHOER);
-    let manifest = requester(test_programs::PLUGINS_LOAD).guest(
-        on_demand("plugin", staged.clone()).digest(digest_of(test_programs::LINK_ECHOER)),
-    );
+    let manifest = requester(test_programs::PLUGINS_LOAD)
+        .guest(on_demand("plugin", staged.clone()).digest(digest_of(test_programs::LINK_ECHOER)));
     let runtime = boot(manifest, &[]).await.expect("assembling runtime");
 
     let first = runtime.load("plugin").await.expect("the pinned bytes load");
@@ -462,7 +493,7 @@ async fn pinned_reload() {
         matches!(&stale, LoadError::Refused(detail) if detail.contains("not its declared digest")),
         "{stale:?}"
     );
-    assert_eq!(recorded(&runtime, "plugin"), None, "nothing was admitted");
+    assert_eq!(recorded(&runtime, "plugin"), Registered::Absent, "nothing was admitted");
     runtime.shutdown();
 }
 
@@ -471,8 +502,8 @@ async fn pinned_reload() {
 // it stands — with no digest — rather than re-binding or re-admitting it.
 #[tokio::test]
 async fn reregister_attests() {
-    let manifest =
-        requester(test_programs::PLUGINS_LOAD).guest(on_demand("plugin", test_programs::LINK_ECHOER));
+    let manifest = requester(test_programs::PLUGINS_LOAD)
+        .guest(on_demand("plugin", test_programs::LINK_ECHOER));
     let runtime = boot(manifest, &[]).await.expect("assembling runtime");
 
     let first = runtime.load("plugin").await.expect("first load");
