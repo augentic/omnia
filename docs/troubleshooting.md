@@ -46,11 +46,15 @@ Formatting uses nightly rustfmt: `cargo +nightly fmt --all`. The stable formatte
 
 It's probably running fine — startup logs are at `info` and off by default. Set `RUST_LOG=info` and look for the `omnia ready` line. Without it, the only output is Cargo's `Running ...`.
 
-### `no guest specified: pass a <wasm> path, or --config <omnia.toml>`
+### `no guest specified: pass a <wasm> path, or --manifest <omnia.toml>`
 
-The `run` subcommand needs either a positional `.wasm`/`.bin` path or a manifest via `--config`/`OMNIA_CONFIG`. Also check argument order: flags for the *host* go before `--`, guest argv after it.
+The `run` subcommand needs either a positional `.wasm`/`.bin` path or a manifest via `--manifest`/`OMNIA_MANIFEST`. Also check argument order: flags for the *host* go before `--`, guest argv after it.
 
-The embedder-path variant — `no deployment manifest supplied and OMNIA_CONFIG is unset` — means a `DeploymentBuilder` was built without `.manifest(...)` and no `OMNIA_CONFIG` fallback was available.
+The embedder-path variant — `no deployment manifest supplied and OMNIA_MANIFEST is unset` — means a `DeploymentBuilder` was built without `.manifest(...)` and no `OMNIA_MANIFEST` fallback was available.
+
+### `this deployment declares no `registries`` / `mounts no directories`
+
+A guest asked the loader for a package the deployment cannot reach. Package loads route through the `registries` configuration (`guests: { registries: include_str!("wasm-pkg.toml") }` in the macro, `[registries] path` in a manifest); path loads resolve against the deployment's mounts, so `./plugin.wasm` needs a `.` mount. `no registry routes ...` means the configuration exists but names neither a `default_registry` nor the package's namespace — add one, or pin the package to its registry under `[package_registry_overrides]`. A runtime built without omnia's `loader` feature has no loader at all; a manifest declaring `registries` is refused at startup until the feature is enabled.
 
 ### `Address already in use` on startup
 
@@ -100,9 +104,9 @@ Host-mediated guest-to-guest calls are nested more than 8 deep — usually accid
 
 ## Direct-command binaries
 
-### `mybin run ...` fails with an argument error / `--config` is rejected
+### `mybin run ...` fails with an argument error / `--manifest` is rejected
 
-A `runtime!` binary with `mode: command` and a compiled-in deployment is a [direct command](reference/runtime-macro.md#direct-commands-raw-argv-passthrough) with **no host CLI**: no `run` subcommand, no `--config`/`OMNIA_CONFIG` override, no positional wasm path. Its argv goes to the guest verbatim, so `mybin greet Ada` is correct and `mybin run -- greet Ada` hands the guest a literal `run` argument. The deployment is fixed at compile time (the compiled-in manifest), by design.
+A `runtime!` binary with `mode: command` and a compiled-in deployment is a [direct command](reference/runtime-macro.md#direct-commands-raw-argv-passthrough) with **no host CLI**: no `run` subcommand, no `--manifest`/`OMNIA_MANIFEST` override, no positional wasm path. Its argv goes to the guest verbatim, so `mybin greet Ada` is correct and `mybin run -- greet Ada` hands the guest a literal `run` argument. The deployment is fixed at compile time (the compiled-in manifest), by design.
 
 ### A direct-command binary logs nothing (or too much)
 

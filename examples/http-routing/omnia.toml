@@ -5,16 +5,16 @@
 #
 # Source paths are resolved relative to this file's directory. Build the guests
 # first (see README.md), then run (this path is the runtime's compiled-in
-# default, so `--config` is optional):
+# default, so `--manifest` is optional):
 #
 #   cargo run --example http-routing -- run
 
 [[guest]]
-id = "a"
+name = "a"
 source.path = "../../target/wasm32-wasip2/debug/examples/http_routing_a_wasm.wasm"
 routes.http = ["/a"]
 
 [[guest]]
-id = "b"
+name = "b"
 source.path = "../../target/wasm32-wasip2/debug/examples/http_routing_b_wasm.wasm"
 routes.http = ["/b"]

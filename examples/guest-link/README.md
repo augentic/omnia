@@ -21,7 +21,7 @@ interface echo {
 }
 ```
 
-The first argument is not a domain field. It is the **guest id** of who should answer — `"responder"` in the default path, the same string as `id` in the manifest. The host reads that string to pick a target, then forwards every argument through unchanged, so the callee sees the same signature.
+The first argument is not a domain field. It is the **guest name** of who should answer — `"responder"` in the default path, the same string as `name` in the manifest. The host reads that string to pick a target, then forwards every argument through unchanged, so the callee sees the same signature.
 
 ## What happens on a call
 
@@ -40,11 +40,20 @@ Three things surprise people coming from HTTP services:
 2. **A new instance every time.** The responder is created for this call and thrown away afterwards, like a Lambda invocation. Nothing in its memory survives for the next call. Put durable state in key-value or SQL.
 3. **Only copyable data.** Strings, numbers, records, lists — fine. File handles, streams, and other live resources cannot cross, because they belong to the caller's instance, not the callee's.
 
-The host does not parse what `echo` means. `[link] interfaces` is an allow-list of interface *names*. Anything listed is callable by any guest that imports it; anything not listed is not.
+The host does not parse what `echo` means, and nothing declares it. `example:link/echo` lies outside the runtime's own `wasi:` and `omnia:` namespaces, so the host relays it: any guest importing it reaches whichever guest exports it, and an import nothing exports fails at start.
 
 ## Quick start
 
-Build the two guests, then run the host. The deployment is compiled into [`runtime.rs`](runtime.rs), so a bare `run` works from any directory:
+The deployment is embedded in [`runtime.rs`](runtime.rs): the examples package's `build.rs` compiles both guests for `wasm32-wasip2`, and the `runtime!` invocation embeds them, naming them `responder` and `router` — the names the router dispatches by — rather than by their files' stems. So a bare `run` works from any directory with no build step first:
+
+```bash
+export RUST_LOG=info,opentelemetry_sdk=off
+cargo run --example guest-link -- run
+```
+
+If startup succeeds, the import was wired: `router` can resolve `echo`, and `responder` is registered to serve it. The process then sits in server mode. To actually *see* a round-trip printed, use the register variant below.
+
+The same deployment as a TOML file is [`omnia.toml`](omnia.toml), which reads the guests from disk at start, so those build first:
 
 ```bash
 cargo build -p examples \
@@ -52,27 +61,17 @@ cargo build -p examples \
   --example guest-link-router-wasm \
   --target wasm32-wasip2
 
-export RUST_LOG=info,opentelemetry_sdk=off
-cargo run --example guest-link -- run
+cargo run --example guest-link -- run --manifest examples/guest-link/omnia.toml
 ```
 
 Cargo writes underscored names: `target/wasm32-wasip2/debug/examples/guest_link_responder_wasm.wasm` and `guest_link_router_wasm.wasm`. The manifest points at those paths.
 
-If startup succeeds, the import was wired: `router` can resolve `echo`, and `responder` is registered to serve it. The process then sits in server mode. To actually *see* a round-trip printed, use the register variant below.
-
-The same deployment as a TOML file is [`omnia.toml`](omnia.toml):
-
-```bash
-cargo run --example guest-link -- run --config examples/guest-link/omnia.toml
-```
-
 ## The same deployment, built in Rust
 
-[`dynamic.rs`](dynamic.rs) does not compile the guest list into the binary. It builds an `omnia::Manifest` at runtime and hands it to the generated host:
+[`dynamic.rs`](dynamic.rs) does not compile the guest list into the binary. It builds an `omnia::Manifest` at runtime, reading the guests built above, and hands it to the generated host:
 
 ```rust
 let manifest = Manifest::new()
-    .link(["omnia:link/echo"])
     .guest(GuestEntry::new("responder", responder_wasm))
     .guest(GuestEntry::new("router", router_wasm));
 

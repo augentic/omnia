@@ -4,20 +4,35 @@ package omnia:plugins@0.1.0;
 /// code, the host acquires, verifies, validates, and registers it — component
 /// bytes never cross this interface.
 interface loader {
-    /// Where the deployment's acquirer finds a package's component bytes.
+    /// An exact package reference and the registry it is fetched from.
+    record registry-ref {
+        /// The exact `namespace:name@version` to fetch.
+        %package: string,
+        /// The registry to fetch from; `none` takes the deployment's
+        /// `registries` routing for the package's namespace.
+        endpoint: option<string>,
+    }
+
+    /// Where a guest's component bytes come from, and the name it registers
+    /// under.
     variant location {
-        /// A package registry; `none` selects the acquirer's default.
-        registry(option<string>),
-        /// A location-relative component path, read fresh on every load.
+        /// A package registry; registers as the package reference.
+        registry(registry-ref),
+        /// A mount-relative component path, read fresh on every load;
+        /// registers as the path's file stem.
         path(string),
+        /// A guest the deployment declares, by name. Nothing is read: the
+        /// handle attests that the guest is registered.
+        declared(string),
     }
 
     /// Why a load was refused.
     variant error {
         /// The request or deployment is wrong and a retry cannot succeed:
-        /// an unserved location kind, a malformed or mismatched digest pin,
-        /// or bytes that are not a raw wasm component (a pre-compiled native
-        /// artifact is always refused) or failed validation.
+        /// an unserved location kind, an undeclared name, a malformed or
+        /// mismatched digest pin, or bytes that are not a raw wasm component
+        /// (a pre-compiled native artifact is always refused) or failed
+        /// validation.
         refused(string),
         /// The acquirer could not produce the package bytes; the source may
         /// recover, so a retry can succeed.
@@ -35,15 +50,17 @@ interface loader {
         /// host Dispatcher).
         id: string,
         /// The resolved `sha256:<hex>` content digest of the loaded bytes —
-        /// commit it as a pin to make an unpinned load reproducible.
-        digest: string,
+        /// commit it as a pin to make an unpinned load reproducible. `none`
+        /// for a declared guest the deployment recorded no digest for.
+        digest: option<string>,
     }
 
-    /// Load `package`, idempotent on (package, digest): an already-active
-    /// package returns its handle immediately. The host acquires through the
-    /// builder-supplied acquirer, verifies the sha256 pin when given,
-    /// validates raw wasm, and registers under `package`.
-    load: async func(%package: string, %from: location, digest: option<string>) -> result<plugin, error>;
+    /// Load the guest `from` names, idempotent on (name, digest): an
+    /// already-active guest returns its handle immediately. The host
+    /// acquires through the deployment's acquirer, verifies the sha256 pin
+    /// when given, validates raw wasm, and registers under the name the
+    /// location derives. A declared guest takes no pin.
+    load: async func(%from: location, digest: option<string>) -> result<plugin, error>;
 }
 
 world imports {

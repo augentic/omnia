@@ -1,6 +1,6 @@
 ---
 source: crates/host-macros/src/runtime.rs
-expression: "expand_pretty(quote!({\n    mode: command, guests:\n    [{ id: \"specify\", source: engine_component_path(), command: true },\n    { id: \"target:mock\", source: mock_target_path() },], mounts:\n    [{ name: \"project\", path: project_root(), writable: true },\n    { name: \"store\", path: store_root(), writable: true },], hosts:\n    { WasiHttp: HttpDefault, WasiOtel: OtelDefault, }\n}))"
+expression: "expand_pretty(quote!({\n    mode: command, guests:\n    [{ name: \"specify\", path: \"engine.wasm\", command: true },\n    { name: \"target:mock\", path: \"mock.wasm\" },], mounts:\n    [{ name: \"project\", path: project_root(), writable: true },\n    { name: \"store\", path: store_root(), writable: true },], hosts:\n    { WasiHttp: HttpDefault, WasiOtel: OtelDefault, }\n}))"
 ---
 mod runtime {
     use omnia::anyhow::Result;
@@ -56,16 +56,19 @@ mod runtime {
             Ok(())
         }
     }
-    /// The deployment compiled in here (`config:` or the inline
+    /// The deployment compiled in here (`manifest:` or the inline
     /// manifest keys; empty when neither is declared), for an
     /// embedder to overlay before `run_with`.
     pub fn manifest() -> omnia::ManifestSource {
         omnia::ManifestSource::Inline(
             omnia::Manifest::new()
                 .guest(
-                    omnia::GuestEntry::new("specify", engine_component_path()).command(),
+                    omnia::GuestEntry::new("specify", include_bytes!("engine.wasm"))
+                        .command(),
                 )
-                .guest(omnia::GuestEntry::new("target:mock", mock_target_path()))
+                .guest(
+                    omnia::GuestEntry::new("target:mock", include_bytes!("mock.wasm")),
+                )
                 .mounts([
                     omnia::Mount {
                         name: ::std::string::String::from("project"),
@@ -91,7 +94,11 @@ mod runtime {
         omnia::main::<
             Backends,
             Hooks,
-        >(omnia::MainOptions::new(omnia::Mode::Command).manifest(manifest()))
+        >(
+                omnia::MainOptions::new(omnia::Mode::Command)
+                    .program_name(env!("CARGO_PKG_NAME"))
+                    .manifest(manifest()),
+            )
             .await
     }
     /// Run one deployment through this runtime's hosts and backends,

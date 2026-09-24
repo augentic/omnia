@@ -1,6 +1,6 @@
 //! # Linking example — extra guest
 //!
-//! Exports `omnia:link/echo` like `responder`, but is *absent from the
+//! Exports `example:link/echo` like `responder`, but is *absent from the
 //! deployment manifest*: it joins the running deployment through dynamic
 //! registration (`Runtime::register`) and is then reachable via the same
 //! host-mediated dispatch as any static guest (see `register.rs`).
@@ -22,7 +22,7 @@ struct Extra;
 
 export!(Extra);
 
-impl exports::omnia::link::echo::Guest for Extra {
+impl exports::example::link::echo::Guest for Extra {
     fn echo(target: String, message: String) -> String {
         format!("{target} echoes from extra: {message}")
     }

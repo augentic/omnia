@@ -8,8 +8,8 @@ Every key the `omnia::runtime!` macro accepts, with exact semantics. The task-or
 | --- | ------- | ---------------- |
 | `hosts:` | The `Host: Backend` map — which WASI interfaces are linked and what implements them | Always (except a backend-less command runtime) |
 | `mode:` | `server` (default) or `command` | Running jobs/CLIs instead of servers |
-| `config:` | Compile in a default manifest *path* | You want `run` with no arguments to work |
-| `link:`, `plugin:`, `guests:`, `mounts:` | Compile in a default manifest *value* (inline) | Same as `config:`, but self-contained — no TOML file at run time |
+| `manifest:` | Compile in a default manifest *path* | You want `run` with no arguments to work |
+| `guests:`, `registries:`, `mounts:` | Compile in a default manifest *value* (inline), the guests embedded | Same as `manifest:`, but self-contained — no TOML file and no `.wasm` beside the binary at run time |
 
 There is no key for raw argv passthrough: a command-mode runtime with a compiled-in deployment is a [direct command](#direct-commands-raw-argv-passthrough) automatically.
 
@@ -43,19 +43,19 @@ The expression's type is the backend's `Backend::ConnectOptions`. Rows sharing a
 - **`mode: server`** (default) — the runtime stays up and serves requests. Trigger hosts (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`) listen for traffic and instantiate a fresh guest instance per request.
 - **`mode: command`** — the runtime drives the guest's `wasi:cli/run` export exactly once, then exits with the guest's status. Unlike server triggers, command mode applies no `GUEST_TIMEOUT_MS` wall-clock cap — to the run itself or to any link dispatch made along its call chain.
 
-Command mode has two entry surfaces, chosen by whether the deployment is compiled in. With a compiled-in deployment (`config:` or inline manifest keys) the binary is a [direct command](#direct-commands-raw-argv-passthrough): no host CLI, argv passes to the guest verbatim. Without one, the standard `run … -- …` grammar applies — arguments after `--` are forwarded to the guest as its argv (`args[0]` is the program name, supplied by the runtime).
+Command mode has two entry surfaces, chosen by whether the deployment is compiled in. With a compiled-in deployment (`manifest:` or inline manifest keys) the binary is a [direct command](#direct-commands-raw-argv-passthrough): no host CLI, argv passes to the guest verbatim. Without one, the standard `run … -- …` grammar applies — arguments after `--` are forwarded to the guest as its argv (`args[0]` is the program name, supplied by the runtime).
 
 A backend-less command runtime is valid: `omnia::runtime!({ mode: command });`.
 
 By default, command mode routes to the sole static guest exporting `wasi:cli/run`; a deployment with no exporter is inert and exits `0`. With several exporters, mark one guest entry `command: true` — see [Command routing](#command-routing-command-true).
 
-## `config:` (default manifest path)
+## `manifest:` (default manifest path)
 
-Compiles a default manifest path into the generated `main`, used only when the command line supplies no source — no positional wasm, no `--config`, no `OMNIA_CONFIG`:
+Compiles a default manifest path into the generated `main`, used only when the command line supplies no source — no positional wasm, no `--manifest`, no `OMNIA_MANIFEST`:
 
 ```rust
 omnia::runtime!({
-    config: concat!(env!("CARGO_MANIFEST_DIR"), "/deploy/omnia.toml"),
+    manifest: concat!(env!("CARGO_MANIFEST_DIR"), "/deploy/omnia.toml"),
     hosts: {
         WasiHttp: HttpDefault,
     }
@@ -64,39 +64,31 @@ omnia::runtime!({
 
 The value is any expression evaluating to a path. Anchoring it with `env!("CARGO_MANIFEST_DIR")` makes it absolute at compile time, so a bare `run` works from any working directory. Explicit sources always win; the compiled-in default is the lowest-precedence fallback.
 
-`config:` and the inline manifest keys are mutually exclusive — a runtime compiles in a manifest path or a manifest value, not both.
+`manifest:` and the inline manifest keys are mutually exclusive — a runtime compiles in a manifest path or a manifest value, not both.
 
-## Inline manifest keys (`link:`, `plugin:`, `guests:`, `mounts:`)
+## Inline manifest keys (`guests:`, `registries:`, `mounts:`)
 
-The deployment `omnia.toml` expresses can also be written directly in the macro, mirroring the `omnia::Manifest` schema. The macro expands the keys to a `Manifest` value compiled into the generated `main` as the same lowest-precedence fallback as `config:`:
+The deployment `omnia.toml` expresses can also be written directly in the macro, mirroring the `omnia::Manifest` schema. The macro expands the keys to a `Manifest` value compiled into the generated `main` as the same lowest-precedence fallback as `manifest:` — with one difference: an inline guest is *embedded*, its component bytes compiled into the binary, where a manifest file's guest is read from disk at start.
 
 ```rust
 omnia::runtime!({
-    link: {
-        interfaces: ["omnia:link/echo"],     // host-mediated interfaces (deployment-wide)
-    },
-    plugin: {
-        locations: [                         // optional: loader acquisition policy
-            { name: ".", path: concat!(env!("CARGO_MANIFEST_DIR"), "/workspace") },
-        ],
-    },
-    guests: [
+    guests: [                                        // the components embedded in the binary
         {
-            id: "responder",
-            source: concat!(env!("CARGO_MANIFEST_DIR"), "/guests/responder.wasm"),
+            name: "responder",                       // optional: the file's stem otherwise
+            path: concat!(env!("CARGO_MANIFEST_DIR"), "/guests/responder.wasm"),
             routes: {
-                messaging: ["orders.>"],     // inbound routes targeting this guest
+                messaging: ["orders.>"],             // inbound routes targeting this guest
             },
         },
         {
-            id: "router",
-            source: concat!(env!("CARGO_MANIFEST_DIR"), "/guests/router.wasm"),
+            path: concat!(env!("CARGO_MANIFEST_DIR"), "/guests/router.wasm"),   // the guest `router`
             routes: {
                 http: ["/"],
                 websocket: ["chat.*"],
             },
         },
     ],
+    registries: include_str!("wasm-pkg.toml"),       // optional: the default routing of package loads
     mounts: [
         { name: ".", path: concat!(env!("CARGO_MANIFEST_DIR"), "/workspace"), writable: true },
     ],
@@ -106,71 +98,32 @@ omnia::runtime!({
 });
 ```
 
-- Each value is any Rust expression evaluating to the field's type (strings for ids, interfaces, and route patterns; paths or embedded bytes for `source`, paths for mount `path`; a bool for `writable`, which defaults to `false`).
-- Relative paths resolve against the process working directory at run time, so anchor them with `env!("CARGO_MANIFEST_DIR")` as with `config:`.
-- Routes are declared per guest, on the target entry's `routes:` block — one pattern list per trigger (`http` prefixes, `messaging` topics, `websocket` routes), with the declaring guest as the implicit target. There is no top-level `routes:` key.
-- A guest entry also accepts `command: true` (a literal bool), marking it as the command-mode target — see [Command routing](#command-routing-command-true).
-- Host-mediated interfaces are declared once, deployment-wide, in the top-level `link:` block's `interfaces:` list — the linker is shared, so there is no per-guest form. `run --link` at the CLI unions with the compiled-in list. A bare `link: [...]` list is a compile error naming the block shape; a bare `link: {}` is a compile error because it would declare nothing. Declaring `link: { interfaces: [...] }` requires omnia's `link` feature; a runtime without it refuses a non-empty interface list at `Manifest::validate`.
-- Declaring a [`locations:` list](#plugin-locations-locations) also links the `omnia:plugins/loader` host capability (guest-requested plugin loading), which ships behind `omnia`'s non-default `plugin` feature; only guests whose world imports it can reach it. The list is the deployment's acquisition policy — the acquisition seam behind `loader.load`. A `link:`-only invocation never references the loader and builds without the feature, so a guest importing `omnia:plugins/loader` in such a deployment fails at instantiation; a bare `plugin: {}` beside `config:` does link it, over the TOML's `[[plugin.location]]` entries (without `config:` a bare block is a compile error, since it would declare nothing). Locations are manifest data (`[[plugin.location]]` in `omnia.toml`), so like every inline key they are mutually exclusive with `config:`; a config-file deployment declares them in the TOML. The two features are independent: neither block implies the other.
+- `guests:` is a list of entries `{ path, name?, routes?, command? }` — see [Guest entries](#guest-entries-path-name-routes-command).
+- `registries:` is the wasm-pkg configuration a package load that names no registry routes through — see [`registries:`](#registries).
+- `mounts:` are the directories preopened into every guest sandbox and the roots a guest's path loads resolve against; each entry is `{ name, path, writable? }` (`writable` a literal bool, `false` by default). A relative mount path resolves against the process working directory at run time, so anchor it with `env!("CARGO_MANIFEST_DIR")` as with `manifest:`.
+- Every value other than a guest's `path:` is any Rust expression evaluating to the field's type (strings for names and route patterns, paths for mounts, a `&'static str` or `String` of TOML for `registries`).
+- `manifest:` and the inline keys are mutually exclusive; a manifest file declares the same things as `[[guest]]`, `[registries]`, and `[[mount]]` — see [Configuration](configuration.md).
 
-### Plugin locations (`locations:`)
+Nothing declares what guests call between themselves. Every import a guest makes outside the runtime's own namespaces (`wasi:`, `omnia:`) is relayed to the guest exporting it, whichever it is, and an import no guest exports fails at boot — see [Multi-Guest Deployments](../guides/multi-guest-deployments.md#guests-calling-guests).
 
-The `locations:` list declares the deployment's acquisition roots. Each entry lowers to an `omnia::Location` on the compiled-in manifest, and the generated `Wiring::extend` hook installs them through `omnia::Plugins::install_declared`, each filling its location kind's slot on `Plugins`. Those paths live behind `omnia`'s `plugin` feature, so a deployment declaring `plugin: { locations: [...] }` enables it (`omnia = { version = "...", features = ["plugin"] }`); without it the expansion fails to compile naming `omnia::WasiPlugins`, and a config-file deployment with `[[plugin.location]]` entries is refused at startup.
+### Guest entries (`path`, `name`, `routes`, `command`)
 
-```rust
-omnia::runtime!({
-    link: {
-        interfaces: ["emery:adapter/probe"],
-    },
-    plugin: {
-        locations: [
-            { name: ".", path: project_root() },  // path loads resolve here
-            { registry: "ghcr.io" },              // package references fetch here
-        ],
-    },
-    guests: [
-        { id: "engine", source: engine_path() },
-    ],
-    hosts: {
-        WasiOtel: OtelDefault,
-    }
-});
-```
+- **`path: <literal or macro>`** — the component, embedded with `include_bytes!`. Because `include_bytes!` takes a string literal (or a macro expanding to one), so does `path:`: `"guest.wasm"` reads relative to the invoking source file, `concat!(env!("CARGO_MANIFEST_DIR"), "/guests/app.wasm")` anchors a path in the crate, and `env!("APP_WASM")` reads a path a `build.rs` emitted with `cargo:rustc-env`. A computed path (`engine_component_path()`) is refused at compile time; a component read at start is a `manifest:` file's `[[guest]]`. The artifact must exist when the host crate compiles, and it must be raw `.wasm`: embedded pre-compiled bytes are native code and are rejected by the safe build, like pre-compiled paths (they need the programmatic `DeploymentBuilder`'s `unsafe build_trusted` — see the [security model](../security-model.md)). The repository's `examples` package compiles the guests its `cli-static` and `guest-link` hosts embed in a `build.rs` (through `omnia_test::build::Components`), so `cargo run --example cli-static` needs no guest build first.
+- **`name: <expr>`** — the guest's name: the `GuestId` it registers under, is dispatched to, and is loaded as by a guest's `loader.load` of `declared("name")`. Omitted, the `path:` file's stem names it — `guests/router.wasm` is `router`, `cli_wasm.wasm` is `cli_wasm` — the same rule a path load applies. Give a name when the file is not called what callers dispatch to, or when two files share a stem; two guests of one name are refused at startup.
+- **`routes: { http: [..], messaging: [..], websocket: [..] }`** — the guest's inbound routes, one pattern list per trigger (`http` prefixes, `messaging` topics, `websocket` routes), with the declaring guest as the implicit target. There is no top-level `routes:` key.
+- **`command: true`** (a literal bool) — marks the guest as the command-mode target — see [Command routing](#command-routing-command-true).
 
-An entry takes one of two shapes:
+Any other guest key is a compile error naming the four.
 
-- **`{ name: ..., path: ... }`** — a named root for path loads. All path entries fold, in declaration order, into one `omnia::PathMounts`, whose directories open when the runtime assembles — a missing root fails startup rather than surfacing per load. A guest's `loader.load` names the location it resolves against; guests conventionally write paths relative to their mounts, so keep location names aligned with the mount names guests see.
-- **`{ registry: ..., config: ... }`** — the deployment's registry policy for exact `namespace:name@version` package references, lowered to a cacheless `omnia::RegistryClient`: `registry` is the default endpoint, and the optional `config` is a [wasm-pkg client configuration](https://github.com/bytecodealliance/wasm-pkg-tools) as TOML (`namespace_registries`, `package_registry_overrides`, per-registry `[registry."..."]` backend settings), typically `include_str!("wasm-pkg.toml")` so the binary alone attests every registry it may reach. A package resolves to its package override, else its namespace's registry, else the default; a `default_registry` key in the configuration must agree with `registry` or the install refuses. At most one entry; a load's own location may still override the endpoint per load.
+### `registries:`
 
-Each load routes by its location kind — path loads to the path acquirer, registry loads to the registry acquirer — and a kind with no entry refuses typed. Routing is structural kind selection, never failure recovery.
+The [wasm-pkg client configuration](https://github.com/bytecodealliance/wasm-pkg-tools) (TOML: `default_registry`, `namespace_registries`, `package_registry_overrides`, per-registry `[registry."..."]` backend settings) that a guest's package load — `loader.load` of `registry({ package: "ns:name@1.0.0", endpoint: none })` — routes through when it names no registry of its own. The expression is the configuration's *contents* — `include_str!("wasm-pkg.toml")` is the idiom — lowered to `omnia::RegistryConfig::contents(..)` on the compiled-in manifest; a manifest file names a path instead (`[registries] path = "wasm-pkg.toml"`). A package resolves to its package override, else its namespace's registry, else `default_registry`; a package the configuration routes nowhere, when the load names no `endpoint` either, is refused, naming its namespace, before any registry is dialled. The contents are parsed when the runtime assembles, so a malformed configuration fails startup, not the first load. A load that names its `endpoint` fetches from that registry whatever the deployment declares, so a deployment needs `registries` only for the default. Without it, an endpoint-less package load is refused typed.
 
-The grammar's refusals are all compile-time, spanned to the offending key: an empty `locations:` list, a second `registry` entry, and a `config` on a path entry are each rejected with a pointed diagnostic; the configuration's contents are parsed when the runtime assembles, so a malformed one fails startup, not the first load.
+Path loads — a guest's `loader.load` of `path("./plugin.wasm")` — resolve against the `mounts:` the deployment already declares: the `.` mount serves `./` and bare paths, a longer mount name serves its own prefix, and a load naming no mount is refused typed. There is no separate root list to keep aligned with the mount names guests see. A deployment mounting no directories refuses every path load. A loaded path registers under its file's stem, as an inline guest does.
 
-Because locations are deployment data, a test can overlay them without touching the binary's declaration: `omnia_test::host::Deployment::from(runtime::manifest()).path_root(dir)` rewrites the `.` root and `runtime::run_with(...)` drives the same generated wiring over in-memory backends — see [Testing omnia code](../guides/testing-omnia-code.md).
+Nothing in the invocation opts into the guest loader. When omnia is built with its non-default `loader` feature (`omnia = { version = "...", features = ["loader"] }`), `Deployment::assemble` links the `omnia:plugins/loader` host beside WASI — worlds that do not import it never see it — and installs the mounts and `registries` as the loader's acquisition policy; without the feature a manifest declaring `registries` is refused at startup, and a guest importing the loader fails at instantiation. An embedder wanting a different policy — a caching `RegistryClient::cached`, a source of its own — selects it on the built deployment with `Deployment::loader(registry, path)` before `assemble`. The `loader` and `link` features are independent: loading a guest and dispatching to it are two capabilities, and a deployment that does both enables both.
 
-### Embedding a guest (`source:` bytes)
-
-`source:` also accepts component bytes, embedding the guest in the host binary — no adjacent `.wasm` file at run time:
-
-```rust
-omnia::runtime!({
-    guests: [{
-        id: "app",
-        source: include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../target/wasm32-wasip2/debug/examples/app_wasm.wasm",
-        )),
-    }],
-    hosts: { /* ... */ }
-});
-```
-
-Two things to know:
-
-- **The guest artifact must exist when the host crate compiles** — `include_bytes!` reads it at build time, so the two-step build order (guest first, then host) becomes a hard requirement rather than a run-time one. This is why the repository's own examples stay path-based.
-- **Embed raw `.wasm`, not `omnia compile` output.** Raw wasm is safe and JIT-compiles at startup (the `jit` feature is on by default). Embedded pre-compiled bytes are native code and are rejected by the safe build, same as pre-compiled paths; they require the programmatic `DeploymentBuilder`'s `unsafe build_trusted` — see the [security model](../security-model.md).
-
-The [`guest-link`](../../examples/guest-link/runtime.rs) example is built this way; its [`omnia.toml`](../../examples/guest-link/omnia.toml) expresses the same deployment as a file for `--config`.
+Because mounts and registries are deployment data, a test can overlay them without touching the binary's declaration: `omnia_test::host::Deployment::from(runtime::manifest()).mount(scratch.mount(false))` replaces the binary's `.` mount (mounts dedup by name, last wins, before any directory opens) and `runtime::run_with(...)` drives the same generated wiring over in-memory backends — see [Testing omnia code](../guides/testing-omnia-code.md).
 
 ## Command routing (`command: true`)
 
@@ -182,37 +135,38 @@ Marking one guest entry `command: true` routes command mode to that guest instea
 omnia::runtime!({
     mode: command,
     guests: [
-        { id: "app", source: "app.wasm", command: true },
-        { id: "helper", source: "helper.wasm" },
+        { path: "app.wasm", command: true },
+        { path: "helper.wasm" },
     ],
 });
 ```
 
-The same mark is available in `omnia.toml` (`command = true` on a `[[guest]]` entry — see [Configuration](configuration.md)) and programmatically (`omnia::GuestEntry::new(id, source).command()`). This leg is fail-closed: a marked identity nothing supplies, or one whose component does not export `wasi:cli/run`, fails the run instead of exiting inert.
+The same mark is available in `omnia.toml` (`command = true` on a `[[guest]]` entry — see [Configuration](configuration.md)) and programmatically (`omnia::GuestEntry::new(name, source).command()`). This leg is fail-closed: a marked identity nothing supplies, or one whose component does not export `wasi:cli/run`, fails the run instead of exiting inert.
 
-`DeploymentBuilder::program_name` overrides the deployment name used for telemetry and prepended to guest argv as `argv[0]` (the default remains the manifest name).
+The program name — telemetry's component name and, in command mode, the `argv[0]` prepended to the guest's arguments — is the invoking crate's package name (`CARGO_PKG_NAME`), which the macro compiles in; `DeploymentBuilder::program_name` sets it on a programmatic deployment, and one that sets none is `omnia`.
 
 ## Direct commands (raw argv passthrough)
 
-**Shipping a binary whose command line belongs entirely to the guest** — a product CLI where `mybin greet Ada` must work, not `mybin run guest.wasm -- greet Ada` — needs no key at all: a `mode: command` runtime with a compiled-in deployment (`config:` or inline manifest keys) is a *direct command*.
+**Shipping a binary whose command line belongs entirely to the guest** — a product CLI where `mybin greet Ada` must work, not `mybin run guest.wasm -- greet Ada` — needs no key at all: a `mode: command` runtime with a compiled-in deployment (`manifest:` or inline manifest keys) is a *direct command*.
 
-A direct command has no host `run` grammar: the binary's argv belongs to the guest. There is no `run` subcommand and no `--config`/`OMNIA_CONFIG`/positional-wasm override — the deployment compiled into the binary is the only source, by design. The program name used for telemetry and prepended to guest argv as `argv[0]` is the manifest name — the first `[[guest]]` id — unless overridden programmatically with `DeploymentBuilder::program_name`.
+A direct command has no host `run` grammar: the binary's argv belongs to the guest. There is no `run` subcommand and no `--manifest`/`OMNIA_MANIFEST`/positional-wasm override — the deployment compiled into the binary is the only source, by design. The program name used for telemetry and prepended to guest argv as `argv[0]` is the crate's package name.
 
 Every argument passes through to the guest untouched. The host also *reads* the verbosity flags on their way past — `-v`/`--verbose` and `-q`/`--quiet`, repeated as `-vv`, before any `--` — to set the process tracing level for the host console and every guest's `RUST_LOG` before the guest runs (see [Verbosity flags](configuration.md#verbosity-flags)); it removes nothing, so the guest declares the same flags in its own grammar by flattening `omnia_sdk::api::command::Verbosity`, which lists them in its help and completions, accepts them, and refuses `-v` beside `-q` as its own usage error. Every other flag is the guest's to define; a guest that wants one of its own to set its tracing defaults reloads with `omnia_wasi_otel::set_filter` once it has parsed argv, and its `RUST_LOG` still refines whatever it sets.
 
-A `mode: command` runtime *without* a compiled-in deployment keeps the `run` grammar byte-for-byte — with no other way to name the guest, the positional wasm path and `--config` remain the entry surface.
+A `mode: command` runtime *without* a compiled-in deployment keeps the `run` grammar byte-for-byte — with no other way to name the guest, the positional wasm path and `--manifest` remain the entry surface.
 
 ## Composing the keys
 
-The [`cli-static`](../../examples/cli-static/runtime.rs) example composes the inline manifest keys into a complete direct command deployment with no handwritten `main`:
+The [`cli-static`](../../examples/cli-static/runtime.rs) example composes the inline manifest keys into a complete direct command deployment with no handwritten `main`; a product runtime that also loads adapters at run time composes every key:
 
 ```rust
 omnia::runtime!({
     mode: command,
     guests: [
-        { id: "specify", source: engine_component_path(), command: true },
-        { id: "target:mock", source: mock_target_path() },
+        { path: concat!(env!("OUT_DIR"), "/engine.wasm"), command: true },   // the guest `engine`
+        { name: "target:mock", path: concat!(env!("CARGO_MANIFEST_DIR"), "/mocks/target.wasm") },
     ],
+    registries: include_str!("wasm-pkg.toml"),
     mounts: [
         { name: "project", path: project_root(), writable: true },
         { name: "store", path: store_root(), writable: true },
@@ -233,8 +187,8 @@ The invocation expands to a private `runtime` module and re-exports five items f
 | ---- | ----- | --- |
 | `main` | `#[tokio::main] fn main() -> ExitCode` | The binary's entry point: connects the declared backends from the environment and drives the compiled-in deployment. |
 | `run` | blocking `fn run(DeploymentBuilder) -> Result<ExitStatus>` | Build the builder, then mount the runtime in-process from a binary with its own argument surface. |
-| `Hooks` | `pub struct Hooks` implementing `omnia::Wiring<B>` | The generated wiring — `link`, `extend`, `serve` — generic over any bundle `B` that `Provides` each declared host's context. |
-| `manifest` | `fn manifest() -> ManifestSource` | The compiled-in deployment (`config:` path or inline keys), for a test to overlay. |
+| `Hooks` | `pub struct Hooks` implementing `omnia::Wiring<B>` | The generated wiring — `link`, `serve` — generic over any bundle `B` that `Provides` each declared host's context. |
+| `manifest` | `fn manifest() -> ManifestSource` | The compiled-in deployment (`manifest:` path or inline keys), for a test to overlay. |
 | `run_with` | `async fn run_with<B>(DeploymentBuilder, B) -> Result<ExitStatus>` | Build the builder, then drive the deployment through `Hooks` over a bundle already in hand; nothing connects. |
 
 `main` and `run` use the generated `Backends` bundle. `Hooks`, `manifest`, and `run_with` exist so a test drives the *same* wiring the binary runs — over `omnia_test::host::Backends`, say — without a second `runtime!` declaration in the test tree.

@@ -67,7 +67,7 @@ That covers the two other shapes a test provider takes. A handler bounded on a s
 
 ## Component rung: `Deployment` over `Backends`
 
-`Deployment` describes one command-mode deployment — guests, mounts, arguments, link interfaces, and the directory the `.` path location serves — and runs it over a backend bundle. Built from nothing it drives a single component through the host you name:
+`Deployment` describes one command-mode deployment — guests, mounts (which also serve a guest's path loads), arguments, and the registries a package load naming no registry routes through — and runs it over a backend bundle. Built from nothing it drives a single component through the host you name:
 
 ```rust,ignore
 use omnia::ExitStatus;
@@ -88,7 +88,7 @@ The guest asserts what crosses the boundary to it (a panic traps and fails the h
 
 ### The overlay on a `runtime!`
 
-An embedder's `runtime!` module generates, beside `main` and `run`, a `manifest()` accessor for the deployment it compiled in and a `Hooks` type carrying its wiring. `Deployment::from(runtime::manifest())` overlays that base — adding guests or mounts, re-marking the command guest, rewriting the `.` path location with `path_root` — and `run_with::<runtime::Hooks, _>` drives it through the production wiring over a test bundle:
+An embedder's `runtime!` module generates, beside `main` and `run`, a `manifest()` accessor for the deployment it compiled in and a `Hooks` type carrying its wiring. `Deployment::from(runtime::manifest())` overlays that base — adding guests, re-marking the command guest, replacing the binary's `.` mount with a scratch directory (`mount(scratch.mount(false))`; mounts dedup by name, last wins, before any directory opens, so a production root that does not exist under test is never touched) — and `run_with::<runtime::Hooks, _>` drives it through the production wiring over a test bundle:
 
 ```rust,ignore
 let status = Deployment::from(runtime::manifest())
@@ -96,7 +96,7 @@ let status = Deployment::from(runtime::manifest())
     .await?;
 ```
 
-The generated `main` and `run` stay untouched; the test reaches the same hosts and the same plugin acquisition policy the binary would. This is the rung for "does the wiring I compiled in actually link and serve this guest".
+The generated `main` and `run` stay untouched; the test reaches the same hosts the binary would, and the same guest loader over the overlaid mounts. This is the rung for "does the wiring I compiled in actually link and serve this guest".
 
 ### `Backends`
 
@@ -122,5 +122,5 @@ fn main() {
 ## Examples to read
 
 - Handler rung: [`crates/tally-connector/tests/static.rs`](https://github.com/augentic/omnia-exemplar/blob/main/crates/tally-connector/tests/static.rs) in the exemplar — a `Config + Publish` handler run against `omnia_test::guest::Provider`, seeded config, published records asserted.
-- Component rung and the overlay: [`crates/omnia-test/tests/host.rs`](../../crates/omnia-test/tests/host.rs) — `runtime_overlay` and `path_root` drive a `runtime!` module's `Hooks` through `Deployment::from(manifest())`.
+- Component rung and the overlay: [`crates/omnia-test/tests/host.rs`](../../crates/omnia-test/tests/host.rs) — `runtime_overlay` and `overlay_mount` drive a `runtime!` module's `Hooks` through `Deployment::from(manifest())`.
 - Fixture rung: [`crates/test-programs/build.rs`](../../crates/test-programs/build.rs), the build that feeds omnia's own e2e suites — in the guest package itself, which the `wasm32` no-op makes safe.

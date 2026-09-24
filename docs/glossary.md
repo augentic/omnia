@@ -26,7 +26,11 @@ A WASI host that runs a server and drives guest instances per inbound request: `
 
 ### Deployment manifest
 
-The `omnia.toml` file (or equivalent programmatic `omnia::Manifest`) declaring guests, mounts, routes, link interfaces, and plugin locations. See [Configuration](reference/configuration.md#deployment-manifest-omniatoml).
+The `omnia.toml` file (or equivalent programmatic `omnia::Manifest`) declaring guests, mounts, routes, and registries. See [Configuration](reference/configuration.md#deployment-manifest-omniatoml).
+
+### Guest entry
+
+One guest a deployment declares: a `[[guest]]` table, a `runtime!` `guests:` entry, or an `omnia::GuestEntry`. Its `name` is the guest's identity (`GuestId`) — what routes and link dispatch address, and what a `declared("name")` load answers with; omitted, the component file's stem names it (`echo.wasm` is `echo`), the rule a path load applies too. A manifest file's entry reads its component at start (`source.path`); the macro's embeds it (`path:`).
 
 ### Registry
 
@@ -34,35 +38,35 @@ The runtime's map from each opaque guest identity (`GuestId`) to a pre-instantia
 
 ### Mount
 
-A host directory preopened into every guest sandbox (`[[mount]]` in the manifest or `--mount` on the CLI). Read-only unless marked writable; the guest sees it under its guest-visible name via `wasi:filesystem` preopens.
+A host directory preopened into every guest sandbox (`[[mount]]` in the manifest, the macro's `mounts:` list, or `--mount` on the CLI). Read-only unless marked writable; the guest sees it under its guest-visible name via `wasi:filesystem` preopens. Mounts are also the roots the [guest loader](#guest-loader) resolves a guest's path loads against: `./plugin.wasm` reads from the `.` mount, `adapters/x.wasm` from the mount named `adapters`. Mounts dedup by name, last wins, before any directory opens — how a test overlays a binary's `.` root.
 
 ### Dispatch (host-mediated)
 
-Guest-to-guest calls carried through the host: a guest imports an interface named in the deployment's `[link] interfaces`, and the host routes the call to whichever guest exports it. Nesting is bounded by `MAX_DISPATCH_DEPTH`. Distinct from the host→guest `Dispatcher`, which names its target explicitly. Both paths drive a fresh callee through `call_fresh`.
+Guest-to-guest calls carried through the host: a guest imports an interface outside the runtime's own namespaces, and the host routes the call to whichever guest exports it. Nothing declares the seam — the [namespace rule](#namespace-rule) decides what crosses. Nesting is bounded by `MAX_DISPATCH_DEPTH`. Distinct from the host→guest `Dispatcher`, which names its target explicitly. Both paths drive a fresh callee through `call_fresh`.
 
-### Link interfaces
+### Namespace rule
 
-The deployment-wide `[link] interfaces` list (the macro's `link: { interfaces: [...] }`, or CLI `--link`) naming interfaces the host will mediate between guests. Anything not listed is not callable — the list is the boundary, fixed at bootstrap. A runtime built without the `link` feature refuses a non-empty list at `Manifest::validate`.
+How the runtime tells its own interfaces from the ones guests share: an import or export under `wasi:` or `omnia:` is the host's (WASI, and omnia's capability hosts such as `omnia:plugins/loader`); every other interface crosses between guests — the host polyfills the import on the caller and serves the export on whichever guest carries it. `omnia::is_host(interface)` is the predicate. A guest's own package (`example:link/echo`, `emery:adapter/source`) therefore never collides with the host's, and an import no guest exports fails at boot rather than at the first call.
 
 ### Link seam
 
-The `LinkSeam` trait the registry drives for guest→guest linking: polyfill declared imports, serve matching exports, and publish or discard endpoints as guests enter and leave. A deployment that declares no link interfaces installs `NoLinks` (every method a no-op); one that does installs `InProcessLinks` from `omnia-link`. Endpoints move through two stages — `serve` parks pending state outside the registry's lifecycle gate; `publish`/`discard`/`remove` run under the gate — and a call never reads pending state.
+The `LinkSeam` trait the registry drives for guest-to-guest dispatch: polyfill every guest import the [namespace rule](#namespace-rule) leaves to guests, serve the matching exports, and publish or discard endpoints as guests enter and leave. A runtime built without the [`link` feature](#link-feature) installs `NoLinks` (every method a no-op); one built with it installs `InProcessLinks` from `omnia-link`. Endpoints move through two stages — `serve` parks pending state outside the registry's lifecycle gate; `publish`/`discard`/`remove` run under the gate — and a call never reads pending state.
 
 ### Link feature
 
-Omnia's off-by-default `link` cargo feature: guest→guest linking via the `omnia-link` crate. Independent of the [`plugin` feature](#plugin-feature) — static guests may link; loaded guests may be host-only.
+Omnia's off-by-default `link` cargo feature: guest-to-guest dispatch via the `omnia-link` crate. Independent of the [`loader` feature](#loader-feature) — static guests may call each other; loaded guests may be host-only. Without it, an import outside the runtime's namespaces is unresolved and the deployment fails at boot.
 
-### Plugin feature
+### Loader feature
 
-Omnia's off-by-default `plugin` cargo feature: the `omnia:plugins/loader` capability (`omnia-plugin`). Independent of the [`link` feature](#link-feature). A `runtime!` invocation declaring `plugin: { locations: [...] }` requires it; a config-file deployment with `[[plugin.location]]` entries is refused at startup without it.
+Omnia's off-by-default `loader` cargo feature: the [guest loader](#guest-loader) (`omnia-plugin`). Independent of the [`link` feature](#link-feature). With it, `Deployment::assemble` links the loader host and installs the deployment's [acquisition policy](#acquisition-policy); a deployment declaring `registries` is refused at startup without it.
 
-### Plugin loader
+### Guest loader
 
-The `omnia:plugins/loader` host capability: a guest names a package (location plus optional sha256 pin) and the host acquires, verifies, validates, and registers it, returning a typed handle. Request-only — component bytes never cross the interface, and the requester gains no lifecycle authority. Ships behind omnia's `plugin` feature; linked when the deployment declares plugin locations (the macro's `plugin: { locations: [...] }` list, or a bare `plugin: {}` beside `config:` over the TOML's `[[plugin.location]]` entries); reachable only from worlds that import it. The requester surface — the `Plugins` capability trait and shared `PluginRef`/`Digest` types — ships in `omnia-sdk`'s `plugins` module.
+The `omnia:plugins/loader` host capability: a guest names a location — a registry package (with the registry to fetch from, or the deployment's default routing), a mount-relative path, or a guest the deployment `declared` — plus an optional sha256 pin, and the host acquires, verifies, validates, and registers it, returning a typed handle; a declared guest is attested, not fetched, and takes no pin. Request-only — component bytes never cross the interface, and the requester gains no lifecycle authority. A path load registers under its file's stem, as a [guest entry](#guest-entry) does. Ships behind omnia's `loader` feature; linked at assembly for every deployment alike, reachable only from worlds that import it. The requester surface — the `Plugins` capability trait and shared `Location`/`PluginRef`/`Digest` types — ships in `omnia-sdk`'s `plugins` module.
 
 ### Acquisition policy
 
-How the loader turns a package name and location into component bytes. Declared at the composition root as deployment data (the macro's `plugin: { locations: [...] }` list, or `[[plugin.location]]` in `omnia.toml`, carried as `Location`s) and installed through `Plugins::install_declared` from the `Wiring::extend` hook, never runtime-core machinery. One slot per location kind, filled by the built-in acquirers `PathMounts` (named directory roots, read fresh on every load) and `RegistryClient` (exact package references, routed by namespace or package through the registry location's wasm-pkg configuration when it carries one, optionally cached by hand in a `ContentStore` + `ReleaseStore` backend); a load names its `Origin` (a registry endpoint or a location-relative path), routes structurally by kind, and an empty slot refuses typed.
+How the loader turns a location into component bytes. The declared policy is deployment data — the [mounts](#mount) serve path loads and the `registries` configuration (the macro's `registries: include_str!(..)`, a manifest's `[registries] path`) is the default routing of a package load that names no registry — installed by `Deployment::assemble` through `Plugins::install_declared`; an embedder selects custom sources with `Deployment::loader(registry, path)` before assembly, never through runtime-core machinery. One slot per origin kind, filled by the built-in acquirers `PathMounts` (the mounts, read fresh on every load) and `RegistryClient` (exact package references, fetched from the registry the load names or routed by package override, namespace, then `default_registry` through the wasm-pkg configuration — a package routed nowhere is refused naming its namespace — optionally cached by hand in a `ContentStore` + `ReleaseStore` backend); a load names its `Origin` (a registry package, a mount-relative path, or a declared guest), routes structurally by kind, and an empty slot refuses typed.
 
 ## Guest SDK (`omnia-sdk`)
 
@@ -92,7 +96,7 @@ Same layer as **Layers 1 + 2 (composition root + live-runtime SDK + WASI interfa
 
 ### Facade
 
-The `omnia` crate, the **composition root** and an embedder's only omnia dependency: it owns deployment assembly and process lifecycle, composes the optional crates — `omnia-link` (guest→guest linking, behind the `link` feature), `omnia-plugin` (the plugin loader capability, behind the `plugin` feature), and `omnia-cli` (the `run` grammar, a leaf crate behind the `cli` feature) — and re-exports the `omnia-core` live-runtime SDK and the `runtime!` macro under `omnia::…` paths.
+The `omnia` crate, the **composition root** and an embedder's only omnia dependency: it owns deployment assembly and process lifecycle, composes the optional crates — `omnia-link` (guest-to-guest dispatch, behind the `link` feature), `omnia-plugin` (the guest loader, behind the `loader` feature), and `omnia-cli` (the `run` grammar, a leaf crate behind the `cli` feature) — and re-exports the `omnia-core` live-runtime SDK and the `runtime!` macro under `omnia::…` paths.
 
 ### Runtime contract
 

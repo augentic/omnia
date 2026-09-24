@@ -1,23 +1,25 @@
-//! # Late-bound plugins
+//! # The guest loader
 //!
-//! The `omnia:plugins/loader` capability crate: a guest names code (package,
-//! location, optional sha256 pin) and the host acquires, verifies, and admits
-//! it through the runtime's admission seam, handing back a typed [`Plugin`]
-//! handle. Component bytes never cross the interface in either direction, and
-//! the requester receives no lifecycle authority — validation, compilation,
-//! and publication stay host-side, bounded by the deployment's declared
-//! plugin interfaces.
+//! The `omnia:plugins/loader` capability crate: a guest names code (a
+//! location — a registry package, a mount-relative path, or a name the
+//! deployment declares — and an optional sha256 pin) and the host acquires,
+//! verifies, and admits it through the runtime's admission seam, handing
+//! back a typed [`Plugin`] handle. Component bytes never cross the interface
+//! in either direction, and the requester receives no lifecycle authority —
+//! validation, compilation, and publication stay host-side.
 //!
-//! Everything plugin lives here: the [`WasiPlugins`] host binding, the
+//! Everything loader lives here: the [`WasiPlugins`] host binding, the
 //! [`Plugins`] load path, and the acquisition seam. Acquisition policy
-//! (endpoints, cache, path reads) is the two slots [`Plugins::install`]
-//! takes — one per [`Origin`] kind — from the deployment's `Wiring::extend`
-//! hook. [`Plugins::install_declared`] fills them from the deployment's
-//! declared locations (the `runtime!` macro's `plugin: { locations: [...] }`
-//! list, carried as manifest data). The built-in acquirers are
-//! [`PathMounts`] and [`RegistryClient`]; a store behind `RegistryClient`
-//! implements [`ContentStore`] and [`ReleaseStore`]. The runtime core keeps
-//! zero storage and network dependencies.
+//! (registries, cache, path reads) is the two slots [`Plugins::install`]
+//! takes — one per acquiring [`Origin`] kind. Assembly installs the declared
+//! policy through [`Plugins::install_declared`]: the deployment's mounts
+//! become the roots path loads resolve against, and its `registries`
+//! configuration (the `runtime!` macro's `registries:`, a manifest's
+//! `[registries]`) is the default routing of a package load that names no
+//! registry of its own. The built-in acquirers are [`PathMounts`] and
+//! [`RegistryClient`]; a store behind `RegistryClient` implements
+//! [`ContentStore`] and [`ReleaseStore`]. The runtime core keeps zero storage
+//! and network dependencies.
 //!
 //! Embedders — deployments and store implementors alike — reach all of this
 //! through the `omnia` facade's re-exports, never by depending on this crate

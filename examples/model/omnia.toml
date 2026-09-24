@@ -11,13 +11,14 @@
 # canned backend ignores the workspace (it never runs tools).
 #
 # Build the guest first (see README.md), then run (this path is compiled in
-# via runtime! `config:`, so the binary is a direct command — no `run`
+# via runtime! `manifest:`, so the binary is a direct command — no `run`
 # subcommand):
 #
 #   cargo run --example model
 
+# Named `model` here; without `name` the file's stem (`model_wasm`) would.
 [[guest]]
-id = "model"
+name = "model"
 source.path = "../../target/wasm32-wasip2/debug/examples/model_wasm.wasm"
 
 # Read-only workspace the `model` guest lends through `grants.workspace`.

@@ -1,6 +1,6 @@
 //! Linker polyfill for host-mediated imports.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::iter::zip;
 use std::sync::Arc;
 use std::time::Instant;
@@ -10,6 +10,7 @@ use omnia_core::{ChainCtx, ChainPolicy, GuestId, HasChain, InvokeError, handle_k
 use wasmtime::Engine;
 use wasmtime::component::{Linker, Type, Val, types};
 
+use super::is_host;
 use super::route::Routes;
 use super::selector::GuestSelector;
 
@@ -38,17 +39,18 @@ pub struct Caller {
     pub routes: Routes,
 }
 
-/// Polyfill one component's imports of the declared `interfaces` not already
-/// in `wired`, bound to `caller`.
+/// Polyfill one component's imports outside the runtime's own namespaces
+/// ([`is_host`]) not already in `wired`, bound to `caller`.
 ///
 /// Each function is linked exactly once (the linker is shared, so the
 /// per-guest imports are unioned function-by-function, reopening an
 /// interface's [`LinkerInstance`](wasmtime::component::LinkerInstance) as
-/// later guests add functions). `wasi:*` imports are never touched here —
-/// they are host-satisfied — so only the manifest-declared interfaces are
-/// dispatched. Runs *before* pre-instantiation, so an import that is neither
-/// host-satisfied nor allow-listed remains unresolved and fails fast at
-/// `instantiate_pre`.
+/// later guests add functions). `wasi:*` and `omnia:*` imports are never
+/// touched here — they are host-satisfied — and a bare function or type
+/// import is not a service, so it is skipped. Runs *before*
+/// pre-instantiation, so a host import nothing links remains unresolved and
+/// fails fast at `instantiate_pre`, and a relayed import that a host also
+/// links collides with that host's definition rather than shadowing it.
 ///
 /// Registration matches the import's type-level asyncness: a plain `func` is
 /// polyfilled with `func_new_async`, an `async func` with
@@ -63,21 +65,22 @@ pub struct Caller {
 ///
 /// # Errors
 ///
-/// Returns an error if a named link target is not an interface import, a
-/// function's signature is not plain, or a function cannot be defined on the
-/// linker.
+/// Returns an error if a function's signature is not plain, two importers
+/// disagree on a function's asyncness, or a function cannot be defined on
+/// the linker.
 pub fn polyfill_component<T: HasChain + 'static>(
     engine: &Engine, linker: &mut Linker<T>, id: &GuestId,
-    component: &wasmtime::component::Component, interfaces: &BTreeSet<Box<str>>,
-    caller: &Arc<Caller>, wired: &mut WiredLinks,
+    component: &wasmtime::component::Component, caller: &Arc<Caller>, wired: &mut WiredLinks,
 ) -> Result<()> {
     let component_ty = component.component_type();
     for (name, types::ComponentExtern { ty, .. }) in component_ty.imports(engine) {
-        if !interfaces.contains(name) {
+        if is_host(name) {
             continue;
         }
+        // A bare function or type import is not a service; if nothing
+        // satisfies it, `instantiate_pre` says so.
         let types::ComponentItem::ComponentInstance(instance_ty) = ty else {
-            bail!("link target `{name}` (imported by guest `{id}`) is not an interface");
+            continue;
         };
 
         // Snapshot the missing function names and asyncness before mutably
@@ -110,9 +113,9 @@ pub fn polyfill_component<T: HasChain + 'static>(
             }
         }
 
-        // Opening the instance also (re)defines it on the linker, so an
-        // allow-listed interface resolves even when every function is already
-        // wired (or it has none).
+        // Opening the instance also (re)defines it on the linker, so a relayed
+        // interface resolves even when every function is already wired (or it
+        // has none).
         let mut root = linker.root();
         let mut interface = root
             .instance(name)

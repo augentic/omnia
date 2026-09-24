@@ -81,9 +81,9 @@ cargo clippy -p omnia-sdk --no-default-features --features docstore --all-target
 cargo clippy -p omnia-sdk --no-default-features --features command,http --all-targets -- -D warnings
 cargo clippy -p omnia --no-default-features --features jit --all-targets -- -D warnings
 cargo clippy -p omnia --no-default-features --features otlp --all-targets -- -D warnings
-cargo clippy -p omnia --no-default-features --features plugin --all-targets -- -D warnings
+cargo clippy -p omnia --no-default-features --features loader --all-targets -- -D warnings
 cargo clippy -p omnia --no-default-features --features link --all-targets -- -D warnings
-cargo clippy -p omnia --no-default-features --features link,plugin --all-targets -- -D warnings
+cargo clippy -p omnia --no-default-features --features link,loader --all-targets -- -D warnings
 cargo clippy -p omnia-core --no-default-features --all-targets -- -D warnings
 cargo clippy -p omnia-link --all-targets -- -D warnings
 cargo clippy -p omnia-cli --no-default-features --all-targets -- -D warnings

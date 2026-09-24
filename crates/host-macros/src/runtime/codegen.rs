@@ -6,7 +6,7 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote};
 use syn::{Expr, Ident, Path};
 
-use crate::runtime::parse::{Config, HostEntry, LocationSpec, ManifestSpec, Mode};
+use crate::runtime::parse::{Config, HostEntry, ManifestSpec, Mode};
 
 // Token fragments needed to expand the runtime macro.
 pub struct Codegen {
@@ -19,12 +19,8 @@ pub struct Codegen {
     pub backends_def: TokenStream,
     pub main_options: TokenStream,
     /// The compiled-in `omnia::ManifestSource`; absent when the invocation
-    /// declares neither `config:` nor inline manifest keys.
+    /// declares neither `manifest:` nor inline manifest keys.
     pub manifest: Option<TokenStream>,
-    /// Whether to link the `omnia::WasiPlugins` loader host and install the
-    /// declared locations — a `locations:` list means the deployment opted
-    /// into the loader capability (and into `omnia`'s `plugin` feature).
-    pub link_loader: bool,
 }
 
 impl From<&Config> for Codegen {
@@ -46,29 +42,30 @@ impl From<&Config> for Codegen {
             backends_def,
             main_options,
             manifest,
-            link_loader: config.link_loader,
         }
     }
 }
 
-/// Emit the `omnia::MainOptions` method chain passed to `omnia::main`; a
-/// compiled-in manifest rides the generated `manifest()` accessor, and keys
-/// the invocation omits contribute no calls.
+/// Emit the `omnia::MainOptions` method chain passed to `omnia::main`: the
+/// invoking crate's package name as the program name, a compiled-in
+/// manifest riding the generated `manifest()` accessor, and no call for a
+/// key the invocation omits.
 fn emit_main_options(config: &Config, has_manifest: bool) -> TokenStream {
     let mode = config.mode.tokens();
     let manifest = has_manifest.then(|| quote! { .manifest(manifest()) });
 
     quote! {
         omnia::MainOptions::new(#mode)
+            .program_name(env!("CARGO_PKG_NAME"))
             #manifest
     }
 }
 
 /// Emit the `omnia::ManifestSource` for the compiled-in deployment
-/// manifest: `Path` for a `config:` expression, `Inline` for the inline
+/// manifest: `Path` for a `manifest:` expression, `Inline` for the inline
 /// manifest keys, nothing when neither is declared.
 fn emit_manifest(config: &Config) -> Option<TokenStream> {
-    if let Some(expr) = &config.config_file {
+    if let Some(expr) = &config.manifest_file {
         return Some(quote! {
             omnia::ManifestSource::Path(::std::path::PathBuf::from(#expr))
         });
@@ -85,40 +82,29 @@ fn emit_manifest(config: &Config) -> Option<TokenStream> {
 
 /// Emit the fluent `omnia::Manifest` builder chain for the inline keys.
 fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
-    let interfaces = manifest.interfaces.iter().map(|interface| {
+    // The expression is the configuration's contents, compiled in; a
+    // manifest file names a path instead.
+    let registries = manifest.registries.as_ref().map(|config| {
         quote! {
-            .link([#interface])
+            .registries(omnia::RegistryConfig::contents(#config))
         }
     });
 
-    let locations = manifest.locations.iter().map(|location| match location {
-        LocationSpec::Path { name, path } => quote! {
-            .locations([omnia::Location::path(#name, #path)])
-        },
-        LocationSpec::Registry {
-            registry,
-            config: None,
-        } => quote! {
-            .locations([omnia::Location::registry(#registry)])
-        },
-        LocationSpec::Registry {
-            registry,
-            config: Some(config),
-        } => quote! {
-            .locations([omnia::Location::registry_config(#registry, #config)])
-        },
-    });
-
+    // The component is embedded at build time; the entry is named by the
+    // path's file stem unless the guest names itself.
     let guests = manifest.guests.iter().map(|guest| {
-        let id = &guest.id;
-        let source = &guest.source;
+        let path = &guest.path;
+        let entry = guest.name.as_ref().map_or_else(
+            || quote! { omnia::GuestEntry::embedded(#path, include_bytes!(#path)) },
+            |name| quote! { omnia::GuestEntry::new(#name, include_bytes!(#path)) },
+        );
         let http = &guest.routes.http;
         let messaging = &guest.routes.messaging;
         let websocket = &guest.routes.websocket;
         let command = guest.command.then(|| quote! { .command() });
         quote! {
             .guest(
-                omnia::GuestEntry::new(#id, #source)
+                #entry
                     #(.route_http(#http))*
                     #(.route_messaging(#messaging))*
                     #(.route_websocket(#websocket))*
@@ -143,8 +129,7 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
 
     quote! {
         omnia::Manifest::new()
-            #(#interfaces)*
-            #(#locations)*
+            #registries
             #(#guests)*
             #(#mounts)*
     }

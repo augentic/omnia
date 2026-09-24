@@ -13,6 +13,7 @@ mod routing;
 
 use std::collections::{BTreeMap, BTreeSet, btree_map};
 use std::fmt;
+use std::path::Path;
 use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use anyhow::{Context as _, Result, bail, ensure};
@@ -34,6 +35,26 @@ use crate::seam::LinkSeam;
 pub struct GuestId(Arc<str>);
 
 impl GuestId {
+    /// Returns the identity a component path names: its file stem.
+    ///
+    /// A path with no stem (`..`, an empty string) names itself.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use omnia_core::GuestId;
+    ///
+    /// assert_eq!(GuestId::from_path("./adapters/intent.wasm").as_str(), "intent");
+    /// assert_eq!(GuestId::from_path("intent").as_str(), "intent");
+    /// ```
+    #[must_use]
+    pub fn from_path(path: &str) -> Self {
+        Path::new(path)
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .map_or_else(|| Self::from(path), Self::from)
+    }
+
     /// Returns the identity as a string slice.
     #[must_use]
     pub fn as_str(&self) -> &str {

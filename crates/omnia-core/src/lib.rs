@@ -9,7 +9,6 @@ mod dispatch;
 mod extensions;
 mod host;
 mod invoke;
-mod location;
 mod mount;
 mod options;
 mod registry;
@@ -35,7 +34,6 @@ pub use self::host::{
     get_cloned,
 };
 pub use self::invoke::{FreshCall, InvokeError, call_fresh};
-pub use self::location::Location;
 pub use self::mount::{MountRegistry, ResolvedPreopen};
 pub use self::options::RuntimeOptions;
 pub use self::registry::{
