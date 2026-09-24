@@ -19,7 +19,7 @@ workspace = true
 anyhow.workspace = true
 cap-std.workspace = true
 futures.workspace = true
-omnia-core.workspace = true
+omnia-core = { workspace = true, features = ["jit"] }
 tokio = { workspace = true, features = ["rt"] }
 tracing.workspace = true
 wasm-pkg-client.workspace = true

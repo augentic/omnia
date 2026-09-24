@@ -464,6 +464,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// Returns a typed [`AdmitError`] naming the refusal: refused artifact,
     /// an identity already registered (an earlier or racing registration), or
     /// an internal serve/publication failure.
+    #[cfg(feature = "jit")]
     pub async fn admit(&self, id: GuestId, bytes: Vec<u8>) -> Result<(), AdmitError> {
         let digest: std::sync::Arc<str> = std::sync::Arc::from(crate::sha256_digest(&bytes));
 

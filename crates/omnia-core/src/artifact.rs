@@ -3,7 +3,9 @@
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context as _, Result, ensure};
+#[cfg(feature = "jit")]
+use anyhow::ensure;
+use anyhow::{Context as _, Result};
 use wasmtime::Engine;
 use wasmtime::component::Component;
 
@@ -38,8 +40,8 @@ pub struct LoadedGuest {
 pub struct GuestArtifact(ArtifactKind);
 
 enum ArtifactKind {
-    /// Raw component wasm, JIT-compiled at registration. Without `jit` the
-    /// bytes are never read — loading bails before compilation.
+    /// Raw component wasm, JIT-compiled at registration.
+    #[cfg(feature = "jit")]
     Wasm(Vec<u8>),
     /// A settings-matched pre-compiled artifact (`omnia compile` output),
     /// loaded via native deserialization with no runtime codegen.
@@ -53,6 +55,7 @@ impl GuestArtifact {
     /// Raw component wasm, JIT-compiled at registration (requires the `jit`
     /// feature). Validated and compiled by wasmtime; safe to accept from
     /// less-trusted sources.
+    #[cfg(feature = "jit")]
     #[must_use]
     pub const fn wasm(bytes: Vec<u8>) -> Self {
         Self(ArtifactKind::Wasm(bytes))
@@ -126,23 +129,16 @@ impl GuestArtifact {
                             )
                         })?
                 }
+                #[cfg(feature = "jit")]
                 ArtifactKind::Wasm(bytes) => {
                     ensure!(
                         bytes.get(..ELF_MAGIC.len()) != Some(&ELF_MAGIC),
                         "the bytes are a pre-compiled (native) artifact; GuestArtifact::wasm \
                          only accepts raw wasm"
                     );
-                    #[cfg(feature = "jit")]
-                    {
-                        Component::new(&engine, &bytes)
-                            .map_err(anyhow::Error::from)
-                            .context("compiling guest component")?
-                    }
-                    #[cfg(not(feature = "jit"))]
-                    anyhow::bail!(
-                        "registering raw wasm requires the `jit` feature; pre-compile with `omnia \
-                         compile` and register the artifact instead"
-                    )
+                    Component::new(&engine, &bytes)
+                        .map_err(anyhow::Error::from)
+                        .context("compiling guest component")?
                 }
             };
             // Build the copy-on-write heap image now rather than lazily on the

@@ -28,15 +28,18 @@ cli = ["dep:omnia-cli"]
 # `Plugins` load path, and the built-in acquirers (`PathMounts`,
 # `RegistryClient`) with their HTTP/OCI registry stack. A `runtime!`
 # invocation declaring `plugin: { locations: [...] }` requires it; without it,
-# deployments are interfaces-only and never link the loader.
-plugin = ["dep:omnia-plugin"]
+# deployments are interfaces-only and never link the loader. Implies `jit`:
+# loaded plugins are raw wasm.
+plugin = ["dep:omnia-plugin", "jit"]
 
 # Enables host-mediated guest→guest linking (the `omnia-link` crate). A
 # deployment whose manifest names link interfaces requires it; without it,
 # `Manifest::validate` refuses a non-empty interface list.
 link = ["dep:omnia-link"]
 
-# Enables just-in-time wasm to machine code compilation.
+# Enables just-in-time wasm to machine code compilation. Raw `.wasm` guests,
+# `GuestArtifact::wasm`, `Runtime::admit`, and `omnia::compile` exist only
+# with it; without it every guest is a pre-compiled `omnia compile` artifact.
 jit = ["omnia-core/jit", "omnia-cli?/jit"]
 
 # Enables the OTLP (gRPC) span and metric exporters. Without it, `Telemetry`
@@ -76,4 +79,4 @@ tokio = { workspace = true, features = ["macros", "rt"] }
 
 [[test]]
 name = "link"
-required-features = ["link"]
+required-features = ["link", "jit"]
