@@ -100,10 +100,10 @@ You should see two lines: one reply tagged `from extra`, and one from `responder
 
 ```rust
 let bytes = std::fs::read(extra_wasm)?;
-runtime.register("extra", GuestArtifact::wasm(bytes)).await?;
+runtime.register("extra", bytes).await?;
 ```
 
-`GuestArtifact::wasm` is the safe constructor: the bytes are validated and compiled as WebAssembly. The other constructor, `GuestArtifact::precompiled`, is `unsafe` because a pre-compiled `.bin` is native code. Only load those from a build pipeline you trust.
+The bytes may be a raw `.wasm`, compiled at registration, or `omnia compile` output, deserialized as native code — the runtime tells them apart the way wasmtime does. Verifying them (digest, signature, provenance) is the install pipeline's job, before they reach the runtime; the registry records their digest either way.
 
 ## Also in this directory
 

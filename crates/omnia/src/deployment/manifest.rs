@@ -13,11 +13,11 @@
 //! The `[[guest]]` population is the allow-list of everything that may run:
 //! each entry (a file, embedded-bytes, or package source, named by its `name`
 //! or, absent one, by its file's stem) loads at boot or — marked `on_demand`
-//! — when the guest loader first admits it by name, and may pin the
-//! `digest` its bytes must hash to. Each guest's `routes` tables and the
-//! `[registries]` configuration that routes package sources are consumed
-//! too. Distributed `[transport]` is not yet implemented: only the
-//! in-process default is accepted.
+//! — when the guest loader first admits it by name, may pin the `digest` its
+//! bytes must hash to, and may admit raw wasm alone (`wasm_only`). Each
+//! guest's `routes` tables and the `[registries]` configuration that routes
+//! package sources are consumed too. Distributed `[transport]` is not yet
+//! implemented: only the in-process default is accepted.
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
@@ -25,12 +25,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
-use omnia_core::{CliRoutes, Digest, GuestId, HttpRoutes, PatternRoutes, ResolvedPreopen, Routes};
-#[cfg(feature = "loader")]
-use omnia_plugin::{OnDemand, Origin};
+use omnia_core::{
+    CliRoutes, Digest, GuestId, HttpRoutes, PatternRoutes, ResolvedPreopen, Routes, Source,
+    SourceSpec,
+};
 use serde::Deserialize;
-
-use super::source::Source;
 
 /// The deployment manifest: every guest that may run, what they mount, and
 /// where package sources are fetched from.
@@ -220,44 +219,26 @@ impl Manifest {
     ///
     /// Returns an error if a boot guest names a package source, which only
     /// loads on demand.
-    pub fn sources(&self) -> Result<Vec<Source>> {
+    pub fn boot_sources(&self) -> Result<Vec<Source>> {
         self.guests
             .iter()
             .filter(|entry| !entry.on_demand)
             .map(|entry| {
-                let id = GuestId::from(entry.name.as_str());
-                let source = match &entry.source {
-                    SourceSpec::Path(path) => Source::with_id(id, path),
-                    SourceSpec::Bytes(bytes) => Source::embedded(id, bytes.clone()),
-                    SourceSpec::Package(package) => {
-                        bail!("guest `{id}`: package `{package}` loads on demand, not at boot")
-                    }
-                };
-                Ok(match entry.digest {
-                    Some(digest) => source.pinned(digest),
-                    None => source,
-                })
+                if let SourceSpec::Package(package) = &entry.source {
+                    bail!(
+                        "guest `{}`: package `{package}` loads on demand, not at boot",
+                        entry.name
+                    );
+                }
+                Ok(source(entry))
             })
             .collect()
     }
 
     /// Every `[[guest]]` that loads on demand, as the guest loader's table.
-    #[cfg(feature = "loader")]
     #[must_use]
-    pub fn on_demand(&self) -> Vec<(GuestId, OnDemand)> {
-        self.guests
-            .iter()
-            .filter(|entry| entry.on_demand)
-            .map(|entry| {
-                (
-                    GuestId::from(entry.name.as_str()),
-                    OnDemand {
-                        origin: Origin::from(&entry.source),
-                        digest: entry.digest,
-                    },
-                )
-            })
-            .collect()
+    pub fn on_demand_sources(&self) -> Vec<Source> {
+        self.guests.iter().filter(|entry| entry.on_demand).map(source).collect()
     }
 
     /// Per-trigger route tables aggregated from each guest's `routes` lists,
@@ -399,6 +380,11 @@ pub struct GuestEntry {
     /// they become a guest — at boot or on demand.
     #[serde(default)]
     pub digest: Option<Digest>,
+    /// Admits raw wasm alone: a pre-compiled artifact is refused however it
+    /// hashes. For a source the deployment declares from input it does not
+    /// author, where the pin comes from the same place as the bytes.
+    #[serde(default)]
+    pub wasm_only: bool,
 }
 
 impl GuestEntry {
@@ -413,6 +399,7 @@ impl GuestEntry {
             command: false,
             on_demand: false,
             digest: None,
+            wasm_only: false,
         }
     }
 
@@ -469,6 +456,14 @@ impl GuestEntry {
         self
     }
 
+    /// Admit raw wasm alone: refuse a pre-compiled artifact however it
+    /// hashes.
+    #[must_use]
+    pub const fn wasm_only(mut self) -> Self {
+        self.wasm_only = true;
+        self
+    }
+
     /// The invariants one entry carries on its own; names are checked across
     /// the manifest.
     fn validate(&self) -> Result<()> {
@@ -498,99 +493,17 @@ impl GuestEntry {
     }
 }
 
-/// Where a guest's component bytes come from.
-///
-/// Modelled as an externally tagged enum so TOML's `source.path = "..."` and
-/// `source.package = "..."` each select a variant.
-#[derive(Clone, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SourceSpec {
-    /// A local `.wasm` / pre-compiled `.bin` path. [`Manifest::load`]
-    /// resolves relative paths against the manifest's directory; a relative
-    /// path set programmatically resolves against the process working directory.
-    Path(PathBuf),
-    /// Component bytes embedded in the host binary (typically an
-    /// `include_bytes!` blob). TOML cannot express this variant; it is set
-    /// through the `runtime!` macro or the programmatic [`GuestEntry`] API.
-    #[serde(skip)]
-    Bytes(Cow<'static, [u8]>),
-    /// An exact `namespace:name@version` package reference, fetched on first
-    /// load from the registry the manifest's `[registries]` routes it to.
-    /// Always loads on demand.
-    Package(String),
-}
-
-impl SourceSpec {
-    /// A package source from its exact `namespace:name@version` reference.
-    #[must_use]
-    pub fn package(reference: impl Into<String>) -> Self {
-        Self::Package(reference.into())
+// The one resolution from a `[[guest]]` entry to its loadable source; boot
+// and on-demand entries differ only in when it is loaded.
+fn source(entry: &GuestEntry) -> Source {
+    let mut source = Source::new(entry.name.as_str(), entry.source.clone());
+    if let Some(digest) = entry.digest {
+        source = source.pinned(digest);
     }
-}
-
-// Manual: the derived impl would dump the embedded component bytes.
-impl std::fmt::Debug for SourceSpec {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Path(path) => f.debug_tuple("Path").field(path).finish(),
-            Self::Bytes(bytes) => write!(f, "Bytes({} bytes)", bytes.len()),
-            Self::Package(package) => f.debug_tuple("Package").field(package).finish(),
-        }
+    if entry.wasm_only {
+        source = source.wasm_only();
     }
-}
-
-#[cfg(feature = "loader")]
-impl From<&SourceSpec> for Origin {
-    fn from(source: &SourceSpec) -> Self {
-        match source {
-            SourceSpec::Path(path) => Self::Path(path.clone()),
-            SourceSpec::Bytes(bytes) => Self::Bytes(bytes.clone()),
-            SourceSpec::Package(package) => Self::Package(package.clone()),
-        }
-    }
-}
-
-impl From<&str> for SourceSpec {
-    fn from(path: &str) -> Self {
-        Self::Path(PathBuf::from(path))
-    }
-}
-
-impl From<String> for SourceSpec {
-    fn from(path: String) -> Self {
-        Self::Path(PathBuf::from(path))
-    }
-}
-
-impl From<&Path> for SourceSpec {
-    fn from(path: &Path) -> Self {
-        Self::Path(path.to_path_buf())
-    }
-}
-
-impl From<PathBuf> for SourceSpec {
-    fn from(path: PathBuf) -> Self {
-        Self::Path(path)
-    }
-}
-
-impl From<&'static [u8]> for SourceSpec {
-    fn from(bytes: &'static [u8]) -> Self {
-        Self::Bytes(Cow::Borrowed(bytes))
-    }
-}
-
-// `include_bytes!` yields `&[u8; N]`, so the array form is the one embedders hit.
-impl<const N: usize> From<&'static [u8; N]> for SourceSpec {
-    fn from(bytes: &'static [u8; N]) -> Self {
-        Self::Bytes(Cow::Borrowed(bytes))
-    }
-}
-
-impl From<Vec<u8>> for SourceSpec {
-    fn from(bytes: Vec<u8>) -> Self {
-        Self::Bytes(Cow::Owned(bytes))
-    }
+    source
 }
 
 /// A guest's inbound routes, one pattern list per trigger; the containing
@@ -1009,22 +922,39 @@ mod tests {
             matches!(&manifest.guests[2].source, SourceSpec::Package(p) if p == "acme:tool@1.2.3")
         );
 
-        // Boot sources carry the boot guests alone.
-        let sources = manifest.sources().expect("boot sources resolve");
+        // Boot sources carry the boot guests alone, pins included.
+        let sources = manifest.boot_sources().expect("boot sources resolve");
         assert_eq!(sources.len(), 1);
         assert_eq!(sources[0].id(), &GuestId::from("app"));
+        assert_eq!(sources[0].digest(), DIGEST.parse().ok());
 
-        #[cfg(feature = "loader")]
-        {
-            let table = manifest.on_demand();
-            assert_eq!(table.len(), 2);
-            assert_eq!(table[0].0, GuestId::from("tool"));
-            assert!(matches!(table[0].1.origin, Origin::Path(_)));
-            assert_eq!(table[0].1.digest, None);
-            assert_eq!(table[1].0, GuestId::from("pkg"));
-            assert!(matches!(&table[1].1.origin, Origin::Package(p) if p == "acme:tool@1.2.3"));
-            assert_eq!(table[1].1.digest, DIGEST.parse().ok());
-        }
+        let table = manifest.on_demand_sources();
+        assert_eq!(table.len(), 2);
+        assert_eq!(table[0].id(), &GuestId::from("tool"));
+        assert!(matches!(table[0].spec(), SourceSpec::Path(_)));
+        assert_eq!(table[0].digest(), None);
+        assert_eq!(table[1].id(), &GuestId::from("pkg"));
+        assert!(matches!(table[1].spec(), SourceSpec::Package(p) if p == "acme:tool@1.2.3"));
+        assert_eq!(table[1].digest(), DIGEST.parse().ok());
+    }
+
+    // `wasm_only` is a per-entry policy carried onto the source it resolves
+    // to, for boot and on-demand entries alike; it defaults off.
+    #[test]
+    fn parse_wasm_only() {
+        let toml = "[[guest]]\nname = \"app\"\nsource.path = \"./app.wasm\"\nwasm_only = true\n\n\
+                    [[guest]]\nname = \"tool\"\nsource.path = \"./tool.wasm\"\non_demand = true\n\
+                    wasm_only = true\n\n\
+                    [[guest]]\nname = \"any\"\nsource.path = \"./any.wasm\"\n";
+        let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
+
+        let boot = manifest.boot_sources().expect("boot sources resolve");
+        assert!(boot[0].is_wasm_only());
+        assert!(!boot[1].is_wasm_only(), "an unmarked entry admits either format");
+        assert!(manifest.on_demand_sources()[0].is_wasm_only());
+
+        let programmatic = GuestEntry::new("tool", "./tool.wasm").on_demand().wasm_only();
+        assert!(programmatic.wasm_only);
     }
 
     // A digest is validated as it parses, not at the first load.
@@ -1092,7 +1022,7 @@ mod tests {
         assert!(matches!(manifest.guests[0].source, SourceSpec::Bytes(_)));
         assert_eq!(format!("{:?}", manifest.guests[0].source), "Bytes(4 bytes)");
 
-        let sources = manifest.sources().expect("bytes sources resolve");
+        let sources = manifest.boot_sources().expect("bytes sources resolve");
         assert_eq!(sources.len(), 2);
         assert_eq!(sources[0].id(), &GuestId::from("baked"));
         assert_eq!(sources[1].id(), &GuestId::from("read"));

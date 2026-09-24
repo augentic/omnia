@@ -23,9 +23,9 @@ use wasmtime::component::{Component, InstancePre, Linker};
 use wasmtime_wasi::WasiView;
 
 use crate::RuntimeOptions;
-use crate::artifact::LoadedGuest;
 use crate::digest::Digest;
 use crate::seam::LinkSeam;
+use crate::source::LoadedGuest;
 
 /// Opaque guest identity.
 ///
@@ -94,29 +94,20 @@ enum Target<T: 'static> {
 pub struct Guest<T: 'static> {
     id: GuestId,
     target: Target<T>,
-    // Content digest of the guest's bytes; `None` when the runtime never had
-    // them in hand — a pre-compiled file wasmtime read itself, or a
-    // `register`-path artifact.
-    digest: Option<Digest>,
+    digest: Digest,
 }
 
 impl<T: 'static> Guest<T> {
-    /// Create a guest backed by a local pre-instantiated component.
+    /// Create a guest backed by a local pre-instantiated component, recording
+    /// the content digest of the bytes it was loaded from so the attestation
+    /// lives and dies with the registry entry itself.
     #[must_use]
-    pub const fn local(id: GuestId, instance_pre: InstancePre<T>) -> Self {
+    pub const fn local(id: GuestId, instance_pre: InstancePre<T>, digest: Digest) -> Self {
         Self {
             id,
             target: Target::Local(instance_pre),
-            digest: None,
+            digest,
         }
-    }
-
-    /// Record the content digest of the guest's bytes, so the attestation
-    /// lives and dies with the registry entry itself.
-    #[must_use]
-    pub const fn with_digest(mut self, digest: Digest) -> Self {
-        self.digest = Some(digest);
-        self
     }
 
     /// Returns the guest's identity.
@@ -125,9 +116,9 @@ impl<T: 'static> Guest<T> {
         &self.id
     }
 
-    /// The recorded content digest, if the runtime hashed the guest's bytes.
+    /// The content digest of the bytes the guest was loaded from.
     #[must_use]
-    pub const fn digest(&self) -> Option<Digest> {
+    pub const fn digest(&self) -> Digest {
         self.digest
     }
 
@@ -211,10 +202,7 @@ impl<T: WasiView + 'static> Registry<T> {
                 .instantiate_pre(&component)
                 .map_err(anyhow::Error::from)
                 .with_context(|| format!("pre-instantiating guest `{id}`"))?;
-            let mut guest = Guest::local(id.clone(), instance_pre);
-            if let Some(digest) = digest {
-                guest = guest.with_digest(digest);
-            }
+            let guest = Guest::local(id.clone(), instance_pre, digest);
             if guests.insert(id.clone(), Arc::new(guest)).is_some() {
                 bail!("duplicate guest id `{id}`: guest identities must be unique");
             }
@@ -385,13 +373,4 @@ pub enum PublishError {
     Occupied(GuestId),
     /// Link-endpoint installation failed.
     Transport(anyhow::Error),
-}
-
-impl PublishError {
-    pub(crate) fn into_anyhow(self) -> anyhow::Error {
-        match self {
-            Self::Occupied(id) => anyhow::anyhow!("guest `{id}` is already registered"),
-            Self::Transport(error) => error,
-        }
-    }
 }

@@ -14,9 +14,7 @@ cfg_if::cfg_if! {
 
         use anyhow::{Context as _, Result, bail};
         use omnia::wasmtime::component::Val;
-        use omnia::{
-            DeploymentBuilder, GuestArtifact, GuestEntry, GuestId, Manifest, Runtime, StoreCtx,
-        };
+        use omnia::{DeploymentBuilder, GuestEntry, GuestId, Manifest, Runtime, StoreCtx};
 
         #[tokio::main]
         async fn main() -> Result<()> {
@@ -30,8 +28,6 @@ cfg_if::cfg_if! {
                 ))
                 .guest(GuestEntry::new("router", artifacts.join("guest_link_router_wasm.wasm")));
 
-            // Raw `.wasm` sources, so the safe `build` applies; a deployment of
-            // trusted `omnia compile` output would call `unsafe build_trusted`.
             let deployment = DeploymentBuilder::new()
                 .manifest(manifest)
                 .build::<StoreCtx<()>>()
@@ -43,13 +39,11 @@ cfg_if::cfg_if! {
             // The extra guest is absent from the manifest. An install pipeline
             // verifies the bytes (digest, signature — deployment policy) before
             // handing them to the runtime; here the "install" is a file read.
-            // Raw wasm is the safe constructor; `GuestArtifact::precompiled` is
-            // `unsafe` because pre-compiled bytes are native code.
             let wasm = std::fs::read(artifacts.join("guest_link_extra_wasm.wasm")).context(
                 "extra guest not built: cargo build -p examples --example \
                  guest-link-extra-wasm --target wasm32-wasip2",
             )?;
-            runtime.register("extra", GuestArtifact::wasm(wasm)).await?;
+            runtime.register("extra", wasm).await?;
 
             // The static router dispatches to the registered guest exactly as it
             // would to a static one.

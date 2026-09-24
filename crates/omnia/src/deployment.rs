@@ -1,7 +1,6 @@
 //! # WebAssembly Initiator
 
 mod manifest;
-mod source;
 
 use std::env;
 use std::sync::Arc;
@@ -9,12 +8,14 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 pub use manifest::{
-    GuestEntry, GuestRoutes, Manifest, Mount, RegistryConfig, SourceSpec, Transport, TransportKind,
+    GuestEntry, GuestRoutes, Manifest, Mount, RegistryConfig, Transport, TransportKind,
 };
 #[cfg(feature = "link")]
 use omnia_core::ChainPolicy;
 #[cfg(not(feature = "link"))]
 use omnia_core::NoLinks;
+#[cfg(feature = "loader")]
+use omnia_core::Source;
 use omnia_core::wasmtime::component::Linker;
 use omnia_core::wasmtime::{Config, Engine};
 use omnia_core::wasmtime_wasi::WasiView;
@@ -25,8 +26,7 @@ use omnia_core::{
 #[cfg(feature = "link")]
 use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks};
 #[cfg(feature = "loader")]
-use omnia_plugin::{OnDemand, Plugins, RegistryClient, RegistrySource, WasiPlugins};
-use source::ArtifactPolicy;
+use omnia_plugin::{Plugins, RegistryClient, RegistrySource, WasiPlugins};
 
 use crate::Mode;
 
@@ -34,10 +34,6 @@ use crate::Mode;
 ///
 /// When no manifest is set, [`build`](Self::build) loads the path in
 /// `OMNIA_MANIFEST`.
-///
-/// The safe [`build`](Self::build) rejects pre-compiled (native) artifacts;
-/// [`build_trusted`](Self::build_trusted) admits them and is `unsafe` because
-/// a pre-compiled artifact is native code the caller must trust.
 ///
 /// ```ignore
 /// let deployment = DeploymentBuilder::new()
@@ -142,10 +138,17 @@ impl DeploymentBuilder {
         self
     }
 
-    /// Resolve the manifest and build the deployment under `policy`.
-    async fn build_inner<T: WasiView + 'static>(
-        self, policy: ArtifactPolicy,
-    ) -> Result<Deployment<T>> {
+    /// Resolve the manifest into a [`Deployment`].
+    ///
+    /// If no manifest was supplied, the path in `OMNIA_MANIFEST` is loaded.
+    /// A guest is a raw wasm component or `omnia compile` output; either
+    /// loads.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no manifest resolves, the manifest is invalid, or
+    /// the deployment cannot be built.
+    pub async fn build<T: WasiView + 'static>(self) -> Result<Deployment<T>> {
         let manifest = if let Some(manifest) = self.manifest {
             manifest
         } else if self.allow_empty {
@@ -161,7 +164,7 @@ impl DeploymentBuilder {
         // startup rather than the first package load.
         let registry_config = manifest.registry_config()?;
         #[cfg(feature = "loader")]
-        let on_demand = manifest.on_demand();
+        let on_demand = manifest.on_demand_sources();
 
         let program_name = self.program_name.unwrap_or_else(|| "omnia".to_owned());
         // The runtime-carried name read by telemetry, trigger servers, and
@@ -188,11 +191,10 @@ impl DeploymentBuilder {
 
         // Boot guests load (and compile) in parallel through the async
         // [`Source::load`] seam; order still follows the manifest.
-        let sources = manifest.sources()?;
-        let guests = futures::future::try_join_all(
-            sources.iter().map(|source| source.load(&engine, policy)),
-        )
-        .await?;
+        let sources = manifest.boot_sources()?;
+        let guests =
+            futures::future::try_join_all(sources.iter().map(|source| source.load(&engine)))
+                .await?;
 
         // In command mode the program name is prepended as `argv[0]`.
         let args = if self.mode.is_command() {
@@ -225,42 +227,6 @@ impl DeploymentBuilder {
             fallback,
         })
     }
-
-    /// Resolve the manifest into a [`Deployment`].
-    ///
-    /// If no manifest was supplied, the path in `OMNIA_MANIFEST` is loaded.
-    /// Every guest must be raw component wasm; a pre-compiled (native)
-    /// artifact is rejected — see [`build_trusted`](Self::build_trusted).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if no manifest resolves, the manifest is invalid, a
-    /// guest names a pre-compiled artifact, or the deployment cannot be built.
-    pub async fn build<T: WasiView + 'static>(self) -> Result<Deployment<T>> {
-        self.build_inner(ArtifactPolicy::Reject).await
-    }
-
-    /// Resolve the manifest into a [`Deployment`], admitting pre-compiled
-    /// artifacts.
-    ///
-    /// If no manifest was supplied, the path in `OMNIA_MANIFEST` is loaded.
-    ///
-    /// # Safety
-    ///
-    /// Every pre-compiled path this builder's manifest names must identify
-    /// trusted, immutable wasmtime output (`omnia compile` /
-    /// [`wasmtime::component::Component::serialize`]). A pre-compiled
-    /// artifact is native code: wasmtime's compatibility check is not an
-    /// authenticity check, and tampered bytes can execute arbitrary code
-    /// with host privileges.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if no manifest resolves, the manifest is invalid, or
-    /// the deployment cannot be built.
-    pub async unsafe fn build_trusted<T: WasiView + 'static>(self) -> Result<Deployment<T>> {
-        self.build_inner(ArtifactPolicy::Trust).await
-    }
 }
 
 /// A compiled set of WebAssembly components with their shared Linker, ready to
@@ -269,8 +235,8 @@ impl DeploymentBuilder {
 /// [`host`]: Self::host
 pub struct Deployment<T: WasiView + 'static> {
     // Deployment name carried onto the runtime for trigger servers and the
-    // bootstrap log (the program name, unless `build_inner` honored an
-    // operator `COMPONENT` override).
+    // bootstrap log (the program name, unless `build` honored an operator
+    // `COMPONENT` override).
     name: String,
     engine: Engine,
     linker: Linker<T>,
@@ -307,7 +273,7 @@ pub struct Deployment<T: WasiView + 'static> {
 #[derive(Default)]
 struct Loader {
     // The manifest's on-demand guests.
-    on_demand: Vec<(GuestId, OnDemand)>,
+    on_demand: Vec<Source>,
     // The embedder's registry source; `None` installs a cacheless
     // `RegistryClient` over the deployment's `registries` configuration.
     registry: Option<Arc<dyn RegistrySource>>,

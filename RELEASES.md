@@ -41,6 +41,56 @@ Unreleased
 
 ### Changed
 
+- One loader for either artifact format, everywhere a guest loads. The
+  bytes a declared guest resolves to — a manifest `source.path`, the
+  macro's compiled-in `path:`, a loader entry's file or registry package —
+  are deserialized when they are `omnia compile` output and compiled when
+  they are raw wasm, told apart the way wasmtime tells them apart
+  (`Engine::detect_precompiled`); a settings-mismatched pre-compiled
+  artifact still fails with the compile-settings hint. What the deployment
+  names is the operator's trusted input in either format
+  (`docs/security-model.md`), so the raw-wasm/pre-compiled trust split is
+  gone with its API: `DeploymentBuilder::build_trusted` (`build` is the one
+  build, and the generated `run` / `run_with` load a pre-compiled guest as
+  `main` does), `GuestArtifact` altogether (`Runtime::register(id, bytes)`
+  takes the bytes in either format), `is_precompiled`, and `ELF_MAGIC`. The
+  loader admits a pre-compiled on-demand guest instead of refusing it, so
+  the `omnia:plugins/loader` `refused` variant no longer names that case.
+  - The digest is never optional. Every path a guest's bytes take runs
+    through one body, `Runtime::admit(id, bytes, digest)` — `register`
+    hashes and delegates; the loader hands over the digest it checked the
+    pin against rather than hashing twice — and every registration records
+    the digest of the bytes it was loaded from: `Guest::digest` and
+    `LoadedGuest::digest` are a `Digest`, `Plugin::digest` is a `Digest` on
+    the host and a `&Digest` in the SDK (the WIT record's `digest` is a
+    `string`), and a load of an active guest always attests it.
+    `Guest::with_digest` and the test loader's `ScriptedLoader::unhashed`
+    are gone with the `None` they scripted.
+  - One `Source` for boot and on-demand guests. `omnia::Source` (in
+    `omnia-core`, beside the `SourceSpec` that moved there under the same
+    `omnia::SourceSpec` path) is a `[[guest]]` entry resolved for loading —
+    identity, `SourceSpec`, digest pin, `wasm_only` — with `read`,
+    `verified`, and `load`, so the pin check and the format policy are one
+    body at boot and on demand. `Manifest::boot_sources()` and
+    `Manifest::on_demand_sources()` are the two filters over it (`sources()`
+    and `on_demand()` are renamed), `Plugins::install` takes the on-demand
+    `Source`s, and omnia-plugin's `Origin` and `OnDemand` are gone.
+  - `wasm_only`, a per-entry policy for sources the deployment declares
+    from input it does not author: `GuestEntry::wasm_only()` (TOML
+    `wasm_only = true`) refuses a pre-compiled artifact however it hashes,
+    at boot (assembly fails) or on demand (`refused`, which the WIT now
+    names). The pin proves the bytes are the ones the entry named; this
+    proves they run inside the sandbox.
+  - The compile-affecting settings are one explicit value. `CompileOptions`
+    (re-exported from `omnia`) holds the six — `Default` is the environment
+    defaults, `RuntimeOptions::compile_options()` the loaded environment's —
+    and `CompileOptions::configure(&mut Config)` is the one body the runtime
+    engine and the compiler apply them through.
+    `omnia::compile::compile(wasm, output, target, &CompileOptions)` takes
+    them and the target triple explicitly instead of reading its own
+    environment and host, so a `build.rs` compile is steered by neither the
+    build shell nor the build machine; the CLI's `compile` gains
+    `-t, --target <triple>`.
 - `ChainCtx` is no longer `Default`: a root is `ChainCtx::server()` or
   `ChainCtx::command()`. `as_command_chain(fut)` is now a store built at the
   command root, `runtime.build_store(runtime.store_in(ChainCtx::command()))`,

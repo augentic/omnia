@@ -142,7 +142,7 @@ The cursor backend requires a workspace: the host must mount a directory (`[[mou
 
 ### A pre-compiled `.bin` fails to load
 
-Compile-affecting options must match between `compile` and `run`: `MAX_FUEL`, `MEMORY_RESERVATION`, `MEMORY_GUARD_SIZE`, `BRANCH_HINTING`, `DEBUG_SYMBOLS`, `GENERATE_ADDRESS_MAP`. Recompile with the production values set, or align the runtime's environment with the compile-time one.
+Compile-affecting options must match between `compile` and `run`: `MAX_FUEL`, `MEMORY_RESERVATION`, `MEMORY_GUARD_SIZE`, `BRANCH_HINTING`, `DEBUG_SYMBOLS`, `GENERATE_ADDRESS_MAP`. The compiler takes them as an explicit `CompileOptions` — `CompileOptions::default()` is the runtime's environment defaults — so check what the compile passed against what the runtime's environment sets, and recompile with the production values or align the runtime's environment with them. The artifact must also be for the runtime's target: a compile that named no `target` produced an artifact for the machine it ran on.
 
 ### `compile` prints an error from my `runtime!` binary
 

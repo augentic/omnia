@@ -3,12 +3,12 @@
 //! Centralised, environment-driven configuration for the runtime engine and
 //! per-guest stores.
 //!
-//! Building the compile-time [`Config`] in one place (the
-//! `From<&RuntimeOptions>` conversion) guarantees that the engine used to
-//! pre-compile a component and the engine used to load it agree on every
-//! code-affecting setting. This
-//! parity is required for [`wasmtime::component::Component::deserialize_file`]
-//! to accept a pre-compiled artifact.
+//! The compile-affecting settings are one value, [`CompileOptions`], applied
+//! by one body, [`CompileOptions::configure`]: the ahead-of-time compiler
+//! takes it explicitly, and the runtime's [`Config`] (the
+//! `From<&RuntimeOptions>` conversion) applies the copy it loaded from the
+//! environment. That parity is what lets the loading engine accept a
+//! pre-compiled artifact.
 
 // `derive(FromEnv)` generates undocumented `from_env`/`requirements` associated
 // functions; `RuntimeOptions` is re-exported from the crate root so they would
@@ -32,11 +32,13 @@ use wasmtime::{Config, Enabled, InstanceAllocationStrategy, PoolingAllocationCon
 ///
 /// `max_fuel`, `branch_hinting`, `memory_reservation`, `memory_guard_size`
 /// (the latter two via bounds-check elision), `debug_symbols`, and
-/// `generate_address_map` influence the generated artifact, so they are
-/// applied by the [`Config`] conversion and must be identical when a
-/// component is pre-compiled and when it is later loaded. Copy-on-write heap
-/// initialisation is likewise pinned there. The remaining values only affect
-/// the engine or individual stores at runtime.
+/// `generate_address_map` influence the generated artifact: they are the
+/// [`CompileOptions`] this runtime loads artifacts under
+/// ([`compile_options`](Self::compile_options)), applied to the [`Config`]
+/// through [`CompileOptions::configure`] beside the pinned copy-on-write heap
+/// initialisation, and must be identical when a component is pre-compiled
+/// and when it is later loaded. The remaining values only affect the engine
+/// or individual stores at runtime.
 // A flat, env-driven configuration record; grouping the independent boolean
 // toggles into enums would obscure their one-to-one mapping to environment
 // variables.
@@ -156,17 +158,56 @@ pub struct RuntimeOptions {
     pub branch_hinting: bool,
 }
 
-/// Build the [`Config`] shared by the ahead-of-time compiler and the load path.
+/// The settings that shape a compiled artifact.
 ///
-/// Centralising it guarantees the compile-affecting settings (fuel metering,
-/// branch hinting, memory reservation/guard size, and copy-on-write heap init)
-/// are identical in the compile and load paths, so a pre-compiled component
-/// stays loadable by [`wasmtime::component::Component::deserialize_file`].
-/// Runtime-only settings are applied here too for a single source of truth.
-impl From<&RuntimeOptions> for Config {
-    fn from(options: &RuntimeOptions) -> Self {
-        let mut config = Self::new();
+/// A pre-compiled component loads only into an engine configured with the
+/// values it was compiled under, so these travel as one value: the
+/// ahead-of-time compiler takes them explicitly, and the runtime applies the
+/// copy [`RuntimeOptions`] loaded from the environment
+/// ([`compile_options`](RuntimeOptions::compile_options)). The default is
+/// the environment defaults, so an artifact compiled with
+/// `CompileOptions::default()` loads into a runtime whose environment sets
+/// none of the compile-affecting variables.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompileOptions {
+    /// Per-invocation fuel budget; `0` disables metering (`MAX_FUEL`).
+    pub max_fuel: u64,
+    /// Honour WebAssembly branch hints (`BRANCH_HINTING`).
+    pub branch_hinting: bool,
+    /// Virtual address space reserved per linear memory, in bytes; `None`
+    /// is Wasmtime's default (`MEMORY_RESERVATION`).
+    pub memory_reservation: Option<u64>,
+    /// Unmapped guard region after each linear memory, in bytes; `None` is
+    /// Wasmtime's default (`MEMORY_GUARD_SIZE`).
+    pub memory_guard_size: Option<u64>,
+    /// Emit ELF symbol tables, for profilers and `wasmtime objdump`
+    /// (`DEBUG_SYMBOLS`).
+    pub debug_symbols: bool,
+    /// Record the machine-code-to-wasm-offset map that gives traps and
+    /// backtraces their wasm offsets (`GENERATE_ADDRESS_MAP`).
+    pub generate_address_map: bool,
+}
 
+impl Default for CompileOptions {
+    fn default() -> Self {
+        Self {
+            max_fuel: 0,
+            branch_hinting: false,
+            memory_reservation: None,
+            memory_guard_size: None,
+            debug_symbols: false,
+            generate_address_map: true,
+        }
+    }
+}
+
+impl CompileOptions {
+    /// Apply every compile-affecting setting to `config` — these six, and the
+    /// two the runtime fixes (epoch interruption, copy-on-write heap images).
+    ///
+    /// The one body both the ahead-of-time compiler and the runtime's
+    /// [`Config`] go through, so the two engines cannot disagree.
+    pub fn configure(&self, config: &mut Config) {
         // Always enabled so each store can install an epoch deadline; the ticker
         // and per-store deadlines drive cooperative guest timeouts.
         config.epoch_interruption(true);
@@ -177,30 +218,37 @@ impl From<&RuntimeOptions> for Config {
         // future default change breaking artifact compatibility.
         config.memory_init_cow(true);
 
-        if options.max_fuel > 0 {
+        if self.max_fuel > 0 {
             config.consume_fuel(true);
         }
-        if options.branch_hinting {
+        if self.branch_hinting {
             config.wasm_branch_hinting(true);
         }
 
-        // Compile-affecting memory tunables (they drive bounds-check elision).
-        // Applied only when set so an unset value preserves the Wasmtime
-        // default; whatever is chosen must match between `omnia compile` and
-        // `omnia run`.
-        if let Some(bytes) = options.memory_reservation {
+        // Memory tunables drive bounds-check elision. Applied only when set so
+        // an unset value preserves the Wasmtime default.
+        if let Some(bytes) = self.memory_reservation {
             config.memory_reservation(bytes);
         }
-        if let Some(bytes) = options.memory_guard_size {
+        if let Some(bytes) = self.memory_guard_size {
             config.memory_guard_size(bytes);
         }
 
-        // Artifact-size tunables (compile-affecting). ELF symbol tables only
-        // serve profilers and `wasmtime objdump`, so they are stripped by
-        // default; the address map stays on so trap messages keep their wasm
-        // offsets even with backtraces disabled.
-        config.debug_symbols(options.debug_symbols);
-        config.generate_address_map(options.generate_address_map);
+        // Artifact-size tunables. ELF symbol tables only serve profilers and
+        // `wasmtime objdump`, so they are stripped by default; the address map
+        // stays on so trap messages keep their wasm offsets even with
+        // backtraces disabled.
+        config.debug_symbols(self.debug_symbols);
+        config.generate_address_map(self.generate_address_map);
+    }
+}
+
+/// Build the runtime's [`Config`]: the compile-affecting settings through
+/// [`CompileOptions::configure`], then the engine's runtime-only settings.
+impl From<&RuntimeOptions> for Config {
+    fn from(options: &RuntimeOptions) -> Self {
+        let mut config = Self::new();
+        options.compile_options().configure(&mut config);
 
         // Runtime-only engine settings (no artifact effect). Set before the
         // pooling early-return so they hold whether or not pooling is enabled.
@@ -312,6 +360,20 @@ impl RuntimeOptions {
         Ok(options)
     }
 
+    /// The compile-affecting settings among these options, as the value an
+    /// artifact this runtime loads must have been compiled under.
+    #[must_use]
+    pub const fn compile_options(&self) -> CompileOptions {
+        CompileOptions {
+            max_fuel: self.max_fuel,
+            branch_hinting: self.branch_hinting,
+            memory_reservation: self.memory_reservation,
+            memory_guard_size: self.memory_guard_size,
+            debug_symbols: self.debug_symbols,
+            generate_address_map: self.generate_address_map,
+        }
+    }
+
     /// Validate cross-field invariants that the per-field `FromEnv` parsing
     /// cannot express, surfacing a clear error before the engine is built
     /// (Wasmtime otherwise rejects the same combinations with a less specific
@@ -397,7 +459,15 @@ fn parse_enabled(value: &str) -> ParseResult<Enabled> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Enabled, RuntimeOptions, parse_enabled};
+    use super::{CompileOptions, Enabled, RuntimeOptions, parse_enabled};
+
+    // An artifact compiled under the default settings loads into a runtime
+    // whose environment sets none of the compile-affecting variables.
+    #[test]
+    fn compile_options_default_is_env_default() {
+        let options = RuntimeOptions::load_env().expect("should load");
+        assert_eq!(options.compile_options(), CompileOptions::default());
+    }
 
     #[test]
     fn parse_enabled_values() {
