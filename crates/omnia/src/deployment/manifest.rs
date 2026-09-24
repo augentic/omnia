@@ -114,7 +114,7 @@ impl Manifest {
     /// Validate manifest-level invariants surfaced before the registry is
     /// built. An `allow_empty` (dynamic) deployment may define no `[[guest]]`
     /// entry that loads at boot.
-    pub fn validate(&self, allow_empty: bool) -> Result<()> {
+    pub(super) fn validate(&self, allow_empty: bool) -> Result<()> {
         let mut names = BTreeSet::new();
         for entry in &self.guests {
             if entry.name.is_empty() {
@@ -202,7 +202,7 @@ impl Manifest {
 
     /// The wasm-pkg client configuration as TOML text: a `Path` read now, or
     /// the `Contents` as carried; `None` when the manifest declares none.
-    pub fn registry_config(&self) -> Result<Option<String>> {
+    pub(super) fn registry_config(&self) -> Result<Option<String>> {
         self.registries
             .as_ref()
             .map(|config| match config {
