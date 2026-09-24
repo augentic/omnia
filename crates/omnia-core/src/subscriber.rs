@@ -20,7 +20,9 @@ use tracing_subscriber::layer::{Layer, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry};
 
-// Whether omnia's subscriber is installed. Held for the whole of `build`, so
+// Whether the process's global subscriber is settled: omnia's installed, or
+// an embedder's found already set (a global subscriber is never replaced, so
+// retrying `try_init` could only re-warn). Held for the whole of `build`, so
 // two racers cannot both pass the check and race on `try_init`.
 static INSTALLED: Mutex<bool> = Mutex::new(false);
 
@@ -121,19 +123,23 @@ impl SubscriberBuilder {
         // Attached layers sit innermost; the global `EnvFilter` gates the
         // whole stack wherever it sits. An already-set subscriber (an
         // embedder's own tracing setup) is tolerated: their subscriber stays
-        // and the runtime keeps running.
-        if let Err(error) = Registry::default()
+        // and the runtime keeps running. Either way the process is settled,
+        // so later builds short-circuit instead of retrying and re-warning.
+        let outcome = match Registry::default()
             .with(attached(self.layers))
             .with(filter_layer)
             .with(fmt_layer)
             .try_init()
         {
-            tracing::warn!(%error, "a tracing subscriber is already set; omnia's skipped");
-            return Ok(Installed::Already);
-        }
+            Ok(()) => Installed::Now,
+            Err(error) => {
+                tracing::warn!(%error, "a tracing subscriber is already set; omnia's skipped");
+                Installed::Already
+            }
+        };
         *installed = true;
         drop(installed);
-        Ok(Installed::Now)
+        Ok(outcome)
     }
 }
 
