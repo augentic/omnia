@@ -71,14 +71,20 @@ install_crate = "cargo-semver-checks"
 [tasks.fmt]
 script = "cargo +nightly fmt --all"
 
-# Lint every line of code: natively, for `wasm32-wasip2`, and with features off.
+# Lint every line of code: all targets with everything on (natively and for
+# `wasm32-wasip2`), then every crate's library in each single-feature configuration.
 [tasks.lint]
+dependencies = ["install-hack"]
 script = '''
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo clippy --workspace --all-targets --all-features --target wasm32-wasip2 -- -D warnings
-cargo clippy -p omnia --no-default-features --all-targets -- -D warnings
+cargo hack clippy --workspace --each-feature --exclude-all-features -- -D warnings
+cargo hack clippy --workspace --each-feature --exclude-all-features --target wasm32-wasip2 -- -D warnings
 '''
 install_crate = { rustup_component_name = "clippy" }
+
+[tasks.install-hack]
+install_crate = { crate_name = "cargo-hack", binary = "cargo", test_arg = ["hack", "--version"] }
 
 # Miri
 [tasks.miri]
