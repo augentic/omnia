@@ -42,10 +42,11 @@ link = ["dep:omnia-link"]
 # with it; without it every guest is a pre-compiled `omnia compile` artifact.
 jit = ["omnia-core/jit", "omnia-cli?/jit"]
 
-# Enables the OTLP (gRPC) span and metric exporters. Without it, `Telemetry`
-# still installs the fmt/`EnvFilter` subscriber, while `telemetry::flush` and
-# `telemetry::resource` become no-ops.
-otlp = ["omnia-core/otlp"]
+# Enables the OTLP (gRPC) span and metric exporters for host telemetry (the
+# `omnia-otlp` crate, re-exported as `omnia::otlp`). Without it, `Telemetry`
+# still installs the fmt/`EnvFilter` subscriber and `OTEL_GRPC_URL` is
+# ignored.
+otlp = ["dep:omnia-otlp"]
 
 # Enables memory protection keys (MPK) support in the pooling allocator. MPK
 # only functions on Linux/x86_64; elsewhere it compiles but is inert
@@ -66,6 +67,7 @@ omnia-cli = { workspace = true, optional = true }
 omnia-core.workspace = true
 omnia-host-macros.workspace = true
 omnia-link = { workspace = true, optional = true }
+omnia-otlp = { workspace = true, optional = true }
 omnia-plugin = { workspace = true, optional = true }
 serde.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "time"] }

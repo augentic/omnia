@@ -138,7 +138,10 @@ async fn run(deployment: Deployment, label: &str) -> Recording {
     // Guest telemetry grafts onto the host trace: the host-side `export`
     // impls skip unless host telemetry is initialized and a host span is
     // live, so install providers and drive the guest inside a span.
-    Telemetry::new("otel-e2e").filter("info").build().expect("telemetry installs");
+    omnia::otlp::Exporters::new("otel-e2e")
+        .attach(Telemetry::new().filter("info"))
+        .build()
+        .expect("telemetry installs");
 
     let recording = Recording::default();
     // Linked by hand: `run_host` would add a second `WasiOtel` beside the

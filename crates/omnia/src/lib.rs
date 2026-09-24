@@ -4,7 +4,8 @@
 
 // The embedder facade: the runtime spine (`omnia-core`), host-mediated linking
 // (`omnia-link`, behind the `link` feature), the plugins capability
-// (`omnia-plugin`, behind the `plugin` feature), the `run` grammar
+// (`omnia-plugin`, behind the `plugin` feature), the OTLP exporters
+// (`omnia-otlp`, behind the `otlp` feature), the `run` grammar
 // (`omnia-cli`, behind the `cli` feature), and the `runtime!` macro,
 // re-exported under one root. The `runtime!` macro emits `omnia::…` paths, so
 // every name it references must stay reachable from here — the plugin names
@@ -50,6 +51,9 @@ pub use omnia_host_macros::runtime;
 #[cfg(feature = "link")]
 #[doc(inline)]
 pub use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks};
+#[cfg(feature = "otlp")]
+#[doc(inline)]
+pub use omnia_otlp as otlp;
 #[cfg(feature = "plugin")]
 #[doc(inline)]
 pub use omnia_plugin::{

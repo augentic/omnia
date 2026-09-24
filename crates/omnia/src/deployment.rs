@@ -164,8 +164,19 @@ impl DeploymentBuilder {
         // environment.
         let name = env::var("COMPONENT").unwrap_or_else(|_| program_name.clone());
 
+        // Telemetry at the run's level: a selected level is the console
+        // filter outright; otherwise the process `RUST_LOG` stands and the
+        // mode's level fills its absence. Initialization is idempotent
+        // (`Telemetry::build`): the first call in the process — here or in an
+        // embedder — installs the subscriber, and later deployments reuse it.
         let fallback = self.mode.level();
-        init_telemetry(&name, self.level, fallback)?;
+        let mut telemetry = Telemetry::new().fallback(fallback);
+        if let Some(level) = self.level {
+            telemetry = telemetry.filter(level.to_string());
+        }
+        #[cfg(feature = "otlp")]
+        let telemetry = otlp_exporters(&name).attach(telemetry);
+        telemetry.build().context("initializing telemetry")?;
         tracing::debug!("initializing runtime");
 
         let (engine, linker, mut options) = engine_and_linker()?;
@@ -438,25 +449,17 @@ fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, Runt
     Ok((engine, linker, options))
 }
 
-// Initialize telemetry for the runtime at the run's level: a selected level
-// is the console filter outright; otherwise the process `RUST_LOG` stands
-// and `fallback` fills its absence.
-//
-// Telemetry initialization is idempotent (`Telemetry::build`): the first call
-// in the process — here or in an embedder — installs the subscriber and
-// providers, and later deployments reuse them.
-fn init_telemetry(name: &str, level: Option<LevelFilter>, fallback: LevelFilter) -> Result<()> {
-    let mut builder = Telemetry::new(name).fallback(fallback);
-    if let Some(level) = level {
-        builder = builder.filter(level.to_string());
-    }
+// The host's own OTLP exporters; `OTEL_GRPC_URL` overrides OpenTelemetry's
+// endpoint resolution.
+#[cfg(feature = "otlp")]
+fn otlp_exporters(name: &str) -> omnia_otlp::Exporters {
+    let exporters = omnia_otlp::Exporters::new(name);
     if let Ok(endpoint) = env::var("OTEL_GRPC_URL") {
-        builder = builder.endpoint(endpoint);
+        exporters.endpoint(endpoint)
     } else {
         tracing::debug!("OTEL_GRPC_URL unset; using OpenTelemetry defaults");
+        exporters
     }
-    builder.build().context("initializing telemetry")?;
-    Ok(())
 }
 
 #[cfg(test)]
