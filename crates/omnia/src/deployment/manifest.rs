@@ -10,11 +10,14 @@
 //! declared here at all: each component says what it imports and exports,
 //! and the runtime links every interface outside its own namespaces.
 //!
-//! The `[[guest]]` population (file or embedded-bytes sources, each named
-//! by its `name` or, absent one, by its file's stem), each guest's `routes`
-//! tables, and the `[registries]` configuration the guest loader routes
-//! package loads through are all consumed. Distributed `[transport]` is not
-//! yet implemented: only the in-process default is accepted.
+//! The `[[guest]]` population is the allow-list of everything that may run:
+//! each entry (a file, embedded-bytes, or package source, named by its `name`
+//! or, absent one, by its file's stem) loads at boot or — marked `on_demand`
+//! — when the guest loader first admits it by name, and may pin the
+//! `digest` its bytes must hash to. Each guest's `routes` tables and the
+//! `[registries]` configuration that routes package sources are consumed
+//! too. Distributed `[transport]` is not yet implemented: only the
+//! in-process default is accepted.
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
@@ -22,27 +25,26 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
-use omnia_core::{CliRoutes, GuestId, HttpRoutes, PatternRoutes, ResolvedPreopen, Routes};
+use omnia_core::{CliRoutes, Digest, GuestId, HttpRoutes, PatternRoutes, ResolvedPreopen, Routes};
+#[cfg(feature = "loader")]
+use omnia_plugin::{OnDemand, Origin};
 use serde::Deserialize;
 
 use super::source::Source;
 
-/// The deployment manifest: which guests load, what they mount, and where
-/// later guests may come from.
+/// The deployment manifest: every guest that may run, what they mount, and
+/// where package sources are fetched from.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Manifest {
     /// Registry population: each entry maps an identity to a source.
     #[serde(rename = "guest")]
     pub guests: Vec<GuestEntry>,
-    /// Working-tree mounts preopened into the guest sandbox — also the roots
-    /// the guest loader resolves path loads against.
+    /// Working-tree mounts preopened into the guest sandbox.
     #[serde(rename = "mount")]
     pub mounts: Vec<Mount>,
-    /// Where the wasm-pkg client configuration the guest loader routes
-    /// package loads through comes from — the default routing a load may
-    /// name a registry past; absent, a package load names its registry or
-    /// refuses.
+    /// Where the wasm-pkg client configuration that routes on-demand
+    /// package sources comes from; absent, every package source is refused.
     pub registries: Option<RegistryConfig>,
     /// Transport configuration for host-mediated calls.
     pub transport: Transport,
@@ -102,7 +104,7 @@ impl Manifest {
     }
 
     /// Set where the wasm-pkg client configuration comes from (the manifest's
-    /// `[registries]` table): the default routing of a package load.
+    /// `[registries]` table): the routing of every on-demand package source.
     #[must_use]
     pub fn registries(mut self, config: impl Into<RegistryConfig>) -> Self {
         self.registries = Some(config.into());
@@ -111,11 +113,8 @@ impl Manifest {
 
     /// Validate manifest-level invariants surfaced before the registry is
     /// built. An `allow_empty` (dynamic) deployment may define no `[[guest]]`
-    /// entries.
+    /// entry that loads at boot.
     pub(super) fn validate(&self, allow_empty: bool) -> Result<()> {
-        if self.guests.is_empty() && !allow_empty {
-            bail!("manifest defines no [[guest]] entries");
-        }
         let mut names = BTreeSet::new();
         for entry in &self.guests {
             if entry.name.is_empty() {
@@ -128,6 +127,10 @@ impl Manifest {
             if !names.insert(entry.name.as_str()) {
                 bail!("duplicate [[guest]] name `{}`: guest names must be unique", entry.name);
             }
+            entry.validate()?;
+        }
+        if !allow_empty && self.guests.iter().all(|entry| entry.on_demand) {
+            bail!("manifest defines no [[guest]] entry that loads at boot");
         }
         let marked: Vec<&str> =
             self.guests.iter().filter(|e| e.command).map(|e| e.name.as_str()).collect();
@@ -147,17 +150,26 @@ impl Manifest {
         // A manifest can declare policy the compiled runtime cannot serve;
         // refuse up front rather than silently never installing it.
         #[cfg(not(feature = "loader"))]
-        if self.registries.is_some() {
-            bail!(
-                "this runtime was built without the `loader` feature; remove `registries` or \
-                 enable the feature on the `omnia` dependency (`features = [\"loader\"]`)"
-            );
+        {
+            if self.registries.is_some() {
+                bail!(
+                    "this runtime was built without the `loader` feature; remove `registries` or \
+                     enable the feature on the `omnia` dependency (`features = [\"loader\"]`)"
+                );
+            }
+            if let Some(entry) = self.guests.iter().find(|entry| entry.on_demand) {
+                bail!(
+                    "guest `{}` loads on demand, but this runtime was built without the `loader` \
+                     feature; load it at boot or enable the feature on the `omnia` dependency \
+                     (`features = [\"loader\"]`)",
+                    entry.name
+                );
+            }
         }
         Ok(())
     }
 
-    // A `[[guest]]` that names no guest is named by its file's stem, the way a
-    // path load registers.
+    // A `[[guest]]` that names no guest is named by its file's stem.
     fn resolve_names(&mut self) {
         for guest in &mut self.guests {
             if guest.name.is_empty()
@@ -202,24 +214,50 @@ impl Manifest {
             .transpose()
     }
 
-    /// Resolve every `[[guest]]` source into a loadable source.
+    /// Resolve every `[[guest]]` that loads at boot into a loadable source.
     ///
     /// # Errors
     ///
-    /// Returns an error if a guest uses a source kind not yet supported.
+    /// Returns an error if a boot guest names a package source, which only
+    /// loads on demand.
     pub fn sources(&self) -> Result<Vec<Source>> {
-        let mut sources = Vec::with_capacity(self.guests.len());
-        for entry in &self.guests {
-            let id = GuestId::from(entry.name.as_str());
-            match &entry.source {
-                SourceSpec::Path(path) => sources.push(Source::with_id(id, path)),
-                SourceSpec::Bytes(bytes) => sources.push(Source::embedded(id, bytes.clone())),
-                SourceSpec::Oci(reference) => {
-                    bail!("guest `{id}`: OCI source `{reference}` is not yet supported")
-                }
-            }
-        }
-        Ok(sources)
+        self.guests
+            .iter()
+            .filter(|entry| !entry.on_demand)
+            .map(|entry| {
+                let id = GuestId::from(entry.name.as_str());
+                let source = match &entry.source {
+                    SourceSpec::Path(path) => Source::with_id(id, path),
+                    SourceSpec::Bytes(bytes) => Source::embedded(id, bytes.clone()),
+                    SourceSpec::Package(package) => {
+                        bail!("guest `{id}`: package `{package}` loads on demand, not at boot")
+                    }
+                };
+                Ok(match entry.digest {
+                    Some(digest) => source.pinned(digest),
+                    None => source,
+                })
+            })
+            .collect()
+    }
+
+    /// Every `[[guest]]` that loads on demand, as the guest loader's table.
+    #[cfg(feature = "loader")]
+    #[must_use]
+    pub fn on_demand(&self) -> Vec<(GuestId, OnDemand)> {
+        self.guests
+            .iter()
+            .filter(|entry| entry.on_demand)
+            .map(|entry| {
+                (
+                    GuestId::from(entry.name.as_str()),
+                    OnDemand {
+                        origin: Origin::from(&entry.source),
+                        digest: entry.digest,
+                    },
+                )
+            })
+            .collect()
     }
 
     /// Per-trigger route tables aggregated from each guest's `routes` lists,
@@ -261,9 +299,8 @@ impl Manifest {
 ///
 /// The configuration is the schema of `wkg`'s own `config.toml`: a
 /// `default_registry`, `namespace_registries` and `package_registry_overrides`
-/// routing past it, and per-registry backend settings. It routes the package
-/// loads that name no registry of their own — one it routes nowhere is
-/// refused — while a load that names its registry fetches from it.
+/// routing past it, and per-registry backend settings. It alone routes an
+/// on-demand guest's package source; one it routes nowhere is refused.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum RegistryConfig {
@@ -310,8 +347,7 @@ impl From<&Path> for RegistryConfig {
 }
 
 /// A single workspace mount: a host directory preopened into the guest
-/// sandbox under a guest-visible name, and a root the guest loader resolves
-/// path loads against.
+/// sandbox under a guest-visible name.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct Mount {
     /// Guest-visible name `preopens.get-directories()` returns (e.g. `.`).
@@ -354,10 +390,20 @@ pub struct GuestEntry {
     /// marked guest the sole static exporter is the catch-all.
     #[serde(default)]
     pub command: bool,
+    /// Loads when the guest loader first admits it by name rather than at
+    /// boot. An on-demand guest takes no routes and is never the command
+    /// guest; a package source always loads on demand.
+    #[serde(default)]
+    pub on_demand: bool,
+    /// The `sha256:<hex>` the source's bytes must hash to, checked wherever
+    /// they become a guest — at boot or on demand.
+    #[serde(default)]
+    pub digest: Option<Digest>,
 }
 
 impl GuestEntry {
-    /// Create a named guest from a local component path or embedded component bytes.
+    /// Create a named guest from a local component path, embedded component
+    /// bytes, or a package reference.
     #[must_use]
     pub fn new(name: impl Into<String>, source: impl Into<SourceSpec>) -> Self {
         Self {
@@ -365,6 +411,8 @@ impl GuestEntry {
             source: source.into(),
             routes: GuestRoutes::default(),
             command: false,
+            on_demand: false,
+            digest: None,
         }
     }
 
@@ -405,12 +453,55 @@ impl GuestEntry {
         self.command = true;
         self
     }
+
+    /// Load this guest when the guest loader first admits it by name rather
+    /// than at boot.
+    #[must_use]
+    pub const fn on_demand(mut self) -> Self {
+        self.on_demand = true;
+        self
+    }
+
+    /// Require the source's bytes to hash to `digest`.
+    #[must_use]
+    pub const fn digest(mut self, digest: Digest) -> Self {
+        self.digest = Some(digest);
+        self
+    }
+
+    /// The invariants one entry carries on its own; names are checked across
+    /// the manifest.
+    fn validate(&self) -> Result<()> {
+        if self.on_demand {
+            if self.command {
+                bail!(
+                    "guest `{}` loads on demand and cannot be the command guest: the command \
+                     guest runs at boot",
+                    self.name
+                );
+            }
+            if !self.routes.is_empty() {
+                bail!(
+                    "guest `{}` loads on demand and cannot take routes: trigger routing is built \
+                     at boot",
+                    self.name
+                );
+            }
+        } else if let SourceSpec::Package(package) = &self.source {
+            bail!(
+                "guest `{}` names the package `{package}`, which is fetched on first load; mark \
+                 the guest `on_demand = true`",
+                self.name
+            );
+        }
+        Ok(())
+    }
 }
 
 /// Where a guest's component bytes come from.
 ///
 /// Modelled as an externally tagged enum so TOML's `source.path = "..."` and
-/// `source.oci = "..."` each select a variant.
+/// `source.package = "..."` each select a variant.
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SourceSpec {
@@ -423,10 +514,18 @@ pub enum SourceSpec {
     /// through the `runtime!` macro or the programmatic [`GuestEntry`] API.
     #[serde(skip)]
     Bytes(Cow<'static, [u8]>),
-    /// A digest-pinned OCI reference. Accepted by the parser and surfaced in the
-    /// "not yet supported" error; the puller that consumes it lands as a
-    /// follow-up.
-    Oci(String),
+    /// An exact `namespace:name@version` package reference, fetched on first
+    /// load from the registry the manifest's `[registries]` routes it to.
+    /// Always loads on demand.
+    Package(String),
+}
+
+impl SourceSpec {
+    /// A package source from its exact `namespace:name@version` reference.
+    #[must_use]
+    pub fn package(reference: impl Into<String>) -> Self {
+        Self::Package(reference.into())
+    }
 }
 
 // Manual: the derived impl would dump the embedded component bytes.
@@ -435,7 +534,18 @@ impl std::fmt::Debug for SourceSpec {
         match self {
             Self::Path(path) => f.debug_tuple("Path").field(path).finish(),
             Self::Bytes(bytes) => write!(f, "Bytes({} bytes)", bytes.len()),
-            Self::Oci(reference) => f.debug_tuple("Oci").field(reference).finish(),
+            Self::Package(package) => f.debug_tuple("Package").field(package).finish(),
+        }
+    }
+}
+
+#[cfg(feature = "loader")]
+impl From<&SourceSpec> for Origin {
+    fn from(source: &SourceSpec) -> Self {
+        match source {
+            SourceSpec::Path(path) => Self::Path(path.clone()),
+            SourceSpec::Bytes(bytes) => Self::Bytes(bytes.clone()),
+            SourceSpec::Package(package) => Self::Package(package.clone()),
         }
     }
 }
@@ -498,6 +608,14 @@ pub struct GuestRoutes {
     pub messaging: Vec<String>,
     /// WebSocket route patterns (same syntax as messaging).
     pub websocket: Vec<String>,
+}
+
+impl GuestRoutes {
+    /// Whether no trigger routes to the guest.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.http.is_empty() && self.messaging.is_empty() && self.websocket.is_empty()
+    }
 }
 
 /// Transport configuration for host-mediated calls.
@@ -832,7 +950,7 @@ mod tests {
     // registered under the empty identity.
     #[test]
     fn reject_unnamed_guest() {
-        let toml = "[[guest]]\nsource.oci = \"ghcr.io/acme/echo@sha256:00\"\n";
+        let toml = "[[guest]]\nsource.package = \"acme:echo@1.0.0\"\non_demand = true\n";
         let mut manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
         manifest.resolve_names();
         let error = manifest.validate(false).expect_err("an unnamed guest must be rejected");
@@ -867,6 +985,101 @@ mod tests {
             Manifest::new().validate(true).is_ok(),
             "a dynamic deployment may start with no guests"
         );
+    }
+
+    const DIGEST: &str = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+    #[test]
+    fn parse_on_demand_and_digest() {
+        let toml = format!(
+            "[[guest]]\nname = \"app\"\nsource.path = \"./app.wasm\"\ndigest = \"{DIGEST}\"\n\n\
+             [[guest]]\nname = \"tool\"\nsource.path = \"./tool.wasm\"\non_demand = true\n\n\
+             [[guest]]\nname = \"pkg\"\nsource.package = \"acme:tool@1.2.3\"\non_demand = true\n\
+             digest = \"{DIGEST}\"\n"
+        );
+        let manifest: Manifest = toml::from_str(&toml).expect("manifest should parse");
+        #[cfg(feature = "loader")]
+        manifest.validate(false).expect("a mixed manifest validates");
+
+        assert!(!manifest.guests[0].on_demand, "on_demand defaults to a boot load");
+        assert_eq!(manifest.guests[0].digest, DIGEST.parse().ok());
+        assert!(manifest.guests[1].on_demand);
+        assert_eq!(manifest.guests[1].digest, None);
+        assert!(
+            matches!(&manifest.guests[2].source, SourceSpec::Package(p) if p == "acme:tool@1.2.3")
+        );
+
+        // Boot sources carry the boot guests alone.
+        let sources = manifest.sources().expect("boot sources resolve");
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].id(), &GuestId::from("app"));
+
+        #[cfg(feature = "loader")]
+        {
+            let table = manifest.on_demand();
+            assert_eq!(table.len(), 2);
+            assert_eq!(table[0].0, GuestId::from("tool"));
+            assert!(matches!(table[0].1.origin, Origin::Path(_)));
+            assert_eq!(table[0].1.digest, None);
+            assert_eq!(table[1].0, GuestId::from("pkg"));
+            assert!(matches!(&table[1].1.origin, Origin::Package(p) if p == "acme:tool@1.2.3"));
+            assert_eq!(table[1].1.digest, DIGEST.parse().ok());
+        }
+    }
+
+    // A digest is validated as it parses, not at the first load.
+    #[test]
+    fn reject_malformed_digest() {
+        let toml = "[[guest]]\nname = \"a\"\nsource.path = \"./a.wasm\"\ndigest = \"sha256:abc\"\n";
+        let error = toml::from_str::<Manifest>(toml).expect_err("a short digest is rejected");
+        assert!(error.to_string().contains("64 hex"), "{error}");
+
+        let toml = "[[guest]]\nname = \"a\"\nsource.path = \"./a.wasm\"\ndigest = \"md5:00\"\n";
+        toml::from_str::<Manifest>(toml).expect_err("only sha256 is a digest");
+    }
+
+    #[test]
+    fn reject_on_demand_routes() {
+        let manifest = Manifest::new()
+            .guest(GuestEntry::new("app", "./app.wasm"))
+            .guest(GuestEntry::new("tool", "./tool.wasm").on_demand().route_http("/tool"));
+        let error = manifest.validate(false).expect_err("an on-demand guest takes no routes");
+        assert!(error.to_string().contains("cannot take routes"), "{error}");
+    }
+
+    #[test]
+    fn reject_on_demand_command() {
+        let manifest = Manifest::new()
+            .guest(GuestEntry::new("app", "./app.wasm"))
+            .guest(GuestEntry::new("tool", "./tool.wasm").on_demand().command());
+        let error = manifest.validate(false).expect_err("an on-demand guest is never the command");
+        assert!(error.to_string().contains("cannot be the command guest"), "{error}");
+    }
+
+    // A package is fetched on first load, never at boot.
+    #[test]
+    fn reject_boot_package() {
+        let manifest = Manifest::new()
+            .guest(GuestEntry::new("app", "./app.wasm"))
+            .guest(GuestEntry::new("tool", SourceSpec::package("acme:tool@1.0.0")));
+        let error = manifest.validate(false).expect_err("a boot package is rejected");
+        assert!(error.to_string().contains("mark the guest `on_demand = true`"), "{error}");
+    }
+
+    // Only on-demand guests is an empty boot set, which only a dynamic
+    // deployment may start from.
+    #[test]
+    fn only_on_demand_guests() {
+        let manifest = Manifest::new().guest(GuestEntry::new("tool", "./tool.wasm").on_demand());
+        let error = manifest.validate(false).expect_err("no boot guest is rejected");
+        assert!(error.to_string().contains("loads at boot"), "{error}");
+        #[cfg(feature = "loader")]
+        manifest.validate(true).expect("a dynamic deployment may boot empty");
+        #[cfg(not(feature = "loader"))]
+        {
+            let error = manifest.validate(true).expect_err("on demand needs the loader feature");
+            assert!(error.to_string().contains("without the `loader` feature"), "{error}");
+        }
     }
 
     #[test]

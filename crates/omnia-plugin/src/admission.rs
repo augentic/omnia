@@ -3,7 +3,7 @@
 
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
-use omnia_core::{AdmitError, GuestId, WeakRuntime};
+use omnia_core::{AdmitError, Digest, GuestId, WeakRuntime};
 
 use crate::error::LoadError;
 
@@ -24,9 +24,10 @@ impl<B: Clone + Send + Sync + 'static> Admission for WeakRuntime<B> {
         let runtime = self
             .upgrade()
             .ok_or_else(|| LoadError::Internal("the runtime has shut down".to_owned()))?;
-        Ok(runtime.registry().get(id).map_or(Registration::Absent, |guest| {
-            Registration::Active(guest.digest().map(str::to_owned))
-        }))
+        Ok(runtime
+            .registry()
+            .get(id)
+            .map_or(Registration::Absent, |guest| Registration::Active(guest.digest())))
     }
 
     fn admit(&self, id: GuestId, bytes: Vec<u8>) -> BoxFuture<'static, Result<(), AdmitError>> {
@@ -43,15 +44,7 @@ impl<B: Clone + Send + Sync + 'static> Admission for WeakRuntime<B> {
 
 pub enum Registration {
     Absent,
-    Active(Option<String>),
-}
-
-impl Registration {
-    /// The recorded digest, when active with one.
-    pub fn digest(self) -> Option<String> {
-        match self {
-            Self::Active(digest) => digest,
-            Self::Absent => None,
-        }
-    }
+    /// Registered, with the digest the registry recorded for it — `None`
+    /// when its bytes were never hashed.
+    Active(Option<Digest>),
 }

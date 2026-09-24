@@ -67,7 +67,7 @@ That covers the two other shapes a test provider takes. A handler bounded on a s
 
 ## Component rung: `Deployment` over `Backends`
 
-`Deployment` describes one command-mode deployment — guests, mounts (which also serve a guest's path loads), arguments, and the registries a package load naming no registry routes through — and runs it over a backend bundle. Built from nothing it drives a single component through the host you name:
+`Deployment` describes one command-mode deployment — guests (boot or `on_demand`), mounts, arguments, and the registries its on-demand package guests are fetched through — and runs it over a backend bundle. Built from nothing it drives a single component through the host you name:
 
 ```rust,ignore
 use omnia::ExitStatus;
@@ -96,7 +96,7 @@ let status = Deployment::from(runtime::manifest())
     .await?;
 ```
 
-The generated `main` and `run` stay untouched; the test reaches the same hosts the binary would, and the same guest loader over the overlaid mounts. This is the rung for "does the wiring I compiled in actually link and serve this guest".
+The generated `main` and `run` stay untouched; the test reaches the same hosts the binary would, and the same guest loader over the base manifest's on-demand guests plus any the overlay declares (`Deployment::on_demand`). This is the rung for "does the wiring I compiled in actually link and serve this guest".
 
 ### `Backends`
 

@@ -52,9 +52,17 @@ The `run` subcommand needs either a positional `.wasm`/`.bin` path or a manifest
 
 The embedder-path variant — `no deployment manifest supplied and OMNIA_MANIFEST is unset` — means a `DeploymentBuilder` was built without `.manifest(...)` and no `OMNIA_MANIFEST` fallback was available.
 
-### `this deployment declares no `registries`` / `mounts no directories`
+### `no guest ... is declared by this deployment`
 
-A guest asked the loader for a package the deployment cannot reach. Package loads route through the `registries` configuration (`guests: { registries: include_str!("wasm-pkg.toml") }` in the macro, `[registries] path` in a manifest); path loads resolve against the deployment's mounts, so `./plugin.wasm` needs a `.` mount. `no registry routes ...` means the configuration exists but names neither a `default_registry` nor the package's namespace — add one, or pin the package to its registry under `[package_registry_overrides]`. A runtime built without omnia's `loader` feature has no loader at all; a manifest declaring `registries` is refused at startup until the feature is enabled.
+A guest called `omnia:plugins/loader.load` with a name the manifest does not declare. The loader admits only `[[guest]]` entries (the macro's `guests:`); add one for the name, marked `on_demand = true` if it should load at first `load` rather than at boot. A guest cannot name a path or a package of its own — the deployment declares every source. A runtime built without omnia's `loader` feature has no loader at all: a guest importing it fails at instantiation, and a manifest declaring `registries` is refused at startup until the feature is enabled.
+
+### `no registry routes ...`
+
+An on-demand guest with a `source.package` (the macro's `package:`) loaded, but the `registries` configuration (`registries: include_str!("wasm-pkg.toml")` in the macro, `[registries] path` in a manifest) is absent or names neither a `default_registry` nor the package's namespace. Add one, or pin the package to its registry under `[package_registry_overrides]`.
+
+### `... resolved to sha256:..., not its declared digest ...`
+
+The guest's bytes do not hash to the `digest` its `[[guest]]` entry pins. At boot this fails startup; on demand it refuses the load. Either the artifact changed under the deployment — rebuild it or restore the pinned one — or the pin is stale: an unpinned load reports the resolved digest on its handle, which is the value to commit.
 
 ### `Address already in use` on startup
 
@@ -68,9 +76,9 @@ Backends connect eagerly during `Runtime::new`; a bad `REDIS_URL`/`POSTGRES_URL`
 
 Only `in-process` is a valid `[transport] default`. Remove `unix`/`nats`/`quic` from the manifest — they're reserved for distributed dispatch.
 
-### `guest ...: OCI source ... is not yet supported`
+### `guest ... names the package ..., which is fetched on first load`
 
-`source.oci` parses but isn't implemented. Use `source.path`.
+A `source.package` guest was not marked `on_demand = true`. A package is fetched when a guest first `load`s it, never at boot, so the mark is required; the macro's `package:` needs `on_demand: true` the same way.
 
 ### The manifest loads but paths don't resolve
 

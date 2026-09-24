@@ -80,7 +80,7 @@ Layers 1 and 2 form the **runtime core** — domain-agnostic infrastructure that
 
 - **Deployment pipeline**: `DeploymentBuilder` builds a `Deployment` from a `Manifest` (loaded from `omnia.toml`, synthesized from a single `.wasm`, or constructed programmatically)
 - **Lifecycle**: `Wiring`, `Backends`, `Mode`; `run` / `run_with` take a built `Deployment`, call `Deployment::assemble`, then drive command mode or the trigger servers
-- **Optional-crate composition**: `omnia-link` (guest-to-guest dispatch — every interface a guest imports outside the runtime's own `wasi:`/`omnia:` namespaces is relayed to the guest exporting it — behind the `link` feature; without it such an import fails at boot), `omnia-plugin` (the guest loader, `omnia:plugins/loader`, behind the `loader` feature; `Deployment::assemble` links its host and installs the deployment's mounts and `registries` as its policy, and a deployment declaring `registries` requires it), `omnia-cli` (the `run` grammar, behind the `cli` feature), and the `runtime!` macro. The two features are independent: static guests may call each other; loaded guests may be host-only.
+- **Optional-crate composition**: `omnia-link` (guest-to-guest dispatch — every interface a guest imports outside the runtime's own `wasi:`/`omnia:` namespaces is relayed to the guest exporting it — behind the `link` feature; without it such an import fails at boot), `omnia-plugin` (the guest loader, `omnia:plugins/loader`, behind the `loader` feature; `Deployment::assemble` links its host and installs the manifest's `on_demand` guests as its table, their package sources routed by `registries`, and a deployment declaring `registries` requires it), `omnia-cli` (the `run` grammar, behind the `cli` feature), and the `runtime!` macro. The two features are independent: static guests may call each other; loaded guests may be host-only.
 
 `omnia-core` is the live-runtime SDK a capability crate targets. Depend on it directly only when building another capability crate. It provides:
 
@@ -89,7 +89,7 @@ Layers 1 and 2 form the **runtime core** — domain-agnostic infrastructure that
 - **Link seam**: the `LinkSeam` trait and `NoLinks` no-op the registry drives; guest→guest linking itself lives in `omnia-link` (`InProcessLinks`)
 - **Host→guest dispatch**: `Dispatcher`, a named-target call through `call_fresh` (the same primitive guest→guest links use)
 - **Telemetry**: `tracing` + OpenTelemetry bootstrap
-- **Admission seam**: `Runtime::admit` and `Extensions`, which `omnia-plugin` uses to install the acquisition policy `Deployment::assemble` selects
+- **Admission seam**: `Runtime::admit` and `Extensions`, which `omnia-plugin` uses to install the on-demand guest table `Deployment::assemble` builds from the manifest
 
 `omnia-cli` is a leaf grammar crate: clap plus argv-precedence over paths and strings, with no `omnia-*` dependencies. `omnia` materializes a `RunPlan` into a `Manifest` and drives the runtime. `compile` (with the `jit` feature) also lives in `omnia`.
 
@@ -171,7 +171,7 @@ The macro generates a `Backends` bundle (one connected backend per `Host: Backen
 A deployment can hold many guests. All of them share one wasmtime `Engine` and one `Linker`; the `Registry` maps each opaque `GuestId` to a pre-instantiated `InstancePre`, so per-request instantiation is cheap. Three things hang off the registry:
 
 - **Route tables** — per-trigger routing (each guest's `routes.http` by longest prefix, `routes.messaging`/`routes.websocket` by NATS-style pattern) selects which guest handles an inbound request.
-- **Mounts** — `[[mount]]` entries preopen host directories into every guest sandbox (read-only unless marked writable); they are also the roots the guest loader resolves path loads against.
+- **Mounts** — `[[mount]]` entries preopen host directories into every guest sandbox (read-only unless marked writable); they are data grants only and never a root the guest loader reads code through.
 - **Link seam** — every import a guest makes outside the runtime's own namespaces (`wasi:`, `omnia:`; the predicate is `omnia::is_host`, and it is closed — a native host linked under any other namespace collides with the polyfill at boot, so a third-party host lives under `omnia:` or the predicate grows) is polyfilled onto the shared linker, nothing declaring it; calls dispatch to whichever guest exports the interface, by in-memory routing to a fresh callee instance on its own task, with nesting bounded by `MAX_DISPATCH_DEPTH`; the callee inherits the caller's chain context — its depth and its wall-clock policy. The registry always holds a `LinkSeam`: `InProcessLinks` (in `omnia-link`) under omnia's `link` feature, `NoLinks` (every method a no-op) without it.
 
 Endpoints move through two stages inside the seam. `serve` runs *outside* the registry's lifecycle gate and writes only pending state; `publish`, `discard`, and `remove` run *under* the gate's write guard, so a guest's registry entry and its live endpoint change as one step. A call path never reads pending state and reads live state under the seam's own lock, not the gate: a call racing a deregister may complete against the departing instance, exactly as an in-flight invocation does.
@@ -182,7 +182,7 @@ All of this is declared in the `omnia.toml` manifest ([reference](reference/conf
 
 1. **CLI parsing** — the generated `main` delegates to `omnia::main`, which parses the `run` subcommand (`omnia-cli` decides the source over `--manifest` / `OMNIA_MANIFEST` / positional `<wasm>` / compiled-in), materializes a `Manifest`, and appends CLI `--mount` entries onto it.
 2. **Build** — `DeploymentBuilder` validates the manifest, resolves mounts, reads the `registries` configuration, loads guests, and returns a `Deployment` ready for host linking (`build` is the safe wasm path; `unsafe build_trusted` is the pre-compiled path).
-3. **Assemble** — `run` connects backends, `Wiring::link` adds each host to the linker, `Deployment::assemble` links the guest loader host (with the `loader` feature), builds the `Runtime` from `RuntimeParts`, installs the loader's acquisition policy — the mounts and `registries`, unless `Deployment::loader` selected custom sources — and serves every guest's linked exports.
+3. **Assemble** — `run` connects backends, `Wiring::link` adds each host to the linker, `Deployment::assemble` links the guest loader host (with the `loader` feature), builds the `Runtime` from `RuntimeParts`, installs the loader's table — the manifest's `on_demand` guests, their package sources fetched through `registries` unless `Deployment::registry_source` selected a registry — and serves every guest's linked exports.
 4. **Bootstrap** — starts epoch interruption and pool-metric sampling, then logs **`omnia ready`**.
 5. **Drive** — command mode invokes the guest's `wasi:cli/run` once and exits with its status; server mode awaits every trigger server.
 6. **Request handling** (server mode) — trigger hosts (`WasiHttp`, `WasiMessaging`, `WasiWebSocket`) accept requests, route to a guest, instantiate it in a fresh store, and return the response.

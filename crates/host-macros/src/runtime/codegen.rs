@@ -6,7 +6,7 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote};
 use syn::{Expr, Ident, Path};
 
-use crate::runtime::parse::{Config, HostEntry, ManifestSpec, Mode};
+use crate::runtime::parse::{Config, GuestSource, HostEntry, ManifestSpec, Mode};
 
 // Token fragments needed to expand the runtime macro.
 pub struct Codegen {
@@ -90,18 +90,34 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
         }
     });
 
-    // The component is embedded at build time; the entry is named by the
-    // path's file stem unless the guest names itself.
+    // An embedded component is read at build time and named by the path's
+    // file stem unless the guest names itself; a package is a reference the
+    // loader fetches on first load.
     let guests = manifest.guests.iter().map(|guest| {
-        let path = &guest.path;
-        let entry = guest.name.as_ref().map_or_else(
-            || quote! { omnia::GuestEntry::embedded(#path, include_bytes!(#path)) },
-            |name| quote! { omnia::GuestEntry::new(#name, include_bytes!(#path)) },
-        );
+        let entry = match &guest.source {
+            GuestSource::Embedded { path, name: None } => {
+                quote! { omnia::GuestEntry::embedded(#path, include_bytes!(#path)) }
+            }
+            GuestSource::Embedded {
+                path,
+                name: Some(name),
+            } => {
+                quote! { omnia::GuestEntry::new(#name, include_bytes!(#path)) }
+            }
+            GuestSource::Package { reference, name } => {
+                quote! { omnia::GuestEntry::new(#name, omnia::SourceSpec::package(#reference)) }
+            }
+        };
         let http = &guest.routes.http;
         let messaging = &guest.routes.messaging;
         let websocket = &guest.routes.websocket;
         let command = guest.command.then(|| quote! { .command() });
+        let on_demand = guest.on_demand.then(|| quote! { .on_demand() });
+        // The pin was validated at parse; it lands as the bytes it decodes to.
+        let digest = guest.digest.as_ref().map(|bytes| {
+            let bytes = bytes.iter();
+            quote! { .digest(omnia::Digest::from([#(#bytes),*])) }
+        });
         quote! {
             .guest(
                 #entry
@@ -109,6 +125,8 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
                     #(.route_messaging(#messaging))*
                     #(.route_websocket(#websocket))*
                     #command
+                    #on_demand
+                    #digest
             )
         }
     });

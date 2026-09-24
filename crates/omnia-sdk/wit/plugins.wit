@@ -1,66 +1,40 @@
 package omnia:plugins@0.1.0;
 
-/// Host-side plugin loading. Request-only in both directions: the guest names
-/// code, the host acquires, verifies, validates, and registers it — component
-/// bytes never cross this interface.
+/// Host-side guest loading. The deployment declares every guest that may
+/// run; a caller names one, and the host admits it if it is not active yet.
+/// Component bytes, paths, and registry endpoints never cross this
+/// interface: the caller supplies a name the deployment already chose.
 interface loader {
-    /// An exact package reference and the registry it is fetched from.
-    record registry-ref {
-        /// The exact `namespace:name@version` to fetch.
-        %package: string,
-        /// The registry to fetch from; `none` takes the deployment's
-        /// `registries` routing for the package's namespace.
-        endpoint: option<string>,
-    }
-
-    /// Where a guest's component bytes come from, and the name it registers
-    /// under.
-    variant location {
-        /// A package registry; registers as the package reference.
-        registry(registry-ref),
-        /// A mount-relative component path, read fresh on every load;
-        /// registers as the path's file stem.
-        path(string),
-        /// A guest the deployment declares, by name. Nothing is read: the
-        /// handle attests that the guest is registered.
-        declared(string),
-    }
-
     /// Why a load was refused.
     variant error {
         /// The request or deployment is wrong and a retry cannot succeed:
-        /// an unserved location kind, an undeclared name, a malformed or
-        /// mismatched digest pin, or bytes that are not a raw wasm component
+        /// the deployment declares no guest of that name, its bytes do not
+        /// hash to the declared digest, or they are not a raw wasm component
         /// (a pre-compiled native artifact is always refused) or failed
         /// validation.
         refused(string),
-        /// The acquirer could not produce the package bytes; the source may
+        /// The guest's source could not produce its bytes; the source may
         /// recover, so a retry can succeed.
         unavailable(string),
-        /// The package identity is already registered and cannot be re-bound.
-        already-active(string),
         /// Loader misconfiguration or an internal registration failure.
         internal(string),
     }
 
-    /// A loaded plugin: a plain value, because the requester holds no
-    /// lifecycle authority over the loaded component.
+    /// A loaded guest: a plain value, because the caller holds no lifecycle
+    /// authority over it.
     record plugin {
         /// The registered guest identity (routes both link dispatch and the
         /// host Dispatcher).
         id: string,
-        /// The resolved `sha256:<hex>` content digest of the loaded bytes —
-        /// commit it as a pin to make an unpinned load reproducible. `none`
-        /// for a declared guest the deployment recorded no digest for.
+        /// The `sha256:<hex>` content digest of the guest's bytes; `none` for
+        /// a guest whose bytes the runtime never hashed.
         digest: option<string>,
     }
 
-    /// Load the guest `from` names, idempotent on (name, digest): an
-    /// already-active guest returns its handle immediately. The host
-    /// acquires through the deployment's acquirer, verifies the sha256 pin
-    /// when given, validates raw wasm, and registers under the name the
-    /// location derives. A declared guest takes no pin.
-    load: async func(%from: location, digest: option<string>) -> result<plugin, error>;
+    /// Ensure the guest the deployment declares as `name` is active and
+    /// return its handle: admitted now from its declared source if it loads
+    /// on demand, attested if it is already active. Idempotent.
+    load: async func(name: string) -> result<plugin, error>;
 }
 
 world imports {

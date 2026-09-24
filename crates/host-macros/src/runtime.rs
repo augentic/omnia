@@ -268,8 +268,8 @@ mod tests {
     // The full inline deployment: `registries` lowers to
     // `.registries(RegistryConfig::contents(..))` with the expression
     // compiled in, and each guest to `.guest(..)`. Nothing else is emitted
-    // for them — assembly links the loader host and installs the declared
-    // policy, so the expansion never names a loader path.
+    // for them — assembly links the loader host and installs the on-demand
+    // table, so the expansion never names a loader path.
     #[test]
     fn expand_guests_block() {
         insta::assert_snapshot!(expand_pretty(quote!({
@@ -288,12 +288,101 @@ mod tests {
 
     // A `registries`-only deployment is valid: the guests arrive at run
     // time (or over the CLI), and the manifest carries only the routing
-    // their package loads fall back on.
+    // their package sources are fetched through.
     #[test]
     fn expand_registries_only() {
         insta::assert_snapshot!(expand_pretty(quote!({
             registries: include_str!("wasm-pkg.toml"),
         })));
+    }
+
+    // Deferred admission: `on_demand: true` lowers to `.on_demand()`, a
+    // `digest:` literal to `.digest(Digest::from([..]))` with the bytes it
+    // decoded to, and a `package:` guest to a `SourceSpec::package` entry.
+    #[test]
+    fn expand_on_demand() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            guests: [
+                {
+                    path: "app.wasm",
+                    digest: "sha256:E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+                },
+                { path: "tool.wasm", on_demand: true },
+                {
+                    name: "pkg",
+                    package: "acme:tool@1.2.3",
+                    on_demand: true,
+                    digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                },
+            ],
+            registries: include_str!("wasm-pkg.toml"),
+        })));
+    }
+
+    #[test]
+    fn digest_malformed() {
+        for (literal, needle) in [
+            ("md5:00", "missing `sha256:`"),
+            ("sha256:abc", "got 3 hex characters"),
+            (
+                "sha256:zz00000000000000000000000000000000000000000000000000000000000000",
+                "not hexadecimal",
+            ),
+        ] {
+            let error = syn::parse2::<Config>(quote!({
+                guests: [{ path: "app.wasm", digest: #literal }],
+            }))
+            .err()
+            .expect("a malformed digest must be refused");
+            assert!(error.to_string().contains(needle), "{error}");
+        }
+    }
+
+    #[test]
+    fn on_demand_takes_no_routes() {
+        let error = syn::parse2::<Config>(quote!({
+            guests: [{ path: "tool.wasm", on_demand: true, routes: { http: ["/tool"] } }],
+        }))
+        .err()
+        .expect("an on-demand guest with routes must be refused");
+        assert!(error.to_string().contains("cannot take routes"), "{error}");
+    }
+
+    #[test]
+    fn on_demand_is_not_command() {
+        let error = syn::parse2::<Config>(quote!({
+            mode: command,
+            guests: [{ path: "tool.wasm", on_demand: true, command: true }],
+        }))
+        .err()
+        .expect("an on-demand command guest must be refused");
+        assert!(error.to_string().contains("cannot be the command guest"), "{error}");
+    }
+
+    // A package has no stem to be named by and is only ever fetched on
+    // first load.
+    #[test]
+    fn package_needs_name_and_on_demand() {
+        let error = syn::parse2::<Config>(quote!({
+            guests: [{ package: "acme:tool@1.2.3", on_demand: true }],
+        }))
+        .err()
+        .expect("an unnamed package guest must be refused");
+        assert!(error.to_string().contains("add `name:`"), "{error}");
+
+        let error = syn::parse2::<Config>(quote!({
+            guests: [{ name: "tool", package: "acme:tool@1.2.3" }],
+        }))
+        .err()
+        .expect("a boot package guest must be refused");
+        assert!(error.to_string().contains("add `on_demand: true`"), "{error}");
+
+        let error = syn::parse2::<Config>(quote!({
+            guests: [{ name: "tool", path: "tool.wasm", package: "acme:tool@1.2.3", on_demand: true }],
+        }))
+        .err()
+        .expect("two sources must be refused");
+        assert!(error.to_string().contains("mutually exclusive"), "{error}");
     }
 
     // `include_bytes!` takes a literal or a macro, so a path computed at run

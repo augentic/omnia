@@ -26,7 +26,7 @@ pub use {anyhow, futures, tokio, wasmtime, wasmtime_wasi};
 
 pub use self::artifact::{ELF_MAGIC, GuestArtifact, LoadedGuest, is_precompiled};
 pub use self::chain::{ChainCtx, ChainPolicy};
-pub use self::digest::sha256_digest;
+pub use self::digest::Digest;
 pub use self::dispatch::Dispatcher;
 pub use self::extensions::Extensions;
 pub use self::host::{
