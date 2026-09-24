@@ -29,7 +29,7 @@ source.path = "./guests/admin.wasm"     # no `name`: the file's stem, `admin`, n
 routes.http = ["/admin"]
 ```
 
-A guest's name is its identity: what routes address, what another guest dispatches to, and what a guest's `loader.load` of `declared("api")` answers with. Leave it out when the file is called what callers dispatch to; give it when the file is not, or when two files share a stem. Names are unique within a deployment.
+A guest's name is its identity: what routes address, what another guest dispatches to, and what a guest's `loader.load("api")` answers with. Leave it out when the file is called what callers dispatch to; give it when the file is not, or when two files share a stem. Names are unique within a deployment.
 
 The full field reference lives in [Configuration](../reference/configuration.md#deployment-manifest-omniatoml).
 

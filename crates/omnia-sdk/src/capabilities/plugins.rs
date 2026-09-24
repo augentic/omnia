@@ -1,13 +1,13 @@
 //! Plugin-loading (requester) capability over `omnia:plugins/loader`.
 //!
 //! The requester surface for any application that late-binds guests into its
-//! deployment: the guest names code — a [`Location`] and an optional content
-//! pin — and the host acquires, verifies, validates, and registers it,
-//! handing back a typed [`Plugin`] handle. Component bytes never cross the
-//! interface in either direction.
+//! deployment: the guest names one of the deployment's declared guests, and
+//! the host admits it from the source the deployment declares — or attests
+//! it if it is already active — handing back a typed [`Plugin`] handle.
+//! Nothing the requester passes chooses code: no bytes, paths, or registry
+//! endpoints cross the interface.
 
 use std::future::Future;
-use std::path::Path;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
@@ -30,53 +30,6 @@ const SCHEME: &str = "sha256:";
 /// Hex characters in a sha256 digest.
 const HEX_LEN: usize = 64;
 
-/// Where a guest's component bytes come from, and the name it registers
-/// under — the routed identity a [`Plugin`] handle carries.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Location {
-    /// An exact `namespace:name@version` from a package registry. Registers
-    /// as the package reference.
-    Registry {
-        /// The exact package reference to fetch, for example
-        /// `emery:intent@1.0.0`.
-        package: String,
-        /// The registry to fetch from; `None` takes the deployment's
-        /// `registries` routing for the package's namespace.
-        endpoint: Option<String>,
-    },
-    /// A mount-relative component path, read fresh on every load. Registers
-    /// as the path's file stem: `./adapters/intent.wasm` dispatches as
-    /// `intent`.
-    Path(String),
-    /// A guest the deployment declares, by name. Nothing is read: the handle
-    /// attests that the guest is registered, and a pin is refused.
-    Declared(String),
-}
-
-impl Location {
-    /// The name a guest loaded from this location registers under: the
-    /// package reference, the path's file stem, or the declared name.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use omnia_sdk::plugins::Location;
-    ///
-    /// assert_eq!(Location::Path("./adapters/intent.wasm".into()).name(), "intent");
-    /// assert_eq!(Location::Declared("intent".into()).name(), "intent");
-    /// ```
-    #[must_use]
-    pub fn name(&self) -> &str {
-        match self {
-            Self::Registry { package, .. } => package,
-            Self::Path(path) => {
-                Path::new(path).file_stem().and_then(|stem| stem.to_str()).unwrap_or(path)
-            }
-            Self::Declared(name) => name,
-        }
-    }
-}
-
 /// A validated `sha256:<hex>` content digest, canonicalized to lowercase.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
@@ -93,15 +46,15 @@ impl Digest {
 impl FromStr for Digest {
     type Err = Error;
 
-    fn from_str(pin: &str) -> Result<Self, Error> {
-        let Some(hex) = pin.strip_prefix(SCHEME) else {
+    fn from_str(digest: &str) -> Result<Self, Error> {
+        let Some(hex) = digest.strip_prefix(SCHEME) else {
             return Err(Error::Refused(format!(
-                "digest pin `{pin}` does not use the `sha256:<hex>` scheme"
+                "digest `{digest}` does not use the `sha256:<hex>` scheme"
             )));
         };
         if hex.len() != HEX_LEN || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err(Error::Refused(format!(
-                "digest pin `{pin}` is not {HEX_LEN} hex characters"
+                "digest `{digest}` is not {HEX_LEN} hex characters"
             )));
         }
         Ok(Self(format!("{SCHEME}{}", hex.to_ascii_lowercase())))
@@ -111,8 +64,8 @@ impl FromStr for Digest {
 impl TryFrom<String> for Digest {
     type Error = Error;
 
-    fn try_from(pin: String) -> Result<Self, Error> {
-        pin.parse()
+    fn try_from(digest: String) -> Result<Self, Error> {
+        digest.parse()
     }
 }
 
@@ -128,18 +81,7 @@ impl std::fmt::Display for Digest {
     }
 }
 
-/// The (location, pin) pair a requester names for one load.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PluginRef {
-    /// Where the component bytes come from, and the name the guest registers
-    /// under.
-    pub location: Location,
-    /// Optional content pin, verified host-side before validation. A
-    /// [`Location::Declared`] load takes none.
-    pub digest: Option<Digest>,
-}
-
-/// A loaded plugin: the routed dispatch identity plus its resolved digest.
+/// A loaded plugin: the routed dispatch identity plus its content digest.
 ///
 /// A plain value — loading confers no lifecycle authority over the loaded
 /// component.
@@ -150,7 +92,7 @@ pub struct Plugin {
 }
 
 impl Plugin {
-    /// A handle over a routed identity and its resolved digest — the
+    /// A handle over a routed identity and its content digest — the
     /// constructor native suites use to script loads.
     #[must_use]
     pub fn new(id: impl Into<String>, digest: Option<Digest>) -> Self {
@@ -166,9 +108,8 @@ impl Plugin {
         &self.id
     }
 
-    /// The resolved content digest of the loaded bytes — commit it as a pin
-    /// to make an unpinned load reproducible. `None` for a declared guest
-    /// the deployment recorded no digest for.
+    /// The content digest of the guest's bytes; `None` for a guest whose
+    /// bytes the runtime never hashed.
     #[must_use]
     pub const fn digest(&self) -> Option<&Digest> {
         self.digest.as_ref()
@@ -178,18 +119,15 @@ impl Plugin {
 /// Typed load refusal, mirroring the `omnia:plugins/loader` error variant.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
-    /// The request or deployment is wrong and a retry cannot succeed: an
-    /// unserved location kind, an undeclared name, a malformed or mismatched
-    /// digest pin, or an invalid artifact.
+    /// The request or deployment is wrong and a retry cannot succeed: the
+    /// deployment declares no guest of that name, its bytes miss the
+    /// declared digest, or they are not a valid raw component.
     #[error("refused: {0}")]
     Refused(String),
-    /// The acquirer could not produce the package bytes; the source may
+    /// The guest's source could not produce its bytes; the source may
     /// recover, so a retry can succeed.
     #[error("unavailable: {0}")]
     Unavailable(String),
-    /// The package identity is already active and cannot be re-bound.
-    #[error("already active: {0}")]
-    AlreadyActive(String),
     /// Loader misconfiguration or an internal registration failure.
     #[error("internal: {0}")]
     Internal(String),
@@ -202,7 +140,6 @@ impl Error {
         match self {
             Self::Refused(_) => "refused",
             Self::Unavailable(_) => "unavailable",
-            Self::AlreadyActive(_) => "already-active",
             Self::Internal(_) => "internal",
         }
     }
@@ -214,9 +151,7 @@ impl From<Error> for crate::Error {
         match error {
             Error::Unavailable(description) => Self::BadGateway { code, description },
             Error::Internal(description) => Self::ServerError { code, description },
-            Error::Refused(description) | Error::AlreadyActive(description) => {
-                Self::BadRequest { code, description }
-            }
+            Error::Refused(description) => Self::BadRequest { code, description },
         }
     }
 }
@@ -226,44 +161,32 @@ impl From<Error> for crate::Error {
 /// The default WASM implementation delegates to `omnia:plugins/loader`; off
 /// `wasm32` the signature is bare so native suites script loads.
 pub trait Plugins: Send + Sync {
-    /// Request the host load `plugin`, idempotent on (name, digest); the
-    /// returned handle carries the routed identity and resolved digest.
+    /// Ensure the guest the deployment declares as `name` is active and
+    /// return its handle; idempotent.
     ///
     /// # Errors
     ///
-    /// Returns the loader's typed refusal ([`Error`]) when the host cannot
-    /// acquire, verify, validate, or register the component, or the
-    /// deployment declares no guest of the name a [`Location::Declared`]
-    /// load gives.
+    /// Returns the loader's typed refusal ([`Error`]) when the deployment
+    /// declares no such guest, or the host cannot acquire, verify, validate,
+    /// or register it.
     #[cfg(not(target_arch = "wasm32"))]
-    fn load(&self, plugin: &PluginRef) -> impl Future<Output = Result<Plugin, Error>> + Send;
+    fn load(&self, name: &str) -> impl Future<Output = Result<Plugin, Error>> + Send;
 
-    /// Request the host load `plugin`, idempotent on (name, digest); the
-    /// returned handle carries the routed identity and resolved digest.
+    /// Ensure the guest the deployment declares as `name` is active and
+    /// return its handle; idempotent.
     ///
     /// # Errors
     ///
-    /// Returns the loader's typed refusal ([`Error`]) when the host cannot
-    /// acquire, verify, validate, or register the component, or the
-    /// deployment declares no guest of the name a [`Location::Declared`]
-    /// load gives.
+    /// Returns the loader's typed refusal ([`Error`]) when the deployment
+    /// declares no such guest, or the host cannot acquire, verify, validate,
+    /// or register it.
     #[cfg(target_arch = "wasm32")]
-    fn load(&self, plugin: &PluginRef) -> impl Future<Output = Result<Plugin, Error>> + Send {
+    fn load(&self, name: &str) -> impl Future<Output = Result<Plugin, Error>> + Send {
         use generated::omnia::plugins::loader;
 
-        let from = match &plugin.location {
-            Location::Registry { package, endpoint } => {
-                loader::Location::Registry(loader::RegistryRef {
-                    package: package.clone(),
-                    endpoint: endpoint.clone(),
-                })
-            }
-            Location::Path(path) => loader::Location::Path(path.clone()),
-            Location::Declared(name) => loader::Location::Declared(name.clone()),
-        };
-        let pin = plugin.digest.as_ref().map(|digest| digest.as_str().to_owned());
+        let name = name.to_owned();
         async move {
-            let loaded = loader::load(from, pin).await?;
+            let loaded = loader::load(name).await?;
             let digest = loaded.digest.map(|digest| digest.parse()).transpose().map_err(
                 |error: Error| {
                     Error::Internal(format!("host reported a malformed digest: {error}"))
@@ -275,8 +198,8 @@ pub trait Plugins: Send + Sync {
 }
 
 delegate_deref!(Plugins {
-    fn load(&self, plugin: &PluginRef) -> impl Future<Output = Result<Plugin, Error>> + Send {
-        (**self).load(plugin)
+    fn load(&self, name: &str) -> impl Future<Output = Result<Plugin, Error>> + Send {
+        (**self).load(name)
     }
 });
 
@@ -300,7 +223,6 @@ mod wire {
             match error {
                 loader::Error::Refused(detail) => Self::Refused(detail),
                 loader::Error::Unavailable(detail) => Self::Unavailable(detail),
-                loader::Error::AlreadyActive(detail) => Self::AlreadyActive(detail),
                 loader::Error::Internal(detail) => Self::Internal(detail),
             }
         }
@@ -320,13 +242,13 @@ mod tests {
 
     #[test]
     fn digest_malformed() {
-        for pin in [
+        for digest in [
             format!("sha512:{}", "ab".repeat(32)),
             "sha256:abcd".into(),
             format!("sha256:{}", "zz".repeat(32)),
         ] {
-            let error = pin.parse::<Digest>().expect_err("malformed pin refused");
-            assert!(matches!(error, Error::Refused(_)), "{pin} refused");
+            let error = digest.parse::<Digest>().expect_err("malformed digest refused");
+            assert!(matches!(error, Error::Refused(_)), "{digest} refused");
         }
     }
 
@@ -343,7 +265,6 @@ mod tests {
         let cases = [
             (Error::Refused("r".into()), "refused"),
             (Error::Unavailable("u".into()), "unavailable"),
-            (Error::AlreadyActive("c".into()), "already-active"),
             (Error::Internal("x".into()), "internal"),
         ];
         for (error, code) in cases {
@@ -356,7 +277,7 @@ mod tests {
                 Error::Internal(_) => {
                     assert!(matches!(mapped, crate::Error::ServerError { .. }));
                 }
-                _ => assert!(matches!(mapped, crate::Error::BadRequest { .. })),
+                Error::Refused(_) => assert!(matches!(mapped, crate::Error::BadRequest { .. })),
             }
         }
     }

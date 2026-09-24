@@ -1,90 +1,55 @@
-//! The acquisition seam: where one load's bytes come from and the two
-//! per-kind acquirer slots [`Plugins`](crate::Plugins) fills.
+//! Where an on-demand guest's bytes come from, and the registry seam that
+//! fetches a package source.
+
+use std::borrow::Cow;
+use std::fmt;
+use std::path::PathBuf;
 
 use futures::future::BoxFuture;
-use omnia_core::GuestId;
+use omnia_core::Digest;
 
 use crate::error::LoadError;
 
-/// Where one load's component bytes come from, the host mirror of the
-/// `omnia:plugins/loader` `location` variant.
-///
-/// Each origin derives the name the guest registers under ([`Origin::id`])
-/// and resolves against the deployment's declared policy: its mounts for a
-/// path, its `registries` configuration for a package the load routes past
-/// no endpoint of its own, and its own guest set for a declared name.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Where an on-demand guest's bytes come from, as its `[[guest]]` entry
+/// declares them.
+#[derive(Clone)]
 pub enum Origin {
-    /// An exact `namespace:name@version` from a package registry —
-    /// `endpoint` when the load names one, else the configuration's routing.
-    /// Registers as the package reference.
-    Registry {
-        /// The exact package reference to fetch.
-        package: String,
-        /// The registry to fetch from, when the load names one.
-        endpoint: Option<String>,
-    },
-    /// A mount-relative component path. Registers as the path's file stem.
-    Path(String),
-    /// A guest the deployment declares, by name. Nothing is acquired.
-    Declared(String),
+    /// A component file, read fresh on every admission.
+    Path(PathBuf),
+    /// Component bytes compiled into the host binary.
+    Bytes(Cow<'static, [u8]>),
+    /// An exact `namespace:name@version`, fetched from the registry the
+    /// deployment's `registries` configuration routes it to.
+    Package(String),
 }
 
-impl Origin {
-    /// The name a guest loaded from this origin registers under.
-    #[must_use]
-    pub fn id(&self) -> GuestId {
+// Manual: the derived impl would dump the embedded component bytes.
+impl fmt::Debug for Origin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Registry { package, .. } => GuestId::from(package.as_str()),
-            Self::Path(path) => GuestId::from_path(path),
-            Self::Declared(name) => GuestId::from(name.as_str()),
-        }
-    }
-
-    /// What the load named, for a refusal.
-    #[must_use]
-    pub fn label(&self) -> &str {
-        match self {
-            Self::Registry { package, .. } => package,
-            Self::Path(path) => path,
-            Self::Declared(name) => name,
+            Self::Path(path) => f.debug_tuple("Path").field(path).finish(),
+            Self::Bytes(bytes) => write!(f, "Bytes({} bytes)", bytes.len()),
+            Self::Package(package) => f.debug_tuple("Package").field(package).finish(),
         }
     }
 }
 
-/// Path acquisition policy — the path slot of [`Plugins`](crate::Plugins).
-pub trait PathSource: Send + Sync + 'static {
-    /// Produce the raw component bytes at the mount-relative `path`, split
-    /// by remedy: [`LoadError::Refused`] for a path no mount serves, never
-    /// for a read failure a retry might clear ([`LoadError::Unavailable`]).
-    fn acquire<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<Vec<u8>, LoadError>>;
+/// A guest the deployment declares for on-demand loading: where its bytes
+/// come from, and the digest they must hash to.
+#[derive(Clone, Debug)]
+pub struct OnDemand {
+    /// Where the bytes come from.
+    pub origin: Origin,
+    /// The digest the bytes must hash to; unpinned when `None`.
+    pub digest: Option<Digest>,
 }
 
-/// Registry acquisition policy — the registry slot of
-/// [`Plugins`](crate::Plugins).
+/// Registry acquisition policy — how an [`Origin::Package`] source is
+/// fetched.
 pub trait RegistrySource: Send + Sync + 'static {
-    /// Produce the raw component bytes for `package` from `registry`
-    /// (`None` lets the acquirer's configuration route the package), split
-    /// by remedy: [`LoadError::Refused`] for an authoritative "no", never
-    /// for a source failure a retry might clear ([`LoadError::Unavailable`]).
-    fn acquire<'a>(
-        &'a self, package: &'a str, registry: Option<&'a str>,
-    ) -> BoxFuture<'a, Result<Vec<u8>, LoadError>>;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ids() {
-        let registry = Origin::Registry {
-            package: "acme:tool@1.0.0".to_owned(),
-            endpoint: Some("ghcr.io".to_owned()),
-        };
-        assert_eq!(registry.id(), GuestId::from("acme:tool@1.0.0"));
-        assert_eq!(Origin::Path("./adapters/tool.wasm".to_owned()).id(), GuestId::from("tool"));
-        assert_eq!(Origin::Path("tool.cwasm".to_owned()).id(), GuestId::from("tool"));
-        assert_eq!(Origin::Declared("tool".to_owned()).id(), GuestId::from("tool"));
-    }
+    /// Produce the raw component bytes for the exact `package` reference,
+    /// split by remedy: [`LoadError::Refused`] for an authoritative "no" (no
+    /// registry routes it, the registry has no such release), never for a
+    /// source failure a retry might clear ([`LoadError::Unavailable`]).
+    fn acquire<'a>(&'a self, package: &'a str) -> BoxFuture<'a, Result<Vec<u8>, LoadError>>;
 }

@@ -62,15 +62,16 @@ Unreleased
   - The `link` cargo feature keeps its name and now governs only whether
     such imports are relayed at all.
 - The `runtime!` grammar embeds its guests.
-  - `guests:` is a list, `guests: [ { path, name?, routes?, command? }, .. ]`.
+  - `guests:` is a list, `guests: [ { path | package, name?, routes?,
+    command?, on_demand?, digest? }, .. ]`.
     Each entry's `path:` is a string literal or a macro expanding to one
     (`concat!(env!(..), ..)`, a `build.rs`-emitted `env!("GUEST_WASM")`) that
     the macro reads with `include_bytes!` — the component is compiled into
     the binary, never read from disk at start; a component read at start is
     a `manifest:` file's `[[guest]]`. A computed `path:` is a compile error.
   - A guest is named by the path's file stem unless `name:` says otherwise.
-  - `registries:` is a root key beside `guests:` and `mounts:`, the default
-    routing of a package load that names no registry.
+  - `registries:` is a root key beside `guests:` and `mounts:`, the routing
+    of the deployment's on-demand `package:` guests.
   - The generated `main` passes the invoking crate's `CARGO_PKG_NAME` as the
     program name — telemetry's component name and, in command mode, the
     guest's `argv[0]` — where it was the first guest's identity;
@@ -82,8 +83,9 @@ Unreleased
 - A guest entry's identity is its `name`.
   - `[[guest]] name = ".."` replaces `id`; it may be omitted, in which case
     the `source.path` file's stem names the guest (`./guests/echo.wasm` is
-    `echo`, `Manifest::load` derives it). An entry nothing names — an `oci`
-    source without `name` — is refused at startup beside a duplicate name.
+    `echo`, `Manifest::load` derives it). An entry nothing names — a
+    `package` source without `name` — is refused at startup beside a
+    duplicate name.
     The retired `id` key is an unknown key.
   - `GuestEntry::new(name, source)`, `GuestEntry::embedded(path, bytes)`
     (named by the path's stem; what the macro lowers to),
@@ -93,60 +95,81 @@ Unreleased
   `PluginConfig` are gone; `config:` is `manifest:`.
   - The TOML manifest follows: `[registries] path = "wasm-pkg.toml"` replaces
     `[[plugin.location]]`, and `Manifest::load` replaces
-    `Manifest::from_config`.
-  - Mounts double as the roots path loads resolve against (`./plugin.wasm`
-    reads from the `.` mount), so there is no separate root list and
-    `omnia_test::host::Deployment::path_root` is gone — overlay a `.` mount
-    instead (mounts dedup by name, last wins, before any directory opens);
-    the test deployment's `locations` builder is `registries`.
+    `Manifest::from_config`. `omnia_test::host::Deployment::path_root` is
+    gone with the location list, and the test deployment's `locations`
+    builder is `registries`.
   - The guest loader is assembly's, not the macro's: `Deployment::assemble`
     links `WasiPlugins` beside WASI whenever omnia is built with the feature
-    and installs the declared policy — mounts and `registries` — or the
-    custom sources selected with the new
-    `Deployment::loader(registry, path)`; `Wiring::extend` and
+    and installs the manifest's on-demand guests (below) through
+    `Plugins::install(runtime, on_demand, registry)`; `Wiring::extend` and
     `Deployment::plugin_locations` are removed, and the generated `Hooks`
     carry `link` and `serve` alone.
   - `RegistryClient::new` takes the wasm-pkg `Config` (there is no
-    `with_config`) and is always installed, over an empty configuration when
-    the deployment declares none. The configuration is routing, not an
-    allow-list: it routes the loads that name no registry — a package it
-    routes nowhere (no `default_registry`, no mapping for its namespace) is
-    refused typed, naming the namespace, before any registry is dialled —
-    and a load that names its registry fetches from it whatever the
-    configuration says.
+    `with_config`), `RegistryClient::from_toml` the deployment's `registries`
+    contents, and one is always installed, over an empty configuration when
+    the deployment declares none; `Deployment::registry_source(..)` selects a
+    custom `RegistrySource` — a `RegistryClient::cached` over a
+    `ContentStore` + `ReleaseStore`, say — before assembly. A package the
+    configuration routes nowhere (no `default_registry`, no mapping for its
+    namespace) is refused typed, naming the namespace, before any registry
+    is dialled.
   - The `plugin` cargo feature is `loader`.
   - On the CLI, `--config`/`-c` is `--manifest`/`-m`, `OMNIA_CONFIG` is
     `OMNIA_MANIFEST`, and `--link` is gone; `RunSource::Config` is
     `RunSource::Manifest`.
-- The `omnia:plugins/loader` contract names every kind of guest a caller can
-  reach through one `load`.
-  - `location` is `registry(registry-ref)`, `path(string)`, or
-    `declared(string)`. A `registry-ref` carries the package and an optional
-    `endpoint`, the registry the load fetches from — a load naming none takes
-    the deployment's `registries` routing, and a package neither routes is
-    refused before any registry is dialled. A path reads through the
-    deployment's mounts as before. `declared(name)` answers with the
-    deployment's own guest of that name, attesting the registration without
-    fetching anything and refusing an undeclared name (where the same name
-    dispatched blind would trap) or a pin (a declared guest is the
-    deployment's, not the caller's, to pin).
-  - `load(from, digest)` takes the pin beside the location, and
-    `plugin.digest` is optional — a declared guest carries none.
-  - A path load registers under its file stem (`./x.wasm` is the guest `x`;
-    `GuestId::from_path`), so a caller dispatches to what it loaded by the
-    name it loaded it as.
-  - In the SDK, `Location` follows the variant, `Location::name` answers the
-    registration name a location derives, `PluginRef` is a plain
-    `{ location, digest }` struct, and `Plugin::digest` is
-    `Option<&Digest>`; the test host's `ScriptedLoader` keys its digests and
-    refusals by that name and `declare(name)` scripts the deployment's
-    guests.
+- The deployment's guest list is the loader's allow-list: a guest names a
+  declared guest, never a location.
+  - `omnia:plugins/loader.load` takes a `name` alone and returns the
+    `plugin` handle (`id`, optional `digest`). Component bytes, paths, and
+    registry endpoints no longer cross the interface in either direction —
+    a caller cannot have the host read a file through a mount or fetch a
+    package of its choosing. A name the deployment does not declare is
+    refused typed (where the same name dispatched blind would trap); a name
+    already active is attested without fetching anything.
+  - A `[[guest]]` entry marked `on_demand = true` (the macro's
+    `on_demand: true`) is admitted at that first `load` rather than at boot,
+    from the source the entry declares: `source.path`, embedded bytes, or
+    the new `source.package = "ns:name@1.0.0"` (the macro's `package:`), an
+    exact reference fetched through `[registries]`. A package source is
+    always on demand and must carry a `name`; an on-demand guest takes no
+    `routes` and is never the `command` guest, since trigger routing is
+    built at boot — each is refused when the manifest validates or, in the
+    macro, at compile time. `GuestEntry::on_demand()` and
+    `SourceSpec::package(..)` build them programmatically; the test host's
+    `Deployment::on_demand(name, source)` and `Deployment::entry(entry)`
+    declare them.
+  - The digest pin moves from the load call to the entry: `[[guest]]
+    digest = "sha256:<hex>"` (the macro's `digest:`, `GuestEntry::digest`)
+    is checked wherever the entry's bytes become a guest, at boot or on
+    demand, before wasmtime sees them; a boot guest whose bytes miss the pin
+    fails startup, an on-demand one refuses the load.
+  - `omnia::Digest` is the typed `sha256:<hex>` value host-side — `Copy`,
+    `Digest::of(bytes)`, `FromStr`/`Display` in the canonical lowercase
+    spelling, serde as that string — and replaces
+    `sha256_digest(bytes) -> String` (a `ContentStore` that verified with it
+    compares `Digest::of(bytes).to_string()` instead). The registry records
+    the digest of every guest it hashed: `LoadedGuest::digest`,
+    `Guest::with_digest`/`Guest::digest` (`None` for a pre-compiled file
+    mapped without a pin or a guest registered from a ready artifact), and
+    the loader's `Plugin::digest` reports it on an attested name.
+  - Mounts are data grants only. A mount is no longer a root the loader
+    reads code through, so a writable mount is not a code-admission root;
+    pin the `digest` of an on-demand `source.path` whose file could change
+    between boot and first load.
+  - `omnia-plugin`'s surface is `Plugins`, `PluginLoader`, `Plugin`,
+    `OnDemand { origin, digest }`, `Origin::{Path, Bytes, Package}`, and the
+    `RegistrySource` seam; `PathMounts`, `PathSource`, `Location`, and
+    `Plugins::install_declared` are gone.
+  - In the SDK, `Plugins::load(name)` returns `Plugin { id, digest }` with
+    `Plugin::digest` an `Option<&Digest>`; `Location` and `PluginRef` are
+    gone. The test host's `ScriptedLoader` keys its `digest`, `refuse`, and
+    `unhashed` scripts by name and records `loads()` in call order.
   - Validating at load that a guest exports what its caller will import —
     refused typed at `load` rather than trapping at the first dispatch — is
     filed, not shipped, with its two homes: an `expects: list<string>` on
-    the WIT `load` call the loader checks against the component's exports
-    for all three kinds, or a check the requester makes against the returned
-    handle once the loader exposes them.
+    the WIT `load` call the loader checks against the component's exports,
+    or a check the requester makes against the returned handle once the
+    loader exposes them.
 
 ---
 

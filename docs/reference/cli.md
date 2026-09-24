@@ -14,7 +14,7 @@ Run a single guest, or a manifest-driven deployment.
 | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `WASM`                  | Path to a guest — a standard WASI component (`.wasm`) or a pre-compiled component (`.bin`). Optional when a manifest is available via `--manifest`, `OMNIA_MANIFEST`, or the binary's compiled-in default. |
 | `-m, --manifest <path>` | Deployment manifest (`omnia.toml`) for multi-guest deployments. Falls back to the `OMNIA_MANIFEST` environment variable, then to a default manifest compiled in via the `runtime!` macro's `manifest:` field or inline manifest keys (if declared). |
-| `--mount <spec>`        | Preopen a host directory into the guest sandbox (repeatable). Layered over the manifest's `[[mount]]` entries; a matching guest-visible name overrides the manifest (last wins). Mounts are also the roots guest path loads resolve against. |
+| `--mount <spec>`        | Preopen a host directory into the guest sandbox (repeatable). Layered over the manifest's `[[mount]]` entries; a matching guest-visible name overrides the manifest (last wins). |
 | `-- <args>...`        | Everything after `--` is forwarded to the guest as its argv (command mode). `args[0]` is the program name, supplied by the runtime.                                              |
 
 ### Mount spec format
@@ -72,6 +72,6 @@ The generated `runtime!` `main` does not dispatch `compile`; call `omnia::compil
 | `cli`   | yes     | The `run` grammar (via the `omnia-cli` crate) and `omnia::Cli`/`Command`/`Parser`. Without it a binary must be a direct command; no `clap` is linked.     |
 | `jit`   | yes     | Cranelift JIT; run raw `.wasm` directly and enable `compile`. Disable to run only pre-compiled `.bin` components.                                         |
 | `link`  | no      | Guest-to-guest dispatch (the `omnia-link` crate): every import a guest makes outside the runtime's own `wasi:`/`omnia:` namespaces is relayed to the guest exporting it. Without it such an import fails at boot. |
-| `loader` | no     | The guest loader (`omnia:plugins/loader`): assembly links its host and installs the deployment's mounts and `registries` as its policy. A deployment declaring `registries` requires it. |
+| `loader` | no     | The guest loader (`omnia:plugins/loader`): assembly links its host and installs the manifest's `on_demand` guests as the table a `load(name)` may name, package sources routed by `registries`. A deployment declaring `registries` requires it. |
 | `mpk`   | no      | Memory protection keys in the pooling allocator (Linux x86-64).                                                                                          |
 | `gc`    | no      | WebAssembly GC support and pooling GC-heap limits.                                                                                                       |

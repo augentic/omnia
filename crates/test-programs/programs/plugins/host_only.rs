@@ -4,16 +4,13 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use omnia_sdk::plugins::{Location, PluginRef, Plugins as _, WasiPlugins};
+use omnia_sdk::plugins::{Plugins as _, WasiPlugins};
 
 omnia_sdk::command!(scenario);
 
 async fn scenario() {
     let plugin = WasiPlugins
-        .load(&PluginRef {
-            location: Location::Path("./plugin.wasm".to_owned()),
-            digest: None,
-        })
+        .load("plugin")
         .await
         .expect("a host-only handler loads without a linked import");
     assert_eq!(plugin.id(), "plugin");

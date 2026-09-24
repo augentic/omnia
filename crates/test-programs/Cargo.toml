@@ -323,38 +323,33 @@ path = "programs/otel/spawned_task_pending.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "plugins_load_declared"
-path = "programs/plugins/load_declared.rs"
+name = "plugins_attest"
+path = "programs/plugins/attest.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "plugins_load_host_only"
-path = "programs/plugins/load_host_only.rs"
+name = "plugins_host_only"
+path = "programs/plugins/host_only.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "plugins_load_mixed"
-path = "programs/plugins/load_mixed.rs"
+name = "plugins_load"
+path = "programs/plugins/load.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "plugins_load_path"
-path = "programs/plugins/load_path.rs"
+name = "plugins_mixed"
+path = "programs/plugins/mixed.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "plugins_load_refused"
-path = "programs/plugins/load_refused.rs"
+name = "plugins_refused"
+path = "programs/plugins/refused.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "plugins_load_registry"
-path = "programs/plugins/load_registry.rs"
-crate-type = ["cdylib"]
-
-[[example]]
-name = "plugins_load_unlinked"
-path = "programs/plugins/load_unlinked.rs"
+name = "plugins_unlinked"
+path = "programs/plugins/unlinked.rs"
 crate-type = ["cdylib"]
 
 [[example]]

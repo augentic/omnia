@@ -25,12 +25,12 @@ default = ["cli", "jit", "otlp"]
 cli = ["dep:omnia-cli"]
 
 # Enables the guest loader (`omnia:plugins/loader`): the `WasiPlugins` host,
-# the `Plugins` load path, and the built-in acquirers (`PathMounts`,
-# `RegistryClient`) with their HTTP/OCI registry stack. With it, assembly
-# links the loader host beside WASI — reachable only from worlds that import
-# it — and installs the deployment's mounts and `registries` as its policy;
-# without it, a manifest declaring `registries` is refused at startup.
-# Implies `jit`: loaded guests are raw wasm.
+# the `Plugins` load path over the manifest's `on_demand` guests, and the
+# `RegistryClient` with its HTTP/OCI registry stack. With it, assembly links
+# the loader host beside WASI — reachable only from worlds that import it —
+# and installs the on-demand table routed by the deployment's `registries`;
+# without it, a manifest declaring `registries` or an `on_demand` guest is
+# refused at startup. Implies `jit`: loaded guests are raw wasm.
 loader = ["dep:omnia-plugin", "jit"]
 
 # Enables guest→guest dispatch (the `omnia-link` crate): every import a guest

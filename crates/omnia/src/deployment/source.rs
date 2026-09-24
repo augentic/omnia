@@ -1,16 +1,16 @@
-//! # Guest acquisition
+//! # Guest acquisition at boot
 //!
-//! Where a guest's component bytes come from. The deployment manifest's
+//! Where a boot guest's component bytes come from. The deployment manifest's
 //! `source` field selects a kind per guest: a local `.wasm` / pre-compiled
-//! `.bin` path, or component bytes embedded in the host binary. OCI would
-//! land as another kind.
+//! `.bin` path, or component bytes embedded in the host binary. A package
+//! source is fetched by the guest loader on first load, never here.
 
 use std::borrow::Cow;
 use std::path::PathBuf;
 
 use anyhow::{Context as _, Result, ensure};
 use omnia_core::wasmtime::Engine;
-use omnia_core::{ELF_MAGIC, GuestArtifact, GuestId, LoadedGuest, is_precompiled};
+use omnia_core::{Digest, ELF_MAGIC, GuestArtifact, GuestId, LoadedGuest, is_precompiled};
 
 /// Whether a deployment build may load pre-compiled (native) artifacts.
 ///
@@ -32,6 +32,7 @@ pub enum ArtifactPolicy {
 pub struct Source {
     id: GuestId,
     kind: SourceKind,
+    digest: Option<Digest>,
 }
 
 /// Where the component bytes live.
@@ -47,6 +48,7 @@ impl Source {
         Self {
             id,
             kind: SourceKind::Path(path.into()),
+            digest: None,
         }
     }
 
@@ -57,7 +59,16 @@ impl Source {
         Self {
             id,
             kind: SourceKind::Bytes(bytes.into()),
+            digest: None,
         }
+    }
+
+    /// Require the bytes to hash to `digest`; a source that resolves to
+    /// anything else fails to load.
+    #[must_use]
+    pub const fn pinned(mut self, digest: Digest) -> Self {
+        self.digest = Some(digest);
+        self
     }
 
     /// Returns the identity this source registers under.
@@ -67,15 +78,15 @@ impl Source {
     }
 
     /// Load the component this source registers, under the build's artifact
-    /// policy.
+    /// policy, recording the digest of every byte sequence that passed
+    /// through omnia's hands.
     ///
-    /// Async so a future source kind (an OCI pull) fits the same signature.
     /// Compilation is CPU-bound, so it runs on a blocking thread — loading
     /// several guests concurrently compiles them in parallel.
     pub(crate) async fn load(
         &self, engine: &Engine, policy: ArtifactPolicy,
     ) -> Result<LoadedGuest> {
-        let artifact = self.artifact(policy)?;
+        let (artifact, digest) = self.artifact(policy)?;
         let component = artifact.load(engine).await.with_context(|| match &self.kind {
             SourceKind::Path(path) => format!("loading guest from {}", path.display()),
             SourceKind::Bytes(_) => format!("loading embedded guest `{}`", self.id),
@@ -83,20 +94,27 @@ impl Source {
         Ok(LoadedGuest {
             id: self.id.clone(),
             component,
+            digest,
         })
     }
 
-    // Select the artifact under `policy`. The base build serves pre-compiled
-    // artifacts only; the `jit` feature adds the raw-wasm branch ahead of it.
-    fn artifact(&self, policy: ArtifactPolicy) -> Result<GuestArtifact> {
+    // Select the artifact under `policy`, with the digest of every byte
+    // sequence that passed through omnia's hands. The base build serves
+    // pre-compiled artifacts only; the `jit` feature adds the raw-wasm branch
+    // ahead of it.
+    fn artifact(&self, policy: ArtifactPolicy) -> Result<(GuestArtifact, Option<Digest>)> {
         match &self.kind {
             SourceKind::Path(path) => {
+                let read = || {
+                    std::fs::read(path)
+                        .with_context(|| format!("loading guest from {}", path.display()))
+                };
                 let precompiled = is_precompiled(path)?;
                 #[cfg(feature = "jit")]
                 if !precompiled {
-                    let bytes = std::fs::read(path)
-                        .with_context(|| format!("loading guest from {}", path.display()))?;
-                    return Ok(GuestArtifact::wasm(bytes));
+                    let bytes = read()?;
+                    let digest = self.verified(&bytes)?;
+                    return Ok((GuestArtifact::wasm(bytes), Some(digest)));
                 }
                 ensure!(
                     precompiled,
@@ -111,17 +129,27 @@ impl Source {
                      `build_trusted`",
                     path.display()
                 );
-                // SAFETY: `policy == Trust` is only reachable through an
-                // `unsafe` build call whose caller attested every
-                // pre-compiled path names unmodified trusted wasmtime
-                // output — the contract `precompiled_file` requires.
-                Ok(unsafe { GuestArtifact::precompiled_file(path.clone()) })
+                if self.digest.is_some() {
+                    // A pinned artifact is read here so the pin can be
+                    // checked; wasmtime reads an unpinned one itself.
+                    let bytes = read()?;
+                    let digest = self.verified(&bytes)?;
+                    // SAFETY: `policy == Trust` is only reachable through an
+                    // `unsafe` build call whose caller attested every
+                    // pre-compiled path names unmodified trusted wasmtime
+                    // output — the contract `precompiled` requires.
+                    Ok((unsafe { GuestArtifact::precompiled(bytes) }, Some(digest)))
+                } else {
+                    // SAFETY: as above, for `precompiled_file`.
+                    Ok((unsafe { GuestArtifact::precompiled_file(path.clone()) }, None))
+                }
             }
             SourceKind::Bytes(bytes) => {
+                let digest = self.verified(bytes)?;
                 let precompiled = bytes.get(..ELF_MAGIC.len()) == Some(&ELF_MAGIC);
                 #[cfg(feature = "jit")]
                 if !precompiled {
-                    return Ok(GuestArtifact::wasm(bytes.to_vec()));
+                    return Ok((GuestArtifact::wasm(bytes.to_vec()), Some(digest)));
                 }
                 ensure!(
                     precompiled,
@@ -138,8 +166,21 @@ impl Source {
                 // `unsafe` build call whose caller attested every
                 // pre-compiled artifact is unmodified trusted wasmtime
                 // output — the contract `precompiled` requires.
-                Ok(unsafe { GuestArtifact::precompiled(bytes.to_vec()) })
+                Ok((unsafe { GuestArtifact::precompiled(bytes.to_vec()) }, Some(digest)))
             }
         }
+    }
+
+    /// The digest of `bytes`, once they match the declared pin, if any.
+    fn verified(&self, bytes: &[u8]) -> Result<Digest> {
+        let digest = Digest::of(bytes);
+        if let Some(declared) = self.digest {
+            ensure!(
+                declared == digest,
+                "guest `{}` resolved to {digest}, not its declared digest {declared}",
+                self.id
+            );
+        }
+        Ok(digest)
     }
 }

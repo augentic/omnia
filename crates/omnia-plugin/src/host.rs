@@ -24,7 +24,6 @@ use self::generated::Error;
 use self::generated::omnia::plugins::loader;
 use crate::error::LoadError;
 use crate::loader::Plugins;
-use crate::source::Origin;
 
 /// Host-side service for `omnia:plugins` — the loader capability this crate
 /// implements over the runtime's admission seam.
@@ -55,41 +54,25 @@ pub struct WasiPluginsCtxView {
     pub plugins: Option<Arc<Plugins>>,
 }
 
-impl From<loader::Location> for Origin {
-    fn from(location: loader::Location) -> Self {
-        match location {
-            loader::Location::Registry(loader::RegistryRef { package, endpoint }) => {
-                Self::Registry { package, endpoint }
-            }
-            loader::Location::Path(path) => Self::Path(path),
-            loader::Location::Declared(name) => Self::Declared(name),
-        }
-    }
-}
-
 impl From<LoadError> for Error {
     fn from(error: LoadError) -> Self {
         match error {
             LoadError::Refused(detail) => Self::Refused(detail),
             LoadError::Unavailable(detail) => Self::Unavailable(detail),
-            LoadError::AlreadyActive(detail) => Self::AlreadyActive(detail),
             LoadError::Internal(detail) => Self::Internal(detail),
         }
     }
 }
 
 impl<T> loader::HostWithStore<T> for WasiPlugins {
-    async fn load(
-        accessor: &Accessor<T, Self>, from: loader::Location, digest: Option<String>,
-    ) -> Result<loader::Plugin, Error> {
-        let from = Origin::from(from);
+    async fn load(accessor: &Accessor<T, Self>, name: String) -> Result<loader::Plugin, Error> {
         let plugins = accessor
             .with(|mut store| store.get().plugins)
-            .ok_or_else(|| LoadError::no_plugins(from.label()))?;
-        let plugin = plugins.load(from, digest.as_deref()).await?;
+            .ok_or_else(|| LoadError::no_plugins(&name))?;
+        let plugin = plugins.load(&name).await?;
         Ok(loader::Plugin {
             id: plugin.id().to_string(),
-            digest: plugin.digest().map(str::to_owned),
+            digest: plugin.digest().map(|digest| digest.to_string()),
         })
     }
 }

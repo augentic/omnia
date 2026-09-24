@@ -24,6 +24,7 @@ use wasmtime_wasi::WasiView;
 
 use crate::RuntimeOptions;
 use crate::artifact::LoadedGuest;
+use crate::digest::Digest;
 use crate::seam::LinkSeam;
 
 /// Opaque guest identity.
@@ -93,9 +94,10 @@ enum Target<T: 'static> {
 pub struct Guest<T: 'static> {
     id: GuestId,
     target: Target<T>,
-    // Content digest of the admitted bytes; `None` for assemble-time and
-    // `register`-path entries, whose bytes the registry never hashed.
-    digest: Option<Arc<str>>,
+    // Content digest of the guest's bytes; `None` when the runtime never had
+    // them in hand — a pre-compiled file wasmtime read itself, or a
+    // `register`-path artifact.
+    digest: Option<Digest>,
 }
 
 impl<T: 'static> Guest<T> {
@@ -109,11 +111,11 @@ impl<T: 'static> Guest<T> {
         }
     }
 
-    /// Record the `sha256:<hex>` content digest of the guest's bytes, so the
-    /// attestation lives and dies with the registry entry itself.
+    /// Record the content digest of the guest's bytes, so the attestation
+    /// lives and dies with the registry entry itself.
     #[must_use]
-    pub fn with_digest(mut self, digest: impl Into<Arc<str>>) -> Self {
-        self.digest = Some(digest.into());
+    pub const fn with_digest(mut self, digest: Digest) -> Self {
+        self.digest = Some(digest);
         self
     }
 
@@ -123,11 +125,10 @@ impl<T: 'static> Guest<T> {
         &self.id
     }
 
-    /// The recorded `sha256:<hex>` content digest, if the guest was admitted
-    /// from hashed bytes.
+    /// The recorded content digest, if the runtime hashed the guest's bytes.
     #[must_use]
-    pub fn digest(&self) -> Option<&str> {
-        self.digest.as_deref()
+    pub const fn digest(&self) -> Option<Digest> {
+        self.digest
     }
 
     /// Returns the guest's pre-instantiated component, ready to instantiate
@@ -200,16 +201,21 @@ impl<T: WasiView + 'static> Registry<T> {
         seam.polyfill(&engine, &mut linker, &loaded)?;
 
         let mut guests = BTreeMap::new();
-        for guest in loaded {
+        for LoadedGuest {
+            id,
+            component,
+            digest,
+        } in loaded
+        {
             let instance_pre = linker
-                .instantiate_pre(&guest.component)
+                .instantiate_pre(&component)
                 .map_err(anyhow::Error::from)
-                .with_context(|| format!("pre-instantiating guest `{}`", guest.id))?;
-            let id = guest.id.clone();
-            if guests
-                .insert(guest.id.clone(), Arc::new(Guest::local(guest.id, instance_pre)))
-                .is_some()
-            {
+                .with_context(|| format!("pre-instantiating guest `{id}`"))?;
+            let mut guest = Guest::local(id.clone(), instance_pre);
+            if let Some(digest) = digest {
+                guest = guest.with_digest(digest);
+            }
+            if guests.insert(id.clone(), Arc::new(guest)).is_some() {
                 bail!("duplicate guest id `{id}`: guest identities must be unique");
             }
         }

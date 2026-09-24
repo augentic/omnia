@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
-use omnia::{ExitStatus, GuestId, Runtime};
+use omnia::{Digest, ExitStatus, GuestEntry, GuestId, Runtime, StoreCtx};
 use omnia_test::host::{Backends, Deployment, ScriptedModel, scratch};
 use omnia_test::{Exchange, SeenFormat};
 use omnia_wasi_blobstore::WasiBlobstoreCtx as _;
@@ -36,8 +36,8 @@ mod production {
     });
 }
 
-// The same shape with a `.` mount the binary would serve path loads from —
-// a directory that does not exist under test.
+// The same shape with a `.` mount the binary would preopen — a directory
+// that does not exist under test.
 mod production_plugins {
     use omnia_wasi_otel::{OtelDefault, WasiOtel};
 
@@ -69,16 +69,17 @@ async fn runtime_overlay() {
 
 // The overlay's `.` mount stands in for the binary's: mounts dedup by name,
 // last wins, before any directory is opened, so the nonexistent production
-// root is never touched and path loads resolve against the scratch directory.
+// root is never touched (opening it would fail the boot) and the overlaid
+// deployment — an on-demand guest included — runs through the binary's hooks.
 #[tokio::test]
 async fn overlay_mount() {
     let _ = (production_plugins::main, production_plugins::run);
     let scratch = scratch();
-    std::fs::copy(test_programs::LINK_ECHOER, scratch.path().join("plugin.wasm"))
-        .expect("staging the loadable echoer");
 
     let deployment = Deployment::from(production_plugins::manifest())
-        .guest("requester", test_programs::PLUGINS_LOAD_PATH)
+        .guest("requester", test_programs::PLUGINS_LOAD)
+        .on_demand("plugin", test_programs::LINK_ECHOER)
+        .args(["plugin"])
         .mount(scratch.mount(false));
     let manifest = deployment.manifest().expect("inline base resolves");
     assert_eq!(
@@ -177,17 +178,14 @@ async fn link_pair() {
     runtime.shutdown();
 }
 
-// The `.` mount is the root path loads resolve against; nothing else opts
-// the deployment into the loader.
+// An on-demand guest is admitted on its first `load`; nothing else opts the
+// deployment into the loader.
 #[tokio::test]
-async fn mount_plugins() {
-    let scratch = scratch();
-    std::fs::copy(test_programs::LINK_ECHOER, scratch.path().join("plugin.wasm"))
-        .expect("staging the loadable echoer");
-
+async fn on_demand_guest() {
     let status = Deployment::new()
-        .guest("requester", test_programs::PLUGINS_LOAD_PATH)
-        .mount(scratch.mount(false))
+        .guest("requester", test_programs::PLUGINS_LOAD)
+        .on_demand("plugin", test_programs::LINK_ECHOER)
+        .args(["plugin"])
         .run(Backends::defaults().await, |deployment| {
             deployment.host::<WasiOtel, Backends>()?;
             Ok(())
@@ -195,6 +193,34 @@ async fn mount_plugins() {
         .await
         .expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+}
+
+// A boot guest's `digest` pin is checked as the deployment builds: the
+// bytes' own digest runs, any other fails startup before the guest loads.
+#[tokio::test]
+async fn pinned_boot_guest() {
+    fn otel_only(deployment: &mut omnia::Deployment<StoreCtx<Backends>>) -> Result<()> {
+        deployment.host::<WasiOtel, Backends>()?;
+        Ok(())
+    }
+    let bytes = std::fs::read(test_programs::COMMAND_EXIT_MAP).expect("reading the guest");
+    let pinned = |digest: Digest| {
+        Deployment::new()
+            .entry(GuestEntry::new("cli", test_programs::COMMAND_EXIT_MAP).digest(digest))
+            .args(["ok"])
+    };
+
+    let status = pinned(Digest::of(&bytes))
+        .run(Backends::defaults().await, otel_only)
+        .await
+        .expect("the pin matches the guest's bytes");
+    assert_eq!(status, ExitStatus::SUCCESS);
+
+    let error = pinned(Digest::of(b"some other component"))
+        .run(Backends::defaults().await, otel_only)
+        .await
+        .expect_err("the pin names other bytes");
+    assert!(format!("{error:#}").contains("not its declared digest"), "{error:#}");
 }
 
 /// A keyvalue backend that notes every bucket opened through it, then hands

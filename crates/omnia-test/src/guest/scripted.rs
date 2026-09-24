@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use omnia_sdk::model::{
     CHECK_TOOL, Error, Format, Function, Model, Reply, Request, Tool, ToolCall,
 };
-use omnia_sdk::plugins::{self, Digest, Location, Plugin, PluginRef, Plugins};
+use omnia_sdk::plugins::{self, Digest, Plugin, Plugins};
 
 use crate::{Exchange, Script, Seen, SeenFormat};
 
@@ -267,38 +267,29 @@ pub fn function_tools(request: &Request) -> Vec<&Function> {
         .collect()
 }
 
-/// A keyed `Plugins` loader: per-name digests, refusals, and declarations,
-/// every load recorded.
+/// A keyed `Plugins` loader: per-name digests and refusals, every load
+/// recorded.
 ///
-/// Keyed rather than FIFO because the loader contract is per name — the one
-/// each [`Location`] registers under ([`Location::name`]): a request whose
-/// name has a scripted refusal fails with it; a [`Location::Declared`] load
-/// attests a name [`declare`]d with no digest and refuses any other, as the
-/// host would; otherwise the load resolves, in order, to the digest scripted
-/// for the name, the request's own pin, the loader-wide default set by
-/// [`defaulting`], or a deterministic per-name placeholder. A pin that
-/// disagrees with the resolved digest is refused before anything else.
+/// Keyed rather than FIFO because the loader contract is per name: a load
+/// of a name with a scripted refusal fails with it; a name marked
+/// [`unhashed`] attests with no digest, as the host does for a guest whose
+/// bytes it never hashed; otherwise the load resolves to the digest scripted
+/// for the name, the loader-wide default set by [`defaulting`], or a
+/// deterministic per-name placeholder. Every name loads unless scripted
+/// otherwise — the deployment's allow-list is the host's to enforce.
 ///
-/// [`declare`]: Self::declare
+/// [`unhashed`]: Self::unhashed
 /// [`defaulting`]: Self::defaulting
 ///
 /// ```
-/// use omnia_sdk::plugins::{Error, Location, PluginRef, Plugins as _};
+/// use omnia_sdk::plugins::{Error, Plugins as _};
 /// use omnia_test::guest::ScriptedLoader;
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
-/// let loader =
-///     ScriptedLoader::default().refuse("acme:bad@1.0.0", Error::Refused("banned".into()));
-/// let registry = |package: &str| PluginRef {
-///     location: Location::Registry {
-///         package: package.into(),
-///         endpoint: None,
-///     },
-///     digest: None,
-/// };
-/// assert!(matches!(loader.load(&registry("acme:bad@1.0.0")).await, Err(Error::Refused(_))));
-/// assert_eq!(loader.load(&registry("acme:ok@1.0.0")).await.unwrap().id(), "acme:ok@1.0.0");
-/// assert_eq!(loader.loads().len(), 2);
+/// let loader = ScriptedLoader::default().refuse("bad", Error::Refused("undeclared".into()));
+/// assert!(matches!(loader.load("bad").await, Err(Error::Refused(_))));
+/// assert_eq!(loader.load("ok").await.unwrap().id(), "ok");
+/// assert_eq!(loader.loads(), ["bad", "ok"]);
 /// # });
 /// ```
 #[derive(Clone, Debug, Default)]
@@ -311,8 +302,8 @@ struct LoaderInner {
     digests: Mutex<BTreeMap<String, Digest>>,
     default: Mutex<Option<Digest>>,
     refusals: Mutex<BTreeMap<String, plugins::Error>>,
-    declared: Mutex<BTreeSet<String>>,
-    loads: Mutex<Vec<PluginRef>>,
+    unhashed: Mutex<BTreeSet<String>>,
+    loads: Mutex<Vec<String>>,
 }
 
 impl ScriptedLoader {
@@ -327,9 +318,9 @@ impl ScriptedLoader {
         self
     }
 
-    /// Resolves every name without a scripted digest or a pin of its own to
-    /// `digest`, in place of the per-name placeholder — for suites that
-    /// assert one fixed digest in their envelopes.
+    /// Resolves every name without a scripted digest to `digest`, in place
+    /// of the per-name placeholder — for suites that assert one fixed digest
+    /// in their envelopes.
     ///
     /// # Panics
     ///
@@ -351,47 +342,35 @@ impl ScriptedLoader {
         self
     }
 
-    /// Declares the guest `name`, so a [`Location::Declared`] load of it
-    /// attests with no digest; an undeclared name refuses.
+    /// Attests the name `name` with no digest, as the host does for a guest
+    /// whose bytes it never hashed.
     ///
     /// # Panics
     ///
     /// Panics if a lock is poisoned.
     #[must_use]
-    pub fn declare(self, name: impl Into<String>) -> Self {
-        self.inner.declared.lock().expect("declared lock").insert(name.into());
+    pub fn unhashed(self, name: impl Into<String>) -> Self {
+        self.inner.unhashed.lock().expect("unhashed lock").insert(name.into());
         self
     }
 
-    /// Every load request in call order.
+    /// Every name loaded, in call order.
     ///
     /// # Panics
     ///
     /// Panics if a lock is poisoned.
     #[must_use]
-    pub fn loads(&self) -> Vec<PluginRef> {
+    pub fn loads(&self) -> Vec<String> {
         self.inner.loads.lock().expect("loads lock").clone()
     }
 
-    fn resolve(&self, plugin: &PluginRef) -> Result<Plugin, plugins::Error> {
-        self.inner.loads.lock().expect("loads lock").push(plugin.clone());
-        let name = plugin.location.name();
+    fn resolve(&self, name: &str) -> Result<Plugin, plugins::Error> {
+        self.inner.loads.lock().expect("loads lock").push(name.to_owned());
         if let Some(refusal) = self.inner.refusals.lock().expect("refusals lock").get(name) {
             return Err(refusal.clone());
         }
-        if let Location::Declared(name) = &plugin.location {
-            if plugin.digest.is_some() {
-                return Err(plugins::Error::Refused(format!(
-                    "`{name}` is declared by the deployment; it takes no pin"
-                )));
-            }
-            return if self.inner.declared.lock().expect("declared lock").contains(name) {
-                Ok(Plugin::new(name.clone(), None))
-            } else {
-                Err(plugins::Error::Refused(format!(
-                    "no guest `{name}` is declared by this deployment"
-                )))
-            };
+        if self.inner.unhashed.lock().expect("unhashed lock").contains(name) {
+            return Ok(Plugin::new(name, None));
         }
         let resolved = self
             .inner
@@ -400,23 +379,15 @@ impl ScriptedLoader {
             .expect("digests lock")
             .get(name)
             .cloned()
-            .or_else(|| plugin.digest.clone())
             .or_else(|| self.inner.default.lock().expect("default lock").clone())
             .unwrap_or_else(|| placeholder_digest(name));
-        match &plugin.digest {
-            Some(pin) if *pin != resolved => Err(plugins::Error::Refused(format!(
-                "`{name}` resolved to {resolved}, which is not the pinned {pin}"
-            ))),
-            _ => Ok(Plugin::new(name, Some(resolved))),
-        }
+        Ok(Plugin::new(name, Some(resolved)))
     }
 }
 
 impl Plugins for ScriptedLoader {
-    fn load(
-        &self, plugin: &PluginRef,
-    ) -> impl Future<Output = Result<Plugin, plugins::Error>> + Send {
-        ready(self.resolve(plugin))
+    fn load(&self, name: &str) -> impl Future<Output = Result<Plugin, plugins::Error>> + Send {
+        ready(self.resolve(name))
     }
 }
 
