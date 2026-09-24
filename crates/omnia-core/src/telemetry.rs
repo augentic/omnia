@@ -163,6 +163,7 @@ impl Telemetry {
 
             let filter_layer =
                 filter(self.filter.as_deref(), self.fallback, rust_log().as_deref())?;
+            let layers = attached(self.layers);
 
             // Console tracing goes to stderr: stdout belongs to the guest's
             // semantic output (command mode pipes and JSON envelopes must stay
@@ -178,7 +179,7 @@ impl Telemetry {
             // tracing setup) is tolerated: their subscriber stays, omnia's
             // exporters are skipped, and the runtime keeps running.
             if let Err(error) = Registry::default()
-                .with(self.layers)
+                .with(layers)
                 .with(filter_layer)
                 .with(fmt_layer)
                 .with(tracing_layer)
@@ -209,8 +210,9 @@ impl Telemetry {
             let filter_layer =
                 filter(self.filter.as_deref(), self.fallback, rust_log().as_deref())?;
             let fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
+            let layers = attached(self.layers);
             if let Err(error) =
-                Registry::default().with(self.layers).with(filter_layer).with(fmt_layer).try_init()
+                Registry::default().with(layers).with(filter_layer).with(fmt_layer).try_init()
             {
                 tracing::warn!(%error, "a tracing subscriber is already set; omnia telemetry skipped");
                 return Ok(Installed::Already);
@@ -261,6 +263,17 @@ impl Telemetry {
             ])
             .build()
     }
+}
+
+// The attached layers as one `Layer`, or `None` when there are none. An empty
+// `Vec` is not a no-op layer: it registers every callsite as `Interest::never`
+// and hints `LevelFilter::OFF`, which as the innermost layer silences the whole
+// stack. `Option::None` is tracing-subscriber's no-op, and `Layered` overrides
+// its hint.
+fn attached(
+    layers: Vec<Box<dyn Layer<Registry> + Send + Sync>>,
+) -> Option<Vec<Box<dyn Layer<Registry> + Send + Sync>>> {
+    (!layers.is_empty()).then_some(layers)
 }
 
 // The process's `RUST_LOG`, read once per build so `filter` stays pure over
