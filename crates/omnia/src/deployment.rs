@@ -13,14 +13,12 @@ pub use manifest::{
 };
 #[cfg(feature = "link")]
 use omnia_core::ChainPolicy;
-#[cfg(not(feature = "link"))]
-use omnia_core::NoLinks;
 use omnia_core::wasmtime::component::Linker;
 use omnia_core::wasmtime::{Config, Engine};
 use omnia_core::wasmtime_wasi::WasiView;
 use omnia_core::{
-    GuestId, HasChain, Host, LevelFilter, LinkSeam, LoadedGuest, MountRegistry, Registry, Routes,
-    Runtime, RuntimeOptions, RuntimeParts, Server, StoreCtx, Telemetry,
+    GuestId, HasChain, Host, LevelFilter, LinkSeam, LoadedGuest, MountRegistry, NoLinks, Registry,
+    Routes, Runtime, RuntimeOptions, RuntimeParts, Server, StoreCtx, Telemetry,
 };
 #[cfg(feature = "link")]
 use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks};
@@ -143,9 +141,7 @@ impl DeploymentBuilder {
     }
 
     /// Resolve the manifest and build the deployment under `policy`.
-    async fn build_inner<T: WasiView + 'static>(
-        self, policy: ArtifactPolicy,
-    ) -> Result<Deployment<T>> {
+    async fn build_inner<T: LinkStore>(self, policy: ArtifactPolicy) -> Result<Deployment<T>> {
         let manifest = if let Some(manifest) = self.manifest {
             manifest
         } else if self.allow_empty {
@@ -210,15 +206,16 @@ impl DeploymentBuilder {
             self.args
         };
 
-        Ok(Deployment {
+        // Base: no host-mediated dispatch. The `link` feature overrides the
+        // seam by struct update, consuming the base.
+        let deployment = Deployment {
             name,
             engine,
             linker,
             options,
             guests,
             routes: manifest.routes(),
-            #[cfg(feature = "link")]
-            selector: Arc::new(FirstArgSelector),
+            seam: Arc::new(NoLinks),
             mounts,
             args: Arc::new(args),
             mode: self.mode,
@@ -229,7 +226,16 @@ impl DeploymentBuilder {
             loader: LoaderPolicy::Declared,
             level: self.level,
             fallback,
-        })
+        };
+        #[cfg(feature = "link")]
+        let deployment = Deployment {
+            seam: Arc::new(InProcessLinks::new(
+                Arc::new(FirstArgSelector),
+                ChainPolicy::from(&deployment.options),
+            )),
+            ..deployment
+        };
+        Ok(deployment)
     }
 
     /// Resolve the manifest into a [`Deployment`].
@@ -242,7 +248,7 @@ impl DeploymentBuilder {
     ///
     /// Returns an error if no manifest resolves, the manifest is invalid, a
     /// guest names a pre-compiled artifact, or the deployment cannot be built.
-    pub async fn build<T: WasiView + 'static>(self) -> Result<Deployment<T>> {
+    pub async fn build<T: LinkStore>(self) -> Result<Deployment<T>> {
         self.build_inner(ArtifactPolicy::Reject).await
     }
 
@@ -264,7 +270,7 @@ impl DeploymentBuilder {
     ///
     /// Returns an error if no manifest resolves, the manifest is invalid, or
     /// the deployment cannot be built.
-    pub async unsafe fn build_trusted<T: WasiView + 'static>(self) -> Result<Deployment<T>> {
+    pub async unsafe fn build_trusted<T: LinkStore>(self) -> Result<Deployment<T>> {
         self.build_inner(ArtifactPolicy::Trust).await
     }
 }
@@ -283,9 +289,8 @@ pub struct Deployment<T: WasiView + 'static> {
     options: RuntimeOptions,
     guests: Vec<LoadedGuest>,
     routes: Routes,
-    // Host-mediated dispatch selector.
-    #[cfg(feature = "link")]
-    selector: Arc<dyn GuestSelector>,
+    // Host-mediated dispatch seam: `NoLinks` unless the `link` feature is on.
+    seam: Arc<dyn LinkSeam<T>>,
     // Mount registry opened from the manifest's resolved preopens.
     mounts: Arc<MountRegistry>,
     // Guest argv threaded into every store. Empty for long-lived servers; in
@@ -320,8 +325,8 @@ enum LoaderPolicy {
     Custom { registry: Option<Arc<dyn RegistrySource>>, path: Option<Arc<dyn PathSource>> },
 }
 
-/// Store bound every deployment store context satisfies; kept as a named bound
-/// for source compatibility with embedders that spell it.
+/// Store bound [`DeploymentBuilder::build`] requires; every deployment store
+/// context ([`StoreCtx`]) satisfies it.
 pub trait LinkStore: WasiView + HasChain + 'static {}
 
 impl<T: WasiView + HasChain + 'static> LinkStore for T {}
@@ -345,8 +350,14 @@ impl<T: WasiView> Deployment<T> {
     /// Defaults to [`FirstArgSelector`] — the runtime core's "first call argument is the
     /// identity" strategy. Chainable.
     #[cfg(feature = "link")]
-    pub fn selector(&mut self, selector: impl GuestSelector) -> &mut Self {
-        self.selector = Arc::new(selector);
+    pub fn selector(&mut self, selector: impl GuestSelector) -> &mut Self
+    where
+        T: HasChain,
+    {
+        // The seam holds only selector + policy until assembly, so rebuilding
+        // it here loses nothing.
+        self.seam =
+            Arc::new(InProcessLinks::new(Arc::new(selector), ChainPolicy::from(&self.options)));
         self
     }
 
@@ -408,23 +419,14 @@ impl<T: WasiView> Deployment<T> {
     ///
     /// Returns an error if a relayed import cannot be polyfilled, a component
     /// cannot be pre-instantiated, or the registry cannot be assembled.
-    pub fn into_registry(self) -> Result<Registry<T>>
-    where
-        T: LinkStore,
-    {
-        #[cfg(feature = "link")]
-        let seam: Arc<dyn LinkSeam<T>> =
-            Arc::new(InProcessLinks::new(self.selector, ChainPolicy::from(&self.options)));
-        #[cfg(not(feature = "link"))]
-        let seam: Arc<dyn LinkSeam<T>> = Arc::new(NoLinks);
-
+    pub fn into_registry(self) -> Result<Registry<T>> {
         Registry::assemble(
             self.engine,
             self.linker,
             self.options,
             self.guests,
             self.routes,
-            seam,
+            self.seam,
             self.allow_empty,
         )
     }
@@ -447,29 +449,23 @@ impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
     /// Returns an error if the loader host cannot be linked, the registry
     /// cannot be assembled, the `registries` configuration does not parse, or
     /// a guest's linked exports cannot be served.
-    pub async fn assemble(
-        #[cfg_attr(
-            not(feature = "loader"),
-            expect(unused_mut, reason = "linking the loader host is the one mutation")
-        )]
-        mut self,
-        backends: B,
-    ) -> Result<Runtime<B>> {
+    pub async fn assemble(self, backends: B) -> Result<Runtime<B>> {
+        let deployment = self;
         #[cfg(feature = "loader")]
-        self.host::<WasiPlugins, B>().context("linking the guest loader host")?;
+        let deployment = deployment.with_loader_host()?;
         #[cfg(feature = "loader")]
-        let loader = self.loader.clone();
+        let loader = deployment.loader.clone();
 
         let runtime = Runtime::from_parts(RuntimeParts {
-            name: Arc::from(self.name.as_str()),
-            args: self.args.to_vec(),
-            mounts: Arc::clone(&self.mounts),
-            registry_config: self.registry_config.clone(),
-            level: self.level,
-            fallback: self.fallback,
-            command_guest: self.command_guest.clone(),
+            name: Arc::from(deployment.name.as_str()),
+            args: deployment.args.to_vec(),
+            mounts: Arc::clone(&deployment.mounts),
+            registry_config: deployment.registry_config.clone(),
+            level: deployment.level,
+            fallback: deployment.fallback,
+            command_guest: deployment.command_guest.clone(),
             backends,
-            registry: Arc::new(self.into_registry().context("assembling registry")?),
+            registry: Arc::new(deployment.into_registry().context("assembling registry")?),
         });
 
         #[cfg(feature = "loader")]
@@ -481,6 +477,14 @@ impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
 
         runtime.serve_links().await.context("serving the guests' linked exports")?;
         Ok(runtime)
+    }
+
+    // Linked here, beside WASI, so wasmtime wires it only into worlds that
+    // import `omnia:plugins/loader`.
+    #[cfg(feature = "loader")]
+    fn with_loader_host(mut self) -> Result<Self> {
+        self.host::<WasiPlugins, B>().context("linking the guest loader host")?;
+        Ok(self)
     }
 }
 
