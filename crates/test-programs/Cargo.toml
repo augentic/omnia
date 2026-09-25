@@ -338,6 +338,11 @@ path = "programs/plugins/mixed.rs"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "plugins_plant"
+path = "programs/plugins/plant.rs"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "plugins_refused"
 path = "programs/plugins/refused.rs"
 crate-type = ["cdylib"]

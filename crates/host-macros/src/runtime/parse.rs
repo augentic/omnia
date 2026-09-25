@@ -76,6 +76,7 @@ pub struct GuestSpec {
     pub on_demand: bool,
     /// The `digest:` pin, decoded from its `sha256:<hex>` literal.
     pub digest: Option<[u8; DIGEST_LEN]>,
+    pub wasm_only: bool,
 }
 
 /// Where a guest entry's component comes from.
@@ -380,6 +381,7 @@ impl Parse for GuestSpec {
         let mut command_span = None;
         let mut on_demand = false;
         let mut digest = None;
+        let mut wasm_only = false;
 
         let span = parse_kv_block(input, |key, value| {
             match key.to_string().as_str() {
@@ -397,12 +399,13 @@ impl Parse for GuestSpec {
                 }
                 "on_demand" => on_demand = value.parse::<syn::LitBool>()?.value(),
                 "digest" => digest = Some(parse_digest(value)?),
+                "wasm_only" => wasm_only = value.parse::<syn::LitBool>()?.value(),
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
                         format!(
                             "unknown guest key `{other}`; expected `path` or `package`, `name`, \
-                             `routes`, `command`, `on_demand`, or `digest`"
+                             `routes`, `command`, `on_demand`, `digest`, or `wasm_only`"
                         ),
                     ));
                 }
@@ -461,6 +464,7 @@ impl Parse for GuestSpec {
             command_span,
             on_demand,
             digest,
+            wasm_only,
         })
     }
 }

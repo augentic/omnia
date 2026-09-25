@@ -1,0 +1,102 @@
+---
+source: crates/host-macros/src/runtime.rs
+expression: "expand_pretty(quote!({\n    guests:\n    [{ path: \"app.wasm\", wasm_only: true },\n    {\n        name: \"pkg\", package: \"acme:tool@1.2.3\", on_demand: true, digest:\n        \"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\n        wasm_only: true,\n    },], registries: include_str!(\"wasm-pkg.toml\"),\n}))"
+---
+mod runtime {
+    use omnia::anyhow::Result;
+    use omnia::futures::future;
+    use omnia::Server;
+    use omnia::tokio;
+    use super::*;
+    /// This runtime's host wiring, generic over the bundle carrying
+    /// its hosts' contexts: the compiled-in bundle under `main` and
+    /// `run`, any other under `run_with`.
+    pub struct Hooks;
+    impl<B> omnia::Wiring<B> for Hooks
+    where
+        B: Clone + Send + Sync + 'static,
+    {
+        fn link(deployment: &mut omnia::Deployment<omnia::StoreCtx<B>>) -> Result<()> {
+            Ok(())
+        }
+        async fn serve(runtime: &omnia::Runtime<B>) -> Result<()> {
+            let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![];
+            future::try_join_all(servers).await?;
+            Ok(())
+        }
+    }
+    /// The deployment compiled in here (`manifest:` or the inline
+    /// manifest keys; empty when neither is declared), for an
+    /// embedder to overlay before `run_with`.
+    pub fn manifest() -> omnia::ManifestSource {
+        omnia::ManifestSource::Inline(
+            omnia::Manifest::new()
+                .registries(
+                    omnia::RegistryConfig::contents(include_str!("wasm-pkg.toml")),
+                )
+                .guest(
+                    omnia::GuestEntry::embedded("app.wasm", include_bytes!("app.wasm"))
+                        .wasm_only(),
+                )
+                .guest(
+                    omnia::GuestEntry::new(
+                            "pkg",
+                            omnia::SourceSpec::package("acme:tool@1.2.3"),
+                        )
+                        .on_demand()
+                        .digest(
+                            omnia::Digest::from([
+                                0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                                0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                                0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                            ]),
+                        )
+                        .wasm_only(),
+                ),
+        )
+    }
+    /// Entry point: run the compiled-in deployment through this
+    /// runtime's hosts and backends (raw argv passthrough for a
+    /// command deployment compiled in here, otherwise the standard
+    /// `run` grammar).
+    #[tokio::main]
+    pub async fn main() -> ::std::process::ExitCode {
+        omnia::main::<
+            (),
+            Hooks,
+        >(
+                omnia::MainOptions::new(omnia::Mode::Server)
+                    .program_name(env!("CARGO_PKG_NAME"))
+                    .manifest(manifest()),
+            )
+            .await
+    }
+    /// Run one deployment through this runtime's hosts and backends,
+    /// blocking until the guest completes.
+    #[tokio::main]
+    pub async fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitStatus> {
+        let deployment = builder
+            .mode(omnia::Mode::Server)
+            .build::<omnia::StoreCtx<()>>()
+            .await?;
+        omnia::run::<(), Hooks>(deployment).await
+    }
+    /// Run one deployment through this runtime's hosts over a bundle
+    /// already in hand — nothing connects.
+    pub async fn run_with<B>(
+        builder: omnia::DeploymentBuilder,
+        backends: B,
+    ) -> Result<omnia::ExitStatus>
+    where
+        B: Clone + Send + Sync + 'static,
+        Hooks: omnia::Wiring<B>,
+    {
+        let deployment = builder
+            .mode(omnia::Mode::Server)
+            .build::<omnia::StoreCtx<B>>()
+            .await?;
+        omnia::run_with::<B, Hooks>(deployment, backends).await
+    }
+}
+#[allow(unused_imports)]
+pub use runtime::{Hooks, main, manifest, run, run_with};

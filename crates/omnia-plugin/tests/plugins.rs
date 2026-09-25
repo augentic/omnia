@@ -15,6 +15,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
+use omnia::wasmtime::Engine;
 use omnia::wasmtime::component::Val;
 use omnia::{
     ChainCtx, CompileOptions, DeploymentBuilder, Digest, ExitStatus, GuestEntry, GuestId,
@@ -238,9 +239,9 @@ async fn embedded_source() {
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
 }
 
-// `omnia compile` output loads wherever raw wasm does — a boot guest and an
-// on-demand one alike — and the registry records its bytes' digest the same
-// way.
+// `omnia compile` output loads wherever raw wasm does — a boot guest, and an
+// on-demand one once its entry pins the bytes — and the registry records its
+// bytes' digest the same way.
 #[tokio::test]
 async fn precompiled_sources() {
     let scratch = scratch();
@@ -250,7 +251,7 @@ async fn precompiled_sources() {
 
     let manifest = Manifest::new()
         .guest(GuestEntry::new("requester", requester_bin))
-        .guest(on_demand("plugin", plugin_bin));
+        .guest(on_demand("plugin", plugin_bin).digest(digest));
     let runtime = boot(manifest, &["declared", "plugin"]).await.expect("assembling runtime");
     let status = runtime.run_command().await.expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
@@ -319,6 +320,82 @@ async fn plugins_wasm_only() {
         panic!("a pre-compiled boot guest on a `wasm_only` entry is refused");
     };
     assert!(format!("{error:#}").contains("admits raw wasm alone"), "{error:#}");
+}
+
+// A pre-compiled artifact on an on-demand entry is read while guests run, so
+// it is admitted only from a source they cannot have shaped: pinned, or
+// embedded. Unpinned, the same artifact `precompiled_sources` loads is
+// refused whether the entry names a path or a package.
+#[tokio::test]
+async fn precompiled_on_demand_unpinned() {
+    let scratch = scratch();
+    let plugin_bin = precompile(&scratch, "plugin.bin", test_programs::LINK_ECHOER);
+    stage_package(scratch.path(), ECHOER_PACKAGE, plugin_bin.to_str().expect("a utf-8 path"));
+
+    let rows = [
+        ("path", requester(test_programs::PLUGINS_REFUSED).guest(on_demand("plugin", plugin_bin))),
+        (
+            "package",
+            requester(test_programs::PLUGINS_REFUSED)
+                .guest(echoer_package())
+                .registries(RegistryConfig::contents(local_registry_toml(scratch.path()))),
+        ),
+    ];
+    for (row, manifest) in rows {
+        let runtime = boot(manifest, &["declared", "plugin", "refused", "unpinned"])
+            .await
+            .expect("assembling runtime");
+        let status = runtime.run_command().await.expect("deployment runs");
+        assert_eq!(status, ExitStatus::SUCCESS, "row `{row}`: the requester's assertions held");
+        assert_eq!(
+            recorded(&runtime, "plugin"),
+            Registered::Absent,
+            "row `{row}`: nothing admitted"
+        );
+        runtime.shutdown();
+    }
+}
+
+// The declared arm reads an on-demand entry's `source.path` when the
+// requester asks, so a guest holding a writable mount over that path
+// chooses what the host is handed. Pre-compiled bytes it plants there are
+// refused as unpinned, where the raw wasm it plants loads: the host compiles
+// that itself. The host reads the planted artifact back, so it is the
+// refusal that kept it out, not a copy that never landed.
+#[tokio::test]
+async fn plugins_plant() {
+    let scratch = scratch();
+    precompile(&scratch, "payload.bin", test_programs::LINK_ECHOER);
+    stage(&scratch, "payload.wasm", test_programs::LINK_ECHOER);
+    let planted = scratch.path().join("plugin.bin");
+
+    let manifest = requester(test_programs::PLUGINS_PLANT)
+        .guest(on_demand("plugin", planted.clone()))
+        .mounts([scratch.mount(true)]);
+    let runtime = boot(manifest, &["payload.bin", "plugin.bin", "refused", "unpinned"])
+        .await
+        .expect("assembling runtime");
+    let status = runtime.run_command().await.expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+    assert_eq!(recorded(&runtime, "plugin"), Registered::Absent, "nothing was admitted");
+    runtime.shutdown();
+    let planted = std::fs::read(&planted).expect("the guest planted the artifact");
+    assert!(Engine::detect_precompiled(&planted).is_some(), "what it planted is pre-compiled");
+
+    let manifest = requester(test_programs::PLUGINS_PLANT)
+        .guest(on_demand("plugin", scratch.path().join("plugin.wasm")))
+        .mounts([scratch.mount(true)]);
+    let runtime = boot(manifest, &["payload.wasm", "plugin.wasm", "loaded"])
+        .await
+        .expect("assembling runtime");
+    let status = runtime.run_command().await.expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+    assert_eq!(
+        recorded(&runtime, "plugin"),
+        Registered::Active(digest_of(test_programs::LINK_ECHOER)),
+        "the planted raw wasm loaded"
+    );
+    runtime.shutdown();
 }
 
 // A package source is fetched from the registry the manifest's `registries`

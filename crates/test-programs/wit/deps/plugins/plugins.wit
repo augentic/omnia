@@ -40,8 +40,9 @@ interface loader {
         /// derives a name it declares, the path is not beneath a read-only
         /// mount, no registry routes the package, the digest is malformed or
         /// the bytes do not hash to it, they are not a loadable component,
-        /// they are pre-compiled where raw wasm alone is admitted, or the
-        /// name is active under other bytes.
+        /// they are pre-compiled where raw wasm alone is admitted, they are
+        /// pre-compiled on a declared on-demand entry that is neither pinned
+        /// nor embedded, or the name is active under other bytes.
         refused(string),
         /// The source could not produce the bytes; the source may recover,
         /// so a retry can succeed.

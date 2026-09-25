@@ -41,7 +41,7 @@ pub use self::registry::{
 };
 pub use self::runtime::{AdmitError, ExitStatus, Runtime, RuntimeParts, WeakRuntime, serve_links};
 pub use self::seam::{LinkSeam, NoLinks, StoreFactory};
-pub use self::source::{LoadedGuest, Source, SourceSpec};
+pub use self::source::{LoadedGuest, Source, SourceSpec, Verified};
 pub use self::store::{
     HasChain, HasDispatcher, HasExtensions, HasLimits, HasMounts, HttpBorrow, HttpCtx, StoreBase,
     StoreConfig, StoreCtx, StoreView,

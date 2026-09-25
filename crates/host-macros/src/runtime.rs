@@ -319,6 +319,35 @@ mod tests {
         })));
     }
 
+    // `wasm_only: true` lowers to `.wasm_only()` after the pin, the TOML's
+    // `wasm_only = true` for an embedded or package guest.
+    #[test]
+    fn expand_wasm_only() {
+        insta::assert_snapshot!(expand_pretty(quote!({
+            guests: [
+                { path: "app.wasm", wasm_only: true },
+                {
+                    name: "pkg",
+                    package: "acme:tool@1.2.3",
+                    on_demand: true,
+                    digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                    wasm_only: true,
+                },
+            ],
+            registries: include_str!("wasm-pkg.toml"),
+        })));
+    }
+
+    #[test]
+    fn wasm_only_non_bool() {
+        let error = syn::parse2::<Config>(quote!({
+            guests: [{ path: "app.wasm", wasm_only: 1 }],
+        }))
+        .err()
+        .expect("a non-bool `wasm_only` must be refused");
+        assert!(error.to_string().contains("expected boolean literal"), "{error}");
+    }
+
     #[test]
     fn digest_malformed() {
         for (literal, needle) in [

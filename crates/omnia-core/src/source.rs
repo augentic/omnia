@@ -9,6 +9,11 @@
 //! the bytes through [`Source::verified`], and admits them through the
 //! runtime. The checks are one body either way, so the two paths cannot
 //! drift.
+//!
+//! What verification yields is a [`Verified`]: the bytes with their digest,
+//! and the only thing the runtime will load a component from. A
+//! pre-compiled artifact is native code, so holding a `Verified` is the proof
+//! `Component::deserialize` asks of its caller.
 
 use std::borrow::Cow;
 use std::fmt;
@@ -136,6 +141,7 @@ pub struct Source {
     spec: SourceSpec,
     digest: Option<Digest>,
     wasm_only: bool,
+    on_demand: bool,
 }
 
 impl Source {
@@ -148,6 +154,7 @@ impl Source {
             spec: spec.into(),
             digest: None,
             wasm_only: false,
+            on_demand: false,
         }
     }
 
@@ -168,6 +175,16 @@ impl Source {
     #[must_use]
     pub const fn wasm_only(mut self) -> Self {
         self.wasm_only = true;
+        self
+    }
+
+    /// Read at first load rather than at boot. Guests are running by then, so
+    /// a pre-compiled artifact is admitted only from a pinned or embedded
+    /// source: anything else read on demand is a file or package a guest may
+    /// have had a hand in.
+    #[must_use]
+    pub const fn on_demand(mut self) -> Self {
+        self.on_demand = true;
         self
     }
 
@@ -216,17 +233,19 @@ impl Source {
         }
     }
 
-    /// The digest of `bytes`, once they satisfy what this source declares:
-    /// they hash to the pin, if any, and are raw wasm where the source admits
-    /// raw wasm alone.
+    /// `bytes` admitted for loading, once they satisfy what this source
+    /// declares: they hash to the pin, if any; they are raw wasm where the
+    /// source admits raw wasm alone; and a pre-compiled artifact read
+    /// [on demand](Self::on_demand) comes from a pinned or embedded source.
     ///
     /// # Errors
     ///
-    /// Returns an error if the bytes miss the declared digest, or are a
-    /// pre-compiled artifact on a [`wasm_only`](Self::wasm_only) source.
-    /// Either is a refusal: the same bytes will never pass.
-    pub fn verified(&self, bytes: &[u8]) -> Result<Digest> {
-        let digest = Digest::of(bytes);
+    /// Returns an error if the bytes miss the declared digest, are a
+    /// pre-compiled artifact on a [`wasm_only`](Self::wasm_only) source, or
+    /// are a pre-compiled artifact on an on-demand source that is neither
+    /// pinned nor embedded. Each is a refusal: the same bytes will never pass.
+    pub fn verified(&self, bytes: Vec<u8>) -> Result<Verified> {
+        let digest = Digest::of(&bytes);
         if let Some(declared) = self.digest {
             ensure!(
                 declared == digest,
@@ -234,10 +253,25 @@ impl Source {
                 self.id
             );
         }
-        if self.wasm_only && Engine::detect_precompiled(bytes).is_some() {
-            bail!("guest `{}` is pre-compiled, but its entry admits raw wasm alone", self.id);
+        if Engine::detect_precompiled(&bytes).is_some() {
+            ensure!(
+                !self.wasm_only,
+                "guest `{}` is pre-compiled, but its entry admits raw wasm alone",
+                self.id
+            );
+            // A pin is the operator's word for these exact bytes, and embedded
+            // bytes cannot change under a running guest. Anything else read on
+            // demand is a file or package a guest may have had a hand in.
+            let anchored = self.digest.is_some() || matches!(self.spec, SourceSpec::Bytes(_));
+            ensure!(
+                !self.on_demand || anchored,
+                "guest `{}` is pre-compiled and loads on demand from unpinned {}: pin its \
+                 `digest`, or ship raw wasm",
+                self.id,
+                self.spec
+            );
         }
-        Ok(digest)
+        Ok(Verified { bytes, digest })
     }
 
     /// Read, verify, and compile this source into the guest it registers at
@@ -252,8 +286,9 @@ impl Source {
     /// [verification](Self::verified), or do not load as a component.
     pub async fn load(&self, engine: &Engine) -> Result<LoadedGuest> {
         let bytes = self.read().await?;
-        let digest = self.verified(&bytes)?;
-        let component = component(engine, bytes)
+        let verified = self.verified(bytes)?;
+        let digest = verified.digest();
+        let component = component(engine, verified)
             .await
             .with_context(|| format!("loading guest `{}` from {}", self.id, self.spec))?;
         Ok(LoadedGuest {
@@ -261,5 +296,121 @@ impl Source {
             component,
             digest,
         })
+    }
+}
+
+/// Component bytes admitted for loading, with their digest.
+///
+/// One exists only through [`Source::verified`] (the declared policy),
+/// [`Verified::wasm`] (raw wasm alone), or the `unsafe`
+/// [`Verified::trusted`]: holding one is the proof `Component::deserialize`
+/// asks its caller for, so it is the only thing the runtime loads a component
+/// from.
+pub struct Verified {
+    bytes: Vec<u8>,
+    digest: Digest,
+}
+
+impl Verified {
+    /// Raw wasm from a caller; a pre-compiled artifact is refused, since
+    /// nothing here attests where a caller's bytes came from.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the bytes are a pre-compiled artifact.
+    pub fn wasm(bytes: Vec<u8>) -> Result<Self> {
+        ensure!(
+            Engine::detect_precompiled(&bytes).is_none(),
+            "the bytes are a pre-compiled artifact; `Verified::wasm` admits raw wasm alone"
+        );
+        Ok(Self {
+            digest: Digest::of(&bytes),
+            bytes,
+        })
+    }
+
+    /// Bytes in either format, on the caller's word.
+    ///
+    /// # Safety
+    ///
+    /// If pre-compiled, `bytes` must be the unmodified output of `omnia
+    /// compile` from a build pipeline the caller trusts: they are native code,
+    /// and wasmtime's settings check is compatibility, not authenticity.
+    #[must_use]
+    pub unsafe fn trusted(bytes: Vec<u8>) -> Self {
+        Self {
+            digest: Digest::of(&bytes),
+            bytes,
+        }
+    }
+
+    /// The content digest of the bytes.
+    #[must_use]
+    pub const fn digest(&self) -> Digest {
+        self.digest
+    }
+
+    pub(crate) fn into_bytes(self) -> Vec<u8> {
+        self.bytes
+    }
+}
+
+// Manual: the derived impl would dump the component bytes.
+impl fmt::Debug for Verified {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Verified({} bytes, {})", self.bytes.len(), self.digest)
+    }
+}
+
+// The fixture is compiled by wasmtime itself, so these run only with the
+// compiler linked in.
+#[cfg(all(test, feature = "jit"))]
+mod tests {
+    use super::*;
+
+    // The smallest component: header and version alone.
+    const EMPTY_COMPONENT: [u8; 8] = [0x00, 0x61, 0x73, 0x6d, 0x0d, 0x00, 0x01, 0x00];
+
+    fn precompiled() -> Vec<u8> {
+        Engine::default().precompile_component(&EMPTY_COMPONENT).expect("compiling the fixture")
+    }
+
+    #[test]
+    fn verified_wasm_refuses_precompiled() {
+        let error = Verified::wasm(precompiled()).expect_err("native code is refused");
+        assert!(error.to_string().contains("raw wasm alone"), "{error}");
+
+        let raw = Verified::wasm(EMPTY_COMPONENT.to_vec()).expect("raw wasm passes");
+        assert_eq!(raw.digest(), Digest::of(&EMPTY_COMPONENT));
+    }
+
+    // Pre-compiled bytes pass an on-demand source only when it is pinned or
+    // embedded, never when it is `wasm_only`; raw wasm passes every source;
+    // boot sources are outside the rule.
+    #[test]
+    fn verified_matrix() {
+        let native = precompiled();
+        let pin = Digest::of(&native);
+        let path = || Source::new("plugin", "plugin.bin");
+        let embedded = || Source::new("plugin", native.clone());
+
+        for (source, admitted) in [
+            (path(), true),
+            (path().on_demand(), false),
+            (path().on_demand().pinned(pin), true),
+            (embedded().on_demand(), true),
+            (path().on_demand().pinned(pin).wasm_only(), false),
+            (embedded().on_demand().wasm_only(), false),
+            (path().wasm_only(), false),
+        ] {
+            let outcome = source.verified(native.clone());
+            assert_eq!(outcome.is_ok(), admitted, "{source:?}: {:?}", outcome.err());
+        }
+        let refused = path().on_demand().verified(native.clone()).expect_err("unpinned on demand");
+        assert!(refused.to_string().contains("unpinned"), "{refused}");
+
+        for source in [path(), path().on_demand(), path().on_demand().wasm_only()] {
+            source.verified(EMPTY_COMPONENT.to_vec()).expect("raw wasm passes every source");
+        }
     }
 }

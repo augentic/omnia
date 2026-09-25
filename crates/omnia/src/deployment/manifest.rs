@@ -266,7 +266,11 @@ impl Manifest {
     /// Every `[[guest]]` that loads on demand, as the guest loader's table.
     #[must_use]
     pub fn on_demand_sources(&self) -> Vec<Source> {
-        self.guests.iter().filter(|entry| entry.on_demand).map(source).collect()
+        self.guests
+            .iter()
+            .filter(|entry| entry.on_demand)
+            .map(|entry| source(entry).on_demand())
+            .collect()
     }
 
     /// Per-trigger route tables aggregated from each guest's `routes` lists,

@@ -39,7 +39,8 @@ pub use omnia_core::{
     LevelFilter, LinkSeam, MountRegistry, NoLinks, NoOptions, PatternRoutes, Provides, Proxy,
     Registry, ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts, Server, Source,
     SourceSpec, StoreBase, StoreConfig, StoreCtx, StoreFactory, StoreView, Telemetry,
-    TriggerRouter, WeakRuntime, get_cloned, host_error, serve_links, telemetry, wasi_view,
+    TriggerRouter, Verified, WeakRuntime, get_cloned, host_error, serve_links, telemetry,
+    wasi_view,
 };
 #[doc(hidden)]
 pub use omnia_core::{pastey, tokio, wasmtime, wasmtime_wasi};

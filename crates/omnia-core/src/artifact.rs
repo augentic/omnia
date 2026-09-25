@@ -4,28 +4,30 @@ use anyhow::{Context as _, Result, bail};
 use wasmtime::component::Component;
 use wasmtime::{Engine, Precompiled};
 
+use crate::source::Verified;
+
 // Appended to every pre-compiled deserialization failure: the usual cause is a
 // compile-affecting settings mismatch, not corruption.
 const SETTINGS_HINT: &str = "the artifact must be built with the same compile-affecting settings \
                              used by `omnia compile` (MAX_FUEL, BRANCH_HINTING, \
                              MEMORY_RESERVATION, MEMORY_GUARD_SIZE)";
 
-/// Load component bytes into a [`Component`] on a blocking thread.
+/// Load verified component bytes into a [`Component`] on a blocking thread.
 ///
 /// The bytes are a raw wasm component, compiled here, or `omnia compile`
-/// output, deserialized here; wasmtime's own detection tells them apart.
-/// Verification (digest, signature, provenance) is deployment policy and
-/// happens before the runtime sees the bytes: a pre-compiled artifact is
-/// native code, loaded on the deployment's word that it is what `omnia
-/// compile` produced.
+/// output, deserialized here; wasmtime's own detection tells them apart. A
+/// pre-compiled artifact is native code, so the bytes arrive as a
+/// [`Verified`]: the policy that admitted them ran before the runtime saw
+/// them, and the token is the proof.
 ///
 /// # Errors
 ///
 /// Returns an error if deserialization or compilation fails, the bytes are a
 /// pre-compiled core module rather than a component, raw wasm is given
 /// without the `jit` feature, or the blocking load task panics.
-pub async fn component(engine: &Engine, bytes: Vec<u8>) -> Result<Component> {
+pub async fn component(engine: &Engine, verified: Verified) -> Result<Component> {
     let engine = engine.clone();
+    let bytes = verified.into_bytes();
     tokio::task::spawn_blocking(move || {
         let component = load(&engine, &bytes)?;
         // Build the copy-on-write heap image now rather than lazily on the
@@ -50,10 +52,12 @@ fn load(engine: &Engine, bytes: &[u8]) -> Result<Component> {
     }
     match precompiled {
         Some(Precompiled::Component) => {
-            // SAFETY: deployment inputs are trusted operator inputs
-            // (docs/security-model.md): these bytes are the artifact the
-            // deployment declared, and a pre-compiled one is `omnia compile`
-            // output by that declaration — the contract
+            // SAFETY: `component` is the one caller, and it unwraps a
+            // `Verified`. One exists only through `Source::verified` — a boot
+            // source, or an on-demand one that is pinned or embedded, with
+            // `wasm_only` applied — or through the `unsafe` `Verified::trusted`,
+            // whose caller attested the bytes. Either way, pre-compiled bytes
+            // here are unmodified `omnia compile` output: the contract
             // `Component::deserialize` requires.
             unsafe { Component::deserialize(engine, bytes) }
                 .map_err(anyhow::Error::from)

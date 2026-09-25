@@ -76,6 +76,10 @@ A guest named a `path` or `registry` package whose derived name — the path's f
 
 The guest's bytes do not hash to the `digest` its `[[guest]]` entry pins, or the one a `path` or `registry` load carried. At boot this fails startup; on demand it refuses the load. Either the artifact changed under the deployment — rebuild it or restore the pinned one — or the pin is stale: an unpinned load reports the resolved digest on its handle, which is the value to commit.
 
+### `... is pre-compiled and loads on demand from unpinned ...`
+
+A guest `load`ed a declared `on_demand` entry whose `source.path` or `source.package` resolved to `omnia compile` output, and the entry carries no `digest`. An on-demand source is read while guests are already running, and a pre-compiled artifact is native code, so the runtime admits one from such an entry only when the entry pins the bytes (`digest = "sha256:…"`, the value the artifact hashes to) or embeds them (the macro's `path:`). Pin the entry, or ship the guest as raw `.wasm`, which the host compiles itself. A boot entry is unaffected: its bytes are read before any guest runs. The related `... is pre-compiled, but its entry admits raw wasm alone` is the entry's own `wasm_only` mark refusing the artifact however it hashes; ``the bytes are a pre-compiled artifact; `Verified::wasm` admits raw wasm alone`` is an embedder's `Runtime::register`, which takes raw wasm only — an artifact your own build produced goes through `Runtime::admit` with `Verified::trusted`.
+
 ### `Address already in use` on startup
 
 Another process holds the trigger port. `HTTP_ADDR` (default `0.0.0.0:8080`) and `WEBSOCKET_ADDR` (default `0.0.0.0:80` — a privileged port; set it explicitly on dev machines) control the bindings.

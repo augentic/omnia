@@ -10,10 +10,10 @@ use wasmtime::Store;
 use wasmtime::component::{Instance, InstancePre};
 
 use crate::artifact::component;
-use crate::digest::Digest;
 use crate::extensions::Extensions;
 use crate::mount::MountRegistry;
 use crate::registry::{Guest, GuestId, HttpRoutes, PublishError, TriggerRouter};
+use crate::source::Verified;
 use crate::store::HasLimits;
 use crate::{ChainCtx, Dispatcher, LevelFilter, Registry, RuntimeOptions, StoreBase, StoreCtx};
 
@@ -406,8 +406,10 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         command::drive(self).await
     }
 
-    /// Register a guest at run time from its component bytes — a raw wasm
-    /// component or `omnia compile` output — under `id`.
+    /// Register a raw wasm component at run time under `id`. Pre-compiled
+    /// bytes are refused here: an embedder holding `omnia compile` output its
+    /// own pipeline produced admits it through [`admit`](Self::admit) with an
+    /// `unsafe` [`Verified::trusted`].
     ///
     /// The identity is opaque and must not already be registered; an upgrade
     /// is [`deregister`](Self::deregister) + `register` (or a new id). A
@@ -416,25 +418,25 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     ///
     /// # Errors
     ///
-    /// Returns an error if `id` is already registered, the bytes cannot be
-    /// loaded, the component's imports exceed the deployment's linked host set
-    /// and declared link interfaces, or its linked exports cannot be served.
+    /// Returns an error if the bytes are a pre-compiled artifact, `id` is
+    /// already registered, the bytes cannot be loaded, the component's
+    /// imports exceed the deployment's linked host set and declared link
+    /// interfaces, or its linked exports cannot be served.
     pub async fn register(&self, id: impl Into<GuestId>, bytes: Vec<u8>) -> Result<()> {
-        let digest = Digest::of(&bytes);
-        self.admit(id.into(), bytes, digest).await.map_err(anyhow::Error::from)
+        self.admit(id.into(), Verified::wasm(bytes)?).await.map_err(anyhow::Error::from)
     }
 
-    /// Admit component bytes as a late guest under `id`: load them as a boot
-    /// guest's are loaded, pre-instantiate against the shared host set, wire
-    /// the host-mediated link serve side, then publish entry and endpoint as
-    /// one atomic lifecycle transition — no dispatch can ever resolve the
-    /// entry and miss the endpoint, or vice versa.
+    /// Admit verified component bytes as a late guest under `id`: load them
+    /// as a boot guest's are loaded, pre-instantiate against the shared host
+    /// set, wire the host-mediated link serve side, then publish entry and
+    /// endpoint as one atomic lifecycle transition — no dispatch can ever
+    /// resolve the entry and miss the endpoint, or vice versa.
     ///
-    /// `digest` is the content digest of `bytes`, hashed by the caller, and
-    /// is recorded on the registry entry, so the attestation lives exactly as
-    /// long as the entry — [`Guest::digest`](crate::Guest::digest) reads it
-    /// back. Acquisition, digest policy, and idempotency live with the guest
-    /// loader (`omnia-plugin`), the privileged caller behind the
+    /// The token's digest is recorded on the registry entry, so the
+    /// attestation lives exactly as long as the entry —
+    /// [`Guest::digest`](crate::Guest::digest) reads it back. Acquisition,
+    /// digest policy, and idempotency live with the guest loader
+    /// (`omnia-plugin`), the privileged caller behind the
     /// `omnia:plugins/loader` capability. Whether the component exports a
     /// linked interface is not checked here: a guest that exports none is
     /// still reachable through the host [`Dispatcher`], and a link call to it
@@ -445,9 +447,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// Returns a typed [`AdmitError`] naming the refusal: refused artifact,
     /// an identity already registered (an earlier or racing registration), or
     /// an internal serve/publication failure.
-    pub async fn admit(
-        &self, id: GuestId, bytes: Vec<u8>, digest: Digest,
-    ) -> Result<(), AdmitError> {
+    pub async fn admit(&self, id: GuestId, verified: Verified) -> Result<(), AdmitError> {
         let registry = self.registry();
 
         // Early occupancy check to skip the load/serve work; the publish below
@@ -458,7 +458,8 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
             )));
         }
 
-        let component = component(registry.engine(), bytes).await.map_err(|error| {
+        let digest = verified.digest();
+        let component = component(registry.engine(), verified).await.map_err(|error| {
             AdmitError::ArtifactRefused(format!("validating `{id}`: {error:#}"))
         })?;
         let instance_pre = registry.instantiate_late(&id, &component).map_err(|error| {

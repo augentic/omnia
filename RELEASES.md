@@ -52,14 +52,26 @@ Unreleased
   (`docs/security-model.md`), so the raw-wasm/pre-compiled trust split is
   gone with its API: `DeploymentBuilder::build_trusted` (`build` is the one
   build, and the generated `run` / `run_with` load a pre-compiled guest as
-  `main` does), `GuestArtifact` altogether (`Runtime::register(id, bytes)`
-  takes the bytes in either format), `is_precompiled`, and `ELF_MAGIC`. The
-  loader admits a pre-compiled on-demand guest instead of refusing it, so
-  the `omnia:plugins/loader` `refused` variant no longer names that case.
+  `main` does), `GuestArtifact`, `is_precompiled`, and `ELF_MAGIC`. Two
+  paths stay raw-wasm-only, because their bytes are not the deployment's
+  word: `Runtime::register(id, bytes)`, the embedder's untrusted-bytes path,
+  refuses a pre-compiled artifact (an artifact the embedder's own build
+  produced goes through `Runtime::admit` wrapped in the `unsafe`
+  `Verified::trusted`), and an on-demand guest — read while guests already
+  run — admits one only when its entry pins the `digest` or embeds the
+  bytes, refusing an unpinned `source.path` or `source.package` that
+  resolves to one (`refused`, which the `omnia:plugins/loader` WIT names).
+  - Native code is admitted through one token. `omnia::Verified` is
+    component bytes with their digest, obtained from exactly three places:
+    `Source::verified`, once the pin, the `wasm_only` mark, and the
+    on-demand rule have passed; `Verified::wasm`, which admits raw wasm
+    alone; and the `unsafe` `Verified::trusted`, the embedder's word for an
+    artifact of its own. `Runtime::admit(id, verified)` takes it (where it
+    took bytes and a digest), `register` delegates through `Verified::wasm`,
+    and the loader hands over the token it verified rather than hashing
+    twice.
   - The digest is never optional. Every path a guest's bytes take runs
-    through one body, `Runtime::admit(id, bytes, digest)` — `register`
-    hashes and delegates; the loader hands over the digest it checked the
-    pin against rather than hashing twice — and every registration records
+    through one body, `Runtime::admit`, and every registration records
     the digest of the bytes it was loaded from: `Guest::digest` and
     `LoadedGuest::digest` are a `Digest`, `Plugin::digest` is a `Digest` on
     the host and a `&Digest` in the SDK (the WIT record's `digest` is a
@@ -69,18 +81,20 @@ Unreleased
   - One `Source` for boot and on-demand guests. `omnia::Source` (in
     `omnia-core`, beside the `SourceSpec` that moved there under the same
     `omnia::SourceSpec` path) is a `[[guest]]` entry resolved for loading —
-    identity, `SourceSpec`, digest pin, `wasm_only` — with `read`,
-    `verified`, and `load`, so the pin check and the format policy are one
-    body at boot and on demand. `Manifest::boot_sources()` and
-    `Manifest::on_demand_sources()` are the two filters over it (`sources()`
-    and `on_demand()` are renamed), `Plugins::install` takes the on-demand
-    `Source`s, and omnia-plugin's `Origin` and `OnDemand` are gone.
+    identity, `SourceSpec`, digest pin, `wasm_only`, and the `on_demand`
+    mark for an entry read at first load — with `read`, `verified`, and
+    `load`, so the pin check and the format policy are one body at boot and
+    on demand. `Manifest::boot_sources()` and `Manifest::on_demand_sources()`
+    are the two filters over it (`sources()` and `on_demand()` are renamed;
+    the latter marks each `Source::on_demand()`, as `Plugins::install` does
+    for any it is handed), `Plugins::install` takes the on-demand `Source`s,
+    and omnia-plugin's `Origin` and `OnDemand` are gone.
   - `wasm_only`, a per-entry policy for sources the deployment declares
     from input it does not author: `GuestEntry::wasm_only()` (TOML
-    `wasm_only = true`) refuses a pre-compiled artifact however it hashes,
-    at boot (assembly fails) or on demand (`refused`, which the WIT now
-    names). The pin proves the bytes are the ones the entry named; this
-    proves they run inside the sandbox.
+    `wasm_only = true`, the macro's `wasm_only: true`) refuses a
+    pre-compiled artifact however it hashes, at boot (assembly fails) or on
+    demand (`refused`, which the WIT now names). The pin proves the bytes
+    are the ones the entry named; this proves they run inside the sandbox.
   - The compile-affecting settings are one explicit value. `CompileOptions`
     (re-exported from `omnia`) holds the six — `Default` is the environment
     defaults, `RuntimeOptions::compile_options()` the loaded environment's —

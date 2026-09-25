@@ -188,8 +188,9 @@ pub enum Error {
     /// deployment declares no guest of that name, the path is beneath no
     /// read-only mount, no registry routes the package, the bytes miss the
     /// digest, they are not a loadable component, they are pre-compiled
-    /// where raw wasm alone is admitted, or the name is active under other
-    /// bytes.
+    /// where raw wasm alone is admitted, they are pre-compiled on a declared
+    /// on-demand entry that is neither pinned nor embedded, or the name is
+    /// active under other bytes.
     #[error("refused: {0}")]
     Refused(String),
     /// The guest's source could not produce its bytes; the source may

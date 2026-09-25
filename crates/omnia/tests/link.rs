@@ -7,11 +7,15 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
-use omnia::{ChainCtx, DeploymentBuilder, GuestEntry, GuestId, Manifest, Runtime, StoreCtx};
+use omnia::{
+    ChainCtx, CompileOptions, DeploymentBuilder, GuestEntry, GuestId, Manifest, Runtime, StoreCtx,
+    Verified,
+};
 
 // Every guest program in `crates/test-programs` must have a matching test
 // here; a new program without one fails to compile.
@@ -162,6 +166,40 @@ async fn link_full_registered_late() {
     // The bootstrap guest is untouched by the late wiring.
     let subset = call(&runtime, "partial", "poke", "still").await.expect("subset dispatch");
     assert_eq!(subset, "echoer pong: still");
+}
+
+// `register` is the embedder's untrusted-bytes path, so it admits raw wasm
+// alone: `omnia compile` output is refused there, and reaches `admit` only
+// through the `unsafe` `Verified::trusted`, the embedder's word that the
+// artifact came from its own toolchain.
+#[tokio::test]
+async fn register_refuses_precompiled() {
+    let runtime =
+        boot(&[("echoer", test_programs::LINK_ECHOER), ("partial", test_programs::LINK_PARTIAL)])
+            .await
+            .expect("deployment boots");
+
+    let artifact = Path::new(env!("CARGO_TARGET_TMPDIR")).join("full.cwasm");
+    omnia::compile::compile(
+        Path::new(test_programs::LINK_FULL),
+        Some(artifact.clone()),
+        None,
+        &CompileOptions::default(),
+    )
+    .expect("compiling the full guest ahead of time");
+    let bytes = std::fs::read(&artifact).expect("reading the compiled artifact");
+
+    let err = runtime.register("full", bytes.clone()).await.expect_err("pre-compiled is refused");
+    assert!(format!("{err:#}").contains("`Verified::wasm`"), "unexpected error: {err:#}");
+    assert!(runtime.registry().get(&GuestId::from("full")).is_none(), "nothing was admitted");
+
+    #[allow(unsafe_code)] // the embedder's trusted-artifact path under test
+    // SAFETY: the artifact was compiled two statements up by this process's
+    // own `omnia::compile`, from a guest the test suite built.
+    let trusted = unsafe { Verified::trusted(bytes) };
+    runtime.admit("full".into(), trusted).await.expect("the embedder's own artifact is admitted");
+    let sync = call(&runtime, "full", "poke", "trusted").await.expect("sync dispatch");
+    assert_eq!(sync, "echoer pong: trusted");
 }
 
 // The relay takes the id `echoer` because `full` hard-codes `ping("echoer",

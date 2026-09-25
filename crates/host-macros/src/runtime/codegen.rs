@@ -118,6 +118,7 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
             let bytes = bytes.iter();
             quote! { .digest(omnia::Digest::from([#(#bytes),*])) }
         });
+        let wasm_only = guest.wasm_only.then(|| quote! { .wasm_only() });
         quote! {
             .guest(
                 #entry
@@ -127,6 +128,7 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
                     #command
                     #on_demand
                     #digest
+                    #wasm_only
             )
         }
     });

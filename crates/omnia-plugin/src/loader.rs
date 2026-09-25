@@ -92,6 +92,10 @@ impl Plugins {
     {
         let mut table = HashMap::new();
         for source in guests {
+            // The table is the on-demand path however its entries were built,
+            // so the on-demand rule holds for a `Source::new` handed in
+            // directly, not only for a manifest's `on_demand_sources()`.
+            let source = source.on_demand();
             let id = source.id().clone();
             ensure!(
                 runtime.registry().get(&id).is_none(),
@@ -127,8 +131,9 @@ impl Plugins {
     /// `refused` on an undeclared name, a declared name with a pin, a path
     /// or package deriving a name the deployment declares, a path beneath no
     /// read-only mount, a package nothing routes, a digest mismatch, a
-    /// pre-compiled artifact where raw wasm alone is admitted, bytes that
-    /// are not a loadable component, or a name active under other bytes;
+    /// pre-compiled artifact where raw wasm alone is admitted or on a
+    /// declared entry that is neither pinned nor embedded, bytes that are
+    /// not a loadable component, or a name active under other bytes;
     /// `unavailable` when the source could not produce the bytes; `internal`
     /// on registration failure.
     pub async fn load(&self, from: Location, pin: Option<Digest>) -> Result<Plugin, LoadError> {
@@ -182,11 +187,12 @@ impl Plugins {
                 source.read().await.map_err(|error| LoadError::Unavailable(format!("{error:#}")))?
             }
         };
-        let digest =
-            source.verified(&bytes).map_err(|error| LoadError::Refused(format!("{error:#}")))?;
+        let verified =
+            source.verified(bytes).map_err(|error| LoadError::Refused(format!("{error:#}")))?;
+        let digest = verified.digest();
 
         // admit them, or attest the registration that got there first
-        match self.admission.admit(id.clone(), bytes, digest).await {
+        match self.admission.admit(id.clone(), verified).await {
             Ok(()) => {
                 tracing::debug!(%id, %digest, "guest loaded");
                 Ok(Plugin { id, digest })
