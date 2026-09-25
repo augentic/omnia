@@ -109,15 +109,18 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
         }
     }
 
-    // A client that fetches `package` from `registry`, whatever the
-    // configuration routes the package or its namespace to; loads are rare,
-    // so a fresh client per fetch beats caching machinery.
+    // A client fetching through the configuration as the deployment declares
+    // it, mapping and metadata intact; a package it routes nowhere is routed
+    // to `registry` — the one the load named — for this fetch alone. Loads
+    // are rare, so a fresh client per fetch beats caching machinery.
     fn client(&self, package: &PackageRef, registry: &Registry) -> Client {
         let mut config = self.config.clone();
-        config.set_package_registry_override(
-            package.clone(),
-            RegistryMapping::Registry(registry.clone()),
-        );
+        if config.resolve_registry(package).is_none() {
+            config.set_package_registry_override(
+                package.clone(),
+                RegistryMapping::Registry(registry.clone()),
+            );
+        }
         Client::new(config)
     }
 
@@ -372,6 +375,35 @@ mod tests {
             matches!(&error, LoadError::Refused(detail) if detail.contains("routed to `acme.test`")),
             "{error}"
         );
+    }
+
+    // The client fetches through the configuration as the deployment
+    // declares it — a routed package keeps its mapping, custom metadata and
+    // all — and only a package routed nowhere is routed, to the registry the
+    // load named, in the client's configuration alone.
+    #[test]
+    fn client_keeps_routing() {
+        let client = RegistryClient::from_toml(
+            "[package_registry_overrides]\n\"acme:tool\" = { registry = \"acme.test\", metadata = \
+             { preferredProtocol = \"oci\" } }\n",
+        )
+        .expect("a custom mapping parses");
+
+        let tool = package("acme:tool");
+        let routed = client.registry(&tool, None).expect("routed");
+        let mapping =
+            client.client(&tool, &routed).config().package_registry_override(&tool).cloned();
+        assert!(matches!(mapping, Some(RegistryMapping::Custom(_))), "{mapping:?}");
+
+        let other = package("acme:other");
+        let named = client.registry(&other, Some("ghcr.io")).expect("named");
+        let mapping =
+            client.client(&other, &named).config().package_registry_override(&other).cloned();
+        assert!(
+            matches!(&mapping, Some(RegistryMapping::Registry(registry)) if *registry == named),
+            "{mapping:?}"
+        );
+        assert!(client.config.package_registry_override(&other).is_none());
     }
 
     // Malformed TOML fails the install, not the first load.
