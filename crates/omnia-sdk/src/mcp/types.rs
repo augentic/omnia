@@ -6,17 +6,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// JSON-RPC code for a request that was not valid JSON.
-pub(super) const PARSE_ERROR: i32 = -32700;
+pub const PARSE_ERROR: i32 = -32700;
 /// JSON-RPC code for a well-formed but invalid request.
-pub(super) const INVALID_REQUEST: i32 = -32600;
+pub const INVALID_REQUEST: i32 = -32600;
 /// JSON-RPC code for an unknown method.
-pub(super) const METHOD_NOT_FOUND: i32 = -32601;
+pub const METHOD_NOT_FOUND: i32 = -32601;
 /// JSON-RPC code for invalid method parameters.
-pub(super) const INVALID_PARAMS: i32 = -32602;
+pub const INVALID_PARAMS: i32 = -32602;
 /// JSON-RPC code for an internal server error.
-pub(super) const INTERNAL_ERROR: i32 = -32603;
+pub const INTERNAL_ERROR: i32 = -32603;
 /// MCP code for a `resources/read` of a URI the server does not serve.
-pub(super) const RESOURCE_NOT_FOUND: i32 = -32002;
+pub const RESOURCE_NOT_FOUND: i32 = -32002;
 
 /// Server identity reported in the `initialize` response (`serverInfo`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

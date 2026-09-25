@@ -6,15 +6,15 @@ use std::fmt::Write as _;
 use super::Program;
 
 /// One built component: the program plus its artifact path.
-pub(super) struct Artifact<'a> {
-    pub(super) program: &'a Program,
-    pub(super) path: String,
+pub struct Artifact<'a> {
+    pub program: &'a Program,
+    pub path: String,
 }
 
 /// Renders `gen.rs`: one `pub const <CONSTANT>: &str` per artifact, then one
 /// `foreach_<group>!` completeness macro per group (an ungrouped artifact —
 /// an extra package — gets a constant and no arm).
-pub(super) fn render_gen(header: &str, artifacts: &[Artifact<'_>]) -> String {
+pub fn render_gen(header: &str, artifacts: &[Artifact<'_>]) -> String {
     let mut generated = String::from(header);
     let mut groups: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for artifact in artifacts {
@@ -50,9 +50,7 @@ pub(super) fn render_gen(header: &str, artifacts: &[Artifact<'_>]) -> String {
 
 /// Renders the manifest with everything after `marker` replaced by one
 /// `[[example]]` stanza per program; `None` when the manifest lacks the marker.
-pub(super) fn refresh_examples(
-    current: &str, marker: &str, programs: &[Program],
-) -> Option<String> {
+pub fn refresh_examples(current: &str, marker: &str, programs: &[Program]) -> Option<String> {
     let (header, _) = current.split_once(marker)?;
     let mut next = String::from(header);
     next.push_str(marker);
@@ -68,7 +66,7 @@ pub(super) fn refresh_examples(
 }
 
 /// The prerequisite paths in a cargo dep-info file, unescaping `\ `.
-pub(super) fn dep_info_paths(contents: &str) -> Vec<String> {
+pub fn dep_info_paths(contents: &str) -> Vec<String> {
     let mut paths = Vec::new();
     for line in contents.lines() {
         let Some((_, deps)) = line.split_once(": ") else {

@@ -23,7 +23,7 @@ use crate::store::StoreCtx;
 /// Returns an error if the explicit command guest is not registered, routing
 /// is ambiguous, the guest cannot be instantiated, or the command traps
 /// without a guest exit code.
-pub(super) async fn drive<B>(runtime: &Runtime<B>) -> Result<ExitStatus>
+pub async fn drive<B>(runtime: &Runtime<B>) -> Result<ExitStatus>
 where
     B: Clone + Send + Sync + 'static,
 {

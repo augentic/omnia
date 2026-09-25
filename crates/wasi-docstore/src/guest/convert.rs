@@ -9,7 +9,7 @@ use crate::guest::generated::wasi::docstore::types::{
 
 /// Map SDK filter to WIT filter resource constructors.
 #[must_use]
-pub(super) fn to_wit_filter(filter: sdk::Filter) -> WitFilterHandle {
+pub fn to_wit_filter(filter: sdk::Filter) -> WitFilterHandle {
     match filter {
         sdk::Filter::Compare { field, op, value } => {
             WitFilterHandle::compare(&field, to_wit_op(op), &to_wit_value(value))
@@ -42,7 +42,7 @@ pub(super) fn to_wit_filter(filter: sdk::Filter) -> WitFilterHandle {
 }
 
 #[must_use]
-pub(super) const fn to_wit_op(op: sdk::ComparisonOp) -> WitComparisonOp {
+pub const fn to_wit_op(op: sdk::ComparisonOp) -> WitComparisonOp {
     match op {
         sdk::ComparisonOp::Eq => WitComparisonOp::Eq,
         sdk::ComparisonOp::Ne => WitComparisonOp::Ne,
@@ -54,7 +54,7 @@ pub(super) const fn to_wit_op(op: sdk::ComparisonOp) -> WitComparisonOp {
 }
 
 #[must_use]
-pub(super) fn to_wit_value(v: sdk::ScalarValue) -> WitScalarValue {
+pub fn to_wit_value(v: sdk::ScalarValue) -> WitScalarValue {
     match v {
         sdk::ScalarValue::Null => WitScalarValue::Null,
         sdk::ScalarValue::Bool(b) => WitScalarValue::Boolean(b),
@@ -68,7 +68,7 @@ pub(super) fn to_wit_value(v: sdk::ScalarValue) -> WitScalarValue {
 }
 
 #[must_use]
-pub(super) fn to_wit_sort(s: &sdk::SortField) -> WitSortField {
+pub fn to_wit_sort(s: &sdk::SortField) -> WitSortField {
     WitSortField {
         field: s.field.clone(),
         descending: s.descending,
@@ -76,7 +76,7 @@ pub(super) fn to_wit_sort(s: &sdk::SortField) -> WitSortField {
 }
 
 #[must_use]
-pub(super) fn to_wit_document(d: &sdk::Document) -> WitDocument {
+pub fn to_wit_document(d: &sdk::Document) -> WitDocument {
     WitDocument {
         id: d.id.clone(),
         data: d.data.clone(),
@@ -84,7 +84,7 @@ pub(super) fn to_wit_document(d: &sdk::Document) -> WitDocument {
 }
 
 #[must_use]
-pub(super) fn to_wit_query_options(o: sdk::QueryOptions) -> WitQueryOptions {
+pub fn to_wit_query_options(o: sdk::QueryOptions) -> WitQueryOptions {
     WitQueryOptions {
         filter: o.filter.map(to_wit_filter),
         order_by: o.order_by.iter().map(to_wit_sort).collect(),
@@ -95,7 +95,7 @@ pub(super) fn to_wit_query_options(o: sdk::QueryOptions) -> WitQueryOptions {
 }
 
 #[must_use]
-pub(super) fn from_wit_document(d: WitDocument) -> sdk::Document {
+pub fn from_wit_document(d: WitDocument) -> sdk::Document {
     sdk::Document {
         id: d.id,
         data: d.data,
@@ -103,7 +103,7 @@ pub(super) fn from_wit_document(d: WitDocument) -> sdk::Document {
 }
 
 #[must_use]
-pub(super) fn from_wit_query_result(r: WitQueryResult) -> sdk::QueryResult {
+pub fn from_wit_query_result(r: WitQueryResult) -> sdk::QueryResult {
     sdk::QueryResult {
         documents: r.documents.into_iter().map(from_wit_document).collect(),
         continuation: r.continuation,

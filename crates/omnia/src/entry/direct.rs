@@ -93,7 +93,7 @@ impl MainOptions {
 }
 
 /// The planner's outcome: every deployment decision, resolved.
-pub(super) struct EntryPlan {
+pub struct EntryPlan {
     mode: Mode,
     manifest: Option<Manifest>,
     program_name: Option<String>,
@@ -103,7 +103,7 @@ pub(super) struct EntryPlan {
 
 impl EntryPlan {
     /// Assemble the deployment builder this plan describes.
-    pub(super) fn into_builder(self) -> DeploymentBuilder {
+    pub fn into_builder(self) -> DeploymentBuilder {
         let builder =
             DeploymentBuilder::new().manifest(self.manifest).args(self.args).mode(self.mode);
         let builder = match self.program_name {
@@ -130,9 +130,7 @@ impl EntryPlan {
 ///
 /// Returns an error if the shape is not a direct command, or if the direct
 /// plan fails (see [`plan_direct`]).
-pub(super) fn plan(
-    options: MainOptions, argv: impl IntoIterator<Item = OsString>,
-) -> Result<EntryPlan> {
+pub fn plan(options: MainOptions, argv: impl IntoIterator<Item = OsString>) -> Result<EntryPlan> {
     if options.is_direct() {
         return plan_direct(options, argv);
     }
@@ -154,7 +152,7 @@ pub(super) fn plan(
 ///
 /// Returns an error if argv is not UTF-8 or the compiled-in manifest cannot
 /// be loaded.
-pub(super) fn plan_direct(
+pub fn plan_direct(
     options: MainOptions, argv: impl IntoIterator<Item = OsString>,
 ) -> Result<EntryPlan> {
     let (mode, manifest, program_name) = options.into_parts();

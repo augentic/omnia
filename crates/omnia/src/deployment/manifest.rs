@@ -34,7 +34,7 @@ use serde::Deserialize;
 /// The optional capabilities this build compiled in; a manifest may only
 /// declare what the build serves.
 #[derive(Clone, Copy, Debug)]
-pub(super) struct Features {
+pub struct Features {
     /// The `loader` feature (the `[registries]` configuration and `on_demand`
     /// guests).
     pub loader: bool,
@@ -42,7 +42,7 @@ pub(super) struct Features {
 
 impl Features {
     /// The features this build was compiled with.
-    pub(super) const COMPILED: Self = Self {
+    pub const COMPILED: Self = Self {
         loader: cfg!(feature = "loader"),
     };
 }
@@ -129,7 +129,7 @@ impl Manifest {
     /// Validate manifest-level invariants surfaced before the registry is
     /// built. An `allow_empty` (dynamic) deployment may define no `[[guest]]`
     /// entry that loads at boot; `features` is what the manifest may declare.
-    pub(super) fn validate(&self, allow_empty: bool, features: Features) -> Result<()> {
+    pub fn validate(&self, allow_empty: bool, features: Features) -> Result<()> {
         let mut names = BTreeSet::new();
         for entry in &self.guests {
             if entry.name.is_empty() {
@@ -216,7 +216,7 @@ impl Manifest {
 
     /// The wasm-pkg client configuration as TOML text: a `Path` read now, or
     /// the `Contents` as carried; `None` when the manifest declares none.
-    pub(super) fn registry_config(&self) -> Result<Option<String>> {
+    pub fn registry_config(&self) -> Result<Option<String>> {
         self.registries
             .as_ref()
             .map(|config| match config {
