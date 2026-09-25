@@ -89,7 +89,7 @@ Layers 1 and 2 form the **runtime core** — domain-agnostic infrastructure that
 - **Link seam**: the `LinkSeam` trait and `NoLinks` no-op the registry drives; guest→guest linking itself lives in `omnia-link` (`InProcessLinks`)
 - **Host→guest dispatch**: `Dispatcher`, a named-target call through `call_fresh` (the same primitive guest→guest links use)
 - **Telemetry**: `Telemetry`, the host's `tracing` subscriber — console logging with the OTLP span and metric exporters beneath it — and `telemetry::{flush, resource}` over the providers it publishes
-- **Admission seam**: `Runtime::admit` and `Extensions`, which `omnia-plugin` uses to install the on-demand guest table `Deployment::assemble` builds from the manifest
+- **Admission seam**: `Runtime::admit` and `Extensions`, which `omnia-plugin` uses to install the loader's grant — the on-demand guest table `Deployment::assemble` builds from the manifest, the runtime's mounts as path roots, and the registry source
 
 `omnia-cli` is a leaf grammar crate: clap plus argv-precedence over paths and strings, with no `omnia-*` dependencies. `omnia` materializes a `RunPlan` into a `Manifest` and drives the runtime. `compile` (with the `jit` feature) also lives in `omnia`.
 
@@ -171,7 +171,7 @@ The macro generates a `Backends` bundle (one connected backend per `Host: Backen
 A deployment can hold many guests. All of them share one wasmtime `Engine` and one `Linker`; the `Registry` maps each opaque `GuestId` to a pre-instantiated `InstancePre`, so per-request instantiation is cheap. Three things hang off the registry:
 
 - **Route tables** — per-trigger routing (each guest's `routes.http` by longest prefix, `routes.messaging`/`routes.websocket` by NATS-style pattern) selects which guest handles an inbound request.
-- **Mounts** — `[[mount]]` entries preopen host directories into every guest sandbox (read-only unless marked writable); they are data grants only and never a root the guest loader reads code through.
+- **Mounts** — `[[mount]]` entries preopen host directories into every guest sandbox (read-only unless marked writable). A read-only mount is also a root the guest loader reads a component from when a guest names a path beneath it; a writable mount never is, and one overlapping a read-only mount's directory is refused at startup.
 - **Link seam** — every import a guest makes outside the runtime's own namespaces (`wasi:`, `omnia:`; the predicate is `omnia::is_host`, and it is closed — a native host linked under any other namespace collides with the polyfill at boot, so a third-party host lives under `omnia:` or the predicate grows) is polyfilled onto the shared linker, nothing declaring it; calls dispatch to whichever guest exports the interface, by in-memory routing to a fresh callee instance on its own task, with nesting bounded by `MAX_DISPATCH_DEPTH`; the callee inherits the caller's chain context — its depth and its wall-clock policy. The registry always holds a `LinkSeam`: `InProcessLinks` (in `omnia-link`) under omnia's `link` feature, `NoLinks` (every method a no-op) without it.
 
 Endpoints move through two stages inside the seam. `serve` runs *outside* the registry's lifecycle gate and writes only pending state; `publish`, `discard`, and `remove` run *under* the gate's write guard, so a guest's registry entry and its live endpoint change as one step. A call path never reads pending state and reads live state under the seam's own lock, not the gate: a call racing a deregister may complete against the departing instance, exactly as an in-flight invocation does.

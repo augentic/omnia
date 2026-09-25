@@ -15,7 +15,7 @@ use x509_cert::{Certificate, TbsCertificate};
 
 /// Why a `Client-Cert` bundle was refused before any connection was attempted.
 #[derive(Debug, PartialEq, Eq)]
-pub(super) enum Rejection {
+pub enum Rejection {
     NoCertificate,
     Malformed,
     CertificateAuthority,
@@ -43,7 +43,7 @@ impl fmt::Display for Rejection {
 }
 
 /// Check the leaf certificate of a PEM bundle for TLS client authentication.
-pub(super) fn validate_bundle(pem: &[u8]) -> Result<(), Rejection> {
+pub fn validate_bundle(pem: &[u8]) -> Result<(), Rejection> {
     // Only the first CERTIFICATE block is the identity presented to the
     // server. Anything after it is chain — legitimately CA certificates
     // without `clientAuth` — and is left to the peer to evaluate.

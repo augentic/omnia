@@ -8,7 +8,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use omnia_sdk::model::{
     Error, Format, Function, Message, Model, Request, Role, SchemaFormat, Tool, ToolCall,
 };
-use omnia_sdk::plugins::{self, Digest, Plugins};
+use omnia_sdk::plugins::{self, Digest, Location, Plugins};
 use omnia_test::guest::{Scripted, ScriptedLoader, function_tools};
 use omnia_test::{Exchange, SeenFormat};
 
@@ -208,41 +208,93 @@ async fn seen() {
     assert_eq!(function_tools(&model.requests()[0])[0].name, "lookup");
 }
 
-#[tokio::test]
-async fn loader_digest() {
-    let loader = ScriptedLoader::default().digest("tool", digest("ab"));
-    let plugin = loader.load("tool").await.expect("loads");
-    assert_eq!(plugin.id(), "tool");
-    assert_eq!(plugin.digest(), &digest("ab"));
-    assert_eq!(loader.loads(), ["tool"]);
+fn declared(name: &str) -> Location {
+    Location::Declared(name.to_owned())
 }
 
-// A name nothing scripts still loads, under a placeholder digest that is
-// stable per name and distinct across names.
+#[tokio::test]
+async fn loader_digest() {
+    let loader = ScriptedLoader::default().declare("tool").digest("tool", digest("ab"));
+    let plugin = loader.load(&declared("tool"), None).await.expect("loads");
+    assert_eq!(plugin.id(), "tool");
+    assert_eq!(plugin.digest(), &digest("ab"));
+    assert_eq!(loader.loads(), [(declared("tool"), None)]);
+}
+
+// A path or a package nothing scripts still loads, under a placeholder
+// digest that is stable per name and distinct across names; the name is
+// the one the location registers under.
 #[tokio::test]
 async fn loader_placeholder() {
     let loader = ScriptedLoader::default();
-    let first = loader.load("other").await.expect("loads");
-    let second = loader.load("other").await.expect("loads");
+    let path = Location::Path("./adapters/other.wasm".to_owned());
+    let first = loader.load(&path, None).await.expect("loads");
+    assert_eq!(first.id(), "other", "a path registers as its file stem");
+    let second = loader.load(&path, None).await.expect("loads");
     assert_eq!(first.digest(), second.digest(), "placeholder digests are deterministic");
-    let third = loader.load("another").await.expect("loads");
+    let package = Location::Registry {
+        package: "acme:another@1.0.0".to_owned(),
+        endpoint: None,
+    };
+    let third = loader.load(&package, None).await.expect("loads");
+    assert_eq!(third.id(), "acme:another@1.0.0", "a package registers as its reference");
     assert_ne!(first.digest(), third.digest(), "placeholder digests are per name");
+}
+
+// A declared name loads only once declared, and never with a digest of its
+// own: the deployment's entry carries the pin.
+#[tokio::test]
+async fn loader_declared() {
+    let loader = ScriptedLoader::default().declare("tool");
+    assert_eq!(loader.load(&declared("tool"), None).await.expect("loads").id(), "tool");
+    let undeclared = loader.load(&declared("other"), None).await.expect_err("undeclared");
+    assert!(
+        matches!(&undeclared, plugins::Error::Refused(detail) if detail.contains("no guest `other`")),
+        "{undeclared}"
+    );
+    let pinned = loader.load(&declared("tool"), Some(&digest("ab"))).await.expect_err("pinned");
+    assert!(matches!(pinned, plugins::Error::Refused(_)), "{pinned}");
+    assert_eq!(loader.loads().len(), 3, "every load is recorded, refused or not");
+}
+
+// A digest on the call is held against the resolved one, as the host holds
+// a pin against the bytes.
+#[tokio::test]
+async fn loader_pin() {
+    let loader = ScriptedLoader::default().digest("tool", digest("ab"));
+    let path = Location::Path("tool.wasm".to_owned());
+    let pinned = loader.load(&path, Some(&digest("ab"))).await.expect("the pin matches");
+    assert_eq!(pinned.digest(), &digest("ab"));
+    let mismatch = loader.load(&path, Some(&digest("ef"))).await.expect_err("the pin misses");
+    assert!(
+        matches!(&mismatch, plugins::Error::Refused(detail) if detail.contains("not its pinned digest")),
+        "{mismatch}"
+    );
+    assert_eq!(loader.loads(), [(path.clone(), Some(digest("ab"))), (path, Some(digest("ef")))]);
 }
 
 // The default sits below the scripted digest: an unscripted load takes it
 // in place of the placeholder, a scripted digest still wins.
 #[tokio::test]
 async fn loader_defaulting() {
-    let loader = ScriptedLoader::default().digest("tool", digest("ab")).defaulting(digest("ef"));
-    assert_eq!(loader.load("other").await.expect("loads").digest(), &digest("ef"));
-    assert_eq!(loader.load("tool").await.expect("loads").digest(), &digest("ab"));
-    assert_eq!(loader.loads(), ["other", "tool"]);
+    let loader = ScriptedLoader::default()
+        .declare("other")
+        .declare("tool")
+        .digest("tool", digest("ab"))
+        .defaulting(digest("ef"));
+    assert_eq!(loader.load(&declared("other"), None).await.expect("loads").digest(), &digest("ef"));
+    assert_eq!(loader.load(&declared("tool"), None).await.expect("loads").digest(), &digest("ab"));
+    assert_eq!(loader.loads(), [(declared("other"), None), (declared("tool"), None)]);
 }
 
 #[tokio::test]
 async fn loader_scripted_refusal_wins() {
     let loader = ScriptedLoader::default()
+        .declare("tool")
         .digest("tool", digest("ab"))
         .refuse("tool", plugins::Error::Unavailable("registry down".into()));
-    assert_eq!(loader.load("tool").await, Err(plugins::Error::Unavailable("registry down".into())));
+    assert_eq!(
+        loader.load(&declared("tool"), None).await,
+        Err(plugins::Error::Unavailable("registry down".into()))
+    );
 }

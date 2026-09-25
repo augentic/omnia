@@ -20,9 +20,9 @@ impl LoadError {
     // The refusal for a runtime that linked the loader host but installed no
     // `Plugins` extension — a runtime assembled by hand from parts, since
     // `Deployment::assemble` always installs one.
-    pub(crate) fn no_plugins(name: &str) -> Self {
+    pub(crate) fn no_plugins(from: impl fmt::Display) -> Self {
         Self::Internal(format!(
-            "this runtime has no guest loader installed; loading `{name}` needs \
+            "this runtime has no guest loader installed; loading `{from}` needs \
              `Plugins::install` on the assembled runtime"
         ))
     }

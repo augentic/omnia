@@ -103,6 +103,8 @@ let workspace = directories.iter().find_map(|(dir, name)| (name == ".").then_som
 
 The [`model`](../../examples/model/) example lends a mounted workspace to a model backend this way.
 
+A read-only mount is also where the guest loader (`omnia:plugins/loader`, behind the `loader` feature) reads a component a guest names by path; a writable mount never is, and a writable mount that shares or nests a read-only mount's directory is refused at startup. Mount code read-only and give state a mount of its own — see the [security model](../security-model.md#guest-requested-plugin-loading-omniapluginsloader).
+
 ## Guests calling guests
 
 Two guests can talk without going out over the network. One guest **imports** an interface; another **exports** it; the host sits in the middle and copies the call across. Nothing in the manifest declares this — each component already says what it imports and exports:

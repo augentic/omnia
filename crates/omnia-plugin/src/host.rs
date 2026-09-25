@@ -17,13 +17,14 @@ mod generated {
 
 use std::sync::Arc;
 
-use omnia_core::{HasExtensions, Host, Server};
+use omnia_core::{Digest, HasExtensions, Host, Server};
 use wasmtime::component::{Accessor, HasData, Linker};
 
 use self::generated::Error;
 use self::generated::omnia::plugins::loader;
 use crate::error::LoadError;
 use crate::loader::Plugins;
+use crate::source::Location;
 
 /// Host-side service for `omnia:plugins` — the loader capability this crate
 /// implements over the runtime's admission seam.
@@ -64,12 +65,31 @@ impl From<LoadError> for Error {
     }
 }
 
+impl From<loader::Location> for Location {
+    fn from(location: loader::Location) -> Self {
+        match location {
+            loader::Location::Declared(name) => Self::Declared(name),
+            loader::Location::Path(path) => Self::Path(path),
+            loader::Location::Registry(loader::RegistryRef { package, endpoint }) => {
+                Self::Registry { package, endpoint }
+            }
+        }
+    }
+}
+
 impl<T> loader::HostWithStore<T> for WasiPlugins {
-    async fn load(accessor: &Accessor<T, Self>, name: String) -> Result<loader::Plugin, Error> {
+    async fn load(
+        accessor: &Accessor<T, Self>, from: loader::Location, digest: Option<String>,
+    ) -> Result<loader::Plugin, Error> {
+        let from = Location::from(from);
         let plugins = accessor
             .with(|mut store| store.get().plugins)
-            .ok_or_else(|| LoadError::no_plugins(&name))?;
-        let plugin = plugins.load(&name).await?;
+            .ok_or_else(|| LoadError::no_plugins(&from))?;
+        let pin = digest
+            .map(|digest| digest.parse::<Digest>())
+            .transpose()
+            .map_err(|error| LoadError::Refused(format!("{error:#}")))?;
+        let plugin = plugins.load(from, pin).await?;
         Ok(loader::Plugin {
             id: plugin.id().to_string(),
             digest: plugin.digest().to_string(),

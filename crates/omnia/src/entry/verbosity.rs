@@ -21,7 +21,7 @@ const LADDER: [LevelFilter; 6] = [
 /// flag selects nothing, so the process `RUST_LOG` stands. Both flags at once
 /// select nothing either: the guest's grammar refuses the pair with its own
 /// usage error, and the host has no level to apply before it does.
-pub(super) fn level(default: LevelFilter, verbose: u8, quiet: u8) -> Option<LevelFilter> {
+pub fn level(default: LevelFilter, verbose: u8, quiet: u8) -> Option<LevelFilter> {
     match (verbose, quiet) {
         (0, 0) => None,
         (_, 0) | (0, _) => {
@@ -39,7 +39,7 @@ pub(super) fn level(default: LevelFilter, verbose: u8, quiet: u8) -> Option<Leve
 /// `-v`, `-vv`, `-q`, `-qq`, … — each letter once; every other token passes
 /// unread, and nothing after a literal `--` is read. A cluster of mixed
 /// letters is left to the guest's grammar, whose flags may take values.
-pub(super) fn scan(args: &[String]) -> (u8, u8) {
+pub fn scan(args: &[String]) -> (u8, u8) {
     let mut verbose = 0u8;
     let mut quiet = 0u8;
     for arg in args.iter().take_while(|arg| *arg != "--") {

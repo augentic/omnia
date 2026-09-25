@@ -67,7 +67,7 @@ That covers the two other shapes a test provider takes. A handler bounded on a s
 
 ## Component rung: `Deployment` over `Backends`
 
-`Deployment` describes one command-mode deployment — guests (boot or `on_demand`), mounts, arguments, and the registries its on-demand package guests are fetched through — and runs it over a backend bundle. Built from nothing it drives a single component through the host you name:
+`Deployment` describes one command-mode deployment — guests (boot or `on_demand`), mounts (the read-only ones also the roots a guest's path load reads through), arguments, and the registries its package guests are fetched through — and runs it over a backend bundle. Built from nothing it drives a single component through the host you name:
 
 ```rust,ignore
 use omnia::ExitStatus;

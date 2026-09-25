@@ -1,6 +1,6 @@
 //! The scripted pair: a FIFO `Model` and a keyed `Plugins` loader.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::{Future, ready};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Mutex};
@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use omnia_sdk::model::{
     CHECK_TOOL, Error, Format, Function, Model, Reply, Request, Tool, ToolCall,
 };
-use omnia_sdk::plugins::{self, Digest, Plugin, Plugins};
+use omnia_sdk::plugins::{self, Digest, Location, Plugin, Plugins};
 
 use crate::{Exchange, Script, Seen, SeenFormat};
 
@@ -270,24 +270,38 @@ pub fn function_tools(request: &Request) -> Vec<&Function> {
 /// A keyed `Plugins` loader: per-name digests and refusals, every load
 /// recorded.
 ///
-/// Keyed rather than FIFO because the loader contract is per name: a load
-/// of a name with a scripted refusal fails with it; otherwise the load
-/// resolves to the digest scripted for the name, the loader-wide default set
-/// by [`defaulting`], or a deterministic per-name placeholder. Every name
-/// loads unless scripted otherwise — the deployment's allow-list is the
-/// host's to enforce.
+/// Keyed rather than FIFO because the loader contract is per name — the name
+/// a location registers under ([`Location::name`]): a load of a name with a
+/// scripted refusal fails with it; a declared name the script did not
+/// [`declare`] is refused as the host would refuse an undeclared guest, and
+/// so is a declared name loaded with a digest; otherwise the load resolves
+/// to the digest scripted for the name, the loader-wide default set by
+/// [`defaulting`], or a deterministic per-name placeholder — refusing a
+/// digest on the call that differs from it. A path or a package carries its
+/// own source, so it loads unless scripted otherwise.
 ///
+/// [`declare`]: Self::declare
 /// [`defaulting`]: Self::defaulting
 ///
 /// ```
-/// use omnia_sdk::plugins::{Error, Plugins as _};
+/// use omnia_sdk::plugins::{Error, Location, Plugins as _};
 /// use omnia_test::guest::ScriptedLoader;
 ///
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
-/// let loader = ScriptedLoader::default().refuse("bad", Error::Refused("undeclared".into()));
-/// assert!(matches!(loader.load("bad").await, Err(Error::Refused(_))));
-/// assert_eq!(loader.load("ok").await.unwrap().id(), "ok");
-/// assert_eq!(loader.loads(), ["bad", "ok"]);
+/// let loader =
+///     ScriptedLoader::default().declare("ok").refuse("bad", Error::Refused("unroutable".into()));
+/// let bad = Location::Registry {
+///     package: "bad".into(),
+///     endpoint: None,
+/// };
+/// assert!(matches!(loader.load(&bad, None).await, Err(Error::Refused(_))));
+/// assert_eq!(loader.load(&Location::Declared("ok".into()), None).await.unwrap().id(), "ok");
+/// assert!(matches!(
+///     loader.load(&Location::Declared("other".into()), None).await,
+///     Err(Error::Refused(_))
+/// ));
+/// assert_eq!(loader.load(&Location::Path("./ok.wasm".into()), None).await.unwrap().id(), "ok");
+/// assert_eq!(loader.loads().len(), 4);
 /// # });
 /// ```
 #[derive(Clone, Debug, Default)]
@@ -297,13 +311,26 @@ pub struct ScriptedLoader {
 
 #[derive(Debug, Default)]
 struct LoaderInner {
+    declared: Mutex<BTreeSet<String>>,
     digests: Mutex<BTreeMap<String, Digest>>,
     default: Mutex<Option<Digest>>,
     refusals: Mutex<BTreeMap<String, plugins::Error>>,
-    loads: Mutex<Vec<String>>,
+    loads: Mutex<Vec<(Location, Option<Digest>)>>,
 }
 
 impl ScriptedLoader {
+    /// Declares the guest `name`, so a [`Location::Declared`] load of it
+    /// resolves.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a lock is poisoned.
+    #[must_use]
+    pub fn declare(self, name: impl Into<String>) -> Self {
+        self.inner.declared.lock().expect("declared lock").insert(name.into());
+        self
+    }
+
     /// Resolves the name `name` to `digest`.
     ///
     /// # Panics
@@ -339,20 +366,34 @@ impl ScriptedLoader {
         self
     }
 
-    /// Every name loaded, in call order.
+    /// Every load, in call order: the location and the digest it carried.
     ///
     /// # Panics
     ///
     /// Panics if a lock is poisoned.
     #[must_use]
-    pub fn loads(&self) -> Vec<String> {
+    pub fn loads(&self) -> Vec<(Location, Option<Digest>)> {
         self.inner.loads.lock().expect("loads lock").clone()
     }
 
-    fn resolve(&self, name: &str) -> Result<Plugin, plugins::Error> {
-        self.inner.loads.lock().expect("loads lock").push(name.to_owned());
+    fn resolve(&self, from: &Location, pin: Option<&Digest>) -> Result<Plugin, plugins::Error> {
+        self.inner.loads.lock().expect("loads lock").push((from.clone(), pin.cloned()));
+        let name = from.name();
         if let Some(refusal) = self.inner.refusals.lock().expect("refusals lock").get(name) {
             return Err(refusal.clone());
+        }
+        if let Location::Declared(name) = from {
+            if pin.is_some() {
+                return Err(plugins::Error::Refused(format!(
+                    "`{name}` is declared by the deployment, which pins it; the load takes no \
+                     digest"
+                )));
+            }
+            if !self.inner.declared.lock().expect("declared lock").contains(name) {
+                return Err(plugins::Error::Refused(format!(
+                    "no guest `{name}` is declared by this deployment"
+                )));
+            }
         }
         let resolved = self
             .inner
@@ -363,13 +404,22 @@ impl ScriptedLoader {
             .cloned()
             .or_else(|| self.inner.default.lock().expect("default lock").clone())
             .unwrap_or_else(|| placeholder_digest(name));
+        if let Some(pin) = pin
+            && *pin != resolved
+        {
+            return Err(plugins::Error::Refused(format!(
+                "`{from}` resolved to {resolved}, not its pinned digest {pin}"
+            )));
+        }
         Ok(Plugin::new(name, resolved))
     }
 }
 
 impl Plugins for ScriptedLoader {
-    fn load(&self, name: &str) -> impl Future<Output = Result<Plugin, plugins::Error>> + Send {
-        ready(self.resolve(name))
+    fn load(
+        &self, from: &Location, digest: Option<&Digest>,
+    ) -> impl Future<Output = Result<Plugin, plugins::Error>> + Send {
+        ready(self.resolve(from, digest))
     }
 }
 

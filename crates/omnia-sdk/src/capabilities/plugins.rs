@@ -1,13 +1,16 @@
 //! Plugin-loading (requester) capability over `omnia:plugins/loader`.
 //!
 //! The requester surface for any application that late-binds guests into its
-//! deployment: the guest names one of the deployment's declared guests, and
-//! the host admits it from the source the deployment declares — or attests
-//! it if it is already active — handing back a typed [`Plugin`] handle.
-//! Nothing the requester passes chooses code: no bytes, paths, or registry
-//! endpoints cross the interface.
+//! deployment: the guest names a [`Location`] — a guest the deployment
+//! declares, a component beneath one of its read-only mounts, or a package
+//! one of its registries serves — and the host acquires, verifies, and
+//! admits the bytes it finds there, or attests the guest if it is already
+//! active, handing back a typed [`Plugin`] handle. Component bytes never
+//! cross the interface, and every location resolves inside what the
+//! deployment granted.
 
 use std::future::Future;
+use std::path::Path;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
@@ -81,6 +84,69 @@ impl std::fmt::Display for Digest {
     }
 }
 
+/// Where a load's component bytes come from, and the name the guest
+/// registers under — the requester's mirror of the `omnia:plugins/loader`
+/// `location` variant.
+///
+/// # Examples
+///
+/// ```
+/// use omnia_sdk::plugins::Location;
+///
+/// assert_eq!(Location::Declared("intent".into()).name(), "intent");
+/// assert_eq!(Location::Path("./adapters/intent.wasm".into()).name(), "intent");
+/// let package = Location::Registry {
+///     package: "emery:intent@1.0.0".into(),
+///     endpoint: None,
+/// };
+/// assert_eq!(package.name(), "emery:intent@1.0.0");
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Location {
+    /// A guest the deployment declares, by name; it takes no digest, since
+    /// the deployment's entry carries the pin.
+    Declared(String),
+    /// A component path beneath one of the deployment's read-only mounts,
+    /// read fresh on every load. Registers as the path's file stem.
+    Path(String),
+    /// An exact `namespace:name@version` from a package registry. Registers
+    /// as the package reference.
+    Registry {
+        /// The exact package reference to fetch.
+        package: String,
+        /// The registry to fetch from when the deployment's `registries`
+        /// routes the package's namespace nowhere; `None` takes that
+        /// routing, and a namespace the deployment routes is fetched from
+        /// its registry alone.
+        endpoint: Option<String>,
+    },
+}
+
+impl Location {
+    /// The name a guest loaded from this location registers under.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Declared(name) => name,
+            Self::Path(path) => {
+                Path::new(path).file_stem().and_then(|stem| stem.to_str()).unwrap_or(path)
+            }
+            Self::Registry { package, .. } => package,
+        }
+    }
+}
+
+// What the load named, for a refusal.
+impl std::fmt::Display for Location {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Declared(name) => f.write_str(name),
+            Self::Path(path) => f.write_str(path),
+            Self::Registry { package, .. } => f.write_str(package),
+        }
+    }
+}
+
 /// A loaded plugin: the routed dispatch identity plus its content digest.
 ///
 /// A plain value — loading confers no lifecycle authority over the loaded
@@ -119,9 +185,11 @@ impl Plugin {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
     /// The request or deployment is wrong and a retry cannot succeed: the
-    /// deployment declares no guest of that name, its bytes miss the
-    /// declared digest, they are not a loadable component, or they are
-    /// pre-compiled where the entry admits raw wasm alone.
+    /// deployment declares no guest of that name, the path is beneath no
+    /// read-only mount, no registry routes the package, the bytes miss the
+    /// digest, they are not a loadable component, they are pre-compiled
+    /// where raw wasm alone is admitted, or the name is active under other
+    /// bytes.
     #[error("refused: {0}")]
     Refused(String),
     /// The guest's source could not produce its bytes; the source may
@@ -161,32 +229,37 @@ impl From<Error> for crate::Error {
 /// The default WASM implementation delegates to `omnia:plugins/loader`; off
 /// `wasm32` the signature is bare so native suites script loads.
 pub trait Plugins: Send + Sync {
-    /// Ensure the guest the deployment declares as `name` is active and
-    /// return its handle; idempotent.
+    /// Ensure the guest `from` names is active and return its handle, held
+    /// to `digest` when one is given; idempotent on (name, digest).
     ///
     /// # Errors
     ///
-    /// Returns the loader's typed refusal ([`Error`]) when the deployment
-    /// declares no such guest, or the host cannot acquire, verify, validate,
-    /// or register it.
+    /// Returns the loader's typed refusal ([`Error`]) when the deployment's
+    /// grant does not serve the location, or the host cannot acquire,
+    /// verify, validate, or register the bytes.
     #[cfg(not(target_arch = "wasm32"))]
-    fn load(&self, name: &str) -> impl Future<Output = Result<Plugin, Error>> + Send;
+    fn load(
+        &self, from: &Location, digest: Option<&Digest>,
+    ) -> impl Future<Output = Result<Plugin, Error>> + Send;
 
-    /// Ensure the guest the deployment declares as `name` is active and
-    /// return its handle; idempotent.
+    /// Ensure the guest `from` names is active and return its handle, held
+    /// to `digest` when one is given; idempotent on (name, digest).
     ///
     /// # Errors
     ///
-    /// Returns the loader's typed refusal ([`Error`]) when the deployment
-    /// declares no such guest, or the host cannot acquire, verify, validate,
-    /// or register it.
+    /// Returns the loader's typed refusal ([`Error`]) when the deployment's
+    /// grant does not serve the location, or the host cannot acquire,
+    /// verify, validate, or register the bytes.
     #[cfg(target_arch = "wasm32")]
-    fn load(&self, name: &str) -> impl Future<Output = Result<Plugin, Error>> + Send {
+    fn load(
+        &self, from: &Location, digest: Option<&Digest>,
+    ) -> impl Future<Output = Result<Plugin, Error>> + Send {
         use generated::omnia::plugins::loader;
 
-        let name = name.to_owned();
+        let from = loader::Location::from(from);
+        let digest = digest.map(ToString::to_string);
         async move {
-            let loaded = loader::load(name).await?;
+            let loaded = loader::load(from, digest).await?;
             let digest = loaded.digest.parse().map_err(|error: Error| {
                 Error::Internal(format!("host reported a malformed digest: {error}"))
             })?;
@@ -196,8 +269,10 @@ pub trait Plugins: Send + Sync {
 }
 
 delegate_deref!(Plugins {
-    fn load(&self, name: &str) -> impl Future<Output = Result<Plugin, Error>> + Send {
-        (**self).load(name)
+    fn load(
+        &self, from: &Location, digest: Option<&Digest>,
+    ) -> impl Future<Output = Result<Plugin, Error>> + Send {
+        (**self).load(from, digest)
     }
 });
 
@@ -210,11 +285,25 @@ pub struct WasiPlugins;
 #[cfg(target_arch = "wasm32")]
 impl Plugins for WasiPlugins {}
 
-/// Wire conversion from the `omnia:plugins/loader` refusal variant.
+/// Wire conversions to the `omnia:plugins/loader` location and from its
+/// refusal variant.
 #[cfg(target_arch = "wasm32")]
 mod wire {
-    use super::Error;
     use super::generated::omnia::plugins::loader;
+    use super::{Error, Location};
+
+    impl From<&Location> for loader::Location {
+        fn from(location: &Location) -> Self {
+            match location {
+                Location::Declared(name) => Self::Declared(name.clone()),
+                Location::Path(path) => Self::Path(path.clone()),
+                Location::Registry { package, endpoint } => Self::Registry(loader::RegistryRef {
+                    package: package.clone(),
+                    endpoint: endpoint.clone(),
+                }),
+            }
+        }
+    }
 
     impl From<loader::Error> for Error {
         fn from(error: loader::Error) -> Self {

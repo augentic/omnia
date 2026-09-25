@@ -318,8 +318,8 @@ impl Model for Provider {
 
 impl Plugins for Provider {
     fn load(
-        &self, name: &str,
+        &self, from: &plugins::Location, digest: Option<&plugins::Digest>,
     ) -> impl Future<Output = Result<plugins::Plugin, plugins::Error>> + Send {
-        Plugins::load(&self.plugins, name)
+        Plugins::load(&self.plugins, from, digest)
     }
 }

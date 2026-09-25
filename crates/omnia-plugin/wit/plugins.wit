@@ -1,19 +1,50 @@
 package omnia:plugins@0.1.0;
 
-/// Host-side guest loading. The deployment declares every guest that may
-/// run; a caller names one, and the host admits it if it is not active yet.
-/// Component bytes, paths, and registry endpoints never cross this
-/// interface: the caller supplies a name the deployment already chose.
+/// Host-side guest loading. A caller names where a guest's bytes come from
+/// — a guest the deployment declares, a component beneath one of its
+/// read-only mounts, or a package one of its registries serves — and the
+/// host acquires, verifies, and admits them. Component bytes never cross
+/// this interface, and every location resolves inside what the deployment
+/// granted: its guest list, its mounts, and its `registries` routing.
 interface loader {
+    /// An exact package reference and the registry it is fetched from.
+    record registry-ref {
+        /// The exact `namespace:name@version` to fetch.
+        %package: string,
+        /// The registry to fetch from when the deployment's `registries`
+        /// routes the package's namespace nowhere; `none` takes that
+        /// routing. A namespace the deployment routes is fetched from its
+        /// registry alone — naming another is refused.
+        endpoint: option<string>,
+    }
+
+    /// Where a guest's component bytes come from, and the name it registers
+    /// under.
+    variant location {
+        /// A package registry; registers as the package reference.
+        registry(registry-ref),
+        /// A component path beneath one of the deployment's read-only
+        /// mounts, read fresh on every load; registers as the path's file
+        /// stem. A path beneath a writable mount is refused.
+        path(string),
+        /// A guest the deployment declares, by name: admitted now from its
+        /// declared source if it loads on demand, attested if it is already
+        /// active. Takes no digest — the deployment's entry carries the pin.
+        declared(string),
+    }
+
     /// Why a load was refused.
     variant error {
         /// The request or deployment is wrong and a retry cannot succeed:
-        /// the deployment declares no guest of that name, its bytes do not
-        /// hash to the declared digest, they are not a loadable component, or
-        /// they are pre-compiled where the entry admits raw wasm alone.
+        /// the deployment declares no guest of that name, the path or package
+        /// derives a name it declares, the path is not beneath a read-only
+        /// mount, no registry routes the package, the digest is malformed or
+        /// the bytes do not hash to it, they are not a loadable component,
+        /// they are pre-compiled where raw wasm alone is admitted, or the
+        /// name is active under other bytes.
         refused(string),
-        /// The guest's source could not produce its bytes; the source may
-        /// recover, so a retry can succeed.
+        /// The source could not produce the bytes; the source may recover,
+        /// so a retry can succeed.
         unavailable(string),
         /// Loader misconfiguration or an internal registration failure.
         internal(string),
@@ -26,14 +57,16 @@ interface loader {
         /// host Dispatcher).
         id: string,
         /// The `sha256:<hex>` content digest of the bytes the guest was
-        /// loaded from.
+        /// loaded from — the pin that makes an unpinned load reproducible.
         digest: string,
     }
 
-    /// Ensure the guest the deployment declares as `name` is active and
-    /// return its handle: admitted now from its declared source if it loads
-    /// on demand, attested if it is already active. Idempotent.
-    load: async func(name: string) -> result<plugin, error>;
+    /// Ensure the guest `from` names is active and return its handle,
+    /// idempotent on (name, digest): the bytes are acquired inside the
+    /// deployment's grant, held to `digest` when one is given, verified, and
+    /// admitted under the name the location derives. A name already active
+    /// under the same bytes is attested; under other bytes it is refused.
+    load: async func(%from: location, digest: option<string>) -> result<plugin, error>;
 }
 
 world imports {
