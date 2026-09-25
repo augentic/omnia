@@ -91,12 +91,15 @@ Unreleased
     environment and host, so a `build.rs` compile is steered by neither the
     build shell nor the build machine; the CLI's `compile` gains
     `-t, --target <triple>`.
-- Host telemetry is always on. The `otlp` feature is gone from `omnia` and
-  `omnia-core`: `Telemetry::build` always installs the OTLP span and metric
-  exporters beneath the console subscriber and publishes the OpenTelemetry
-  providers process-wide, so `omnia::telemetry::flush` and
-  `omnia::telemetry::resource` are never no-ops, `OTEL_GRPC_URL` is always
-  honoured, and a `default-features = false` build of `omnia` exports too.
+- Host telemetry is no longer feature-gated. The `otlp` feature is gone from
+  `omnia` and `omnia-core`: every build of `Telemetry` carries the OTLP span
+  and metric exporters beneath the console subscriber, so
+  `omnia::telemetry::flush`, `omnia::telemetry::resource`, and
+  `OTEL_GRPC_URL` are never compiled out, and a `default-features = false`
+  build of `omnia` exports too. Whether they take effect at run time is
+  unchanged from 0.36.0: `Telemetry::build` publishes the providers when it
+  installs the subscriber, and yields (leaving `flush` a no-op and
+  `resource` `None`) when an embedder's own subscriber is already set.
   `Telemetry::{new, endpoint, filter, build}` are as in 0.36.0; `fallback`
   is new (above). A later `build` after an embedder's own subscriber is
   settled without retrying or re-warning. The OpenTelemetry crate family is
