@@ -36,11 +36,12 @@ interface loader {
     /// Why a load was refused.
     variant error {
         /// The request or deployment is wrong and a retry cannot succeed:
-        /// the deployment declares no guest of that name, the path is not
-        /// beneath a read-only mount, no registry routes the package, the
-        /// digest is malformed or the bytes do not hash to it, they are not
-        /// a loadable component, they are pre-compiled where raw wasm alone
-        /// is admitted, or the name is active under other bytes.
+        /// the deployment declares no guest of that name, the path or package
+        /// derives a name it declares, the path is not beneath a read-only
+        /// mount, no registry routes the package, the digest is malformed or
+        /// the bytes do not hash to it, they are not a loadable component,
+        /// they are pre-compiled where raw wasm alone is admitted, or the
+        /// name is active under other bytes.
         refused(string),
         /// The source could not produce the bytes; the source may recover,
         /// so a retry can succeed.

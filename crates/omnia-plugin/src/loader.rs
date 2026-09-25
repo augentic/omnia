@@ -2,10 +2,11 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context as _, bail, ensure};
+use cap_fs_ext::MetadataExt as _;
 use cap_std::fs::Dir;
 use omnia_core::{AdmitError, Digest, GuestId, MountRegistry, Runtime, Source, SourceSpec};
 
@@ -73,7 +74,9 @@ impl Plugins {
     /// the deployment declares for on-demand loading, `registry` fetches the
     /// [`SourceSpec::Package`] sources, and the runtime's mounts are the
     /// roots a path load resolves against — the read-only ones as code
-    /// roots, the writable ones as refusals.
+    /// roots, the writable ones as refusals. Mount directories are told
+    /// apart by identity, not path: two mount points of one directory are
+    /// one directory here.
     ///
     /// # Errors
     ///
@@ -122,11 +125,12 @@ impl Plugins {
     /// # Errors
     ///
     /// `refused` on an undeclared name, a declared name with a pin, a path
-    /// beneath no read-only mount, a package nothing routes, a digest
-    /// mismatch, a pre-compiled artifact where raw wasm alone is admitted,
-    /// bytes that are not a loadable component, or a name active under
-    /// other bytes; `unavailable` when the source could not produce the
-    /// bytes; `internal` on registration failure.
+    /// or package deriving a name the deployment declares, a path beneath no
+    /// read-only mount, a package nothing routes, a digest mismatch, a
+    /// pre-compiled artifact where raw wasm alone is admitted, bytes that
+    /// are not a loadable component, or a name active under other bytes;
+    /// `unavailable` when the source could not produce the bytes; `internal`
+    /// on registration failure.
     pub async fn load(&self, from: Location, pin: Option<Digest>) -> Result<Plugin, LoadError> {
         let id = from.id();
 
@@ -148,6 +152,15 @@ impl Plugins {
                     )));
                 };
                 (source.clone(), None)
+            }
+            // A declared name is bound by its entry alone: a path or package
+            // deriving it would seat the caller's bytes where the deployment's
+            // belong, for the declared load to attest later.
+            Location::Path(_) | Location::Registry { .. } if self.guests.contains_key(&id) => {
+                return Err(LoadError::Refused(format!(
+                    "`{from}` would register as `{id}`, a guest this deployment declares; load \
+                     it as the declared guest `{id}`, whose source and pin are the deployment's"
+                )));
             }
             Location::Path(path) => {
                 let bytes = self.read(path).await?;
@@ -250,28 +263,41 @@ impl Plugins {
 
 // The deployment's mounts as load roots, refusing a writable mount that
 // shares or nests a read-only mount's directory: written through the one
-// view, its files would load through the other.
+// view, its files would load through the other. Directories are told apart
+// by identity, not path, so two mount points of one directory — a bind
+// mount, a firmlink — are the one directory they are on disk.
 fn roots(mounts: &MountRegistry) -> anyhow::Result<Vec<Root>> {
-    let mut canonical: Vec<(&str, bool, PathBuf)> = Vec::new();
-    for mount in mounts.entries() {
-        let path = mount.host_path.canonicalize().with_context(|| {
-            format!("resolving mount `{}` at {}", mount.name, mount.host_path.display())
-        })?;
-        canonical.push((&mount.name, mount.writable, path));
-    }
-    for (name, writable, path) in &canonical {
-        for (other, other_writable, other_path) in &canonical {
-            let nested = path.starts_with(other_path) || other_path.starts_with(path);
-            if *writable && !*other_writable && nested {
+    // identify each mount's directory and the directories above it
+    let lineages = mounts
+        .entries()
+        .iter()
+        .map(|mount| {
+            let lineage = ancestry(&mount.host_path).with_context(|| {
+                format!("resolving mount `{}` at {}", mount.name, mount.host_path.display())
+            })?;
+            Ok((mount, lineage))
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
+    // refuse a writable mount at, above, or beneath a read-only one
+    for (mount, lineage) in &lineages {
+        for (other, other_lineage) in &lineages {
+            let nested =
+                lineage.contains(&other.identity) || other_lineage.contains(&mount.identity);
+            if mount.writable && !other.writable && nested {
                 bail!(
-                    "writable mount `{name}` shares its directory with the read-only mount \
-                     `{other}` ({}): a component beneath it could be written through one and \
-                     loaded through the other",
-                    path.display()
+                    "writable mount `{}` ({}) shares its directory with the read-only mount `{}` \
+                     ({}): a component beneath it could be written through one and loaded \
+                     through the other",
+                    mount.name,
+                    mount.host_path.display(),
+                    other.name,
+                    other.host_path.display()
                 );
             }
         }
     }
+
     Ok(mounts
         .entries()
         .iter()
@@ -281,6 +307,20 @@ fn roots(mounts: &MountRegistry) -> anyhow::Result<Vec<Root>> {
             writable: mount.writable,
         })
         .collect())
+}
+
+// The `(device, inode)` identity of the directory at `path` and of each
+// directory above it, nearest first — the identity the mount registry
+// records for a mount, so a mount is found in another's lineage by it.
+fn ancestry(path: &Path) -> anyhow::Result<Vec<(u64, u64)>> {
+    let path = path.canonicalize()?;
+    path.ancestors()
+        .map(|dir| {
+            let meta =
+                std::fs::metadata(dir).with_context(|| format!("identifying {}", dir.display()))?;
+            Ok((meta.dev(), meta.ino()))
+        })
+        .collect()
 }
 
 fn check_subpath(path: &str, subpath: &str) -> Result<(), LoadError> {
@@ -353,6 +393,31 @@ mod tests {
             roots(&open(vec![first, second])).expect("same-permission nesting installs");
         }
         roots(&open(vec![preopen(".", root, false)])).expect("one read-only mount installs");
+    }
+
+    // Two mount points of one directory are refused as one directory, though
+    // their canonical paths differ. macOS firmlinks the data volume at
+    // `/System/Volumes/Data`, so every directory beneath it has a second
+    // path with a canonical form of its own — the one such view a test can
+    // reach unprivileged; a bind mount is the same case elsewhere.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn overlap_across_firmlink() {
+        let dir = tempfile::tempdir().expect("scratch dir");
+        let root = dir.path().canonicalize().expect("canonical scratch dir");
+        let relative = root.strip_prefix("/").expect("a canonical path is absolute");
+        let alias = Path::new("/System/Volumes/Data").join(relative);
+        assert_ne!(
+            alias.canonicalize().expect("the firmlinked path resolves"),
+            root,
+            "the firmlink keeps a canonical path of its own"
+        );
+
+        let mounts =
+            MountRegistry::open(vec![preopen(".", &root, false), preopen("out", &alias, true)])
+                .expect("mounts open");
+        let error = roots(&mounts).expect_err("one directory through two paths is refused");
+        assert!(error.to_string().contains("writable mount"), "{error}");
     }
 
     #[test]

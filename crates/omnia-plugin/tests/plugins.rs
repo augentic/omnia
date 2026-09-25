@@ -470,6 +470,33 @@ async fn path_attests_active() {
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
 }
 
+// A path or package whose derived name the deployment declares on demand is
+// refused before anything is read, while that guest is still inactive: the
+// name is bound by its entry alone, so a caller cannot seat other bytes
+// under it for the declared load to attest.
+#[tokio::test]
+async fn declared_name_reserved() {
+    let scratch = scratch();
+    scratch.write("plugin.wasm", changed_echoer(b"squatter"));
+    stage_package(scratch.path(), ECHOER_PACKAGE, test_programs::LINK_ECHOER);
+
+    for row in [
+        ["path", "plugin.wasm", "refused", "declares"],
+        ["registry", ECHOER_PACKAGE, "refused", "declares"],
+    ] {
+        let manifest = requester(test_programs::PLUGINS_REFUSED)
+            .guest(on_demand("plugin", test_programs::LINK_ECHOER))
+            .guest(on_demand(ECHOER_PACKAGE, test_programs::LINK_ECHOER))
+            .mounts([scratch.mount(false)])
+            .registries(RegistryConfig::contents(local_registry_toml(scratch.path())));
+        let runtime = boot(manifest, &row).await.expect("assembling runtime");
+        let status = runtime.run_command().await.expect("deployment runs");
+        assert_eq!(status, ExitStatus::SUCCESS, "row {row:?}: the requester's assertions held");
+        assert_eq!(runtime.registry().len(), 1, "row {row:?}: nothing was admitted");
+        runtime.shutdown();
+    }
+}
+
 // A package the requester names is fetched from the registry the
 // deployment's `registries` routes it to, and registers as its reference.
 #[tokio::test]

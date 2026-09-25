@@ -66,7 +66,11 @@ A guest named a `registry` package with an `endpoint` other than the registry th
 
 ### `path ... is beneath the writable mount ...`
 
-A guest named a component `path` beneath a mount the deployment marks `writable`. A component loads from a read-only mount alone — what a guest can write, it cannot run. Mount the code directory read-only and keep the guest's state under a mount of its own; the two may not share or nest directories (`writable mount ... shares its directory with the read-only mount ...` at startup).
+A guest named a component `path` beneath a mount the deployment marks `writable`. A component loads from a read-only mount alone — what a guest can write, it cannot run. Mount the code directory read-only and keep the guest's state under a mount of its own; the two may not share or nest directories (`writable mount ... shares its directory with the read-only mount ...` at startup, judged by directory identity, so a bind mount or firmlink of the code directory counts as it).
+
+### `... would register as ..., a guest this deployment declares`
+
+A guest named a `path` or `registry` package whose derived name — the path's file stem, the package reference — is a `[[guest]]` the deployment declares on demand. A declared name is bound by its entry alone, so nothing a caller names can seat other bytes under it: load the guest as `declared(name)`, or rename the file or the entry so the two no longer collide.
 
 ### `... resolved to sha256:..., not its declared digest ...`
 

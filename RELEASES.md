@@ -194,7 +194,9 @@ Unreleased
     attested without fetching anything, and it takes no digest of its own —
     the entry carries the pin. The `already-active` variant is gone: a
     location whose name is active under other bytes is `refused`, and the
-    same bytes attest.
+    same bytes attest. A `path` or `registry` whose derived name the
+    deployment declares is `refused` before anything is read: a declared
+    name is bound by its entry alone.
   - A component loads from a read-only mount alone. A `path` resolves to
     the mount it lies beneath — `.` for a bare relative path, a mount's name
     as its prefix otherwise — and is refused before the file is read when
@@ -202,8 +204,9 @@ Unreleased
     writable mount and have the host compile it; `Deployment::assemble`
     refuses a writable mount that shares or nests a read-only mount's
     directory, since a file written through one view would load through the
-    other. The `writable` flag on a mount is therefore also its code-root
-    policy; there is no separate mark.
+    other — by directory identity, so a bind mount or firmlink of one
+    directory is refused as that directory. The `writable` flag on a mount
+    is therefore also its code-root policy; there is no separate mark.
   - A `path` or `registry` the requester names admits raw wasm alone
     (`wasm_only`): a pre-compiled artifact under it is refused however it
     hashes. The `endpoint` a registry load names serves a namespace the

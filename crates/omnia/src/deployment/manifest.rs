@@ -129,6 +129,15 @@ impl Manifest {
     /// Validate manifest-level invariants surfaced before the registry is
     /// built. An `allow_empty` (dynamic) deployment may define no `[[guest]]`
     /// entry that loads at boot; `features` is what the manifest may declare.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a `[[guest]]` entry names no guest or repeats a
+    /// name, an on-demand entry is the command guest or takes routes, a boot
+    /// entry names a package, no entry loads at boot when `allow_empty` is
+    /// false, more than one entry is the command guest, the transport is not
+    /// in-process, or the manifest declares `registries` or an on-demand
+    /// guest that `features` lacks the `loader` to serve.
     pub fn validate(&self, allow_empty: bool, features: Features) -> Result<()> {
         let mut names = BTreeSet::new();
         for entry in &self.guests {
@@ -216,6 +225,10 @@ impl Manifest {
 
     /// The wasm-pkg client configuration as TOML text: a `Path` read now, or
     /// the `Contents` as carried; `None` when the manifest declares none.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration is a `Path` that cannot be read.
     pub fn registry_config(&self) -> Result<Option<String>> {
         self.registries
             .as_ref()
