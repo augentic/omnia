@@ -19,7 +19,7 @@ use omnia_core::wasmtime::{Config, Engine};
 use omnia_core::wasmtime_wasi::WasiView;
 use omnia_core::{
     GuestId, HasChain, Host, LevelFilter, LinkSeam, LoadedGuest, MountRegistry, NoLinks, Registry,
-    Routes, Runtime, RuntimeOptions, RuntimeParts, Server, StoreCtx, SubscriberBuilder,
+    Routes, Runtime, RuntimeOptions, RuntimeParts, Server, StoreCtx, Telemetry,
 };
 #[cfg(feature = "link")]
 use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks};
@@ -171,21 +171,14 @@ impl DeploymentBuilder {
         // environment.
         let name = env::var("COMPONENT").unwrap_or_else(|_| program_name.clone());
 
-        // The tracing subscriber at the run's level: a selected level is the
-        // console filter outright; otherwise the process `RUST_LOG` stands and
-        // the mode's level fills its absence. With the `otlp` feature the OTLP
-        // exporters attach as layers beneath the console. Initialization is
-        // idempotent (`SubscriberBuilder::build`): the first call in the
-        // process — here or in an embedder — installs the subscriber, and
-        // later deployments reuse it.
+        // Telemetry at the run's level: a selected level is the console
+        // filter outright; otherwise the process `RUST_LOG` stands and the
+        // mode's level fills its absence. Initialization is idempotent
+        // (`Telemetry::build`): the first call in the process — here or in an
+        // embedder — installs the subscriber and the exporters, and later
+        // deployments reuse them.
         let fallback = self.mode.level();
-        let mut subscriber = SubscriberBuilder::new().fallback(fallback);
-        if let Some(level) = self.level {
-            subscriber = subscriber.filter(level.to_string());
-        }
-        #[cfg(feature = "otlp")]
-        let subscriber = otlp_exporters(&name).attach(subscriber);
-        subscriber.build().context("initializing tracing subscriber")?;
+        init_telemetry(&name, self.level, fallback)?;
         tracing::debug!("initializing runtime");
 
         let (engine, linker, mut options) = engine_and_linker()?;
@@ -489,17 +482,19 @@ fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, Runt
     Ok((engine, linker, options))
 }
 
-// The host's own OTLP exporters; `OTEL_GRPC_URL` overrides OpenTelemetry's
-// endpoint resolution.
-#[cfg(feature = "otlp")]
-fn otlp_exporters(name: &str) -> omnia_otlp::Exporters {
-    let exporters = omnia_otlp::Exporters::new(name);
+// The host's telemetry: the console at the run's level, the exporters at
+// `OTEL_GRPC_URL` when set (else OpenTelemetry's own endpoint resolution).
+fn init_telemetry(name: &str, level: Option<LevelFilter>, fallback: LevelFilter) -> Result<()> {
+    let mut telemetry = Telemetry::new(name).fallback(fallback);
+    if let Some(level) = level {
+        telemetry = telemetry.filter(level.to_string());
+    }
     if let Ok(endpoint) = env::var("OTEL_GRPC_URL") {
-        exporters.endpoint(endpoint)
+        telemetry = telemetry.endpoint(endpoint);
     } else {
         tracing::debug!("OTEL_GRPC_URL unset; using OpenTelemetry defaults");
-        exporters
     }
+    telemetry.build().context("initializing telemetry")
 }
 
 #[cfg(test)]

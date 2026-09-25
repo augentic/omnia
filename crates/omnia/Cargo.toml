@@ -16,7 +16,7 @@ version.workspace = true
 workspace = true
 
 [features]
-default = ["cli", "jit", "otlp"]
+default = ["cli", "jit"]
 
 # Enables the standard `omnia run` CLI grammar in generated `main`s and the
 # `clap` re-export. Without it, deployments are direct commands (command mode
@@ -45,12 +45,6 @@ link = ["dep:omnia-link"]
 # on demand, is a pre-compiled `omnia compile` artifact.
 jit = ["omnia-core/jit", "omnia-cli?/jit"]
 
-# Enables the OTLP (gRPC) span and metric exporters for host telemetry (the
-# `omnia-otlp` crate, re-exported as `omnia::otlp`). Without it,
-# `SubscriberBuilder` still installs the console fmt/`EnvFilter` subscriber
-# and `OTEL_GRPC_URL` is ignored.
-otlp = ["dep:omnia-otlp"]
-
 # Enables memory protection keys (MPK) support in the pooling allocator. MPK
 # only functions on Linux/x86_64; elsewhere it compiles but is inert
 # (`POOL_MEMORY_PROTECTION_KEYS=auto` falls back to leaving guard regions in
@@ -70,7 +64,6 @@ omnia-cli = { workspace = true, optional = true }
 omnia-core.workspace = true
 omnia-host-macros.workspace = true
 omnia-link = { workspace = true, optional = true }
-omnia-otlp = { workspace = true, optional = true }
 omnia-plugin = { workspace = true, optional = true }
 serde.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "time"] }

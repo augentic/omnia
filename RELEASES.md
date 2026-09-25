@@ -23,7 +23,7 @@ Unreleased
   lists them in help and completions, accepts them, and refuses the pair with
   its own usage error — the guest never acts on the values. Embedders select
   the level in code with `DeploymentBuilder::level(LevelFilter)` (`omnia`
-  re-exports `LevelFilter`), `SubscriberBuilder::fallback(level)` sets the console's
+  re-exports `LevelFilter`), `Telemetry::fallback(level)` sets the console's
   fallback for an unset `RUST_LOG` (`WARN` when not called, as before), and
   the test host's `Deployment::level` scripts a guest's `RUST_LOG` without
   touching the suite's environment. A bare command run's host console now
@@ -91,36 +91,19 @@ Unreleased
     environment and host, so a `build.rs` compile is steered by neither the
     build shell nor the build machine; the CLI's `compile` gains
     `-t, --target <triple>`.
-- Host telemetry is split from the host's `tracing` subscriber. `omnia-core`
-  keeps the subscriber and nothing of OpenTelemetry; OTLP export is the new
-  `omnia-otlp` crate, selected by omnia's `otlp` feature (still default) and
-  re-exported as `omnia::otlp`. A deployment depends on `omnia` alone, as
-  before.
-  - `omnia::Telemetry` is `omnia::SubscriberBuilder` (`omnia_core::telemetry`
-    is `omnia_core::subscriber`): a builder for the process's `tracing`
-    subscriber — console logging (`EnvFilter` + `fmt` to stderr) with a layer
-    seam telemetry exporters attach through — that knows nothing of spans,
-    metrics, or export. `SubscriberBuilder::new()` takes no name and there
-    is no `endpoint`; `filter(directives)` stays, `fallback(level)` is new
-    (above), and `layer(impl Layer<Registry>)` adds a layer beneath the
-    console ones. `build` returns `Installed::{Now, Already}` rather than
-    `()`: `Now` when this call installed the subscriber, `Already` when
-    omnia's earlier build or an embedder's own subscriber was already set
-    (tolerated, as before, but now reported).
-  - The exporters attach to that seam: `omnia::otlp::Exporters::new(name)`,
-    optionally `.endpoint(url)`, then `.attach(subscriber).build()` installs
-    the subscriber with the OTLP span and metric exporters layered beneath
-    it and publishes the OpenTelemetry providers process-wide (only when the
-    subscriber installed — a build that yielded to an embedder's leaves no
-    orphaned globals). `name` is the service name `Telemetry::new(name)`
-    took, `endpoint` the `OTEL_GRPC_URL` override `Telemetry::endpoint`
-    set. `omnia::otlp::flush()` and
-    `omnia::otlp::resource()` replace `omnia::telemetry::flush` and
-    `omnia::telemetry::resource`; the `wasi-otel` host reads its resource
-    from `omnia-otlp`. Without the feature, the console subscriber still
-    installs and `OTEL_GRPC_URL` is ignored; `omnia-core` no longer has an
-    `otlp` feature.
-  - The OpenTelemetry crate family is 0.33 (`tracing-opentelemetry` 0.34).
+- Host telemetry is no longer feature-gated. The `otlp` feature is gone from
+  `omnia` and `omnia-core`: every build of `Telemetry` carries the OTLP span
+  and metric exporters beneath the console subscriber, so
+  `omnia::telemetry::flush`, `omnia::telemetry::resource`, and
+  `OTEL_GRPC_URL` are never compiled out, and a `default-features = false`
+  build of `omnia` exports too. Whether they take effect at run time is
+  unchanged from 0.36.0: `Telemetry::build` publishes the providers when it
+  installs the subscriber, and yields (leaving `flush` a no-op and
+  `resource` `None`) when an embedder's own subscriber is already set.
+  `Telemetry::{new, endpoint, filter, build}` are as in 0.36.0; `fallback`
+  is new (above). A later `build` after an embedder's own subscriber is
+  settled without retrying or re-warning. The OpenTelemetry crate family is
+  0.33 (`tracing-opentelemetry` 0.34).
 - `ChainCtx` is no longer `Default`: a root is `ChainCtx::server()` or
   `ChainCtx::command()`. `as_command_chain(fut)` is now a store built at the
   command root, `runtime.build_store(runtime.store_in(ChainCtx::command()))`,
@@ -250,6 +233,12 @@ Unreleased
     the WIT `load` call the loader checks against the component's exports,
     or a check the requester makes against the returned handle once the
     loader exposes them.
+
+### Removed
+
+- `omnia_wasi_otel::set_filter`. A guest's tracing filter is the `RUST_LOG`
+  its WASI environment carries, which the runtime sets from its verbosity
+  flags (above); nothing reloads it at run time.
 
 ---
 

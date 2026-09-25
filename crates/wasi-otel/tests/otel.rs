@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::FutureExt as _;
-use omnia::{ExitStatus, FutureResult, Provides, SubscriberBuilder};
+use omnia::{ExitStatus, FutureResult, Provides, Telemetry};
 use omnia_test::host::Deployment;
 use omnia_wasi_otel::{WasiOtel, WasiOtelCtx};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
@@ -138,10 +138,7 @@ async fn run(deployment: Deployment, label: &str) -> Recording {
     // Guest telemetry grafts onto the host trace: the host-side `export`
     // impls skip unless host telemetry is initialized and a host span is
     // live, so install providers and drive the guest inside a span.
-    omnia::otlp::Exporters::new("otel-e2e")
-        .attach(SubscriberBuilder::new().filter("info"))
-        .build()
-        .expect("telemetry installs");
+    Telemetry::new("otel-e2e").filter("info").build().expect("telemetry installs");
 
     let recording = Recording::default();
     // Linked by hand: `run_host` would add a second `WasiOtel` beside the
@@ -169,12 +166,6 @@ async fn otel_instrumented_handler() {
     // The scenario records no metrics, so the flush skips the metrics export
     // rather than sending an empty collection.
     assert!(recording.metrics.lock().expect("metrics lock").is_empty());
-}
-
-#[tokio::test]
-async fn otel_filter_reload() {
-    let recording = run_guest(test_programs::OTEL_FILTER_RELOAD).await;
-    assert_eq!(recording.span_names(), ["traced"]);
 }
 
 #[tokio::test]

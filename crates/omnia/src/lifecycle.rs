@@ -179,8 +179,7 @@ where
     runtime.shutdown();
     // Push batch-queued spans and metrics to the exporters so they survive
     // fast command-mode exits.
-    #[cfg(feature = "otlp")]
-    omnia_otlp::flush();
+    omnia_core::telemetry::flush();
     outcome
 }
 

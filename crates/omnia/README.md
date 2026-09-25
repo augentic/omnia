@@ -47,7 +47,7 @@ The runtime is built around a set of traits that allow services to be plugged in
 - **Registry pipeline:** `Manifest` (with `GuestEntry`, `Mount`, `RegistryConfig`, `SourceSpec`, route/transport types), `Source` (an entry resolved for loading, at boot or on demand), `DeploymentBuilder`, `Deployment`, `Registry`, `Guest`, `GuestId`, `RuntimeOptions`, `CompileOptions`
 - **Trigger routing (host servers):** `RouteTable` + `MatchStrategy` (aliased `HttpRoutes`/`PatternRoutes`/`CliRoutes`), `Routes`, `Resolver`, `TriggerRouter`
 - **Guest-to-guest dispatch (`link` feature):** `GuestSelector`, `FirstArgSelector`, `InProcessLinks`, and the `is_host` namespace predicate; every import a guest makes outside the runtime's own `wasi:`/`omnia:` namespaces is relayed to the guest exporting it, nothing declaring the seam
-- **Tracing subscriber:** `SubscriberBuilder` (console logging, plus the layer seam exporters attach through); `otlp::Exporters`, `otlp::flush`, `otlp::resource` (`otlp` feature)
+- **Telemetry:** `Telemetry` (the host's `tracing` subscriber: console logging with OTLP span and metric exporters beneath it), `telemetry::flush`, `telemetry::resource`, `LevelFilter`
 - **CLI:** `Cli`, `Command`, `Parser` (`cli` feature)
 - **Guest loader (`omnia:plugins/loader`, `loader` feature):** `WasiPlugins`, `Plugins`, `PluginLoader`, the on-demand `Source` table of declared guests, the `RegistryClient` acquirer with its `RegistrySource` seam, the `ContentStore`/`ReleaseStore` cache traits, and `Deployment::registry_source` for a custom registry; `RegistryConfig` is always available as manifest data, and a deployment declaring `registries` requires the feature
 - **Signature vocabulary:** `anyhow` (`omnia::anyhow::Result`) because `Backend`, `Wiring`, and the generated runtime module speak it, and `futures` (`omnia::futures::future::BoxFuture`) because the loader store and acquirer seams return it
@@ -58,7 +58,6 @@ Most deployments only touch the `runtime!` macro; a hand-written runtime instead
 
 - **`cli`** (default): Enables the `run` command-line grammar (the `omnia-cli` crate) and the `Cli`, `Command`, and `Parser` re-exports. Disable it for a direct-command binary that owns its whole argv; no `clap` is linked.
 - **`jit`** (default): Enables Cranelift JIT compilation, allowing you to run `.wasm` files directly. Disable this to only support pre-compiled `.bin` components (useful for faster startup in production).
-- **`otlp`** (default): Enables OTLP span and metric export for host telemetry (the `omnia-otlp` crate, re-exported as `omnia::otlp`). Without it the console subscriber still installs and `OTEL_GRPC_URL` is ignored.
 - **`link`:** Enables guest-to-guest dispatch (the `omnia-link` crate): every import outside the runtime's own namespaces is relayed to the guest exporting it. Without it such an import is unresolved and the deployment fails at boot.
 - **`loader`:** Enables the guest loader (`omnia:plugins/loader`). With it, `Deployment::assemble` links the loader host beside WASI — worlds that do not import it never see it — and installs the manifest's `on_demand` guests as the table a `load(name)` may name, their package sources routed by the deployment's `registries`; a deployment declaring `registries` requires it. A loaded guest is raw wasm or `omnia compile` output; compiling the former needs `jit`.
 
@@ -67,31 +66,26 @@ Most deployments only touch the `runtime!` macro; a hand-written runtime instead
 The runtime and its included services are configured via environment variables:
 
 - **`RUST_LOG`**: The tracing filter for the whole process, host console and guests alike (e.g., `info`, `debug`, `omnia_core=trace`), when no `-v`/`-q` flag selects a level; unset means `info` for a command runtime and `warn` for a server. Each `-v` steps the level up from that default and each `-q` down, replacing `RUST_LOG` for the run. Noisy dependencies (`hyper`, `h2`, `tonic`, `opentelemetry`, `opentelemetry_sdk`, `omnia_wasi_otel`) are always muted.
-- **`OTEL_GRPC_URL`**: OTLP gRPC endpoint for exporting host traces and metrics (with the `otlp` feature). Unset uses OpenTelemetry defaults (`http://localhost:4317`).
+- **`OTEL_GRPC_URL`**: OTLP gRPC endpoint for exporting host traces and metrics. Unset uses OpenTelemetry defaults (`http://localhost:4317`).
 
 ## Logging and telemetry
 
-During startup, `omnia` installs the host's `tracing` subscriber via `SubscriberBuilder`: console logging (`EnvFilter` + `fmt` to stderr) with a layer seam telemetry exporters attach through. With the `otlp` feature, `omnia::otlp::Exporters` attaches OTLP span exporters and metric readers to that seam, so host runtimes emit OpenTelemetry traces and metrics without extra wiring. Most applications never need to call this directly:
+During startup, `omnia` installs the host's telemetry via `Telemetry`: the `tracing` subscriber — console logging (`EnvFilter` + `fmt` to stderr) with OTLP span exporters and metric readers layered beneath it — so host runtimes emit OpenTelemetry traces and metrics without extra wiring. Most applications never need to call this directly:
 
 ```rust,ignore
-use omnia::SubscriberBuilder;
+use omnia::Telemetry;
 
-// Console logging only
-SubscriberBuilder::new().build()?;
-
-// Console logging plus OTLP exporters (`otlp` feature); omit `endpoint`
-// for OpenTelemetry's own endpoint resolution
-omnia::otlp::Exporters::new("my-service")
+// Omit `endpoint` for OpenTelemetry's own endpoint resolution.
+Telemetry::new("my-service")
     .endpoint("http://localhost:4317")
-    .attach(SubscriberBuilder::new())
     .build()?;
 ```
 
-Initialization is idempotent: the first `build` in the process installs the subscriber and providers, and later calls are no-ops that reuse them, so an embedder installing a subscriber itself and the runtime's own startup never conflict. Telemetry is batch-exported; the runtime flushes it at the end of every run so it survives fast command-mode exits, and embedders driving work themselves can call `omnia::otlp::flush()` before the process exits. The `OTEL_GRPC_URL` environment variable is respected when set; when unset, OpenTelemetry defaults apply. Export errors from a missing collector never reach the console: the subscriber's filter always mutes the `opentelemetry` and `opentelemetry_sdk` targets.
+Initialization is idempotent: the first `build` in the process installs the subscriber and providers, and later calls are no-ops that reuse them, so an embedder installing a subscriber itself and the runtime's own startup never conflict. Telemetry is batch-exported; the runtime flushes it at the end of every run so it survives fast command-mode exits, and embedders driving work themselves can call `omnia::telemetry::flush()` before the process exits. The `OTEL_GRPC_URL` environment variable is respected when set; when unset, OpenTelemetry defaults apply. Export errors from a missing collector never reach the console: the subscriber's filter always mutes the `opentelemetry` and `opentelemetry_sdk` targets.
 
 ## Architecture
 
-`omnia` is the composition root: it owns deployment assembly, process lifecycle, and composition of the optional crates (`omnia-link` behind `link`, `omnia-plugin` behind `loader`, `omnia-otlp` behind `otlp`, `omnia-cli` behind `cli`, the `runtime!` macro), and re-exports the `omnia-core` live-runtime SDK under one root — the paths embedders (and the macro's generated code) use never name the underlying crates, and neither should a deployment's `Cargo.toml`. Depend on `omnia-core` (or `omnia-plugin`) directly only when building a capability crate of your own. `omnia-cli` is a leaf grammar crate with no `omnia-*` dependencies.
+`omnia` is the composition root: it owns deployment assembly, process lifecycle, and composition of the optional crates (`omnia-link` behind `link`, `omnia-plugin` behind `loader`, `omnia-cli` behind `cli`, the `runtime!` macro), and re-exports the `omnia-core` live-runtime SDK under one root — the paths embedders (and the macro's generated code) use never name the underlying crates, and neither should a deployment's `Cargo.toml`. Depend on `omnia-core` (or `omnia-plugin`) directly only when building a capability crate of your own. `omnia-cli` is a leaf grammar crate with no `omnia-*` dependencies.
 
 See the [workspace documentation](https://github.com/augentic/omnia) for the full architecture guide and list of available WASI interface crates.
 
