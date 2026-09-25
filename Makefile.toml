@@ -23,8 +23,6 @@ dependencies = ["audit", "fmt", "lint", "outdated", "deps"]
 dependencies = [
   "fmt",
   "lint",
-  "features",
-  "hack",
   "test",
   "test-docs",
   "docs",
@@ -62,54 +60,6 @@ install_crate = "cargo-udeps"
 # args = ["machete", "--skip-target-dir"]
 # install_crate = "cargo-machete"
 
-# Feature gates: the flagged crates must stay warning-free without their
-# default features so the gates don't rot (`lint` only covers --all-features).
-# The workspace `omnia-sdk` entry carries `default-features = false` so
-# the `http`/`command` lines are real checks: a consumer that re-enabled the
-# defaults would unify them back in through `--all-targets` (dev-deps) and
-# silently turn the gate vacuous. In-repo consumers name the rungs they use;
-# `omnia-test/guest` legitimately carries `sql` and `docstore`, so those
-# gates stay masked under `--all-targets`.
-[tasks.features]
-script = '''
-cargo clippy -p omnia -p omnia-wasi-sql -p omnia-wasi-identity -p omnia-sdk --no-default-features --all-targets -- -D warnings
-cargo clippy -p omnia --no-default-features --features cli --all-targets -- -D warnings
-cargo clippy -p omnia-sdk --no-default-features --features command --all-targets -- -D warnings
-cargo clippy -p omnia-sdk --no-default-features --features http --all-targets -- -D warnings
-cargo clippy -p omnia-sdk --no-default-features --features sql --all-targets -- -D warnings
-cargo clippy -p omnia-sdk --no-default-features --features docstore --all-targets -- -D warnings
-cargo clippy -p omnia-sdk --no-default-features --features command,http --all-targets -- -D warnings
-cargo clippy -p omnia --no-default-features --features jit --all-targets -- -D warnings
-cargo clippy -p omnia --no-default-features --features otlp --all-targets -- -D warnings
-cargo clippy -p omnia --no-default-features --features loader --all-targets -- -D warnings
-cargo clippy -p omnia --no-default-features --features link --all-targets -- -D warnings
-cargo clippy -p omnia --no-default-features --features link,loader --all-targets -- -D warnings
-cargo clippy -p omnia-core --no-default-features --all-targets -- -D warnings
-cargo clippy -p omnia-link --all-targets -- -D warnings
-cargo clippy -p omnia-cli --no-default-features --all-targets -- -D warnings
-cargo clippy -p omnia-cli --no-default-features --features jit --all-targets -- -D warnings
-for features in build guest host guest,host; do
-  cargo clippy -p omnia-test --no-default-features --features "$features" --all-targets -- -D warnings
-done
-'''
-install_crate = { rustup_component_name = "clippy" }
-
-# Every feature combination of the published test crate must build on its
-# own, without dev-dependencies masking a missing `dep:` line.
-[tasks.hack]
-command = "cargo"
-args = [
-  "hack",
-  "check",
-  "--feature-powerset",
-  "--exclude-features",
-  "default",
-  "--no-dev-deps",
-  "-p",
-  "omnia-test",
-]
-install_crate = "cargo-hack"
-
 # Semver check against the last published omnia-test; joins `ci` once the
 # first release exists as a baseline.
 [tasks.semver]
@@ -121,11 +71,20 @@ install_crate = "cargo-semver-checks"
 [tasks.fmt]
 script = "cargo +nightly fmt --all"
 
-# Lint
+# Lint every line of code: all targets with everything on (natively and for
+# `wasm32-wasip2`), then every crate's library in each single-feature configuration.
 [tasks.lint]
-command = "cargo"
-args = ["clippy", "--workspace", "--all-targets", "--all-features", "--", "-D", "warnings"]
+dependencies = ["install-hack"]
+script = '''
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo clippy --workspace --all-targets --all-features --target wasm32-wasip2 -- -D warnings
+cargo hack clippy --workspace --each-feature --exclude-all-features -- -D warnings
+cargo hack clippy --workspace --each-feature --exclude-all-features --target wasm32-wasip2 -- -D warnings
+'''
 install_crate = { rustup_component_name = "clippy" }
+
+[tasks.install-hack]
+install_crate = { crate_name = "cargo-hack", binary = "cargo", test_arg = ["hack", "--version"] }
 
 # Miri
 [tasks.miri]
@@ -143,8 +102,10 @@ cargo outdated --workspace --exit-code 1 --depth 1 \
 install_crate = "cargo-outdated"
 
 [tasks.test]
-command = "cargo"
-args = ["nextest", "run", "--locked", "--all", "--all-features", "--no-tests=pass"]
+dependencies = ["install-hack"]
+script = '''
+cargo hack nextest run --workspace --each-feature --locked --no-tests=pass
+'''
 env = { RUSTFLAGS = "-Dwarnings" }
 
 [tasks.docs]

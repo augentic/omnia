@@ -3,7 +3,8 @@
 
 // The embedder facade: the runtime spine (`omnia-core`), guest→guest dispatch
 // (`omnia-link`, behind the `link` feature), the guest loader
-// (`omnia-plugin`, behind the `loader` feature), the `run` grammar
+// (`omnia-plugin`, behind the `loader` feature), the OTLP exporters
+// (`omnia-otlp`, behind the `otlp` feature), the `run` grammar
 // (`omnia-cli`, behind the `cli` feature), and the `runtime!` macro,
 // re-exported under one root. The `runtime!` macro emits `omnia::…` paths, so
 // every name it references must stay reachable from here — `RegistryConfig`
@@ -38,8 +39,8 @@ pub use omnia_core::{
     HasExtensions, HasLimits, HasMounts, HasTable, Host, HostCtx, HttpBorrow, HttpCtx, HttpRoutes,
     LevelFilter, LinkSeam, MountRegistry, NoLinks, NoOptions, PatternRoutes, Provides, Proxy,
     Registry, ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts, Server, Source,
-    SourceSpec, StoreBase, StoreConfig, StoreCtx, StoreFactory, StoreView, Telemetry,
-    TriggerRouter, WeakRuntime, get_cloned, host_error, serve_links, telemetry, wasi_view,
+    SourceSpec, StoreBase, StoreConfig, StoreCtx, StoreFactory, StoreView, SubscriberBuilder,
+    TriggerRouter, WeakRuntime, get_cloned, host_error, serve_links, subscriber, wasi_view,
 };
 #[doc(hidden)]
 pub use omnia_core::{pastey, tokio, wasmtime, wasmtime_wasi};
@@ -48,6 +49,9 @@ pub use omnia_host_macros::runtime;
 #[cfg(feature = "link")]
 #[doc(inline)]
 pub use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks, is_host};
+#[cfg(feature = "otlp")]
+#[doc(inline)]
+pub use omnia_otlp as otlp;
 #[cfg(feature = "loader")]
 #[doc(inline)]
 pub use omnia_plugin::{

@@ -31,6 +31,22 @@ use omnia_core::{
 };
 use serde::Deserialize;
 
+/// The optional capabilities this build compiled in; a manifest may only
+/// declare what the build serves.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Features {
+    /// The `loader` feature (the `[registries]` configuration and `on_demand`
+    /// guests).
+    pub loader: bool,
+}
+
+impl Features {
+    /// The features this build was compiled with.
+    pub(super) const COMPILED: Self = Self {
+        loader: cfg!(feature = "loader"),
+    };
+}
+
 /// The deployment manifest: every guest that may run, what they mount, and
 /// where package sources are fetched from.
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -112,8 +128,8 @@ impl Manifest {
 
     /// Validate manifest-level invariants surfaced before the registry is
     /// built. An `allow_empty` (dynamic) deployment may define no `[[guest]]`
-    /// entry that loads at boot.
-    pub(super) fn validate(&self, allow_empty: bool) -> Result<()> {
+    /// entry that loads at boot; `features` is what the manifest may declare.
+    pub(super) fn validate(&self, allow_empty: bool, features: Features) -> Result<()> {
         let mut names = BTreeSet::new();
         for entry in &self.guests {
             if entry.name.is_empty() {
@@ -148,8 +164,7 @@ impl Manifest {
         }
         // A manifest can declare policy the compiled runtime cannot serve;
         // refuse up front rather than silently never installing it.
-        #[cfg(not(feature = "loader"))]
-        {
+        if !features.loader {
             if self.registries.is_some() {
                 bail!(
                     "this runtime was built without the `loader` feature; remove `registries` or \
@@ -716,13 +731,20 @@ mod tests {
             manifest.registries,
             Some(RegistryConfig::Path(PathBuf::from("/deploy/app/wasm-pkg.toml")))
         );
-        #[cfg(feature = "loader")]
-        manifest.validate(false).expect("a registries configuration is allowed");
-        #[cfg(not(feature = "loader"))]
-        {
-            let error = manifest.validate(false).expect_err("registries need the loader feature");
-            assert!(error.to_string().contains("without the `loader` feature"), "{error}");
-        }
+        manifest
+            .validate(false, Features { loader: true })
+            .expect("a registries configuration is allowed");
+    }
+
+    #[test]
+    fn registries_without_loader_feature() {
+        let manifest = Manifest::new()
+            .guest(GuestEntry::new("a", "./a.wasm"))
+            .registries("default_registry = \"ghcr.io\"\n");
+        let error = manifest
+            .validate(false, Features { loader: false })
+            .expect_err("registries need the loader feature");
+        assert!(error.to_string().contains("without the `loader` feature"), "{error}");
     }
 
     // A `[registries]` table names a path; the contents variant is the
@@ -787,7 +809,10 @@ mod tests {
         let toml = "[[guest]]\nname = \"only\"\nsource.path = \"./only.wasm\"\n\n\
              [transport]\ndefault = \"unix\"\n";
         let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
-        assert!(manifest.validate(false).is_err(), "distributed transport is not yet implemented");
+        assert!(
+            manifest.validate(false, Features::COMPILED).is_err(),
+            "distributed transport is not yet implemented"
+        );
     }
 
     #[test]
@@ -813,7 +838,7 @@ mod tests {
         let toml = "[[guest]]\nname = \"helper\"\nsource.path = \"./helper.wasm\"\n\n\
              [[guest]]\nname = \"app\"\nsource.path = \"./app.wasm\"\ncommand = true\n";
         let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
-        manifest.validate(false).expect("one marked guest validates");
+        manifest.validate(false, Features::COMPILED).expect("one marked guest validates");
         assert!(!manifest.guests[0].command, "the flag defaults to false");
         assert_eq!(manifest.command_guest(), Some(GuestId::from("app")));
     }
@@ -823,7 +848,9 @@ mod tests {
         let manifest = Manifest::new()
             .guest(GuestEntry::new("a", "./a.wasm").command())
             .guest(GuestEntry::new("b", "./b.wasm").command());
-        let error = manifest.validate(false).expect_err("two marked guests must be rejected");
+        let error = manifest
+            .validate(false, Features::COMPILED)
+            .expect_err("two marked guests must be rejected");
         assert!(error.to_string().contains("at most one guest may be the command guest"));
     }
 
@@ -832,7 +859,9 @@ mod tests {
         let toml = "[[guest]]\nname = \"same\"\nsource.path = \"./a.wasm\"\n\n\
              [[guest]]\nname = \"same\"\nsource.path = \"./b.wasm\"\n";
         let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
-        let error = manifest.validate(false).expect_err("duplicate guest names must be rejected");
+        let error = manifest
+            .validate(false, Features::COMPILED)
+            .expect_err("duplicate guest names must be rejected");
         assert!(error.to_string().contains("duplicate [[guest]] name `same`"), "{error}");
     }
 
@@ -847,14 +876,16 @@ mod tests {
         manifest.resolve_names();
         assert_eq!(manifest.guests[0].name, "echo");
         assert_eq!(manifest.guests[1].name, "echo");
-        let error = manifest.validate(false).expect_err("two `echo` guests must be rejected");
+        let error = manifest
+            .validate(false, Features::COMPILED)
+            .expect_err("two `echo` guests must be rejected");
         assert!(error.to_string().contains("duplicate [[guest]] name `echo`"), "{error}");
 
         let toml = "[[guest]]\nsource.path = \"./a/echo.wasm\"\n\n\
              [[guest]]\nname = \"other\"\nsource.path = \"./b/echo.wasm\"\n";
         let mut manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
         manifest.resolve_names();
-        manifest.validate(false).expect("distinct names validate");
+        manifest.validate(false, Features::COMPILED).expect("distinct names validate");
         assert_eq!(manifest.command_guest(), None);
         assert_eq!(manifest.guests[1].name, "other", "a given name is kept");
     }
@@ -866,12 +897,14 @@ mod tests {
         let toml = "[[guest]]\nsource.package = \"acme:echo@1.0.0\"\non_demand = true\n";
         let mut manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
         manifest.resolve_names();
-        let error = manifest.validate(false).expect_err("an unnamed guest must be rejected");
+        let error = manifest
+            .validate(false, Features::COMPILED)
+            .expect_err("an unnamed guest must be rejected");
         assert!(error.to_string().contains("names no guest"), "{error}");
 
         let error = Manifest::new()
             .guest(GuestEntry::new("", b"\0asm"))
-            .validate(false)
+            .validate(false, Features::COMPILED)
             .expect_err("an unnamed embedded guest must be rejected");
         assert!(error.to_string().contains("names no guest"), "{error}");
     }
@@ -891,11 +924,11 @@ mod tests {
         let manifest: Manifest =
             toml::from_str("[transport]\ndefault = \"unix\"\n").expect("manifest should parse");
         assert!(
-            manifest.validate(false).is_err(),
+            manifest.validate(false, Features::COMPILED).is_err(),
             "a static manifest with no guests must be rejected"
         );
         assert!(
-            Manifest::new().validate(true).is_ok(),
+            Manifest::new().validate(true, Features::COMPILED).is_ok(),
             "a dynamic deployment may start with no guests"
         );
     }
@@ -911,8 +944,7 @@ mod tests {
              digest = \"{DIGEST}\"\n"
         );
         let manifest: Manifest = toml::from_str(&toml).expect("manifest should parse");
-        #[cfg(feature = "loader")]
-        manifest.validate(false).expect("a mixed manifest validates");
+        manifest.validate(false, Features { loader: true }).expect("a mixed manifest validates");
 
         assert!(!manifest.guests[0].on_demand, "on_demand defaults to a boot load");
         assert_eq!(manifest.guests[0].digest, DIGEST.parse().ok());
@@ -973,7 +1005,9 @@ mod tests {
         let manifest = Manifest::new()
             .guest(GuestEntry::new("app", "./app.wasm"))
             .guest(GuestEntry::new("tool", "./tool.wasm").on_demand().route_http("/tool"));
-        let error = manifest.validate(false).expect_err("an on-demand guest takes no routes");
+        let error = manifest
+            .validate(false, Features::COMPILED)
+            .expect_err("an on-demand guest takes no routes");
         assert!(error.to_string().contains("cannot take routes"), "{error}");
     }
 
@@ -982,7 +1016,9 @@ mod tests {
         let manifest = Manifest::new()
             .guest(GuestEntry::new("app", "./app.wasm"))
             .guest(GuestEntry::new("tool", "./tool.wasm").on_demand().command());
-        let error = manifest.validate(false).expect_err("an on-demand guest is never the command");
+        let error = manifest
+            .validate(false, Features::COMPILED)
+            .expect_err("an on-demand guest is never the command");
         assert!(error.to_string().contains("cannot be the command guest"), "{error}");
     }
 
@@ -992,7 +1028,8 @@ mod tests {
         let manifest = Manifest::new()
             .guest(GuestEntry::new("app", "./app.wasm"))
             .guest(GuestEntry::new("tool", SourceSpec::package("acme:tool@1.0.0")));
-        let error = manifest.validate(false).expect_err("a boot package is rejected");
+        let error =
+            manifest.validate(false, Features::COMPILED).expect_err("a boot package is rejected");
         assert!(error.to_string().contains("mark the guest `on_demand = true`"), "{error}");
     }
 
@@ -1001,15 +1038,17 @@ mod tests {
     #[test]
     fn only_on_demand_guests() {
         let manifest = Manifest::new().guest(GuestEntry::new("tool", "./tool.wasm").on_demand());
-        let error = manifest.validate(false).expect_err("no boot guest is rejected");
+        let error = manifest
+            .validate(false, Features { loader: true })
+            .expect_err("no boot guest is rejected");
         assert!(error.to_string().contains("loads at boot"), "{error}");
-        #[cfg(feature = "loader")]
-        manifest.validate(true).expect("a dynamic deployment may boot empty");
-        #[cfg(not(feature = "loader"))]
-        {
-            let error = manifest.validate(true).expect_err("on demand needs the loader feature");
-            assert!(error.to_string().contains("without the `loader` feature"), "{error}");
-        }
+        manifest
+            .validate(true, Features { loader: true })
+            .expect("a dynamic deployment may boot empty");
+        let error = manifest
+            .validate(true, Features { loader: false })
+            .expect_err("on demand needs the loader feature");
+        assert!(error.to_string().contains("without the `loader` feature"), "{error}");
     }
 
     #[test]
@@ -1043,7 +1082,7 @@ mod tests {
                 writable: true,
             }]);
 
-        manifest.validate(false).expect("manifest should validate");
+        manifest.validate(false, Features::COMPILED).expect("manifest should validate");
         assert_eq!(manifest.guests.len(), 2);
         assert_eq!(manifest.mounts.len(), 1);
         assert_eq!(manifest.guests[0].routes.http, ["/router"]);

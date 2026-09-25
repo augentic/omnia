@@ -389,17 +389,15 @@ impl RuntimeOptions {
             return Ok(());
         }
 
-        // Fail fast on `yes` rather than silently ignoring MPK when the feature
-        // that compiles in the Wasmtime support is absent.
-        #[cfg(not(feature = "mpk"))]
-        if self.pool_memory_protection_keys == Enabled::Yes {
+        // Compiled in every build and inert when `mpk` is on: fail fast on `yes`
+        // rather than silently ignoring MPK when Wasmtime's support is absent.
+        if !cfg!(feature = "mpk") && self.pool_memory_protection_keys == Enabled::Yes {
             bail!("POOL_MEMORY_PROTECTION_KEYS=yes requires building omnia with the `mpk` feature");
         }
 
-        // Likewise reject a GC heap count when the `gc` feature that compiles in
-        // `total_gc_heaps` is absent, rather than silently ignoring it.
-        #[cfg(not(feature = "gc"))]
-        if self.pool_total_gc_heaps.is_some() {
+        // Likewise compiled in every build and inert when `gc` is on: reject a GC
+        // heap count rather than silently ignoring it when `total_gc_heaps` is absent.
+        if !cfg!(feature = "gc") && self.pool_total_gc_heaps.is_some() {
             bail!("POOL_TOTAL_GC_HEAPS requires building omnia with the `gc` feature");
         }
 

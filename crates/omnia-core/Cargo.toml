@@ -16,15 +16,10 @@ version.workspace = true
 workspace = true
 
 [features]
-default = ["jit", "otlp"]
+default = ["jit"]
 
 # Enables just-in-time wasm to machine code compilation.
 jit = ["wasmtime/cranelift"]
-
-# Enables the OTLP (gRPC) span and metric exporters. Without it, `Telemetry`
-# still installs the fmt/`EnvFilter` subscriber, while `telemetry::flush` and
-# `telemetry::resource` become no-ops.
-otlp = ["dep:opentelemetry-otlp", "dep:tracing-opentelemetry"]
 
 # Enables memory protection keys (MPK) support in the pooling allocator. MPK
 # only functions on Linux/x86_64; elsewhere it compiles but is inert
@@ -46,14 +41,10 @@ cfg-if.workspace = true
 fromenv.workspace = true
 futures.workspace = true
 http.workspace = true
-opentelemetry = { workspace = true, features = ["metrics", "trace"] }
-opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["grpc-tonic", "metrics", "trace"], optional = true }
-opentelemetry_sdk = { workspace = true, features = ["metrics", "rt-tokio", "trace"] }
 pastey.workspace = true
 serde.workspace = true
 sha2.workspace = true
 tracing.workspace = true
-tracing-opentelemetry = { workspace = true, features = ["metrics"], optional = true }
 tracing-subscriber = { workspace = true, features = ["ansi", "smallvec"] }
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt", "sync", "time"] }
 wasmtime = { workspace = true, features = ["runtime"] }

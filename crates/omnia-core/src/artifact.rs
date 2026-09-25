@@ -27,36 +27,7 @@ const SETTINGS_HINT: &str = "the artifact must be built with the same compile-af
 pub async fn component(engine: &Engine, bytes: Vec<u8>) -> Result<Component> {
     let engine = engine.clone();
     tokio::task::spawn_blocking(move || {
-        let component = match Engine::detect_precompiled(&bytes) {
-            Some(Precompiled::Component) => {
-                // SAFETY: deployment inputs are trusted operator inputs
-                // (docs/security-model.md): these bytes are the artifact the
-                // deployment declared, and a pre-compiled one is `omnia
-                // compile` output by that declaration — the contract
-                // `Component::deserialize` requires.
-                unsafe { Component::deserialize(&engine, &bytes) }
-                    .map_err(anyhow::Error::from)
-                    .with_context(|| {
-                        format!("deserializing pre-compiled component: {SETTINGS_HINT}")
-                    })?
-            }
-            Some(Precompiled::Module) => {
-                bail!("the artifact is a pre-compiled core module, not a component")
-            }
-            None => {
-                #[cfg(feature = "jit")]
-                {
-                    Component::new(&engine, &bytes)
-                        .map_err(anyhow::Error::from)
-                        .context("compiling component")?
-                }
-                #[cfg(not(feature = "jit"))]
-                bail!(
-                    "compiling raw wasm requires the `jit` feature; pre-compile the component \
-                     with `omnia compile` instead"
-                )
-            }
-        };
+        let component = load(&engine, &bytes)?;
         // Build the copy-on-write heap image now rather than lazily on the
         // first instantiation, moving that one-time cost off the first call.
         component.initialize_copy_on_write_image()?;
@@ -64,4 +35,36 @@ pub async fn component(engine: &Engine, bytes: Vec<u8>) -> Result<Component> {
     })
     .await
     .context("guest load task panicked")?
+}
+
+// Deserialize a pre-compiled component, or compile raw wasm. The base build
+// has no compiler and refuses raw wasm; the `jit` feature adds the compile
+// path ahead of that refusal.
+fn load(engine: &Engine, bytes: &[u8]) -> Result<Component> {
+    let precompiled = Engine::detect_precompiled(bytes);
+    #[cfg(feature = "jit")]
+    if precompiled.is_none() {
+        return Component::new(engine, bytes)
+            .map_err(anyhow::Error::from)
+            .context("compiling component");
+    }
+    match precompiled {
+        Some(Precompiled::Component) => {
+            // SAFETY: deployment inputs are trusted operator inputs
+            // (docs/security-model.md): these bytes are the artifact the
+            // deployment declared, and a pre-compiled one is `omnia compile`
+            // output by that declaration — the contract
+            // `Component::deserialize` requires.
+            unsafe { Component::deserialize(engine, bytes) }
+                .map_err(anyhow::Error::from)
+                .with_context(|| format!("deserializing pre-compiled component: {SETTINGS_HINT}"))
+        }
+        Some(Precompiled::Module) => {
+            bail!("the artifact is a pre-compiled core module, not a component")
+        }
+        None => bail!(
+            "compiling raw wasm requires the `jit` feature; pre-compile the component with \
+             `omnia compile` instead"
+        ),
+    }
 }

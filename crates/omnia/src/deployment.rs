@@ -12,16 +12,14 @@ pub use manifest::{
 };
 #[cfg(feature = "link")]
 use omnia_core::ChainPolicy;
-#[cfg(not(feature = "link"))]
-use omnia_core::NoLinks;
 #[cfg(feature = "loader")]
 use omnia_core::Source;
 use omnia_core::wasmtime::component::Linker;
 use omnia_core::wasmtime::{Config, Engine};
 use omnia_core::wasmtime_wasi::WasiView;
 use omnia_core::{
-    GuestId, HasChain, Host, LevelFilter, LinkSeam, LoadedGuest, MountRegistry, Registry, Routes,
-    Runtime, RuntimeOptions, RuntimeParts, Server, StoreCtx, Telemetry,
+    GuestId, HasChain, Host, LevelFilter, LinkSeam, LoadedGuest, MountRegistry, NoLinks, Registry,
+    Routes, Runtime, RuntimeOptions, RuntimeParts, Server, StoreCtx, SubscriberBuilder,
 };
 #[cfg(feature = "link")]
 use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks};
@@ -148,7 +146,7 @@ impl DeploymentBuilder {
     ///
     /// Returns an error if no manifest resolves, the manifest is invalid, or
     /// the deployment cannot be built.
-    pub async fn build<T: WasiView + 'static>(self) -> Result<Deployment<T>> {
+    pub async fn build<T: LinkStore>(self) -> Result<Deployment<T>> {
         let manifest = if let Some(manifest) = self.manifest {
             manifest
         } else if self.allow_empty {
@@ -159,7 +157,7 @@ impl DeploymentBuilder {
                 .context("no deployment manifest supplied and OMNIA_MANIFEST is unset")?;
             Manifest::load(path)?
         };
-        manifest.validate(self.allow_empty)?;
+        manifest.validate(self.allow_empty, manifest::Features::COMPILED)?;
         // Read once, here, so a missing or unreadable configuration fails
         // startup rather than the first package load.
         let registry_config = manifest.registry_config()?;
@@ -173,8 +171,21 @@ impl DeploymentBuilder {
         // environment.
         let name = env::var("COMPONENT").unwrap_or_else(|_| program_name.clone());
 
+        // The tracing subscriber at the run's level: a selected level is the
+        // console filter outright; otherwise the process `RUST_LOG` stands and
+        // the mode's level fills its absence. With the `otlp` feature the OTLP
+        // exporters attach as layers beneath the console. Initialization is
+        // idempotent (`SubscriberBuilder::build`): the first call in the
+        // process — here or in an embedder — installs the subscriber, and
+        // later deployments reuse it.
         let fallback = self.mode.level();
-        init_telemetry(&name, self.level, fallback)?;
+        let mut subscriber = SubscriberBuilder::new().fallback(fallback);
+        if let Some(level) = self.level {
+            subscriber = subscriber.filter(level.to_string());
+        }
+        #[cfg(feature = "otlp")]
+        let subscriber = otlp_exporters(&name).attach(subscriber);
+        subscriber.build().context("initializing tracing subscriber")?;
         tracing::debug!("initializing runtime");
 
         let (engine, linker, mut options) = engine_and_linker()?;
@@ -203,15 +214,16 @@ impl DeploymentBuilder {
             self.args
         };
 
-        Ok(Deployment {
+        // Base: no host-mediated dispatch. The `link` feature overrides the
+        // seam by struct update, consuming the base.
+        let deployment = Deployment {
             name,
             engine,
             linker,
             options,
             guests,
             routes: manifest.routes(),
-            #[cfg(feature = "link")]
-            selector: Arc::new(FirstArgSelector),
+            seam: Arc::new(NoLinks),
             mounts,
             args: Arc::new(args),
             mode: self.mode,
@@ -225,7 +237,16 @@ impl DeploymentBuilder {
             },
             level: self.level,
             fallback,
-        })
+        };
+        #[cfg(feature = "link")]
+        let deployment = Deployment {
+            seam: Arc::new(InProcessLinks::new(
+                Arc::new(FirstArgSelector),
+                ChainPolicy::from(&deployment.options),
+            )),
+            ..deployment
+        };
+        Ok(deployment)
     }
 }
 
@@ -243,9 +264,8 @@ pub struct Deployment<T: WasiView + 'static> {
     options: RuntimeOptions,
     guests: Vec<LoadedGuest>,
     routes: Routes,
-    // Host-mediated dispatch selector.
-    #[cfg(feature = "link")]
-    selector: Arc<dyn GuestSelector>,
+    // Host-mediated dispatch seam: `NoLinks` unless the `link` feature is on.
+    seam: Arc<dyn LinkSeam<T>>,
     // Mount registry opened from the manifest's resolved preopens.
     mounts: Arc<MountRegistry>,
     // Guest argv threaded into every store. Empty for long-lived servers; in
@@ -279,8 +299,23 @@ struct Loader {
     registry: Option<Arc<dyn RegistrySource>>,
 }
 
-/// Store bound every deployment store context satisfies; kept as a named bound
-/// for source compatibility with embedders that spell it.
+#[cfg(feature = "loader")]
+impl Loader {
+    // The registry package sources are fetched from: the embedder's, else a
+    // cacheless `RegistryClient` over the deployment's `registries` `config`.
+    fn registry(&self, config: Option<&str>) -> Result<Arc<dyn RegistrySource>> {
+        Ok(match &self.registry {
+            Some(registry) => Arc::clone(registry),
+            None => Arc::new(match config {
+                Some(config) => RegistryClient::from_toml(config)?,
+                None => RegistryClient::default(),
+            }),
+        })
+    }
+}
+
+/// Store bound [`DeploymentBuilder::build`] requires; every deployment store
+/// context ([`StoreCtx`]) satisfies it.
 pub trait LinkStore: WasiView + HasChain + 'static {}
 
 impl<T: WasiView + HasChain + 'static> LinkStore for T {}
@@ -304,8 +339,14 @@ impl<T: WasiView> Deployment<T> {
     /// Defaults to [`FirstArgSelector`] — the runtime core's "first call argument is the
     /// identity" strategy. Chainable.
     #[cfg(feature = "link")]
-    pub fn selector(&mut self, selector: impl GuestSelector) -> &mut Self {
-        self.selector = Arc::new(selector);
+    pub fn selector(&mut self, selector: impl GuestSelector) -> &mut Self
+    where
+        T: HasChain,
+    {
+        // The seam holds only selector + policy until assembly, so rebuilding
+        // it here loses nothing.
+        self.seam =
+            Arc::new(InProcessLinks::new(Arc::new(selector), ChainPolicy::from(&self.options)));
         self
     }
 
@@ -365,23 +406,14 @@ impl<T: WasiView> Deployment<T> {
     ///
     /// Returns an error if a relayed import cannot be polyfilled, a component
     /// cannot be pre-instantiated, or the registry cannot be assembled.
-    pub fn into_registry(self) -> Result<Registry<T>>
-    where
-        T: LinkStore,
-    {
-        #[cfg(feature = "link")]
-        let seam: Arc<dyn LinkSeam<T>> =
-            Arc::new(InProcessLinks::new(self.selector, ChainPolicy::from(&self.options)));
-        #[cfg(not(feature = "link"))]
-        let seam: Arc<dyn LinkSeam<T>> = Arc::new(NoLinks);
-
+    pub fn into_registry(self) -> Result<Registry<T>> {
         Registry::assemble(
             self.engine,
             self.linker,
             self.options,
             self.guests,
             self.routes,
-            seam,
+            self.seam,
             self.allow_empty,
         )
     }
@@ -405,44 +437,42 @@ impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
     /// Returns an error if the loader host cannot be linked, the registry
     /// cannot be assembled, the `registries` configuration does not parse, or
     /// a guest's linked exports cannot be served.
-    pub async fn assemble(
-        #[cfg_attr(
-            not(feature = "loader"),
-            expect(unused_mut, reason = "linking the loader host is the one mutation")
-        )]
-        mut self,
-        backends: B,
-    ) -> Result<Runtime<B>> {
+    pub async fn assemble(self, backends: B) -> Result<Runtime<B>> {
+        let deployment = self;
         #[cfg(feature = "loader")]
-        self.host::<WasiPlugins, B>().context("linking the guest loader host")?;
+        let (deployment, loader) = deployment.with_loader_host()?;
         #[cfg(feature = "loader")]
-        let Loader { on_demand, registry } = std::mem::take(&mut self.loader);
-        #[cfg(feature = "loader")]
-        let registry = match registry {
-            Some(registry) => registry,
-            None => Arc::new(match &self.registry_config {
-                Some(config) => RegistryClient::from_toml(config)?,
-                None => RegistryClient::default(),
-            }),
-        };
+        let registry = loader.registry(deployment.registry_config.as_deref())?;
 
         let runtime = Runtime::from_parts(RuntimeParts {
-            name: Arc::from(self.name.as_str()),
-            args: self.args.to_vec(),
-            mounts: Arc::clone(&self.mounts),
-            registry_config: self.registry_config.clone(),
-            level: self.level,
-            fallback: self.fallback,
-            command_guest: self.command_guest.clone(),
+            name: Arc::from(deployment.name.as_str()),
+            args: deployment.args.to_vec(),
+            mounts: Arc::clone(&deployment.mounts),
+            registry_config: deployment.registry_config.clone(),
+            level: deployment.level,
+            fallback: deployment.fallback,
+            command_guest: deployment.command_guest.clone(),
             backends,
-            registry: Arc::new(self.into_registry().context("assembling registry")?),
+            registry: Arc::new(deployment.into_registry().context("assembling registry")?),
         });
 
         #[cfg(feature = "loader")]
-        Plugins::install(&runtime, on_demand, registry).context("installing the guest loader")?;
+        Plugins::install(&runtime, loader.on_demand, registry)
+            .context("installing the guest loader")?;
 
         runtime.serve_links().await.context("serving the guests' linked exports")?;
         Ok(runtime)
+    }
+
+    // Link the loader host — here, beside WASI, so wasmtime wires it only into
+    // worlds that import `omnia:plugins/loader` — and take what `assemble`
+    // installs on it: the on-demand table and the registry its package
+    // sources are fetched from.
+    #[cfg(feature = "loader")]
+    fn with_loader_host(mut self) -> Result<(Self, Loader)> {
+        self.host::<WasiPlugins, B>().context("linking the guest loader host")?;
+        let loader = std::mem::take(&mut self.loader);
+        Ok((self, loader))
     }
 }
 
@@ -459,24 +489,17 @@ fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, Runt
     Ok((engine, linker, options))
 }
 
-// Initialize telemetry for the runtime at the run's level: a selected level
-// is the console filter outright; otherwise the process `RUST_LOG` stands
-// and `fallback` fills its absence.
-//
-// Telemetry initialization is idempotent (`Telemetry::build`): the first call
-// in the process — here or in an embedder — installs the subscriber and
-// providers, and later deployments reuse them.
-fn init_telemetry(name: &str, level: Option<LevelFilter>, fallback: LevelFilter) -> Result<()> {
-    let mut builder = Telemetry::new(name).fallback(fallback);
-    if let Some(level) = level {
-        builder = builder.filter(level.to_string());
-    }
+// The host's own OTLP exporters; `OTEL_GRPC_URL` overrides OpenTelemetry's
+// endpoint resolution.
+#[cfg(feature = "otlp")]
+fn otlp_exporters(name: &str) -> omnia_otlp::Exporters {
+    let exporters = omnia_otlp::Exporters::new(name);
     if let Ok(endpoint) = env::var("OTEL_GRPC_URL") {
-        builder = builder.endpoint(endpoint);
+        exporters.endpoint(endpoint)
     } else {
         tracing::debug!("OTEL_GRPC_URL unset; using OpenTelemetry defaults");
+        exporters
     }
-    builder.build().context("initializing telemetry")
 }
 
 #[cfg(test)]

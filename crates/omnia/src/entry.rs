@@ -22,45 +22,26 @@ where
     B: Backends,
     H: Wiring<B>,
 {
-    let builder = if options.is_direct() {
-        match direct::plan(options, env::args_os()) {
-            Ok(plan) => plan.into_builder(),
-            Err(error) => {
-                eprintln!("{error:#}");
-                return ExitCode::FAILURE;
-            }
+    match builder(options) {
+        Ok(builder) => crate::lifecycle::drive_main::<B, H>(builder).await,
+        Err(error) => {
+            eprintln!("{error:#}");
+            ExitCode::FAILURE
         }
-    } else {
-        match cli_plan(options) {
-            Ok(builder) => builder,
-            #[cfg(feature = "cli")]
+    }
+}
+
+// Core plans direct commands; the `cli` feature adds the `run` grammar for every other shape.
+fn builder(options: MainOptions) -> anyhow::Result<DeploymentBuilder> {
+    #[cfg(feature = "cli")]
+    if !options.is_direct() {
+        return match materialize(options, env::args_os(), env::var_os("OMNIA_MANIFEST")) {
+            Ok(builder) => Ok(builder),
             Err(omnia_cli::PlanError::Usage(error)) => error.exit(),
-            #[cfg(feature = "cli")]
-            Err(omnia_cli::PlanError::Fatal(error)) => {
-                eprintln!("{error:#}");
-                return ExitCode::FAILURE;
-            }
-            #[cfg(not(feature = "cli"))]
-            Err(error) => {
-                eprintln!("{error:#}");
-                return ExitCode::FAILURE;
-            }
-        }
-    };
-    crate::lifecycle::drive_main::<B, H>(builder).await
-}
-
-#[cfg(feature = "cli")]
-fn cli_plan(options: MainOptions) -> Result<DeploymentBuilder, omnia_cli::PlanError> {
-    materialize(options, env::args_os(), env::var_os("OMNIA_MANIFEST"))
-}
-
-#[cfg(not(feature = "cli"))]
-fn cli_plan(_: MainOptions) -> Result<DeploymentBuilder, anyhow::Error> {
-    Err(anyhow::anyhow!(
-        "this runtime was built without omnia's `cli` feature; compile the deployment in \
-         (command mode with a manifest) or enable the feature"
-    ))
+            Err(omnia_cli::PlanError::Fatal(error)) => Err(error),
+        };
+    }
+    Ok(direct::plan(options, env::args_os())?.into_builder())
 }
 
 #[cfg(feature = "cli")]

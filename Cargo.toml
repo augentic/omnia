@@ -87,9 +87,10 @@ insta = "1.48.0"
 moka = { version = "0.12.16", features = ["sync"] }
 # The OpenTelemetry stack is compiled into every guest, so the shared entries
 # carry no defaults and each consumer names the signals it uses.
-opentelemetry = { version = "0.32.0", default-features = false }
-opentelemetry-proto = "0.32.0"
-opentelemetry_sdk = { version = "0.32.1", default-features = false }
+opentelemetry = { version = "0.33.0", default-features = false }
+opentelemetry-otlp = { version = "0.33.0", default-features = false }
+opentelemetry-proto = "0.33.0"
+opentelemetry_sdk = { version = "0.33.0", default-features = false }
 parking_lot = "0.12.5"
 pastey = "0.2.3"
 prettyplease = "0.3.0"
@@ -115,7 +116,7 @@ tokio-util = { version = "0.7.19", features = ["codec"] }
 toml = { version = "1.1.6", default-features = false, features = ["parse", "serde", "std"] }
 tower = "0.5.3"
 tracing = "0.1.44"
-tracing-opentelemetry = { version = "0.33.0", default-features = false }
+tracing-opentelemetry = { version = "0.34.0", default-features = false }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["env-filter", "fmt"] }
 wasip3 = { version = "0.9.0", features = ["http-compat"] }
 wasm-pkg-client = "0.16.1"
@@ -138,6 +139,7 @@ omnia-core = { path = "crates/omnia-core", version = "0.37.0", default-features 
 omnia-guest-macros = { path = "crates/guest-macros", version = "0.37.0" }
 omnia-host-macros = { path = "crates/host-macros", version = "0.37.0" }
 omnia-link = { path = "crates/omnia-link", version = "0.37.0" }
+omnia-otlp = { path = "crates/omnia-otlp", version = "0.37.0" }
 omnia-plugin = { path = "crates/omnia-plugin", version = "0.37.0" }
 omnia-sdk = { path = "crates/omnia-sdk", version = "0.37.0", default-features = false }
 omnia-test = { path = "crates/omnia-test", version = "0.37.0", default-features = false }

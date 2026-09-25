@@ -30,7 +30,8 @@ cli = ["dep:omnia-cli"]
 # the loader host beside WASI — reachable only from worlds that import it —
 # and installs the on-demand table routed by the deployment's `registries`;
 # without it, a manifest declaring `registries` or an `on_demand` guest is
-# refused at startup.
+# refused at startup. A loaded guest is raw wasm or `omnia compile` output;
+# compiling the former needs `jit`.
 loader = ["dep:omnia-plugin"]
 
 # Enables guest→guest dispatch (the `omnia-link` crate): every import a guest
@@ -39,13 +40,16 @@ loader = ["dep:omnia-plugin"]
 # deployment fails at boot.
 link = ["dep:omnia-link"]
 
-# Enables just-in-time wasm to machine code compilation.
+# Enables just-in-time wasm to machine code compilation. Raw `.wasm` guests
+# and `omnia::compile` exist only with it; without it every guest, at boot or
+# on demand, is a pre-compiled `omnia compile` artifact.
 jit = ["omnia-core/jit", "omnia-cli?/jit"]
 
-# Enables the OTLP (gRPC) span and metric exporters. Without it, `Telemetry`
-# still installs the fmt/`EnvFilter` subscriber, while `telemetry::flush` and
-# `telemetry::resource` become no-ops.
-otlp = ["omnia-core/otlp"]
+# Enables the OTLP (gRPC) span and metric exporters for host telemetry (the
+# `omnia-otlp` crate, re-exported as `omnia::otlp`). Without it,
+# `SubscriberBuilder` still installs the console fmt/`EnvFilter` subscriber
+# and `OTEL_GRPC_URL` is ignored.
+otlp = ["dep:omnia-otlp"]
 
 # Enables memory protection keys (MPK) support in the pooling allocator. MPK
 # only functions on Linux/x86_64; elsewhere it compiles but is inert
@@ -66,6 +70,7 @@ omnia-cli = { workspace = true, optional = true }
 omnia-core.workspace = true
 omnia-host-macros.workspace = true
 omnia-link = { workspace = true, optional = true }
+omnia-otlp = { workspace = true, optional = true }
 omnia-plugin = { workspace = true, optional = true }
 serde.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "time"] }
@@ -79,4 +84,4 @@ tokio = { workspace = true, features = ["macros", "rt"] }
 
 [[test]]
 name = "link"
-required-features = ["link"]
+required-features = ["link", "jit"]
