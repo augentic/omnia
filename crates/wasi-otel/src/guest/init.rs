@@ -6,10 +6,10 @@ use anyhow::{Context, Result};
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider as _;
 use tracing_opentelemetry::{MetricsLayer, layer as tracing_layer};
-use tracing_subscriber::filter::{Directive, filter_fn};
+use tracing_subscriber::filter::filter_fn;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{EnvFilter, Layer as _, Registry, reload};
+use tracing_subscriber::{EnvFilter, Layer as _, Registry};
 
 use crate::guest::generated::omnia::otel::{resource, types};
 use crate::guest::{metrics, tracing};
@@ -37,27 +37,6 @@ pub async fn scope<F: Future>(inner: impl FnOnce() -> F) -> F::Output {
     output
 }
 
-/// Set tracing filter `directives`.
-///
-/// `directives` is a `RUST_LOG` string (`info`, `my_guest=debug`). Valid
-/// environment directives are applied after it and so win where both select
-/// the same target.
-///
-/// # Errors
-///
-/// Returns an error if telemetry is not initialized, `directives` do not
-/// parse, or the filter cannot be reloaded.
-pub fn set_filter(directives: &str) -> Result<()> {
-    let rust_log = std::env::var("RUST_LOG").unwrap_or_default();
-    let env = rust_log.split(',').filter(|val| !val.is_empty()).filter_map(|val| {
-        val.parse::<Directive>().inspect_err(|err| eprintln!("ignoring `{val}`: {err}")).ok()
-    });
-    let filter = mute(env.fold(EnvFilter::builder().parse(directives)?, EnvFilter::add_directive));
-
-    let telemetry = telemetry().context("telemetry is not initialized")?;
-    telemetry.filter.reload(filter).context("issue reloading the filter")
-}
-
 /// Export buffered spans and recorded metrics to the host.
 ///
 /// Export failures are logged, not propagated. Telemetry must not affect
@@ -69,7 +48,6 @@ pub async fn flush() {
 }
 
 struct Telemetry {
-    filter: reload::Handle<EnvFilter, Registry>,
     spans: tracing::SpanBuffer,
     meters: metrics::MeterProvider,
     resource: types::Resource,
@@ -78,7 +56,7 @@ struct Telemetry {
 fn init() -> Result<Telemetry> {
     let resource = resource::resource();
 
-    let (filter_layer, filter) = reload::Layer::new(mute(EnvFilter::from_default_env()));
+    let filter_layer = mute(EnvFilter::from_default_env());
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_writer(std::io::stderr)
         .with_filter(filter_fn(|meta| !meta.is_span()));
@@ -102,7 +80,6 @@ fn init() -> Result<Telemetry> {
     global::set_meter_provider(meter_provider.clone());
 
     Ok(Telemetry {
-        filter,
         spans,
         meters: meter_provider,
         resource,

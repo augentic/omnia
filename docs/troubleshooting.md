@@ -118,7 +118,7 @@ A `runtime!` binary with `mode: command` and a compiled-in deployment is a [dire
 
 ### A direct-command binary logs nothing (or too much)
 
-One level governs the host console and every guest: a `-v`/`-q` flag in argv, else `RUST_LOG`, else the command-mode default `info` (see [Verbosity flags](reference/configuration.md#verbosity-flags)). Argv still reaches the guest verbatim, so a guest whose grammar does not flatten `omnia_sdk::api::command::Verbosity` rejects `-v` as an unknown flag *after* the host has applied the level — declare the flags. A bare run that logs too much has a process `RUST_LOG` set: `-q` overrides it, as does any flag. Guest tracing is the guest's own subscriber reading the `RUST_LOG` its WASI environment carries — the decided level; a guest that owns a flag of its own reloads its defaults with `omnia_wasi_otel::set_filter` after parsing argv, and that `RUST_LOG` still refines the reloaded defaults, so target the guest's own crate (`set_filter("my_guest=debug")`) when the flag must bite regardless.
+One level governs the host console and every guest: a `-v`/`-q` flag in argv, else `RUST_LOG`, else the command-mode default `info` (see [Verbosity flags](reference/configuration.md#verbosity-flags)). Argv still reaches the guest verbatim, so a guest whose grammar does not flatten `omnia_sdk::api::command::Verbosity` rejects `-v` as an unknown flag *after* the host has applied the level — declare the flags. A bare run that logs too much has a process `RUST_LOG` set: `-q` overrides it, as does any flag. Guest tracing is the guest's own subscriber reading the `RUST_LOG` its WASI environment carries — the decided level — so the verbosity flags are the one way to change what a guest logs.
 
 ## Model completions
 

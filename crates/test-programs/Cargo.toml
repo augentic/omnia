@@ -293,11 +293,6 @@ path = "programs/otel/axum_handler.rs"
 crate-type = ["cdylib"]
 
 [[example]]
-name = "otel_filter_reload"
-path = "programs/otel/filter_reload.rs"
-crate-type = ["cdylib"]
-
-[[example]]
 name = "otel_instrumented_handler"
 path = "programs/otel/instrumented_handler.rs"
 crate-type = ["cdylib"]

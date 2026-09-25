@@ -46,7 +46,7 @@ async fn handle(request: Request) -> Response {
 }
 ```
 
-Console output (events only, to stderr) follows `RUST_LOG`, defaulting to `error`; `set_filter` replaces those defaults at run time (valid `RUST_LOG` directives still apply on top) and `flush` exports on demand.
+Console output (events only, to stderr) follows the `RUST_LOG` the guest's WASI environment carries (the runtime sets it from its verbosity flags), defaulting to `error`; `flush` exports on demand.
 
 ## License
 

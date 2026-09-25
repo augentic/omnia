@@ -2323,7 +2323,6 @@ dependencies = [
  "omnia-core",
  "omnia-host-macros",
  "omnia-link",
- "omnia-otlp",
  "omnia-plugin",
  "serde",
  "test-programs",
@@ -2352,11 +2351,15 @@ dependencies = [
  "fromenv",
  "futures",
  "http",
+ "opentelemetry",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
  "pastey",
  "serde",
  "sha2 0.11.0",
  "tokio",
  "tracing",
+ "tracing-opentelemetry",
  "tracing-subscriber",
  "wasmtime",
  "wasmtime-wasi",
@@ -2392,19 +2395,6 @@ dependencies = [
  "omnia-core",
  "tracing",
  "wasmtime",
-]
-
-[[package]]
-name = "omnia-otlp"
-version = "0.37.0"
-dependencies = [
- "anyhow",
- "omnia-core",
- "opentelemetry",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
- "tracing",
- "tracing-opentelemetry",
 ]
 
 [[package]]
@@ -2674,7 +2664,6 @@ dependencies = [
  "omnia",
  "omnia-core",
  "omnia-guest-macros",
- "omnia-otlp",
  "omnia-test",
  "opentelemetry",
  "opentelemetry-proto",
@@ -2823,8 +2812,6 @@ dependencies = [
  "portable-atomic",
  "rand 0.9.5",
  "thiserror 2.0.20",
- "tokio",
- "tokio-stream",
 ]
 
 [[package]]

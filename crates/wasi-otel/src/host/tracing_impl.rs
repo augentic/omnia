@@ -21,7 +21,7 @@ impl<T> HostWithStore<T> for WasiOtel {
     async fn export(
         accessor: &Accessor<T, Self>, mut span_data: Vec<wasi::SpanData>,
     ) -> Result<(), wasi::Error> {
-        let Some(resource) = omnia_otlp::resource() else {
+        let Some(resource) = omnia_core::telemetry::resource() else {
             tracing::warn!("otel resource not initialized, skipping trace export");
             return Ok(());
         };

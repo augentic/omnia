@@ -24,7 +24,6 @@ tracing.workspace = true
 futures.workspace = true
 hex = "0.4.3"
 omnia-core.workspace = true
-omnia-otlp.workspace = true
 opentelemetry = { workspace = true, features = ["trace"] }
 opentelemetry-proto.workspace = true
 opentelemetry_sdk.workspace = true
