@@ -415,21 +415,23 @@ impl<T: WasiView> Deployment<T> {
 impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
     /// Assemble this deployment into a [`Runtime`]: the guest loader host
     /// joins the linked hosts, the registry pre-instantiates the boot guests,
-    /// the loader's on-demand table installs, then the serve side of every
-    /// guest's linked exports is wired.
+    /// the loader's grant installs, then the serve side of every guest's
+    /// linked exports is wired.
     ///
     /// The loader host is linked here, beside WASI, whenever omnia is built
     /// with the `loader` feature; wasmtime wires it only into worlds that
-    /// import `omnia:plugins/loader`. The table it serves is the manifest's
-    /// `on_demand` guests; their package sources are fetched through the
-    /// deployment's `registries` configuration unless
+    /// import `omnia:plugins/loader`. The grant it serves is the manifest's
+    /// `on_demand` guests as the table a declared load may name, the
+    /// deployment's read-only mounts as the roots a path load reads through,
+    /// and the `registries` configuration every package is fetched by unless
     /// [`registry_source`](Self::registry_source) selected a registry.
     ///
     /// # Errors
     ///
     /// Returns an error if the loader host cannot be linked, the registry
-    /// cannot be assembled, the `registries` configuration does not parse, or
-    /// a guest's linked exports cannot be served.
+    /// cannot be assembled, the `registries` configuration does not parse, a
+    /// writable mount shares or nests a read-only mount's directory, or a
+    /// guest's linked exports cannot be served.
     pub async fn assemble(self, backends: B) -> Result<Runtime<B>> {
         let deployment = self;
         #[cfg(feature = "loader")]
@@ -459,8 +461,8 @@ impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
 
     // Link the loader host — here, beside WASI, so wasmtime wires it only into
     // worlds that import `omnia:plugins/loader` — and take what `assemble`
-    // installs on it: the on-demand table and the registry its package
-    // sources are fetched from.
+    // installs on it: the on-demand table and the registry packages are
+    // fetched from; the mounts it reads paths through are the runtime's.
     #[cfg(feature = "loader")]
     fn with_loader_host(mut self) -> Result<(Self, Loader)> {
         self.host::<WasiPlugins, B>().context("linking the guest loader host")?;

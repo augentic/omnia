@@ -8,7 +8,9 @@ use anyhow::{Context as _, Result, bail};
 use futures::future::BoxFuture;
 use futures::{FutureExt as _, TryStreamExt as _};
 use omnia_core::Digest;
-use wasm_pkg_client::{Client, Config, ContentStream, PackageRef, Registry, Release, Version};
+use wasm_pkg_client::{
+    Client, Config, ContentStream, PackageRef, Registry, RegistryMapping, Release, Version,
+};
 
 use crate::error::LoadError;
 use crate::source::RegistrySource;
@@ -17,12 +19,15 @@ use crate::store::{ContentStore, NoStore, ReleaseStore};
 /// Registry acquisition using [wasm-pkg-client].
 ///
 /// Fetches exact `namespace:name@version` references only, verifying every
-/// result against the registry's content digest. The configuration alone
-/// routes a package — its `package_registry_overrides` entry, its
-/// namespace's `namespace_registries` entry, or the `default_registry` —
-/// and a package it routes nowhere is refused. The attached store is a byte
-/// cache and offline fallback — never the authority while the registry is
-/// reachable — so a failing store degrades a load, never refuses it.
+/// result against the registry's content digest. The configuration bounds
+/// where a package is fetched from: one it routes — by its
+/// `package_registry_overrides` entry, its namespace's
+/// `namespace_registries` entry, or the `default_registry` — is fetched from
+/// that registry alone, and a load naming another is refused; one it routes
+/// nowhere is fetched from the registry the load names, and refused when it
+/// names none. The attached store is a byte cache and offline fallback —
+/// never the authority while the registry is reachable — so a failing store
+/// degrades a load, never refuses it.
 ///
 /// [wasm-pkg-client]: https://github.com/bytecodealliance/wasm-pkg-tools
 pub struct RegistryClient<S = NoStore> {
@@ -74,24 +79,56 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
         }
     }
 
-    fn registry(&self, package: &PackageRef) -> Result<Registry, LoadError> {
-        self.config.resolve_registry(package).cloned().ok_or_else(|| {
-            LoadError::Refused(format!(
-                "no registry routes `{package}`: the deployment's `registries` routes neither the \
-                 `{}` namespace nor a default",
+    // The registry `package` is fetched from. The configuration's routing
+    // bounds the load: a package it routes is served by that registry alone,
+    // and one it routes nowhere by the registry the load names.
+    fn registry(
+        &self, package: &PackageRef, endpoint: Option<&str>,
+    ) -> Result<Registry, LoadError> {
+        let named = endpoint
+            .map(|endpoint| {
+                endpoint.parse::<Registry>().map_err(|error| {
+                    LoadError::Refused(format!(
+                        "registry `{endpoint}` is not a valid name: {error}"
+                    ))
+                })
+            })
+            .transpose()?;
+        match (self.config.resolve_registry(package), named) {
+            (Some(routed), Some(named)) if *routed != named => Err(LoadError::Refused(format!(
+                "`{package}` is routed to `{routed}` by the deployment's `registries`; it cannot \
+                 be fetched from `{named}`"
+            ))),
+            (Some(routed), _) => Ok(routed.clone()),
+            (None, Some(named)) => Ok(named),
+            (None, None) => Err(LoadError::Refused(format!(
+                "no registry routes `{package}`: the load names none, and the deployment's \
+                 `registries` routes neither the `{}` namespace nor a default",
                 package.namespace()
-            ))
-        })
+            ))),
+        }
+    }
+
+    // A client that fetches `package` from `registry`, whatever the
+    // configuration routes the package or its namespace to; loads are rare,
+    // so a fresh client per fetch beats caching machinery.
+    fn client(&self, package: &PackageRef, registry: &Registry) -> Client {
+        let mut config = self.config.clone();
+        config.set_package_registry_override(
+            package.clone(),
+            RegistryMapping::Registry(registry.clone()),
+        );
+        Client::new(config)
     }
 
     /// Resolve and fetch `package`, serving verified bytes from the store
     /// when possible.
-    async fn fetch(&self, package: &str) -> Result<Vec<u8>, LoadError> {
+    async fn fetch(&self, package: &str, endpoint: Option<&str>) -> Result<Vec<u8>, LoadError> {
         let (package_ref, version) =
             parse_package(package).map_err(|error| LoadError::Refused(format!("{error:#}")))?;
-        let registry = self.registry(&package_ref)?.to_string();
-        // Loads are rare, so a fresh client per fetch beats caching machinery.
-        let client = Client::new(self.config.clone());
+        let registry = self.registry(&package_ref, endpoint)?;
+        let client = self.client(&package_ref, &registry);
+        let registry = registry.to_string();
         let release =
             self.resolve_release(&client, &registry, package, &package_ref, &version).await?;
         let expected: Digest = release.content_digest.to_string().parse().map_err(|error| {
@@ -222,8 +259,10 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
 }
 
 impl<S: ContentStore + ReleaseStore> RegistrySource for RegistryClient<S> {
-    fn acquire<'a>(&'a self, package: &'a str) -> BoxFuture<'a, Result<Vec<u8>, LoadError>> {
-        self.fetch(package).boxed()
+    fn acquire<'a>(
+        &'a self, package: &'a str, endpoint: Option<&'a str>,
+    ) -> BoxFuture<'a, Result<Vec<u8>, LoadError>> {
+        self.fetch(package, endpoint).boxed()
     }
 }
 
@@ -310,8 +349,29 @@ mod tests {
     fn default_routes_nothing() {
         let client = RegistryClient::default();
         assert!(client.config.resolve_registry(&package("acme:tool")).is_none());
-        let error = client.registry(&package("acme:tool")).expect_err("refused");
+        let error = client.registry(&package("acme:tool"), None).expect_err("refused");
         assert!(matches!(error, LoadError::Refused(detail) if detail.contains("`acme` namespace")));
+    }
+
+    // The configuration bounds the load: an unrouted package takes the
+    // registry the load names, a routed one is served by its route alone.
+    #[test]
+    fn endpoint_precedence() {
+        let unrouted = RegistryClient::default();
+        let named = unrouted.registry(&package("acme:tool"), Some("ghcr.io")).expect("named");
+        assert_eq!(named.to_string(), "ghcr.io");
+        let error = unrouted.registry(&package("acme:tool"), Some("not a registry")).expect_err("");
+        assert!(matches!(error, LoadError::Refused(detail) if detail.contains("not a valid name")));
+
+        let routed = RegistryClient::from_toml("[namespace_registries]\nacme = \"acme.test\"\n")
+            .expect("a routed configuration parses");
+        let same = routed.registry(&package("acme:tool"), Some("acme.test")).expect("same route");
+        assert_eq!(same.to_string(), "acme.test");
+        let error = routed.registry(&package("acme:tool"), Some("ghcr.io")).expect_err("refused");
+        assert!(
+            matches!(&error, LoadError::Refused(detail) if detail.contains("routed to `acme.test`")),
+            "{error}"
+        );
     }
 
     // Malformed TOML fails the install, not the first load.

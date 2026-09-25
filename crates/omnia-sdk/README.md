@@ -115,7 +115,7 @@ The guest crate exposes trait-based abstractions for host capabilities. When com
 | `Identity` | Obtain access tokens from an identity provider. |
 | `TableStore` | Execute parameterized SQL queries and statements over `wasi:sql`. |
 | `Broadcast` | Send events over WebSocket channels. |
-| `Plugins` | Request guest loads through `omnia:plugins/loader`: name one of the deployment's declared guests and receive a typed `Plugin` handle once it is active. The `plugins` module carries the `Digest` type and typed refusals convertible into `Error`. |
+| `Plugins` | Request guest loads through `omnia:plugins/loader`: name a `Location` — one of the deployment's declared guests, a component path beneath one of its read-only mounts, or a registry package — with an optional `Digest` pin, and receive a typed `Plugin` handle once it is active. The `plugins` module carries the `Location` and `Digest` types and typed refusals convertible into `Error`. |
 | `BlobStore` / `BlobStoreExt` | Object storage. `BlobStore` is the ten primitives an implementor writes; `BlobStoreExt` (`has`, `delete_objects`, `clear`, `copy_object`, `move_object`) is derived for every `BlobStore` — one host call each on `wasm32`, composed from the primitives natively. |
 | `DocumentStore` | Document CRUD and filtered queries. |
 | `Model` | Prompt completions, with tool calls answered by a guest closure. A request with `check` set has the guest judge each candidate answer (`Ok` accepts, `Err(text)` is the correction the backend sends back to the model); `model::Question<T>` runs that exchange for a `Deserialize + JsonSchema` answer type and returns the accepted `T`. |

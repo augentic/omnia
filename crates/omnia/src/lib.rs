@@ -51,7 +51,7 @@ pub use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks, is_host};
 #[cfg(feature = "loader")]
 #[doc(inline)]
 pub use omnia_plugin::{
-    ContentStore, LoadError, NoStore, Plugin, PluginLoader, Plugins, RegistryClient,
+    ContentStore, LoadError, Location, NoStore, Plugin, PluginLoader, Plugins, RegistryClient,
     RegistrySource, ReleaseStore, WasiPlugins, WasiPluginsCtxView,
 };
 

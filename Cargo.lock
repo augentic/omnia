@@ -2402,6 +2402,7 @@ name = "omnia-plugin"
 version = "0.37.0"
 dependencies = [
  "anyhow",
+ "cap-std",
  "futures",
  "omnia",
  "omnia-core",

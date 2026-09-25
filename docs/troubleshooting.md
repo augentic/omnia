@@ -54,15 +54,23 @@ The embedder-path variant — `no deployment manifest supplied and OMNIA_MANIFES
 
 ### `no guest ... is declared by this deployment`
 
-A guest called `omnia:plugins/loader.load` with a name the manifest does not declare. The loader admits only `[[guest]]` entries (the macro's `guests:`); add one for the name, marked `on_demand = true` if it should load at first `load` rather than at boot. A guest cannot name a path or a package of its own — the deployment declares every source. A runtime built without omnia's `loader` feature has no loader at all: a guest importing it fails at instantiation, and a manifest declaring `registries` is refused at startup until the feature is enabled.
+A guest called `omnia:plugins/loader.load` with a `declared` name the manifest does not declare. A `declared` load names only `[[guest]]` entries (the macro's `guests:`); add one for the name, marked `on_demand = true` if it should load at first `load` rather than at boot — or, for a component the deployment does not declare, have the guest name its `path` beneath a read-only mount or its `registry` package instead. A runtime built without omnia's `loader` feature has no loader at all: a guest importing it fails at instantiation, and a manifest declaring `registries` is refused at startup until the feature is enabled.
 
 ### `no registry routes ...`
 
-An on-demand guest with a `source.package` (the macro's `package:`) loaded, but the `registries` configuration (`registries: include_str!("wasm-pkg.toml")` in the macro, `[registries] path` in a manifest) is absent or names neither a `default_registry` nor the package's namespace. Add one, or pin the package to its registry under `[package_registry_overrides]`.
+An on-demand guest with a `source.package` (the macro's `package:`) loaded, or a guest named a `registry` package of its own, but the `registries` configuration (`registries: include_str!("wasm-pkg.toml")` in the macro, `[registries] path` in a manifest) is absent or names neither a `default_registry` nor the package's namespace. Add one, pin the package to its registry under `[package_registry_overrides]`, or — for a package a guest names — have the load name its registry `endpoint`, which serves a namespace the configuration routes nowhere.
+
+### `... is routed to ... by the deployment's registries; it cannot be fetched from ...`
+
+A guest named a `registry` package with an `endpoint` other than the registry the deployment's `registries` routes its namespace to. The deployment's routing outranks the load's: drop the endpoint, or route the namespace to that registry in the configuration.
+
+### `path ... is beneath the writable mount ...`
+
+A guest named a component `path` beneath a mount the deployment marks `writable`. A component loads from a read-only mount alone — what a guest can write, it cannot run. Mount the code directory read-only and keep the guest's state under a mount of its own; the two may not share or nest directories (`writable mount ... shares its directory with the read-only mount ...` at startup).
 
 ### `... resolved to sha256:..., not its declared digest ...`
 
-The guest's bytes do not hash to the `digest` its `[[guest]]` entry pins. At boot this fails startup; on demand it refuses the load. Either the artifact changed under the deployment — rebuild it or restore the pinned one — or the pin is stale: an unpinned load reports the resolved digest on its handle, which is the value to commit.
+The guest's bytes do not hash to the `digest` its `[[guest]]` entry pins, or the one a `path` or `registry` load carried. At boot this fails startup; on demand it refuses the load. Either the artifact changed under the deployment — rebuild it or restore the pinned one — or the pin is stale: an unpinned load reports the resolved digest on its handle, which is the value to commit.
 
 ### `Address already in use` on startup
 

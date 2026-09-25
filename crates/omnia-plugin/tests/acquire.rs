@@ -1,6 +1,7 @@
 //! Acquisition over wasm-pkg-client's `local` backend: fresh-release-preferred
 //! resolution, the store as fallback and byte cache, poisoned entries,
-//! configuration routing, and unrouted packages — all offline.
+//! configuration routing, the registry a load names, and unrouted packages —
+//! all offline.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -127,7 +128,7 @@ async fn registry_fetch() {
     stage(registry.path(), PACKAGE, b"component bytes");
     let acquirer = registry_acquirer(registry.path()).cached(MemStore::default());
 
-    let bytes = acquirer.acquire(PACKAGE).await.expect("acquires");
+    let bytes = acquirer.acquire(PACKAGE, None).await.expect("acquires");
     assert_eq!(bytes, b"component bytes");
 }
 
@@ -140,7 +141,7 @@ async fn store_miss() {
 
     let digest = key(b"component bytes");
     assert!(store.content_of(&digest).is_none(), "the store starts empty");
-    acquirer.acquire(PACKAGE).await.expect("acquires");
+    acquirer.acquire(PACKAGE, None).await.expect("acquires");
     assert!(store.content_of(&digest).is_some(), "the store gains the digest-keyed entry");
 }
 
@@ -149,13 +150,13 @@ async fn fresh_over_warm() {
     let registry = TempDir::new().expect("registry dir");
     stage(registry.path(), PACKAGE, b"first bytes");
     let acquirer = registry_acquirer(registry.path()).cached(MemStore::default());
-    acquirer.acquire(PACKAGE).await.expect("warms the store");
+    acquirer.acquire(PACKAGE, None).await.expect("warms the store");
 
     // The registry re-publishes the same version with different content. A
     // release-record cache would keep serving the stored bytes; the fresh
     // resolution must win.
     stage(registry.path(), PACKAGE, b"second bytes");
-    let bytes = acquirer.acquire(PACKAGE).await.expect("re-acquires");
+    let bytes = acquirer.acquire(PACKAGE, None).await.expect("re-acquires");
     assert_eq!(bytes, b"second bytes", "the reachable registry is the authority");
 }
 
@@ -170,13 +171,13 @@ async fn network_failure_fallback() {
     let mut config = defaulting_to(UNROUTABLE_REGISTRY);
     add_local_registry(&mut config, UNROUTABLE_REGISTRY, registry.path());
     let warm = RegistryClient::new(config).cached(store.clone());
-    warm.acquire(PACKAGE).await.expect("warms the store");
+    warm.acquire(PACKAGE, None).await.expect("warms the store");
 
     // Same registry name and store, no backend mapping: resolution now dials
     // the closed port and fails as a network error, so the stored record and
     // content serve the load.
     let offline = RegistryClient::new(defaulting_to(UNROUTABLE_REGISTRY)).cached(store);
-    let bytes = offline.acquire(PACKAGE).await.expect("falls back");
+    let bytes = offline.acquire(PACKAGE, None).await.expect("falls back");
     assert_eq!(bytes, b"component bytes");
 }
 
@@ -185,7 +186,7 @@ async fn network_failure_no_record() {
     let acquirer =
         RegistryClient::new(defaulting_to(UNROUTABLE_REGISTRY)).cached(MemStore::default());
 
-    let error = acquirer.acquire(PACKAGE).await.expect_err("nothing stored to fall back to");
+    let error = acquirer.acquire(PACKAGE, None).await.expect_err("nothing stored to fall back to");
     assert!(
         matches!(&error, LoadError::Unavailable(detail) if detail.contains("resolving")),
         "resolution failure: {error:?}"
@@ -203,7 +204,7 @@ async fn unrouted_package() {
     add_local_registry(&mut config, DEFAULT_REGISTRY, registry.path());
     let acquirer = RegistryClient::new(config);
 
-    let error = acquirer.acquire(PACKAGE).await.expect_err("nothing routes the package");
+    let error = acquirer.acquire(PACKAGE, None).await.expect_err("nothing routes the package");
     assert!(
         matches!(&error, LoadError::Refused(detail) if detail.contains("no registry routes") && detail.contains("`test` namespace")),
         "refusal names the namespace: {error:?}"
@@ -216,12 +217,12 @@ async fn poisoned_store() {
     stage(registry.path(), PACKAGE, b"honest bytes");
     let store = MemStore::default();
     let acquirer = registry_acquirer(registry.path()).cached(store.clone());
-    acquirer.acquire(PACKAGE).await.expect("warms the store");
+    acquirer.acquire(PACKAGE, None).await.expect("warms the store");
 
     let digest = key(b"honest bytes");
     store.poison(&digest, b"poison");
 
-    let bytes = acquirer.acquire(PACKAGE).await.expect("a poisoned entry refetches");
+    let bytes = acquirer.acquire(PACKAGE, None).await.expect("a poisoned entry refetches");
     assert_eq!(bytes, b"honest bytes");
     let healed = store.content_of(&digest).expect("reading the store entry");
     assert_eq!(healed, b"honest bytes", "the refetch overwrites the poisoned entry");
@@ -241,15 +242,18 @@ async fn release_scoped() {
     add_local_registry(&mut first, DEFAULT_REGISTRY, first_root.path());
     let bytes = RegistryClient::new(first)
         .cached(store.clone())
-        .acquire(PACKAGE)
+        .acquire(PACKAGE, None)
         .await
         .expect("first acquires");
     assert_eq!(bytes, b"first registry bytes");
 
     let mut second = defaulting_to("second.test");
     add_local_registry(&mut second, "second.test", second_root.path());
-    let bytes =
-        RegistryClient::new(second).cached(store).acquire(PACKAGE).await.expect("second acquires");
+    let bytes = RegistryClient::new(second)
+        .cached(store)
+        .acquire(PACKAGE, None)
+        .await
+        .expect("second acquires");
     assert_eq!(bytes, b"second registry bytes");
 }
 
@@ -277,12 +281,70 @@ async fn config_routing() {
     add_local_registry(&mut config, "pinned.test", pinned_root.path());
     let acquirer = RegistryClient::new(config);
 
-    let unmapped = acquirer.acquire(PACKAGE).await.expect("default acquires");
+    let unmapped = acquirer.acquire(PACKAGE, None).await.expect("default acquires");
     assert_eq!(unmapped, b"default registry bytes", "an unmapped namespace falls to the default");
-    let namespaced = acquirer.acquire("acme:ledger@2.1.0").await.expect("acme acquires");
+    let namespaced = acquirer.acquire("acme:ledger@2.1.0", None).await.expect("acme acquires");
     assert_eq!(namespaced, b"acme registry bytes", "a mapped namespace routes past the default");
-    let pinned = acquirer.acquire("acme:pinned@1.0.0").await.expect("pinned acquires");
+    let pinned = acquirer.acquire("acme:pinned@1.0.0", None).await.expect("pinned acquires");
     assert_eq!(pinned, b"pinned registry bytes", "a package override beats its namespace");
+}
+
+// The registry a load names serves a namespace the configuration routes
+// nowhere, and gives way to the configuration's routing — namespace or
+// default — everywhere else: a load cannot re-route a package the deployment
+// has placed.
+#[tokio::test]
+async fn endpoint_named_on_load() {
+    let default_root = TempDir::new().expect("default registry dir");
+    stage(default_root.path(), PACKAGE, b"default registry bytes");
+    let acme_root = TempDir::new().expect("acme registry dir");
+    stage(acme_root.path(), "acme:ledger@2.1.0", b"acme registry bytes");
+    let named_root = TempDir::new().expect("named registry dir");
+    stage(named_root.path(), PACKAGE, b"named registry bytes");
+    stage(named_root.path(), "acme:ledger@2.1.0", b"named ledger bytes");
+    stage(named_root.path(), "other:tool@1.0.0", b"named tool bytes");
+
+    let mut unrouted = Config::from_toml("[namespace_registries]\nacme = \"acme.test\"\n")
+        .expect("routing config parses");
+    add_local_registry(&mut unrouted, "acme.test", acme_root.path());
+    add_local_registry(&mut unrouted, "named.test", named_root.path());
+    let acquirer = RegistryClient::new(unrouted);
+    let bytes = acquirer.acquire(PACKAGE, Some("named.test")).await.expect("named acquires");
+    assert_eq!(bytes, b"named registry bytes", "an unrouted namespace takes the named registry");
+    let routed = acquirer
+        .acquire("acme:ledger@2.1.0", Some("named.test"))
+        .await
+        .expect_err("a routed namespace is not re-routed");
+    assert!(
+        matches!(&routed, LoadError::Refused(detail) if detail.contains("routed to `acme.test`") && detail.contains("`named.test`")),
+        "refusal names both registries: {routed:?}"
+    );
+    let same = acquirer
+        .acquire("acme:ledger@2.1.0", Some("acme.test"))
+        .await
+        .expect("naming the routed registry agrees with it");
+    assert_eq!(same, b"acme registry bytes");
+    let malformed = acquirer
+        .acquire("other:tool@1.0.0", Some("not a registry"))
+        .await
+        .expect_err("a malformed registry name is refused");
+    assert!(
+        matches!(&malformed, LoadError::Refused(detail) if detail.contains("not a valid name")),
+        "refusal: {malformed:?}"
+    );
+
+    let mut defaulted = defaulting_to(DEFAULT_REGISTRY);
+    add_local_registry(&mut defaulted, DEFAULT_REGISTRY, default_root.path());
+    add_local_registry(&mut defaulted, "named.test", named_root.path());
+    let acquirer = RegistryClient::new(defaulted);
+    let error = acquirer
+        .acquire(PACKAGE, Some("named.test"))
+        .await
+        .expect_err("a default registry routes every namespace");
+    assert!(
+        matches!(&error, LoadError::Refused(detail) if detail.contains("routed to `registry.test`")),
+        "refusal: {error:?}"
+    );
 }
 
 #[tokio::test]
@@ -291,10 +353,10 @@ async fn cacheless() {
     stage(registry.path(), PACKAGE, b"first bytes");
     let acquirer = registry_acquirer(registry.path());
 
-    let first = acquirer.acquire(PACKAGE).await.expect("acquires");
+    let first = acquirer.acquire(PACKAGE, None).await.expect("acquires");
     assert_eq!(first, b"first bytes");
     stage(registry.path(), PACKAGE, b"second bytes");
-    let second = acquirer.acquire(PACKAGE).await.expect("re-acquires");
+    let second = acquirer.acquire(PACKAGE, None).await.expect("re-acquires");
     assert_eq!(second, b"second bytes", "nothing cached anywhere");
 }
 
@@ -305,12 +367,13 @@ async fn unversioned_and_missing() {
     let acquirer = registry_acquirer(registry.path());
 
     let unversioned =
-        acquirer.acquire("test:adapter").await.expect_err("exact version is mandatory");
+        acquirer.acquire("test:adapter", None).await.expect_err("exact version is mandatory");
     assert!(
         matches!(&unversioned, LoadError::Refused(detail) if detail.contains("exact version")),
         "refusal: {unversioned:?}"
     );
 
-    let absent = acquirer.acquire("test:absent@1.0.0").await.expect_err("an absent package fails");
+    let absent =
+        acquirer.acquire("test:absent@1.0.0", None).await.expect_err("an absent package fails");
     assert!(matches!(absent, LoadError::Refused(_)), "an authoritative miss refuses: {absent:?}");
 }

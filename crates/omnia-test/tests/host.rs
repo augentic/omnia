@@ -79,7 +79,7 @@ async fn overlay_mount() {
     let deployment = Deployment::from(production_plugins::manifest())
         .guest("requester", test_programs::PLUGINS_LOAD)
         .on_demand("plugin", test_programs::LINK_ECHOER)
-        .args(["plugin"])
+        .args(["declared", "plugin"])
         .mount(scratch.mount(false));
     let manifest = deployment.manifest().expect("inline base resolves");
     assert_eq!(
@@ -185,7 +185,7 @@ async fn on_demand_guest() {
     let status = Deployment::new()
         .guest("requester", test_programs::PLUGINS_LOAD)
         .on_demand("plugin", test_programs::LINK_ECHOER)
-        .args(["plugin"])
+        .args(["declared", "plugin"])
         .run(Backends::defaults().await, |deployment| {
             deployment.host::<WasiOtel, Backends>()?;
             Ok(())
