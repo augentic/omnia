@@ -38,8 +38,6 @@ static SETTLED: Mutex<bool> = Mutex::new(false);
 // the providers, it lives for the rest of the process.
 static PROVIDERS: OnceLock<Providers> = OnceLock::new();
 
-const UNKNOWN: &str = "unknown";
-
 /// Builder for the host's telemetry: the `tracing` subscriber with OTLP
 /// exporters beneath it.
 pub struct Telemetry {
@@ -103,13 +101,6 @@ impl Telemetry {
     /// Installs the subscriber as the process's global `tracing` subscriber
     /// and publishes the OpenTelemetry providers process-wide.
     ///
-    /// The first call in the process installs them; later calls are no-ops
-    /// that reuse them (this builder's configuration is ignored), so
-    /// embedders and the runtime can each initialize without coordinating.
-    /// An already-set subscriber (an embedder's own tracing setup) is
-    /// tolerated: theirs stays, omnia's exporters are skipped, and the
-    /// runtime keeps running.
-    ///
     /// # Errors
     ///
     /// Returns an error if the filter directives do not parse or an exporter
@@ -121,19 +112,14 @@ impl Telemetry {
         }
 
         let filter_layer = filter(self.filter.as_deref(), self.fallback, rust_log().as_deref())?;
-        // Console tracing goes to stderr: stdout belongs to the guest's
-        // semantic output (command mode pipes and JSON envelopes must stay
-        // clean of log lines).
+        // Console tracing goes to stderr: stdout belongs to the guest's output.
         let fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
 
         let providers = Providers::build(&self.name, self.endpoint.as_deref())?;
         let tracer = providers.tracer.tracer(self.name);
 
         // Publish the providers only once the subscriber that references
-        // them is installed: a build that yields to an already-set
-        // subscriber must not leave orphaned globals. Either way the process
-        // is settled, so later builds short-circuit instead of retrying and
-        // re-warning.
+        // them is installed.
         match Registry::default()
             .with(filter_layer)
             .with(fmt_layer)
@@ -152,18 +138,14 @@ impl Telemetry {
     }
 }
 
-// The process's `RUST_LOG`, read once per build so `filter` stays pure over
-// its inputs.
+// The process's `RUST_LOG`, read once per build so `filter`.
 fn rust_log() -> Option<String> {
     env::var("RUST_LOG").ok()
 }
 
 // The subscriber's filter: explicit `directives` when given, else the
 // `rust_log` directives with `fallback` as the level an unset variable falls
-// back to, so host warnings (a mount that failed to preopen) reach the
-// console without a hand-written filter. Every filter carries the
-// noisy-dependency mutes so the output stays readable without a hand-written
-// suffix.
+// back to.
 fn filter(
     directives: Option<&str>, fallback: LevelFilter, rust_log: Option<&str>,
 ) -> Result<EnvFilter> {
@@ -238,7 +220,7 @@ fn resource_for(name: &str) -> Resource {
             KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
             KeyValue::new(
                 "service.instance.id",
-                env::var("HOSTNAME").unwrap_or_else(|_| UNKNOWN.to_string()),
+                env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string()),
             ),
             KeyValue::new("telemetry.sdk.name", "opentelemetry"),
             KeyValue::new("instrumentation.provider", "opentelemetry"),
@@ -254,9 +236,7 @@ fn flush_providers(tracer: &SdkTracerProvider, meter: &SdkMeterProvider) {
 }
 
 // Report a flush failure without panicking; a provider that is already shut
-// down has nothing left to flush. The report is DEBUG, not WARN: a
-// collectorless command-mode run fails its flush at every exit, and that is
-// a deployment fact, not a warning for the console.
+// down has nothing left to flush.
 fn settle(signal: &str, result: OTelSdkResult) {
     match result {
         Ok(()) | Err(OTelSdkError::AlreadyShutdown) => {}
@@ -266,11 +246,7 @@ fn settle(signal: &str, result: OTelSdkResult) {
 
 /// Flush batched telemetry to the exporters.
 ///
-/// A no-op when telemetry was never installed. This force-flushes rather
-/// than shutting down, so export continues afterwards and repeated flushes
-/// are safe — the runtime calls it at the end of every drive so queued spans
-/// and metrics survive fast command-mode exits; embedders driving work
-/// themselves should call it before the process exits.
+/// A no-op when telemetry was never installed.
 pub fn flush() {
     if let Some(providers) = PROVIDERS.get() {
         flush_providers(&providers.tracer, &providers.meter);
