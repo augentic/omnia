@@ -44,12 +44,12 @@ The runtime is built around a set of traits that allow services to be plugged in
 - **Macros:** `runtime!`
 - **Lifecycle:** `run` — takes a built `Deployment`, assembles the `Runtime` (installing epoch interruption, pool-metric sampling, and the guest loader's policy, and serving every guest's linked exports), then drives command mode or the trigger servers
 - **Runtime + store:** `Runtime`, `RuntimeParts`, `Wiring`, `StoreCtx`, `StoreBase`, `Host`, `Server`, `Backend`, `FromEnv`, `HasLimits`, `Dispatcher`, `FutureResult`
-- **Registry pipeline:** `Manifest` (with `GuestEntry`, `Mount`, `RegistryConfig`, `SourceSpec`, route/transport types), `DeploymentBuilder`, `Deployment`, `Registry`, `Guest`, `GuestId`, `RuntimeOptions`
+- **Registry pipeline:** `Manifest` (with `GuestEntry`, `Mount`, `RegistryConfig`, `SourceSpec`, route/transport types), `Source` (an entry resolved for loading, at boot or on demand), `DeploymentBuilder`, `Deployment`, `Registry`, `Guest`, `GuestId`, `RuntimeOptions`, `CompileOptions`
 - **Trigger routing (host servers):** `RouteTable` + `MatchStrategy` (aliased `HttpRoutes`/`PatternRoutes`/`CliRoutes`), `Routes`, `Resolver`, `TriggerRouter`
 - **Guest-to-guest dispatch (`link` feature):** `GuestSelector`, `FirstArgSelector`, `InProcessLinks`, and the `is_host` namespace predicate; every import a guest makes outside the runtime's own `wasi:`/`omnia:` namespaces is relayed to the guest exporting it, nothing declaring the seam
 - **Tracing subscriber:** `SubscriberBuilder` (console logging, plus the layer seam exporters attach through); `otlp::Exporters`, `otlp::flush`, `otlp::resource` (`otlp` feature)
 - **CLI:** `Cli`, `Command`, `Parser` (`cli` feature)
-- **Guest loader (`omnia:plugins/loader`, `loader` feature):** `WasiPlugins`, `Plugins`, `PluginLoader`, the `OnDemand`/`Origin` table of declared guests, the `RegistryClient` acquirer with its `RegistrySource` seam, the `ContentStore`/`ReleaseStore` cache traits, and `Deployment::registry_source` for a custom registry; `RegistryConfig` is always available as manifest data, and a deployment declaring `registries` requires the feature
+- **Guest loader (`omnia:plugins/loader`, `loader` feature):** `WasiPlugins`, `Plugins`, `PluginLoader`, the on-demand `Source` table of declared guests, the `RegistryClient` acquirer with its `RegistrySource` seam, the `ContentStore`/`ReleaseStore` cache traits, and `Deployment::registry_source` for a custom registry; `RegistryConfig` is always available as manifest data, and a deployment declaring `registries` requires the feature
 - **Signature vocabulary:** `anyhow` (`omnia::anyhow::Result`) because `Backend`, `Wiring`, and the generated runtime module speak it, and `futures` (`omnia::futures::future::BoxFuture`) because the loader store and acquirer seams return it
 
 Most deployments only touch the `runtime!` macro; a hand-written runtime instead implements [`Wiring`], builds a `Deployment`, and calls `run`.
@@ -60,7 +60,7 @@ Most deployments only touch the `runtime!` macro; a hand-written runtime instead
 - **`jit`** (default): Enables Cranelift JIT compilation, allowing you to run `.wasm` files directly. Disable this to only support pre-compiled `.bin` components (useful for faster startup in production).
 - **`otlp`** (default): Enables OTLP span and metric export for host telemetry (the `omnia-otlp` crate, re-exported as `omnia::otlp`). Without it the console subscriber still installs and `OTEL_GRPC_URL` is ignored.
 - **`link`:** Enables guest-to-guest dispatch (the `omnia-link` crate): every import outside the runtime's own namespaces is relayed to the guest exporting it. Without it such an import is unresolved and the deployment fails at boot.
-- **`loader`:** Enables the guest loader (`omnia:plugins/loader`). With it, `Deployment::assemble` links the loader host beside WASI — worlds that do not import it never see it — and installs the manifest's `on_demand` guests as the table a `load(name)` may name, their package sources routed by the deployment's `registries`; a deployment declaring `registries` requires it. Implies `jit`: loaded guests are raw wasm.
+- **`loader`:** Enables the guest loader (`omnia:plugins/loader`). With it, `Deployment::assemble` links the loader host beside WASI — worlds that do not import it never see it — and installs the manifest's `on_demand` guests as the table a `load(name)` may name, their package sources routed by the deployment's `registries`; a deployment declaring `registries` requires it. A loaded guest is raw wasm or `omnia compile` output; compiling the former needs `jit`.
 
 ## Configuration
 

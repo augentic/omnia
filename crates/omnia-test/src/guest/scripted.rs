@@ -1,6 +1,6 @@
 //! The scripted pair: a FIFO `Model` and a keyed `Plugins` loader.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::future::{Future, ready};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Mutex};
@@ -271,14 +271,12 @@ pub fn function_tools(request: &Request) -> Vec<&Function> {
 /// recorded.
 ///
 /// Keyed rather than FIFO because the loader contract is per name: a load
-/// of a name with a scripted refusal fails with it; a name marked
-/// [`unhashed`] attests with no digest, as the host does for a guest whose
-/// bytes it never hashed; otherwise the load resolves to the digest scripted
-/// for the name, the loader-wide default set by [`defaulting`], or a
-/// deterministic per-name placeholder. Every name loads unless scripted
-/// otherwise — the deployment's allow-list is the host's to enforce.
+/// of a name with a scripted refusal fails with it; otherwise the load
+/// resolves to the digest scripted for the name, the loader-wide default set
+/// by [`defaulting`], or a deterministic per-name placeholder. Every name
+/// loads unless scripted otherwise — the deployment's allow-list is the
+/// host's to enforce.
 ///
-/// [`unhashed`]: Self::unhashed
 /// [`defaulting`]: Self::defaulting
 ///
 /// ```
@@ -302,7 +300,6 @@ struct LoaderInner {
     digests: Mutex<BTreeMap<String, Digest>>,
     default: Mutex<Option<Digest>>,
     refusals: Mutex<BTreeMap<String, plugins::Error>>,
-    unhashed: Mutex<BTreeSet<String>>,
     loads: Mutex<Vec<String>>,
 }
 
@@ -342,18 +339,6 @@ impl ScriptedLoader {
         self
     }
 
-    /// Attests the name `name` with no digest, as the host does for a guest
-    /// whose bytes it never hashed.
-    ///
-    /// # Panics
-    ///
-    /// Panics if a lock is poisoned.
-    #[must_use]
-    pub fn unhashed(self, name: impl Into<String>) -> Self {
-        self.inner.unhashed.lock().expect("unhashed lock").insert(name.into());
-        self
-    }
-
     /// Every name loaded, in call order.
     ///
     /// # Panics
@@ -369,9 +354,6 @@ impl ScriptedLoader {
         if let Some(refusal) = self.inner.refusals.lock().expect("refusals lock").get(name) {
             return Err(refusal.clone());
         }
-        if self.inner.unhashed.lock().expect("unhashed lock").contains(name) {
-            return Ok(Plugin::new(name, None));
-        }
         let resolved = self
             .inner
             .digests
@@ -381,7 +363,7 @@ impl ScriptedLoader {
             .cloned()
             .or_else(|| self.inner.default.lock().expect("default lock").clone())
             .unwrap_or_else(|| placeholder_digest(name));
-        Ok(Plugin::new(name, Some(resolved)))
+        Ok(Plugin::new(name, resolved))
     }
 }
 

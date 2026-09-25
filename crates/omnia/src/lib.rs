@@ -1,6 +1,5 @@
 #![doc = include_str!("../README.md")]
 #![cfg(not(target_arch = "wasm32"))]
-#![allow(unsafe_code)] // `DeploymentBuilder::build_trusted` and `Source::artifact`
 
 // The embedder facade: the runtime spine (`omnia-core`), guest→guest dispatch
 // (`omnia-link`, behind the `link` feature), the guest loader
@@ -35,13 +34,13 @@ pub use futures;
 pub use omnia_cli::{Cli, Command, Parser};
 #[doc(inline)]
 pub use omnia_core::{
-    AdmitError, Backend, ChainCtx, ChainPolicy, CliRoutes, Digest, Dispatcher, ExitStatus,
-    Extensions, FromEnv, FutureResult, Guest, GuestArtifact, GuestId, HasChain, HasDispatcher,
+    AdmitError, Backend, ChainCtx, ChainPolicy, CliRoutes, CompileOptions, Digest, Dispatcher,
+    ExitStatus, Extensions, FromEnv, FutureResult, Guest, GuestId, HasChain, HasDispatcher,
     HasExtensions, HasLimits, HasMounts, HasTable, Host, HostCtx, HttpBorrow, HttpCtx, HttpRoutes,
     LevelFilter, LinkSeam, MountRegistry, NoLinks, NoOptions, PatternRoutes, Provides, Proxy,
-    Registry, ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts, Server, StoreBase,
-    StoreConfig, StoreCtx, StoreFactory, StoreView, SubscriberBuilder, TriggerRouter, WeakRuntime,
-    get_cloned, host_error, serve_links, subscriber, wasi_view,
+    Registry, ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts, Server, Source,
+    SourceSpec, StoreBase, StoreConfig, StoreCtx, StoreFactory, StoreView, SubscriberBuilder,
+    TriggerRouter, WeakRuntime, get_cloned, host_error, serve_links, subscriber, wasi_view,
 };
 #[doc(hidden)]
 pub use omnia_core::{pastey, tokio, wasmtime, wasmtime_wasi};
@@ -56,13 +55,13 @@ pub use omnia_otlp as otlp;
 #[cfg(feature = "loader")]
 #[doc(inline)]
 pub use omnia_plugin::{
-    ContentStore, LoadError, NoStore, OnDemand, Origin, Plugin, PluginLoader, Plugins,
-    RegistryClient, RegistrySource, ReleaseStore, WasiPlugins, WasiPluginsCtxView,
+    ContentStore, LoadError, NoStore, Plugin, PluginLoader, Plugins, RegistryClient,
+    RegistrySource, ReleaseStore, WasiPlugins, WasiPluginsCtxView,
 };
 
 pub use self::deployment::{
     Deployment, DeploymentBuilder, GuestEntry, GuestRoutes, LinkStore, Manifest, Mount,
-    RegistryConfig, SourceSpec, Transport, TransportKind,
+    RegistryConfig, Transport, TransportKind,
 };
 #[doc(hidden)]
 pub use self::entry::{MainOptions, ManifestSource, main};

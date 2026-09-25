@@ -52,12 +52,12 @@ path=<host-path>[,name=<guest-name>][,writable]
 Ahead-of-time compile a `wasm32-wasip2` component to a serialized wasmtime component (`.bin`) for faster startup:
 
 ```bash
-<runtime> compile <wasm> [-o <output>]
+<runtime> compile <wasm> [-o <output>] [-t <triple>]
 ```
 
-Without `-o`, the serialized component is written to **stdout** (redirect it: `<runtime> compile guest.wasm > guest.bin`). With `-o`, the value may be a file path (written exactly there, parent directories created) or an existing directory (the output lands inside it as `<input-stem>.bin`). Compile-affecting runtime options (fuel metering, memory reservation, branch hinting) must match between compile time and run time. That settings match is a compatibility check, not an authenticity check: a `.bin` is native code, and every path the CLI loads one from is a trusted operator input (see the [security model](../security-model.md)).
+Without `-o`, the serialized component is written to **stdout** (redirect it: `<runtime> compile guest.wasm > guest.bin`). With `-o`, the value may be a file path (written exactly there, parent directories created) or an existing directory (the output lands inside it as `<input-stem>.bin`). `-t` names the target triple the artifact runs on (`aarch64-unknown-linux-gnu`, say) for cross-compiling; unset, the artifact is for the host. The compile-affecting settings are an explicit argument of the library call — `omnia::compile::compile(&wasm, output, target, &CompileOptions)` — and the runtime that loads the artifact must run under the same ones: `CompileOptions::default()` matches a runtime whose environment sets none of them, and `RuntimeOptions::load_env()?.compile_options()` matches the environment the compile runs in. That settings match is a compatibility check, not an authenticity check: a `.bin` is native code, and every path the CLI loads one from is a trusted operator input (see the [security model](../security-model.md)).
 
-The generated `runtime!` `main` does not dispatch `compile`; call `omnia::compile` from a custom `main` to expose it.
+The generated `runtime!` `main` does not dispatch `compile`; call `omnia::compile::compile` from a custom `main` to expose it.
 
 ## Exit status (command mode)
 

@@ -46,7 +46,7 @@ serde.workspace = true
 sha2.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["ansi", "smallvec"] }
-tokio = { workspace = true, features = ["io-util", "macros", "rt", "sync", "time"] }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt", "sync", "time"] }
 wasmtime = { workspace = true, features = ["runtime"] }
 wasmtime-wasi.workspace = true
 wasmtime-wasi-http.workspace = true

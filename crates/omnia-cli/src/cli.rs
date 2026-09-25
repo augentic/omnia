@@ -62,10 +62,15 @@ pub enum Command {
         /// The path to the wasm file to compile.
         wasm: PathBuf,
 
-        /// An optional output directory. If not set, the compiled component
-        /// will be written to the same location as the input file.
+        /// Where to write the artifact: a file path, or an existing directory
+        /// the artifact lands in as `<input stem>.bin`. Without it, the
+        /// artifact is written to stdout.
         #[arg(short, long)]
         output: Option<PathBuf>,
+
+        /// The target triple the artifact runs on; the host's when unset.
+        #[arg(short, long)]
+        target: Option<String>,
     },
 }
 

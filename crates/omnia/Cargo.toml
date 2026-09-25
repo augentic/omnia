@@ -30,8 +30,9 @@ cli = ["dep:omnia-cli"]
 # the loader host beside WASI — reachable only from worlds that import it —
 # and installs the on-demand table routed by the deployment's `registries`;
 # without it, a manifest declaring `registries` or an `on_demand` guest is
-# refused at startup. Implies `jit`: loaded guests are raw wasm.
-loader = ["dep:omnia-plugin", "jit"]
+# refused at startup. A loaded guest is raw wasm or `omnia compile` output;
+# compiling the former needs `jit`.
+loader = ["dep:omnia-plugin"]
 
 # Enables guest→guest dispatch (the `omnia-link` crate): every import a guest
 # makes outside the runtime's own namespaces (`wasi:`, `omnia:`) is relayed to
@@ -39,9 +40,9 @@ loader = ["dep:omnia-plugin", "jit"]
 # deployment fails at boot.
 link = ["dep:omnia-link"]
 
-# Enables just-in-time wasm to machine code compilation. Raw `.wasm` guests,
-# `GuestArtifact::wasm`, `Runtime::admit`, and `omnia::compile` exist only
-# with it; without it every guest is a pre-compiled `omnia compile` artifact.
+# Enables just-in-time wasm to machine code compilation. Raw `.wasm` guests
+# and `omnia::compile` exist only with it; without it every guest, at boot or
+# on demand, is a pre-compiled `omnia compile` artifact.
 jit = ["omnia-core/jit", "omnia-cli?/jit"]
 
 # Enables the OTLP (gRPC) span and metric exporters for host telemetry (the

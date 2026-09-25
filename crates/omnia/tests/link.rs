@@ -11,9 +11,7 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::component::Val;
-use omnia::{
-    ChainCtx, DeploymentBuilder, GuestArtifact, GuestEntry, GuestId, Manifest, Runtime, StoreCtx,
-};
+use omnia::{ChainCtx, DeploymentBuilder, GuestEntry, GuestId, Manifest, Runtime, StoreCtx};
 
 // Every guest program in `crates/test-programs` must have a matching test
 // here; a new program without one fails to compile.
@@ -155,7 +153,7 @@ async fn link_full_registered_late() {
             .expect("deployment boots");
 
     let wasm = std::fs::read(test_programs::LINK_FULL).expect("reading full guest artifact");
-    runtime.register("full", GuestArtifact::wasm(wasm)).await.expect("late registration");
+    runtime.register("full", wasm).await.expect("late registration");
 
     let sync = call(&runtime, "full", "poke", "late").await.expect("sync dispatch");
     assert_eq!(sync, "echoer pong: late");

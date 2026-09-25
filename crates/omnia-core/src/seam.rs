@@ -12,10 +12,10 @@ use anyhow::Result;
 use wasmtime::component::{Component, Linker};
 use wasmtime::{Engine, Store};
 
-use crate::artifact::LoadedGuest;
 use crate::chain::ChainCtx;
 use crate::host::FutureResult;
 use crate::registry::{Guest, GuestId};
+use crate::source::LoadedGuest;
 
 /// Builds a fresh, fully configured guest store per served invocation, at the
 /// chain context the invocation runs at.

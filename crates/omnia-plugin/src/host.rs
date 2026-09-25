@@ -72,7 +72,7 @@ impl<T> loader::HostWithStore<T> for WasiPlugins {
         let plugin = plugins.load(&name).await?;
         Ok(loader::Plugin {
             id: plugin.id().to_string(),
-            digest: plugin.digest().map(|digest| digest.to_string()),
+            digest: plugin.digest().to_string(),
         })
     }
 }

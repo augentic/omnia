@@ -213,7 +213,7 @@ async fn loader_digest() {
     let loader = ScriptedLoader::default().digest("tool", digest("ab"));
     let plugin = loader.load("tool").await.expect("loads");
     assert_eq!(plugin.id(), "tool");
-    assert_eq!(plugin.digest(), Some(&digest("ab")));
+    assert_eq!(plugin.digest(), &digest("ab"));
     assert_eq!(loader.loads(), ["tool"]);
 }
 
@@ -234,8 +234,8 @@ async fn loader_placeholder() {
 #[tokio::test]
 async fn loader_defaulting() {
     let loader = ScriptedLoader::default().digest("tool", digest("ab")).defaulting(digest("ef"));
-    assert_eq!(loader.load("other").await.expect("loads").digest(), Some(&digest("ef")));
-    assert_eq!(loader.load("tool").await.expect("loads").digest(), Some(&digest("ab")));
+    assert_eq!(loader.load("other").await.expect("loads").digest(), &digest("ef"));
+    assert_eq!(loader.load("tool").await.expect("loads").digest(), &digest("ab"));
     assert_eq!(loader.loads(), ["other", "tool"]);
 }
 
@@ -245,14 +245,4 @@ async fn loader_scripted_refusal_wins() {
         .digest("tool", digest("ab"))
         .refuse("tool", plugins::Error::Unavailable("registry down".into()));
     assert_eq!(loader.load("tool").await, Err(plugins::Error::Unavailable("registry down".into())));
-}
-
-// An unhashed name attests with no digest whatever the default says.
-#[tokio::test]
-async fn loader_unhashed() {
-    let loader = ScriptedLoader::default().unhashed("intent").defaulting(digest("ef"));
-    let plugin = loader.load("intent").await.expect("attests");
-    assert_eq!(plugin.id(), "intent");
-    assert_eq!(plugin.digest(), None, "the default digest is for hashed loads");
-    assert_eq!(loader.loads(), ["intent"]);
 }
