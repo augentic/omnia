@@ -16,15 +16,16 @@
 //! compilation, and publication stay host-side.
 //!
 //! Everything loader lives here: the [`WasiPlugins`] host binding, the
-//! [`Plugins`] load path over the deployment's on-demand [`Source`] table and
-//! its mounts, and the registry seam. A [`SourceSpec::Package`] source is
-//! fetched by the [`RegistrySource`] the deployment installs — by default a
-//! [`RegistryClient`] routed by the deployment's `registries` configuration
-//! (the `runtime!` macro's `registries:`, a manifest's `[registries]`); a
-//! store behind it implements [`ContentStore`] and [`ReleaseStore`]. The
-//! runtime core keeps zero storage and network dependencies.
+//! [`Plugins`] load path over the runtime's first-use seam (a declared name)
+//! and the deployment's mounts (a path), and the registry client. A
+//! [`SourceSpec::Package`] source — the deployment's, at first use, or one a
+//! load names — is fetched by the [`RegistrySource`] the deployment installs
+//! — by default a [`RegistryClient`] routed by the deployment's `registries`
+//! configuration (the `runtime!` macro's `registries:`, a manifest's
+//! `[registries]`); a store behind it implements [`ContentStore`] and
+//! [`ReleaseStore`]. The runtime core keeps zero storage and network
+//! dependencies.
 //!
-//! [`Source`]: omnia_core::Source
 //! [`SourceSpec::Package`]: omnia_core::SourceSpec::Package
 //!
 //! Embedders — deployments and store implementors alike — reach all of this

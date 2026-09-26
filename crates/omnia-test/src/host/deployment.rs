@@ -10,8 +10,8 @@ use omnia_wasi_otel::WasiOtel;
 /// One command-mode deployment: guests, mounts, arguments, registries, and the tracing level.
 ///
 /// What guests call between themselves is read off their components,
-/// declared nowhere; `registries` is the routing an on-demand guest's
-/// package source is fetched through.
+/// declared nowhere; `registries` is the routing a guest's package source is
+/// fetched through.
 ///
 /// Built from nothing, or as an overlay on the manifest a production
 /// `runtime!` compiled in (`Deployment::from(runtime::manifest())`): the
@@ -20,17 +20,17 @@ use omnia_wasi_otel::WasiOtel;
 /// test serves the binary's `.` root from a scratch directory. Drive it
 /// through the generated wiring with [`run_with`](Self::run_with), or link
 /// hosts by hand with [`run`](Self::run); either way the guest loader is
-/// assembly's, serving the deployment's [`on_demand`](Self::on_demand)
-/// guests.
+/// assembly's, and a guest added as an [`entry`](Self::entry) loads at its
+/// first use.
 ///
 /// ```no_run
-/// use omnia::ExitStatus;
+/// use omnia::{ExitStatus, GuestEntry};
 /// use omnia_test::host::{Backends, Deployment};
 ///
 /// # async fn example(requester: &'static str, plugin: &'static str) -> anyhow::Result<()> {
 /// let status = Deployment::new()
 ///     .guest("requester", requester)
-///     .on_demand("plugin", plugin)
+///     .entry(GuestEntry::new("plugin", plugin))
 ///     .run(Backends::defaults().await, |_| Ok(()))
 ///     .await?;
 /// assert_eq!(status, ExitStatus::SUCCESS);
@@ -40,12 +40,21 @@ use omnia_wasi_otel::WasiOtel;
 #[derive(Clone, Debug, Default)]
 pub struct Deployment {
     base: Option<ManifestSource>,
-    guests: Vec<GuestEntry>,
+    guests: Vec<Entry>,
     command: Option<String>,
     mounts: Vec<Mount>,
     args: Vec<String>,
     registries: Option<RegistryConfig>,
     level: Option<LevelFilter>,
+}
+
+// A guest as the test declared it: one added through `guest` is read into
+// bytes when the manifest is built, so it loads at boot like the
+// `runtime!` macro's embedded guests; one added as built stays as it is.
+#[derive(Clone, Debug)]
+struct Entry {
+    entry: GuestEntry,
+    embed: bool,
 }
 
 impl From<ManifestSource> for Deployment {
@@ -64,23 +73,24 @@ impl Deployment {
         Self::default()
     }
 
-    /// Adds a guest under `name` from a component path or embedded bytes.
+    /// Adds a guest under `name` that loads at boot: a component path is
+    /// read when the manifest is built, so it stands in for the bytes a
+    /// `runtime!` embeds.
     #[must_use]
-    pub fn guest(self, name: impl Into<String>, source: impl Into<SourceSpec>) -> Self {
-        self.entry(GuestEntry::new(name, source))
+    pub fn guest(mut self, name: impl Into<String>, source: impl Into<SourceSpec>) -> Self {
+        self.guests.push(Entry {
+            entry: GuestEntry::new(name, source),
+            embed: true,
+        });
+        self
     }
 
-    /// Declares `name` for on-demand loading from a component path or
-    /// embedded bytes: admitted when a guest first `load`s it, not at boot.
-    #[must_use]
-    pub fn on_demand(self, name: impl Into<String>, source: impl Into<SourceSpec>) -> Self {
-        self.entry(GuestEntry::new(name, source).on_demand())
-    }
-
-    /// Adds a `[[guest]]` entry as built — a pinned or package source, say.
+    /// Adds a `[[guest]]` entry as built — a path, pinned, or package
+    /// source, say — which loads as its source decides: embedded bytes at
+    /// boot, a path or package at first use.
     #[must_use]
     pub fn entry(mut self, entry: GuestEntry) -> Self {
-        self.guests.push(entry);
+        self.guests.push(Entry { entry, embed: false });
         self
     }
 
@@ -115,8 +125,8 @@ impl Deployment {
         self
     }
 
-    /// The wasm-pkg configuration on-demand package sources are fetched
-    /// through, replacing the base manifest's.
+    /// The wasm-pkg configuration package sources are fetched through,
+    /// replacing the base manifest's.
     #[must_use]
     pub fn registries(mut self, config: impl Into<RegistryConfig>) -> Self {
         self.registries = Some(config.into());
@@ -139,15 +149,23 @@ impl Deployment {
     ///
     /// # Errors
     ///
-    /// Returns an error if a `manifest:` base manifest cannot be loaded.
+    /// Returns an error if a `manifest:` base manifest cannot be loaded, or
+    /// a [`guest`](Self::guest) path cannot be read.
     pub fn manifest(&self) -> Result<Manifest> {
         let base = self.base.clone().map(ManifestSource::into_manifest).transpose()?;
         let mut manifest = base.unwrap_or_default().mounts(self.mounts.iter().cloned());
         if let Some(registries) = &self.registries {
             manifest = manifest.registries(registries.clone());
         }
-        for guest in &self.guests {
-            manifest = manifest.guest(guest.clone());
+        for Entry { entry, embed } in &self.guests {
+            let mut entry = entry.clone();
+            if *embed && let SourceSpec::Path(path) = &entry.source {
+                let bytes = std::fs::read(path).with_context(|| {
+                    format!("reading guest `{}` from {}", entry.name, path.display())
+                })?;
+                entry.source = bytes.into();
+            }
+            manifest = manifest.guest(entry);
         }
         if let Some(command) = &self.command {
             for guest in &mut manifest.guests {
@@ -168,8 +186,8 @@ impl Deployment {
 
     /// Assembles the runtime by hand: builds the deployment, links the
     /// caller's hosts through `link`, and assembles — which links the guest
-    /// loader, installs the on-demand guests as its table, and serves every
-    /// guest's linked exports.
+    /// loader, tables the guests that load at first use, and serves every
+    /// boot guest's linked exports.
     ///
     /// # Errors
     ///

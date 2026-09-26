@@ -7,12 +7,11 @@ use std::io;
 use anyhow::{Context as _, Result, bail};
 use futures::future::BoxFuture;
 use futures::{FutureExt as _, TryStreamExt as _};
-use omnia_core::Digest;
+use omnia_core::{AcquireError, Digest};
 use wasm_pkg_client::{
     Client, Config, ContentStream, PackageRef, Registry, RegistryMapping, Release, Version,
 };
 
-use crate::error::LoadError;
 use crate::source::RegistrySource;
 use crate::store::{ContentStore, NoStore, ReleaseStore};
 
@@ -84,24 +83,24 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
     // and one it routes nowhere by the registry the load names.
     fn registry(
         &self, package: &PackageRef, endpoint: Option<&str>,
-    ) -> Result<Registry, LoadError> {
+    ) -> Result<Registry, AcquireError> {
         let named = endpoint
             .map(|endpoint| {
                 endpoint.parse::<Registry>().map_err(|error| {
-                    LoadError::Refused(format!(
+                    AcquireError::Refused(format!(
                         "registry `{endpoint}` is not a valid name: {error}"
                     ))
                 })
             })
             .transpose()?;
         match (self.config.resolve_registry(package), named) {
-            (Some(routed), Some(named)) if *routed != named => Err(LoadError::Refused(format!(
+            (Some(routed), Some(named)) if *routed != named => Err(AcquireError::Refused(format!(
                 "`{package}` is routed to `{routed}` by the deployment's `registries`; it cannot \
                  be fetched from `{named}`"
             ))),
             (Some(routed), _) => Ok(routed.clone()),
             (None, Some(named)) => Ok(named),
-            (None, None) => Err(LoadError::Refused(format!(
+            (None, None) => Err(AcquireError::Refused(format!(
                 "no registry routes `{package}`: the load names none, and the deployment's \
                  `registries` routes neither the `{}` namespace nor a default",
                 package.namespace()
@@ -126,16 +125,16 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
 
     /// Resolve and fetch `package`, serving verified bytes from the store
     /// when possible.
-    async fn fetch(&self, package: &str, endpoint: Option<&str>) -> Result<Vec<u8>, LoadError> {
+    async fn fetch(&self, package: &str, endpoint: Option<&str>) -> Result<Vec<u8>, AcquireError> {
         let (package_ref, version) =
-            parse_package(package).map_err(|error| LoadError::Refused(format!("{error:#}")))?;
+            parse_package(package).map_err(|error| AcquireError::Refused(format!("{error:#}")))?;
         let registry = self.registry(&package_ref, endpoint)?;
         let client = self.client(&package_ref, &registry);
         let registry = registry.to_string();
         let release =
             self.resolve_release(&client, &registry, package, &package_ref, &version).await?;
         let expected: Digest = release.content_digest.to_string().parse().map_err(|error| {
-            LoadError::Refused(format!(
+            AcquireError::Refused(format!(
                 "the registry digest for `{package}` is unsupported: {error}"
             ))
         })?;
@@ -147,15 +146,15 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
         let content = client
             .stream_content(&package_ref, &release)
             .await
-            .map_err(|error| LoadError::Unavailable(format!("fetching `{package}`: {error}")))?;
+            .map_err(|error| AcquireError::Unavailable(format!("fetching `{package}`: {error}")))?;
         let bytes = collect(content)
             .await
-            .map_err(|error| LoadError::Unavailable(format!("reading `{package}`: {error}")))?;
+            .map_err(|error| AcquireError::Unavailable(format!("reading `{package}`: {error}")))?;
 
         let resolved = Digest::of(&bytes);
         if resolved != expected {
             // The registry misdelivered; a retry may serve honest bytes.
-            return Err(LoadError::Unavailable(format!(
+            return Err(AcquireError::Unavailable(format!(
                 "package `{package}` content hashes to {resolved}, not the registry digest \
                  {expected}"
             )));
@@ -210,7 +209,7 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
     async fn resolve_release(
         &self, client: &Client, registry: &str, package: &str, package_ref: &PackageRef,
         version: &Version,
-    ) -> Result<Release, LoadError> {
+    ) -> Result<Release, AcquireError> {
         let full_name = package_ref.to_string();
         match client.get_release(package_ref, version).await {
             Ok(release) => {
@@ -234,9 +233,11 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
                     .store
                     .release(registry, &full_name, &version.to_string())
                     .await
-                    .map_err(|error| LoadError::Unavailable(format!("{error:#}")))?;
+                    .map_err(|error| AcquireError::Unavailable(format!("{error:#}")))?;
                 let Some(digest) = stored else {
-                    return Err(LoadError::Unavailable(format!("resolving `{package}`: {error}")));
+                    return Err(AcquireError::Unavailable(format!(
+                        "resolving `{package}`: {error}"
+                    )));
                 };
                 tracing::warn!(
                     package,
@@ -245,7 +246,7 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
                     "registry unreachable; falling back to the stored release record"
                 );
                 let content_digest = digest.parse().map_err(|error| {
-                    LoadError::Unavailable(format!(
+                    AcquireError::Unavailable(format!(
                         "stored release record for `{package}` carries a malformed digest: {error}"
                     ))
                 })?;
@@ -256,7 +257,7 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
             }
             // An authoritative registry answer — not found, yanked, malformed
             // input — refuses: retrying the same reference cannot succeed.
-            Err(error) => Err(LoadError::Refused(format!("resolving `{package}`: {error}"))),
+            Err(error) => Err(AcquireError::Refused(format!("resolving `{package}`: {error}"))),
         }
     }
 }
@@ -264,7 +265,7 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
 impl<S: ContentStore + ReleaseStore> RegistrySource for RegistryClient<S> {
     fn acquire<'a>(
         &'a self, package: &'a str, endpoint: Option<&'a str>,
-    ) -> BoxFuture<'a, Result<Vec<u8>, LoadError>> {
+    ) -> BoxFuture<'a, Result<Vec<u8>, AcquireError>> {
         self.fetch(package, endpoint).boxed()
     }
 }
@@ -353,7 +354,9 @@ mod tests {
         let client = RegistryClient::default();
         assert!(client.config.resolve_registry(&package("acme:tool")).is_none());
         let error = client.registry(&package("acme:tool"), None).expect_err("refused");
-        assert!(matches!(error, LoadError::Refused(detail) if detail.contains("`acme` namespace")));
+        assert!(
+            matches!(error, AcquireError::Refused(detail) if detail.contains("`acme` namespace"))
+        );
     }
 
     // The configuration bounds the load: an unrouted package takes the
@@ -364,7 +367,9 @@ mod tests {
         let named = unrouted.registry(&package("acme:tool"), Some("ghcr.io")).expect("named");
         assert_eq!(named.to_string(), "ghcr.io");
         let error = unrouted.registry(&package("acme:tool"), Some("not a registry")).expect_err("");
-        assert!(matches!(error, LoadError::Refused(detail) if detail.contains("not a valid name")));
+        assert!(
+            matches!(error, AcquireError::Refused(detail) if detail.contains("not a valid name"))
+        );
 
         let routed = RegistryClient::from_toml("[namespace_registries]\nacme = \"acme.test\"\n")
             .expect("a routed configuration parses");
@@ -372,7 +377,7 @@ mod tests {
         assert_eq!(same.to_string(), "acme.test");
         let error = routed.registry(&package("acme:tool"), Some("ghcr.io")).expect_err("refused");
         assert!(
-            matches!(&error, LoadError::Refused(detail) if detail.contains("routed to `acme.test`")),
+            matches!(&error, AcquireError::Refused(detail) if detail.contains("routed to `acme.test`")),
             "{error}"
         );
     }

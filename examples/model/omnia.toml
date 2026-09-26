@@ -16,10 +16,14 @@
 #
 #   cargo run --example model
 
-# Named `model` here; without `name` the file's stem (`model_wasm`) would.
+# Named `model` here; without `name` the file's stem (`model_wasm`) would. A
+# manifest file's guest loads at its first use, and only a guest loaded at
+# boot can be command mode's catch-all, so the mark is what makes the run
+# drive it.
 [[guest]]
 name = "model"
 source.path = "../../target/wasm32-wasip2/debug/examples/model_wasm.wasm"
+command = true
 
 # Read-only workspace the `model` guest lends through `grants.workspace`.
 # `path` resolves relative to this manifest's directory, so `../..` is the repo

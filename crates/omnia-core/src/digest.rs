@@ -25,6 +25,20 @@ impl Digest {
     pub fn of(bytes: &[u8]) -> Self {
         Self(Sha256::digest(bytes).into())
     }
+
+    /// The digest of `bytes`, held to `pin` when one is given; `subject`
+    /// names the bytes in the refusal.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the bytes hash to anything but `pin`.
+    pub fn checked(bytes: &[u8], pin: Option<Self>, subject: impl fmt::Display) -> Result<Self> {
+        let digest = Self::of(bytes);
+        if let Some(pin) = pin {
+            ensure!(pin == digest, "{subject} resolved to {digest}, not its declared digest {pin}");
+        }
+        Ok(digest)
+    }
 }
 
 impl From<[u8; 32]> for Digest {

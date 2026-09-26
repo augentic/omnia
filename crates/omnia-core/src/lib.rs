@@ -37,11 +37,14 @@ pub use self::invoke::{FreshCall, InvokeError, call_fresh};
 pub use self::mount::{MountRegistry, ResolvedPreopen};
 pub use self::options::{CompileOptions, RuntimeOptions};
 pub use self::registry::{
-    CliRoutes, Guest, GuestId, HttpRoutes, PatternRoutes, Registry, Resolver, Routes, TriggerRouter,
+    CliRoutes, Guest, GuestId, HttpRoutes, PatternRoutes, Registry, RegistryParts, Resolver,
+    Routes, TriggerRouter,
 };
-pub use self::runtime::{AdmitError, ExitStatus, Runtime, RuntimeParts, WeakRuntime, serve_links};
+pub use self::runtime::{
+    AdmitError, ExitStatus, GuestError, Runtime, RuntimeParts, WeakRuntime, serve_links,
+};
 pub use self::seam::{LinkSeam, NoLinks, StoreFactory};
-pub use self::source::{LoadedGuest, Source, SourceSpec};
+pub use self::source::{AcquireError, LoadedGuest, RegistrySource, Source, SourceSpec, Verified};
 pub use self::store::{
     HasChain, HasDispatcher, HasExtensions, HasLimits, HasMounts, HttpBorrow, HttpCtx, StoreBase,
     StoreConfig, StoreCtx, StoreView,

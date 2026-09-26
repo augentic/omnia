@@ -11,8 +11,8 @@ use std::sync::{Arc, Mutex};
 
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
-use omnia::Digest;
-use omnia_plugin::{ContentStore, LoadError, RegistryClient, RegistrySource as _, ReleaseStore};
+use omnia::{AcquireError, Digest};
+use omnia_plugin::{ContentStore, RegistryClient, RegistrySource as _, ReleaseStore};
 use tempfile::TempDir;
 use wasm_pkg_client::{Config, Registry};
 
@@ -188,7 +188,7 @@ async fn network_failure_no_record() {
 
     let error = acquirer.acquire(PACKAGE, None).await.expect_err("nothing stored to fall back to");
     assert!(
-        matches!(&error, LoadError::Unavailable(detail) if detail.contains("resolving")),
+        matches!(&error, AcquireError::Unavailable(detail) if detail.contains("resolving")),
         "resolution failure: {error:?}"
     );
 }
@@ -206,7 +206,7 @@ async fn unrouted_package() {
 
     let error = acquirer.acquire(PACKAGE, None).await.expect_err("nothing routes the package");
     assert!(
-        matches!(&error, LoadError::Refused(detail) if detail.contains("no registry routes") && detail.contains("`test` namespace")),
+        matches!(&error, AcquireError::Refused(detail) if detail.contains("no registry routes") && detail.contains("`test` namespace")),
         "refusal names the namespace: {error:?}"
     );
 }
@@ -316,7 +316,7 @@ async fn endpoint_named_on_load() {
         .await
         .expect_err("a routed namespace is not re-routed");
     assert!(
-        matches!(&routed, LoadError::Refused(detail) if detail.contains("routed to `acme.test`") && detail.contains("`named.test`")),
+        matches!(&routed, AcquireError::Refused(detail) if detail.contains("routed to `acme.test`") && detail.contains("`named.test`")),
         "refusal names both registries: {routed:?}"
     );
     let same = acquirer
@@ -329,7 +329,7 @@ async fn endpoint_named_on_load() {
         .await
         .expect_err("a malformed registry name is refused");
     assert!(
-        matches!(&malformed, LoadError::Refused(detail) if detail.contains("not a valid name")),
+        matches!(&malformed, AcquireError::Refused(detail) if detail.contains("not a valid name")),
         "refusal: {malformed:?}"
     );
 
@@ -342,7 +342,7 @@ async fn endpoint_named_on_load() {
         .await
         .expect_err("a default registry routes every namespace");
     assert!(
-        matches!(&error, LoadError::Refused(detail) if detail.contains("routed to `registry.test`")),
+        matches!(&error, AcquireError::Refused(detail) if detail.contains("routed to `registry.test`")),
         "refusal: {error:?}"
     );
 }
@@ -369,11 +369,14 @@ async fn unversioned_and_missing() {
     let unversioned =
         acquirer.acquire("test:adapter", None).await.expect_err("exact version is mandatory");
     assert!(
-        matches!(&unversioned, LoadError::Refused(detail) if detail.contains("exact version")),
+        matches!(&unversioned, AcquireError::Refused(detail) if detail.contains("exact version")),
         "refusal: {unversioned:?}"
     );
 
     let absent =
         acquirer.acquire("test:absent@1.0.0", None).await.expect_err("an absent package fails");
-    assert!(matches!(absent, LoadError::Refused(_)), "an authoritative miss refuses: {absent:?}");
+    assert!(
+        matches!(absent, AcquireError::Refused(_)),
+        "an authoritative miss refuses: {absent:?}"
+    );
 }

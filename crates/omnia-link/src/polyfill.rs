@@ -6,7 +6,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
-use omnia_core::{ChainCtx, ChainPolicy, GuestId, HasChain, InvokeError, handle_kind};
+use omnia_core::{
+    ChainCtx, ChainPolicy, Dispatcher, GuestId, HasChain, HasDispatcher, InvokeError, handle_kind,
+};
 use wasmtime::Engine;
 use wasmtime::component::{Linker, Type, Val, types};
 
@@ -39,6 +41,24 @@ pub struct Caller {
     pub routes: Routes,
 }
 
+/// What one call reads from the calling store before its future is built,
+/// so no store borrow crosses the dispatch: the chain context the callee's
+/// derives from, and the runtime's dispatcher, whose first-use seam loads a
+/// declared target the route table does not hold yet.
+struct Origin {
+    chain: ChainCtx,
+    dispatcher: Arc<dyn Dispatcher>,
+}
+
+impl Origin {
+    fn of<T: HasChain + HasDispatcher>(data: &T) -> Self {
+        Self {
+            chain: data.chain(),
+            dispatcher: data.dispatcher(),
+        }
+    }
+}
+
 /// Polyfill one component's imports outside the runtime's own namespaces
 /// ([`is_host`]) not already in `wired`, bound to `caller`.
 ///
@@ -56,8 +76,8 @@ pub struct Caller {
 /// polyfilled with `func_new_async`, an `async func` with
 /// `func_new_concurrent` — the sync-typed registration would fail the
 /// pre-instantiation asyncness typecheck. Both share one body ([`relay`]),
-/// whose only read of the caller's store is a snapshot of its chain context,
-/// taken before the dispatch. A function an earlier guest wired with the
+/// whose only read of the caller's store is a snapshot of its chain context
+/// and dispatcher, taken before the dispatch. A function an earlier guest wired with the
 /// *other* asyncness is a cross-guest interface disagreement, rejected here
 /// with both views named. A signature carrying a store-bound handle
 /// (resource, future, stream, error-context) is refused before it is wired:
@@ -68,7 +88,7 @@ pub struct Caller {
 /// Returns an error if a function's signature is not plain, two importers
 /// disagree on a function's asyncness, or a function cannot be defined on
 /// the linker.
-pub fn polyfill_component<T: HasChain + 'static>(
+pub fn polyfill_component<T: HasChain + HasDispatcher + 'static>(
     engine: &Engine, linker: &mut Linker<T>, id: &GuestId,
     component: &wasmtime::component::Component, caller: &Arc<Caller>, wired: &mut WiredLinks,
 ) -> Result<()> {
@@ -127,16 +147,16 @@ pub fn polyfill_component<T: HasChain + 'static>(
             let caller = Arc::clone(caller);
             let iface_name = Arc::clone(&iface_name);
             let func_name = Arc::clone(func);
-            // The caller's chain context is read here, before the future is
-            // built, so no store borrow crosses the dispatch.
+            // The caller's store is read here, before the future is built, so
+            // no store borrow crosses the dispatch.
             let registered = if ty.async_() {
                 interface.func_new_concurrent(func, move |accessor, ty, params, results| {
                     let caller = Arc::clone(&caller);
                     let iface_name = Arc::clone(&iface_name);
                     let func_name = Arc::clone(&func_name);
-                    let chain = accessor.with(|mut access| access.data_mut().chain());
+                    let origin = accessor.with(|mut access| Origin::of(access.data_mut()));
                     Box::pin(async move {
-                        relay(&caller, chain, &iface_name, &func_name, &ty, params, results)
+                        relay(&caller, origin, &iface_name, &func_name, &ty, params, results)
                             .await
                             .map_err(wasmtime::Error::from_anyhow)
                     })
@@ -146,9 +166,9 @@ pub fn polyfill_component<T: HasChain + 'static>(
                     let caller = Arc::clone(&caller);
                     let iface_name = Arc::clone(&iface_name);
                     let func_name = Arc::clone(&func_name);
-                    let chain = store.data().chain();
+                    let origin = Origin::of(store.data());
                     Box::new(async move {
-                        relay(&caller, chain, &iface_name, &func_name, &ty, params, results)
+                        relay(&caller, origin, &iface_name, &func_name, &ty, params, results)
                             .await
                             .map_err(wasmtime::Error::from_anyhow)
                     })
@@ -170,14 +190,16 @@ pub fn polyfill_component<T: HasChain + 'static>(
 }
 
 /// The per-call dispatch: select the target, reject crossing handles, take a
-/// depth slot beneath the calling guest's `chain`, resolve the live route, and
-/// move the lifted parameters to a fresh callee instance on its own task,
-/// writing its results back.
+/// depth slot beneath the calling guest's chain, resolve the live route —
+/// loading a declared target through the runtime's first-use seam when it
+/// is not registered yet — and move the lifted parameters to a fresh callee
+/// instance on its own task, writing its results back.
 async fn relay(
-    caller: &Caller, chain: ChainCtx, interface: &str, func: &str, ty: &types::ComponentFunc,
+    caller: &Caller, origin: Origin, interface: &str, func: &str, ty: &types::ComponentFunc,
     params: &[Val], results: &mut [Val],
 ) -> Result<()> {
     let start = Instant::now();
+    let Origin { chain, dispatcher } = origin;
 
     let (target, forwarded) = caller
         .selector
@@ -201,7 +223,15 @@ async fn relay(
         forwarded.len(),
     );
 
-    let route = caller.routes.resolve(&target, interface)?;
+    let route = if let Some(route) = caller.routes.lookup(&target, interface)? {
+        route
+    } else {
+        // A declared guest loads on first use and its route is live once the
+        // seam returns; an identity the deployment does not know fails here
+        // as unregistered.
+        dispatcher.ensure(&target).await?;
+        caller.routes.resolve(&target, interface)?
+    };
     // A server-rooted chain is wall-clock bounded so a hung target cannot stall
     // the caller; a command-rooted chain runs uncapped.
     let bound = (!ctx.uncapped).then_some(caller.policy.timeout);

@@ -70,7 +70,8 @@ async fn runtime_overlay() {
 // The overlay's `.` mount stands in for the binary's: mounts dedup by name,
 // last wins, before any directory is opened, so the nonexistent production
 // root is never touched (opening it would fail the boot) and the overlaid
-// deployment — an on-demand guest included — runs through the binary's hooks.
+// deployment — a guest loaded at first use included — runs through the
+// binary's hooks.
 #[tokio::test]
 async fn overlay_mount() {
     let _ = (production_plugins::main, production_plugins::run);
@@ -78,7 +79,7 @@ async fn overlay_mount() {
 
     let deployment = Deployment::from(production_plugins::manifest())
         .guest("requester", test_programs::PLUGINS_LOAD)
-        .on_demand("plugin", test_programs::LINK_ECHOER)
+        .entry(GuestEntry::new("plugin", test_programs::LINK_ECHOER))
         .args(["declared", "plugin"])
         .mount(scratch.mount(false));
     let manifest = deployment.manifest().expect("inline base resolves");
@@ -178,13 +179,13 @@ async fn link_pair() {
     runtime.shutdown();
 }
 
-// An on-demand guest is admitted on its first `load`; nothing else opts the
-// deployment into the loader.
+// A declared path guest loads at its first use — here the requester's
+// `load` of its name; nothing else opts the deployment into the loader.
 #[tokio::test]
-async fn on_demand_guest() {
+async fn declared_guest() {
     let status = Deployment::new()
         .guest("requester", test_programs::PLUGINS_LOAD)
-        .on_demand("plugin", test_programs::LINK_ECHOER)
+        .entry(GuestEntry::new("plugin", test_programs::LINK_ECHOER))
         .args(["declared", "plugin"])
         .run(Backends::defaults().await, |deployment| {
             deployment.host::<WasiOtel, Backends>()?;
@@ -195,10 +196,11 @@ async fn on_demand_guest() {
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
 }
 
-// A boot guest's `digest` pin is checked as the deployment builds: the
-// bytes' own digest runs, any other fails startup before the guest loads.
+// A path guest's `digest` pin is checked at its first use — here the command
+// drive, which names it as the marked command guest: the bytes' own digest
+// runs, any other fails the run before the guest loads.
 #[tokio::test]
-async fn pinned_boot_guest() {
+async fn pinned_path_guest() {
     fn otel_only(deployment: &mut omnia::Deployment<StoreCtx<Backends>>) -> Result<()> {
         deployment.host::<WasiOtel, Backends>()?;
         Ok(())
@@ -206,7 +208,7 @@ async fn pinned_boot_guest() {
     let bytes = std::fs::read(test_programs::COMMAND_EXIT_MAP).expect("reading the guest");
     let pinned = |digest: Digest| {
         Deployment::new()
-            .entry(GuestEntry::new("cli", test_programs::COMMAND_EXIT_MAP).digest(digest))
+            .entry(GuestEntry::new("cli", test_programs::COMMAND_EXIT_MAP).digest(digest).command())
             .args(["ok"])
     };
 

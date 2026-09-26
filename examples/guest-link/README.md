@@ -53,7 +53,7 @@ cargo run --example guest-link -- run
 
 If startup succeeds, the import was wired: `router` can resolve `echo`, and `responder` is registered to serve it. The process then sits in server mode. To actually *see* a round-trip printed, use the register variant below.
 
-The same deployment as a TOML file is [`omnia.toml`](omnia.toml), which reads the guests from disk at start, so those build first:
+The same deployment as a TOML file is [`omnia.toml`](omnia.toml), which reads each guest from disk at its first use rather than at start (so under this server-mode host, which never calls the router, it boots and sits without loading either); those build first:
 
 ```bash
 cargo build -p examples \
@@ -68,15 +68,17 @@ Cargo writes underscored names: `target/wasm32-wasip2/debug/examples/guest_link_
 
 ## The same deployment, built in Rust
 
-[`dynamic.rs`](dynamic.rs) does not compile the guest list into the binary. It builds an `omnia::Manifest` at runtime, reading the guests built above, and hands it to the generated host:
+[`dynamic.rs`](dynamic.rs) does not compile the guest list into the binary. It builds an `omnia::Manifest` at runtime, reading the guests built above into bytes — so, like the embedded pair, they load at boot and startup proves the wiring — and hands it to the generated host:
 
 ```rust
 let manifest = Manifest::new()
-    .guest(GuestEntry::new("responder", responder_wasm))
-    .guest(GuestEntry::new("router", router_wasm));
+    .guest(GuestEntry::new("responder", std::fs::read(responder_wasm)?))
+    .guest(GuestEntry::new("router", std::fs::read(router_wasm)?));
 
 host::run(DeploymentBuilder::new().manifest(manifest))?;
 ```
+
+Handing `GuestEntry::new` the *path* instead declares a guest that loads at its first use, as a `[[guest]]` in a manifest file does.
 
 ```bash
 cargo run --example guest-link-dynamic
@@ -84,7 +86,7 @@ cargo run --example guest-link-dynamic
 
 ## Adding a guest after startup
 
-[`extra.rs`](extra.rs) also exports `echo`, but it is not in the manifest. [`register.rs`](register.rs) starts the two-guest deployment, then loads `extra` with `Runtime::register` and asks the (already running) router to call it:
+[`extra.rs`](extra.rs) also exports `echo`, but it is not in the manifest. [`register.rs`](register.rs) starts the two-guest deployment (naming its guests by path, so each loads at its first use), then loads `extra` with `Runtime::register` and asks the router to call it — resolving the router through `Runtime::guest`, which is what loads it:
 
 ```bash
 cargo build -p examples \

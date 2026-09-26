@@ -12,7 +12,7 @@ use wasmtime::component::{Val, types};
 use crate::chain::{ChainCtx, ChainPolicy};
 use crate::host::FutureResult;
 use crate::invoke::{FreshCall, call_fresh};
-use crate::registry::GuestId;
+use crate::registry::{Guest, GuestId};
 use crate::runtime::Runtime;
 use crate::value::handle_kind;
 
@@ -32,7 +32,8 @@ use crate::value::handle_kind;
 /// # Errors
 ///
 /// Returns an error if the depth bound is exceeded, an argument or result carries
-/// a store-bound handle, the target is not registered, the named
+/// a store-bound handle, the target is neither registered nor declared (or
+/// its first use fails to load it), the named
 /// `interface`/`func` export is absent or is not a function, the call exceeds
 /// the wall-clock bound, or the guest call traps.
 pub async fn dispatch<B>(
@@ -51,11 +52,9 @@ where
     }
 
     let instance_pre = runtime
-        .registry()
-        .get(target)
-        .with_context(|| {
-            format!("dispatching `{interface}/{func}` to guest `{target}`: guest is not registered")
-        })?
+        .guest(target)
+        .await
+        .with_context(|| format!("dispatching `{interface}/{func}` to guest `{target}`"))?
         .instance_pre()
         .clone();
 
@@ -107,6 +106,12 @@ pub trait Dispatcher: Send + Sync + 'static {
         &self, caller: ChainCtx, target: GuestId, interface: Option<String>, func: String,
         args: Vec<Val>,
     ) -> FutureResult<Vec<Val>>;
+
+    /// Ensure the guest `id` names is loaded: a declared guest not yet used
+    /// loads from its source here. The link relay reaches the runtime's
+    /// first-use seam through this, so a call to a declared exporter loads
+    /// it rather than failing as unregistered.
+    fn ensure(&self, id: &GuestId) -> FutureResult<()>;
 }
 
 impl<B: Clone + Send + Sync + 'static> Dispatcher for crate::runtime::RuntimeDispatcher<B> {
@@ -116,27 +121,33 @@ impl<B: Clone + Send + Sync + 'static> Dispatcher for crate::runtime::RuntimeDis
     ) -> FutureResult<Vec<Val>> {
         let runtime = self.runtime();
         async move {
-            let interface: Box<str> = match interface {
-                Some(name) => Box::from(name),
-                None => find_interface(&runtime, &target, &func)?,
+            let interface: Box<str> = if let Some(name) = interface {
+                Box::from(name)
+            } else {
+                let guest = runtime
+                    .guest(&target)
+                    .await
+                    .with_context(|| format!("dispatching `{func}` to guest `{target}`"))?;
+                find_interface(&guest, &func)?
             };
             dispatch(&runtime, &caller, &target, &interface, &func, args).await
         }
         .boxed()
     }
+
+    fn ensure(&self, id: &GuestId) -> FutureResult<()> {
+        let runtime = self.runtime();
+        let id = id.clone();
+        async move { runtime.guest(&id).await.map(drop).map_err(anyhow::Error::from) }.boxed()
+    }
 }
 
-/// Find the *unique* exported interface on `target`'s component that carries a
+/// Find the *unique* exported interface on `guest`'s component that carries a
 /// function named `func`, so a host can invoke it without hardcoding a
 /// consumer interface name. Ambiguity is an error, never a silent first-match.
-fn find_interface<B: Clone + Send + Sync + 'static>(
-    runtime: &Runtime<B>, target: &GuestId, func: &str,
-) -> Result<Box<str>> {
-    let registry = runtime.registry();
-    let engine = registry.engine();
-    let guest = registry
-        .get(target)
-        .with_context(|| format!("dispatch target `{target}` is not registered"))?;
+fn find_interface<T: 'static>(guest: &Guest<T>, func: &str) -> Result<Box<str>> {
+    let target = guest.id();
+    let engine = guest.instance_pre().engine();
     let component_ty = guest.component().component_type();
     let mut matches: Vec<Box<str>> = Vec::new();
     for (interface, types::ComponentExtern { ty, .. }) in component_ty.exports(engine) {

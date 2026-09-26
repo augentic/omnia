@@ -57,7 +57,7 @@ fn materialize(
     let plan = omnia_cli::plan(argv, omnia_manifest, compiled_in.is_some())?;
     let manifest = match plan.source {
         RunSource::Manifest(path) => Manifest::load(path)?,
-        RunSource::Wasm(path) => Manifest::from_wasm(path),
+        RunSource::Wasm(path) => Manifest::from_wasm(path)?,
         RunSource::CompiledIn => compiled_in.expect("planner checked").into_manifest()?,
     };
     let mounts = plan.mounts.into_iter().map(|arg| Mount {

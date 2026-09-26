@@ -3,21 +3,26 @@
 
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
-use omnia_core::{AdmitError, Digest, GuestId, WeakRuntime};
+use omnia_core::{AdmitError, Digest, GuestError, GuestId, Verified, WeakRuntime};
 
 use crate::error::LoadError;
 
-/// The registry record and the admission seam — erased of the deployment's
-/// backend type so [`Plugins`](crate::Plugins) can live in the runtime's
-/// extensions.
+/// The registry record, the first-use seam, and the admission seam — erased
+/// of the deployment's backend type so [`Plugins`](crate::Plugins) can live
+/// in the runtime's extensions.
 pub trait Admission: Send + Sync + 'static {
     /// The registration state of `id`, with its recorded digest.
     fn registration(&self, id: &GuestId) -> Result<Registration, LoadError>;
 
-    /// Admit component bytes, hashing to `digest`, as the late guest `id`.
-    fn admit(
-        &self, id: GuestId, bytes: Vec<u8>, digest: Digest,
-    ) -> BoxFuture<'static, Result<(), AdmitError>>;
+    /// Whether the deployment declares `id` as a guest loaded at first use.
+    fn is_declared(&self, id: &GuestId) -> bool;
+
+    /// Ensure the guest the deployment declares as `id` is loaded, and
+    /// return the digest its registration records.
+    fn ensure(&self, id: &GuestId) -> BoxFuture<'static, Result<Digest, GuestError>>;
+
+    /// Admit verified component bytes as the late guest `id`.
+    fn admit(&self, id: GuestId, verified: Verified) -> BoxFuture<'static, Result<(), AdmitError>>;
 }
 
 // Weak: a strong handle would cycle through the extension.
@@ -32,15 +37,29 @@ impl<B: Clone + Send + Sync + 'static> Admission for WeakRuntime<B> {
             .map_or(Registration::Absent, |guest| Registration::Active(guest.digest())))
     }
 
-    fn admit(
-        &self, id: GuestId, bytes: Vec<u8>, digest: Digest,
-    ) -> BoxFuture<'static, Result<(), AdmitError>> {
+    fn is_declared(&self, id: &GuestId) -> bool {
+        self.upgrade().is_some_and(|runtime| runtime.registry().is_declared(id))
+    }
+
+    fn ensure(&self, id: &GuestId) -> BoxFuture<'static, Result<Digest, GuestError>> {
+        let weak = self.clone();
+        let id = id.clone();
+        async move {
+            let Some(runtime) = weak.upgrade() else {
+                return Err(GuestError::Internal("the runtime has shut down".to_owned()));
+            };
+            runtime.guest(&id).await.map(|guest| guest.digest())
+        }
+        .boxed()
+    }
+
+    fn admit(&self, id: GuestId, verified: Verified) -> BoxFuture<'static, Result<(), AdmitError>> {
         let weak = self.clone();
         async move {
             let Some(runtime) = weak.upgrade() else {
                 return Err(AdmitError::Internal("the runtime has shut down".to_owned()));
             };
-            runtime.admit(id, bytes, digest).await
+            runtime.admit(id, verified).await
         }
         .boxed()
     }
