@@ -16,8 +16,7 @@ Or, more manually, for debugging:
 cargo build --example blobstore-wasm --target wasm32-wasip2
 
 # run the host
-export RUST_LOG="info,opentelemetry_sdk=off,wasi_blobstore=debug,omnia_wasi_http=debug,blobstore=debug"
-cargo run --example blobstore -- run ./target/wasm32-wasip2/debug/examples/blobstore_wasm.wasm
+cargo run --example blobstore -- -v run ./target/wasm32-wasip2/debug/examples/blobstore_wasm.wasm
 ```
 
 ## Test

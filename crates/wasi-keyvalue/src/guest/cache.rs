@@ -35,8 +35,10 @@ impl Cache {
             return Ok(None);
         };
 
+        // A value the cache did not write (raw bytes another writer stored)
+        // is the normal case for a shared bucket, not an event.
         let Ok(ttl_val) = Cacheable::try_from(&entry) else {
-            tracing::debug!("Not serialized using Cacheable");
+            tracing::trace!("Not serialized using Cacheable");
             return Ok(Some(entry));
         };
 

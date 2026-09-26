@@ -20,7 +20,7 @@ cargo run --example http -- run ./target/wasm32-wasip2/debug/examples/http_wasm.
 
 (Guest artifact names use underscores: `http_wasm.wasm`, not `http-wasm.wasm`.)
 
-Host startup logs (`initializing runtime`, trigger servers listening, and so on) use `tracing` at the `info` level. `make run` sets a sensible default `RUST_LOG`; override it when you need more detail. Without logging configured, the process stays quiet apart from Cargo's `Running …` line.
+Servers are quiet by default: `-v` shows startup and readiness, `-vv` each request. `make run` passes `-v`. `RUST_LOG` targets a single crate on top (`RUST_LOG=omnia_wasi_http=trace`); see [Verbosity flags](../docs/reference/configuration.md#verbosity-flags).
 
 Each example directory has a `README.md` with test commands and example-specific setup.
 

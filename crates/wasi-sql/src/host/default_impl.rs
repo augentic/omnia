@@ -63,7 +63,7 @@ impl Backend for SqlDefault {
 
 impl WasiSqlCtx for SqlDefault {
     fn open(&self, _name: String) -> FutureResult<Arc<dyn Connection>> {
-        tracing::debug!("opening SQL connection");
+        tracing::trace!("opening SQL connection");
         let conn = Arc::clone(&self.conn);
 
         async move {
@@ -84,7 +84,7 @@ impl Connection for SqliteConn {
     // connection, so the drop cannot be tightened further.
     #[expect(clippy::significant_drop_tightening)]
     fn query(&self, query: String, params: Vec<DataType>) -> FutureResult<Vec<Row>> {
-        tracing::debug!("executing query: {}", query);
+        tracing::trace!("executing query: {}", query);
         let conn = Arc::clone(&self.conn);
 
         async move {
@@ -136,7 +136,7 @@ impl Connection for SqliteConn {
     // See `query`: the guard must outlive the prepared statement.
     #[expect(clippy::significant_drop_tightening)]
     fn exec(&self, query: String, params: Vec<DataType>) -> FutureResult<u32> {
-        tracing::debug!("executing statement: {}", query);
+        tracing::trace!("executing statement: {}", query);
         let conn = Arc::clone(&self.conn);
 
         async move {

@@ -4,30 +4,39 @@ Unreleased
 
 ### Added
 
-- One tracing level for the whole process, selected by verbosity flags. A
-  run's level is the flag, else the process `RUST_LOG`, else the mode's
-  default — `info` for a command, `warn` for a server (`Mode::level`) — and
-  it governs the host console and every guest alike: each guest's WASI
-  environment carries it as `RUST_LOG` (a selected level replaces the
-  process variable there; a bare run fills it only when unset), and the
-  process environment is never written. Each `-v`/`--verbose` steps the
-  level one rung up the scale `off`, `error`, `warn`, `info`, `debug`,
-  `trace` from the mode's default and each `-q`/`--quiet` one rung down,
-  clamped at the ends, so a command reads `-q` warn, `-qq` error, `-v`
-  debug, `-vv` trace, and a server `-q` error, `-qq` off, `-v` info, `-vv`
-  debug, `-vvv` trace. On the `run` grammar the flags are global to the
-  command (`bin -v run …`, `bin run -v …`; `-v` beside `-q` is a usage
-  error); on the direct-command path the host reads them out of argv before
-  `--` and forwards argv verbatim, so a command guest declares the same flags
-  by flattening `omnia_sdk::api::command::Verbosity` into its grammar, which
-  lists them in help and completions, accepts them, and refuses the pair with
-  its own usage error — the guest never acts on the values. Embedders select
-  the level in code with `DeploymentBuilder::level(LevelFilter)` (`omnia`
-  re-exports `LevelFilter`), `Telemetry::fallback(level)` sets the console's
-  fallback for an unset `RUST_LOG` (`WARN` when not called, as before), and
-  the test host's `Deployment::level` scripts a guest's `RUST_LOG` without
-  touching the suite's environment. A bare command run's host console now
-  opens at `info`, where it opened at `warn`.
+- One tracing filter for the whole process, its level selected by verbosity
+  flags and composed with `RUST_LOG`. A run's bare level is the flag, else
+  the process `RUST_LOG`'s, else the mode's default — `info` for a command,
+  `warn` for a server (`Mode::level`) — and the process `RUST_LOG`'s
+  targeted directives (`tower=off`, `my_sdk=debug`) apply on top whichever
+  decided the level, so `RUST_LOG=my_sdk=debug bin -v` runs at
+  `debug,my_sdk=debug` and `RUST_LOG=info bin -v` at `debug`; a token that
+  is neither a level nor a directive is reported and dropped, as `EnvFilter`
+  drops it. The filter governs the host console and every guest alike: each
+  guest's WASI environment carries it as `RUST_LOG`, and the process
+  environment is never written. `omnia::telemetry::directives(level,
+  fallback, rust_log)` is the composition, pure over its inputs. Each
+  `-v`/`--verbose` steps the level one rung up the scale `off`, `error`,
+  `warn`, `info`, `debug`, `trace` from the mode's default and each
+  `-q`/`--quiet` one rung down, clamped at the ends, so a command reads `-q`
+  warn, `-qq` error, `-v` debug, `-vv` trace, and a server `-q` error, `-qq`
+  off, `-v` info, `-vv` debug, `-vvv` trace. On the `run` grammar the flags
+  are global to the command (`bin -v run …`, `bin run -v …`; `-v` beside
+  `-q` is a usage error); on the direct-command path the host reads them out
+  of argv before `--` and forwards argv verbatim, so a command guest
+  declares the same flags by flattening `omnia_sdk::api::command::Verbosity`
+  into its grammar, which lists them in help and completions, accepts them,
+  and refuses the pair with its own usage error — the guest never acts on
+  the values. Embedders select the level in code with
+  `DeploymentBuilder::level(LevelFilter)` (`omnia` re-exports
+  `LevelFilter`), `Telemetry::filter(directives)` sets the console's filter
+  outright (the run's composed directives, in omnia's own deployment),
+  `Telemetry::fallback(level)` sets its fallback for an unset `RUST_LOG`
+  (`WARN` when not called, as before), and the test host's
+  `Deployment::level` scripts a guest's bare level without touching the
+  suite's environment. `RuntimeParts` carries the composed `rust_log:
+  String` where it carried `level` and `fallback`. A bare command run's
+  host console now opens at `info`, where it opened at `warn`.
 - The dispatch-chain context lives on the guest store. Every store is built
   at a `ChainCtx` (`StoreConfig::chain`, `StoreBase::chain`):
   `Runtime::store()` builds a server root, `Runtime::store_in(chain)` any
@@ -41,6 +50,36 @@ Unreleased
 
 ### Changed
 
+- A run with no collector exports nothing. A signal's OTLP exporter attaches
+  only when an endpoint is configured for it — OpenTelemetry's
+  `OTEL_EXPORTER_OTLP_ENDPOINT` or the signal's own
+  `OTEL_EXPORTER_OTLP_{TRACES,METRICS}_ENDPOINT`, an empty value counting
+  as unset — where it used to fall back to `localhost:4317` and, without a
+  collector there, spend every run retrying the connection and every exit
+  waiting on the flush. The
+  providers still publish (the resource and the tracer guest telemetry
+  grafts onto are unchanged); an unexported signal is dropped, and the
+  choice is reported once at `debug`. `tower` joins the always-muted
+  targets, so the retries a configured-but-unreachable collector does
+  produce stay off the console too. Per-operation narration — every call
+  on the in-memory `keyvalue`, `blobstore`, `vault`, `messaging`, and `sql`
+  hosts, the `wasi-http` guest's request and response dumps, and
+  `wasi-keyvalue`'s `Cache` reading a value it did not write — moves from
+  `debug` to `trace`, so `-v` shows a run's decisions and `-vv` its every
+  step.
+- Console colour only when stderr is a terminal. A redirected or captured
+  stderr (`2>run.log`, a container log driver, journald) gets plain text
+  where it used to get ANSI escapes; on a terminal `NO_COLOR` still
+  disables it.
+- The runtime opens an `info` span around every `wasi:cli/run` drive
+  (`cli-run`) and every trigger request (`http-request`,
+  `messaging-handle`, `websocket-handle`, up from `debug`). Guest spans
+  graft onto the host span live when they export and are dropped without
+  one, so a command run's guest spans now reach a configured collector at
+  the default level, where no span was live around the drive at any level;
+  a server's request spans are live from `-v` (`RUST_LOG=info`), its
+  default `warn` still dropping them. Host console lines emitted inside a
+  live span carry its name (`cli-run:`), as `fmt` renders span context.
 - A guest not compiled into the runtime loads at its first use. Bytes that
   were in the process before any guest ran — the macro's embedded `path:`,
   the component `run <component>` names, a programmatic
@@ -154,8 +193,9 @@ Unreleased
 - Host telemetry is no longer feature-gated. The `otlp` feature is gone from
   `omnia` and `omnia-core`: every build of `Telemetry` carries the OTLP span
   and metric exporters beneath the console subscriber, so
-  `omnia::telemetry::flush`, `omnia::telemetry::resource`, and
-  `OTEL_GRPC_URL` are never compiled out, and a `default-features = false`
+  `omnia::telemetry::flush`, `omnia::telemetry::resource`, and the
+  `OTEL_EXPORTER_OTLP_*` endpoints are never compiled out, and a
+  `default-features = false`
   build of `omnia` exports too. Whether they take effect at run time is
   unchanged from 0.36.0: `Telemetry::build` publishes the providers when it
   installs the subscriber, and yields (leaving `flush` a no-op and
@@ -334,9 +374,18 @@ Unreleased
 
 ### Removed
 
+- `OTEL_GRPC_URL`. The host's collector endpoint is OpenTelemetry's own
+  `OTEL_EXPORTER_OTLP_ENDPOINT` (with `OTEL_EXPORTER_OTLP_{TRACES,METRICS}_ENDPOINT`
+  per signal), which the exporter already resolved beneath the alias; the
+  alias was read by the runtime alone and handed to `Telemetry::endpoint`,
+  which stays for an embedder setting the endpoint in code. `omnia-opentelemetry`
+  in `omnia-backends` reads the same variable for guest telemetry, so one
+  setting now names the collector for both.
 - `omnia_wasi_otel::set_filter`. A guest's tracing filter is the `RUST_LOG`
-  its WASI environment carries, which the runtime sets from its verbosity
-  flags (above); nothing reloads it at run time.
+  its WASI environment carries, which the runtime composes from its
+  verbosity flags and the process `RUST_LOG` (above) — the same
+  directives-then-`RUST_LOG` layering `set_filter` did for one guest, now
+  decided once for the whole process; nothing reloads it at run time.
 
 ---
 

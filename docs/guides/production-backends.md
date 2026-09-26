@@ -63,7 +63,7 @@ Every backend reads its connection settings from environment variables at startu
 | Azure Blob | `AZURE_BLOB_ENDPOINT`; service-principal via `AZURE_TENANT_ID`/`AZURE_CLIENT_ID`/`AZURE_CLIENT_SECRET`, else `az login` |
 | Azure Table | `AZURE_STORAGE_ACCOUNT`, `AZURE_STORAGE_KEY`, optional `AZURE_TABLE_ENDPOINT` (Azurite) |
 | Azure Key Vault | `AZURE_KEYVAULT_URL` + Azure credentials |
-| OpenTelemetry | `OTEL_GRPC_URL` (default `http://localhost:4317`) |
+| OpenTelemetry | `OTEL_EXPORTER_OTLP_ENDPOINT` (unset exports nothing) |
 
 Each crate's README in the `omnia-backends` repository documents its complete variable set.
 

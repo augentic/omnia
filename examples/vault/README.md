@@ -16,8 +16,7 @@ Or, more manually, for debugging:
 cargo build --example vault-wasm --target wasm32-wasip2
 
 # run the host
-export RUST_LOG="info,opentelemetry_sdk=off,wasi_vault=debug,omnia_wasi_http=debug,vault=debug"
-cargo run --example vault -- run ./target/wasm32-wasip2/debug/examples/vault_wasm.wasm
+cargo run --example vault -- -v run ./target/wasm32-wasip2/debug/examples/vault_wasm.wasm
 ```
 
 ## Test

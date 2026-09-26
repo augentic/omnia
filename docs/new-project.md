@@ -131,10 +131,10 @@ Two steps, always in this order — guest first, then host:
 
 ```bash
 cargo build -p my-guest --target wasm32-wasip2
-RUST_LOG=info cargo run -p my-host -- run ./target/wasm32-wasip2/debug/my_guest.wasm
+cargo run -p my-host -- -v run ./target/wasm32-wasip2/debug/my_guest.wasm
 ```
 
-(The artifact name uses underscores: `my_guest.wasm`.) When `omnia ready` appears, the server is on `localhost:8080`:
+(The artifact name uses underscores: `my_guest.wasm`; `-v` shows startup logs.) When `omnia ready` appears, the server is on `localhost:8080`:
 
 ```bash
 curl http://localhost:8080

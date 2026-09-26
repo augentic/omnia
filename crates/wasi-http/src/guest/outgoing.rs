@@ -20,7 +20,7 @@ where
     T::Error: Into<Box<dyn Error + Send + Sync + 'static>>,
 {
     // forward to `wasmtime-wasi-http` outbound proxy
-    tracing::debug!("forwarding request to proxy: {:?}", request.headers());
+    tracing::trace!("forwarding request to proxy: {:?}", request.headers());
     let wasi_req = http_into_wasi_request(request).context("Issue converting request")?;
     let wasi_resp = client::send(wasi_req).await.context("Issue calling proxy")?;
     let http_resp = http_from_wasi_response(wasi_resp).context("Issue converting response")?;
@@ -37,7 +37,7 @@ where
     };
 
     let response = http::Response::from_parts(parts, bytes.into());
-    tracing::debug!("proxy response: {response:?}");
+    tracing::trace!("proxy response: {response:?}");
 
     Ok(response)
 }

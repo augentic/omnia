@@ -36,11 +36,10 @@ impl Guest for HttpGuest {
 
 ## Step 2: Run it in a host
 
-A **host** is a native binary that loads the guest and provides its capabilities. Run the example host, passing it the `.wasm` file:
+A **host** is a native binary that loads the guest and provides its capabilities. Run the example host, passing it the `.wasm` file (`-v` shows startup logs):
 
 ```bash
-export RUST_LOG=info
-cargo run --example http -- run ./target/wasm32-wasip2/debug/examples/http_wasm.wasm
+cargo run --example http -- -v run ./target/wasm32-wasip2/debug/examples/http_wasm.wasm
 ```
 
 When the log line `omnia ready` appears, the runtime is serving on `localhost:8080`. Try it from another terminal:

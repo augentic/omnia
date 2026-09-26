@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
+use tracing::Instrument;
 use wasmtime_wasi::I32Exit;
 use wasmtime_wasi::p3::bindings::{Command, CommandPre};
 
@@ -73,8 +74,12 @@ where
     let instance = runtime.instantiate(guest.instance_pre(), &mut store).await?;
     let command = Command::new(&mut store, &instance)?;
 
-    let outcome =
-        store.run_concurrent(async move |store| command.wasi_cli_run().call_run(store).await).await;
+    // The host span guest telemetry grafts onto: `wasi:otel` drops a guest's
+    // spans when none is live at export.
+    let outcome = store
+        .run_concurrent(async move |store| command.wasi_cli_run().call_run(store).await)
+        .instrument(tracing::info_span!("cli-run"))
+        .await;
 
     let status = match outcome {
         Ok(Ok(Ok(()))) => ExitStatus::SUCCESS,

@@ -36,7 +36,7 @@ impl Backend for VaultDefault {
 
 impl WasiVaultCtx for VaultDefault {
     fn open_locker(&self, identifier: String) -> FutureResult<Arc<dyn Locker>> {
-        tracing::debug!("opening locker: {}", identifier);
+        tracing::trace!("opening locker: {}", identifier);
         let locker = InMemLocker {
             identifier: identifier.clone(),
             store: Arc::clone(&self.store),
@@ -60,7 +60,7 @@ struct InMemLocker {
 
 impl Locker for InMemLocker {
     fn get(&self, secret_id: String) -> FutureResult<Option<Vec<u8>>> {
-        tracing::debug!("getting secret: {} from locker: {}", secret_id, self.identifier);
+        tracing::trace!("getting secret: {} from locker: {}", secret_id, self.identifier);
         let store = Arc::clone(&self.store);
         let locker_id = self.identifier.clone();
 
@@ -75,7 +75,7 @@ impl Locker for InMemLocker {
     }
 
     fn set(&self, secret_id: String, value: Vec<u8>) -> FutureResult<()> {
-        tracing::debug!("setting secret: {} in locker: {}", secret_id, self.identifier);
+        tracing::trace!("setting secret: {} in locker: {}", secret_id, self.identifier);
         let store = Arc::clone(&self.store);
         let locker_id = self.identifier.clone();
 
@@ -90,7 +90,7 @@ impl Locker for InMemLocker {
     }
 
     fn delete(&self, secret_id: String) -> FutureResult<()> {
-        tracing::debug!("deleting secret: {} from locker: {}", secret_id, self.identifier);
+        tracing::trace!("deleting secret: {} from locker: {}", secret_id, self.identifier);
         let store = Arc::clone(&self.store);
         let locker_id = self.identifier.clone();
 
@@ -107,7 +107,7 @@ impl Locker for InMemLocker {
     }
 
     fn exists(&self, secret_id: String) -> FutureResult<bool> {
-        tracing::debug!(
+        tracing::trace!(
             "checking existence of secret: {} in locker: {}",
             secret_id,
             self.identifier
@@ -126,7 +126,7 @@ impl Locker for InMemLocker {
     }
 
     fn list_ids(&self) -> FutureResult<Vec<String>> {
-        tracing::debug!("listing secrets in locker: {}", self.identifier);
+        tracing::trace!("listing secrets in locker: {}", self.identifier);
         let store = Arc::clone(&self.store);
         let locker_id = self.identifier.clone();
 

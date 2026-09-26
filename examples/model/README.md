@@ -41,7 +41,6 @@ command-mode binary a direct command — no `run` subcommand, argv passes to the
 guest verbatim:
 
 ```bash
-export RUST_LOG=info,opentelemetry_sdk=off
 cargo run --example model
 ```
 

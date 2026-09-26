@@ -15,7 +15,7 @@ use crate::mount::MountRegistry;
 use crate::registry::{Guest, GuestId, HttpRoutes, PublishError, TriggerRouter};
 use crate::source::{AcquireError, RegistrySource, SourceSpec, Verified};
 use crate::store::HasLimits;
-use crate::{ChainCtx, Dispatcher, LevelFilter, Registry, RuntimeOptions, StoreBase, StoreCtx};
+use crate::{ChainCtx, Dispatcher, Registry, RuntimeOptions, StoreBase, StoreCtx};
 
 /// Guest exit code. [`code_u8`](Self::code_u8) and [`ExitCode`](std::process::ExitCode)
 /// keep only the low byte (POSIX semantics).
@@ -72,12 +72,10 @@ pub struct RuntimeParts<B: 'static> {
     /// contents: how a package source is routed to a registry. `None` when
     /// the deployment declares none, where every package source is refused.
     pub registry_config: Option<String>,
-    /// The tracing level selected for this run, if any; it replaces every
-    /// guest's `RUST_LOG`.
-    pub level: Option<LevelFilter>,
-    /// The level a guest's `RUST_LOG` falls back to when none is selected and
-    /// the host process sets none.
-    pub fallback: LevelFilter,
+    /// The run's tracing directives — its verbosity flag composed with the
+    /// process `RUST_LOG` ([`telemetry::directives`](crate::telemetry::directives))
+    /// — set as every guest's `RUST_LOG`.
+    pub rust_log: String,
     /// Command-mode guest identity, if any.
     pub command_guest: Option<GuestId>,
 }
@@ -110,10 +108,8 @@ struct RuntimeInner<B: 'static> {
     // The deployment's resolved wasm-pkg configuration, carried for an
     // embedder that installs the loader capability on a runtime by hand.
     registry_config: Option<String>,
-    // The run's selected tracing level and the level it falls back to; what
-    // every store's `RUST_LOG` is built from.
-    level: Option<LevelFilter>,
-    fallback: LevelFilter,
+    // The run's tracing directives: every store's `RUST_LOG`.
+    rust_log: String,
     // Capability-crate state installed at assembly and shared with every
     // store context.
     extensions: Extensions,
@@ -246,8 +242,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
             packages: parts.packages,
             command_guest: parts.command_guest,
             registry_config: parts.registry_config,
-            level: parts.level,
-            fallback: parts.fallback,
+            rust_log: parts.rust_log,
             extensions: Extensions::new(),
         }))
     }
@@ -416,9 +411,9 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// Fresh per-guest store context at `chain`: a root for the command
     /// driver, the context a link dispatch derived for its callee.
     ///
-    /// The guest's environment is the host's with `RUST_LOG` at the
-    /// deployment's tracing level: a selected level replaces the variable,
-    /// otherwise the fallback fills it when the host process sets none.
+    /// The guest's environment is the host's with `RUST_LOG` set to the
+    /// deployment's tracing directives: the run's verbosity flag composed
+    /// with the process variable, decided once at build.
     #[must_use]
     pub fn store_in(&self, chain: ChainCtx) -> StoreCtx<B> {
         // Read at store build so every store sees the process environment as
@@ -427,7 +422,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         let host = std::env::vars_os().filter_map(|(name, value)| {
             Some((name.into_string().ok()?, value.into_string().ok()?))
         });
-        let env = crate::store::guest_env(host, self.inner.level, self.inner.fallback);
+        let env = crate::store::guest_env(host, &self.inner.rust_log);
         StoreCtx {
             base: StoreBase::new(crate::StoreConfig {
                 options: self.options(),

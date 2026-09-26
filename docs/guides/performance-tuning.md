@@ -12,14 +12,14 @@ Drive concurrent keep-alive HTTP load at a running host with any load-testing to
 
 ```bash
 cargo build --example http-wasm --target wasm32-wasip2
-RUST_LOG=warn cargo run --example http -- run ./target/wasm32-wasip2/debug/examples/http_wasm.wasm
+cargo run --example http -- run ./target/wasm32-wasip2/debug/examples/http_wasm.wasm
 # second terminal:
 hey -z 30s -c 64 http://127.0.0.1:8080/
 ```
 
 Watch two signals while it runs:
 
-- **Pool occupancy gauges** — with `RUST_LOG=info`, the host logs pool-occupancy metrics every `POOL_METRICS_INTERVAL_MS` (default 5s; set `1000` while tuning). If occupancy hits the pool ceilings, requests queue.
+- **Pool occupancy gauges** — with `RUST_LOG=omnia=debug`, the host logs pool-occupancy metrics every `POOL_METRICS_INTERVAL_MS` (default 5s; set `1000` while tuning). If occupancy hits the pool ceilings, requests queue.
 - **Resident memory** — `ps -o rss= -p $(pgrep -f 'my-runtime run')` while under load, since most pooling knobs trade memory for latency.
 
 ## Knobs, in the order to try them
@@ -59,4 +59,4 @@ Per-request tuning doesn't help cold starts. For those, pre-compile guests (`com
 
 ## What not to tune
 
-Guest lookup, routing, and dispatch are in-process and effectively free relative to instantiation. If p99 is high, look at the pool gauges and the guest's own work (outbound calls, backend latency — visible in OTel traces via `OTEL_GRPC_URL`) before touching anything else.
+Guest lookup, routing, and dispatch are in-process and effectively free relative to instantiation. If p99 is high, look at the pool gauges and the guest's own work (outbound calls, backend latency — visible in OTel traces via `OTEL_EXPORTER_OTLP_ENDPOINT`) before touching anything else.

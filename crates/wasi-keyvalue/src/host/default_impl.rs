@@ -43,7 +43,7 @@ impl Backend for KeyValueDefault {
 
 impl WasiKeyValueCtx for KeyValueDefault {
     fn open_bucket(&self, identifier: String) -> FutureResult<Arc<dyn Bucket>> {
-        tracing::debug!("opening bucket: {identifier}");
+        tracing::trace!("opening bucket: {identifier}");
 
         // The lock registry lives with the bucket identity so every handle to
         // the same bucket serializes writes and atomics on the same locks.
@@ -92,13 +92,13 @@ impl InMemBucket {
 
 impl Bucket for InMemBucket {
     fn get(&self, key: String) -> FutureResult<Option<Vec<u8>>> {
-        tracing::debug!("getting key: {key} from bucket: {}", self.name);
+        tracing::trace!("getting key: {key} from bucket: {}", self.name);
         let result = self.cache.get(&key);
         async move { Ok(result) }.boxed()
     }
 
     fn set(&self, key: String, value: Vec<u8>) -> FutureResult<()> {
-        tracing::debug!("setting key: {key} in bucket: {}", self.name);
+        tracing::trace!("setting key: {key} in bucket: {}", self.name);
         let lock = self.key_lock(&key);
         let _guard = lock.lock().expect("key lock poisoned");
         self.cache.insert(key, value);
@@ -106,7 +106,7 @@ impl Bucket for InMemBucket {
     }
 
     fn delete(&self, key: String) -> FutureResult<()> {
-        tracing::debug!("deleting key: {key} from bucket: {}", self.name);
+        tracing::trace!("deleting key: {key} from bucket: {}", self.name);
         let lock = self.key_lock(&key);
         let _guard = lock.lock().expect("key lock poisoned");
         self.cache.invalidate(&key);
@@ -114,19 +114,19 @@ impl Bucket for InMemBucket {
     }
 
     fn exists(&self, key: String) -> FutureResult<bool> {
-        tracing::debug!("checking existence of key: {key} in bucket: {}", self.name);
+        tracing::trace!("checking existence of key: {key} in bucket: {}", self.name);
         let exists = self.cache.contains_key(&key);
         async move { Ok(exists) }.boxed()
     }
 
     fn keys(&self) -> FutureResult<Vec<String>> {
-        tracing::debug!("listing keys in bucket: {}", self.name);
+        tracing::trace!("listing keys in bucket: {}", self.name);
         let keys = self.cache.iter().map(|(k, _)| (*k).clone()).collect();
         async move { Ok(keys) }.boxed()
     }
 
     fn increment(&self, key: String, delta: i64) -> FutureResult<i64> {
-        tracing::debug!("incrementing key: {key} in bucket: {}", self.name);
+        tracing::trace!("incrementing key: {key} in bucket: {}", self.name);
 
         let lock = self.key_lock(&key);
         let result = (|| {
@@ -141,7 +141,7 @@ impl Bucket for InMemBucket {
     }
 
     fn swap(&self, cas: Cas, value: Vec<u8>) -> FutureResult<Result<(), Cas>> {
-        tracing::debug!("swapping key: {} in bucket: {}", cas.key, self.name);
+        tracing::trace!("swapping key: {} in bucket: {}", cas.key, self.name);
 
         let lock = self.key_lock(&cas.key);
         let result = {

@@ -22,8 +22,7 @@ Or, more manually, for debugging:
 cargo build --example http-proxy-wasm --target wasm32-wasip2
 
 # run the host
-export RUST_LOG="info,opentelemetry_sdk=off,omnia_wasi_http=debug,http_proxy=debug"
-cargo run --example http-proxy -- run ./target/wasm32-wasip2/debug/examples/http_proxy_wasm.wasm
+cargo run --example http-proxy -- -v run ./target/wasm32-wasip2/debug/examples/http_proxy_wasm.wasm
 ```
 
 ## Test

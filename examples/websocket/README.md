@@ -16,8 +16,7 @@ Or, more manually, for debugging:
 cargo build --example websocket-wasm --target wasm32-wasip2
 
 # run the host
-export RUST_LOG="info,opentelemetry_sdk=off,wasi_websocket=debug,omnia_wasi_http=debug,websocket=debug"
-cargo run --example websocket -- run ./target/wasm32-wasip2/debug/examples/websocket_wasm.wasm
+cargo run --example websocket -- -v run ./target/wasm32-wasip2/debug/examples/websocket_wasm.wasm
 ```
 
 ## Test

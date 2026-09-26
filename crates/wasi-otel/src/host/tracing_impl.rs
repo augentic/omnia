@@ -34,7 +34,8 @@ impl<T> HostWithStore<T> for WasiOtel {
             WARNED.call_once(|| {
                 tracing::warn!(
                     "no host span is live: guest spans are dropped until the guest runs inside \
-                     an enabled `tracing` span (the trigger hosts open theirs at DEBUG)"
+                     an enabled `tracing` span (the runtime opens one per `wasi:cli/run` and \
+                     per trigger request at INFO)"
                 );
             });
             return Ok(());

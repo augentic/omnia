@@ -65,8 +65,8 @@ Most deployments only touch the `runtime!` macro; a hand-written runtime instead
 
 The runtime and its included services are configured via environment variables:
 
-- **`RUST_LOG`**: The tracing filter for the whole process, host console and guests alike (e.g., `info`, `debug`, `omnia_core=trace`), when no `-v`/`-q` flag selects a level; unset means `info` for a command runtime and `warn` for a server. Each `-v` steps the level up from that default and each `-q` down, replacing `RUST_LOG` for the run. Noisy dependencies (`hyper`, `h2`, `tonic`, `opentelemetry`, `opentelemetry_sdk`, `omnia_wasi_otel`) are always muted.
-- **`OTEL_GRPC_URL`**: OTLP gRPC endpoint for exporting host traces and metrics. Unset uses OpenTelemetry defaults (`http://localhost:4317`).
+- **`RUST_LOG`**: The tracing filter for the whole process, host console and guests alike (e.g., `info`, `debug`, `omnia_core=trace`); unset means `info` for a command runtime and `warn` for a server. Each `-v` steps the level up from that default and each `-q` down; a flag displaces only `RUST_LOG`'s bare level, and its targeted directives (`omnia_core=trace`, `tower=off`) stay in force on top — `omnia::telemetry::directives` is the composition. Noisy dependencies (`hyper`, `h2`, `tower`, `tonic`, `opentelemetry`, `opentelemetry_sdk`, `omnia_wasi_otel`) are always muted.
+- **`OTEL_EXPORTER_OTLP_ENDPOINT`**: OTLP gRPC endpoint for exporting host traces and metrics — OpenTelemetry's own variable, with `OTEL_EXPORTER_OTLP_{TRACES,METRICS}_ENDPOINT` taking precedence per signal. A signal with no endpoint has no exporter, so a run with no collector exports nothing (guest spans included) rather than retrying against `localhost:4317`.
 
 ## Logging and telemetry
 
@@ -81,7 +81,7 @@ Telemetry::new("my-service")
     .build()?;
 ```
 
-Initialization is idempotent: the first `build` in the process installs the subscriber and providers, and later calls are no-ops that reuse them, so an embedder installing a subscriber itself and the runtime's own startup never conflict. Telemetry is batch-exported; the runtime flushes it at the end of every run so it survives fast command-mode exits, and embedders driving work themselves can call `omnia::telemetry::flush()` before the process exits. The `OTEL_GRPC_URL` environment variable is respected when set; when unset, OpenTelemetry defaults apply. Export errors from a missing collector never reach the console: the subscriber's filter always mutes the `opentelemetry` and `opentelemetry_sdk` targets.
+Initialization is idempotent: the first `build` in the process installs the subscriber and providers, and later calls are no-ops that reuse them, so an embedder installing a subscriber itself and the runtime's own startup never conflict. Telemetry is batch-exported; the runtime flushes it at the end of every run so it survives fast command-mode exits, and embedders driving work themselves can call `omnia::telemetry::flush()` before the process exits. OpenTelemetry's `OTEL_EXPORTER_OTLP_*` variables select the collector, and with none of them set no exporter is attached (the providers still publish, so the resource and the tracer guest telemetry grafts onto are there; `flush` has nothing to wait on). The subscriber's filter always mutes the `opentelemetry`, `opentelemetry_sdk`, `tonic`, and `tower` targets, so an exporter that cannot reach its collector never reaches the console either.
 
 ## Architecture
 

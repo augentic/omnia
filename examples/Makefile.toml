@@ -29,8 +29,11 @@ ws="$(cargo locate-project --workspace --message-format=plain)"
 ws="${ws%/Cargo.toml}"
 shift
 
-export RUST_LOG="${RUST_LOG:-info,opentelemetry_sdk=off,omnia_wasi_http=debug,${module}=debug}"
+# `-v` shows startup logs; a set `RUST_LOG` takes over, as `-v` would
+# displace its level.
+flags=""
+[ -n "${RUST_LOG:-}" ] || flags="-v"
 
-cargo run -p examples --example "$name" -- \
+cargo run -p examples --example "$name" -- $flags \
   run "${CARGO_TARGET_DIR:-$ws/target}/wasm32-wasip2/debug/examples/${module}_wasm.wasm" -- "$@"
 '''

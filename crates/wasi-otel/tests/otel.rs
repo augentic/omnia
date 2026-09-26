@@ -22,7 +22,6 @@ use opentelemetry_proto::tonic::metrics::v1::{
 };
 use opentelemetry_proto::tonic::trace::v1::Span;
 use opentelemetry_proto::tonic::trace::v1::status::StatusCode;
-use tracing::Instrument as _;
 
 // Every guest program in `crates/test-programs` must have a matching test
 // here; a new program without one fails to compile.
@@ -137,7 +136,10 @@ async fn run_guest(wasm: &str) -> Recording {
 async fn run(deployment: Deployment, label: &str) -> Recording {
     // Guest telemetry grafts onto the host trace: the host-side `export`
     // impls skip unless host telemetry is initialized and a host span is
-    // live, so install providers and drive the guest inside a span.
+    // live. The runtime's own `cli-run` span is that span, at `info`, so
+    // the suite installs providers at that level and adds no span of its
+    // own — a guest whose spans export here exports under a real command
+    // run.
     Telemetry::new("otel-e2e").filter("info").build().expect("telemetry installs");
 
     let recording = Recording::default();
@@ -145,12 +147,10 @@ async fn run(deployment: Deployment, label: &str) -> Recording {
     // one under test.
     let status = tokio::time::timeout(
         Duration::from_secs(300),
-        deployment
-            .run(Backends(recording.clone()), |deployment| {
-                deployment.host::<WasiOtel, Backends>()?;
-                Ok(())
-            })
-            .instrument(tracing::info_span!("test-drive")),
+        deployment.run(Backends(recording.clone()), |deployment| {
+            deployment.host::<WasiOtel, Backends>()?;
+            Ok(())
+        }),
     )
     .await
     .expect("guest must not stall on the telemetry flush")
