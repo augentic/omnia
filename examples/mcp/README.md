@@ -17,9 +17,8 @@ Or, more manually, for debugging:
 # build the guest
 cargo build --example mcp-wasm --target wasm32-wasip2
 
-# run the host
-export RUST_LOG="info,omnia_wasi_http=debug,mcp=debug"
-cargo run --example mcp -- run ./target/wasm32-wasip2/debug/examples/mcp_wasm.wasm
+# run the host (-v shows startup and readiness; -vv logs each request)
+cargo run --example mcp -- -v run ./target/wasm32-wasip2/debug/examples/mcp_wasm.wasm
 ```
 
 ## Test

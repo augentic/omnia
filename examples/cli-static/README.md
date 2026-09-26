@@ -16,8 +16,7 @@ forwarded to the guest verbatim.
 
 ```bash
 # run the host: argv passes straight to the guest (no `run`, no `--`);
-# the guest builds with the host
-export RUST_LOG=info
+# the guest builds with the host; a command host logs at `info` by default
 cargo run --example cli-static -- greet Ada
 cargo run --example cli-static -- add 2 40
 cargo run --example cli-static -- fail not-found; echo $?  # 2

@@ -18,7 +18,7 @@ Build a guest and run it with an example host runtime:
 
 ```bash
 cargo build --example http-wasm --target wasm32-wasip2
-RUST_LOG=info cargo run --example http -- run ./target/wasm32-wasip2/debug/examples/http_wasm.wasm
+cargo run --example http -- -v run ./target/wasm32-wasip2/debug/examples/http_wasm.wasm
 ```
 
 A host runtime is a single macro invocation — each entry pairs a WASI interface with the backend that implements it:

@@ -47,8 +47,8 @@ The host does not parse what `echo` means, and nothing declares it. `example:lin
 The deployment is embedded in [`runtime.rs`](runtime.rs): the examples package's `build.rs` compiles both guests for `wasm32-wasip2`, and the `runtime!` invocation embeds them, naming them `responder` and `router` — the names the router dispatches by — rather than by their files' stems. So a bare `run` works from any directory with no build step first:
 
 ```bash
-export RUST_LOG=info
-cargo run --example guest-link -- run
+# -v shows startup and readiness
+cargo run --example guest-link -- -v run
 ```
 
 If startup succeeds, the import was wired: `router` can resolve `echo`, and `responder` is registered to serve it. The process then sits in server mode. To actually *see* a round-trip printed, use the register variant below.
@@ -61,7 +61,7 @@ cargo build -p examples \
   --example guest-link-router-wasm \
   --target wasm32-wasip2
 
-cargo run --example guest-link -- run --manifest examples/guest-link/omnia.toml
+cargo run --example guest-link -- -v run --manifest examples/guest-link/omnia.toml
 ```
 
 Cargo writes underscored names: `target/wasm32-wasip2/debug/examples/guest_link_responder_wasm.wasm` and `guest_link_router_wasm.wasm`. The manifest points at those paths.

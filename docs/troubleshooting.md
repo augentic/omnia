@@ -44,7 +44,7 @@ Formatting uses nightly rustfmt: `cargo +nightly fmt --all`. The stable formatte
 
 ### The host prints nothing and appears hung
 
-It's probably running fine — startup logs are at `info` and off by default. Set `RUST_LOG=info` and look for the `omnia ready` line. Without it, the only output is Cargo's `Running ...`.
+It's probably running fine — a server defaults to `warn`, and startup logs are at `info`. Run with `-v` (or set `RUST_LOG=info`) and look for the `omnia ready` line. Without it, the only output is Cargo's `Running ...`.
 
 ### `no guest specified: pass a <wasm> path, or --manifest <omnia.toml>`
 

@@ -17,9 +17,8 @@ Or, more manually, for debugging:
 # build the guest
 cargo build --example otel-wasm --target wasm32-wasip2
 
-# run the host
-export RUST_LOG="info,wasi_otel=debug,omnia_wasi_http=debug,otel=debug"
-cargo run --example otel -- run ./target/wasm32-wasip2/debug/examples/otel_wasm.wasm
+# run the host (-v shows startup and readiness; -vv logs each request)
+cargo run --example otel -- -v run ./target/wasm32-wasip2/debug/examples/otel_wasm.wasm
 ```
 
 ## Test
@@ -57,8 +56,7 @@ omnia::runtime!({
 
 ```bash
 export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4317"
-export RUST_LOG="info,wasi_otel=debug,omnia_wasi_http=debug,otel=debug"
-cargo run --example otel -- run ./target/wasm32-wasip2/debug/examples/otel_wasm.wasm
+cargo run --example otel -- -v run ./target/wasm32-wasip2/debug/examples/otel_wasm.wasm
 ```
 
 

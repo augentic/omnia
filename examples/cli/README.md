@@ -27,8 +27,8 @@ Or, more manually, for debugging:
 # build the guest
 cargo build --example cli-wasm --target wasm32-wasip2
 
-# run the host (everything after `--` is the guest argv)
-export RUST_LOG=info
+# run the host (everything after `--` is the guest argv; a command host
+# logs at `info` by default, -v lifts it to `debug`)
 cargo run --example cli -- run ./target/wasm32-wasip2/debug/examples/cli_wasm.wasm -- greet Ada
 
 # test

@@ -41,7 +41,7 @@ command-mode binary a direct command — no `run` subcommand, argv passes to the
 guest verbatim:
 
 ```bash
-export RUST_LOG=info
+# a command host logs at `info` by default
 cargo run --example model
 ```
 

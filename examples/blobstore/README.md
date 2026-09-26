@@ -15,9 +15,9 @@ Or, more manually, for debugging:
 # build the guest
 cargo build --example blobstore-wasm --target wasm32-wasip2
 
-# run the host
-export RUST_LOG="info,wasi_blobstore=debug,omnia_wasi_http=debug,blobstore=debug"
-cargo run --example blobstore -- run ./target/wasm32-wasip2/debug/examples/blobstore_wasm.wasm
+# run the host (-v shows startup and readiness; -vv logs each request;
+# RUST_LOG=omnia_wasi_blobstore=trace traces every store operation)
+cargo run --example blobstore -- -v run ./target/wasm32-wasip2/debug/examples/blobstore_wasm.wasm
 ```
 
 ## Test

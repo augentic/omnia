@@ -15,9 +15,9 @@ Or, more manually, for debugging:
 # build the guest
 cargo build --example websocket-wasm --target wasm32-wasip2
 
-# run the host
-export RUST_LOG="info,wasi_websocket=debug,omnia_wasi_http=debug,websocket=debug"
-cargo run --example websocket -- run ./target/wasm32-wasip2/debug/examples/websocket_wasm.wasm
+# run the host (-v shows startup, readiness, and each connection;
+# -vv logs each request and event)
+cargo run --example websocket -- -v run ./target/wasm32-wasip2/debug/examples/websocket_wasm.wasm
 ```
 
 ## Test
