@@ -17,8 +17,7 @@ Or, more manually, for debugging:
 # build the guest
 cargo build --example docstore-wasm --target wasm32-wasip2
 
-# run the host (-v shows startup and readiness; -vv logs each request;
-# RUST_LOG=omnia_wasi_docstore=trace traces every store operation)
+# run the host
 cargo run --example docstore -- -v run ./target/wasm32-wasip2/debug/examples/docstore_wasm.wasm
 ```
 

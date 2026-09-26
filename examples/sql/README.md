@@ -18,8 +18,7 @@ Or, more manually, for debugging:
 # build the guest
 cargo build --example sql-wasm --target wasm32-wasip2
 
-# run the host (-v shows startup and readiness; -vv logs each request;
-# RUST_LOG=omnia_wasi_sql=trace traces every query)
+# run the host
 cargo run --example sql -- -v run ./target/wasm32-wasip2/debug/examples/sql_wasm.wasm
 ```
 

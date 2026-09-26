@@ -29,9 +29,8 @@ ws="$(cargo locate-project --workspace --message-format=plain)"
 ws="${ws%/Cargo.toml}"
 shift
 
-# `-v` lifts the host one level (a server to `info`: startup, listening,
-# ready). A set `RUST_LOG` is honoured as-is instead, since the flag would
-# displace its bare level.
+# `-v` shows startup logs; a set `RUST_LOG` takes over, as `-v` would
+# displace its level.
 flags=""
 [ -n "${RUST_LOG:-}" ] || flags="-v"
 

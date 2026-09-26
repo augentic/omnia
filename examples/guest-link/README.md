@@ -47,7 +47,6 @@ The host does not parse what `echo` means, and nothing declares it. `example:lin
 The deployment is embedded in [`runtime.rs`](runtime.rs): the examples package's `build.rs` compiles both guests for `wasm32-wasip2`, and the `runtime!` invocation embeds them, naming them `responder` and `router` — the names the router dispatches by — rather than by their files' stems. So a bare `run` works from any directory with no build step first:
 
 ```bash
-# -v shows startup and readiness
 cargo run --example guest-link -- -v run
 ```
 

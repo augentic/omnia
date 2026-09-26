@@ -15,8 +15,7 @@ Or, more manually, for debugging:
 # build the guest
 cargo build --example messaging-wasm --target wasm32-wasip2
 
-# run the host (-v shows startup and readiness;
-# RUST_LOG=omnia_wasi_messaging=trace traces each message)
+# run the host
 cargo run --example messaging -- -v run ./target/wasm32-wasip2/debug/examples/messaging_wasm.wasm
 ```
 

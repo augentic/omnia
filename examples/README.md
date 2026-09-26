@@ -20,7 +20,7 @@ cargo run --example http -- run ./target/wasm32-wasip2/debug/examples/http_wasm.
 
 (Guest artifact names use underscores: `http_wasm.wasm`, not `http-wasm.wasm`.)
 
-A server host defaults to `warn`, so without a flag it stays quiet apart from Cargo's `Running …` line. `-v` lifts it to `info` (startup, `http server listening on: …`, `omnia ready`) and `-vv` to `debug` (one line per request and each runtime decision); `make run` passes `-v` unless `RUST_LOG` is set. A command host defaults to `info`. `RUST_LOG` refines a single target on top of any flag — `RUST_LOG=omnia_wasi_http=trace` dumps every request and response — see [Verbosity flags](../docs/reference/configuration.md#verbosity-flags).
+Servers are quiet by default: `-v` shows startup and readiness, `-vv` each request. `make run` passes `-v`. `RUST_LOG` targets a single crate on top (`RUST_LOG=omnia_wasi_http=trace`); see [Verbosity flags](../docs/reference/configuration.md#verbosity-flags).
 
 Each example directory has a `README.md` with test commands and example-specific setup.
 

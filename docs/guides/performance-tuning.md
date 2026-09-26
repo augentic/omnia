@@ -19,7 +19,7 @@ hey -z 30s -c 64 http://127.0.0.1:8080/
 
 Watch two signals while it runs:
 
-- **Pool occupancy gauges** — under `RUST_LOG=omnia=debug` (a bare `-vv` would also log every request), the host logs pool-occupancy metrics every `POOL_METRICS_INTERVAL_MS` (default 5s; set `1000` while tuning). If occupancy hits the pool ceilings, requests queue.
+- **Pool occupancy gauges** — with `RUST_LOG=omnia=debug`, the host logs pool-occupancy metrics every `POOL_METRICS_INTERVAL_MS` (default 5s; set `1000` while tuning). If occupancy hits the pool ceilings, requests queue.
 - **Resident memory** — `ps -o rss= -p $(pgrep -f 'my-runtime run')` while under load, since most pooling knobs trade memory for latency.
 
 ## Knobs, in the order to try them

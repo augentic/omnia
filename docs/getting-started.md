@@ -36,7 +36,7 @@ impl Guest for HttpGuest {
 
 ## Step 2: Run it in a host
 
-A **host** is a native binary that loads the guest and provides its capabilities. Run the example host, passing it the `.wasm` file (`-v` shows startup and readiness; a server is otherwise quiet):
+A **host** is a native binary that loads the guest and provides its capabilities. Run the example host, passing it the `.wasm` file (`-v` shows startup logs):
 
 ```bash
 cargo run --example http -- -v run ./target/wasm32-wasip2/debug/examples/http_wasm.wasm

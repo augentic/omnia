@@ -41,7 +41,6 @@ command-mode binary a direct command — no `run` subcommand, argv passes to the
 guest verbatim:
 
 ```bash
-# a command host logs at `info` by default
 cargo run --example model
 ```
 

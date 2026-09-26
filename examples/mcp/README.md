@@ -17,7 +17,7 @@ Or, more manually, for debugging:
 # build the guest
 cargo build --example mcp-wasm --target wasm32-wasip2
 
-# run the host (-v shows startup and readiness; -vv logs each request)
+# run the host
 cargo run --example mcp -- -v run ./target/wasm32-wasip2/debug/examples/mcp_wasm.wasm
 ```
 

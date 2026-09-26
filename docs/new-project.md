@@ -134,7 +134,7 @@ cargo build -p my-guest --target wasm32-wasip2
 cargo run -p my-host -- -v run ./target/wasm32-wasip2/debug/my_guest.wasm
 ```
 
-(The artifact name uses underscores: `my_guest.wasm`. `-v` lifts the server from its quiet `warn` default to `info`.) When `omnia ready` appears, the server is on `localhost:8080`:
+(The artifact name uses underscores: `my_guest.wasm`; `-v` shows startup logs.) When `omnia ready` appears, the server is on `localhost:8080`:
 
 ```bash
 curl http://localhost:8080

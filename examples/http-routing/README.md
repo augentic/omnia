@@ -14,8 +14,7 @@ cargo build --example http-routing-a-wasm --target wasm32-wasip2
 cargo build --example http-routing-b-wasm --target wasm32-wasip2
 
 # run the host — the manifest path is compiled in (runtime! `manifest:`),
-# so a bare `run` works from any directory (-v shows startup and readiness;
-# -vv logs each request)
+# so a bare `run` works from any directory
 cargo run --example http-routing -- -v run
 
 # or with an explicit manifest
