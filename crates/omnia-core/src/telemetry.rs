@@ -244,6 +244,7 @@ fn filter(directives: &str) -> Result<EnvFilter> {
         .add_directive("tower=off".parse()?)
         .add_directive("tonic=off".parse()?)
         .add_directive("opentelemetry=off".parse()?)
+        .add_directive("opentelemetry_sdk=off".parse()?)
         .add_directive("omnia_wasi_otel=off".parse()?))
 }
 
@@ -499,12 +500,13 @@ mod tests {
     mod filter {
         use super::super::filter;
 
-        const MUTES: [&str; 6] = [
+        const MUTES: [&str; 7] = [
             "hyper=off",
             "h2=off",
             "tower=off",
             "tonic=off",
             "opentelemetry=off",
+            "opentelemetry_sdk=off",
             "omnia_wasi_otel=off",
         ];
 
