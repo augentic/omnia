@@ -300,7 +300,7 @@ pub fn guest_env(
 ) -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = host.into_iter().collect();
     match env.iter_mut().find(|(name, _)| name == RUST_LOG) {
-        Some((_, value)) => *value = rust_log.to_owned(),
+        Some((_, value)) => rust_log.clone_into(value),
         None => env.push((RUST_LOG.to_owned(), rust_log.to_owned())),
     }
     env

@@ -187,10 +187,12 @@ fn exports(endpoint: Option<&str>, env: impl Fn(&str) -> Option<String>) -> Expo
     }
 }
 
-/// The run's tracing directives: its global level — `level` when one is
-/// selected, else the bare level `rust_log` carries, else `fallback` when it
-/// carries no directive at all — followed by every targeted directive
-/// (`tower=off`, `omnia_core=trace`, `[span]=debug`) in `rust_log`.
+/// The run's tracing directives: the verbosity flag composed with `RUST_LOG`.
+///
+/// The global level is `level` when one is selected, else the bare level
+/// `rust_log` carries, else `fallback` when it carries no directive at all;
+/// every targeted directive (`tower=off`, `omnia_core=trace`, `[span]=debug`)
+/// in `rust_log` follows it.
 ///
 /// A selected level displaces only `rust_log`'s bare level, so a flag steps
 /// the run's level without discarding the operator's refinements. A token
