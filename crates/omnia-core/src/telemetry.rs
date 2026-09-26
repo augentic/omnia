@@ -79,7 +79,10 @@ impl Telemetry {
     /// Sets the OTLP gRPC endpoint both signals export to; empty is unset.
     #[must_use]
     pub fn endpoint(mut self, endpoint: impl Into<String>) -> Self {
-        self.endpoint = Some(endpoint.into());
+        // Kept only when non-empty: an empty endpoint handed to the exporter
+        // would override its own `OTEL_EXPORTER_OTLP_*` resolution.
+        let endpoint = endpoint.into();
+        self.endpoint = (!endpoint.is_empty()).then_some(endpoint);
         self
     }
 
@@ -252,7 +255,6 @@ fn filter(directives: &str) -> Result<EnvFilter> {
         .add_directive("tower=off".parse()?)
         .add_directive("tonic=off".parse()?)
         .add_directive("opentelemetry=off".parse()?)
-        .add_directive("opentelemetry_sdk=off".parse()?)
         .add_directive("omnia_wasi_otel=off".parse()?))
 }
 
@@ -404,6 +406,18 @@ mod tests {
         )
     }
 
+    // An empty endpoint is unset before it can reach an exporter.
+    #[test]
+    fn empty_endpoint_unset() {
+        use super::Telemetry;
+
+        assert!(Telemetry::new("svc").endpoint("").endpoint.is_none());
+        assert_eq!(
+            Telemetry::new("svc").endpoint("http://collector:4317").endpoint.as_deref(),
+            Some("http://collector:4317")
+        );
+    }
+
     // Pure over their inputs: the process `RUST_LOG` is handed in, never read
     // (other tests run in parallel).
     mod directives {
@@ -502,7 +516,6 @@ mod tests {
             "tower=off",
             "tonic=off",
             "opentelemetry=off",
-            "opentelemetry_sdk=off",
             "omnia_wasi_otel=off",
         ];
 

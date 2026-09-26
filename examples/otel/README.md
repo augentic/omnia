@@ -18,7 +18,7 @@ Or, more manually, for debugging:
 cargo build --example otel-wasm --target wasm32-wasip2
 
 # run the host
-export RUST_LOG="info,opentelemetry_sdk=off,wasi_otel=debug,omnia_wasi_http=debug,otel=debug"
+export RUST_LOG="info,wasi_otel=debug,omnia_wasi_http=debug,otel=debug"
 cargo run --example otel -- run ./target/wasm32-wasip2/debug/examples/otel_wasm.wasm
 ```
 
@@ -57,7 +57,7 @@ omnia::runtime!({
 
 ```bash
 export OTEL_GRPC_URL="http://localhost:4317"
-export RUST_LOG="info,opentelemetry_sdk=off,wasi_otel=debug,omnia_wasi_http=debug,otel=debug"
+export RUST_LOG="info,wasi_otel=debug,omnia_wasi_http=debug,otel=debug"
 cargo run --example otel -- run ./target/wasm32-wasip2/debug/examples/otel_wasm.wasm
 ```
 

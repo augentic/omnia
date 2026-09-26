@@ -28,7 +28,7 @@ Or, more manually, for debugging:
 cargo build --example cli-wasm --target wasm32-wasip2
 
 # run the host (everything after `--` is the guest argv)
-export RUST_LOG=info,opentelemetry_sdk=off
+export RUST_LOG=info
 cargo run --example cli -- run ./target/wasm32-wasip2/debug/examples/cli_wasm.wasm -- greet Ada
 
 # test
@@ -57,13 +57,13 @@ A failure is the same envelope in either format on stderr — text as
 The guest never picks an exit code; the error class does. `fail [CLASS]`
 returns that class from its handler so the mapping can be observed:
 
-| Argv                | Error class       | Exit |
-| ------------------- | ----------------- | ---- |
-| `fail bad-request`  | `BadRequest`      | 1    |
-| `fail not-found`    | `NotFound`        | 2    |
-| `fail` (default)    | `ServerError`     | 3    |
-| `fail bad-gateway`  | `BadGateway`      | 4    |
-| `bogus`             | clap usage error  | 64   |
+| Argv               | Error class      | Exit |
+| ------------------ | ---------------- | ---- |
+| `fail bad-request` | `BadRequest`     | 1    |
+| `fail not-found`   | `NotFound`       | 2    |
+| `fail` (default)   | `ServerError`    | 3    |
+| `fail bad-gateway` | `BadGateway`     | 4    |
+| `bogus`            | clap usage error | 64   |
 
 Usage errors exit 64 (`EX_USAGE`), so exit 2 always means `NotFound`.
 Invocation metadata is read from `CLI_REQUEST_ID`, `CLI_CORRELATION_ID`,

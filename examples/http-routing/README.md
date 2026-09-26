@@ -15,7 +15,7 @@ cargo build --example http-routing-b-wasm --target wasm32-wasip2
 
 # run the host — the manifest path is compiled in (runtime! `manifest:`),
 # so a bare `run` works from any directory
-export RUST_LOG="info,opentelemetry_sdk=off,omnia_wasi_http=debug"
+export RUST_LOG="info,omnia_wasi_http=debug"
 cargo run --example http-routing -- run
 
 # or with an explicit manifest

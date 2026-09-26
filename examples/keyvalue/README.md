@@ -16,7 +16,7 @@ Or, more manually, for debugging:
 cargo build --example keyvalue-wasm --target wasm32-wasip2
 
 # run the host
-export RUST_LOG="info,opentelemetry_sdk=off,wasi_keyvalue=debug,omnia_wasi_http=debug,keyvalue=debug"
+export RUST_LOG="info,wasi_keyvalue=debug,omnia_wasi_http=debug,keyvalue=debug"
 cargo run --example keyvalue -- run ./target/wasm32-wasip2/debug/examples/keyvalue_wasm.wasm
 ```
 

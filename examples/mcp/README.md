@@ -18,7 +18,7 @@ Or, more manually, for debugging:
 cargo build --example mcp-wasm --target wasm32-wasip2
 
 # run the host
-export RUST_LOG="info,opentelemetry_sdk=off,omnia_wasi_http=debug,mcp=debug"
+export RUST_LOG="info,omnia_wasi_http=debug,mcp=debug"
 cargo run --example mcp -- run ./target/wasm32-wasip2/debug/examples/mcp_wasm.wasm
 ```
 

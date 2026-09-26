@@ -16,7 +16,7 @@ Or, more manually, for debugging:
 cargo build --example messaging-wasm --target wasm32-wasip2
 
 # run the host
-export RUST_LOG="info,opentelemetry_sdk=off,wasi_messaging=debug,messaging=debug"
+export RUST_LOG="info,wasi_messaging=debug,messaging=debug"
 cargo run --example messaging -- run ./target/wasm32-wasip2/debug/examples/messaging_wasm.wasm
 ```
 
