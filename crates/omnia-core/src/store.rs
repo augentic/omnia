@@ -12,9 +12,7 @@ use wasmtime::{StoreLimits, StoreLimitsBuilder};
 use wasmtime_wasi::{FsPerms, ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::{WasiHttpCtxView, WasiHttpView};
 
-use crate::{
-    ChainCtx, Dispatcher, Extensions, HostCtx, LevelFilter, MountRegistry, Provides, RuntimeOptions,
-};
+use crate::{ChainCtx, Dispatcher, Extensions, HostCtx, MountRegistry, Provides, RuntimeOptions};
 
 /// Exposes a store context's [`StoreLimits`] so the runtime can install a
 /// per-guest resource limiter on every [`Store`](wasmtime::Store) it creates.
@@ -290,22 +288,20 @@ impl<B: Send + 'static> HasChain for StoreCtx<B> {
 
 const RUST_LOG: &str = "RUST_LOG";
 
-/// The complete guest environment: every `host` pair, with `RUST_LOG` at the
-/// deployment's tracing level.
+/// The complete guest environment: every `host` pair, with `RUST_LOG` set to
+/// the run's tracing directives.
 ///
-/// A selected `level` replaces whatever `RUST_LOG` the host carries. With
-/// none selected, `fallback` fills the variable only when the host lacks it,
-/// so an operator's own `RUST_LOG` stands on a bare run.
+/// `rust_log` is the composition of the run's verbosity flag with the
+/// process `RUST_LOG` ([`telemetry::directives`](crate::telemetry::directives)),
+/// so it replaces the host's variable in place — the process value is already
+/// folded in — or is appended when the host carries none.
 pub fn guest_env(
-    host: impl IntoIterator<Item = (String, String)>, level: Option<LevelFilter>,
-    fallback: LevelFilter,
+    host: impl IntoIterator<Item = (String, String)>, rust_log: &str,
 ) -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = host.into_iter().collect();
-    match (level, env.iter_mut().find(|(name, _)| name == RUST_LOG)) {
-        (Some(level), Some((_, value))) => *value = level.to_string(),
-        (None, Some(_)) => {}
-        (Some(level), None) => env.push((RUST_LOG.to_owned(), level.to_string())),
-        (None, None) => env.push((RUST_LOG.to_owned(), fallback.to_string())),
+    match env.iter_mut().find(|(name, _)| name == RUST_LOG) {
+        Some((_, value)) => *value = rust_log.to_owned(),
+        None => env.push((RUST_LOG.to_owned(), rust_log.to_owned())),
     }
     env
 }
@@ -318,36 +314,20 @@ mod tests {
         entries.iter().map(|(name, value)| ((*name).to_owned(), (*value).to_owned())).collect()
     }
 
-    // A selected level replaces the host's `RUST_LOG` in place, or is
-    // appended when the host has none; every other pair comes through
-    // untouched.
+    // The composed directives replace the host's `RUST_LOG` in place; every
+    // other pair comes through untouched.
     #[test]
-    fn level_overrides() {
+    fn replaces_process() {
         let host = pairs(&[("RUST_LOG", "off"), ("HOME", "/home/op")]);
         assert_eq!(
-            guest_env(host, Some(LevelFilter::DEBUG), LevelFilter::INFO),
-            pairs(&[("RUST_LOG", "debug"), ("HOME", "/home/op")])
-        );
-
-        let host = pairs(&[("HOME", "/home/op")]);
-        assert_eq!(
-            guest_env(host, Some(LevelFilter::TRACE), LevelFilter::INFO),
-            pairs(&[("HOME", "/home/op"), ("RUST_LOG", "trace")])
+            guest_env(host, "debug,tower=off"),
+            pairs(&[("RUST_LOG", "debug,tower=off"), ("HOME", "/home/op")])
         );
     }
 
     #[test]
-    fn bare_fills_fallback() {
+    fn fills_absent() {
         let host = pairs(&[("HOME", "/home/op")]);
-        assert_eq!(
-            guest_env(host, None, LevelFilter::WARN),
-            pairs(&[("HOME", "/home/op"), ("RUST_LOG", "warn")])
-        );
-    }
-
-    #[test]
-    fn bare_keeps_process() {
-        let host = pairs(&[("RUST_LOG", "my_sdk=debug"), ("HOME", "/home/op")]);
-        assert_eq!(guest_env(host.clone(), None, LevelFilter::INFO), host);
+        assert_eq!(guest_env(host, "warn"), pairs(&[("HOME", "/home/op"), ("RUST_LOG", "warn")]));
     }
 }

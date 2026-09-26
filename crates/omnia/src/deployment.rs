@@ -20,7 +20,7 @@ use omnia_core::wasmtime_wasi::WasiView;
 use omnia_core::{
     GuestId, HasChain, HasDispatcher, Host, LevelFilter, LinkSeam, LoadedGuest, MountRegistry,
     NoLinks, Registry, RegistryParts, Routes, Runtime, RuntimeOptions, RuntimeParts, Server,
-    Source, SourceSpec, StoreCtx, Telemetry,
+    Source, SourceSpec, StoreCtx, Telemetry, telemetry,
 };
 #[cfg(feature = "link")]
 use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks};
@@ -85,11 +85,13 @@ impl DeploymentBuilder {
     /// Select the tracing level for the whole process: the host console and
     /// every guest's `RUST_LOG` alike.
     ///
-    /// A selected level replaces whatever `RUST_LOG` the process carries.
-    /// Unset, a run keeps the process `RUST_LOG` and falls back to the
-    /// [mode's level](Mode::level) when it sets none. The process environment
-    /// is never written: guests read the level through their WASI
-    /// environment, the host through its subscriber.
+    /// The level composes with the process `RUST_LOG`
+    /// ([`telemetry::directives`]): it displaces the variable's bare level,
+    /// and the variable's targeted directives (`tower=off`, `my_sdk=debug`)
+    /// stay in force on top. Unset, a run keeps the process `RUST_LOG` and
+    /// falls back to the [mode's level](Mode::level) when it sets none. The
+    /// process environment is never written: guests read the directives
+    /// through their WASI environment, the host through its subscriber.
     #[must_use]
     pub const fn level(mut self, level: LevelFilter) -> Self {
         self.level = Some(level);
@@ -170,14 +172,18 @@ impl DeploymentBuilder {
         // environment.
         let name = env::var("COMPONENT").unwrap_or_else(|_| program_name.clone());
 
-        // Telemetry at the run's level: a selected level is the console
-        // filter outright; otherwise the process `RUST_LOG` stands and the
-        // mode's level fills its absence. Initialization is idempotent
-        // (`Telemetry::build`): the first call in the process — here or in an
-        // embedder — installs the subscriber and the exporters, and later
-        // deployments reuse them.
-        let fallback = self.mode.level();
-        init_telemetry(&name, self.level, fallback)?;
+        // The run's tracing directives, decided once for the host console and
+        // every guest: the selected level (else the process `RUST_LOG`'s, else
+        // the mode's) with the process `RUST_LOG`'s targeted directives on
+        // top. Telemetry initialization is idempotent (`Telemetry::build`):
+        // the first call in the process — here or in an embedder — installs
+        // the subscriber and the exporters, and later deployments reuse them.
+        let rust_log = telemetry::directives(
+            self.level,
+            self.mode.level(),
+            env::var("RUST_LOG").ok().as_deref(),
+        );
+        init_telemetry(&name, &rust_log)?;
         tracing::debug!("initializing runtime");
 
         let (engine, linker, mut options) = engine_and_linker()?;
@@ -229,8 +235,7 @@ impl DeploymentBuilder {
             registry_config,
             #[cfg(feature = "loader")]
             loader: Loader { registry: None },
-            level: self.level,
-            fallback,
+            rust_log,
         };
         #[cfg(feature = "link")]
         let deployment = Deployment {
@@ -279,10 +284,9 @@ pub struct Deployment<T: WasiView + 'static> {
     // What `assemble` installs on the guest loader.
     #[cfg(feature = "loader")]
     loader: Loader,
-    // The selected tracing level and the mode's fallback, carried onto the
-    // runtime to set `RUST_LOG` in every store it builds.
-    level: Option<LevelFilter>,
-    fallback: LevelFilter,
+    // The run's tracing directives, carried onto the runtime to set
+    // `RUST_LOG` in every store it builds.
+    rust_log: String,
 }
 
 #[cfg(feature = "loader")]
@@ -383,12 +387,6 @@ impl<T: WasiView> Deployment<T> {
         &self.args
     }
 
-    /// The tracing level selected for this run, if any.
-    #[must_use]
-    pub const fn level(&self) -> Option<LevelFilter> {
-        self.level
-    }
-
     /// Assemble the guest [`Registry`].
     ///
     /// Consumes the deployment: pre-instantiation of the boot guests happens
@@ -455,8 +453,7 @@ impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
             #[cfg(not(feature = "loader"))]
             packages: None,
             registry_config: deployment.registry_config.clone(),
-            level: deployment.level,
-            fallback: deployment.fallback,
+            rust_log: deployment.rust_log.clone(),
             command_guest: deployment.command_guest.clone(),
             backends,
             registry: Arc::new(deployment.into_registry().context("assembling registry")?),
@@ -494,17 +491,13 @@ fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, Runt
     Ok((engine, linker, options))
 }
 
-// The host's telemetry: the console at the run's level, the exporters at
-// `OTEL_GRPC_URL` when set (else OpenTelemetry's own endpoint resolution).
-fn init_telemetry(name: &str, level: Option<LevelFilter>, fallback: LevelFilter) -> Result<()> {
-    let mut telemetry = Telemetry::new(name).fallback(fallback);
-    if let Some(level) = level {
-        telemetry = telemetry.filter(level.to_string());
-    }
+// The host's telemetry: the console at the run's directives, the exporters at
+// `OTEL_GRPC_URL` when set (else OpenTelemetry's own endpoint resolution, and
+// none without an endpoint — `Telemetry::build` reports that at `debug`).
+fn init_telemetry(name: &str, rust_log: &str) -> Result<()> {
+    let mut telemetry = Telemetry::new(name).filter(rust_log);
     if let Ok(endpoint) = env::var("OTEL_GRPC_URL") {
         telemetry = telemetry.endpoint(endpoint);
-    } else {
-        tracing::debug!("OTEL_GRPC_URL unset; using OpenTelemetry defaults");
     }
     telemetry.build().context("initializing telemetry")
 }

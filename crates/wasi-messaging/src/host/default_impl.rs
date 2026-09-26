@@ -37,7 +37,7 @@ impl Backend for MessagingDefault {
 
 impl WasiMessagingCtx for MessagingDefault {
     fn connect(&self) -> FutureResult<Arc<dyn Client>> {
-        tracing::debug!("connecting messaging client");
+        tracing::trace!("connecting messaging client");
         let client = self.clone();
         async move { Ok(Arc::new(client) as Arc<dyn Client>) }.boxed()
     }
@@ -56,7 +56,7 @@ impl Client for MessagingDefault {
     }
 
     fn send(&self, topic: String, mut message: Message) -> FutureResult<()> {
-        tracing::debug!("sending message to topic: {topic}");
+        tracing::trace!("sending message to topic: {topic}");
         let sender = self.sender.clone();
 
         async move {
@@ -72,7 +72,7 @@ impl Client for MessagingDefault {
     fn request(
         &self, topic: String, mut message: Message, _options: Option<RequestOptions>,
     ) -> FutureResult<Message> {
-        tracing::debug!("sending request to topic: {}", topic);
+        tracing::trace!("sending request to topic: {}", topic);
         let sender = self.sender.clone();
 
         async move {

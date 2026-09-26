@@ -133,9 +133,12 @@ impl Deployment {
         self
     }
 
-    /// The tracing level for the run: every guest's `RUST_LOG`, whatever the
-    /// test process sets, so a suite scripts a guest's level without
-    /// touching its own environment.
+    /// The tracing level for the run: the bare level of every guest's
+    /// `RUST_LOG`, whatever the test process sets, so a suite scripts a
+    /// guest's level without touching its own environment. The process
+    /// `RUST_LOG`'s targeted directives (`my_sdk=debug`) still reach the
+    /// guest on top, composed as the runtime composes them
+    /// (`omnia::telemetry::directives`).
     ///
     /// Unset, a guest keeps the process `RUST_LOG` and falls back to the
     /// command-mode `info` when it sets none.

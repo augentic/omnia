@@ -37,7 +37,7 @@ impl Backend for BlobstoreDefault {
 
 impl WasiBlobstoreCtx for BlobstoreDefault {
     fn create_container(&self, name: String) -> FutureResult<Arc<dyn Container>> {
-        tracing::debug!("creating container: {name}");
+        tracing::trace!("creating container: {name}");
         let store = Arc::clone(&self.store);
 
         async move {
@@ -53,7 +53,7 @@ impl WasiBlobstoreCtx for BlobstoreDefault {
     }
 
     fn get_container(&self, name: String) -> FutureResult<Arc<dyn Container>> {
-        tracing::debug!("getting container: {name}");
+        tracing::trace!("getting container: {name}");
         let store = Arc::clone(&self.store);
 
         async move {
@@ -70,7 +70,7 @@ impl WasiBlobstoreCtx for BlobstoreDefault {
     }
 
     fn delete_container(&self, name: String) -> FutureResult<()> {
-        tracing::debug!("deleting container: {name}");
+        tracing::trace!("deleting container: {name}");
         let store = Arc::clone(&self.store);
 
         async move {
@@ -84,7 +84,7 @@ impl WasiBlobstoreCtx for BlobstoreDefault {
     }
 
     fn container_exists(&self, name: String) -> FutureResult<bool> {
-        tracing::debug!("checking existence of container: {name}");
+        tracing::trace!("checking existence of container: {name}");
         let store = Arc::clone(&self.store);
 
         async move {
@@ -134,7 +134,7 @@ impl Container for InMemContainer {
     }
 
     fn get_data(&self, name: String, start: u64, end: u64) -> FutureResult<Option<Bytes>> {
-        tracing::debug!("getting object: {name} from container: {}", self.name);
+        tracing::trace!("getting object: {name} from container: {}", self.name);
         let objects = Arc::clone(&self.objects);
 
         async move {
@@ -164,7 +164,7 @@ impl Container for InMemContainer {
     }
 
     fn write_data(&self, name: String, data: Bytes) -> FutureResult<()> {
-        tracing::debug!("writing object: {name} to container: {}", self.name);
+        tracing::trace!("writing object: {name} to container: {}", self.name);
         let objects = Arc::clone(&self.objects);
 
         async move {
@@ -184,7 +184,7 @@ impl Container for InMemContainer {
     }
 
     fn list_objects(&self) -> FutureResult<Vec<String>> {
-        tracing::debug!("listing objects in container: {}", self.name);
+        tracing::trace!("listing objects in container: {}", self.name);
         let objects = Arc::clone(&self.objects);
 
         async move {
@@ -198,7 +198,7 @@ impl Container for InMemContainer {
     }
 
     fn delete_object(&self, name: String) -> FutureResult<()> {
-        tracing::debug!("deleting object: {name} from container: {}", self.name);
+        tracing::trace!("deleting object: {name} from container: {}", self.name);
         let objects = Arc::clone(&self.objects);
 
         async move {
@@ -212,7 +212,7 @@ impl Container for InMemContainer {
     }
 
     fn has_object(&self, name: String) -> FutureResult<bool> {
-        tracing::debug!("checking existence of object: {name} in container: {}", self.name);
+        tracing::trace!("checking existence of object: {name} in container: {}", self.name);
         let objects = Arc::clone(&self.objects);
 
         async move {
@@ -223,7 +223,7 @@ impl Container for InMemContainer {
     }
 
     fn object_info(&self, name: String) -> FutureResult<ObjectMetadata> {
-        tracing::debug!("getting info for object: {name} in container: {}", self.name);
+        tracing::trace!("getting info for object: {name} in container: {}", self.name);
         let objects = Arc::clone(&self.objects);
         let container_name = self.name.clone();
 

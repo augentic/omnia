@@ -12,7 +12,7 @@ Uses `opentelemetry` and `tracing` crates to export telemetry data.
 
 ## Configuration
 
-- **`OTEL_GRPC_URL`**: The gRPC endpoint for the OpenTelemetry collector (default: `http://localhost:4317`).
+- **`OTEL_GRPC_URL`**: The gRPC endpoint for the OpenTelemetry collector. Unset defers to `OTEL_EXPORTER_OTLP_*`; with neither, the host attaches no exporter and guest telemetry it receives is dropped.
 
 - **Production**: [`omnia-opentelemetry`](https://github.com/augentic/omnia-backends/tree/main/crates/opentelemetry) (OTLP gRPC collector export) — a one-line swap in the host, guests untouched (see the [Production Backends guide](https://github.com/augentic/omnia/blob/main/docs/guides/production-backends.md)).
 
@@ -46,7 +46,7 @@ async fn handle(request: Request) -> Response {
 }
 ```
 
-Console output (events only, to stderr) follows the `RUST_LOG` the guest's WASI environment carries (the runtime's tracing level: a `-v`/`-q` flag, else the process `RUST_LOG`, else the mode's default), defaulting to `error` when there is none; `flush` exports on demand.
+Console output (events only, to stderr) follows the `RUST_LOG` the guest's WASI environment carries (the runtime's tracing filter: a `-v`/`-q` flag's level, else the process `RUST_LOG`'s, else the mode's default, with the process `RUST_LOG`'s targeted directives on top), defaulting to `error` when there is none; `flush` exports on demand.
 
 ## License
 
