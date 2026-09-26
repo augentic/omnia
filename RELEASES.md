@@ -67,6 +67,10 @@ Unreleased
   `wasi-keyvalue`'s `Cache` reading a value it did not write — moves from
   `debug` to `trace`, so `-v` shows a run's decisions and `-vv` its every
   step.
+- Console colour only when stderr is a terminal. A redirected or captured
+  stderr (`2>run.log`, a container log driver, journald) gets plain text
+  where it used to get ANSI escapes; on a terminal `NO_COLOR` still
+  disables it.
 - The runtime opens an `info` span around every `wasi:cli/run` drive
   (`cli-run`) and every trigger request (`http-request`,
   `messaging-handle`, `websocket-handle`, up from `debug`). Guest spans

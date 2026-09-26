@@ -14,6 +14,7 @@
 //! this at the end of every drive.
 
 use std::env;
+use std::io::IsTerminal;
 use std::sync::{Mutex, OnceLock, PoisonError};
 
 use anyhow::{Result, anyhow};
@@ -108,7 +109,13 @@ impl Telemetry {
             self.filter.unwrap_or_else(|| directives(None, self.fallback, rust_log().as_deref()));
         let filter_layer = filter(&console)?;
         // Console tracing goes to stderr: stdout belongs to the guest's output.
-        let fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
+        // The layer's own default colours unless `NO_COLOR` is set, with no look
+        // at the stream; keep that on a terminal, and force plain text when
+        // stderr is a file, pipe, or log driver.
+        let mut fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
+        if !std::io::stderr().is_terminal() {
+            fmt_layer = fmt_layer.with_ansi(false);
+        }
 
         let exports = exports(self.endpoint.as_deref(), |name| env::var(name).ok());
         let providers = Providers::build(&self.name, self.endpoint.as_deref(), exports)?;
