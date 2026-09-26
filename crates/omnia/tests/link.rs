@@ -21,8 +21,10 @@ use omnia::{
 // here; a new program without one fails to compile.
 test_programs::foreach_link!();
 
-/// Boot a runtime over `guests` (assembled in order); nothing declares the
-/// `omnia-test:link/ops` seam, which is read off the components.
+/// Boot a runtime over `guests` (assembled in order), each read into bytes
+/// so it loads at boot as a `runtime!`'s embedded guests do; nothing
+/// declares the `omnia-test:link/ops` seam, which is read off the
+/// components.
 async fn boot(guests: &[(&str, &str)]) -> Result<Runtime<()>> {
     boot_with(guests, |builder| builder).await
 }
@@ -33,8 +35,16 @@ async fn boot_with(
 ) -> Result<Runtime<()>> {
     let mut manifest = Manifest::new();
     for (name, wasm) in guests {
-        manifest = manifest.guest(GuestEntry::new(*name, *wasm));
+        let bytes = std::fs::read(wasm).with_context(|| format!("reading {wasm}"))?;
+        manifest = manifest.guest(GuestEntry::new(*name, bytes));
     }
+    assemble(manifest, configure).await
+}
+
+/// Build and assemble `manifest` with `configure` applied to the builder.
+async fn assemble(
+    manifest: Manifest, configure: impl FnOnce(DeploymentBuilder) -> DeploymentBuilder,
+) -> Result<Runtime<()>> {
     let deployment = configure(DeploymentBuilder::new().manifest(manifest))
         .build::<StoreCtx<()>>()
         .await
@@ -42,13 +52,14 @@ async fn boot_with(
     deployment.assemble(()).await
 }
 
-/// Instantiate `guest` fresh and drive its exported `func` with one string
-/// argument, returning the string result.
+/// Instantiate `guest` fresh — loading it first when the deployment declares
+/// it — and drive its exported `func` with one string argument, returning
+/// the string result.
 async fn call(runtime: &Runtime<()>, guest: &str, func: &str, message: &str) -> Result<String> {
     let entry = runtime
-        .registry()
-        .get(&GuestId::from(guest))
-        .with_context(|| format!("guest `{guest}` is not registered"))?;
+        .guest(&GuestId::from(guest))
+        .await
+        .with_context(|| format!("resolving guest `{guest}`"))?;
     let mut store = runtime.build_store(runtime.store());
     let instance = runtime
         .instantiate(entry.instance_pre(), &mut store)
@@ -106,6 +117,34 @@ async fn link_unserved() {
 
     let err = call(&runtime, "full", "poke", "hi").await.expect_err("no guest serves `ops`");
     assert!(format!("{err:#}").contains("`echoer` is not registered"), "unexpected error: {err:#}");
+}
+
+// A path guest loads at its first use, and a link call is one: the relay
+// finds `echoer` unregistered, loads it through the runtime's first-use
+// seam, and the call lands on the freshly served route. The importer boots
+// from bytes, so the seam it imports was polyfilled at bootstrap.
+#[tokio::test]
+async fn link_declared_exporter() {
+    let full = std::fs::read(test_programs::LINK_FULL).expect("reading the full guest");
+    let manifest = Manifest::new()
+        .guest(GuestEntry::new("full", full))
+        .guest(GuestEntry::new("echoer", test_programs::LINK_ECHOER));
+    let runtime = assemble(manifest, |builder| builder).await.expect("deployment boots");
+    assert!(runtime.registry().get(&GuestId::from("echoer")).is_none(), "absent until used");
+
+    let sync = call(&runtime, "full", "poke", "hi").await.expect("sync dispatch");
+    assert_eq!(sync, "echoer pong: hi");
+    assert!(runtime.registry().get(&GuestId::from("echoer")).is_some(), "the call loaded it");
+    let concurrent = call(&runtime, "full", "poke-async", "hi").await.expect("async dispatch");
+    assert_eq!(concurrent, "echoer pong-async: hi");
+
+    // A declared guest that fails to load fails the call that named it.
+    let manifest = Manifest::new()
+        .guest(GuestEntry::new("full", std::fs::read(test_programs::LINK_FULL).expect("full")))
+        .guest(GuestEntry::new("echoer", "/nonexistent/echoer.wasm"));
+    let runtime = assemble(manifest, |builder| builder).await.expect("deployment boots");
+    let err = call(&runtime, "full", "poke", "hi").await.expect_err("the exporter cannot load");
+    assert!(format!("{err:#}").contains("/nonexistent/echoer.wasm"), "unexpected error: {err:#}");
 }
 
 // A guest that exports no interface outside the host's namespaces parks no

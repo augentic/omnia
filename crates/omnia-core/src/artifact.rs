@@ -53,9 +53,9 @@ fn load(engine: &Engine, bytes: &[u8]) -> Result<Component> {
     match precompiled {
         Some(Precompiled::Component) => {
             // SAFETY: `component` is the one caller, and it unwraps a
-            // `Verified`. One exists only through `Source::verified` — a boot
-            // source, or an on-demand one that is pinned or embedded, with
-            // `wasm_only` applied — or through the `unsafe` `Verified::trusted`,
+            // `Verified`. One holding pre-compiled bytes exists only through
+            // `Source::verified` — over bytes the deployment embedded, or a
+            // path it pinned — or through the `unsafe` `Verified::trusted`,
             // whose caller attested the bytes. Either way, pre-compiled bytes
             // here are unmodified `omnia compile` output: the contract
             // `Component::deserialize` requires.

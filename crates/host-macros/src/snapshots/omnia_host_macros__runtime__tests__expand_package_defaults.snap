@@ -1,6 +1,6 @@
 ---
 source: crates/host-macros/src/runtime.rs
-expression: "expand_pretty(quote!({\n    guests:\n    [{ path: \"app.wasm\", wasm_only: true },\n    {\n        name: \"pkg\", package: \"acme:tool@1.2.3\", on_demand: true, digest:\n        \"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\n        wasm_only: true,\n    },], registries: include_str!(\"wasm-pkg.toml\"),\n}))"
+expression: "expand_pretty(quote!({\n    guests:\n    [{ path: \"app.wasm\" },\n    {\n        package: \"acme:tool@1.2.3\", digest:\n        \"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\n    },\n    {\n        name: \"pinned\", path: \"pinned.wasm\", digest:\n        \"sha256:E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855\",\n    }, { name: \"tool\", package: \"acme:tool@2.0.0\" },], registries:\n    include_str!(\"wasm-pkg.toml\"),\n}))"
 ---
 mod runtime {
     use omnia::anyhow::Result;
@@ -35,23 +35,34 @@ mod runtime {
                     omnia::RegistryConfig::contents(include_str!("wasm-pkg.toml")),
                 )
                 .guest(
-                    omnia::GuestEntry::embedded("app.wasm", include_bytes!("app.wasm"))
-                        .wasm_only(),
+                    omnia::GuestEntry::embedded("app.wasm", include_bytes!("app.wasm")),
                 )
                 .guest(
-                    omnia::GuestEntry::new(
-                            "pkg",
-                            omnia::SourceSpec::package("acme:tool@1.2.3"),
-                        )
-                        .on_demand()
+                    omnia::GuestEntry::package("acme:tool@1.2.3")
                         .digest(
                             omnia::Digest::from([
                                 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
                                 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
                                 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
                             ]),
-                        )
-                        .wasm_only(),
+                        ),
+                )
+                .guest(
+                    omnia::GuestEntry::new("pinned", include_bytes!("pinned.wasm"))
+                        .digest(
+                            omnia::Digest::from([
+                                227u8, 176u8, 196u8, 66u8, 152u8, 252u8, 28u8, 20u8, 154u8,
+                                251u8, 244u8, 200u8, 153u8, 111u8, 185u8, 36u8, 39u8, 174u8,
+                                65u8, 228u8, 100u8, 155u8, 147u8, 76u8, 164u8, 149u8, 153u8,
+                                27u8, 120u8, 82u8, 184u8, 85u8,
+                            ]),
+                        ),
+                )
+                .guest(
+                    omnia::GuestEntry::new(
+                        "tool",
+                        omnia::SourceSpec::package("acme:tool@2.0.0"),
+                    ),
                 ),
         )
     }

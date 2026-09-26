@@ -2,9 +2,12 @@
 //!
 //! Boots the two-guest `guest-link` deployment, then registers a third guest
 //! (`extra`, absent from the manifest) at run time via `Runtime::register`.
-//! The static `router` reaches it through the same host-mediated link dispatch
-//! as any static target — `run-to("extra", ...)` — proving serve-at-register
-//! end to end. Build the guests first (see README.md), then:
+//! The `router` reaches it through the same host-mediated link dispatch as
+//! any manifest target — `run-to("extra", ...)` — proving serve-at-register
+//! end to end. The manifest names its guests by path, so each loads at its
+//! first use: the router when `call_router` first resolves it, and
+//! `responder` inside the relay when the router first calls it. Build the
+//! guests first (see README.md), then:
 //!
 //!   cargo run --example guest-link-register
 
@@ -45,8 +48,8 @@ cfg_if::cfg_if! {
             )?;
             runtime.register("extra", wasm).await?;
 
-            // The static router dispatches to the registered guest exactly as it
-            // would to a static one.
+            // The router dispatches to the registered guest exactly as it would
+            // to a manifest one; the second call loads `responder` on the way.
             println!("{}", call_router(&runtime, "extra", "hello").await?);
             println!("{}", call_router(&runtime, "responder", "hello").await?);
 
@@ -54,12 +57,13 @@ cfg_if::cfg_if! {
             Ok(())
         }
 
-        /// Instantiate the router fresh and drive `run-to(target, message)`.
+        /// Resolve the router — loading it from the manifest's path on the
+        /// first call — instantiate it fresh, and drive `run-to(target, message)`.
         async fn call_router(runtime: &Runtime<()>, target: &str, message: &str) -> Result<String> {
             let guest = runtime
-                .registry()
-                .get(&GuestId::from("router"))
-                .context("router guest is registered")?;
+                .guest(&GuestId::from("router"))
+                .await
+                .context("resolving the router guest")?;
             let mut store = runtime.build_store(runtime.store());
             let instance = runtime
                 .instantiate(guest.instance_pre(), &mut store)

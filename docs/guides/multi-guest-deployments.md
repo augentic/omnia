@@ -21,7 +21,7 @@ A manifest declares guests, mounts, routes, registries, and (eventually) transpo
 ```toml
 [[guest]]
 name = "api"                            # the guest's name; the runtime treats it as a string
-source.path = "./guests/api.wasm"       # .wasm or pre-compiled .bin
+source.path = "./guests/api.wasm"       # raw .wasm (a pre-compiled .bin needs a `digest`)
 routes.http = ["/"]
 
 [[guest]]
@@ -30,6 +30,8 @@ routes.http = ["/admin"]
 ```
 
 A guest's name is its identity: what routes address, what another guest dispatches to, and what a guest's `loader.load("api")` answers with. Leave it out when the file is called what callers dispatch to; give it when the file is not, or when two files share a stem. Names are unique within a deployment.
+
+A manifest file's guest is not compiled into the runtime, so it loads at its first use — the first request its routes match, the command run that drives it, the first call another guest makes to it — rather than at startup. Startup validates the manifest; the file is read, pinned, and compiled when the guest is first named, and a failure there (a missing file, a stale `digest`) fails that use. A guest nothing names — no routes, no `command = true`, no caller — never runs, since only the guests compiled into the runtime can be a trigger's catch-all.
 
 The full field reference lives in [Configuration](../reference/configuration.md#deployment-manifest-omniatoml).
 
@@ -47,7 +49,7 @@ let manifest = Manifest::new()
 host::run(DeploymentBuilder::new().manifest(manifest))?;
 ```
 
-`Manifest::load(path)?` loads a TOML file into the same value, resolving relative paths against the file's directory. `Manifest::from_wasm(path)` is the one-guest shorthand (what you get from `run guest.wasm`). Relative paths in a programmatic manifest resolve against the process working directory.
+`Manifest::load(path)?` loads a TOML file into the same value, resolving relative paths against the file's directory. `Manifest::from_wasm(path)?` is the one-guest shorthand (what you get from `run guest.wasm`): it reads the component now, so that guest loads at boot like an embedded one. A `GuestEntry::new(name, path)` is a first-use guest exactly as a `[[guest]]` file entry is; `GuestEntry::new(name, bytes)` loads at boot. Relative paths in a programmatic manifest resolve against the process working directory.
 
 The [`guest-link-dynamic`](../../examples/guest-link/dynamic.rs) example builds a host this way.
 
@@ -59,7 +61,7 @@ This is the analogue of putting two services behind one reverse proxy. Each gues
 - **`routes.messaging`** — topics matched by NATS-style pattern (`.`-separated tokens, `*` matches one token, `>` matches the rest).
 - **`routes.websocket`** — same pattern syntax, for WebSocket routes.
 
-If a trigger has no routes and exactly one guest exports its handler, that guest is the catch-all — so a single-guest deployment needs no routes at all.
+If a trigger has no routes and exactly one guest compiled into the runtime (an embedded `path:`, the `run <component>` file) exports its handler, that guest is the catch-all — so a single-guest deployment run from the command line needs no routes at all. A manifest file's guest loads at first use and is never the catch-all: give it routes, or the `command = true` mark.
 
 The [`http-routing`](../../examples/http-routing/) example runs two HTTP guests behind `/a` and `/b` prefixes.
 
@@ -75,7 +77,7 @@ source.path = "./guests/billing.wasm"    # exports the messaging handler; named 
 routes.messaging = ["invoices.*"]        # exactly one token after `invoices.`
 ```
 
-Each matched message starts a fresh instance of the routed guest, exactly like an HTTP request. Inside the guest, topic-to-handler matching stays exact — see [Messaging](messaging.md#handling-incoming-messages).
+Each matched message starts a fresh instance of the routed guest, exactly like an HTTP request; the first message to match a guest's routes is what loads it. Inside the guest, topic-to-handler matching stays exact — see [Messaging](messaging.md#handling-incoming-messages).
 
 ## Mounts: giving guests a workspace
 
@@ -115,6 +117,7 @@ source.path = "./responder.wasm"        # exports example:link/echo
                                         # (named `responder` by its file)
 [[guest]]
 source.path = "./router.wasm"           # imports example:link/echo
+command = true                          # the run drives `router`, which loads it
 ```
 
 The host decides what crosses by namespace: an interface under `wasi:` or `omnia:` is the host's own (WASI, and omnia's capability hosts), and every other interface a guest imports is relayed to whichever guest exports it. So `example:link/echo` — a package the guests' author owns — is wired between them without being named anywhere, and a guest package can never collide with the host's.
@@ -123,7 +126,7 @@ When `router` calls `echo`, the host starts a fresh `responder` instance, runs t
 
 A few constraints:
 
-- Dispatch is deployment-wide. Any guest that imports an interface can call any guest that exports it; what a guest may reach is bounded by which guests the deployment runs, not by a list. An import no guest exports fails when the deployment boots, not at the first call. The exporter does not have to be present at startup: a guest registered later — or loaded through `omnia:plugins/loader` — can still serve the call. A runtime built without Omnia's `link` feature leaves such imports unsatisfied, so the deployment fails at boot.
+- Dispatch is deployment-wide. Any guest that imports an interface can call any guest that exports it; what a guest may reach is bounded by which guests the deployment runs, not by a list. An import no guest exports fails when the deployment boots, not at the first call. The exporter does not have to be loaded at startup: a manifest file's guest loads when the first call names it (so above, `router`'s first `echo` is what loads `responder`), and a guest registered later — or loaded through `omnia:plugins/loader` — can serve the call too. A runtime built without Omnia's `link` feature leaves such imports unsatisfied, so the deployment fails at boot.
 - Calls can nest (A calls B calls C) up to `MAX_DISPATCH_DEPTH` (default 8), so accidental recursion cannot run forever.
 - Today the call stays in-process. Declaring `unix`, `nats`, or `quic` under `[transport]` is rejected at load.
 

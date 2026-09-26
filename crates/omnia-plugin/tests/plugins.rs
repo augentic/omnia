@@ -2,8 +2,9 @@
 //! requester guest from `crates/test-programs` drives loads through omnia's
 //! runtime against a deployment whose grant bounds what may be loaded — the
 //! `[[guest]]` list it declares (from a staged file, embedded bytes, or a
-//! wasm-pkg `local` registry), the read-only mounts a path may lie beneath,
-//! and the registries its `registries` routes a package to. The requester
+//! wasm-pkg `local` registry), each loaded at boot or at its first use as
+//! its source decides, the read-only mounts a path may lie beneath, and the
+//! registries its `registries` routes a package to. The requester
 //! asserts internally (handles, digests, dispatch answers, and every typed
 //! refusal); the host side declares the deployment and checks the exit and
 //! the registry. Lifecycle scenarios the WASI surface cannot reach
@@ -18,9 +19,9 @@ use anyhow::{Context as _, Result, bail};
 use omnia::wasmtime::Engine;
 use omnia::wasmtime::component::Val;
 use omnia::{
-    ChainCtx, CompileOptions, DeploymentBuilder, Digest, ExitStatus, GuestEntry, GuestId,
-    LoadError, Location, Manifest, Mode, PluginLoader as _, RegistryClient, RegistryConfig,
-    RegistrySource, Runtime, SourceSpec, StoreCtx,
+    AcquireError, ChainCtx, CompileOptions, DeploymentBuilder, Digest, ExitStatus, GuestEntry,
+    GuestId, LoadError, Location, Manifest, Mode, PluginLoader as _, RegistryClient,
+    RegistryConfig, RegistrySource, Runtime, SourceSpec, StoreCtx,
 };
 use omnia_test::host::{Backends, Scratch, scratch};
 use omnia_wasi_otel::WasiOtel;
@@ -31,15 +32,14 @@ test_programs::foreach_plugins!();
 
 const ECHOER_PACKAGE: &str = "test:echoer@1.0.0";
 
-/// A manifest booting `wasm` as the `requester` command guest; the tests
-/// declare what it may load beside it.
-fn requester(wasm: &str) -> Manifest {
-    Manifest::new().guest(GuestEntry::new("requester", wasm))
-}
+/// The name the echoer package derives: its reference without the version.
+const ECHOER_NAME: &str = "test:echoer";
 
-/// A `[[guest]]` admitted on its first load from a path or embedded bytes.
-fn on_demand(name: &str, source: impl Into<SourceSpec>) -> GuestEntry {
-    GuestEntry::new(name, source).on_demand()
+/// A manifest declaring `wasm` as the `requester` command guest — a path,
+/// so it loads when the command drive first names it; the tests declare
+/// what it may load beside it.
+fn requester(wasm: &str) -> Manifest {
+    Manifest::new().guest(GuestEntry::new("requester", wasm).command())
 }
 
 /// The location of a guest the deployment declares as `name`.
@@ -201,27 +201,31 @@ fn local_registry_toml(root: &Path) -> String {
     format!("default_registry = \"registry.test\"\n\n{}", local_backend_toml(root))
 }
 
-/// The on-demand declaration of the echoer as a registry package.
+/// The echoer declared as a registry package, named `test:echoer` by its
+/// reference.
 fn echoer_package() -> GuestEntry {
-    GuestEntry::new("plugin", SourceSpec::package(ECHOER_PACKAGE)).on_demand()
+    GuestEntry::package(ECHOER_PACKAGE)
 }
 
-// The declared path source: the requester names `plugin`, the deployment
-// admits the file it declared for that name, and the registry records the
-// bytes' digest.
+// The declared path source: a path guest is absent until its first use —
+// here the requester naming `plugin` — when the deployment admits the file
+// it declared for that name and the registry records the bytes' digest. The
+// requester is a path guest too, loaded when the command drive names it.
 #[tokio::test]
 async fn plugins_load() {
     let manifest = requester(test_programs::PLUGINS_LOAD)
-        .guest(on_demand("plugin", test_programs::LINK_ECHOER));
+        .guest(GuestEntry::new("plugin", test_programs::LINK_ECHOER));
     let runtime = boot(manifest, &["declared", "plugin"]).await.expect("assembling runtime");
-    assert_eq!(
-        recorded(&runtime, "plugin"),
-        Registered::Absent,
-        "an on-demand guest is absent until loaded"
-    );
+    assert_eq!(runtime.registry().len(), 0, "path guests are absent until their first use");
+    assert_eq!(recorded(&runtime, "plugin"), Registered::Absent);
 
     let status = runtime.run_command().await.expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+    assert_eq!(
+        recorded(&runtime, "requester"),
+        Registered::Active(digest_of(test_programs::PLUGINS_LOAD)),
+        "the command drive loaded the requester"
+    );
     assert_eq!(
         recorded(&runtime, "plugin"),
         Registered::Active(digest_of(test_programs::LINK_ECHOER)),
@@ -230,31 +234,24 @@ async fn plugins_load() {
     runtime.shutdown();
 }
 
-// Embedded bytes are a source like any other, held for the first load.
-#[tokio::test]
-async fn embedded_source() {
-    let bytes = std::fs::read(test_programs::LINK_ECHOER).expect("reading the echoer");
-    let manifest = requester(test_programs::PLUGINS_LOAD).guest(on_demand("plugin", bytes));
-    let status = run(manifest, &["declared", "plugin"]).await.expect("deployment runs");
-    assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
-}
-
-// `omnia compile` output loads wherever raw wasm does — a boot guest, and an
-// on-demand one once its entry pins the bytes — and the registry records its
-// bytes' digest the same way.
+// `omnia compile` output loads from a path once the entry pins the bytes —
+// the requester at the command drive, the plugin at the declared load — and
+// the registry records its bytes' digest the same way.
 #[tokio::test]
 async fn precompiled_sources() {
     let scratch = scratch();
     let requester_bin = precompile(&scratch, "requester.bin", test_programs::PLUGINS_LOAD);
     let plugin_bin = precompile(&scratch, "plugin.bin", test_programs::LINK_ECHOER);
-    let digest = Digest::of(&std::fs::read(&plugin_bin).expect("reading the compiled echoer"));
+    let requester_digest = digest_of(requester_bin.to_str().expect("a utf-8 path"));
+    let digest = digest_of(plugin_bin.to_str().expect("a utf-8 path"));
 
     let manifest = Manifest::new()
-        .guest(GuestEntry::new("requester", requester_bin))
-        .guest(on_demand("plugin", plugin_bin).digest(digest));
+        .guest(GuestEntry::new("requester", requester_bin).digest(requester_digest).command())
+        .guest(GuestEntry::new("plugin", plugin_bin).digest(digest));
     let runtime = boot(manifest, &["declared", "plugin"]).await.expect("assembling runtime");
     let status = runtime.run_command().await.expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+    assert_eq!(recorded(&runtime, "requester"), Registered::Active(requester_digest));
     assert_eq!(
         recorded(&runtime, "plugin"),
         Registered::Active(digest),
@@ -269,7 +266,7 @@ async fn precompiled_sources() {
 async fn pinned() {
     let digest = digest_of(test_programs::LINK_ECHOER);
     let manifest = requester(test_programs::PLUGINS_LOAD)
-        .guest(on_demand("plugin", test_programs::LINK_ECHOER).digest(digest));
+        .guest(GuestEntry::new("plugin", test_programs::LINK_ECHOER).digest(digest));
     let status =
         run(manifest, &["declared", "plugin", &digest.to_string()]).await.expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
@@ -277,8 +274,9 @@ async fn pinned() {
 
 #[tokio::test]
 async fn pin_mismatch() {
-    let manifest = requester(test_programs::PLUGINS_REFUSED)
-        .guest(on_demand("plugin", test_programs::LINK_ECHOER).digest(Digest::of(b"other bytes")));
+    let manifest = requester(test_programs::PLUGINS_REFUSED).guest(
+        GuestEntry::new("plugin", test_programs::LINK_ECHOER).digest(Digest::of(b"other bytes")),
+    );
     let runtime = boot(manifest, &["declared", "plugin", "refused", "not its declared digest"])
         .await
         .expect("assembling runtime");
@@ -288,80 +286,61 @@ async fn pin_mismatch() {
     runtime.shutdown();
 }
 
-// `wasm_only` refuses a pre-compiled artifact however it hashes — the policy
-// for an entry declared from input the deployment author does not control —
-// where the same artifact on an unmarked entry loads (`precompiled_sources`).
-// Raw wasm still passes the marked entry, and a marked boot entry refuses
-// the same way, at assembly.
+// What a pre-compiled artifact may load from follows from the source kind
+// alone, no key: embedded bytes were in the process before any guest ran and
+// load at boot; a path is read while guests run, so it loads only pinned
+// (`precompiled_sources`) and is refused unpinned; a package admits raw wasm
+// alone, however it hashes. The same artifact runs every row.
 #[tokio::test]
-async fn plugins_wasm_only() {
+async fn precompiled_by_source() {
     let scratch = scratch();
     let plugin_bin = precompile(&scratch, "plugin.bin", test_programs::LINK_ECHOER);
-    let pinned = Digest::of(&std::fs::read(&plugin_bin).expect("reading the compiled echoer"));
-
-    let manifest = requester(test_programs::PLUGINS_REFUSED)
-        .guest(on_demand("plugin", plugin_bin.clone()).digest(pinned).wasm_only());
-    let runtime = boot(manifest, &["declared", "plugin", "refused", "admits raw wasm alone"])
-        .await
-        .expect("assembling runtime");
-    let status = runtime.run_command().await.expect("deployment runs");
-    assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
-    assert_eq!(recorded(&runtime, "plugin"), Registered::Absent, "nothing was admitted");
-    runtime.shutdown();
-
-    let manifest = requester(test_programs::PLUGINS_LOAD)
-        .guest(on_demand("plugin", test_programs::LINK_ECHOER).wasm_only());
-    let status = run(manifest, &["declared", "plugin"]).await.expect("deployment runs");
-    assert_eq!(status, ExitStatus::SUCCESS, "raw wasm passes a `wasm_only` entry");
-
-    let manifest = requester(test_programs::PLUGINS_LOAD)
-        .guest(GuestEntry::new("plugin", plugin_bin).wasm_only());
-    let Err(error) = boot(manifest, &["declared", "plugin"]).await else {
-        panic!("a pre-compiled boot guest on a `wasm_only` entry is refused");
-    };
-    assert!(format!("{error:#}").contains("admits raw wasm alone"), "{error:#}");
-}
-
-// A pre-compiled artifact on an on-demand entry is read while guests run, so
-// it is admitted only from a source they cannot have shaped: pinned, or
-// embedded. Unpinned, the same artifact `precompiled_sources` loads is
-// refused whether the entry names a path or a package.
-#[tokio::test]
-async fn precompiled_on_demand_unpinned() {
-    let scratch = scratch();
-    let plugin_bin = precompile(&scratch, "plugin.bin", test_programs::LINK_ECHOER);
+    let bytes = std::fs::read(&plugin_bin).expect("reading the compiled echoer");
+    let pinned = Digest::of(&bytes);
     stage_package(scratch.path(), ECHOER_PACKAGE, plugin_bin.to_str().expect("a utf-8 path"));
 
+    let manifest = requester(test_programs::PLUGINS_LOAD).guest(GuestEntry::new("plugin", bytes));
+    let runtime = boot(manifest, &["declared", "plugin"]).await.expect("assembling runtime");
+    assert_eq!(
+        recorded(&runtime, "plugin"),
+        Registered::Active(pinned),
+        "embedded pre-compiled bytes loaded at boot"
+    );
+    let status = runtime.run_command().await.expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the declared load attested the boot guest");
+    runtime.shutdown();
+
     let rows = [
-        ("path", requester(test_programs::PLUGINS_REFUSED).guest(on_demand("plugin", plugin_bin))),
+        ("unpinned path", GuestEntry::new("plugin", plugin_bin), "plugin", "unpinned", None),
         (
-            "package",
-            requester(test_programs::PLUGINS_REFUSED)
-                .guest(echoer_package())
-                .registries(RegistryConfig::contents(local_registry_toml(scratch.path()))),
+            "pinned package",
+            echoer_package().digest(pinned),
+            ECHOER_NAME,
+            "a package admits raw wasm alone",
+            Some(RegistryConfig::contents(local_registry_toml(scratch.path()))),
         ),
     ];
-    for (row, manifest) in rows {
-        let runtime = boot(manifest, &["declared", "plugin", "refused", "unpinned"])
+    for (row, entry, name, needle, registries) in rows {
+        let mut manifest = requester(test_programs::PLUGINS_REFUSED).guest(entry);
+        if let Some(registries) = registries {
+            manifest = manifest.registries(registries);
+        }
+        let runtime = boot(manifest, &["declared", name, "refused", needle])
             .await
             .expect("assembling runtime");
         let status = runtime.run_command().await.expect("deployment runs");
         assert_eq!(status, ExitStatus::SUCCESS, "row `{row}`: the requester's assertions held");
-        assert_eq!(
-            recorded(&runtime, "plugin"),
-            Registered::Absent,
-            "row `{row}`: nothing admitted"
-        );
+        assert_eq!(recorded(&runtime, name), Registered::Absent, "row `{row}`: nothing admitted");
         runtime.shutdown();
     }
 }
 
-// The declared arm reads an on-demand entry's `source.path` when the
-// requester asks, so a guest holding a writable mount over that path
-// chooses what the host is handed. Pre-compiled bytes it plants there are
-// refused as unpinned, where the raw wasm it plants loads: the host compiles
-// that itself. The host reads the planted artifact back, so it is the
-// refusal that kept it out, not a copy that never landed.
+// The declared arm reads a path entry's `source.path` at its first use —
+// when the requester asks — so a guest holding a writable mount over that
+// path chooses what the host is handed. Pre-compiled bytes it plants there
+// are refused as unpinned, where the raw wasm it plants loads: the host
+// compiles that itself. The host reads the planted artifact back, so it is
+// the refusal that kept it out, not a copy that never landed.
 #[tokio::test]
 async fn plugins_plant() {
     let scratch = scratch();
@@ -370,7 +349,7 @@ async fn plugins_plant() {
     let planted = scratch.path().join("plugin.bin");
 
     let manifest = requester(test_programs::PLUGINS_PLANT)
-        .guest(on_demand("plugin", planted.clone()))
+        .guest(GuestEntry::new("plugin", planted.clone()))
         .mounts([scratch.mount(true)]);
     let runtime = boot(manifest, &["payload.bin", "plugin.bin", "refused", "unpinned"])
         .await
@@ -383,7 +362,7 @@ async fn plugins_plant() {
     assert!(Engine::detect_precompiled(&planted).is_some(), "what it planted is pre-compiled");
 
     let manifest = requester(test_programs::PLUGINS_PLANT)
-        .guest(on_demand("plugin", scratch.path().join("plugin.wasm")))
+        .guest(GuestEntry::new("plugin", scratch.path().join("plugin.wasm")))
         .mounts([scratch.mount(true)]);
     let runtime = boot(manifest, &["payload.wasm", "plugin.wasm", "loaded"])
         .await
@@ -398,9 +377,9 @@ async fn plugins_plant() {
     runtime.shutdown();
 }
 
-// A package source is fetched from the registry the manifest's `registries`
-// routes it to, and registers under its declared name — never the package
-// reference.
+// A package source is fetched at its first use from the registry the
+// manifest's `registries` routes it to, and registers under its declared
+// name — the reference without its version, never the reference itself.
 #[tokio::test]
 async fn plugins_load_package() {
     let scratch = scratch();
@@ -409,11 +388,12 @@ async fn plugins_load_package() {
         .guest(echoer_package())
         .registries(RegistryConfig::contents(local_registry_toml(scratch.path())));
 
-    let runtime = boot(manifest, &["declared", "plugin"]).await.expect("assembling runtime");
+    let runtime = boot(manifest, &["declared", ECHOER_NAME]).await.expect("assembling runtime");
+    assert_eq!(recorded(&runtime, ECHOER_NAME), Registered::Absent, "not fetched until used");
     let status = runtime.run_command().await.expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
     assert_eq!(
-        recorded(&runtime, "plugin"),
+        recorded(&runtime, ECHOER_NAME),
         Registered::Active(digest_of(test_programs::LINK_ECHOER)),
         "the package registered under its declared name"
     );
@@ -433,7 +413,7 @@ async fn custom_registry_source() {
 
     let manifest = requester(test_programs::PLUGINS_LOAD).guest(echoer_package());
     let mut deployment =
-        deployment(manifest, &["declared", "plugin"]).await.expect("building deployment");
+        deployment(manifest, &["declared", ECHOER_NAME]).await.expect("building deployment");
     deployment.registry_source(client);
     let runtime =
         deployment.assemble(Backends::defaults().await).await.expect("assembling runtime");
@@ -450,9 +430,10 @@ async fn package_not_found() {
     let manifest = requester(test_programs::PLUGINS_REFUSED)
         .guest(echoer_package())
         .registries(RegistryConfig::contents(local_registry_toml(scratch.path())));
-    let status = run(manifest, &["declared", "plugin", "refused", "resolving `test:echoer@1.0.0`"])
-        .await
-        .expect("deployment runs");
+    let status =
+        run(manifest, &["declared", ECHOER_NAME, "refused", "resolving `test:echoer@1.0.0`"])
+            .await
+            .expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
 }
 
@@ -467,15 +448,15 @@ async fn plugins_refused() {
     let absent = scratch.path().join("absent.wasm");
 
     let rows: [(&str, GuestEntry, &str, &str); 4] = [
-        ("junk", on_demand("junk", junk), "refused", "validating `junk`"),
-        ("absent", on_demand("absent", absent), "unavailable", "reading"),
+        ("junk", GuestEntry::new("junk", junk), "refused", "validating `junk`"),
+        ("absent", GuestEntry::new("absent", absent), "unavailable", "reading"),
         // No `registries` at all: nothing routes any package.
-        ("plugin", echoer_package(), "refused", "no registry routes `test:echoer`"),
-        // A boot guest declared on demand under another name is still just
-        // a name; the undeclared one refuses, naming it.
+        (ECHOER_NAME, echoer_package(), "refused", "no registry routes `test:echoer`"),
+        // A guest declared under another name is still just a name; the
+        // undeclared one refuses, naming it.
         (
             "nonesuch",
-            on_demand("other", test_programs::LINK_ECHOER),
+            GuestEntry::new("other", test_programs::LINK_ECHOER),
             "refused",
             "no guest `nonesuch` is declared",
         ),
@@ -502,7 +483,7 @@ async fn unrouted_namespace() {
     let manifest = requester(test_programs::PLUGINS_REFUSED)
         .guest(echoer_package())
         .registries(RegistryConfig::contents("[namespace_registries]\nwasi = \"wasi.dev\"\n"));
-    let status = run(manifest, &["declared", "plugin", "refused", "`test` namespace"])
+    let status = run(manifest, &["declared", ECHOER_NAME, "refused", "`test` namespace"])
         .await
         .expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
@@ -534,23 +515,26 @@ async fn plugins_load_path() {
 }
 
 // A path whose stem is an active guest attests it when the bytes are the
-// same: the deployment booted the echoer, and the requester names its file.
+// same: the deployment booted the echoer from embedded bytes, and the
+// requester names its file.
 #[tokio::test]
 async fn path_attests_active() {
     let scratch = scratch();
     stage(&scratch, "echoer.wasm", test_programs::LINK_ECHOER);
+    let echoer = std::fs::read(test_programs::LINK_ECHOER).expect("reading the echoer");
     let manifest = requester(test_programs::PLUGINS_LOAD)
-        .guest(GuestEntry::new("echoer", test_programs::LINK_ECHOER))
+        .guest(GuestEntry::new("echoer", echoer))
         .mounts([scratch.mount(false)]);
     let digest = digest_of(test_programs::LINK_ECHOER).to_string();
     let status = run(manifest, &["path", "echoer.wasm", &digest]).await.expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
 }
 
-// A path or package whose derived name the deployment declares on demand is
-// refused before anything is read, while that guest is still inactive: the
-// name is bound by its entry alone, so a caller cannot seat other bytes
-// under it for the declared load to attest.
+// A path or package whose derived name the deployment declares is refused
+// before anything is read, whether or not that guest has loaded: the name
+// is bound by its entry alone, so a caller cannot seat other bytes under it
+// for the declared load to attest. A package derives its name without the
+// version, so another release of a declared package is refused the same.
 #[tokio::test]
 async fn declared_name_reserved() {
     let scratch = scratch();
@@ -560,22 +544,24 @@ async fn declared_name_reserved() {
     for row in [
         ["path", "plugin.wasm", "refused", "declares"],
         ["registry", ECHOER_PACKAGE, "refused", "declares"],
+        ["registry", "test:echoer@9.9.9", "refused", "declares"],
     ] {
         let manifest = requester(test_programs::PLUGINS_REFUSED)
-            .guest(on_demand("plugin", test_programs::LINK_ECHOER))
-            .guest(on_demand(ECHOER_PACKAGE, test_programs::LINK_ECHOER))
+            .guest(GuestEntry::new("plugin", test_programs::LINK_ECHOER))
+            .guest(GuestEntry::new(ECHOER_NAME, test_programs::LINK_ECHOER))
             .mounts([scratch.mount(false)])
             .registries(RegistryConfig::contents(local_registry_toml(scratch.path())));
         let runtime = boot(manifest, &row).await.expect("assembling runtime");
         let status = runtime.run_command().await.expect("deployment runs");
         assert_eq!(status, ExitStatus::SUCCESS, "row {row:?}: the requester's assertions held");
-        assert_eq!(runtime.registry().len(), 1, "row {row:?}: nothing was admitted");
+        assert_eq!(runtime.registry().len(), 1, "row {row:?}: only the requester loaded");
         runtime.shutdown();
     }
 }
 
 // A package the requester names is fetched from the registry the
-// deployment's `registries` routes it to, and registers as its reference.
+// deployment's `registries` routes it to, and registers as its reference
+// without the version.
 #[tokio::test]
 async fn plugins_load_registry() {
     let scratch = scratch();
@@ -586,19 +572,21 @@ async fn plugins_load_registry() {
     let status = runtime.run_command().await.expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
     assert_eq!(
-        recorded(&runtime, ECHOER_PACKAGE),
+        recorded(&runtime, ECHOER_NAME),
         Registered::Active(digest_of(test_programs::LINK_ECHOER)),
-        "the package registered under its reference"
+        "the package registered under its unversioned reference"
     );
+    assert_eq!(recorded(&runtime, ECHOER_PACKAGE), Registered::Absent);
     runtime.shutdown();
 }
 
 // The refusal matrix over requester-named locations, one run per row, over
 // a deployment mounting the scratch directory read-only as `.`: a path that
 // escapes, a missing file, junk, a pre-compiled artifact, a malformed or
-// mismatched pin, a stem active under other bytes, and a declared name
-// pinned by the call. Nothing a row names is ever admitted — the requester
-// stays the registry's one guest.
+// mismatched pin, a stem the deployment declares (the requester itself,
+// loaded and running), and a declared name pinned by the call. Nothing a
+// row names is ever admitted — the requester stays the registry's one
+// guest.
 #[tokio::test]
 async fn location_refused() {
     let scratch = scratch();
@@ -616,7 +604,7 @@ async fn location_refused() {
         &["path", "native.bin", "refused", "admits raw wasm alone"],
         &["path", "plugin.wasm", "refused", "digest `sha256:zz`", "sha256:zz"],
         &["path", "plugin.wasm", "refused", "not its declared digest", &other],
-        &["path", "requester.wasm", "refused", "active under other bytes"],
+        &["path", "requester.wasm", "refused", "declares"],
         &["declared", "requester", "refused", "takes no digest", &other],
     ];
     for row in rows {
@@ -627,6 +615,22 @@ async fn location_refused() {
         assert_eq!(runtime.registry().len(), 1, "row {row:?}: nothing was admitted");
         runtime.shutdown();
     }
+
+    // A stem active under other bytes, where no entry declares the name: the
+    // echoer booted from embedded bytes, and the file planted under its name
+    // is refused rather than re-bound (the same bytes would attest —
+    // `path_attests_active`).
+    scratch.write("echoer.wasm", changed_echoer(b"impostor"));
+    let echoer = std::fs::read(test_programs::LINK_ECHOER).expect("reading the echoer");
+    let manifest = requester(test_programs::PLUGINS_REFUSED)
+        .guest(GuestEntry::new("echoer", echoer))
+        .mounts([scratch.mount(false)]);
+    let row = ["path", "echoer.wasm", "refused", "active under other bytes"];
+    let runtime = boot(manifest, &row).await.expect("assembling runtime");
+    let status = runtime.run_command().await.expect("deployment runs");
+    assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
+    assert_eq!(runtime.registry().len(), 2, "nothing was admitted beside the two guests");
+    runtime.shutdown();
 
     // With no mount at all, no path resolves.
     let manifest = requester(test_programs::PLUGINS_REFUSED);
@@ -722,15 +726,19 @@ async fn endpoint_unrouted_namespace() {
     assert_eq!(status, ExitStatus::SUCCESS, "the requester's assertions all held");
 }
 
-// Loading a name that is already active attests it — a boot guest, the
-// requester itself — with the digest boot recorded for its bytes.
+// Loading a name that is already active attests it — a boot guest from
+// embedded bytes, the requester the command drive loaded — with the digest
+// its registration recorded for its bytes.
 #[tokio::test]
 async fn plugins_attest() {
-    let manifest = requester(test_programs::PLUGINS_ATTEST)
-        .guest(GuestEntry::new("echoer", test_programs::LINK_ECHOER));
+    let bytes = std::fs::read(test_programs::LINK_ECHOER).expect("reading the echoer");
+    let manifest = requester(test_programs::PLUGINS_ATTEST).guest(GuestEntry::new("echoer", bytes));
     let echoer = digest_of(test_programs::LINK_ECHOER).to_string();
-    let status = run(manifest.clone(), &["echoer", &echoer]).await.expect("deployment runs");
+    let runtime = boot(manifest.clone(), &["echoer", &echoer]).await.expect("assembling runtime");
+    assert_eq!(recorded(&runtime, "echoer"), Registered::Active(echoer.parse().expect("digest")));
+    let status = runtime.run_command().await.expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "a boot guest attests with its digest");
+    runtime.shutdown();
     let requester = digest_of(test_programs::PLUGINS_ATTEST).to_string();
     let status = run(manifest, &["requester", &requester]).await.expect("deployment runs");
     assert_eq!(status, ExitStatus::SUCCESS, "the requester attests itself");
@@ -743,7 +751,7 @@ async fn plugins_attest() {
 #[tokio::test]
 async fn plugins_unlinked() {
     let manifest = requester(test_programs::PLUGINS_UNLINKED)
-        .guest(on_demand("noseam", test_programs::LINK_FULL));
+        .guest(GuestEntry::new("noseam", test_programs::LINK_FULL));
     let runtime = boot(manifest, &[]).await.expect("assembling runtime");
 
     let error = runtime.run_command().await.expect_err("the link call traps the requester");
@@ -764,7 +772,7 @@ async fn plugins_unlinked() {
 #[tokio::test]
 async fn plugins_host_only() {
     let manifest = requester(test_programs::PLUGINS_HOST_ONLY)
-        .guest(on_demand("plugin", test_programs::LINK_ECHOER));
+        .guest(GuestEntry::new("plugin", test_programs::LINK_ECHOER));
     let runtime = boot(manifest, &[]).await.expect("assembling runtime");
 
     let status = runtime.run_command().await.expect("deployment runs");
@@ -786,8 +794,8 @@ async fn plugins_host_only() {
 #[tokio::test]
 async fn plugins_mixed() {
     let manifest = requester(test_programs::PLUGINS_MIXED)
-        .guest(on_demand("echoer", test_programs::LINK_ECHOER))
-        .guest(on_demand("handler", test_programs::LINK_FULL));
+        .guest(GuestEntry::new("echoer", test_programs::LINK_ECHOER))
+        .guest(GuestEntry::new("handler", test_programs::LINK_FULL));
     let runtime = boot(manifest, &[]).await.expect("assembling runtime");
 
     let status = runtime.run_command().await.expect("deployment runs");
@@ -835,7 +843,7 @@ async fn reload_after_deregister() {
     let staged = stage(&scratch, "plugin.wasm", test_programs::LINK_ECHOER);
     // The requester guest is manifest ballast: these loads are host-driven.
     let manifest =
-        requester(test_programs::PLUGINS_LOAD).guest(on_demand("plugin", staged.clone()));
+        requester(test_programs::PLUGINS_LOAD).guest(GuestEntry::new("plugin", staged.clone()));
     let runtime = boot(manifest, &[]).await.expect("assembling runtime");
 
     let first = runtime.load(declared("plugin"), None).await.expect("first load");
@@ -857,8 +865,9 @@ async fn reload_after_deregister() {
 async fn pinned_reload() {
     let scratch = scratch();
     let staged = stage(&scratch, "plugin.wasm", test_programs::LINK_ECHOER);
-    let manifest = requester(test_programs::PLUGINS_LOAD)
-        .guest(on_demand("plugin", staged.clone()).digest(digest_of(test_programs::LINK_ECHOER)));
+    let manifest = requester(test_programs::PLUGINS_LOAD).guest(
+        GuestEntry::new("plugin", staged.clone()).digest(digest_of(test_programs::LINK_ECHOER)),
+    );
     let runtime = boot(manifest, &[]).await.expect("assembling runtime");
 
     let first = runtime.load(declared("plugin"), None).await.expect("the pinned bytes load");
@@ -882,7 +891,7 @@ async fn pinned_reload() {
 #[tokio::test]
 async fn reregister_attests() {
     let manifest = requester(test_programs::PLUGINS_LOAD)
-        .guest(on_demand("plugin", test_programs::LINK_ECHOER));
+        .guest(GuestEntry::new("plugin", test_programs::LINK_ECHOER));
     let runtime = boot(manifest, &[]).await.expect("assembling runtime");
 
     let first = runtime.load(declared("plugin"), None).await.expect("first load");
@@ -920,17 +929,15 @@ fn wit_copies_stay_identical() {
 }
 
 // Compile-time proof that the macro's inline keys lower into the manifest
-// data this crate consumes: an `on_demand` guest with a `digest` and a
-// `package` source, and the `registries` contents that route it. The macro's
+// data this crate consumes: a `package` guest with a `digest`, named by its
+// reference, and the `registries` contents that route it. The macro's
 // snapshot suite pins the expansion shape; this pins the types and the
 // carried data.
 mod loader_grammar {
     omnia::runtime!({
         guests: [
             {
-                name: "tool",
                 package: "acme:tool@1.2.3",
-                on_demand: true,
                 digest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
             },
         ],
@@ -951,8 +958,7 @@ fn loader_grammar() {
     let [tool] = manifest.guests.as_slice() else {
         panic!("one guest: {:?}", manifest.guests);
     };
-    assert_eq!(tool.name, "tool");
-    assert!(tool.on_demand);
+    assert_eq!(tool.name, "acme:tool", "the reference without its version");
     assert_eq!(tool.digest, Some(Digest::of(b"")), "the empty input's digest, as written");
     assert!(matches!(&tool.source, SourceSpec::Package(package) if package == "acme:tool@1.2.3"));
 }
@@ -966,7 +972,7 @@ async fn custom_registry_trait() {
     impl RegistrySource for Fixed {
         fn acquire<'a>(
             &'a self, package: &'a str, endpoint: Option<&'a str>,
-        ) -> omnia::futures::future::BoxFuture<'a, Result<Vec<u8>, LoadError>> {
+        ) -> omnia::futures::future::BoxFuture<'a, Result<Vec<u8>, AcquireError>> {
             Box::pin(async move {
                 assert_eq!(package, ECHOER_PACKAGE);
                 assert_eq!(endpoint, None, "a declared package names no registry of its own");
@@ -978,7 +984,7 @@ async fn custom_registry_trait() {
     let bytes = std::fs::read(test_programs::LINK_ECHOER).expect("reading the echoer");
     let manifest = requester(test_programs::PLUGINS_LOAD).guest(echoer_package());
     let mut deployment =
-        deployment(manifest, &["declared", "plugin"]).await.expect("building deployment");
+        deployment(manifest, &["declared", ECHOER_NAME]).await.expect("building deployment");
     deployment.registry_source(Fixed(bytes));
     let runtime =
         deployment.assemble(Backends::defaults().await).await.expect("assembling runtime");

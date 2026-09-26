@@ -57,7 +57,7 @@ where
 {
     state: Runtime<B>,
     component: String,
-    routing: Arc<TriggerRouter<MessagingRequestReplyIndices, PatternRoutes>>,
+    routing: Arc<TriggerRouter<PatternRoutes>>,
 }
 
 impl<B> MessagingHandler<B>
@@ -74,8 +74,9 @@ where
     /// with the guests' exports.
     pub fn new(runtime: &Runtime<B>) -> Result<Option<Self>> {
         // Capability probe: a guest exports the messaging handler exactly when
-        // its typed indices resolve. Build the per-guest indices and the topic
-        // router that selects among them once, up front.
+        // its typed indices resolve. Build the topic router once, up front,
+        // over the guests loaded at boot; a declared guest is probed when
+        // its first message loads it.
         let routing = TriggerRouter::build(
             runtime.registry(),
             "messaging",
@@ -99,24 +100,32 @@ where
     ///
     /// # Errors
     ///
-    /// Returns an error if the guest cannot be instantiated, traps, or times
-    /// out.
+    /// Returns an error if the guest cannot be loaded at its first use or
+    /// instantiated, traps, or times out.
     pub async fn handle(&self, message: Message) -> Result<()> {
         // Resolve the guest by topic; an unmatched topic is dropped, not an
         // error (the message simply has no handler in this deployment).
         let topic = message.topic.clone();
-        let Some((guest_id, indices)) = self.routing.resolve(&topic) else {
+        let Some(guest_id) = self.routing.resolve(&topic) else {
             tracing::debug!(%topic, "no route for topic; dropping message");
             return Ok(());
         };
-        // Static resolution only yields identities drawn from the registry, so
-        // a miss is a lifecycle race (e.g. concurrent deregistration) — an
-        // error, never a server panic.
+        // The routed identity is the deployment's, so a miss here is a first
+        // use that failed to load or a lifecycle race (e.g. concurrent
+        // deregistration) — an error, never a server panic.
         let guest = self
             .state
-            .registry()
-            .get(guest_id)
-            .with_context(|| format!("routed guest `{guest_id}` is not registered"))?;
+            .guest(guest_id)
+            .await
+            .with_context(|| format!("resolving the routed guest `{guest_id}`"))?;
+        // The route says this guest handles messaging; a declared guest's
+        // export is checked here, at its first use, where a boot guest's
+        // was checked at boot.
+        let indices = MessagingRequestReplyIndices::new(guest.instance_pre())
+            .map_err(anyhow::Error::from)
+            .with_context(|| {
+                format!("routed guest `{guest_id}` does not export the messaging handler")
+            })?;
 
         let mut store_data = self.state.store();
         let msg_res = store_data

@@ -54,11 +54,11 @@ The embedder-path variant — `no deployment manifest supplied and OMNIA_MANIFES
 
 ### `no guest ... is declared by this deployment`
 
-A guest called `omnia:plugins/loader.load` with a `declared` name the manifest does not declare. A `declared` load names only `[[guest]]` entries (the macro's `guests:`); add one for the name, marked `on_demand = true` if it should load at first `load` rather than at boot — or, for a component the deployment does not declare, have the guest name its `path` beneath a read-only mount or its `registry` package instead. A runtime built without omnia's `loader` feature has no loader at all: a guest importing it fails at instantiation, and a manifest declaring `registries` is refused at startup until the feature is enabled.
+A guest called `omnia:plugins/loader.load` with a `declared` name the manifest does not declare. A `declared` load names only `[[guest]]` entries (the macro's `guests:`); add one for the name — a manifest file's entry loads at that first `load` — or, for a component the deployment does not declare, have the guest name its `path` beneath a read-only mount or its `registry` package instead. A runtime built without omnia's `loader` feature has no loader at all: a guest importing it fails at instantiation, and a manifest declaring `registries` or a `source.package` guest is refused at startup until the feature is enabled.
 
 ### `no registry routes ...`
 
-An on-demand guest with a `source.package` (the macro's `package:`) loaded, or a guest named a `registry` package of its own, but the `registries` configuration (`registries: include_str!("wasm-pkg.toml")` in the macro, `[registries] path` in a manifest) is absent or names neither a `default_registry` nor the package's namespace. Add one, pin the package to its registry under `[package_registry_overrides]`, or — for a package a guest names — have the load name its registry `endpoint`, which serves a namespace the configuration routes nowhere.
+A `source.package` guest (the macro's `package:`) was first used, or a guest named a `registry` package of its own, but the `registries` configuration (`registries: include_str!("wasm-pkg.toml")` in the macro, `[registries] path` in a manifest) is absent or names neither a `default_registry` nor the package's namespace. Add one, pin the package to its registry under `[package_registry_overrides]`, or — for a package a guest names — have the load name its registry `endpoint`, which serves a namespace the configuration routes nowhere.
 
 ### `... is routed to ... by the deployment's registries; it cannot be fetched from ...`
 
@@ -70,15 +70,15 @@ A guest named a component `path` beneath a mount the deployment marks `writable`
 
 ### `... would register as ..., a guest this deployment declares`
 
-A guest named a `path` or `registry` package whose derived name — the path's file stem, the package reference — is a `[[guest]]` the deployment declares on demand. A declared name is bound by its entry alone, so nothing a caller names can seat other bytes under it: load the guest as `declared(name)`, or rename the file or the entry so the two no longer collide.
+A guest named a `path` or `registry` package whose derived name — the path's file stem, the package reference without its version — is a `[[guest]]` the deployment declares, whether or not that guest has loaded yet. A declared name is bound by its entry alone, so nothing a caller names can seat other bytes under it: load the guest as `declared(name)`, or rename the file or the entry so the two no longer collide.
 
 ### `... resolved to sha256:..., not its declared digest ...`
 
-The guest's bytes do not hash to the `digest` its `[[guest]]` entry pins, or the one a `path` or `registry` load carried. At boot this fails startup; on demand it refuses the load. Either the artifact changed under the deployment — rebuild it or restore the pinned one — or the pin is stale: an unpinned load reports the resolved digest on its handle, which is the value to commit.
+The guest's bytes do not hash to the `digest` its `[[guest]]` entry pins, or the one a `path` or `registry` load carried. For a guest loaded at boot (embedded bytes, `run <component>`) this fails startup; for a first-use guest it fails the use that named it — the request, the run, the link call, or the `load`. Either the artifact changed under the deployment — rebuild it or restore the pinned one — or the pin is stale: an unpinned load reports the resolved digest on its handle, which is the value to commit.
 
-### `... is pre-compiled and loads on demand from unpinned ...`
+### `... is pre-compiled and is read from unpinned ... while guests run: pin its digest`
 
-A guest `load`ed a declared `on_demand` entry whose `source.path` or `source.package` resolved to `omnia compile` output, and the entry carries no `digest`. An on-demand source is read while guests are already running, and a pre-compiled artifact is native code, so the runtime admits one from such an entry only when the entry pins the bytes (`digest = "sha256:…"`, the value the artifact hashes to) or embeds them (the macro's `path:`). Pin the entry, or ship the guest as raw `.wasm`, which the host compiles itself. A boot entry is unaffected: its bytes are read before any guest runs. The related `... is pre-compiled, but its entry admits raw wasm alone` is the entry's own `wasm_only` mark refusing the artifact however it hashes; ``the bytes are a pre-compiled artifact; `Verified::wasm` admits raw wasm alone`` is an embedder's `Runtime::register`, which takes raw wasm only — an artifact your own build produced goes through `Runtime::admit` with `Verified::trusted`.
+A `[[guest]]` with a `source.path` resolved to `omnia compile` output at its first use, and the entry carries no `digest`. A manifest file's path is read while guests are already running, and a pre-compiled artifact is native code, so the runtime admits one from a path only when the entry pins the bytes (`digest = "sha256:…"`, the value the artifact hashes to). Pin the entry, or ship the guest as raw `.wasm`, which the host compiles itself. Embedded bytes (the macro's `path:`) and the component `run <component>` names are unaffected: they were read before any guest ran. Two related refusals: `... is pre-compiled, but a package admits raw wasm alone` is a `source.package` guest whose registry served `omnia compile` output — a package is admitted as raw wasm alone, however it hashes, so publish the `.wasm`; ``the bytes are a pre-compiled artifact; `Verified::wasm` admits raw wasm alone`` is a `path` or `registry` location a guest named itself, or an embedder's `Runtime::register`, both of which take raw wasm only — an artifact your own build produced goes through `Runtime::admit` with `Verified::trusted`.
 
 ### `Address already in use` on startup
 
@@ -92,9 +92,17 @@ Backends connect eagerly during `Runtime::new`; a bad `REDIS_URL`/`POSTGRES_URL`
 
 Only `in-process` is a valid `[transport] default`. Remove `unix`/`nats`/`quic` from the manifest — they're reserved for distributed dispatch.
 
-### `guest ... names the package ..., which is fetched on first load`
+### `guest ... is the package ..., but this runtime was built without the loader feature`
 
-A `source.package` guest was not marked `on_demand = true`. A package is fetched when a guest first `load`s it, never at boot, so the mark is required; the macro's `package:` needs `on_demand: true` the same way.
+A manifest declares a `source.package` guest, but the runtime has no registry client to fetch it with. Packages are fetched through omnia's `loader` feature; enable it on the `omnia` dependency (`features = ["loader"]`), or give the guest a `source.path`. The run-time twin, `... has no registry to fetch it from`, is the same gap reached through an embedder's own `RuntimeParts` with `packages: None`.
+
+### The deployment starts but a guest never runs
+
+A guest declared in a manifest file loads at its first use, and only something naming it is a use: a `routes.*` entry matching an event, the `command = true` mark, a link call from another guest, a host dispatch, or a `loader.load(declared(..))`. An entry with none of those is never reached — it is not the catch-all, which is drawn from the guests loaded at boot alone (embedded `path:` bytes, `run <component>`). Give it routes or the `command` mark. Startup validates the manifest but does not read the file, so a wrong `source.path` also surfaces only here.
+
+### A first-use guest fails on its first request, run, or call
+
+Whatever would have failed at boot for a compiled-in guest fails at first use for a declared one: an unreadable `source.path`, a pin miss, a pre-compiled path without a `digest`, a package no registry routes or that resolves to pre-compiled bytes, a routed target that does not export the trigger's handler. An HTTP trigger answers `500` and logs the cause at `error`; messaging and websocket drop the event and log it; the command drive and a link call fail with the cause in the error chain; a `load` returns it typed. Fix the entry and use the guest again — nothing is cached from the failure. The first use of a raw `.wasm` guest also pays its compile, so a hot path that cannot afford it should ship a pinned `omnia compile` artifact, or embed the guest.
 
 ### The manifest loads but paths don't resolve
 

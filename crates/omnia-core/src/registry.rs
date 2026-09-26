@@ -25,7 +25,7 @@ use wasmtime_wasi::WasiView;
 use crate::RuntimeOptions;
 use crate::digest::Digest;
 use crate::seam::LinkSeam;
-use crate::source::LoadedGuest;
+use crate::source::{LoadedGuest, Source};
 
 /// Opaque guest identity.
 ///
@@ -54,6 +54,22 @@ impl GuestId {
             .file_stem()
             .and_then(|stem| stem.to_str())
             .map_or_else(|| Self::from(path), Self::from)
+    }
+
+    /// Returns the identity a package reference names: the reference without
+    /// its version.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use omnia_core::GuestId;
+    ///
+    /// assert_eq!(GuestId::from_package("acme:tool@1.2.3").as_str(), "acme:tool");
+    /// assert_eq!(GuestId::from_package("acme:tool").as_str(), "acme:tool");
+    /// ```
+    #[must_use]
+    pub fn from_package(reference: &str) -> Self {
+        Self::from(reference.split_once('@').map_or(reference, |(name, _)| name))
     }
 
     /// Returns the identity as a string slice.
@@ -148,11 +164,14 @@ impl<T: 'static> Guest<T> {
 /// registration; per call only a fresh instantiate on a new store remains.
 ///
 /// The guest map grows (and shrinks) after assembly through the dynamic
-/// registration seam ([`Runtime::register`](crate::Runtime::register)); the
-/// linker is retained so late guests pre-instantiate against the same host set.
+/// registration seam ([`Runtime::register`](crate::Runtime::register)) and
+/// through first use of a declared guest ([`Runtime::guest`]); the linker is
+/// retained so late guests pre-instantiate against the same host set.
 ///
 /// The registry is cheap to share behind an `Arc`, matching how the runtime
 /// context is cloned into each connection handler.
+///
+/// [`Runtime::guest`]: crate::Runtime::guest
 pub struct Registry<T: 'static> {
     engine: Engine,
     options: RuntimeOptions,
@@ -167,25 +186,59 @@ pub struct Registry<T: 'static> {
     lifecycle: RwLock<()>,
     // Assemble-time identities, which deregistration refuses to remove.
     static_ids: BTreeSet<GuestId>,
+    // The deployment's guests not loaded at boot, by identity: each loads
+    // from its source at first use and is a late guest from then on.
+    declared: BTreeMap<GuestId, Source>,
     routes: Routes,
     seam: Arc<dyn LinkSeam<T>>,
 }
 
+/// Inputs to [`Registry::assemble`].
+pub struct RegistryParts<T: 'static> {
+    /// The shared engine.
+    pub engine: Engine,
+    /// The linker every guest pre-instantiates against, hosts linked.
+    pub linker: Linker<T>,
+    /// Runtime options.
+    pub options: RuntimeOptions,
+    /// The guests loaded at boot.
+    pub loaded: Vec<LoadedGuest>,
+    /// The deployment's other guests, each loaded from its source at first
+    /// use.
+    pub declared: Vec<Source>,
+    /// Per-trigger inbound route tables.
+    pub routes: Routes,
+    /// The guest→guest link seam.
+    pub seam: Arc<dyn LinkSeam<T>>,
+    /// Whether a deployment with no guests assembles (a dynamic deployment
+    /// registers them later).
+    pub allow_empty: bool,
+}
+
 impl<T: WasiView + 'static> Registry<T> {
     /// Assemble a registry from a linked deployment's parts: polyfill link
-    /// imports through `seam`, pre-instantiate every loaded guest, validate
-    /// that routes name registered guests, and freeze the static set.
+    /// imports through the seam, pre-instantiate every loaded guest, table
+    /// the declared ones, validate that routes name guests, and freeze the
+    /// static set.
     ///
     /// # Errors
     ///
-    /// Returns an error if there are no guests to register (unless
-    /// `allow_empty`), link imports cannot be polyfilled, a component cannot
-    /// be pre-instantiated, or a route targets a guest that is not registered.
-    pub fn assemble(
-        engine: Engine, mut linker: Linker<T>, options: RuntimeOptions, loaded: Vec<LoadedGuest>,
-        routes: Routes, seam: Arc<dyn LinkSeam<T>>, allow_empty: bool,
-    ) -> Result<Self> {
-        if loaded.is_empty() && !allow_empty {
+    /// Returns an error if there are no guests at all (unless `allow_empty`),
+    /// link imports cannot be polyfilled, a component cannot be
+    /// pre-instantiated, an identity repeats, or a route targets a guest that
+    /// is neither loaded nor declared.
+    pub fn assemble(parts: RegistryParts<T>) -> Result<Self> {
+        let RegistryParts {
+            engine,
+            mut linker,
+            options,
+            loaded,
+            declared,
+            routes,
+            seam,
+            allow_empty,
+        } = parts;
+        if loaded.is_empty() && declared.is_empty() && !allow_empty {
             bail!("cannot build a guest registry with no guests");
         }
 
@@ -207,14 +260,21 @@ impl<T: WasiView + 'static> Registry<T> {
                 bail!("duplicate guest id `{id}`: guest identities must be unique");
             }
         }
+        let mut sources = BTreeMap::new();
+        for source in declared {
+            let id = source.id().clone();
+            if guests.contains_key(&id) || sources.insert(id.clone(), source).is_some() {
+                bail!("duplicate guest id `{id}`: guest identities must be unique");
+            }
+        }
 
         for target in routes.targets() {
-            if !guests.contains_key(target) {
+            if !guests.contains_key(target) && !sources.contains_key(target) {
                 bail!("route targets guest `{target}`, which is not registered");
             }
         }
 
-        tracing::debug!(guests = guests.len(), "runtime initialized");
+        tracing::debug!(guests = guests.len(), declared = sources.len(), "runtime initialized");
 
         let static_ids = guests.keys().cloned().collect();
         Ok(Self {
@@ -224,6 +284,7 @@ impl<T: WasiView + 'static> Registry<T> {
             guests: RwLock::new(guests),
             lifecycle: RwLock::new(()),
             static_ids,
+            declared: sources,
             routes,
             seam,
         })
@@ -274,11 +335,26 @@ impl<T: 'static> Registry<T> {
         self.lifecycle.write().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Look up a guest by identity.
+    /// Look up a registered guest by identity; a declared guest not yet
+    /// loaded is `None` here and loads through
+    /// [`Runtime::guest`](crate::Runtime::guest).
     #[must_use]
     pub fn get(&self, id: &GuestId) -> Option<Arc<Guest<T>>> {
         let _lifecycle = self.lifecycle_read();
         self.guests.read().unwrap_or_else(PoisonError::into_inner).get(id).cloned()
+    }
+
+    /// The source a declared guest loads from at first use, whether or not it
+    /// is loaded now.
+    #[must_use]
+    pub fn declared(&self, id: &GuestId) -> Option<&Source> {
+        self.declared.get(id)
+    }
+
+    /// Whether the deployment declares `id` as a guest loaded at first use.
+    #[must_use]
+    pub fn is_declared(&self, id: &GuestId) -> bool {
+        self.declared.contains_key(id)
     }
 
     /// Snapshot every registered guest in a deterministic, identity-sorted

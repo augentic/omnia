@@ -11,10 +11,15 @@
 # The runtime core stays domain-agnostic: the selector sees only the opaque
 # interface string `example:link/echo` and opaque guest names.
 #
-# Build the guests first (see README.md), then run (this path is the runtime's
-# compiled-in default, so `--manifest` is optional):
+# Build the guests first (see README.md), then run:
 #
-#   cargo run --example guest-link -- run
+#   cargo run --example guest-link -- run --manifest examples/guest-link/omnia.toml
+#
+# A manifest file's guests load at their first use rather than at startup:
+# the router loads when something first calls it (`register.rs` does that
+# in code), and its first `echo` is what loads `responder`. Neither exports
+# a trigger, so under the server-mode host this manifest boots and sits;
+# the embedded `runtime.rs` deployment is the one that wires both at start.
 
 # The file's stem would name each guest (`guest_link_responder_wasm`); the
 # router dispatches to `responder`, so the name is given.

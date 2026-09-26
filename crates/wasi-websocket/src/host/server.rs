@@ -59,7 +59,7 @@ where
 {
     state: Runtime<B>,
     component: String,
-    routing: Arc<TriggerRouter<DuplexIndices, PatternRoutes>>,
+    routing: Arc<TriggerRouter<PatternRoutes>>,
 }
 
 impl<B> WebSocketHandler<B>
@@ -76,8 +76,9 @@ where
     /// with the guests' exports.
     pub fn new(runtime: &Runtime<B>) -> Result<Option<Self>> {
         // Capability probe: a guest exports the websocket handler exactly when
-        // its typed indices resolve. Build the per-guest indices and the route
-        // router that selects among them once, up front.
+        // its typed indices resolve. Build the route router once, up front,
+        // over the guests loaded at boot; a declared guest is probed when
+        // its first event loads it.
         let routing = TriggerRouter::build(
             runtime.registry(),
             "websocket",
@@ -101,8 +102,8 @@ where
     ///
     /// # Errors
     ///
-    /// Returns an error if the guest cannot be instantiated, traps, or times
-    /// out.
+    /// Returns an error if the guest cannot be loaded at its first use or
+    /// instantiated, traps, or times out.
     pub async fn handle(&self, event: Event) -> Result<()> {
         // Resolve the guest by the event's route; an event with no route falls
         // into the catch-all (sole exporter). A miss is dropped, not an error.
@@ -110,18 +111,25 @@ where
             .route
             .as_deref()
             .map_or_else(|| self.routing.catch_all(), |route| self.routing.resolve(route));
-        let Some((guest_id, indices)) = routed else {
+        let Some(guest_id) = routed else {
             tracing::debug!("no route for websocket event; dropping");
             return Ok(());
         };
-        // Static resolution only yields identities drawn from the registry, so
-        // a miss is a lifecycle race (e.g. concurrent deregistration) — an
-        // error, never a server panic.
+        // The routed identity is the deployment's, so a miss here is a first
+        // use that failed to load or a lifecycle race (e.g. concurrent
+        // deregistration) — an error, never a server panic.
         let guest = self
             .state
-            .registry()
-            .get(guest_id)
-            .with_context(|| format!("routed guest `{guest_id}` is not registered"))?;
+            .guest(guest_id)
+            .await
+            .with_context(|| format!("resolving the routed guest `{guest_id}`"))?;
+        // The route says this guest handles websocket events; a declared
+        // guest's export is checked here, at its first use, where a boot
+        // guest's was checked at boot.
+        let indices =
+            DuplexIndices::new(guest.instance_pre()).map_err(anyhow::Error::from).with_context(
+                || format!("routed guest `{guest_id}` does not export the websocket handler"),
+            )?;
 
         let mut store_data = self.state.store();
         let event_res = store_data

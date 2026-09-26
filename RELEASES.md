@@ -41,35 +41,88 @@ Unreleased
 
 ### Changed
 
+- A guest not compiled into the runtime loads at its first use. Bytes that
+  were in the process before any guest ran — the macro's embedded `path:`,
+  the component `run <component>` names, a programmatic
+  `GuestEntry::new(name, bytes)` — load at boot; every other `[[guest]]` —
+  a manifest file's `source.path` or `source.package`, the macro's
+  `package:`, a programmatic path entry — loads the first time a route, the
+  command drive, a link call, a host dispatch, or an
+  `omnia:plugins/loader.load(declared(..))` names it. Nothing marks the
+  difference: the source kind is the rule, so there is no `on_demand` key
+  anywhere (TOML, macro, `GuestEntry`), and a manifest carrying one is
+  refused as an unknown key. Boot still validates everything the manifest
+  states; what a compiled-in guest would fail at boot — a missing file, a
+  pin miss, a refused artifact, a routed target that does not export the
+  trigger's handler — a first-use guest fails at the use that named it
+  (`500` and an `error` log on HTTP, a dropped event on messaging and
+  websocket, the error chain on the command drive and a link call, a typed
+  `error` on `load`). A first-use guest is never a trigger's catch-all: the
+  no-routes fallback is drawn from the guests loaded at boot, so a manifest
+  file's command guest carries `command = true` (the `model` and
+  `guest-link` example manifests do now). Concurrent first uses may load
+  twice; the second admission loses and returns the winner.
+  - `Runtime::guest(&id)` is the one seam: a registered guest as it stands,
+    a declared one read (or fetched, for a package), verified, and admitted
+    as a late guest, typed by `GuestError { Unregistered, Unavailable,
+    Refused, Internal }` (`Unregistered` displays as the former "guest `..`
+    is not registered"). `dispatch`, the command driver, the trigger hosts,
+    the link relay (through the new `Dispatcher::ensure(&id)`), and the
+    loader's `declared` arm all resolve through it.
+  - `Registry::assemble(RegistryParts { engine, linker, options, loaded,
+    declared, routes, seam, allow_empty })` takes the declared `Source`s
+    beside the loaded guests (`Registry::declared(&id)`, `is_declared`); a
+    name in both, or twice, is the duplicate error, the empty check is "no
+    loaded and no declared guest", and a route may target a declared guest.
+    `TriggerRouter<R>` (`Runtime::http_trigger_router` follows) caches no
+    handler indices: `resolve(key)` and `catch_all()` yield the `GuestId`,
+    and each trigger host probes the resolved guest's exports per event.
+  - `RegistrySource` and its `AcquireError { Refused, Unavailable }` live in
+    `omnia-core` (re-exported by `omnia` and `omnia-plugin`) as the acquirer
+    `RuntimeParts.packages: Option<Arc<dyn RegistrySource>>` fetches a
+    `source.package` guest through; `Deployment::assemble` sets it to the
+    loader's `RegistryClient` under the `loader` feature, and a manifest
+    declaring a package guest without the feature is refused at startup
+    beside one declaring `registries`. `Plugins::install(runtime, registry)`
+    takes no guest table.
+  - `Manifest::sources()` is the one list (`boot_sources()` and
+    `on_demand_sources()` are gone; `Deployment::build` partitions it on
+    `SourceSpec::Bytes`), `Manifest::from_wasm(path) -> Result<Self>` reads
+    the component now so `run <component>` loads at boot in either format,
+    and `omnia_test::host::Deployment::guest(name, path)` reads the path
+    into bytes for the same reason; `Deployment::on_demand` is gone,
+    `Deployment::entry(GuestEntry::new(name, path))` declares a first-use
+    guest.
 - One loader for either artifact format, everywhere a guest loads. The
-  bytes a declared guest resolves to — a manifest `source.path`, the
-  macro's compiled-in `path:`, a loader entry's file or registry package —
-  are deserialized when they are `omnia compile` output and compiled when
-  they are raw wasm, told apart the way wasmtime tells them apart
-  (`Engine::detect_precompiled`); a settings-mismatched pre-compiled
-  artifact still fails with the compile-settings hint. What the deployment
-  names is the operator's trusted input in either format
-  (`docs/security-model.md`), so the raw-wasm/pre-compiled trust split is
-  gone with its API: `DeploymentBuilder::build_trusted` (`build` is the one
-  build, and the generated `run` / `run_with` load a pre-compiled guest as
-  `main` does), `GuestArtifact`, `is_precompiled`, and `ELF_MAGIC`. Two
-  paths stay raw-wasm-only, because their bytes are not the deployment's
-  word: `Runtime::register(id, bytes)`, the embedder's untrusted-bytes path,
-  refuses a pre-compiled artifact (an artifact the embedder's own build
-  produced goes through `Runtime::admit` wrapped in the `unsafe`
-  `Verified::trusted`), and an on-demand guest — read while guests already
-  run — admits one only when its entry pins the `digest` or embeds the
-  bytes, refusing an unpinned `source.path` or `source.package` that
-  resolves to one (`refused`, which the `omnia:plugins/loader` WIT names).
+  bytes a declared guest resolves to are deserialized when they are `omnia
+  compile` output and compiled when they are raw wasm, told apart the way
+  wasmtime tells them apart (`Engine::detect_precompiled`); a
+  settings-mismatched pre-compiled artifact still fails with the
+  compile-settings hint. The raw-wasm/pre-compiled trust split is gone with
+  its API: `DeploymentBuilder::build_trusted` (`build` is the one build, and
+  the generated `run` / `run_with` load a pre-compiled guest as `main`
+  does), `GuestArtifact`, `is_precompiled`, and `ELF_MAGIC`. Which format a
+  source may load follows from the source kind alone, with no key
+  (`docs/security-model.md`): embedded bytes and `run <component>`, in the
+  process before any guest ran, load either; a `source.path`, read at first
+  use while guests run, loads `omnia compile` output only when its entry
+  pins the `digest` ("is pre-compiled and is read from unpinned .. while
+  guests run: pin its `digest`"); a `source.package`, a caller-named `path`
+  or `registry` load, and `Runtime::register(id, bytes)` admit raw wasm
+  alone ("a package admits raw wasm alone"; "`Verified::wasm` admits raw
+  wasm alone"), because a registry, a requester, or an embedder's untrusted
+  bytes are not the deployment's build — an artifact the embedder's own
+  build produced goes through `Runtime::admit` wrapped in the `unsafe`
+  `Verified::trusted`. The `omnia:plugins/loader` `refused` variant names
+  each of those.
   - Native code is admitted through one token. `omnia::Verified` is
     component bytes with their digest, obtained from exactly three places:
-    `Source::verified`, once the pin, the `wasm_only` mark, and the
-    on-demand rule have passed; `Verified::wasm`, which admits raw wasm
-    alone; and the `unsafe` `Verified::trusted`, the embedder's word for an
-    artifact of its own. `Runtime::admit(id, verified)` takes it (where it
-    took bytes and a digest), `register` delegates through `Verified::wasm`,
-    and the loader hands over the token it verified rather than hashing
-    twice.
+    `Source::verified`, once the pin and the format rule have passed;
+    `Verified::wasm`, which admits raw wasm alone; and the `unsafe`
+    `Verified::trusted`, the embedder's word for an artifact of its own.
+    `Runtime::admit(id, verified)` takes it (where it took bytes and a
+    digest), `register` delegates through `Verified::wasm`, and the loader
+    hands over the token it verified rather than hashing twice.
   - The digest is never optional. Every path a guest's bytes take runs
     through one body, `Runtime::admit`, and every registration records
     the digest of the bytes it was loaded from: `Guest::digest` and
@@ -77,24 +130,17 @@ Unreleased
     the host and a `&Digest` in the SDK (the WIT record's `digest` is a
     `string`), and a load of an active guest always attests it.
     `Guest::with_digest` and the test loader's `ScriptedLoader::unhashed`
-    are gone with the `None` they scripted.
-  - One `Source` for boot and on-demand guests. `omnia::Source` (in
-    `omnia-core`, beside the `SourceSpec` that moved there under the same
+    are gone with the `None` they scripted. `Digest::checked(bytes, pin,
+    subject)` is the one pin check ("resolved to .., not its declared digest
+    ..") `Source::verified` and the loader's caller-named loads share.
+  - One `Source` for every declared guest. `omnia::Source` (in `omnia-core`,
+    beside the `SourceSpec` that moved there under the same
     `omnia::SourceSpec` path) is a `[[guest]]` entry resolved for loading —
-    identity, `SourceSpec`, digest pin, `wasm_only`, and the `on_demand`
-    mark for an entry read at first load — with `read`, `verified`, and
-    `load`, so the pin check and the format policy are one body at boot and
-    on demand. `Manifest::boot_sources()` and `Manifest::on_demand_sources()`
-    are the two filters over it (`sources()` and `on_demand()` are renamed;
-    the latter marks each `Source::on_demand()`, as `Plugins::install` does
-    for any it is handed), `Plugins::install` takes the on-demand `Source`s,
-    and omnia-plugin's `Origin` and `OnDemand` are gone.
-  - `wasm_only`, a per-entry policy for sources the deployment declares
-    from input it does not author: `GuestEntry::wasm_only()` (TOML
-    `wasm_only = true`, the macro's `wasm_only: true`) refuses a
-    pre-compiled artifact however it hashes, at boot (assembly fails) or on
-    demand (`refused`, which the WIT now names). The pin proves the bytes
-    are the ones the entry named; this proves they run inside the sandbox.
+    identity, `SourceSpec`, digest pin — with `read`, `verified`, and
+    `load`, so the pin check and the format rule are one body at boot and
+    at first use; omnia-plugin's `Origin` and `OnDemand` are gone. A
+    caller-named `path` or `registry` load builds no `Source`: it runs the
+    shared pin check, then `Verified::wasm`.
   - The compile-affecting settings are one explicit value. `CompileOptions`
     (re-exported from `omnia`) holds the six — `Default` is the environment
     defaults, `RuntimeOptions::compile_options()` the loaded environment's —
@@ -140,15 +186,20 @@ Unreleased
     such imports are relayed at all.
 - The `runtime!` grammar embeds its guests.
   - `guests:` is a list, `guests: [ { path | package, name?, routes?,
-    command?, on_demand?, digest? }, .. ]`.
+    command?, digest? }, .. ]`.
     Each entry's `path:` is a string literal or a macro expanding to one
     (`concat!(env!(..), ..)`, a `build.rs`-emitted `env!("GUEST_WASM")`) that
     the macro reads with `include_bytes!` — the component is compiled into
-    the binary, never read from disk at start; a component read at start is
-    a `manifest:` file's `[[guest]]`. A computed `path:` is a compile error.
-  - A guest is named by the path's file stem unless `name:` says otherwise.
+    the binary and loads at boot, never read from disk; a component read at
+    its first use is a `manifest:` file's `[[guest]]`. A computed `path:` is
+    a compile error. A `package:` entry needs nothing but its reference —
+    it takes `routes:`, `command:`, and `digest:` like any other, and
+    `name:` is optional — and any other key, the retired `on_demand:` and
+    `wasm_only:` included, is a compile error naming the six.
+  - A guest is named by the path's file stem, or by the package reference
+    without its version, unless `name:` says otherwise.
   - `registries:` is a root key beside `guests:` and `mounts:`, the routing
-    of the deployment's on-demand `package:` guests.
+    of the deployment's `package:` guests.
   - The generated `main` passes the invoking crate's `CARGO_PKG_NAME` as the
     program name — telemetry's component name and, in command mode, the
     guest's `argv[0]` — where it was the first guest's identity;
@@ -160,14 +211,15 @@ Unreleased
 - A guest entry's identity is its `name`.
   - `[[guest]] name = ".."` replaces `id`; it may be omitted, in which case
     the `source.path` file's stem names the guest (`./guests/echo.wasm` is
-    `echo`, `Manifest::load` derives it). An entry nothing names — a
-    `package` source without `name` — is refused at startup beside a
-    duplicate name.
-    The retired `id` key is an unknown key.
+    `echo`) or the `source.package` reference without its version does
+    (`acme:echo@1.2.0` is `acme:echo`; `Manifest::load` derives both). Two
+    versions of one package collide as a duplicate name unless one is
+    given a `name`. The retired `id` key is an unknown key.
   - `GuestEntry::new(name, source)`, `GuestEntry::embedded(path, bytes)`
-    (named by the path's stem; what the macro lowers to),
-    `GuestId::from_path`; the test host's `Deployment` takes
-    `guest(name, ..)` and `command(name)`.
+    (named by the path's stem) and `GuestEntry::package(reference)` (named
+    by the reference without its version) — what the macro lowers to —
+    `GuestId::from_path`, `GuestId::from_package`; the test host's
+    `Deployment` takes `guest(name, ..)` and `command(name)`.
 - The `link:` and `plugin:` blocks, `omnia::Location`, `LinkConfig`, and
   `PluginConfig` are gone; `config:` is `manifest:`.
   - The TOML manifest follows: `[registries] path = "wasm-pkg.toml"` replaces
@@ -176,9 +228,10 @@ Unreleased
     gone with the location list, and the test deployment's `locations`
     builder is `registries`.
   - The guest loader is assembly's, not the macro's: `Deployment::assemble`
-    links `WasiPlugins` beside WASI whenever omnia is built with the feature
-    and installs the manifest's on-demand guests (below) through
-    `Plugins::install(runtime, on_demand, registry)`; `Wiring::extend` and
+    links `WasiPlugins` beside WASI whenever omnia is built with the
+    feature, hands the runtime its `RegistryClient` as the package source
+    (above), and installs the loader's grant through
+    `Plugins::install(runtime, registry)`; `Wiring::extend` and
     `Deployment::plugin_locations` are removed, and the generated `Hooks`
     carry `link` and `serve` alone.
   - `RegistryClient::new` takes the wasm-pkg `Config` (there is no
@@ -202,15 +255,22 @@ Unreleased
     `registry` arm carries a `registry-ref { package, endpoint? }` and the
     `path` arm a component path, so the separate `package` parameter is
     gone — a load registers under the name its location derives: the
-    declared name, the path's file stem, or the package reference. A
-    `declared` name outside the deployment's table is refused typed (where
-    the same name dispatched blind would trap), one already active is
-    attested without fetching anything, and it takes no digest of its own —
-    the entry carries the pin. The `already-active` variant is gone: a
-    location whose name is active under other bytes is `refused`, and the
-    same bytes attest. A `path` or `registry` whose derived name the
-    deployment declares is `refused` before anything is read: a declared
-    name is bound by its entry alone.
+    declared name, the path's file stem, or the package reference without
+    its version (`registry("acme:tool@1.2.3")` registers `acme:tool`, so a
+    deployment holds one guest per package and another version of an
+    active one is refused as active under other bytes; the SDK's
+    `Location::name` strips the version the same way). A `declared` name
+    outside the deployment's guest list is refused typed (where the same
+    name dispatched blind would trap), one not yet loaded is loaded through
+    `Runtime::guest` — the same first-use seam a route or a link call uses
+    — one already active is attested without fetching anything, and it
+    takes no digest of its own — the entry carries the pin. The
+    `already-active` variant is gone: a location whose name is active under
+    other bytes is `refused`, and the same bytes attest. A `path` or
+    `registry` whose derived name the deployment declares — any version of
+    a declared package included — is `refused` before anything is read,
+    whether or not that guest has loaded: a declared name is bound by its
+    entry alone.
   - A component loads from a read-only mount alone. A `path` resolves to
     the mount it lies beneath — `.` for a bare relative path, a mount's name
     as its prefix otherwise — and is refused before the file is read when
@@ -222,28 +282,25 @@ Unreleased
     directory is refused as that directory. The `writable` flag on a mount
     is therefore also its code-root policy; there is no separate mark.
   - A `path` or `registry` the requester names admits raw wasm alone
-    (`wasm_only`): a pre-compiled artifact under it is refused however it
-    hashes. The `endpoint` a registry load names serves a namespace the
+    (`Verified::wasm`): a pre-compiled artifact under it is refused however
+    it hashes. The `endpoint` a registry load names serves a namespace the
     deployment's `registries` routes nowhere; a package the deployment
     routes is refused rather than fetched elsewhere.
-  - A `[[guest]]` entry marked `on_demand = true` (the macro's
-    `on_demand: true`) is admitted at its first `declared` load rather than
-    at boot, from the source the entry declares: `source.path`, embedded
-    bytes, or the new `source.package = "ns:name@1.0.0"` (the macro's
-    `package:`), an exact reference fetched through `[registries]`. A
-    package source is always on demand and must carry a `name`; an
-    on-demand guest takes no `routes` and is never the `command` guest,
-    since trigger routing is built at boot — each is refused when the
-    manifest validates or, in the macro, at compile time.
-    `GuestEntry::on_demand()` and `SourceSpec::package(..)` build them
-    programmatically; the test host's `Deployment::on_demand(name, source)`
-    and `Deployment::entry(entry)` declare them.
+  - `source.package = "ns:name@1.0.0"` (the macro's `package:`,
+    `SourceSpec::package(..)`, `GuestEntry::package(..)`) declares a guest
+    as an exact package reference fetched through `[registries]` at its
+    first use — a route, the command drive, a link call, a host dispatch,
+    or a `declared` load — and named by the reference without its version
+    unless the entry names it. It takes `routes` and `command` like any
+    other entry, and admits raw wasm alone.
   - A declared entry's digest pin lives on the entry: `[[guest]]
     digest = "sha256:<hex>"` (the macro's `digest:`, `GuestEntry::digest`)
-    is checked wherever the entry's bytes become a guest, at boot or on
-    demand, before wasmtime sees them; a boot guest whose bytes miss the pin
-    fails startup, an on-demand one refuses the load. A `path` or
-    `registry` load carries its pin on the call, as before.
+    is checked wherever the entry's bytes become a guest, at boot or at
+    first use, before wasmtime sees them; a guest loaded at boot whose
+    bytes miss the pin fails startup, a first-use one fails the use that
+    named it. On a `source.path` the pin is also what admits `omnia
+    compile` output. A `path` or `registry` load carries its pin on the
+    call, as before.
   - `omnia::Digest` is the typed `sha256:<hex>` value host-side — `Copy`,
     `Digest::of(bytes)`, `FromStr`/`Display` in the canonical lowercase
     spelling, serde as that string — and replaces
@@ -253,11 +310,14 @@ Unreleased
     `Guest::digest`), and the loader's `Plugin::digest` reports it on an
     attested name.
   - `omnia-plugin`'s surface is `Plugins` (installed by assembly over the
-    on-demand `Source` table, the runtime's mounts, and the registry
-    source), `PluginLoader::load(from: Location, pin: Option<Digest>)` on
-    `Runtime`, `Plugin`, `Location::{Declared, Path, Registry}`, and the
-    `RegistrySource` seam, whose `acquire(package, endpoint)` takes the
-    registry the load names; `PathMounts` and `PathSource` are gone.
+    runtime's mounts and the registry source; the declared guests are the
+    registry's), `PluginLoader::load(from: Location, pin: Option<Digest>)`
+    on `Runtime`, `Plugin`, `Location::{Declared, Path, Registry}`, and the
+    `RegistrySource` seam re-exported from `omnia-core`, whose
+    `acquire(package, endpoint)` takes the registry the load names and
+    fails with core's `AcquireError` (`From<AcquireError> for LoadError`,
+    `From<GuestError> for LoadError`); `PathMounts` and `PathSource` are
+    gone.
   - In the SDK, `Plugins::load(&Location, Option<&Digest>)` returns
     `Plugin { id, digest }`; `PluginRef` is gone, and `Location::name()` is
     the name a load registers under. The test host's `ScriptedLoader`

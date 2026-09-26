@@ -13,18 +13,19 @@ pub use manifest::{
 #[cfg(feature = "link")]
 use omnia_core::ChainPolicy;
 #[cfg(feature = "loader")]
-use omnia_core::Source;
+use omnia_core::RegistrySource;
 use omnia_core::wasmtime::component::Linker;
 use omnia_core::wasmtime::{Config, Engine};
 use omnia_core::wasmtime_wasi::WasiView;
 use omnia_core::{
-    GuestId, HasChain, Host, LevelFilter, LinkSeam, LoadedGuest, MountRegistry, NoLinks, Registry,
-    Routes, Runtime, RuntimeOptions, RuntimeParts, Server, StoreCtx, Telemetry,
+    GuestId, HasChain, HasDispatcher, Host, LevelFilter, LinkSeam, LoadedGuest, MountRegistry,
+    NoLinks, Registry, RegistryParts, Routes, Runtime, RuntimeOptions, RuntimeParts, Server,
+    Source, SourceSpec, StoreCtx, Telemetry,
 };
 #[cfg(feature = "link")]
 use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks};
 #[cfg(feature = "loader")]
-use omnia_plugin::{Plugins, RegistryClient, RegistrySource, WasiPlugins};
+use omnia_plugin::{Plugins, RegistryClient, WasiPlugins};
 
 use crate::Mode;
 
@@ -35,7 +36,7 @@ use crate::Mode;
 ///
 /// ```ignore
 /// let deployment = DeploymentBuilder::new()
-///     .manifest(Manifest::from_wasm(wasm))
+///     .manifest(Manifest::from_wasm(wasm)?)
 ///     .args(args)
 ///     .mode(mode)
 ///     .build::<StoreCtx>()
@@ -139,8 +140,8 @@ impl DeploymentBuilder {
     /// Resolve the manifest into a [`Deployment`].
     ///
     /// If no manifest was supplied, the path in `OMNIA_MANIFEST` is loaded.
-    /// A guest is a raw wasm component or `omnia compile` output; either
-    /// loads.
+    /// Guests the process already holds as bytes load (and compile) here; a
+    /// path or package source is declared and loads at its first use.
     ///
     /// # Errors
     ///
@@ -161,8 +162,6 @@ impl DeploymentBuilder {
         // Read once, here, so a missing or unreadable configuration fails
         // startup rather than the first package load.
         let registry_config = manifest.registry_config()?;
-        #[cfg(feature = "loader")]
-        let on_demand = manifest.on_demand_sources();
 
         let program_name = self.program_name.unwrap_or_else(|| "omnia".to_owned());
         // The runtime-carried name read by telemetry, trigger servers, and
@@ -193,11 +192,15 @@ impl DeploymentBuilder {
         // mount fails fast at startup rather than per store.
         let mounts = Arc::new(MountRegistry::open(manifest.preopens())?);
 
-        // Boot guests load (and compile) in parallel through the async
-        // [`Source::load`] seam; order still follows the manifest.
-        let sources = manifest.boot_sources()?;
+        // Bytes the process holds load (and compile) now, in parallel through
+        // the async [`Source::load`] seam, order following the manifest; a
+        // path or package is the runtime's to load at first use.
+        let (embedded, declared): (Vec<Source>, Vec<Source>) = manifest
+            .sources()
+            .into_iter()
+            .partition(|source| matches!(source.spec(), SourceSpec::Bytes(_)));
         let guests =
-            futures::future::try_join_all(sources.iter().map(|source| source.load(&engine)))
+            futures::future::try_join_all(embedded.iter().map(|source| source.load(&engine)))
                 .await?;
 
         // In command mode the program name is prepended as `argv[0]`.
@@ -215,6 +218,7 @@ impl DeploymentBuilder {
             linker,
             options,
             guests,
+            declared,
             routes: manifest.routes(),
             seam: Arc::new(NoLinks),
             mounts,
@@ -224,10 +228,7 @@ impl DeploymentBuilder {
             command_guest: manifest.command_guest(),
             registry_config,
             #[cfg(feature = "loader")]
-            loader: Loader {
-                on_demand,
-                registry: None,
-            },
+            loader: Loader { registry: None },
             level: self.level,
             fallback,
         };
@@ -256,6 +257,8 @@ pub struct Deployment<T: WasiView + 'static> {
     linker: Linker<T>,
     options: RuntimeOptions,
     guests: Vec<LoadedGuest>,
+    // The manifest's path and package guests, each loaded at first use.
+    declared: Vec<Source>,
     routes: Routes,
     // Host-mediated dispatch seam: `NoLinks` unless the `link` feature is on.
     seam: Arc<dyn LinkSeam<T>>,
@@ -285,8 +288,6 @@ pub struct Deployment<T: WasiView + 'static> {
 #[cfg(feature = "loader")]
 #[derive(Default)]
 struct Loader {
-    // The manifest's on-demand guests.
-    on_demand: Vec<Source>,
     // The embedder's registry source; `None` installs a cacheless
     // `RegistryClient` over the deployment's `registries` configuration.
     registry: Option<Arc<dyn RegistrySource>>,
@@ -309,9 +310,9 @@ impl Loader {
 
 /// Store bound [`DeploymentBuilder::build`] requires; every deployment store
 /// context ([`StoreCtx`]) satisfies it.
-pub trait LinkStore: WasiView + HasChain + 'static {}
+pub trait LinkStore: WasiView + HasChain + HasDispatcher + 'static {}
 
-impl<T: WasiView + HasChain + 'static> LinkStore for T {}
+impl<T: WasiView + HasChain + HasDispatcher + 'static> LinkStore for T {}
 
 impl<T: WasiView> Deployment<T> {
     /// Link a WASI host's interfaces into the shared Linker.
@@ -334,7 +335,7 @@ impl<T: WasiView> Deployment<T> {
     #[cfg(feature = "link")]
     pub fn selector(&mut self, selector: impl GuestSelector) -> &mut Self
     where
-        T: HasChain,
+        T: HasChain + HasDispatcher,
     {
         // The seam holds only selector + policy until assembly, so rebuilding
         // it here loses nothing.
@@ -343,8 +344,10 @@ impl<T: WasiView> Deployment<T> {
         self
     }
 
-    /// Select the registry the guest loader fetches on-demand package sources
-    /// from — typically a [`RegistryClient`] with a cache store attached.
+    /// Select the registry package sources are fetched from — the manifest's
+    /// `source.package` guests at their first use, and the packages a guest
+    /// names through the loader — typically a [`RegistryClient`] with a cache
+    /// store attached.
     ///
     /// Without this call, [`assemble`](Self::assemble) installs a cacheless
     /// [`RegistryClient`] routed by the deployment's `registries`
@@ -388,42 +391,46 @@ impl<T: WasiView> Deployment<T> {
 
     /// Assemble the guest [`Registry`].
     ///
-    /// Consumes the deployment: pre-instantiation happens once, here, after all
-    /// hosts are linked — so no host can be linked after the guests are frozen.
-    /// Per call only a fresh instantiate on a new store remains. With the
-    /// `link` feature, every import a guest makes outside the runtime's own
-    /// namespaces is relayed to the guest exporting it; without it, such an
-    /// import is unresolved and pre-instantiation fails.
+    /// Consumes the deployment: pre-instantiation of the boot guests happens
+    /// once, here, after all hosts are linked — so no host can be linked
+    /// after the guests are frozen; a declared guest pre-instantiates against
+    /// the same linker when its first use loads it. Per call only a fresh
+    /// instantiate on a new store remains. With the `link` feature, every
+    /// import a guest makes outside the runtime's own namespaces is relayed
+    /// to the guest exporting it; without it, such an import is unresolved
+    /// and pre-instantiation fails.
     ///
     /// # Errors
     ///
     /// Returns an error if a relayed import cannot be polyfilled, a component
     /// cannot be pre-instantiated, or the registry cannot be assembled.
     pub fn into_registry(self) -> Result<Registry<T>> {
-        Registry::assemble(
-            self.engine,
-            self.linker,
-            self.options,
-            self.guests,
-            self.routes,
-            self.seam,
-            self.allow_empty,
-        )
+        Registry::assemble(RegistryParts {
+            engine: self.engine,
+            linker: self.linker,
+            options: self.options,
+            loaded: self.guests,
+            declared: self.declared,
+            routes: self.routes,
+            seam: self.seam,
+            allow_empty: self.allow_empty,
+        })
     }
 }
 
 impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
     /// Assemble this deployment into a [`Runtime`]: the guest loader host
-    /// joins the linked hosts, the registry pre-instantiates the boot guests,
-    /// the loader's grant installs, then the serve side of every guest's
-    /// linked exports is wired.
+    /// joins the linked hosts, the registry pre-instantiates the boot guests
+    /// and tables the declared ones, the loader's grant installs, then the
+    /// serve side of every boot guest's linked exports is wired.
     ///
     /// The loader host is linked here, beside WASI, whenever omnia is built
     /// with the `loader` feature; wasmtime wires it only into worlds that
-    /// import `omnia:plugins/loader`. The grant it serves is the manifest's
-    /// `on_demand` guests as the table a declared load may name, the
+    /// import `omnia:plugins/loader`. The grant it serves is the runtime's
+    /// first-use seam for the guests the deployment declares, the
     /// deployment's read-only mounts as the roots a path load reads through,
-    /// and the `registries` configuration every package is fetched by unless
+    /// and the `registries` configuration every package — declared or named
+    /// by a guest — is fetched by unless
     /// [`registry_source`](Self::registry_source) selected a registry.
     ///
     /// # Errors
@@ -443,6 +450,10 @@ impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
             name: Arc::from(deployment.name.as_str()),
             args: deployment.args.to_vec(),
             mounts: Arc::clone(&deployment.mounts),
+            #[cfg(feature = "loader")]
+            packages: Some(Arc::clone(&registry)),
+            #[cfg(not(feature = "loader"))]
+            packages: None,
             registry_config: deployment.registry_config.clone(),
             level: deployment.level,
             fallback: deployment.fallback,
@@ -452,8 +463,7 @@ impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
         });
 
         #[cfg(feature = "loader")]
-        Plugins::install(&runtime, loader.on_demand, registry)
-            .context("installing the guest loader")?;
+        Plugins::install(&runtime, registry).context("installing the guest loader")?;
 
         runtime.serve_links().await.context("serving the guests' linked exports")?;
         Ok(runtime)
@@ -461,8 +471,8 @@ impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
 
     // Link the loader host — here, beside WASI, so wasmtime wires it only into
     // worlds that import `omnia:plugins/loader` — and take what `assemble`
-    // installs on it: the on-demand table and the registry packages are
-    // fetched from; the mounts it reads paths through are the runtime's.
+    // installs on it: the registry packages are fetched from; the mounts it
+    // reads paths through are the runtime's.
     #[cfg(feature = "loader")]
     fn with_loader_host(mut self) -> Result<(Self, Loader)> {
         self.host::<WasiPlugins, B>().context("linking the guest loader host")?;

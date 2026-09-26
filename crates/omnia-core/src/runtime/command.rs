@@ -13,16 +13,17 @@ use crate::store::StoreCtx;
 
 /// Run the command guest once, after the [`Runtime`] is assembled.
 ///
-/// A guest marked `command = true` in the manifest goes through the ordinary
-/// registry lookup and fails the run if it is not registered. Without a
-/// marked guest, the sole static `wasi:cli/run` exporter is the catch-all; a
-/// deployment with no exporter is inert and exits `0`.
+/// A guest marked `command = true` in the manifest resolves through
+/// [`Runtime::guest`], so a declared guest loads here by being run. Without
+/// a marked guest, the sole `wasi:cli/run` exporter among the guests loaded
+/// at boot is the catch-all; a deployment with no exporter is inert and
+/// exits `0`.
 ///
 /// # Errors
 ///
-/// Returns an error if the explicit command guest is not registered, routing
-/// is ambiguous, the guest cannot be instantiated, or the command traps
-/// without a guest exit code.
+/// Returns an error if the explicit command guest is neither registered nor
+/// declared or fails to load, routing is ambiguous, the guest cannot be
+/// instantiated, or the command traps without a guest exit code.
 pub async fn drive<B>(runtime: &Runtime<B>) -> Result<ExitStatus>
 where
     B: Clone + Send + Sync + 'static,
@@ -30,9 +31,9 @@ where
     if let Some(id) = runtime.command_guest() {
         let id = id.clone();
         let guest = runtime
-            .registry()
-            .get(&id)
-            .with_context(|| format!("command guest `{id}` is not registered"))?;
+            .guest(&id)
+            .await
+            .with_context(|| format!("resolving the command guest `{id}`"))?;
         return run_guest(runtime, &id, &guest).await;
     }
 
@@ -46,13 +47,13 @@ where
         tracing::info!("no guest exports wasi:cli/run; cli trigger inert");
         return Ok(ExitStatus::SUCCESS);
     }
-    let Some((guest_id, ())) = routing.catch_all() else {
+    let Some(guest_id) = routing.catch_all() else {
         bail!("multiple wasi:cli/run guests; mark one `command = true` to disambiguate");
     };
     let guest = runtime
-        .registry()
-        .get(guest_id)
-        .with_context(|| format!("routed guest `{guest_id}` is not registered"))?;
+        .guest(guest_id)
+        .await
+        .with_context(|| format!("resolving the routed guest `{guest_id}`"))?;
     run_guest(runtime, guest_id, &guest).await
 }
 

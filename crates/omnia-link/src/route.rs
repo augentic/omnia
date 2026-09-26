@@ -143,6 +143,27 @@ impl Routes {
         table.live.clear();
     }
 
+    /// The live route for `target`, for a call to `interface`, or `None`
+    /// when `target` is not registered.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `target` is registered but exports no linked
+    /// interface.
+    pub fn lookup(
+        &self, target: &GuestId, interface: &str,
+    ) -> Result<Option<Arc<dyn RouteInvoke>>> {
+        let table = self.inner.read().unwrap_or_else(PoisonError::into_inner);
+        match table.live.get(target) {
+            None => Ok(None),
+            Some(None) => bail!(
+                "guest `{target}` is registered but exports no linked interface (`{interface}`); \
+                 is it meant to be a link target?"
+            ),
+            Some(Some(route)) => Ok(Some(Arc::clone(route))),
+        }
+    }
+
     /// The live route for `target`, for a call to `interface`.
     ///
     /// # Errors
@@ -150,14 +171,6 @@ impl Routes {
     /// Returns an error if `target` is not registered, or is registered but
     /// exports no linked interface.
     pub fn resolve(&self, target: &GuestId, interface: &str) -> Result<Arc<dyn RouteInvoke>> {
-        let table = self.inner.read().unwrap_or_else(PoisonError::into_inner);
-        match table.live.get(target) {
-            None => bail!("guest `{target}` is not registered"),
-            Some(None) => bail!(
-                "guest `{target}` is registered but exports no linked interface (`{interface}`); \
-                 is it meant to be a link target?"
-            ),
-            Some(Some(route)) => Ok(Arc::clone(route)),
-        }
+        self.lookup(target, interface)?.ok_or_else(|| anyhow!("guest `{target}` is not registered"))
     }
 }

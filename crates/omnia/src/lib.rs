@@ -33,14 +33,14 @@ pub use futures;
 pub use omnia_cli::{Cli, Command, Parser};
 #[doc(inline)]
 pub use omnia_core::{
-    AdmitError, Backend, ChainCtx, ChainPolicy, CliRoutes, CompileOptions, Digest, Dispatcher,
-    ExitStatus, Extensions, FromEnv, FutureResult, Guest, GuestId, HasChain, HasDispatcher,
-    HasExtensions, HasLimits, HasMounts, HasTable, Host, HostCtx, HttpBorrow, HttpCtx, HttpRoutes,
-    LevelFilter, LinkSeam, MountRegistry, NoLinks, NoOptions, PatternRoutes, Provides, Proxy,
-    Registry, ResolvedPreopen, Routes, Runtime, RuntimeOptions, RuntimeParts, Server, Source,
-    SourceSpec, StoreBase, StoreConfig, StoreCtx, StoreFactory, StoreView, Telemetry,
-    TriggerRouter, Verified, WeakRuntime, get_cloned, host_error, serve_links, telemetry,
-    wasi_view,
+    AcquireError, AdmitError, Backend, ChainCtx, ChainPolicy, CliRoutes, CompileOptions, Digest,
+    Dispatcher, ExitStatus, Extensions, FromEnv, FutureResult, Guest, GuestError, GuestId,
+    HasChain, HasDispatcher, HasExtensions, HasLimits, HasMounts, HasTable, Host, HostCtx,
+    HttpBorrow, HttpCtx, HttpRoutes, LevelFilter, LinkSeam, MountRegistry, NoLinks, NoOptions,
+    PatternRoutes, Provides, Proxy, Registry, RegistryParts, RegistrySource, ResolvedPreopen,
+    Routes, Runtime, RuntimeOptions, RuntimeParts, Server, Source, SourceSpec, StoreBase,
+    StoreConfig, StoreCtx, StoreFactory, StoreView, Telemetry, TriggerRouter, Verified,
+    WeakRuntime, get_cloned, host_error, serve_links, telemetry, wasi_view,
 };
 #[doc(hidden)]
 pub use omnia_core::{pastey, tokio, wasmtime, wasmtime_wasi};
@@ -53,7 +53,7 @@ pub use omnia_link::{FirstArgSelector, GuestSelector, InProcessLinks, is_host};
 #[doc(inline)]
 pub use omnia_plugin::{
     ContentStore, LoadError, Location, NoStore, Plugin, PluginLoader, Plugins, RegistryClient,
-    RegistrySource, ReleaseStore, WasiPlugins, WasiPluginsCtxView,
+    ReleaseStore, WasiPlugins, WasiPluginsCtxView,
 };
 
 pub use self::deployment::{

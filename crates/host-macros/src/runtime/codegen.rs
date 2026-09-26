@@ -92,7 +92,8 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
 
     // An embedded component is read at build time and named by the path's
     // file stem unless the guest names itself; a package is a reference the
-    // loader fetches on first load.
+    // runtime fetches at first use, named by the reference without its
+    // version unless the guest names itself.
     let guests = manifest.guests.iter().map(|guest| {
         let entry = match &guest.source {
             GuestSource::Embedded { path, name: None } => {
@@ -104,7 +105,16 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
             } => {
                 quote! { omnia::GuestEntry::new(#name, include_bytes!(#path)) }
             }
-            GuestSource::Package { reference, name } => {
+            GuestSource::Package {
+                reference,
+                name: None,
+            } => {
+                quote! { omnia::GuestEntry::package(#reference) }
+            }
+            GuestSource::Package {
+                reference,
+                name: Some(name),
+            } => {
                 quote! { omnia::GuestEntry::new(#name, omnia::SourceSpec::package(#reference)) }
             }
         };
@@ -112,13 +122,11 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
         let messaging = &guest.routes.messaging;
         let websocket = &guest.routes.websocket;
         let command = guest.command.then(|| quote! { .command() });
-        let on_demand = guest.on_demand.then(|| quote! { .on_demand() });
         // The pin was validated at parse; it lands as the bytes it decodes to.
         let digest = guest.digest.as_ref().map(|bytes| {
             let bytes = bytes.iter();
             quote! { .digest(omnia::Digest::from([#(#bytes),*])) }
         });
-        let wasm_only = guest.wasm_only.then(|| quote! { .wasm_only() });
         quote! {
             .guest(
                 #entry
@@ -126,9 +134,7 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
                     #(.route_messaging(#messaging))*
                     #(.route_websocket(#websocket))*
                     #command
-                    #on_demand
                     #digest
-                    #wasm_only
             )
         }
     });

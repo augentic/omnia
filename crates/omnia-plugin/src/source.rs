@@ -4,10 +4,8 @@
 
 use std::fmt;
 
-use futures::future::BoxFuture;
 use omnia_core::GuestId;
-
-use crate::error::LoadError;
+pub use omnia_core::RegistrySource;
 
 /// Where a load's component bytes come from, and the name the guest
 /// registers under.
@@ -23,7 +21,7 @@ pub enum Location {
     /// Registers as the path's file stem.
     Path(String),
     /// An exact `namespace:name@version` from a package registry. Registers
-    /// as the package reference.
+    /// as the package reference without its version.
     Registry {
         /// The exact package reference to fetch.
         package: String,
@@ -40,7 +38,7 @@ impl Location {
         match self {
             Self::Declared(name) => GuestId::from(name.as_str()),
             Self::Path(path) => GuestId::from_path(path),
-            Self::Registry { package, .. } => GuestId::from(package.as_str()),
+            Self::Registry { package, .. } => GuestId::from_package(package),
         }
     }
 }
@@ -56,23 +54,6 @@ impl fmt::Display for Location {
     }
 }
 
-/// Registry acquisition policy — how a [`SourceSpec::Package`] source is
-/// fetched.
-///
-/// [`SourceSpec::Package`]: omnia_core::SourceSpec::Package
-pub trait RegistrySource: Send + Sync + 'static {
-    /// Produce the raw component bytes for the exact `package` reference —
-    /// from `endpoint` when the load names one and the deployment's routing
-    /// does not claim the package's namespace, else from that routing —
-    /// split by remedy: [`LoadError::Refused`] for an authoritative "no"
-    /// (nothing routes it, a routed namespace named another registry, the
-    /// registry has no such release), never for a source failure a retry
-    /// might clear ([`LoadError::Unavailable`]).
-    fn acquire<'a>(
-        &'a self, package: &'a str, endpoint: Option<&'a str>,
-    ) -> BoxFuture<'a, Result<Vec<u8>, LoadError>>;
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,7 +64,7 @@ mod tests {
             package: "acme:tool@1.0.0".to_owned(),
             endpoint: Some("ghcr.io".to_owned()),
         };
-        assert_eq!(registry.id(), GuestId::from("acme:tool@1.0.0"));
+        assert_eq!(registry.id(), GuestId::from("acme:tool"));
         assert_eq!(Location::Path("./adapters/tool.wasm".to_owned()).id(), GuestId::from("tool"));
         assert_eq!(Location::Declared("tool".to_owned()).id(), GuestId::from("tool"));
     }

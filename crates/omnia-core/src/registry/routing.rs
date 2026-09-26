@@ -9,11 +9,12 @@
 //! policy.
 //!
 //! [`Router`] layers the capability-based default routing of the guest-registry
-//! design over a table: with no routes configured a sole handler exporter is the
-//! catch-all for its trigger, zero exporters is inert, and two or more exporters
-//! require explicit routes to disambiguate.
+//! design over a table: with no routes configured a sole handler exporter among
+//! the guests loaded at boot is the catch-all for its trigger, zero exporters is
+//! inert, and two or more exporters require explicit routes to disambiguate. A
+//! route may also name a guest the deployment declares but loads at first use;
+//! whether it exports the handler is learnt when it loads.
 
-use std::collections::HashMap;
 use std::marker::PhantomData;
 
 use anyhow::{Result, bail};
@@ -201,21 +202,27 @@ pub enum Router<R> {
 }
 
 impl<R: Resolver> Router<R> {
-    /// Decide how `trigger` routes, given the guests that export its handler
-    /// (`capable`, in a stable order) and the configured `table`.
+    /// Decide how `trigger` routes, given the loaded guests that export its
+    /// handler (`capable`, in a stable order), which identities the
+    /// deployment `declares` for loading at first use, and the configured
+    /// `table`.
     ///
     /// With routes configured the trigger is fully route-driven, and every
-    /// target must be capable. With an empty table the capability default
+    /// target must be capable or declared: a declared target's handler is
+    /// checked when it loads. With an empty table the capability default
     /// routes by exporter count: one is the catch-all, none is inert, two or
-    /// more is ambiguous.
+    /// more is ambiguous. A declared guest is never the catch-all.
     ///
     /// # Errors
     ///
-    /// Returns an error if a route targets a guest that does not export the
-    /// handler, or if two or more guests export it with no routes.
-    pub fn build(trigger: &str, capable: &[GuestId], resolver: R) -> Result<Self> {
+    /// Returns an error if a route targets a loaded guest that does not
+    /// export the handler or an identity the deployment does not declare, or
+    /// if two or more guests export it with no routes.
+    pub fn build(
+        trigger: &str, capable: &[GuestId], declares: impl Fn(&GuestId) -> bool, resolver: R,
+    ) -> Result<Self> {
         if !resolver.is_empty() {
-            return Self::routed(trigger, capable, resolver);
+            return Self::routed(trigger, capable, declares, resolver);
         }
 
         match capable {
@@ -231,10 +238,13 @@ impl<R: Resolver> Router<R> {
         }
     }
 
-    /// Validate that every route target is capable and wrap the table.
-    fn routed(trigger: &str, capable: &[GuestId], resolver: R) -> Result<Self> {
+    /// Validate that every route target is capable or declared and wrap the
+    /// table.
+    fn routed(
+        trigger: &str, capable: &[GuestId], declares: impl Fn(&GuestId) -> bool, resolver: R,
+    ) -> Result<Self> {
         for target in resolver.targets() {
-            if !capable.contains(target) {
+            if !capable.contains(target) && !declares(target) {
                 bail!(
                     "route for trigger `{trigger}` names `{target}`, which does not export the \
                      `{trigger}` handler"
@@ -272,44 +282,40 @@ impl<R: Resolver> Router<R> {
     }
 }
 
-/// Pairs a per-trigger `Router` with the typed binding indices of every
-/// capable guest.
+/// A per-trigger [`Router`] built over a registry.
 ///
-/// A trigger server builds this once, then resolves a routing key straight to
-/// the indices it needs to instantiate. `I` is the handler-specific generated
-/// index type (e.g. `ServiceIndices` for HTTP); the runtime core never names it — it
-/// only stores it and hands it back.
-pub struct TriggerRouter<I, R> {
-    indices: HashMap<GuestId, I>,
+/// A trigger server builds this once at boot, then resolves each routing key
+/// to the identity it fetches through the runtime's first-use seam — a
+/// declared guest loads the first time a key names it — and probes for the
+/// typed binding indices it needs to instantiate.
+pub struct TriggerRouter<R> {
     router: Router<R>,
 }
 
-impl<I, R: Resolver> TriggerRouter<I, R> {
+impl<R: Resolver> TriggerRouter<R> {
     /// Probe every registered guest for the trigger's handler — a guest is
     /// *capable* exactly when `probe` succeeds — then build the `Router` over
-    /// the capable set and the configured route `table`.
+    /// the capable set, the registry's declared identities, and the
+    /// configured route `table`.
     ///
     /// # Errors
     ///
     /// Returns an error if `Router::build` rejects the capable set and
-    /// table: a route names a guest that does not export the handler, or two
-    /// or more guests export it with no routes.
-    pub fn build<T, E, F>(
+    /// table: a route names a guest that neither exports the handler nor is
+    /// declared, or two or more guests export it with no routes.
+    pub fn build<T, I, E, F>(
         registry: &Registry<T>, trigger: &str, table: R, mut probe: F,
     ) -> Result<Self>
     where
         F: FnMut(&InstancePre<T>) -> Result<I, E>,
     {
-        let mut indices = HashMap::new();
-        let mut capable = Vec::new();
-        for guest in registry.guests() {
-            if let Ok(index) = probe(guest.instance_pre()) {
-                capable.push(guest.id().clone());
-                indices.insert(guest.id().clone(), index);
-            }
-        }
-        let router = Router::build(trigger, &capable, table)?;
-        Ok(Self { indices, router })
+        let capable: Vec<GuestId> = registry
+            .guests()
+            .filter(|guest| probe(guest.instance_pre()).is_ok())
+            .map(|guest| guest.id().clone())
+            .collect();
+        let router = Router::build(trigger, &capable, |id| registry.is_declared(id), table)?;
+        Ok(Self { router })
     }
 
     /// Returns `true` when no guest answers this trigger.
@@ -318,21 +324,19 @@ impl<I, R: Resolver> TriggerRouter<I, R> {
         self.router.is_inert()
     }
 
-    /// Resolve a routing `key` to the target identity and its binding indices,
-    /// or `None` on a miss or an inert trigger. A catch-all ignores the key.
+    /// Resolve a routing `key` to the target identity, or `None` on a miss or
+    /// an inert trigger. A catch-all ignores the key.
     #[must_use]
-    pub fn resolve(&self, key: &str) -> Option<(&GuestId, &I)> {
-        let id = self.router.resolve(key)?;
-        self.indices.get(id).map(|index| (id, index))
+    pub fn resolve(&self, key: &str) -> Option<&GuestId> {
+        self.router.resolve(key)
     }
 
-    /// The sole-exporter catch-all target and its binding indices, if this
-    /// trigger fans an unkeyed call into a single exporter (used by websocket
-    /// events that carry no route).
+    /// The sole-exporter catch-all target, if this trigger fans an unkeyed
+    /// call into a single exporter (used by websocket events that carry no
+    /// route).
     #[must_use]
-    pub fn catch_all(&self) -> Option<(&GuestId, &I)> {
-        let id = self.router.catch_all()?;
-        self.indices.get(id).map(|index| (id, index))
+    pub const fn catch_all(&self) -> Option<&GuestId> {
+        self.router.catch_all()
     }
 }
 
@@ -413,32 +417,45 @@ mod tests {
         assert_eq!(routes.resolve("specify.build"), None);
     }
 
+    fn none_declared(_: &GuestId) -> bool {
+        false
+    }
+
     #[test]
     fn build_catch_all() {
-        let router = Router::build("http", &[id("only")], HttpRoutes::default())
+        let router = Router::build("http", &[id("only")], none_declared, HttpRoutes::default())
             .expect("a sole exporter is the catch-all");
         assert_eq!(router.resolve("/anything"), Some(&id("only")));
     }
 
     #[test]
     fn build_inert() {
-        let router = Router::build("http", &[], HttpRoutes::default())
+        let router = Router::build("http", &[], none_declared, HttpRoutes::default())
             .expect("no exporters is inert, not an error");
         assert!(router.is_inert());
         assert_eq!(router.resolve("/anything"), None);
     }
 
     #[test]
+    fn declared_is_never_catch_all() {
+        let router =
+            Router::build("http", &[], |guest| *guest == id("later"), HttpRoutes::default())
+                .expect("no loaded exporter is inert, whatever is declared");
+        assert!(router.is_inert());
+    }
+
+    #[test]
     fn build_ambiguous() {
-        let error = Router::build("http", &[id("a"), id("b")], HttpRoutes::default())
-            .expect_err("two exporters with no routes is ambiguous");
+        let error =
+            Router::build("http", &[id("a"), id("b")], none_declared, HttpRoutes::default())
+                .expect_err("two exporters with no routes is ambiguous");
         assert!(error.to_string().contains("2 capable guests"));
     }
 
     #[test]
     fn build_routes() {
         let routes = HttpRoutes::new([("/a".to_owned(), id("a"))]);
-        let r = Router::build("http", &[id("a")], routes).expect("routes are valid");
+        let r = Router::build("http", &[id("a")], none_declared, routes).expect("routes are valid");
         assert_eq!(r.resolve("/a"), Some(&id("a")));
         // An explicit route makes the trigger fully route-driven: a miss is a
         // miss even though `a` is the sole exporter.
@@ -446,9 +463,17 @@ mod tests {
     }
 
     #[test]
+    fn defer_declared_route() {
+        let routes = HttpRoutes::new([("/a".to_owned(), id("later"))]);
+        let r = Router::build("http", &[], |guest| *guest == id("later"), routes)
+            .expect("a route may name a declared guest that has not loaded");
+        assert_eq!(r.resolve("/a"), Some(&id("later")));
+    }
+
+    #[test]
     fn reject_route() {
         let routes = HttpRoutes::new([("/a".to_owned(), id("ghost"))]);
-        let error = Router::build("http", &[id("real")], routes)
+        let error = Router::build("http", &[id("real")], none_declared, routes)
             .expect_err("a route to a non-exporter must fail fast");
         assert!(error.to_string().contains("ghost"));
     }

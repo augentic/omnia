@@ -237,7 +237,7 @@ async fn loader_placeholder() {
         endpoint: None,
     };
     let third = loader.load(&package, None).await.expect("loads");
-    assert_eq!(third.id(), "acme:another@1.0.0", "a package registers as its reference");
+    assert_eq!(third.id(), "acme:another", "a package registers as its reference, unversioned");
     assert_ne!(first.digest(), third.digest(), "placeholder digests are per name");
 }
 

@@ -116,7 +116,7 @@ where
 {
     state: Runtime<B>,
     component: Arc<str>,
-    routing: Arc<TriggerRouter<ServiceIndices, HttpRoutes>>,
+    routing: Arc<TriggerRouter<HttpRoutes>>,
 }
 
 impl<B> HttpHandler<B>
@@ -134,8 +134,8 @@ where
     pub fn new(runtime: &Runtime<B>) -> Result<Option<Self>> {
         // Capability probe: a guest exports `wasi:http/incoming-handler`
         // exactly when its typed `ServiceIndices` resolve. The runtime builds
-        // the per-guest indices and the router that selects among them once,
-        // up front.
+        // the router once, up front, over the guests loaded at boot; a
+        // declared guest is probed when its first request loads it.
         let routing = runtime.http_trigger_router(ServiceIndices::new)?;
         if routing.is_inert() {
             return Ok(None);
@@ -152,7 +152,8 @@ where
     /// The request is normalised first (scheme and authority from `Host` or
     /// `Forwarded`). Outcomes the handler can answer itself come back as
     /// responses: a request without either header `400`, an unrouted path
-    /// `404`, and a guest that times out or is no longer registered `500`.
+    /// `404`, and a guest that times out, cannot be loaded at its first use,
+    /// or is no longer registered `500`.
     ///
     /// # Errors
     ///
@@ -178,16 +179,27 @@ where
 
         // Resolve the guest by request path through the boot-built router; an
         // unmatched path is an ordinary 404.
-        let Some((guest_id, indices)) = self.routing.resolve(request.uri().path()) else {
+        let Some(guest_id) = self.routing.resolve(request.uri().path()) else {
             return Ok(not_found());
         };
-        // Static resolution only yields identities drawn from the
-        // registry, so a miss is a lifecycle race (e.g. concurrent
+        // The routed identity is the deployment's, so a miss here is a first
+        // use that failed to load or a lifecycle race (e.g. concurrent
         // deregistration) — a 500, never a server panic.
-        let Some(guest) = self.state.registry().get(guest_id) else {
-            tracing::error!(guest = %guest_id, "routed guest is not registered; returning 500");
-            return Ok(internal_error());
+        let guest = match self.state.guest(guest_id).await {
+            Ok(guest) => guest,
+            Err(error) => {
+                tracing::error!(guest = %guest_id, %error, "routed guest unavailable; returning 500");
+                return Ok(internal_error());
+            }
         };
+        // The route says this guest handles http; a declared guest's export
+        // is checked here, at its first use, where a boot guest's was
+        // checked at boot.
+        let indices = ServiceIndices::new(guest.instance_pre())
+            .map_err(anyhow::Error::from)
+            .with_context(|| {
+                format!("routed guest `{guest_id}` does not export `wasi:http/incoming-handler`")
+            })?;
 
         // instantiate the selected guest fresh (instance-per-call)
         let store_data = self.state.store();

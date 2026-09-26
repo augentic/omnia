@@ -126,7 +126,7 @@ Most runtimes never need these. Each solves one specific deployment shape — re
 
 | Key | Reach for it when |
 | --- | ----------------- |
-| [`guests:`/`registries:`/`mounts:`](../reference/runtime-macro.md#inline-manifest-keys-guests-registries-mounts) | You want the deployment compiled into the binary instead of a TOML file — the guests embedded, named by their files unless you say otherwise, plus the mounts they see and the registries their on-demand `package:` guests are fetched through. |
+| [`guests:`/`registries:`/`mounts:`](../reference/runtime-macro.md#inline-manifest-keys-guests-registries-mounts) | You want the deployment compiled into the binary instead of a TOML file — the guests embedded, named by their files unless you say otherwise, plus the mounts they see and the registries their `package:` guests are fetched through at first use. |
 
 Shipping a product CLI whose argv belongs entirely to the guest needs no key: a command-mode runtime with a compiled-in deployment is a [direct command](../reference/runtime-macro.md#direct-commands-raw-argv-passthrough) — no host `run` grammar at all.
 

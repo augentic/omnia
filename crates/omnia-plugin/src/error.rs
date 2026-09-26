@@ -4,6 +4,8 @@
 
 use std::fmt;
 
+use omnia_core::{AcquireError, GuestError};
+
 /// Why a load was refused — the host mirror of the `omnia:plugins/loader`
 /// `error` variant.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -39,3 +41,25 @@ impl fmt::Display for LoadError {
 }
 
 impl std::error::Error for LoadError {}
+
+impl From<AcquireError> for LoadError {
+    fn from(error: AcquireError) -> Self {
+        match error {
+            AcquireError::Refused(detail) => Self::Refused(detail),
+            AcquireError::Unavailable(detail) => Self::Unavailable(detail),
+        }
+    }
+}
+
+impl From<GuestError> for LoadError {
+    fn from(error: GuestError) -> Self {
+        match error {
+            GuestError::Unregistered(id) => {
+                Self::Refused(format!("no guest `{id}` is declared by this deployment"))
+            }
+            GuestError::Refused(detail) => Self::Refused(detail),
+            GuestError::Unavailable(detail) => Self::Unavailable(detail),
+            GuestError::Internal(detail) => Self::Internal(detail),
+        }
+    }
+}

@@ -55,7 +55,7 @@ pub struct ManifestSpec {
     pub guests: Vec<GuestSpec>,
     pub mounts: Vec<MountSpec>,
     /// The `registries:` expression — the wasm-pkg configuration (TOML) that
-    /// routes on-demand package sources, typically an `include_str!`.
+    /// routes package sources, typically an `include_str!`.
     pub registries: Option<Expr>,
 }
 
@@ -66,17 +66,15 @@ impl ManifestSpec {
 }
 
 /// One `{ path: ..., name: ..., routes: { ... }, command: true }` (or
-/// `{ name: ..., package: ..., on_demand: true }`) guest entry.
+/// `{ package: ..., digest: ... }`) guest entry.
 pub struct GuestSpec {
     pub source: GuestSource,
     pub routes: GuestRoutesSpec,
     pub command: bool,
     /// Span of the `command:` key, for cross-key diagnostics.
     pub command_span: Option<Span>,
-    pub on_demand: bool,
     /// The `digest:` pin, decoded from its `sha256:<hex>` literal.
     pub digest: Option<[u8; DIGEST_LEN]>,
-    pub wasm_only: bool,
 }
 
 /// Where a guest entry's component comes from.
@@ -85,9 +83,10 @@ pub enum GuestSource {
     /// such as `concat!(env!(..), ..)`; the file's stem names the guest
     /// unless `name:` does.
     Embedded { path: Expr, name: Option<Expr> },
-    /// A `package:` reference the guest loader fetches on first load; named
-    /// by `name:`, since no path stem is at hand.
-    Package { reference: Expr, name: Expr },
+    /// A `package:` reference the runtime fetches at the guest's first use;
+    /// the reference without its version names the guest unless `name:`
+    /// does.
+    Package { reference: Expr, name: Option<Expr> },
 }
 
 const DIGEST_LEN: usize = 32;
@@ -106,12 +105,6 @@ pub struct GuestRoutesSpec {
     pub http: Vec<Expr>,
     pub messaging: Vec<Expr>,
     pub websocket: Vec<Expr>,
-}
-
-impl GuestRoutesSpec {
-    pub const fn is_empty(&self) -> bool {
-        self.http.is_empty() && self.messaging.is_empty() && self.websocket.is_empty()
-    }
 }
 
 impl Parse for Config {
@@ -376,36 +369,28 @@ impl Parse for GuestSpec {
         let mut package: Option<(Expr, Span)> = None;
         let mut name = None;
         let mut routes = GuestRoutesSpec::default();
-        let mut routes_span = None;
         let mut command = false;
         let mut command_span = None;
-        let mut on_demand = false;
         let mut digest = None;
-        let mut wasm_only = false;
 
         let span = parse_kv_block(input, |key, value| {
             match key.to_string().as_str() {
                 "path" => path = Some(parse_embeddable(value)?),
                 "package" => package = Some((value.parse()?, key.span())),
                 "name" => name = Some(value.parse()?),
-                "routes" => {
-                    routes = value.parse()?;
-                    routes_span = Some(key.span());
-                }
+                "routes" => routes = value.parse()?,
                 "command" => {
                     let lit: syn::LitBool = value.parse()?;
                     command = lit.value();
                     command_span = command.then(|| key.span());
                 }
-                "on_demand" => on_demand = value.parse::<syn::LitBool>()?.value(),
                 "digest" => digest = Some(parse_digest(value)?),
-                "wasm_only" => wasm_only = value.parse::<syn::LitBool>()?.value(),
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
                         format!(
                             "unknown guest key `{other}`; expected `path` or `package`, `name`, \
-                             `routes`, `command`, `on_demand`, `digest`, or `wasm_only`"
+                             `routes`, `command`, or `digest`"
                         ),
                     ));
                 }
@@ -421,50 +406,18 @@ impl Parse for GuestSpec {
                 ));
             }
             (Some(path), None) => GuestSource::Embedded { path, name },
-            (None, Some((reference, span))) => {
-                let Some(name) = name else {
-                    return Err(syn::Error::new(
-                        span,
-                        "a `package:` guest has no file stem to be named by; add `name:`",
-                    ));
-                };
-                if !on_demand {
-                    return Err(syn::Error::new(
-                        span,
-                        "a `package:` guest is fetched on first load; add `on_demand: true`",
-                    ));
-                }
-                GuestSource::Package { reference, name }
-            }
+            (None, Some((reference, _))) => GuestSource::Package { reference, name },
             (None, None) => {
                 return Err(syn::Error::new(span, "guest entry is missing `path` (or `package`)"));
             }
         };
-
-        if on_demand {
-            if let Some(span) = command_span {
-                return Err(syn::Error::new(
-                    span,
-                    "an on-demand guest cannot be the command guest: the command guest runs at \
-                     boot",
-                ));
-            }
-            if let Some(span) = routes_span.filter(|_| !routes.is_empty()) {
-                return Err(syn::Error::new(
-                    span,
-                    "an on-demand guest cannot take routes: trigger routing is built at boot",
-                ));
-            }
-        }
 
         Ok(Self {
             source,
             routes,
             command,
             command_span,
-            on_demand,
             digest,
-            wasm_only,
         })
     }
 }

@@ -25,13 +25,13 @@ default = ["cli", "jit"]
 cli = ["dep:omnia-cli"]
 
 # Enables the guest loader (`omnia:plugins/loader`): the `WasiPlugins` host,
-# the `Plugins` load path over the manifest's `on_demand` guests, and the
+# the `Plugins` load path over the runtime's first-use seam, and the
 # `RegistryClient` with its HTTP/OCI registry stack. With it, assembly links
 # the loader host beside WASI — reachable only from worlds that import it —
-# and installs the on-demand table routed by the deployment's `registries`;
-# without it, a manifest declaring `registries` or an `on_demand` guest is
-# refused at startup. A loaded guest is raw wasm or `omnia compile` output;
-# compiling the former needs `jit`.
+# and fetches every `source.package` guest through the deployment's
+# `registries` at its first use; without it, a manifest declaring
+# `registries` or a package source is refused at startup. A loaded guest is
+# raw wasm or `omnia compile` output; compiling the former needs `jit`.
 loader = ["dep:omnia-plugin"]
 
 # Enables guest→guest dispatch (the `omnia-link` crate): every import a guest
@@ -42,7 +42,7 @@ link = ["dep:omnia-link"]
 
 # Enables just-in-time wasm to machine code compilation. Raw `.wasm` guests
 # and `omnia::compile` exist only with it; without it every guest, at boot or
-# on demand, is a pre-compiled `omnia compile` artifact.
+# at first use, is a pre-compiled `omnia compile` artifact.
 jit = ["omnia-core/jit", "omnia-cli?/jit"]
 
 # Enables memory protection keys (MPK) support in the pooling allocator. MPK

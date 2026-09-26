@@ -1,8 +1,9 @@
-//! A guest plants the file a declared on-demand entry reads: argv names the
-//! payload to copy, the path to plant it at beneath the writable `.` mount,
-//! and the outcome — `refused` with a needle the detail must carry, or
-//! `loaded`. A pre-compiled payload is refused because the entry is unpinned
-//! and read on demand; raw wasm loads, since the host compiles it itself.
+//! A guest plants the file a declared path entry reads at its first use:
+//! argv names the payload to copy, the path to plant it at beneath the
+//! writable `.` mount, and the outcome — `refused` with a needle the detail
+//! must carry, or `loaded`. A pre-compiled payload is refused because the
+//! entry is unpinned and read while guests run; raw wasm loads, since the
+//! host compiles it itself.
 
 #![cfg(target_arch = "wasm32")]
 

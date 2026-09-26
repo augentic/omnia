@@ -99,7 +99,7 @@ impl std::fmt::Display for Digest {
 ///     package: "emery:intent@1.0.0".into(),
 ///     endpoint: None,
 /// };
-/// assert_eq!(package.name(), "emery:intent@1.0.0");
+/// assert_eq!(package.name(), "emery:intent");
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Location {
@@ -110,7 +110,7 @@ pub enum Location {
     /// read fresh on every load. Registers as the path's file stem.
     Path(String),
     /// An exact `namespace:name@version` from a package registry. Registers
-    /// as the package reference.
+    /// as the package reference without its version.
     Registry {
         /// The exact package reference to fetch.
         package: String,
@@ -131,7 +131,9 @@ impl Location {
             Self::Path(path) => {
                 Path::new(path).file_stem().and_then(|stem| stem.to_str()).unwrap_or(path)
             }
-            Self::Registry { package, .. } => package,
+            Self::Registry { package, .. } => {
+                package.split_once('@').map_or(package.as_str(), |(name, _)| name)
+            }
         }
     }
 }
@@ -188,9 +190,9 @@ pub enum Error {
     /// deployment declares no guest of that name, the path is beneath no
     /// read-only mount, no registry routes the package, the bytes miss the
     /// digest, they are not a loadable component, they are pre-compiled
-    /// where raw wasm alone is admitted, they are pre-compiled on a declared
-    /// on-demand entry that is neither pinned nor embedded, or the name is
-    /// active under other bytes.
+    /// where raw wasm alone is admitted (a caller-named path or package, a
+    /// declared package, or a declared path without a `digest`), or the
+    /// name is active under other bytes.
     #[error("refused: {0}")]
     Refused(String),
     /// The guest's source could not produce its bytes; the source may

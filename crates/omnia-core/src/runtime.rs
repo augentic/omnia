@@ -13,7 +13,7 @@ use crate::artifact::component;
 use crate::extensions::Extensions;
 use crate::mount::MountRegistry;
 use crate::registry::{Guest, GuestId, HttpRoutes, PublishError, TriggerRouter};
-use crate::source::Verified;
+use crate::source::{AcquireError, RegistrySource, SourceSpec, Verified};
 use crate::store::HasLimits;
 use crate::{ChainCtx, Dispatcher, LevelFilter, Registry, RuntimeOptions, StoreBase, StoreCtx};
 
@@ -64,10 +64,13 @@ pub struct RuntimeParts<B: 'static> {
     pub mounts: Arc<MountRegistry>,
     /// Connected backend bundle.
     pub backends: B,
+    /// How a declared package source is fetched at first use. `None` when the
+    /// runtime has no registry client (omnia built without the `loader`
+    /// feature), where every package guest's first use fails.
+    pub packages: Option<Arc<dyn RegistrySource>>,
     /// The deployment's wasm-pkg client configuration (TOML), resolved to its
-    /// contents: how the guest loader routes an on-demand guest's package
-    /// source to a registry. `None` when the deployment declares none, where
-    /// every package source is refused.
+    /// contents: how a package source is routed to a registry. `None` when
+    /// the deployment declares none, where every package source is refused.
     pub registry_config: Option<String>,
     /// The tracing level selected for this run, if any; it replaces every
     /// guest's `RUST_LOG`.
@@ -99,6 +102,8 @@ struct RuntimeInner<B: 'static> {
     args: Arc<Vec<String>>,
     mounts: Arc<MountRegistry>,
     backends: B,
+    // Fetches a declared package source at its first use.
+    packages: Option<Arc<dyn RegistrySource>>,
     // Command-mode guest identity; absent, command mode routes to
     // the sole static `wasi:cli/run` exporter.
     command_guest: Option<GuestId>,
@@ -178,6 +183,35 @@ impl fmt::Display for AdmitError {
 
 impl std::error::Error for AdmitError {}
 
+/// Why [`Runtime::guest`] could not produce the guest an identity names.
+#[derive(Clone, Debug)]
+pub enum GuestError {
+    /// The deployment neither registered nor declares the identity.
+    Unregistered(GuestId),
+    /// The declared source could not produce its bytes; a retry may succeed.
+    Unavailable(String),
+    /// The bytes were refused: they miss the pin, are a pre-compiled
+    /// artifact where raw wasm alone is admitted, or do not load as a
+    /// component against the deployment's host set.
+    Refused(String),
+    /// The runtime has no registry to fetch a package from, or the
+    /// registration itself failed.
+    Internal(String),
+}
+
+impl fmt::Display for GuestError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unregistered(id) => write!(f, "guest `{id}` is not registered"),
+            Self::Unavailable(reason) | Self::Refused(reason) | Self::Internal(reason) => {
+                f.write_str(reason)
+            }
+        }
+    }
+}
+
+impl std::error::Error for GuestError {}
+
 // Manual: `StoreCtx<B>` is not `Clone`; both fields are `Arc`-backed.
 impl<B: Clone + Send + Sync + 'static> Clone for Runtime<B> {
     fn clone(&self) -> Self {
@@ -209,6 +243,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
             args: Arc::new(parts.args),
             mounts: parts.mounts,
             backends: parts.backends,
+            packages: parts.packages,
             command_guest: parts.command_guest,
             registry_config: parts.registry_config,
             level: parts.level,
@@ -231,6 +266,66 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         self.inner.registry_config.as_deref()
     }
 
+    /// The guest `id` names, loaded from its declared source on first use.
+    ///
+    /// A registered guest is returned as it stands. One the deployment
+    /// declares but has not loaded is read — or fetched, for a package —
+    /// verified against its entry, admitted as a late guest, and returned;
+    /// when a racing first use admitted it first, that registration stands
+    /// and is returned. Every way into a guest resolves through here, so a
+    /// declared guest loads the first time a route, the command drive, a
+    /// link call, a host dispatch, or the guest loader names it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GuestError::Unregistered`] for an identity the deployment
+    /// neither registered nor declares; `Unavailable` when the source could
+    /// not produce its bytes; `Refused` when the bytes miss the pin, are a
+    /// pre-compiled artifact where raw wasm alone is admitted, or do not
+    /// load as a component; `Internal` when a package has no registry to be
+    /// fetched from or the registration failed.
+    pub async fn guest(&self, id: &GuestId) -> Result<Arc<Guest<StoreCtx<B>>>, GuestError> {
+        let registry = self.registry();
+        if let Some(guest) = registry.get(id) {
+            return Ok(guest);
+        }
+        let Some(source) = registry.declared(id) else {
+            return Err(GuestError::Unregistered(id.clone()));
+        };
+
+        let bytes = match source.spec() {
+            SourceSpec::Package(package) => {
+                let Some(packages) = &self.inner.packages else {
+                    return Err(GuestError::Internal(format!(
+                        "guest `{id}` is the package `{package}`, but this runtime has no \
+                         registry to fetch it from: build omnia with the `loader` feature"
+                    )));
+                };
+                packages.acquire(package, None).await.map_err(|error| match error {
+                    AcquireError::Refused(reason) => GuestError::Refused(reason),
+                    AcquireError::Unavailable(reason) => GuestError::Unavailable(reason),
+                })?
+            }
+            SourceSpec::Path(_) | SourceSpec::Bytes(_) => source
+                .read()
+                .await
+                .map_err(|error| GuestError::Unavailable(format!("{error:#}")))?,
+        };
+        let verified =
+            source.verified(bytes).map_err(|error| GuestError::Refused(format!("{error:#}")))?;
+        match self.admit(id.clone(), verified).await {
+            // A racing first use admitted it first; that registration stands.
+            Ok(()) | Err(AdmitError::AlreadyRegistered(_)) => {}
+            Err(AdmitError::ArtifactRefused(reason)) => return Err(GuestError::Refused(reason)),
+            Err(AdmitError::Internal(reason)) => return Err(GuestError::Internal(reason)),
+        }
+        registry.get(id).ok_or_else(|| {
+            GuestError::Internal(format!(
+                "guest `{id}` was admitted and deregistered before it could be returned"
+            ))
+        })
+    }
+
     /// The deployment name — read by trigger servers and the bootstrap log.
     #[must_use]
     pub fn name(&self) -> &str {
@@ -241,14 +336,16 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// registry and static route table so the boot-time routing decision
     /// lives in one place.
     ///
-    /// `probe` resolves a guest's typed handler indices; a guest is capable
-    /// exactly when it succeeds.
+    /// `probe` resolves a guest's typed handler indices; a loaded guest is
+    /// capable exactly when it succeeds. A route may also name a declared
+    /// guest, probed when its first request loads it.
     ///
     /// # Errors
     ///
-    /// Returns an error if a route names a guest that does not export the
-    /// handler, or two or more guests export it with no routes.
-    pub fn http_trigger_router<I, E, F>(&self, probe: F) -> Result<TriggerRouter<I, HttpRoutes>>
+    /// Returns an error if a route names a guest that neither exports the
+    /// handler nor is declared, or two or more guests export it with no
+    /// routes.
+    pub fn http_trigger_router<I, E, F>(&self, probe: F) -> Result<TriggerRouter<HttpRoutes>>
     where
         F: FnMut(&InstancePre<StoreCtx<B>>) -> std::result::Result<I, E>,
     {
@@ -434,13 +531,12 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     ///
     /// The token's digest is recorded on the registry entry, so the
     /// attestation lives exactly as long as the entry —
-    /// [`Guest::digest`](crate::Guest::digest) reads it back. Acquisition,
-    /// digest policy, and idempotency live with the guest loader
-    /// (`omnia-plugin`), the privileged caller behind the
-    /// `omnia:plugins/loader` capability. Whether the component exports a
-    /// linked interface is not checked here: a guest that exports none is
-    /// still reachable through the host [`Dispatcher`], and a link call to it
-    /// fails at the call site.
+    /// [`Guest::digest`](crate::Guest::digest) reads it back. Acquisition and
+    /// digest policy live with the callers: [`guest`](Self::guest) for a
+    /// declared source, the guest loader (`omnia-plugin`) for a location a
+    /// guest names. Whether the component exports a linked interface is not
+    /// checked here: a guest that exports none is still reachable through
+    /// the host [`Dispatcher`], and a link call to it fails at the call site.
     ///
     /// # Errors
     ///
@@ -486,13 +582,14 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         Ok(())
     }
 
-    /// Remove a dynamically registered guest. New dispatches to `id` fail as
-    /// unregistered; in-flight calls complete on the instance they hold
-    /// (instance-per-call). Static deployment entries are refused.
+    /// Remove a late guest — one registered at run time, or a declared guest
+    /// loaded at first use, which its next use reloads from its source.
+    /// In-flight calls complete on the instance they hold
+    /// (instance-per-call). Guests loaded at boot are refused.
     ///
     /// # Errors
     ///
-    /// Returns an error if `id` names a static `[[guest]]` entry or is not
+    /// Returns an error if `id` names a guest loaded at boot or is not
     /// registered.
     pub fn deregister(&self, id: &GuestId) -> Result<()> {
         self.registry().remove(id)?;

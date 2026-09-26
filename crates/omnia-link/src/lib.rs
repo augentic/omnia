@@ -45,7 +45,8 @@ use anyhow::Result;
 use futures::FutureExt as _;
 use futures::future::ready;
 use omnia_core::{
-    ChainPolicy, FutureResult, Guest, GuestId, HasChain, LinkSeam, LoadedGuest, StoreFactory,
+    ChainPolicy, FutureResult, Guest, GuestId, HasChain, HasDispatcher, LinkSeam, LoadedGuest,
+    StoreFactory,
 };
 use wasmtime::Engine;
 use wasmtime::component::{Component, Linker};
@@ -103,7 +104,7 @@ impl InProcessLinks {
     }
 }
 
-impl<T: HasChain + 'static> LinkSeam<T> for InProcessLinks {
+impl<T: HasChain + HasDispatcher + 'static> LinkSeam<T> for InProcessLinks {
     fn polyfill(
         &self, engine: &Engine, linker: &mut Linker<T>, guests: &[LoadedGuest],
     ) -> Result<()> {
