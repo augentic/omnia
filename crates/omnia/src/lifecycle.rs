@@ -213,7 +213,7 @@ fn sample_pool(engine: Engine, interval: Duration) -> Option<tokio::task::JoinHa
                 break;
             };
 
-            tracing::debug!(
+            tracing::trace!(
                 gauge.pool_core_instances = metrics.core_instances(),
                 gauge.pool_component_instances = metrics.component_instances(),
                 gauge.pool_memories = metrics.memories() as u64,
