@@ -29,7 +29,7 @@ impl<T> HostWithStore<T> for WasiOtel {
         let ctx = tracing::Span::current().context();
         let parent_ctx = ctx.span().span_context().clone();
         if !parent_ctx.is_valid() {
-            // Once per process: a warning per export would drown the console.
+            // once per process: a warning per export would drown the console
             static WARNED: Once = Once::new();
             WARNED.call_once(|| {
                 tracing::warn!(
@@ -232,7 +232,7 @@ mod tests {
         };
         assert_eq!(resource_spans.scope_spans.len(), 2);
         assert_eq!(scope("a").spans.len(), 2);
-        // The scope's own schema URL, not the resource's.
+        // the scope's own schema url, not the resource's
         assert_eq!(scope("a").schema_url, "https://a");
         assert_eq!(scope("b").schema_url, "");
     }

@@ -24,7 +24,7 @@ pub fn body(attrs: Attributes, item_fn: &ItemFn) -> proc_macro2::TokenStream {
             )).await
         }
     } else {
-        // A sync function is never an export: it only opens a span.
+        // a sync function is never an export: it only opens a span
         quote! {
             #tracing::span!(#level, #span_name).in_scope(|| {
                 #block

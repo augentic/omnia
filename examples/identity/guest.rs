@@ -36,7 +36,6 @@ impl Guest for Http {
     }
 }
 
-/// Obtains an access token from the identity provider.
 #[omnia_wasi_otel::instrument]
 async fn handler() -> HttpResult<Json<Value>> {
     let identity = get_identity("identity".to_string()).await.context("getting identity")?;

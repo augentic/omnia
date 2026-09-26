@@ -23,12 +23,10 @@ impl<T> HostClientWithStore<T> for WasiWebSocket {
 }
 
 impl<T> HostEventWithStore<T> for WasiWebSocket {
-    /// Create a new event with the given payload.
     fn new(mut host: Access<'_, T, Self>, data: Vec<u8>) -> wasmtime::Result<Resource<Event>> {
         Ok(host.get().table.push(Event::new(data))?)
     }
 
-    /// The socket address this event was received from.
     fn socket_addr(
         mut host: Access<'_, T, Self>, self_: Resource<Event>,
     ) -> wasmtime::Result<Option<SocketAddr>> {
@@ -36,7 +34,6 @@ impl<T> HostEventWithStore<T> for WasiWebSocket {
         Ok(event.socket_addr.clone())
     }
 
-    /// The event data.
     fn data(mut host: Access<'_, T, Self>, self_: Resource<Event>) -> wasmtime::Result<Vec<u8>> {
         let event = host.get().table.get(&self_)?;
         Ok(event.data.clone())

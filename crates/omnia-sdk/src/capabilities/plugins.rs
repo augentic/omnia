@@ -15,7 +15,6 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-/// Bindings for the `omnia:plugins` imports world.
 #[cfg(target_arch = "wasm32")]
 mod generated {
     #![allow(missing_docs)]
@@ -27,10 +26,7 @@ mod generated {
     });
 }
 
-/// The canonical digest scheme prefix.
 const SCHEME: &str = "sha256:";
-
-/// Hex characters in a sha256 digest.
 const HEX_LEN: usize = 64;
 
 /// A validated `sha256:<hex>` content digest, canonicalized to lowercase.
@@ -288,8 +284,6 @@ pub struct WasiPlugins;
 #[cfg(target_arch = "wasm32")]
 impl Plugins for WasiPlugins {}
 
-/// Wire conversions to the `omnia:plugins/loader` location and from its
-/// refusal variant.
 #[cfg(target_arch = "wasm32")]
 mod wire {
     use super::generated::omnia::plugins::loader;

@@ -75,9 +75,7 @@ where
                         },
                         Err,
                     ),
-                    // A backend that fails with a typed `Error` (a rejected
-                    // check exhausting its rounds) keeps it; anything else
-                    // is a `backend` failure.
+                    // a typed `Error` is kept; anything else is a `backend` failure
                     Err(error) => Err(session
                         .take_error()
                         .unwrap_or_else(|| error.downcast::<Error>().unwrap_or_else(Into::into))),

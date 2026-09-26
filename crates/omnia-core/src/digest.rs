@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn hash_vector() {
-        // The well-known sha256 of the empty input.
+        // the well-known sha256 of the empty input
         assert_eq!(Digest::of(b"").to_string(), EMPTY);
     }
 

@@ -32,13 +32,10 @@ pub struct ConnectOptions {
 
 impl omnia_core::FromEnv for ConnectOptions {
     fn load_env() -> Result<Self> {
-        // `Self::from_env()` is the builder-returning inherent the `FromEnv`
-        // derive emits.
         Self::from_env().finalize().context("issue loading connection options")
     }
 }
 
-/// Reqwest-based HTTP hooks for outbound `wasi:http` requests.
 #[derive(Debug, Clone)]
 struct HttpHooks {
     client: reqwest::Client,
@@ -53,7 +50,6 @@ pub struct HttpDefault {
 }
 
 impl omnia_core::HttpBorrow for HttpDefault {
-    /// Produce a [`WasiHttpCtxView`] by splitting borrows on inner fields.
     fn as_view<'a>(&'a mut self, table: &'a mut ResourceTable) -> WasiHttpCtxView<'a> {
         WasiHttpCtxView {
             hooks: &mut self.hooks,
@@ -64,10 +60,8 @@ impl omnia_core::HttpBorrow for HttpDefault {
 }
 
 // reqwest is built with `rustls-no-provider` (keeping `aws-lc-sys` out of the
-// tree), which requires a process-level crypto provider before a client is
-// built. Ring comes from this crate's own rustls dependency; an embedder
-// that installed its own provider first wins, and losing an install race
-// still leaves exactly one default in place.
+// tree), so a process-level provider must exist before a client is built; an
+// embedder's own provider wins, and a lost install race still leaves one.
 fn ensure_crypto_provider() {
     if rustls::crypto::CryptoProvider::get_default().is_none() {
         let _ = rustls::crypto::ring::default_provider().install_default();
@@ -94,9 +88,7 @@ impl Backend for HttpDefault {
 }
 
 impl WasiHttpHooks for HttpHooks {
-    // Suppress the runtime's `Host` header injection: reqwest derives `Host`
-    // from the URL, and a guest can never supply one (`host` is a forbidden
-    // header), so the request reaching `send_request` stays header-clean.
+    // reqwest derives `Host` from the URL, and a guest can never supply one
     fn set_host_header(&mut self) -> bool {
         false
     }
@@ -117,10 +109,8 @@ impl WasiHttpHooks for HttpHooks {
         Box::new(async move {
             let (mut parts, body) = request.into_parts();
 
-            // A one-off client is required for a client certificate or whenever the
-            // guest overrides the connect/between-bytes timeouts (both are
-            // client-level in `reqwest`); otherwise reuse the shared client so
-            // connection pooling still applies on the common path.
+            // a one-off client only for client-level settings (certificate,
+            // timeout overrides); the shared client keeps its pool otherwise
             let cert = parts.headers.remove("Client-Cert");
             let client = if cert.is_some() || opt_connect.is_some() || opt_between.is_some() {
                 let builder = reqwest::Client::builder()
@@ -145,9 +135,7 @@ impl WasiHttpHooks for HttpHooks {
                 shared_client
             };
 
-            // Stream the outbound body instead of buffering it: a large or
-            // long-lived guest body would otherwise sit in host memory in full
-            // before the request even starts.
+            // stream the outbound body rather than hold it whole in host memory
             let body = reqwest::Body::wrap_stream(
                 body.into_data_stream().map_err(|e| std::io::Error::other(e.to_string())),
             );
@@ -156,9 +144,7 @@ impl WasiHttpHooks for HttpHooks {
             let url = parts.uri.to_string();
             let send = client.request(parts.method, &url).headers(parts.headers).body(body).send();
 
-            // Bound time-to-response (connect + first byte). The response body is
-            // streamed downstream, so it is *not* part of this deadline; its
-            // pacing is governed by `between_bytes` (the read timeout above).
+            // bound connect plus first byte; the streamed body is paced by `between_bytes`
             let resp = match opt_first_byte {
                 Some(first_byte) => {
                     let budget = opt_connect.unwrap_or(connect_timeout).saturating_add(first_byte);
@@ -170,9 +156,7 @@ impl WasiHttpHooks for HttpHooks {
                 None => send.await.map_err(reqwest_err)?,
             };
 
-            // process response; forbidden headers need no stripping here — the
-            // runtime routes the response through `FieldMap::new_immutable`,
-            // which strips per `is_forbidden_header`, before the guest sees it
+            // forbidden headers are stripped by the runtime before the guest sees them
             let converted: Response<reqwest::Body> = resp.into();
             let (parts, body) = converted.into_parts();
             let body = body.map_err(reqwest_err).boxed_unsync();

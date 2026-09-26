@@ -41,10 +41,8 @@ pub struct Caller {
     pub routes: Routes,
 }
 
-/// What one call reads from the calling store before its future is built,
-/// so no store borrow crosses the dispatch: the chain context the callee's
-/// derives from, and the runtime's dispatcher, whose first-use seam loads a
-/// declared target the route table does not hold yet.
+// Read from the calling store before the future is built, so no store borrow
+// crosses the dispatch.
 struct Origin {
     chain: ChainCtx,
     dispatcher: Arc<dyn Dispatcher>,
@@ -97,14 +95,12 @@ pub fn polyfill_component<T: HasChain + HasDispatcher + 'static>(
         if is_host(name) {
             continue;
         }
-        // A bare function or type import is not a service; if nothing
-        // satisfies it, `instantiate_pre` says so.
+        // a bare function or type import is not a service; `instantiate_pre` reports it
         let types::ComponentItem::ComponentInstance(instance_ty) = ty else {
             continue;
         };
 
-        // Snapshot the missing function names and asyncness before mutably
-        // borrowing the linker, skipping functions an earlier guest wired.
+        // snapshot the unwired functions before mutably borrowing the linker
         let wired_funcs = wired.entry(Box::from(name)).or_default();
         let describe = |is_async: bool| if is_async { "an async func" } else { "a plain func" };
         let mut funcs: Vec<(Arc<str>, types::ComponentFunc)> = Vec::new();
@@ -133,9 +129,7 @@ pub fn polyfill_component<T: HasChain + HasDispatcher + 'static>(
             }
         }
 
-        // Opening the instance also (re)defines it on the linker, so a relayed
-        // interface resolves even when every function is already wired (or it
-        // has none).
+        // opening the instance also defines it, so an interface with nothing left to wire resolves
         let mut root = linker.root();
         let mut interface = root
             .instance(name)
@@ -147,8 +141,7 @@ pub fn polyfill_component<T: HasChain + HasDispatcher + 'static>(
             let caller = Arc::clone(caller);
             let iface_name = Arc::clone(&iface_name);
             let func_name = Arc::clone(func);
-            // The caller's store is read here, before the future is built, so
-            // no store borrow crosses the dispatch.
+            // the caller's store is read before the future is built
             let registered = if ty.async_() {
                 interface.func_new_concurrent(func, move |accessor, ty, params, results| {
                     let caller = Arc::clone(&caller);
@@ -189,11 +182,9 @@ pub fn polyfill_component<T: HasChain + HasDispatcher + 'static>(
     Ok(())
 }
 
-/// The per-call dispatch: select the target, reject crossing handles, take a
-/// depth slot beneath the calling guest's chain, resolve the live route —
-/// loading a declared target through the runtime's first-use seam when it
-/// is not registered yet — and move the lifted parameters to a fresh callee
-/// instance on its own task, writing its results back.
+// One call: select the target, reject crossing handles, take a depth slot,
+// resolve the live route (loading a declared target at first use), and run a
+// fresh callee instance on its own task.
 async fn relay(
     caller: &Caller, origin: Origin, interface: &str, func: &str, ty: &types::ComponentFunc,
     params: &[Val], results: &mut [Val],
@@ -226,14 +217,12 @@ async fn relay(
     let route = if let Some(route) = caller.routes.lookup(&target, interface)? {
         route
     } else {
-        // A declared guest loads on first use and its route is live once the
-        // seam returns; an identity the deployment does not know fails here
-        // as unregistered.
+        // a declared guest loads on first use; an unknown identity fails as unregistered
         dispatcher.ensure(&target).await?;
         caller.routes.resolve(&target, interface)?
     };
-    // A server-rooted chain is wall-clock bounded so a hung target cannot stall
-    // the caller; a command-rooted chain runs uncapped.
+
+    // a server-rooted chain is wall-clock bounded; a command-rooted one runs uncapped
     let bound = (!ctx.uncapped).then_some(caller.policy.timeout);
     let out =
         route.invoke(interface, func, forwarded.into_owned(), ctx, bound).await.map_err(|err| {
@@ -259,9 +248,7 @@ async fn relay(
     Ok(())
 }
 
-/// Checks that every parameter and result type of `func` is a plain value,
-/// naming the kind (`resource`, `future`, `stream`, or `error-context`) of the
-/// first store-bound handle type the signature carries.
+// names the kind of the first store-bound handle type the signature carries
 fn plain_signature(func: &types::ComponentFunc) -> Result<(), &'static str> {
     func.params().map(|(_, ty)| ty).chain(func.results()).try_for_each(|ty| plain_type(&ty))
 }

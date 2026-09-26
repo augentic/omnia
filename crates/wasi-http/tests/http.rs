@@ -34,26 +34,24 @@ use wasmtime_wasi_http::io::TokioIo;
 // here; a new program without one fails to compile.
 test_programs::foreach_http!();
 
-/// The body the origin answers every request with.
 const BODY: &[u8] = b"hello from origin";
 
-/// One request as the origin saw it.
+// one request as the origin saw it
 #[derive(Clone, Debug)]
 struct Hit {
     path: String,
     headers: HeaderMap,
 }
 
-/// A loopback origin answering every request with `200`, a marker header,
-/// and [`BODY`] — honouring nothing conditional — and recording each hit.
+// a loopback origin answering every request with `200`, a marker header and
+// `BODY`, honouring nothing conditional, and recording each hit
 #[derive(Clone, Debug, Default)]
 struct Origin {
     hits: Arc<Mutex<Vec<Hit>>>,
 }
 
 impl Origin {
-    /// Serves a fresh origin on an ephemeral port for the life of the test
-    /// runtime; returns it with its base URL.
+    // serves on an ephemeral port for the life of the test runtime; returns the base url
     async fn serve() -> (Self, String) {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("binding loopback");
         let addr = listener.local_addr().expect("listener address");
@@ -92,10 +90,8 @@ impl Origin {
     }
 }
 
-/// Run one guest program against `backends`, requiring a clean exit.
 async fn run_guest(wasm: &str, backends: Backends) {
-    // Linked by hand: the guest reads the origin from `wasi:config`,
-    // alongside the host under test.
+    // linked by hand: the guest reads the origin from `wasi:config`
     let status = Deployment::new()
         .guest("guest", wasm)
         .run(backends, |deployment| {
@@ -116,17 +112,15 @@ async fn http_outgoing_get() {
 
     run_guest(test_programs::HTTP_OUTGOING_GET, backends).await;
 
-    // Wire fidelity: one request reached the origin, at the guest's path,
-    // carrying the guest's header.
+    // wire fidelity: one request, at the guest's path, carrying the guest's header
     let hits = origin.hits();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].path, "/resource");
     assert_eq!(hits[0].headers.get("x-probe").and_then(|v| v.to_str().ok()), Some("1"));
 }
 
-/// A base64 `Client-Cert` bundle — throwaway self-signed P-256 certificate
-/// with the given extended key usage, then its PKCS#8 key — minted per run
-/// so no private key is ever checked in.
+// a throwaway self-signed certificate then its PKCS#8 key, minted per run so
+// no private key is ever checked in
 fn client_cert(purpose: ExtendedKeyUsagePurpose) -> String {
     let key = KeyPair::generate().expect("key pair");
     let mut params = CertificateParams::new(Vec::<String>::new()).expect("parameters");
@@ -147,9 +141,7 @@ async fn http_outgoing_client_cert() {
 
     run_guest(test_programs::HTTP_OUTGOING_CLIENT_CERT, backends).await;
 
-    // Only the client-auth request reached the origin — the server-auth
-    // bundle was refused before connecting — and the bundle itself never
-    // left the host.
+    // only the client-auth request reached the origin, and the bundle never left the host
     let hits = origin.hits();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].path, "/mtls");
@@ -158,8 +150,7 @@ async fn http_outgoing_client_cert() {
 
 #[tokio::test]
 async fn http_incoming_echo() {
-    // The handler guest exports no `wasi:cli/run`: boot without driving it
-    // and dispatch requests through the trigger's in-process handler.
+    // no `wasi:cli/run` to drive: boot, then dispatch through the in-process handler
     let runtime = Deployment::new()
         .guest("guest", test_programs::HTTP_INCOMING_ECHO)
         .boot(Backends::defaults().await, |deployment| {
@@ -173,8 +164,7 @@ async fn http_incoming_echo() {
         .expect("http routes consistent")
         .expect("the guest exports the http handler");
 
-    // GET: the message is the query parameter; the transport's request id
-    // header comes back as the guest saw it in its metadata.
+    // get: the message is the query parameter; the request id comes back from the metadata
     let request = Request::get("/echo?message=hi")
         .header(HOST, "echo.test")
         .header("x-request-id", "req-get")
@@ -184,7 +174,7 @@ async fn http_incoming_echo() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(collect(response).await, json!({ "message": "hi", "request_id": "req-get" }));
 
-    // POST: the message is the JSON body.
+    // post: the message is the json body
     let request = Request::post("/echo")
         .header(HOST, "echo.test")
         .header("x-request-id", "req-post")
@@ -197,7 +187,6 @@ async fn http_incoming_echo() {
     runtime.shutdown();
 }
 
-/// The handler's response body, read to the end as JSON.
 async fn collect(response: Response<omnia_wasi_http::OutgoingBody>) -> Value {
     let body = response.into_body().collect().await.expect("body streams").to_bytes();
     serde_json::from_slice(&body).expect("JSON body")

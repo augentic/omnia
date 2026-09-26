@@ -17,11 +17,8 @@ export!(Sleeper);
 
 fn respond(target: &str, message: &str) -> String {
     if message == "sleep" {
-        // std on `wasm32-wasip2` routes `thread::sleep` through `wasi:clocks`
-        // + `wasi:io/poll`, which wasmtime-wasi serves as async host calls:
-        // the callee fiber is suspended rather than spinning, so a task abort
-        // lands. The test runtime does not drive the epoch, so a busy loop
-        // would not be abortable here.
+        // `thread::sleep` is an async host call on wasip2, so the fiber suspends
+        // and an abort lands; a busy loop would not be abortable without the epoch
         std::thread::sleep(Duration::from_secs(2));
     }
     format!("{target} woke: {message}")

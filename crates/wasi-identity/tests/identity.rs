@@ -19,8 +19,6 @@ use omnia_wasi_otel::{OtelDefault, WasiOtel, WasiOtelCtx};
 // here; a new program without one fails to compile.
 test_programs::foreach_identity!();
 
-/// The store's backend bundle: the recording identity backend under test
-/// plus the no-op otel every `command!` guest imports.
 #[derive(Clone, Debug)]
 struct Backends {
     identity: RecordingIdentity,
@@ -48,11 +46,10 @@ impl Provides<WasiOtel> for Backends {
     }
 }
 
-/// Every `get-token` call the backend saw, as `(identity name, scopes)`.
+// every `get-token` call the backend saw, as `(identity name, scopes)`
 type Requests = Arc<Mutex<Vec<(String, Vec<String>)>>>;
 
-/// Issues a fixed token, records every `(name, scopes)` request, and refuses
-/// the name `missing`.
+// issues a fixed token, records every request, and refuses the name `missing`
 #[derive(Clone, Debug, Default)]
 struct RecordingIdentity {
     requests: Requests,
@@ -77,7 +74,6 @@ impl WasiIdentityCtx for RecordingIdentity {
     }
 }
 
-/// One resolved identity, sharing the backend's request log.
 #[derive(Debug)]
 struct Recorded {
     name: String,
@@ -97,7 +93,6 @@ impl Identity for Recorded {
     }
 }
 
-/// Run one guest program against `backends`, requiring a clean exit.
 async fn run_guest(wasm: &str, backends: Backends) {
     let status = Deployment::new()
         .guest("guest", wasm)

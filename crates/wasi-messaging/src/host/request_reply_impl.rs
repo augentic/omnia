@@ -33,7 +33,6 @@ impl<T> HostWithStore<T> for WasiMessaging {
         Ok(vec![reply_res])
     }
 
-    /// Replies to the given message with the given response message.
     async fn reply(
         accessor: &Accessor<T, Self>, reply_to: Resource<Message>, message: Resource<Message>,
     ) -> Result<()> {
@@ -50,15 +49,11 @@ impl<T> HostWithStore<T> for WasiMessaging {
 }
 
 impl<T> HostRequestOptionsWithStore<T> for WasiMessaging {
-    /// Creates a new request options resource with no options set.
     fn new(mut host: Access<'_, T, Self>) -> wasmtime::Result<Resource<RequestOptions>> {
         let options = RequestOptions::default();
         Ok(host.get().table.push(options)?)
     }
 
-    /// The maximum amount of time to wait for a response. If the timeout value
-    /// is not set, then the request/reply operation will block until a message
-    /// is received in response.
     fn set_timeout_ms(
         mut host: Access<'_, T, Self>, self_: Resource<RequestOptions>, timeout_ms: u32,
     ) -> wasmtime::Result<()> {
@@ -67,9 +62,7 @@ impl<T> HostRequestOptionsWithStore<T> for WasiMessaging {
         Ok(())
     }
 
-    /// The maximum number of replies to expect before returning.
-    ///
-    /// For NATS, this is not configurable so this function does nothing.
+    // recorded but not configurable on NATS
     fn set_expected_replies(
         mut host: Access<'_, T, Self>, self_: Resource<RequestOptions>, expected_replies: u32,
     ) -> wasmtime::Result<()> {
@@ -78,7 +71,6 @@ impl<T> HostRequestOptionsWithStore<T> for WasiMessaging {
         Ok(())
     }
 
-    /// Removes the resource from the resource table.
     fn drop(
         mut accessor: Access<'_, T, Self>, rep: Resource<RequestOptions>,
     ) -> wasmtime::Result<()> {

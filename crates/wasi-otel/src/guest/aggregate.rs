@@ -129,8 +129,7 @@ impl<T: Measurement> Aggregate for Sum<T> {
     type Value = T;
 
     fn record(&mut self, value: T, attributes: &[KeyValue]) {
-        // A counter only increases: a negative increment is dropped, as the
-        // SDK drops it.
+        // a negative increment on a monotonic counter is dropped, as in the sdk
         if self.monotonic && value < T::default() {
             return;
         }
@@ -272,8 +271,7 @@ impl<T: Measurement> Aggregate for Histogram<T> {
     type Value = T;
 
     fn record(&mut self, value: T, attributes: &[KeyValue]) {
-        // Bucket `i` holds `(bounds[i - 1], bounds[i]]`; the last bucket is
-        // open-ended, so `index` is always in range.
+        // bucket `i` holds `(bounds[i - 1], bounds[i]]`; the last is open-ended
         let index = self.bounds.partition_point(|bound| *bound < value.as_f64());
         let buckets = self.buckets.entry(attribute_set(attributes)).or_insert_with(|| Buckets {
             counts: vec![0; self.bounds.len() + 1],

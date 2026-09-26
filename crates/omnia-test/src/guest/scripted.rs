@@ -156,24 +156,16 @@ impl Scripted {
     }
 }
 
+// panics when the script is exhausted without a fallback
 impl Model for Scripted {
-    /// # Panics
-    ///
-    /// Panics if the turn has scripted tool calls or the request asks for a
-    /// `check` (both require `complete_with`), or if the script is exhausted
-    /// without a fallback.
     fn complete(&self, request: Request) -> impl Future<Output = Result<Reply, Error>> + Send {
-        // A single-shot completion has no handler; scripting tool calls on
-        // its turn, or asking it to check, is a harness bug.
+        // a single-shot completion has no handler, so tool calls or a check are a harness bug
         assert!(!request.check, "a check requires complete_with");
         let turn = self.script.next(request);
         assert!(turn.calls.is_empty(), "scripted tool calls require complete_with");
         ready(turn.result)
     }
 
-    /// # Panics
-    ///
-    /// Panics if the script is exhausted without a fallback.
     fn complete_with<H, F>(
         &self, request: Request, mut handler: H,
     ) -> impl Future<Output = Result<Reply, Error>> + Send
@@ -214,8 +206,7 @@ impl Model for Scripted {
                 });
                 match outcome {
                     Ok(_) => return Ok(reply),
-                    // The next scripted answer is the model's corrected
-                    // attempt; none left is the backend's round budget.
+                    // the next scripted answer is the corrected attempt; none left is the budget
                     Err(correction) if script.remaining() == 0 => {
                         return Err(Error::BudgetExhausted(correction));
                     }

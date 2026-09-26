@@ -74,9 +74,7 @@ pub struct InProcessLinks {
     selector: Arc<dyn GuestSelector>,
     policy: ChainPolicy,
     routes: Routes,
-    // Link functions polyfilled onto the shared linker at bootstrap, per
-    // interface; a late guest's remaining imports are polyfilled on a linker
-    // clone against a copy of this map.
+    // the bootstrap wiring; a late guest polyfills on a linker clone against a copy
     wired: Mutex<WiredLinks>,
 }
 
@@ -120,16 +118,13 @@ impl<T: HasChain + HasDispatcher + 'static> LinkSeam<T> for InProcessLinks {
     fn polyfill_late(
         &self, engine: &Engine, linker: &mut Linker<T>, id: &GuestId, component: &Component,
     ) -> Result<()> {
-        // A copy: the functions wired here live on a linker clone and must not
-        // leak into the bootstrap record.
+        // a copy, so a linker clone's wiring never leaks into the bootstrap record
         let mut wired = self.wired.lock().unwrap_or_else(PoisonError::into_inner).clone();
         polyfill::polyfill_component(engine, linker, id, component, &self.caller(), &mut wired)
     }
 
     fn serve(&self, factory: StoreFactory<T>, guest: &Guest<T>) -> FutureResult<()> {
-        // Pure introspection, so the route is built here and the future only
-        // carries its outcome. The bootstrap wiring is snapshotted so the
-        // exporter's signatures are checked against what its importers wired.
+        // pure introspection: the route is built here, the future only carries its outcome
         let wired = self.wired.lock().unwrap_or_else(PoisonError::into_inner).clone();
         let parked = serve::serve_guest(
             &self.routes,

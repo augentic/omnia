@@ -30,10 +30,8 @@ impl Backend for OtelDefault {
     }
 }
 
+// logs what it is handed, for development use only
 impl WasiOtelCtx for OtelDefault {
-    /// Log traces but don't export them.
-    ///
-    /// This is a no-op implementation for development use only.
     fn export_traces(&self, request: ExportTraceServiceRequest) -> FutureResult<()> {
         async move {
             let span_count = request
@@ -47,9 +45,6 @@ impl WasiOtelCtx for OtelDefault {
         .boxed()
     }
 
-    /// Log metrics but don't export them.
-    ///
-    /// This is a no-op implementation for development use only.
     fn export_metrics(&self, request: ExportMetricsServiceRequest) -> FutureResult<()> {
         async move {
             let metric_count = request

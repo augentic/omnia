@@ -45,7 +45,6 @@ impl Guest for Http {
     }
 }
 
-/// Publishes a message using the pub-sub pattern.
 async fn pub_sub(Json(body): Json<Value>) -> HttpResult<Json<Value>> {
     tracing::debug!("sending message to topic 'a'");
 
@@ -62,7 +61,6 @@ async fn pub_sub(Json(body): Json<Value>) -> HttpResult<Json<Value>> {
     Ok(Json(json!({"message": "message published"})))
 }
 
-/// Sends a message and waits for a reply.
 async fn request_reply_handler(body: Bytes) -> HttpResult<Json<Value>> {
     let client =
         Client::connect("default".to_string()).await.map_err(|e| anyhow!("connect: {e}"))?;
@@ -78,7 +76,7 @@ async fn request_reply_handler(body: Bytes) -> HttpResult<Json<Value>> {
     Ok(Json(json!({"reply": data_str})))
 }
 
-/// Simple echo endpoint used as the target for outbound HTTP from the messaging handler.
+// the target for outbound http from the messaging handler
 async fn upstream_handler(body: Bytes) -> Json<Value> {
     Json(json!({"echo": String::from_utf8_lossy(&body)}))
 }
@@ -134,8 +132,7 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
                     });
                 }
 
-                // The sends run in spawned tasks, so the timer covers only the
-                // spawning, not delivery.
+                // the sends run in spawned tasks, so the timer covers spawning, not delivery
                 println!("spawned 1000 sends in {} milliseconds", timer.elapsed().as_millis());
             }
             "b" => {
@@ -147,11 +144,9 @@ impl omnia_wasi_messaging::incoming_handler::Guest for Messaging {
                     .map_err(|e| Error::Other(format!("not utf8: {e}")))?;
                 tracing::debug!("message received on topic 'c': {data_str}");
 
-                // Outbound HTTP from the messaging handler — verifies that
-                // wasip3's wit-bindgen dependency matches the workspace's.
-                // A mismatch causes a deadlock: the body_writer spawned by
-                // wasip3 lands in a different SPAWNED queue than the active
-                // executor.
+                // HACK!: outbound http here proves wasip3's wit-bindgen matches the
+                // workspace's; a mismatch deadlocks, its body writer landing in a
+                // different spawned queue than the active executor
                 let upstream = http::Request::builder()
                     .method(http::Method::POST)
                     .uri("http://localhost:8080/upstream")

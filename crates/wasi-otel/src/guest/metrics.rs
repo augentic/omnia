@@ -78,7 +78,7 @@ pub async fn export(provider: &MeterProvider, resource: &wasi::Resource) {
     }
 }
 
-/// Every instrument built so far, grouped by instrumentation scope.
+// every instrument built so far, grouped by instrumentation scope
 #[derive(Debug, Default)]
 struct Registry {
     scopes: Mutex<Vec<Scope>>,
@@ -91,9 +91,8 @@ struct Scope {
 }
 
 impl Scope {
-    /// The series behind (`kind`, `name`), created by `aggregate` on first
-    /// use: a later build of the same instrument shares it and keeps the
-    /// first description and unit, as in the SDK.
+    // A later build of the same instrument shares the series and keeps the
+    // first description and unit, as in the SDK.
     fn series<A>(
         &mut self, kind: Kind, name: Cow<'static, str>, description: Option<Cow<'static, str>>,
         unit: Option<Cow<'static, str>>, aggregate: impl FnOnce(SystemTime) -> A,
@@ -121,7 +120,6 @@ impl Scope {
     }
 }
 
-/// The instrument builders of one meter.
 #[derive(Debug)]
 struct Instruments {
     scope: InstrumentationScope,
@@ -154,8 +152,7 @@ impl Instruments {
     ) -> Arc<dyn SyncInstrument<T> + Send + Sync> {
         let bounds = builder.boundaries.unwrap_or_else(|| aggregate::DEFAULT_BOUNDARIES.to_vec());
         if !aggregate::valid_boundaries(&bounds) {
-            // As in the SDK, a misconfigured instrument records nothing
-            // rather than failing the guest.
+            // as in the sdk, a misconfigured instrument records nothing
             tracing::error!(
                 name = %builder.name,
                 "histogram boundaries must be finite and strictly increasing; recording nothing"
@@ -254,8 +251,7 @@ impl InstrumentProvider for Instruments {
     }
 }
 
-/// An instrument's identity within its scope: what it measures and in
-/// which value type.
+// an instrument's identity within its scope
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
     CounterU64,
@@ -269,8 +265,6 @@ enum Kind {
     HistogramF64,
 }
 
-/// One built instrument: its identity, for a later builder to reuse, and
-/// the collection of the series it aggregates.
 trait Instrument: Any + fmt::Debug + Send + Sync {
     fn kind(&self) -> Kind;
     fn name(&self) -> &str;
@@ -278,7 +272,6 @@ trait Instrument: Any + fmt::Debug + Send + Sync {
     fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync>;
 }
 
-/// An instrument's descriptor and accumulator.
 #[derive(Debug)]
 struct Series<A> {
     kind: Kind,
@@ -324,7 +317,7 @@ where
     }
 }
 
-/// An instrument that records nothing: what a misconfigured builder yields.
+// what a misconfigured builder yields
 #[derive(Debug)]
 struct Noop;
 
@@ -332,7 +325,7 @@ impl<T> SyncInstrument<T> for Noop {
     fn measure(&self, _: T, _: &[KeyValue]) {}
 }
 
-/// A value type with its `aggregated-metrics` arm.
+// a value type with its `aggregated-metrics` arm
 trait Number: Measurement + Into<wasi::DataValue> {
     fn aggregated(data: wasi::MetricData) -> wasi::AggregatedMetrics;
 }

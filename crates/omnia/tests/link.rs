@@ -21,15 +21,12 @@ use omnia::{
 // here; a new program without one fails to compile.
 test_programs::foreach_link!();
 
-/// Boot a runtime over `guests` (assembled in order), each read into bytes
-/// so it loads at boot as a `runtime!`'s embedded guests do; nothing
-/// declares the `omnia-test:link/ops` seam, which is read off the
-/// components.
+// each guest is read into bytes so it loads at boot, as a `runtime!`'s
+// embedded guests do; the link seam is read off the components
 async fn boot(guests: &[(&str, &str)]) -> Result<Runtime<()>> {
     boot_with(guests, |builder| builder).await
 }
 
-/// `boot` with `configure` applied to the builder (dispatch depth, timeout).
 async fn boot_with(
     guests: &[(&str, &str)], configure: impl FnOnce(DeploymentBuilder) -> DeploymentBuilder,
 ) -> Result<Runtime<()>> {
@@ -41,7 +38,6 @@ async fn boot_with(
     assemble(manifest, configure).await
 }
 
-/// Build and assemble `manifest` with `configure` applied to the builder.
 async fn assemble(
     manifest: Manifest, configure: impl FnOnce(DeploymentBuilder) -> DeploymentBuilder,
 ) -> Result<Runtime<()>> {
@@ -52,9 +48,7 @@ async fn assemble(
     deployment.assemble(()).await
 }
 
-/// Instantiate `guest` fresh — loading it first when the deployment declares
-/// it — and drive its exported `func` with one string argument, returning
-/// the string result.
+// instantiates `guest` fresh, loading it first when the deployment declares it
 async fn call(runtime: &Runtime<()>, guest: &str, func: &str, message: &str) -> Result<String> {
     let entry = runtime
         .guest(&GuestId::from(guest))

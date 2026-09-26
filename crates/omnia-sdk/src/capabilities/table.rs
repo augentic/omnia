@@ -56,7 +56,6 @@ pub trait TableStore: Send + Sync {
     }
 }
 
-/// Open the connection and prepare the statement shared by `query` and `exec`.
 #[cfg(target_arch = "wasm32")]
 async fn prepare(
     conn_name: String, query: String, params: Vec<DataType>,

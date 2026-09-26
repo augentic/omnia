@@ -29,8 +29,7 @@ pub fn expand(config: &Config) -> TokenStream {
 
     quote! {
         mod runtime {
-            // Every path resolves through the facade so an embedder's only
-            // required dependency is `omnia` itself.
+            // every path resolves through the facade, the embedder's one dependency
             use omnia::anyhow::Result;
             use omnia::futures::future;
             use omnia::Server;
@@ -55,9 +54,7 @@ pub fn expand(config: &Config) -> TokenStream {
                 }
 
                 async fn serve(runtime: &omnia::Runtime<B>) -> Result<()> {
-                    // Every host runs uniformly: capability hosts resolve
-                    // immediately through `Server`'s no-op default, trigger
-                    // servers loop until shutdown.
+                    // capability hosts resolve at once through `Server`'s no-op default
                     let servers: Vec<future::BoxFuture<'_, Result<()>>> = vec![
                         #(
                             Box::pin(#host_types.run(runtime)),
@@ -150,8 +147,7 @@ mod tests {
         })));
     }
 
-    // A backend shared by non-adjacent hosts must emit exactly one struct
-    // field (interleaved duplicates defeat a consecutive-only dedup).
+    // interleaved duplicates defeat a consecutive-only dedup
     #[test]
     fn expand_shared_backend() {
         insta::assert_snapshot!(expand_pretty(quote!({
@@ -183,9 +179,7 @@ mod tests {
         })));
     }
 
-    // A `command: true` guest entry marks the command-mode target; the flag
-    // expands to `.command()` on its `GuestEntry`, and a guest without a
-    // `name:` is named by its path's stem.
+    // `command: true` expands to `.command()`; a guest without `name:` is named by its stem
     #[test]
     fn expand_command_flag() {
         insta::assert_snapshot!(expand_pretty(quote!({
@@ -197,8 +191,6 @@ mod tests {
         })));
     }
 
-    // The composed deployment shape: named and stem-named guests, mounts,
-    // and explicit command routing.
     #[test]
     fn expand_deployment_keys() {
         insta::assert_snapshot!(expand_pretty(quote!({
@@ -218,9 +210,7 @@ mod tests {
         })));
     }
 
-    // A macro-valued `path:` (the `concat!(env!(..), ..)` anchoring shape)
-    // passes through to both `GuestEntry::embedded` and `include_bytes!`
-    // unchanged; the stem of the path it names is the guest's name.
+    // a macro-valued `path:` passes through to `include_bytes!` unchanged
     #[test]
     fn expand_embedded_bytes() {
         insta::assert_snapshot!(expand_pretty(quote!({
@@ -233,9 +223,7 @@ mod tests {
         })));
     }
 
-    // Guest-owned routes: every trigger list expands to `route_*` builder
-    // calls on the owning `GuestEntry` (the guest is the implicit target),
-    // and patterns are arbitrary expressions.
+    // every trigger list expands to `route_*` calls on the owning entry
     #[test]
     fn expand_routes() {
         insta::assert_snapshot!(expand_pretty(quote!({
@@ -265,11 +253,7 @@ mod tests {
         })));
     }
 
-    // The full inline deployment: `registries` lowers to
-    // `.registries(RegistryConfig::contents(..))` with the expression
-    // compiled in, and each guest to `.guest(..)`. Nothing else is emitted
-    // for them — assembly links the loader host and installs the registry
-    // client, so the expansion never names a loader path.
+    // the expansion never names a loader path: assembly installs the registry client
     #[test]
     fn expand_guests_block() {
         insta::assert_snapshot!(expand_pretty(quote!({
@@ -286,9 +270,7 @@ mod tests {
         })));
     }
 
-    // A `registries`-only deployment is valid: the guests arrive at run
-    // time (or over the CLI), and the manifest carries only the routing
-    // their package sources are fetched through.
+    // valid: the guests arrive at run time or over the cli
     #[test]
     fn expand_registries_only() {
         insta::assert_snapshot!(expand_pretty(quote!({
@@ -296,11 +278,8 @@ mod tests {
         })));
     }
 
-    // A guest is its source and, at most, a pin: an embedded `path:` lowers
-    // to `GuestEntry::embedded`, a `package:` with no `name:` to
-    // `GuestEntry::package` (named by the reference without its version), a
-    // `digest:` literal to `.digest(Digest::from([..]))` with the bytes it
-    // decoded to, and a named package to a `SourceSpec::package` entry.
+    // an unnamed package is named by its reference without the version; a
+    // `digest:` literal lands as the bytes it decoded to
     #[test]
     fn expand_package_defaults() {
         insta::assert_snapshot!(expand_pretty(quote!({

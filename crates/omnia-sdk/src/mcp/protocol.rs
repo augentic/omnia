@@ -9,9 +9,8 @@ use super::types::{INVALID_REQUEST, McpError, PARSE_ERROR};
 /// newest revision this server implements.
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
 
-// Revisions this stateless server behaves identically across. A request for
-// any other revision negotiates down to `PROTOCOL_VERSION`, per the spec's
-// "respond with the version the server wants to use" rule.
+// revisions this stateless server behaves identically across; any other
+// negotiates down to `PROTOCOL_VERSION`, as the spec allows
 const SUPPORTED_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26"];
 
 /// Handle one JSON-RPC message, returning the serialized response — or `None`
@@ -70,9 +69,8 @@ fn dispatch(server: &dyn McpServer, method: &str, params: &Value) -> Result<Valu
     }
 }
 
-// Build the `initialize` result, echoing the client's protocol version when
-// this server supports it. Capabilities advertise feature support, not list
-// contents: the trait always answers `tools/list` and `resources/list`.
+// Capabilities advertise feature support, not list contents: the trait
+// always answers `tools/list` and `resources/list`.
 fn initialize_result(server: &dyn McpServer, params: &Value) -> Value {
     let protocol_version = params
         .get("protocolVersion")
@@ -235,7 +233,7 @@ mod tests {
 
     #[test]
     fn tools_call_error() {
-        // A tool that runs but fails is a result with `isError`, not a JSON-RPC error.
+        // a tool that runs but fails is a result with `isError`, not a json-rpc error
         let result = result_of(&json!({
             "jsonrpc": "2.0", "id": 4, "method": "tools/call",
             "params": { "name": "read_doc", "arguments": { "name": "missing" } }
@@ -245,7 +243,7 @@ mod tests {
 
     #[test]
     fn tools_call_unknown_tool() {
-        // An unknown tool name is a protocol error (`-32602`), not a tool result.
+        // an unknown tool name is a protocol error (`-32602`), not a tool result
         let reply = handle_message(
             &Docs,
             &json!({

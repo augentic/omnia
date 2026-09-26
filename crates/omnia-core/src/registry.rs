@@ -97,12 +97,8 @@ impl From<String> for GuestId {
     }
 }
 
-/// A registry entry's resolution target.
-///
-/// Only [`Target::Local`] exists today; a remote variant will land
-/// with distributed transport.
+// a remote variant will land with distributed transport
 enum Target<T: 'static> {
-    /// A locally pre-instantiated component.
     Local(InstancePre<T>),
 }
 
@@ -176,18 +172,14 @@ pub struct Registry<T: 'static> {
     engine: Engine,
     options: RuntimeOptions,
     linker: Linker<T>,
-    // Concurrent-read, exclusive-write; guards are never held across an await.
     guests: RwLock<BTreeMap<GuestId, Arc<Guest<T>>>>,
-    // Serializes guest lifecycle transitions (register/deregister/bootstrap
-    // serve wiring) against readers, so the guest map and the seam's live
-    // endpoints always change as one atomic step. Lock order: this gate
-    // first, then a single inner map — never the other way around, and never
-    // across an await.
+    // gates lifecycle transitions so the guest map and the seam's live
+    // endpoints change as one step; lock order is this gate, then one inner
+    // map, never across an await
     lifecycle: RwLock<()>,
-    // Assemble-time identities, which deregistration refuses to remove.
+    // assemble-time identities, which deregistration refuses to remove
     static_ids: BTreeSet<GuestId>,
-    // The deployment's guests not loaded at boot, by identity: each loads
-    // from its source at first use and is a late guest from then on.
+    // not loaded at boot: each loads from its source at first use
     declared: BTreeMap<GuestId, Source>,
     routes: Routes,
     seam: Arc<dyn LinkSeam<T>>,
@@ -323,8 +315,7 @@ impl<T: 'static> Registry<T> {
         &self.options
     }
 
-    /// Enter a lifecycle read section: registry lookups taken under
-    /// this guard never observe a half-applied register or deregister.
+    // lookups under this guard never observe a half-applied transition
     fn lifecycle_read(&self) -> RwLockReadGuard<'_, ()> {
         self.lifecycle.read().unwrap_or_else(PoisonError::into_inner)
     }
@@ -379,7 +370,7 @@ impl<T: 'static> Registry<T> {
     pub(crate) fn publish(&self, guest: Guest<T>) -> Result<(), PublishError> {
         let id = guest.id().clone();
 
-        // Lifecycle write first, then the inner maps (the crate-wide order).
+        // lifecycle write first, then the inner maps
         let _lifecycle = self.lifecycle_write();
         let mut guests = self.guests.write().unwrap_or_else(PoisonError::into_inner);
         match guests.entry(id.clone()) {
@@ -388,8 +379,7 @@ impl<T: 'static> Registry<T> {
                 return Err(PublishError::Occupied(id));
             }
             btree_map::Entry::Vacant(slot) => {
-                // Seam before entry: `publish` refuses an occupied live slot,
-                // and failing here leaves the registry map untouched.
+                // seam before entry, so a refused publish leaves the map untouched
                 self.seam.publish(&id).map_err(PublishError::Transport)?;
                 slot.insert(Arc::new(guest));
             }

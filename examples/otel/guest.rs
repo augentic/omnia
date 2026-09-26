@@ -28,12 +28,12 @@ impl Guest for Http {
         tracing::info!(monotonic_counter.tracing_counter = 1, key1 = "value 1");
         tracing::info!(gauge.tracing_gauge = 1);
 
-        // OpenTelemetry metrics API
+        // opentelemetry metrics api
         let meter = global::meter("my_meter");
         let counter = meter.u64_counter("otel_counter").build();
         counter.add(1, &[KeyValue::new("key1", "value 1")]);
 
-        // OpenTelemetry spans
+        // opentelemetry spans
         let tracer = global::tracer("basic");
         tracer.in_span("main-operation", |cx| {
             let span = cx.span();
@@ -53,8 +53,7 @@ impl Guest for Http {
             .in_scope(|| {
                 tracing::info!("received request");
 
-                // `layer` only wraps routes added before it, so CORS must come
-                // after the routes.
+                // `layer` only wraps routes added before it, so cors comes after the routes
                 let router = Router::new().route("/", post(handler).options(handle_options)).layer(
                     CorsLayer::new()
                         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
@@ -78,7 +77,7 @@ async fn handler(Json(body): Json<Value>) -> HttpResult<Json<Value>> {
     })))
 }
 
-/// Handles CORS preflight OPTIONS requests.
+// cors preflight
 async fn handle_options() -> HttpResult<()> {
     Ok(())
 }

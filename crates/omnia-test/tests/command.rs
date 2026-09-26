@@ -8,7 +8,6 @@ use omnia_wasi_otel::WasiOtel;
 
 test_programs::foreach_command!();
 
-/// Drives the `exit_map` guest once with the operator arguments `args`.
 async fn exit_of(args: &[&str]) -> u8 {
     Deployment::new()
         .guest("cli", test_programs::COMMAND_EXIT_MAP)

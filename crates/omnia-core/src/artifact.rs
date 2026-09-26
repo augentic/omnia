@@ -30,8 +30,7 @@ pub async fn component(engine: &Engine, verified: Verified) -> Result<Component>
     let bytes = verified.into_bytes();
     tokio::task::spawn_blocking(move || {
         let component = load(&engine, &bytes)?;
-        // Build the copy-on-write heap image now rather than lazily on the
-        // first instantiation, moving that one-time cost off the first call.
+        // build the cow image now, off the first call
         component.initialize_copy_on_write_image()?;
         Ok(component)
     })
@@ -39,8 +38,7 @@ pub async fn component(engine: &Engine, verified: Verified) -> Result<Component>
     .context("guest load task panicked")?
 }
 
-// Deserialize a pre-compiled component, or compile raw wasm. The base build
-// has no compiler and refuses raw wasm; the `jit` feature adds the compile
+// The base build has no compiler and refuses raw wasm; `jit` adds the compile
 // path ahead of that refusal.
 fn load(engine: &Engine, bytes: &[u8]) -> Result<Component> {
     let precompiled = Engine::detect_precompiled(bytes);

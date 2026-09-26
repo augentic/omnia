@@ -256,10 +256,8 @@ impl ScriptedModel {
 }
 
 impl ScriptedModel {
-    // Pop the next scripted turn for `request`, or the backend failure a
-    // guest completing past the script must see — not a host panic inside
-    // the wasmtime call; `try_next` records the overrun for
-    // `assert_exhausted`.
+    // A guest completing past the script sees a backend failure, not a host
+    // panic inside the wasmtime call; `try_next` records the overrun.
     fn turn(&self, request: &Request) -> anyhow::Result<Completion> {
         self.script.try_next(Seen::from(request)).ok_or_else(|| {
             let consumed = self.script.seen().len();
@@ -336,9 +334,8 @@ impl WasiModelCtx for ScriptedModel {
                 });
                 match outcome {
                     Ok(()) => return Ok(turn.answer),
-                    // The next scripted answer is the model's corrected
-                    // attempt; none left is the backend's round budget,
-                    // typed so the host surfaces it as `budget-exhausted`.
+                    // the next scripted answer is the corrected attempt; none left is
+                    // the budget, typed so the host surfaces `budget-exhausted`
                     Err(correction) if this.script.remaining() == 0 => {
                         return Err(Error::BudgetExhausted(correction).into());
                     }
@@ -376,8 +373,7 @@ impl From<&Request> for Seen {
                 })
                 .collect(),
             temperature: request.generation.as_ref().and_then(|generation| generation.temperature),
-            // The descriptor lend cannot cross into a plain record; the
-            // subpath beneath the lent root is what the guest chose.
+            // the descriptor cannot cross into a plain record; the subpath is what the guest chose
             workspace: request.grants.workspace.as_ref().map(|grant| grant.subpath.clone()),
             check: request.check,
         }

@@ -12,8 +12,7 @@ impl<T> HostWithStore<T> for WasiKeyValue {
     ) -> Result<Vec<Option<(String, Vec<u8>)>>> {
         let bucket = get_bucket(accessor, &bucket)?;
 
-        // The WIT contract returns one entry per requested key, positionally
-        // aligned: `some((key, value))` when present, `none` when absent.
+        // one entry per requested key, positionally aligned
         let mut many = Vec::with_capacity(keys.len());
         for key in keys {
             let entry = bucket.get(key.clone()).await?.map(|value| (key, value));

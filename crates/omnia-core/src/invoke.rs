@@ -43,9 +43,7 @@ impl fmt::Display for InvokeError {
         match self {
             Self::Timeout(bound) => write!(f, "timed out after {bound:?}"),
             Self::Handle(kind) => write!(f, "a {kind} handle cannot cross the link seam"),
-            // Trap and Join are transparent — display shows the top of the
-            // inner chain and `source` exposes the rest — so an `anyhow` wrap
-            // renders the chain exactly once under `{:#}`.
+            // transparent, so an `anyhow` wrap renders the chain once under `{:#}`
             Self::Trap(err) => write!(f, "{err}"),
             Self::Join(err) => write!(f, "{err}"),
         }
@@ -86,15 +84,9 @@ impl<T> Drop for AbortOnDrop<T> {
 pub async fn call_fresh<T: Send + 'static>(
     call: FreshCall<T>, args: Vec<Val>, ctx: ChainCtx, bound: Option<Duration>,
 ) -> Result<Vec<Val>, InvokeError> {
-    // Own task: a caller that keeps executing wasm after an `async func`
-    // import cannot starve the callee, and the two guests run in parallel;
-    // an abandoned caller aborts the callee (`AbortOnDrop`); and the
-    // wall-clock bound wraps the whole callee call, the placement wasmtime's
-    // `run_concurrent` docs recommend over in-closure timeouts. Driving the
-    // callee inline on the caller's event loop (which wasmtime's per-store
-    // recursion guard permits) would serialise the two and regress
-    // concurrent link dispatch. `spawn` drops the caller's span; re-enter it
-    // so guest otel export parents onto the host span.
+    // own task, so the caller cannot starve the callee and an abandoned caller
+    // aborts it; the bound wraps the whole call, as wasmtime's `run_concurrent`
+    // docs recommend; the span `spawn` drops is re-entered for otel parenting
     let callee = async move {
         let mut store = (call.factory)(ctx);
         let instance = call.instance_pre.instantiate_async(&mut store).await?;

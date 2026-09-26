@@ -22,9 +22,7 @@ where
         return Ok(());
     };
 
-    // Subscribe once: a fresh subscription per iteration would drop events
-    // published between polls (broadcast receivers only see what arrives
-    // after they subscribe).
+    // subscribe once: a broadcast receiver only sees what arrives after it subscribes
     let mut events = handler.events().await?;
 
     while let Some(event) = events.next().await {
@@ -75,10 +73,8 @@ where
     /// Returns an error if the deployment's websocket routes are inconsistent
     /// with the guests' exports.
     pub fn new(runtime: &Runtime<B>) -> Result<Option<Self>> {
-        // Capability probe: a guest exports the websocket handler exactly when
-        // its typed indices resolve. Build the route router once, up front,
-        // over the guests loaded at boot; a declared guest is probed when
-        // its first event loads it.
+        // a guest is capable exactly when its `DuplexIndices` resolve; a
+        // declared guest is probed when its first event loads it
         let routing = TriggerRouter::build(
             runtime.registry(),
             "websocket",
@@ -105,8 +101,7 @@ where
     /// Returns an error if the guest cannot be loaded at its first use or
     /// instantiated, traps, or times out.
     pub async fn handle(&self, event: Event) -> Result<()> {
-        // Resolve the guest by the event's route; an event with no route falls
-        // into the catch-all (sole exporter). A miss is dropped, not an error.
+        // resolve the guest by route, or the catch-all; unmatched is dropped, not an error
         let routed = event
             .route
             .as_deref()
@@ -115,17 +110,15 @@ where
             tracing::debug!("no route for websocket event; dropping");
             return Ok(());
         };
-        // The routed identity is the deployment's, so a miss here is a first
-        // use that failed to load or a lifecycle race (e.g. concurrent
-        // deregistration) — an error, never a server panic.
+
+        // a routed guest that fails to load is an error, never a panic
         let guest = self
             .state
             .guest(guest_id)
             .await
             .with_context(|| format!("resolving the routed guest `{guest_id}`"))?;
-        // The route says this guest handles websocket events; a declared
-        // guest's export is checked here, at its first use, where a boot
-        // guest's was checked at boot.
+
+        // a declared guest's export is checked here, at first use
         let indices =
             DuplexIndices::new(guest.instance_pre()).map_err(anyhow::Error::from).with_context(
                 || format!("routed guest `{guest_id}` does not export the websocket handler"),
@@ -159,7 +152,6 @@ where
             .context("websocket handler timed out")??
     }
 
-    /// Get events for incoming WebSocket events.
     async fn events(&self) -> Result<Events> {
         let store_data = self.state.store();
         let mut store = self.state.build_store(store_data);

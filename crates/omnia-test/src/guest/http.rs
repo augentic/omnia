@@ -161,10 +161,8 @@ impl MatchedHttp {
     }
 }
 
+// panics when no route matches the request
 impl HttpRequest for MatchedHttp {
-    /// # Panics
-    ///
-    /// Panics when no route matches the request.
     fn fetch<T>(&self, request: Request<T>) -> impl Future<Output = Result<Response<Bytes>>> + Send
     where
         T: Body + Any + Send,
@@ -185,9 +183,8 @@ impl HttpRequest for MatchedHttp {
     }
 }
 
-// Drains `body` into bytes frame by frame. `BodyExt::collect` would hold
-// `T::Data` across an await, and the trait does not promise that type is
-// `Send`; converting each frame inside `poll` keeps the future `Send`.
+// Frame by frame: `BodyExt::collect` would hold `T::Data`, which the trait
+// does not promise is `Send`, across an await.
 fn collect<T>(body: T) -> impl Future<Output = Result<Vec<u8>, Box<dyn Error + Send + Sync>>> + Send
 where
     T: Body + Send,

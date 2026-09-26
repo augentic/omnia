@@ -88,11 +88,7 @@ pub struct MountArg {
 impl FromStr for MountArg {
     type Err = anyhow::Error;
 
-    /// Parse a CLI `--mount` spec: comma-separated `path=<host-path>`,
-    /// `name=<guest-name>`, and a bare `writable` (or `writable=<bool>`) flag. A
-    /// lone token without `=` is taken as the path, so `workspace` and
-    /// `workspace,writable` are shorthands; `name` defaults to `.` and the mount
-    /// is read-only unless `writable` is present.
+    // a lone token without `=` is the path, so `workspace,writable` is a shorthand
     fn from_str(spec: &str) -> Result<Self> {
         let mut path: Option<PathBuf> = None;
         let mut name: Option<String> = None;

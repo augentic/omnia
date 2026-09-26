@@ -209,8 +209,7 @@ impl<T: JsonSchema + DeserializeOwned + Send> Question<T> {
             (Ok(_), None, _) => Err(Error::Backend(
                 "the backend finished on a candidate the check rejected".to_owned(),
             )),
-            // A candidate serde rejected means the schema and `T` disagree:
-            // a guest bug more rounds would not have fixed.
+            // the schema and `T` disagree: a guest bug more rounds would not fix
             (Err(Error::BudgetExhausted(_)), None, Some(mismatch)) => {
                 Err(Error::InvalidRequest(format!("schema and answer type disagree: {mismatch}")))
             }

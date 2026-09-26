@@ -41,8 +41,7 @@ impl WasiBlobstoreCtx for BlobstoreDefault {
         let store = Arc::clone(&self.store);
 
         async move {
-            // Idempotent: re-creating an existing container returns it
-            // rather than silently replacing it (and destroying its objects).
+            // idempotent: re-creating a container returns it rather than replace it
             let container = {
                 let mut store = store.write();
                 store.entry(name.clone()).or_insert_with(|| InMemContainer::new(name)).clone()
@@ -145,9 +144,7 @@ impl Container for InMemContainer {
                 return Ok(None);
             };
 
-            // Range semantics match the production backends (azure-blob):
-            // `end` of 0 or `u64::MAX` reads to the end; otherwise `end` is
-            // inclusive per the WIT contract, clamped to the object's length.
+            // as azure-blob: `end` of 0 or `u64::MAX` reads to the end, else inclusive
             let unbounded = end == 0 || end == u64::MAX;
             if !unbounded && end < start {
                 return Err(anyhow!("invalid byte range: end ({end}) < start ({start})"));
@@ -155,7 +152,7 @@ impl Container for InMemContainer {
             let len = data.len() as u64;
             let from = start.min(len);
             let to = if unbounded { len } else { end.saturating_add(1).min(len) };
-            // Both bounds are clamped to the object's length, itself a usize.
+            // both bounds are clamped to the object's length, itself a usize
             #[allow(clippy::cast_possible_truncation)]
             let range = from as usize..to as usize;
             Ok(Some(data.slice(range)))

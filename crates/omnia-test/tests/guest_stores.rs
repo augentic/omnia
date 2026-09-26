@@ -22,7 +22,7 @@ use omnia_test::guest::{
 };
 use omnia_wasi_sql::{DataType, Field, Row};
 
-/// Resolves a double's future; every store double answers without yielding.
+// every store double answers without yielding
 fn now<F: Future>(future: F) -> F::Output {
     let mut future = pin!(future);
     match future.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
@@ -188,7 +188,7 @@ fn namespaced() {
 
 // -- Pointer impls -----------------------------------------------------------
 
-/// A handler-shaped fn: bounded on the capability, not on `Memory`.
+// handler-shaped: bounded on the capability, not on `Memory`
 fn bump<P: StateStore>(store: &P) -> i64 {
     now(store.increment("visits", 1)).expect("increment")
 }

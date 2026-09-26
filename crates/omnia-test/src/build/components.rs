@@ -29,9 +29,7 @@ pub struct Program {
     pub example: bool,
 }
 
-/// Where programs come from: an explicit example list, a scanned
-/// `<group>/<scenario>.rs` tree, or `cdylib` packages — listed, or every
-/// crate directory under one parent. A build may draw from several.
+// where programs come from; a build may draw from several
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Source {
     Examples { names: Vec<String>, group: String },
@@ -40,12 +38,10 @@ enum Source {
     ScanPackages { dir: PathBuf, group: String },
 }
 
-/// The group a listed source starts in.
 const DEFAULT_GROUP: &str = "examples";
 
 impl Source {
-    /// Whether the artifacts are `[[example]]` targets, uplifted under
-    /// `debug/examples/` rather than `debug/`.
+    // `[[example]]` targets are uplifted under `debug/examples/`, not `debug/`
     const fn is_examples(&self) -> bool {
         matches!(self, Self::Examples { .. } | Self::Scan(_))
     }
@@ -242,8 +238,7 @@ impl Components {
             );
         }
 
-        // Always `debug`: the nested build uses the dev profile regardless of
-        // the outer profile.
+        // always `debug`: the nested build uses the dev profile whatever the outer one
         let built = Built {
             header,
             programs,
@@ -254,8 +249,7 @@ impl Components {
         built
     }
 
-    /// The programs every source names, in source order, discovering and
-    /// registering scanned directories.
+    // in source order; scanned directories are discovered and registered here
     fn programs(&self, root: &Path) -> Vec<Program> {
         self.sources
             .iter()
@@ -263,10 +257,8 @@ impl Components {
                 Source::Examples { names, group } => names
                     .iter()
                     .map(|name| {
-                        // Cargo uplifts a cdylib example under its crate
-                        // name, so a hyphenated `[[example]]` lands (and is
-                        // named) as its underscored stem; the nested build
-                        // is still told the manifest spelling.
+                        // cargo uplifts a hyphenated example under its underscored
+                        // stem; the nested build is still told the manifest spelling
                         let stem = name.replace('-', "_");
                         Program {
                             constant: stem.to_uppercase(),
@@ -292,9 +284,7 @@ impl Components {
             .collect()
     }
 
-    /// The nested cargo invocations: one per example source, selecting that
-    /// source's targets of the package, then one for every `cdylib` package
-    /// — the package sources' programs and the extras together.
+    // one invocation per example source, then one for every `cdylib` package
     fn nested_builds(&self, root: &Path, target_dir: &Path, programs: &[Program]) -> Vec<Command> {
         let mut commands = Vec::new();
         for source in &self.sources {
@@ -372,8 +362,6 @@ impl Built {
         }
     }
 
-    /// Asserts every artifact exists and registers each one's dep-info
-    /// prerequisites with cargo.
     fn register_inputs(&self) {
         let mut seen = BTreeSet::new();
         for program in self.programs.iter().chain(&self.extras) {
@@ -389,9 +377,8 @@ impl Built {
                     "a `cdylib` package of the workspace"
                 }
             );
-            // Cargo's extra dep-info sits next to the uplifted artifact
-            // (`{name}.d`) and lists the program's sources plus every local
-            // path dependency, so edits there rebuild the fixture.
+            // the dep-info beside the artifact lists the program's sources and
+            // every local path dependency, so edits there rebuild the fixture
             let dep_info = artifact.with_extension("d");
             let contents = fs::read_to_string(&dep_info)
                 .unwrap_or_else(|err| panic!("reading {}: {err}", dep_info.display()));
@@ -432,8 +419,7 @@ fn rerun_if_changed(path: &Path) {
     println!("cargo:rerun-if-changed={}", path.display());
 }
 
-/// Discovers `<dir>/<group>/<scenario>.rs`, registering each directory and
-/// file with cargo.
+// discovers `<dir>/<group>/<scenario>.rs`, registering each with cargo
 fn scan(dir: &Path) -> Vec<Program> {
     let mut groups = Vec::new();
     for entry in read_dir(dir) {
@@ -475,8 +461,7 @@ fn scan(dir: &Path) -> Vec<Program> {
     programs_from(&relative, groups)
 }
 
-/// Discovers `<dir>/<name>/Cargo.toml` package directories, registering the
-/// parent with cargo; anything else under `dir` is a layout error.
+// discovers `<dir>/<name>/Cargo.toml`; anything else under `dir` is a layout error
 fn scan_packages(dir: &Path) -> Vec<String> {
     let mut packages = Vec::new();
     for entry in read_dir(dir) {
@@ -499,8 +484,7 @@ fn read_dir(dir: &Path) -> impl Iterator<Item = fs::DirEntry> {
         .map(|entry| entry.expect("reading directory entry"))
 }
 
-/// Names `<group>_<scenario>` programs from a `(group, scenarios)` listing,
-/// with sources under `<programs_dir>/<group>/<scenario>.rs`, sorted by name.
+// `<group>_<scenario>` programs, sorted by name
 fn programs_from(
     programs_dir: &str, groups: impl IntoIterator<Item = (String, Vec<String>)>,
 ) -> Vec<Program> {
@@ -523,7 +507,7 @@ fn programs_from(
     programs
 }
 
-/// An ungrouped program for an extra `cdylib` package: a constant, no arm.
+// ungrouped: a constant, no macro arm
 fn extra_program(package: &str) -> Program {
     let name = package.replace('-', "_");
     Program {
@@ -535,10 +519,9 @@ fn extra_program(package: &str) -> Program {
     }
 }
 
-/// One program per `cdylib` package in `group`, sorted by name: the crate
-/// name (`-` as `_`) is the artifact stem and `foreach_<group>!` arm, the
-/// package name is what the nested build is told, and the constant carries
-/// the group so it reads beside scanned programs (`SOURCE_INTENT`).
+// The underscored crate name is the artifact stem and macro arm, the package
+// name is what the nested build is told, and the constant carries the group
+// so it reads beside scanned programs (`SOURCE_INTENT`).
 fn package_programs(group: &str, packages: Vec<String>) -> Vec<Program> {
     let mut programs: Vec<Program> = packages
         .into_iter()
@@ -557,8 +540,7 @@ fn package_programs(group: &str, packages: Vec<String>) -> Vec<Program> {
     programs
 }
 
-/// Rewrites the `[[example]]` list in `manifest` when it disagrees with
-/// `programs`.
+// rewrites the `[[example]]` list when it disagrees with `programs`
 fn sync(manifest: &Path, programs: &[Program]) {
     let current = fs::read_to_string(manifest)
         .unwrap_or_else(|err| panic!("reading {}: {err}", manifest.display()));
@@ -707,9 +689,8 @@ mod tests {
         assert_eq!(packages.extras, ["caller"]);
     }
 
-    // A hyphenated `[[example]]` is found under the underscored stem cargo
-    // uplifts it as, and that stem is the constant and macro arm; the nested
-    // build still selects the target by its manifest name.
+    // the underscored stem is the artifact, constant and macro arm; the
+    // nested build still selects the target by its manifest name
     #[test]
     fn hyphenated_examples() {
         let components =

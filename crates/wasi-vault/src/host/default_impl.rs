@@ -42,7 +42,7 @@ impl WasiVaultCtx for VaultDefault {
             store: Arc::clone(&self.store),
         };
 
-        // Ensure locker exists in store
+        // ensure the locker exists in the store
         {
             let mut store = self.store.write();
             store.entry(identifier).or_default()

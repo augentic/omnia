@@ -225,8 +225,7 @@ async fn pinned_path_guest() {
     assert!(format!("{error:#}").contains("not its declared digest"), "{error:#}");
 }
 
-/// A keyvalue backend that notes every bucket opened through it, then hands
-/// the call to the in-memory default it wraps.
+// notes every bucket opened, then hands the call to the default it wraps
 #[derive(Clone, Debug)]
 struct RecordingKeyValue {
     inner: KeyValueDefault,
@@ -295,8 +294,6 @@ fn scratch_mounts() {
     assert_eq!(mount.path, scratch.path());
 }
 
-/// Instantiate `guest` fresh and drive its exported `func` with one string
-/// argument, returning the string result.
 async fn call<B>(runtime: &Runtime<B>, guest: &str, func: &str, message: &str) -> Result<String>
 where
     B: Clone + Send + Sync + 'static,

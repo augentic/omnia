@@ -83,7 +83,7 @@ impl MatchStrategy for ExactMatch {
 /// generic over its [`MatchStrategy`].
 #[derive(Clone, Debug, Default)]
 pub struct RouteTable<M> {
-    /// `(pattern, target)` pairs, ordered by the strategy at construction.
+    // ordered by the strategy at construction
     entries: Vec<(String, GuestId)>,
     strategy: PhantomData<M>,
 }
@@ -238,8 +238,6 @@ impl<R: Resolver> Router<R> {
         }
     }
 
-    /// Validate that every route target is capable or declared and wrap the
-    /// table.
     fn routed(
         trigger: &str, capable: &[GuestId], declares: impl Fn(&GuestId) -> bool, resolver: R,
     ) -> Result<Self> {
@@ -340,19 +338,14 @@ impl<R: Resolver> TriggerRouter<R> {
     }
 }
 
-/// Path-prefix match that respects segment boundaries: `/a` matches `/a` and
-/// `/a/b` but not `/ab`.
+// segment-aware: `/a` matches `/a` and `/a/b` but not `/ab`
 fn path_has_prefix(path: &str, prefix: &str) -> bool {
     path.strip_prefix(prefix)
         .is_some_and(|rest| rest.is_empty() || rest.starts_with('/') || prefix.ends_with('/'))
 }
 
-/// NATS-style topic match: `.`-tokenised, `*` matches exactly one token, and `>`
-/// matches one or more trailing tokens (and must be the final pattern token).
+// NATS-style: `*` matches exactly one `.`-token, a trailing `>` one or more
 fn topic_matches(topic: &str, pattern: &str) -> bool {
-    // Walk both token streams in lockstep without materialising either: `*`
-    // consumes exactly one topic token, a literal must match it, and `>` (which
-    // must be the final pattern token) swallows one or more trailing tokens.
     let mut topic_tokens = topic.split('.');
     let mut pattern_tokens = pattern.split('.').peekable();
 
@@ -377,8 +370,6 @@ fn topic_matches(topic: &str, pattern: &str) -> bool {
     topic_tokens.next().is_none()
 }
 
-// Unit tests by design: route-table matching is pure (prefix/segment/topic
-// rules).
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -457,8 +448,7 @@ mod tests {
         let routes = HttpRoutes::new([("/a".to_owned(), id("a"))]);
         let r = Router::build("http", &[id("a")], none_declared, routes).expect("routes are valid");
         assert_eq!(r.resolve("/a"), Some(&id("a")));
-        // An explicit route makes the trigger fully route-driven: a miss is a
-        // miss even though `a` is the sole exporter.
+        // an explicit route makes the trigger route-driven: a miss is a miss
         assert_eq!(r.resolve("/b"), None);
     }
 

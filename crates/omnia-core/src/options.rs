@@ -10,9 +10,8 @@
 //! environment. That parity is what lets the loading engine accept a
 //! pre-compiled artifact.
 
-// `derive(FromEnv)` generates undocumented `from_env`/`requirements` associated
-// functions; `RuntimeOptions` is re-exported from the crate root so they would
-// otherwise trip `missing_docs`.
+// `derive(FromEnv)` generates undocumented associated functions on a type the
+// crate root re-exports
 #![allow(missing_docs)]
 
 use std::time::Duration;
@@ -23,25 +22,15 @@ use wasmtime::{Config, Enabled, InstanceAllocationStrategy, PoolingAllocationCon
 
 /// Runtime configuration loaded from the environment.
 ///
-/// Values are read once at start-up via `RuntimeOptions::from_env().finalize()`
-/// and threaded through the generated runtime to every store. Each field maps to
-/// an `*` environment variable (booleans use `true`/`false`); call
-/// [`RuntimeOptions::requirements`] to print the full list with defaults.
+/// Read once at start-up and threaded through the runtime to every store.
+/// Each field maps to one environment variable (booleans use `true`/`false`);
+/// [`RuntimeOptions::requirements`] prints the full list with defaults.
 ///
-/// # Compile-time vs runtime settings
-///
-/// `max_fuel`, `branch_hinting`, `memory_reservation`, `memory_guard_size`
-/// (the latter two via bounds-check elision), `debug_symbols`, and
-/// `generate_address_map` influence the generated artifact: they are the
-/// [`CompileOptions`] this runtime loads artifacts under
-/// ([`compile_options`](Self::compile_options)), applied to the [`Config`]
-/// through [`CompileOptions::configure`] beside the pinned copy-on-write heap
-/// initialisation, and must be identical when a component is pre-compiled
-/// and when it is later loaded. The remaining values only affect the engine
-/// or individual stores at runtime.
-// A flat, env-driven configuration record; grouping the independent boolean
-// toggles into enums would obscure their one-to-one mapping to environment
-// variables.
+/// The fields marked compile-affecting are the [`CompileOptions`] this
+/// runtime loads artifacts under ([`compile_options`](Self::compile_options))
+/// and must match between pre-compiling a component and loading it. The rest
+/// only affect the engine or individual stores at runtime.
+// flat by design: each boolean is one environment variable
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Debug, FromEnv)]
 pub struct RuntimeOptions {
@@ -161,13 +150,10 @@ pub struct RuntimeOptions {
 /// The settings that shape a compiled artifact.
 ///
 /// A pre-compiled component loads only into an engine configured with the
-/// values it was compiled under, so these travel as one value: the
-/// ahead-of-time compiler takes them explicitly, and the runtime applies the
-/// copy [`RuntimeOptions`] loaded from the environment
-/// ([`compile_options`](RuntimeOptions::compile_options)). The default is
-/// the environment defaults, so an artifact compiled with
-/// `CompileOptions::default()` loads into a runtime whose environment sets
-/// none of the compile-affecting variables.
+/// values it was compiled under, so these travel as one value. The default
+/// matches the environment defaults, so an artifact compiled with
+/// `CompileOptions::default()` loads into a runtime that sets none of the
+/// compile-affecting variables.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompileOptions {
     /// Per-invocation fuel budget; `0` disables metering (`MAX_FUEL`).
@@ -208,14 +194,10 @@ impl CompileOptions {
     /// The one body both the ahead-of-time compiler and the runtime's
     /// [`Config`] go through, so the two engines cannot disagree.
     pub fn configure(&self, config: &mut Config) {
-        // Always enabled so each store can install an epoch deadline; the ticker
-        // and per-store deadlines drive cooperative guest timeouts.
+        // epoch interruption: per-store deadlines drive cooperative guest timeouts
         config.epoch_interruption(true);
 
-        // Copy-on-write heap images make per-request instantiation cheap. Pinned
-        // on (the default) because it is compile-affecting: the compiling and
-        // loading engines must agree, and an explicit value guards against a
-        // future default change breaking artifact compatibility.
+        // cow heap images are compile-affecting, so pinned explicitly
         config.memory_init_cow(true);
 
         if self.max_fuel > 0 {
@@ -225,8 +207,7 @@ impl CompileOptions {
             config.wasm_branch_hinting(true);
         }
 
-        // Memory tunables drive bounds-check elision. Applied only when set so
-        // an unset value preserves the Wasmtime default.
+        // memory tunables only when set, so unset keeps the wasmtime default
         if let Some(bytes) = self.memory_reservation {
             config.memory_reservation(bytes);
         }
@@ -234,32 +215,25 @@ impl CompileOptions {
             config.memory_guard_size(bytes);
         }
 
-        // Artifact-size tunables. ELF symbol tables only serve profilers and
-        // `wasmtime objdump`, so they are stripped by default; the address map
-        // stays on so trap messages keep their wasm offsets even with
-        // backtraces disabled.
+        // artifact size: strip symbols, keep the address map for trap offsets
         config.debug_symbols(self.debug_symbols);
         config.generate_address_map(self.generate_address_map);
     }
 }
 
-/// Build the runtime's [`Config`]: the compile-affecting settings through
-/// [`CompileOptions::configure`], then the engine's runtime-only settings.
+// compile-affecting settings through `configure`, then the runtime-only ones
 impl From<&RuntimeOptions> for Config {
     fn from(options: &RuntimeOptions) -> Self {
         let mut config = Self::new();
         options.compile_options().configure(&mut config);
 
-        // Runtime-only engine settings (no artifact effect). Set before the
-        // pooling early-return so they hold whether or not pooling is enabled.
+        // runtime-only engine settings, before the pooling early-return
         config.async_stack_zeroing(options.async_stack_zeroing);
         if let Some(bytes) = options.memory_reservation_for_growth {
             config.memory_reservation_for_growth(bytes);
         }
 
-        // Guest backtraces are runtime-only (not artifact-affecting). Disable via
-        // the non-deprecated max-frames API; `true` leaves the Wasmtime default
-        // (backtraces on).
+        // backtraces off via the max-frames api; `true` leaves the default on
         if !options.wasm_backtrace {
             config.wasm_backtrace_max_frames(None);
         }
@@ -274,33 +248,25 @@ impl From<&RuntimeOptions> for Config {
         // matters most.
         let mut pool = PoolingAllocationConfig::new();
 
-        // Totals are kept independent of the component-instance count: a single
-        // component can transitively embed several core instances/memories/tables,
-        // so pinning these to `pool_max_instances` would exhaust the memory/table
-        // pools before reaching the advertised instance count under load.
+        // totals stay independent of the instance count: one component can
+        // embed several core instances, memories and tables
         pool.total_component_instances(options.pool_max_instances)
             .total_core_instances(options.pool_total_core_instances)
             .total_memories(options.pool_total_memories)
             .total_tables(options.pool_total_tables)
             .total_stacks(options.pool_total_stacks)
             .max_memory_size(options.pool_max_memory_bytes.unwrap_or(options.max_memory_bytes))
-            // Keep memory/tables/stacks resident across reuse to skip
-            // decommit/zeroing; defaults of 0 preserve the prior behaviour.
+            // keep-resident skips decommit and zeroing on slot reuse
             .linear_memory_keep_resident(options.pool_memory_keep_resident)
             .table_keep_resident(options.pool_table_keep_resident)
             .async_stack_keep_resident(options.pool_async_stack_keep_resident)
             .max_unused_warm_slots(options.pool_max_unused_warm_slots)
-            // Instance-per-call decommits pool slots on every teardown; batching
-            // amortises the syscalls (one `process_madvise` per batch on Linux)
-            // at the cost of slots waiting decommitted-later in the queue.
+            // batching amortises the per-teardown decommit syscalls
             .decommit_batch_size(options.pool_decommit_batch_size)
-            // Linux-only fast linear-memory reset; the default (`No`) preserves the
-            // prior behaviour and `Auto` falls back cleanly where unsupported.
+            // linux-only fast memory reset; `Auto` falls back where unsupported
             .pagemap_scan(options.pool_pagemap_scan);
 
-        // GC heaps are only used by guests adopting the component-model GC /
-        // reference types; current guests never allocate one. Gated behind the
-        // opt-in `gc` feature, so the pool count is applied only when compiled in.
+        // gc heaps only when compiled in
         cfg_if::cfg_if! {
             if #[cfg(feature = "gc")] {
                 if let Some(count) = options.pool_total_gc_heaps {
@@ -309,8 +275,7 @@ impl From<&RuntimeOptions> for Config {
             }
         }
 
-        // Structural limits and sizes are applied only when explicitly set so an
-        // unset value preserves the Wasmtime default.
+        // structural limits only when set, so unset keeps the wasmtime default
         if let Some(count) = options.pool_max_core_instances_per_component {
             pool.max_core_instances_per_component(count);
         }
@@ -374,29 +339,17 @@ impl RuntimeOptions {
         }
     }
 
-    /// Validate cross-field invariants that the per-field `FromEnv` parsing
-    /// cannot express, surfacing a clear error before the engine is built
-    /// (Wasmtime otherwise rejects the same combinations with a less specific
-    /// message when the pool is constructed).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the pooling configuration is internally
-    /// inconsistent, e.g. a per-module structural limit exceeds the
-    /// corresponding pool total.
+    // Cross-field invariants `FromEnv` cannot express, checked before the
+    // engine is built where wasmtime's own rejection is less specific.
     fn validate(&self) -> Result<()> {
         if !self.pooling {
             return Ok(());
         }
 
-        // Compiled in every build and inert when `mpk` is on: fail fast on `yes`
-        // rather than silently ignoring MPK when Wasmtime's support is absent.
+        // fail fast on a feature the build lacks rather than ignore it
         if !cfg!(feature = "mpk") && self.pool_memory_protection_keys == Enabled::Yes {
             bail!("POOL_MEMORY_PROTECTION_KEYS=yes requires building omnia with the `mpk` feature");
         }
-
-        // Likewise compiled in every build and inert when `gc` is on: reject a GC
-        // heap count rather than silently ignoring it when `total_gc_heaps` is absent.
         if !cfg!(feature = "gc") && self.pool_total_gc_heaps.is_some() {
             bail!("POOL_TOTAL_GC_HEAPS requires building omnia with the `gc` feature");
         }
@@ -422,13 +375,11 @@ impl RuntimeOptions {
     }
 }
 
-/// Parse a millisecond count into a [`Duration`]; used by the `FromEnv` derive.
 fn parse_millis(value: &str) -> ParseResult<Duration> {
     Ok(Duration::from_millis(value.parse::<u64>()?))
 }
 
-/// Parse the guest timeout, rejecting `0` (a zero wall-clock bound would time
-/// out every invocation immediately); used by the `FromEnv` derive.
+// a zero wall-clock bound would time out every invocation
 fn parse_timeout(value: &str) -> ParseResult<Duration> {
     let millis = value.parse::<u64>()?;
     if millis == 0 {
@@ -437,15 +388,11 @@ fn parse_timeout(value: &str) -> ParseResult<Duration> {
     Ok(Duration::from_millis(millis))
 }
 
-/// Parse the epoch tick, clamping to a 1ms minimum so the ticker interval can
-/// never be zero; used by the `FromEnv` derive.
+// clamped so the ticker interval can never be zero
 fn parse_tick(value: &str) -> ParseResult<Duration> {
     Ok(Duration::from_millis(value.parse::<u64>()?.max(1)))
 }
 
-/// Parse an `auto`/`yes`/`no` toggle into a [`wasmtime::Enabled`]; used by the
-/// `FromEnv` derive for the pooling allocator's tri-state switches
-/// (`PAGEMAP_SCAN`, memory protection keys).
 fn parse_enabled(value: &str) -> ParseResult<Enabled> {
     match value.trim().to_ascii_lowercase().as_str() {
         "auto" => Ok(Enabled::Auto),
@@ -459,8 +406,8 @@ fn parse_enabled(value: &str) -> ParseResult<Enabled> {
 mod tests {
     use super::{CompileOptions, Enabled, RuntimeOptions, parse_enabled};
 
-    // An artifact compiled under the default settings loads into a runtime
-    // whose environment sets none of the compile-affecting variables.
+    // an artifact compiled under the defaults loads into a runtime whose
+    // environment sets none of the compile-affecting variables
     #[test]
     fn compile_options_default_is_env_default() {
         let options = RuntimeOptions::load_env().expect("should load");

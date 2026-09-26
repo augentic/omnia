@@ -153,7 +153,7 @@ impl DeploymentBuilder {
         let manifest = if let Some(manifest) = self.manifest {
             manifest
         } else if self.allow_empty {
-            // A dynamic deployment may start empty and register guests later.
+            // a dynamic deployment may start empty and register guests later
             Manifest::new()
         } else {
             let path = env::var_os("OMNIA_MANIFEST")
@@ -161,23 +161,15 @@ impl DeploymentBuilder {
             Manifest::load(path)?
         };
         manifest.validate(self.allow_empty, manifest::Features::COMPILED)?;
-        // Read once, here, so a missing or unreadable configuration fails
-        // startup rather than the first package load.
+
+        // read once, so a bad configuration fails startup rather than the first load
         let registry_config = manifest.registry_config()?;
 
+        // an operator `COMPONENT` override wins over the program name
         let program_name = self.program_name.unwrap_or_else(|| "omnia".to_owned());
-        // The runtime-carried name read by telemetry, trigger servers, and
-        // the bootstrap log. An operator `COMPONENT` override wins over the
-        // program name — read once here, never written back to the process
-        // environment.
         let name = env::var("COMPONENT").unwrap_or_else(|_| program_name.clone());
 
-        // The run's tracing directives, decided once for the host console and
-        // every guest: the selected level (else the process `RUST_LOG`'s, else
-        // the mode's) with the process `RUST_LOG`'s targeted directives on
-        // top. Telemetry initialization is idempotent (`Telemetry::build`):
-        // the first call in the process — here or in an embedder — installs
-        // the subscriber and the exporters, and later deployments reuse them.
+        // the run's directives, decided once for the host console and every guest
         let rust_log = telemetry::directives(
             self.level,
             self.mode.level(),
@@ -194,13 +186,10 @@ impl DeploymentBuilder {
             options.max_dispatch_depth = depth;
         }
 
-        // Open + identity-stamp every preopen once, here, so a misconfigured
-        // mount fails fast at startup rather than per store.
+        // open every preopen once, so a misconfigured mount fails at startup
         let mounts = Arc::new(MountRegistry::open(manifest.preopens())?);
 
-        // Bytes the process holds load (and compile) now, in parallel through
-        // the async [`Source::load`] seam, order following the manifest; a
-        // path or package is the runtime's to load at first use.
+        // embedded bytes load now, in parallel; a path or package loads at first use
         let (embedded, declared): (Vec<Source>, Vec<Source>) = manifest
             .sources()
             .into_iter()
@@ -209,15 +198,14 @@ impl DeploymentBuilder {
             futures::future::try_join_all(embedded.iter().map(|source| source.load(&engine)))
                 .await?;
 
-        // In command mode the program name is prepended as `argv[0]`.
+        // command mode prepends the program name as `argv[0]`
         let args = if self.mode.is_command() {
             std::iter::once(program_name).chain(self.args).collect()
         } else {
             self.args
         };
 
-        // Base: no host-mediated dispatch. The `link` feature overrides the
-        // seam by struct update, consuming the base.
+        // no host-mediated dispatch unless `link` overrides the seam below
         let deployment = Deployment {
             name,
             engine,
@@ -254,53 +242,38 @@ impl DeploymentBuilder {
 ///
 /// [`host`]: Self::host
 pub struct Deployment<T: WasiView + 'static> {
-    // Deployment name carried onto the runtime for trigger servers and the
-    // bootstrap log (the program name, unless `build` honored an operator
-    // `COMPONENT` override).
     name: String,
     engine: Engine,
     linker: Linker<T>,
     options: RuntimeOptions,
     guests: Vec<LoadedGuest>,
-    // The manifest's path and package guests, each loaded at first use.
+    // path and package guests, each loaded at first use
     declared: Vec<Source>,
     routes: Routes,
-    // Host-mediated dispatch seam: `NoLinks` unless the `link` feature is on.
+    // `NoLinks` unless the `link` feature is on
     seam: Arc<dyn LinkSeam<T>>,
-    // Mount registry opened from the manifest's resolved preopens.
     mounts: Arc<MountRegistry>,
-    // Guest argv threaded into every store. Empty for long-lived servers; in
-    // command mode the deployment name is prepended as `argv[0]`.
     args: Arc<Vec<String>>,
-    // Whether this deployment runs a one-shot `wasi:cli` command.
     mode: Mode,
-    // Whether the guest set may start empty and grow at run time.
     allow_empty: bool,
-    // Command-mode guest identity derived from the manifest's marked entry.
     command_guest: Option<GuestId>,
-    // The manifest's wasm-pkg configuration, resolved to one document despite
-    // the public plural key, carried onto the runtime for the guest loader.
+    // one document despite the public plural key
     registry_config: Option<String>,
-    // What `assemble` installs on the guest loader.
     #[cfg(feature = "loader")]
     loader: Loader,
-    // The run's tracing directives, carried onto the runtime to set
-    // `RUST_LOG` in every store it builds.
+    // every store's `RUST_LOG`
     rust_log: String,
 }
 
 #[cfg(feature = "loader")]
 #[derive(Default)]
 struct Loader {
-    // The embedder's registry source; `None` installs a cacheless
-    // `RegistryClient` over the deployment's `registries` configuration.
+    // `None` installs a cacheless `RegistryClient` over the deployment's `registries`
     registry: Option<Arc<dyn RegistrySource>>,
 }
 
 #[cfg(feature = "loader")]
 impl Loader {
-    // The registry package sources are fetched from: the embedder's, else a
-    // cacheless `RegistryClient` over the deployment's `registries` `config`.
     fn registry(&self, config: Option<&str>) -> Result<Arc<dyn RegistrySource>> {
         Ok(match &self.registry {
             Some(registry) => Arc::clone(registry),
@@ -341,8 +314,7 @@ impl<T: WasiView> Deployment<T> {
     where
         T: HasChain + HasDispatcher,
     {
-        // The seam holds only selector + policy until assembly, so rebuilding
-        // it here loses nothing.
+        // the seam holds only selector and policy until assembly, so rebuilding loses nothing
         self.seam =
             Arc::new(InProcessLinks::new(Arc::new(selector), ChainPolicy::from(&self.options)));
         self
@@ -466,10 +438,8 @@ impl<B: Clone + Send + Sync + 'static> Deployment<StoreCtx<B>> {
         Ok(runtime)
     }
 
-    // Link the loader host — here, beside WASI, so wasmtime wires it only into
-    // worlds that import `omnia:plugins/loader` — and take what `assemble`
-    // installs on it: the registry packages are fetched from; the mounts it
-    // reads paths through are the runtime's.
+    // Linked beside WASI so wasmtime wires it only into worlds that import
+    // `omnia:plugins/loader`; `assemble` installs the registry on it.
     #[cfg(feature = "loader")]
     fn with_loader_host(mut self) -> Result<(Self, Loader)> {
         self.host::<WasiPlugins, B>().context("linking the guest loader host")?;
@@ -491,10 +461,7 @@ fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, Runt
     Ok((engine, linker, options))
 }
 
-// The host's telemetry: the console at the run's directives, the exporters at
-// OpenTelemetry's own endpoint resolution (`OTEL_EXPORTER_OTLP_ENDPOINT` and
-// the per-signal variables), and none without an endpoint — `Telemetry::build`
-// reports that at `debug`.
+// exporters follow OpenTelemetry's own endpoint resolution; none without an endpoint
 fn init_telemetry(name: &str, rust_log: &str) -> Result<()> {
     Telemetry::new(name).filter(rust_log).build().context("initializing telemetry")
 }
@@ -506,8 +473,7 @@ mod tests {
 
     #[test]
     fn builds_pooling() {
-        // Independent totals plus per-component/per-module limits, sized small
-        // (and with a tiny per-memory cap) so the reservation stays cheap.
+        // sized small so the reservation stays cheap
         let options = RuntimeOptions {
             pool_max_instances: 8,
             pool_total_core_instances: 8,

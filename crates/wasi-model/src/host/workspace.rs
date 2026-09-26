@@ -113,9 +113,7 @@ pub fn resolve(
         return Err(anyhow!("grants.workspace root must be a directory"));
     };
 
-    // The lent handle is a plain `std::fs::File`; cap-std's `Metadata` (the
-    // same type the registry's `dir_metadata()` produces) derives the
-    // portable `(dev, ino)` identity the registry keys on.
+    // cap-std's `Metadata` derives the portable `(dev, ino)` the registry keys on
     let meta =
         Metadata::from_file(&dir.dir).context("reading lent workspace directory metadata")?;
     let entry = registry
@@ -154,10 +152,8 @@ fn check_subpath(subpath: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-// Unit tests by design: subpath vetting is pure validation; size/listing
-// caps and subdirectory listing are host I/O bounds no guest uniquely
-// observes. cap-std's `open_dir` is the runtime escape enforcement; the ABI
-// workspace scenarios cover mount authority and write policy.
+// subpath vetting and the I/O caps are pure; the guest scenarios cover mount
+// authority and write policy
 #[cfg(test)]
 mod tests {
     use std::fs;

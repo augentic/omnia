@@ -28,11 +28,9 @@ pub struct ConnectOptions {
     pub database: String,
 }
 
-/// Loads connection options from environment variables with error context.
 impl omnia_core::FromEnv for ConnectOptions {
     fn load_env() -> Result<Self> {
-        // `Self::from_env()` is the builder-returning inherent the `FromEnv`
-        // derive emits.
+        // `Self::from_env()` is the builder the `FromEnv` derive emits
         Self::from_env().finalize().context("issue loading connection options")
     }
 }
@@ -52,7 +50,7 @@ impl Backend for SqlDefault {
     async fn connect_with(options: Self::ConnectOptions) -> Result<Self> {
         tracing::debug!("initializing SQLite connection to: {}", options.database);
 
-        // Create initial connection to validate database path
+        // open now, so a bad database path fails connect rather than the first query
         let conn = Arc::new(parking_lot::Mutex::new(
             SqliteConnection::open(&options.database).context("failed to open SQLite database")?,
         ));
@@ -88,8 +86,7 @@ impl Connection for SqliteConn {
         let conn = Arc::clone(&self.conn);
 
         async move {
-            // Blocking rusqlite work (and the mutex held around it) runs on a
-            // blocking thread so it never pins an executor thread.
+            // rusqlite blocks, and holds the mutex, so it never pins an executor thread
             tokio::task::spawn_blocking(move || {
                 let rusqlite_params: Vec<_> = params.iter().map(to_sqlite).collect();
 
@@ -140,7 +137,7 @@ impl Connection for SqliteConn {
         let conn = Arc::clone(&self.conn);
 
         async move {
-            // See `query`: keep the blocking work off the executor.
+            // as `query`: keep the blocking work off the executor
             tokio::task::spawn_blocking(move || {
                 let rusqlite_params: Vec<_> = params.iter().map(to_sqlite).collect();
 
@@ -175,7 +172,7 @@ fn to_sqlite(dt: &DataType) -> rusqlite::types::Value {
         DataType::Str(Some(s)) => rusqlite::types::Value::Text(s.clone()),
         DataType::Binary(Some(b)) => rusqlite::types::Value::Blob(b.clone()),
         DataType::Timestamp(Some(ts)) => rusqlite::types::Value::Text(ts.clone()),
-        // All None variants map to NULL
+        // every `None` variant
         _ => rusqlite::types::Value::Null,
     }
 }

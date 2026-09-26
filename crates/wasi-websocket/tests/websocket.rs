@@ -21,8 +21,6 @@ use omnia_wasi_websocket::{
 // here; a new program without one fails to compile.
 test_programs::foreach_websocket!();
 
-/// The store's backend bundle: the recording websocket backend under test
-/// beside the no-op telemetry sink the guest imports.
 #[derive(Clone, Debug)]
 struct Backends {
     websocket: Recording,
@@ -41,12 +39,11 @@ impl Provides<WasiOtel> for Backends {
     }
 }
 
-/// One `send` as the client saw it: the event and its socket filter.
+// one `send` as the client saw it: the event and its socket filter
 type Sent = (Event, Option<Vec<String>>);
 
-/// Records every event the guest sends, for host-side assertions. The
-/// default backend fans out to zero peers, so a send through it is
-/// unobservable; this stands in as the scenario backend.
+// records every send: the default backend fans out to zero peers, so a
+// send through it is unobservable
 #[derive(Clone, Debug, Default)]
 struct Recording {
     sent: Arc<Mutex<Vec<Sent>>>,
@@ -61,7 +58,7 @@ impl WasiWebSocketCtx for Recording {
 
 impl Client for Recording {
     fn events(&self) -> FutureResult<Events> {
-        // Events are handed to the handler directly; nothing arrives here.
+        // events are handed to the handler directly; nothing arrives here
         async { Ok(Box::pin(futures::stream::empty()) as Events) }.boxed()
     }
 

@@ -13,13 +13,11 @@ use omnia_wasi_blobstore::types::{IncomingValue, OutgoingValue};
 
 omnia_sdk::command!(scenario);
 
-/// Longer than one `blocking-write-and-flush` budget so the write spans
-/// several stream chunks the host must accumulate into one value.
+// longer than one `blocking-write-and-flush` budget, so the write spans several chunks
 const LARGE: usize = 10_000;
 
 async fn scenario() {
-    // The host seeded `seeded/from-host` before the run; a missing container
-    // is an error rather than an empty one.
+    // seeded by the host before the run; a missing container is an error, not an empty one
     let seeded = blobstore::get_container("seeded".to_owned()).await.expect("get-container");
     assert_eq!(read(&seeded, "from-host").await, b"hello");
     let error = blobstore::get_container("missing".to_owned()).await.expect_err("absent");

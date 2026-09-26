@@ -15,7 +15,6 @@ use serde_json::{Value, json};
 // here; a new program without one fails to compile.
 test_programs::foreach_docstore!();
 
-/// Run one guest program against `backends`, requiring a clean exit.
 async fn run_guest(wasm: &str, backends: Backends) {
     let status = Deployment::new()
         .guest("guest", wasm)
@@ -25,7 +24,6 @@ async fn run_guest(wasm: &str, backends: Backends) {
     assert_eq!(status, ExitStatus::SUCCESS, "guest `{wasm}` failed");
 }
 
-/// One document's JSON body, read through the docstore handle.
 async fn body(backends: &Backends, collection: &str, id: &str) -> Option<Value> {
     let doc = backends.docstore.get(collection.to_owned(), id.to_owned()).await.expect("get")?;
     assert_eq!(doc.id, id);

@@ -45,8 +45,7 @@ impl WasiKeyValueCtx for KeyValueDefault {
     fn open_bucket(&self, identifier: String) -> FutureResult<Arc<dyn Bucket>> {
         tracing::trace!("opening bucket: {identifier}");
 
-        // The lock registry lives with the bucket identity so every handle to
-        // the same bucket serializes writes and atomics on the same locks.
+        // the lock registry lives with the bucket, so every handle shares its locks
         let bucket = self.store.get_with(identifier.clone(), || InMemBucket {
             name: identifier,
             cache: Cache::builder().build(),
@@ -71,13 +70,10 @@ impl std::fmt::Debug for InMemBucket {
 }
 
 impl InMemBucket {
-    /// Per-key mutex so writes and atomics serialize per key, not per bucket.
-    ///
-    /// The registry stores [`Weak`] refs so unused keys do not keep a mutex
-    /// alive. Entries are never removed while a strong ref exists: dropping
-    /// them from the map would let a concurrent `key_lock` install a second
-    /// mutex for the same key, and `set` / `increment` / `swap` could then
-    /// interleave.
+    // Per-key, so writes and atomics serialize per key rather than per bucket.
+    // `Weak` refs let unused keys drop their mutex; an entry is never removed
+    // while a strong ref exists, or a concurrent call could install a second
+    // mutex for the key.
     fn key_lock(&self, key: &str) -> Arc<Mutex<()>> {
         let mut locks = self.locks.lock().expect("lock registry poisoned");
         if let Some(existing) = locks.get(key).and_then(Weak::upgrade) {

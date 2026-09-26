@@ -198,11 +198,10 @@ impl<Req, Turn> Script<Req, Turn> {
     }
 }
 
+// The last handle dropping with turns left or overruns is a forgotten
+// assertion; a panic already unwinding must not be masked, since a panic
+// during unwinding aborts the process.
 impl<Req, Turn> Drop for Inner<Req, Turn> {
-    // The last handle dropping with turns left or overruns is a forgotten
-    // assertion; it fails the test unless `assert_exhausted` already reported
-    // or a panic is already unwinding, which it must not mask (a panic
-    // during unwinding aborts the process).
     fn drop(&mut self) {
         if thread::panicking() || self.checked.load(Ordering::SeqCst) {
             return;

@@ -8,8 +8,7 @@ use std::process::Command;
 
 pub const WASM_TARGET: &str = "wasm32-wasip2";
 
-/// The nested build's target directory, a sibling of the outer profile
-/// directory.
+// a sibling of the outer profile directory
 const NESTED_TARGET: &str = "wasm32-fixtures";
 
 /// A cargo-provided variable, or a panic naming it: the pipeline only runs
@@ -79,15 +78,13 @@ pub fn nested_build(root: &Path, target_dir: &Path) -> Command {
     command
 }
 
-/// Strips the outer build's `CARGO_*` and `RUST*` variables from `command`
-/// so host flags do not leak into the wasm32 build, keeping only the settings
-/// cargo itself needs (`CARGO_HOME`, offline mode). Returns what was removed.
+// Strips the outer build's `CARGO_*` and `RUST*` variables so host flags do
+// not leak into the wasm32 build; returns what was removed.
 fn sanitise(command: &mut Command, keys: impl IntoIterator<Item = String>) -> Vec<String> {
     let mut removed: Vec<String> = keys.into_iter().filter(|key| should_strip(key)).collect();
-    // The outer command may be `cargo clippy`, whose workspace wrapper would
-    // run clippy-driver over the guests' wasm32 dep tree; the fixtures are a
-    // plain rustc build. The wrappers are removed even when unset so the
-    // nested build never inherits them from a later `env`.
+
+    // an outer `cargo clippy` would run clippy-driver over the guests' dep tree;
+    // removed even when unset, so a later `env` cannot reintroduce them
     for key in STRIPPED_TOOLCHAIN_VARS {
         if !removed.iter().any(|removed| removed == key) {
             removed.push((*key).to_owned());
@@ -121,10 +118,8 @@ mod tests {
         assert!(!denies_warnings(None));
     }
 
-    // The sibling is chosen from cargo's layout alone — v1
-    // (`build/<pkg>-<hash>/out`) and v2 (`build/<pkg>/<hash>/out`) — under
-    // the default `target/` and a redirected one alike; a layout that is
-    // not cargo's keeps the build under `OUT_DIR`.
+    // cargo's v1 and v2 layouts, default and redirected `target/`; a layout
+    // that is not cargo's keeps the build under `OUT_DIR`
     #[test]
     fn nested_target() {
         assert_eq!(

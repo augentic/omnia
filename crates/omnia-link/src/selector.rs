@@ -76,19 +76,17 @@ mod tests {
             FirstArgSelector.select("example:link/echo", "echo", &params).expect("should select");
 
         assert_eq!(id, GuestId::from("responder"));
-        // The default forwards every parameter (including the identity) through.
+        // the default forwards every parameter, identity included
         assert_eq!(&*forwarded, params.as_slice());
     }
 
     #[test]
     fn first_arg_invalid() {
-        // A non-string leading argument is rejected.
         let error = FirstArgSelector
             .select("example:link/echo", "echo", &[Val::U32(7)])
             .expect_err("a non-string identity must fail");
         assert!(error.to_string().contains("leading string identity"));
 
-        // An empty parameter list is rejected too.
         FirstArgSelector
             .select("example:link/echo", "echo", &[])
             .expect_err("a missing identity must fail");

@@ -23,17 +23,14 @@ fn cargo(args: &[&str]) {
     assert!(status.success(), "cargo {} failed", args.join(" "));
 }
 
-/// Idempotent: nextest runs every test in its own process, so each one builds
-/// first; concurrent invocations serialise on cargo's lock and the rest are
-/// no-ops.
+// idempotent: each nextest process builds first, serialised on cargo's lock
 fn build_guests() {
     cargo(&["build", "-p", "examples", "--examples", "--target", "wasm32-wasip2"]);
 }
 
 fn run(example: &str, args: &[&str]) {
-    // The example manifests and hosts hardcode `../target/...`, so a redirected
-    // target dir would run a stale default-dir guest (or none) rather than the
-    // one just built: refuse up front instead of passing or failing spuriously.
+    // the examples hardcode `../target/...`, so a redirected target dir would
+    // run a stale guest, or none; refuse up front
     assert!(
         std::env::var_os("CARGO_TARGET_DIR").is_none(),
         "examples assume the default target/ directory; unset CARGO_TARGET_DIR"

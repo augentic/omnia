@@ -49,8 +49,7 @@ where
     let addr = listener.local_addr().context("reading http listener address")?;
     tracing::info!("{} http server listening on: {addr}", handler.component);
 
-    // `keep_alive` defaults to true; build the connection builder once and
-    // clone it cheaply per accepted connection.
+    // built once, cloned per connection
     let http1 = http1::Builder::new();
 
     // listen for requests until terminated
@@ -58,8 +57,7 @@ where
         let (stream, _) = match listener.accept().await {
             Ok(conn) => conn,
             Err(error) => {
-                // A transient accept error (e.g. file-descriptor exhaustion)
-                // must not tear down the whole server.
+                // a transient accept error must not tear down the server
                 tracing::error!(%error, "accept error");
                 continue;
             }
@@ -132,10 +130,8 @@ where
     /// Returns an error if the deployment's http routes are inconsistent with
     /// the guests' exports.
     pub fn new(runtime: &Runtime<B>) -> Result<Option<Self>> {
-        // Capability probe: a guest exports `wasi:http/incoming-handler`
-        // exactly when its typed `ServiceIndices` resolve. The runtime builds
-        // the router once, up front, over the guests loaded at boot; a
-        // declared guest is probed when its first request loads it.
+        // a guest is capable exactly when its `ServiceIndices` resolve; a
+        // declared guest is probed when its first request loads it
         let routing = runtime.http_trigger_router(ServiceIndices::new)?;
         if routing.is_inert() {
             return Ok(None);
@@ -167,8 +163,7 @@ where
     {
         tracing::debug!(method = %request.method(), uri = %request.uri(), "handling request");
 
-        // Normalise the request (scheme/authority); a request we cannot
-        // normalise (e.g. a missing `Host` header) is a client error, not a 500.
+        // normalise the request; a bad `Host` header is a 400, not a 500
         let request = match fix_request(request) {
             Ok(request) => request,
             Err(error) => {
@@ -177,14 +172,12 @@ where
             }
         };
 
-        // Resolve the guest by request path through the boot-built router; an
-        // unmatched path is an ordinary 404.
+        // resolve the guest by path; unmatched is 404
         let Some(guest_id) = self.routing.resolve(request.uri().path()) else {
             return Ok(not_found());
         };
-        // The routed identity is the deployment's, so a miss here is a first
-        // use that failed to load or a lifecycle race (e.g. concurrent
-        // deregistration) — a 500, never a server panic.
+
+        // a routed guest that fails to load is a 500, never a panic
         let guest = match self.state.guest(guest_id).await {
             Ok(guest) => guest,
             Err(error) => {
@@ -192,9 +185,8 @@ where
                 return Ok(internal_error());
             }
         };
-        // The route says this guest handles http; a declared guest's export
-        // is checked here, at its first use, where a boot guest's was
-        // checked at boot.
+
+        // a declared guest's export is checked here, at first use
         let indices = ServiceIndices::new(guest.instance_pre())
             .map_err(anyhow::Error::from)
             .with_context(|| {
@@ -212,10 +204,8 @@ where
         let guest_task = tokio::spawn(async move {
             let result = store
                 .run_concurrent(async |store| {
-                    // Build the guest's response, routing every failure (a trap,
-                    // a guest-returned error, or a response-conversion error)
-                    // through `sender`. A single error path means the caller
-                    // never mistakes a real error for a panicked task.
+                    // one error path through `sender`, so the caller never
+                    // mistakes a real error for a panicked task
                     let built = async move {
                         let (request, io) = store.with(|mut access| {
                             let mut cx = access.as_context_mut();
@@ -236,9 +226,8 @@ where
 
                     match built {
                         Ok(resp) => {
-                            // wrap the body so we can detect when hyper finishes
-                            // consuming it, then keep run_concurrent alive until
-                            // it does so the WASI pipe resources stay valid
+                            // keep `run_concurrent` alive until hyper has consumed
+                            // the body, so the wasi pipe resources stay valid
                             let (body_done_tx, body_done_rx) = oneshot::channel::<()>();
                             let resp = resp.map(|body| {
                                 BodyDoneWrapper {
@@ -285,18 +274,14 @@ where
     }
 }
 
-// Prepare the request for the guest.
+// rebuild the uri with scheme and authority set, so they reach the guest
 fn fix_request<T>(mut request: http::Request<T>) -> Result<http::Request<T>> {
-    // rebuild Uri with scheme and authority explicitly set so they are passed to the Guest
     let uri = request.uri_mut();
     let p_and_q = uri.path_and_query().map_or_else(|| PathAndQuery::from_static("/"), Clone::clone);
     let mut uri_builder = Uri::builder().path_and_query(p_and_q);
 
     if let Some(forwarded) = request.headers().get(FORWARDED) {
-        // Behind a proxy: RFC 7239 `Forwarded` is a comma-separated list of
-        // elements (one per hop; the first is the client-facing one), each a
-        // semicolon-separated set of parameters with case-insensitive names
-        // and optionally quoted values.
+        // behind a proxy: the first RFC 7239 element is the client-facing hop
         let element = forwarded.to_str()?.split(',').next().unwrap_or_default();
         let mut scheme = "http";
         for parameter in element.split(';') {
@@ -322,7 +307,6 @@ fn fix_request<T>(mut request: http::Request<T>) -> Result<http::Request<T>> {
         uri_builder = uri_builder.scheme("http");
     }
 
-    // update the uri with the new scheme and authority
     let (mut parts, body) = request.into_parts();
     parts.uri = uri_builder.build()?;
     let request = http::Request::from_parts(parts, body);
@@ -330,10 +314,8 @@ fn fix_request<T>(mut request: http::Request<T>) -> Result<http::Request<T>> {
     Ok(request)
 }
 
-/// Wraps a response body and holds a `oneshot::Sender` that is dropped when
-/// the body is fully consumed (or the wrapper itself is dropped). The
-/// corresponding receiver keeps `run_concurrent` alive so WASI pipe resources
-/// remain valid while hyper streams the response.
+// The sender drops once the body is consumed (or the wrapper dropped); its
+// receiver keeps `run_concurrent` alive while hyper streams the response.
 struct BodyDoneWrapper<B> {
     body: B,
     _tx: oneshot::Sender<()>,
@@ -386,8 +368,6 @@ fn internal_error() -> hyper::Response<OutgoingBody> {
         .expect("should build internal error response")
 }
 
-/// A `400 Bad Request` for a request the server could not normalise (e.g. a
-/// missing `Host` header).
 fn bad_request() -> hyper::Response<OutgoingBody> {
     let body = Full::new(Bytes::from_static(b"Bad Request")).map_err(Into::into).boxed_unsync();
 
@@ -398,8 +378,6 @@ fn bad_request() -> hyper::Response<OutgoingBody> {
         .expect("should build bad request response")
 }
 
-/// A `404 Not Found` for a request that matched no route (or a trigger with no
-/// http-capable guest).
 fn not_found() -> hyper::Response<OutgoingBody> {
     let body = Full::new(Bytes::from_static(b"Not Found")).map_err(Into::into).boxed_unsync();
 

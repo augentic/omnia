@@ -222,8 +222,7 @@ impl Source {
                     "guest `{}` is pre-compiled, but a package admits raw wasm alone",
                     self.id
                 ),
-                // A path is read at first use, while guests run: only the
-                // deployment's pin says these are the bytes it meant.
+                // a path is read at first use, while guests run: only the pin vouches for it
                 SourceSpec::Path(_) if self.digest.is_none() => bail!(
                     "guest `{}` is pre-compiled and is read from unpinned {} while guests run: \
                      pin its `digest`",

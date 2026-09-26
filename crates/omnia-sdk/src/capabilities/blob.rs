@@ -97,13 +97,11 @@ pub trait BlobStore: Send + Sync {
 
         async move {
             let ctr = open_container(container).await?;
-            // Single round trip: fetch directly and map the host's not-found
-            // error to `None` rather than racing a separate existence check.
+
+            // one round trip: a not-found error is `None`, rather than racing an existence check
             let incoming = match ctr.get_data(name.to_string(), 0, u64::MAX).await {
                 Ok(incoming) => incoming,
-                // The shared host layer lowers a missing object to this
-                // message for every backend (see wasi-blobstore
-                // `container_impl::get_data`).
+                // wasi-blobstore lowers a missing object to this message for every backend
                 Err(e) if e.contains("object not found") => return Ok(None),
                 Err(e) => return Err(anyhow!("reading object: {e}")),
             };
@@ -121,9 +119,7 @@ pub trait BlobStore: Send + Sync {
         use anyhow::anyhow;
         use omnia_wasi_blobstore::types::OutgoingValue;
 
-        // `blocking-write-and-flush` permits at most 4096 bytes per
-        // call (the wasi:io stream write budget), so larger payloads
-        // must be written in chunks.
+        // the wasi:io write budget: `blocking-write-and-flush` takes at most 4096 bytes
         const WRITE_CHUNK: usize = 4096;
 
         async move {
@@ -494,7 +490,6 @@ delegate_deref!(BlobStore {
     }
 });
 
-/// Open a blobstore container, mapping the WIT error into `anyhow`.
 #[cfg(target_arch = "wasm32")]
 async fn open_container(container: &str) -> Result<omnia_wasi_blobstore::container::Container> {
     use anyhow::anyhow;

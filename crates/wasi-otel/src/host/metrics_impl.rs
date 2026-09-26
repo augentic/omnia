@@ -152,7 +152,7 @@ impl From<wasi::MetricData> for MetricData {
     }
 }
 
-/// The proto `NumberDataPoint` shared by the Gauge and Sum conversions.
+// shared by the Gauge and Sum conversions
 fn number_dp(
     attributes: Vec<wasi::KeyValue>, value: wasi::DataValue, exemplars: Vec<wasi::Exemplar>,
     start_time_unix_nano: u64, time_unix_nano: u64,
@@ -341,7 +341,7 @@ mod tests {
             panic!("one resource, got {}", request.resource_metrics.len());
         };
         assert_eq!(resource_metrics.schema_url, "https://resource");
-        // The URL is not doubled as a resource attribute.
+        // the url is not doubled as a resource attribute
         let attributes = &resource_metrics.resource.as_ref().expect("resource").attributes;
         assert_eq!(
             attributes.iter().map(|kv| kv.key.as_str()).collect::<Vec<_>>(),

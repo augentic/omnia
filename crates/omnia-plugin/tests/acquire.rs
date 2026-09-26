@@ -26,7 +26,6 @@ struct LocalBackendConfig {
     root: PathBuf,
 }
 
-/// Stage `bytes` as `package` in a local-backend registry rooted at `root`.
 fn stage(root: &Path, package: &str, bytes: &[u8]) {
     let (name, version) = package.split_once('@').expect("test packages pin versions");
     let (namespace, name) = name.split_once(':').expect("test packages are namespaced");
@@ -35,7 +34,6 @@ fn stage(root: &Path, package: &str, bytes: &[u8]) {
     std::fs::write(dir.join(format!("{version}.wasm")), bytes).expect("staging package");
 }
 
-/// Register a `local`-backend registry named `name` in `config`.
 fn add_local_registry(config: &mut Config, name: &str, root: &Path) {
     let registry: Registry = name.parse().expect("test registry name parses");
     let backend = config.get_or_insert_registry_config_mut(&registry);
@@ -50,30 +48,28 @@ fn add_local_registry(config: &mut Config, name: &str, root: &Path) {
         .expect("local backend config serializes");
 }
 
-/// An empty configuration whose default registry is `name`.
 fn defaulting_to(name: &str) -> Config {
     let mut config = Config::empty();
     config.set_default_registry(Some(name.parse().expect("test registry name parses")));
     config
 }
 
-/// A cacheless acquirer whose default registry is a local backend at `root`.
+// cacheless, defaulting to a local backend at `root`
 fn registry_acquirer(root: &Path) -> RegistryClient {
     let mut config = defaulting_to(DEFAULT_REGISTRY);
     add_local_registry(&mut config, DEFAULT_REGISTRY, root);
     RegistryClient::new(config)
 }
 
-/// The store key of `bytes`: the `sha256:<hex>` the registry reports.
+// the `sha256:<hex>` the registry reports
 fn key(bytes: &[u8]) -> String {
     Digest::of(bytes).to_string()
 }
 
 type ReleaseKey = (String, String, String);
 
-/// An in-memory [`ContentStore`] + [`ReleaseStore`] double: digest-keyed
-/// content plus per-registry release records, with direct map access so
-/// tests can inspect and poison entries without going through the traits.
+// a `ContentStore` + `ReleaseStore` double with direct map access, so tests
+// can inspect and poison entries without going through the traits
 #[derive(Clone, Default)]
 struct MemStore {
     content: Arc<Mutex<HashMap<String, Vec<u8>>>>,

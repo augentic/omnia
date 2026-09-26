@@ -78,9 +78,8 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
         }
     }
 
-    // The registry `package` is fetched from. The configuration's routing
-    // bounds the load: a package it routes is served by that registry alone,
-    // and one it routes nowhere by the registry the load names.
+    // A routed package is served by its registry alone; one routed nowhere by
+    // the registry the load names.
     fn registry(
         &self, package: &PackageRef, endpoint: Option<&str>,
     ) -> Result<Registry, AcquireError> {
@@ -108,10 +107,8 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
         }
     }
 
-    // A client fetching through the configuration as the deployment declares
-    // it, mapping and metadata intact; a package it routes nowhere is routed
-    // to `registry` — the one the load named — for this fetch alone. Loads
-    // are rare, so a fresh client per fetch beats caching machinery.
+    // A fresh client per fetch, since loads are rare; a package routed nowhere
+    // is routed to `registry` for this fetch alone.
     fn client(&self, package: &PackageRef, registry: &Registry) -> Client {
         let mut config = self.config.clone();
         if config.resolve_registry(package).is_none() {
@@ -123,8 +120,6 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
         Client::new(config)
     }
 
-    /// Resolve and fetch `package`, serving verified bytes from the store
-    /// when possible.
     async fn fetch(&self, package: &str, endpoint: Option<&str>) -> Result<Vec<u8>, AcquireError> {
         let (package_ref, version) =
             parse_package(package).map_err(|error| AcquireError::Refused(format!("{error:#}")))?;
@@ -153,7 +148,7 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
 
         let resolved = Digest::of(&bytes);
         if resolved != expected {
-            // The registry misdelivered; a retry may serve honest bytes.
+            // the registry misdelivered; a retry may serve honest bytes
             return Err(AcquireError::Unavailable(format!(
                 "package `{package}` content hashes to {resolved}, not the registry digest \
                  {expected}"
@@ -171,12 +166,12 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
         Ok(bytes)
     }
 
-    /// The store's verified bytes for `digest`; `None` on a miss, a failed
-    /// verification, or an unreadable store — the cache never refuses a load.
+    // `None` on a miss, a failed verification, or an unreadable store: the
+    // cache never refuses a load.
     async fn stored(&self, package: &str, digest: Digest) -> Option<Vec<u8>> {
         match self.store.content(&digest.to_string()).await {
             Ok(Some(bytes)) => {
-                // A poisoned entry must never become code; discard and refetch.
+                // a poisoned entry must never become code
                 if Digest::of(&bytes) == digest {
                     tracing::debug!(package, %digest, "package served from the store");
                     Some(bytes)
@@ -191,8 +186,7 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
             }
             Ok(None) => None,
             Err(error) => {
-                // Cache, never authority: an unreadable store degrades to a
-                // fresh fetch.
+                // cache, never authority
                 tracing::warn!(
                     package,
                     %digest,
@@ -204,8 +198,8 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
         }
     }
 
-    /// Resolve the release fresh, refreshing the store's record; fall back
-    /// to the stored record — logged — only on a network failure.
+    // Fresh, refreshing the store's record; the stored record stands in only
+    // on a network failure.
     async fn resolve_release(
         &self, client: &Client, registry: &str, package: &str, package_ref: &PackageRef,
         version: &Version,
@@ -255,8 +249,7 @@ impl<S: ContentStore + ReleaseStore> RegistryClient<S> {
                     content_digest,
                 })
             }
-            // An authoritative registry answer — not found, yanked, malformed
-            // input — refuses: retrying the same reference cannot succeed.
+            // an authoritative answer refuses: retrying the same reference cannot succeed
             Err(error) => Err(AcquireError::Refused(format!("resolving `{package}`: {error}"))),
         }
     }
@@ -270,10 +263,8 @@ impl<S: ContentStore + ReleaseStore> RegistrySource for RegistryClient<S> {
     }
 }
 
-/// Whether a resolution error is a transport failure — endpoint unreachable,
-/// registry misbehaving — rather than an authoritative registry answer
-/// (not found, yanked, malformed input), which must never be papered over
-/// by a stored record.
+// A transport failure, as opposed to an authoritative answer (not found,
+// yanked, malformed input) a stored record must never paper over.
 fn is_network_failure(error: &wasm_pkg_client::Error) -> bool {
     match error {
         wasm_pkg_client::Error::RegistryError(source)
@@ -283,16 +274,14 @@ fn is_network_failure(error: &wasm_pkg_client::Error) -> bool {
     }
 }
 
-// A backend that serves releases from storage (wasm-pkg-client's `local`)
-// reports a version it lacks as an I/O `NotFound` inside a registry error;
-// that is the registry's answer, not a fault on the way to it.
+// wasm-pkg-client's `local` backend reports a version it lacks as an I/O
+// `NotFound` inside a registry error: the registry's answer, not a fault
 fn is_not_found(error: &anyhow::Error) -> bool {
     error.chain().any(|cause| {
         cause.downcast_ref::<io::Error>().is_some_and(|io| io.kind() == io::ErrorKind::NotFound)
     })
 }
 
-/// Drain `stream` into memory; callers hash the whole buffer anyway.
 async fn collect(mut stream: ContentStream) -> Result<Vec<u8>, wasm_pkg_client::Error> {
     let mut bytes = Vec::new();
     while let Some(chunk) = stream.try_next().await? {
@@ -301,8 +290,7 @@ async fn collect(mut stream: ContentStream) -> Result<Vec<u8>, wasm_pkg_client::
     Ok(bytes)
 }
 
-/// Split an exact `namespace:name@version` reference; remote lookup never
-/// resolves "latest".
+// exact `namespace:name@version` only; remote lookup never resolves "latest"
 fn parse_package(package: &str) -> Result<(PackageRef, Version)> {
     let Some((name, version)) = package.split_once('@') else {
         bail!("registry package `{package}` must pin an exact version (`namespace:name@version`)")
@@ -382,10 +370,8 @@ mod tests {
         );
     }
 
-    // The client fetches through the configuration as the deployment
-    // declares it — a routed package keeps its mapping, custom metadata and
-    // all — and only a package routed nowhere is routed, to the registry the
-    // load named, in the client's configuration alone.
+    // a routed package keeps its mapping and metadata; only one routed
+    // nowhere goes to the registry the load named
     #[test]
     fn client_keeps_routing() {
         let client = RegistryClient::from_toml(

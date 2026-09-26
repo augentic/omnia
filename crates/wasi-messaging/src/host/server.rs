@@ -73,10 +73,8 @@ where
     /// Returns an error if the deployment's messaging routes are inconsistent
     /// with the guests' exports.
     pub fn new(runtime: &Runtime<B>) -> Result<Option<Self>> {
-        // Capability probe: a guest exports the messaging handler exactly when
-        // its typed indices resolve. Build the topic router once, up front,
-        // over the guests loaded at boot; a declared guest is probed when
-        // its first message loads it.
+        // a guest is capable exactly when its typed indices resolve; a
+        // declared guest is probed when its first message loads it
         let routing = TriggerRouter::build(
             runtime.registry(),
             "messaging",
@@ -103,24 +101,21 @@ where
     /// Returns an error if the guest cannot be loaded at its first use or
     /// instantiated, traps, or times out.
     pub async fn handle(&self, message: Message) -> Result<()> {
-        // Resolve the guest by topic; an unmatched topic is dropped, not an
-        // error (the message simply has no handler in this deployment).
+        // resolve the guest by topic; unmatched is dropped, not an error
         let topic = message.topic.clone();
         let Some(guest_id) = self.routing.resolve(&topic) else {
             tracing::debug!(%topic, "no route for topic; dropping message");
             return Ok(());
         };
-        // The routed identity is the deployment's, so a miss here is a first
-        // use that failed to load or a lifecycle race (e.g. concurrent
-        // deregistration) — an error, never a server panic.
+
+        // a routed guest that fails to load is an error, never a panic
         let guest = self
             .state
             .guest(guest_id)
             .await
             .with_context(|| format!("resolving the routed guest `{guest_id}`"))?;
-        // The route says this guest handles messaging; a declared guest's
-        // export is checked here, at its first use, where a boot guest's
-        // was checked at boot.
+
+        // a declared guest's export is checked here, at first use
         let indices = MessagingRequestReplyIndices::new(guest.instance_pre())
             .map_err(anyhow::Error::from)
             .with_context(|| {

@@ -111,8 +111,7 @@ pub trait StateStore: Send + Sync {
             }
             match atomics::swap(cas, value.to_vec()).await {
                 Ok(()) => Ok(()),
-                // A writer slipped in between `new` and `swap`: flatten the
-                // fresh handle to its observed bytes, same typed conflict.
+                // a writer slipped in between `new` and `swap`: the same typed conflict
                 Err(atomics::CasError::CasFailed(fresh)) => {
                     let observed = fresh
                         .current()

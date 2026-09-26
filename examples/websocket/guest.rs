@@ -28,7 +28,6 @@ impl http::handler::Guest for HttpGuest {
     }
 }
 
-/// Sends a message to all connected WebSocket clients.
 #[axum::debug_handler]
 async fn send_message(message: String) -> HttpResult<Json<Value>> {
     let client =

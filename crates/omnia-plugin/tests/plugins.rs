@@ -32,25 +32,20 @@ test_programs::foreach_plugins!();
 
 const ECHOER_PACKAGE: &str = "test:echoer@1.0.0";
 
-/// The name the echoer package derives: its reference without the version.
+// the name the echoer package derives: its reference without the version
 const ECHOER_NAME: &str = "test:echoer";
 
-/// A manifest declaring `wasm` as the `requester` command guest — a path,
-/// so it loads when the command drive first names it; the tests declare
-/// what it may load beside it.
+// a path, so the requester loads when the command drive first names it
 fn requester(wasm: &str) -> Manifest {
     Manifest::new().guest(GuestEntry::new("requester", wasm).command())
 }
 
-/// The location of a guest the deployment declares as `name`.
 fn declared(name: &str) -> Location {
     Location::Declared(name.to_owned())
 }
 
-/// Build `manifest` in command mode with `args` as the guest's argv past the
-/// program name, the telemetry host serving the `command!` guest's otel
-/// imports; the loader host is assembly's. Nothing declares what the
-/// requester imports: the seam is read off the components.
+// command mode; the loader host is assembly's, and the link seam is read
+// off the components
 async fn deployment(
     manifest: Manifest, args: &[&str],
 ) -> Result<omnia::Deployment<StoreCtx<Backends>>> {
@@ -65,8 +60,7 @@ async fn deployment(
     Ok(deployment)
 }
 
-/// Assemble `manifest` over the declared policy: package sources fetch
-/// through the manifest's `registries`.
+// over the declared policy: package sources fetch through the manifest's `registries`
 async fn boot(manifest: Manifest, args: &[&str]) -> Result<Runtime<Backends>> {
     deployment(manifest, args)
         .await?
@@ -75,7 +69,6 @@ async fn boot(manifest: Manifest, args: &[&str]) -> Result<Runtime<Backends>> {
         .context("assembling runtime")
 }
 
-/// Boot and drive the requester once.
 async fn run(manifest: Manifest, args: &[&str]) -> Result<ExitStatus> {
     let runtime = boot(manifest, args).await?;
     let status = runtime.run_command().await;
@@ -83,8 +76,7 @@ async fn run(manifest: Manifest, args: &[&str]) -> Result<ExitStatus> {
     status
 }
 
-/// Host→guest `omnia-test:link/ops` `ping` through the [`Dispatcher`], from a
-/// server root.
+// host-to-guest `ping` through the `Dispatcher`, from a server root
 async fn invoke_ping(runtime: &Runtime<Backends>, target: &str, message: &str) -> Result<String> {
     let results = runtime
         .dispatcher()
@@ -103,7 +95,7 @@ async fn invoke_ping(runtime: &Runtime<Backends>, target: &str, message: &str) -
     }
 }
 
-/// Instantiate `guest` fresh and drive a world-level string export.
+// instantiates `guest` fresh and drives a world-level string export
 async fn call_export(
     runtime: &Runtime<Backends>, guest: &str, func: &str, message: &str,
 ) -> Result<String> {
@@ -131,7 +123,7 @@ async fn call_export(
     }
 }
 
-/// What the registry holds for a guest name.
+// what the registry holds for a guest name
 #[derive(Debug, PartialEq, Eq)]
 enum Registered {
     Absent,
@@ -150,7 +142,6 @@ fn digest_of(path: &str) -> Digest {
     Digest::of(&std::fs::read(path).unwrap_or_else(|error| panic!("reading {path}: {error}")))
 }
 
-/// Stage `wasm` in the scratch dir under `name`, returning the staged path.
 fn stage(scratch: &Scratch, name: &str, wasm: &str) -> PathBuf {
     let target = scratch.path().join(name);
     if let Some(parent) = target.parent() {
@@ -160,8 +151,7 @@ fn stage(scratch: &Scratch, name: &str, wasm: &str) -> PathBuf {
     target
 }
 
-/// Compile `wasm` ahead of time into the scratch dir under `name` — what
-/// `omnia compile` writes — returning the artifact's path.
+// what `omnia compile` writes
 fn precompile(scratch: &Scratch, name: &str, wasm: &str) -> PathBuf {
     let target = scratch.path().join(name);
     omnia::compile::compile(
@@ -174,8 +164,7 @@ fn precompile(scratch: &Scratch, name: &str, wasm: &str) -> PathBuf {
     target
 }
 
-/// Stage `wasm` as `package` in a wasm-pkg `local` backend rooted at `root`,
-/// served by the registry `registry.test`.
+// a wasm-pkg `local` backend, served by the registry `registry.test`
 fn stage_package(root: &Path, package: &str, wasm: &str) {
     let (name, version) = package.split_once('@').expect("test packages pin versions");
     let (namespace, name) = name.split_once(':').expect("test packages are namespaced");
@@ -184,8 +173,7 @@ fn stage_package(root: &Path, package: &str, wasm: &str) {
     std::fs::copy(wasm, dir.join(format!("{version}.wasm"))).expect("staging package");
 }
 
-/// The `registries` TOML serving the registry `registry.test` from the
-/// `local` backend at `root`, routing nothing to it.
+// serves `registry.test` from the `local` backend at `root`, routing nothing to it
 fn local_backend_toml(root: &Path) -> String {
     format!(
         "[registry.\"registry.test\"]\ndefault = \"local\"\n\n[registry.\"registry.test\".local]\nroot \
@@ -194,15 +182,11 @@ fn local_backend_toml(root: &Path) -> String {
     )
 }
 
-/// The `registries` TOML routing every package to the `local` backend at
-/// `root` — what a manifest's `[registries]` file or the macro's
-/// `registries:` would carry.
+// routes every package to the `local` backend at `root`
 fn local_registry_toml(root: &Path) -> String {
     format!("default_registry = \"registry.test\"\n\n{}", local_backend_toml(root))
 }
 
-/// The echoer declared as a registry package, named `test:echoer` by its
-/// reference.
 fn echoer_package() -> GuestEntry {
     GuestEntry::package(ECHOER_PACKAGE)
 }
@@ -450,10 +434,9 @@ async fn plugins_refused() {
     let rows: [(&str, GuestEntry, &str, &str); 4] = [
         ("junk", GuestEntry::new("junk", junk), "refused", "validating `junk`"),
         ("absent", GuestEntry::new("absent", absent), "unavailable", "reading"),
-        // No `registries` at all: nothing routes any package.
+        // no `registries` at all: nothing routes any package
         (ECHOER_NAME, echoer_package(), "refused", "no registry routes `test:echoer`"),
-        // A guest declared under another name is still just a name; the
-        // undeclared one refuses, naming it.
+        // a guest declared under another name is still just a name
         (
             "nonesuch",
             GuestEntry::new("other", test_programs::LINK_ECHOER),
@@ -813,9 +796,8 @@ async fn plugins_mixed() {
     runtime.shutdown();
 }
 
-/// A wasm custom section (id 0) named `omnia-test` wrapping `payload`:
-/// appending one changes a component's bytes — and digest — without changing
-/// its behavior. Single-byte LEB128 sizes, so name plus payload stay short.
+// Appending a custom section changes a component's bytes, and digest,
+// without changing its behavior. Single-byte LEB128 sizes, so keep it short.
 fn custom_section(payload: &[u8]) -> Vec<u8> {
     let name = b"omnia-test";
     let mut body = vec![u8::try_from(name.len()).expect("short name")];
@@ -826,7 +808,7 @@ fn custom_section(payload: &[u8]) -> Vec<u8> {
     section
 }
 
-/// The echoer with one extra custom section: same behavior, new digest.
+// same behavior, new digest
 fn changed_echoer(payload: &[u8]) -> Vec<u8> {
     let mut changed = std::fs::read(test_programs::LINK_ECHOER).expect("reading the echoer");
     changed.extend_from_slice(&custom_section(payload));
