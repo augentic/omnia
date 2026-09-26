@@ -53,9 +53,10 @@ Unreleased
 - A run with no collector exports nothing. A signal's OTLP exporter attaches
   only when an endpoint is configured for it — `OTEL_GRPC_URL`,
   OpenTelemetry's `OTEL_EXPORTER_OTLP_ENDPOINT`, or the signal's own
-  `OTEL_EXPORTER_OTLP_{TRACES,METRICS}_ENDPOINT` — where it used to fall
-  back to `localhost:4317` and, without a collector there, spend every run
-  retrying the connection and every exit waiting on the flush. The
+  `OTEL_EXPORTER_OTLP_{TRACES,METRICS}_ENDPOINT`, an empty value counting
+  as unset — where it used to fall back to `localhost:4317` and, without a
+  collector there, spend every run retrying the connection and every exit
+  waiting on the flush. The
   providers still publish (the resource and the tracer guest telemetry
   grafts onto are unchanged); an unexported signal is dropped, and the
   choice is reported once at `debug`. `tower` joins the always-muted

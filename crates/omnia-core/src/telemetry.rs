@@ -76,7 +76,7 @@ impl Telemetry {
         }
     }
 
-    /// Sets the OTLP gRPC endpoint both signals export to.
+    /// Sets the OTLP gRPC endpoint both signals export to; empty is unset.
     #[must_use]
     pub fn endpoint(mut self, endpoint: impl Into<String>) -> Self {
         self.endpoint = Some(endpoint.into());
@@ -125,9 +125,7 @@ impl Telemetry {
         // Console tracing goes to stderr: stdout belongs to the guest's output.
         let fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
 
-        let exports = exports(self.endpoint.as_deref(), |name| {
-            env::var(name).ok().filter(|value| !value.is_empty())
-        });
+        let exports = exports(self.endpoint.as_deref(), |name| env::var(name).ok());
         let providers = Providers::build(&self.name, self.endpoint.as_deref(), exports)?;
         let tracer = providers.tracer.tracer(self.name);
 
@@ -166,6 +164,8 @@ impl Telemetry {
 // connect retry and the exit flush waits on them; so a signal exports only
 // when an endpoint is configured for it — the builder's (`OTEL_GRPC_URL`),
 // the shared `OTEL_EXPORTER_OTLP_ENDPOINT`, or the signal's own variable.
+// An empty value is unset, as the exporter itself reads one, so an
+// `OTEL_GRPC_URL=` left in a profile attaches nothing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Exports {
     traces: bool,
@@ -180,10 +180,13 @@ impl Exports {
 }
 
 fn exports(endpoint: Option<&str>, env: impl Fn(&str) -> Option<String>) -> Exports {
-    let shared = endpoint.is_some() || env(OTEL_EXPORTER_OTLP_ENDPOINT).is_some();
+    fn set(value: Option<impl AsRef<str>>) -> bool {
+        value.is_some_and(|value| !value.as_ref().is_empty())
+    }
+    let shared = set(endpoint) || set(env(OTEL_EXPORTER_OTLP_ENDPOINT));
     Exports {
-        traces: shared || env(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT).is_some(),
-        metrics: shared || env(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT).is_some(),
+        traces: shared || set(env(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)),
+        metrics: shared || set(env(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT)),
     }
 }
 
@@ -553,6 +556,27 @@ mod tests {
         #[test]
         fn builder_endpoint() {
             assert_eq!(exports(Some("http://collector:4317"), env(&[])), Exports::ALL);
+        }
+
+        // Set but empty is unset, for the builder's endpoint (`OTEL_GRPC_URL=`
+        // in a profile) as for every `OTEL_EXPORTER_OTLP_*` variable.
+        #[test]
+        fn empty_is_unset() {
+            let empty = |_: &str| Some(String::new());
+            assert_eq!(
+                exports(Some(""), empty),
+                Exports {
+                    traces: false,
+                    metrics: false
+                }
+            );
+            assert_eq!(
+                exports(Some(""), env(&["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"])),
+                Exports {
+                    traces: true,
+                    metrics: false
+                }
+            );
         }
 
         #[test]
