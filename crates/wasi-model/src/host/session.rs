@@ -73,9 +73,8 @@ struct Inner {
 }
 
 impl Inner {
-    // Record `error` as the session's typed failure (the first one wins) and
-    // return the matching hard error for the backend. Spelled by hand because
-    // the generated `Display` for `Error` is `Debug`-shaped.
+    // The first typed failure wins. Spelled by hand because the generated
+    // `Display` for `Error` is `Debug`-shaped.
     fn record(&mut self, error: Error) -> anyhow::Error {
         let hard = anyhow!(match &error {
             Error::InvalidRequest(detail) => format!("invalid request: {detail}"),
@@ -139,8 +138,7 @@ impl ToolSession {
         async move {
             let pending = self.reserve(CHECK_TOOL, false)?;
             let output = self.exchange(pending, CHECK_TOOL, candidate).await?;
-            // The correction is what reaches the model here; the same cap
-            // that bounds a tool result bounds it.
+            // the correction reaches the model, so the tool-result cap bounds it
             if let Err(correction) = &output {
                 self.cap(CHECK_TOOL, correction)?;
             }
@@ -237,25 +235,22 @@ impl ToolSession {
     fn deliver(&self, result: ToolResult) {
         let sender = self.lock().pending.remove(&result.id);
         if let Some(sender) = sender {
-            // A rejected send means the caller stopped waiting; stale either way.
+            // a rejected send means the caller stopped waiting
             drop(sender.send(result.output));
         } else {
             tracing::trace!(id = %result.id, "dropping tool result with no pending call");
         }
     }
 
-    // End the session: close the calls stream toward the guest and fail
-    // every pending waiter. Runs when the reply pipeline finishes or is
-    // cancelled, and when the guest closes its results stream.
+    // Runs when the reply pipeline ends, and when the guest closes its results stream.
     fn shutdown(&self) {
         let mut inner = self.lock();
         inner.calls = None;
         inner.pending.clear();
     }
 
-    // The session can no longer consume results: the calls stream is closed
-    // and no call awaits an answer. Rejecting further writes lets a guest
-    // still holding the results writer observe the session's end.
+    // Rejecting further writes lets a guest still holding the results writer
+    // observe the session's end.
     fn dead(&self) -> bool {
         let inner = self.lock();
         inner.calls.is_none() && inner.pending.is_empty()
@@ -296,8 +291,7 @@ impl ReplyTask {
     pub async fn join(mut self) -> Result<Reply, Error> {
         match (&mut self.handle).await {
             Ok(result) => result,
-            // Cancelled cannot be observed here (aborting requires dropping
-            // `self`), so this is a pipeline panic.
+            // aborting requires dropping `self`, so this is a pipeline panic
             Err(error) => Err(Error::Backend(format!("reply pipeline failed: {error}"))),
         }
     }

@@ -20,9 +20,8 @@ impl HasData for WasiConfig {
     type Data<'a> = wasmtime_wasi_config::WasiConfig<'a>;
 }
 
-// `wasi:config`'s linker-facing view is a shared borrow over the backend's
-// variables — no resource table involved — so the `HostCtx` impl is
-// hand-written rather than `wasi_view!`-generated.
+// hand-written rather than `wasi_view!`-generated: the view is a shared
+// borrow over the backend's variables, with no resource table involved
 impl HostCtx for WasiConfig {
     type Borrow<'a> = &'a dyn WasiConfigCtx;
 

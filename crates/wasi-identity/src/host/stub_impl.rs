@@ -32,7 +32,6 @@ impl WasiIdentityCtx for IdentityStub {
     }
 }
 
-/// The fixed-token identity handed out by [`IdentityStub`].
 #[derive(Debug)]
 struct StubIdentity;
 

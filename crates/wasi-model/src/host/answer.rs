@@ -160,9 +160,7 @@ fn maybe_json(text: &str) -> Vec<Value> {
     values
 }
 
-// Unit tests by design: `candidate` / `instruction` are the pure extraction
-// and prompt-shaping surface backends drive directly; no guest boundary
-// reaches them with these inputs.
+// `candidate` and `instruction` are pure; backends drive them directly
 #[cfg(test)]
 mod tests {
     use super::Format;

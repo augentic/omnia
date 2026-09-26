@@ -69,10 +69,9 @@ impl Request {
     }
 }
 
+// the prompt: system text, each message (non-user ones under a `[role]`
+// header) and the format's final-answer instruction, joined by blank lines
 impl fmt::Display for Request {
-    // The prompt is the request's blocks joined by blank lines: the system
-    // text, each message (non-user ones under a `[role]` header), and the
-    // format's final-answer instruction.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut blocks: Vec<String> = self.system.iter().cloned().collect();
         blocks.extend(self.messages.iter().map(|message| match message.role {

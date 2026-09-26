@@ -61,8 +61,7 @@ impl Client for MessagingDefault {
 
         async move {
             message.topic = topic;
-            // A broadcast send only fails when there are no subscribers;
-            // publishing into the void is a valid no-op.
+            // a broadcast send fails only without subscribers, a valid no-op
             let _ = sender.send(message);
             Ok(())
         }
@@ -76,13 +75,10 @@ impl Client for MessagingDefault {
         let sender = self.sender.clone();
 
         async move {
-            // In a real implementation, this would send a request and wait for a response
-            // For the default impl, we'll just create a simple response
+            // a canned reply: publish, then acknowledge without waiting
             message.topic = topic;
-            // No subscribers is a valid state for the canned request/reply stub.
             let _ = sender.send(message);
 
-            // Return a simple acknowledgment message
             Ok(Message {
                 topic: "response".to_string(),
                 payload: b"ACK".to_vec(),

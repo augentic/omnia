@@ -77,7 +77,7 @@ impl<T> HostWithStore<T> for WasiBlobstore {
         );
 
         if same_object(&src, &dest) {
-            // No-op for identical source and destination; deleting would corrupt data.
+            // deleting the source would destroy the destination
             return Ok(());
         }
 
@@ -87,8 +87,7 @@ impl<T> HostWithStore<T> for WasiBlobstore {
     }
 }
 
-/// Copy `src` to `dest`, returning the source container so `move_object` can
-/// delete the source afterwards.
+// returns the source container so `move_object` can delete the source after
 async fn copy<T>(
     accessor: &Accessor<T, WasiBlobstore>, src: &ObjectId, dest: ObjectId,
 ) -> Result<std::sync::Arc<dyn crate::host::resource::Container>> {

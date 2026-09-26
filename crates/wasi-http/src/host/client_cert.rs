@@ -44,9 +44,7 @@ impl fmt::Display for Rejection {
 
 /// Check the leaf certificate of a PEM bundle for TLS client authentication.
 pub fn validate_bundle(pem: &[u8]) -> Result<(), Rejection> {
-    // Only the first CERTIFICATE block is the identity presented to the
-    // server. Anything after it is chain — legitimately CA certificates
-    // without `clientAuth` — and is left to the peer to evaluate.
+    // only the first block is the identity; the chain after it is the peer's to evaluate
     let leaf = match CertificateDer::pem_slice_iter(pem).next() {
         None => return Err(Rejection::NoCertificate),
         Some(Err(_)) => return Err(Rejection::Malformed),
@@ -89,8 +87,7 @@ pub fn validate_bundle(pem: &[u8]) -> Result<(), Rejection> {
     Ok(())
 }
 
-/// The certificate's extension of type `T`, if present; `Malformed` when it
-/// is duplicated or fails to decode (its criticality flag is irrelevant here).
+// `Malformed` when duplicated or undecodable; criticality is irrelevant here
 fn extension<'a, T>(tbs: &'a TbsCertificate) -> Result<Option<T>, Rejection>
 where
     T: Decode<'a> + AssociatedOid,
@@ -109,16 +106,14 @@ mod tests {
 
     use super::*;
 
-    /// Certificate parameters with rcgen's defaults: no EKU, no key usage, no
-    /// basic constraints, and a validity window spanning the present.
+    // rcgen's defaults: no EKU, no key usage, no basic constraints
     fn params(configure: impl FnOnce(&mut CertificateParams)) -> CertificateParams {
         let mut params = CertificateParams::new(Vec::<String>::new()).expect("parameters");
         configure(&mut params);
         params
     }
 
-    /// A self-signed P-256 certificate followed by its PKCS#8 key: the layout
-    /// the `Client-Cert` header carries.
+    // certificate then PKCS#8 key: the layout the `Client-Cert` header carries
     fn bundle(configure: impl FnOnce(&mut CertificateParams)) -> Vec<u8> {
         let key = KeyPair::generate().expect("key pair");
         let certificate = params(configure).self_signed(&key).expect("certificate");
@@ -157,8 +152,7 @@ mod tests {
 
     #[test]
     fn client_auth_with_chain() {
-        // Leaf issued by a CA, then the CA itself, key last: the CA is never
-        // the identity, so its lack of `clientAuth` must not be inspected.
+        // the ca is never the identity, so its lack of `clientAuth` must not be inspected
         let ca_key = KeyPair::generate().expect("CA key pair");
         let ca_params = params(|params| {
             params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);

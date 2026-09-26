@@ -57,9 +57,7 @@ impl<T> HostBucketWithStore<T> for WasiKeyValue {
         tracing::trace!("store::HostBucket::list_keys {cursor:?}");
         let bucket = get_bucket(accessor, &self_)?;
         let keys = bucket.keys().await.context("issue listing keys")?;
-        // `keys()` returns the complete set in one page; echoing the caller's
-        // cursor back would signal another page and loop pagination-aware
-        // guests forever.
+        // one page: echoing the cursor back would loop pagination-aware guests forever
         Ok(KeyResponse { keys, cursor: None })
     }
 

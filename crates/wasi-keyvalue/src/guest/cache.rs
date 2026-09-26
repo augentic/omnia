@@ -35,8 +35,7 @@ impl Cache {
             return Ok(None);
         };
 
-        // A value the cache did not write (raw bytes another writer stored)
-        // is the normal case for a shared bucket, not an event.
+        // raw bytes another writer stored are the normal case for a shared bucket
         let Ok(ttl_val) = Cacheable::try_from(&entry) else {
             tracing::trace!("Not serialized using Cacheable");
             return Ok(Some(entry));
@@ -145,7 +144,6 @@ mod tests {
 
     #[test]
     fn wrong_type() {
-        // JSON for a different type (e.g., a string)
         let bytes = serde_json::to_vec(&"just a string").unwrap();
         let result = Cacheable::try_from(&bytes);
         result.unwrap_err();

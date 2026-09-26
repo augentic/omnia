@@ -112,7 +112,7 @@ impl TypesHost for WasiDocStoreCtxView<'_> {
     }
 }
 
-/// Consume child filter resources into one combining node (`and` / `or`).
+// consumes the child filter resources into one `and` / `or` node
 fn combine<T>(
     mut host: Access<'_, T, WasiDocStore>, filters: Vec<Resource<FilterProxy>>, verb: &str,
     node: fn(Vec<FilterTree>) -> FilterTree,

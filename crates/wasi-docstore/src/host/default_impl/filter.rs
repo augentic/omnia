@@ -269,8 +269,7 @@ mod tests {
 
     #[test]
     fn not_of_and_conjunction() {
-        // De Morgan: NOT(agency = AT AND type = 3) admits everything except
-        // documents satisfying both conjuncts.
+        // de morgan: everything but a document satisfying both conjuncts
         let filter = FilterTree::Not(Box::new(FilterTree::And(vec![
             compare("agency", ComparisonOp::Eq, ScalarValue::Str("AT".into())),
             compare("route_type", ComparisonOp::Eq, ScalarValue::Int32(3)),

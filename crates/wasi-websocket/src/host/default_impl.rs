@@ -111,7 +111,6 @@ impl Client for WebSocketDefault {
         .boxed()
     }
 
-    /// Send event to WebSocket clients, optionally filtered by group.
     fn send(&self, event: Event, sockets: Option<Vec<String>>) -> FutureResult<()> {
         tracing::debug!("sending event to WebSocket clients, sockets: {:?}", sockets);
 
@@ -131,15 +130,9 @@ impl Client for WebSocketDefault {
     }
 }
 
-/// Default implementation for the WebSocket server.
-///
-/// This implementation listens for new connections and handles them in a
-/// separate task. It broadcasts incoming messages to all connected peers and
-/// forwards outgoing messages to connected clients.
 impl WebSocketDefault {
-    /// Build the backend without a listener: `connect()` still yields a
-    /// client, but its events come only from in-process senders and its
-    /// sends reach no peer. Tests use this; a server calls `connect_with`.
+    /// Build the backend without a listener: events come only from in-process
+    /// senders and sends reach no peer. A server calls `connect_with`.
     #[must_use]
     pub fn new() -> Self {
         let (event_tx, _) = broadcast::channel::<Event>(BROADCAST_CAPACITY);
@@ -226,7 +219,6 @@ impl WebSocketDefault {
         self.connections.remove(&socket_addr);
     }
 
-    /// Add a new socket to the connection map.
     fn add_socket(&self, socket_addr: String, tx: mpsc::Sender<Message>) -> Result<()> {
         if self.connections.len() >= MAX_CONNECTIONS {
             return Err(anyhow!("max connections reached"));
@@ -235,7 +227,6 @@ impl WebSocketDefault {
         Ok(())
     }
 
-    /// Send event to the wasm guest's websocket event handler.
     fn send_to_guest(&self, socket_addr: String, data: Vec<u8>) {
         let event = Event {
             socket_addr: Some(socket_addr),

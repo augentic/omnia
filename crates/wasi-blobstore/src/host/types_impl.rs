@@ -48,9 +48,7 @@ impl<T> HostOutgoingValueWithStore<T> for WasiBlobstore {
     fn new_outgoing_value(
         mut host: Access<'_, T, Self>,
     ) -> wasmtime::Result<Resource<OutgoingValue>> {
-        // The pipe is never drained (`finish` hands the whole buffer to the
-        // backend), so a finite capacity only traps writes past it; the
-        // buffer grows on demand from empty.
+        // never drained before `finish`, so a finite capacity would only trap writes
         Ok(host.get().table.push(OutgoingValue::new(usize::MAX))?)
     }
 

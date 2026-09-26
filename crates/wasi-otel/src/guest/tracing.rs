@@ -57,8 +57,7 @@ impl otel::Tracer for Tracer {
     type Span = Span;
 
     fn build_with_context(&self, builder: SpanBuilder, parent_cx: &Context) -> Span {
-        // A root span opens a new trace; the host grafts it onto the live
-        // host span at export.
+        // a root span opens a new trace; the host grafts it onto its live span at export
         let parent_span = parent_cx.span();
         let parent = parent_span.span_context();
         let (trace_id, parent_span_id, trace_state) = if parent.is_valid() {
@@ -196,8 +195,7 @@ impl Drop for Span {
     }
 }
 
-/// Random id bytes; a per-instance counter stands in should the random
-/// source fail, so an id is still unique and never the all-zero invalid one.
+// a counter stands in should the random source fail, so an id is never the all-zero invalid one
 fn random<const N: usize>() -> [u8; N] {
     let mut bytes = [0; N];
     if getrandom::fill(&mut bytes).is_err() {
@@ -227,8 +225,7 @@ fn take(buffer: &SpanBuffer) -> Vec<wasi::SpanData> {
 
 impl From<SpanContext> for wasi::SpanContext {
     fn from(sc: SpanContext) -> Self {
-        // `Display` zero-pads the ids; `LowerHex` would not, and the host
-        // hex-decodes them.
+        // `Display` zero-pads the ids the host hex-decodes; `LowerHex` would not
         Self {
             trace_id: sc.trace_id().to_string(),
             span_id: sc.span_id().to_string(),

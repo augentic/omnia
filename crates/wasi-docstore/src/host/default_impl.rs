@@ -114,8 +114,7 @@ impl WasiDocStoreCtx for DocStoreDefault {
     ) -> FutureResult<QueryResult> {
         let store = self.clone();
         async move {
-            // Clamp rather than trust the guest-supplied page size; an
-            // oversized limit degrades to the host maximum.
+            // clamp the guest-supplied page size to the host maximum
             let limit = options.limit.map_or(MAX_PAGE_SIZE, u64::from).min(MAX_PAGE_SIZE);
             anyhow::ensure!(limit > 0, "query limit must be at least 1");
             let page_size = usize::try_from(limit).unwrap_or(usize::MAX);
@@ -137,7 +136,7 @@ impl WasiDocStoreCtx for DocStoreDefault {
             };
 
             if !options.order_by.is_empty() {
-                // Id tiebreaker keeps pagination stable across equal sort keys.
+                // the id tiebreaker keeps pagination stable across equal sort keys
                 rows.sort_by(|a, b| {
                     filter::compare_documents(&a.1, &b.1, &options.order_by)
                         .then_with(|| a.0.cmp(&b.0))

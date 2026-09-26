@@ -46,8 +46,7 @@ impl fmt::Debug for ConnectOptions {
 
 impl omnia_core::FromEnv for ConnectOptions {
     fn load_env() -> Result<Self> {
-        // `Self::from_env()` is the builder-returning inherent the `FromEnv`
-        // derive emits.
+        // `Self::from_env()` is the builder the `FromEnv` derive emits
         Self::from_env().finalize().context("issue loading connection options")
     }
 }
@@ -109,8 +108,8 @@ impl CachedToken {
 #[derive(Debug, Clone)]
 struct TokenManager {
     options: Arc<ConnectOptions>,
-    // Tokens are scoped: a token minted for one scope set must never be
-    // handed out for another, so the cache is keyed by normalized scopes.
+    // keyed by normalized scopes: a token minted for one scope set is never
+    // handed out for another
     // TODO: change to use wasi-keyvalue for distributed caching
     cache: Arc<Mutex<HashMap<Vec<String>, CachedToken>>>,
 }
@@ -173,7 +172,7 @@ impl TokenManager {
     }
 }
 
-/// Normalize a scope list into a cache key (order- and duplicate-insensitive).
+// order- and duplicate-insensitive
 fn cache_key(scopes: &[String]) -> Vec<String> {
     let mut key = scopes.to_vec();
     key.sort_unstable();
