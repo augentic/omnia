@@ -78,7 +78,7 @@ Everything is environment variables — backend connection strings, runtime limi
 Two variables deserve attention in production:
 
 - `RUST_LOG` — a server defaults to `warn`; set at least `info` (or start the binary with `-v`) so startup, readiness, and trigger-server logs are emitted.
-- `OTEL_GRPC_URL` — point at your collector; the host exports traces and metrics (including pool-occupancy gauges) with no further wiring. Unset (and no `OTEL_EXPORTER_OTLP_*`), nothing is exported — guest telemetry included.
+- `OTEL_EXPORTER_OTLP_ENDPOINT` — point at your collector; the host exports traces and metrics (including pool-occupancy gauges) with no further wiring. Unset (and no per-signal `OTEL_EXPORTER_OTLP_*_ENDPOINT`), nothing is exported — guest telemetry included.
 
 ## Readiness and health
 
@@ -95,6 +95,6 @@ with the mode and guest count attached. Orchestrators (or a log-watching startup
 - [ ] Release build; consider AOT (`compile`) plus a `jit`-less host for fastest, smallest deployments
 - [ ] Backend env vars set and validated (the host fails at startup if a backend cannot connect)
 - [ ] `GUEST_TIMEOUT_MS`, `MAX_MEMORY_BYTES` sized for your workload ([tuning guide](performance-tuning.md))
-- [ ] `RUST_LOG=info` and `OTEL_GRPC_URL` set
+- [ ] `RUST_LOG=info` and `OTEL_EXPORTER_OTLP_ENDPOINT` set
 - [ ] Readiness keyed on the `omnia ready` log line (or TCP on `HTTP_ADDR`)
 - [ ] Mounts limited to the directories guests actually need, read-only unless writes are required ([security model](../security-model.md))

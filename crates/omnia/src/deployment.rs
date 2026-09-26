@@ -492,14 +492,11 @@ fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, Runt
 }
 
 // The host's telemetry: the console at the run's directives, the exporters at
-// `OTEL_GRPC_URL` when set (else OpenTelemetry's own endpoint resolution, and
-// none without an endpoint — `Telemetry::build` reports that at `debug`).
+// OpenTelemetry's own endpoint resolution (`OTEL_EXPORTER_OTLP_ENDPOINT` and
+// the per-signal variables), and none without an endpoint — `Telemetry::build`
+// reports that at `debug`.
 fn init_telemetry(name: &str, rust_log: &str) -> Result<()> {
-    let mut telemetry = Telemetry::new(name).filter(rust_log);
-    if let Ok(endpoint) = env::var("OTEL_GRPC_URL") {
-        telemetry = telemetry.endpoint(endpoint);
-    }
-    telemetry.build().context("initializing telemetry")
+    Telemetry::new(name).filter(rust_log).build().context("initializing telemetry")
 }
 
 #[cfg(test)]

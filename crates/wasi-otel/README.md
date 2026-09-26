@@ -12,7 +12,7 @@ Uses `opentelemetry` and `tracing` crates to export telemetry data.
 
 ## Configuration
 
-- **`OTEL_GRPC_URL`**: The gRPC endpoint for the OpenTelemetry collector. Unset defers to `OTEL_EXPORTER_OTLP_*`; with neither, the host attaches no exporter and guest telemetry it receives is dropped.
+- **`OTEL_EXPORTER_OTLP_ENDPOINT`**: The gRPC endpoint for the OpenTelemetry collector, for the host's own spans and — through [`omnia-opentelemetry`](https://github.com/augentic/omnia-backends/tree/main/crates/opentelemetry) — the guest telemetry it receives. Unset, the host attaches no exporter, and `OtelDefault` (below) drops guest telemetry whatever is set.
 
 - **Production**: [`omnia-opentelemetry`](https://github.com/augentic/omnia-backends/tree/main/crates/opentelemetry) (OTLP gRPC collector export) — a one-line swap in the host, guests untouched (see the [Production Backends guide](https://github.com/augentic/omnia/blob/main/docs/guides/production-backends.md)).
 

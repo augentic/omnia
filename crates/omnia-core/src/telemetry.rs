@@ -33,33 +33,15 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry};
 
-// Whether the process's global subscriber is settled: omnia's installed, or
-// an embedder's found already set (a global subscriber is never replaced, so
-// retrying `try_init` could only re-warn). Held for the whole of `build`, so
-// two racers cannot both pass the check and race on `try_init`.
 static SETTLED: Mutex<bool> = Mutex::new(false);
-
-// The process's provider state. Like the global subscriber that references
-// the providers, it lives for the rest of the process.
 static PROVIDERS: OnceLock<Providers> = OnceLock::new();
 
 /// Builder for the host's telemetry: the `tracing` subscriber with OTLP
 /// exporters beneath it.
 pub struct Telemetry {
-    /// The service name identifying the process in telemetry data.
     name: String,
-
-    /// OTLP gRPC endpoint override; unset defers to OpenTelemetry endpoint
-    /// resolution (`OTEL_EXPORTER_OTLP_*` env vars), and a signal with no
-    /// endpoint from either has no exporter.
     endpoint: Option<String>,
-
-    /// Explicit filter directives for the console; unset defers to
-    /// `RUST_LOG`.
     filter: Option<String>,
-
-    /// The level the console falls back to when `RUST_LOG` is unset and no
-    /// explicit directives are given.
     fallback: LevelFilter,
 }
 
@@ -147,8 +129,8 @@ impl Telemetry {
                     tracing::debug!(
                         traces = exports.traces,
                         metrics = exports.metrics,
-                        "no OTLP endpoint (`OTEL_GRPC_URL`, `OTEL_EXPORTER_OTLP_*`); an \
-                         unexported signal is dropped"
+                        "no OTLP endpoint (`OTEL_EXPORTER_OTLP_ENDPOINT`); an unexported \
+                         signal is dropped"
                     );
                 }
             }
@@ -165,10 +147,10 @@ impl Telemetry {
 // Which signals have an exporter. OpenTelemetry's endpoint resolution falls
 // back to `localhost:4317`, where without a collector every export is a
 // connect retry and the exit flush waits on them; so a signal exports only
-// when an endpoint is configured for it — the builder's (`OTEL_GRPC_URL`),
-// the shared `OTEL_EXPORTER_OTLP_ENDPOINT`, or the signal's own variable.
-// An empty value is unset, as the exporter itself reads one, so an
-// `OTEL_GRPC_URL=` left in a profile attaches nothing.
+// when an endpoint is configured for it — the builder's, the shared
+// `OTEL_EXPORTER_OTLP_ENDPOINT`, or the signal's own variable. An empty
+// value is unset, as the exporter itself reads one, so an
+// `OTEL_EXPORTER_OTLP_ENDPOINT=` left in a profile attaches nothing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Exports {
     traces: bool,
@@ -571,8 +553,8 @@ mod tests {
             assert_eq!(exports(Some("http://collector:4317"), env(&[])), Exports::ALL);
         }
 
-        // Set but empty is unset, for the builder's endpoint (`OTEL_GRPC_URL=`
-        // in a profile) as for every `OTEL_EXPORTER_OTLP_*` variable.
+        // Set but empty is unset, for the builder's endpoint as for every
+        // `OTEL_EXPORTER_OTLP_*` variable (an `=` left in a profile).
         #[test]
         fn empty_is_unset() {
             let empty = |_: &str| Some(String::new());

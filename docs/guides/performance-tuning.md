@@ -59,4 +59,4 @@ Per-request tuning doesn't help cold starts. For those, pre-compile guests (`com
 
 ## What not to tune
 
-Guest lookup, routing, and dispatch are in-process and effectively free relative to instantiation. If p99 is high, look at the pool gauges and the guest's own work (outbound calls, backend latency — visible in OTel traces via `OTEL_GRPC_URL`) before touching anything else.
+Guest lookup, routing, and dispatch are in-process and effectively free relative to instantiation. If p99 is high, look at the pool gauges and the guest's own work (outbound calls, backend latency — visible in OTel traces via `OTEL_EXPORTER_OTLP_ENDPOINT`) before touching anything else.

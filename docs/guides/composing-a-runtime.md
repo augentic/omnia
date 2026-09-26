@@ -117,7 +117,7 @@ Runtime-wide settings (guest timeout, memory limits, instance pooling) are envir
 
 ## Observability and readiness
 
-- The runtime configures `tracing` and OpenTelemetry at startup. Set `RUST_LOG=info` (or run with `-v`) to see startup logs; set `OTEL_GRPC_URL` to export traces and metrics to an OTLP collector — without an endpoint nothing is exported.
+- The runtime configures `tracing` and OpenTelemetry at startup. Set `RUST_LOG=info` (or run with `-v`) to see startup logs; set `OTEL_EXPORTER_OTLP_ENDPOINT` to export traces and metrics to an OTLP collector — without an endpoint nothing is exported.
 - Once bootstrap completes, the runtime logs **`omnia ready`** at `info` level (including the mode and guest count). Orchestrators can watch for this line to detect readiness.
 
 ## Advanced deployment keys

@@ -30,7 +30,7 @@ curl --header 'Content-Type: application/json' -d '{"text":"hello"}' http://loca
 
 ## Using an OpenTelemetry Collector Backend
 
-To use an OpenTelemetry Collector backend, you need to set the `OTEL_GRPC_URL` environment variable to the address of the OpenTelemetry Collector.
+To use an OpenTelemetry Collector backend, you need to set the `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable to the address of the OpenTelemetry Collector.
 
 ## Prerequisites
 
@@ -56,7 +56,7 @@ omnia::runtime!({
 ```
 
 ```bash
-export OTEL_GRPC_URL="http://localhost:4317"
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4317"
 export RUST_LOG="info,wasi_otel=debug,omnia_wasi_http=debug,otel=debug"
 cargo run --example otel -- run ./target/wasm32-wasip2/debug/examples/otel_wasm.wasm
 ```

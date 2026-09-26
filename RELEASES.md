@@ -51,8 +51,8 @@ Unreleased
 ### Changed
 
 - A run with no collector exports nothing. A signal's OTLP exporter attaches
-  only when an endpoint is configured for it — `OTEL_GRPC_URL`,
-  OpenTelemetry's `OTEL_EXPORTER_OTLP_ENDPOINT`, or the signal's own
+  only when an endpoint is configured for it — OpenTelemetry's
+  `OTEL_EXPORTER_OTLP_ENDPOINT` or the signal's own
   `OTEL_EXPORTER_OTLP_{TRACES,METRICS}_ENDPOINT`, an empty value counting
   as unset — where it used to fall back to `localhost:4317` and, without a
   collector there, spend every run retrying the connection and every exit
@@ -189,8 +189,9 @@ Unreleased
 - Host telemetry is no longer feature-gated. The `otlp` feature is gone from
   `omnia` and `omnia-core`: every build of `Telemetry` carries the OTLP span
   and metric exporters beneath the console subscriber, so
-  `omnia::telemetry::flush`, `omnia::telemetry::resource`, and
-  `OTEL_GRPC_URL` are never compiled out, and a `default-features = false`
+  `omnia::telemetry::flush`, `omnia::telemetry::resource`, and the
+  `OTEL_EXPORTER_OTLP_*` endpoints are never compiled out, and a
+  `default-features = false`
   build of `omnia` exports too. Whether they take effect at run time is
   unchanged from 0.36.0: `Telemetry::build` publishes the providers when it
   installs the subscriber, and yields (leaving `flush` a no-op and
@@ -369,6 +370,13 @@ Unreleased
 
 ### Removed
 
+- `OTEL_GRPC_URL`. The host's collector endpoint is OpenTelemetry's own
+  `OTEL_EXPORTER_OTLP_ENDPOINT` (with `OTEL_EXPORTER_OTLP_{TRACES,METRICS}_ENDPOINT`
+  per signal), which the exporter already resolved beneath the alias; the
+  alias was read by the runtime alone and handed to `Telemetry::endpoint`,
+  which stays for an embedder setting the endpoint in code. `omnia-opentelemetry`
+  in `omnia-backends` reads the same variable for guest telemetry, so one
+  setting now names the collector for both.
 - `omnia_wasi_otel::set_filter`. A guest's tracing filter is the `RUST_LOG`
   its WASI environment carries, which the runtime composes from its
   verbosity flags and the process `RUST_LOG` (above) — the same
