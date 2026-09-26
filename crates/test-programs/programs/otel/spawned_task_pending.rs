@@ -15,9 +15,8 @@ struct CliGuest;
 
 wasip3::cli::command::export!(CliGuest);
 
-// Not `omnia_sdk::command!`: that opens the telemetry scope around the whole
-// scenario, so `traced` would neither own the lifecycle nor flush while the
-// receiver is pending — the exact condition this regression needs.
+// not `omnia_sdk::command!`: its telemetry scope would own the lifecycle, so
+// `traced` could not flush while the receiver is pending
 impl wasip3::exports::cli::run::Guest for CliGuest {
     async fn run() -> Result<(), ()> {
         scenario().await;

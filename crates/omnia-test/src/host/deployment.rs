@@ -48,9 +48,8 @@ pub struct Deployment {
     level: Option<LevelFilter>,
 }
 
-// A guest as the test declared it: one added through `guest` is read into
-// bytes when the manifest is built, so it loads at boot like the
-// `runtime!` macro's embedded guests; one added as built stays as it is.
+// One added through `guest` is read into bytes when the manifest is built,
+// so it loads at boot like the `runtime!` macro's embedded guests.
 #[derive(Clone, Debug)]
 struct Entry {
     entry: GuestEntry,

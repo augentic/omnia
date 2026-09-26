@@ -26,7 +26,6 @@ test_programs::foreach_model!();
 // Harness
 // ------------------------------------------------------------------------
 
-/// Run one guest program against `model`, requiring a clean exit.
 async fn run_guest<M: WasiModelCtx + Clone>(wasm: &str, mounts: Vec<Mount>, model: M) {
     let backends = Backends::defaults().await.model(model);
     let status = Deployment::new()
@@ -38,8 +37,7 @@ async fn run_guest<M: WasiModelCtx + Clone>(wasm: &str, mounts: Vec<Mount>, mode
     assert_eq!(status, ExitStatus::SUCCESS, "guest `{wasm}` failed");
 }
 
-/// [`run_guest`] over a scripted model, also requiring the script to be
-/// exactly consumed; returns the model for its recordings.
+// also requires the script to be exactly consumed; returns the model for its recordings
 async fn run_scripted(wasm: &str, mounts: Vec<Mount>, model: ScriptedModel) -> ScriptedModel {
     run_guest(wasm, mounts, model.clone()).await;
     model.assert_exhausted();
@@ -53,9 +51,8 @@ async fn run_scripted(wasm: &str, mounts: Vec<Mount>, model: ScriptedModel) -> S
 // Most scenarios script `omnia_test::host::ScriptedModel`; the two below
 // exercise session behaviour a FIFO script cannot express and stay by hand.
 
-/// Issues two `lookup` calls concurrently and answers with both outputs in
-/// issue order, proving results correlate by id however the guest answers.
-/// By hand: a script drives its steps serially.
+// Two concurrent `lookup` calls, answered in issue order, prove results
+// correlate by id however the guest answers. By hand: a script is serial.
 #[derive(Clone, Copy, Debug)]
 struct ParallelLookups;
 
@@ -74,9 +71,8 @@ impl WasiModelCtx for ParallelLookups {
     }
 }
 
-/// Calls an undeclared tool, ignores the hard failure, and still answers —
-/// host enforcement must win over that `Ok`. By hand: a script propagates a
-/// hard failure instead of swallowing it.
+// Calls an undeclared tool, ignores the hard failure and still answers: host
+// enforcement must win over that `Ok`. By hand: a script propagates failure.
 #[derive(Clone, Copy, Debug)]
 struct IgnoringToolFailure;
 
@@ -93,11 +89,10 @@ impl WasiModelCtx for IgnoringToolFailure {
     }
 }
 
-/// The candidates the `check_*` scenarios' scripted backend proposes.
+// the candidates the `check_*` scenarios' scripted backend proposes
 const PASS: &str = r#"{"verdict":"pass","findings":[]}"#;
 const FAIL: &str = r#"{"verdict":"fail","findings":["x"]}"#;
 
-/// One recorded `check` round.
 fn check(candidate: &str, outcome: Result<&str, &str>) -> Exchange {
     Exchange {
         tool: "check".into(),
@@ -106,7 +101,6 @@ fn check(candidate: &str, outcome: Result<&str, &str>) -> Exchange {
     }
 }
 
-/// The tool-call exchange every `lookup` scenario drives.
 fn lookup(outcome: Result<&str, &str>) -> Exchange {
     Exchange {
         tool: "lookup".into(),
@@ -115,13 +109,12 @@ fn lookup(outcome: Result<&str, &str>) -> Exchange {
     }
 }
 
-/// A `lookup` turn: one scripted call answered by the guest, then `answer`.
+// one scripted call answered by the guest, then `answer`
 fn lookup_turn(answer: &str) -> ScriptedModel {
     ScriptedModel::answering([answer]).calling(0, [("lookup", "{}")])
 }
 
-/// The workspace turn every `workspace_*` scenario drives: read the seed,
-/// write `out.txt`, list the root, answer.
+// read the seed, write `out.txt`, list the root, answer
 fn workspace_turn() -> ScriptedModel {
     ScriptedModel::answering(["hello:out.txt,seed.txt"])
         .reading(0, "seed.txt")
@@ -129,7 +122,7 @@ fn workspace_turn() -> ScriptedModel {
         .listing(0, "")
 }
 
-/// What a fully served [`workspace_turn`] records.
+// what a fully served `workspace_turn` records
 fn workspace_exchanges() -> Vec<Exchange> {
     let exchange = |tool: &str, path: &str, outcome: &str| Exchange {
         tool: tool.into(),

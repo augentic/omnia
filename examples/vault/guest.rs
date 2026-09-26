@@ -45,7 +45,6 @@ impl Guest for Http {
     }
 }
 
-/// Stores and retrieves a secret from the vault.
 #[omnia_wasi_otel::instrument]
 async fn handler(body: Bytes) -> HttpResult<Json<Value>> {
     let locker =

@@ -32,9 +32,7 @@ fn render(outcome: Result<omnia_sdk::model::Reply, omnia_sdk::model::Error>) -> 
     }
 }
 
-// A tool-less schema completion over the sugar, lending the `.` mount when
-// the host preopened one (with no mount the preopen table is empty and the
-// guest lends nothing).
+// a tool-less schema completion, lending the `.` mount when the host preopened one
 async fn default_completion() -> String {
     let (system, user) = Sections {
         role: Some("a terse code reviewer".to_string()),

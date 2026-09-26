@@ -14,7 +14,6 @@ use omnia_wasi_blobstore::{WasiBlobstore, WasiBlobstoreCtx as _};
 // here; a new program without one fails to compile.
 test_programs::foreach_blobstore!();
 
-/// Run one guest program against `backends`, requiring a clean exit.
 async fn run_guest(wasm: &str, backends: Backends) {
     let status = Deployment::new()
         .guest("guest", wasm)

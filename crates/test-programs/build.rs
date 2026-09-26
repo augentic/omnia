@@ -12,8 +12,7 @@ fn main() {
         .package("test-programs")
         .scan("crates/test-programs/programs")
         .sync_examples("crates/test-programs/Cargo.toml")
-        // The guests' WIT lives outside the dep-info the nested build emits
-        // (proc macros don't track file reads), so watch it explicitly.
+        // wit is outside the nested build's dep-info: proc macros do not track file reads
         .track([
             "crates/test-programs/wit",
             "crates/test-programs/wit-skew",

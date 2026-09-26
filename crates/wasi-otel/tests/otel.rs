@@ -27,7 +27,6 @@ use opentelemetry_proto::tonic::trace::v1::status::StatusCode;
 // here; a new program without one fails to compile.
 test_programs::foreach_otel!();
 
-/// The store's backend bundle: just the otel backend under test.
 #[derive(Clone, Debug)]
 struct Backends(Recording);
 
@@ -37,7 +36,6 @@ impl Provides<WasiOtel> for Backends {
     }
 }
 
-/// Records every export it receives, for host-side assertions.
 #[derive(Clone, Debug, Default)]
 struct Recording {
     traces: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
@@ -49,7 +47,7 @@ impl Recording {
         self.spans().into_iter().map(|(_, span)| span.name).collect()
     }
 
-    /// Every exported span with the name of its instrumentation scope.
+    // every exported span with the name of its instrumentation scope
     fn spans(&self) -> Vec<(String, Span)> {
         self.traces
             .lock()
@@ -64,7 +62,6 @@ impl Recording {
             .collect()
     }
 
-    /// The metrics of each export, in export order.
     fn metric_exports(&self) -> Vec<Vec<Metric>> {
         self.metrics
             .lock()
@@ -102,7 +99,6 @@ fn sum<'a>(metrics: &'a [Metric], name: &str) -> &'a Sum {
     }
 }
 
-/// The single data point of a delta histogram.
 fn histogram_point<'a>(metrics: &'a [Metric], name: &str) -> &'a HistogramDataPoint {
     let Some(Data::Histogram(histogram)) = &metric(metrics, name).data else {
         panic!("`{name}` must be a histogram");
@@ -126,25 +122,19 @@ impl WasiOtelCtx for Recording {
     }
 }
 
-/// Run one guest program against a fresh recording backend.
 async fn run_guest(wasm: &str) -> Recording {
     run(Deployment::new().guest("guest", wasm), wasm).await
 }
 
-/// Run `deployment` against a fresh recording backend; the deadline turns a
-/// telemetry-flush deadlock into a failure instead of a hung suite.
+// the deadline turns a telemetry-flush deadlock into a failure, not a hung suite
 async fn run(deployment: Deployment, label: &str) -> Recording {
-    // Guest telemetry grafts onto the host trace: the host-side `export`
-    // impls skip unless host telemetry is initialized and a host span is
-    // live. The runtime's own `cli-run` span is that span, at `info`, so
-    // the suite installs providers at that level and adds no span of its
-    // own — a guest whose spans export here exports under a real command
-    // run.
+    // guest spans graft onto the runtime's own `cli-run` span at `info`, so
+    // providers install at that level and the suite adds no span of its own
     Telemetry::new("otel-e2e").filter("info").build().expect("telemetry installs");
 
     let recording = Recording::default();
-    // Linked by hand: `run_host` would add a second `WasiOtel` beside the
-    // one under test.
+
+    // linked by hand: `run_host` would add a second `WasiOtel` beside the one under test
     let status = tokio::time::timeout(
         Duration::from_secs(300),
         deployment.run(Backends(recording.clone()), |deployment| {
@@ -163,8 +153,7 @@ async fn run(deployment: Deployment, label: &str) -> Recording {
 async fn otel_instrumented_handler() {
     let recording = run_guest(test_programs::OTEL_INSTRUMENTED_HANDLER).await;
     assert_eq!(recording.span_names(), ["traced"]);
-    // The scenario records no metrics, so the flush skips the metrics export
-    // rather than sending an empty collection.
+    // no metrics recorded, so the flush skips the export rather than send an empty one
     assert!(recording.metrics.lock().expect("metrics lock").is_empty());
 }
 

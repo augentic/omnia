@@ -105,8 +105,7 @@ impl Backends {
                 .expect("in-process messaging"),
             model: ModelDefault,
             otel: OtelDefault,
-            // A private database per bundle: the crate default
-            // `file::memory:?cache=shared` is one store for the whole process.
+            // a private database per bundle: the crate default is shared process-wide
             sql: SqlDefault::connect_with(SqlOptions {
                 database: ":memory:".to_owned(),
             })

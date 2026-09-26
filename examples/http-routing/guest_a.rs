@@ -19,10 +19,7 @@ impl Guest for GuestA {
     }
 }
 
-/// Respond to any path with this guest's identity and the `HTTP_ADDR` it
-/// sees — address discovery: when the deployment supplies a pre-bound
-/// listener, the runtime sets `HTTP_ADDR` to the address actually serving,
-/// so a guest can advertise or self-reference its own endpoint.
+// `HTTP_ADDR` is the address actually serving, so a guest can advertise its own endpoint
 async fn respond() -> String {
     let addr = std::env::var("HTTP_ADDR").unwrap_or_else(|_| "unset".into());
     format!("http-routing example: guest a (HTTP_ADDR={addr})\n")

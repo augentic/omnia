@@ -13,8 +13,7 @@ async fn scenario() {
 
     let reply = WasiModel
         .complete(
-            // Preopen `.` needs the `./` prefix so lend_subpath does not treat
-            // `.` as a stray first character of `nested`.
+            // the `./` prefix, so `.` is the preopen rather than a stray character of `nested`
             Request::builder().messages(vec![user("workspace")]).workspace("./nested").build(),
         )
         .await

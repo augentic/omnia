@@ -162,7 +162,7 @@ async fn refuse_tool_call() {
     assert!(refusal.contains("tool `lookup` has no handler"), "{refusal}");
 }
 
-/// A model that strips `check` before delegating: a backend ignoring the flag.
+// strips `check` before delegating: a backend ignoring the flag
 struct Unchecked(Scripted);
 
 impl omnia_sdk::Model for Unchecked {
@@ -189,8 +189,7 @@ impl omnia_sdk::Model for Unchecked {
     }
 }
 
-/// A model that offers one candidate to `check` and replies with it whatever
-/// the verdict: a backend that ignores the rejection.
+// offers one candidate to `check` and replies with it whatever the verdict
 struct Heedless(&'static str);
 
 impl omnia_sdk::Model for Heedless {

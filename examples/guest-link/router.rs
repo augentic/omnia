@@ -21,28 +21,22 @@ struct Router;
 export!(Router);
 
 impl Guest for Router {
-    /// Call the host-mediated `echo`, naming `responder` as the target. The host
-    /// runs the selector, dispatches to the responder (instantiated fresh), and
-    /// returns its typed result.
+    // the host runs the selector, dispatches to a fresh responder, returns its result
     fn run(message: String) -> String {
         example::link::echo::echo("responder", &message)
     }
 
-    /// The async-lifted dual: `echo-slow` is an async-typed import, so only an
-    /// async-lifted export may call it.
+    // `echo-slow` is an async-typed import, so only an async-lifted export may call it
     async fn run_slow(message: String) -> String {
         example::link::echo::echo_slow("responder".to_owned(), message).await
     }
 
-    /// Call the host-mediated `echo` naming an arbitrary target — the path that
-    /// reaches guests registered after startup (dynamic registration).
+    // an arbitrary target: the path that reaches guests registered after startup
     fn run_to(target: String, message: String) -> String {
         example::link::echo::echo(&target, &message)
     }
 
-    /// The arbitrary-target dual of `run-slow`: an async-lifted call whose
-    /// callee parks on a timer, so a dispatch can be genuinely in flight when
-    /// the target is deregistered.
+    // the callee parks on a timer, so a dispatch can be in flight at deregistration
     async fn run_to_slow(target: String, message: String) -> String {
         example::link::echo::echo_slow(target, message).await
     }

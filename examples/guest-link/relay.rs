@@ -29,8 +29,7 @@ impl exports::example::link::echo::Guest for Relay {
             Ok(hops) if hops > 0 => {
                 example::link::echo::echo_slow(target, (hops - 1).to_string()).await
             }
-            // Finish on the responder's parked `echo-slow`, so the chain's
-            // last hop is genuinely pending (and timeout-sensitive).
+            // finish on the responder's parked `echo-slow`, so the last hop is pending
             _ => example::link::echo::echo_slow("responder".to_owned(), message).await,
         }
     }

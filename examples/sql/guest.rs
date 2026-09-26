@@ -34,7 +34,6 @@ impl Guest for Http {
     }
 }
 
-/// List all agencies, newest first (SELECT).
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
 async fn list_agencies() -> HttpResult<Json<Value>> {
@@ -56,7 +55,6 @@ async fn list_agencies() -> HttpResult<Json<Value>> {
     Ok(Json(json!({ "agencies": agencies })))
 }
 
-/// Create an agency with a client-supplied id (INSERT).
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
 async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> HttpResult<Json<Value>> {
@@ -90,7 +88,7 @@ async fn create_agency(Json(req): Json<CreateAgencyRequest>) -> HttpResult<Json<
     Ok(Json(json!({ "agency": agency })))
 }
 
-/// Delete an agency (DELETE); zero affected rows means it did not exist.
+// zero affected rows means it did not exist
 #[axum::debug_handler]
 #[omnia_wasi_otel::instrument]
 async fn delete_agency(Path(id): Path<i64>) -> HttpResult<Json<Value>> {
@@ -112,8 +110,7 @@ async fn delete_agency(Path(id): Path<i64>) -> HttpResult<Json<Value>> {
     Ok(Json(json!({ "message": "agency deleted", "agency_id": id })))
 }
 
-/// Create the schema with raw prepared statements. Each request is handled by
-/// a fresh guest instance, so this runs per request — fine for an example.
+// runs per request, since each is handled by a fresh instance; fine for an example
 async fn ensure_schema() -> Result<()> {
     let pool = Connection::open("db".to_string())
         .await

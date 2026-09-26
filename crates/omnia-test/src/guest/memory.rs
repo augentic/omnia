@@ -205,9 +205,7 @@ impl Memory {
         let data = self
             .object(container, name)
             .ok_or_else(|| anyhow!("object not found: {container}/{name}"))?;
-        // Range semantics match the blobstore default: `end` of 0 or
-        // `u64::MAX` reads to the end; otherwise `end` is inclusive, clamped
-        // to the object's length.
+        // as the blobstore default: `end` of 0 or `u64::MAX` reads to the end, else inclusive
         let unbounded = end == 0 || end == u64::MAX;
         if !unbounded && end < start {
             bail!("invalid byte range: end ({end}) < start ({start})");

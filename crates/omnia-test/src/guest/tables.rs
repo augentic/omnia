@@ -132,10 +132,8 @@ impl ScriptedTables {
     }
 }
 
+// panics when no rule matches the statement
 impl TableStore for ScriptedTables {
-    /// # Panics
-    ///
-    /// Panics when no `on_query` rule matches the statement.
     fn query(
         &self, conn_name: String, query: String, params: Vec<DataType>,
     ) -> impl Future<Output = Result<Vec<Row>>> + Send {
@@ -146,9 +144,6 @@ impl TableStore for ScriptedTables {
         ready(Ok(rows))
     }
 
-    /// # Panics
-    ///
-    /// Panics when no `on_exec` rule matches the statement.
     fn exec(
         &self, conn_name: String, query: String, params: Vec<DataType>,
     ) -> impl Future<Output = Result<u32>> + Send {

@@ -38,7 +38,6 @@ impl Guest for Http {
     }
 }
 
-/// Stores and retrieves data from the blobstore.
 #[omnia_wasi_otel::instrument]
 async fn handler(body: Bytes) -> HttpResult<Json<Value>> {
     // create an outgoing value to hold the data we want to store

@@ -22,7 +22,6 @@ use omnia_wasi_otel::WasiOtel;
 // here; a new program without one fails to compile.
 test_programs::foreach_messaging!();
 
-/// Run one command guest program against `backends`, requiring a clean exit.
 async fn run_guest(wasm: &str, backends: Backends) {
     let status = Deployment::new()
         .guest("guest", wasm)
@@ -32,7 +31,6 @@ async fn run_guest(wasm: &str, backends: Backends) {
     assert_eq!(status, ExitStatus::SUCCESS, "guest `{wasm}` failed");
 }
 
-/// The next message the broker fans out to `stream`, within a bounded wait.
 async fn next(stream: &mut Subscriptions) -> Message {
     tokio::time::timeout(Duration::from_secs(5), stream.next())
         .await
@@ -40,7 +38,6 @@ async fn next(stream: &mut Subscriptions) -> Message {
         .expect("the broker stays open")
 }
 
-/// A message's metadata as sorted pairs.
 fn metadata(message: &Message) -> Vec<(String, String)> {
     let mut pairs: Vec<_> = message
         .metadata

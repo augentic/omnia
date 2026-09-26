@@ -16,9 +16,8 @@ omnia_sdk::command!(scenario);
 const ITEMS: &str = "items";
 
 async fn scenario() {
-    // A mix of kinds, ranks and zone presence so one filter can discriminate
-    // on both a comparison and a null check; `b` is explicitly null and `e`
-    // lacks the field altogether.
+    // a mix so one filter discriminates on both a comparison and a null
+    // check: `b` is explicitly null, `e` lacks the field
     insert("a", json!({"kind": "fruit", "rank": 3, "zone": "z1"})).await;
     insert("b", json!({"kind": "fruit", "rank": 1, "zone": null})).await;
     insert("c", json!({"kind": "veg", "rank": 2, "zone": "z2"})).await;
@@ -45,9 +44,8 @@ async fn scenario() {
     assert_eq!(ids(&all.documents), ["a", "b", "c", "d", "e", "f", "g"]);
     assert_eq!(all.continuation, None);
 
-    // Fruit with a zone, highest rank first, two per page: `g`, `a`, then `d`
-    // on the continuation page; `b`, `e` fail the null check, `c` and `f`
-    // the comparison.
+    // fruit with a zone, highest rank first, two per page: `g`, `a`, then `d` on
+    // the continuation page
     let page = QueryOptions {
         filter: Some(Filter::and([Filter::eq("kind", "fruit"), Filter::is_not_null("zone")])),
         order_by: vec![SortField {

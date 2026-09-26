@@ -39,17 +39,15 @@ cfg_if::cfg_if! {
             // `assemble` also wires the host-mediated link serve side.
             let runtime = deployment.assemble(()).await?;
 
-            // The extra guest is absent from the manifest. An install pipeline
-            // verifies the bytes (digest, signature — deployment policy) before
-            // handing them to the runtime; here the "install" is a file read.
+            // absent from the manifest; an install pipeline would verify the
+            // bytes first, here the "install" is a file read
             let wasm = std::fs::read(artifacts.join("guest_link_extra_wasm.wasm")).context(
                 "extra guest not built: cargo build -p examples --example \
                  guest-link-extra-wasm --target wasm32-wasip2",
             )?;
             runtime.register("extra", wasm).await?;
 
-            // The router dispatches to the registered guest exactly as it would
-            // to a manifest one; the second call loads `responder` on the way.
+            // dispatched exactly as a manifest guest; the second call loads `responder` on the way
             println!("{}", call_router(&runtime, "extra", "hello").await?);
             println!("{}", call_router(&runtime, "responder", "hello").await?);
 
@@ -57,8 +55,7 @@ cfg_if::cfg_if! {
             Ok(())
         }
 
-        /// Resolve the router — loading it from the manifest's path on the
-        /// first call — instantiate it fresh, and drive `run-to(target, message)`.
+        // loads the router from the manifest's path on the first call
         async fn call_router(runtime: &Runtime<()>, target: &str, message: &str) -> Result<String> {
             let guest = runtime
                 .guest(&GuestId::from("router"))

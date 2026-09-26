@@ -37,8 +37,6 @@ impl Guest for Http {
     }
 }
 
-/// Stores and retrieves data from the key-value store, then exercises the
-/// atomics compare-and-swap flow.
 #[omnia_wasi_otel::instrument]
 async fn handler(body: Bytes) -> HttpResult<Json<Value>> {
     let bucket = store::open("omnia_bucket".to_string()).await.context("opening bucket")?;
