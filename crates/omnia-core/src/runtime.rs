@@ -3,6 +3,7 @@
 mod command;
 
 use std::fmt;
+use std::io::IsTerminal as _;
 use std::sync::{Arc, Weak};
 
 use anyhow::Result;
@@ -405,15 +406,18 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// driver, the context a link dispatch derived for its callee.
     ///
     /// The guest's environment is the host's with `RUST_LOG` set to the
-    /// deployment's tracing directives: the run's verbosity flag composed
-    /// with the process variable, decided once at build.
+    /// deployment's tracing directives — the run's verbosity flag composed
+    /// with the process variable, decided once at build — and `NO_COLOR` set
+    /// when the console the guest shares is not a terminal.
     #[must_use]
     pub fn store_in(&self, chain: ChainCtx) -> StoreCtx<B> {
         // the environment as it stands; a non-UTF-8 pair cannot cross `wasi:cli`
         let host = std::env::vars_os().filter_map(|(name, value)| {
             Some((name.into_string().ok()?, value.into_string().ok()?))
         });
-        let env = crate::store::guest_env(host, &self.inner.rust_log);
+        let ansi = std::io::stderr().is_terminal();
+        let env = crate::store::guest_env(host, &self.inner.rust_log, ansi);
+
         StoreCtx {
             base: StoreBase::new(crate::StoreConfig {
                 options: self.options(),
@@ -470,7 +474,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         &self, instance_pre: &InstancePre<StoreCtx<B>>, store: &mut Store<StoreCtx<B>>,
     ) -> Result<Instance> {
         let instance = instance_pre.instantiate_async(store).await?;
-        tracing::debug!("component instantiated");
+        tracing::trace!("component instantiated");
         Ok(instance)
     }
 
@@ -558,7 +562,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
             }
         })?;
 
-        tracing::debug!(guest = %id, "guest registered");
+        tracing::trace!(guest = %id, "guest registered");
         Ok(())
     }
 
@@ -573,7 +577,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// registered.
     pub fn deregister(&self, id: &GuestId) -> Result<()> {
         self.registry().remove(id)?;
-        tracing::debug!(guest = %id, "guest deregistered");
+        tracing::trace!(guest = %id, "guest deregistered");
         Ok(())
     }
 

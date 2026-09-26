@@ -46,7 +46,7 @@ async fn handle(request: Request) -> Response {
 }
 ```
 
-Console output (events only, to stderr) follows the `RUST_LOG` the guest's WASI environment carries (the runtime's tracing filter: a `-v`/`-q` flag's level, else the process `RUST_LOG`'s, else the mode's default, with the process `RUST_LOG`'s targeted directives on top), defaulting to `error` when there is none; `flush` exports on demand.
+Console output (events only, to stderr) follows the `RUST_LOG` the guest's WASI environment carries (the runtime's tracing filter: a `-v`/`-q` flag's level, else the process `RUST_LOG`'s, else the mode's default, with the process `RUST_LOG`'s targeted directives on top), defaulting to `error` when there is none, and colours its lines unless that environment carries `NO_COLOR` — which the runtime sets when the console it shares is not a terminal; `flush` exports on demand.
 
 ## License
 

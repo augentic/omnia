@@ -64,7 +64,7 @@ async fn run_guest<B>(
 where
     B: Clone + Send + Sync + 'static,
 {
-    tracing::debug!(guest = %guest_id, "running wasi:cli/run");
+    tracing::trace!(guest = %guest_id, "running wasi:cli/run");
 
     // a command chain root: its link hops run uncapped, like the run itself
     let mut store = runtime.build_store(runtime.store_in(ChainCtx::command()));

@@ -237,12 +237,12 @@ async fn relay(
         *slot = value;
     }
 
-    let elapsed_us = u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX);
+    let elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
     tracing::debug!(
         target = %target,
         interface,
         func,
-        elapsed_us,
+        elapsed_ms,
         "dispatched host-mediated call",
     );
     Ok(())

@@ -176,7 +176,7 @@ impl DeploymentBuilder {
             env::var("RUST_LOG").ok().as_deref(),
         );
         init_telemetry(&name, &rust_log)?;
-        tracing::debug!("initializing runtime");
+        tracing::trace!("initializing runtime");
 
         let (engine, linker, mut options) = engine_and_linker()?;
         if let Some(timeout) = self.guest_timeout {
