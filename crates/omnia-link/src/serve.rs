@@ -52,11 +52,8 @@ pub fn serve_guest<T: Send + 'static>(
             let types::ComponentItem::ComponentFunc(func_ty) = ty else {
                 continue;
             };
-            // Only the bootstrap importers are in the snapshot; a skew a late
-            // importer introduces is still refused at lower time by
-            // wasmtime's name-checked `Val` typing. `types::Type` compares
-            // structurally across components; `ComponentFunc` does not, hence
-            // element-wise.
+            // element-wise, since `ComponentFunc` does not compare structurally
+            // across components; a late importer's skew is refused at lower time
             if let Some(import) = wired.get(interface).and_then(|funcs| funcs.get(func)) {
                 let same = func_ty.async_() == import.ty.async_()
                     && func_ty.params().eq(import.ty.params())

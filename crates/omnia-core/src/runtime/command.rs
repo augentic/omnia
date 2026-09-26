@@ -58,7 +58,6 @@ where
     run_guest(runtime, guest_id, &guest).await
 }
 
-/// Instantiate `guest` and drive its `wasi:cli/run` once.
 async fn run_guest<B>(
     runtime: &Runtime<B>, guest_id: &GuestId, guest: &Arc<Guest<StoreCtx<B>>>,
 ) -> Result<ExitStatus>
@@ -67,9 +66,7 @@ where
 {
     tracing::debug!(guest = %guest_id, "running wasi:cli/run");
 
-    // A command chain root: link dispatches the guest makes (and their nested
-    // hops) run without the `GUEST_TIMEOUT_MS` wall-clock cap, matching the
-    // uncapped `wasi:cli/run` drive itself.
+    // a command chain root: its link hops run uncapped, like the run itself
     let mut store = runtime.build_store(runtime.store_in(ChainCtx::command()));
     let instance = runtime.instantiate(guest.instance_pre(), &mut store).await?;
     let command = Command::new(&mut store, &instance)?;

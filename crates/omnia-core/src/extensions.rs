@@ -51,7 +51,7 @@ impl Extensions {
         let inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         let value = Arc::clone(inner.get(&TypeId::of::<T>())?);
         drop(inner);
-        // Infallible: the map is keyed by the value's own type.
+        // infallible: the map is keyed by the value's own type
         value.downcast::<T>().ok()
     }
 }

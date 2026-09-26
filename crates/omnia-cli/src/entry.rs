@@ -113,9 +113,7 @@ pub fn plan(
     }
 }
 
-// Unit tests by design: `plan` is factored pure (argv and `OMNIA_MANIFEST`
-// are parameters) precisely so source precedence is testable without spawning
-// a binary.
+// `plan` is pure over argv and `OMNIA_MANIFEST`, so precedence is testable without a binary
 #[cfg(test)]
 mod tests {
     use super::*;

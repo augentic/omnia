@@ -163,8 +163,7 @@ impl Parse for Config {
     }
 }
 
-/// Spans of the keys that participate in cross-key validation, kept out of
-/// [`Config`] itself since they matter only for diagnostics.
+// kept out of `Config`, since they matter only for diagnostics
 struct KeySpans {
     manifest: Option<Span>,
     inline: Option<Span>,
@@ -180,8 +179,7 @@ impl Config {
             ));
         }
 
-        // Rows sharing a backend type share one connection, so their connect
-        // options must agree token-for-token — or be absent on every row.
+        // rows sharing a backend share one connection, so their options must agree
         let mut options_seen: std::collections::HashMap<String, Option<String>> =
             std::collections::HashMap::new();
         for entry in &self.host_entries {
@@ -231,8 +229,7 @@ mod kw {
     syn::custom_keyword!(mounts);
 }
 
-/// One `key: value` setting, tagged with its key name and span so
-/// `Config::parse` can reject duplicates with a pointed diagnostic.
+// the span lets `Config::parse` reject a duplicate with a pointed diagnostic
 struct Opt {
     name: &'static str,
     span: Span,
@@ -330,17 +327,14 @@ fn parse_host_entries(input: ParseStream) -> Result<Vec<HostEntry>> {
     Ok(Punctuated::<HostEntry, Token![,]>::parse_terminated(input)?.into_iter().collect())
 }
 
-/// Parse `[ item, item, ... ]` where each item implements [`Parse`].
 fn parse_bracketed_list<T: Parse>(input: ParseStream) -> Result<Vec<T>> {
     let list;
     syn::bracketed!(list in input);
     Ok(Punctuated::<T, Token![,]>::parse_terminated(&list)?.into_iter().collect())
 }
 
-/// Parse a braced `{ key: value, ... }` block, handing each key (and the
-/// stream positioned at its value) to `field`. Repeated keys are refused
-/// with a pointed diagnostic. Returns the brace span for missing-key
-/// diagnostics.
+// Hands each key and the stream at its value to `field`, refusing repeats;
+// returns the brace span for missing-key diagnostics.
 fn parse_kv_block(
     input: ParseStream, mut field: impl FnMut(&Ident, ParseStream) -> Result<()>,
 ) -> Result<Span> {
@@ -422,9 +416,7 @@ impl Parse for GuestSpec {
     }
 }
 
-/// Parse a `digest:` value — a `sha256:<64 hex>` string literal — into the
-/// bytes the expansion hands to `omnia::Digest::from`, so a malformed pin
-/// is refused here, pointed at the key, rather than at start-up.
+// a malformed pin is refused here, pointed at the key, rather than at start-up
 fn parse_digest(input: ParseStream) -> Result<[u8; DIGEST_LEN]> {
     let lit: syn::LitStr = input.parse()?;
     let value = lit.value();
@@ -458,9 +450,8 @@ const fn nibble(digit: u8) -> Option<u8> {
     }
 }
 
-/// Parse a `path:` value the expansion hands to `include_bytes!`, which
-/// takes a string literal or a macro it expands to one — anything else is
-/// refused here, where the diagnostic can name the key.
+// `include_bytes!` takes a literal or a macro expanding to one; anything else
+// is refused here, where the diagnostic can name the key
 fn parse_embeddable(input: ParseStream) -> Result<Expr> {
     let expr: Expr = input.parse()?;
     match &expr {

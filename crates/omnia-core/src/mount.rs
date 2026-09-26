@@ -91,15 +91,12 @@ pub struct MountRegistry {
 
 impl MountRegistry {
     /// Open every resolved preopen, capturing its directory identity, and build
-    /// the registry. This is the startup fail-fast gate: a mount whose host
-    /// path cannot be opened as a directory (or stat-ed) is a configuration
-    /// error surfaced before the registry is built.
+    /// the registry: the startup fail-fast gate for a mount whose host path
+    /// cannot be opened as a directory.
     ///
-    /// Preopens are first deduplicated by guest-visible name with last-wins
-    /// semantics, so a CLI `--mount` layered after a manifest `[[mount]]` of the
-    /// same name overrides it rather than being silently shadowed by wasi-libc's
-    /// first-match path resolution. The overriding entry keeps the position of
-    /// the first occurrence; only its value is replaced, and the discarded
+    /// Preopens sharing a guest-visible name collapse to the last, so a CLI
+    /// `--mount` layered after a manifest `[[mount]]` overrides it rather than
+    /// being shadowed by wasi-libc's first-match resolution; the discarded
     /// mount's host path is never opened.
     ///
     /// # Errors
@@ -141,11 +138,8 @@ impl MountRegistry {
     }
 }
 
-/// Collapse preopens sharing a guest-visible name to a single entry, last-wins.
-///
-/// The winning entry keeps the position of the first occurrence of its name so
-/// the overall order is stable; only its value is taken from the last
-/// occurrence.
+// The winner keeps the position of its name's first occurrence, so the order
+// is stable; only the value comes from the last.
 fn dedup_last_wins(preopens: Vec<ResolvedPreopen>) -> Vec<ResolvedPreopen> {
     let mut deduped: Vec<ResolvedPreopen> = Vec::with_capacity(preopens.len());
     let mut index: HashMap<String, usize> = HashMap::new();
@@ -170,7 +164,6 @@ mod tests {
 
     use super::{MountRegistry, ResolvedPreopen};
 
-    /// A fresh, empty temp directory unique to this process and `label`.
     fn temp_root(label: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("omnia-reg-{label}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -178,7 +171,7 @@ mod tests {
         dir
     }
 
-    /// `(dev, ino)` of `path`, computed independently of the registry under test.
+    // computed independently of the registry under test
     fn identity_of(path: &Path) -> (u64, u64) {
         let dir = Dir::open_ambient_dir(path, ambient_authority()).expect("opening dir");
         let meta = dir.dir_metadata().expect("reading metadata");
@@ -214,8 +207,7 @@ mod tests {
 
         let hit = registry.match_identity(dev, ino).expect("the mount's identity matches");
         assert_eq!(hit.host_path, root);
-        // A foreign identity matches nothing — the out-of-scope rejection a
-        // consuming host relies on.
+        // a foreign identity matches nothing
         assert!(registry.match_identity(dev ^ 0xFFFF, ino ^ 0xFFFF).is_none());
     }
 
@@ -232,8 +224,7 @@ mod tests {
     fn duplicate_name_last_wins() {
         let manifest_root = temp_root("dup-manifest");
         let cli_root = temp_root("dup-cli");
-        // Same guest-visible name, distinct host paths: the CLI entry is layered
-        // last and must override the manifest entry rather than be shadowed.
+        // same guest-visible name: the cli entry, layered last, must win
         let registry = MountRegistry::open(vec![
             ResolvedPreopen::new(".".to_owned(), manifest_root, false),
             ResolvedPreopen::new(".".to_owned(), cli_root.clone(), true),
@@ -249,8 +240,7 @@ mod tests {
     #[test]
     fn overridden_mount_path() {
         let cli_root = temp_root("override-cli");
-        // The shadowed manifest entry names a nonexistent path; last-wins dedup
-        // discards it before opening, so a stale override does not fail startup.
+        // the shadowed entry's nonexistent path is discarded before opening
         let registry = MountRegistry::open(vec![
             ResolvedPreopen::new(".".to_owned(), PathBuf::from("/no/such/mount"), false),
             ResolvedPreopen::new(".".to_owned(), cli_root.clone(), true),

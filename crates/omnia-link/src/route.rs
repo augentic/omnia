@@ -54,8 +54,7 @@ impl<T: Send + 'static> RouteInvoke for Route<T> {
             export: linked.export,
             results: linked.results,
         };
-        // `anyhow::Error::from` keeps the `InvokeError` downcastable so the
-        // polyfill can word a timeout with the target and function.
+        // `from` keeps the `InvokeError` downcastable, so the polyfill can word a timeout
         async move { call_fresh(call, args, ctx, bound).await.map_err(anyhow::Error::from) }.boxed()
     }
 }
@@ -77,8 +76,8 @@ pub struct Routes {
     inner: Arc<RwLock<RouteTable>>,
 }
 
-/// Recording every served guest — linked or not — lets `resolve` tell "not
-/// registered" from "registered but exports nothing linked".
+// Every served guest is recorded, linked or not, so `resolve` can tell "not
+// registered" from "registered but exports nothing linked".
 #[derive(Default)]
 struct RouteTable {
     pending: HashMap<GuestId, Option<Arc<dyn RouteInvoke>>>,

@@ -203,8 +203,7 @@ mod tests {
 
     #[test]
     fn direct_argv() {
-        // `--manifest`, `run`, and `--debug` are guest arguments, not host
-        // CLI options: nothing in argv is reserved for the host.
+        // nothing in argv is reserved for the host
         let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
         let plan =
             plan(options, argv(&["bin", "--manifest", "foo.toml", "run", "--debug", "greet"]))
@@ -231,9 +230,8 @@ mod tests {
         assert_eq!(conflict.level, None, "the guest refuses the pair; the host applies nothing");
     }
 
-    // Hard acceptance criterion: the direct plan always carries the compiled-in
-    // manifest, so `DeploymentBuilder::build` can never fall through to its own
-    // `OMNIA_MANIFEST` lookup.
+    // the direct plan always carries the compiled-in manifest, so `build` can
+    // never fall through to its own `OMNIA_MANIFEST` lookup
     #[test]
     fn direct_compiled_manifest() {
         let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));

@@ -142,9 +142,8 @@ impl<B: Clone + Send + Sync + 'static> Dispatcher for crate::runtime::RuntimeDis
     }
 }
 
-/// Find the *unique* exported interface on `guest`'s component that carries a
-/// function named `func`, so a host can invoke it without hardcoding a
-/// consumer interface name. Ambiguity is an error, never a silent first-match.
+// The unique exported interface carrying `func`; ambiguity is an error, never
+// a silent first match.
 fn find_interface<T: 'static>(guest: &Guest<T>, func: &str) -> Result<Box<str>> {
     let target = guest.id();
     let engine = guest.instance_pre().engine();

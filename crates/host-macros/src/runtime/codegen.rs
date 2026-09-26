@@ -46,10 +46,7 @@ impl From<&Config> for Codegen {
     }
 }
 
-/// Emit the `omnia::MainOptions` method chain passed to `omnia::main`: the
-/// invoking crate's package name as the program name, a compiled-in
-/// manifest riding the generated `manifest()` accessor, and no call for a
-/// key the invocation omits.
+// no call is emitted for a key the invocation omits
 fn emit_main_options(config: &Config, has_manifest: bool) -> TokenStream {
     let mode = config.mode.tokens();
     let manifest = has_manifest.then(|| quote! { .manifest(manifest()) });
@@ -61,9 +58,7 @@ fn emit_main_options(config: &Config, has_manifest: bool) -> TokenStream {
     }
 }
 
-/// Emit the `omnia::ManifestSource` for the compiled-in deployment
-/// manifest: `Path` for a `manifest:` expression, `Inline` for the inline
-/// manifest keys, nothing when neither is declared.
+// `Path` for a `manifest:` expression, `Inline` for the inline keys
 fn emit_manifest(config: &Config) -> Option<TokenStream> {
     if let Some(expr) = &config.manifest_file {
         return Some(quote! {
@@ -80,20 +75,16 @@ fn emit_manifest(config: &Config) -> Option<TokenStream> {
     })
 }
 
-/// Emit the fluent `omnia::Manifest` builder chain for the inline keys.
 fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
-    // The expression is the configuration's contents, compiled in; a
-    // manifest file names a path instead.
+    // the expression is the configuration's contents, compiled in
     let registries = manifest.registries.as_ref().map(|config| {
         quote! {
             .registries(omnia::RegistryConfig::contents(#config))
         }
     });
 
-    // An embedded component is read at build time and named by the path's
-    // file stem unless the guest names itself; a package is a reference the
-    // runtime fetches at first use, named by the reference without its
-    // version unless the guest names itself.
+    // unless the guest names itself, an embedded component is named by its
+    // path's stem and a package by its reference without the version
     let guests = manifest.guests.iter().map(|guest| {
         let entry = match &guest.source {
             GuestSource::Embedded { path, name: None } => {
@@ -122,7 +113,7 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
         let messaging = &guest.routes.messaging;
         let websocket = &guest.routes.websocket;
         let command = guest.command.then(|| quote! { .command() });
-        // The pin was validated at parse; it lands as the bytes it decodes to.
+        // validated at parse; lands as the bytes it decodes to
         let digest = guest.digest.as_ref().map(|bytes| {
             let bytes = bytes.iter();
             quote! { .digest(omnia::Digest::from([#(#bytes),*])) }
@@ -162,11 +153,8 @@ fn emit_manifest_builder(manifest: &ManifestSpec) -> TokenStream {
 }
 
 fn emit_backends(host_entries: &[HostEntry]) -> (TokenStream, TokenStream) {
-    // Order-preserving dedup: `Vec::dedup_by` only removes *consecutive*
-    // duplicates, so a backend shared by non-adjacent hosts would emit two
-    // identically named struct fields. Parse validation guarantees rows
-    // sharing a backend agree on connect options, so the first row's
-    // options stand for the shared connection.
+    // order-preserving dedup: a backend shared by non-adjacent hosts must not
+    // emit two fields; parse validation made their options agree
     let rows = host_entries.iter().map(|entry| (&entry.backend, entry.options.as_ref()));
     let mut seen = std::collections::HashSet::new();
     let backends: Vec<(&Path, Option<&Expr>)> =
@@ -224,10 +212,8 @@ fn path_key(path: &Path) -> String {
     path.to_token_stream().to_string()
 }
 
-/// One uniform bundle-accessor impl per `hosts:` row. The borrow shape rides
-/// the carrier's `HostCtx::Borrow` — `&mut self.field` coerces to every
-/// carrier's borrow (`&mut dyn Ctx`, `&dyn Ctx`, or `&mut dyn HttpBorrow`) —
-/// so third-party hosts and re-exports work with no name surgery.
+// `&mut self.field` coerces to every carrier's `HostCtx::Borrow`, so
+// third-party hosts and re-exports work with no name surgery
 fn host_impl(host: &Path, field: &Ident) -> TokenStream {
     let ctx = ctx_key(host);
     quote! {
@@ -239,16 +225,11 @@ fn host_impl(host: &Path, field: &Ident) -> TokenStream {
     }
 }
 
-/// The `Provides` key for a `hosts:` row: the host type itself, save one
-/// special case. `wasi:http`'s linker-facing view trait (`WasiHttpView`) is
-/// foreign — owned by `wasmtime-wasi-http` — so its `StoreCtx` blanket lives
-/// in omnia core against the core-owned `HttpCtx` carrier, and the http row's
-/// accessor must be keyed to that carrier. (Keying by an associated type on
-/// the host — `<#host as HostBinding>::Ctx` — is not an option: coherence
-/// does not normalize projections in impl headers across crates, so two such
-/// impls are rejected as overlapping.) An aliased `WasiHttp` row that dodges
-/// this match fails loudly at compile time: linking requires `WasiHttpView`,
-/// whose blanket bound `Provides<HttpCtx>` is then unsatisfied.
+// HACK!: `wasi:http`'s view trait is foreign, so its `StoreCtx` blanket is
+// keyed to the core-owned `HttpCtx` carrier and the row must match by name;
+// an associated-type key is no option, since coherence does not normalize
+// projections in impl headers across crates. An aliased `WasiHttp` row fails
+// loudly: linking then finds `Provides<HttpCtx>` unsatisfied.
 fn ctx_key(host: &Path) -> TokenStream {
     let is_http = host.segments.last().is_some_and(|segment| segment.ident == "WasiHttp");
     if is_http { quote!(omnia::HttpCtx) } else { quote!(#host) }

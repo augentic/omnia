@@ -1,25 +1,13 @@
 #![doc = include_str!("../README.md")]
 #![cfg(not(target_arch = "wasm32"))]
 
-// The embedder facade: the runtime spine (`omnia-core`), guest→guest dispatch
-// (`omnia-link`, behind the `link` feature), the guest loader
-// (`omnia-plugin`, behind the `loader` feature), the `run` grammar
-// (`omnia-cli`, behind the `cli` feature), and the `runtime!` macro,
-// re-exported under one root. The `runtime!` macro emits `omnia::…` paths, so
-// every name it references must stay reachable from here — `RegistryConfig`
-// among them, which a `guests.registries` key lowers to.
+// The `runtime!` macro emits `omnia::…` paths, so every name it references
+// must stay reachable from here. `#[doc(inline)]` keeps the documented
+// surface at `omnia::…` rather than a bare re-export line into the source
+// crate.
 //
-// `#[doc(inline)]` matters: rustdoc renders a cross-crate `pub use` as a bare
-// re-export line pointing into the source crate, so without it every item
-// page (and every path readers copy) would spell `omnia_core::…`. Inlining
-// keeps the documented surface at `omnia::…`, the only path embedders use.
-
-// `anyhow` is the error vocabulary of `Backend`, `Wiring`, and the generated
-// runtime module; `futures` supplies the `BoxFuture` in the loader store and
-// registry seams (`ContentStore`, `ReleaseStore`, `RegistrySource`) and the
-// generated `serve` hook. Both are part of the
-// facade's public signatures, so embedders reach them from here without a
-// direct dependency of their own; `futures` stays unconditional because the
+// `anyhow` and `futures` appear in the facade's public signatures, so
+// embedders reach them from here; `futures` stays unconditional because the
 // macro output uses it whether or not the loader surface is enabled.
 #[cfg(feature = "jit")]
 pub mod compile;

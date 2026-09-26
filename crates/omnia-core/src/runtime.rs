@@ -87,31 +87,24 @@ pub struct RuntimeParts<B: 'static> {
 /// bundle.
 pub struct Runtime<B: 'static> {
     inner: Arc<RuntimeInner<B>>,
-    // Cached host→guest dispatch capability, built once per runtime so
-    // `store()` hands out clones instead of allocating one per store.
+    // built once so `store()` hands out clones instead of one per store
     dispatcher: Arc<dyn Dispatcher>,
 }
 
 struct RuntimeInner<B: 'static> {
-    // Deployment name read by trigger servers and the bootstrap log —
-    // carried state, never a process environment variable.
+    // carried state, never a process environment variable
     name: Arc<str>,
     registry: Arc<Registry<StoreCtx<B>>>,
     args: Arc<Vec<String>>,
     mounts: Arc<MountRegistry>,
     backends: B,
-    // Fetches a declared package source at its first use.
     packages: Option<Arc<dyn RegistrySource>>,
-    // Command-mode guest identity; absent, command mode routes to
-    // the sole static `wasi:cli/run` exporter.
+    // absent, command mode routes to the sole static `wasi:cli/run` exporter
     command_guest: Option<GuestId>,
-    // The deployment's resolved wasm-pkg configuration, carried for an
-    // embedder that installs the loader capability on a runtime by hand.
+    // for an embedder that installs the loader capability by hand
     registry_config: Option<String>,
-    // The run's tracing directives: every store's `RUST_LOG`.
+    // every store's `RUST_LOG`
     rust_log: String,
-    // Capability-crate state installed at assembly and shared with every
-    // store context.
     extensions: Extensions,
 }
 
@@ -309,7 +302,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         let verified =
             source.verified(bytes).map_err(|error| GuestError::Refused(format!("{error:#}")))?;
         match self.admit(id.clone(), verified).await {
-            // A racing first use admitted it first; that registration stands.
+            // a racing first use admitted it first; that registration stands
             Ok(()) | Err(AdmitError::AlreadyRegistered(_)) => {}
             Err(AdmitError::ArtifactRefused(reason)) => return Err(GuestError::Refused(reason)),
             Err(AdmitError::Internal(reason)) => return Err(GuestError::Internal(reason)),
@@ -416,9 +409,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// with the process variable, decided once at build.
     #[must_use]
     pub fn store_in(&self, chain: ChainCtx) -> StoreCtx<B> {
-        // Read at store build so every store sees the process environment as
-        // it stands. A pair that is not UTF-8 cannot cross `wasi:cli` as a
-        // string; it is left out rather than failing the store.
+        // the environment as it stands; a non-UTF-8 pair cannot cross `wasi:cli`
         let host = std::env::vars_os().filter_map(|(name, value)| {
             Some((name.into_string().ok()?, value.into_string().ok()?))
         });
@@ -453,10 +444,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         store.epoch_deadline_async_yield_and_update(1);
 
         if options.max_fuel > 0 {
-            // `Config::from(&options)` enables `consume_fuel` whenever
-            // `max_fuel > 0`, so a failure here means the engine was built
-            // from different options; running unmetered would silently void
-            // the fuel bound.
+            // a failure means the engine was built from different options
             store.set_fuel(options.max_fuel).expect("engine was built without fuel metering");
         }
 
@@ -541,8 +529,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     pub async fn admit(&self, id: GuestId, verified: Verified) -> Result<(), AdmitError> {
         let registry = self.registry();
 
-        // Early occupancy check to skip the load/serve work; the publish below
-        // re-checks transactionally, so a racing registration cannot slip in.
+        // early occupancy check; the publish below re-checks transactionally
         if registry.get(&id).is_some() {
             return Err(AdmitError::AlreadyRegistered(format!(
                 "guest `{id}` is already registered"
@@ -558,9 +545,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         })?;
         let guest = Guest::local(id.clone(), instance_pre, digest);
 
-        // Serve the guest's linked exports (if any) as a pending endpoint;
-        // publish then makes the endpoint and the registry entry observable in
-        // one atomic step, discarding the endpoint if a racing registration won.
+        // serve as a pending endpoint, then publish endpoint and entry as one step
         registry.seam().serve(self.store_factory(), &guest).await.map_err(|error| {
             AdmitError::Internal(format!("serving `{id}` seam exports: {error:#}"))
         })?;
@@ -619,8 +604,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         let factory = self.store_factory();
         let guests: Vec<_> = registry.guests().collect();
 
-        // On any failure, release what is still parked so a failed bootstrap
-        // pins nothing.
+        // on failure, release what is still parked so a failed bootstrap pins nothing
         let discard_from = |first_unpublished: usize| {
             for guest in &guests[first_unpublished..] {
                 seam.discard(guest.id());
@@ -665,7 +649,7 @@ mod tests {
 
     #[test]
     fn code_u8_low_byte() {
-        // The POSIX low-byte truncation is the only non-trivial ExitStatus logic.
+        // posix low-byte truncation
         assert_eq!(ExitStatus::from(256).code_u8(), 0);
         assert_eq!(ExitStatus::from(257).code_u8(), 1);
         assert_eq!(ExitStatus::from(-1).code_u8(), 255);

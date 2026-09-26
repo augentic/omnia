@@ -62,8 +62,7 @@ impl Telemetry {
     /// Sets the OTLP gRPC endpoint both signals export to; empty is unset.
     #[must_use]
     pub fn endpoint(mut self, endpoint: impl Into<String>) -> Self {
-        // Kept only when non-empty: an empty endpoint handed to the exporter
-        // would override its own `OTEL_EXPORTER_OTLP_*` resolution.
+        // empty would override the exporter's own `OTEL_EXPORTER_OTLP_*` resolution
         let endpoint = endpoint.into();
         self.endpoint = (!endpoint.is_empty()).then_some(endpoint);
         self
@@ -108,10 +107,8 @@ impl Telemetry {
         let console =
             self.filter.unwrap_or_else(|| directives(None, self.fallback, rust_log().as_deref()));
         let filter_layer = filter(&console)?;
-        // Console tracing goes to stderr: stdout belongs to the guest's output.
-        // The layer's own default colours unless `NO_COLOR` is set, with no look
-        // at the stream; keep that on a terminal, and force plain text when
-        // stderr is a file, pipe, or log driver.
+
+        // console to stderr, since stdout is the guest's; plain text off a terminal
         let mut fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
         if !std::io::stderr().is_terminal() {
             fmt_layer = fmt_layer.with_ansi(false);
@@ -121,8 +118,7 @@ impl Telemetry {
         let providers = Providers::build(&self.name, self.endpoint.as_deref(), exports)?;
         let tracer = providers.tracer.tracer(self.name);
 
-        // Publish the providers only once the subscriber that references
-        // them is installed.
+        // publish the providers only once the subscriber referencing them is installed
         match Registry::default()
             .with(filter_layer)
             .with(fmt_layer)
@@ -151,13 +147,10 @@ impl Telemetry {
     }
 }
 
-// Which signals have an exporter. OpenTelemetry's endpoint resolution falls
-// back to `localhost:4317`, where without a collector every export is a
-// connect retry and the exit flush waits on them; so a signal exports only
-// when an endpoint is configured for it — the builder's, the shared
-// `OTEL_EXPORTER_OTLP_ENDPOINT`, or the signal's own variable. An empty
-// value is unset, as the exporter itself reads one, so an
-// `OTEL_EXPORTER_OTLP_ENDPOINT=` left in a profile attaches nothing.
+// Which signals have an exporter. Without a collector, OpenTelemetry's
+// `localhost:4317` fallback turns every export into a connect retry the exit
+// flush waits on, so a signal exports only when an endpoint is configured for
+// it; an empty value is unset, as the exporter itself reads one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Exports {
     traces: bool,
@@ -200,9 +193,7 @@ pub fn directives(
     let mut global = None;
     let mut targeted = Vec::new();
     for token in rust_log.unwrap_or_default().split(',').map(str::trim) {
-        // `EnvFilter` reads a bare token as the global level exactly when it
-        // parses as one; an empty token is skipped there too (and would parse
-        // as `error` here).
+        // an empty token would parse as `error`; `EnvFilter` skips it too
         if token.is_empty() {
             continue;
         }
@@ -214,9 +205,7 @@ pub fn directives(
             targeted.push(token);
         }
     }
-    // The fallback fills an empty `RUST_LOG`, never one that names a target:
-    // `EnvFilter`'s default directive applies only when nothing parsed, so a
-    // bare `RUST_LOG=omnia_core=trace` run stays as narrow as it always was.
+    // the fallback fills an empty `RUST_LOG`, never one that names a target
     let global = level.or(global).or_else(|| targeted.is_empty().then_some(fallback));
     global
         .map(|level| level.to_string())
@@ -226,16 +215,13 @@ pub fn directives(
         .join(",")
 }
 
-// The process's `RUST_LOG`, read once per build so `directives` stays pure
-// over its inputs.
+// read once per build so `directives` stays pure over its inputs
 fn rust_log() -> Option<String> {
     env::var("RUST_LOG").ok()
 }
 
-// The subscriber's filter: `directives` with the noisy-dependency mutes
-// appended, so the console stays readable without a hand-written suffix.
-// `tower` is muted whole: it narrates every buffered request, and it arrives
-// through `reqwest` (registry fetches) as well as `tonic` (OTLP).
+// `directives` plus the noisy-dependency mutes; `tower` is muted whole since
+// it narrates every buffered request through `reqwest` as well as `tonic`
 fn filter(directives: &str) -> Result<EnvFilter> {
     Ok(EnvFilter::builder()
         .parse(directives)?
@@ -248,7 +234,6 @@ fn filter(directives: &str) -> Result<EnvFilter> {
         .add_directive("omnia_wasi_otel=off".parse()?))
 }
 
-// The process's resource and provider handles.
 struct Providers {
     resource: Resource,
     tracer: SdkTracerProvider,
@@ -256,9 +241,8 @@ struct Providers {
 }
 
 impl Providers {
-    // The providers are built and published whatever exports: the resource
-    // and the tracer are what guest telemetry grafts onto, and a provider
-    // with no processor or reader drops what it is handed.
+    // Built whatever exports: guest telemetry grafts onto the resource and
+    // tracer, and a provider with no processor or reader drops what it gets.
     fn build(name: &str, endpoint: Option<&str>, exports: Exports) -> Result<Self> {
         let resource = resource_for(name);
         Ok(Self {
@@ -319,15 +303,13 @@ fn resource_for(name: &str) -> Resource {
         .build()
 }
 
-// Force-flush (not shut down) both providers, so telemetry keeps exporting
-// afterwards and repeated flushes are safe.
+// force-flush rather than shut down, so export continues and repeated flushes are safe
 fn flush_providers(tracer: &SdkTracerProvider, meter: &SdkMeterProvider) {
     settle("traces", tracer.force_flush());
     settle("metrics", meter.force_flush());
 }
 
-// Report a flush failure without panicking; a provider that is already shut
-// down has nothing left to flush.
+// an already-shut-down provider has nothing left to flush
 fn settle(signal: &str, result: OTelSdkResult) {
     match result {
         Ok(()) | Err(OTelSdkError::AlreadyShutdown) => {}
@@ -352,8 +334,7 @@ pub fn resource() -> Option<&'static Resource> {
     PROVIDERS.get().map(|providers| &providers.resource)
 }
 
-// Unit tests by design: these pin the tracing/OTLP SDK contract (filter
-// directives, exporter flush), not guest–host boundary behavior.
+// these pin the tracing/OTLP SDK contract, not guest-host boundary behaviour
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
@@ -364,8 +345,7 @@ mod tests {
 
     use super::{OTelSdkResult, flush_providers};
 
-    // A span exporter that keeps its records, so flushing is observable
-    // without a collector.
+    // keeps its records, so flushing is observable without a collector
     #[derive(Clone, Debug, Default)]
     struct Recording {
         names: Arc<Mutex<Vec<String>>>,
@@ -387,8 +367,7 @@ mod tests {
         }
     }
 
-    // A batch-exported provider set: spans stay queued (5s schedule delay)
-    // until a flush pushes them, so flush behavior is what the test sees.
+    // batch-exported, so spans stay queued until a flush pushes them
     fn providers(exporter: &Recording) -> (SdkTracerProvider, SdkMeterProvider) {
         (
             SdkTracerProvider::builder().with_batch_exporter(exporter.clone()).build(),
@@ -396,7 +375,6 @@ mod tests {
         )
     }
 
-    // An empty endpoint is unset before it can reach an exporter.
     #[test]
     fn empty_endpoint_unset() {
         use super::Telemetry;
@@ -408,8 +386,7 @@ mod tests {
         );
     }
 
-    // Pure over their inputs: the process `RUST_LOG` is handed in, never read
-    // (other tests run in parallel).
+    // the process `RUST_LOG` is handed in, never read: other tests run in parallel
     mod directives {
         use super::super::{LevelFilter, directives};
 
@@ -452,8 +429,7 @@ mod tests {
             assert_eq!(directives(Some(LevelFilter::TRACE), LevelFilter::WARN, None), "trace");
         }
 
-        // A targeted `RUST_LOG` with no bare level names what it wants and
-        // nothing else; the fallback stands in for an empty variable alone.
+        // the fallback stands in for an empty variable alone
         #[test]
         fn targeted_only_takes_no_fallback() {
             assert_eq!(
@@ -462,8 +438,7 @@ mod tests {
             );
         }
 
-        // Every spelling `EnvFilter` reads as a global level is one here, and
-        // it renders in the one canonical form; a bare target is not a level.
+        // every spelling `EnvFilter` reads as a level renders canonically; a bare target is not one
         #[test]
         fn bare_level_spellings() {
             assert_eq!(directives(None, LevelFilter::INFO, Some("3,tower=off")), "info,tower=off");
@@ -538,7 +513,7 @@ mod tests {
         }
     }
 
-    // Pure over its inputs: the environment is a closure, never the process's.
+    // the environment is a closure, never the process's
     mod exports {
         use super::super::{Exports, exports};
 
@@ -562,8 +537,7 @@ mod tests {
             assert_eq!(exports(Some("http://collector:4317"), env(&[])), Exports::ALL);
         }
 
-        // Set but empty is unset, for the builder's endpoint as for every
-        // `OTEL_EXPORTER_OTLP_*` variable (an `=` left in a profile).
+        // an `=` left in a profile attaches nothing
         #[test]
         fn empty_is_unset() {
             let empty = |_: &str| Some(String::new());
@@ -607,8 +581,7 @@ mod tests {
         }
     }
 
-    // The fast-exit contract: a span emitted immediately before a flush
-    // reaches the exporter, and export keeps working after the flush.
+    // the fast-exit contract: a span emitted just before a flush reaches the exporter
     #[test]
     fn flush_exports() {
         let exporter = Recording::default();

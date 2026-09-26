@@ -132,9 +132,8 @@ impl Plugins {
                 tracing::debug!(%id, %digest, "declared guest loaded");
                 return Ok(Plugin { id, digest });
             }
-            // A declared name is bound by its entry alone: a path or package
-            // deriving it would seat the caller's bytes where the deployment's
-            // belong, for the declared load to attest later.
+            // a declared name is bound by its entry alone; the caller's bytes
+            // must not seat where the deployment's belong
             Location::Path(_) | Location::Registry { .. } if self.admission.is_declared(&id) => {
                 return Err(LoadError::Refused(format!(
                     "`{from}` would register as `{id}`, a guest this deployment declares; load \
@@ -147,8 +146,7 @@ impl Plugins {
             }
         };
 
-        // hold them to the caller's pin; nothing attests where a caller's
-        // bytes came from, so raw wasm alone is admitted
+        // nothing attests where a caller's bytes came from, so raw wasm alone is admitted
         let refused = |error: anyhow::Error| LoadError::Refused(format!("{error:#}"));
         Digest::checked(&bytes, pin, format_args!("guest `{id}`")).map_err(refused)?;
         let verified = Verified::wasm(bytes).map_err(refused)?;
@@ -160,9 +158,8 @@ impl Plugins {
                 tracing::debug!(%id, %digest, "guest loaded");
                 Ok(Plugin { id, digest })
             }
-            // Another load registered this name first — a racing load of the
-            // same location, or a location naming an active guest. The same
-            // bytes attest; other bytes never re-bind an active name.
+            // another load registered the name first: the same bytes attest,
+            // other bytes never re-bind an active name
             Err(AdmitError::AlreadyRegistered(_)) => match self.admission.registration(&id)? {
                 Registration::Active(recorded) if recorded == digest => Ok(Plugin { id, digest }),
                 Registration::Active(recorded) => Err(LoadError::Refused(format!(
@@ -192,20 +189,16 @@ impl Plugins {
             .map_err(|error| LoadError::Unavailable(format!("{error:#}")))
     }
 
-    // Resolve `path` to the mount it lies beneath and its subpath within it
-    // — the longest mount-name prefix, else `.` for a bare relative path, as
-    // wasi-libc resolves a guest's own opens — refusing before anything is
-    // read when that mount is writable. The subpath must be plain: cap-std
-    // then refuses any escape at open time.
+    // The mount `path` lies beneath, as wasi-libc resolves a guest's own opens
+    // (longest name prefix, else `.`), refused before any read when writable;
+    // cap-std refuses any escape in the subpath at open time.
     fn resolve(&self, path: &str) -> Result<(Arc<Dir>, String), LoadError> {
         let best = self
             .mounts
             .iter()
             .filter_map(|root| {
                 if path == root.name {
-                    // Naming a mount itself yields an empty subpath, which
-                    // `check_subpath` refuses — kept so the refusal names the
-                    // mount rather than "beneath no mount".
+                    // kept so `check_subpath`'s refusal names the mount
                     return Some((root, ""));
                 }
                 let subpath = path.strip_prefix(&root.name)?.strip_prefix('/')?;
@@ -230,11 +223,9 @@ impl Plugins {
     }
 }
 
-// The deployment's mounts as load roots, refusing a writable mount that
-// shares or nests a read-only mount's directory: written through the one
-// view, its files would load through the other. Directories are told apart
-// by identity, not path, so two mount points of one directory — a bind
-// mount, a firmlink — are the one directory they are on disk.
+// Refuses a writable mount that shares or nests a read-only mount's
+// directory: written through one view, its files would load through the
+// other. Directories are told apart by identity, not path.
 fn roots(mounts: &MountRegistry) -> anyhow::Result<Vec<Root>> {
     // identify each mount's directory and the directories above it
     let lineages = mounts
@@ -278,9 +269,7 @@ fn roots(mounts: &MountRegistry) -> anyhow::Result<Vec<Root>> {
         .collect())
 }
 
-// The `(device, inode)` identity of the directory at `path` and of each
-// directory above it, nearest first — the identity the mount registry
-// records for a mount, so a mount is found in another's lineage by it.
+// `(device, inode)` of `path` and each directory above it, nearest first
 fn ancestry(path: &Path) -> anyhow::Result<Vec<(u64, u64)>> {
     let path = path.canonicalize()?;
     path.ancestors()
@@ -336,9 +325,7 @@ mod tests {
         ResolvedPreopen::new(name.to_owned(), path.to_path_buf(), writable)
     }
 
-    // A writable mount nested inside a read-only one, or enclosing one, or
-    // sharing its directory, is refused at install; two read-only mounts, or
-    // two writable ones, may nest freely.
+    // two read-only mounts, or two writable ones, may nest freely
     #[test]
     fn overlap() {
         let dir = tempfile::tempdir().expect("scratch dir");
@@ -364,11 +351,8 @@ mod tests {
         roots(&open(vec![preopen(".", root, false)])).expect("one read-only mount installs");
     }
 
-    // Two mount points of one directory are refused as one directory, though
-    // their canonical paths differ. macOS firmlinks the data volume at
-    // `/System/Volumes/Data`, so every directory beneath it has a second
-    // path with a canonical form of its own — the one such view a test can
-    // reach unprivileged; a bind mount is the same case elsewhere.
+    // macOS firmlinks the data volume at `/System/Volumes/Data`, the one
+    // second path with its own canonical form a test reaches unprivileged
     #[cfg(target_os = "macos")]
     #[test]
     fn overlap_across_firmlink() {

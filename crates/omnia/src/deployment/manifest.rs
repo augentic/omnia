@@ -177,8 +177,7 @@ impl Manifest {
                 self.transport.default
             );
         }
-        // A manifest can declare policy the compiled runtime cannot serve;
-        // refuse up front rather than silently never installing it.
+        // refuse policy the compiled runtime cannot serve, rather than never install it
         if !features.loader {
             if self.registries.is_some() {
                 bail!(
@@ -282,9 +281,7 @@ impl Manifest {
         let http = HttpRoutes::new(pairs(|routes| &routes.http));
         let messaging = PatternRoutes::new(pairs(|routes| &routes.messaging));
         let websocket = PatternRoutes::new(pairs(|routes| &routes.websocket));
-        // CLI routes are not yet parsed; an empty table makes a sole
-        // `wasi:cli/run` exporter the catch-all (multi-command routing is
-        // deferred).
+        // cli routes are not yet parsed; empty makes a sole `wasi:cli/run` exporter the catch-all
         Routes::new(http, messaging, websocket, CliRoutes::default())
     }
 
@@ -581,7 +578,7 @@ mod tests {
         let toml = "bogus = 1\n\n[[guest]]\nname = \"a\"\nsource.path = \"./a.wasm\"\n";
         toml::from_str::<Manifest>(toml).unwrap_err();
 
-        // The retired `id` is an unknown key like any other.
+        // the retired `id` is an unknown key like any other
         let toml = "[[guest]]\nid = \"a\"\nsource.path = \"./a.wasm\"\n";
         toml::from_str::<Manifest>(toml).unwrap_err();
 
@@ -631,7 +628,7 @@ mod tests {
 
         let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
         let routes = manifest.routes();
-        // Longest-prefix matching is preserved across guest-owned lists.
+        // longest-prefix matching holds across guest-owned lists
         assert_eq!(routes.http().resolve("/a/x"), Some(&GuestId::from("a")));
         assert_eq!(routes.http().resolve("/a/b/x"), Some(&GuestId::from("b")));
     }
@@ -669,11 +666,11 @@ mod tests {
         manifest.resolve_paths(base);
         let resolved = manifest.preopens();
         assert_eq!(resolved.len(), 2);
-        // A relative path resolves against the manifest's directory; read-only by default.
+        // relative resolves against the manifest's directory, read-only by default
         assert_eq!(resolved[0].name, ".");
         assert_eq!(resolved[0].host_path, base.join("../.."));
         assert!(!resolved[0].writable);
-        // An absolute path passes through unchanged, and `writable` grants mutation.
+        // absolute passes through unchanged
         assert_eq!(resolved[1].host_path, PathBuf::from("/srv/shared"));
         assert!(resolved[1].writable);
     }
@@ -691,8 +688,7 @@ mod tests {
 
         let mut manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
         manifest.resolve_paths(Path::new("/deploy/app"));
-        // A relative path resolves against the manifest's directory, like a
-        // guest source or a mount.
+        // relative resolves against the manifest's directory, like a source or mount
         assert_eq!(
             manifest.registries,
             Some(RegistryConfig::Path(PathBuf::from("/deploy/app/wasm-pkg.toml")))
@@ -751,8 +747,7 @@ mod tests {
             path: PathBuf::from("workspace"),
             writable: true,
         };
-        // CLI mounts resolve against the process working directory, unlike
-        // manifest mounts which resolve against the manifest's directory.
+        // cli mounts resolve against the working directory, not the manifest's
         let resolved = entry.resolve(Path::new("/cwd"));
         assert_eq!(resolved.host_path, PathBuf::from("/cwd/workspace"));
         assert!(resolved.writable);

@@ -25,8 +25,7 @@ pub trait Backends: Clone + Send + Sync + 'static {
     fn connect() -> impl Future<Output = Result<Self>>;
 }
 
-/// The zero-backend bundle: a deployment that links only backend-less hosts
-/// (such as a `mode: command` `wasi:cli` deployment) connects nothing.
+// the zero-backend bundle: a deployment linking only backend-less hosts connects nothing
 impl Backends for () {
     fn connect() -> impl Future<Output = Result<Self>> {
         std::future::ready(Ok(()))
@@ -140,17 +139,13 @@ where
     finish::<B, H>(runtime, mode).await
 }
 
-/// Start background tasks, then run command mode or every trigger server,
-/// releasing the runtime when the drive completes.
 async fn finish<B, H>(runtime: Runtime<B>, mode: Mode) -> Result<ExitStatus>
 where
     B: Clone + Send + Sync + 'static,
     H: Wiring<B>,
 {
-    // Background tasks hold Engine clones; abort them when the drive
-    // completes so a finished deployment releases its engine (and the pooling
-    // allocator's large virtual reservation) instead of leaking it into the
-    // host process.
+    // background tasks hold engine clones; aborted after the drive so a
+    // finished deployment releases its pooling reservation
     let epoch = drive_epoch(runtime.registry().engine().clone(), runtime.options().epoch_tick);
     let pool =
         sample_pool(runtime.registry().engine().clone(), runtime.options().pool_metrics_interval);
@@ -174,11 +169,11 @@ where
     if let Some(pool) = pool {
         pool.abort();
     }
-    // Drop every link-serve endpoint: the drain tasks hold Runtime clones, so
-    // leaving them running would pin the engine past the deployment's life.
+
+    // the link-serve drain tasks hold runtime clones that would pin the engine
     runtime.shutdown();
-    // Push batch-queued spans and metrics to the exporters so they survive
-    // fast command-mode exits.
+
+    // batch-queued telemetry must survive a fast command-mode exit
     omnia_core::telemetry::flush();
     outcome
 }
