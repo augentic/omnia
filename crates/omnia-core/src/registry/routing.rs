@@ -282,7 +282,7 @@ impl<R: Resolver> Router<R> {
     }
 }
 
-/// A per-trigger [`Router`] built over a registry.
+/// A per-trigger router built over a registry.
 ///
 /// A trigger server builds this once at boot, then resolves each routing key
 /// to the identity it fetches through the runtime's first-use seam — a
