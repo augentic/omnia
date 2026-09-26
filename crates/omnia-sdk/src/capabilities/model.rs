@@ -308,8 +308,7 @@ pub trait Model: Send + Sync {
         use wasip3::filesystem::preopens;
 
         async move {
-            // The lent workspace borrows one of these descriptors, so the
-            // table must outlive the `create` call below.
+            // the lent workspace borrows a descriptor, so the table outlives `create`
             let directories =
                 if request.workspace.is_some() { preopens::get_directories() } else { vec![] };
             let workspace = match request.workspace.as_deref() {
@@ -342,9 +341,8 @@ pub trait Model: Send + Sync {
             let session = completion::create(wire, results_rx).await.map_err(Error::from)?;
             let completion::Session { mut calls, reply } = session;
 
-            // Serial by design: each result feeds the same model turn. A
-            // rejected write means the host stopped reading results; the
-            // loop then ends on the closed calls stream.
+            // serial by design: each result feeds the same model turn; a rejected
+            // write means the host stopped reading, and the closed stream ends the loop
             let calls_loop = async {
                 while let Some(call) = calls.next().await {
                     let id = call.id.clone();
@@ -358,9 +356,7 @@ pub trait Model: Send + Sync {
                 }
             };
 
-            // The host always resolves the reply future, so joining cannot
-            // hang on a well-behaved host; either side closing its stream
-            // ends the other's loop.
+            // the host always resolves the reply, so the join cannot hang
             let ((), outcome) =
                 futures::join!(calls_loop, std::future::IntoFuture::into_future(reply));
             outcome.map(Into::into).map_err(Into::into)
@@ -393,9 +389,8 @@ pub struct WasiModel;
 #[cfg(target_arch = "wasm32")]
 impl Model for WasiModel {}
 
-/// Resolve a lend path against the guest's preopens: the longest preopen
-/// name that equals the path or prefixes it at a `/` boundary wins; the
-/// remainder becomes the grant's subpath (empty for the mount itself).
+// The longest preopen that equals the path or prefixes it at a `/` boundary
+// wins; the remainder is the grant's subpath (empty for the mount itself).
 #[cfg(any(target_arch = "wasm32", test))]
 fn resolve_lend<'a, D>(directories: &'a [(D, String)], path: &'a str) -> Option<(&'a D, &'a str)> {
     directories
@@ -404,7 +399,6 @@ fn resolve_lend<'a, D>(directories: &'a [(D, String)], path: &'a str) -> Option<
         .max_by_key(|(_, subpath)| std::cmp::Reverse(subpath.len()))
 }
 
-/// The subpath of `path` beneath the preopen `name`, when `name` covers it.
 #[cfg(any(target_arch = "wasm32", test))]
 fn lend_subpath<'a>(name: &str, path: &'a str) -> Option<&'a str> {
     if path == name {
@@ -413,8 +407,7 @@ fn lend_subpath<'a>(name: &str, path: &'a str) -> Option<&'a str> {
     path.strip_prefix(name)?.strip_prefix('/').filter(|rest| !rest.is_empty())
 }
 
-/// Mirror-to-wire conversions between the target-independent records above
-/// and the `omnia:model/completion` bindings.
+// conversions between the target-independent records above and the bindings
 #[cfg(target_arch = "wasm32")]
 mod wire {
     use omnia_wasi_model::completion;

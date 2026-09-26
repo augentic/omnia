@@ -183,11 +183,9 @@ impl IntoExit for Response {
 fn write_channel(sink: &mut impl Write, bytes: &[u8]) -> Result<(), u8> {
     match sink.write_all(bytes).and_then(|()| sink.flush()) {
         Ok(()) => Ok(()),
-        // A reader that has gone away (`head`, a closed pipe) is the
-        // consumer's decision, not this command's failure: keep its own exit.
+        // a reader that has gone away is the consumer's decision, not this command's failure
         Err(error) if error.kind() == ErrorKind::BrokenPipe => Ok(()),
-        // Any other refused process channel is unclassified, so it takes
-        // the exit the one map gives a `ServerError`.
+        // anything else is unclassified, so it takes a `ServerError`'s exit
         Err(error) => Err(crate::server_error!("process channel: {error}").exit_code()),
     }
 }
