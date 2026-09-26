@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
 use omnia_core::{PatternRoutes, Runtime, StoreCtx, StoreView, TriggerRouter};
-use tracing::{Instrument, debug_span, instrument};
+use tracing::{Instrument, info_span, instrument};
 
 use crate::host::WasiWebSocket;
 use crate::host::generated::DuplexIndices;
@@ -152,7 +152,7 @@ where
                     .map_err(anyhow::Error::from)
                     .context("issue handling event")
             })
-            .instrument(debug_span!("websocket-handle"));
+            .instrument(info_span!("websocket-handle"));
 
         tokio::time::timeout(self.state.options().guest_timeout, run)
             .await

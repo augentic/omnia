@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
 use omnia_core::{PatternRoutes, Runtime, StoreCtx, StoreView, TriggerRouter};
-use tracing::{Instrument, debug_span, instrument};
+use tracing::{Instrument, info_span, instrument};
 
 use crate::host::WasiMessaging;
 use crate::host::generated::MessagingRequestReplyIndices;
@@ -148,7 +148,7 @@ where
                     .map_err(anyhow::Error::from)
                     .context("issue sending message")
             })
-            .instrument(debug_span!("messaging-handle"));
+            .instrument(info_span!("messaging-handle"));
 
         tokio::time::timeout(self.state.options().guest_timeout, run)
             .await

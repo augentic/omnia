@@ -67,6 +67,15 @@ Unreleased
   `wasi-keyvalue`'s `Cache` reading a value it did not write — moves from
   `debug` to `trace`, so `-v` shows a run's decisions and `-vv` its every
   step.
+- The runtime opens an `info` span around every `wasi:cli/run` drive
+  (`cli-run`) and every trigger request (`http-request`,
+  `messaging-handle`, `websocket-handle`, up from `debug`). Guest spans
+  graft onto the host span live when they export and are dropped without
+  one, so a command run's guest spans now reach a configured collector at
+  the default level, where no span was live around the drive at any level;
+  a server's request spans are live from `-v` (`RUST_LOG=info`), its
+  default `warn` still dropping them. Host console lines emitted inside a
+  live span carry its name (`cli-run:`), as `fmt` renders span context.
 - A guest not compiled into the runtime loads at its first use. Bytes that
   were in the process before any guest ran — the macro's embedded `path:`,
   the component `run <component>` names, a programmatic

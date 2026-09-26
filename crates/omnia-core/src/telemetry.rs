@@ -510,7 +510,7 @@ mod tests {
     mod filter {
         use super::super::filter;
 
-        const MUTES: [&str; 7] = [
+        const MUTES: [&str; 6] = [
             "hyper=off",
             "h2=off",
             "tower=off",

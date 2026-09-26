@@ -21,7 +21,7 @@ use omnia_core::{HttpRoutes, Runtime, StoreCtx, TriggerRouter};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
-use tracing::{Instrument, debug_span, instrument};
+use tracing::{Instrument, info_span, instrument};
 use wasmtime::AsContextMut as _;
 use wasmtime_wasi_http::WasiHttpView;
 use wasmtime_wasi_http::io::TokioIo;
@@ -258,7 +258,7 @@ where
 
                     anyhow::Ok(())
                 })
-                .instrument(debug_span!("http-request"))
+                .instrument(info_span!("http-request"))
                 .await;
 
             match result {
