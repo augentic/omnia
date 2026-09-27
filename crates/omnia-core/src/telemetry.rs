@@ -138,21 +138,27 @@ impl Telemetry {
         let directives =
             self.filter.unwrap_or_else(|| directives(None, self.fallback, rust_log().as_deref()));
 
-        // console to stderr, since stdout is the guest's; plain text off a terminal or under `NO_COLOR`
-        let console = console(&directives, self.runtime, std::io::stderr, ansi())?;
-
         let exports = exports(self.endpoint.as_deref(), |name| env::var(name).ok());
         let providers = Providers::build(&self.name, self.endpoint.as_deref(), exports)?;
         let tracer = providers.tracer.tracer(self.name);
 
-        // publish the providers only once the subscriber referencing them is installed
-        match Registry::default()
+        // console to stderr, since stdout is the guest's; plain text off a terminal or under `NO_COLOR`
+        let console = console(&directives, self.runtime, std::io::stderr, ansi())?;
+
+        // every layer filtered: an unfiltered one beside the console's per-layer
+        // filter drops the level hint, and `log` records flood in unfiltered
+        let subscriber = Registry::default()
             .with(filter(&directives)?)
             .with(console)
-            .with(tracing_opentelemetry::layer().with_tracer(tracer))
-            .with(MetricsLayer::new(providers.meter.clone()))
-            .try_init()
-        {
+            .with(
+                tracing_opentelemetry::layer()
+                    .with_tracer(tracer)
+                    .with_filter(filter(&directives)?),
+            )
+            .with(MetricsLayer::new(providers.meter.clone()).with_filter(filter(&directives)?));
+
+        // publish the providers only once the subscriber referencing them is installed
+        match subscriber.try_init() {
             Ok(()) => {
                 providers.publish()?;
                 if exports != Exports::ALL {
@@ -174,10 +180,6 @@ impl Telemetry {
     }
 }
 
-// Which signals have an exporter. Without a collector, OpenTelemetry's
-// `localhost:4317` fallback turns every export into a connect retry the exit
-// flush waits on, so a signal exports only when an endpoint is configured for
-// it; an empty value is unset, as the exporter itself reads one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Exports {
     traces: bool,
@@ -196,6 +198,7 @@ fn exports(endpoint: Option<&str>, env: impl Fn(&str) -> Option<String>) -> Expo
         value.is_some_and(|value| !value.as_ref().is_empty())
     }
     let shared = set(endpoint) || set(env(OTEL_EXPORTER_OTLP_ENDPOINT));
+
     Exports {
         traces: shared || set(env(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)),
         metrics: shared || set(env(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT)),
@@ -221,6 +224,7 @@ pub fn directives(
     for (token, error) in &tokens.invalid {
         eprintln!("ignoring `RUST_LOG` directive `{token}`: {error}");
     }
+
     tokens
         .bare(level, fallback)
         .map(|level| level.to_string())
@@ -243,9 +247,7 @@ pub fn bare(
     tokens(rust_log).bare(level, fallback)
 }
 
-// The console layer: `fmt` on `writer`, its own filter refining the runtime's
-// crates to `runtime` when one is selected. Spans and every other layer see
-// the run's filter alone, so the refinement never disables a span.
+// the refinement is per-layer so it never disables a span
 fn console<S, W>(
     directives: &str, runtime: Option<LevelFilter>, writer: W, ansi: bool,
 ) -> Result<impl Layer<S>>
@@ -461,8 +463,11 @@ mod tests {
     use opentelemetry::trace::{Tracer as _, TracerProvider as _};
     use opentelemetry_sdk::metrics::SdkMeterProvider;
     use opentelemetry_sdk::trace::{SdkTracerProvider, SpanData, SpanExporter};
+    use tracing::Subscriber as _;
+    use tracing_opentelemetry::MetricsLayer;
+    use tracing_subscriber::layer::{Layer as _, SubscriberExt as _};
 
-    use super::{OTelSdkResult, flush_providers};
+    use super::{LevelFilter, OTelSdkResult, Registry, console, filter, flush_providers};
 
     // keeps its records, so flushing is observable without a collector
     #[derive(Clone, Debug, Default)]
@@ -863,11 +868,7 @@ mod tests {
     // the runtime's `info` while an `info` span of the same crate — the one
     // guest telemetry grafts onto — is live and exports.
     #[test]
-    fn console_refined_spans_live() {
-        use tracing_subscriber::layer::SubscriberExt as _;
-
-        use super::{LevelFilter, Registry, console, filter};
-
+    fn refined_spans() {
         let out = Console::default();
         let exporter = Recording::default();
         let (tracer, meter) = providers(&exporter);
@@ -891,6 +892,28 @@ mod tests {
         assert!(!console.contains("guest loaded"), "{console}");
         assert!(console.contains("mount failed"), "{console}");
         assert!(console.contains("completion"), "{console}");
+    }
+
+    // The stack `build` installs, as `tracing-log` reads it: the hint is the
+    // run's level, refined or not, so `log` records above it never dispatch.
+    #[test]
+    fn stack_level_hint() {
+        for runtime in [Some(LevelFilter::WARN), None] {
+            let exporter = Recording::default();
+            let (tracer, meter) = providers(&exporter);
+            let stack = Registry::default()
+                .with(filter("info,tower=off").expect("parse"))
+                .with(console("info,tower=off", runtime, Console::default(), false).expect("parse"))
+                .with(
+                    tracing_opentelemetry::layer()
+                        .with_tracer(tracer.tracer("test"))
+                        .with_filter(filter("info,tower=off").expect("parse")),
+                )
+                .with(
+                    MetricsLayer::new(meter).with_filter(filter("info,tower=off").expect("parse")),
+                );
+            assert_eq!(stack.max_level_hint(), Some(LevelFilter::INFO), "runtime {runtime:?}");
+        }
     }
 
     // the fast-exit contract: a span emitted just before a flush reaches the exporter
