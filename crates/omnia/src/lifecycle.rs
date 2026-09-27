@@ -150,7 +150,7 @@ where
     let pool =
         sample_pool(runtime.registry().engine().clone(), runtime.options().pool_metrics_interval);
 
-    log_ready(&runtime, mode);
+    tracing::info!(component = runtime.name(), "omnia ready");
 
     let outcome = match mode {
         Mode::Command => {
@@ -176,17 +176,6 @@ where
     // batch-queued telemetry must survive a fast command-mode exit
     omnia_core::telemetry::flush();
     outcome
-}
-
-fn log_ready<B>(runtime: &Runtime<B>, mode: Mode)
-where
-    B: Clone + Send + Sync + 'static,
-{
-    if mode.is_command() {
-        tracing::debug!(component = runtime.name(), "omnia ready");
-    } else {
-        tracing::info!(component = runtime.name(), "omnia ready");
-    }
 }
 
 fn drive_epoch(engine: Engine, tick: Duration) -> tokio::task::JoinHandle<()> {

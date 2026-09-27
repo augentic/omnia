@@ -310,7 +310,7 @@ pub fn guest_env(
             None => env.push((NO_COLOR.to_owned(), "1".to_owned())),
         }
     }
-    
+
     env
 }
 

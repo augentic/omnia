@@ -474,7 +474,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
         &self, instance_pre: &InstancePre<StoreCtx<B>>, store: &mut Store<StoreCtx<B>>,
     ) -> Result<Instance> {
         let instance = instance_pre.instantiate_async(store).await?;
-        tracing::trace!("component instantiated");
+        tracing::debug!("component instantiated");
         Ok(instance)
     }
 
@@ -562,7 +562,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
             }
         })?;
 
-        tracing::trace!(guest = %id, "guest registered");
+        tracing::debug!(guest = %id, "guest registered");
         Ok(())
     }
 
@@ -577,7 +577,7 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// registered.
     pub fn deregister(&self, id: &GuestId) -> Result<()> {
         self.registry().remove(id)?;
-        tracing::trace!(guest = %id, "guest deregistered");
+        tracing::debug!(guest = %id, "guest deregistered");
         Ok(())
     }
 

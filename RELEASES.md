@@ -67,6 +67,28 @@ Unreleased
   `wasi-keyvalue`'s `Cache` reading a value it did not write — moves from
   `debug` to `trace`, so `-v` shows a run's decisions and `-vv` its every
   step.
+- The host console shows the runtime's own crates — `omnia`, `omnia_core`,
+  `omnia_link`, `omnia_plugin` (`telemetry::RUNTIME`) — as a server run
+  shows them, whatever the mode: from `warn`, stepping with the verbosity
+  flags (`-v` info, `-vv` debug, `-vvv` trace), or at the process
+  `RUST_LOG`'s bare level as written. A bare command run's console carries
+  its guests' progress and the runtime's warnings alone; `-v` adds the
+  runtime's `info` beside the guests' `debug`. A `RUST_LOG` directive
+  naming one of those crates, or `omnia` as a prefix of all four, stands.
+  The refinement is the console layer's own filter and nothing else's:
+  spans, the exporters, and every guest's `RUST_LOG` follow the run's
+  filter, so the `cli-run` span guest telemetry grafts onto is live at a
+  bare command run whether or not the console prints it — host lines
+  inside the run carry the `cli-run:` prefix from `-v`, where the console
+  first sees the span. `Telemetry::runtime_level(level)` sets the
+  refinement and `telemetry::bare(level, fallback, rust_log)` reads the
+  level `directives` leads with; embedders select the level with
+  `DeploymentBuilder::runtime_level`, which the generated `main` sets from
+  the flags. With the refinement in place, a guest's load (`guest loaded`,
+  with its digest), each `wasi:cli/run` exit, and the `omnia ready` line
+  are at `info` in either mode, where the command-mode lines were at
+  `debug`, and a command deployment with no `wasi:cli/run` exporter warns
+  that it is inert, where it said so at `info`.
 - Console colour only when stderr is a terminal. A redirected or captured
   stderr (`2>run.log`, a container log driver, journald) gets plain text
   where it used to get ANSI escapes; on a terminal `NO_COLOR` still

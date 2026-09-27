@@ -47,7 +47,7 @@ Command mode has two entry surfaces, chosen by whether the deployment is compile
 
 A backend-less command runtime is valid: `omnia::runtime!({ mode: command });`.
 
-By default, command mode routes to the sole guest loaded at boot exporting `wasi:cli/run`; a deployment with no such exporter is inert and exits `0`. With several exporters, or a command guest that loads at first use (a manifest file's `[[guest]]`, a `package:`), mark one guest entry `command: true` — see [Command routing](#command-routing-command-true).
+By default, command mode routes to the sole guest loaded at boot exporting `wasi:cli/run`; a deployment with no such exporter is inert: it warns and exits `0`. With several exporters, or a command guest that loads at first use (a manifest file's `[[guest]]`, a `package:`), mark one guest entry `command: true` — see [Command routing](#command-routing-command-true).
 
 ## `manifest:` (default manifest path)
 
@@ -151,7 +151,7 @@ The program name — telemetry's component name and, in command mode, the `argv[
 
 A direct command has no host `run` grammar: the binary's argv belongs to the guest. There is no `run` subcommand and no `--manifest`/`OMNIA_MANIFEST`/positional-wasm override — the deployment compiled into the binary is the only source, by design. The program name used for telemetry and prepended to guest argv as `argv[0]` is the crate's package name.
 
-Every argument passes through to the guest untouched. The host also *reads* the verbosity flags on their way past — `-v`/`--verbose` and `-q`/`--quiet`, repeated as `-vv`, before any `--` — to set the process tracing level for the host console and every guest's `RUST_LOG` before the guest runs (see [Verbosity flags](configuration.md#verbosity-flags)); it removes nothing, so the guest declares the same flags in its own grammar by flattening `omnia_sdk::api::command::Verbosity`, which lists them in its help and completions, accepts them, and refuses `-v` beside `-q` as its own usage error. Every other flag is the guest's to define; the guest's tracing filter is the `RUST_LOG` its WASI environment carries, which the host has already set to the filter it decided — the flag's level (else the process `RUST_LOG`'s, else the mode's default) with the process `RUST_LOG`'s targeted directives on top.
+Every argument passes through to the guest untouched. The host also *reads* the verbosity flags on their way past — `-v`/`--verbose` and `-q`/`--quiet`, repeated as `-vv`, before any `--` — to set the process tracing level for the host console and every guest's `RUST_LOG` before the guest runs (the runtime's own crates stepping from a server's `warn` on the console; see [Verbosity flags](configuration.md#verbosity-flags)); it removes nothing, so the guest declares the same flags in its own grammar by flattening `omnia_sdk::api::command::Verbosity`, which lists them in its help and completions, accepts them, and refuses `-v` beside `-q` as its own usage error. Every other flag is the guest's to define; the guest's tracing filter is the `RUST_LOG` its WASI environment carries, which the host has already set to the filter it decided — the flag's level (else the process `RUST_LOG`'s, else the mode's default) with the process `RUST_LOG`'s targeted directives on top.
 
 A `mode: command` runtime *without* a compiled-in deployment keeps the `run` grammar byte-for-byte — with no other way to name the guest, the positional wasm path and `--manifest` remain the entry surface.
 

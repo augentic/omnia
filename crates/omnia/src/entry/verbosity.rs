@@ -1,7 +1,8 @@
-//! The verbosity flags: counting `-v`/`-q` in argv and stepping a mode's
-//! default level by them.
+//! The verbosity flags: counting `-v`/`-q` in argv and stepping a run's
+//! levels by them — the run's from its mode's default, the runtime's own
+//! crates' from a server's.
 
-use crate::LevelFilter;
+use crate::{DeploymentBuilder, LevelFilter, Mode};
 
 // The scale the flags step along, quietest first.
 const LADDER: [LevelFilter; 6] = [
@@ -12,6 +13,43 @@ const LADDER: [LevelFilter; 6] = [
     LevelFilter::DEBUG,
     LevelFilter::TRACE,
 ];
+
+/// The levels a run's verbosity flags select, each `None` when they select
+/// nothing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Levels {
+    /// The run's level: the host console's bare level and every guest's.
+    pub run: Option<LevelFilter>,
+    /// The level of the runtime's own crates on the host console.
+    pub runtime: Option<LevelFilter>,
+}
+
+impl Levels {
+    /// Select the levels on `builder`, leaving one selecting nothing unset.
+    pub const fn apply(self, builder: DeploymentBuilder) -> DeploymentBuilder {
+        let builder = match self.run {
+            Some(level) => builder.level(level),
+            None => builder,
+        };
+        match self.runtime {
+            Some(level) => builder.runtime_level(level),
+            None => builder,
+        }
+    }
+}
+
+/// The levels `verbose` and `quiet` select for a run in `mode`.
+///
+/// The run steps from the [mode's default](Mode::level); the runtime's own
+/// crates step from a server's whatever the mode, so a command's console
+/// shows its guests' progress at `info` and the runtime's from `-v`, as a
+/// server's does — see [`DeploymentBuilder::runtime_level`].
+pub fn levels(mode: Mode, verbose: u8, quiet: u8) -> Levels {
+    Levels {
+        run: level(mode.level(), verbose, quiet),
+        runtime: level(Mode::Server.level(), verbose, quiet),
+    }
+}
 
 /// The level `verbose` and `quiet` counts select from `default`, or `None`
 /// when they select nothing.
@@ -108,6 +146,41 @@ mod tests {
     fn ladder_conflict() {
         assert_eq!(level(LevelFilter::INFO, 1, 1), None);
         assert_eq!(level(LevelFilter::INFO, 2, 1), None);
+    }
+
+    // the runtime's own crates climb a server's ladder in either mode, so
+    // `-vvv` reaches their `trace` where the command's own level has clamped
+    #[test]
+    fn levels_by_mode() {
+        assert_eq!(levels(Mode::Command, 0, 0), Levels::default());
+        assert_eq!(
+            levels(Mode::Command, 1, 0),
+            Levels {
+                run: Some(LevelFilter::DEBUG),
+                runtime: Some(LevelFilter::INFO),
+            }
+        );
+        assert_eq!(
+            levels(Mode::Command, 3, 0),
+            Levels {
+                run: Some(LevelFilter::TRACE),
+                runtime: Some(LevelFilter::TRACE),
+            }
+        );
+        assert_eq!(
+            levels(Mode::Command, 0, 2),
+            Levels {
+                run: Some(LevelFilter::ERROR),
+                runtime: Some(LevelFilter::OFF),
+            }
+        );
+        assert_eq!(
+            levels(Mode::Server, 1, 0),
+            Levels {
+                run: Some(LevelFilter::INFO),
+                runtime: Some(LevelFilter::INFO),
+            }
+        );
     }
 
     #[test]

@@ -32,7 +32,7 @@ omnia::runtime!({
 });
 ```
 
-Guest spans are grafted onto the host trace: the host span live when the guest exports becomes their parent, and without one they are dropped. The runtime opens one at `INFO` around every `wasi:cli/run` drive (`cli-run`) and every trigger request (`http-request`, `messaging-handle`, `websocket-handle`), so a command run's guest spans export at its default level and a server's from `-v` (`RUST_LOG=info`); its default `warn` disables the span.
+Guest spans are grafted onto the host trace: the host span live when the guest exports becomes their parent, and without one they are dropped. The runtime opens one at `INFO` around every `wasi:cli/run` drive (`cli-run`) and every trigger request (`http-request`, `messaging-handle`, `websocket-handle`), so a command run's guest spans export at its default level and a server's from `-v` (`RUST_LOG=info`); its default `warn` disables the span. The console's refinement of the runtime's own crates ([Verbosity flags](https://github.com/augentic/omnia/blob/main/docs/reference/configuration.md#verbosity-flags)) is the console layer's alone and never disables a span.
 
 ### Guest
 

@@ -44,8 +44,9 @@ where
         runtime.registry().routes().cli().clone(),
         |pre| CommandPre::new(pre.clone()).map(|_| ()),
     )?;
+    // a command runtime with nothing to run exits clean, but the operator should hear
     if routing.is_inert() {
-        tracing::info!("no guest exports wasi:cli/run; cli trigger inert");
+        tracing::warn!("no guest exports wasi:cli/run; cli trigger inert");
         return Ok(ExitStatus::SUCCESS);
     }
     let Some(guest_id) = routing.catch_all() else {
@@ -64,15 +65,14 @@ async fn run_guest<B>(
 where
     B: Clone + Send + Sync + 'static,
 {
-    tracing::trace!(guest = %guest_id, "running wasi:cli/run");
+    tracing::debug!(guest = %guest_id, "running wasi:cli/run");
 
     // a command chain root: its link hops run uncapped, like the run itself
     let mut store = runtime.build_store(runtime.store_in(ChainCtx::command()));
     let instance = runtime.instantiate(guest.instance_pre(), &mut store).await?;
     let command = Command::new(&mut store, &instance)?;
 
-    // The host span guest telemetry grafts onto: `wasi:otel` drops a guest's
-    // spans when none is live at export.
+    // host anchor for guest spans: `wasi:otel` drops them with no span live at export
     let outcome = store
         .run_concurrent(async move |store| command.wasi_cli_run().call_run(store).await)
         .instrument(tracing::info_span!("cli-run"))
@@ -87,6 +87,6 @@ where
         },
     };
 
-    tracing::debug!(guest = %guest_id, code = status.code(), "wasi:cli/run exited");
+    tracing::info!(guest = %guest_id, code = status.code(), "wasi:cli/run exited");
     Ok(status)
 }

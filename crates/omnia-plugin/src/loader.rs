@@ -129,7 +129,7 @@ impl Plugins {
                     )));
                 }
                 let digest = self.admission.ensure(&id).await?;
-                tracing::debug!(%id, %digest, "declared guest loaded");
+                tracing::info!(%id, %digest, "declared guest loaded");
                 return Ok(Plugin { id, digest });
             }
             // a declared name is bound by its entry alone; the caller's bytes
@@ -155,7 +155,7 @@ impl Plugins {
         // admit them, or attest the registration that got there first
         match self.admission.admit(id.clone(), verified).await {
             Ok(()) => {
-                tracing::debug!(%id, %digest, "guest loaded");
+                tracing::info!(%id, %digest, "guest loaded");
                 Ok(Plugin { id, digest })
             }
             // another load registered the name first: the same bytes attest,
