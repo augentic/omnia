@@ -1,0 +1,37 @@
+[task_config]
+includes = ["mise-rust.toml"]
+# includes = ["git::https://github.com/augentic/.github.git//mise/rust.toml?ref=v0.1.0"]
+
+# -------------------------------------
+# Examples (project-specific; the generic Rust tasks live in the include)
+# -------------------------------------
+
+# Full WASM example build for main/scheduled validation.
+[tasks.examples]
+description = "Build every example guest for wasm32-wasip2"
+run = "cargo build -p examples --examples --target wasm32-wasip2"
+
+[tasks.build]
+description = "Build one example guest: mise run build <name>"
+usage = 'arg "<name>" help="example name, e.g. http"'
+run = 'cargo build -p examples --example "${usage_name?}-wasm" --target wasm32-wasip2'
+
+[tasks.run]
+description = "Run one example host against its built guest: mise run run <name> [-- guest args]"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+name="${1}"
+module="$(printf '%s' "$name" | tr '-' '_')"
+ws="$(cargo locate-project --workspace --message-format=plain)"
+ws="${ws%/Cargo.toml}"
+shift
+
+# `-v` shows startup logs; a set `RUST_LOG` takes over, as `-v` would
+# displace its level.
+flags=""
+[ -n "${RUST_LOG:-}" ] || flags="-v"
+
+cargo run -p examples --example "$name" -- $flags \
+  run "${CARGO_TARGET_DIR:-$ws/target}/wasm32-wasip2/debug/examples/${module}_wasm.wasm" -- "$@"
+'''

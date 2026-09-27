@@ -1,0 +1,132 @@
+# Rust code-quality tasks, included from `mise.toml` via `task_config.includes`.
+# Install: `curl https://mise.run | sh`
+# Help: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise-task.json
+
+# -------------------------------------
+# CI Checks
+# -------------------------------------
+
+# `run` steps execute in order (`depends` would run them in parallel), so
+# `fmt` finishes rewriting sources before anything lints them.
+[check]
+description = "Local pre-push checks: audit, fmt, lint, outdated, deps"
+run = [
+  { task = "audit" },
+  { task = "fmt" },
+  { task = "lint" },
+  { task = "outdated" },
+  { task = "deps" },
+]
+
+[ci]
+description = "Everything CI runs, in order"
+run = [
+  { task = "fmt" },
+  { task = "lint" },
+  { task = "test" },
+  { task = "test-docs" },
+  { task = "docs" },
+  { task = "vet" },
+  { task = "outdated" },
+  { task = "deny" },
+  { task = "deps" }
+]
+
+# -------------------------------------
+# Individual Actions
+# -------------------------------------
+
+[audit]
+description = "Check Cargo.lock against the RustSec advisory database"
+run = "cargo audit"
+
+[deny]
+description = "Check licenses, bans, advisories and sources"
+depends = ["install deny"]
+run = "cargo deny --workspace check"
+
+[deps]
+description = "Find unused dependencies (nightly)"
+depends = ["install udeps"]
+run = "cargo +nightly udeps --all-targets"
+
+[fmt]
+description = "Format all crates in place (nightly rustfmt)"
+run = "cargo +nightly fmt --all"
+
+# Lint every line of code: all targets with everything on (natively and for
+# `wasm32-wasip2`), then every crate's library in each single-feature configuration.
+[lint]
+description = "Clippy with -D warnings: all features, each feature, natively and for wasm32-wasip2"
+depends = ["install hack"]
+run = [
+  "cargo clippy --workspace --all-targets --all-features -- -D warnings",
+  "cargo clippy --workspace --all-targets --all-features --target wasm32-wasip2 -- -D warnings",
+  "cargo hack clippy --workspace --each-feature --exclude-all-features -- -D warnings",
+  "cargo hack clippy --workspace --each-feature --exclude-all-features --target wasm32-wasip2 -- -D warnings",
+]
+
+[outdated]
+description = "Fail on outdated direct dependencies"
+depends = ["install outdated"]
+run = """
+cargo outdated --workspace --exit-code 1 --depth 1 \
+  --ignore cap-fs-ext --ignore cap-std --ignore cap-primitives \
+  --ignore thiserror
+"""
+
+[test]
+description = "nextest across every single-feature configuration (includes the examples gate)"
+depends = ["install hack"]
+env = { RUSTFLAGS = "-Dwarnings" }
+run = "cargo hack nextest run --workspace --each-feature --locked --no-tests=pass"
+
+[docs]
+description = "Build rustdoc for the workspace"
+run = "cargo doc --no-deps --workspace --all-features --locked"
+
+[test-docs]
+description = "Run doc tests"
+run = "cargo test --doc --all-features --workspace"
+
+[vet]
+description = "Regenerate cargo-vet imports/exemptions/unpublished, then vet"
+depends = ["install vet"]
+run = [
+  "cargo vet regenerate imports",
+  "cargo vet regenerate exemptions",
+  "cargo vet regenerate unpublished",
+  "cargo vet --locked",
+]
+
+# -------------------------------------
+# Advisory and Helpers (not part of ci)
+# -------------------------------------
+
+# Equivalent of cargo-make's `install_crate`: install a cargo subcommand only
+# when it is not already on PATH. Used as `depends = ["install <subcommand>"]`.
+[install]
+hide = true
+description = "Install cargo-<subcommand> if missing"
+usage = 'arg "<subcommand>" help="cargo subcommand, e.g. hack for cargo-hack"'
+run = 'command -v "cargo-${usage_subcommand?}" >/dev/null 2>&1 || cargo install --locked "cargo-${usage_subcommand?}"'
+
+# Dry run of what the `Publish Release` workflow's crates job executes; the
+# only pre-release check that every publishable member packages and verifies.
+[publish]
+description = "Dry-run publishing every publishable workspace member"
+run = "cargo publish --workspace --locked --dry-run"
+
+[miri]
+description = "Run the test suite under Miri (nightly)"
+run = ["cargo +nightly miri setup", "cargo +nightly miri nextest run --no-tests=pass"]
+
+[clean]
+description = "Remove the target directory"
+run = "cargo clean"
+
+[sweep]
+description = "Removed old/unused build artifacts"
+depends = ["install sweep"]
+run = "cargo sweep --time 7"
