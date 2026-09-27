@@ -138,9 +138,8 @@ impl Telemetry {
         let directives =
             self.filter.unwrap_or_else(|| directives(None, self.fallback, rust_log().as_deref()));
 
-        // console to stderr, since stdout is the guest's; plain text off a terminal
-        let stderr = std::io::stderr();
-        let console = console(&directives, self.runtime, std::io::stderr, stderr.is_terminal())?;
+        // console to stderr, since stdout is the guest's; plain text off a terminal or under `NO_COLOR`
+        let console = console(&directives, self.runtime, std::io::stderr, ansi())?;
 
         let exports = exports(self.endpoint.as_deref(), |name| env::var(name).ok());
         let providers = Providers::build(&self.name, self.endpoint.as_deref(), exports)?;
@@ -323,6 +322,21 @@ fn tokens(rust_log: Option<&str>) -> Tokens<'_> {
 // read once per build so `directives` stays pure over its inputs
 fn rust_log() -> Option<String> {
     env::var("RUST_LOG").ok()
+}
+
+/// Whether the host console colours its lines: stderr is a terminal and
+/// `NO_COLOR` is unset or empty.
+///
+/// Decided once, for the console layer and for every guest's environment.
+/// `with_ansi` overrides the `fmt` default that honours `NO_COLOR` on a
+/// terminal, so the console reads the variable itself.
+pub(crate) fn ansi() -> bool {
+    colour(std::io::stderr().is_terminal(), env::var("NO_COLOR").ok().as_deref())
+}
+
+// the `NO_COLOR` convention: any non-empty value disables colour, an empty one does not
+fn colour(terminal: bool, no_color: Option<&str>) -> bool {
+    terminal && no_color.is_none_or(str::is_empty)
 }
 
 // `directives` plus the noisy-dependency mutes; `tower` is muted whole since
@@ -603,6 +617,27 @@ mod tests {
                 directives(None, LevelFilter::INFO, Some(" info , tower=off ,,")),
                 "info,tower=off"
             );
+        }
+    }
+
+    // `NO_COLOR` is honoured on a terminal by its convention — any non-empty
+    // value disables colour, an empty one does not — and off a terminal
+    // nothing enables it
+    mod colour {
+        use super::super::colour;
+
+        #[test]
+        fn terminal() {
+            assert!(colour(true, None));
+            assert!(colour(true, Some("")));
+            assert!(!colour(true, Some("1")));
+            assert!(!colour(true, Some("0")));
+        }
+
+        #[test]
+        fn piped() {
+            assert!(!colour(false, None));
+            assert!(!colour(false, Some("")));
         }
     }
 

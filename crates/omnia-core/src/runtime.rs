@@ -3,7 +3,6 @@
 mod command;
 
 use std::fmt;
-use std::io::IsTerminal as _;
 use std::sync::{Arc, Weak};
 
 use anyhow::Result;
@@ -408,15 +407,14 @@ impl<B: Clone + Send + Sync + 'static> Runtime<B> {
     /// The guest's environment is the host's with `RUST_LOG` set to the
     /// deployment's tracing directives — the run's verbosity flag composed
     /// with the process variable, decided once at build — and `NO_COLOR` set
-    /// when the console the guest shares is not a terminal.
+    /// when the console the guest shares does not colour its lines.
     #[must_use]
     pub fn store_in(&self, chain: ChainCtx) -> StoreCtx<B> {
         // the environment as it stands; a non-UTF-8 pair cannot cross `wasi:cli`
         let host = std::env::vars_os().filter_map(|(name, value)| {
             Some((name.into_string().ok()?, value.into_string().ok()?))
         });
-        let ansi = std::io::stderr().is_terminal();
-        let env = crate::store::guest_env(host, &self.inner.rust_log, ansi);
+        let env = crate::store::guest_env(host, &self.inner.rust_log, crate::telemetry::ansi());
 
         StoreCtx {
             base: StoreBase::new(crate::StoreConfig {

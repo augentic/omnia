@@ -282,8 +282,8 @@ const RUST_LOG: &str = "RUST_LOG";
 const NO_COLOR: &str = "NO_COLOR";
 
 /// The complete guest environment: every `host` pair, with `RUST_LOG` set to
-/// the run's tracing directives and `NO_COLOR` set when the console is not a
-/// terminal.
+/// the run's tracing directives and `NO_COLOR` set when the console does not
+/// colour its lines.
 ///
 /// `rust_log` is the composition of the run's verbosity flag with the
 /// process `RUST_LOG` ([`telemetry::directives`](crate::telemetry::directives)),
