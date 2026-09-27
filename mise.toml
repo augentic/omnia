@@ -1,6 +1,5 @@
 [task_config]
-includes = ["mise-rust.toml"]
-# includes = ["git::https://github.com/augentic/.github.git//mise/rust.toml?ref=v0.1.0"]
+includes = ["git::https://github.com/augentic/.github.git//mise/rust.toml?ref=v0.1.0"]
 
 # -------------------------------------
 # Examples (project-specific; the generic Rust tasks live in the include)
