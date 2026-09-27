@@ -11,8 +11,8 @@ use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
 
-use super::verbosity;
-use crate::{DeploymentBuilder, LevelFilter, Manifest, Mode};
+use super::verbosity::{self, Levels};
+use crate::{DeploymentBuilder, Manifest, Mode};
 
 /// How a runtime's compiled-in deployment manifest is supplied.
 ///
@@ -98,7 +98,7 @@ pub struct EntryPlan {
     manifest: Option<Manifest>,
     program_name: Option<String>,
     args: Vec<String>,
-    level: Option<LevelFilter>,
+    levels: Levels,
 }
 
 impl EntryPlan {
@@ -110,10 +110,7 @@ impl EntryPlan {
             Some(name) => builder.program_name(name),
             None => builder,
         };
-        match self.level {
-            Some(level) => builder.level(level),
-            None => builder,
-        }
+        self.levels.apply(builder)
     }
 }
 
@@ -144,7 +141,7 @@ pub fn plan(options: MainOptions, argv: impl IntoIterator<Item = OsString>) -> R
 /// compiled-in manifest is the sole source.
 ///
 /// The host reads the verbosity flags (`-v`, `-q`, and their long forms) out
-/// of argv to select the process level, but removes nothing: the guest
+/// of argv to select the run's levels, but removes nothing: the guest
 /// declares the same flags in its own grammar, so its help lists them and
 /// its parser refuses `-v` with `-q`.
 ///
@@ -165,14 +162,14 @@ pub fn plan_direct(
         })
         .collect::<Result<Vec<_>>>()?;
     let (verbose, quiet) = verbosity::scan(&guest_args);
-    let level = verbosity::level(mode.level(), verbose, quiet);
+    let levels = verbosity::levels(mode, verbose, quiet);
     let manifest = manifest.map(ManifestSource::into_manifest).transpose()?;
     Ok(EntryPlan {
         mode,
         manifest,
         program_name,
         args: guest_args,
-        level,
+        levels,
     })
 }
 
@@ -210,24 +207,41 @@ mod tests {
                 .unwrap_or_else(|error| panic!("{}", fatal(&error)));
         assert_eq!(plan.args, ["--manifest", "foo.toml", "run", "--debug", "greet"]);
         assert_eq!(first_guest(&plan), "app");
-        assert_eq!(plan.level, None, "no flag leaves the process `RUST_LOG` standing");
+        assert_eq!(
+            plan.levels,
+            Levels::default(),
+            "no flag leaves the process `RUST_LOG` standing"
+        );
     }
 
-    // The verbosity flags are read for the level and stay in the guest's
+    // The verbosity flags are read for the levels and stay in the guest's
     // argv, where its own grammar declares them.
     #[test]
     fn direct_argv_verbatim() {
+        use crate::LevelFilter;
+
         let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
         let verbose = plan(options, argv(&["bin", "-v", "greet"]))
             .unwrap_or_else(|error| panic!("{}", fatal(&error)));
         assert_eq!(verbose.args, ["-v", "greet"]);
-        assert_eq!(verbose.level, Some(LevelFilter::DEBUG), "one rung up from command `info`");
+        assert_eq!(
+            verbose.levels,
+            Levels {
+                run: Some(LevelFilter::DEBUG),
+                runtime: Some(LevelFilter::INFO),
+            },
+            "one rung up from command `info`, and from a server's `warn` for the runtime's crates"
+        );
 
         let options = MainOptions::new(Mode::Command).manifest(inline_source("app"));
         let conflict = plan(options, argv(&["bin", "-v", "greet", "--quiet"]))
             .unwrap_or_else(|error| panic!("{}", fatal(&error)));
         assert_eq!(conflict.args, ["-v", "greet", "--quiet"]);
-        assert_eq!(conflict.level, None, "the guest refuses the pair; the host applies nothing");
+        assert_eq!(
+            conflict.levels,
+            Levels::default(),
+            "the guest refuses the pair; the host applies nothing"
+        );
     }
 
     // the direct plan always carries the compiled-in manifest, so `build` can

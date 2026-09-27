@@ -32,7 +32,7 @@ omnia::runtime!({
 });
 ```
 
-Guest spans are grafted onto the host trace: the host span live when the guest exports becomes their parent, and without one they are dropped. The runtime opens one at `INFO` around every `wasi:cli/run` drive (`cli-run`) and every trigger request (`http-request`, `messaging-handle`, `websocket-handle`), so a command run's guest spans export at its default level and a server's from `-v` (`RUST_LOG=info`); its default `warn` disables the span.
+Guest spans are grafted onto the host trace: the host span live when the guest exports becomes their parent, and without one they are dropped. The runtime opens one at `INFO` around every `wasi:cli/run` drive (`cli-run`) and every trigger request (`http-request`, `messaging-handle`, `websocket-handle`), so a command run's guest spans export at its default level and a server's from `-v` (`RUST_LOG=info`); its default `warn` disables the span. The console's refinement of the runtime's own crates ([Verbosity flags](https://github.com/augentic/omnia/blob/main/docs/reference/configuration.md#verbosity-flags)) is the console layer's alone and never disables a span.
 
 ### Guest
 
@@ -46,7 +46,7 @@ async fn handle(request: Request) -> Response {
 }
 ```
 
-Console output (events only, to stderr) follows the `RUST_LOG` the guest's WASI environment carries (the runtime's tracing filter: a `-v`/`-q` flag's level, else the process `RUST_LOG`'s, else the mode's default, with the process `RUST_LOG`'s targeted directives on top), defaulting to `error` when there is none; `flush` exports on demand.
+Console output (events only, to stderr) follows the `RUST_LOG` the guest's WASI environment carries (the runtime's tracing filter: a `-v`/`-q` flag's level, else the process `RUST_LOG`'s, else the mode's default, with the process `RUST_LOG`'s targeted directives on top), defaulting to `error` when there is none, and colours its lines unless that environment carries `NO_COLOR` — which the runtime sets when the console it shares is not a terminal; `flush` exports on demand.
 
 ## License
 

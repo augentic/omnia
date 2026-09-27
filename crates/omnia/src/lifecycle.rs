@@ -150,7 +150,7 @@ where
     let pool =
         sample_pool(runtime.registry().engine().clone(), runtime.options().pool_metrics_interval);
 
-    log_ready(&runtime, mode);
+    tracing::info!(component = runtime.name(), "omnia ready");
 
     let outcome = match mode {
         Mode::Command => {
@@ -178,17 +178,6 @@ where
     outcome
 }
 
-fn log_ready<B>(runtime: &Runtime<B>, mode: Mode)
-where
-    B: Clone + Send + Sync + 'static,
-{
-    if mode.is_command() {
-        tracing::debug!(component = runtime.name(), "omnia ready");
-    } else {
-        tracing::info!(component = runtime.name(), "omnia ready");
-    }
-}
-
 fn drive_epoch(engine: Engine, tick: Duration) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(tick);
@@ -213,7 +202,7 @@ fn sample_pool(engine: Engine, interval: Duration) -> Option<tokio::task::JoinHa
                 break;
             };
 
-            tracing::debug!(
+            tracing::trace!(
                 gauge.pool_core_instances = metrics.core_instances(),
                 gauge.pool_component_instances = metrics.component_instances(),
                 gauge.pool_memories = metrics.memories() as u64,

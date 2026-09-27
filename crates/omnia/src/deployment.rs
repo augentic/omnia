@@ -48,6 +48,7 @@ pub struct DeploymentBuilder {
     args: Vec<String>,
     mode: Mode,
     level: Option<LevelFilter>,
+    runtime_level: Option<LevelFilter>,
     allow_empty: bool,
     program_name: Option<String>,
     guest_timeout: Option<Duration>,
@@ -95,6 +96,20 @@ impl DeploymentBuilder {
     #[must_use]
     pub const fn level(mut self, level: LevelFilter) -> Self {
         self.level = Some(level);
+        self
+    }
+
+    /// Filter the runtime's own crates ([`telemetry::RUNTIME`]) on the host console.
+    ///
+    /// Set, they step from a server default with the same verbosity flags while
+    /// guests keep the run's [level](Self::level). Unset, they sit at the process
+    /// `RUST_LOG`'s bare level as written, else at `warn`. A `RUST_LOG` directive
+    /// naming one stands. The refinement is the console layer's alone
+    /// ([`Telemetry::runtime_level`]): spans, the exporters, and every guest
+    /// follow the run's level.
+    #[must_use]
+    pub const fn runtime_level(mut self, level: LevelFilter) -> Self {
+        self.runtime_level = Some(level);
         self
     }
 
@@ -169,13 +184,17 @@ impl DeploymentBuilder {
         let program_name = self.program_name.unwrap_or_else(|| "omnia".to_owned());
         let name = env::var("COMPONENT").unwrap_or_else(|_| program_name.clone());
 
-        // the run's directives, decided once for the host console and every guest
-        let rust_log = telemetry::directives(
-            self.level,
-            self.mode.level(),
-            env::var("RUST_LOG").ok().as_deref(),
-        );
-        init_telemetry(&name, &rust_log)?;
+        // the run's directives, decided once for every span, exporter, and
+        // guest; the console alone shows the runtime's crates from a server's
+        // default, and exporters follow OpenTelemetry's own endpoint resolution
+        let process = env::var("RUST_LOG").ok();
+        let rust_log = telemetry::directives(self.level, self.mode.level(), process.as_deref());
+        let runtime = telemetry::bare(self.runtime_level, Mode::Server.level(), process.as_deref());
+        Telemetry::new(&name)
+            .filter(&rust_log)
+            .runtime_level(runtime)
+            .build()
+            .context("initializing telemetry")?;
         tracing::debug!("initializing runtime");
 
         let (engine, linker, mut options) = engine_and_linker()?;
@@ -459,11 +478,6 @@ fn engine_and_linker<T: WasiView + 'static>() -> Result<(Engine, Linker<T>, Runt
     omnia_core::wasmtime_wasi::p3::add_to_linker(&mut linker)?;
 
     Ok((engine, linker, options))
-}
-
-// exporters follow OpenTelemetry's own endpoint resolution; none without an endpoint
-fn init_telemetry(name: &str, rust_log: &str) -> Result<()> {
-    Telemetry::new(name).filter(rust_log).build().context("initializing telemetry")
 }
 
 #[cfg(test)]

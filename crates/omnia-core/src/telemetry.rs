@@ -1,11 +1,13 @@
 //! # Telemetry
 //!
-//! The host's observability stack: the `tracing` subscriber (console
-//! `EnvFilter` + `fmt` to stderr) with the OTLP span and metric exporters
+//! The host's observability stack: the `tracing` subscriber (the run's
+//! `EnvFilter`, `fmt` to stderr) with the OTLP span and metric exporters
 //! layered beneath it, and the process-wide OpenTelemetry providers they
-//! publish. The console filter is the run's [`directives`]; a signal's
-//! exporter attaches only when an OTLP endpoint is configured for it, so a
-//! run with no collector exports nothing rather than retrying against one.
+//! publish. The run's filter is its [`directives`]; the console alone may
+//! refine the runtime's own crates beneath it
+//! ([`runtime_level`](Telemetry::runtime_level)). A signal's exporter
+//! attaches only when an OTLP endpoint is configured for it, so a run with no
+//! collector exports nothing rather than retrying against one.
 //!
 //! Telemetry is process-global: the first [`Telemetry::build`] installs the
 //! subscriber and the providers, and later builds in the same process are
@@ -28,14 +30,25 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
+use tracing::Subscriber;
 use tracing_opentelemetry::MetricsLayer;
-use tracing_subscriber::filter::{Directive, LevelFilter};
-use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::filter::{Directive, LevelFilter, ParseError};
+use tracing_subscriber::fmt::MakeWriter;
+use tracing_subscriber::layer::{Layer, SubscriberExt};
+use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry};
 
 static SETTLED: Mutex<bool> = Mutex::new(false);
 static PROVIDERS: OnceLock<Providers> = OnceLock::new();
+
+/// The runtime's own crate prefixes, which the console may refine apart from
+/// the run — see [`Telemetry::runtime_level`].
+///
+/// `omnia::` matches only the composition root, never the bare `omnia` prefix
+/// capability crates share (`omnia_sdk`, `omnia_wasi_http`), which a directive
+/// would match by prefix.
+pub const RUNTIME: [&str; 4] = ["omnia::", "omnia_core", "omnia_link", "omnia_plugin"];
 
 /// Builder for the host's telemetry: the `tracing` subscriber with OTLP
 /// exporters beneath it.
@@ -44,6 +57,7 @@ pub struct Telemetry {
     endpoint: Option<String>,
     filter: Option<String>,
     fallback: LevelFilter,
+    runtime: Option<LevelFilter>,
 }
 
 impl Telemetry {
@@ -56,6 +70,7 @@ impl Telemetry {
             endpoint: None,
             filter: None,
             fallback: LevelFilter::WARN,
+            runtime: None,
         }
     }
 
@@ -68,19 +83,20 @@ impl Telemetry {
         self
     }
 
-    /// Filters the console by `directives` instead of the environment.
+    /// Filters the run by `directives` instead of the environment.
     ///
     /// `directives` is a `RUST_LOG` string (`info`, `omnia_core=debug`) —
     /// typically the run's [`directives`], composed from its verbosity flag
-    /// and the process `RUST_LOG`. The always-on noisy-dependency mutes still
-    /// apply.
+    /// and the process `RUST_LOG`. It governs every span and event: the
+    /// console, the exporters, and the `RUST_LOG` every guest receives. The
+    /// always-on noisy-dependency mutes still apply.
     #[must_use]
     pub fn filter(mut self, directives: impl Into<String>) -> Self {
         self.filter = Some(directives.into());
         self
     }
 
-    /// Sets the level the console falls back to when the environment sets no
+    /// Sets the level the run falls back to when the environment sets no
     /// `RUST_LOG`.
     ///
     /// `WARN` when not called. Explicit [`filter`](Self::filter) directives
@@ -88,6 +104,21 @@ impl Telemetry {
     #[must_use]
     pub const fn fallback(mut self, level: LevelFilter) -> Self {
         self.fallback = level;
+        self
+    }
+
+    /// Shows the runtime's own crates on the console at `level` alone.
+    ///
+    /// The console's filter is the run's with each of [`RUNTIME`] refined to
+    /// `level`; a directive the run's filter already carries for one of them
+    /// (`omnia_core=trace`, `omnia=debug`) stands as written. The refinement
+    /// is the console layer's: spans, the exporters, and every guest follow
+    /// the run's filter, so the span guest telemetry grafts onto stays live
+    /// whatever the console shows. `None` leaves the console at the run's
+    /// filter, as does not calling.
+    #[must_use]
+    pub fn runtime_level(mut self, level: impl Into<Option<LevelFilter>>) -> Self {
+        self.runtime = level.into();
         self
     }
 
@@ -104,15 +135,11 @@ impl Telemetry {
             return Ok(());
         }
 
-        let console =
+        let directives =
             self.filter.unwrap_or_else(|| directives(None, self.fallback, rust_log().as_deref()));
-        let filter_layer = filter(&console)?;
 
-        // console to stderr, since stdout is the guest's; plain text off a terminal
-        let mut fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
-        if !std::io::stderr().is_terminal() {
-            fmt_layer = fmt_layer.with_ansi(false);
-        }
+        // console to stderr, since stdout is the guest's; plain text off a terminal or under `NO_COLOR`
+        let console = console(&directives, self.runtime, std::io::stderr, ansi())?;
 
         let exports = exports(self.endpoint.as_deref(), |name| env::var(name).ok());
         let providers = Providers::build(&self.name, self.endpoint.as_deref(), exports)?;
@@ -120,8 +147,8 @@ impl Telemetry {
 
         // publish the providers only once the subscriber referencing them is installed
         match Registry::default()
-            .with(filter_layer)
-            .with(fmt_layer)
+            .with(filter(&directives)?)
+            .with(console)
             .with(tracing_opentelemetry::layer().with_tracer(tracer))
             .with(MetricsLayer::new(providers.meter.clone()))
             .try_init()
@@ -190,34 +217,126 @@ fn exports(endpoint: Option<&str>, env: impl Fn(&str) -> Option<String>) -> Expo
 pub fn directives(
     level: Option<LevelFilter>, fallback: LevelFilter, rust_log: Option<&str>,
 ) -> String {
-    let mut global = None;
-    let mut targeted = Vec::new();
+    let tokens = tokens(rust_log);
+    for (token, error) in &tokens.invalid {
+        eprintln!("ignoring `RUST_LOG` directive `{token}`: {error}");
+    }
+    tokens
+        .bare(level, fallback)
+        .map(|level| level.to_string())
+        .into_iter()
+        .chain(tokens.targeted.iter().map(|&token| token.to_owned()))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// The bare level the run's directives lead with.
+///
+/// `level` when one is selected, else the bare level `rust_log` carries,
+/// else `fallback` when it carries no directive at all — the level
+/// [`directives`] renders first over the same inputs — and `None` when
+/// `rust_log` names targets alone, so no bare level governs the run.
+#[must_use]
+pub fn bare(
+    level: Option<LevelFilter>, fallback: LevelFilter, rust_log: Option<&str>,
+) -> Option<LevelFilter> {
+    tokens(rust_log).bare(level, fallback)
+}
+
+// The console layer: `fmt` on `writer`, its own filter refining the runtime's
+// crates to `runtime` when one is selected. Spans and every other layer see
+// the run's filter alone, so the refinement never disables a span.
+fn console<S, W>(
+    directives: &str, runtime: Option<LevelFilter>, writer: W, ansi: bool,
+) -> Result<impl Layer<S>>
+where
+    S: Subscriber + for<'a> LookupSpan<'a> + 'static,
+    W: for<'w> MakeWriter<'w> + 'static,
+{
+    let refinement =
+        runtime.map(|level| EnvFilter::builder().parse(refine(directives, level))).transpose()?;
+    Ok(tracing_subscriber::fmt::layer().with_writer(writer).with_ansi(ansi).with_filter(refinement))
+}
+
+// `directives` plus `<prefix>=<level>` for each of `RUNTIME` no directive
+// already governs — by naming it or a prefix of it (`omnia_core=trace`,
+// `omnia=debug`)
+fn refine(directives: &str, level: LevelFilter) -> String {
+    let named: Vec<&str> = directives.split(',').filter_map(target).collect();
+    let governed = |prefix: &str| named.iter().any(|target| prefix.starts_with(target));
+    let refinements = RUNTIME
+        .into_iter()
+        .filter(|prefix| !governed(prefix))
+        .map(|prefix| format!(",{prefix}={level}"));
+    std::iter::once(directives.to_owned()).chain(refinements).collect()
+}
+
+// The target a directive governs by prefix; a bare level or a span-only
+// directive (`[cli-run]=info`) governs none
+fn target(directive: &str) -> Option<&str> {
+    let directive = directive.trim();
+    if directive.parse::<LevelFilter>().is_ok() {
+        return None;
+    }
+    let target = directive.split(['=', '[']).next().unwrap_or_default().trim();
+    (!target.is_empty()).then_some(target)
+}
+
+// The tokens of a `RUST_LOG`: its bare level (the last, as `EnvFilter`
+// reads one), its targeted directives, and the tokens that are neither.
+struct Tokens<'a> {
+    global: Option<LevelFilter>,
+    targeted: Vec<&'a str>,
+    invalid: Vec<(&'a str, ParseError)>,
+}
+
+impl Tokens<'_> {
+    // the fallback fills an empty `RUST_LOG`, never one that names a target
+    fn bare(&self, level: Option<LevelFilter>, fallback: LevelFilter) -> Option<LevelFilter> {
+        level.or(self.global).or_else(|| self.targeted.is_empty().then_some(fallback))
+    }
+}
+
+fn tokens(rust_log: Option<&str>) -> Tokens<'_> {
+    let mut tokens = Tokens {
+        global: None,
+        targeted: Vec::new(),
+        invalid: Vec::new(),
+    };
     for token in rust_log.unwrap_or_default().split(',').map(str::trim) {
         // an empty token would parse as `error`; `EnvFilter` skips it too
         if token.is_empty() {
             continue;
         }
         if let Ok(level) = token.parse::<LevelFilter>() {
-            global = Some(level);
+            tokens.global = Some(level);
         } else if let Err(error) = token.parse::<Directive>() {
-            eprintln!("ignoring `RUST_LOG` directive `{token}`: {error}");
+            tokens.invalid.push((token, error));
         } else {
-            targeted.push(token);
+            tokens.targeted.push(token);
         }
     }
-    // the fallback fills an empty `RUST_LOG`, never one that names a target
-    let global = level.or(global).or_else(|| targeted.is_empty().then_some(fallback));
-    global
-        .map(|level| level.to_string())
-        .into_iter()
-        .chain(targeted.into_iter().map(str::to_owned))
-        .collect::<Vec<_>>()
-        .join(",")
+    tokens
 }
 
 // read once per build so `directives` stays pure over its inputs
 fn rust_log() -> Option<String> {
     env::var("RUST_LOG").ok()
+}
+
+/// Whether the host console colours its lines: stderr is a terminal and
+/// `NO_COLOR` is unset or empty.
+///
+/// Decided once, for the console layer and for every guest's environment.
+/// `with_ansi` overrides the `fmt` default that honours `NO_COLOR` on a
+/// terminal, so the console reads the variable itself.
+pub(crate) fn ansi() -> bool {
+    colour(std::io::stderr().is_terminal(), env::var("NO_COLOR").ok().as_deref())
+}
+
+// the `NO_COLOR` convention: any non-empty value disables colour, an empty one does not
+fn colour(terminal: bool, no_color: Option<&str>) -> bool {
+    terminal && no_color.is_none_or(str::is_empty)
 }
 
 // `directives` plus the noisy-dependency mutes; `tower` is muted whole since
@@ -367,6 +486,35 @@ mod tests {
         }
     }
 
+    // captures the console, so what a refinement shows is observable
+    #[derive(Clone, Debug, Default)]
+    struct Console(Arc<Mutex<Vec<u8>>>);
+
+    impl Console {
+        fn text(&self) -> String {
+            String::from_utf8(self.0.lock().expect("console lock").clone()).expect("utf-8 console")
+        }
+    }
+
+    impl std::io::Write for Console {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().expect("console lock").extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> super::MakeWriter<'a> for Console {
+        type Writer = Self;
+
+        fn make_writer(&'a self) -> Self {
+            self.clone()
+        }
+    }
+
     // batch-exported, so spans stay queued until a flush pushes them
     fn providers(exporter: &Recording) -> (SdkTracerProvider, SdkMeterProvider) {
         (
@@ -472,6 +620,125 @@ mod tests {
         }
     }
 
+    // `NO_COLOR` is honoured on a terminal by its convention — any non-empty
+    // value disables colour, an empty one does not — and off a terminal
+    // nothing enables it
+    mod colour {
+        use super::super::colour;
+
+        #[test]
+        fn terminal() {
+            assert!(colour(true, None));
+            assert!(colour(true, Some("")));
+            assert!(!colour(true, Some("1")));
+            assert!(!colour(true, Some("0")));
+        }
+
+        #[test]
+        fn piped() {
+            assert!(!colour(false, None));
+            assert!(!colour(false, Some("")));
+        }
+    }
+
+    // the level `directives` leads with, over the same composition
+    mod bare {
+        use super::super::{LevelFilter, bare};
+
+        #[test]
+        fn flag_displaces_bare_level() {
+            assert_eq!(
+                bare(Some(LevelFilter::INFO), LevelFilter::WARN, Some("trace")),
+                Some(LevelFilter::INFO)
+            );
+        }
+
+        #[test]
+        fn no_flag_keeps_rust_log() {
+            assert_eq!(
+                bare(None, LevelFilter::WARN, Some("debug,omnia_core=trace")),
+                Some(LevelFilter::DEBUG)
+            );
+        }
+
+        #[test]
+        fn unset_falls_back() {
+            assert_eq!(bare(None, LevelFilter::WARN, None), Some(LevelFilter::WARN));
+            assert_eq!(
+                bare(None, LevelFilter::WARN, Some("omnia_core=loud")),
+                Some(LevelFilter::WARN)
+            );
+        }
+
+        #[test]
+        fn targeted_only_takes_no_fallback() {
+            assert_eq!(bare(None, LevelFilter::WARN, Some("my_sdk=debug")), None);
+        }
+    }
+
+    mod refine {
+        use super::super::{LevelFilter, RUNTIME, refine};
+
+        #[test]
+        fn refines_runtime_crates() {
+            assert_eq!(
+                refine("info", LevelFilter::WARN),
+                "info,omnia::=warn,omnia_core=warn,omnia_link=warn,omnia_plugin=warn"
+            );
+            assert_eq!(
+                refine("debug,tower=off", LevelFilter::INFO),
+                "debug,tower=off,omnia::=info,omnia_core=info,omnia_link=info,omnia_plugin=info"
+            );
+        }
+
+        // a directive of the operator's governing a runtime target stands as written
+        #[test]
+        fn named_target_stands() {
+            assert_eq!(
+                refine("info,omnia_core=trace", LevelFilter::WARN),
+                "info,omnia_core=trace,omnia::=warn,omnia_link=warn,omnia_plugin=warn"
+            );
+            assert_eq!(
+                refine("info,omnia_link[dispatch]=trace", LevelFilter::WARN),
+                "info,omnia_link[dispatch]=trace,omnia::=warn,omnia_core=warn,omnia_plugin=warn"
+            );
+        }
+
+        // `omnia=debug` matches every runtime target by prefix, so refining
+        // one beneath it would override what the operator wrote
+        #[test]
+        fn prefix_of_target_stands() {
+            assert_eq!(refine("info,omnia=debug", LevelFilter::WARN), "info,omnia=debug");
+        }
+
+        // a more specific directive wins where it applies and leaves the rest of
+        // the crate to the refinement; a span-only directive names no target
+        #[test]
+        fn narrower_directives_refined_around() {
+            assert_eq!(
+                refine("info,omnia_core::runtime=trace", LevelFilter::WARN),
+                "info,omnia_core::runtime=trace,omnia::=warn,omnia_core=warn,omnia_link=warn,\
+                 omnia_plugin=warn"
+            );
+            assert_eq!(
+                refine("info,[cli-run]=trace", LevelFilter::WARN),
+                "info,[cli-run]=trace,omnia::=warn,omnia_core=warn,omnia_link=warn,omnia_plugin=warn"
+            );
+        }
+
+        // the composition root's prefix leaves `omnia_cursor`, `omnia_sdk`,
+        // and every `omnia_wasi_*` host to the run's level
+        #[test]
+        fn runtime_prefixes() {
+            for prefix in RUNTIME {
+                assert!(prefix.starts_with("omnia"), "{prefix}");
+                for other in ["omnia_cursor", "omnia_sdk", "omnia_wasi_http", "omnia"] {
+                    assert!(!other.starts_with(prefix), "`{prefix}` would govern `{other}`");
+                }
+            }
+        }
+    }
+
     mod filter {
         use super::super::filter;
 
@@ -505,6 +772,17 @@ mod tests {
         fn off() {
             let rendered = rendered("off");
             assert!(has(&rendered, "off"), "{rendered}");
+        }
+
+        // `omnia::` is a target `EnvFilter` accepts, so the refinement parses whole
+        #[test]
+        fn refined() {
+            use super::super::{LevelFilter, refine};
+
+            let rendered = rendered(&refine("info,tower=off", LevelFilter::WARN));
+            for directive in ["info", "omnia::=warn", "omnia_core=warn", "omnia_plugin=warn"] {
+                assert!(has(&rendered, directive), "missing `{directive}` in `{rendered}`");
+            }
         }
 
         #[test]
@@ -579,6 +857,40 @@ mod tests {
                 }
             );
         }
+    }
+
+    // The refinement is the console's alone: at a bare command run it hides
+    // the runtime's `info` while an `info` span of the same crate — the one
+    // guest telemetry grafts onto — is live and exports.
+    #[test]
+    fn console_refined_spans_live() {
+        use tracing_subscriber::layer::SubscriberExt as _;
+
+        use super::{LevelFilter, Registry, console, filter};
+
+        let out = Console::default();
+        let exporter = Recording::default();
+        let (tracer, meter) = providers(&exporter);
+        let subscriber = Registry::default()
+            .with(filter("info").expect("directives parse"))
+            .with(console("info", Some(LevelFilter::WARN), out.clone(), false).expect("parse"))
+            .with(tracing_opentelemetry::layer().with_tracer(tracer.tracer("test")));
+
+        tracing::subscriber::with_default(subscriber, || {
+            let anchor = tracing::info_span!("cli-run");
+            assert!(!anchor.is_disabled(), "the run's filter governs spans");
+            let _entered = anchor.enter();
+            tracing::info!("guest loaded");
+            tracing::warn!("mount failed");
+            tracing::info!(target: "omnia_cursor::model", "completion");
+        });
+
+        flush_providers(&tracer, &meter);
+        assert_eq!(exporter.names(), ["cli-run"]);
+        let console = out.text();
+        assert!(!console.contains("guest loaded"), "{console}");
+        assert!(console.contains("mount failed"), "{console}");
+        assert!(console.contains("completion"), "{console}");
     }
 
     // the fast-exit contract: a span emitted just before a flush reaches the exporter

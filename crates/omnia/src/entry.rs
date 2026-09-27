@@ -71,10 +71,7 @@ fn materialize(
         Some(name) => builder.program_name(name),
         None => builder,
     };
-    Ok(match verbosity::level(mode.level(), plan.verbose, plan.quiet) {
-        Some(level) => builder.level(level),
-        None => builder,
-    })
+    Ok(verbosity::levels(mode, plan.verbose, plan.quiet).apply(builder))
 }
 
 #[cfg(all(test, feature = "cli"))]

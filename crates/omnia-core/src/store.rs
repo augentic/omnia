@@ -279,22 +279,38 @@ impl<B: Send + 'static> HasChain for StoreCtx<B> {
 }
 
 const RUST_LOG: &str = "RUST_LOG";
+const NO_COLOR: &str = "NO_COLOR";
 
 /// The complete guest environment: every `host` pair, with `RUST_LOG` set to
-/// the run's tracing directives.
+/// the run's tracing directives and `NO_COLOR` set when the console does not
+/// colour its lines.
 ///
 /// `rust_log` is the composition of the run's verbosity flag with the
 /// process `RUST_LOG` ([`telemetry::directives`](crate::telemetry::directives)),
 /// so it replaces the host's variable in place — the process value is already
 /// folded in — or is appended when the host carries none.
+///
+/// `ansi` is whether the host console colours its lines. When it does not,
+/// `NO_COLOR=1` is appended so a guest's console — which cannot see the
+/// descriptor it shares — decides the same way; a host `NO_COLOR` already set
+/// to a non-empty value stands as it is.
 pub fn guest_env(
-    host: impl IntoIterator<Item = (String, String)>, rust_log: &str,
+    host: impl IntoIterator<Item = (String, String)>, rust_log: &str, ansi: bool,
 ) -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = host.into_iter().collect();
     match env.iter_mut().find(|(name, _)| name == RUST_LOG) {
         Some((_, value)) => rust_log.clone_into(value),
         None => env.push((RUST_LOG.to_owned(), rust_log.to_owned())),
     }
+
+    if !ansi {
+        match env.iter_mut().find(|(name, _)| name == NO_COLOR) {
+            Some((_, value)) if value.is_empty() => "1".clone_into(value),
+            Some(_) => {}
+            None => env.push((NO_COLOR.to_owned(), "1".to_owned())),
+        }
+    }
+
     env
 }
 
@@ -312,7 +328,7 @@ mod tests {
     fn replaces_process() {
         let host = pairs(&[("RUST_LOG", "off"), ("HOME", "/home/op")]);
         assert_eq!(
-            guest_env(host, "debug,tower=off"),
+            guest_env(host, "debug,tower=off", true),
             pairs(&[("RUST_LOG", "debug,tower=off"), ("HOME", "/home/op")])
         );
     }
@@ -320,6 +336,33 @@ mod tests {
     #[test]
     fn fills_absent() {
         let host = pairs(&[("HOME", "/home/op")]);
-        assert_eq!(guest_env(host, "warn"), pairs(&[("HOME", "/home/op"), ("RUST_LOG", "warn")]));
+        assert_eq!(
+            guest_env(host, "warn", true),
+            pairs(&[("HOME", "/home/op"), ("RUST_LOG", "warn")])
+        );
+    }
+
+    // A console off a terminal tells the guest so; a host `NO_COLOR` already
+    // in force stands, and an empty one — no colour suppression, by the
+    // convention — is filled the way an absent one is.
+    #[test]
+    fn piped_stderr() {
+        let host = pairs(&[("HOME", "/home/op")]);
+        assert_eq!(
+            guest_env(host, "info", false),
+            pairs(&[("HOME", "/home/op"), ("RUST_LOG", "info"), ("NO_COLOR", "1")])
+        );
+
+        let host = pairs(&[("NO_COLOR", "true"), ("RUST_LOG", "off")]);
+        assert_eq!(
+            guest_env(host, "info", false),
+            pairs(&[("NO_COLOR", "true"), ("RUST_LOG", "info")])
+        );
+
+        let host = pairs(&[("NO_COLOR", ""), ("RUST_LOG", "off")]);
+        assert_eq!(
+            guest_env(host, "info", false),
+            pairs(&[("NO_COLOR", "1"), ("RUST_LOG", "info")])
+        );
     }
 }
