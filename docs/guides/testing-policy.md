@@ -66,7 +66,7 @@ The same inline pattern serves hosts whose default backend records nothing obser
 
 ```bash
 cargo nextest run -p <crate> --all-features       # the crate you changed: unit tests plus its e2e suite
-mise run test                                     # everything (`cargo hack nextest run --workspace --each-feature --locked`), examples gate included
+mise run test                                     # everything (`cargo nextest run --workspace --all-features --locked`), examples gate included
 cargo test --doc --all-features --workspace       # doc tests
 ```
 

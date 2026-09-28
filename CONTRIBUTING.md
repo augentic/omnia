@@ -28,8 +28,13 @@ Run the full CI check locally and make sure it passes:
 mise run ci
 ```
 
-This runs formatting (`cargo +nightly fmt --all`), clippy (warnings deny), the
-test suite (`cargo nextest`), doc tests, rustdoc, and the dependency audits.
+This runs exactly the CI jobs, in order: the formatting check (`cargo +nightly
+fmt --all --check`), clippy with warnings denied (natively, then for
+`wasm32-wasip2` over lib, bins and examples), the test suite (`cargo nextest`),
+doc tests, rustdoc, `cargo vet` and `cargo deny`. `mise run check` adds the
+local advisory extras (`cargo audit`, `cargo outdated`, `cargo udeps`) and
+rewrites formatting in place. After changing dependencies, `mise run vet-regen`
+refreshes the `supply-chain/` files that `vet` only checks.
 Tasks are run with [mise](https://mise.jdx.dev/getting-started.html); `mise
 tasks` lists them, and [mise.toml](mise.toml) includes the shared Rust tasks
 from [augentic/.github](https://github.com/augentic/.github).

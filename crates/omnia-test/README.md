@@ -40,8 +40,8 @@ nothing to the component — the gate simply keeps the host crates out of the
 `mise run ci` checks the shapes a consumer sees, not just `--all-features`:
 
 ```sh
-mise run lint          # cargo hack clippy --each-feature, natively and for wasm32-wasip2
-mise run test          # cargo hack nextest run --each-feature
+mise run lint          # clippy --all-features then cargo hack clippy --each-feature, natively and for wasm32-wasip2
+mise run test          # cargo nextest run --workspace --all-features
 ```
 
 The `build` feature must stay `std`-only so a consumer's `build.rs` does not
