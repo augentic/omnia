@@ -17,7 +17,8 @@ Terminology (**runtime core**, **host-side**, **host-injected tools**, etc.) is 
 | Format check | `cargo +nightly fmt --all --check`                                                                   |
 | Format fix   | `cargo +nightly fmt --all`                                                                           |
 | Test a crate | `cargo nextest run -p <crate> --all-features` (the local verification step)                          |
-| Test (full)  | `mise run test` (`cargo hack nextest run --workspace --each-feature`; includes the examples gate — CI's job) |
+| Test (full)  | `mise run test` (`cargo nextest run --workspace --all-features`; includes the examples gate — CI's job)   |
+| Lint (full)  | `mise run lint` (clippy natively, then `--target wasm32-wasip2` over lib, bins and examples; CI's job)     |
 | Doc tests    | `cargo test --doc --all-features --workspace`                                                        |
 | Task runner  | `mise run <task>` (`mise tasks` lists them; `mise.toml` includes the shared Rust tasks from `augentic/.github`) |
 

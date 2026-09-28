@@ -12,5 +12,5 @@ permissions:
 
 jobs:
   patch:
-    uses: augentic/.github/.github/workflows/patch.yaml@v0.1.2
+    uses: augentic/.github/.github/workflows/patch.yaml@v0.2.0
     secrets: inherit

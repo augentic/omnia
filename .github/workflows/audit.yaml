@@ -16,4 +16,7 @@ permissions:
 
 jobs:
   audit:
-    uses: augentic/.github/.github/workflows/audit.yaml@v0.1.2
+    uses: augentic/.github/.github/workflows/audit.yaml@v0.2.0
+    with:
+      # Mirrors `OUTDATED_IGNORE` in mise.toml.
+      outdated: cap-fs-ext,cap-std,cap-primitives,thiserror

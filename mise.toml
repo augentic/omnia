@@ -1,5 +1,10 @@
 [task_config]
-includes = ["git::https://github.com/augentic/.github.git//mise/rust.toml?ref=v0.1.2"]
+includes = ["git::https://github.com/augentic/.github.git//mise/rust.toml?ref=v0.2.0"]
+
+# Knobs read by the included tasks. Keep `OUTDATED_IGNORE` in step with the
+# `outdated` input in `.github/workflows/audit.yaml`.
+[env]
+OUTDATED_IGNORE = "cap-fs-ext,cap-std,cap-primitives,thiserror"
 
 # -------------------------------------
 # Examples (project-specific; the generic Rust tasks live in the include)
