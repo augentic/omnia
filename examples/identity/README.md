@@ -5,7 +5,7 @@ Demonstrates `wasi-identity` using the default implementation.
 ## Quick Start
 
 ```bash
-make run identity
+make example identity
 ```
 
 Or, more manually, for debugging:

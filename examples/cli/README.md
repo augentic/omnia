@@ -8,14 +8,16 @@ the `wasi:cli/run` export.
 ## Quick Start
 
 ```bash
-make run cli greet Ada
-make run cli add 2 3 4
-make run cli env
-make run cli --help
-make run cli -- --format json greet Ada
-make run cli -- bogus; echo $?           # 64 (usage)
-make run cli -- fail; echo $?            # 3 (server-error)
-make run cli -- fail not-found; echo $?  # 2
+make example cli greet Ada
+make example cli add 2 3 4
+make example cli env
+
+# guest flags go after `--`, or make and mise claim them
+make example cli -- --help
+make example cli -- --format json greet Ada
+make example cli -- bogus; echo $?           # 64 (usage)
+make example cli -- fail; echo $?            # 3 (server-error)
+make example cli -- fail not-found; echo $?  # 2
 ```
 
 Or, more manually, for debugging:
@@ -38,7 +40,7 @@ Every verb takes a global `--format text|json` (default `text`). Text goes
 through the verb's render fn; JSON is the handler output, pretty-printed:
 
 ```bash
-$ make run cli -- --format json greet Ada
+$ make example cli -- --format json greet Ada
 {
   "greeting": "Hello, Ada!"
 }

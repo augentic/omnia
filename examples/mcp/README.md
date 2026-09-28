@@ -7,7 +7,7 @@ An end-to-end example using `WasiModel` and `cursor-agent` is available in the `
 ## Quick Start
 
 ```bash
-make run mcp
+make example mcp
 ```
 
 Or, more manually, for debugging:

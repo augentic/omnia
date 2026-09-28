@@ -5,7 +5,7 @@ Demonstrates `wasi-blobstore` using the default (in-memory) implementation.
 ## Quick Start
 
 ```bash
-make run blobstore
+make example blobstore
 ```
 
 Or, more manually, for debugging:

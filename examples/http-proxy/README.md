@@ -11,7 +11,7 @@ This example shows how to:
 ## Quick Start
 
 ```bash
-make run http-proxy
+make example http-proxy
 ```
 
 Or, more manually, for debugging:

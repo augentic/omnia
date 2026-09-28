@@ -7,10 +7,10 @@ Every WASI capability has a runnable example here. Each example is a **guest** (
 From the repo root, build and run any single-guest example with:
 
 ```bash
-make run http
+make example http
 ```
 
-Or use Cargo directly — the two steps behind `make run`:
+Or use Cargo directly — the two steps behind `make example`:
 
 ```bash
 cargo build --example http-wasm --target wasm32-wasip2
@@ -19,7 +19,7 @@ cargo run --example http -- run ./target/wasm32-wasip2/debug/examples/http_wasm.
 
 (Guest artifact names use underscores: `http_wasm.wasm`, not `http-wasm.wasm`.)
 
-Servers are quiet by default: `-v` shows startup and readiness, `-vv` each request. `make run` passes `-v`. `RUST_LOG` targets a single crate on top (`RUST_LOG=omnia_wasi_http=trace`); see [Verbosity flags](../docs/reference/configuration.md#verbosity-flags).
+Servers are quiet by default: `-v` shows startup and readiness, `-vv` each request. `make example` passes `-v`. `RUST_LOG` targets a single crate on top (`RUST_LOG=omnia_wasi_http=trace`); see [Verbosity flags](../docs/reference/configuration.md#verbosity-flags).
 
 Each example directory has a `README.md` with test commands and example-specific setup.
 
