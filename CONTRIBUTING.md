@@ -25,12 +25,14 @@ architecture. There are many ways to help besides contributing code:
 Run the full CI check locally and make sure it passes:
 
 ```shell
-cargo make ci
+mise run ci
 ```
 
-This runs clippy (warnings deny), the test suite (`cargo nextest`), doc tests,
-a formatting check (`cargo +nightly fmt --all --check`), and the dependency
-audits. Individual tasks are listed in [Makefile.toml](Makefile.toml).
+This runs formatting (`cargo +nightly fmt --all`), clippy (warnings deny), the
+test suite (`cargo nextest`), doc tests, rustdoc, and the dependency audits.
+Tasks are run with [mise](https://mise.jdx.dev/getting-started.html); `mise
+tasks` lists them, and [mise.toml](mise.toml) includes the shared Rust tasks
+from [augentic/.github](https://github.com/augentic/.github).
 
 Checklist:
 
@@ -55,7 +57,7 @@ with write access merges their own pull request after approval.
 
 - Rust code must match the output of `cargo +nightly fmt --all`.
 - Workspace lints are strict (`missing_docs`, clippy `pedantic`, warnings
-  denied); `cargo make lint` must pass clean.
+  denied); `mise run lint` must pass clean.
 - See the code-comment guidance in [AGENTS.md](AGENTS.md): document intent,
   not mechanics.
 

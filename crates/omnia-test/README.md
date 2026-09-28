@@ -37,12 +37,11 @@ nothing to the component — the gate simply keeps the host crates out of the
 
 ## Reviewing the crate
 
-`cargo make ci` checks the shapes a consumer sees, not just `--all-features`:
+`mise run ci` checks the shapes a consumer sees, not just `--all-features`:
 
 ```sh
-cargo make lint        # cargo hack clippy --each-feature, natively and for wasm32-wasip2
-cargo make test        # cargo hack nextest run --each-feature
-cargo make semver      # cargo semver-checks against the last release (not yet in `ci`)
+mise run lint          # cargo hack clippy --each-feature, natively and for wasm32-wasip2
+mise run test          # cargo hack nextest run --each-feature
 ```
 
 The `build` feature must stay `std`-only so a consumer's `build.rs` does not

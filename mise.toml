@@ -1,0 +1,32 @@
+[task_config]
+includes = ["git::https://github.com/augentic/.github.git//mise/rust.toml?ref=v0.1.2"]
+
+# -------------------------------------
+# Examples (project-specific; the generic Rust tasks live in the include)
+# -------------------------------------
+
+# No `usage` spec: usage would parse the guest's own flags, and the cli
+# example forwards those. `mise run` still claims `-h`/`--help` itself, so
+# guest flags go after `--`.
+[tasks.example]
+description = "Build one example guest, then run its host against it: mise run example <name> [-- guest args]"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+name="${1:?example name required: mise run example <name> [-- guest args]}"
+module="$(printf '%s' "$name" | tr '-' '_')"
+ws="$(cargo locate-project --workspace --message-format=plain)"
+ws="${ws%/Cargo.toml}"
+shift
+
+# incremental, so a current guest costs a fingerprint check
+cargo build -p examples --example "${name}-wasm" --target wasm32-wasip2
+
+# `-v` shows startup logs; a set `RUST_LOG` takes over, as `-v` would
+# displace its level.
+flags=""
+[ -n "${RUST_LOG:-}" ] || flags="-v"
+
+cargo run -p examples --example "$name" -- $flags \
+  run "${CARGO_TARGET_DIR:-$ws/target}/wasm32-wasip2/debug/examples/${module}_wasm.wasm" -- "$@"
+'''

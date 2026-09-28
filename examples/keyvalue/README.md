@@ -5,8 +5,7 @@ Demonstrates `wasi-keyvalue` using the default (in-memory) implementation.
 ## Quick Start
 
 ```bash
-make build keyvalue
-make run keyvalue
+make example keyvalue
 ```
 
 Or, more manually, for debugging:

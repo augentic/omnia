@@ -7,8 +7,7 @@ limits, and continuation-token pagination.
 ## Quick Start
 
 ```bash
-make build docstore
-make run docstore
+make example docstore
 ```
 
 Or, more manually, for debugging:
