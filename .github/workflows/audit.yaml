@@ -16,4 +16,4 @@ permissions:
 
 jobs:
   audit:
-    uses: augentic/.github/.github/workflows/audit.yaml@main
+    uses: augentic/.github/.github/workflows/audit.yaml@v0.1.2
