@@ -2,7 +2,18 @@
 includes = ["git::https://github.com/augentic/.github.git//mise/rust.toml?ref=v0.1.0"]
 
 # -------------------------------------
-# Examples (project-specific; the generic Rust tasks live in the include)
+# Project-specific tasks (the generic Rust tasks live in the include)
+# -------------------------------------
+
+# Semver check against the last published omnia-test; joins `ci` once the
+# first release exists as a baseline.
+[tasks.semver]
+description = "cargo semver-checks for omnia-test against the last release (not yet in ci)"
+depends = ["install semver-checks"]
+run = "cargo semver-checks -p omnia-test --all-features"
+
+# -------------------------------------
+# Examples
 # -------------------------------------
 
 # Full WASM example build for main/scheduled validation.
@@ -15,12 +26,14 @@ description = "Build one example guest: mise run build <name>"
 usage = 'arg "<name>" help="example name, e.g. http"'
 run = 'cargo build -p examples --example "${usage_name?}-wasm" --target wasm32-wasip2'
 
+# No `usage` spec here, unlike `build`: usage would parse the guest's own
+# flags (`-h`/`--help` never reach it), and the cli example forwards those.
 [tasks.run]
 description = "Run one example host against its built guest: mise run run <name> [-- guest args]"
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
-name="${1}"
+name="${1:?example name required: mise run run <name> [-- guest args]}"
 module="$(printf '%s' "$name" | tr '-' '_')"
 ws="$(cargo locate-project --workspace --message-format=plain)"
 ws="${ws%/Cargo.toml}"
