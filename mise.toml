@@ -1,19 +1,8 @@
 [task_config]
-includes = ["git::https://github.com/augentic/.github.git//mise/rust.toml?ref=v0.1.0"]
+includes = ["git::https://github.com/augentic/.github.git//mise/rust.toml?ref=v0.1.1"]
 
 # -------------------------------------
-# Project-specific tasks (the generic Rust tasks live in the include)
-# -------------------------------------
-
-# Semver check against the last published omnia-test; joins `ci` once the
-# first release exists as a baseline.
-[tasks.semver]
-description = "cargo semver-checks for omnia-test against the last release (not yet in ci)"
-depends = ["install semver-checks"]
-run = "cargo semver-checks -p omnia-test --all-features"
-
-# -------------------------------------
-# Examples
+# Examples (project-specific; the generic Rust tasks live in the include)
 # -------------------------------------
 
 # Full WASM example build for main/scheduled validation.
