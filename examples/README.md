@@ -7,11 +7,10 @@ Every WASI capability has a runnable example here. Each example is a **guest** (
 From the repo root, build and run any single-guest example with:
 
 ```bash
-make build http
 make run http
 ```
 
-Or use Cargo directly — the two-step pattern behind the Makefile:
+Or use Cargo directly — the two steps behind `make run`:
 
 ```bash
 cargo build --example http-wasm --target wasm32-wasip2

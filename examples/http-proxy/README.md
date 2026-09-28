@@ -11,7 +11,6 @@ This example shows how to:
 ## Quick Start
 
 ```bash
-make build http-proxy
 make run http-proxy
 ```
 

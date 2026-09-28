@@ -5,7 +5,6 @@ Demonstrates `wasi-vault` using the default (in-memory) implementation for secur
 ## Quick Start
 
 ```bash
-make build vault
 make run vault
 ```
 

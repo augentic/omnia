@@ -8,7 +8,6 @@ capability, mapping result `Row`s back into a Rust struct.
 ## Quick Start
 
 ```bash
-make build sql
 make run sql
 ```
 

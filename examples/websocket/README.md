@@ -5,7 +5,6 @@ Demonstrates `wasi-websocket` for real-time bidirectional communication.
 ## Quick Start
 
 ```bash
-make build websocket
 make run websocket
 ```
 

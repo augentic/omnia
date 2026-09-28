@@ -5,7 +5,6 @@ Demonstrates `wasi-messaging` using the default (in-memory) implementation for p
 ## Quick Start
 
 ```bash
-make build messaging
 make run messaging
 ```
 

@@ -5,7 +5,6 @@ Demonstrates a basic HTTP server using `wasi-http` with GET and POST endpoints.
 ## Quick Start
 
 ```bash
-make build http
 make run http
 ```
 

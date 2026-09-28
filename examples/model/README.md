@@ -21,12 +21,6 @@ The runtime core stays generic (Law 2): no model id, provider, or schema dialect
 ## Quick Start
 
 ```bash
-make build model
-```
-
-Or, more manually, for debugging:
-
-```bash
 # build the guest
 cargo build -p examples --example model-wasm --target wasm32-wasip2
 ```

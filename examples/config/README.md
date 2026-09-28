@@ -5,7 +5,6 @@ Demonstrates a basic Config using `wasi-config`.
 ## Quick Start
 
 ```bash
-make build config
 make run config
 ```
 

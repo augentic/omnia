@@ -5,20 +5,10 @@ includes = ["git::https://github.com/augentic/.github.git//mise/rust.toml?ref=v0
 # Examples (project-specific; the generic Rust tasks live in the include)
 # -------------------------------------
 
-# Full WASM example build for main/scheduled validation.
-[tasks.examples]
-description = "Build every example guest for wasm32-wasip2"
-run = "cargo build -p examples --examples --target wasm32-wasip2"
-
-[tasks.build]
-description = "Build one example guest: mise run build <name>"
-usage = 'arg "<name>" help="example name, e.g. http"'
-run = 'cargo build -p examples --example "${usage_name?}-wasm" --target wasm32-wasip2'
-
-# No `usage` spec here, unlike `build`: usage would parse the guest's own
-# flags (`-h`/`--help` never reach it), and the cli example forwards those.
+# No `usage` spec: usage would parse the guest's own flags (`-h`/`--help`
+# never reach it), and the cli example forwards those.
 [tasks.run]
-description = "Run one example host against its built guest: mise run run <name> [-- guest args]"
+description = "Build one example guest, then run its host against it: mise run run <name> [-- guest args]"
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
@@ -27,6 +17,9 @@ module="$(printf '%s' "$name" | tr '-' '_')"
 ws="$(cargo locate-project --workspace --message-format=plain)"
 ws="${ws%/Cargo.toml}"
 shift
+
+# incremental, so a current guest costs a fingerprint check
+cargo build -p examples --example "${name}-wasm" --target wasm32-wasip2
 
 # `-v` shows startup logs; a set `RUST_LOG` takes over, as `-v` would
 # displace its level.

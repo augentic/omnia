@@ -8,9 +8,6 @@ the `wasi:cli/run` export.
 ## Quick Start
 
 ```bash
-make build cli
-
-# test
 make run cli greet Ada
 make run cli add 2 3 4
 make run cli env
