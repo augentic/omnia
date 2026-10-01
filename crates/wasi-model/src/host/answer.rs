@@ -154,10 +154,15 @@ impl Candidate {
             },
         };
 
-        // a document that opens the reply and does not parse is malformed,
-        // not wrapped: its members are not the answer
-        if text.trim_start().starts_with(['{', '[']) && leading(text).is_none() {
-            return unparsed();
+        // a document (a bracket followed by a member, unlike `[thinking]`)
+        // that opens the reply and does not parse is malformed, not wrapped
+        let opener = text.trim_start();
+        if let Some(members) = opener.strip_prefix(['{', '[']) {
+            let members = members.trim_start();
+            let keyed = !opener.starts_with('{') || members.starts_with('"');
+            if keyed && first(opener).is_none() && first(members).is_some() {
+                return unparsed();
+            }
         }
 
         // what the prose wraps: one value, or the largest of several
@@ -219,8 +224,8 @@ pub enum Reading {
         /// How many distinct JSON values the reply held.
         of: usize,
     },
-    /// As written, because the reply holds no JSON value or opens one that
-    /// does not parse.
+    /// As written, because the reply holds no JSON value or opens a document
+    /// that does not parse.
     Unparsed {
         /// The parser's word on the whole reply.
         fault: String,
@@ -228,7 +233,7 @@ pub enum Reading {
 }
 
 // The JSON value that opens `text`, when one does.
-fn leading(text: &str) -> Option<Value> {
+fn first(text: &str) -> Option<Value> {
     serde_json::Deserializer::from_str(text).into_iter::<Value>().next()?.ok()
 }
 
@@ -375,6 +380,10 @@ mod tests {
         assert_eq!(
             candidate("{thinking} done.\n```json\n{\"verdict\":\"pass\"}\n```"),
             read(r#"{"verdict":"pass"}"#, Reading::Value)
+        );
+        assert_eq!(
+            candidate("[\"thinking\"] done.\n{\"verdict\":\"pass\"}"),
+            read(r#"{"verdict":"pass"}"#, Reading::Largest { of: 2 })
         );
     }
 
