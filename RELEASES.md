@@ -56,7 +56,9 @@ Unreleased
   parse whole, where it read the values inside it: a document cut short is
   handed back as written, so the guest's check sees the reply rather than
   a well-formed member of it. A fence body is one such block, so a literal
-  inside code is never taken for the answer beside it.
+  inside code is never taken for the answer beside it; a fence is delimited
+  only by a "```" that begins a line, so one inside a string or a sentence
+  is content.
 - `omnia_wasi_model::Usage` is the WIT `usage` record itself, as `Reply`
   and `Request` already were, rather than a mirror of it; the mirror's
   `From` conversion goes with it. The host-only types drop the derives

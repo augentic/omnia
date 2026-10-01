@@ -120,18 +120,28 @@ fn extract_json(text: &str) -> Vec<Value> {
 }
 
 // Fence bodies and bracketed blocks, left to right; whichever opens first
-// owns what it spans.
+// owns what it spans. A fence delimiter is a "```" that begins a line, as
+// Markdown places it: one inside a line — in prose, or in a JSON string,
+// which cannot hold a raw newline — delimits nothing.
 struct Spans<'a> {
     rest: &'a str,
 }
 
 impl<'a> Spans<'a> {
+    // The offset of the next fence delimiter in `rest`.
+    fn fence_at(&self) -> Option<usize> {
+        if self.rest.starts_with("```") {
+            return Some(0);
+        }
+        self.rest.find("\n```").map(|at| at + 1)
+    }
+
     // The body of the fence at the head of `rest`, minus its language-tag
-    // line; `rest` moves past the closing "```", or to the end when none
+    // line; `rest` moves past the closing delimiter, or to the end when none
     // closes it.
     fn fence(&mut self) -> &'a str {
         let inner = &self.rest[3..];
-        let (body, rest) = inner.split_once("```").unwrap_or((inner, ""));
+        let (body, rest) = inner.split_once("\n```").unwrap_or((inner, ""));
         self.rest = rest;
         body.split_once('\n').map_or(body, |(_tag, body)| body).trim()
     }
@@ -158,8 +168,8 @@ impl<'a> Spans<'a> {
             None
         });
 
-        // one that never closes is abandoned at the next "```", which is a fence after all
-        let end = closed.unwrap_or_else(|| self.rest.find("```").unwrap_or(self.rest.len()));
+        // one that never closes is abandoned at the next fence delimiter
+        let end = closed.or_else(|| self.fence_at()).unwrap_or(self.rest.len());
         let (body, rest) = self.rest.split_at(end);
         self.rest = rest;
         body
@@ -170,8 +180,7 @@ impl<'a> Iterator for Spans<'a> {
     type Item = &'a str;
 
     fn next(&mut self) -> Option<&'a str> {
-        let start =
-            [self.rest.find("```"), self.rest.find(['{', '['])].into_iter().flatten().min()?;
+        let start = [self.fence_at(), self.rest.find(['{', '['])].into_iter().flatten().min()?;
         self.rest = &self.rest[start..];
         Some(if self.rest.starts_with("```") { self.fence() } else { self.block() })
     }
@@ -269,11 +278,18 @@ mod tests {
         assert_eq!(candidate(&format!("Note:\n{answer}")), answer);
     }
 
-    // a "```" inside a block's string is the block's, not a fence
+    // a "```" inside a line is content, not a delimiter: in a block's string,
+    // in a fenced answer's string — where it would close the fence early —
+    // and in prose, where an opener would own the rest of the text
     #[test]
-    fn fence_delimiter_in_string() {
+    fn fence_delimiter_mid_line() {
         let answer = r#"{"finding":"wrap code in ``` fences","verdict":"pass"}"#;
         assert_eq!(candidate(&format!("Note:\n{answer}")), answer);
+        assert_eq!(candidate(&format!("```json\n{answer}\n```")), answer);
+        assert_eq!(
+            candidate("Open a fence with ``` on its own line.\n{\"verdict\":\"pass\"}"),
+            PASS
+        );
     }
 
     // a document cut short, or broken mid-way, is handed back whole — bare,
