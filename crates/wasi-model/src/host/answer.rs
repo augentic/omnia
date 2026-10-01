@@ -226,11 +226,10 @@ pub enum Reading {
 }
 
 // Every distinct JSON value in `text`, each once — the bodies of "```" fences
-// first, then every `{` / `[` slice — unless a document in it does not
-// parse. A bracket followed by a member opens a document, unlike an aside
-// such as `[thinking]`, and one that does not parse is malformed, not a
-// wrapper around its members, wherever it stands: bare, fenced, or amid
-// prose. The error is the parser's word on it, placed in `text`.
+// first, then every `{` / `[` slice — or the parser's word on the first
+// document that does not parse. A malformed document is the answer's fault,
+// not a wrapper around its members, wherever it stands: bare, fenced, or
+// amid prose.
 fn maybe_json(text: &str) -> Result<Vec<Value>, String> {
     let mut values: Vec<Value> = Vec::new();
     let mut push = |value: Value| {
@@ -269,16 +268,20 @@ fn maybe_json(text: &str) -> Result<Vec<Value>, String> {
 }
 
 // Whether `slice`, which starts at a bracket, opens a document rather than an
-// aside such as `[thinking]`: a key follows `{`, a value follows `[`.
+// aside such as `[thinking]` or `[1 point]`: a key follows `{`; a value
+// follows `[`, and its `,` or `]` — or the end of the text — follows that.
 fn opens_document(slice: &str) -> bool {
     let members = slice[1..].trim_start();
     if slice.starts_with('{') {
-        members.starts_with('"')
-    } else {
-        matches!(
-            serde_json::Deserializer::from_str(members).into_iter::<Value>().next(),
-            Some(Ok(_))
-        )
+        return members.starts_with('"');
+    }
+    let mut stream = serde_json::Deserializer::from_str(members).into_iter::<Value>();
+    match stream.next() {
+        Some(Ok(_)) => {
+            let after = members[stream.byte_offset()..].trim_start();
+            after.is_empty() || after.starts_with([',', ']'])
+        }
+        Some(Err(_)) | None => false,
     }
 }
 
@@ -292,11 +295,15 @@ fn placed(text: &str, start: usize, fault: &serde_json::Error) -> String {
 
     let line = lines + fault.line();
     let column = if fault.line() == 1 { columns + fault.column() } else { fault.column() };
+
+    // HACK!: serde_json offers no view of its message without the position,
+    // so take the position it wrote off the end and write ours
     let message = fault.to_string();
-    match message.strip_suffix(&format!(" at line {} column {}", fault.line(), fault.column())) {
-        Some(code) => format!("{code} at line {line} column {column}"),
-        None => message,
-    }
+    let within = format!(" at line {} column {}", fault.line(), fault.column());
+    let Some(code) = message.strip_suffix(&within) else {
+        return message;
+    };
+    format!("{code} at line {line} column {column}")
 }
 
 // `candidate`, the turns it offers and `instruction` are pure; backends
@@ -326,7 +333,10 @@ mod tests {
 
     // the reply read as written, and the parser's word on it
     fn unparsed(text: &str) -> String {
-        let Candidate { text: as_written, reading } = candidate(text);
+        let Candidate {
+            text: as_written,
+            reading,
+        } = candidate(text);
         assert_eq!(as_written, text);
         match reading {
             Reading::Unparsed { fault } => fault,
@@ -397,7 +407,8 @@ mod tests {
     // its line and column rather than a well-formed member's shape
     #[test]
     fn malformed_document() {
-        let fault = unparsed("{\n  \"requirements\": [{\"scenarios\":[],\"subject\":\"a.run\"}],\n");
+        let fault =
+            unparsed("{\n  \"requirements\": [{\"scenarios\":[],\"subject\":\"a.run\"}],\n");
         assert_eq!(fault, "EOF while parsing a value at line 3 column 0");
     }
 
@@ -468,11 +479,17 @@ mod tests {
     #[test]
     fn asides_amid_prose() {
         assert_eq!(
-            candidate("Done [thinking] with {care}; see [[note]] and {{name}}.\n{\"verdict\":\"pass\"}"),
+            candidate(
+                "Done [thinking] with {care}; see [[note]] and {{name}}.\n{\"verdict\":\"pass\"}"
+            ),
             read(r#"{"verdict":"pass"}"#, Reading::Value)
         );
         assert_eq!(
             candidate("```python\nxs = [x for x in xs]\n```\n{\"verdict\":\"pass\"}"),
+            read(r#"{"verdict":"pass"}"#, Reading::Value)
+        );
+        assert_eq!(
+            candidate("Scored [1 point] as a [true story] — [3 items]:\n{\"verdict\":\"pass\"}"),
             read(r#"{"verdict":"pass"}"#, Reading::Value)
         );
     }
@@ -530,46 +547,6 @@ mod tests {
         let schema = verdict_schema().instruction();
         assert!(schema.contains("JSON Schema"), "unexpected: {schema}");
         assert!(schema.contains("object"), "unexpected: {schema}");
-    }
-
-    #[test]
-    fn tmp_probe() {
-        let cases: &[&str] = &[
-            "{",
-            "[",
-            "{\"",
-            "[\"",
-            "{\"a\": 1,}",
-            "{'a': 1}",
-            "Answer: {'a': 1}",
-            "{\"a\": 1}{\"b\": 2}",
-            "— {\"a\": 1,",
-            "```json\r\n{\r\n  \"a\": 1,\r\n```",
-            "[{\"a\": 1,",
-            "[[1, 2",
-            "[[1, 2], [3",
-            "[1 point] then {\"verdict\":\"pass\"}",
-            "[true story] then {\"verdict\":\"pass\"}",
-            "See [1] and [2].\n{\"verdict\":\"pass\"}",
-            "```python\nd = {\"a\": x}\n```\n{\"verdict\":\"pass\"}",
-            "```json\n{\"verdict\":\"pass\"}\n```\nNote the {\"verdict\"} key.",
-            "```json\n\"pass\"\n```",
-            "```json\n\"unterminated\n```",
-            "[[wikilink]] and {{ template }} then {\"verdict\":\"pass\"}",
-            "{\"note\": \"a { b\", // c\n}",
-            "{\"a\": {\"b\": {\"c\": 1,",
-            "```json\n{\"a\": 1}\n```\n```json\n{\"b\": [1,\n```",
-            "\n\n  {\n\"a\": 1,\n",
-            "Done.\n\n```\n{\"verdict\":\"pass\"}\n```\n\nThanks!",
-            "{\"verdict\":\"pass\"}\nHope this helps!",
-            "x = [i for i in xs]; y = {k: v}\n{\"verdict\":\"pass\"}",
-            "{\"a\": [1, 2, 3",
-            "The result {\"a\": 1} and {\"b\": 2} and {\"c\": [",
-        ];
-        for case in cases {
-            let Candidate { text, reading } = candidate(case);
-            eprintln!("CASE {case:?}\n  -> {reading:?}\n  -> {text:?}");
-        }
     }
 
     #[test]

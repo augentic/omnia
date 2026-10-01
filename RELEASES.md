@@ -57,10 +57,11 @@ Unreleased
   its prose wraps); `Largest { of }` (the largest of `of` distinct JSON
   values — fence bodies and `{` / `[` slices, deduplicated by value — where
   the last one was taken before); `Unparsed { fault }` (the reply as
-  written, because it holds no JSON value or opens one that does not parse
-  — a malformed document is the answer's fault, not a wrapper around its
-  members, so the guest's check names the syntax position rather than a
-  nested member's shape — with the parser's word on it). The turns a
+  written, because it holds no JSON value or holds a document that does not
+  parse — bare, fenced, or amid prose, a malformed document is the answer's
+  fault, not a wrapper around its members, so the guest's check names the
+  syntax position rather than a nested member's shape — with the parser's
+  word on it, placed in the reply). The turns a
   backend puts to the model about its reply's shape live beside
   `Format::instruction`: `Candidate::nudge` asks an `Unparsed` reply for
   one JSON value, naming the fault, and `Candidate::correction` leads the
