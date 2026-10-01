@@ -364,6 +364,30 @@ mod tests {
         assert!(fault.contains("line 3"), "{fault}");
     }
 
+    // a bracketed aside opens the reply but is not a document: nothing a
+    // document holds follows its bracket, so the value after it is read
+    #[test]
+    fn aside_then_value() {
+        assert_eq!(
+            candidate("[thinking] weighing the claims.\n{\"verdict\":\"pass\"}"),
+            read(r#"{"verdict":"pass"}"#, Reading::Value)
+        );
+        assert_eq!(
+            candidate("{thinking} done.\n```json\n{\"verdict\":\"pass\"}\n```"),
+            read(r#"{"verdict":"pass"}"#, Reading::Value)
+        );
+    }
+
+    // a document broken mid-way, not cut short, is still malformed: a member
+    // that parses on its own is not the answer
+    #[test]
+    fn broken_document() {
+        let broken = "{\"verdict\": \"pass\", // reason\n  \"findings\": [{\"claim\":\"a\"}]}";
+        let Candidate { text, reading } = candidate(broken);
+        assert_eq!(text, broken);
+        assert!(matches!(reading, Reading::Unparsed { .. }), "{reading:?}");
+    }
+
     #[test]
     fn no_json() {
         let Candidate { text, reading } = candidate("not json");
