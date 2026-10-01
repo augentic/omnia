@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::host::generated::omnia::model::completion::{Format, Usage as ReplyUsage};
+use crate::host::generated::omnia::model::completion::{self, Format};
 
 /// A backend's result: the answer text, optional usage, and transcript.
 ///
@@ -48,6 +48,16 @@ pub struct Usage {
     pub reasoning_tokens: Option<u32>,
 }
 
+impl From<Usage> for completion::Usage {
+    fn from(usage: Usage) -> Self {
+        Self {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            reasoning_tokens: usage.reasoning_tokens,
+        }
+    }
+}
+
 /// The tool-call transcript a backend may capture for diagnostics or future
 /// replay. Host-only; it never crosses the WIT boundary. Empty when the
 /// backend captured no tool turns.
@@ -68,16 +78,6 @@ pub struct ToolTurn {
     pub result: serde_json::Value,
 }
 
-impl From<Usage> for ReplyUsage {
-    fn from(usage: Usage) -> Self {
-        Self {
-            input_tokens: usage.input_tokens,
-            output_tokens: usage.output_tokens,
-            reasoning_tokens: usage.reasoning_tokens,
-        }
-    }
-}
-
 impl std::fmt::Display for Format {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
@@ -96,8 +96,8 @@ impl Format {
         match self {
             Self::Schema(spec) => format!(
                 "When you are done, reply with only your final answer as a single JSON value \
-                 conforming to this JSON Schema, and nothing else:\n{}",
-                spec.schema
+                 conforming to this JSON Schema, and nothing else:\n{schema}",
+                schema = spec.schema
             ),
             Self::Json => "When you are done, reply with only your final answer as a single JSON \
                            object and nothing else."
@@ -110,208 +110,90 @@ impl Format {
         }
     }
 
-    /// The candidate answer in a model's final text, and how it was read. A
-    /// courtesy for providers that wrap JSON in prose, never a gate — the
-    /// guest's check decides.
+    /// The candidate answer in a model's final text: the text itself for
+    /// `text`; for `json` and `schema`, the whole text when it parses as
+    /// JSON, otherwise the largest fenced or bracketed JSON value, and the
+    /// raw text when there is none. A courtesy for providers that wrap JSON
+    /// in prose, never a gate — the guest's check decides.
     #[must_use]
-    pub fn candidate(&self, text: &str) -> Candidate {
+    pub fn candidate(&self, text: &str) -> String {
         match self {
-            Self::Text => Candidate {
-                text: text.to_owned(),
-                reading: Reading::Text,
-            },
-            Self::Json | Self::Schema(_) => Candidate::from_json(text),
+            Self::Text => text.to_owned(),
+            Self::Json | Self::Schema(_) => maybe_json(text)
+                .iter()
+                .map(ToString::to_string)
+                .max_by_key(String::len)
+                .unwrap_or_else(|| text.to_owned()),
         }
     }
 }
 
-/// What a backend puts to the guest's check from a model's final text, and
-/// how it was read.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Candidate {
-    /// The text as written, or the one JSON value read from it.
-    pub text: String,
-    /// How `text` was read.
-    pub reading: Reading,
-}
-
-impl Candidate {
-    fn from_json(text: &str) -> Self {
-        let unparsed = |fault: String| Self {
-            text: text.to_owned(),
-            reading: Reading::Unparsed { fault },
-        };
-
-        // the whole reply is one value
-        let fault = match serde_json::from_str::<Value>(text) {
-            Ok(value) => {
-                return Self {
-                    text: value.to_string(),
-                    reading: Reading::Value,
-                };
-            }
-            Err(fault) => fault,
-        };
-
-        // what the prose wraps: one value, or the largest of several — unless
-        // a document in it does not parse, which is the answer's fault
-        let found: Vec<String> = match maybe_json(text) {
-            Ok(values) => values.iter().map(ToString::to_string).collect(),
-            Err(fault) => return unparsed(fault),
-        };
-        let of = found.len();
-        match found.into_iter().max_by_key(String::len) {
-            None => unparsed(fault.to_string()),
-            Some(text) if of == 1 => Self {
-                text,
-                reading: Reading::Value,
-            },
-            Some(text) => Self {
-                text,
-                reading: Reading::Largest { of },
-            },
-        }
+// Every JSON value in `text`: the whole text alone when it parses, else the
+// bodies of "```" fences and every bracketed block, each parsed whole. A
+// block that does not parse — prose in brackets, code, a document cut short
+// — is passed over entire, never read for the values inside it, so a
+// fragment of a broken answer is never the answer.
+fn maybe_json(text: &str) -> Vec<Value> {
+    // the whole text is one value
+    let text = text.trim();
+    if let Ok(value) = serde_json::from_str(text) {
+        return vec![value];
     }
-
-    /// The turn that asks a reply read as no JSON value for one that is,
-    /// naming the parser's fault; `None` when a value was read, or the
-    /// `text` format asked for none.
-    #[must_use]
-    pub fn nudge(&self) -> Option<String> {
-        let Reading::Unparsed { fault } = &self.reading else {
-            return None;
-        };
-        Some(format!(
-            "Your last reply is not one well-formed JSON value ({fault}), so it is not the \
-             answer. Reply now with only your final answer as a single JSON value in the shape \
-             the prompt asked for, and nothing else."
-        ))
-    }
-
-    /// The turn that puts the guest's `correction` to the model: led by one
-    /// sentence naming the count when the reply held several JSON values and
-    /// the largest was the one checked, the correction alone otherwise.
-    #[must_use]
-    pub fn correction(&self, correction: String) -> String {
-        match self.reading {
-            Reading::Largest { of } => format!(
-                "Your reply held {of} JSON values; the largest was read as your answer and is \
-                 the previous answer below. Reply with only your final answer as one JSON \
-                 value.\n\n{correction}"
-            ),
-            _ => correction,
-        }
-    }
-}
-
-/// How a candidate was read from a model's final text.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Reading {
-    /// As written: the `text` format reads nothing from the reply.
-    Text,
-    /// The one JSON value the reply holds, whole or wrapped in prose.
-    Value,
-    /// The largest of the distinct JSON values the reply holds.
-    Largest {
-        /// How many distinct JSON values the reply held.
-        of: usize,
-    },
-    /// As written, because the reply holds no JSON value, or holds a document
-    /// that does not parse.
-    Unparsed {
-        /// The parser's word on the document that does not parse, placed in
-        /// the reply, or on the reply when it holds no JSON value.
-        fault: String,
-    },
-}
-
-// Every distinct JSON value in `text`, each once — the bodies of "```" fences
-// first, then every `{` / `[` slice — or the parser's word on the first
-// document that does not parse. A malformed document is the answer's fault,
-// not a wrapper around its members, wherever it stands: bare, fenced, or
-// amid prose.
-fn maybe_json(text: &str) -> Result<Vec<Value>, String> {
-    let mut values: Vec<Value> = Vec::new();
-    let mut push = |value: Value| {
-        if !values.contains(&value) {
-            values.push(value);
-        }
-    };
 
     // fence bodies are the odd-indexed chunks between the delimiters, minus
     // their language-tag line
+    let mut values = Vec::new();
     for body in text.split("```").skip(1).step_by(2) {
         let body = body.split_once('\n').map_or(body, |(_tag, body)| body);
         if let Ok(value) = serde_json::from_str(body.trim()) {
-            push(value);
+            values.push(value);
         }
     }
 
-    // `{` / `[` slices
+    // `{` / `[` blocks
     let mut rest = text;
-    while let Some(offset) = rest.find(['{', '[']) {
-        let slice = &rest[offset..];
-        let mut stream = serde_json::Deserializer::from_str(slice).into_iter::<Value>();
-        match stream.next() {
-            Some(Ok(value)) => {
-                rest = &slice[stream.byte_offset()..];
-                push(value);
+    while let Some(start) = rest.find(['{', '[']) {
+        let end = start + block_len(&rest[start..]);
+        if let Ok(value) = serde_json::from_str(&rest[start..end]) {
+            values.push(value);
+        }
+        rest = &rest[end..];
+    }
+
+    values
+}
+
+// The length of the bracketed block opening `text`: through the close that
+// brings its depth back to zero, brackets inside strings not counted, or all
+// of `text` when none does.
+fn block_len(text: &str) -> usize {
+    let (mut depth, mut quoted, mut escaped) = (0_usize, false, false);
+    for (at, c) in text.char_indices() {
+        match c {
+            _ if escaped => escaped = false,
+            '\\' if quoted => escaped = true,
+            '"' => quoted = !quoted,
+            _ if quoted => {}
+            '{' | '[' => depth += 1,
+            '}' | ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return at + c.len_utf8();
+                }
             }
-            Some(Err(fault)) if opens_document(slice) => {
-                return Err(placed(text, text.len() - slice.len(), &fault));
-            }
-            Some(Err(_)) | None => rest = &slice[1..],
+            _ => {}
         }
     }
-
-    Ok(values)
+    text.len()
 }
 
-// Whether `slice`, which starts at a bracket, opens a document rather than an
-// aside such as `[thinking]` or `[1 point]`: a key follows `{`; a value
-// follows `[`, and its `,` or `]` — or the end of the text — follows that.
-fn opens_document(slice: &str) -> bool {
-    let members = slice[1..].trim_start();
-    if slice.starts_with('{') {
-        return members.starts_with('"');
-    }
-    let mut stream = serde_json::Deserializer::from_str(members).into_iter::<Value>();
-    match stream.next() {
-        Some(Ok(_)) => {
-            let after = members[stream.byte_offset()..].trim_start();
-            after.is_empty() || after.starts_with([',', ']'])
-        }
-        Some(Err(_)) | None => false,
-    }
-}
-
-// The parser's word on the document opening at `start`, with the line and
-// column it names — counted from the document — moved to `text` as a whole.
-fn placed(text: &str, start: usize, fault: &serde_json::Error) -> String {
-    // the document's bracket stands `lines` down and `columns` along
-    let before = &text[..start];
-    let lines = before.matches('\n').count();
-    let columns = before.len() - before.rfind('\n').map_or(0, |at| at + 1);
-
-    let line = lines + fault.line();
-    let column = if fault.line() == 1 { columns + fault.column() } else { fault.column() };
-
-    // HACK!: serde_json offers no view of its message without the position,
-    // so take the position it wrote off the end and write ours
-    let message = fault.to_string();
-    let within = format!(" at line {} column {}", fault.line(), fault.column());
-    let Some(code) = message.strip_suffix(&within) else {
-        return message;
-    };
-    format!("{code} at line {line} column {column}")
-}
-
-// `candidate`, the turns it offers and `instruction` are pure; backends
-// drive them directly
+// `candidate` and `instruction` are pure; backends drive them directly
 #[cfg(test)]
 mod tests {
-    use super::{Candidate, Format, Reading};
+    use super::Format;
     use crate::host::generated::omnia::model::completion::Schema;
+
+    const PASS: &str = r#"{"verdict":"pass"}"#;
 
     fn verdict_schema() -> Format {
         Format::Schema(Schema {
@@ -320,224 +202,96 @@ mod tests {
         })
     }
 
-    fn candidate(text: &str) -> Candidate {
+    fn candidate(text: &str) -> String {
         verdict_schema().candidate(text)
-    }
-
-    fn read(text: &str, reading: Reading) -> Candidate {
-        Candidate {
-            text: text.to_owned(),
-            reading,
-        }
-    }
-
-    // the reply read as written, and the parser's word on it
-    fn unparsed(text: &str) -> String {
-        let Candidate {
-            text: as_written,
-            reading,
-        } = candidate(text);
-        assert_eq!(as_written, text);
-        match reading {
-            Reading::Unparsed { fault } => fault,
-            read => panic!("{read:?}"),
-        }
     }
 
     #[test]
     fn text_passthrough() {
-        let text = "  plain {not: json}  ";
-        assert_eq!(Format::Text.candidate(text), read(text, Reading::Text));
+        assert_eq!(Format::Text.candidate("  plain {not: json}  "), "  plain {not: json}  ");
     }
 
     #[test]
     fn json_document() {
-        assert_eq!(
-            candidate(r#"{"verdict":"pass"}"#),
-            read(r#"{"verdict":"pass"}"#, Reading::Value)
-        );
+        assert_eq!(Format::Json.candidate(PASS), PASS);
     }
 
-    // a fenced document is one value, not one per way of finding it
     #[test]
     fn fenced_json() {
-        assert_eq!(
-            candidate("```json\n{\"verdict\":\"pass\"}\n```"),
-            read(r#"{"verdict":"pass"}"#, Reading::Value)
-        );
+        assert_eq!(candidate("```json\n{\"verdict\":\"pass\"}\n```"), PASS);
+    }
+
+    // a scalar answer has no bracket to open it, so the fence is its only way in
+    #[test]
+    fn fenced_scalar() {
+        assert_eq!(candidate("```json\n\"pass\"\n```"), r#""pass""#);
     }
 
     #[test]
     fn json_with_preamble() {
-        assert_eq!(
-            candidate("Done.\n{\"verdict\":\"pass\"}\n"),
-            read(r#"{"verdict":"pass"}"#, Reading::Value)
-        );
+        assert_eq!(candidate("Done.\n{\"verdict\":\"pass\"}\n"), PASS);
     }
 
+    // the largest value is the answer: a worked example before it, a
+    // fragment of it repeated after it, and a citation beside it are smaller
     #[test]
     fn largest_value_wins() {
         assert_eq!(
-            candidate("findings: []\n{\"outcome\":\"completed\"}"),
-            read(r#"{"outcome":"completed"}"#, Reading::Largest { of: 2 })
+            candidate(
+                "For example {\"verdict\":\"fail\"} — and mine:\n{\"findings\":[],\"verdict\":\"pass\"}"
+            ),
+            r#"{"findings":[],"verdict":"pass"}"#
         );
-    }
-
-    // a fragment of the answer repeated after it is not the answer
-    #[test]
-    fn document_then_fragment() {
         let document = r#"{"requirements":[{"scenarios":[],"subject":"a.run"}]}"#;
         assert_eq!(
             candidate(&format!("{document}\n{{\"scenarios\":[],\"subject\":\"a.run\"}}")),
-            read(document, Reading::Largest { of: 2 })
+            document
         );
+        assert_eq!(candidate("{\"verdict\":\"pass\"}\nSee [1] and [2]."), PASS);
     }
 
-    // a worked example before the answer is smaller than the answer
+    // a bracketed block that does not parse whole is passed over, not read
+    // for the values inside it — prose in brackets, code in a fence, a key
+    // named with no `:` — and the value beside it is read
     #[test]
-    fn example_then_answer() {
-        let text = "For example {\"verdict\":\"fail\"} — and mine:\n{\"findings\":[],\"verdict\":\"pass\"}";
-        assert_eq!(
-            candidate(text),
-            read(r#"{"findings":[],"verdict":"pass"}"#, Reading::Largest { of: 2 })
-        );
+    fn blocks_that_are_not_json() {
+        for text in [
+            "[thinking] weighing the claims.\n{\"verdict\":\"pass\"}",
+            "{thinking} done.\n```json\n{\"verdict\":\"pass\"}\n```",
+            "Done [thinking] with {care}; see [[note]] and {{name}}.\n{\"verdict\":\"pass\"}",
+            "Scored [1 point] as a [true story] — [3 items, mostly]:\n{\"verdict\":\"pass\"}",
+            "```python\nxs = [x for x in xs]\n```\n{\"verdict\":\"pass\"}",
+            "```js\nconst reply = { \"verdict\": verdict };\n```\n{\"verdict\":\"pass\"}",
+            "{\"verdict\":\"pass\"}\nThe {\"verdict\"} key is required.",
+        ] {
+            assert_eq!(candidate(text), PASS, "{text}");
+        }
     }
 
-    // a document cut short is handed back whole, with the parser's fault at
-    // its line and column rather than a well-formed member's shape
+    // a bracket or an escaped quote inside a string does not end the block
+    #[test]
+    fn brackets_in_strings() {
+        let answer = r#"{"finding":"an unmatched } and \" quote","verdict":"pass"}"#;
+        assert_eq!(candidate(&format!("Note:\n{answer}")), answer);
+    }
+
+    // a document cut short, or broken mid-way, is handed back whole — bare,
+    // fenced, or after prose — never a well-formed member of it
     #[test]
     fn malformed_document() {
-        let fault =
-            unparsed("{\n  \"requirements\": [{\"scenarios\":[],\"subject\":\"a.run\"}],\n");
-        assert_eq!(fault, "EOF while parsing a value at line 3 column 0");
-    }
-
-    // a document cut short inside a fence is malformed wherever it stands,
-    // not a fence around its members; the fault is placed in the reply, past
-    // the fence line, where the model reading its own reply finds it
-    #[test]
-    fn fenced_malformed_document() {
-        let fault = unparsed(
+        for text in [
+            "{\n  \"requirements\": [{\"scenarios\":[],\"subject\":\"a.run\"}],\n",
             "```json\n{\n  \"requirements\": [{\"scenarios\":[],\"subject\":\"a.run\"}],\n```",
-        );
-        assert_eq!(fault, "key must be a string at line 4 column 1");
-    }
-
-    // a document broken mid-way inside a fence: its members are not read
-    // either, and a fault on the document's first line keeps its column
-    #[test]
-    fn fenced_broken_document() {
-        let fault = unparsed(
-            "```json\n{\"verdict\": \"pass\", // reason\n  \"findings\": [{\"claim\":\"a\"}]}\n```",
-        );
-        assert_eq!(fault, "key must be a string at line 2 column 21");
-    }
-
-    // a document cut short after prose on the same line: the fault's column
-    // is placed in the reply, so it is the reply's end
-    #[test]
-    fn malformed_document_after_preamble() {
-        let truncated = "Here is my answer: {\"findings\": [], \"verdict\": \"pass\"";
-        assert_eq!(
-            unparsed(truncated),
-            format!("EOF while parsing an object at line 1 column {}", truncated.len())
-        );
-    }
-
-    // a well-formed value ahead of a document cut short does not make the
-    // reply wrapped: the document is still the answer's fault
-    #[test]
-    fn malformed_document_after_value() {
-        let document = "[{\"claim\":\"a\"}, {\"claim\":\"b\", ";
-        assert_eq!(
-            unparsed(&format!("{{\"verdict\":\"pass\"}}\nIn detail:\n{document}")),
-            format!("EOF while parsing a value at line 3 column {}", document.len())
-        );
-    }
-
-    // a bracketed aside opens the reply but is not a document: nothing a
-    // document holds follows its bracket, so the value after it is read
-    #[test]
-    fn aside_then_value() {
-        assert_eq!(
-            candidate("[thinking] weighing the claims.\n{\"verdict\":\"pass\"}"),
-            read(r#"{"verdict":"pass"}"#, Reading::Value)
-        );
-        assert_eq!(
-            candidate("{thinking} done.\n```json\n{\"verdict\":\"pass\"}\n```"),
-            read(r#"{"verdict":"pass"}"#, Reading::Value)
-        );
-        assert_eq!(
-            candidate("[\"thinking\"] done.\n{\"verdict\":\"pass\"}"),
-            read(r#"{"verdict":"pass"}"#, Reading::Largest { of: 2 })
-        );
-    }
-
-    // brackets amid prose that no member follows are asides wherever they
-    // stand — in a sentence, doubled, or in code of another language — and
-    // the value after them is read
-    #[test]
-    fn asides_amid_prose() {
-        assert_eq!(
-            candidate(
-                "Done [thinking] with {care}; see [[note]] and {{name}}.\n{\"verdict\":\"pass\"}"
-            ),
-            read(r#"{"verdict":"pass"}"#, Reading::Value)
-        );
-        assert_eq!(
-            candidate("```python\nxs = [x for x in xs]\n```\n{\"verdict\":\"pass\"}"),
-            read(r#"{"verdict":"pass"}"#, Reading::Value)
-        );
-        assert_eq!(
-            candidate("Scored [1 point] as a [true story] — [3 items]:\n{\"verdict\":\"pass\"}"),
-            read(r#"{"verdict":"pass"}"#, Reading::Value)
-        );
-    }
-
-    // a document broken mid-way, not cut short, is still malformed: a member
-    // that parses on its own is not the answer
-    #[test]
-    fn broken_document() {
-        let fault =
-            unparsed("{\"verdict\": \"pass\", // reason\n  \"findings\": [{\"claim\":\"a\"}]}");
-        assert_eq!(fault, "key must be a string at line 1 column 21");
+            "Here is my answer: {\"findings\": [], \"verdict\": \"pass\"",
+            "{\"verdict\": \"pass\", // reason\n  \"findings\": [{\"claim\":\"a\"}]}",
+        ] {
+            assert_eq!(candidate(text), text);
+        }
     }
 
     #[test]
     fn no_json() {
-        let fault = unparsed("not json");
-        assert!(fault.contains("line 1"), "{fault}");
-    }
-
-    // the nudge names the parser's fault; a reply read as a value, or as
-    // text, is not nudged
-    #[test]
-    fn nudge_names_the_fault() {
-        let nudge = candidate("Analyzing the claims.").nudge().expect("unparsed");
-        assert!(
-            nudge.starts_with(
-                "Your last reply is not one well-formed JSON value (expected value at line 1 \
-                 column 1), so it is not the answer."
-            ),
-            "{nudge}"
-        );
-        assert_eq!(candidate(r#"{"verdict":"pass"}"#).nudge(), None);
-        assert_eq!(Format::Text.candidate("Analyzing the claims.").nudge(), None);
-    }
-
-    // the correction leads with the count only when the largest of several
-    // values was the one checked
-    #[test]
-    fn correction_leads_with_the_count() {
-        let correction = "## Previous answer (rejected)\n\n{}".to_owned();
-        let led =
-            candidate("findings: []\n{\"outcome\":\"completed\"}").correction(correction.clone());
-        assert!(
-            led.starts_with("Your reply held 2 JSON values; the largest was read as your answer"),
-            "{led}"
-        );
-        assert!(led.ends_with(&format!("one JSON value.\n\n{correction}")), "{led}");
-        assert_eq!(candidate(r#"{"verdict":"pass"}"#).correction(correction.clone()), correction);
+        assert_eq!(candidate("not json"), "not json");
     }
 
     #[test]
