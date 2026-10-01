@@ -105,11 +105,14 @@ impl Format {
     }
 }
 
-// Every JSON value in `text`: the whole text alone when it parses, else the
-// bodies of "```" fences and every bracketed block in the prose around them,
-// each parsed whole. A block that does not parse — prose in brackets, code in
-// a fence, a document cut short — is passed over entire, never read for the
-// values inside it, so a fragment of a broken answer is never the answer.
+// Every JSON value in `text`: the whole text alone when it parses, else each
+// "```" fence body and each bracketed block in the prose, read left to right
+// and each parsed whole. Whichever opens first owns what it spans — a "```"
+// inside a block's string is the block's, not a fence; a `{` inside a fence
+// is the fence's, not a block. A span that does not parse — prose in
+// brackets, code in a fence, a document cut short — is passed over entire,
+// never read for the values inside it, so a fragment of a broken answer is
+// never the answer.
 fn extract_json(text: &str) -> Vec<Value> {
     // the whole text is one value
     let text = text.trim();
@@ -117,38 +120,41 @@ fn extract_json(text: &str) -> Vec<Value> {
         return vec![value];
     }
 
-    // splitting on the delimiter alternates prose and fence body
+    // left to right, whichever opens first is read whole
     let mut values = Vec::new();
-    for (i, chunk) in text.split("```").enumerate() {
-        // a fence body is one value, minus its language-tag line, or nothing
-        if i % 2 == 1 {
-            let body = chunk.split_once('\n').map_or(chunk, |(_tag, body)| body);
-            if let Ok(value) = serde_json::from_str(body.trim()) {
-                values.push(value);
-            }
-            continue;
+    let mut rest = text;
+    while let Some(start) = opener(rest) {
+        let (body, end) =
+            if rest[start..].starts_with("```") { fence(rest, start) } else { block(rest, start) };
+        if let Ok(value) = serde_json::from_str(body) {
+            values.push(value);
         }
-
-        // `{` / `[` blocks in prose
-        let mut rest = chunk;
-        while let Some(start) = rest.find(['{', '[']) {
-            let end = start + block_len(&rest[start..]);
-            if let Ok(value) = serde_json::from_str(&rest[start..end]) {
-                values.push(value);
-            }
-            rest = &rest[end..];
-        }
+        rest = &rest[end..];
     }
 
     values
 }
 
-// The length of the bracketed block opening `text`: through the close that
-// brings its depth back to zero, brackets inside strings not counted, or all
-// of `text` when none does.
-fn block_len(text: &str) -> usize {
+fn opener(text: &str) -> Option<usize> {
+    [text.find("```"), text.find(['{', '['])].into_iter().flatten().min()
+}
+
+// The body of the fence opening at `start`, minus its language-tag line, and
+// the offset past its closing "```" — or the end of `text` when none closes it.
+fn fence(text: &str, start: usize) -> (&str, usize) {
+    let inner = &text[start + 3..];
+    let (body, end) =
+        inner.find("```").map_or((inner, text.len()), |at| (&inner[..at], start + 3 + at + 3));
+    (body.split_once('\n').map_or(body, |(_tag, body)| body).trim(), end)
+}
+
+// The bracketed block opening at `start` and the offset past it: through the
+// close that brings its depth back to zero, brackets inside strings not
+// counted. One that never closes is abandoned at the next "```", which is a
+// fence after all, or at the end of `text`.
+fn block(text: &str, start: usize) -> (&str, usize) {
     let (mut depth, mut quoted, mut escaped) = (0_usize, false, false);
-    for (at, c) in text.char_indices() {
+    for (at, c) in text[start..].char_indices() {
         match c {
             _ if escaped => escaped = false,
             '\\' if quoted => escaped = true,
@@ -158,14 +164,16 @@ fn block_len(text: &str) -> usize {
             '}' | ']' => {
                 depth -= 1;
                 if depth == 0 {
-                    return at + c.len_utf8();
+                    let end = start + at + c.len_utf8();
+                    return (&text[start..end], end);
                 }
             }
             _ => {}
         }
     }
 
-    text.len()
+    let end = text[start..].find("```").map_or(text.len(), |at| start + at);
+    (&text[start..end], end)
 }
 
 // `candidate` and `instruction` are pure; backends drive them directly
@@ -247,6 +255,7 @@ mod tests {
             "```js\nconst reply = { \"verdict\": verdict };\n```\n{\"verdict\":\"pass\"}",
             "```python\nconfig = {\"model\":\"gpt-4\",\"temperature\":0,\"stream\":false}\n```\n{\"verdict\":\"pass\"}",
             "{\"verdict\":\"pass\"}\nThe {\"verdict\"} key is required.",
+            "The object opens with a { like so:\n```json\n{\"verdict\":\"pass\"}\n```",
         ] {
             assert_eq!(candidate(text), PASS, "{text}");
         }
@@ -256,6 +265,13 @@ mod tests {
     #[test]
     fn brackets_in_strings() {
         let answer = r#"{"finding":"an unmatched } and \" quote","verdict":"pass"}"#;
+        assert_eq!(candidate(&format!("Note:\n{answer}")), answer);
+    }
+
+    // a "```" inside a block's string is the block's, not a fence
+    #[test]
+    fn fence_delimiter_in_string() {
+        let answer = r#"{"finding":"wrap code in ``` fences","verdict":"pass"}"#;
         assert_eq!(candidate(&format!("Note:\n{answer}")), answer);
     }
 
