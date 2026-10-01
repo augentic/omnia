@@ -106,10 +106,10 @@ impl Format {
 }
 
 // Every JSON value in `text`: the whole text alone when it parses, else the
-// bodies of "```" fences and every bracketed block, each parsed whole. A
-// block that does not parse — prose in brackets, code, a document cut short
-// — is passed over entire, never read for the values inside it, so a
-// fragment of a broken answer is never the answer.
+// bodies of "```" fences and every bracketed block in the prose around them,
+// each parsed whole. A block that does not parse — prose in brackets, code in
+// a fence, a document cut short — is passed over entire, never read for the
+// values inside it, so a fragment of a broken answer is never the answer.
 fn extract_json(text: &str) -> Vec<Value> {
     // the whole text is one value
     let text = text.trim();
@@ -117,24 +117,27 @@ fn extract_json(text: &str) -> Vec<Value> {
         return vec![value];
     }
 
-    // fence bodies are the odd-indexed chunks between the delimiters, minus
-    // their language-tag line
+    // splitting on the delimiter alternates prose and fence body
     let mut values = Vec::new();
-    for body in text.split("```").skip(1).step_by(2) {
-        let body = body.split_once('\n').map_or(body, |(_tag, body)| body);
-        if let Ok(value) = serde_json::from_str(body.trim()) {
-            values.push(value);
+    for (i, chunk) in text.split("```").enumerate() {
+        // a fence body is one value, minus its language-tag line, or nothing
+        if i % 2 == 1 {
+            let body = chunk.split_once('\n').map_or(chunk, |(_tag, body)| body);
+            if let Ok(value) = serde_json::from_str(body.trim()) {
+                values.push(value);
+            }
+            continue;
         }
-    }
 
-    // `{` / `[` blocks
-    let mut rest = text;
-    while let Some(start) = rest.find(['{', '[']) {
-        let end = start + block_len(&rest[start..]);
-        if let Ok(value) = serde_json::from_str(&rest[start..end]) {
-            values.push(value);
+        // `{` / `[` blocks in prose
+        let mut rest = chunk;
+        while let Some(start) = rest.find(['{', '[']) {
+            let end = start + block_len(&rest[start..]);
+            if let Ok(value) = serde_json::from_str(&rest[start..end]) {
+                values.push(value);
+            }
+            rest = &rest[end..];
         }
-        rest = &rest[end..];
     }
 
     values
@@ -230,7 +233,9 @@ mod tests {
 
     // a bracketed block that does not parse whole is passed over, not read
     // for the values inside it — prose in brackets, code in a fence, a key
-    // named with no `:` — and the value beside it is read
+    // named with no `:` — and the value beside it is read. A fence body is
+    // one block: a literal inside code is never mined, even one that parses
+    // and outweighs the answer
     #[test]
     fn blocks_that_are_not_json() {
         for text in [
@@ -240,6 +245,7 @@ mod tests {
             "Scored [1 point] as a [true story] — [3 items, mostly]:\n{\"verdict\":\"pass\"}",
             "```python\nxs = [x for x in xs]\n```\n{\"verdict\":\"pass\"}",
             "```js\nconst reply = { \"verdict\": verdict };\n```\n{\"verdict\":\"pass\"}",
+            "```python\nconfig = {\"model\":\"gpt-4\",\"temperature\":0,\"stream\":false}\n```\n{\"verdict\":\"pass\"}",
             "{\"verdict\":\"pass\"}\nThe {\"verdict\"} key is required.",
         ] {
             assert_eq!(candidate(text), PASS, "{text}");
