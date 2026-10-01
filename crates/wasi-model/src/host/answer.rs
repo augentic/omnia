@@ -161,7 +161,7 @@ fn block_len(text: &str) -> usize {
             _ => {}
         }
     }
-    
+
     text.len()
 }
 
