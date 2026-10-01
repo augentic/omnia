@@ -137,6 +137,11 @@ pub struct Candidate {
 
 impl Candidate {
     fn from_json(text: &str) -> Self {
+        let unparsed = |fault: String| Self {
+            text: text.to_owned(),
+            reading: Reading::Unparsed { fault },
+        };
+
         // the whole reply is one value
         let fault = match serde_json::from_str::<Value>(text) {
             Ok(value) => {
@@ -147,29 +152,16 @@ impl Candidate {
             }
             Err(fault) => fault,
         };
-        let unparsed = || Self {
-            text: text.to_owned(),
-            reading: Reading::Unparsed {
-                fault: fault.to_string(),
-            },
+
+        // what the prose wraps: one value, or the largest of several — unless
+        // a document in it does not parse, which is the answer's fault
+        let found: Vec<String> = match maybe_json(text) {
+            Ok(values) => values.iter().map(ToString::to_string).collect(),
+            Err(fault) => return unparsed(fault),
         };
-
-        // a document (a bracket followed by a member, unlike `[thinking]`)
-        // that opens the reply and does not parse is malformed, not wrapped
-        let opener = text.trim_start();
-        if let Some(members) = opener.strip_prefix(['{', '[']) {
-            let members = members.trim_start();
-            let keyed = !opener.starts_with('{') || members.starts_with('"');
-            if keyed && first(opener).is_none() && first(members).is_some() {
-                return unparsed();
-            }
-        }
-
-        // what the prose wraps: one value, or the largest of several
-        let found: Vec<String> = maybe_json(text).iter().map(ToString::to_string).collect();
         let of = found.len();
         match found.into_iter().max_by_key(String::len) {
-            None => unparsed(),
+            None => unparsed(fault.to_string()),
             Some(text) if of == 1 => Self {
                 text,
                 reading: Reading::Value,
@@ -224,22 +216,22 @@ pub enum Reading {
         /// How many distinct JSON values the reply held.
         of: usize,
     },
-    /// As written, because the reply holds no JSON value or opens a document
+    /// As written, because the reply holds no JSON value, or holds a document
     /// that does not parse.
     Unparsed {
-        /// The parser's word on the whole reply.
+        /// The parser's word on the document that does not parse, placed in
+        /// the reply, or on the reply when it holds no JSON value.
         fault: String,
     },
 }
 
-// The JSON value that opens `text`, when one does.
-fn first(text: &str) -> Option<Value> {
-    serde_json::Deserializer::from_str(text).into_iter::<Value>().next()?.ok()
-}
-
-// Every distinct JSON value in `text`, each once: the bodies of "```" fences
-// first, then every `{` / `[` slice.
-fn maybe_json(text: &str) -> Vec<Value> {
+// Every distinct JSON value in `text`, each once — the bodies of "```" fences
+// first, then every `{` / `[` slice — unless a document in it does not
+// parse. A bracket followed by a member opens a document, unlike an aside
+// such as `[thinking]`, and one that does not parse is malformed, not a
+// wrapper around its members, wherever it stands: bare, fenced, or amid
+// prose. The error is the parser's word on it, placed in `text`.
+fn maybe_json(text: &str) -> Result<Vec<Value>, String> {
     let mut values: Vec<Value> = Vec::new();
     let mut push = |value: Value| {
         if !values.contains(&value) {
@@ -247,8 +239,8 @@ fn maybe_json(text: &str) -> Vec<Value> {
         }
     };
 
-    // extract values from "```" fences: fence bodies are the odd-indexed
-    // chunks between the delimiters, minus their language-tag line
+    // fence bodies are the odd-indexed chunks between the delimiters, minus
+    // their language-tag line
     for body in text.split("```").skip(1).step_by(2) {
         let body = body.split_once('\n').map_or(body, |(_tag, body)| body);
         if let Ok(value) = serde_json::from_str(body.trim()) {
@@ -256,20 +248,55 @@ fn maybe_json(text: &str) -> Vec<Value> {
         }
     }
 
-    // extract values from `{` or `[` slices
+    // `{` / `[` slices
     let mut rest = text;
     while let Some(offset) = rest.find(['{', '[']) {
-        let mut stream = serde_json::Deserializer::from_str(&rest[offset..]).into_iter::<Value>();
+        let slice = &rest[offset..];
+        let mut stream = serde_json::Deserializer::from_str(slice).into_iter::<Value>();
         match stream.next() {
             Some(Ok(value)) => {
-                rest = &rest[offset + stream.byte_offset()..];
+                rest = &slice[stream.byte_offset()..];
                 push(value);
             }
-            Some(Err(_)) | None => rest = &rest[offset + 1..],
+            Some(Err(fault)) if opens_document(slice) => {
+                return Err(placed(text, text.len() - slice.len(), &fault));
+            }
+            Some(Err(_)) | None => rest = &slice[1..],
         }
     }
 
-    values
+    Ok(values)
+}
+
+// Whether `slice`, which starts at a bracket, opens a document rather than an
+// aside such as `[thinking]`: a key follows `{`, a value follows `[`.
+fn opens_document(slice: &str) -> bool {
+    let members = slice[1..].trim_start();
+    if slice.starts_with('{') {
+        members.starts_with('"')
+    } else {
+        matches!(
+            serde_json::Deserializer::from_str(members).into_iter::<Value>().next(),
+            Some(Ok(_))
+        )
+    }
+}
+
+// The parser's word on the document opening at `start`, with the line and
+// column it names — counted from the document — moved to `text` as a whole.
+fn placed(text: &str, start: usize, fault: &serde_json::Error) -> String {
+    // the document's bracket stands `lines` down and `columns` along
+    let before = &text[..start];
+    let lines = before.matches('\n').count();
+    let columns = before.len() - before.rfind('\n').map_or(0, |at| at + 1);
+
+    let line = lines + fault.line();
+    let column = if fault.line() == 1 { columns + fault.column() } else { fault.column() };
+    let message = fault.to_string();
+    match message.strip_suffix(&format!(" at line {} column {}", fault.line(), fault.column())) {
+        Some(code) => format!("{code} at line {line} column {column}"),
+        None => message,
+    }
 }
 
 // `candidate`, the turns it offers and `instruction` are pure; backends
@@ -294,6 +321,16 @@ mod tests {
         Candidate {
             text: text.to_owned(),
             reading,
+        }
+    }
+
+    // the reply read as written, and the parser's word on it
+    fn unparsed(text: &str) -> String {
+        let Candidate { text: as_written, reading } = candidate(text);
+        assert_eq!(as_written, text);
+        match reading {
+            Reading::Unparsed { fault } => fault,
+            read => panic!("{read:?}"),
         }
     }
 
@@ -360,13 +397,51 @@ mod tests {
     // its line and column rather than a well-formed member's shape
     #[test]
     fn malformed_document() {
-        let truncated = "{\n  \"requirements\": [{\"scenarios\":[],\"subject\":\"a.run\"}],\n";
-        let Candidate { text, reading } = candidate(truncated);
-        assert_eq!(text, truncated);
-        let Reading::Unparsed { fault } = reading else {
-            panic!("{reading:?}");
-        };
-        assert!(fault.contains("line 3"), "{fault}");
+        let fault = unparsed("{\n  \"requirements\": [{\"scenarios\":[],\"subject\":\"a.run\"}],\n");
+        assert_eq!(fault, "EOF while parsing a value at line 3 column 0");
+    }
+
+    // a document cut short inside a fence is malformed wherever it stands,
+    // not a fence around its members; the fault is placed in the reply, past
+    // the fence line, where the model reading its own reply finds it
+    #[test]
+    fn fenced_malformed_document() {
+        let fault = unparsed(
+            "```json\n{\n  \"requirements\": [{\"scenarios\":[],\"subject\":\"a.run\"}],\n```",
+        );
+        assert_eq!(fault, "key must be a string at line 4 column 1");
+    }
+
+    // a document broken mid-way inside a fence: its members are not read
+    // either, and a fault on the document's first line keeps its column
+    #[test]
+    fn fenced_broken_document() {
+        let fault = unparsed(
+            "```json\n{\"verdict\": \"pass\", // reason\n  \"findings\": [{\"claim\":\"a\"}]}\n```",
+        );
+        assert_eq!(fault, "key must be a string at line 2 column 21");
+    }
+
+    // a document cut short after prose on the same line: the fault's column
+    // is placed in the reply, so it is the reply's end
+    #[test]
+    fn malformed_document_after_preamble() {
+        let truncated = "Here is my answer: {\"findings\": [], \"verdict\": \"pass\"";
+        assert_eq!(
+            unparsed(truncated),
+            format!("EOF while parsing an object at line 1 column {}", truncated.len())
+        );
+    }
+
+    // a well-formed value ahead of a document cut short does not make the
+    // reply wrapped: the document is still the answer's fault
+    #[test]
+    fn malformed_document_after_value() {
+        let document = "[{\"claim\":\"a\"}, {\"claim\":\"b\", ";
+        assert_eq!(
+            unparsed(&format!("{{\"verdict\":\"pass\"}}\nIn detail:\n{document}")),
+            format!("EOF while parsing a value at line 3 column {}", document.len())
+        );
     }
 
     // a bracketed aside opens the reply but is not a document: nothing a
@@ -387,21 +462,34 @@ mod tests {
         );
     }
 
+    // brackets amid prose that no member follows are asides wherever they
+    // stand — in a sentence, doubled, or in code of another language — and
+    // the value after them is read
+    #[test]
+    fn asides_amid_prose() {
+        assert_eq!(
+            candidate("Done [thinking] with {care}; see [[note]] and {{name}}.\n{\"verdict\":\"pass\"}"),
+            read(r#"{"verdict":"pass"}"#, Reading::Value)
+        );
+        assert_eq!(
+            candidate("```python\nxs = [x for x in xs]\n```\n{\"verdict\":\"pass\"}"),
+            read(r#"{"verdict":"pass"}"#, Reading::Value)
+        );
+    }
+
     // a document broken mid-way, not cut short, is still malformed: a member
     // that parses on its own is not the answer
     #[test]
     fn broken_document() {
-        let broken = "{\"verdict\": \"pass\", // reason\n  \"findings\": [{\"claim\":\"a\"}]}";
-        let Candidate { text, reading } = candidate(broken);
-        assert_eq!(text, broken);
-        assert!(matches!(reading, Reading::Unparsed { .. }), "{reading:?}");
+        let fault =
+            unparsed("{\"verdict\": \"pass\", // reason\n  \"findings\": [{\"claim\":\"a\"}]}");
+        assert_eq!(fault, "key must be a string at line 1 column 21");
     }
 
     #[test]
     fn no_json() {
-        let Candidate { text, reading } = candidate("not json");
-        assert_eq!(text, "not json");
-        assert!(matches!(reading, Reading::Unparsed { .. }), "{reading:?}");
+        let fault = unparsed("not json");
+        assert!(fault.contains("line 1"), "{fault}");
     }
 
     // the nudge names the parser's fault; a reply read as a value, or as
@@ -442,6 +530,46 @@ mod tests {
         let schema = verdict_schema().instruction();
         assert!(schema.contains("JSON Schema"), "unexpected: {schema}");
         assert!(schema.contains("object"), "unexpected: {schema}");
+    }
+
+    #[test]
+    fn tmp_probe() {
+        let cases: &[&str] = &[
+            "{",
+            "[",
+            "{\"",
+            "[\"",
+            "{\"a\": 1,}",
+            "{'a': 1}",
+            "Answer: {'a': 1}",
+            "{\"a\": 1}{\"b\": 2}",
+            "— {\"a\": 1,",
+            "```json\r\n{\r\n  \"a\": 1,\r\n```",
+            "[{\"a\": 1,",
+            "[[1, 2",
+            "[[1, 2], [3",
+            "[1 point] then {\"verdict\":\"pass\"}",
+            "[true story] then {\"verdict\":\"pass\"}",
+            "See [1] and [2].\n{\"verdict\":\"pass\"}",
+            "```python\nd = {\"a\": x}\n```\n{\"verdict\":\"pass\"}",
+            "```json\n{\"verdict\":\"pass\"}\n```\nNote the {\"verdict\"} key.",
+            "```json\n\"pass\"\n```",
+            "```json\n\"unterminated\n```",
+            "[[wikilink]] and {{ template }} then {\"verdict\":\"pass\"}",
+            "{\"note\": \"a { b\", // c\n}",
+            "{\"a\": {\"b\": {\"c\": 1,",
+            "```json\n{\"a\": 1}\n```\n```json\n{\"b\": [1,\n```",
+            "\n\n  {\n\"a\": 1,\n",
+            "Done.\n\n```\n{\"verdict\":\"pass\"}\n```\n\nThanks!",
+            "{\"verdict\":\"pass\"}\nHope this helps!",
+            "x = [i for i in xs]; y = {k: v}\n{\"verdict\":\"pass\"}",
+            "{\"a\": [1, 2, 3",
+            "The result {\"a\": 1} and {\"b\": 2} and {\"c\": [",
+        ];
+        for case in cases {
+            let Candidate { text, reading } = candidate(case);
+            eprintln!("CASE {case:?}\n  -> {reading:?}\n  -> {text:?}");
+        }
     }
 
     #[test]
