@@ -2,15 +2,14 @@
 //! model's final text. Nothing here validates: acceptance is the guest's
 //! `check`, or nothing at all when the request declares none.
 
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::host::generated::omnia::model::completion::{self, Format};
+use crate::host::generated::omnia::model::completion::{Format, Usage};
 
 /// A backend's result: the answer text, optional usage, and transcript.
 ///
 /// Host-only — the guest sees a `reply` carrying `answer` and `usage`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct Answer {
     /// The text the guest's check accepted, or the model's final text.
     pub answer: String,
@@ -36,39 +35,17 @@ impl From<&str> for Answer {
     }
 }
 
-/// Token accounting for one completion. Mirrors the WIT `usage` record; the
-/// serde derive lets backends record it alongside the transcript.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Usage {
-    /// Prompt tokens consumed.
-    pub input_tokens: u32,
-    /// Completion tokens produced.
-    pub output_tokens: u32,
-    /// Reasoning tokens, for models that bill them separately.
-    pub reasoning_tokens: Option<u32>,
-}
-
-impl From<Usage> for completion::Usage {
-    fn from(usage: Usage) -> Self {
-        Self {
-            input_tokens: usage.input_tokens,
-            output_tokens: usage.output_tokens,
-            reasoning_tokens: usage.reasoning_tokens,
-        }
-    }
-}
-
-/// The tool-call transcript a backend may capture for diagnostics or future
-/// replay. Host-only; it never crosses the WIT boundary. Empty when the
-/// backend captured no tool turns.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// The tool-call transcript a backend may capture for diagnostics. Host-only;
+/// it never crosses the WIT boundary. Empty when the backend captured no
+/// tool turns.
+#[derive(Clone, Debug, Default)]
 pub struct Transcript {
     /// Ordered tool turns the backend drove to reach the answer.
     pub turns: Vec<ToolTurn>,
 }
 
 /// One recorded tool interaction within a completion's transcript.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct ToolTurn {
     /// The tool the model called.
     pub tool: String,
@@ -119,7 +96,7 @@ impl Format {
     pub fn candidate(&self, text: &str) -> String {
         match self {
             Self::Text => text.to_owned(),
-            Self::Json | Self::Schema(_) => maybe_json(text)
+            Self::Json | Self::Schema(_) => extract_json(text)
                 .iter()
                 .map(ToString::to_string)
                 .max_by_key(String::len)
@@ -133,7 +110,7 @@ impl Format {
 // block that does not parse — prose in brackets, code, a document cut short
 // — is passed over entire, never read for the values inside it, so a
 // fragment of a broken answer is never the answer.
-fn maybe_json(text: &str) -> Vec<Value> {
+fn extract_json(text: &str) -> Vec<Value> {
     // the whole text is one value
     let text = text.trim();
     if let Ok(value) = serde_json::from_str(text) {
@@ -184,6 +161,7 @@ fn block_len(text: &str) -> usize {
             _ => {}
         }
     }
+    
     text.len()
 }
 

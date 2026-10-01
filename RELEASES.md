@@ -56,6 +56,14 @@ Unreleased
   parse whole, where it read the values inside it: a document cut short is
   handed back as written, so the guest's check sees the reply rather than
   a well-formed member of it.
+- `omnia_wasi_model::Usage` is the WIT `usage` record itself, as `Reply`
+  and `Request` already were, rather than a mirror of it; the mirror's
+  `From` conversion goes with it. The host-only types drop the derives
+  nothing exercised: `Answer`, `Transcript`, `ToolTurn`, `Sections` and
+  `Example` lose `PartialEq`/`Eq`, `Transcript`, `ToolTurn` and `DirEntry`
+  lose `Serialize`/`Deserialize` (`DirEntry` keeps `Serialize`, which
+  backends use to put a listing to the model), and `Example` loses
+  `Default`.
 - A run with no collector exports nothing. A signal's OTLP exporter attaches
   only when an endpoint is configured for it — OpenTelemetry's
   `OTEL_EXPORTER_OTLP_ENDPOINT` or the signal's own
