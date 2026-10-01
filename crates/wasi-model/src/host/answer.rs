@@ -110,10 +110,9 @@ impl Format {
         }
     }
 
-    /// The candidate answer in a model's final text and how it was read:
-    /// the text itself for `text`; for `json` and `schema`, the JSON value
-    /// the text holds, as [`Reading`] describes. A courtesy for providers
-    /// that wrap JSON in prose, never a gate — the guest's check decides.
+    /// The candidate answer in a model's final text, and how it was read. A
+    /// courtesy for providers that wrap JSON in prose, never a gate — the
+    /// guest's check decides.
     #[must_use]
     pub fn candidate(&self, text: &str) -> Candidate {
         match self {
