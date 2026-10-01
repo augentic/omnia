@@ -106,13 +106,9 @@ impl Format {
 }
 
 // Every JSON value in `text`: the whole text alone when it parses, else each
-// "```" fence body and each bracketed block in the prose, read left to right
-// and each parsed whole. Whichever opens first owns what it spans — a "```"
-// inside a block's string is the block's, not a fence; a `{` inside a fence
-// is the fence's, not a block. A span that does not parse — prose in
-// brackets, code in a fence, a document cut short — is passed over entire,
-// never read for the values inside it, so a fragment of a broken answer is
-// never the answer.
+// span that parses whole. A span that does not — prose in brackets, code in
+// a fence, a document cut short — is passed over entire, never read for the
+// values inside it, so a fragment of a broken answer is never the answer.
 fn extract_json(text: &str) -> Vec<Value> {
     // the whole text is one value
     let text = text.trim();
@@ -120,60 +116,65 @@ fn extract_json(text: &str) -> Vec<Value> {
         return vec![value];
     }
 
-    // left to right, whichever opens first is read whole
-    let mut values = Vec::new();
-    let mut rest = text;
-    while let Some(start) = opener(rest) {
-        let (body, end) =
-            if rest[start..].starts_with("```") { fence(rest, start) } else { block(rest, start) };
-        if let Ok(value) = serde_json::from_str(body) {
-            values.push(value);
-        }
-        rest = &rest[end..];
+    Spans { rest: text }.filter_map(|span| serde_json::from_str(span).ok()).collect()
+}
+
+// Fence bodies and bracketed blocks, left to right; whichever opens first
+// owns what it spans.
+struct Spans<'a> {
+    rest: &'a str,
+}
+
+impl<'a> Spans<'a> {
+    // The body of the fence at the head of `rest`, minus its language-tag
+    // line; `rest` moves past the closing "```", or to the end when none
+    // closes it.
+    fn fence(&mut self) -> &'a str {
+        let inner = &self.rest[3..];
+        let (body, rest) = inner.split_once("```").unwrap_or((inner, ""));
+        self.rest = rest;
+        body.split_once('\n').map_or(body, |(_tag, body)| body).trim()
     }
 
-    values
-}
-
-fn opener(text: &str) -> Option<usize> {
-    [text.find("```"), text.find(['{', '['])].into_iter().flatten().min()
-}
-
-// The body of the fence opening at `start`, minus its language-tag line, and
-// the offset past its closing "```" — or the end of `text` when none closes it.
-fn fence(text: &str, start: usize) -> (&str, usize) {
-    let inner = &text[start + 3..];
-    let (body, end) =
-        inner.find("```").map_or((inner, text.len()), |at| (&inner[..at], start + 3 + at + 3));
-    (body.split_once('\n').map_or(body, |(_tag, body)| body).trim(), end)
-}
-
-// The bracketed block opening at `start` and the offset past it: through the
-// close that brings its depth back to zero, brackets inside strings not
-// counted. One that never closes is abandoned at the next "```", which is a
-// fence after all, or at the end of `text`.
-fn block(text: &str, start: usize) -> (&str, usize) {
-    let (mut depth, mut quoted, mut escaped) = (0_usize, false, false);
-    for (at, c) in text[start..].char_indices() {
-        match c {
-            _ if escaped => escaped = false,
-            '\\' if quoted => escaped = true,
-            '"' => quoted = !quoted,
-            _ if quoted => {}
-            '{' | '[' => depth += 1,
-            '}' | ']' => {
-                depth -= 1;
-                if depth == 0 {
-                    let end = start + at + c.len_utf8();
-                    return (&text[start..end], end);
+    // The bracketed block at the head of `rest`: through the close that
+    // brings its depth back to zero, brackets inside strings not counted.
+    fn block(&mut self) -> &'a str {
+        let (mut depth, mut quoted, mut escaped) = (0_usize, false, false);
+        let closed = self.rest.char_indices().find_map(|(at, c)| {
+            match c {
+                _ if escaped => escaped = false,
+                '\\' if quoted => escaped = true,
+                '"' => quoted = !quoted,
+                _ if quoted => {}
+                '{' | '[' => depth += 1,
+                '}' | ']' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(at + c.len_utf8());
+                    }
                 }
+                _ => {}
             }
-            _ => {}
-        }
-    }
+            None
+        });
 
-    let end = text[start..].find("```").map_or(text.len(), |at| start + at);
-    (&text[start..end], end)
+        // one that never closes is abandoned at the next "```", which is a fence after all
+        let end = closed.unwrap_or_else(|| self.rest.find("```").unwrap_or(self.rest.len()));
+        let (body, rest) = self.rest.split_at(end);
+        self.rest = rest;
+        body
+    }
+}
+
+impl<'a> Iterator for Spans<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<&'a str> {
+        let start =
+            [self.rest.find("```"), self.rest.find(['{', '['])].into_iter().flatten().min()?;
+        self.rest = &self.rest[start..];
+        Some(if self.rest.starts_with("```") { self.fence() } else { self.block() })
+    }
 }
 
 // `candidate` and `instruction` are pure; backends drive them directly
