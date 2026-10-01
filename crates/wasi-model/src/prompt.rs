@@ -9,7 +9,7 @@
 use crate::completion::{Message, Role};
 
 /// Structured prompt template assembled into `system` / `messages` channels.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub struct Sections {
     /// Persona / actor instruction; joins the system channel.
     pub role: Option<String>,
@@ -26,7 +26,7 @@ pub struct Sections {
 }
 
 /// One few-shot input/output pair.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct Example {
     /// Example user input.
     pub input: String,

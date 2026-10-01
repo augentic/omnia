@@ -70,7 +70,7 @@ where
                         || {
                             Ok(Reply {
                                 answer: answer.answer,
-                                usage: answer.usage.map(Into::into),
+                                usage: answer.usage,
                             })
                         },
                         Err,

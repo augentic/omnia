@@ -50,6 +50,23 @@ Unreleased
 
 ### Changed
 
+- `Format::candidate` reads the largest JSON value a reply wraps, where it
+  read the last — a citation or a repeated fragment after the answer is no
+  longer taken for it — and passes over a bracketed block that does not
+  parse whole, where it read the values inside it: a document cut short is
+  handed back as written, so the guest's check sees the reply rather than
+  a well-formed member of it. A fence body is one such block, so a literal
+  inside code is never taken for the answer beside it; a fence is delimited
+  only by a "```" that begins a line, so one inside a string or a sentence
+  is content.
+- `omnia_wasi_model::Usage` is the WIT `usage` record itself, as `Reply`
+  and `Request` already were, rather than a mirror of it; the mirror's
+  `From` conversion goes with it. The host-only types drop the derives
+  nothing exercised: `Answer`, `Transcript`, `ToolTurn`, `Sections` and
+  `Example` lose `PartialEq`/`Eq`, `Transcript`, `ToolTurn` and `DirEntry`
+  lose `Serialize`/`Deserialize` (`DirEntry` keeps `Serialize`, which
+  backends use to put a listing to the model), and `Example` loses
+  `Default`.
 - A run with no collector exports nothing. A signal's OTLP exporter attaches
   only when an endpoint is configured for it — OpenTelemetry's
   `OTEL_EXPORTER_OTLP_ENDPOINT` or the signal's own

@@ -50,7 +50,7 @@ The host enforces per-session limits (`Limits`, backend-configurable via `WasiMo
 | `json` | Toward a JSON object. |
 | `schema(schema)` | Toward the given JSON Schema. `schema` carries a `name` (passed to the provider, e.g. `verdict`) and the schema document as a JSON string, which must parse as JSON (`invalid-request` otherwise). |
 
-`format` is a hint: backends pass it to the provider as `response_format` where the provider constrains decoding, or as instruction prose where it does not, and extract the candidate from the model's final text (the whole text when it parses, else the last fenced or brace-delimited JSON value). Nothing validates the answer against it. Acceptance is the guest's, through `check`.
+`format` is a hint: backends pass it to the provider as `response_format` where the provider constrains decoding, or as instruction prose where it does not, and read the candidate from the model's final text: the whole text when it parses as JSON, else the largest fenced or bracketed JSON value that parses whole, else the text as written. Nothing validates the answer against it. Acceptance is the guest's, through `check`.
 
 ### `check`
 

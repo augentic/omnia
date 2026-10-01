@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 
 pub use omnia_core::FutureResult;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 /// Host-side capabilities for one completion, lent to backends that need them.
 pub trait ToolHost: Debug + Send + Sync {
@@ -39,8 +39,9 @@ pub trait ToolHost: Debug + Send + Sync {
 /// A function tool's model-visible output or failure text.
 pub type ToolOutcome = Result<String, String>;
 
-/// One bounded directory entry returned by `ToolHost::list`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// One bounded directory entry returned by `ToolHost::list`; backends
+/// serialise the listing for the model.
+#[derive(Clone, Debug, Serialize)]
 pub struct DirEntry {
     /// Entry name (never an OS path).
     pub name: String,

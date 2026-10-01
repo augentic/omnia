@@ -2,15 +2,14 @@
 //! model's final text. Nothing here validates: acceptance is the guest's
 //! `check`, or nothing at all when the request declares none.
 
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::host::generated::omnia::model::completion::{Format, Usage as ReplyUsage};
+use crate::host::generated::omnia::model::completion::{Format, Usage};
 
 /// A backend's result: the answer text, optional usage, and transcript.
 ///
 /// Host-only — the guest sees a `reply` carrying `answer` and `usage`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct Answer {
     /// The text the guest's check accepted, or the model's final text.
     pub answer: String,
@@ -18,48 +17,6 @@ pub struct Answer {
     pub usage: Option<Usage>,
     /// Optional tool-call transcript the backend captured.
     pub transcript: Option<Transcript>,
-}
-
-/// Token accounting for one completion. Mirrors the WIT `usage` record; the
-/// serde derive lets backends record it alongside the transcript.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Usage {
-    /// Prompt tokens consumed.
-    pub input_tokens: u32,
-    /// Completion tokens produced.
-    pub output_tokens: u32,
-    /// Reasoning tokens, for models that bill them separately.
-    pub reasoning_tokens: Option<u32>,
-}
-
-/// The tool-call transcript a backend may capture for diagnostics or future
-/// replay. Host-only; it never crosses the WIT boundary. Empty when the
-/// backend captured no tool turns.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Transcript {
-    /// Ordered tool turns the backend drove to reach the answer.
-    pub turns: Vec<ToolTurn>,
-}
-
-/// One recorded tool interaction within a completion's transcript.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ToolTurn {
-    /// The tool the model called.
-    pub tool: String,
-    /// The arguments the model supplied.
-    pub args: serde_json::Value,
-    /// The result the host returned.
-    pub result: serde_json::Value,
-}
-
-impl From<Usage> for ReplyUsage {
-    fn from(usage: Usage) -> Self {
-        Self {
-            input_tokens: usage.input_tokens,
-            output_tokens: usage.output_tokens,
-            reasoning_tokens: usage.reasoning_tokens,
-        }
-    }
 }
 
 impl From<String> for Answer {
@@ -76,6 +33,26 @@ impl From<&str> for Answer {
     fn from(answer: &str) -> Self {
         answer.to_owned().into()
     }
+}
+
+/// The tool-call transcript a backend may capture for diagnostics. Host-only;
+/// it never crosses the WIT boundary. Empty when the backend captured no
+/// tool turns.
+#[derive(Clone, Debug, Default)]
+pub struct Transcript {
+    /// Ordered tool turns the backend drove to reach the answer.
+    pub turns: Vec<ToolTurn>,
+}
+
+/// One recorded tool interaction within a completion's transcript.
+#[derive(Clone, Debug)]
+pub struct ToolTurn {
+    /// The tool the model called.
+    pub tool: String,
+    /// The arguments the model supplied.
+    pub args: serde_json::Value,
+    /// The result the host returned.
+    pub result: serde_json::Value,
 }
 
 impl std::fmt::Display for Format {
@@ -96,8 +73,8 @@ impl Format {
         match self {
             Self::Schema(spec) => format!(
                 "When you are done, reply with only your final answer as a single JSON value \
-                 conforming to this JSON Schema, and nothing else:\n{}",
-                spec.schema
+                 conforming to this JSON Schema, and nothing else:\n{schema}",
+                schema = spec.schema
             ),
             Self::Json => "When you are done, reply with only your final answer as a single JSON \
                            object and nothing else."
@@ -112,52 +89,101 @@ impl Format {
 
     /// The candidate answer in a model's final text: the text itself for
     /// `text`; for `json` and `schema`, the whole text when it parses as
-    /// JSON, otherwise the last fenced or brace-delimited JSON value, and
-    /// the raw text when there is none. A courtesy for providers that wrap
-    /// JSON in prose, never a gate — the guest's check decides.
+    /// JSON, otherwise the largest fenced or bracketed JSON value, and the
+    /// raw text when there is none. A courtesy for providers that wrap JSON
+    /// in prose, never a gate — the guest's check decides.
     #[must_use]
     pub fn candidate(&self, text: &str) -> String {
         match self {
             Self::Text => text.to_owned(),
-            Self::Json | Self::Schema(_) => {
-                maybe_json(text).last().map_or_else(|| text.to_owned(), ToString::to_string)
-            }
+            Self::Json | Self::Schema(_) => extract_json(text)
+                .iter()
+                .map(ToString::to_string)
+                .max_by_key(String::len)
+                .unwrap_or_else(|| text.to_owned()),
         }
     }
 }
 
-// Every JSON value in `text`: the whole text alone when it parses, else the
-// bodies of "```" fences and every `{` / `[` slice, in order.
-fn maybe_json(text: &str) -> Vec<Value> {
-    // try to parse the whole text as a single JSON value
+// Every JSON value in `text`: the whole text alone when it parses, else each
+// span that parses whole. A span that does not — prose in brackets, code in
+// a fence, a document cut short — is passed over entire, never read for the
+// values inside it, so a fragment of a broken answer is never the answer.
+fn extract_json(text: &str) -> Vec<Value> {
+    // the whole text is one value
     let text = text.trim();
     if let Ok(value) = serde_json::from_str(text) {
         return vec![value];
     }
 
-    // extract values from "```" fences: fence bodies are the odd-indexed
-    // chunks between the delimiters, minus their language-tag line
-    let mut values = Vec::new();
-    for body in text.split("```").skip(1).step_by(2) {
-        let body = body.split_once('\n').map_or(body, |(_tag, body)| body);
-        if let Ok(value) = serde_json::from_str(body.trim()) {
-            values.push(value);
+    Spans { rest: text }.filter_map(|span| serde_json::from_str(span).ok()).collect()
+}
+
+// Fence bodies and bracketed blocks, left to right; whichever opens first
+// owns what it spans. A fence delimiter is a "```" that begins a line, as
+// Markdown places it: one inside a line — in prose, or in a JSON string,
+// which cannot hold a raw newline — delimits nothing.
+struct Spans<'a> {
+    rest: &'a str,
+}
+
+impl<'a> Spans<'a> {
+    // The offset of the next fence delimiter in `rest`.
+    fn fence_at(&self) -> Option<usize> {
+        if self.rest.starts_with("```") {
+            return Some(0);
         }
+        self.rest.find("\n```").map(|at| at + 1)
     }
 
-    // extract values from `{` or `[` slices
-    let mut rest = text;
-    while let Some(offset) = rest.find(['{', '[']) {
-        let mut stream = serde_json::Deserializer::from_str(&rest[offset..]).into_iter::<Value>();
-        match stream.next() {
-            Some(Ok(value)) => {
-                rest = &rest[offset + stream.byte_offset()..];
-                values.push(value);
-            }
-            Some(Err(_)) | None => rest = &rest[offset + 1..],
-        }
+    // The body of the fence at the head of `rest`, minus its language-tag
+    // line; `rest` moves past the closing delimiter, or to the end when none
+    // closes it.
+    fn fence(&mut self) -> &'a str {
+        let inner = &self.rest[3..];
+        let (body, rest) = inner.split_once("\n```").unwrap_or((inner, ""));
+        self.rest = rest;
+        body.split_once('\n').map_or(body, |(_tag, body)| body).trim()
     }
-    values
+
+    // The bracketed block at the head of `rest`: through the close that
+    // brings its depth back to zero, brackets inside strings not counted.
+    fn block(&mut self) -> &'a str {
+        let (mut depth, mut quoted, mut escaped) = (0_usize, false, false);
+        let closed = self.rest.char_indices().find_map(|(at, c)| {
+            match c {
+                _ if escaped => escaped = false,
+                '\\' if quoted => escaped = true,
+                '"' => quoted = !quoted,
+                _ if quoted => {}
+                '{' | '[' => depth += 1,
+                '}' | ']' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(at + c.len_utf8());
+                    }
+                }
+                _ => {}
+            }
+            None
+        });
+
+        // one that never closes is abandoned at the next fence delimiter
+        let end = closed.or_else(|| self.fence_at()).unwrap_or(self.rest.len());
+        let (body, rest) = self.rest.split_at(end);
+        self.rest = rest;
+        body
+    }
+}
+
+impl<'a> Iterator for Spans<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<&'a str> {
+        let start = [self.fence_at(), self.rest.find(['{', '['])].into_iter().flatten().min()?;
+        self.rest = &self.rest[start..];
+        Some(if self.rest.starts_with("```") { self.fence() } else { self.block() })
+    }
 }
 
 // `candidate` and `instruction` are pure; backends drive them directly
@@ -166,11 +192,17 @@ mod tests {
     use super::Format;
     use crate::host::generated::omnia::model::completion::Schema;
 
+    const PASS: &str = r#"{"verdict":"pass"}"#;
+
     fn verdict_schema() -> Format {
         Format::Schema(Schema {
             name: "verdict".to_owned(),
             schema: r#"{"type":"object"}"#.to_owned(),
         })
+    }
+
+    fn candidate(text: &str) -> String {
+        verdict_schema().candidate(text)
     }
 
     #[test]
@@ -180,30 +212,103 @@ mod tests {
 
     #[test]
     fn json_document() {
-        assert_eq!(Format::Json.candidate(r#"{"verdict":"pass"}"#), r#"{"verdict":"pass"}"#);
+        assert_eq!(Format::Json.candidate(PASS), PASS);
     }
 
     #[test]
     fn fenced_json() {
-        let fenced = "```json\n{\"verdict\":\"pass\"}\n```";
-        assert_eq!(verdict_schema().candidate(fenced), r#"{"verdict":"pass"}"#);
+        assert_eq!(candidate("```json\n{\"verdict\":\"pass\"}\n```"), PASS);
+    }
+
+    // a scalar answer has no bracket to open it, so the fence is its only way in
+    #[test]
+    fn fenced_scalar() {
+        assert_eq!(candidate("```json\n\"pass\"\n```"), r#""pass""#);
     }
 
     #[test]
     fn json_with_preamble() {
-        let text = "Done.\n{\"verdict\":\"pass\"}\n";
-        assert_eq!(Format::Json.candidate(text), r#"{"verdict":"pass"}"#);
+        assert_eq!(candidate("Done.\n{\"verdict\":\"pass\"}\n"), PASS);
     }
 
+    // the largest value is the answer: a worked example before it, a
+    // fragment of it repeated after it, and a citation beside it are smaller
     #[test]
-    fn last_value_wins() {
-        let text = "findings: []\n{\"outcome\":\"completed\"}";
-        assert_eq!(verdict_schema().candidate(text), r#"{"outcome":"completed"}"#);
+    fn largest_value_wins() {
+        assert_eq!(
+            candidate(
+                "For example {\"verdict\":\"fail\"} — and mine:\n{\"findings\":[],\"verdict\":\"pass\"}"
+            ),
+            r#"{"findings":[],"verdict":"pass"}"#
+        );
+        let document = r#"{"requirements":[{"scenarios":[],"subject":"a.run"}]}"#;
+        assert_eq!(
+            candidate(&format!("{document}\n{{\"scenarios\":[],\"subject\":\"a.run\"}}")),
+            document
+        );
+        assert_eq!(candidate("{\"verdict\":\"pass\"}\nSee [1] and [2]."), PASS);
+    }
+
+    // a bracketed block that does not parse whole is passed over, not read
+    // for the values inside it — prose in brackets, code in a fence, a key
+    // named with no `:` — and the value beside it is read. A fence body is
+    // one block: a literal inside code is never mined, even one that parses
+    // and outweighs the answer
+    #[test]
+    fn blocks_that_are_not_json() {
+        for text in [
+            "[thinking] weighing the claims.\n{\"verdict\":\"pass\"}",
+            "{thinking} done.\n```json\n{\"verdict\":\"pass\"}\n```",
+            "Done [thinking] with {care}; see [[note]] and {{name}}.\n{\"verdict\":\"pass\"}",
+            "Scored [1 point] as a [true story] — [3 items, mostly]:\n{\"verdict\":\"pass\"}",
+            "```python\nxs = [x for x in xs]\n```\n{\"verdict\":\"pass\"}",
+            "```js\nconst reply = { \"verdict\": verdict };\n```\n{\"verdict\":\"pass\"}",
+            "```python\nconfig = {\"model\":\"gpt-4\",\"temperature\":0,\"stream\":false}\n```\n{\"verdict\":\"pass\"}",
+            "{\"verdict\":\"pass\"}\nThe {\"verdict\"} key is required.",
+            "The object opens with a { like so:\n```json\n{\"verdict\":\"pass\"}\n```",
+        ] {
+            assert_eq!(candidate(text), PASS, "{text}");
+        }
+    }
+
+    // a bracket or an escaped quote inside a string does not end the block
+    #[test]
+    fn brackets_in_strings() {
+        let answer = r#"{"finding":"an unmatched } and \" quote","verdict":"pass"}"#;
+        assert_eq!(candidate(&format!("Note:\n{answer}")), answer);
+    }
+
+    // a "```" inside a line is content, not a delimiter: in a block's string,
+    // in a fenced answer's string — where it would close the fence early —
+    // and in prose, where an opener would own the rest of the text
+    #[test]
+    fn fence_delimiter_mid_line() {
+        let answer = r#"{"finding":"wrap code in ``` fences","verdict":"pass"}"#;
+        assert_eq!(candidate(&format!("Note:\n{answer}")), answer);
+        assert_eq!(candidate(&format!("```json\n{answer}\n```")), answer);
+        assert_eq!(
+            candidate("Open a fence with ``` on its own line.\n{\"verdict\":\"pass\"}"),
+            PASS
+        );
+    }
+
+    // a document cut short, or broken mid-way, is handed back whole — bare,
+    // fenced, or after prose — never a well-formed member of it
+    #[test]
+    fn malformed_document() {
+        for text in [
+            "{\n  \"requirements\": [{\"scenarios\":[],\"subject\":\"a.run\"}],\n",
+            "```json\n{\n  \"requirements\": [{\"scenarios\":[],\"subject\":\"a.run\"}],\n```",
+            "Here is my answer: {\"findings\": [], \"verdict\": \"pass\"",
+            "{\"verdict\": \"pass\", // reason\n  \"findings\": [{\"claim\":\"a\"}]}",
+        ] {
+            assert_eq!(candidate(text), text);
+        }
     }
 
     #[test]
     fn no_json() {
-        assert_eq!(Format::Json.candidate("not json"), "not json");
+        assert_eq!(candidate("not json"), "not json");
     }
 
     #[test]

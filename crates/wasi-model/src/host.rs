@@ -41,12 +41,12 @@ pub use omnia_core::FutureResult;
 use omnia_core::{HasMounts, Host, Server, StoreView};
 use wasmtime::component::{HasData, Linker};
 
-pub use self::answer::{Answer, ToolTurn, Transcript, Usage};
+pub use self::answer::{Answer, ToolTurn, Transcript};
 pub use self::default_impl::ModelDefault;
 use self::generated::omnia::model::completion;
 pub use self::generated::omnia::model::completion::{
     Effort, Error, Format, Function, Generation, Grants, Mcp, Message, Reply, Request, Role,
-    Schema, Tool, WorkspaceGrant,
+    Schema, Tool, Usage, WorkspaceGrant,
 };
 pub use self::session::Limits;
 pub use self::tool_host::*;
