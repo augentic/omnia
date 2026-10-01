@@ -50,7 +50,7 @@ The host enforces per-session limits (`Limits`, backend-configurable via `WasiMo
 | `json` | Toward a JSON object. |
 | `schema(schema)` | Toward the given JSON Schema. `schema` carries a `name` (passed to the provider, e.g. `verdict`) and the schema document as a JSON string, which must parse as JSON (`invalid-request` otherwise). |
 
-`format` is a hint: backends pass it to the provider as `response_format` where the provider constrains decoding, or as instruction prose where it does not, and extract the candidate from the model's final text (the whole text when it parses, else the last fenced or brace-delimited JSON value). Nothing validates the answer against it. Acceptance is the guest's, through `check`.
+`format` is a hint: backends pass it to the provider as `response_format` where the provider constrains decoding, or as instruction prose where it does not, and read the candidate from the model's final text: the one JSON value it holds (the whole text when it parses, else the value its prose wraps), or the largest of several; the text as written when it holds none, or opens a JSON value that does not parse, so the guest's finding names the fault. Nothing validates the answer against it. Acceptance is the guest's, through `check`.
 
 ### `check`
 
@@ -59,7 +59,7 @@ When `check` is set, the backend does not finish on the model's final text. It o
 | Result | Effect |
 | ------ | ------ |
 | `ok(_)` | The candidate is the reply; the completion ends. |
-| `err(text)` | The backend appends `text` verbatim as the next user turn (after the rejected candidate as an assistant turn) and goes round again. |
+| `err(text)` | The backend puts `text` to the model as the next user turn (after the rejected candidate as an assistant turn) — led by one sentence naming the count when the reply held several JSON values and the largest was the one checked — and goes round again. |
 
 The check rides the same streams as function tools but outside their budget: it never counts against `max-tool-calls` and needs no declaration in `tools`. The per-call timeout does apply, and the per-result size cap bounds the correction text (`tool-failed` when exceeded). A backend that runs out of rounds on a rejection fails the completion with `budget-exhausted` whose detail is the last correction. Guests using `omnia-sdk` reach this through `Request::check` and a `complete_with` handler matching `call.name == "check"`, or through `model::Question<T>`, which derives the steering schema from `T`, deserializes each candidate, runs the guest's closure, and returns the accepted `T`.
 

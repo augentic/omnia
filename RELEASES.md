@@ -50,6 +50,23 @@ Unreleased
 
 ### Changed
 
+- `Format::candidate` returns a `Candidate { text, reading }` instead of
+  the text alone, and reads a reply differently. `Reading` names how `text`
+  was read: `Text` (the `text` format reads nothing); `Value` (the one JSON
+  value the reply holds — the whole reply when it parses, else the value
+  its prose wraps); `Largest { of }` (the largest of `of` distinct JSON
+  values — fence bodies and `{` / `[` slices, deduplicated by value — where
+  the last one was taken before); `Unparsed { fault }` (the reply as
+  written, because it holds no JSON value or opens one that does not parse
+  — a malformed document is the answer's fault, not a wrapper around its
+  members, so the guest's check names the syntax position rather than a
+  nested member's shape — with the parser's word on it). The turns a
+  backend puts to the model about its reply's shape live beside
+  `Format::instruction`: `Candidate::nudge` asks an `Unparsed` reply for
+  one JSON value, naming the fault, and `Candidate::correction` leads the
+  guest's correction with one sentence naming the count when the reading is
+  `Largest`, so every backend says the same thing. `Candidate` and
+  `Reading` are exported from `omnia_wasi_model`.
 - A run with no collector exports nothing. A signal's OTLP exporter attaches
   only when an endpoint is configured for it — OpenTelemetry's
   `OTEL_EXPORTER_OTLP_ENDPOINT` or the signal's own

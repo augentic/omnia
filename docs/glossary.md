@@ -114,7 +114,7 @@ Work done inside Omnia host crates (validation, dispatch, workspace resolution) 
 
 ### Guest check
 
-The `omnia:model/completion` request flag (`check`) under which the backend offers each candidate answer to the guest before finishing, as a tool call named `check` over the session. The guest's `ok` ends the completion; its `err(text)` is appended verbatim as the correction turn and the backend goes round again. The host validates nothing about the answer — `format` only steers the provider — so acceptance lives with the guest that knows the type (`omnia_sdk::model::Question<T>` runs the exchange for a typed answer).
+The `omnia:model/completion` request flag (`check`) under which the backend offers each candidate answer to the guest before finishing, as a tool call named `check` over the session. The guest's `ok` ends the completion; its `err(text)` becomes the correction turn — led by one sentence naming the count when the model's reply held several JSON values and the largest was the one checked — and the backend goes round again. The host validates nothing about the answer — `format` only steers the provider — so acceptance lives with the guest that knows the type (`omnia_sdk::model::Question<T>` runs the exchange for a typed answer).
 
 ### Host-injected tools
 
