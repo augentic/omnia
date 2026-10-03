@@ -1,0 +1,31 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":disableDependencyDashboard"],
+  "enabledManagers": ["github-actions", "custom.regex"],
+  "packageRules": [
+    {
+      "matchPackageNames": ["augentic/toolkit"],
+      "groupName": "augentic/toolkit",
+      "commitMessageTopic": "augentic/toolkit",
+      "prBodyNotes": [
+        "Run `make conventions-sync` on this branch and commit what changed before merging."
+      ]
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["!augentic/toolkit"],
+      "enabled": false
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^mise\\.toml$/"],
+      "matchStrings": [
+        "github\\.com/augentic/toolkit\\.git//mise/rust\\.toml\\?ref=(?<currentValue>v\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "augentic/toolkit",
+      "datasourceTemplate": "github-tags"
+    }
+  ]
+}

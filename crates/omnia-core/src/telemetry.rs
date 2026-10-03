@@ -923,7 +923,7 @@ mod tests {
         let (tracer, meter) = providers(&exporter);
 
         tracer.tracer("test").start("first-drive");
-        assert!(exporter.names().is_empty());
+        assert_eq!(exporter.names(), Vec::<String>::new());
 
         flush_providers(&tracer, &meter);
         assert_eq!(exporter.names(), ["first-drive"]);

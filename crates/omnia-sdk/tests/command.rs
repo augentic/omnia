@@ -105,7 +105,7 @@ fn usage_error() {
 
     assert_eq!(response.exit, USAGE_EXIT);
     assert_eq!(response.exit, 64);
-    assert!(response.stdout.is_empty());
+    assert_eq!(response.stdout, b"");
     let stderr = String::from_utf8(response.stderr).expect("clap renders utf-8");
     assert!(stderr.contains("bogus"));
     assert!(stderr.contains("Usage: app"));
@@ -161,7 +161,7 @@ fn completions_bash() {
     let response = completions::<App>(Shell::Bash, "app");
 
     assert_eq!(response.exit, 0);
-    assert!(response.stderr.is_empty());
+    assert_eq!(response.stderr, b"");
     let script = String::from_utf8(response.stdout).expect("completion script is utf-8");
     assert!(script.contains("_app"));
     assert!(script.contains("greet"));
@@ -246,7 +246,7 @@ async fn call_success_text() {
         .await;
 
     assert_eq!(response.exit, 0);
-    assert!(response.stderr.is_empty());
+    assert_eq!(response.stderr, b"");
     assert_eq!(response.stdout, b"hello, ada\n");
 }
 
@@ -277,7 +277,7 @@ async fn call_handler_error() {
     let response = command.call(lookup, || Ok(item("42")), render_never).await;
 
     assert_eq!(response.exit, 2);
-    assert!(response.stdout.is_empty());
+    assert_eq!(response.stdout, b"");
     assert_eq!(
         stderr_json(&response),
         serde_json::json!({ "error": "not_found", "message": "no item 42", "exit-code": 2 })

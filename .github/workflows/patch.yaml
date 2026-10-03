@@ -1,4 +1,10 @@
+# Managed by augentic/toolkit from conventions/workflows/patch.yaml and conventions.toml. Do not edit: run `make conventions-sync`.
+
 name: Create Patch
+
+# Bump the patch version on a durable release-X.Y.Z line (Cargo version and
+# RELEASES.md). Dispatch from the release-* branch carrying the fix; Publish
+# Release, dispatched from the same branch, tags and releases it.
 
 on:
   workflow_dispatch:
@@ -12,5 +18,5 @@ permissions:
 
 jobs:
   patch:
-    uses: augentic/.github/.github/workflows/patch.yaml@v0.2.0
+    uses: augentic/toolkit/.github/workflows/patch.yaml@v0.3.0
     secrets: inherit

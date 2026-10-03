@@ -20,43 +20,24 @@ architecture. There are many ways to help besides contributing code:
   a unit test or a live test.
 - [docs/glossary.md](docs/glossary.md) — project terminology.
 
-## Before you open a pull request
+<!-- conventions:begin contributing/pull-requests -->
+## Pull request procedure
 
-Run the full CI check locally and make sure it passes:
+Pull requests should be targeted at the `main` branch. Before creating a pull request, go through this checklist:
 
-```shell
-mise run ci
-```
+1. Create a feature branch off of `main`.
+2. [Rebase](https://git-scm.com/book/en/Git-Branching-Rebasing) your local changes against `main`.
+3. Run `make ci` and confirm that it passes: exactly the CI jobs, in order.
+4. Accept the Developer's Certificate of Origin on all commits (see above).
 
-This runs exactly the CI jobs, in order: the formatting check (`cargo +nightly
-fmt --all --check`), clippy with warnings denied (natively, then for
-`wasm32-wasip2` over lib, bins and examples), the test suite (`cargo nextest`),
-doc tests, rustdoc, `cargo vet` and `cargo deny`. `mise run check` adds the
-local advisory extras (`cargo audit`, `cargo outdated`, `cargo udeps`) and
-rewrites formatting in place. After changing dependencies, `mise run vet-regen`
-refreshes the `supply-chain/` files that `vet` only checks.
-Tasks are run with [mise](https://mise.jdx.dev/getting-started.html); `mise
-tasks` lists them, and [mise.toml](mise.toml) includes the shared Rust tasks
-from [augentic/.github](https://github.com/augentic/.github).
+All contributions are made via pull request. All patches from all contributors get reviewed. At least one review from a maintainer is required for all patches (even patches from maintainers). When CI fails, authors are expected to update the pull request until it passes.
 
-Checklist:
+Normally, all pull requests must include tests that cover your change. Occasionally, a change will be very difficult to test for; in those cases, include a note in your commit message explaining why.
+<!-- conventions:end contributing/pull-requests -->
 
-1. Create a feature branch off `main`.
-1. [Rebase](https://git-scm.com/book/en/v2/Git-Branching-Rebasing) your branch
-   against `main` before submitting.
-1. Include tests for your change, following the testing policy above. If a
-   change is genuinely hard to test, say why in the commit message.
-1. Accept the Developer's Certificate of Origin on every commit (see below).
-1. Give each commit a conventional prefix describing the change
-   (`fix:`, `feat:`, `perf:`, `docs:`, ...).
+`make ci` runs the formatting check, clippy with warnings denied (natively, then for `wasm32-wasip2` over lib, bins and examples), the test suite (`cargo nextest`), doc tests, rustdoc, `cargo vet`, `cargo deny`, and `conventions-check`. `make check` adds the local advisory extras (`cargo audit`, `cargo outdated`, `cargo udeps`) and rewrites formatting in place. After changing dependencies, `make vet-regen` refreshes the `supply-chain/` files that `vet` only checks.
 
-## Review
-
-All contributions are made via pull request against `main`, and **all patches
-from all contributors get reviewed**. At least one approval from a maintainer
-is required (including for patches submitted by maintainers). When CI fails,
-authors are expected to update the pull request until it passes. A maintainer
-with write access merges their own pull request after approval.
+Tests follow the testing policy above. Give each commit a conventional prefix describing the change (`fix:`, `feat:`, `perf:`, `docs:`, ...). A maintainer with write access merges their own pull request after approval.
 
 ## Code style
 
@@ -66,10 +47,10 @@ with write access merges their own pull request after approval.
 - See the code-comment guidance in [AGENTS.md](AGENTS.md): document intent,
   not mechanics.
 
+<!-- conventions:begin contributing/dco -->
 ## Developer's Certificate of Origin
 
-All contributions must include acceptance of the
-[DCO](https://developercertificate.org/):
+All contributions must include acceptance of the [DCO](https://developercertificate.org/):
 
 ```text
 Developer Certificate of Origin
@@ -110,36 +91,25 @@ By making a contribution to this project, I certify that:
     this project or the open source license(s) involved.
 ```
 
-To accept the DCO, add this line to each commit message with your name and
-email address (`git commit -s` does this for you):
+To accept the DCO, add this line to each commit message with your name and email address (`git commit -s` will do this for you):
 
 ```text
 Signed-off-by: Jane Example <jane@example.com>
 ```
 
-For legal reasons, no anonymous or pseudonymous contributions are accepted;
-open a GitHub issue if this is a problem for you.
+For legal reasons, no anonymous or pseudonymous contributions are accepted; open a GitHub issue if this is a problem for you.
+<!-- conventions:end contributing/dco -->
 
+<!-- conventions:begin contributing/conduct -->
 ## Conduct
 
-Whether you are a regular contributor or a newcomer, we care about making this
-community a safe place for you and we've got your back.
+Whether you are a regular contributor or a newcomer, we care about making this community a safe place for you and we've got your back.
 
-- We are committed to providing a friendly, safe and welcoming environment for
-  all, regardless of gender, sexual orientation, disability, ethnicity,
-  religion, or similar personal characteristic.
-- Please avoid using nicknames that might detract from a friendly, safe and
-  welcoming environment for all.
+- We are committed to providing a friendly, safe and welcoming environment for all, regardless of gender, sexual orientation, disability, ethnicity, religion, or similar personal characteristic.
 - Be kind and courteous. There is no need to be mean or rude.
-- We will exclude you from interaction if you insult, demean or harass anyone.
-  In particular, we do not tolerate behavior that excludes people in socially
-  marginalized groups.
-- Private harassment is also unacceptable. No matter who you are, if you feel
-  you have been or are being harassed or made uncomfortable by a community
-  member, please contact a member of the Omnia core team immediately.
-- Likewise any spamming, trolling, flaming, baiting or other
-  attention-stealing behaviour is not welcome.
+- We will exclude you from interaction if you insult, demean or harass anyone. In particular, we do not tolerate behavior that excludes people in socially marginalized groups.
+- Private harassment is also unacceptable. If you feel you have been or are being harassed or made uncomfortable by a community member, please contact a member of the core team immediately.
+- Likewise any spamming, trolling, flaming, baiting or other attention-stealing behaviour is not welcome.
 
-We welcome discussion about creating a welcoming, safe, and productive
-environment for the community. If you have any questions, feedback, or
-concerns please let us know with a GitHub issue.
+We welcome discussion about creating a welcoming, safe, and productive environment for the community. If you have any questions, feedback, or concerns please let us know with a GitHub issue. The [Code of Conduct](CODE_OF_CONDUCT.md) applies throughout.
+<!-- conventions:end contributing/conduct -->

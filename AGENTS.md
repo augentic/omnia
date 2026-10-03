@@ -20,7 +20,7 @@ Terminology (**runtime core**, **host-side**, **host-injected tools**, etc.) is 
 | Test (full)  | `mise run test` (`cargo nextest run --workspace --all-features`; includes the examples gate — CI's job)   |
 | Lint (full)  | `mise run lint` (clippy natively, then `--target wasm32-wasip2` over lib, bins and examples; CI's job)     |
 | Doc tests    | `cargo test --doc --all-features --workspace`                                                        |
-| Task runner  | `mise run <task>` (`mise tasks` lists them; `mise.toml` includes the shared Rust tasks from `augentic/.github`) |
+| Task runner  | `mise run <task>` (`mise tasks` lists them; `mise.toml` includes the shared Rust tasks from `augentic/toolkit`) |
 
 ### Verifying a change
 
@@ -69,12 +69,57 @@ The practical walk-through is [docs/guides/testing-policy.md](docs/guides/testin
 
 ### Code comments
 
-Golden rule: do not document what is self-evident in code. The style is the one found in anyhow, serde, tokio and rand: rustdoc carries the public contract, `//` is rare and terse, and a body reads as headed blocks. Note that the workspace lints (`missing_docs` plus clippy `pedantic`/`missing_errors_doc`, all enforced via `-D warnings` in `mise run lint`) require a doc comment on every public item and an `# Errors` section on every public fallible function. Within that constraint:
+The shared rules under [Code style](#code-style) below apply, the workspace lints (`missing_docs` plus clippy `pedantic`/`missing_errors_doc`, all enforced via `-D warnings` in `mise run lint`) hold a doc comment on every public item and an `# Errors` section on every public fallible function, and `// SAFETY:` (linted) and `// SECURITY:` stay as they are. The `examples` crate does not inherit the workspace lints, so prefer no doc comment over one that merely echoes a handler's name.
 
-- **Rustdoc (`///`) follows the `pub` keyword**, including `pub(crate)`: public types, methods, fields and variants, plus the methods a `pub trait` declares (the declaration is the contract) and clap-derived fields, whose docs are the help text. Nothing else gets `///` — not private items, not private fields, not `impl` blocks (a `/// X to Y mapping` above a `From` is noise), not trait-impl methods. `//!` module docs stay on every module, private or not.
-- **Keep public-item docs to a concise one-line summary** plus the behavioural contract; do not pad them by restating the signature, types, or fragile cross-references that a glance at the code already shows. Trim redundant secondary sentences from multi-line docs, keeping the summary line the lint requires.
-- **Private items get `//` only when needed**: a line or two above the item stating the non-local *why* (an invariant, a lifetime the type guards, a reason the obvious approach fails). If the name says it, no comment. `fn lock`, `fn elapsed_ms` and a `Registry` struct that holds a registry need nothing.
-- **Inside bodies, `//` lines are section headers**: one line, lowercase, no trailing period, naming the block's purpose (`// spawn the worker`, `// resolve the guest by path; unmatched is 404`, `// cow heap images are compile-affecting, so pinned explicitly`), separated from the previous block by a blank line so the eye can skip block to block. A header may carry a *why* in the same breath; it never narrates *what* the next line does, and a second line is for a genuinely non-local reason only.
-- **Tag the tricks**: a step a senior Rust developer would not expect is `// HACK!: ...` with the reason; `// SAFETY:` (linted) and `// SECURITY:` stay as-is. Everything else is a plain header.
-- **Tests follow the same rules.** Suites and helpers are all-private, so `///` never appears in `tests/`; a scenario's rationale is a `//` block above the test fn, and names identify while comments explain.
-- The `examples` crate does not inherit the workspace lints, so prefer no doc comment over one that merely echoes a handler's name.
+<!-- conventions:begin agents/git -->
+## Git
+
+Never `git commit`, `git push`, open or close a pull request, or delete a branch — in this repository or in any sibling checkout — unless the maintainer lifts this for the session, explicitly and for named work. Leave every change uncommitted in the working tree; the maintainer reviews and commits. No plan or to-do list carries a commit, push, or PR step, and an instruction to complete every step does not override this.
+<!-- conventions:end agents/git -->
+
+<!-- conventions:begin agents/code-style -->
+## Code style
+
+clippy (`make lint`) and nightly rustfmt (`make fmt`) are the style gate; beyond them and the rules below, match the surrounding code.
+
+- Suppress a lint with `#[expect(lint, reason = "…")]` at the smallest scope, never `#[allow]`.
+- `<module>.rs` plus `<module>/<child>.rs`; `mod.rs` only under `tests/support/`.
+- A fn over a type is that type's method, not a free fn taking it as its first argument, where the type's module declares the fn or the fn is a plain lookup or predicate on the type. A constructor is an associated fn. A policy `const` sits beside the type whose method reads it. Values several fns thread through every call become one struct whose methods they are. A fn stays free when it is pure over primitives and iterators, or when it is one module's rule applied to another module's type.
+<!-- conventions:end agents/code-style -->
+
+<!-- conventions:begin agents/comments -->
+Comments follow the conventions `std`, `serde`, and `tokio` converge on: docs state the observable contract for the crate's user, never the body's mechanics.
+
+- `///` goes on the public API only — the `pub` types, fns, fields, variants, and re-exports a user of the crate can reach — never on a private or `pub(crate)` item, an `impl` block, or a trait-impl method. A clap field's `///` is its `--help` text. A doc opens with one summary sentence (about fifteen words, full stop), then a blank line, then short sentences and bullet lists. `# Examples` holds compiled doctests, for non-obvious usage only; `# Errors` names each class the caller matches on, linked; `# Panics` the rest. Every item mentioned is an intra-doc link. No mechanics, history, or migration notes. A `//!` says what a module is for, in the same shape.
+- A private item takes a `//` only for what a senior developer would not see from its name and signature: a constraint, a why, an invariant. Most carry nothing. No restatements, match-arm labels, or body paraphrases.
+- Inside a body, a `//` is a section header: lowercase, no full stop, above a blank-line-separated block, naming what the block achieves, so the headers read together outline the fn. A fn readable at a glance carries none, and a header never narrates the line beneath it. The one in-body explanation is `// HACK: …`, for a trick a senior would not see through.
+- A test fn takes `//`, never `///`, and only for rationale its scenario name and assertions do not expose.
+- No commented-out code.
+- Every sentence earns its place and reads once: short plain sentences, one idea each; three or more things are a bullet list, not a colon-and-dash clause; no chained em-dashes, nested parentheticals, or semicolon runs; each fact has one home across `//!`, `///`, and `//`. A comment is as long as its why takes and no longer — concise is not dense, and readable is not verbose.
+<!-- conventions:end agents/comments -->
+
+<!-- conventions:begin agents/testing -->
+## Testing
+
+Tests drive the public boundary: a behaviour is asserted through what a user of the product or crate can reach, over scripted doubles rather than a live filesystem, network, or model, never through private internals. A suite below the root survives only for an independent library contract; a unit test only for a branch no public boundary reaches. A test fn names the scenario (`gen_spec`, `no_sources`), never the outcome. Scripted doubles are strict: script exactly the exchanges a run consumes.
+<!-- conventions:end agents/testing -->
+
+<!-- conventions:begin agents/commands -->
+## Commands
+
+All from the repository root through `make` ([`Makefile`](Makefile) → mise). The tasks are the shared `mise/rust.toml` of [`augentic/toolkit`](https://github.com/augentic/toolkit), pinned in [`mise.toml`](mise.toml) to the tag every `uses:` under `.github/workflows/` names; a bump is one pull request over both, and `make conventions-check` holds them together.
+
+```bash
+make ci # exactly the CI jobs: fmt-check + lint + test + test-docs + docs + vet + deny + conventions-check — run before handing over
+make check # local advisories: audit + fmt (rewrites) + lint + outdated + deps
+make test # cargo nextest run --locked --workspace --all-features, under -Dwarnings
+make lint # lint-host (cargo clippy --workspace --all-targets --all-features, then cargo hack --each-feature), then lint-wasm (the same over every lib, bin and example for wasm32-wasip2 — never tests)
+make fmt # cargo +nightly fmt --all
+make vet-regen # regenerate cargo-vet imports/exemptions/unpublished, then vet
+make conventions-sync # write the shared conventions at the pinned toolkit tag
+make cov # cargo llvm-cov nextest --workspace --all-features --summary-only
+make sweep # drop target/ artifacts untouched for a week
+```
+
+A file with a `Managed by augentic/toolkit` header, and everything between a `conventions:begin` and `conventions:end` marker pair, is written by `make conventions-sync`: never edit it here. Change it in [`augentic/toolkit`](https://github.com/augentic/toolkit) instead. If `make ci` cannot run, say exactly why and which checks ran instead.
+<!-- conventions:end agents/commands -->

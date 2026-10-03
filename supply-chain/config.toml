@@ -4,6 +4,9 @@
 [cargo-vet]
 version = "0.10"
 
+[imports.augentic]
+url = "https://raw.githubusercontent.com/augentic/toolkit/main/supply-chain/augentic/audits.toml"
+
 [imports.bytecode-alliance]
 url = "https://raw.githubusercontent.com/bytecodealliance/wasmtime/main/supply-chain/audits.toml"
 
@@ -25,10 +28,37 @@ url = "https://raw.githubusercontent.com/zcash/rust-ecosystem/main/supply-chain/
 [policy.omnia]
 audit-as-crates-io = false
 
+[policy.omnia-cli]
+audit-as-crates-io = false
+
+[policy.omnia-core]
+audit-as-crates-io = false
+
+[policy.omnia-guest-macros]
+audit-as-crates-io = false
+
+[policy.omnia-host-macros]
+audit-as-crates-io = false
+
+[policy.omnia-link]
+audit-as-crates-io = false
+
+[policy.omnia-plugin]
+audit-as-crates-io = false
+
+[policy.omnia-sdk]
+audit-as-crates-io = false
+
+[policy.omnia-test]
+audit-as-crates-io = false
+
 [policy.omnia-wasi-blobstore]
 audit-as-crates-io = false
 
 [policy.omnia-wasi-config]
+audit-as-crates-io = false
+
+[policy.omnia-wasi-docstore]
 audit-as-crates-io = false
 
 [policy.omnia-wasi-http]
@@ -41,6 +71,9 @@ audit-as-crates-io = false
 audit-as-crates-io = false
 
 [policy.omnia-wasi-messaging]
+audit-as-crates-io = false
+
+[policy.omnia-wasi-model]
 audit-as-crates-io = false
 
 [policy.omnia-wasi-otel]
@@ -145,26 +178,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.chrono]]
 version = "0.4.45"
-criteria = "safe-to-deploy"
-
-[[exemptions.clap]]
-version = "4.6.7"
-criteria = "safe-to-deploy"
-
-[[exemptions.clap_builder]]
-version = "4.6.7"
-criteria = "safe-to-deploy"
-
-[[exemptions.clap_complete]]
-version = "4.6.11"
-criteria = "safe-to-deploy"
-
-[[exemptions.clap_derive]]
-version = "4.6.7"
-criteria = "safe-to-deploy"
-
-[[exemptions.clap_lex]]
-version = "1.1.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.combine]]
@@ -441,10 +454,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.hyper-timeout]]
 version = "0.5.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.hyper-util]]
-version = "0.1.21"
 criteria = "safe-to-deploy"
 
 [[exemptions.iana-time-zone]]
@@ -775,10 +784,6 @@ criteria = "safe-to-deploy"
 version = "4.1.0"
 criteria = "safe-to-run"
 
-[[exemptions.rustix]]
-version = "1.1.5"
-criteria = "safe-to-deploy"
-
 [[exemptions.rustls]]
 version = "0.23.45"
 criteria = "safe-to-deploy"
@@ -887,10 +892,6 @@ criteria = "safe-to-deploy"
 version = "1.2.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.syn]]
-version = "3.0.6"
-criteria = "safe-to-deploy"
-
 [[exemptions.sync_wrapper]]
 version = "1.0.2"
 criteria = "safe-to-deploy"
@@ -913,14 +914,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tempfile]]
 version = "3.3.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.thiserror]]
-version = "2.0.21"
-criteria = "safe-to-deploy"
-
-[[exemptions.thiserror-impl]]
-version = "2.0.21"
 criteria = "safe-to-deploy"
 
 [[exemptions.thread_local]]
@@ -1021,10 +1014,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.unicase]]
 version = "2.9.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.unicode-ident]]
-version = "1.0.26"
 criteria = "safe-to-deploy"
 
 [[exemptions.untrusted]]
