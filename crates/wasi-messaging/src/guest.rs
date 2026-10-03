@@ -4,6 +4,7 @@
 // See (<https://github.com/WebAssembly/wasi-messaging/>)
 mod generated {
     #![allow(missing_docs)]
+    #![allow(clippy::same_length_and_capacity)]
 
     wit_bindgen::generate!({
         world: "messaging-request-reply",
