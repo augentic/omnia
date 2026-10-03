@@ -384,7 +384,7 @@ impl Built {
                 .unwrap_or_else(|err| panic!("reading {}: {err}", dep_info.display()));
             for path in dep_info_paths(&contents) {
                 if seen.insert(path.clone()) {
-                    println!("cargo:rerun-if-changed={path}");
+                    rerun_if_changed(Path::new(&path));
                 }
             }
         }
@@ -415,6 +415,7 @@ impl Built {
     }
 }
 
+#[expect(clippy::print_stdout, reason = "cargo's build-script protocol")]
 fn rerun_if_changed(path: &Path) {
     println!("cargo:rerun-if-changed={}", path.display());
 }

@@ -149,13 +149,11 @@ impl Container for InMemContainer {
             if !unbounded && end < start {
                 return Err(anyhow!("invalid byte range: end ({end}) < start ({start})"));
             }
-            let len = data.len() as u64;
-            let from = start.min(len);
-            let to = if unbounded { len } else { end.saturating_add(1).min(len) };
-            // both bounds are clamped to the object's length, itself a usize
-            #[allow(clippy::cast_possible_truncation)]
-            let range = from as usize..to as usize;
-            Ok(Some(data.slice(range)))
+            let len = data.len();
+            let clamp = |bound: u64| usize::try_from(bound).map_or(len, |bound| bound.min(len));
+            let from = clamp(start);
+            let to = if unbounded { len } else { clamp(end.saturating_add(1)) };
+            Ok(Some(data.slice(from..to)))
         }
         .boxed()
     }

@@ -2,8 +2,7 @@
 
 // Bindings for the `wasi:docstore` world.
 mod generated {
-    #![allow(missing_docs)]
-    #![allow(clippy::same_length_and_capacity)]
+    #![allow(missing_docs, clippy::same_length_and_capacity, reason = "wit-bindgen output")]
 
     wit_bindgen::generate!({
         world: "imports",

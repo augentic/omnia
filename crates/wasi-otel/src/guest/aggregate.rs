@@ -31,7 +31,7 @@ impl Measurement for u64 {
         self.saturating_add(other)
     }
 
-    #[expect(clippy::cast_precision_loss)]
+    #[expect(clippy::cast_precision_loss, reason = "the boundary scale is `f64` by contract")]
     fn as_f64(self) -> f64 {
         self as f64
     }
@@ -42,7 +42,7 @@ impl Measurement for i64 {
         self.saturating_add(other)
     }
 
-    #[expect(clippy::cast_precision_loss)]
+    #[expect(clippy::cast_precision_loss, reason = "the boundary scale is `f64` by contract")]
     fn as_f64(self) -> f64 {
         self as f64
     }

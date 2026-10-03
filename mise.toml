@@ -1,5 +1,5 @@
 [task_config]
-includes = ["git::https://github.com/augentic/toolkit.git//mise/rust.toml?ref=v0.4.0"]
+includes = ["git::https://github.com/augentic/toolkit.git//mise/rust.toml?ref=v0.5.0"]
 
 # Knobs read by the included tasks. Keep `OUTDATED_IGNORE` in step with the
 # `outdated` input in `.github/workflows/audit.yaml`.

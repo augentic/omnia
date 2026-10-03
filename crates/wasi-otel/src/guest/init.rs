@@ -26,7 +26,7 @@ pub async fn scope<F: Future>(inner: impl FnOnce() -> F) -> F::Output {
     let mut owner = false;
     TELEMETRY.get_or_init(|| {
         owner = true;
-        init().inspect_err(|err| eprintln!("initialization issue: {err:#}")).ok()
+        init().inspect_err(report).ok()
     });
 
     let output = inner().await;
@@ -88,6 +88,11 @@ fn init() -> Result<Telemetry> {
 
 fn mute(filter: EnvFilter) -> EnvFilter {
     filter.add_directive("opentelemetry=off".parse().expect("opentelemetry=off"))
+}
+
+#[expect(clippy::print_stderr, reason = "the subscriber that would carry this failed to install")]
+fn report(err: &anyhow::Error) {
+    eprintln!("initialization issue: {err:#}");
 }
 
 fn telemetry() -> Option<&'static Telemetry> {

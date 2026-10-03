@@ -2,14 +2,9 @@
 //!
 //! This is a lightweight implementation for development use only.
 
-// `derive(FromEnv)` generates undocumented `from_env`/`requirements` associated
-// functions that would otherwise trip `missing_docs`.
-#![allow(missing_docs)]
-
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use fromenv::FromEnv;
 use futures::FutureExt;
 use omnia_core::Backend;
 use rusqlite::types::ValueRef;
@@ -19,14 +14,21 @@ use tracing::instrument;
 use crate::host::resource::{Connection, FutureResult};
 use crate::host::{DataType, Field, Row, WasiSqlCtx};
 
-/// Options used to connect to the SQL database.
-///
-/// This struct is used to load connection options from environment variables.
-#[derive(Debug, Clone, FromEnv)]
-pub struct ConnectOptions {
-    #[env(from = "SQL_DATABASE", default = "file::memory:?cache=shared")]
-    pub database: String,
+#[expect(missing_docs, reason = "`FromEnv` has no docs")]
+mod config {
+    use fromenv::FromEnv;
+
+    /// Options used to connect to the SQL database.
+    ///
+    /// This struct is used to load connection options from environment variables.
+    #[derive(Debug, Clone, FromEnv)]
+    pub struct ConnectOptions {
+        /// The `SQLite` database URI (`SQL_DATABASE`, default: one shared in-memory database).
+        #[env(from = "SQL_DATABASE", default = "file::memory:?cache=shared")]
+        pub database: String,
+    }
 }
+pub use config::ConnectOptions;
 
 impl omnia_core::FromEnv for ConnectOptions {
     fn load_env() -> Result<Self> {
@@ -78,9 +80,10 @@ struct SqliteConn {
 }
 
 impl Connection for SqliteConn {
-    // The mutex guard must outlive the prepared statement that borrows the
-    // connection, so the drop cannot be tightened further.
-    #[expect(clippy::significant_drop_tightening)]
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "the prepared statement borrows the connection the guard holds"
+    )]
     fn query(&self, query: String, params: Vec<DataType>) -> FutureResult<Vec<Row>> {
         tracing::trace!("executing query: {}", query);
         let conn = Arc::clone(&self.conn);
@@ -130,8 +133,10 @@ impl Connection for SqliteConn {
         .boxed()
     }
 
-    // See `query`: the guard must outlive the prepared statement.
-    #[expect(clippy::significant_drop_tightening)]
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "the prepared statement borrows the connection the guard holds"
+    )]
     fn exec(&self, query: String, params: Vec<DataType>) -> FutureResult<u32> {
         tracing::trace!("executing statement: {}", query);
         let conn = Arc::clone(&self.conn);
@@ -157,16 +162,15 @@ impl Connection for SqliteConn {
     }
 }
 
-// `u64 as i64` is the standard SQLite convention: store the raw bits and let
-// readers reinterpret, since SQLite integers are always signed 64-bit.
-#[expect(clippy::cast_possible_wrap)]
+// A `u64` is stored as its raw bits, the `SQLite` convention: its integers
+// are always signed 64-bit, and readers reinterpret.
 fn to_sqlite(dt: &DataType) -> rusqlite::types::Value {
     match dt {
         DataType::Boolean(Some(b)) => rusqlite::types::Value::Integer(i64::from(*b)),
         DataType::Int32(Some(i)) => rusqlite::types::Value::Integer(i64::from(*i)),
         DataType::Int64(Some(i)) => rusqlite::types::Value::Integer(*i),
         DataType::Uint32(Some(u)) => rusqlite::types::Value::Integer(i64::from(*u)),
-        DataType::Uint64(Some(u)) => rusqlite::types::Value::Integer(*u as i64),
+        DataType::Uint64(Some(u)) => rusqlite::types::Value::Integer(u.cast_signed()),
         DataType::Float(Some(f)) => rusqlite::types::Value::Real(f64::from(*f)),
         DataType::Double(Some(f)) => rusqlite::types::Value::Real(*f),
         DataType::Str(Some(s)) => rusqlite::types::Value::Text(s.clone()),

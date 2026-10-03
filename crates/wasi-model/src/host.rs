@@ -14,7 +14,7 @@ mod tool_host;
 mod workspace;
 
 mod generated {
-    #![allow(missing_docs)]
+    #![allow(missing_docs, reason = "wasmtime bindgen output")]
 
     pub use self::omnia::model::completion::Error;
 

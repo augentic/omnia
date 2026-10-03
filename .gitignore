@@ -1,10 +1,7 @@
-# BEGIN Managed by augentic/toolkit: conventions/gitignore/head
-# Do not edit: run `make conventions-sync`.
 target/
 .env
 **/*.rs.bk
 rustc-ice-*
 .DS_Store
-# END Managed by augentic/toolkit: conventions/gitignore/head
 
 docs/book/

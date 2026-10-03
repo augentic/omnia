@@ -3,8 +3,7 @@
 // Bindings for the `wasi:messaging` world.
 // See (<https://github.com/WebAssembly/wasi-messaging/>)
 mod generated {
-    #![allow(missing_docs)]
-    #![allow(clippy::same_length_and_capacity)]
+    #![allow(missing_docs, clippy::same_length_and_capacity, reason = "wit-bindgen output")]
 
     wit_bindgen::generate!({
         world: "messaging-request-reply",
