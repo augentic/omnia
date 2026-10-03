@@ -24,10 +24,7 @@ where
 {
     match builder(options) {
         Ok(builder) => crate::lifecycle::drive_main::<B, H>(builder).await,
-        Err(error) => {
-            eprintln!("{error:#}");
-            ExitCode::FAILURE
-        }
+        Err(error) => crate::lifecycle::report(&error),
     }
 }
 

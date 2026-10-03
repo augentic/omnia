@@ -7,7 +7,7 @@ mod resource;
 mod types_impl;
 
 mod generated {
-    #![allow(missing_docs)]
+    #![allow(missing_docs, reason = "wasmtime bindgen output")]
 
     pub use super::{ContainerProxy, Error, IncomingValue, OutgoingValue, StreamObjectNames};
 

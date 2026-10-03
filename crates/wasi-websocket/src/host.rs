@@ -9,7 +9,7 @@ mod server;
 mod types_impl;
 
 mod generated {
-    #![allow(missing_docs)]
+    #![allow(missing_docs, reason = "wasmtime bindgen output")]
 
     pub use self::omnia::websocket::types::Error;
     pub use crate::host::resource::{ClientProxy, Event};

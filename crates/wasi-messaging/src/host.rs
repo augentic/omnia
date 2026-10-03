@@ -6,7 +6,7 @@ mod server;
 mod types_impl;
 
 mod generated {
-    #![allow(missing_docs)]
+    #![allow(missing_docs, reason = "wasmtime bindgen output")]
 
     pub use wasi::messaging::types::Error;
 

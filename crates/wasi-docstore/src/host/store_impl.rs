@@ -30,7 +30,6 @@ impl<T> HostWithStore<T> for WasiDocStore {
         Ok(fut.await?)
     }
 
-    #[allow(clippy::needless_pass_by_value)] // Matches generated `HostWithStore::query` signature.
     async fn query(
         accessor: &Accessor<T, Self>, collection: String, options: QueryOptions,
     ) -> Result<QueryResult> {

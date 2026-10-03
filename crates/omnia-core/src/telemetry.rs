@@ -217,6 +217,7 @@ fn exports(endpoint: Option<&str>, env: impl Fn(&str) -> Option<String>) -> Expo
 /// that is neither is reported on stderr and dropped, as `EnvFilter` drops
 /// it on a bare run; the result always parses.
 #[must_use]
+#[expect(clippy::print_stderr, reason = "the subscriber this composes is not installed yet")]
 pub fn directives(
     level: Option<LevelFilter>, fallback: LevelFilter, rust_log: Option<&str>,
 ) -> String {
