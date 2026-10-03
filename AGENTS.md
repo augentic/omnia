@@ -71,13 +71,15 @@ The practical walk-through is [docs/guides/testing-policy.md](docs/guides/testin
 
 The shared rules under [Code style](#code-style) below apply, the workspace lints (`missing_docs` plus clippy `pedantic`/`missing_errors_doc`, all enforced via `-D warnings` in `mise run lint`) hold a doc comment on every public item and an `# Errors` section on every public fallible function, and `// SAFETY:` (linted) and `// SECURITY:` stay as they are. The `examples` crate does not inherit the workspace lints, so prefer no doc comment over one that merely echoes a handler's name.
 
-<!-- conventions:begin agents/git -->
+<!-- BEGIN Managed by augentic/toolkit: conventions/agents/git.md -->
+<!-- Do not edit: run `make conventions-sync`. -->
 ## Git
 
 Never `git commit`, `git push`, open or close a pull request, or delete a branch — in this repository or in any sibling checkout — unless the maintainer lifts this for the session, explicitly and for named work. Leave every change uncommitted in the working tree; the maintainer reviews and commits. No plan or to-do list carries a commit, push, or PR step, and an instruction to complete every step does not override this.
-<!-- conventions:end agents/git -->
+<!-- END Managed by augentic/toolkit: conventions/agents/git.md -->
 
-<!-- conventions:begin agents/code-style -->
+<!-- BEGIN Managed by augentic/toolkit: conventions/agents/code-style.md -->
+<!-- Do not edit: run `make conventions-sync`. -->
 ## Code style
 
 clippy (`make lint`) and nightly rustfmt (`make fmt`) are the style gate; beyond them and the rules below, match the surrounding code.
@@ -85,9 +87,10 @@ clippy (`make lint`) and nightly rustfmt (`make fmt`) are the style gate; beyond
 - Suppress a lint with `#[expect(lint, reason = "…")]` at the smallest scope, never `#[allow]`.
 - `<module>.rs` plus `<module>/<child>.rs`; `mod.rs` only under `tests/support/`.
 - A fn over a type is that type's method, not a free fn taking it as its first argument, where the type's module declares the fn or the fn is a plain lookup or predicate on the type. A constructor is an associated fn. A policy `const` sits beside the type whose method reads it. Values several fns thread through every call become one struct whose methods they are. A fn stays free when it is pure over primitives and iterators, or when it is one module's rule applied to another module's type.
-<!-- conventions:end agents/code-style -->
+<!-- END Managed by augentic/toolkit: conventions/agents/code-style.md -->
 
-<!-- conventions:begin agents/comments -->
+<!-- BEGIN Managed by augentic/toolkit: conventions/agents/comments.md -->
+<!-- Do not edit: run `make conventions-sync`. -->
 Comments follow the conventions `std`, `serde`, and `tokio` converge on: docs state the observable contract for the crate's user, never the body's mechanics.
 
 - `///` goes on the public API only — the `pub` types, fns, fields, variants, and re-exports a user of the crate can reach — never on a private or `pub(crate)` item, an `impl` block, or a trait-impl method. A clap field's `///` is its `--help` text. A doc opens with one summary sentence (about fifteen words, full stop), then a blank line, then short sentences and bullet lists. `# Examples` holds compiled doctests, for non-obvious usage only; `# Errors` names each class the caller matches on, linked; `# Panics` the rest. Every item mentioned is an intra-doc link. No mechanics, history, or migration notes. A `//!` says what a module is for, in the same shape.
@@ -96,15 +99,17 @@ Comments follow the conventions `std`, `serde`, and `tokio` converge on: docs st
 - A test fn takes `//`, never `///`, and only for rationale its scenario name and assertions do not expose.
 - No commented-out code.
 - Every sentence earns its place and reads once: short plain sentences, one idea each; three or more things are a bullet list, not a colon-and-dash clause; no chained em-dashes, nested parentheticals, or semicolon runs; each fact has one home across `//!`, `///`, and `//`. A comment is as long as its why takes and no longer — concise is not dense, and readable is not verbose.
-<!-- conventions:end agents/comments -->
+<!-- END Managed by augentic/toolkit: conventions/agents/comments.md -->
 
-<!-- conventions:begin agents/testing -->
+<!-- BEGIN Managed by augentic/toolkit: conventions/agents/testing.md -->
+<!-- Do not edit: run `make conventions-sync`. -->
 ## Testing
 
 Tests drive the public boundary: a behaviour is asserted through what a user of the product or crate can reach, over scripted doubles rather than a live filesystem, network, or model, never through private internals. A suite below the root survives only for an independent library contract; a unit test only for a branch no public boundary reaches. A test fn names the scenario (`gen_spec`, `no_sources`), never the outcome. Scripted doubles are strict: script exactly the exchanges a run consumes.
-<!-- conventions:end agents/testing -->
+<!-- END Managed by augentic/toolkit: conventions/agents/testing.md -->
 
-<!-- conventions:begin agents/commands -->
+<!-- BEGIN Managed by augentic/toolkit: conventions/agents/commands.md -->
+<!-- Do not edit: run `make conventions-sync`. -->
 ## Commands
 
 All from the repository root through `make` ([`Makefile`](Makefile) → mise). The tasks are the shared `mise/rust.toml` of [`augentic/toolkit`](https://github.com/augentic/toolkit), pinned in [`mise.toml`](mise.toml) to the tag every `uses:` under `.github/workflows/` names; a bump is one pull request over both, and `make conventions-check` holds them together.
@@ -121,5 +126,5 @@ make cov # cargo llvm-cov nextest --workspace --all-features --summary-only
 make sweep # drop target/ artifacts untouched for a week
 ```
 
-A file with a `Managed by augentic/toolkit` header, and everything between a `conventions:begin` and `conventions:end` marker pair, is written by `make conventions-sync`: never edit it here. Change it in [`augentic/toolkit`](https://github.com/augentic/toolkit) instead. If `make ci` cannot run, say exactly why and which checks ran instead.
-<!-- conventions:end agents/commands -->
+A file that opens with `Managed by augentic/toolkit`, everything from a `BEGIN Managed by augentic/toolkit` line to its `END` line, and every value the shared TOML tables set, is written by `make conventions-sync`: never edit it here. Change it in [`augentic/toolkit`](https://github.com/augentic/toolkit) instead. If `make ci` cannot run, say exactly why and which checks ran instead.
+<!-- END Managed by augentic/toolkit: conventions/agents/commands.md -->

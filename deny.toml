@@ -7,14 +7,11 @@ targets = ["aarch64-apple-darwin", "wasm32-wasip2"]
 [output]
 feature-depth = 1
 
-# conventions:begin deny/advisories
 [advisories]
 unmaintained = "workspace"
-# conventions:end deny/advisories
 ignore = [
 ]
 
-# conventions:begin deny/licenses
 [licenses]
 allow = [
   "Apache-2.0 WITH LLVM-exception",
@@ -30,7 +27,6 @@ allow = [
   "Unicode-3.0",
   "Zlib",
 ]
-# conventions:end deny/licenses
 
 [licenses.private]
 ignore = true
