@@ -75,8 +75,8 @@ mod tests {
 
     #[test]
     fn decode_id_malformed() {
-        assert!(decode_id("not-hex").is_empty());
-        assert!(decode_id("abc").is_empty());
+        assert_eq!(decode_id("not-hex"), b"");
+        assert_eq!(decode_id("abc"), b"");
     }
 
     #[test]

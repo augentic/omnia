@@ -152,7 +152,7 @@ async fn model_echo_text() {
     assert_eq!(seen.len(), 1);
     assert_eq!(seen[0].system.as_deref(), Some("be terse"));
     assert_eq!(seen[0].messages, ["hi", "second"]);
-    assert!(seen[0].tools.is_empty());
+    assert_eq!(seen[0].tools, Vec::<String>::new());
     assert!(seen[0].temperature.is_none());
 }
 
@@ -190,7 +190,7 @@ async fn model_schema_answer() {
     let model = ScriptedModel::answering([r#"{"verdict":"pass"}"#]);
     let model = run_scripted(test_programs::MODEL_SCHEMA_ANSWER, vec![], model).await;
     assert!(!model.seen()[0].check, "no check was asked for");
-    assert!(model.exchanges().is_empty());
+    assert_eq!(model.exchanges(), vec![]);
 }
 
 #[tokio::test]

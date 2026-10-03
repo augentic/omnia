@@ -71,6 +71,41 @@ user-id = 6825
 user-login = "sunfishcode"
 user-name = "Dan Gohman"
 
+[[publisher.clap]]
+version = "4.6.7"
+when = "2026-09-14"
+user-id = 6743
+user-login = "epage"
+user-name = "Ed Page"
+
+[[publisher.clap_builder]]
+version = "4.6.7"
+when = "2026-09-14"
+user-id = 6743
+user-login = "epage"
+user-name = "Ed Page"
+
+[[publisher.clap_complete]]
+version = "4.6.11"
+when = "2026-09-15"
+user-id = 6743
+user-login = "epage"
+user-name = "Ed Page"
+
+[[publisher.clap_derive]]
+version = "4.6.7"
+when = "2026-09-14"
+user-id = 6743
+user-login = "epage"
+user-name = "Ed Page"
+
+[[publisher.clap_lex]]
+version = "1.1.1"
+when = "2026-09-14"
+user-id = 6743
+user-login = "epage"
+user-name = "Ed Page"
+
 [[publisher.cmake]]
 version = "0.1.58"
 when = "2026-03-26"
@@ -85,68 +120,68 @@ user-login = "jrmuizel"
 user-name = "Jeff Muizelaar"
 
 [[publisher.cranelift-assembler-x64]]
-version = "0.136.1"
-when = "2026-09-24"
+version = "0.136.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-assembler-x64-meta]]
-version = "0.136.1"
-when = "2026-09-24"
+version = "0.136.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-bforest]]
-version = "0.136.1"
-when = "2026-09-24"
+version = "0.136.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-bitset]]
-version = "0.136.1"
-when = "2026-09-24"
+version = "0.136.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-codegen]]
-version = "0.136.1"
-when = "2026-09-24"
+version = "0.136.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-codegen-meta]]
-version = "0.136.1"
-when = "2026-09-24"
+version = "0.136.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-codegen-shared]]
-version = "0.136.1"
-when = "2026-09-24"
+version = "0.136.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-control]]
-version = "0.136.1"
-when = "2026-09-24"
+version = "0.136.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-entity]]
-version = "0.136.1"
-when = "2026-09-24"
+version = "0.136.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-frontend]]
-version = "0.136.1"
-when = "2026-09-24"
+version = "0.136.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-isle]]
-version = "0.136.1"
-when = "2026-09-24"
+version = "0.136.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-native]]
-version = "0.136.1"
-when = "2026-09-24"
+version = "0.136.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-srcgen]]
-version = "0.136.1"
-when = "2026-09-24"
+version = "0.136.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.dyn-clone]]
@@ -233,6 +268,13 @@ user-name = "Sean McArthur"
 [[publisher.hyper]]
 version = "1.11.1"
 when = "2026-08-28"
+user-id = 359
+user-login = "seanmonstar"
+user-name = "Sean McArthur"
+
+[[publisher.hyper-util]]
+version = "0.1.21"
+when = "2026-09-24"
 user-id = 359
 user-login = "seanmonstar"
 user-name = "Sean McArthur"
@@ -355,13 +397,13 @@ user-login = "dtolnay"
 user-name = "David Tolnay"
 
 [[publisher.pulley-interpreter]]
-version = "49.0.1"
-when = "2026-09-24"
+version = "49.0.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.pulley-macros]]
-version = "49.0.1"
-when = "2026-09-24"
+version = "49.0.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.quote]]
@@ -433,6 +475,13 @@ when = "2026-07-08"
 user-id = 55123
 user-login = "rust-lang-owner"
 
+[[publisher.rustix]]
+version = "1.1.5"
+when = "2026-09-16"
+user-id = 6825
+user-login = "sunfishcode"
+user-name = "Dan Gohman"
+
 [[publisher.rustversion]]
 version = "1.0.23"
 when = "2026-07-07"
@@ -496,6 +545,13 @@ user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
 
+[[publisher.syn]]
+version = "3.0.6"
+when = "2026-09-16"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
+
 [[publisher.target-lexicon]]
 version = "0.13.5"
 when = "2026-02-15"
@@ -517,9 +573,23 @@ user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
 
+[[publisher.thiserror]]
+version = "2.0.21"
+when = "2026-09-23"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
+
 [[publisher.thiserror-impl]]
 version = "1.0.69"
 when = "2024-11-10"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
+
+[[publisher.thiserror-impl]]
+version = "2.0.21"
+when = "2026-09-23"
 user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
@@ -579,6 +649,13 @@ when = "2026-08-31"
 user-id = 359
 user-login = "seanmonstar"
 user-name = "Sean McArthur"
+
+[[publisher.unicode-ident]]
+version = "1.0.26"
+when = "2026-09-17"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
 
 [[publisher.unicode-normalization]]
 version = "0.1.25"
@@ -647,8 +724,8 @@ when = "2026-07-20"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
 [[publisher.wasm-encoder]]
-version = "0.258.0"
-when = "2026-08-24"
+version = "0.258.3"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
 [[publisher.wasm-encoder]]
@@ -672,8 +749,8 @@ when = "2026-07-20"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
 [[publisher.wasm-metadata]]
-version = "0.258.0"
-when = "2026-08-24"
+version = "0.258.3"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
 [[publisher.wasm-metadata]]
@@ -692,8 +769,8 @@ when = "2026-07-20"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
 [[publisher.wasmparser]]
-version = "0.258.0"
-when = "2026-08-24"
+version = "0.258.3"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
 [[publisher.wasmparser]]
@@ -707,88 +784,88 @@ when = "2026-09-30"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
 [[publisher.wasmprinter]]
-version = "0.258.0"
-when = "2026-08-24"
+version = "0.258.3"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
 [[publisher.wasmtime]]
-version = "49.0.1"
-when = "2026-09-24"
+version = "49.0.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-environ]]
-version = "49.0.1"
-when = "2026-09-24"
+version = "49.0.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-internal-component-macro]]
-version = "49.0.1"
-when = "2026-09-24"
+version = "49.0.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-internal-component-util]]
-version = "49.0.1"
-when = "2026-09-24"
+version = "49.0.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-internal-core]]
-version = "49.0.1"
-when = "2026-09-24"
+version = "49.0.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-internal-cranelift]]
-version = "49.0.1"
-when = "2026-09-24"
+version = "49.0.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-internal-fiber]]
-version = "49.0.1"
-when = "2026-09-24"
+version = "49.0.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-internal-jit-debug]]
-version = "49.0.1"
-when = "2026-09-24"
+version = "49.0.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-internal-jit-icache-coherence]]
-version = "49.0.1"
-when = "2026-09-24"
+version = "49.0.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-internal-unwinder]]
-version = "49.0.1"
-when = "2026-09-24"
+version = "49.0.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-internal-versioned-export-macros]]
-version = "49.0.1"
-when = "2026-09-24"
+version = "49.0.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-internal-wit-bindgen]]
-version = "49.0.1"
-when = "2026-09-24"
+version = "49.0.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-wasi]]
-version = "49.0.1"
-when = "2026-09-24"
+version = "49.0.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-wasi-config]]
-version = "49.0.1"
-when = "2026-09-24"
+version = "49.0.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-wasi-http]]
-version = "49.0.1"
-when = "2026-09-24"
+version = "49.0.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-wasi-io]]
-version = "49.0.1"
-when = "2026-09-24"
+version = "49.0.2"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wast]]
@@ -865,20 +942,6 @@ user-login = "kennykerr"
 user-name = "Kenny Kerr"
 
 [[publisher.windows-sys]]
-version = "0.59.0"
-when = "2024-07-30"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows-sys]]
-version = "0.60.2"
-when = "2025-06-12"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows-sys]]
 version = "0.61.2"
 when = "2025-10-06"
 user-id = 64539
@@ -892,23 +955,9 @@ user-id = 64539
 user-login = "kennykerr"
 user-name = "Kenny Kerr"
 
-[[publisher.windows-targets]]
-version = "0.53.5"
-when = "2025-10-06"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
 [[publisher.windows_aarch64_gnullvm]]
 version = "0.52.6"
 when = "2024-07-03"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_aarch64_gnullvm]]
-version = "0.53.1"
-when = "2025-10-06"
 user-id = 64539
 user-login = "kennykerr"
 user-name = "Kenny Kerr"
@@ -920,23 +969,9 @@ user-id = 64539
 user-login = "kennykerr"
 user-name = "Kenny Kerr"
 
-[[publisher.windows_aarch64_msvc]]
-version = "0.53.1"
-when = "2025-10-06"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
 [[publisher.windows_i686_gnu]]
 version = "0.52.6"
 when = "2024-07-03"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_i686_gnu]]
-version = "0.53.1"
-when = "2025-10-06"
 user-id = 64539
 user-login = "kennykerr"
 user-name = "Kenny Kerr"
@@ -948,23 +983,9 @@ user-id = 64539
 user-login = "kennykerr"
 user-name = "Kenny Kerr"
 
-[[publisher.windows_i686_gnullvm]]
-version = "0.53.1"
-when = "2025-10-06"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
 [[publisher.windows_i686_msvc]]
 version = "0.52.6"
 when = "2024-07-03"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_i686_msvc]]
-version = "0.53.1"
-when = "2025-10-06"
 user-id = 64539
 user-login = "kennykerr"
 user-name = "Kenny Kerr"
@@ -976,13 +997,6 @@ user-id = 64539
 user-login = "kennykerr"
 user-name = "Kenny Kerr"
 
-[[publisher.windows_x86_64_gnu]]
-version = "0.53.1"
-when = "2025-10-06"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
 [[publisher.windows_x86_64_gnullvm]]
 version = "0.52.6"
 when = "2024-07-03"
@@ -990,23 +1004,9 @@ user-id = 64539
 user-login = "kennykerr"
 user-name = "Kenny Kerr"
 
-[[publisher.windows_x86_64_gnullvm]]
-version = "0.53.1"
-when = "2025-10-06"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
 [[publisher.windows_x86_64_msvc]]
 version = "0.52.6"
 when = "2024-07-03"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
-
-[[publisher.windows_x86_64_msvc]]
-version = "0.53.1"
-when = "2025-10-06"
 user-id = 64539
 user-login = "kennykerr"
 user-name = "Kenny Kerr"
@@ -1061,8 +1061,8 @@ when = "2026-07-20"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
 [[publisher.wit-component]]
-version = "0.258.0"
-when = "2026-08-24"
+version = "0.258.3"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
 [[publisher.wit-component]]
@@ -1081,14 +1081,16 @@ when = "2026-07-20"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
 [[publisher.wit-parser]]
-version = "0.258.0"
-when = "2026-08-24"
+version = "0.258.3"
+when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
 [[publisher.wit-parser]]
 version = "0.259.0"
 when = "2026-09-10"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
+
+[audits.augentic.audits]
 
 [[audits.bytecode-alliance.wildcard-audits.arbitrary]]
 who = "Nick Fitzgerald <fitzgen@gmail.com>"

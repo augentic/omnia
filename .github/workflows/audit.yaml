@@ -1,4 +1,10 @@
+# Managed by augentic/toolkit from conventions/workflows/audit.yaml and conventions.toml. Do not edit: run `make conventions-sync`.
+
 name: Audit
+
+# Daily advisory-database audit and outdated-dependency check of the
+# workspace, apart from the per-push CI gate so a fresh upstream advisory
+# never blocks an unrelated change.
 
 on:
   schedule:
@@ -16,7 +22,6 @@ permissions:
 
 jobs:
   audit:
-    uses: augentic/.github/.github/workflows/audit.yaml@v0.2.0
+    uses: augentic/toolkit/.github/workflows/audit.yaml@v0.3.0
     with:
-      # Mirrors `OUTDATED_IGNORE` in mise.toml.
       outdated: cap-fs-ext,cap-std,cap-primitives,thiserror

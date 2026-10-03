@@ -41,6 +41,6 @@ mod tests {
 
     #[test]
     fn parse_empty_header() {
-        assert!(parse("").is_empty());
+        assert_eq!(parse(""), Vec::<(String, String)>::new());
     }
 }

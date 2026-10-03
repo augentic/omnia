@@ -85,7 +85,6 @@ pub trait Backend: Sized + Sync + Send {
     type ConnectOptions: FromEnv;
 
     /// Connect to the resource.
-    #[must_use]
     fn connect() -> impl Future<Output = Result<Self>> {
         async { Self::connect_with(Self::ConnectOptions::load_env()?).await }
     }

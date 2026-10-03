@@ -124,7 +124,7 @@ fn objects() {
     now(BlobStore::delete(&memory, "c", "a")).expect("delete");
     assert_eq!(memory.objects("c"), ["b"]);
     now(memory.delete_objects("c", &["b".to_owned()])).expect("delete many");
-    assert!(memory.objects("c").is_empty());
+    assert_eq!(memory.objects("c"), Vec::<String>::new());
     assert!(memory.has_container("c"));
     now(memory.delete_container("c")).expect("delete container");
     assert!(!memory.has_container("c"));
@@ -161,7 +161,7 @@ fn copy_move_and_clear() {
     memory.insert_object("src", "o", b"data");
     now(memory.copy_object("src", "o", "dst", "copy")).expect("copy");
     now(memory.move_object("src", "o", "dst", "moved")).expect("move");
-    assert!(memory.objects("src").is_empty());
+    assert_eq!(memory.objects("src"), Vec::<String>::new());
     assert_eq!(memory.objects("dst"), ["copy", "moved"]);
     now(memory.clear("dst")).expect("clear");
     assert!(memory.objects("dst").is_empty() && memory.has_container("dst"));

@@ -1,3 +1,5 @@
+# Managed by augentic/toolkit from conventions/Makefile. Do not edit: run `make conventions-sync`.
+
 # Convenience pass-through to mise: `make <task> [args]` runs `mise run <task> -- [args]`.
 # mise is never installed implicitly; see https://mise.jdx.dev/getting-started.html
 MISE := $(shell command -v mise 2>/dev/null)
