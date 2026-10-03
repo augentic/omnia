@@ -120,7 +120,7 @@ A blocking `pub fn run(builder: omnia::DeploymentBuilder) -> Result<omnia::ExitS
 
 `pub fn manifest() -> omnia::ManifestSource` returns the compiled-in deployment (`manifest:` path or inline manifest keys; an empty inline manifest when neither is declared), and `pub async fn run_with<B>(builder, backends: B) -> Result<omnia::ExitStatus>` builds the builder and drives the resulting deployment through `Hooks` over a bundle already in hand, connecting nothing. Together with `Hooks` they let a test run the binary's own wiring over test backends: `omnia_test::host::Deployment::from(runtime::manifest())` overlays the compiled-in manifest, and `run_with::<runtime::Hooks, _>` drives it.
 
-All five are re-exported from the generated module as `pub use runtime::{Hooks, main, manifest, run, run_with};` (`#[allow(unused_imports)]`, so a nested-module invocation that uses only some stays warning-clean).
+All five are re-exported from the generated module as `pub use runtime::{Hooks, main, manifest, run, run_with};` (`#[allow(unused_imports, …)]`, so a nested-module invocation that uses only some stays warning-clean).
 
 ## Example: multiple runtime configurations
 

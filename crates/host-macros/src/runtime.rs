@@ -103,7 +103,7 @@ pub fn expand(config: &Config) -> TokenStream {
             }
         }
 
-        #[allow(unused_imports)]
+        #[allow(unused_imports, reason = "a nested-module invocation uses only some re-exports")]
         pub use runtime::{Hooks, main, manifest, run, run_with};
     }
 }
