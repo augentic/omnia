@@ -6,10 +6,7 @@
     {
       "matchPackageNames": ["augentic/toolkit"],
       "groupName": "augentic/toolkit",
-      "commitMessageTopic": "augentic/toolkit",
-      "prBodyNotes": [
-        "Run `make conventions-sync` on this branch and commit what changed before merging."
-      ]
+      "commitMessageTopic": "augentic/toolkit"
     },
     {
       "matchManagers": ["github-actions"],

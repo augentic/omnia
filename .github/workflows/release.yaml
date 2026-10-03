@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   release:
-    uses: augentic/toolkit/.github/workflows/release.yaml@v0.4.0
+    uses: augentic/toolkit/.github/workflows/release.yaml@v0.5.0
     with:
       increment: ${{ inputs.increment }}
     secrets: inherit
