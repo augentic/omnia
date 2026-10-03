@@ -79,5 +79,5 @@ mod runtime {
         omnia::run_with::<B, Hooks>(deployment, backends).await
     }
 }
-#[allow(unused_imports)]
+#[allow(unused_imports, reason = "a nested-module invocation uses only some re-exports")]
 pub use runtime::{Hooks, main, manifest, run, run_with};
