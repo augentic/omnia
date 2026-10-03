@@ -1,6 +1,7 @@
 version: 2
 updates:
-# conventions:begin dependabot/actions
+# BEGIN Managed by augentic/toolkit: conventions/dependabot/actions.yml
+# Do not edit: run `make conventions-sync`.
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -13,4 +14,4 @@ updates:
       # The toolkit pin is Renovate's: one pull request over every `uses:`
       # and the mise `?ref=` together (renovate.json).
       - dependency-name: "augentic/*"
-# conventions:end dependabot/actions
+# END Managed by augentic/toolkit: conventions/dependabot/actions.yml

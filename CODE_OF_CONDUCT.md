@@ -1,4 +1,5 @@
-<!-- Managed by augentic/toolkit from conventions/CODE_OF_CONDUCT.md. Do not edit: run `make conventions-sync`. -->
+<!-- Managed by augentic/toolkit: conventions/CODE_OF_CONDUCT.md -->
+<!-- Do not edit: run `make conventions-sync`. -->
 
 ## Community Code of Conduct
 

@@ -1,3 +1,0 @@
-name = "Omnia"
-targets = ["wasm32-wasip2"]
-outdated-ignore = ["cap-fs-ext", "cap-std", "cap-primitives", "thiserror"]

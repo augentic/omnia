@@ -1,5 +1,3 @@
-# Managed by augentic/toolkit from conventions/rust-toolchain.toml and conventions.toml. Do not edit: run `make conventions-sync`.
-
 [toolchain]
 channel = "stable"
 components = ["clippy", "rust-src", "rustfmt"]

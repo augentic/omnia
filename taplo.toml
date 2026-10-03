@@ -1,4 +1,5 @@
-# Managed by augentic/toolkit from conventions/taplo.toml. Do not edit: run `make conventions-sync`.
+# Managed by augentic/toolkit: conventions/taplo.toml
+# Do not edit: run `make conventions-sync`.
 
 [formatting]
 allowed_blank_lines = 1
