@@ -552,10 +552,6 @@ criteria = "safe-to-deploy"
 version = "1.5.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.libc]]
-version = "0.2.190"
-criteria = "safe-to-deploy"
-
 [[exemptions.libsqlite3-sys]]
 version = "0.38.2"
 criteria = "safe-to-deploy"

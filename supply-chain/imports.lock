@@ -314,6 +314,11 @@ user-id = 6825
 user-login = "sunfishcode"
 user-name = "Dan Gohman"
 
+[[publisher.libc]]
+version = "0.2.190"
+when = "2026-10-02"
+trusted-publisher = "github:rust-lang/libc"
+
 [[publisher.libm]]
 version = "0.2.16"
 when = "2026-01-24"
