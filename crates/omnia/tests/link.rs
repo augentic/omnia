@@ -226,7 +226,7 @@ async fn register_refuses_precompiled() {
     assert!(format!("{err:#}").contains("`Verified::wasm`"), "unexpected error: {err:#}");
     assert!(runtime.registry().get(&GuestId::from("full")).is_none(), "nothing was admitted");
 
-    #[allow(unsafe_code)] // the embedder's trusted-artifact path under test
+    #[expect(unsafe_code, reason = "the embedder's trusted-artifact path under test")]
     // SAFETY: the artifact was compiled two statements up by this process's
     // own `omnia::compile`, from a guest the test suite built.
     let trusted = unsafe { Verified::trusted(bytes) };

@@ -49,6 +49,10 @@ fn load(engine: &Engine, bytes: &[u8]) -> Result<Component> {
             .context("compiling component");
     }
     match precompiled {
+        #[expect(
+            unsafe_code,
+            reason = "`Component::deserialize` trusts its input; `Verified` is that trust"
+        )]
         Some(Precompiled::Component) => {
             // SAFETY: `component` is the one caller, and it unwraps a
             // `Verified`. One holding pre-compiled bytes exists only through

@@ -10,9 +10,7 @@
 //! environment. That parity is what lets the loading engine accept a
 //! pre-compiled artifact.
 
-// `derive(FromEnv)` generates undocumented associated functions on a type the
-// crate root re-exports
-#![allow(missing_docs)]
+#![expect(missing_docs, reason = "`FromEnv` has no docs")]
 
 use std::time::Duration;
 
@@ -30,8 +28,7 @@ use wasmtime::{Config, Enabled, InstanceAllocationStrategy, PoolingAllocationCon
 /// runtime loads artifacts under ([`compile_options`](Self::compile_options))
 /// and must match between pre-compiling a component and loading it. The rest
 /// only affect the engine or individual stores at runtime.
-// flat by design: each boolean is one environment variable
-#[allow(clippy::struct_excessive_bools)]
+#[expect(clippy::struct_excessive_bools, reason = "flat by design: one environment variable each")]
 #[derive(Clone, Debug, FromEnv)]
 pub struct RuntimeOptions {
     /// Wall-clock cap on a server or server-rooted link-dispatch invocation (`GUEST_TIMEOUT_MS`, default 30s, min 1ms; a command-mode chain, including its link hops, is uncapped).

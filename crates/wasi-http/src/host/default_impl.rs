@@ -1,13 +1,8 @@
-// `derive(FromEnv)` generates undocumented `from_env`/`requirements` associated
-// functions that would otherwise trip `missing_docs`.
-#![allow(missing_docs)]
-
 use std::fmt::Display;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use base64ct::{Base64, Encoding};
-use fromenv::FromEnv;
 use futures::{Future, TryStreamExt};
 use http::{Request, Response};
 use http_body_util::BodyExt;
@@ -22,13 +17,19 @@ use super::client_cert;
 
 pub type FutureResult<T> = Box<dyn Future<Output = Result<T, HttpError>> + Send>;
 
-/// Options for the default outbound `wasi:http` client.
-#[derive(Debug, Clone, FromEnv)]
-pub struct ConnectOptions {
-    /// Connect timeout in seconds (`HTTP_CONNECT_TIMEOUT`, default 10).
-    #[env(from = "HTTP_CONNECT_TIMEOUT", default = "10")]
-    pub connect_timeout: u64,
+#[expect(missing_docs, reason = "`FromEnv` has no docs")]
+mod config {
+    use fromenv::FromEnv;
+
+    /// Options for the default outbound `wasi:http` client.
+    #[derive(Debug, Clone, FromEnv)]
+    pub struct ConnectOptions {
+        /// Connect timeout in seconds (`HTTP_CONNECT_TIMEOUT`, default 10).
+        #[env(from = "HTTP_CONNECT_TIMEOUT", default = "10")]
+        pub connect_timeout: u64,
+    }
 }
+pub use config::ConnectOptions;
 
 impl omnia_core::FromEnv for ConnectOptions {
     fn load_env() -> Result<Self> {
@@ -130,7 +131,7 @@ impl WasiHttpHooks for HttpHooks {
                     }
                     None => builder,
                 };
-                builder.build().map_err(reqwest_err)?
+                builder.build().map_err(|e| reqwest_err(&e))?
             } else {
                 shared_client
             };
@@ -149,17 +150,17 @@ impl WasiHttpHooks for HttpHooks {
                 Some(first_byte) => {
                     let budget = opt_connect.unwrap_or(connect_timeout).saturating_add(first_byte);
                     match tokio::time::timeout(budget, send).await {
-                        Ok(result) => result.map_err(reqwest_err)?,
+                        Ok(result) => result.map_err(|e| reqwest_err(&e))?,
                         Err(_elapsed) => return Err(HttpError::ConnectionTimeout),
                     }
                 }
-                None => send.await.map_err(reqwest_err)?,
+                None => send.await.map_err(|e| reqwest_err(&e))?,
             };
 
             // forbidden headers are stripped by the runtime before the guest sees them
             let converted: Response<reqwest::Body> = resp.into();
             let (parts, body) = converted.into_parts();
-            let body = body.map_err(reqwest_err).boxed_unsync();
+            let body = body.map_err(|e| reqwest_err(&e)).boxed_unsync();
             let response = Response::from_parts(parts, body);
 
             Ok((response, fut))
@@ -171,8 +172,7 @@ fn internal_err(e: impl Display) -> HttpError {
     HttpError::InternalError(Some(e.to_string()))
 }
 
-#[allow(clippy::needless_pass_by_value)]
-fn reqwest_err(e: reqwest::Error) -> HttpError {
+fn reqwest_err(e: &reqwest::Error) -> HttpError {
     if e.is_timeout() {
         HttpError::ConnectionTimeout
     } else if e.is_connect() {

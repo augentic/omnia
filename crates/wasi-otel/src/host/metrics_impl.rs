@@ -268,11 +268,11 @@ impl From<wasi::Exemplar> for Exemplar {
     }
 }
 
-#[expect(clippy::cast_possible_wrap)]
+// OTLP's integer is `i64`: a `u64` crosses as its raw bits.
 impl From<wasi::DataValue> for NumberValue {
     fn from(dv: wasi::DataValue) -> Self {
         match dv {
-            wasi::DataValue::U64(v) => Self::AsInt(v as i64),
+            wasi::DataValue::U64(v) => Self::AsInt(v.cast_signed()),
             wasi::DataValue::S64(v) => Self::AsInt(v),
             wasi::DataValue::F64(v) => Self::AsDouble(v),
         }
@@ -289,7 +289,7 @@ impl From<wasi::DataValue> for ExemplarValue {
     }
 }
 
-#[expect(clippy::cast_precision_loss)]
+#[expect(clippy::cast_precision_loss, reason = "an OTLP double is `f64` by contract")]
 impl From<wasi::DataValue> for f64 {
     fn from(dv: wasi::DataValue) -> Self {
         match dv {

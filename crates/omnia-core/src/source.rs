@@ -334,6 +334,7 @@ impl Verified {
     /// compile` from a build pipeline the caller trusts: they are native code,
     /// and wasmtime's settings check is compatibility, not authenticity.
     #[must_use]
+    #[expect(unsafe_code, reason = "the caller attests what no check here can")]
     pub unsafe fn trusted(bytes: Vec<u8>) -> Self {
         Self {
             digest: Digest::of(&bytes),

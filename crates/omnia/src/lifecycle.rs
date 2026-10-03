@@ -96,11 +96,16 @@ where
     .await
     {
         Ok(status) => status.into(),
-        Err(error) => {
-            eprintln!("{error:#}");
-            ExitCode::FAILURE
-        }
+        Err(error) => report(&error),
     }
+}
+
+// The fatal-error path of a generated `main`: the deployment is not up, or
+// never came up, so stderr is the one channel a subscriber may not be on.
+#[expect(clippy::print_stderr, reason = "the fatal-error channel, with or without a subscriber")]
+pub fn report(error: &anyhow::Error) -> ExitCode {
+    eprintln!("{error:#}");
+    ExitCode::FAILURE
 }
 
 /// Connect backends, bootstrap the runtime, then run command mode or every trigger server.
