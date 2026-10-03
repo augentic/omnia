@@ -15,7 +15,6 @@ version = "0.37.0"
 
 # conventions:begin lints/rust
 [workspace.lints.rust]
-# https://doc.rust-lang.org/rustc/lints/listing/allowed-by-default.html
 missing_docs = "warn"
 trivial_numeric_casts = "warn"
 unsafe_code = "deny"
@@ -25,15 +24,12 @@ unused_extern_crates = "warn"
 
 # conventions:begin lints/clippy
 [workspace.lints.clippy]
-# https://doc.rust-lang.org/stable/clippy/index.html
-all = { level = "warn", priority = -1 }      # correctness, suspicious, style, complexity, perf
+all = { level = "warn", priority = -1 }
 cargo = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 
-# Cherry-picked lints are from the `restriction` lint group in order to drive up
-# consistency, quality, and brevity
-# See https://microsoft.github.io/rust-guidelines/guidelines/universal/index.html
+# Cherry-picked lints from the `restriction` group
 as_pointer_underscore = "warn"
 assertions_on_result_states = "warn"
 clone_on_ref_ptr = "warn"
@@ -55,20 +51,12 @@ unneeded_field_pattern = "warn"
 unused_result_ok = "warn"
 # conventions:end lints/clippy
 
-# `wit_bindgen::generate!` lifts every `list<T>` via `Vec::from_raw_parts(ptr, len, len)`;
-# `unsafe_code = "deny"` above rules out a hand-written instance.
-same_length_and_capacity = "allow"
-
 [workspace.dependencies]
 anyhow = "1.0.104"
 axum = { version = "0.8.9", default-features = false, features = ["json"] }
 base64ct = { version = "1.8.3", features = ["std"] }
-bon = "3.10.1"
+bon = "3.10.2"
 bytes = "1.12.1"
-# cap-std backs omnia's own mount registry and workspace tools (bounded
-# directory handles). Since wasmtime-wasi 48 dropped cap-std from its public
-# API (`Descriptor` wraps `std::fs::File`), the version is no longer coupled
-# to wasmtime's.
 cap-fs-ext = "4.0.3"
 cap-std = "4.0.3"
 cfg-if = "1.0.5"
@@ -84,11 +72,9 @@ http = "1.5.0"
 http-body = "1.1.0"
 http-body-util = "0.1.5"
 hyper = "1.11.1"
-hyper-util = "0.1.20"
-insta = "1.48.0"
+hyper-util = "0.1.21"
+insta = "1.49.0"
 moka = { version = "0.12.16", features = ["sync"] }
-# The OpenTelemetry stack is compiled into every guest, so the shared entries
-# carry no defaults and each consumer names the signals it uses.
 opentelemetry = { version = "0.33.0", default-features = false }
 opentelemetry-otlp = { version = "0.33.0", default-features = false }
 opentelemetry-proto = "0.33.0"
@@ -98,7 +84,7 @@ pastey = "0.2.3"
 prettyplease = "0.3.0"
 proc-macro2 = "1.0.107"
 quote = "1.0.47"
-rand = "0.10.2"
+rand = "0.10.3"
 rcgen = "0.14.10"
 regex = "1.13.1"
 reqwest = { version = "0.13.5", default-features = false }
@@ -110,7 +96,7 @@ serde_urlencoded = "0.7.1"
 sha2 = "0.11.0"
 syn = { version = "3.0.6", features = ["full"] }
 tempfile = "3.27.0"
-thiserror = "2.0.20"
+thiserror = "2.0.21"
 tokio = { version = "1.53.1", default-features = false }
 tokio-stream = { version = "0.1.19", features = ["sync"] }
 tokio-tungstenite = "0.30.0"
@@ -122,15 +108,10 @@ tracing-opentelemetry = { version = "0.34.0", default-features = false }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["env-filter", "fmt"] }
 wasip3 = { version = "0.9.0", features = ["http-compat"] }
 wasm-pkg-client = "0.16.1"
-wasmtime = { version = "49.0.0", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation", "pooling-allocator"] }
-# Omnia links `p2::add_to_linker_async` + `p3::add_to_linker` only; the `p1`
-# default would pull the wiggle/witx stack into the graph for nothing.
-wasmtime-wasi = { version = "49.0.0", default-features = false, features = ["p2", "p3"] }
-wasmtime-wasi-config = "49.0.0"
-# The defaults would add `default-send-request` (rustls + webpki-roots) and
-# `p2`; outbound is omnia's own reqwest `send_request` hook and `wasi:http` is
-# served as p3 only.
-wasmtime-wasi-http = { version = "49.0.0", default-features = false, features = ["p3"] }
+wasmtime = { version = "49.0.2", default-features = false, features = ["anyhow", "component-model-bytes", "parallel-compilation", "pooling-allocator"] }
+wasmtime-wasi = { version = "49.0.2", default-features = false, features = ["p2", "p3"] }
+wasmtime-wasi-config = "49.0.2"
+wasmtime-wasi-http = { version = "49.0.2", default-features = false, features = ["p3"] }
 wit-bindgen = { version = "0.62.0", features = ["async-spawn"] }
 x509-cert = { version = "0.3.0", default-features = false, features = ["std"] }
 
@@ -163,18 +144,8 @@ lto = true
 opt-level = "s"
 strip = true
 
-# Guest components are JIT-compiled through Cranelift on every e2e test run;
-# unoptimized codegen is ~10x slower and pushes the wasi-* suites toward their
-# deadlines on CI runners. Only these dependencies build optimized — workspace
-# code keeps full dev-profile debuggability.
-[profile.dev.package.cranelift-codegen]
-opt-level = 3
-
-[profile.dev.package.regalloc2]
-opt-level = 3
-
-# Wasm-to-CLIF translation and trampoline generation. Crate name is
-# version-coupled: `wasmtime-cranelift` has been named this since wasmtime 48;
-# cargo silently ignores the entry if a future bump renames it again.
-[profile.dev.package.wasmtime-internal-cranelift]
-opt-level = 3
+# Unoptimized cranelift is ~10x slower.
+[profile.dev.package]
+cranelift-codegen = { opt-level = 3 }
+regalloc2 = { opt-level = 3 }
+wasmtime-internal-cranelift = { opt-level = 3 }

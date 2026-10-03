@@ -157,15 +157,15 @@ version = "0.12.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.bon]]
-version = "3.10.1"
+version = "3.10.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.bon-macros]]
-version = "3.10.1"
+version = "3.10.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.cc]]
-version = "1.5.1"
+version = "1.6.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.cfg-if]]
@@ -497,7 +497,7 @@ version = "1.2.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.insta]]
-version = "1.48.0"
+version = "1.49.0"
 criteria = "safe-to-run"
 
 [[exemptions.ipnet]]
@@ -546,6 +546,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.konst_macro_rules]]
 version = "0.2.19"
+criteria = "safe-to-deploy"
+
+[[exemptions.lazy_static]]
+version = "1.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.libsqlite3-sys]]
@@ -877,7 +881,7 @@ version = "1.16.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.spdx]]
-version = "0.13.5"
+version = "0.13.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.spki]]
@@ -1021,7 +1025,7 @@ version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.uuid]]
-version = "1.26.1"
+version = "1.27.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.version_check]]

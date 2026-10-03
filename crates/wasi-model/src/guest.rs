@@ -3,6 +3,7 @@
 // Bindings for the `omnia:model` world.
 mod generated {
     #![allow(missing_docs)]
+    #![allow(clippy::same_length_and_capacity)]
     wit_bindgen::generate!({
         world: "model",
         path: "wit",

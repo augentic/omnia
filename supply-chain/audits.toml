@@ -393,6 +393,12 @@ user-id = 55123 # rust-lang-owner
 start = "2024-08-15"
 end = "2027-10-03"
 
+[[trusted.libc]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:rust-lang/libc"
+start = "2026-10-02"
+end = "2027-10-03"
+
 [[trusted.libm]]
 criteria = "safe-to-deploy"
 user-id = 55123 # rust-lang-owner

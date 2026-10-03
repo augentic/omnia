@@ -13,6 +13,7 @@ mod tracing;
 mod generated {
     #![allow(clippy::future_not_send)]
     #![allow(clippy::collection_is_never_read)]
+    #![allow(clippy::same_length_and_capacity)]
 
     wit_bindgen::generate!({
         world: "imports",
