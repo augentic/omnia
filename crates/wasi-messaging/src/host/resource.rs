@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
+use std::sync::Arc;
 
 use futures::Stream;
 pub use omnia_core::FutureResult;
@@ -27,6 +28,20 @@ pub trait Client: Debug + Send + Sync + 'static {
 /// Proxy for a messaging client.
 pub type ClientProxy = omnia_core::Proxy<dyn Client>;
 
+/// A backend's hook for learning the host is done with a message.
+///
+/// A backend that tracks delivery (offsets, redelivery, in-flight bounds)
+/// attaches one to each message it yields from [`Client::subscribe`]; a
+/// backend with no use for it leaves [`Message::ack`] as `None`.
+pub trait Ack: Debug + Send + Sync + 'static {
+    /// The host ran the guest for this message, or had no guest to run.
+    ///
+    /// Dropping the token without calling this means it did neither: the
+    /// guest could not be loaded or instantiated, and the message never
+    /// reached one.
+    fn ack(&self);
+}
+
 /// A message crossing the messaging boundary.
 ///
 /// The host owns message state; backends translate to and from their wire
@@ -43,6 +58,8 @@ pub struct Message {
     pub metadata: Option<Metadata>,
     /// Optional reply topic to which a response can be published.
     pub reply: Option<Reply>,
+    /// Host-side acknowledgement token; never visible to the guest.
+    pub ack: Option<Arc<dyn Ack>>,
 }
 
 impl Message {
